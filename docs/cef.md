@@ -468,6 +468,55 @@ This is deferred to WezTerm integration, which uses its own windowing system.
 The objc crate generates `unexpected_cfgs` warnings for `cargo-clippy` feature
 checks. Suppressed with `#![allow(unexpected_cfgs)]` in iosurface.rs.
 
+### macOS: Multiple Browsers Fail When Launched from Terminal
+
+**Status:** Investigating
+
+**Problem:** On macOS, CEF only supports one browser instance when the app is
+launched directly from terminal (`./binary`). Subsequent browsers fail silently
+(blank screen, no errors). However, when launched via `open app.app`
+(LaunchServices), multiple browsers work correctly.
+
+**Affected:**
+
+- cef-rs OSR example: Second browser window doesn't load when run from terminal
+- WezTerm + CEF: Can only open one browser; reopening or opening in another pane
+  fails
+
+**Symptoms:**
+
+- First browser loads and renders correctly
+- Second browser (simultaneous or sequential) shows blank screen
+- No error messages - silent failure
+- `on_paint` callback either never fires or fires after browser is already
+  closed
+
+**Reproduction:**
+
+```bash
+# FAILS - only first browser works
+./cef-osr.app/Contents/MacOS/cef-osr
+
+# WORKS - both browsers work
+open cef-osr.app
+```
+
+**Root Cause (Hypothesis):** When launched via `open`, macOS LaunchServices:
+
+- Registers the app as a foreground GUI application
+- Properly connects the app to WindowServer
+- Sets up NSApplication with correct activation policy
+
+When launched directly from terminal, CEF's message pump or browser management
+may not function correctly because the process isn't properly registered as a
+GUI app.
+
+**Potential Fix:** Call `NSApplication.setActivationPolicy(.regular)` BEFORE CEF
+initialization. Currently, WezTerm sets this after CEF init.
+
+**Workaround:** Always launch via `open` command rather than running the binary
+directly.
+
 ## Next Steps
 
 These modifications validate that cef-rs is ready for WezTerm integration. The

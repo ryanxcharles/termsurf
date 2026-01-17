@@ -17,8 +17,10 @@ This document details the implementation plan for MVP2 - adding a `web-open` CLI
 10. Browser overlay placeholder rendering in `paint_browser_overlay()`
 
 **Remaining:**
-1. Actual CEF texture rendering - currently shows a dark blue placeholder
-2. Testing and validation
+1. ~~Actual CEF texture rendering~~ - DONE (commit `247ba3b1c`)
+2. Fix macOS terminal launch issue - see [Known Issues in cef.md](cef.md#macos-multiple-browsers-fail-when-launched-from-terminal)
+3. Fix HiDPI/Retina resolution (content appears small on high-DPI displays)
+4. Testing and validation
 
 ## Goal
 
