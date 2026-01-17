@@ -29,6 +29,7 @@ libloading.workspace = true
 metal.workspace = true
 objc.workspace = true
 io-surface.workspace = true
+cocoa = "0.26"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true

@@ -660,6 +660,15 @@ fn main() -> std::process::ExitCode {
         return 0.into();
     }
 
+    // Set up NSApplication as a proper GUI app BEFORE CEF initialization.
+    // This is required for multiple browsers to work when launched from terminal.
+    // When launched via `open`, LaunchServices does this automatically.
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicyRegular};
+        NSApp().setActivationPolicy_(NSApplicationActivationPolicyRegular);
+    }
+
     let settings = Settings {
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
