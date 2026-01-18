@@ -727,7 +727,7 @@ impl crate::TermWindow {
         let cell_width = self.render_metrics.cell_size.width as f32;
         let cell_height = self.render_metrics.cell_size.height as f32;
 
-        // Calculate true pixel bounds (fills to edges of splits, same as background_rect)
+        // Calculate position and size - extends to window edges for edge panes
         let (x, width_delta) = if pos.left == 0 {
             // Left edge pane: start at true window edge
             (0., padding_left + border.left.get() as f32 + (cell_width / 2.0))
@@ -751,44 +751,29 @@ impl crate::TermWindow {
             )
         };
 
-        // Width: extend to window edge if rightmost, otherwise extend half-cell into right divider
+        // Calculate viewport size - extends to window edges for edge panes
+        // This is the VIEWPORT size, not the CEF texture size
         let pane_width = if pos.left + pos.width >= self.terminal_size.cols as usize {
+            // Right edge pane: extend to window edge
             self.dimensions.pixel_width as f32 - x
         } else {
+            // Interior pane: grid-based width plus delta
             (pos.width as f32 * cell_width) + width_delta
         };
 
-        // Height: extend to window edge if bottommost, otherwise extend half-cell into bottom divider
         let pane_height = if pos.top + pos.height >= self.terminal_size.rows as usize {
+            // Bottom edge pane: extend to window edge
             self.dimensions.pixel_height as f32 - y
         } else {
+            // Interior pane: grid-based height plus delta
             (pos.height as f32 * cell_height) + height_delta
         };
 
-        // Update browser pane bounds and check if resize needed
+        // Update browser pane bounds for rendering
+        // No resize call - we just stretch the initial texture to fit
         let pane_id = pos.pane.pane_id();
         if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
-            // Store current pane bounds - used directly for rendering
             browser.set_pane_bounds(x, y, pane_width as u32, pane_height as u32);
-
-            // Check if browser needs to be resized (tell CEF the new logical size)
-            const MACOS_BASE_DPI: f32 = 72.0;
-            let scale = self.dimensions.dpi as f32 / MACOS_BASE_DPI;
-            let logical_width = (pos.pixel_width as f32 / scale) as u32;
-            let logical_height = (pos.pixel_height as f32 / scale) as u32;
-
-            let (current_w, current_h) = browser.get_size();
-            if logical_width != current_w || logical_height != current_h {
-                log::info!(
-                    "[CEF] paint_browser_overlay: resizing browser {} from {}x{} to {}x{}",
-                    pane_id,
-                    current_w,
-                    current_h,
-                    logical_width,
-                    logical_height
-                );
-                browser.resize(logical_width, logical_height);
-            }
         }
 
         Ok(())
