@@ -117,6 +117,46 @@ struct DebounceState {
 }
 ```
 
+### Source of Truth
+
+**The physical pixel dimensions passed to `set_pane_bounds()` are the source of
+truth for re-renders.** Convert these to logical pixels and pass to
+`browser.resize()`. Do not introduce a different calculation.
+
+The values are calculated in `paint_browser_overlay` as follows:
+
+```
+# Edge detection
+is_left   = pos.left == 0
+is_top    = pos.top == 0
+is_right  = pos.left + pos.width >= terminal_cols
+is_bottom = pos.top + pos.height >= terminal_rows
+
+# Position
+x = 0                                                  if is_left
+    padding_left + border.left + pos.left*cell_w - cell_w/2    otherwise
+
+y = border.top + tab_bar_height                        if is_top
+    border.top + tab_bar_height + padding_top + pos.top*cell_h - cell_h/2    otherwise
+
+# Size
+pane_width  = window_width - x                         if is_right
+              pos.width*cell_w + width_delta           otherwise
+
+pane_height = window_height - y                        if is_bottom
+              pos.height*cell_h + height_delta         otherwise
+
+# Deltas (extend into padding/dividers)
+width_delta  = padding_left + border.left + cell_w/2   if is_left
+               cell_w                                  otherwise
+
+height_delta = padding_top + cell_h/2                  if is_top
+               cell_h                                  otherwise
+```
+
+The key principle: **edge panes extend to window edge; interior panes extend
+half-cell into dividers.**
+
 ## Non-Goals for MVP3
 
 - Perfect frame-by-frame synchronization (minor lag is acceptable)

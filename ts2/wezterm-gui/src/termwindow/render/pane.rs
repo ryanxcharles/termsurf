@@ -698,15 +698,41 @@ impl crate::TermWindow {
         })
     }
 
-    /// Paint a browser overlay for a pane with CEF content.
-    /// Sets the pending state (position + expected size) and triggers resize if needed.
-    /// The actual CEF texture is rendered in a separate pass after main rendering.
+    /// Calculate the exact pixel bounds for a pane's browser overlay.
+    ///
+    /// # CRITICAL - DO NOT MODIFY WITHOUT READING
+    ///
+    /// These calculations are the **source of truth** for browser viewport bounds.
+    /// They are 100% correct and have been painstakingly debugged. Changing them
+    /// WILL reintroduce the "bouncing browser" bug that took a full day to fix.
+    ///
+    /// ## How it works
+    ///
+    /// The calculation handles two cases:
+    /// - **Edge panes**: Extend to the window edge (covers padding/borders)
+    /// - **Interior panes**: Extend half-cell into dividers
+    ///
+    /// ## Usage
+    ///
+    /// The returned values must be used for:
+    /// 1. Setting viewport bounds via `set_pane_bounds(x, y, width, height)`
+    /// 2. Triggering CEF re-renders via `browser.resize()` (convert to logical first)
+    ///
+    /// To convert to logical pixels for CEF: `logical = physical / device_scale_factor`
+    ///
+    /// ## DO NOT
+    ///
+    /// - Introduce alternative calculations
+    /// - "Simplify" or "optimize" this code
+    /// - Use different values for viewport vs resize
+    ///
+    /// See docs/cef-mvp3.md "Source of Truth" section for the full specification.
+    ///
+    /// # Returns
+    ///
+    /// `(x, y, width, height)` in physical pixels as `f32`
     #[cfg(all(target_os = "macos", feature = "cef"))]
-    fn paint_browser_overlay(
-        &mut self,
-        pos: &PositionedPane,
-        _layers: &mut TripleLayerQuadAllocator,
-    ) -> anyhow::Result<()> {
+    fn calculate_pane_pixel_bounds(&self, pos: &PositionedPane) -> anyhow::Result<(f32, f32, f32, f32)> {
         let (padding_left, padding_top) = self.padding_left_top();
 
         let tab_bar_height = if self.show_tab_bar {
@@ -752,8 +778,7 @@ impl crate::TermWindow {
         };
 
         // Calculate viewport size - extends to window edges for edge panes
-        // This is the VIEWPORT size, not the CEF texture size
-        let pane_width = if pos.left + pos.width >= self.terminal_size.cols as usize {
+        let width = if pos.left + pos.width >= self.terminal_size.cols as usize {
             // Right edge pane: extend to window edge
             self.dimensions.pixel_width as f32 - x
         } else {
@@ -761,7 +786,7 @@ impl crate::TermWindow {
             (pos.width as f32 * cell_width) + width_delta
         };
 
-        let pane_height = if pos.top + pos.height >= self.terminal_size.rows as usize {
+        let height = if pos.top + pos.height >= self.terminal_size.rows as usize {
             // Bottom edge pane: extend to window edge
             self.dimensions.pixel_height as f32 - y
         } else {
@@ -769,11 +794,24 @@ impl crate::TermWindow {
             (pos.height as f32 * cell_height) + height_delta
         };
 
+        Ok((x, y, width, height))
+    }
+
+    /// Paint a browser overlay for a pane with CEF content.
+    /// The actual CEF texture is rendered in a separate pass after main rendering.
+    #[cfg(all(target_os = "macos", feature = "cef"))]
+    fn paint_browser_overlay(
+        &mut self,
+        pos: &PositionedPane,
+        _layers: &mut TripleLayerQuadAllocator,
+    ) -> anyhow::Result<()> {
+        let (x, y, width, height) = self.calculate_pane_pixel_bounds(pos)?;
+
         // Update browser pane bounds for rendering
         // No resize call - we just stretch the initial texture to fit
         let pane_id = pos.pane.pane_id();
         if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
-            browser.set_pane_bounds(x, y, pane_width as u32, pane_height as u32);
+            browser.set_pane_bounds(x, y, width as u32, height as u32);
         }
 
         Ok(())
