@@ -1307,39 +1307,10 @@ impl TermWindow {
                     // Also handled by clientpane
                     self.update_title_post_status();
                 }
-                #[cfg_attr(
-                    not(all(target_os = "macos", feature = "cef")),
-                    allow(unused_variables)
-                )]
-                MuxNotification::TabResized(tab_id) => {
+                MuxNotification::TabResized(_) => {
                     // Also handled by wezterm-client
                     self.update_title_post_status();
-
-                    // Resize any CEF browsers in panes that were resized
-                    #[cfg(all(target_os = "macos", feature = "cef"))]
-                    {
-                        log::info!("[CEF] TabResized notification received for tab_id={}", tab_id);
-                        let mux = Mux::get();
-                        if let Some(tab) = mux.get_tab(tab_id) {
-                            let panes = self.get_pos_panes_for_tab(&tab);
-                            log::info!("[CEF] TabResized: found {} panes in tab", panes.len());
-                            for pos in panes {
-                                log::info!(
-                                    "[CEF] TabResized: processing pane_id={}, pixel_width={}, pixel_height={}",
-                                    pos.pane.pane_id(),
-                                    pos.pixel_width,
-                                    pos.pixel_height
-                                );
-                                self.resize_browser_for_pane(
-                                    pos.pane.pane_id(),
-                                    pos.pixel_width,
-                                    pos.pixel_height,
-                                );
-                            }
-                        } else {
-                            log::warn!("[CEF] TabResized: could not find tab {}", tab_id);
-                        }
-                    }
+                    // CEF browser resize is handled in paint_browser_overlay()
                 }
                 MuxNotification::TabTitleChanged { .. } => {
                     self.update_title_post_status();
@@ -3783,47 +3754,6 @@ impl TermWindow {
         if let Some(ref w) = self.window {
             w.invalidate();
         }
-    }
-
-    /// Resize the CEF browser for a specific pane if one exists
-    pub fn resize_browser_for_pane(
-        &self,
-        pane_id: PaneId,
-        pixel_width: usize,
-        pixel_height: usize,
-    ) {
-        log::info!(
-            "[CEF] resize_browser_for_pane called: pane_id={}, pixel_width={}, pixel_height={}",
-            pane_id,
-            pixel_width,
-            pixel_height
-        );
-
-        let browser_states = self.browser_states.borrow();
-        let Some(browser) = browser_states.get(&pane_id) else {
-            log::info!("[CEF] resize_browser_for_pane: no browser for pane {}, skipping", pane_id);
-            return;
-        };
-
-        // Convert physical pixels to logical pixels (DIP) for CEF
-        // macOS uses 72.0 as base DPI, so scale = dpi / 72.0
-        const MACOS_BASE_DPI: f32 = 72.0;
-        let device_scale_factor = self.dimensions.dpi as f32 / MACOS_BASE_DPI;
-        let logical_width = (pixel_width as f32 / device_scale_factor) as u32;
-        let logical_height = (pixel_height as f32 / device_scale_factor) as u32;
-
-        log::info!(
-            "[CEF] resize_browser_for_pane: pane={}, logical={}x{}, physical={}x{}, scale={}",
-            pane_id,
-            logical_width,
-            logical_height,
-            pixel_width,
-            pixel_height,
-            device_scale_factor
-        );
-
-        browser.resize(logical_width, logical_height);
-        log::info!("[CEF] resize_browser_for_pane: browser.resize() called for pane {}", pane_id);
     }
 
     /// Check if a pane has an active browser overlay

@@ -144,6 +144,11 @@ impl BrowserState {
         *self.pane_rect.borrow()
     }
 
+    /// Get the current logical size (DIP)
+    pub fn get_size(&self) -> (u32, u32) {
+        *self.size.borrow()
+    }
+
     /// Get the browser host for sending events
     pub fn host(&self) -> Option<BrowserHost> {
         self.browser.host()

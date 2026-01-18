@@ -768,6 +768,25 @@ impl crate::TermWindow {
         // Update the browser's pane rectangle for the CEF overlay render pass
         let pane_id = pos.pane.pane_id();
         if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
+            // Check if browser needs to be resized (handles window resize, split, close)
+            const MACOS_BASE_DPI: f32 = 72.0;
+            let scale = self.dimensions.dpi as f32 / MACOS_BASE_DPI;
+            let logical_width = (pos.pixel_width as f32 / scale) as u32;
+            let logical_height = (pos.pixel_height as f32 / scale) as u32;
+
+            let (current_w, current_h) = browser.get_size();
+            if logical_width != current_w || logical_height != current_h {
+                log::info!(
+                    "[CEF] paint_browser_overlay: resizing browser {} from {}x{} to {}x{}",
+                    pane_id,
+                    current_w,
+                    current_h,
+                    logical_width,
+                    logical_height
+                );
+                browser.resize(logical_width, logical_height);
+            }
+
             browser.set_pane_rect(x, y, width, height);
             log::trace!(
                 "[CEF] Updated pane rect for browser {}: x={}, y={}, w={}, h={}",
