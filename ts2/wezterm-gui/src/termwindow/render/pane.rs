@@ -698,8 +698,8 @@ impl crate::TermWindow {
         })
     }
 
-    /// Paint a browser overlay for a pane with CEF content
-    /// Update the browser's pane rectangle for CEF overlay rendering.
+    /// Paint a browser overlay for a pane with CEF content.
+    /// Sets the browser position and triggers resize if needed.
     /// The actual CEF texture is rendered in a separate pass after main rendering.
     #[cfg(all(target_os = "macos", feature = "cef"))]
     fn paint_browser_overlay(
@@ -727,45 +727,21 @@ impl crate::TermWindow {
         let cell_width = self.render_metrics.cell_size.width as f32;
         let cell_height = self.render_metrics.cell_size.height as f32;
 
-        // Calculate the pane rectangle (same logic as paint_pane)
-        let (x, width_delta) = if pos.left == 0 {
-            (
-                0.,
-                padding_left + border.left.get() as f32 + (cell_width / 2.0),
-            )
+        // Calculate the pane position (where on screen to place the browser)
+        let x = if pos.left == 0 {
+            0.
         } else {
-            (
-                padding_left + border.left.get() as f32 - (cell_width / 2.0)
-                    + (pos.left as f32 * cell_width),
-                cell_width,
-            )
+            padding_left + border.left.get() as f32 - (cell_width / 2.0)
+                + (pos.left as f32 * cell_width)
         };
 
-        let (y, height_delta) = if pos.top == 0 {
-            (
-                (top_pixel_y - padding_top),
-                padding_top + (cell_height / 2.0),
-            )
+        let y = if pos.top == 0 {
+            top_pixel_y - padding_top
         } else {
-            (
-                top_pixel_y + (pos.top as f32 * cell_height) - (cell_height / 2.0),
-                cell_height,
-            )
+            top_pixel_y + (pos.top as f32 * cell_height) - (cell_height / 2.0)
         };
 
-        let width = if pos.left + pos.width >= self.terminal_size.cols as usize {
-            self.dimensions.pixel_width as f32 - x
-        } else {
-            (pos.width as f32 * cell_width) + width_delta
-        };
-
-        let height = if pos.top + pos.height >= self.terminal_size.rows as usize {
-            self.dimensions.pixel_height as f32 - y
-        } else {
-            (pos.height as f32 * cell_height) + height_delta as f32
-        };
-
-        // Update the browser's pane rectangle for the CEF overlay render pass
+        // Update the browser's position and check if resize needed
         let pane_id = pos.pane.pane_id();
         if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
             // Check if browser needs to be resized (handles window resize, split, close)
@@ -787,14 +763,12 @@ impl crate::TermWindow {
                 browser.resize(logical_width, logical_height);
             }
 
-            browser.set_pane_rect(x, y, width, height);
+            browser.set_pane_position(x, y);
             log::trace!(
-                "[CEF] Updated pane rect for browser {}: x={}, y={}, w={}, h={}",
+                "[CEF] Updated pane position for browser {}: x={}, y={}",
                 pane_id,
                 x,
-                y,
-                width,
-                height
+                y
             );
         }
 

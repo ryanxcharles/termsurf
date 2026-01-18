@@ -175,12 +175,28 @@ impl crate::TermWindow {
                 log::trace!("[CEF] render_cef_overlays: pane {} has no texture yet", pane_id);
                 continue;
             };
-            log::trace!("[CEF] render_cef_overlays: rendering pane {}", pane_id);
 
-            let pane_rect = browser.get_pane_rect();
-            if pane_rect.width <= 0.0 || pane_rect.height <= 0.0 {
+            // Get actual texture size from CEF (physical pixels)
+            let Some((texture_width, texture_height)) = browser.get_texture_size() else {
+                log::trace!("[CEF] render_cef_overlays: pane {} has no texture size yet", pane_id);
+                continue;
+            };
+
+            if texture_width == 0 || texture_height == 0 {
                 continue;
             }
+
+            // Get position from pane layout
+            let position = browser.get_pane_position();
+
+            log::trace!(
+                "[CEF] render_cef_overlays: rendering pane {} at ({}, {}) size {}x{}",
+                pane_id,
+                position.x,
+                position.y,
+                texture_width,
+                texture_height
+            );
 
             let mut encoder = webgpu
                 .device
@@ -206,12 +222,13 @@ impl crate::TermWindow {
                 render_pass.set_pipeline(&webgpu.cef_render_pipeline);
                 render_pass.set_bind_group(0, &bind_group, &[]);
 
-                // Set viewport to pane bounds
+                // Set viewport using position from layout and size from actual texture
+                // This ensures no stretching/squishing - texture is rendered at 1:1 pixel ratio
                 render_pass.set_viewport(
-                    pane_rect.x,
-                    pane_rect.y,
-                    pane_rect.width,
-                    pane_rect.height,
+                    position.x,
+                    position.y,
+                    texture_width as f32,
+                    texture_height as f32,
                     0.0,
                     1.0,
                 );
