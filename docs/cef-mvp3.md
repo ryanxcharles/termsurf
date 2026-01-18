@@ -45,83 +45,61 @@ The browser must always match the precise position and dimensions of its pane.
    Retina currently works—preserve this. The browser must render at the correct
    scale factor for the display.
 
-4. **Debounced re-render**: When pane size changes, request a CEF re-render
-   using debounced resize with trailing edge. See detailed section below.
+4. **Settle-and-rerender**: When pane size changes, resize immediately. After
+   10ms of no changes, trigger one final render to fix any texture mismatch. See
+   detailed section below.
 
-## Debounced Resize with Trailing Edge
+## Settle-and-Rerender
 
-The re-render loop uses **debounced resize with trailing edge** to avoid
-overwhelming CEF with resize requests during continuous dragging.
+CEF renders asynchronously. When resize requests arrive during an in-progress
+render, the delivered texture may not match the current pane size. This causes
+visual distortion (stretching/compression artifacts).
 
-### The Pattern
+The solution: after resizing stops, wait briefly, then render one more time.
 
-1. At most one resize render is in flight at any time
-2. At most one resize is queued (the "trailing edge")
-3. New resize requests replace the queued one, not append to it
-4. The final size is always rendered (hence "trailing edge")
+### How It Works
 
-### State Machine
+1. **Immediate resize**: When pane size changes, call `browser.resize()`
+   immediately. The viewport stretches the current texture to fit (acceptable
+   temporary state).
 
-```
-States:
-  Idle                          - No render in progress
-  Rendering(size)               - Render in progress, nothing queued
-  RenderingWithQueued(in_flight, queued)  - Render in progress, trailing edge queued
+2. **Mark time**: Record when the resize happened (`last_resize_time`).
 
-Transitions:
+3. **Keep painting**: While waiting to settle, keep the paint loop running via
+   `window.invalidate()`.
 
-  [Pane size changes to S]
-    Idle                        → Rendering(S)           // Start immediately
-    Rendering(X)                → RenderingWithQueued(X, S)  // Queue trailing edge
-    RenderingWithQueued(X, _)   → RenderingWithQueued(X, S)  // Replace trailing edge
+4. **Settle render**: After 10ms with no size changes, trigger one final
+   `browser.resize()` at the current size. This ensures the texture matches the
+   pane exactly.
 
-  [CEF finishes rendering]
-    Rendering(X)                → Idle                   // Done
-    RenderingWithQueued(X, Q)   → Rendering(Q)           // Start trailing edge
-```
+### Why 10ms?
 
-### Example Flow
+- Fast enough to be imperceptible to humans
+- Long enough to catch the "settle" point after rapid resize
+- Empirically validated to fix the texture mismatch issue
 
-1. User drags window edge
-2. Paint loop detects pane size changed (800×600 → 850×600)
-3. State is `Idle` → call `browser.resize(850, 600)` → `Rendering(850×600)`
-4. Viewport stretches current texture to pane bounds (temporary)
-5. User keeps dragging → pane is now 900×600
-6. State is `Rendering` → queue trailing edge →
-   `RenderingWithQueued(850×600, 900×600)`
-7. User keeps dragging → pane is now 950×600
-8. Replace trailing edge → `RenderingWithQueued(850×600, 950×600)`
-9. CEF delivers 850×600 texture
-10. Start trailing edge → `Rendering(950×600)`
-11. User stopped, pane stays at 950×600
-12. CEF delivers 950×600 texture
-13. No trailing edge queued → `Idle`
-14. Viewport shows 950×600 texture in 950×600 pane = 1:1
+### Manual Fallback
 
-### Detection Point
+If the browser ever gets into a bad state, **Ctrl+Shift+R** forces an immediate
+re-render at the current size. This is a debugging aid and should rarely be
+needed with the automatic settle logic.
 
-Hybrid approach:
+### Implementation
 
-- **Detection** in `paint_browser_overlay`: compare current pane bounds (from
-  `calculate_pane_pixel_bounds()`) to last-requested size, update state
-- **Resize calls**:
-  - From `paint_browser_overlay`: when `Idle` and pane size differs from last
-    render, call `browser.resize()` immediately
-  - From `on_paint` callback: when CEF finishes and there's a trailing edge
-    queued, call `browser.resize()` with the queued size
+In `BrowserState`:
 
-### Data Structure
+- `last_resize_time: RefCell<Option<Instant>>` - when last resize was requested
+- `mark_resize_time()` - called after each resize
+- `clear_resize_time()` - called after settle render
+- `time_since_last_resize()` - returns elapsed time if waiting
 
-```rust
-struct DebounceState {
-    // Physical pixels - matches set_pane_bounds() values
-    // Convert to logical (physical / device_scale_factor) when calling browser.resize()
-    in_flight: Option<(u32, u32)>,      // Size currently being rendered
-    trailing_edge: Option<(u32, u32)>,  // Queued size (replaces, not appends)
-}
-```
+In `paint_browser_overlay`:
 
-### Source of Truth
+- If size changed: resize + mark time
+- If waiting and 10ms elapsed: settle render + clear time
+- If waiting and <10ms: invalidate window to keep painting
+
+## Source of Truth
 
 **The physical pixel dimensions passed to `set_pane_bounds()` are the source of
 truth for re-renders.** Convert these to logical pixels and pass to
