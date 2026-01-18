@@ -49,6 +49,74 @@ The browser must always match the precise position and dimensions of its pane.
    still dragging), we request another render. This continues until the texture
    matches the current pane size.
 
+## Debounced Resize with Trailing Edge
+
+The re-render loop uses **debounced resize with trailing edge** to avoid
+overwhelming CEF with resize requests during continuous dragging.
+
+### The Pattern
+
+1. At most one resize render is in flight at any time
+2. At most one resize is queued (the "trailing edge")
+3. New resize requests replace the queued one, not append to it
+4. The final size is always rendered (hence "trailing edge")
+
+### State Machine
+
+```
+States:
+  Idle                          - No render in progress
+  Rendering(size)               - Render in progress, nothing queued
+  RenderingWithQueued(in_flight, queued)  - Render in progress, trailing edge queued
+
+Transitions:
+
+  [Pane size changes to S]
+    Idle                        → Rendering(S)           // Start immediately
+    Rendering(X)                → RenderingWithQueued(X, S)  // Queue trailing edge
+    RenderingWithQueued(X, _)   → RenderingWithQueued(X, S)  // Replace trailing edge
+
+  [CEF finishes rendering]
+    Rendering(X)                → Idle                   // Done
+    RenderingWithQueued(X, Q)   → Rendering(Q)           // Start trailing edge
+```
+
+### Example Flow
+
+1. User drags window edge
+2. Paint loop detects pane size changed (800×600 → 850×600)
+3. State is `Idle` → call `browser.resize(850, 600)` → `Rendering(850×600)`
+4. Viewport stretches current texture to pane bounds (temporary)
+5. User keeps dragging → pane is now 900×600
+6. State is `Rendering` → queue trailing edge →
+   `RenderingWithQueued(850×600, 900×600)`
+7. User keeps dragging → pane is now 950×600
+8. Replace trailing edge → `RenderingWithQueued(850×600, 950×600)`
+9. CEF delivers 850×600 texture
+10. Start trailing edge → `Rendering(950×600)`
+11. User stopped, pane stays at 950×600
+12. CEF delivers 950×600 texture
+13. No trailing edge queued → `Idle`
+14. Viewport shows 950×600 texture in 950×600 pane = 1:1
+
+### Detection Point
+
+Hybrid approach:
+
+- **Detection** in `paint_browser_overlay`: compare pane size to last-requested
+  size, update trailing edge queue
+- **Execution** in `on_paint` callback: when CEF finishes, start trailing edge
+  if queued
+
+### Data Structure
+
+```rust
+struct DebounceState {
+    in_flight: Option<(u32, u32)>,      // Size currently being rendered
+    trailing_edge: Option<(u32, u32)>,  // Queued size (replaces, not appends)
+}
+```
+
 ## Non-Goals for MVP3
 
 - Perfect frame-by-frame synchronization (minor lag is acceptable)
