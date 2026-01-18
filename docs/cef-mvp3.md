@@ -34,7 +34,8 @@ The browser must always match the precise position and dimensions of its pane.
 
 1. **Single source of truth**: All pane bounds come from
    `calculate_pane_pixel_bounds()`. This function is the sole authority for
-   browser viewport position and size. Do not introduce alternative calculations.
+   browser viewport position and size. Do not introduce alternative
+   calculations.
 
 2. **Edge extension**: Edge panes extend to the window edge (covering
    padding/borders). Interior panes extend half-cell into dividers. See the
@@ -101,15 +102,20 @@ Transitions:
 
 Hybrid approach:
 
-- **Detection** in `paint_browser_overlay`: compare pane size to last-requested
-  size, update trailing edge queue
-- **Execution** in `on_paint` callback: when CEF finishes, start trailing edge
-  if queued
+- **Detection** in `paint_browser_overlay`: compare current pane bounds (from
+  `calculate_pane_pixel_bounds()`) to last-requested size, update state
+- **Resize calls**:
+  - From `paint_browser_overlay`: when `Idle` and pane size differs from last
+    render, call `browser.resize()` immediately
+  - From `on_paint` callback: when CEF finishes and there's a trailing edge
+    queued, call `browser.resize()` with the queued size
 
 ### Data Structure
 
 ```rust
 struct DebounceState {
+    // Physical pixels - matches set_pane_bounds() values
+    // Convert to logical (physical / device_scale_factor) when calling browser.resize()
     in_flight: Option<(u32, u32)>,      // Size currently being rendered
     trailing_edge: Option<(u32, u32)>,  // Queued size (replaces, not appends)
 }
@@ -121,7 +127,7 @@ struct DebounceState {
 truth for re-renders.** Convert these to logical pixels and pass to
 `browser.resize()`. Do not introduce a different calculation.
 
-The values are calculated in `paint_browser_overlay` as follows:
+The values are calculated in `calculate_pane_pixel_bounds()` as follows:
 
 ```
 # Edge detection
