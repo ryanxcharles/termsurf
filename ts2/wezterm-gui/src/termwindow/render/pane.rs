@@ -1,7 +1,5 @@
 use crate::quad::{HeapQuadAllocator, QuadTrait, TripleLayerQuadAllocator};
 use crate::selection::SelectionRange;
-#[cfg(all(target_os = "macos", feature = "cef"))]
-use crate::tabbar::parse_status_text;
 use crate::termwindow::box_model::*;
 use crate::termwindow::render::{
     same_hyperlink, CursorProperties, LineQuadCacheKey, LineQuadCacheValue, LineToEleShapeCacheKey,
@@ -19,8 +17,6 @@ use mux::renderable::{RenderableDimensions, StableCursorPosition};
 use mux::tab::PositionedPane;
 use ordered_float::NotNan;
 use std::time::Instant;
-#[cfg(all(target_os = "macos", feature = "cef"))]
-use termwiz::cell::CellAttributes;
 use wezterm_dynamic::Value;
 use wezterm_term::color::{ColorAttribute, ColorPalette};
 use wezterm_term::{Line, StableRowIndex};
@@ -812,6 +808,8 @@ impl crate::TermWindow {
     /// Paint a browser overlay for a pane with CEF content.
     /// The actual CEF texture is rendered in a separate pass after main rendering.
     #[cfg(all(target_os = "macos", feature = "cef"))]
+    /// Paint browser overlay background and handle browser bounds/resize.
+    /// Text rendering is done separately in paint_browser_control_bars() after layers are dropped.
     fn paint_browser_overlay(
         &mut self,
         pos: &PositionedPane,
@@ -824,90 +822,14 @@ impl crate::TermWindow {
         let (x, y, width, height) = self.calculate_pane_pixel_bounds(pos)?;
 
         // Control panel is 2 cell heights at the top of the browser pane
-        // (half-cell top margin + text + half-cell bottom margin)
         let cell_height = self.render_metrics.cell_size.height as f32;
-        let half_cell_height = cell_height / 2.0;
         let control_bar_height = cell_height * 2.0;
 
-        // Render control panel background
+        // Render control panel background using layers (while buffer is mapped)
         let palette = self.palette().clone();
         let bg_color = palette.background.to_linear();
         let control_panel_rect = euclid::rect(x, y, width, control_bar_height);
         self.filled_rectangle(layers, 0, control_panel_rect, bg_color)?;
-
-        // Render control panel text based on current mode
-        use crate::cef_browser::BrowserMode;
-        let pane_id = pos.pane.pane_id();
-        let mode_text = if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
-            match browser.get_mode() {
-                BrowserMode::Browse => browser.get_url(),
-                BrowserMode::Control => "Control Mode".to_string(),
-            }
-        } else {
-            "Browser".to_string()
-        };
-        let line = parse_status_text(&mode_text, CellAttributes::default());
-        let gl_state = self.render_state.as_ref().unwrap();
-        let white_space = gl_state.util_sprites.white_space.texture_coords();
-        let filled_box = gl_state.util_sprites.filled_box.texture_coords();
-        let window_is_transparent =
-            !self.window_background.is_empty() || self.config.window_background_opacity != 1.0;
-        let default_bg = palette
-            .resolve_bg(ColorAttribute::Default)
-            .to_linear()
-            .mul_alpha(if window_is_transparent {
-                0.
-            } else {
-                self.config.text_background_opacity
-            });
-
-        // Add half-cell margins to match terminal content positioning
-        let half_cell_width = self.render_metrics.cell_size.width as f32 / 2.0;
-
-        self.render_screen_line(
-            RenderScreenLineParams {
-                top_pixel_y: y + half_cell_height,
-                left_pixel_x: x + half_cell_width,
-                pixel_width: width - half_cell_width,
-                stable_line_idx: None,
-                line: &line,
-                selection: 0..0,
-                cursor: &Default::default(),
-                palette: &palette,
-                dims: &RenderableDimensions {
-                    cols: (width / self.render_metrics.cell_size.width as f32) as usize,
-                    physical_top: 0,
-                    scrollback_rows: 0,
-                    scrollback_top: 0,
-                    viewport_rows: 1,
-                    dpi: self.terminal_size.dpi,
-                    pixel_height: self.render_metrics.cell_size.height as usize,
-                    pixel_width: width as usize,
-                    reverse_video: false,
-                },
-                config: &self.config,
-                cursor_border_color: LinearRgba::default(),
-                foreground: palette.foreground.to_linear(),
-                pane: None,
-                is_active: true,
-                selection_fg: LinearRgba::default(),
-                selection_bg: LinearRgba::default(),
-                cursor_fg: LinearRgba::default(),
-                cursor_bg: LinearRgba::default(),
-                cursor_is_default_color: true,
-                white_space,
-                filled_box,
-                window_is_transparent,
-                default_bg,
-                style: None,
-                font: None,
-                use_pixel_positioning: self.config.experimental_pixel_positioning,
-                render_metrics: self.render_metrics,
-                shape_key: None,
-                password_input: false,
-            },
-            layers,
-        )?;
 
         // Browser bounds: pushed down by control panel height
         let browser_y = y + control_bar_height;
@@ -928,19 +850,14 @@ impl crate::TermWindow {
             let target_size = (logical_width, logical_height);
 
             // Check if target size changed (compare against pending, not actual)
-            // We DON'T resize immediately - just track that we need to resize
-            // This avoids the "bouncing" visual artifacts during drag resize
             if browser.get_pending_size() != Some(target_size) {
                 browser.set_pending_size(logical_width, logical_height);
                 browser.mark_resize_time();
             }
 
-            // Settle-and-rerender logic:
-            // Only resize AFTER 10ms of no size changes
-            // During resize, just stretch the existing texture to fit
+            // Settle-and-rerender logic
             if let Some(elapsed) = browser.time_since_last_resize() {
                 if elapsed >= SETTLE_DELAY {
-                    // Settled! Now do the actual resize
                     log::debug!(
                         "[CEF] Settle render for pane {} at {}x{} (waited {:?})",
                         pane_id,
@@ -952,12 +869,97 @@ impl crate::TermWindow {
                     browser.clear_resize_time();
                     browser.clear_pending_size();
                 } else {
-                    // Still waiting to settle - keep paint loop running
                     if let Some(ref w) = self.window {
                         w.invalidate();
                     }
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    /// Paint browser control bar text for all browser panes.
+    /// Must be called AFTER layers are dropped (like paint_modal).
+    #[cfg(all(target_os = "macos", feature = "cef"))]
+    pub fn paint_browser_control_bars(&mut self) -> anyhow::Result<()> {
+        use crate::cef_browser::BrowserMode;
+        use crate::utilsprites::RenderMetrics;
+        use config::{Dimension, DimensionContext};
+
+        let panes = self.get_panes_to_render();
+
+        for pos in panes {
+            let pane_id = pos.pane.pane_id();
+            if !self.has_browser_for_pane(pane_id) {
+                continue;
+            }
+
+            let (x, y, width, _height) = self.calculate_pane_pixel_bounds(&pos)?;
+
+            let cell_height = self.render_metrics.cell_size.height as f32;
+            let half_cell_height = cell_height / 2.0;
+            let control_bar_height = cell_height * 2.0;
+
+            let palette = self.palette().clone();
+
+            let mode_text = if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
+                match browser.get_mode() {
+                    BrowserMode::Browse => browser.get_url(),
+                    BrowserMode::Control => "Control Mode".to_string(),
+                }
+            } else {
+                "Browser".to_string()
+            };
+
+            // Get the monospace font and create metrics for it
+            let font = self.fonts.default_font()?;
+            let metrics = RenderMetrics::with_font_metrics(&font.metrics());
+            let half_cell_width = metrics.cell_size.width as f32 / 2.0;
+
+            // Create text element with padding for margins
+            let element = Element::new(&font, ElementContent::Text(mode_text))
+                .colors(ElementColors {
+                    border: BorderColor::default(),
+                    bg: palette.background.to_linear().into(),
+                    text: palette.foreground.to_linear().into(),
+                })
+                .min_width(Some(Dimension::Pixels(width)))
+                .min_height(Some(Dimension::Pixels(control_bar_height)))
+                .padding(BoxDimension {
+                    left: Dimension::Pixels(half_cell_width),
+                    top: Dimension::Pixels(half_cell_height),
+                    right: Dimension::Pixels(0.),
+                    bottom: Dimension::Pixels(half_cell_height),
+                });
+
+            // Compute element with full window dimensions for pixel_max
+            let gl_state = self.render_state.as_ref().unwrap();
+            let mut computed = self.compute_element(
+                &LayoutContext {
+                    height: DimensionContext {
+                        dpi: self.dimensions.dpi as f32,
+                        pixel_max: self.dimensions.pixel_height as f32,
+                        pixel_cell: metrics.cell_size.height as f32,
+                    },
+                    width: DimensionContext {
+                        dpi: self.dimensions.dpi as f32,
+                        pixel_max: self.dimensions.pixel_width as f32,
+                        pixel_cell: metrics.cell_size.width as f32,
+                    },
+                    bounds: euclid::rect(0., 0., width, control_bar_height),
+                    metrics: &metrics,
+                    gl_state,
+                    zindex: 0,
+                },
+                &element,
+            )?;
+
+            // Translate to final position
+            computed.translate(euclid::vec2(x, y));
+
+            // Render the element (safe now - layers are dropped)
+            self.render_element(&computed, gl_state, None)?;
         }
 
         Ok(())
