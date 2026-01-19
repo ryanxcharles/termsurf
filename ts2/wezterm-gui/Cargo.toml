@@ -11,7 +11,8 @@ publish = false
 
 [features]
 default = ["vendored-fonts", "wayland"]
-cef = ["dep:cef"]
+cef = ["dep:cef", "accelerated_osr"]
+accelerated_osr = ["cef/accelerated_osr"]
 wayland = ["window/wayland"]
 distro-defaults = ["config/distro-defaults"]
 vendor-nerd-font-symbols-font = ["wezterm-font/vendor-nerd-font-symbols"]
