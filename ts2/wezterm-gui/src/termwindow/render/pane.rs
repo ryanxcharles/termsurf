@@ -832,8 +832,18 @@ impl crate::TermWindow {
         let control_panel_rect = euclid::rect(x, y, width, cell_height);
         self.filled_rectangle(layers, 0, control_panel_rect, bg_color)?;
 
-        // Render control panel text
-        let line = parse_status_text("Control Bar", CellAttributes::default());
+        // Render control panel text based on current mode
+        use crate::cef_browser::BrowserMode;
+        let pane_id = pos.pane.pane_id();
+        let mode_text = if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
+            match browser.get_mode() {
+                BrowserMode::Browse => "Browse Mode",
+                BrowserMode::Control => "Control Mode",
+            }
+        } else {
+            "Browser"
+        };
+        let line = parse_status_text(mode_text, CellAttributes::default());
         let gl_state = self.render_state.as_ref().unwrap();
         let white_space = gl_state.util_sprites.white_space.texture_coords();
         let filled_box = gl_state.util_sprites.filled_box.texture_coords();

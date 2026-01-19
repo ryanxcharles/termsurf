@@ -602,12 +602,22 @@ impl super::TermWindow {
             None => return,
         };
 
-        // CEF browser key handling - intercept Ctrl+C to close browser
+        // CEF browser key handling - mode-aware input routing
         #[cfg(all(target_os = "macos", feature = "cef"))]
         {
+            use crate::cef_browser::BrowserMode;
+
             let pane_id = pane.pane_id();
-            if self.has_browser_for_pane(pane_id) {
-                // Check for Ctrl+C to close the browser
+
+            // Get mode first, then drop the borrow before taking any actions
+            let browser_mode = self
+                .browser_states
+                .borrow()
+                .get(&pane_id)
+                .map(|b| b.get_mode());
+
+            if let Some(mode) = browser_mode {
+                // Check for Ctrl+C (used in both modes)
                 let is_ctrl_c = window_key.key_is_down
                     && window_key.modifiers.contains(::window::Modifiers::CTRL)
                     && matches!(
@@ -615,32 +625,70 @@ impl super::TermWindow {
                         ::window::KeyCode::Char('c') | ::window::KeyCode::Char('C')
                     );
 
-                if is_ctrl_c {
-                    log::info!("[CEF] Ctrl+C pressed, closing browser for pane {}", pane_id);
-                    self.close_browser_for_pane(pane_id);
-                    return;
-                }
+                // Check for Enter key
+                let is_enter = window_key.key_is_down
+                    && window_key.modifiers.is_empty()
+                    && matches!(&window_key.key, ::window::KeyCode::Char('\r'));
 
                 // Check for Ctrl+Shift+R to force re-render browser
-                // Note: SHIFT modifier is consumed by the key itself, so 'R' appears as uppercase
-                // Note: macOS doesn't generate key-down KeyEvent for Ctrl+Shift combos, so we use key-up
                 let is_ctrl_shift_r = !window_key.key_is_down
                     && window_key.modifiers.contains(::window::Modifiers::CTRL)
                     && matches!(&window_key.key, ::window::KeyCode::Char('R'));
 
-                if is_ctrl_shift_r {
-                    log::info!(
-                        "[CEF] Ctrl+Shift+R: forcing browser re-render for pane {}",
-                        pane_id
-                    );
-                    self.force_browser_rerender(pane_id);
-                    return;
-                }
+                match mode {
+                    BrowserMode::Browse => {
+                        // In Browse mode: Ctrl+C switches to Control mode
+                        if is_ctrl_c {
+                            log::info!(
+                                "[CEF] Ctrl+C in Browse mode, switching to Control mode for pane {}",
+                                pane_id
+                            );
+                            if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
+                                browser.set_mode(BrowserMode::Control);
+                            }
+                            return;
+                        }
 
-                // Forward other key events to the browser
-                // TODO: Implement full key event forwarding to CEF browser
-                // For now, consume all keys when browser is active
-                return;
+                        if is_ctrl_shift_r {
+                            log::info!(
+                                "[CEF] Ctrl+Shift+R: forcing browser re-render for pane {}",
+                                pane_id
+                            );
+                            self.force_browser_rerender(pane_id);
+                            return;
+                        }
+
+                        // In Browse mode, consume all other keys (browser receives input)
+                        // TODO: Forward key events to CEF browser
+                        return;
+                    }
+                    BrowserMode::Control => {
+                        // In Control mode: Enter switches to Browse mode
+                        if is_enter {
+                            log::info!(
+                                "[CEF] Enter in Control mode, switching to Browse mode for pane {}",
+                                pane_id
+                            );
+                            if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
+                                browser.set_mode(BrowserMode::Browse);
+                            }
+                            return;
+                        }
+
+                        // In Control mode: Ctrl+C closes the browser
+                        if is_ctrl_c {
+                            log::info!(
+                                "[CEF] Ctrl+C in Control mode, closing browser for pane {}",
+                                pane_id
+                            );
+                            self.close_browser_for_pane(pane_id);
+                            return;
+                        }
+
+                        // In Control mode, let other keys fall through to terminal keybindings
+                        // (don't return, continue to normal key processing)
+                    }
+                }
             }
         }
 

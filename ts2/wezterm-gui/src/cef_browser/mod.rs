@@ -24,6 +24,16 @@ pub type TextureHolder = std::rc::Rc<RefCell<Option<wgpu::BindGroup>>>;
 /// Updated every frame from paint_browser_overlay, used directly for rendering
 pub type PaneBoundsHolder = std::rc::Rc<RefCell<(f32, f32, u32, u32)>>;
 
+/// Browser interaction mode
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum BrowserMode {
+    /// Browser receives input (default on open)
+    #[default]
+    Browse,
+    /// Terminal keybindings work, browser is inactive
+    Control,
+}
+
 /// State for a single browser instance
 pub struct BrowserState {
     pub browser: Browser,
@@ -40,6 +50,8 @@ pub struct BrowserState {
     /// Pending target size - the size we want to resize to after settling
     /// Used to detect when the target size changes vs when we're just waiting
     pending_size: RefCell<Option<(u32, u32)>>,
+    /// Current interaction mode (Browse or Control)
+    mode: RefCell<BrowserMode>,
 }
 
 impl BrowserState {
@@ -129,6 +141,7 @@ impl BrowserState {
             size,
             last_resize_time: RefCell::new(None),
             pending_size: RefCell::new(None),
+            mode: RefCell::new(BrowserMode::Browse), // Start in Browse mode
         })
     }
 
@@ -177,6 +190,16 @@ impl BrowserState {
     /// Clear the pending size (after resize is complete)
     pub fn clear_pending_size(&self) {
         *self.pending_size.borrow_mut() = None;
+    }
+
+    /// Get the current browser mode
+    pub fn get_mode(&self) -> BrowserMode {
+        *self.mode.borrow()
+    }
+
+    /// Set the browser mode
+    pub fn set_mode(&self, mode: BrowserMode) {
+        *self.mode.borrow_mut() = mode;
     }
 
     /// Get the browser host for sending events
