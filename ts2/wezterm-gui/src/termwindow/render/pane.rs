@@ -1,5 +1,7 @@
 use crate::quad::{HeapQuadAllocator, QuadTrait, TripleLayerQuadAllocator};
 use crate::selection::SelectionRange;
+#[cfg(all(target_os = "macos", feature = "cef"))]
+use crate::tabbar::parse_status_text;
 use crate::termwindow::box_model::*;
 use crate::termwindow::render::{
     same_hyperlink, CursorProperties, LineQuadCacheKey, LineQuadCacheValue, LineToEleShapeCacheKey,
@@ -17,6 +19,8 @@ use mux::renderable::{RenderableDimensions, StableCursorPosition};
 use mux::tab::PositionedPane;
 use ordered_float::NotNan;
 use std::time::Instant;
+#[cfg(all(target_os = "macos", feature = "cef"))]
+use termwiz::cell::CellAttributes;
 use wezterm_dynamic::Value;
 use wezterm_term::color::{ColorAttribute, ColorPalette};
 use wezterm_term::{Line, StableRowIndex};
@@ -823,9 +827,71 @@ impl crate::TermWindow {
         let cell_height = self.render_metrics.cell_size.height as f32;
 
         // Render control panel background
-        let bg_color = self.palette().background.to_linear();
+        let palette = self.palette().clone();
+        let bg_color = palette.background.to_linear();
         let control_panel_rect = euclid::rect(x, y, width, cell_height);
         self.filled_rectangle(layers, 0, control_panel_rect, bg_color)?;
+
+        // Render control panel text
+        let line = parse_status_text("Control Bar", CellAttributes::default());
+        let gl_state = self.render_state.as_ref().unwrap();
+        let white_space = gl_state.util_sprites.white_space.texture_coords();
+        let filled_box = gl_state.util_sprites.filled_box.texture_coords();
+        let window_is_transparent =
+            !self.window_background.is_empty() || self.config.window_background_opacity != 1.0;
+        let default_bg = palette
+            .resolve_bg(ColorAttribute::Default)
+            .to_linear()
+            .mul_alpha(if window_is_transparent {
+                0.
+            } else {
+                self.config.text_background_opacity
+            });
+
+        self.render_screen_line(
+            RenderScreenLineParams {
+                top_pixel_y: y,
+                left_pixel_x: x,
+                pixel_width: width,
+                stable_line_idx: None,
+                line: &line,
+                selection: 0..0,
+                cursor: &Default::default(),
+                palette: &palette,
+                dims: &RenderableDimensions {
+                    cols: (width / self.render_metrics.cell_size.width as f32) as usize,
+                    physical_top: 0,
+                    scrollback_rows: 0,
+                    scrollback_top: 0,
+                    viewport_rows: 1,
+                    dpi: self.terminal_size.dpi,
+                    pixel_height: self.render_metrics.cell_size.height as usize,
+                    pixel_width: width as usize,
+                    reverse_video: false,
+                },
+                config: &self.config,
+                cursor_border_color: LinearRgba::default(),
+                foreground: palette.foreground.to_linear(),
+                pane: None,
+                is_active: true,
+                selection_fg: LinearRgba::default(),
+                selection_bg: LinearRgba::default(),
+                cursor_fg: LinearRgba::default(),
+                cursor_bg: LinearRgba::default(),
+                cursor_is_default_color: true,
+                white_space,
+                filled_box,
+                window_is_transparent,
+                default_bg,
+                style: None,
+                font: None,
+                use_pixel_positioning: self.config.experimental_pixel_positioning,
+                render_metrics: self.render_metrics,
+                shape_key: None,
+                password_input: false,
+            },
+            layers,
+        )?;
 
         // Browser bounds: pushed down by control panel height
         let browser_y = y + cell_height;
