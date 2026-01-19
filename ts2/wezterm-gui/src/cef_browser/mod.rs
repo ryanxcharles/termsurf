@@ -202,6 +202,11 @@ impl BrowserState {
         *self.mode.borrow_mut() = mode;
     }
 
+    /// Get the current URL
+    pub fn get_url(&self) -> String {
+        self.url.clone()
+    }
+
     /// Get the browser host for sending events
     pub fn host(&self) -> Option<BrowserHost> {
         self.browser.host()

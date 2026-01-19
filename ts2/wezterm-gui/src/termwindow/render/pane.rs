@@ -840,13 +840,13 @@ impl crate::TermWindow {
         let pane_id = pos.pane.pane_id();
         let mode_text = if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
             match browser.get_mode() {
-                BrowserMode::Browse => "Browse Mode",
-                BrowserMode::Control => "Control Mode",
+                BrowserMode::Browse => browser.get_url(),
+                BrowserMode::Control => "Control Mode".to_string(),
             }
         } else {
-            "Browser"
+            "Browser".to_string()
         };
-        let line = parse_status_text(mode_text, CellAttributes::default());
+        let line = parse_status_text(&mode_text, CellAttributes::default());
         let gl_state = self.render_state.as_ref().unwrap();
         let white_space = gl_state.util_sprites.white_space.texture_coords();
         let filled_box = gl_state.util_sprites.filled_box.texture_coords();
