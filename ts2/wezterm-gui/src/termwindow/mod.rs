@@ -3750,8 +3750,8 @@ impl TermWindow {
             invalidate_callback,
         ) {
             Ok(state) => {
-                // Browser starts in browse mode, so give it focus
-                state.set_focus(true);
+                // Browser starts in browse mode; focus will be set on first paint
+                // (when CEF is fully ready to handle it)
                 self.browser_states.borrow_mut().insert(pane_id, state);
                 log::info!("[CEF] Browser created successfully for pane {}", pane_id);
 

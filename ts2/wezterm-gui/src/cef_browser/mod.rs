@@ -93,6 +93,7 @@ impl BrowserState {
             bind_group_layout: bind_group_layout.clone(),
             device_scale_factor,
             invalidate_callback,
+            initial_focus_set: std::rc::Rc::new(RefCell::new(false)),
         };
 
         // Window info for OSR mode
@@ -484,6 +485,8 @@ struct CefRenderHandler {
     bind_group_layout: wgpu::BindGroupLayout,
     device_scale_factor: f32,
     invalidate_callback: Arc<dyn Fn() + Send + Sync>,
+    /// Track whether we've set initial focus (do it on first paint when browser is ready)
+    initial_focus_set: std::rc::Rc<RefCell<bool>>,
 }
 
 wrap_render_handler! {
@@ -534,12 +537,26 @@ wrap_render_handler! {
         #[cfg(target_os = "macos")]
         fn on_accelerated_paint(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             type_: PaintElementType,
             _dirty_rects: Option<&[Rect]>,
             info: Option<&cef::AcceleratedPaintInfo>,
         ) {
             log::info!("[CEF] on_accelerated_paint called");
+
+            // Set initial focus on first paint (browser is now ready)
+            // We unfocus then refocus to properly initialize the focus state,
+            // mimicking what happens when cycling through control/browse modes
+            if !*self.handler.initial_focus_set.borrow() {
+                if let Some(browser) = browser {
+                    if let Some(host) = browser.host() {
+                        log::info!("[CEF] Setting initial focus on first paint (unfocus then refocus)");
+                        host.set_focus(0);
+                        host.set_focus(1);
+                        *self.handler.initial_focus_set.borrow_mut() = true;
+                    }
+                }
+            }
             let Some(info) = info else {
                 log::warn!("[CEF] on_accelerated_paint: no info provided");
                 return;
@@ -609,7 +626,7 @@ wrap_render_handler! {
         // Software fallback paint handler - copies pixel buffer to GPU texture
         fn on_paint(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             _type_: PaintElementType,
             _dirty_rects: Option<&[Rect]>,
             buffer: *const u8,
@@ -617,6 +634,21 @@ wrap_render_handler! {
             height: ::std::os::raw::c_int,
         ) {
             log::info!("[CEF] on_paint called (software fallback) {}x{}", width, height);
+
+            // Set initial focus on first paint (browser is now ready)
+            // We unfocus then refocus to properly initialize the focus state,
+            // mimicking what happens when cycling through control/browse modes
+            if !*self.handler.initial_focus_set.borrow() {
+                if let Some(browser) = browser {
+                    if let Some(host) = browser.host() {
+                        log::info!("[CEF] Setting initial focus on first paint (unfocus then refocus)");
+                        host.set_focus(0);
+                        host.set_focus(1);
+                        *self.handler.initial_focus_set.borrow_mut() = true;
+                    }
+                }
+            }
+
             // Software fallback path
             use wgpu::{Extent3d, TextureDescriptor, TextureDimension, TextureUsages};
 
