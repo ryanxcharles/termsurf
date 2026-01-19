@@ -605,6 +605,10 @@ wrap_render_handler! {
                             resource: wgpu::BindingResource::TextureView(&src_texture.create_view(
                                 &wgpu::TextureViewDescriptor {
                                     label: Some("CEF Texture View"),
+                                    // Use sRGB format to tell GPU the texture data is already
+                                    // sRGB-encoded (Chromium renders for display). This prevents
+                                    // double gamma correction when rendering to WezTerm's sRGB surface.
+                                    format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                                     ..Default::default()
                                 },
                             )),
@@ -672,7 +676,8 @@ wrap_render_handler! {
                 dimension: TextureDimension::D2,
                 format: wgpu::TextureFormat::Bgra8Unorm,
                 usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                view_formats: &[],
+                // Allow creating sRGB views so we can tell GPU the data is already sRGB-encoded
+                view_formats: &[wgpu::TextureFormat::Bgra8UnormSrgb],
             };
 
             let texture = self.handler.device.create_texture(&texture_desc);
@@ -716,6 +721,10 @@ wrap_render_handler! {
                             resource: wgpu::BindingResource::TextureView(&texture.create_view(
                                 &wgpu::TextureViewDescriptor {
                                     label: Some("CEF Texture View"),
+                                    // Use sRGB format to tell GPU the texture data is already
+                                    // sRGB-encoded (Chromium renders for display). This prevents
+                                    // double gamma correction when rendering to WezTerm's sRGB surface.
+                                    format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                                     ..Default::default()
                                 },
                             )),

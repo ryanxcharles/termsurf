@@ -19,6 +19,17 @@ pub mod format {
         }
     }
 
+    /// Get sRGB view formats for a CEF color type.
+    /// Returns a static slice containing the sRGB variant, allowing consumers
+    /// to create texture views that interpret the data as sRGB-encoded.
+    pub fn srgb_view_formats(format: cef_color_type_t) -> &'static [wgpu::TextureFormat] {
+        match format {
+            cef_color_type_t::CEF_COLOR_TYPE_BGRA_8888 => &[wgpu::TextureFormat::Bgra8UnormSrgb],
+            cef_color_type_t::CEF_COLOR_TYPE_RGBA_8888 => &[wgpu::TextureFormat::Rgba8UnormSrgb],
+            _ => &[],
+        }
+    }
+
     #[cfg(target_os = "linux")]
     /// Convert CEF color type to Vulkan format
     pub fn cef_to_vulkan(format: cef_color_type_t) -> Result<ash::vk::Format, TextureImportError> {
@@ -56,7 +67,7 @@ pub mod texture {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu_format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+            view_formats: format::srgb_view_formats(format),
         });
 
         tracing::warn!(

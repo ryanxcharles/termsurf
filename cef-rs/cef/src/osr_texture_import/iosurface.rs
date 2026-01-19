@@ -77,7 +77,7 @@ impl TextureImporter for IOSurfaceImporter {
 }
 
 impl IOSurfaceImporter {
-    fn get_texture_desc(&self) -> TextureDescriptor<'_> {
+    fn get_texture_desc(&self) -> TextureDescriptor<'static> {
         use wgpu::{Extent3d, TextureDimension, TextureUsages};
 
         TextureDescriptor {
@@ -92,7 +92,7 @@ impl IOSurfaceImporter {
             dimension: TextureDimension::D2,
             format: format::cef_to_wgpu(self.format).expect("Unsupported CEF color format"),
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
-            view_formats: &[],
+            view_formats: format::srgb_view_formats(self.format),
         }
     }
     fn get_metal_desc(
