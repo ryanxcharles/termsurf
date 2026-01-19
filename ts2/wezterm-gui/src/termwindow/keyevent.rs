@@ -664,6 +664,35 @@ impl super::TermWindow {
                         };
                         use cef::KeyEventType;
 
+                        // DEBUG: Log incoming key event
+                        log::info!(
+                            "[CEF KEY] Received: key_is_down={}, key={:?}, raw_code={:?}",
+                            window_key.key_is_down,
+                            window_key.key,
+                            window_key.raw.as_ref().map(|r| r.raw_code)
+                        );
+
+                        // Skip KEYUP for navigation keys - CEF moves cursor on both
+                        // KEYDOWN and KEYUP, causing double movement
+                        // Note: Backspace is Char('\u{8}'), Delete is Char('\u{7f}')
+                        let is_navigation_key = matches!(
+                            window_key.key,
+                            ::window::KeyCode::UpArrow
+                                | ::window::KeyCode::DownArrow
+                                | ::window::KeyCode::LeftArrow
+                                | ::window::KeyCode::RightArrow
+                                | ::window::KeyCode::Home
+                                | ::window::KeyCode::End
+                                | ::window::KeyCode::PageUp
+                                | ::window::KeyCode::PageDown
+                                | ::window::KeyCode::Char('\u{8}')   // Backspace
+                                | ::window::KeyCode::Char('\u{7f}') // Delete
+                        );
+                        if is_navigation_key && !window_key.key_is_down {
+                            log::info!("[CEF KEY] Skipping KEYUP for navigation key");
+                            return;
+                        }
+
                         // Update modifier state
                         self.update_cef_modifiers(window_key.modifiers);
                         let modifiers = self.cef_all_modifiers();
@@ -684,6 +713,15 @@ impl super::TermWindow {
                             KeyEventType::KEYUP
                         };
 
+                        // DEBUG: Log outgoing KEYDOWN/KEYUP
+                        log::info!(
+                            "[CEF KEY] Sending {:?}: windows_vk={}, native={}, modifiers={}",
+                            event_type,
+                            windows_vk,
+                            cef_native,
+                            modifiers
+                        );
+
                         // Send KEYDOWN or KEYUP
                         if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
                             let key_event = CefKeyEvent {
@@ -700,6 +738,13 @@ impl super::TermWindow {
                             if window_key.key_is_down {
                                 // Extract character from the key
                                 if let ::window::KeyCode::Char(ch) = &window_key.key {
+                                    // DEBUG: Log outgoing CHAR
+                                    log::info!(
+                                        "[CEF KEY] Sending CHAR: char='{}' ({}), modifiers={}",
+                                        ch,
+                                        *ch as u16,
+                                        modifiers
+                                    );
                                     let char_event = CefKeyEvent {
                                         event_type: KeyEventType::CHAR,
                                         modifiers,
