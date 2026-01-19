@@ -906,7 +906,7 @@ impl crate::TermWindow {
             let mode_text = if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
                 match browser.get_mode() {
                     BrowserMode::Browse => browser.get_url(),
-                    BrowserMode::Control => "Control Mode".to_string(),
+                    BrowserMode::Control => "Enter to browse. Ctrl+C to exit.".to_string(),
                 }
             } else {
                 "Browser".to_string()
