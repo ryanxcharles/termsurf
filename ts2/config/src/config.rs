@@ -1006,9 +1006,9 @@ impl Config {
         // multiple.  In addition, it spawns a lot of subprocesses,
         // so we do this bit "by-hand"
 
-        let mut paths = vec![PathPossibility::optional(HOME_DIR.join(".wezterm.lua"))];
+        let mut paths = vec![PathPossibility::optional(HOME_DIR.join(".termsurf.lua"))];
         for dir in CONFIG_DIRS.iter() {
-            paths.push(PathPossibility::optional(dir.join("wezterm.lua")))
+            paths.push(PathPossibility::optional(dir.join("termsurf.lua")))
         }
 
         if cfg!(windows) {
@@ -1022,7 +1022,7 @@ impl Config {
             // dir as the executable that will take precedence.
             if let Ok(exe_name) = std::env::current_exe() {
                 if let Some(exe_dir) = exe_name.parent() {
-                    paths.insert(0, PathPossibility::optional(exe_dir.join("wezterm.lua")));
+                    paths.insert(0, PathPossibility::optional(exe_dir.join("termsurf.lua")));
                 }
             }
         }
@@ -1055,7 +1055,7 @@ impl Config {
             }
         }
 
-        // We didn't find (or were asked to skip) a wezterm.lua file, so
+        // We didn't find (or were asked to skip) a termsurf.lua file, so
         // update the environment to make it simpler to understand this
         // state.
         std::env::remove_var("WEZTERM_CONFIG_FILE");
@@ -1739,26 +1739,26 @@ fn default_font_size() -> f64 {
 
 pub(crate) fn compute_cache_dir() -> anyhow::Result<PathBuf> {
     if let Some(runtime) = dirs_next::cache_dir() {
-        return Ok(runtime.join("wezterm"));
+        return Ok(runtime.join("termsurf"));
     }
 
-    Ok(crate::HOME_DIR.join(".local/share/wezterm"))
+    Ok(crate::HOME_DIR.join(".local/share/termsurf"))
 }
 
 pub(crate) fn compute_data_dir() -> anyhow::Result<PathBuf> {
     if let Some(runtime) = dirs_next::data_dir() {
-        return Ok(runtime.join("wezterm"));
+        return Ok(runtime.join("termsurf"));
     }
 
-    Ok(crate::HOME_DIR.join(".local/share/wezterm"))
+    Ok(crate::HOME_DIR.join(".local/share/termsurf"))
 }
 
 pub(crate) fn compute_runtime_dir() -> anyhow::Result<PathBuf> {
     if let Some(runtime) = dirs_next::runtime_dir() {
-        return Ok(runtime.join("wezterm"));
+        return Ok(runtime.join("termsurf"));
     }
 
-    Ok(crate::HOME_DIR.join(".local/share/wezterm"))
+    Ok(crate::HOME_DIR.join(".local/share/termsurf"))
 }
 
 pub fn pki_dir() -> anyhow::Result<PathBuf> {

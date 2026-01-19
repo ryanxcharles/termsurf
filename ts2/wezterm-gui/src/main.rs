@@ -108,16 +108,16 @@ fn init_cef() -> Result<(), String> {
     let cache_path_str = cef_cache.to_string_lossy().to_string();
 
     // Compute path to helper binary
-    // exe is: .../WezTerm.app/Contents/MacOS/wezterm-gui
-    // helper is: .../WezTerm.app/Contents/Frameworks/WezTerm Helper.app/Contents/MacOS/WezTerm Helper
+    // exe is: .../TermSurf.app/Contents/MacOS/termsurf-gui
+    // helper is: .../TermSurf.app/Contents/Frameworks/TermSurf Helper.app/Contents/MacOS/TermSurf Helper
     let helper_path = exe
         .parent().unwrap() // MacOS
         .parent().unwrap() // Contents
         .join("Frameworks")
-        .join("WezTerm Helper.app")
+        .join("TermSurf Helper.app")
         .join("Contents")
         .join("MacOS")
-        .join("WezTerm Helper");
+        .join("TermSurf Helper");
     let helper_path_str = helper_path.to_string_lossy().to_string();
 
     let settings = Settings {

@@ -1,5 +1,5 @@
 [package]
-name = "wezterm-gui"
+name = "termsurf-gui"
 version = "0.1.0"
 authors = ["Wez Furlong <wez@wezfurlong.org>"]
 edition = "2018"
@@ -137,6 +137,6 @@ env_logger.workspace = true
 k9.workspace = true
 
 [[bin]]
-name = "wezterm-cef-helper"
+name = "termsurf-cef-helper"
 path = "src/bin/wezterm-cef-helper.rs"
 required-features = ["cef"]

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build WezTerm with CEF in Debug mode
+# Build TermSurf with CEF in Debug mode
 #
 # Usage:
 #   ./scripts/build-debug.sh [--clean] [--open]
@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 CEF_RS_DIR="$(dirname "$REPO_DIR")/cef-rs"
 CEF_OSR_APP="$CEF_RS_DIR/cef-osr.app"
-BUNDLE_DIR="$REPO_DIR/target/debug/WezTerm.app"
+BUNDLE_DIR="$REPO_DIR/target/debug/TermSurf.app"
 
 # Parse flags
 CLEAN=false
@@ -41,17 +41,17 @@ if [ "$CLEAN" = true ]; then
     echo "Cleared target/debug"
 fi
 
-echo "=== Building WezTerm with CEF (Debug) ==="
+echo "=== Building TermSurf with CEF (Debug) ==="
 
 # 1. Build debug binaries
 echo "Building debug binaries..."
 cd "$REPO_DIR"
-cargo build -p wezterm-gui --features cef
+cargo build -p termsurf-gui --features cef
 
 # 2. Remove existing bundle and copy template
 echo "Creating bundle from template..."
 rm -rf "$BUNDLE_DIR"
-cp -R "$REPO_DIR/assets/macos/WezTerm.app" "$BUNDLE_DIR"
+cp -R "$REPO_DIR/assets/macos/TermSurf.app" "$BUNDLE_DIR"
 
 # 3. Create directories
 mkdir -p "$BUNDLE_DIR/Contents/MacOS"
@@ -66,7 +66,7 @@ fi
 
 # 5. Copy main executable
 echo "Copying main executable..."
-cp "$REPO_DIR/target/debug/wezterm-gui" "$BUNDLE_DIR/Contents/MacOS/"
+cp "$REPO_DIR/target/debug/termsurf-gui" "$BUNDLE_DIR/Contents/MacOS/"
 
 # 6. Copy CEF framework
 echo "Copying CEF framework (~200MB, this takes a moment)..."
@@ -77,15 +77,15 @@ echo "Creating helper bundles..."
 CEF_OSR_FRAMEWORKS="$CEF_OSR_APP/Contents/Frameworks"
 for suffix in "Helper" "Helper (GPU)" "Helper (Renderer)" "Helper (Plugin)" "Helper (Alerts)"; do
     SRC_BUNDLE="${CEF_OSR_FRAMEWORKS}/cef-osr ${suffix}.app"
-    DEST_BUNDLE="$BUNDLE_DIR/Contents/Frameworks/WezTerm ${suffix}.app"
+    DEST_BUNDLE="$BUNDLE_DIR/Contents/Frameworks/TermSurf ${suffix}.app"
 
     cp -R "${SRC_BUNDLE}" "${DEST_BUNDLE}"
-    mv "${DEST_BUNDLE}/Contents/MacOS/cef-osr ${suffix}" "${DEST_BUNDLE}/Contents/MacOS/WezTerm ${suffix}"
-    cp "$REPO_DIR/target/debug/wezterm-cef-helper" "${DEST_BUNDLE}/Contents/MacOS/WezTerm ${suffix}"
-    sed -i '' 's/cef-osr/WezTerm/g' "${DEST_BUNDLE}/Contents/Info.plist"
-    sed -i '' 's/apps.tauri.cef-rs.WezTerm/com.github.wez.wezterm.helper/g' "${DEST_BUNDLE}/Contents/Info.plist"
+    mv "${DEST_BUNDLE}/Contents/MacOS/cef-osr ${suffix}" "${DEST_BUNDLE}/Contents/MacOS/TermSurf ${suffix}"
+    cp "$REPO_DIR/target/debug/termsurf-cef-helper" "${DEST_BUNDLE}/Contents/MacOS/TermSurf ${suffix}"
+    sed -i '' 's/cef-osr/TermSurf/g' "${DEST_BUNDLE}/Contents/Info.plist"
+    sed -i '' 's/apps.tauri.cef-rs.TermSurf/com.termsurf.termsurf.helper/g' "${DEST_BUNDLE}/Contents/Info.plist"
 
-    echo "  Created: WezTerm ${suffix}.app"
+    echo "  Created: TermSurf ${suffix}.app"
 done
 
 # 8. Update Info.plist
@@ -93,7 +93,7 @@ echo "Updating Info.plist..."
 python3 << 'PYTHON_SCRIPT'
 import plistlib
 
-plist_path = "target/debug/WezTerm.app/Contents/Info.plist"
+plist_path = "target/debug/TermSurf.app/Contents/Info.plist"
 
 with open(plist_path, 'rb') as f:
     plist = plistlib.load(f)
@@ -118,11 +118,11 @@ echo "=== Debug Build Complete ==="
 echo "App location: $BUNDLE_DIR"
 echo ""
 echo "To run:"
-echo "  $BUNDLE_DIR/Contents/MacOS/wezterm-gui"
+echo "  $BUNDLE_DIR/Contents/MacOS/termsurf-gui"
 
 # Open if requested
 if [ "$OPEN" = true ]; then
     echo ""
-    echo "Opening WezTerm..."
+    echo "Opening TermSurf..."
     open "$BUNDLE_DIR"
 fi
