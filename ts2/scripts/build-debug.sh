@@ -47,6 +47,7 @@ echo "=== Building TermSurf with CEF (Debug) ==="
 echo "Building debug binaries..."
 cd "$REPO_DIR"
 cargo build -p termsurf-gui --features cef
+cargo build -p termsurf
 
 # 2. Remove existing bundle and copy template
 echo "Creating bundle from template..."
@@ -64,9 +65,10 @@ if [[ -f "$BUNDLE_DIR/libEGL.dylib" ]]; then
     mv "$BUNDLE_DIR/libGLESv2.dylib" "$BUNDLE_DIR/Contents/Frameworks/"
 fi
 
-# 5. Copy main executable
-echo "Copying main executable..."
+# 5. Copy executables
+echo "Copying executables..."
 cp "$REPO_DIR/target/debug/termsurf-gui" "$BUNDLE_DIR/Contents/MacOS/"
+cp "$REPO_DIR/target/debug/termsurf" "$BUNDLE_DIR/Contents/MacOS/"
 
 # 6. Copy CEF framework
 echo "Copying CEF framework (~200MB, this takes a moment)..."
