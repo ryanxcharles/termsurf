@@ -26,8 +26,8 @@ WezTerm currently handles only 4 specific keys here:
 - `Shift+Tab`
 
 For these, it calls `key_common()` and returns `YES` to prevent further macOS
-handling. For all other keys (including Cmd+C/V), it returns `NO`, allowing
-them to fall through to Level 2.
+handling. For all other keys (including Cmd+C/V), it returns `NO`, allowing them
+to fall through to Level 2.
 
 ### Level 2: macOS Menu Key Equivalents
 
@@ -43,8 +43,7 @@ action is triggered and `keyDown:` is never called.
   `WindowEvent::PerformKeyAssignment`
 
 **Currently**: Copy/Paste menu items have Cmd+C/V as key equivalents (defined in
-`CommandDef` at lines 660 and 683). There is `#[cfg(feature = "cef")]` code at
-lines 520-532 that attempts to clear these, but its effectiveness is unverified.
+`CommandDef` at lines 642-652 for Copy and lines 665-675 for Paste).
 
 ### Level 3: `keyDown:` / `keyUp:` (NSView)
 
@@ -79,14 +78,14 @@ This function does extensive preprocessing:
 Called via `WindowEvent::RawKeyEvent`. This is the FIRST place WezTerm
 application code can intercept keys.
 
-**CEF Browser Shortcuts** (lines 468-544, `#[cfg(feature = "cef")]`):
+**CEF Browser Shortcuts** (lines 468-520, `#[cfg(feature = "cef")]`):
 
 - Only active when `browser_mode == Some(BrowserMode::Browse)`
-- Currently handles: `Cmd+[`, `Cmd+]`, `Cmd+R`, `Cmd+Shift+R`, `Cmd+C`, `Cmd+V`,
-  `Cmd+X`
+- Currently handles: `Cmd+[`, `Cmd+]`, `Cmd+R`, `Cmd+Shift+R`
+- Does NOT yet handle `Cmd+C`, `Cmd+V`, `Cmd+X` (this is what MVP5 needs to add)
 - If handled, calls `key.set_handled()` and returns
 
-**Physical Key Binding Lookup** (lines 546-607):
+**Physical Key Binding Lookup** (lines 522-583):
 
 - Tries physical key code, raw code, then main key
 - Calls `process_key()` with `OnlyKeyBindings::Yes`
@@ -94,24 +93,24 @@ application code can intercept keys.
 
 ### Level 6: `key_event_impl()` (Main Key Processing)
 
-**File:** `wezterm-gui/src/termwindow/keyevent.rs:679`
+**File:** `wezterm-gui/src/termwindow/keyevent.rs:655`
 
 Called via `WindowEvent::KeyEvent` (after IME processing in `key_common`).
 
-**CEF Browser Mode Handling** (lines 685-869, `#[cfg(feature = "cef")]`):
+**CEF Browser Mode Handling** (lines 661-845, `#[cfg(feature = "cef")]`):
 
 - `BrowserMode::Browse`: Forwards most keys to CEF via `send_key_event()`.
   Ctrl+C switches to Control mode.
 - `BrowserMode::Control`: Enter switches to Browse mode, Ctrl+C closes browser.
   Other keys fall through to terminal keybindings.
 
-**InputMap Keybinding Lookup** (lines 897-909):
+**InputMap Keybinding Lookup** (lines 873-884):
 
 - Calls `process_key()` with `OnlyKeyBindings::No`
 - Checks leader key, active modal, then inputmap
 - If no match, key falls through to terminal input
 
-**Terminal Input** (lines 918+):
+**Terminal Input** (lines 916+):
 
 - Encodes key and sends to pane via `pane.key_down()` or `pane.key_up()`
 
@@ -129,7 +128,7 @@ Debugging shows that Cmd+C/V key events do not appear in the `[CEF RAW]` debug
 log when in Browse mode, even though Ctrl+C does appear.
 
 This suggests Cmd+C/V are being intercepted BEFORE `raw_key_event_impl` when in
-Browse mode. The most likely culprit is **Level 1 (Menu Key Equivalents)**, but
+Browse mode. The most likely culprit is **Level 2 (Menu Key Equivalents)**, but
 this contradicts the fact that Cmd+C/V work on the terminal.
 
 **Unresolved question:** Why would the menu intercept Cmd+C in Browse mode but
