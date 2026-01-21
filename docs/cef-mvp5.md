@@ -402,3 +402,52 @@ simulation:
 
 These are direct function calls, not events processed through CEF's message
 loop.
+
+### Experiment 2: Direct Frame Clipboard Methods
+
+**Status:** Planned
+
+**Approach:** Use CEF's direct clipboard methods instead of simulating key
+events.
+
+**Rationale:** Experiment 1 failed because `send_key_event()` causes CEF to
+process events through its message loop, which triggers re-entrant macOS
+callbacks. Direct frame methods (`frame.copy()`, `frame.paste()`) are
+synchronous function calls that should avoid this.
+
+#### Research Questions (Answer Before Implementing)
+
+1. Do `frame.copy()` / `frame.paste()` have any async behavior or message loop
+   interaction?
+2. What happens if `focused_frame()` returns `None`?
+3. Are there any borrow conflicts when accessing `browser.focused_frame()`?
+
+#### Implementation Plan
+
+1. Get pane_id from pane
+2. Check if browser exists and is in Browse mode (single borrow, then release)
+3. If Browse mode:
+   - Get the browser reference
+   - Call `browser.focused_frame()` to get the frame
+   - Call `frame.copy()` or `frame.paste()` directly
+   - Return early
+4. Otherwise: fall through to terminal copy/paste
+
+#### Key Differences from Experiment 1
+
+| Aspect           | Experiment 1           | Experiment 2             |
+| ---------------- | ---------------------- | ------------------------ |
+| Method           | `send_key_event()`     | `frame.copy/paste()`     |
+| Event processing | Async via message loop | Synchronous direct call  |
+| Re-entrancy risk | High (caused crash)    | Low (no message loop)    |
+| Complexity       | High (KEYDOWN + CHAR)  | Low (single method call) |
+
+#### Logging Strategy
+
+```rust
+log::info!("[CEF CLIPBOARD] CopyTo triggered for pane {}", pane_id);
+log::info!("[CEF CLIPBOARD] Found browser in Browse mode, calling frame.copy()");
+log::info!("[CEF CLIPBOARD] frame.copy() completed");
+// Or if frame is None:
+log::info!("[CEF CLIPBOARD] focused_frame() returned None");
+```
