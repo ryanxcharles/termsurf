@@ -673,6 +673,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Edit"],
             icon: Some("md_content_paste"),
         },
+        CutToClipboard => CommandDef {
+            brief: "Cut to clipboard".into(),
+            doc: "Cuts selected text to the clipboard (browser only)".into(),
+            keys: vec![(Modifiers::SUPER, "x".into())],
+            args: &[ArgType::ActivePane],
+            menubar: &["Edit"],
+            icon: Some("md_content_cut"),
+        },
         ToggleFullScreen => CommandDef {
             brief: "Toggle full screen mode".into(),
             doc: "Switch between normal and full screen mode".into(),

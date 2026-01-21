@@ -2851,6 +2851,51 @@ impl TermWindow {
 
                 self.paste_from_clipboard(pane, *source);
             }
+            CutToClipboard => {
+                // CEF browser clipboard handling - cut only works in browser
+                #[cfg(all(target_os = "macos", feature = "cef"))]
+                {
+                    use crate::cef_browser::BrowserMode;
+                    use cef::{ImplBrowser, ImplFrame};
+
+                    let pane_id = pane.pane_id();
+                    log::info!("[CEF CLIPBOARD] CutToClipboard triggered for pane {}", pane_id);
+
+                    let browser_mode = self
+                        .browser_states
+                        .borrow()
+                        .get(&pane_id)
+                        .map(|b| b.get_mode());
+
+                    if let Some(mode) = browser_mode {
+                        log::info!(
+                            "[CEF CLIPBOARD] Found browser for pane {}, mode={:?}",
+                            pane_id,
+                            mode
+                        );
+
+                        if mode == BrowserMode::Browse {
+                            log::info!("[CEF CLIPBOARD] Browse mode - calling frame.cut()");
+                            if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
+                                if let Some(frame) = browser.browser.focused_frame() {
+                                    frame.cut();
+                                    log::info!("[CEF CLIPBOARD] frame.cut() completed");
+                                } else {
+                                    log::warn!("[CEF CLIPBOARD] focused_frame() returned None");
+                                }
+                            }
+                        } else {
+                            log::info!("[CEF CLIPBOARD] Control mode - cut has no effect");
+                        }
+                    } else {
+                        log::info!(
+                            "[CEF CLIPBOARD] No browser for pane {} - cut has no effect",
+                            pane_id
+                        );
+                    }
+                }
+                // Cut has no effect outside of browser Browse mode
+            }
             ActivateTabRelative(n) => {
                 self.activate_tab_relative(*n, true)?;
             }

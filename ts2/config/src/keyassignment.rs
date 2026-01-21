@@ -545,6 +545,7 @@ pub enum KeyAssignment {
         destination: ClipboardCopyDestination,
     },
     PasteFrom(ClipboardPasteSource),
+    CutToClipboard,
     ActivateTabRelative(isize),
     ActivateTabRelativeNoWrap(isize),
     IncreaseFontSize,

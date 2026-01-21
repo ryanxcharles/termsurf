@@ -501,7 +501,7 @@ text and paste into text fields.
 
 ### Experiment 3: Add Cut (Cmd+X) for Browser
 
-**Status:** Planned
+**Status:** FAILED
 
 **Goal:** Add Cut functionality to the menu bar. In Browse mode, call
 `frame.cut()`. Outside Browse mode, do nothing.
@@ -531,3 +531,20 @@ text and paste into text fields.
 - Same pattern as CopyTo/PasteFrom:
   - In Browse mode: call `frame.cut()`
   - Otherwise: do nothing, return `Handled`
+
+#### Build Result
+
+Build succeeded with `cargo build --features cef`. Only pre-existing warnings,
+no errors.
+
+#### Test Result: FAILED
+
+**Symptoms:**
+
+1. Cmd+X has no effect in browser
+2. "Cut" does not appear in the Edit menu
+
+**Root cause:** Unknown. The `CommandDef` was added but the menu item doesn't
+appear. Need to investigate how menu items are actually populated - there may be
+an explicit list of actions that get added to the menu, separate from the
+`CommandDef` match arm.
