@@ -125,6 +125,7 @@ echo "  $BUNDLE_DIR/Contents/MacOS/termsurf-gui"
 # Open if requested
 if [ "$OPEN" = true ]; then
     echo ""
-    echo "Opening TermSurf..."
-    open "$BUNDLE_DIR"
+    echo "Opening TermSurf with logging..."
+    echo "Logs: /tmp/termsurf-debug.log"
+    open "$BUNDLE_DIR" --stdout /tmp/termsurf-debug.log --stderr /tmp/termsurf-debug.log --env WEZTERM_LOG=info,wezterm_gui=debug
 fi

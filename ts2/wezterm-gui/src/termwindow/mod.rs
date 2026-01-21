@@ -2754,6 +2754,50 @@ impl TermWindow {
                 window.set_window_level(level.clone());
             }
             CopyTo(dest) => {
+                // CEF browser clipboard handling
+                #[cfg(all(target_os = "macos", feature = "cef"))]
+                {
+                    use crate::cef_browser::BrowserMode;
+                    use cef::{ImplBrowser, ImplFrame};
+
+                    let pane_id = pane.pane_id();
+                    log::info!("[CEF CLIPBOARD] CopyTo triggered for pane {}", pane_id);
+
+                    let browser_mode = self
+                        .browser_states
+                        .borrow()
+                        .get(&pane_id)
+                        .map(|b| b.get_mode());
+
+                    if let Some(mode) = browser_mode {
+                        log::info!(
+                            "[CEF CLIPBOARD] Found browser for pane {}, mode={:?}",
+                            pane_id,
+                            mode
+                        );
+
+                        if mode == BrowserMode::Browse {
+                            log::info!("[CEF CLIPBOARD] Browse mode - calling frame.copy()");
+                            if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
+                                if let Some(frame) = browser.browser.focused_frame() {
+                                    frame.copy();
+                                    log::info!("[CEF CLIPBOARD] frame.copy() completed");
+                                } else {
+                                    log::warn!("[CEF CLIPBOARD] focused_frame() returned None");
+                                }
+                            }
+                            return Ok(PerformAssignmentResult::Handled);
+                        } else {
+                            log::info!("[CEF CLIPBOARD] Control mode - using terminal copy");
+                        }
+                    } else {
+                        log::info!(
+                            "[CEF CLIPBOARD] No browser for pane {}, using terminal copy",
+                            pane_id
+                        );
+                    }
+                }
+
                 let text = self.selection_text(pane);
                 self.copy_to_clipboard(*dest, text);
             }
@@ -2761,6 +2805,50 @@ impl TermWindow {
                 self.copy_to_clipboard(*destination, text.clone());
             }
             PasteFrom(source) => {
+                // CEF browser clipboard handling
+                #[cfg(all(target_os = "macos", feature = "cef"))]
+                {
+                    use crate::cef_browser::BrowserMode;
+                    use cef::{ImplBrowser, ImplFrame};
+
+                    let pane_id = pane.pane_id();
+                    log::info!("[CEF CLIPBOARD] PasteFrom triggered for pane {}", pane_id);
+
+                    let browser_mode = self
+                        .browser_states
+                        .borrow()
+                        .get(&pane_id)
+                        .map(|b| b.get_mode());
+
+                    if let Some(mode) = browser_mode {
+                        log::info!(
+                            "[CEF CLIPBOARD] Found browser for pane {}, mode={:?}",
+                            pane_id,
+                            mode
+                        );
+
+                        if mode == BrowserMode::Browse {
+                            log::info!("[CEF CLIPBOARD] Browse mode - calling frame.paste()");
+                            if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
+                                if let Some(frame) = browser.browser.focused_frame() {
+                                    frame.paste();
+                                    log::info!("[CEF CLIPBOARD] frame.paste() completed");
+                                } else {
+                                    log::warn!("[CEF CLIPBOARD] focused_frame() returned None");
+                                }
+                            }
+                            return Ok(PerformAssignmentResult::Handled);
+                        } else {
+                            log::info!("[CEF CLIPBOARD] Control mode - using terminal paste");
+                        }
+                    } else {
+                        log::info!(
+                            "[CEF CLIPBOARD] No browser for pane {}, using terminal paste",
+                            pane_id
+                        );
+                    }
+                }
+
                 self.paste_from_clipboard(pane, *source);
             }
             ActivateTabRelative(n) => {

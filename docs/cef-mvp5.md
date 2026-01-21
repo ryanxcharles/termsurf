@@ -405,7 +405,7 @@ loop.
 
 ### Experiment 2: Direct Frame Clipboard Methods
 
-**Status:** Planned
+**Status:** Build succeeded, awaiting test
 
 **Approach:** Use CEF's direct clipboard methods instead of simulating key
 events.
@@ -415,23 +415,65 @@ process events through its message loop, which triggers re-entrant macOS
 callbacks. Direct frame methods (`frame.copy()`, `frame.paste()`) are
 synchronous function calls that should avoid this.
 
-#### Research Questions (Answer Before Implementing)
+#### Research Questions (Answered)
 
-1. Do `frame.copy()` / `frame.paste()` have any async behavior or message loop
-   interaction?
-2. What happens if `focused_frame()` returns `None`?
-3. Are there any borrow conflicts when accessing `browser.focused_frame()`?
+1. **Do `frame.copy()` / `frame.paste()` have any async behavior or message loop
+   interaction?**
 
-#### Implementation Plan
+   **Answer: No.** Looking at the CEF bindings (`aarch64_apple_darwin.rs:7600`):
 
-1. Get pane_id from pane
-2. Check if browser exists and is in Browse mode (single borrow, then release)
-3. If Browse mode:
-   - Get the browser reference
-   - Call `browser.focused_frame()` to get the frame
-   - Call `frame.copy()` or `frame.paste()` directly
-   - Return early
-4. Otherwise: fall through to terminal copy/paste
+   ```rust
+   fn copy(&self) {
+       unsafe {
+           if let Some(f) = self.0.copy {
+               let arg_self_ = self.into_raw();
+               f(arg_self_);
+           }
+       }
+   }
+   ```
+
+   These are synchronous FFI calls to the CEF C API. No callbacks, no futures,
+   no message loop interaction.
+
+2. **What happens if `focused_frame()` returns `None`?**
+
+   Returns `Option<Frame>`. Can be `None` if no frame is focused or browser not
+   fully loaded. We handle this by logging a warning and returning early
+   (Handled).
+
+3. **Are there any borrow conflicts when accessing `browser.focused_frame()`?**
+
+   **Answer: No.** Since `focused_frame()` and `frame.copy()` are synchronous
+   FFI calls that don't interact with Rust's RefCell or CEF's message loop,
+   there is no re-entrancy risk.
+
+#### Implementation
+
+Modified `termwindow/mod.rs` at the `CopyTo` and `PasteFrom` match arms:
+
+```rust
+// CopyTo (line 2760)
+use crate::cef_browser::BrowserMode;
+use cef::{ImplBrowser, ImplFrame};
+
+let pane_id = pane.pane_id();
+let browser_mode = self.browser_states.borrow().get(&pane_id).map(|b| b.get_mode());
+
+if let Some(mode) = browser_mode {
+    if mode == BrowserMode::Browse {
+        if let Some(browser) = self.browser_states.borrow().get(&pane_id) {
+            if let Some(frame) = browser.browser.focused_frame() {
+                frame.copy();
+            }
+        }
+        return Ok(PerformAssignmentResult::Handled);
+    }
+}
+// Fall through to terminal copy
+```
+
+Same pattern for `PasteFrom` with `frame.paste()`.
 
 #### Key Differences from Experiment 1
 
@@ -442,12 +484,7 @@ synchronous function calls that should avoid this.
 | Re-entrancy risk | High (caused crash)    | Low (no message loop)    |
 | Complexity       | High (KEYDOWN + CHAR)  | Low (single method call) |
 
-#### Logging Strategy
+#### Build Result
 
-```rust
-log::info!("[CEF CLIPBOARD] CopyTo triggered for pane {}", pane_id);
-log::info!("[CEF CLIPBOARD] Found browser in Browse mode, calling frame.copy()");
-log::info!("[CEF CLIPBOARD] frame.copy() completed");
-// Or if frame is None:
-log::info!("[CEF CLIPBOARD] focused_frame() returned None");
-```
+Build succeeded with `cargo build --features cef`. Only pre-existing warnings,
+no errors.
