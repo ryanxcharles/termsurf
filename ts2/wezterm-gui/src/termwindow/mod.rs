@@ -30,8 +30,8 @@ use ::wezterm_term::input::{ClickPosition, MouseButton as TMB};
 use ::window::*;
 use anyhow::{anyhow, ensure, Context};
 use config::keyassignment::{
-    Confirmation, KeyAssignment, LauncherActionArgs, PaneDirection, Pattern, PromptInputLine,
-    QuickSelectArguments, RotationDirection, SpawnCommand, SplitSize,
+    ClipboardCopyDestination, Confirmation, KeyAssignment, LauncherActionArgs, PaneDirection,
+    Pattern, PromptInputLine, QuickSelectArguments, RotationDirection, SpawnCommand, SplitSize,
 };
 use config::window::WindowLevel;
 use config::{
@@ -2894,7 +2894,9 @@ impl TermWindow {
                         );
                     }
                 }
-                // Cut has no effect outside of browser Browse mode
+                // Outside browser Browse mode, Cut acts as Copy
+                let text = self.selection_text(pane);
+                self.copy_to_clipboard(ClipboardCopyDestination::Clipboard, text);
             }
             ActivateTabRelative(n) => {
                 self.activate_tab_relative(*n, true)?;
