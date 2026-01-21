@@ -354,3 +354,51 @@ open ts2/target/debug/TermSurf.app \
   --stderr /tmp/termsurf-debug.log \
   --env WEZTERM_LOG=info,wezterm_gui=debug
 ```
+
+#### Result: FAILED
+
+**Status:** Failed — app crashed with RefCell borrow panic.
+
+**What happened:**
+
+1. Code executed successfully — logs confirmed CopyTo triggered, browser found
+   in Browse mode, KEYDOWN and CHAR sent to CEF
+2. Crash occurred ~800ms later during `do_message_loop_work()` called from
+   resize
+3. Panic: `RefCell already borrowed` at `window/src/os/macos/window.rs:2292`
+
+**Root cause:** Re-entrancy through CEF's message loop.
+
+The crash chain:
+
+1. Menu action calls `wezterm_perform_key_assignment`, borrows `inner` RefCell
+2. My code sends Cmd+C key event to CEF via `send_key_event()`
+3. Later, `do_message_loop_work()` is called (from resize function)
+4. CEF processes the key event, interacts with macOS clipboard APIs
+5. macOS triggers a callback that dispatches another menu action
+6. That tries to borrow `inner` again → **panic**
+
+**Why planning failed to catch this:**
+
+- The research correctly traced the event flow for `PerformKeyAssignment`
+- The research confirmed state access (browser_states, pane_id, send_key_event)
+- **MISSED:** The interaction between `send_key_event()` and CEF's message loop
+- **MISSED:** The fact that CEF processes key events asynchronously via
+  `do_message_loop_work()`, which can trigger re-entrant macOS callbacks
+- **MISSED:** RefCell borrows held during event dispatch can conflict with
+  callbacks triggered by CEF
+
+**Key learning:** Sending key events to CEF is fundamentally unsafe from within
+a menu action handler because CEF's message loop can trigger re-entrant
+callbacks that conflict with active RefCell borrows.
+
+**Discovery:** CEF has direct clipboard methods that don't require key
+simulation:
+
+- `browser.focused_frame()` → returns a `Frame`
+- `frame.copy()` — copies selection to clipboard
+- `frame.cut()` — cuts selection
+- `frame.paste()` — pastes from clipboard
+
+These are direct function calls, not events processed through CEF's message
+loop.
