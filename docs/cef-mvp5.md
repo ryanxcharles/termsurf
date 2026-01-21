@@ -243,4 +243,9 @@ disruption and consistent menu appearance.
 
 _This section tracks implementation attempts and their outcomes._
 
-(No experiments yet)
+### Experiment 1: Approach 1 (Browser-Aware Menu Action)
+
+**Status:** In progress
+
+**Rationale:** Minimal architectural disruption, consistent menu UX, single
+point of change. The existing `send_key_event()` infrastructure can be reused.
