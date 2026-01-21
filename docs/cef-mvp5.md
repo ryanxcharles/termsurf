@@ -10,10 +10,29 @@ these keybindings for the terminal, which already work.
 This section documents every place where keyboard events are intercepted in
 TermSurf, from the macOS system level down to the terminal/CEF backend.
 
-### Level 1: macOS Menu Key Equivalents
+### Level 1: `performKeyEquivalent:` (NSView)
 
-**Before any WezTerm code runs**, macOS checks if a pressed key combination
-matches a menu item's key equivalent. If a match is found, the menu item's
+**File:** `window/src/os/macos/window.rs:2829`
+
+The FIRST interception point. macOS calls this on the first responder before
+checking menu key equivalents. If it returns `YES`, the key is consumed and
+nothing else sees it.
+
+WezTerm currently handles only 4 specific keys here:
+
+- `Cmd+.` (Command-Period)
+- `Ctrl+Esc`
+- `Ctrl+Tab`
+- `Shift+Tab`
+
+For these, it calls `key_common()` and returns `YES` to prevent further macOS
+handling. For all other keys (including Cmd+C/V), it returns `NO`, allowing
+them to fall through to Level 2.
+
+### Level 2: macOS Menu Key Equivalents
+
+Only checked if `performKeyEquivalent:` returned `NO`. macOS walks the menu bar
+looking for items with matching key equivalents. If found, the menu item's
 action is triggered and `keyDown:` is never called.
 
 - Menu items are created in `wezterm-gui/src/commands.rs` via
@@ -26,20 +45,6 @@ action is triggered and `keyDown:` is never called.
 **Currently**: Copy/Paste menu items have Cmd+C/V as key equivalents (defined in
 `CommandDef` at lines 660 and 683). There is `#[cfg(feature = "cef")]` code at
 lines 520-532 that attempts to clear these, but its effectiveness is unverified.
-
-### Level 2: `performKeyEquivalent:` (NSView)
-
-**File:** `window/src/os/macos/window.rs:2829`
-
-Called by macOS before `keyDown:`. WezTerm handles only 4 specific keys here:
-
-- `Cmd+.` (Command-Period)
-- `Ctrl+Esc`
-- `Ctrl+Tab`
-- `Shift+Tab`
-
-For these, it calls `key_common()` and returns `YES` to prevent further macOS
-handling. For all other keys (including Cmd+C/V), it returns `NO`.
 
 ### Level 3: `keyDown:` / `keyUp:` (NSView)
 
