@@ -133,3 +133,114 @@ this contradicts the fact that Cmd+C/V work on the terminal.
 
 **Unresolved question:** Why would the menu intercept Cmd+C in Browse mode but
 not in terminal mode? The menu state should be identical in both cases.
+
+## Technical Approaches to Implementation
+
+Three approaches have been identified for making Cmd+C/V/X work with CEF while
+keeping them in the menu.
+
+### Approach 1: Browser-Aware Menu Action
+
+**Concept**: The menu intercepts Cmd+C/V/X as it does now. But when the
+`PerformKeyAssignment` action is executed, the handler checks if we're in Browse
+mode and forwards the key to CEF instead of copying the terminal selection.
+
+**Flow**:
+
+1. User presses Cmd+C
+2. Menu intercepts at Level 2
+3. Menu triggers `WindowEvent::PerformKeyAssignment` with `CopyTo` action
+4. Handler checks: is the active pane in Browse mode?
+5. If Browse mode → Synthesize Cmd+C key event, send to CEF
+6. If terminal mode → Copy terminal selection (current behavior)
+
+**Pros**:
+
+- Menu stays exactly as-is (Cmd+C/V visible, Cmd+X can be added)
+- All browser-awareness logic lives in the WezTerm application layer
+- No architectural changes needed to plumb state to window level
+- Single point of change
+
+**Cons**:
+
+- Need to find where `PerformKeyAssignment` is handled
+- Need to synthesize a key event to send to CEF
+- Conceptually odd: menu "Copy" action sends a key event rather than copying
+
+### Approach 2: Intercept in `performKeyEquivalent:` Before the Menu
+
+**Concept**: In `performKeyEquivalent:` (Level 1), check if we're in Browse
+mode. If yes, handle Cmd+C/V/X there (call `key_common()`, return YES). If no,
+return NO and let the menu handle them.
+
+**Flow**:
+
+1. User presses Cmd+C
+2. `performKeyEquivalent:` is called
+3. Check: is the active pane in Browse mode?
+4. If Browse mode → Call `key_common()`, return YES (reaches CEF via normal key
+   path)
+5. If terminal mode → Return NO, menu intercepts, normal copy behavior
+
+**Pros**:
+
+- Key events flow through the normal path to CEF
+- Clean separation: menu handles terminal, key events handle browser
+- No event synthesis needed
+
+**Cons**:
+
+- `performKeyEquivalent:` is at the Cocoa/window layer, doesn't have access to
+  browser mode
+- Need to plumb browser mode state down to the window level (architectural
+  change)
+- State synchronization concerns (what if mode changes mid-event?)
+
+### Approach 3: Dynamic Menu Key Equivalents
+
+**Concept**: When entering Browse mode, remove the Cmd+C/V/X key equivalents
+from the menu items. When leaving Browse mode, restore them.
+
+**Flow**:
+
+1. User opens browser, enters Browse mode
+2. System removes Cmd+C/V key equivalents from Edit menu items
+3. User presses Cmd+C
+4. Menu has no matching key equivalent, so `keyDown:` is called
+5. Key flows through `key_common` → `raw_key_event_impl` → `key_event_impl` →
+   CEF
+6. User exits Browse mode
+7. System restores Cmd+C/V key equivalents
+
+**Pros**:
+
+- Keys flow naturally to CEF without synthesis
+- No architectural changes to window layer
+- Menu items remain visible (just without shortcuts temporarily)
+
+**Cons**:
+
+- UI shows menu items without keyboard shortcuts in Browse mode (potentially
+  confusing)
+- Need to track mode changes and update menus in sync
+- Menu management complexity
+- Race conditions if mode changes rapidly
+
+### Approach Comparison
+
+| Aspect               | Approach 1  | Approach 2             | Approach 3                    |
+| -------------------- | ----------- | ---------------------- | ----------------------------- |
+| Menu appearance      | Unchanged   | Unchanged              | Shortcuts disappear in Browse |
+| Architectural change | Minimal     | Significant (plumbing) | Moderate (menu sync)          |
+| Key event path       | Synthesized | Natural                | Natural                       |
+| Complexity           | Low-Medium  | Medium-High            | Medium                        |
+| Risk of bugs         | Low         | Medium (state sync)    | Medium (menu sync)            |
+
+**Recommended**: Approach 1 appears most pragmatic due to minimal architectural
+disruption and consistent menu appearance.
+
+## Experiment Log
+
+_This section tracks implementation attempts and their outcomes._
+
+(No experiments yet)
