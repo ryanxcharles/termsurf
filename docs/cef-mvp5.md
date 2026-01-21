@@ -544,7 +544,23 @@ no errors.
 1. Cmd+X has no effect in browser
 2. "Cut" does not appear in the Edit menu
 
-**Root cause:** Unknown. The `CommandDef` was added but the menu item doesn't
-appear. Need to investigate how menu items are actually populated - there may be
-an explicit list of actions that get added to the menu, separate from the
-`CommandDef` match arm.
+**Root cause:** There is an explicit list of actions that populate the Edit menu
+at `commands.rs:2051-2064`. The `CommandDef` only defines metadata - it does not
+add the item to the menu. `CutToClipboard` was not added to this list.
+
+### Experiment 4: Add Cut to Menu List
+
+**Status:** Planned
+
+**Goal:** Fix Experiment 3 by adding `CutToClipboard` to the explicit menu
+action list.
+
+#### Implementation Plan
+
+**1. Add CutToClipboard to the Edit menu action list**
+
+- File: `wezterm-gui/src/commands.rs`
+- Location: Line 2057, after `PasteFrom(ClipboardPasteSource::Clipboard),`
+- Add: `CutToClipboard,`
+
+One line in one file.
