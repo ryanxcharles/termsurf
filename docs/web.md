@@ -416,7 +416,7 @@ Console streaming will be added in a future experiment.
 
 ### Experiment 3: Console Output Streaming
 
-**Status:** Pending
+**Status:** Success
 
 **Goal:** Stream console output (console.log, console.error, etc.) from the
 browser to the CLI's stdout/stderr.
