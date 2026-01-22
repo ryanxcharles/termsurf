@@ -1,355 +1,355 @@
 {
-  "generatedAt": "2026-01-14T14:08:32.933Z",
+  "generatedAt": "2026-01-22T11:32:37.074Z",
   "commits": [
     {
-      "hash": "76d4cec7833be3912a3934c7768d46b36c882c0e",
-      "message": "Add web-open CLI command",
-      "body": "A terminal sought to browse the web,\nBut first it needed a thread to thread.\nNow PDUs fly through socket wire,\n\"Opening...\" echoes higher and higher—\nThe plumbing's done, CEF lies ahead.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "fc408e7dd3bc51450e63ef57010def965b50838f",
+      "message": "Complete MVP5 with lessons learned",
+      "body": "Five experiments, two that failed,\nBut in the end, the feature sailed.\nCopy, cut, and paste now work—\nNo RefCell panics left to lurk.\n\nThe lessons learned are written down:\nAsk before you code, don't drown\nIn assumptions left unchecked.\nBuild success? Runtime wrecked.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-14T08:07:36-06:00"
+      "date": "2026-01-21T06:40:53-06:00"
     },
     {
-      "hash": "716c776228faf4ce0d20ee4eac85d50c637f79d1",
-      "message": "Document event-driven rendering architecture",
-      "body": "The docs now tell of frames that wait,\nNo longer spinning, sealed to fate.\nWith diagrams and code displayed,\nThe rendering story fully conveyed.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "06c28715470e8eccba667215b6e2a0b7c8ac62c9",
+      "message": "Make Cut act as Copy in terminal",
+      "body": "In browser land, Cut cuts with flair,\nBut terminals have no text to spare.\nSo Cut now copies, a gentle disguise—\nThe same result, no compromise.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-14T06:59:45-06:00"
+      "date": "2026-01-21T06:39:25-06:00"
     },
     {
-      "hash": "150cb77755b13271c9f6d8189a003f62c8f4142f",
-      "message": "Add event-driven rendering to OSR example",
-      "body": "The render loop once spun in vain,\nPainting frames again and again.\nNow CEF cries \"Ready!\"\nWe render steady—\nNo lag, no stutter, no pain.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "650417714665a26d141e96340e3b424101e98cb5",
+      "message": "Document Experiment 4 success, plan Experiment 5",
+      "body": "Experiment 4 is done, the Cut appears,\nThe menu shows it now, no more tears.\nBut terminal Cut just sits there, mute—\nExperiment 5 will make it copy, not stay on mute.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-14T06:56:59-06:00"
+      "date": "2026-01-21T06:36:57-06:00"
     },
     {
-      "hash": "790a38aa1cf4fcfacd37e2d34a52dc355ab39388",
-      "message": "Remove fixed 16ms sleep from OSR event loop",
-      "body": "The loop once slept a steady beat,\nSixteen milliseconds, bittersweet.\nBut input lagged and frames grew stale,\nWhile users cursed this sluggish tale.\nNow pump_app_events waits instead—\nWake on events, no sleepy dread!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "e88456dad42e433ce94eb25606de536a8095020a",
+      "message": "Add Cut to Edit menu action list",
+      "body": "One line was all it took to mend,\nThe oversight that caused the end\nOf Experiment 3's brief career—\nNow Cut appears, the menu's clear!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-14T06:37:08-06:00"
+      "date": "2026-01-21T06:22:24-06:00"
     },
     {
-      "hash": "3f62d7f9c29b32f92f8ad3a2d314cc369666e733",
-      "message": "Align docs with TermSurf 2.0 direction",
-      "body": "The docs were lost in versions past,\nWith WKWebView holding fast.\nBut now they know the path we tread:\nWezTerm and cef-rs lie ahead.\nEach file now tells which version speaks,\nSo future readers won't spend weeks\nConfused by code that's come and gone—\nThe documentation marches on!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "ca0f2edf2275c22992fe7ace9d4c8f13bda440ba",
+      "message": "Plan Experiment 4 to fix Cut menu",
+      "body": "The root cause found, the mystery solved:\nA list explicit, where menus evolved.\nOne line forgotten, the Cut left behind—\nExperiment 4 shall fix this bind.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-14T06:06:32-06:00"
+      "date": "2026-01-21T06:20:39-06:00"
     },
     {
-      "hash": "1612ca302ecd80c2d6b40955e4c8caf75ef2f902",
-      "message": "Document cef-rs modifications",
-      "body": "Seven commits we made along the way,\nFrom crashes dark to textures bright as day.\nIOSurface learned to speak in proper types,\nWhile context menus ceased their crashing bites.\nNow written down so future selves may know\nThe battles fought to make the browser glow.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "427e30e4fd059cb0af3ff5a9d18b9dc341ead81b",
+      "message": "Experiment 3 failed: Cut menu missing",
+      "body": "I added the variant, the handler too,\nCommandDef was set, I thought I was through.\nBut the menu stayed empty, Cut nowhere in sight—\nAn explicit list I failed to write.\n\nA costly oversight, time and money spent,\nOn code that compiled but never went\nTo the menu bar where it should reside.\nLesson learned: check where menu items hide.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-14T05:52:57-06:00"
+      "date": "2026-01-21T06:19:18-06:00"
     },
     {
-      "hash": "8c3821444832e2f4f7020eb9b2f2c8a0f4a9b122",
-      "message": "Document cef-rs validation results",
-      "body": "The docs were out of date, you see,\nStill speaking of plans that used to be.\nNow README, AGENTS, and cef.md align,\nWith validation results that truly shine.\n\n- Create top-level README.md with project overview\n- Update AGENTS.md with cef-rs validation status table\n- Update docs/cef.md: status from \"planned\" to \"validated\"\n- Mark Zig integration approach as historical\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "ea14710b8ccf3bb1fc3e89d52e67d62eb77c09f4",
+      "message": "Plan Experiment 3 for Cut (Cmd+X)",
+      "body": "Three files to change, a simple scheme,\nTo cut in the browser, fulfill the dream.\nKeyAssignment gets a brand new friend,\nThe menu and handler follow the trend.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-13T07:15:47-06:00"
+      "date": "2026-01-21T06:12:08-06:00"
     },
     {
-      "hash": "25def7592d0157307b338d15b4c75f5020ae1680",
-      "message": "Suppress context menu to prevent crash",
-      "body": "A right-click once did bring,\nThe app unto its end.\nNSApplication sought a thing\nThat winit could not lend.\n\nNow we clear the menu model fast,\nBefore the menu shows—\nThe crash is fixed, the bug has passed,\nAnd harmony now flows.",
+      "hash": "65ec8188f176d6c3c31ffd915531cb75b8601c3d",
+      "message": "Document copy+paste success in browser",
+      "body": "The clipboard works! The test came through,\nGoogle's search bar proved it true.\nCut and terminal still await their turn,\nBut victory's sweet—a lesson learned.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-13T06:51:45-06:00"
+      "date": "2026-01-21T05:57:22-06:00"
     },
     {
-      "hash": "40f2a55cc008dffa1bdcd7f6f20daa1d066ff0a9",
-      "message": "Add multi-browser instance support",
-      "body": "Two browsers walked in parallel,\nEach with textures to behold.\nGitHub and Google side by side,\nThough winit's loop was somewhat cold.\n\nPer-instance TextureHolder stores each paint,\nHashMap routes events by WindowId so quaint.",
+      "hash": "0e81bfd3b687c95910f43549ee622c584883efb2",
+      "message": "Add Cmd+C/V copy/paste for CEF browser",
+      "body": "The first attempt did crash and burn,\nKey events through the loop took a wrong turn.\nRefCell cried \"already borrowed!\"—\nOur hopes felt hollowed.\n\nBut frame.copy() saved the day,\nA synchronous call, the simpler way.\nNo message loop, no macOS callback chain,\nJust clipboard bliss without the pain.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-13T06:47:17-06:00"
+      "date": "2026-01-21T05:29:13-06:00"
     },
     {
-      "hash": "c4bbf909dddf2ab6931cd14e351d5a5d7b4de3cd",
-      "message": "Tidy window config, note fullscreen woes",
-      "body": "A window needs a name,\nAnd size to call its own.\nFullscreen? Don't ask—\nThat path leads to despair,\nSo we left a note, and moved along.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "a989c056315e964fdbcf137906e94137e782a5b8",
+      "message": "Plan Experiment 2 for copy/paste",
+      "body": "From ashes of the first attempt we rise,\nWith frame.copy()—a simpler, wiser guise.\nNo message loops, no re-entrant snare,\nJust direct calls to clipboard with care.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-13T06:37:24-06:00"
+      "date": "2026-01-21T05:15:03-06:00"
     },
     {
-      "hash": "88ab043551f1445e3fb0f5afcc79d715c4dee7d1",
-      "message": "Add input handling to CEF OSR example",
-      "body": "A browser window sits, still as stone,\nNo clicks, no keys, no life of its own.\nNow mouse and keyboard speak to the frame,\nAnd Chromium dances, no longer tame.\n\n- Mouse: move, click, drag, scroll\n- Keyboard: typing, arrows, delete\n- macOS native key codes for proper input\n- Clean shutdown without crash\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "3f4d8184378d0dcb56a6850560b698a15c754efb",
+      "message": "Document Experiment 1 failure",
+      "body": "The plan was sound, the code compiled clean,\nBut RefCell said: \"Already borrowed, friend.\"\nCEF's message loop, a trap unseen,\nBrought re-entrancy—a crashing end.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-13T05:38:48-06:00"
+      "date": "2026-01-21T05:12:52-06:00"
     },
     {
-      "hash": "e6f8a2e4cff24c457a067f0db701c2f95854f243",
-      "message": "Fix purple flash on OSR startup",
-      "body": "Before CEF paints its first frame,\nUninitialized memory took the blame.\nNow we clear to black with care,\nNo more purple anywhere.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "4eded655f52f483bef496124c0ea1b8ed008a4d0",
+      "message": "Add logging strategy for copy/paste debug",
+      "body": "When bugs hide in the dark,\nLogs light the way like a spark.\n[CEF CLIPBOARD] they'll say,\nGuiding us through the fray.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-13T05:01:52-06:00"
+      "date": "2026-01-21T05:04:49-06:00"
     },
     {
-      "hash": "b1fed971cd84cc05dc6c824c0ecdfcc40fbbab51",
-      "message": "Unify merge-upstream docs for all three repos",
-      "body": "Three rivers flow into one stream,\nGhostty, WezTerm, cef-rs—a team.\nOne skill to merge them all,\nOne doc to heed the call.\nNow upstream syncing's not so extreme.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "8d4fb01a5fea62d9bf2929714f476952315d667d",
+      "message": "Document research for copy/paste fix",
+      "body": "We traced the path from menu to match,\nFound every state we need to catch.\nBrowser mode? Check. Key codes? Here.\nThe implementation plan is clear.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-13T04:47:42-06:00"
+      "date": "2026-01-21T05:00:07-06:00"
     },
     {
-      "hash": "d8b58edea66247c7a9fd2b7d8013d3cebed5d27b",
-      "message": "Fix macOS IOSurface texture import crash",
-      "body": "The Metal API did reject transmutes' plea,\nCrashing at address 0x1f00000080.\nDeviceRef and TextureDescriptorRef—\nProper types, the objc Message decree.\n\nNow textures flow from CEF to screen,\nThe purple fades, GitHub's page appears.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "96cd669374cc3dad647232f26aa0651934e03765",
+      "message": "Begin Experiment 1 for copy/paste",
+      "body": "The log awaits, the quest begins,\nApproach One enters—may the best code win.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-13T04:37:25-06:00"
+      "date": "2026-01-21T04:48:18-06:00"
     },
     {
-      "hash": "b0fde79d116ff13653fba957495d13ef3bebaa09",
-      "message": "Merge cef-rs (tauri-apps/cef-rs) into termsurf repo",
-      "body": "",
+      "hash": "36e4f817791fe3b0aee6da2d1adac6585d370839",
+      "message": "Add implementation approaches for copy/paste",
+      "body": "Three roads diverged in the code so deep,\nEach promising copy/paste to keep.\nBrowser-aware menus? Intercept the key?\nOr toggle shortcuts dynamically?\nWe've mapped the paths—now choose and leap.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-13T04:32:53-06:00"
+      "date": "2026-01-21T04:46:34-06:00"
     },
     {
-      "hash": "5075cc44c2c13b5a7e061df250d83597e4063867",
-      "message": "Move cef-rs files to cef-rs/ folder for termsurf integration",
-      "body": "",
+      "hash": "46a558b5075029efcefb9f7b56eacf2224cfba76",
+      "message": "Fix line numbers in keybinding docs",
+      "body": "The docs had lines all wrong, you see,\nPointing to code that couldn't be.\nSix-sixty claimed, but six-forty-two found,\nNow every reference is sound.\nCmd+C/V? Not handled yet—\nA note reminds us not to forget.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-13T04:32:39-06:00"
+      "date": "2026-01-21T04:32:41-06:00"
     },
     {
-      "hash": "666b59c14e5689a4ed2838b65be68e608a42c928",
-      "message": "Add unified .gitmodules for ts1/ and ts2/",
-      "body": "Git submodules relocated with care,\nTo ts1/ and ts2/, both now there.\nFreetype, harfbuzz, and more,\nNow build from their new shore.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "45fdaadbe1015c4a6f50fd589184acc38e0e545b",
+      "message": "Fix keybinding priority order in docs",
+      "body": "The docs had it backwards, I confess—\nMenu was first, but that's not the process.\nperformKeyEquivalent wins the race,\nMenu key matching takes second place.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-12T08:26:12-06:00"
+      "date": "2026-01-21T04:25:54-06:00"
     },
     {
-      "hash": "c1f56d48b71cb8f3b2490b631ff3e8fa80db7fb6",
-      "message": "Merge WezTerm as ts2/ for TermSurf 2.0",
-      "body": "Two terminals, now side by side,\nIn ts1/ the Ghost does hide.\nIn ts2/ the Wez takes flight,\nCross-platform dreams within our sight.\n\nRust and Zig, a curious pair,\nEach with features rich and rare.\nVersion two will blend them true—\nA terminal-browser, fresh and new.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "9079345d68c30192132878ce80d9b2f3dd1d7818",
+      "message": "Document keybinding interception flow",
+      "body": "From menu to CEF, seven levels deep,\nWhere keyboard events must crawl and creep.\nEach layer inspects, transforms, or blocks—\nA labyrinth of handlers, selectors, and locks.\n\nWe mapped the maze from top to floor,\nSo future devs won't wonder anymore.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-12T08:20:35-06:00"
+      "date": "2026-01-20T08:33:26-06:00"
     },
     {
-      "hash": "4a80d28ea2c7a9772dc8404a2b9b795e3d7d8d60",
-      "message": "Move all WezTerm files to ts2/",
-      "body": "",
+      "hash": "d86bf8de379e7e2f3ccc366a2d716de17e754401",
+      "message": "Add Cmd+R/Cmd+Shift+R for browser reload",
+      "body": "The Shift key got lost in translation,\nSwallowed by raw key event interpretation.\nWe moved the handlers up the chain,\nNow hard reload works again—\nA tale of key event prioritization.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-12T08:20:06-06:00"
+      "date": "2026-01-20T06:32:28-06:00"
     },
     {
-      "hash": "7586cb310f5a2500cbfa2708c856a1372ff77ed3",
-      "message": "Update docs for ts1/ structure",
-      "body": "The AGENTS.md now shows the way,\nTo ts1/ where Ghostty stays.\nAnd .gitignore learned paths anew,\nTo track what builds, both old and true.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "e3c5ac52227af311067f3709ba248a30a1fad1cb",
+      "message": "Add Cmd+[/] for browser back/forward navigation",
+      "body": "The browser knew not where to go,\nWhen Cmd and bracket pressed just so.\nCEF in OSR mode, you see,\nIgnores such shortcuts stubbornly.\nNow we catch them, call the shots—\nBack and forward, connect the dots!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-12T07:55:22-06:00"
+      "date": "2026-01-20T05:44:08-06:00"
     },
     {
-      "hash": "8b12e27d7d293fde1659ebdd3a43b923023d549f",
-      "message": "Move Ghostty to ts1/ for TermSurf 2.0",
-      "body": "The Ghostty files have packed their bags,\nTo ts1/ they now retreat.\nMaking room at root for WezTerm's flags,\nWhere Rust and CEF shall meet.\n\nA fork of forks, both old and new,\nVersion one archived with care.\nVersion two will soon break through—\nCross-platform browser, fair and square.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "2f5be7fe35f2ebd8f3ff2d1716b97fa5c8b80369",
+      "message": "Fix double key actions in CEF browser",
+      "body": "Tab, Enter, Space, Escape—\nEach pressed once, but acted twice!\nCEF heard KEYDOWN, then KEYUP,\nAnd doubled every action's price.\nNow we skip the second call,\nOne press means one event, that's all.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-12T07:54:57-06:00"
+      "date": "2026-01-20T05:36:55-06:00"
     },
     {
-      "hash": "2a531a0a8b94f0535d99db859a01d7af093d7347",
-      "message": "Update website data for v1.0.0",
-      "body": "The JSON files got fresh news to share,\nOf version one-point-oh in the air.\nNew commits joined the log parade,\nWhile older ones began to fade.\nThe website now knows what we've done—\nTermSurf 1.0, the milestone's won!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "d997964dd937546a8c499a872bef93d7765ba366",
+      "message": "Build and bundle the termsurf CLI tool",
+      "body": "The scripts forgot to pack,\nA CLI in the back.\nNow termsurf rides along,\nWhere it belonged all along—\nNo more \"command not found\" flak!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-12T07:20:24-06:00"
+      "date": "2026-01-20T05:21:32-06:00"
     },
     {
-      "hash": "279cea92b4c9092677e1d54e84cdc8fcb3603ef7",
-      "message": "Add TermSurf 2.0 architecture analysis",
-      "body": "We gazed across the Rust-y plains,\nWhere WezTerm meets Chromium's veins.\nWith wgpu both sides render bright,\nCEF and terminal—a unified sight!\nCross-platform dreams no longer far,\nWhen Rust becomes the guiding star.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "cf4427c11e62d3b3480a3e8245087c6122cf1653",
+      "message": "Rename WezTerm to TermSurf in user-facing places",
+      "body": "A name by any other byte,\nWould render just as bright.\nWezTerm shed its former guise,\nTermSurf now greets your eyes—\nIn menus, configs, CLI alike,\nThe surf is up, take flight!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-12T07:19:26-06:00"
+      "date": "2026-01-19T16:03:05-06:00"
     },
     {
-      "hash": "5a4253328a98ffabe6ab27597c56322f5d1720a8",
-      "message": "Release 1.0.0",
-      "body": "From zero to one, the journey's complete,\nA terminal browser, a surfing feat!\nThrough WebKit waves and iframe fights,\nWe've reached the shore of stable heights.\nWhat started as a ghostly dream,\nNow rides the web on Zig's own stream.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "0d6c943862f1862563deb0b9dd4fda014c0eef0c",
+      "message": "Respect system dark mode in CEF browsers",
+      "body": "At dawn the app awakes and asks the Mac,\n\"Is darkness what you seek, or light instead?\"\nNSAppearance whispers secrets back,\nAnd websites dress in colors fitting said.\n\nNo more shall pages blind the midnight coder,\nThe system's will is done, the theme respects.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-12T05:59:08-06:00"
+      "date": "2026-01-19T15:10:20-06:00"
     },
     {
-      "hash": "b607cfeb3b83dc05cef9583ad369e2a22423d610",
-      "message": "update website",
-      "body": "",
+      "hash": "2b3aa8a3d23926c587e77dfa842d2e0b49149ec8",
+      "message": "Fix CEF browser color rendering with sRGB",
+      "body": "The colors came through gamma's gate twice,\nA washed-out world, not looking nice.\n\"I'm already sRGB!\" the pixels cried,\nBut the GPU converted them, misapplied.\n\nNow texture views declare the truth at last,\nThe double-correction era has passed.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-12T05:57:25-06:00"
+      "date": "2026-01-19T14:50:13-06:00"
     },
     {
-      "hash": "4a098b4100b419e8a284eeb13fddf99d9de4f054",
-      "message": "document termsurf 2.0 plan",
-      "body": "",
+      "hash": "c37e81d8b0ec229f6c72e19d8d43915b187f9ffc",
+      "message": "Only render CEF browsers for visible panes",
+      "body": "The browser lingered, ghostly, out of place,\nBlocking new tabs with its persistent face.\nNow we check which panes the user sees,\nAnd hide the browsers on inactive keys.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-12T05:57:19-06:00"
+      "date": "2026-01-19T14:14:33-06:00"
     },
     {
-      "hash": "e66b88721659ea1565ffc0910f8b03fee81fceed",
-      "message": "Fix iframe navigation hijacking",
-      "body": "An iframe with dreams to be free,\nEscaped to the main frame with glee.\nWe checked isMainFrame,\nPut an end to its game—\nNow OAuth stays where it should be.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "9b869e4db41207910be2abb0ea1f81e0199e8a61",
+      "message": "Enable GPU-accelerated CEF rendering",
+      "body": "The browser toiled in software's slow embrace,\nEach pixel copied, frame by sluggish frame.\nNow shared textures fly at GPU pace,\nAnd on_accelerated_paint stakes its claim.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-12T04:43:54-06:00"
+      "date": "2026-01-19T10:24:39-06:00"
     },
     {
-      "hash": "1fcc469bbb563eb7f4b98cf28fb8c20431cb45d9",
-      "message": "Add debug build script, tidy output paths",
-      "body": "Two scripts now, a matching pair,\nDebug and Release, each with care.\n\"Where did my .app go?\" you'd once cry—\nNow build/debug/ and build/release/ reply.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "42a55269c9f92e5cb9fd1fab462df5e770698ebe",
+      "message": "Set CEF focus on first paint for text cursor",
+      "body": "We tried on creation, but the browser wasn't ready,\nWe tried accelerated paint, but software held steady.\nNow on_paint sets focus with unfocus-refocus dance,\nAnd the blinking cursor appears on first chance.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T17:58:34-06:00"
+      "date": "2026-01-19T10:21:29-06:00"
     },
     {
-      "hash": "bce388a4c6f910011abf0d6a4f4fd18e22aec599",
-      "message": "Track target=\"_blank\" as TODO",
-      "body": "A link that says \"open new window please!\"\nWe load it in place with relative ease.\nTrue tabs need shell escapes done right,\nA security matter—worth the wait, not the fight.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "1774d96058c7a8b5a975f3444cef34516921e8f6",
+      "message": "Manage CEF browser focus for text cursor display",
+      "body": "The cursor refused to blink, invisible, shy,\nNo focus was set, and we wondered why.\nNow browse mode grants focus, control takes it away,\nAnd the caret appears where your text wants to stay.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T16:03:32-06:00"
+      "date": "2026-01-19T10:11:36-06:00"
     },
     {
-      "hash": "c9bc3976be0b168cf42d27688da2619b747a38d6",
-      "message": "Bump version to 0.8.0",
-      "body": "The page now bends to your command,\nZoom in, zoom out, with keyboard hand.\nPlus and minus, zero too—\nScale the web to perfect view.\nA minor bump, a polished release,\nWhere documentation finds its peace.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "37cb03626c1bfde0b33c14c59add2e988a8e8d4e",
+      "message": "Skip KEYUP for navigation keys in CEF browser",
+      "body": "The arrow keys moved twice with every press,\nBoth down and up caused cursor to progress.\nNow KEYUP we ignore for navigation's sake,\nAnd cursors move just once—no more mistake.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T15:53:29-06:00"
+      "date": "2026-01-19T09:55:01-06:00"
     },
     {
-      "hash": "9eda823b1fb45095cbd96ce972d89fdcbf34eba8",
-      "message": "Update docs to reflect completed features",
-      "body": "The checklist grew, the boxes filled,\nWith features built and bugs now stilled.\nCamera, mic, and downloads too—\n(Though cross-origin? That won't go through.)\nFrom \"notes to do\" to \"reference made,\"\nOur documentation's been upgraded.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "009e14eaf40fa9169b4c8315e222c1ebf21086bf",
+      "message": "Forward keyboard and mouse to CEF in browse mode",
+      "body": "The browser sat idle, ignoring each tap,\nNo clicks would register, keys fell through the gap.\nNow mouse and keyboard flow into the frame,\nAnd Ctrl+C alone escapes the browser's claim.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T15:51:47-06:00"
+      "date": "2026-01-19T09:39:39-06:00"
     },
     {
-      "hash": "b53c6459a6c0c8380e7fbc19a343347664b878c8",
-      "message": "Add page zoom shortcuts",
-      "body": "cmd+plus and cmd+minus, a familiar pair,\nAdjust the page with typographic flair.\nToo small to read? Just zoom right in!\nToo large for comfort? Make it thin.\nAnd should you lose your sense of scale,\ncmd+zero resets without fail.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "923c860e9fda62fbd67397baa52855f07c514fed",
+      "message": "Show helpful hints in control mode",
+      "body": "\"Control Mode\" was rather terse,\nNow users see the keys to press.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T15:41:18-06:00"
+      "date": "2026-01-19T09:12:10-06:00"
     },
     {
-      "hash": "bbb28f030d8dbc8a09bb17c54da1957044c4df36",
-      "message": "Bump version to 0.7.0",
-      "body": "Three guardians join the watch tonight:\nAuth checks your name, Crash sets things right,\nAnd Media asks before it peers\nThrough camera lens or listening ears.\nThe browser grows more wise and kind—\nSecurity and grace combined!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "9a3328796a4005a73f7fe83c737a730b876d725b",
+      "message": "Simplify CEF MVP4 spec, remove insert mode",
+      "body": "Three modes were one too many,\nInsert mode had to go.\nNow Browse and Control are plenty—\nA simpler path to flow.\n\nNo stacking, just one browser per pane,\nTwo-phase rendering keeps buffers sane.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T15:21:27-06:00"
+      "date": "2026-01-19T09:09:46-06:00"
     },
     {
-      "hash": "5e9345012226bd2a5564263222cc544ad4791847",
-      "message": "Add camera and microphone permission prompts",
-      "body": "\"May I see? May I hear?\"\nThe website asks, drawing near.\nA dialog appears, polite and clear:\n\"Allow\" or \"Don't\"—the choice is here.\nNo silent spying, have no fear,\nYour camera and mic need your cheer!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "e1400aae5c82fdc658f19c5ff06f3f9fe19065fa",
+      "message": "Fix control bar text with two-phase rendering",
+      "body": "A buffer mapped cannot be mapped again,\nThe GPU protests with a panic refrain.\nSo we split the work into two distinct parts:\nBackground first, then text when mapping departs.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T15:19:36-06:00"
+      "date": "2026-01-19T08:59:09-06:00"
     },
     {
-      "hash": "a723b35e8b9eae361d57eb5d44a4fcc78beae807",
-      "message": "Add WebKit crash recovery dialog",
-      "body": "When WebKit falls and all goes white,\nNo longer shall you lose the fight.\nA dialog rises from the void:\n\"Reload, or close what was destroyed?\"\nThe phoenix option now appears—\nRefresh the page, and dry your tears.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "84ad89d1cebdc80e7b820af27683b9517ccf2830",
+      "message": "Display URL in control bar for Browse mode",
+      "body": "Where once \"Browse Mode\" plainly stood,\nThe URL now shows as it should.\nControl mode keeps its simple name,\nBut browsing shows from whence you came.\nPhase one complete—the address shown,\nPhase two will track where you have flown.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T15:00:24-06:00"
+      "date": "2026-01-19T08:12:07-06:00"
     },
     {
-      "hash": "4700a6099bf044b768084e09a90c0bf897395d79",
-      "message": "Add HTTP Basic Auth support",
-      "body": "A site said \"You cannot pass through!\"\nIt demanded a name and word too.\nNow a dialog appears,\nType credentials, no fears—\nThe bouncer steps aside, letting you view.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "a58fdaddbd582776b100415fc274e461acf61d78",
+      "message": "Add vertical margins to control bar text",
+      "body": "The text once cramped, no room to breathe,\nNow half a cell both top beneath.\nTwo rows it stands, a taller bar,\nThe letters float like a distant star—\nWith breathing room on every side,\nThe control bar wears its height with pride.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T14:55:42-06:00"
+      "date": "2026-01-19T07:58:45-06:00"
     },
     {
-      "hash": "8b224a94919865ac358e08adb313544a62fed623",
-      "message": "Bump version to 0.6.0",
-      "body": "Downloads now descend from cloud to ground,\nThrough WebKit's gates, a path was found.\nBlob URLs and same-origin flows,\nNSSavePanel catches all that goes!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "aa783deabc2574aa82eb50d030d917601aece33e",
+      "message": "Add Browse/Control mode switching for CEF browser",
+      "body": "Two modes now dance within the pane:\nBrowse for surfing, Control to reign.\nCtrl+C toggles the modal state,\nEnter returns—no need to wait.\nThe bar declares which mode you're in,\nSo users know before they begin.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T14:44:40-06:00"
+      "date": "2026-01-19T07:53:38-06:00"
     },
     {
-      "hash": "0b545fef3efec158cfe178cd40c5f971a3910fa8",
-      "message": "Add download support for WebView",
-      "body": "The browser pane longed to save,\nFiles it fetched from the wave.\nWith delegates in place,\nAnd blobs we embrace,\nNow downloads behave—no more knave!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "7ee73ccd0ec07e4ab01733156327b3b2edc83d36",
+      "message": "Add half-cell margin to control bar text",
+      "body": "The text hugged the edge too tight,\nA crowded look, not quite right.\nHalf a cell of breathing room,\nNow the letters have space to bloom.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T14:42:21-06:00"
+      "date": "2026-01-19T07:21:38-06:00"
     },
     {
-      "hash": "dbf55ab24291653fc5d69740bc4916bce4e4dd2a",
-      "message": "Smart file vs URL detection for web command",
-      "body": "Type a filename, it opens the file,\nType a URL, it surfs in style.\nlocalhost:3000 gets http:// prepended,\nNo more typing schemes—how splendid!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "12bd478a10855dab62187f21230a7791209f9501",
+      "message": "Render \"Control Bar\" text in browser control panel",
+      "body": "A bar once blank, a void of space,\nNow letters march to fill the place.\nWith parse_status_text we shape the words,\nAnd render_screen_line draws the nerds—\nEr, glyphs! In monospace they stand,\nThe terminal font, as we had planned.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T13:54:51-06:00"
+      "date": "2026-01-19T07:16:57-06:00"
     },
     {
-      "hash": "08fedcb5678a6194b451192a045d6200bc4cef58",
-      "message": "Release 0.5.0",
-      "body": "Upload your files with a click,\nThe picker appears, smooth and slick.\nFrom photos to docs, big or small,\nTermSurf now handles them all.\nThe version badge gleams on the site,\nAnother release done right!\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "c7a6a06974495936336c0b07ddf57682e2426b03",
+      "message": "Tune settle delay to 30ms",
+      "body": "Ten was too quick, a hundred too slow,\nThirty's the tempo where smooth resizes flow.\nNot quite a blink, but enough time to wait—\nThe Goldilocks zone for a texture's fate.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T13:36:54-06:00"
+      "date": "2026-01-19T06:37:08-06:00"
     },
     {
-      "hash": "842d75298dcd71a0cf9a40972406033bdc9a7e84",
-      "message": "Add file upload support",
-      "body": "A file picker springs to life,\nWhen upload buttons end their strife.\nSingle, multiple, directory too—\nNow TermSurf can upload for you.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "ac4363460f46330bfd2b0507a9109219ed56b6cc",
+      "message": "Defer CEF resize until drag stops",
+      "body": "The browser bounced and jittered so,\nEach frame a new size, to and fro.\n\"Why render mid-drag?\" we thought at last,\n\"Just stretch the texture, hold it fast!\"\nNow pixels wait in patient grace,\nTill mouse at rest finds its place.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T13:35:56-06:00"
+      "date": "2026-01-19T06:33:41-06:00"
     },
     {
-      "hash": "d776b7a84cd158fcb0f70c6326615cf949ce4f51",
-      "message": "Move HTML tests to dedicated html folder",
-      "body": "The test folder had a prior claim,\nSo HTML files needed a new name.\nA folder called html, neat and clean,\nFor browser tests to call their scene.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "8781c2aab7f5a69c24fc6f58c4d9e82a161e8eef",
+      "message": "Add control panel background above CEF browser",
+      "body": "A browser pane stood tall and proud,\nIts head touching the topmost cloud.\nBut now a panel sits on high,\nOne cell of background—by and by,\nThe browser dips its viewport down,\nMaking room for its control crown.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T13:23:21-06:00"
+      "date": "2026-01-19T06:10:14-06:00"
     },
     {
-      "hash": "4676e36a1e8854bdafe3a7bcb1864488db534e28",
-      "message": "Fix version badge to not shift title",
-      "body": "The badge once pushed the title aside,\nNow absolute, it floats with pride.\nCentered stays the name we know,\nWhile version tags just tag along for show.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "e185c1b0df5f63f28c5c828fba0db2b8d0162129",
+      "message": "Add CEF MVP4 plan for control panel and modes",
+      "body": "Three modes walk into a bar:\nControl, Browse, Insert—each a star.\n\"Ctrl+C to escape!\" they say,\n\"Enter to browse, i to play!\"\nThe URL field awaits your keystroke from afar.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T13:22:03-06:00"
+      "date": "2026-01-18T17:31:55-06:00"
     },
     {
-      "hash": "e18c5e84fc1b4987023334a04e5410fe69be774f",
-      "message": "Add version badge to website header",
-      "body": "A tiny tag beside the name,\nProclaims the version's claim to fame.\nSo visitors can see at a glance,\nIf updates deserve a second chance.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "814fa04b63ece597572507c71f1d162404e288cc",
+      "message": "Update MVP3 docs to reflect settle approach",
+      "body": "The state machine grew complex and tall,\nWith queues and edges, it had them all.\nBut simpler won the day, you see:\nJust wait ten milliseconds, then render free.\n\nCtrl+Shift+R stands ready in the wings,\nFor when the texture misbehaves and clings.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T13:16:28-06:00"
+      "date": "2026-01-18T17:18:51-06:00"
     },
     {
-      "hash": "d3835a8d750cfa369f8d561e64860d0f5f71d545",
-      "message": "Release 0.4.0",
-      "body": "The dialogs now speak from the page,\nAlert, confirm, prompt take the stage.\nWith origin shown for your trust,\nAnd spam suppression—a must!\nTermSurf grows wiser with age.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "3861b9a762535f602c2c92eb68d663908cde7c25",
+      "message": "Add settle-and-rerender after resize stops",
+      "body": "Ten milliseconds, a patient wait,\nFor textures to align with fate.\nWhile resize storms rage wild and fast,\nWe hold our brush until the last.\n\nWhen silence falls and changes cease,\nOne final render brings us peace.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T13:09:17-06:00"
+      "date": "2026-01-18T17:15:02-06:00"
     },
     {
-      "hash": "26102ea6edcd8ee0e2bb65c1f96e8e651fdb2edf",
-      "message": "Add JavaScript dialog support",
-      "body": "A website once wanted to say,\n\"Hello!\" in a modal display.\nWith alert, confirm, prompt—\nNow TermSurf is prompt!\nAnd spam? Just one click, go away.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "6bc56cbaf517ceeb315523a6edd72e7c7ebc9882",
+      "message": "Add Ctrl+Shift+R to force CEF browser re-render",
+      "body": "When textures misbehave and pixels go astray,\nA simple keystroke saves the day.\nCtrl+Shift+R, the magic spell,\nMakes distorted browsers render well.\n\n(Key-up, not down—macOS won't relay\nThe key-down event in Shift's array.)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T13:08:29-06:00"
+      "date": "2026-01-18T17:05:11-06:00"
     },
     {
-      "hash": "422a1766e6d2c4a176403d635c46f5809829de24",
-      "message": "Add poetic commit messages to release skill",
-      "body": "Releases deserve a verse or two,\nA celebration long overdue.\nFour to eight lines of wit and cheer,\nTo mark each milestone through the year.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "141ab84db19a832350dc66495571d9aa0f452b94",
+      "message": "Revert simple resize approach (bouncing)",
+      "body": "The simple path we tried to take,\nBut bouncing browsers make hearts break.\nWe step back now to try anew,\nWith debouncing in our view.\n\nThis reverts commit 417c36e75.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T11:59:13-06:00"
+      "date": "2026-01-18T16:24:17-06:00"
     },
     {
-      "hash": "b9ab5d5716ed05541eee7642cee20bf89154d443",
-      "message": "Shorten tagline, speed up TS builds",
-      "body": "Less is more, the tagline's now tight,\nAnd TypeScript compiles at the speed of light.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+      "hash": "417c36e7553df5c8231d58c0c7ebf80ded0b85d3",
+      "message": "Add simple browser resize on pane change",
+      "body": "We hoped that CEF would debounce inside,\nBut alas, the browser still bounces wide.\nThe simple approach did not suffice—\nWe'll need debouncing, to be precise.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T11:54:23-06:00"
+      "date": "2026-01-18T16:23:25-06:00"
     },
     {
-      "hash": "5d19b99c1e0716406feff7b73b2f3b0392624f25",
-      "message": "minor, not patch",
-      "body": "",
+      "hash": "b8c30cf70d367af9f677e6229d9054ad0a07df0b",
+      "message": "Clarify resize call sites and pixel types in docs",
+      "body": "Physical or logical? The question was unclear,\nNow comments explain it, the path is now clear.\nFrom paint or on_paint? Both places we call,\nThe docs now describe it—no ambiguity at all.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T09:21:13-06:00"
+      "date": "2026-01-18T16:12:22-06:00"
     },
     {
-      "hash": "c23b614e395b614c4b9c09af02e5821555c21764",
-      "message": "update release skill to use patch version numbers",
-      "body": "",
+      "hash": "2d6581c7cbad94baf05e6d59bacf4132ea30f662",
+      "message": "Update technical approach to match implementation",
+      "body": "The old approach spoke of grids and such,\nBut reality differed quite much.\nNow the docs align\nWith the code so fine—\nOne source of truth we trust and clutch.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-01-11T09:19:30-06:00"
+      "date": "2026-01-18T16:08:13-06:00"
     }
   ]
 }
