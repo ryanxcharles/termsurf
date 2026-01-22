@@ -183,3 +183,231 @@ flat commands (`web-open`).
 | `wezterm/src/cli/web.rs`      | New file with `WebCommand` and subcommands |
 | `wezterm/src/cli/mod.rs`      | Register `Web` variant, remove `WebOpen`   |
 | `wezterm/src/cli/web_open.rs` | Delete                                     |
+
+---
+
+### Experiment 2: Replace RPC with Unix Socket
+
+**Status:** Pending
+
+**Goal:** Replace WezTerm's RPC mechanism for the `web` command with a Unix
+domain socket approach, matching TS1's architecture. This enables bidirectional
+communication needed for streaming console output.
+
+**Background:**
+
+The current implementation uses WezTerm's RPC/PDU system:
+
+```
+CLI ──WebOpen PDU──► Server ──► GUI creates browser
+CLI ◄──WebOpenResponse──       (CLI exits, no event streaming)
+```
+
+TS1 uses a Unix domain socket for bidirectional communication:
+
+```
+CLI ◄──────────────────────► Socket Server (in GUI)
+    request: open
+    response: opened
+    event: console
+    event: console
+    event: closed
+    (CLI stays connected until browser closes)
+```
+
+**Plan:**
+
+1. Add Unix socket server to GUI (`wezterm-gui/src/termsurf_socket/`):
+
+   ```rust
+   // mod.rs - Socket server that listens for CLI connections
+   pub struct TermsurfSocketServer {
+       socket_path: PathBuf,
+       // ...
+   }
+
+   impl TermsurfSocketServer {
+       pub fn start() -> anyhow::Result<Self>;
+       pub fn emit_to_pane(&self, pane_id: PaneId, event: TermsurfEvent);
+   }
+   ```
+
+   ```rust
+   // protocol.rs - JSON message types (matching TS1)
+   #[derive(Serialize, Deserialize)]
+   pub struct TermsurfRequest {
+       pub id: String,
+       pub command: String,  // "open", "close"
+       pub pane_id: Option<PaneId>,
+       pub params: serde_json::Value,
+   }
+
+   #[derive(Serialize, Deserialize)]
+   pub struct TermsurfResponse {
+       pub id: String,
+       pub success: bool,
+       pub message: Option<String>,
+       pub error: Option<String>,
+   }
+
+   #[derive(Serialize, Deserialize)]
+   pub struct TermsurfEvent {
+       pub id: String,
+       pub event: String,  // "console", "closed"
+       pub data: serde_json::Value,
+   }
+   ```
+
+   ```rust
+   // connection.rs - Per-client connection handler
+   pub struct TermsurfConnection {
+       stream: UnixStream,
+       subscribed_panes: HashSet<PaneId>,
+   }
+   ```
+
+2. Start socket server on GUI launch and set environment variable:
+
+   ```rust
+   // In GUI startup code
+   let socket_server = TermsurfSocketServer::start()?;
+   std::env::set_var("TERMSURF_SOCKET", socket_server.socket_path());
+   ```
+
+   Socket path: `/tmp/termsurf-{pid}.sock`
+
+3. Update CLI `web.rs` to use socket instead of RPC:
+
+   ```rust
+   impl WebOpen {
+       pub fn run(&self) -> anyhow::Result<()> {
+           // 1. Connect to socket
+           let socket_path = std::env::var("TERMSURF_SOCKET")
+               .map_err(|_| anyhow!("Not running inside TermSurf"))?;
+           let mut stream = UnixStream::connect(&socket_path)?;
+
+           // 2. Get pane ID from environment
+           let pane_id: PaneId = std::env::var("WEZTERM_PANE")?.parse()?;
+
+           // 3. Send open request
+           let request = TermsurfRequest {
+               id: uuid::Uuid::new_v4().to_string(),
+               command: "open".to_string(),
+               pane_id: Some(pane_id),
+               params: json!({"url": self.url}),
+           };
+           writeln!(stream, "{}", serde_json::to_string(&request)?)?;
+
+           // 4. Read response
+           let mut reader = BufReader::new(stream);
+           let mut line = String::new();
+           reader.read_line(&mut line)?;
+           let response: TermsurfResponse = serde_json::from_str(&line)?;
+
+           if !response.success {
+               anyhow::bail!(response.error.unwrap_or_default());
+           }
+
+           // 5. Event loop (for future console streaming)
+           // For now, just exit after successful open
+           println!("{}", response.message.unwrap_or_default());
+           Ok(())
+       }
+   }
+   ```
+
+4. Handle "open" command in socket server:
+
+   ```rust
+   // In TermsurfSocketServer
+   fn handle_request(&self, conn: &mut TermsurfConnection, req: TermsurfRequest) {
+       match req.command.as_str() {
+           "open" => {
+               let url = req.params["url"].as_str().unwrap();
+               let pane_id = req.pane_id.unwrap();
+
+               // Create browser (same logic as current handle_web_open)
+               // ...
+
+               // Subscribe connection to events for this pane
+               conn.subscribed_panes.insert(pane_id);
+
+               // Send response
+               conn.send(TermsurfResponse {
+                   id: req.id,
+                   success: true,
+                   message: Some(format!("Opening {}", url)),
+                   error: None,
+               });
+           }
+           // ...
+       }
+   }
+   ```
+
+5. Remove RPC-based web open:
+
+   - Remove `Web` variant from `CliSubCommand` enum in `mod.rs`
+   - Remove `WebOpen`/`WebOpenResponse` handling from `sessionhandler.rs`
+   - Keep `MuxNotification::WebOpen` for internal use (or remove if unused)
+
+6. Update `mod.rs` to run `web` command directly (not through RPC client):
+
+   ```rust
+   // In CliSubCommand enum, web is now handled separately
+   // Before entering run_cli_async(), check if it's a web command
+   // and handle it directly without creating an RPC client
+
+   pub fn run_cli(opts: &crate::Opt, cli: CliCommand) -> anyhow::Result<()> {
+       // Handle web commands directly (no RPC)
+       if let CliSubCommand::Web(cmd) = &cli.sub {
+           return cmd.run();  // Uses socket, not RPC
+       }
+
+       // All other commands use RPC as before
+       let executor = promise::spawn::ScopedExecutor::new();
+       // ...
+   }
+   ```
+
+7. Build and test:
+   ```bash
+   ./scripts/build-debug.sh --open
+   termsurf cli web open https://example.com
+   ```
+
+**Protocol (newline-delimited JSON):**
+
+Request (CLI → Server):
+
+```json
+{"id":"abc123","command":"open","pane_id":1,"params":{"url":"https://example.com"}}
+```
+
+Response (Server → CLI):
+
+```json
+{"id":"abc123","success":true,"message":"Opening https://example.com"}
+```
+
+Event (Server → CLI, future):
+
+```json
+{"id":"abc123","event":"console","data":{"level":"log","message":"Hello"}}
+```
+
+**Files changed:**
+
+| File                                            | Change                          |
+| ----------------------------------------------- | ------------------------------- |
+| `wezterm-gui/src/termsurf_socket/mod.rs`        | New: Socket server              |
+| `wezterm-gui/src/termsurf_socket/protocol.rs`   | New: JSON message types         |
+| `wezterm-gui/src/termsurf_socket/connection.rs` | New: Connection handler         |
+| `wezterm-gui/src/lib.rs`                        | Start socket server on launch   |
+| `wezterm/src/cli/web.rs`                        | Replace RPC with socket client  |
+| `wezterm/src/cli/mod.rs`                        | Handle `web` command separately |
+| `wezterm-mux-server-impl/src/sessionhandler.rs` | Remove WebOpen handler          |
+
+**Note:** This experiment maintains the same user-facing behavior. The
+`web open` command will work exactly as before, but uses the socket internally.
+Console streaming will be added in a future experiment.
