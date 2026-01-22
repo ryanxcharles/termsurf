@@ -60,10 +60,10 @@ web close
 
 ### Current State
 
-The command is currently `web-open` (flat, not nested):
+The `web open` subcommand is implemented:
 
 ```bash
-termsurf cli web-open <url>
+termsurf cli web open https://example.com
 ```
 
 ---
@@ -72,10 +72,12 @@ termsurf cli web-open <url>
 
 ### Experiment 1: Convert `web-open` to `web open`
 
-**Status:** Pending
+**Status:** Success
 
 **Goal:** Restructure the CLI to use nested subcommands (`web open`) instead of
 flat commands (`web-open`).
+
+**Result:** The `termsurf cli web open <url>` command now works as expected.
 
 **Plan:**
 
