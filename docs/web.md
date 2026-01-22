@@ -14,6 +14,22 @@ The `web` command supports the following subcommands:
 | `web file <path>` | Open a local file in the browser |
 | `web close`       | Close the browser overlay        |
 
+### Console Output
+
+When running `web open` or `web file`, all browser console output is redirected
+to the terminal:
+
+- `console.log()` → stdout
+- `console.error()` → stderr
+- `console.warn()` → stderr
+- `console.info()` → stdout
+- `console.debug()` → stdout
+
+This enables using the browser as a scripting environment where output flows
+back to the terminal, similar to running `node script.js`. The CLI command
+remains running and streams console output until the browser is closed or the
+user presses Ctrl+C.
+
 ### Invocation
 
 Phase 1: Subcommand of `termsurf cli`:
