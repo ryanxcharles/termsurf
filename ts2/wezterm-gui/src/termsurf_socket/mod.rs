@@ -168,6 +168,20 @@ impl TermsurfSocketServer {
         }
     }
 
+    /// Validate profile name: lowercase alphanumeric, must start with letter
+    fn validate_profile_name(name: &str) -> Result<(), String> {
+        if name.is_empty() {
+            return Err("Profile name cannot be empty".to_string());
+        }
+        if !name.chars().next().unwrap().is_ascii_lowercase() {
+            return Err("Profile name must start with a lowercase letter".to_string());
+        }
+        if !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) {
+            return Err("Profile name must contain only lowercase letters and digits".to_string());
+        }
+        Ok(())
+    }
+
     /// Handle "open" action - open a URL in a browser pane
     fn handle_open(
         &self,
@@ -195,6 +209,32 @@ impl TermsurfSocketServer {
             }
         };
 
+        // Extract incognito flag (defaults to false)
+        let incognito = request
+            .data
+            .as_ref()
+            .and_then(|d| d.get("incognito"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Extract and validate profile (only if not incognito)
+        let profile = if incognito {
+            None
+        } else {
+            let profile_name = request
+                .data
+                .as_ref()
+                .and_then(|d| d.get("profile"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("default");
+
+            if let Err(e) = Self::validate_profile_name(profile_name) {
+                return TermsurfResponse::error(request.id.clone(), e);
+            }
+
+            Some(profile_name.to_string())
+        };
+
         // Validate pane exists
         let mux = Mux::get();
         if mux.get_pane(pane_id).is_none() {
@@ -220,6 +260,8 @@ impl TermsurfSocketServer {
             pane_id,
             url: url.clone(),
             browser_id: browser_id.clone(),
+            profile: profile.clone(),
+            incognito,
         });
 
         TermsurfResponse::ok(

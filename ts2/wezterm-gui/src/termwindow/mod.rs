@@ -1352,12 +1352,14 @@ impl TermWindow {
                     pane_id,
                     url,
                     browser_id,
+                    profile,
+                    incognito,
                 } => {
                     #[cfg(all(target_os = "macos", feature = "cef"))]
-                    self.handle_web_open(pane_id, url, browser_id);
+                    self.handle_web_open(pane_id, url, browser_id, profile, incognito);
                     #[cfg(not(all(target_os = "macos", feature = "cef")))]
                     {
-                        let _ = (pane_id, url, browser_id);
+                        let _ = (pane_id, url, browser_id, profile, incognito);
                         log::warn!("WebOpen notification received but CEF is not enabled");
                     }
                 }
@@ -3807,12 +3809,21 @@ impl TermWindow {
 #[cfg(all(target_os = "macos", feature = "cef"))]
 impl TermWindow {
     /// Handle WebOpen notification - create a browser overlay for the pane
-    pub fn handle_web_open(&self, pane_id: PaneId, url: String, browser_id: String) {
+    pub fn handle_web_open(
+        &self,
+        pane_id: PaneId,
+        url: String,
+        browser_id: String,
+        profile: Option<String>,
+        incognito: bool,
+    ) {
         log::info!(
-            "[CEF] handle_web_open called for pane {} with URL: {} (browser_id: {})",
+            "[CEF] handle_web_open called for pane {} with URL: {} (browser_id: {}, profile: {:?}, incognito: {})",
             pane_id,
             url,
-            browser_id
+            browser_id,
+            profile,
+            incognito
         );
 
         // Check if we already have a browser for this pane
@@ -3889,6 +3900,8 @@ impl TermWindow {
             &cef_bind_group_layout,
             invalidate_callback,
             browser_id,
+            profile,
+            incognito,
         ) {
             Ok(state) => {
                 // Browser starts in browse mode; focus will be set on first paint

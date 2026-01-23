@@ -24,6 +24,28 @@ pub enum WebSubCommand {
 pub struct WebOpen {
     /// The URL to open
     url: String,
+
+    /// Browser profile name (lowercase alphanumeric, must start with letter)
+    #[arg(long, default_value = "default")]
+    profile: String,
+
+    /// Use incognito mode (in-memory only, no persistence)
+    #[arg(long, conflicts_with = "profile")]
+    incognito: bool,
+}
+
+/// Validate profile name: lowercase alphanumeric, must start with letter
+fn validate_profile_name(name: &str) -> anyhow::Result<()> {
+    if name.is_empty() {
+        anyhow::bail!("Profile name cannot be empty");
+    }
+    if !name.chars().next().unwrap().is_ascii_lowercase() {
+        anyhow::bail!("Profile name must start with a lowercase letter");
+    }
+    if !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) {
+        anyhow::bail!("Profile name must contain only lowercase letters and digits");
+    }
+    Ok(())
 }
 
 // Protocol types (matching GUI's termsurf_socket/protocol.rs)
@@ -82,16 +104,23 @@ impl WebOpen {
         let mut stream = UnixStream::connect(&socket_path)
             .with_context(|| format!("Failed to connect to socket at {}", socket_path))?;
 
+        // Validate profile name (unless incognito)
+        if !self.incognito {
+            validate_profile_name(&self.profile)?;
+        }
+
         // Generate a simple request ID
         let request_id = format!("{}", std::process::id());
 
-        // Build request
+        // Build request with profile info
         let request = TermsurfRequest {
             id: request_id,
             action: "open".to_string(),
             pane_id: Some(pane_id),
             data: Some(serde_json::json!({
                 "url": self.url,
+                "profile": if self.incognito { serde_json::Value::Null } else { serde_json::json!(self.profile) },
+                "incognito": self.incognito,
             })),
         };
 

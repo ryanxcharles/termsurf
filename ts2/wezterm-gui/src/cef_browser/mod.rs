@@ -63,6 +63,8 @@ impl BrowserState {
     /// - `width`, `height`: Logical pixel dimensions (DIP), not physical pixels
     /// - `device_scale_factor`: Display scale factor (e.g., 2.0 for Retina)
     /// - `browser_id`: Unique ID for socket event routing
+    /// - `profile`: Profile name (e.g., "default"). None for incognito mode.
+    /// - `incognito`: If true, use in-memory storage only (no persistence)
     pub fn new(
         pane_id: PaneId,
         url: &str,
@@ -74,15 +76,19 @@ impl BrowserState {
         bind_group_layout: &wgpu::BindGroupLayout,
         invalidate_callback: Arc<dyn Fn() + Send + Sync>,
         browser_id: String,
+        profile: Option<String>,
+        incognito: bool,
     ) -> anyhow::Result<Self> {
         log::info!(
-            "[CEF] Creating browser for pane {} with URL: {} ({}x{} @ {:.1}x scale, browser_id: {})",
+            "[CEF] Creating browser for pane {} with URL: {} ({}x{} @ {:.1}x scale, browser_id: {}, profile: {:?}, incognito: {})",
             pane_id,
             url,
             width,
             height,
             device_scale_factor,
-            browser_id
+            browser_id,
+            profile,
+            incognito
         );
 
         // Create render handler parts
@@ -118,9 +124,42 @@ impl BrowserState {
             ..Default::default()
         };
 
-        // Create request context
+        // Create request context with profile-specific cache path
+        // Empty cache_path = incognito mode (in-memory only)
+        // Non-empty cache_path = persistent storage at ~/.config/termsurf/profiles/<profile>/
+        let cache_path = if incognito {
+            log::info!("[CEF] Using incognito mode (in-memory storage)");
+            String::new()
+        } else if let Some(ref profile_name) = profile {
+            // Build profile directory path
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            let profile_dir = format!("{}/.config/termsurf/profiles/{}", home, profile_name);
+
+            // Create directory if it doesn't exist
+            if let Err(e) = std::fs::create_dir_all(&profile_dir) {
+                log::warn!(
+                    "[CEF] Failed to create profile directory {}: {}",
+                    profile_dir,
+                    e
+                );
+            } else {
+                log::info!("[CEF] Using profile directory: {}", profile_dir);
+            }
+
+            profile_dir
+        } else {
+            // No profile and not incognito - shouldn't happen, but default to incognito
+            log::warn!("[CEF] No profile specified and not incognito, defaulting to incognito mode");
+            String::new()
+        };
+
+        let request_context_settings = RequestContextSettings {
+            cache_path: cache_path.as_str().into(),
+            ..Default::default()
+        };
+
         let mut context = cef::request_context_create_context(
-            Some(&RequestContextSettings::default()),
+            Some(&request_context_settings),
             Some(&mut CefRequestContextHandlerBuilder::build()),
         );
 

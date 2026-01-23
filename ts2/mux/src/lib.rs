@@ -99,6 +99,10 @@ pub enum MuxNotification {
         pane_id: PaneId,
         url: String,
         browser_id: String,
+        /// Profile name (e.g., "default"). None if incognito mode.
+        profile: Option<String>,
+        /// If true, use incognito mode (in-memory only, no persistence)
+        incognito: bool,
     },
     WebClosed {
         pane_id: PaneId,

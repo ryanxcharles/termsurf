@@ -1000,10 +1000,13 @@ impl SessionHandler {
                             let browser_id = format!("browser-{}", pane_id);
 
                             // Notify GUI to open browser overlay
+                            // RPC path uses default profile (socket path handles profiles)
                             mux.notify(MuxNotification::WebOpen {
                                 pane_id,
                                 url: url.clone(),
                                 browser_id,
+                                profile: Some("default".to_string()),
+                                incognito: false,
                             });
 
                             let message = format!("Opening {}", url);
