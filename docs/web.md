@@ -658,7 +658,7 @@ TS1's routing approach (to support multiple simultaneous browser panes):
 
 ### Experiment 4: Browser Profiles
 
-**Status:** Pending
+**Status:** Success
 
 **Goal:** Implement named browser profiles to isolate cookies, localStorage, and
 other session data between different use cases.
