@@ -29,7 +29,9 @@ ts3 addresses this with a new process model.
 1. A shared CEF daemon forces all browsers to share one profile context
 2. In order to support multiple profiles, we MUST separate the browser process
    from the window, and we MUST attach exactly one process per profile
-3. The `web` command should BE the browser, not a messenger to a daemon
+3. CEF prevents two processes from opening the same profile (to avoid data
+   corruption), so the `web` command must coordinate access to browser
+   subprocesses
 
 ## Process Model
 
@@ -38,29 +40,37 @@ ts3 addresses this with a new process model.
 ```
 termsurf (main terminal process)
     │
-    ├── termsurf web --profile=default (browser subprocess)
-    │       └── CEF helper processes (managed by CEF)
+    ├── termsurf web https://a.com ──┐
+    ├── termsurf web https://b.com ──┼──► browser-subprocess (profile=default)
+    │                                │        └── CEF helper processes
+    │                                │
+    ├── termsurf web --profile=work https://c.com ──► browser-subprocess (profile=work)
+    │                                                     └── CEF helper processes
     │
-    ├── termsurf web --profile=work (browser subprocess)
-    │       └── CEF helper processes (managed by CEF)
-    │
-    └── termsurf web --profile=personal (browser subprocess)
-            └── CEF helper processes (managed by CEF)
+    └── termsurf web --profile=personal https://d.com ──► browser-subprocess (profile=personal)
+                                                              └── CEF helper processes
 ```
+
+The `termsurf web` command is a **coordinator**:
+
+- If a browser subprocess for the requested profile exists, connect to it
+- If not, spawn a new browser subprocess for that profile
+- Send commands to the subprocess to open URLs, navigate, etc.
 
 ### Key Principles
 
-1. **One CEF process per profile**: Each profile gets its own `termsurf web`
+1. **One browser subprocess per profile**: Each profile gets its own browser
    subprocess with its own CEF context, enabling true isolation (separate
    cookies, storage, sessions).
 
-2. **Multiple panes per profile**: A single `termsurf web` process can host
-   multiple browser panes/tabs that share the same profile. This is efficient -
-   you don't spawn a new process for each tab.
+2. **Multiple panes per profile**: A single browser subprocess can host multiple
+   browser panes/tabs that share the same profile. This is efficient - you don't
+   spawn a new process for each tab.
 
-3. **The `web` command IS the browser**: Unlike ts2 Web Experiment 7's
-   client-daemon model, the `web` command directly initializes CEF and renders
-   browsers. No IPC to a separate daemon.
+3. **The `web` command is a coordinator**: The `web` command does not run CEF
+   directly. Instead, it spawns or connects to browser subprocesses based on the
+   requested profile. This is necessary because CEF prevents two processes from
+   opening the same profile directory.
 
 4. **Cross-process texture sharing**: Browser content is rendered off-screen by
    CEF and shared with the main terminal process via platform-native APIs. This
@@ -74,20 +84,21 @@ termsurf (main terminal process)
 The main terminal process and browser subprocesses communicate via:
 
 - Unix domain sockets for commands (navigate, go back, reload, etc.)
-- Platform-native texture handles for zero-copy sharing (IOSurface, DMA-BUF, D3D11)
+- Platform-native texture handles for zero-copy sharing (IOSurface, DMA-BUF,
+  D3D11)
 
 ### Profile Isolation
 
 Each profile has:
 
 - Its own CEF `root_cache_path` (cookies, local storage, cache)
-- Its own `termsurf web` process
+- Its own browser subprocess
 - Complete isolation from other profiles
 
 Users can:
 
-- Have multiple tabs open in the same profile (shared session)
-- Have tabs in different profiles (isolated sessions)
+- Have multiple tabs/panes open in the same profile (shared session)
+- Have tabs/panes in different profiles (isolated sessions)
 - Log into the same site with different accounts in different profiles
 
 ## Components
@@ -96,14 +107,21 @@ Users can:
 
 - Window management and compositing
 - Terminal emulation
-- Spawns and manages `termsurf web` subprocesses
 - Receives textures from browser subprocesses
 - Routes input events to appropriate subprocess
 
-### Browser Subprocess (`termsurf web`)
+### Web Command Coordinator (`termsurf web`)
 
+- CLI entry point for browser operations
+- Checks if a browser subprocess for the requested profile is running
+- Spawns new browser subprocess if needed, or connects to existing one
+- Forwards commands (open URL, navigate, reload, etc.) to the subprocess
+
+### Browser Subprocess
+
+- Long-lived process, one per profile
 - Initializes CEF with profile-specific cache path
-- Manages one or more browser instances (tabs)
+- Manages one or more browser instances (panes/tabs)
 - Renders to off-screen shared textures
 - Handles browser-specific input (when pane is focused)
 - Streams console output back to terminal (optional)
@@ -129,14 +147,19 @@ The following has been validated and is ready for ts3:
 
 ## Open Questions
 
-1. **Pane creation flow**: How does the main process signal a browser subprocess
+1. **Browser subprocess binary**: Is the browser subprocess a separate binary,
+   or a mode of the main `termsurf` binary (e.g.,
+   `termsurf browser-subprocess`)?
+2. **Subprocess discovery**: How does the `web` command find existing browser
+   subprocesses? PID files? Unix socket naming convention?
+3. **Pane creation flow**: How does the main process signal a browser subprocess
    to create a new pane?
-2. **Texture handle passing**: How are IOSurface handles passed from subprocess
-   to main process?
-3. **Focus management**: How does the main process know which browser pane has
+4. **Texture handle passing**: How are texture handles passed from subprocess to
+   main process?
+5. **Focus management**: How does the main process know which browser pane has
    focus?
-4. **Subprocess lifecycle**: When does a `termsurf web` process exit? When all
-   its panes close?
+6. **Subprocess lifecycle**: When does a browser subprocess exit? When all its
+   panes close?
 
 ## Future Considerations
 
