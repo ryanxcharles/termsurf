@@ -200,10 +200,29 @@ simultaneously.
 
 **Success criteria:**
 
-- [ ] `web` prints "loaded CEF" with profile=default
-- [ ] `web --profile work` prints "loaded CEF" with profile=work
-- [ ] `web --incognito` prints "loaded CEF" with no profile
-- [ ] Two processes with different profiles run simultaneously
-- [ ] Two processes with the same profile: second fails gracefully
+- [x] `web` prints "loaded CEF" with profile=default
+- [x] `web --profile work` prints "loaded CEF" with profile=work
+- [x] `web --incognito` prints "loaded CEF" with no profile
+- [x] Two processes with different profiles run simultaneously
+- [x] Two processes with the same profile: second fails gracefully
 
-**Results:** (to be filled in after experiment)
+**Results:** SUCCESS (2025-01-24)
+
+All test cases passed. Key findings:
+
+1. **Profile isolation works**: Each profile gets its own directory under
+   `~/.config/termsurf/cef/<profile>/` with separate cookies, storage, etc.
+
+2. **CEF enforces single-process-per-profile**: CEF automatically creates a
+   `SingletonLock` file in the profile directory. If a second process tries to
+   open the same profile, CEF fails with: "Failed to create SingletonLock: File
+   exists" and "Aborting now to avoid profile corruption."
+
+3. **Incognito works**: Empty `root_cache_path` triggers CEF's in-memory storage
+   mode (with a warning about singleton behavior, which is expected).
+
+4. **Validation works**: Profile names must be lowercase alphanumeric starting
+   with a letter. `--profile` and `--incognito` are mutually exclusive.
+
+This validates our core architecture: one CEF process per profile with automatic
+conflict detection.
