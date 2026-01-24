@@ -401,7 +401,7 @@ Update documentation and ensure everything is consistent.
 ### Checklist
 
 - [ ] Update `CLAUDE.md` with bookmark-related files
-- [ ] Update `docs/architecture.md` if needed
+- [ ] Update `docs/ts2-architecture.md` if needed
 - [ ] Add user-facing documentation for bookmark commands
 - [ ] Verify all error messages are clear and helpful
 - [ ] Review code for consistency and cleanup

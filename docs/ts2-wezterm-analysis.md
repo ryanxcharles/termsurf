@@ -443,7 +443,7 @@ CEF has a C API, but integrating it with Swift failed due to struct marshalling:
 - Swift class memory layout doesn't match what CEF expects
 - The CEF C-to-C++ wrapper validates struct sizes and rejects Swift-created
   structs
-- See `docs/cef.md` for detailed documentation of the Swift integration
+- See `docs/ts2-cef.md` for detailed documentation of the Swift integration
   challenges
 
 **Why Zig + CEF Was Considered**

@@ -16,7 +16,7 @@ integrated browser panes.
 
 - **Debug build script**: Added `scripts/build-debug.sh` for faster debug builds
 - **TermSurf 2.0 planning**: Documented architecture for future CEF integration
-  via Zig (see `docs/termsurf2.md`)
+  via Zig (see `docs/ts2-wezterm-analysis.md`)
 
 ## v0.8.0
 
@@ -164,9 +164,9 @@ integrated browser panes.
 - **Google.com and other sites displaying incorrectly**: Fixed websites serving
   mobile/simplified layouts to WKWebView. Root cause: WKWebView doesn't send the
   `Upgrade-Insecure-Requests` HTTP header that Safari sends. We now inject this
-  header on all HTTP/HTTPS requests. See [docs/webview.md](docs/webview.md).
+  header on all HTTP/HTTPS requests. See [docs/ts1-webview.md](docs/ts1-webview.md).
 - **User-Agent**: Set Safari User-Agent string to avoid being detected as an
-  embedded webview.
+  embedded webview. See [docs/ts1-webview.md](docs/ts1-webview.md).
 
 ## v0.1.4
 

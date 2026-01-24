@@ -61,10 +61,10 @@ termsurf/                    # Root (Ghostty fork)
 │   └── cli/web.zig          # CLI web command (termsurf +web)
 ├── macos/                   # Original Ghostty macOS app
 ├── docs/                    # Documentation
-│   ├── architecture.md      # Technical decisions
-│   ├── console.md           # Console bridging & JS API
-│   ├── keybindings.md       # Keyboard shortcuts
-│   └── cef.md               # CEF integration (deferred)
+│   ├── ts2-architecture.md  # Technical decisions
+│   ├── ts1-console.md       # Console bridging & JS API
+│   ├── ts1-keybindings.md   # Keyboard shortcuts
+│   └── ts2-cef.md           # CEF integration (deferred)
 ├── TODO.md                  # Active task checklist
 ├── termsurf-macos/          # TermSurf macOS app (our code)
 │   ├── Sources/             # Swift source
@@ -102,7 +102,7 @@ We start with WKWebView (Apple's WebKit) because:
 **Planned: Chromium (via CEF)**
 
 CEF integration is deferred due to Swift-to-C struct marshalling challenges. See
-`docs/cef.md` for documentation. When implemented, CEF will provide:
+`docs/ts2-cef.md` for documentation. When implemented, CEF will provide:
 
 - Full Chrome DevTools
 - Cross-platform API (macOS, Linux, Windows)
@@ -180,10 +180,10 @@ Then rebuild the app.
 See:
 
 - [TODO.md](TODO.md) - Active checklist of tasks to launch
-- [Architecture](docs/architecture.md) - Technical decisions and design rationale
-- [Console Bridging](docs/console.md) - Console output and JavaScript API
-- [Keybindings](docs/keybindings.md) - Keyboard shortcuts for webview modes
-- [CEF Integration](docs/cef.md) - CEF attempt documentation (deferred)
+- [Architecture](docs/ts2-architecture.md) - Technical decisions and design rationale
+- [Console Bridging](docs/ts1-console.md) - Console output and JavaScript API
+- [Keybindings](docs/ts1-keybindings.md) - Keyboard shortcuts for webview modes
+- [CEF Integration](docs/ts2-cef.md) - CEF attempt documentation (deferred)
 
 ## Acknowledgments
 

@@ -1196,7 +1196,7 @@ termsurf cli web open https://example.com --incognito
 | `wezterm-gui/src/termsurf_socket/mod.rs` | Parse profile as u32, remove validator    |
 | `mux/src/lib.rs`                         | Change profile to Option<u32>             |
 | `wezterm-gui/src/cef_browser/mod.rs`     | Use Chrome naming, re-enable RequestCtx   |
-| `docs/web.md`                            | Update profile documentation              |
+| `docs/ts2-web.md`                        | Update profile documentation              |
 
 **Test plan:**
 

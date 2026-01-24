@@ -58,22 +58,27 @@ transitioning from TermSurf 1.x (Ghostty-based, macOS-only) to TermSurf 2.0
 - **TODO.md: `TODO.md`** - Active checklist of tasks to launch (keep up to
   date!)
 - Documentation: `docs/`
-  - `docs/architecture.md` - Technical decisions and design rationale
-  - `docs/bookmarks.md` - Bookmarks implementation plan and checklist
-  - `docs/build.md` - Build instructions and troubleshooting
-  - `docs/console.md` - Console bridging and JavaScript API (`--js-api`)
-  - `docs/keybindings.md` - Webview keyboard shortcuts and modes
-  - `docs/libghostty.md` - Changes to libghostty (tracking for upstream PRs)
-  - `docs/merge-upstream.md` - How to merge changes from upstream repos
-    (Ghostty, WezTerm, cef-rs)
-  - `docs/release.md` - Release procedure and versioning
-  - `docs/target-blank.md` - target="_blank" link handling
-  - `docs/webview.md` - WebView implementation, API checklist, and workarounds
-  - `docs/ctrl-z.md` - ctrl+z/fg analysis (deferred, documented for future
-    reference)
-  - `docs/cef.md` - CEF integration via cef-rs (validation status,
-    modifications, usage)
-  - `docs/termsurf2.md` - TermSurf 2.0 architecture (WezTerm + cef-rs)
+  - **TermSurf 1.x (ts1):**
+    - `docs/ts1-bookmarks.md` - Bookmarks implementation plan
+    - `docs/ts1-build.md` - Build instructions and troubleshooting
+    - `docs/ts1-console.md` - Console bridging and JavaScript API (`--js-api`)
+    - `docs/ts1-ctrl-z.md` - ctrl+z/fg analysis (deferred)
+    - `docs/ts1-keybindings.md` - Webview keyboard shortcuts and modes
+    - `docs/ts1-libghostty.md` - Changes to libghostty (tracking for upstream PRs)
+    - `docs/ts1-release.md` - Release procedure and versioning
+    - `docs/ts1-target-blank.md` - target="_blank" link handling
+    - `docs/ts1-webview.md` - WebView implementation and API checklist
+  - **TermSurf 2.x (ts2):**
+    - `docs/ts2-architecture.md` - Technical decisions and design rationale
+    - `docs/ts2-cef.md` - CEF integration via cef-rs
+    - `docs/ts2-cef-wezterm.md` - CEF + WezTerm integration details
+    - `docs/ts2-profile.md` - CEF browser profile research
+    - `docs/ts2-web.md` - Web command experiments
+    - `docs/ts2-wezterm-analysis.md` - WezTerm + cef-rs architecture
+  - **General:**
+    - `docs/merge-upstream.md` - How to merge changes from upstream repos
+    - `docs/competitors.md` - Terminal-browser hybrid comparison
+    - `docs/website.md` - termsurf.com website
 
 ### libghostty-vt
 
@@ -99,8 +104,8 @@ TermSurf 1.x uses WKWebView (Apple's WebKit) for browser panes, providing:
 - `ts1/termsurf-macos/Sources/Features/WebView/` - WebView implementation
 - `ts1/termsurf-macos/Sources/Features/Socket/` - CLI-app socket communication
 - `ts1/src/cli/web.zig` - CLI web command (integrated into termsurf binary)
-- `docs/console.md` - Console bridging and JS API documentation
-- `docs/webview.md` - WebView implementation and API checklist
+- `docs/ts1-console.md` - Console bridging and JS API documentation
+- `docs/ts1-webview.md` - WebView implementation and API checklist
 
 ### Key Files for TermSurf 1.x Development
 
@@ -153,7 +158,7 @@ Note: Source icons should be at least 1024x1024 pixels for best quality.
 TermSurf 2.0 will be based on WezTerm + cef-rs for cross-platform support with
 full browser capabilities.
 
-See `docs/termsurf2.md` for the detailed architecture analysis and
+See `docs/ts2-wezterm-analysis.md` for the detailed architecture analysis and
 implementation plan.
 
 ### Key differences from 1.x:

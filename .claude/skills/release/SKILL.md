@@ -8,11 +8,11 @@ description: "Create a new TermSurf 1.x release"
 > **Scope:** This skill applies to TermSurf 1.x releases.
 > TermSurf 2.0 will have a different release process based on Rust/Cargo tooling.
 
-Read and follow the process documented in `docs/release.md`.
+Read and follow the process documented in `docs/ts1-release.md`.
 
 ## Steps
 
-1. **Read the documentation** - Read `docs/release.md` to understand the full
+1. **Read the documentation** - Read `docs/ts1-release.md` to understand the full
    release process.
 
 2. **Review changes since last release**

@@ -274,7 +274,7 @@ Our cef-rs fork includes fixes required for proper operation. Summary:
 | Context menu crash | winit NSApplication conflict | Suppress native context menu |
 | Event-driven rendering | Continuous polling | Render only when CEF signals new frame |
 
-See `../docs/cef.md` for detailed documentation of each fix.
+See `ts2-cef.md` for detailed documentation of each fix.
 
 ## Known Issues
 
