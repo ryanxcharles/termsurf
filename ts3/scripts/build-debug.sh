@@ -34,29 +34,20 @@ echo "=== Building TermSurf 3.0 (Debug) ==="
 
 cd "$REPO_DIR"
 
-# Build binaries
-echo "Building web coordinator..."
-cargo build -p termsurf-web
-
-# TODO: Build browser subprocess when implemented
-# echo "Building browser subprocess..."
-# cargo build -p termsurf-browser
-
-# TODO: Build GUI when implemented
-# echo "Building GUI..."
-# cargo build -p termsurf-gui --features cef
-
-# TODO: CEF framework copying (when browser subprocess is ready)
-# TODO: App bundling (when GUI is ready)
+# Build everything
+echo "Building workspace..."
+cargo build
 
 echo ""
 echo "=== Debug Build Complete ==="
 echo "Binaries:"
-echo "  $REPO_DIR/target/debug/web"
+echo "  $REPO_DIR/target/debug/wezterm-gui  (terminal)"
+echo "  $REPO_DIR/target/debug/wezterm      (CLI)"
+echo "  $REPO_DIR/target/debug/web          (web coordinator)"
 echo ""
 
 # Open if requested
 if [ "$OPEN" = true ]; then
-    echo "Running web binary..."
-    "$REPO_DIR/target/debug/web"
+    echo "Running terminal..."
+    "$REPO_DIR/target/debug/wezterm-gui"
 fi
