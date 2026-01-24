@@ -229,7 +229,7 @@ conflict detection.
 
 ### Experiment 2: Socket Communication (Ping/Pong)
 
-**Status:** Not Started
+**Status:** SUCCESS
 
 **Goal:** Validate Unix domain socket communication between the coordinator and
 browser subprocess, establishing the foundation for command passing and
@@ -293,11 +293,11 @@ Response:
 
 **Success criteria:**
 
-- [ ] Browser subprocess creates socket at expected path
-- [ ] Coordinator connects to socket successfully
-- [ ] Ping request receives pong response
-- [ ] Socket file cleaned up on subprocess exit
-- [ ] Error handling for socket already exists (stale socket)
+- [x] Browser subprocess creates socket at expected path
+- [x] Coordinator connects to socket successfully
+- [x] Ping request receives pong response
+- [x] Socket file cleaned up on subprocess exit
+- [x] Error handling for socket already exists (stale socket)
 
 **Future extensions (not part of this experiment):**
 
@@ -306,4 +306,29 @@ Response:
 - Event streaming for console output
 - Texture handle passing for rendering
 
-**Results:** (to be filled in after experiment)
+**Results:** SUCCESS (2025-01-24)
+
+All test cases passed. Key findings:
+
+1. **Socket creation works**: Browser subprocess creates socket at
+   `~/.config/termsurf/sockets/{profile}.sock` immediately after CEF
+   initialization.
+
+2. **Communication works**: Newline-delimited JSON protocol enables
+   bidirectional request/response communication. Ping request:
+   `{"id":"uuid","action":"ping"}` receives response:
+   `{"id":"uuid","status":"ok","data":{"pong":true}}`.
+
+3. **Incognito sockets work**: Incognito mode uses unique UUID-based socket
+   paths (`incognito-{uuid}.sock`) to enable multiple concurrent incognito
+   sessions.
+
+4. **Cleanup works**: Socket files are properly removed when the subprocess
+   exits, preventing stale socket accumulation.
+
+5. **Stale socket handling**: If a stale socket exists from a crashed process,
+   it is removed before binding to prevent "address already in use" errors.
+
+This validates our IPC architecture. The coordinator can spawn and communicate
+with browser subprocesses, establishing the foundation for browser management
+commands and eventually texture handle passing.

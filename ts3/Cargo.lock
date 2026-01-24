@@ -5872,6 +5872,9 @@ name = "termsurf-web"
 version = "0.1.0"
 dependencies = [
  "cef",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
