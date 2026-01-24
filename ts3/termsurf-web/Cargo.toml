@@ -5,7 +5,7 @@ edition = "2021"
 description = "Web browser coordinator for TermSurf"
 
 [[bin]]
-name = "termsurf-web"
+name = "web"
 path = "src/main.rs"
 
 [dependencies]
