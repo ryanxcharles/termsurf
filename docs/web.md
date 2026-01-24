@@ -1328,7 +1328,7 @@ architecture for multi-profile support.
 
 ### Experiment 7: CEF in Separate Process
 
-**Status:** Pending
+**Status:** Failed
 
 **Goal:** Move CEF into a separate process to enable future multi-profile
 support (one CEF process per profile). This experiment focuses on the
@@ -1605,3 +1605,102 @@ newline-delimited JSON.
 - Multiple CEF processes for multi-profile support
 - Process crash recovery and restart
 - Lazy spawning (only when first browser is requested)
+
+**Result: Failed**
+
+The implementation was completed but revealed fundamental architectural flaws
+that make this approach unsuitable.
+
+**What was built:**
+
+- `termsurf-browser` binary with full CEF initialization
+- `cef_process/` module for spawning and IPC communication
+- `cef_browser_ipc/` module for IPC-based BrowserState
+- JSON protocol for commands (create, resize, input, clipboard, navigation)
+- IOSurface texture sharing via surface ID lookup
+- Event polling in render loop
+
+**Critical bugs discovered:**
+
+1. **Multi-browser event loss:** With multiple browser panes, the first
+   `BrowserState` to call `poll_events()` drains ALL events from the shared
+   socket, then filters to only its `pane_id`. Events for other browsers are
+   silently dropped. Only the first browser in the HashMap iteration receives
+   texture updates; all others show blank content.
+
+2. **Architecture doesn't solve the original problem:** CEF can only have one
+   profile per process. A shared `termsurf-browser` process cannot support
+   multiple profiles anyway—we would need one subprocess per profile, not one
+   shared subprocess. The "shared CEF process" design was fundamentally wrong
+   for the multi-profile goal.
+
+3. **Excessive complexity:** The IPC layer required:
+   - Duplicated protocol types in two places (prone to desync)
+   - Event routing by `pane_id` (bug-prone, as proven above)
+   - Texture handle serialization and lookup
+   - Process lifecycle management
+   - Polling integration with render loop
+
+4. **Wrong abstraction:** We created a hidden daemon when the natural entry
+   point (`termsurf web` command) should have been the browser process itself.
+
+**Lessons learned:**
+
+1. **One process per profile is required** - CEF initializes with a single
+   `root_cache_path`. Multiple profiles require multiple CEF processes, each
+   with its own root directory.
+
+2. **The CLI command should BE the browser process** - When the user types
+   `termsurf web <url>`, that process should own the browser lifecycle, not
+   send a message to a hidden daemon. This matches the user's mental model.
+
+3. **Event routing across all browsers is fragile** - Each browser should have
+   its own dedicated communication channel, not share a multiplexed socket
+   where events must be filtered by `pane_id`.
+
+4. **Start with the right architecture** - The complexity of retrofitting a
+   multi-process model onto the existing single-process design was greater than
+   the value gained. The code changes were extensive and introduced subtle bugs.
+
+**Decision:**
+
+Abandon Experiment 7. Do not commit the code changes. Restore ts2 to its
+pre-experiment working state (single-browser support with in-process CEF).
+
+**Future direction: TermSurf 3.0**
+
+Start fresh with a new architecture where:
+
+```
+┌─────────────────┐
+│  termsurf-gui   │  (window, renders textures, forwards input)
+└────────┬────────┘
+         │ IPC per profile-process
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│                    termsurf web                          │
+│                    (coordinator)                         │
+│                                                          │
+│  Spawns/manages one subprocess per profile:             │
+│                                                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │ Profile A    │  │ Profile B    │  │ Incognito    │  │
+│  │ (CEF proc)   │  │ (CEF proc)   │  │ (CEF proc)   │  │
+│  │ tab1, tab2   │  │ tab3         │  │ tab4         │  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+Key differences from Experiment 7:
+
+- `termsurf web` command is the browser coordinator, not a hidden daemon
+- One CEF process per profile (enables true multi-profile support)
+- Each profile process handles only its own tabs (no cross-browser event
+  routing)
+- Point-to-point IPC per profile, not multiplexed by `pane_id`
+- Natural lifecycle: profile process lives while any tab uses it
+
+This architecture will be implemented as TermSurf 3.0, a fresh fork of WezTerm
++ cef-rs with the correct architecture from day one. ts2 will be preserved as
+reference code for CEF integration patterns (texture import, input handling,
+etc.).
