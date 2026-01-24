@@ -1069,3 +1069,143 @@ are valid within CEF's process but not accessible from wezterm-gui.
 2. CEF's multi-process architecture (browser process, GPU process, renderer
    processes) adds complexity to texture sharing
 3. The ts2 approach of running CEF in-process avoids these issues entirely
+
+### Experiment 8: Clean Up Failed Cross-Process Code
+
+**Status:** PLANNED
+
+**Goal:** Remove the broken cross-process IOSurface rendering code from
+Experiment 7 while preserving working infrastructure. This creates a clean
+foundation for future experiments.
+
+**Background:** Experiment 7 attempted cross-process IOSurface sharing but
+failed because `IOSurfaceLookup()` returns NULL for IOSurfaces created by CEF's
+GPU process. The codebase now has error-producing code that clutters logs and
+makes the app appear broken.
+
+**Approach:** Keep the working parts (socket servers, communication protocol,
+overlay state tracking) and remove the broken parts (IOSurface lookup, texture
+import, rendering).
+
+**What to KEEP:**
+
+1. **GUI socket server** (`wezterm-gui/src/termwindow/webview_socket.rs`)
+   - Server creation and `TERMSURF_GUI_SOCKET` env var ✓
+   - Connection handling ✓
+   - Message parsing (`display_webview`, `close_webview`) ✓
+   - `WebviewOverlayState` struct ✓
+   - This infrastructure works and will be useful for future experiments
+
+2. **Profile server socket communication** (`termsurf-web/src/main.rs`)
+   - Socket server for profile server ✓
+   - `open` command handling ✓
+   - CEF browser creation ✓
+   - The `get_status` and `ping` commands ✓
+
+3. **Coordinator bridge** (`termsurf-web/src/main.rs`)
+   - Connection to profile server ✓
+   - Connection to GUI socket ✓
+   - Message forwarding ✓
+
+4. **Environment variable propagation** (`mux/src/domain.rs`)
+   - `TERMSURF_GUI_SOCKET` passed to child processes ✓
+
+**What to REMOVE:**
+
+1. **GUI texture rendering** (`wezterm-gui/src/termwindow/render/draw.rs`)
+   - Remove `render_webview_overlays()` function
+   - Remove IOSurface lookup calls (`lookup_iosurface_by_id`)
+   - Remove texture import code
+   - Remove bind group creation
+
+2. **Webview render pipeline** (`wezterm-gui/src/termwindow/webgpu.rs`)
+   - Remove `webview_render_pipeline`
+   - Remove `webview_bind_group_layout`
+   - Remove shader module loading
+
+3. **CEF shader** (`wezterm-gui/src/cef_shader.wgsl`)
+   - Delete this file entirely
+
+4. **Pane rendering skip** (`wezterm-gui/src/termwindow/render/pane.rs`)
+   - Remove the overlay detection that skips terminal rendering
+   - Terminal should render normally even when overlay is registered
+
+5. **IOSurface retention** (`termsurf-web/src/main.rs`)
+   - Remove `retain_iosurface()` calls in `BrowserState`
+   - Remove `retained_handle` field
+   - Keep `iosurface_id` field (for logging/debugging, but don't rely on it)
+
+6. **IOSurface IPC retain/release**
+   (`cef-rs/cef/src/osr_texture_import/iosurface_ipc.rs`)
+   - Remove `retain_iosurface()` function
+   - Remove `release_iosurface()` function
+   - Keep `get_iosurface_id()` and `lookup_iosurface_by_id()` (may be useful
+     later)
+
+7. **Frontend default change** (`config/src/frontend.rs`)
+   - Revert default from `WebGpu` back to `OpenGL`
+   - This was changed for Experiment 7 but isn't needed without texture
+     rendering
+
+**What to SIMPLIFY:**
+
+1. **Overlay state behavior**: When a `display_webview` message is received,
+   still register the overlay in `WebviewOverlayState`, but don't attempt to
+   render anything. This preserves the protocol for future use.
+
+2. **Profile server response**: Still return `iosurface_id` in the `open`
+   response for debugging visibility, but document that it's informational only.
+
+**Implementation order:**
+
+1. Remove texture rendering code from `draw.rs`
+2. Remove pipeline/shader from `webgpu.rs`
+3. Delete `cef_shader.wgsl`
+4. Remove pane skip logic from `pane.rs`
+5. Remove IOSurface retention from `termsurf-web/src/main.rs`
+6. Remove retain/release from `iosurface_ipc.rs`
+7. Revert frontend default to OpenGL
+8. Test that `web` command no longer produces errors
+9. Verify terminal still renders normally
+
+**Success criteria:**
+
+- [ ] No `IOSurface NOT FOUND` errors in logs
+- [ ] No `[Webview]` error messages in GUI logs
+- [ ] Terminal renders normally when `web` command is running
+- [ ] Socket communication still works (GUI acknowledges `display_webview`)
+- [ ] Clean build with no warnings about unused code
+- [ ] Profile server still captures IOSurface IDs (visible in logs, for
+      debugging)
+
+**Files to modify:**
+
+| File                                                 | Action                                                   |
+| ---------------------------------------------------- | -------------------------------------------------------- |
+| `wezterm-gui/src/termwindow/render/draw.rs`          | Remove `render_webview_overlays()` and IOSurface imports |
+| `wezterm-gui/src/termwindow/webgpu.rs`               | Remove webview pipeline and bind group layout            |
+| `wezterm-gui/src/cef_shader.wgsl`                    | Delete                                                   |
+| `wezterm-gui/src/termwindow/render/pane.rs`          | Remove overlay detection code                            |
+| `termsurf-web/src/main.rs`                           | Remove IOSurface retention code                          |
+| `cef-rs/cef/src/osr_texture_import/iosurface_ipc.rs` | Remove retain/release functions                          |
+| `config/src/frontend.rs`                             | Revert default to OpenGL                                 |
+
+**Expected outcome:**
+
+A clean codebase where:
+
+- The `web` command runs without errors
+- Socket infrastructure is preserved for future experiments
+- Terminal functionality is unaffected
+- Logs show successful socket communication without texture-related errors
+
+**Future direction:**
+
+With this cleanup complete, we can explore alternative approaches:
+
+1. <del>Move CEF back into wezterm-gui (like ts2) for in-process texture
+   sharing</del> - Absolutely not.
+2. Investigate Mach port-based IOSurface transfer
+3. Use shared memory to copy pixel data between processes
+4. <del>Accept single-profile limitation and use ts2 architecture</del> -
+   Absolutely not.
