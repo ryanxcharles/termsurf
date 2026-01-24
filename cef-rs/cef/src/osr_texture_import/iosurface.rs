@@ -77,6 +77,29 @@ impl TextureImporter for IOSurfaceImporter {
 }
 
 impl IOSurfaceImporter {
+    /// Create an IOSurfaceImporter from an IOSurface ID received from another process.
+    /// This is used for cross-process texture sharing.
+    ///
+    /// # Arguments
+    /// * `id` - The IOSurface ID obtained from `iosurface_ipc::get_iosurface_id()`
+    /// * `format` - The CEF color format of the texture
+    /// * `width` - The texture width in pixels
+    /// * `height` - The texture height in pixels
+    ///
+    /// # Returns
+    /// Some(IOSurfaceImporter) if the IOSurface was found, None otherwise
+    pub fn from_id(id: u32, format: cef_color_type_t, width: u32, height: u32) -> Option<Self> {
+        use super::iosurface_ipc::lookup_iosurface_by_id;
+
+        let handle = lookup_iosurface_by_id(id)?;
+        Some(Self {
+            handle,
+            format,
+            width,
+            height,
+        })
+    }
+
     fn get_texture_desc(&self) -> TextureDescriptor<'static> {
         use wgpu::{Extent3d, TextureDimension, TextureUsages};
 

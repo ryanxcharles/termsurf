@@ -753,6 +753,12 @@ fn run_terminal_gui(opts: StartCommand, default_domain_name: Option<String>) -> 
         opts.workspace.as_deref(),
     )?;
 
+    // Start the webview socket server for CLI communication (macOS only)
+    #[cfg(target_os = "macos")]
+    if let Err(e) = crate::termwindow::webview_socket::start_server() {
+        log::error!("[GUI Socket] Failed to start socket server: {}", e);
+    }
+
     // First, let's see if we can ask an already running wezterm to do this.
     // We must do this before we start the gui frontend as the scheduler
     // requirements are different.

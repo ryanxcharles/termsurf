@@ -83,6 +83,8 @@ pub mod resize;
 mod selection;
 pub mod spawn;
 pub mod webgpu;
+#[cfg(target_os = "macos")]
+pub mod webview_socket;
 use crate::spawn::SpawnWhere;
 use prevcursor::PrevCursorPos;
 

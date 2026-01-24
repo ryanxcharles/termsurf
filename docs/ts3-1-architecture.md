@@ -688,7 +688,7 @@ profile, not just a generic subprocess.
 
 ### Experiment 6: Display Webview in GUI
 
-**Status:** Not Started
+**Status:** FAILURE
 
 **Goal:** Render a webpage in the profile server and display it in the GUI
 (wezterm-gui), with the coordinator acting as intermediary. This is the first
@@ -881,13 +881,99 @@ also use sRGB views when importing the IOSurface texture.
 
 **Success criteria:**
 
-- [ ] GUI creates socket and sets `TERMSURF_SOCKET`
-- [ ] Profile server renders webpage to IOSurface
-- [ ] Profile server returns texture handle to coordinator
-- [ ] Coordinator passes texture handle to GUI
-- [ ] GUI imports IOSurface and displays webpage in correct pane
-- [ ] Webpage is visible and correctly sized
-- [ ] Colors are correct (no washed-out appearance from double gamma correction)
-- [ ] ctrl+c exits coordinator and hides webview
+- [x] GUI creates socket and sets `TERMSURF_GUI_SOCKET`
+- [x] Profile server renders webpage to IOSurface
+- [x] Profile server returns texture handle (IOSurface ID) to coordinator
+- [x] Coordinator passes texture handle to GUI
+- [ ] GUI imports IOSurface and displays webpage in correct pane - **NOT IMPLEMENTED**
+- [ ] Webpage is visible and correctly sized - **NOT VISIBLE**
+- [ ] Colors are correct (no washed-out appearance from double gamma correction) - **UNTESTABLE**
+- [x] ctrl+c exits coordinator and hides webview
 
-**Results:** (to be filled in after experiment)
+**Results:** FAILURE (2026-01-24)
+
+**What worked:**
+
+1. **Profile server CEF rendering**: Accelerated OSR works - `on_accelerated_paint`
+   fires (not software fallback), IOSurface IDs are captured successfully.
+
+2. **Socket communication**: Coordinator connects to both profile server socket
+   and GUI socket. Full protocol round-trip works.
+
+3. **GUI socket timing**: Fixed by starting server early in `main.rs` before
+   any windows/shells spawn (learned from ts2's `start_server()` pattern).
+
+4. **Single-threaded profile server**: Fixed CEF threading requirement (browser
+   creation must happen on main thread) by replacing threaded connection handling
+   with a single-threaded poll loop.
+
+5. **Protocol flow**: Complete data flow works - profile server creates browser,
+   captures IOSurface ID, coordinator receives it and forwards to GUI socket,
+   GUI acknowledges receipt.
+
+**What failed:**
+
+1. **GUI rendering not implemented**: Phase 4 (texture import and rendering in
+   `pane.rs`/`draw.rs`) was never completed. The GUI receives the IOSurface ID
+   but doesn't import or render it.
+
+2. **IOSurface ID instability**: Discovered that CEF uses multiple buffers
+   (double/triple buffering). The IOSurface ID changes every frame (246, 282,
+   289, etc.). The ID captured initially becomes stale immediately.
+
+**Fundamental architectural issue:**
+
+Cross-process IOSurface sharing is problematic because CEF cycles through
+multiple IOSurface buffers. The IOSurface ID we capture and send to the GUI
+becomes stale by the next frame. To make this work, we'd need to continuously
+stream updated IOSurface IDs at 60fps, adding significant IPC overhead.
+
+In ts2's in-process architecture, this isn't a problem because the render
+handler runs inside wezterm-gui and updates the texture directly in
+`on_accelerated_paint` every frame - no IPC needed for texture updates.
+
+**Lessons learned:**
+
+1. **Socket timing matters**: The GUI socket server must start in `main()`
+   before any windows or panes spawn, otherwise child processes won't inherit
+   the `TERMSURF_GUI_SOCKET` environment variable.
+
+2. **Use PID-based socket paths**: Window-ID-based paths require the window to
+   exist first, creating a chicken-and-egg problem. PID-based paths (like ts2
+   uses) can be created before any windows exist.
+
+3. **CEF threading requirements**: Browser creation must happen on the thread
+   that called `cef_initialize`. The original multi-threaded socket server
+   violated this. Single-threaded poll loop solves it.
+
+4. **Don't disable GPU compositing**: The `disable-gpu-compositing` flag forces
+   software rendering. Without it, CEF uses accelerated OSR with IOSurface.
+
+5. **Cross-process texture sharing has inherent challenges**: The buffer cycling
+   issue is fundamental to how CEF works. ts2's in-process approach sidesteps
+   this entirely.
+
+**Files changed:**
+
+- `cef-rs/cef/src/osr_texture_import/iosurface_ipc.rs` - New: IOSurface ID
+  lookup functions (`get_iosurface_id`, `lookup_iosurface_by_id`)
+- `cef-rs/cef/src/osr_texture_import/iosurface.rs` - Added `from_id()` method
+- `ts3/termsurf-web/src/main.rs` - Major rewrite: CEF browser management with
+  `on_accelerated_paint`, single-threaded socket server, coordinator bridge
+- `ts3/wezterm-gui/src/termwindow/webview_socket.rs` - New: GUI socket server
+  with global singleton pattern (matching ts2)
+- `ts3/wezterm-gui/src/termwindow/mod.rs` - Added webview_socket module
+- `ts3/wezterm-gui/src/main.rs` - Early socket server startup
+- `ts3/mux/src/domain.rs` - Propagate `TERMSURF_GUI_SOCKET` to child processes
+
+**Recommendation:**
+
+Consider reverting to ts2's in-process architecture (CEF inside wezterm-gui)
+rather than pursuing cross-process texture sharing. The profile isolation
+benefit may not justify the complexity and performance overhead of continuously
+streaming IOSurface IDs across processes. Alternative approaches to explore:
+
+1. Accept single-profile limitation (ts2 approach)
+2. Use software rendering and shared memory (slower but stable IDs)
+3. Investigate CEF's `shared_texture_handle` stability guarantees
+4. Consider a hybrid: CEF in-process, profile switching via CEF restart

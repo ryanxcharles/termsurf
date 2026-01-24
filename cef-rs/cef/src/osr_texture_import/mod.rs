@@ -65,6 +65,9 @@ pub(crate) mod d3d11;
 #[cfg(target_os = "macos")]
 pub(crate) mod iosurface;
 
+#[cfg(target_os = "macos")]
+pub mod iosurface_ipc;
+
 /// Result type for texture import operations
 pub type TextureImportResult = Result<wgpu::Texture, TextureImportError>;
 
