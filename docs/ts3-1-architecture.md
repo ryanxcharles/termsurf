@@ -206,7 +206,7 @@ simultaneously.
 - [x] Two processes with different profiles run simultaneously
 - [x] Two processes with the same profile: second fails gracefully
 
-**Results:** SUCCESS (2025-01-24)
+**Results:** SUCCESS (2026-01-24)
 
 All test cases passed. Key findings:
 
@@ -306,7 +306,7 @@ Response:
 - Event streaming for console output
 - Texture handle passing for rendering
 
-**Results:** SUCCESS (2025-01-24)
+**Results:** SUCCESS (2026-01-24)
 
 All test cases passed. Key findings:
 
@@ -436,7 +436,7 @@ ryan  12345  web --browser-subprocess --profile test
 3. **Connection detection**: Rely on socket EOF detection when clients
    disconnect. No heartbeat mechanism needed.
 
-**Results:** SUCCESS (2025-01-24)
+**Results:** SUCCESS (2026-01-24)
 
 All test cases passed. Key implementation details:
 
@@ -469,7 +469,7 @@ processes.
 
 ### Experiment 4: Connection-Based Webview Lifecycle
 
-**Status:** Not Started
+**Status:** SUCCESS
 
 **Goal:** Simplify the protocol and webview lifecycle:
 
@@ -574,13 +574,13 @@ web (coordinator)                    subprocess
 
 **Success criteria:**
 
-- [ ] Clean `web` exit closes webview automatically
-- [ ] SIGTERM'd `web` closes webview automatically
-- [ ] SIGKILL'd `web` closes webview automatically
-- [ ] No orphaned subprocesses after `web` death
-- [ ] `open_browser` renamed to `open`
-- [ ] `close_browser` command removed from protocol
-- [ ] Multiple `web` instances can coexist, each with their own webview
+- [x] Clean `web` exit closes webview automatically
+- [x] SIGTERM'd `web` closes webview automatically
+- [x] SIGKILL'd `web` closes webview automatically
+- [x] No orphaned subprocesses after `web` death
+- [x] `open_browser` renamed to `open`
+- [x] `close_browser` command removed from protocol
+- [x] Multiple `web` instances can coexist, each with their own webview
 
 **Benefits:**
 
@@ -590,4 +590,30 @@ web (coordinator)                    subprocess
 3. **Simpler protocol**: Fewer commands, no IDs to track
 4. **Uniform behavior**: Same cleanup path for clean exit and crash
 
-**Results:** (to be filled in after experiment)
+**Results:** SUCCESS (2026-01-24)
+
+All test cases passed. Key findings:
+
+1. **EOF detection works**: When a coordinator disconnects (for any reason), the
+   subprocess detects EOF on the socket read and triggers cleanup. This works
+   for clean exits, SIGTERM, and even SIGKILL.
+
+2. **Ownership tracking works**: Each connection thread tracks its owned
+   webviews in a local `Vec<u64>`. On disconnect, it iterates and closes each
+   webview. This ensures no leaks regardless of how the coordinator exits.
+
+3. **Subprocess lifecycle correct**: The subprocess exits only when the last
+   webview is closed. Multiple coordinators can connect and disconnect
+   independently; the subprocess stays alive as long as any webview remains.
+
+4. **Simplified protocol**: The `open` command (renamed from `open_browser`)
+   creates a webview. There is no `close_browser` command - disconnecting
+   automatically closes owned webviews. The response no longer includes a
+   `webview_id` since the subprocess tracks ownership internally.
+
+5. **No orphaned subprocesses**: Even with SIGKILL (which cannot be caught), the
+   OS closes the socket, the subprocess detects EOF, and cleanup proceeds
+   normally. There is no way to leak a subprocess.
+
+This validates our connection-based lifecycle model. The architecture is now
+crash-proof and simpler to use.

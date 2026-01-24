@@ -246,58 +246,57 @@ fn load_cef(_profile: &ProfileMode) -> Result<(), String> {
 }
 
 // ============================================================================
-// Browser State (shared across connections)
+// Webview State (shared across connections)
 // ============================================================================
 
-struct BrowserState {
-    browser_count: AtomicUsize,
-    next_browser_id: AtomicU64,
+struct WebviewState {
+    webview_count: AtomicUsize,
+    next_webview_id: AtomicU64,
 }
 
-impl BrowserState {
+impl WebviewState {
     fn new() -> Self {
         Self {
-            browser_count: AtomicUsize::new(0),
-            next_browser_id: AtomicU64::new(1),
+            webview_count: AtomicUsize::new(0),
+            next_webview_id: AtomicU64::new(1),
         }
     }
 
-    fn open_browser(&self, url: &str) -> u64 {
-        let id = self.next_browser_id.fetch_add(1, Ordering::SeqCst);
-        self.browser_count.fetch_add(1, Ordering::SeqCst);
-        println!("[Subprocess] Opened browser {} with url: {}", id, url);
+    fn open_webview(&self, url: &str) -> u64 {
+        let id = self.next_webview_id.fetch_add(1, Ordering::SeqCst);
+        self.webview_count.fetch_add(1, Ordering::SeqCst);
+        println!("[Subprocess] Opened webview {} for: {}", id, url);
         id
     }
 
-    fn close_browser(&self, id: u64) -> bool {
-        let prev_count = self.browser_count.fetch_sub(1, Ordering::SeqCst);
+    fn close_webview(&self, id: u64) -> bool {
+        let prev_count = self.webview_count.fetch_sub(1, Ordering::SeqCst);
         println!(
-            "[Subprocess] Closed browser {} (remaining: {})",
+            "[Subprocess] Closed webview {} (remaining: {})",
             id,
             prev_count - 1
         );
-        prev_count == 1 // Returns true if this was the last browser
+        prev_count == 1 // Returns true if this was the last webview
     }
 
     fn count(&self) -> usize {
-        self.browser_count.load(Ordering::SeqCst)
+        self.webview_count.load(Ordering::SeqCst)
     }
 }
 
 // ============================================================================
-// Socket Server (Browser Subprocess)
+// Socket Server (Subprocess)
 // ============================================================================
 
-fn handle_request(request: &Request, state: &Arc<BrowserState>) -> (Response, bool) {
-    let should_exit = false;
-
+/// Handle a request and return (response, webview_id if opened)
+fn handle_request(request: &Request, state: &Arc<WebviewState>) -> (Response, Option<u64>) {
     match request.action.as_str() {
         "ping" => (
             Response::ok(&request.id, Some(serde_json::json!({"pong": true}))),
-            should_exit,
+            None,
         ),
 
-        "open_browser" => {
+        "open" => {
             let url = request
                 .data
                 .as_ref()
@@ -305,69 +304,57 @@ fn handle_request(request: &Request, state: &Arc<BrowserState>) -> (Response, bo
                 .and_then(|u| u.as_str())
                 .unwrap_or("about:blank");
 
-            let browser_id = state.open_browser(url);
+            let webview_id = state.open_webview(url);
 
-            (
-                Response::ok(
-                    &request.id,
-                    Some(serde_json::json!({"browser_id": browser_id})),
-                ),
-                should_exit,
-            )
-        }
-
-        "close_browser" => {
-            let browser_id = request
-                .data
-                .as_ref()
-                .and_then(|d| d.get("browser_id"))
-                .and_then(|id| id.as_u64())
-                .unwrap_or(0);
-
-            let was_last = state.close_browser(browser_id);
-
-            (Response::ok(&request.id, None), was_last)
+            (Response::ok(&request.id, None), Some(webview_id))
         }
 
         "get_status" => (
             Response::ok(
                 &request.id,
                 Some(serde_json::json!({
-                    "browser_count": state.count(),
+                    "webview_count": state.count(),
                     "pid": std::process::id()
                 })),
             ),
-            should_exit,
+            None,
         ),
 
         _ => (
             Response::error(&request.id, &format!("Unknown action: {}", request.action)),
-            should_exit,
+            None,
         ),
     }
 }
 
-fn handle_connection(mut stream: UnixStream, state: Arc<BrowserState>) -> bool {
+fn handle_connection(mut stream: UnixStream, state: Arc<WebviewState>) -> bool {
     let peer_id = Uuid::new_v4().to_string()[..8].to_string();
     println!("[Subprocess] Client {} connected", peer_id);
 
     let reader = BufReader::new(stream.try_clone().expect("Failed to clone stream"));
-    let mut should_exit = false;
+
+    // Track webviews owned by this connection
+    let mut owned_webviews: Vec<u64> = Vec::new();
 
     for line in reader.lines() {
         match line {
             Ok(line) if line.is_empty() => continue,
             Ok(line) => {
-                let (response, exit_after) = match serde_json::from_str::<Request>(&line) {
+                let (response, webview_id) = match serde_json::from_str::<Request>(&line) {
                     Ok(request) => {
                         println!("[Subprocess] {} -> {:?}", peer_id, request);
                         handle_request(&request, &state)
                     }
                     Err(e) => (
                         Response::error("unknown", &format!("Invalid JSON: {}", e)),
-                        false,
+                        None,
                     ),
                 };
+
+                // Track opened webviews
+                if let Some(id) = webview_id {
+                    owned_webviews.push(id);
+                }
 
                 let response_json = serde_json::to_string(&response).unwrap();
                 println!("[Subprocess] {} <- {}", peer_id, response_json);
@@ -377,11 +364,6 @@ fn handle_connection(mut stream: UnixStream, state: Arc<BrowserState>) -> bool {
                     break;
                 }
                 let _ = stream.flush();
-
-                if exit_after {
-                    should_exit = true;
-                    break;
-                }
             }
             Err(e) => {
                 eprintln!("[Subprocess] Error reading from {}: {}", peer_id, e);
@@ -390,11 +372,29 @@ fn handle_connection(mut stream: UnixStream, state: Arc<BrowserState>) -> bool {
         }
     }
 
-    println!("[Subprocess] Client {} disconnected", peer_id);
+    // Connection ended - close all webviews owned by this connection
+    println!(
+        "[Subprocess] Client {} disconnected, closing {} webview(s)",
+        peer_id,
+        owned_webviews.len()
+    );
+
+    let mut should_exit = false;
+    for webview_id in owned_webviews {
+        let was_last = state.close_webview(webview_id);
+        if was_last {
+            should_exit = true;
+        }
+    }
+
     should_exit
 }
 
-fn run_socket_server(socket_path: PathBuf, state: Arc<BrowserState>, shutdown_flag: Arc<std::sync::atomic::AtomicBool>) {
+fn run_socket_server(
+    socket_path: PathBuf,
+    state: Arc<WebviewState>,
+    shutdown_flag: Arc<std::sync::atomic::AtomicBool>,
+) {
     // Remove stale socket if it exists
     if socket_path.exists() {
         if let Err(e) = fs::remove_file(&socket_path) {
@@ -414,7 +414,9 @@ fn run_socket_server(socket_path: PathBuf, state: Arc<BrowserState>, shutdown_fl
     };
 
     // Set non-blocking so we can check shutdown flag
-    listener.set_nonblocking(true).expect("Failed to set non-blocking");
+    listener
+        .set_nonblocking(true)
+        .expect("Failed to set non-blocking");
 
     println!(
         "[Subprocess] Socket server listening at {:?}",
@@ -432,8 +434,10 @@ fn run_socket_server(socket_path: PathBuf, state: Arc<BrowserState>, shutdown_fl
 
         match listener.accept() {
             Ok((stream, _)) => {
-                // Set stream to blocking mode (listener is non-blocking but we want blocking reads)
-                stream.set_nonblocking(false).expect("Failed to set stream to blocking");
+                // Set stream to blocking mode
+                stream
+                    .set_nonblocking(false)
+                    .expect("Failed to set stream to blocking");
 
                 let state_clone = Arc::clone(&state);
                 let shutdown_clone = Arc::clone(&shutdown_flag);
@@ -457,7 +461,10 @@ fn run_socket_server(socket_path: PathBuf, state: Arc<BrowserState>, shutdown_fl
     }
 
     // Wait for all connection handlers to finish
-    println!("[Subprocess] Waiting for {} connections to close...", handles.len());
+    println!(
+        "[Subprocess] Waiting for {} connections to close...",
+        handles.len()
+    );
     for handle in handles {
         let _ = handle.join();
     }
@@ -467,7 +474,7 @@ fn run_socket_server(socket_path: PathBuf, state: Arc<BrowserState>, shutdown_fl
     println!("[Subprocess] Socket cleaned up");
 }
 
-fn run_browser_subprocess(profile: ProfileMode) {
+fn run_subprocess(profile: ProfileMode) {
     let socket_path = profile.socket_path();
 
     println!(
@@ -488,8 +495,8 @@ fn run_browser_subprocess(profile: ProfileMode) {
         }
     }
 
-    // Create shared browser state and shutdown flag
-    let state = Arc::new(BrowserState::new());
+    // Create shared webview state and shutdown flag
+    let state = Arc::new(WebviewState::new());
     let shutdown_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     // Run socket server (this blocks until shutdown)
@@ -502,7 +509,7 @@ fn run_browser_subprocess(profile: ProfileMode) {
 }
 
 // ============================================================================
-// Socket Client (Coordinator)
+// Socket Client (Coordinator / web CLI)
 // ============================================================================
 
 fn try_connect(socket_path: &PathBuf) -> Option<UnixStream> {
@@ -536,7 +543,11 @@ fn wait_for_socket(socket_path: &PathBuf, timeout: Duration) -> Result<UnixStrea
     }
 }
 
-fn send_request(stream: &mut UnixStream, action: &str, data: Option<serde_json::Value>) -> Result<Response, String> {
+fn send_request(
+    stream: &mut UnixStream,
+    action: &str,
+    data: Option<serde_json::Value>,
+) -> Result<Response, String> {
     let request = Request {
         id: Uuid::new_v4().to_string(),
         action: action.to_string(),
@@ -545,11 +556,16 @@ fn send_request(stream: &mut UnixStream, action: &str, data: Option<serde_json::
 
     let request_json = serde_json::to_string(&request).unwrap();
     writeln!(stream, "{}", request_json).map_err(|e| format!("Failed to write: {}", e))?;
-    stream.flush().map_err(|e| format!("Failed to flush: {}", e))?;
+    stream
+        .flush()
+        .map_err(|e| format!("Failed to flush: {}", e))?;
 
-    let mut reader = BufReader::new(stream.try_clone().map_err(|e| format!("Clone failed: {}", e))?);
+    let mut reader =
+        BufReader::new(stream.try_clone().map_err(|e| format!("Clone failed: {}", e))?);
     let mut response_line = String::new();
-    reader.read_line(&mut response_line).map_err(|e| format!("Failed to read: {}", e))?;
+    reader
+        .read_line(&mut response_line)
+        .map_err(|e| format!("Failed to read: {}", e))?;
 
     serde_json::from_str(&response_line).map_err(|e| format!("Invalid response JSON: {}", e))
 }
@@ -574,7 +590,7 @@ fn spawn_subprocess(profile: &ProfileMode) {
         .stderr(Stdio::null())
         .stdin(Stdio::null())
         .spawn()
-        .expect("Failed to spawn browser subprocess");
+        .expect("Failed to spawn subprocess");
 }
 
 fn run_coordinator(profile: ProfileMode, url: Option<String>) {
@@ -607,68 +623,50 @@ fn run_coordinator(profile: ProfileMode, url: Option<String>) {
         }
     };
 
-    // Open a browser
-    println!("Opening browser: {}", url);
-    let response = send_request(
-        &mut stream,
-        "open_browser",
-        Some(serde_json::json!({"url": url})),
-    );
+    // Open a webview
+    println!("Opening webview: {}", url);
+    let response = send_request(&mut stream, "open", Some(serde_json::json!({"url": url})));
 
-    let browser_id = match response {
+    match response {
         Ok(resp) if resp.status == "ok" => {
-            let id = resp.data.as_ref()
-                .and_then(|d| d.get("browser_id"))
-                .and_then(|id| id.as_u64())
-                .unwrap_or(0);
-            println!("Browser opened with id={}", id);
-            id
+            println!("Webview opened");
         }
         Ok(resp) => {
-            eprintln!("Failed to open browser: {}", resp.error.unwrap_or_default());
+            eprintln!(
+                "Failed to open webview: {}",
+                resp.error.unwrap_or_default()
+            );
             std::process::exit(1);
         }
         Err(e) => {
-            eprintln!("Failed to open browser: {}", e);
+            eprintln!("Failed to open webview: {}", e);
             std::process::exit(1);
         }
-    };
+    }
 
     // Get subprocess status
     if let Ok(resp) = send_request(&mut stream, "get_status", None) {
         if let Some(data) = resp.data {
             println!(
-                "Subprocess status: pid={}, browsers={}",
+                "Subprocess status: pid={}, webviews={}",
                 data.get("pid").and_then(|p| p.as_u64()).unwrap_or(0),
-                data.get("browser_count").and_then(|c| c.as_u64()).unwrap_or(0)
+                data.get("webview_count")
+                    .and_then(|c| c.as_u64())
+                    .unwrap_or(0)
             );
         }
     }
 
-    // Wait for user to press Enter (simulating browser being open)
-    println!("\nPress Enter to close browser...");
+    // Wait for user to press Enter (simulating webview being open)
+    println!("\nPress Enter to close webview...");
     let mut input = String::new();
     let _ = std::io::stdin().read_line(&mut input);
 
-    // Close the browser
-    println!("Closing browser {}...", browser_id);
-    match send_request(
-        &mut stream,
-        "close_browser",
-        Some(serde_json::json!({"browser_id": browser_id})),
-    ) {
-        Ok(resp) if resp.status == "ok" => {
-            println!("Browser closed");
-        }
-        Ok(resp) => {
-            eprintln!("Failed to close browser: {}", resp.error.unwrap_or_default());
-        }
-        Err(e) => {
-            eprintln!("Failed to close browser: {}", e);
-        }
-    }
+    // Webview closes automatically when we disconnect
+    println!("Disconnecting (webview will close automatically)");
 
-    println!("Coordinator exiting");
+    // Stream is dropped here, closing the connection
+    // The subprocess will detect EOF and close our webview
 }
 
 // ============================================================================
@@ -679,7 +677,7 @@ fn main() {
     match parse_args() {
         Ok((is_subprocess, profile, url)) => {
             if is_subprocess {
-                run_browser_subprocess(profile);
+                run_subprocess(profile);
             } else {
                 run_coordinator(profile, url);
             }
