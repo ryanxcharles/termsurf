@@ -466,3 +466,106 @@ This validates the core multi-pane architecture. Multiple browser panes using
 the same profile share one subprocess (and thus one CEF context with shared
 cookies/storage), while different profiles are fully isolated in separate
 processes.
+
+### Experiment 4: Connection-Based Browser Lifecycle
+
+**Status:** Not Started
+
+**Goal:** Simplify browser lifecycle by tying browsers to connection lifetime,
+eliminating the `close_browser` command and handling coordinator crashes
+gracefully.
+
+**Background:** Experiment 3 uses explicit `open_browser` and `close_browser`
+commands. However, if a coordinator crashes or is killed without sending
+`close_browser`, the browser remains counted and the subprocess never exits.
+This creates orphaned subprocesses.
+
+**Problem with current approach:**
+
+```
+$ web https://example.com --profile test &
+# Opens browser_id=1, browser_count=1
+
+$ kill -9 $!   # Coordinator killed without cleanup
+# Connection EOF detected
+# But browser_count is still 1
+# Subprocess waits forever for close_browser that never comes
+```
+
+**Proposed solution:**
+
+Tie browser lifetime to connection lifetime. When a connection opens a browser,
+that browser is owned by the connection. When the connection ends (for any
+reason), all browsers owned by that connection are automatically closed.
+
+**Key insight:** The OS guarantees that when a process dies (clean exit, crash,
+SIGKILL), all its file descriptors are closed. The subprocess sees EOF on the
+socket. We can use this as the signal to clean up.
+
+**Protocol changes:**
+
+Remove `close_browser` command. The protocol becomes:
+
+```json
+{"id": "uuid", "action": "open_browser", "data": {"url": "https://..."}}
+{"id": "uuid", "status": "ok", "data": {"browser_id": 1}}
+```
+
+No close command needed - closing the connection closes the browser.
+
+**Implementation changes:**
+
+1. **Track browser ownership**: Each connection maintains a list of browser IDs
+   it has opened.
+
+2. **Cleanup on disconnect**: When the connection handler's read loop exits
+   (EOF or error), close all browsers owned by that connection.
+
+3. **Remove close_browser**: The explicit command is no longer needed.
+
+**Lifecycle flow:**
+
+```
+Coordinator                          Subprocess
+    |                                    |
+    |-- connect ----------------------->| (new connection thread)
+    |-- open_browser ------------------>| browser_count++, track owner
+    |                                    |
+    |   [browser open, events stream]    |
+    |                                    |
+    |-- disconnect (EOF) -------------->| close owned browsers
+    |   (clean exit, crash, or SIGKILL)  | browser_count--
+    |                                    | if count==0: shutdown
+```
+
+**Test cases:**
+
+1. Coordinator opens browser, then exits cleanly (closes socket) → browser
+   closed, subprocess exits
+2. Coordinator opens browser, then is killed with SIGTERM → browser closed,
+   subprocess exits
+3. Coordinator opens browser, then is killed with SIGKILL → browser closed,
+   subprocess exits
+4. Two coordinators open browsers, first exits → only first browser closed,
+   subprocess stays alive
+5. Two coordinators open browsers, both exit → both browsers closed, subprocess
+   exits
+
+**Success criteria:**
+
+- [ ] Clean coordinator exit closes browser automatically
+- [ ] SIGTERM'd coordinator closes browser automatically
+- [ ] SIGKILL'd coordinator closes browser automatically
+- [ ] No orphaned subprocesses after coordinator death
+- [ ] `close_browser` command removed from protocol
+- [ ] Multiple connections can coexist, each managing their own browsers
+
+**Benefits:**
+
+1. **Crash-proof**: No way to leak browsers - connection death always triggers
+   cleanup
+2. **Simpler protocol**: One fewer command to implement and test
+3. **Simpler coordinator**: No need to track browser IDs for closing
+4. **Uniform behavior**: Same cleanup path for clean exit and crash
+
+**Results:** (to be filled in after experiment)
