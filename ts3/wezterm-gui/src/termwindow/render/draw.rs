@@ -100,6 +100,7 @@ impl crate::TermWindow {
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &view,
                             resolve_target: None,
+                            depth_slice: None,
                             ops: wgpu::Operations {
                                 load: if cleared {
                                     wgpu::LoadOp::Load
@@ -117,6 +118,7 @@ impl crate::TermWindow {
                         depth_stencil_attachment: None,
                         occlusion_query_set: None,
                         timestamp_writes: None,
+                        multiview_mask: None,
                     });
                     cleared = true;
 
