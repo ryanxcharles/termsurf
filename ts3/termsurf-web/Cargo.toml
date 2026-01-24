@@ -1,0 +1,11 @@
+[package]
+name = "termsurf-web"
+version = "0.1.0"
+edition = "2021"
+description = "Web browser coordinator for TermSurf"
+
+[[bin]]
+name = "termsurf-web"
+path = "src/main.rs"
+
+[dependencies]
