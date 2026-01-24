@@ -17,17 +17,18 @@ TermSurf 2.0 (ts2) validated that WezTerm + CEF integration works:
 - Multiple browser instances in a single process
 - Browser resize handling
 
-However, Experiment 7 revealed a fundamental limitation: **CEF can only
+However, our experiments revealed a fundamental limitation: **CEF can only
 initialize once per process with a single `root_cache_path`**. This means a
 shared browser daemon cannot support multiple isolated profiles (different
 cookies, storage, login sessions).
 
 ts3 addresses this with a new process model.
 
-### Lessons from Experiment 7
+### Lessons from ts2
 
 1. A shared CEF daemon forces all browsers to share one profile context
-2. Event routing by pane ID across processes is error-prone
+2. In order to support multiple profiles, we MUST separate the browser process
+   from the window, and we MUST attach exactly one process per profile
 3. The `web` command should BE the browser, not a messenger to a daemon
 
 ## Process Model
@@ -57,20 +58,23 @@ termsurf (main terminal process)
    multiple browser panes/tabs that share the same profile. This is efficient -
    you don't spawn a new process for each tab.
 
-3. **The `web` command IS the browser**: Unlike Experiment 7's client-daemon
-   model, the `web` command directly initializes CEF and renders browsers. No
-   IPC to a separate daemon.
+3. **The `web` command IS the browser**: Unlike ts2 Web Experiment 7's
+   client-daemon model, the `web` command directly initializes CEF and renders
+   browsers. No IPC to a separate daemon.
 
-4. **Texture sharing via IOSurface**: Browser content is rendered off-screen by
-   CEF and shared with the main terminal process via IOSurface (macOS). This
-   allows compositing browser panes alongside terminal panes.
+4. **Cross-process texture sharing**: Browser content is rendered off-screen by
+   CEF and shared with the main terminal process via platform-native APIs. This
+   allows compositing browser panes alongside terminal panes. cef-rs supports:
+   - **macOS**: IOSurface via Metal (currently testing)
+   - **Linux**: DMA-BUF via Vulkan external memory
+   - **Windows**: D3D11 shared textures via Vulkan interop
 
 ### Communication
 
 The main terminal process and browser subprocesses communicate via:
 
 - Unix domain sockets for commands (navigate, go back, reload, etc.)
-- IOSurface handles for texture sharing (zero-copy)
+- Platform-native texture handles for zero-copy sharing (IOSurface, DMA-BUF, D3D11)
 
 ### Profile Isolation
 
@@ -100,7 +104,7 @@ Users can:
 
 - Initializes CEF with profile-specific cache path
 - Manages one or more browser instances (tabs)
-- Renders to off-screen textures (IOSurface)
+- Renders to off-screen shared textures
 - Handles browser-specific input (when pane is focused)
 - Streams console output back to terminal (optional)
 
@@ -136,7 +140,7 @@ The following has been validated and is ready for ts3:
 
 ## Future Considerations
 
-- **Linux/Windows**: IOSurface is macOS-only. Will need platform-specific
-  texture sharing (DMA-BUF on Linux, shared handles on Windows).
+- **Linux/Windows testing**: cef-rs has cross-platform texture sharing support,
+  but we are only testing on macOS for now.
 - **Profile management UI**: How users create, switch, and manage profiles.
 - **DevTools**: Exposing Chrome DevTools for browser panes.
