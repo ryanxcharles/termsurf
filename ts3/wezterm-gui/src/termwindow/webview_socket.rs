@@ -49,6 +49,12 @@ pub fn start_server() -> anyhow::Result<()> {
         server.socket_path().display()
     );
 
+    // Start XPC manager for IOSurface Mach port transfer
+    if let Err(e) = super::webview_xpc::start_xpc_manager() {
+        log::warn!("[GUI Socket] Failed to start XPC manager: {}", e);
+        // Continue anyway - XPC is optional for now
+    }
+
     // Start accept loop in background thread
     server.start();
 
@@ -288,8 +294,8 @@ impl ProfileServerManager {
 /// Information about an active webview overlay on a pane
 #[derive(Debug, Clone)]
 pub struct WebviewOverlay {
-    /// IOSurface ID for texture import
-    pub iosurface_id: u32,
+    /// Mach port for IOSurface (received via XPC)
+    pub mach_port: u32,
     /// Width of the webview texture
     pub width: u32,
     /// Height of the webview texture
@@ -312,9 +318,9 @@ impl WebviewOverlayState {
 
     pub fn add_overlay(&mut self, pane_id: PaneId, overlay: WebviewOverlay) {
         log::info!(
-            "Adding webview overlay to pane {}: iosurface_id={}, size={}x{}",
+            "Adding webview overlay to pane {}: mach_port={}, size={}x{}",
             pane_id,
-            overlay.iosurface_id,
+            overlay.mach_port,
             overlay.width,
             overlay.height
         );
@@ -354,140 +360,69 @@ fn handle_request(
                 None => return Response::error(&request.id, "Missing data"),
             };
 
-            // Extract required fields
-            let engine = match data.get("engine").and_then(|v| v.as_str()) {
-                Some(e) => PathBuf::from(e),
-                None => return Response::error(&request.id, "Missing engine"),
+            let pane_id = match data.get("pane_id").and_then(|v| v.as_u64()) {
+                Some(id) => id as PaneId,
+                None => return Response::error(&request.id, "Missing pane_id"),
             };
-
-            let profile = data
-                .get("profile")
-                .and_then(|v| v.as_str())
-                .unwrap_or("default");
 
             let url = data
                 .get("url")
                 .and_then(|v| v.as_str())
                 .unwrap_or("about:blank");
 
-            let pane_id = match data.get("pane_id").and_then(|v| v.as_u64()) {
-                Some(id) => id as PaneId,
-                None => return Response::error(&request.id, "Missing pane_id"),
-            };
-
-            let width = data.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
-            let height = data.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
-
             log::info!(
-                "[GUI Socket] open_webview: engine={:?}, profile={}, url={}, pane={}, size={}x{}",
-                engine,
-                profile,
-                url,
+                "[GUI Socket] open_webview: pane={}, url={}",
                 pane_id,
-                width,
-                height
+                url
             );
 
-            // Get or spawn the profile server
-            let mut manager = profile_manager.lock().unwrap();
-            let server = match manager.get_or_spawn(&engine, profile) {
-                Ok(s) => s,
+            // Use XPC to spawn test-sender via launcher
+            let xpc_manager = match super::webview_xpc::get_xpc_manager() {
+                Some(m) => m,
+                None => return Response::error(&request.id, "XPC manager not available"),
+            };
+
+            // Request profile spawn (this triggers launcher -> test-sender -> Mach port transfer)
+            let session_id = match xpc_manager.request_profile_spawn(pane_id) {
+                Ok(id) => id,
                 Err(e) => {
-                    log::error!("[GUI Socket] Failed to get/spawn profile server: {}", e);
-                    return Response::error(&request.id, &format!("Failed to spawn engine: {}", e));
+                    log::error!("[GUI Socket] Failed to request profile spawn: {}", e);
+                    return Response::error(&request.id, &format!("Failed to spawn: {}", e));
                 }
             };
 
-            // Send open request to profile server
-            let open_response = match server.send_request(
-                "open",
-                Some(serde_json::json!({
-                    "url": url,
-                    "width": width,
-                    "height": height
-                })),
-            ) {
-                Ok(r) => r,
-                Err(e) => {
-                    log::error!("[GUI Socket] Failed to send open request: {}", e);
-                    return Response::error(&request.id, &format!("Profile server error: {}", e));
+            log::info!("[GUI Socket] Spawned profile with session_id={}", session_id);
+
+            // Wait for surface to be received via XPC (poll with timeout)
+            let max_wait = std::time::Duration::from_secs(5);
+            let poll_interval = std::time::Duration::from_millis(100);
+            let start = std::time::Instant::now();
+
+            let surface = loop {
+                if let Some(s) = xpc_manager.get_received_surface(pane_id) {
+                    break s;
                 }
-            };
-
-            // Check response status
-            if open_response.status != "ok" {
-                let error = open_response.error.unwrap_or_else(|| "Unknown error".to_string());
-                log::error!("[GUI Socket] Profile server returned error: {}", error);
-                return Response::error(&request.id, &error);
-            }
-
-            // Extract IOSurface ID from response
-            let response_data = match open_response.data {
-                Some(d) => d,
-                None => {
-                    return Response::error(&request.id, "Profile server returned no data");
+                if start.elapsed() > max_wait {
+                    log::error!("[GUI Socket] Timeout waiting for surface from XPC");
+                    return Response::error(&request.id, "Timeout waiting for surface");
                 }
+                std::thread::sleep(poll_interval);
             };
-
-            let iosurface_id = response_data
-                .get("iosurface_id")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
-            let actual_width = response_data
-                .get("width")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(width as u64) as u32;
-            let actual_height = response_data
-                .get("height")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(height as u64) as u32;
 
             log::info!(
-                "[GUI Socket] Profile server returned: iosurface_id={}, size={}x{}",
-                iosurface_id,
-                actual_width,
-                actual_height
+                "[GUI Socket] Received surface via XPC: mach_port={}, size={}x{}",
+                surface.mach_port,
+                surface.width,
+                surface.height
             );
-
-            // TEST: Try to look up the IOSurface by ID
-            // This is the key test for Experiment 1 - if this succeeds, process ancestry works
-            #[cfg(target_os = "macos")]
-            {
-                use cef::osr_texture_import::iosurface_ipc::lookup_iosurface_by_id;
-
-                if iosurface_id != 0 {
-                    match lookup_iosurface_by_id(iosurface_id) {
-                        Some(handle) => {
-                            log::info!(
-                                "[GUI Socket] SUCCESS! IOSurfaceLookup returned valid handle: {:?}",
-                                handle
-                            );
-                            log::info!(
-                                "[GUI Socket] Hypothesis 2 VALIDATED: process ancestry enables IOSurface sharing!"
-                            );
-                        }
-                        None => {
-                            log::warn!(
-                                "[GUI Socket] FAILED: IOSurfaceLookup returned NULL for id={}",
-                                iosurface_id
-                            );
-                            log::warn!(
-                                "[GUI Socket] Hypothesis 2 DISPROVEN: process ancestry does NOT enable IOSurface sharing"
-                            );
-                        }
-                    }
-                } else {
-                    log::warn!("[GUI Socket] IOSurface ID is 0 - profile server may not have painted yet");
-                }
-            }
 
             // Allocate webview ID and store overlay
-            let webview_id = manager.next_webview_id();
+            let webview_id = profile_manager.lock().unwrap().next_webview_id();
 
             let overlay = WebviewOverlay {
-                iosurface_id,
-                width: actual_width,
-                height: actual_height,
+                mach_port: surface.mach_port,
+                width: surface.width,
+                height: surface.height,
             };
 
             state.write().unwrap().add_overlay(pane_id, overlay);
@@ -496,15 +431,15 @@ fn handle_request(
                 &request.id,
                 Some(serde_json::json!({
                     "webview_id": webview_id,
-                    "iosurface_id": iosurface_id,
-                    "width": actual_width,
-                    "height": actual_height
+                    "mach_port": surface.mach_port,
+                    "width": surface.width,
+                    "height": surface.height
                 })),
             )
         }
 
         "display_webview" => {
-            // Legacy action - keep for backwards compatibility
+            // Legacy action - accepts mach_port for direct overlay display
             let data = match &request.data {
                 Some(d) => d,
                 None => return Response::error(&request.id, "Missing data"),
@@ -515,16 +450,16 @@ fn handle_request(
                 None => return Response::error(&request.id, "Missing pane_id"),
             };
 
-            let iosurface_id = match data.get("iosurface_id").and_then(|v| v.as_u64()) {
+            let mach_port = match data.get("mach_port").and_then(|v| v.as_u64()) {
                 Some(id) => id as u32,
-                None => return Response::error(&request.id, "Missing iosurface_id"),
+                None => return Response::error(&request.id, "Missing mach_port"),
             };
 
             let width = data.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
             let height = data.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
 
             let overlay = WebviewOverlay {
-                iosurface_id,
+                mach_port,
                 width,
                 height,
             };
@@ -565,6 +500,84 @@ fn handle_request(
                     "pid": std::process::id()
                 })),
             )
+        }
+
+        "test_xpc" => {
+            // Test XPC Mach port transfer (Experiment 2)
+            let data = match &request.data {
+                Some(d) => d,
+                None => return Response::error(&request.id, "Missing data"),
+            };
+
+            let pane_id = match data.get("pane_id").and_then(|v| v.as_u64()) {
+                Some(id) => id as PaneId,
+                None => return Response::error(&request.id, "Missing pane_id"),
+            };
+
+            log::info!("[GUI Socket] test_xpc: requesting profile spawn for pane {}", pane_id);
+
+            // Get XPC manager and request profile spawn
+            let xpc_manager = match super::webview_xpc::get_xpc_manager() {
+                Some(m) => m,
+                None => return Response::error(&request.id, "XPC manager not available"),
+            };
+
+            match xpc_manager.request_profile_spawn(pane_id) {
+                Ok(session_id) => {
+                    log::info!("[GUI Socket] test_xpc: spawned with session_id={}", session_id);
+                    Response::ok(
+                        &request.id,
+                        Some(serde_json::json!({
+                            "session_id": session_id,
+                            "pane_id": pane_id
+                        })),
+                    )
+                }
+                Err(e) => {
+                    log::error!("[GUI Socket] test_xpc: failed to spawn: {}", e);
+                    Response::error(&request.id, &format!("Failed to spawn: {}", e))
+                }
+            }
+        }
+
+        "check_xpc_surface" => {
+            // Check if an IOSurface has been received via XPC for a pane
+            let data = match &request.data {
+                Some(d) => d,
+                None => return Response::error(&request.id, "Missing data"),
+            };
+
+            let pane_id = match data.get("pane_id").and_then(|v| v.as_u64()) {
+                Some(id) => id as PaneId,
+                None => return Response::error(&request.id, "Missing pane_id"),
+            };
+
+            let xpc_manager = match super::webview_xpc::get_xpc_manager() {
+                Some(m) => m,
+                None => return Response::error(&request.id, "XPC manager not available"),
+            };
+
+            match xpc_manager.get_received_surface(pane_id) {
+                Some(surface) => {
+                    Response::ok(
+                        &request.id,
+                        Some(serde_json::json!({
+                            "found": true,
+                            "mach_port": surface.mach_port,
+                            "width": surface.width,
+                            "height": surface.height
+                        })),
+                    )
+                }
+                None => {
+                    Response::ok(
+                        &request.id,
+                        Some(serde_json::json!({
+                            "found": false
+                        })),
+                    )
+                }
+            }
         }
 
         _ => Response::error(&request.id, &format!("Unknown action: {}", request.action)),

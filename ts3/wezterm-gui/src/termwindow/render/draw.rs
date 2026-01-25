@@ -161,7 +161,173 @@ impl crate::TermWindow {
         // submit will accept anything that implements IntoIter
         webgpu.queue.submit(std::iter::once(encoder.finish()));
 
+        // Render webview overlays after main content (Experiment 2: pink test texture via XPC)
+        // This uses its own encoder and submits separately
+        #[cfg(target_os = "macos")]
+        {
+            self.render_webview_overlays_webgpu(webgpu, &output.texture)?;
+        }
+
         output.present();
+
+        Ok(())
+    }
+
+    /// Render webview overlays using wgpu (macOS only)
+    /// Uses the same approach as ts2: render pipeline with sRGB texture view
+    #[cfg(target_os = "macos")]
+    fn render_webview_overlays_webgpu(
+        &self,
+        webgpu: &crate::termwindow::webgpu::WebGpuState,
+        output_texture: &wgpu::Texture,
+    ) -> anyhow::Result<()> {
+        use crate::termwindow::webview_socket::get_server;
+        use cef::osr_texture_import::iosurface::IOSurfaceImporter;
+        use cef::osr_texture_import::TextureImporter;
+        use cef::sys::cef_color_type_t;
+
+        // Get overlay state
+        let server = match get_server() {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        let state = server.state();
+        let overlays = state.read().unwrap();
+
+        if overlays.overlays.is_empty() {
+            return Ok(());
+        }
+
+        let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // For each overlay, import the IOSurface and render it
+        for (_pane_id, overlay) in overlays.overlays.iter() {
+            if overlay.mach_port == 0 {
+                continue;
+            }
+
+            log::info!(
+                "[Render] Importing IOSurface from mach_port={}, size={}x{}",
+                overlay.mach_port,
+                overlay.width,
+                overlay.height
+            );
+
+            // Import IOSurface from Mach port
+            let importer = match IOSurfaceImporter::from_mach_port(
+                overlay.mach_port,
+                cef_color_type_t::CEF_COLOR_TYPE_BGRA_8888,
+                overlay.width,
+                overlay.height,
+            ) {
+                Some(imp) => imp,
+                None => {
+                    log::warn!(
+                        "[Render] Failed to import IOSurface from mach_port={}",
+                        overlay.mach_port
+                    );
+                    continue;
+                }
+            };
+
+            // Import to wgpu texture
+            let texture = match importer.import_to_wgpu(&webgpu.device) {
+                Ok(tex) => tex,
+                Err(e) => {
+                    log::warn!("[Render] Failed to import IOSurface to wgpu: {}", e);
+                    continue;
+                }
+            };
+
+            log::info!(
+                "[Render] Successfully imported IOSurface texture, rendering with pipeline..."
+            );
+
+            // Create sRGB texture view - tells GPU the data is already sRGB-encoded
+            // This prevents double gamma correction when rendering to WezTerm's sRGB surface
+            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("Webview Texture View"),
+                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
+                ..Default::default()
+            });
+
+            // Create sampler
+            let sampler = webgpu.device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::MipmapFilterMode::Linear,
+                ..Default::default()
+            });
+
+            // Create bind group
+            let bind_group = webgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Webview Texture Bind Group"),
+                layout: &webgpu.webview_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            });
+
+            // Create encoder and render pass
+            let mut encoder =
+                webgpu
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Webview Overlay Encoder"),
+                    });
+
+            {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Webview Overlay Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &output_view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load, // Preserve existing terminal content
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+
+                render_pass.set_pipeline(&webgpu.webview_render_pipeline);
+                render_pass.set_bind_group(0, &bind_group, &[]);
+
+                // Set viewport to fill the entire screen for now
+                // TODO: Use pane bounds when integrating with real panes
+                render_pass.set_viewport(
+                    0.0,
+                    0.0,
+                    self.dimensions.pixel_width as f32,
+                    self.dimensions.pixel_height as f32,
+                    0.0,
+                    1.0,
+                );
+
+                // Draw a single triangle that covers the viewport
+                render_pass.draw(0..3, 0..1);
+            }
+
+            webgpu.queue.submit(std::iter::once(encoder.finish()));
+
+            log::info!(
+                "[Render] Rendered {}x{} webview texture to screen",
+                overlay.width,
+                overlay.height
+            );
+        }
 
         Ok(())
     }

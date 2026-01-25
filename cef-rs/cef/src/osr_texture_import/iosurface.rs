@@ -13,12 +13,13 @@ use std::os::raw::c_void;
 #[cfg(target_os = "macos")]
 use objc::{sel, sel_impl};
 
-// IOSurface C functions for validation
+// IOSurface C functions
 #[cfg(target_os = "macos")]
 #[link(name = "IOSurface", kind = "framework")]
 extern "C" {
     fn IOSurfaceGetWidth(buffer: *const c_void) -> usize;
     fn IOSurfaceGetHeight(buffer: *const c_void) -> usize;
+    fn IOSurfaceLookupFromMachPort(port: u32) -> *mut c_void;
 }
 
 pub struct IOSurfaceImporter {
@@ -92,6 +93,50 @@ impl IOSurfaceImporter {
         use super::iosurface_ipc::lookup_iosurface_by_id;
 
         let handle = lookup_iosurface_by_id(id)?;
+        Some(Self {
+            handle,
+            format,
+            width,
+            height,
+        })
+    }
+
+    /// Create an IOSurfaceImporter from a Mach port received via XPC.
+    ///
+    /// This is the **only** way to share IOSurfaces across processes on macOS.
+    /// IOSurface IDs cannot be looked up without Mach port authorization.
+    ///
+    /// # Arguments
+    /// * `port` - The Mach port received via XPC `copy_mach_send()`
+    /// * `format` - The CEF color format of the texture
+    /// * `width` - The texture width in pixels
+    /// * `height` - The texture height in pixels
+    ///
+    /// # Returns
+    /// Some(IOSurfaceImporter) if the IOSurface was successfully looked up, None otherwise
+    #[cfg(target_os = "macos")]
+    pub fn from_mach_port(
+        port: u32,
+        format: cef_color_type_t,
+        width: u32,
+        height: u32,
+    ) -> Option<Self> {
+        if port == 0 {
+            return None;
+        }
+
+        let handle = unsafe { IOSurfaceLookupFromMachPort(port) };
+        if handle.is_null() {
+            tracing::warn!("IOSurfaceLookupFromMachPort returned null for port {}", port);
+            return None;
+        }
+
+        tracing::info!(
+            "IOSurfaceLookupFromMachPort succeeded: port={}, handle={:?}",
+            port,
+            handle
+        );
+
         Some(Self {
             handle,
             format,

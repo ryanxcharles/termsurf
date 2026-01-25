@@ -19,6 +19,8 @@ members = [
   # TermSurf additions
   "termsurf-web",
   "termsurf-xpc",
+  "termsurf-launcher",
+  "termsurf-test-sender",
 ]
 resolver = "2"
 exclude = [

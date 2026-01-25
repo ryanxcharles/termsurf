@@ -1,0 +1,14 @@
+[package]
+name = "termsurf-test-sender"
+version = "0.1.0"
+edition = "2021"
+description = "Test sender for Experiment 2 - creates IOSurface and sends via XPC"
+license = "MIT"
+
+[[bin]]
+name = "termsurf-test-sender"
+path = "src/main.rs"
+
+[dependencies]
+termsurf-xpc = { path = "../termsurf-xpc" }
+clap = { version = "4.0", features = ["derive"] }

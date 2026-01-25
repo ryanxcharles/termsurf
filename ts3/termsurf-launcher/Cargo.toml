@@ -1,0 +1,13 @@
+[package]
+name = "termsurf-launcher"
+version = "0.1.0"
+edition = "2021"
+description = "XPC service launcher for TermSurf cross-process IOSurface sharing"
+license = "MIT"
+
+[[bin]]
+name = "termsurf-launcher"
+path = "src/main.rs"
+
+[dependencies]
+termsurf-xpc = { path = "../termsurf-xpc" }

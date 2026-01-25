@@ -5909,6 +5909,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "termsurf-launcher"
+version = "0.1.0"
+dependencies = [
+ "termsurf-xpc",
+]
+
+[[package]]
+name = "termsurf-test-sender"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "termsurf-xpc",
+]
+
+[[package]]
 name = "termsurf-web"
 version = "0.1.0"
 dependencies = [
@@ -7207,6 +7222,7 @@ dependencies = [
  "tabout",
  "tempfile",
  "terminfo",
+ "termsurf-xpc",
  "termwiz",
  "termwiz-funcs",
  "textwrap",
