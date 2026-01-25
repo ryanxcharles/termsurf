@@ -3,6 +3,9 @@
 //! This module provides a Unix domain socket server that allows the `web` CLI
 //! coordinator to send webview display requests to the GUI process.
 //!
+//! The GUI spawns and manages profile server processes, enabling IOSurface
+//! sharing through process ancestry (GUI is ancestor of CEF GPU process).
+//!
 //! Socket path: /tmp/termsurf-gui-{pid}.sock
 
 use mux::pane::PaneId;
@@ -12,8 +15,10 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::thread;
+use std::time::{Duration, Instant};
 
 // ============================================================================
 // Global Server Instance
@@ -93,6 +98,190 @@ impl Response {
 }
 
 // ============================================================================
+// Profile Server Management
+// ============================================================================
+
+/// Key for tracking profile servers: (engine_path, profile_name)
+type ProfileServerKey = (PathBuf, String);
+
+/// A managed profile server process
+struct ProfileServer {
+    /// The child process handle
+    _process: Child,
+    /// Socket path for this profile server
+    socket_path: PathBuf,
+    /// Connection to the profile server (lazy, established on first use)
+    connection: Option<UnixStream>,
+    /// Counter for generating request IDs
+    next_request_id: u64,
+}
+
+impl ProfileServer {
+    /// Spawn a new profile server and wait for its socket to become available
+    fn spawn(engine: &PathBuf, profile: &str) -> Result<Self, String> {
+        // Determine socket path based on profile
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let socket_path = PathBuf::from(format!(
+            "{}/.config/termsurf/sockets/{}.sock",
+            home, profile
+        ));
+
+        // Ensure sockets directory exists
+        if let Some(parent) = socket_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
+        log::info!(
+            "[GUI Socket] Spawning profile server: engine={:?}, profile={}",
+            engine,
+            profile
+        );
+
+        // Spawn the profile server process
+        let process = Command::new(engine)
+            .arg("--profile-server")
+            .arg("--profile")
+            .arg(profile)
+            .stdout(Stdio::inherit()) // For debugging
+            .stderr(Stdio::inherit())
+            .stdin(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn profile server: {}", e))?;
+
+        log::info!(
+            "[GUI Socket] Profile server spawned, pid={}",
+            process.id()
+        );
+
+        Ok(Self {
+            _process: process,
+            socket_path,
+            connection: None,
+            next_request_id: 1,
+        })
+    }
+
+    /// Wait for the socket to become available and establish a connection
+    fn connect(&mut self) -> Result<&mut UnixStream, String> {
+        if self.connection.is_some() {
+            return Ok(self.connection.as_mut().unwrap());
+        }
+
+        log::info!(
+            "[GUI Socket] Waiting for profile server socket at {:?}",
+            self.socket_path
+        );
+
+        // Retry with exponential backoff (up to 5 seconds total)
+        let start = Instant::now();
+        let max_wait = Duration::from_secs(5);
+        let mut delay = Duration::from_millis(50);
+
+        while start.elapsed() < max_wait {
+            if self.socket_path.exists() {
+                match UnixStream::connect(&self.socket_path) {
+                    Ok(stream) => {
+                        log::info!("[GUI Socket] Connected to profile server");
+                        self.connection = Some(stream);
+                        return Ok(self.connection.as_mut().unwrap());
+                    }
+                    Err(e) => {
+                        log::debug!(
+                            "[GUI Socket] Connection attempt failed: {}, retrying...",
+                            e
+                        );
+                    }
+                }
+            }
+
+            thread::sleep(delay);
+            delay = std::cmp::min(delay * 2, Duration::from_millis(500));
+        }
+
+        Err(format!(
+            "Timeout waiting for profile server socket at {:?}",
+            self.socket_path
+        ))
+    }
+
+    /// Send a request to the profile server and get a response
+    fn send_request(
+        &mut self,
+        action: &str,
+        data: Option<serde_json::Value>,
+    ) -> Result<Response, String> {
+        // Get request ID first before borrowing stream
+        let request_id = self.next_request_id;
+        self.next_request_id += 1;
+
+        let request = Request {
+            id: format!("req-{}", request_id),
+            action: action.to_string(),
+            data,
+        };
+
+        let request_json =
+            serde_json::to_string(&request).map_err(|e| format!("JSON serialize error: {}", e))?;
+
+        log::debug!("[GUI Socket] -> Profile server: {}", request_json);
+
+        // Now borrow stream
+        let stream = self.connect()?;
+        writeln!(stream, "{}", request_json).map_err(|e| format!("Write error: {}", e))?;
+        stream.flush().map_err(|e| format!("Flush error: {}", e))?;
+
+        // Read response
+        let mut reader = BufReader::new(stream.try_clone().map_err(|e| format!("Clone error: {}", e))?);
+        let mut response_line = String::new();
+        reader
+            .read_line(&mut response_line)
+            .map_err(|e| format!("Read error: {}", e))?;
+
+        log::debug!("[GUI Socket] <- Profile server: {}", response_line.trim());
+
+        serde_json::from_str(&response_line).map_err(|e| format!("JSON parse error: {}", e))
+    }
+}
+
+/// Manages all profile server processes
+struct ProfileServerManager {
+    servers: HashMap<ProfileServerKey, ProfileServer>,
+    next_webview_id: u64,
+}
+
+impl ProfileServerManager {
+    fn new() -> Self {
+        Self {
+            servers: HashMap::new(),
+            next_webview_id: 1,
+        }
+    }
+
+    /// Get or spawn a profile server for the given engine and profile
+    fn get_or_spawn(
+        &mut self,
+        engine: &PathBuf,
+        profile: &str,
+    ) -> Result<&mut ProfileServer, String> {
+        let key = (engine.clone(), profile.to_string());
+
+        if !self.servers.contains_key(&key) {
+            let server = ProfileServer::spawn(engine, profile)?;
+            self.servers.insert(key.clone(), server);
+        }
+
+        Ok(self.servers.get_mut(&key).unwrap())
+    }
+
+    /// Allocate a new webview ID
+    fn next_webview_id(&mut self) -> u64 {
+        let id = self.next_webview_id;
+        self.next_webview_id += 1;
+        id
+    }
+}
+
+// ============================================================================
 // Webview Overlay State
 // ============================================================================
 
@@ -151,11 +340,171 @@ impl WebviewOverlayState {
 // ============================================================================
 
 /// Handle a single request and return a response
-fn handle_request(request: &Request, state: &RwLock<WebviewOverlayState>) -> Response {
+fn handle_request(
+    request: &Request,
+    state: &RwLock<WebviewOverlayState>,
+    profile_manager: &Mutex<ProfileServerManager>,
+) -> Response {
     match request.action.as_str() {
         "ping" => Response::ok(&request.id, Some(serde_json::json!({"pong": true}))),
 
+        "open_webview" => {
+            let data = match &request.data {
+                Some(d) => d,
+                None => return Response::error(&request.id, "Missing data"),
+            };
+
+            // Extract required fields
+            let engine = match data.get("engine").and_then(|v| v.as_str()) {
+                Some(e) => PathBuf::from(e),
+                None => return Response::error(&request.id, "Missing engine"),
+            };
+
+            let profile = data
+                .get("profile")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default");
+
+            let url = data
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("about:blank");
+
+            let pane_id = match data.get("pane_id").and_then(|v| v.as_u64()) {
+                Some(id) => id as PaneId,
+                None => return Response::error(&request.id, "Missing pane_id"),
+            };
+
+            let width = data.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
+            let height = data.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
+
+            log::info!(
+                "[GUI Socket] open_webview: engine={:?}, profile={}, url={}, pane={}, size={}x{}",
+                engine,
+                profile,
+                url,
+                pane_id,
+                width,
+                height
+            );
+
+            // Get or spawn the profile server
+            let mut manager = profile_manager.lock().unwrap();
+            let server = match manager.get_or_spawn(&engine, profile) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("[GUI Socket] Failed to get/spawn profile server: {}", e);
+                    return Response::error(&request.id, &format!("Failed to spawn engine: {}", e));
+                }
+            };
+
+            // Send open request to profile server
+            let open_response = match server.send_request(
+                "open",
+                Some(serde_json::json!({
+                    "url": url,
+                    "width": width,
+                    "height": height
+                })),
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    log::error!("[GUI Socket] Failed to send open request: {}", e);
+                    return Response::error(&request.id, &format!("Profile server error: {}", e));
+                }
+            };
+
+            // Check response status
+            if open_response.status != "ok" {
+                let error = open_response.error.unwrap_or_else(|| "Unknown error".to_string());
+                log::error!("[GUI Socket] Profile server returned error: {}", error);
+                return Response::error(&request.id, &error);
+            }
+
+            // Extract IOSurface ID from response
+            let response_data = match open_response.data {
+                Some(d) => d,
+                None => {
+                    return Response::error(&request.id, "Profile server returned no data");
+                }
+            };
+
+            let iosurface_id = response_data
+                .get("iosurface_id")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            let actual_width = response_data
+                .get("width")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(width as u64) as u32;
+            let actual_height = response_data
+                .get("height")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(height as u64) as u32;
+
+            log::info!(
+                "[GUI Socket] Profile server returned: iosurface_id={}, size={}x{}",
+                iosurface_id,
+                actual_width,
+                actual_height
+            );
+
+            // TEST: Try to look up the IOSurface by ID
+            // This is the key test for Experiment 1 - if this succeeds, process ancestry works
+            #[cfg(target_os = "macos")]
+            {
+                use cef::osr_texture_import::iosurface_ipc::lookup_iosurface_by_id;
+
+                if iosurface_id != 0 {
+                    match lookup_iosurface_by_id(iosurface_id) {
+                        Some(handle) => {
+                            log::info!(
+                                "[GUI Socket] SUCCESS! IOSurfaceLookup returned valid handle: {:?}",
+                                handle
+                            );
+                            log::info!(
+                                "[GUI Socket] Hypothesis 2 VALIDATED: process ancestry enables IOSurface sharing!"
+                            );
+                        }
+                        None => {
+                            log::warn!(
+                                "[GUI Socket] FAILED: IOSurfaceLookup returned NULL for id={}",
+                                iosurface_id
+                            );
+                            log::warn!(
+                                "[GUI Socket] Hypothesis 2 DISPROVEN: process ancestry does NOT enable IOSurface sharing"
+                            );
+                        }
+                    }
+                } else {
+                    log::warn!("[GUI Socket] IOSurface ID is 0 - profile server may not have painted yet");
+                }
+            }
+
+            // Allocate webview ID and store overlay
+            let webview_id = manager.next_webview_id();
+
+            let overlay = WebviewOverlay {
+                iosurface_id,
+                width: actual_width,
+                height: actual_height,
+            };
+
+            state.write().unwrap().add_overlay(pane_id, overlay);
+
+            Response::ok(
+                &request.id,
+                Some(serde_json::json!({
+                    "webview_id": webview_id,
+                    "iosurface_id": iosurface_id,
+                    "width": actual_width,
+                    "height": actual_height
+                })),
+            )
+        }
+
         "display_webview" => {
+            // Legacy action - keep for backwards compatibility
             let data = match &request.data {
                 Some(d) => d,
                 None => return Response::error(&request.id, "Missing data"),
@@ -206,10 +555,13 @@ fn handle_request(request: &Request, state: &RwLock<WebviewOverlayState>) -> Res
 
         "get_status" => {
             let overlay_count = state.read().unwrap().overlays.len();
+            let manager = profile_manager.lock().unwrap();
+            let server_count = manager.servers.len();
             Response::ok(
                 &request.id,
                 Some(serde_json::json!({
                     "overlay_count": overlay_count,
+                    "server_count": server_count,
                     "pid": std::process::id()
                 })),
             )
@@ -220,7 +572,11 @@ fn handle_request(request: &Request, state: &RwLock<WebviewOverlayState>) -> Res
 }
 
 /// Handle a single client connection
-fn handle_connection(mut stream: UnixStream, state: Arc<RwLock<WebviewOverlayState>>) {
+fn handle_connection(
+    mut stream: UnixStream,
+    state: Arc<RwLock<WebviewOverlayState>>,
+    profile_manager: Arc<Mutex<ProfileServerManager>>,
+) {
     log::info!("[GUI Socket] Client connected");
 
     let reader = match stream.try_clone() {
@@ -238,7 +594,7 @@ fn handle_connection(mut stream: UnixStream, state: Arc<RwLock<WebviewOverlaySta
                 let response = match serde_json::from_str::<Request>(&line) {
                     Ok(request) => {
                         log::debug!("[GUI Socket] Request: {:?}", request);
-                        handle_request(&request, &state)
+                        handle_request(&request, &state, &profile_manager)
                     }
                     Err(e) => Response::error("unknown", &format!("Invalid JSON: {}", e)),
                 };
@@ -274,6 +630,7 @@ pub struct WebviewSocketServer {
     socket_path: PathBuf,
     listener: Mutex<Option<UnixListener>>,
     state: Arc<RwLock<WebviewOverlayState>>,
+    profile_manager: Arc<Mutex<ProfileServerManager>>,
 }
 
 impl WebviewSocketServer {
@@ -302,6 +659,7 @@ impl WebviewSocketServer {
             socket_path,
             listener: Mutex::new(Some(listener)),
             state: Arc::new(RwLock::new(WebviewOverlayState::new())),
+            profile_manager: Arc::new(Mutex::new(ProfileServerManager::new())),
         })
     }
 
@@ -314,6 +672,7 @@ impl WebviewSocketServer {
         };
 
         let state = Arc::clone(&self.state);
+        let profile_manager = Arc::clone(&self.profile_manager);
         let socket_path = self.socket_path.clone();
 
         thread::spawn(move || {
@@ -323,8 +682,9 @@ impl WebviewSocketServer {
                 match stream {
                     Ok(stream) => {
                         let state_clone = Arc::clone(&state);
+                        let profile_manager_clone = Arc::clone(&profile_manager);
                         thread::spawn(move || {
-                            handle_connection(stream, state_clone);
+                            handle_connection(stream, state_clone, profile_manager_clone);
                         });
                     }
                     Err(e) => {

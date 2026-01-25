@@ -39,6 +39,7 @@ bitflags.workspace = true
 bytemuck.workspace = true
 chrono.workspace = true
 clap.workspace = true
+cef = { path = "../../cef-rs/cef" }
 codec.workspace = true
 colorgrad.workspace = true
 config.workspace = true

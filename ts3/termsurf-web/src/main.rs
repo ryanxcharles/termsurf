@@ -4,7 +4,6 @@ use std::fs;
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
@@ -1168,22 +1167,6 @@ fn try_connect(socket_path: &PathBuf) -> Option<UnixStream> {
     }
 }
 
-fn wait_for_socket(socket_path: &PathBuf, timeout: Duration) -> Result<UnixStream, String> {
-    let start = std::time::Instant::now();
-
-    loop {
-        if let Some(stream) = try_connect(socket_path) {
-            return Ok(stream);
-        }
-
-        if start.elapsed() > timeout {
-            return Err(format!("Timeout waiting for socket at {:?}", socket_path));
-        }
-
-        thread::sleep(Duration::from_millis(50));
-    }
-}
-
 fn send_request(
     stream: &mut UnixStream,
     action: &str,
@@ -1211,32 +1194,7 @@ fn send_request(
     serde_json::from_str(&response_line).map_err(|e| format!("Invalid response JSON: {}", e))
 }
 
-fn spawn_profile_server(profile: &ProfileMode) {
-    let exe = env::current_exe().expect("Failed to get current executable path");
-
-    let mut cmd = Command::new(&exe);
-    cmd.arg("--profile-server");
-
-    match profile {
-        ProfileMode::Named(name) => {
-            cmd.arg("--profile").arg(name);
-        }
-        ProfileMode::Incognito(uuid) => {
-            cmd.arg("--incognito").arg("--incognito-id").arg(uuid);
-        }
-    }
-
-    // Spawn in background - don't wait for it
-    // NOTE: Using inherit for stdout/stderr for debugging - change to null() for production
-    cmd.stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .stdin(Stdio::null())
-        .spawn()
-        .expect("Failed to start profile server");
-}
-
 fn run_coordinator(profile: ProfileMode, url: Option<String>) {
-    let socket_path = profile.socket_path();
     let url = url.unwrap_or_else(|| "about:blank".to_string());
 
     // Read environment variables for GUI integration
@@ -1245,29 +1203,39 @@ fn run_coordinator(profile: ProfileMode, url: Option<String>) {
         .and_then(|s| s.parse::<u64>().ok());
     let gui_socket_path = env::var("TERMSURF_GUI_SOCKET").ok().map(PathBuf::from);
 
-    // Try to connect to existing profile server
-    let mut profile_stream = if let Some(stream) = try_connect(&socket_path) {
-        println!(
-            "Connected to existing profile server for profile={}",
-            profile.display_name()
-        );
-        stream
-    } else {
-        println!(
-            "Starting profile server for profile={}...",
-            profile.display_name()
-        );
-        spawn_profile_server(&profile);
+    // Require GUI socket - coordinator only talks to GUI now
+    let gui_socket = match gui_socket_path {
+        Some(path) => path,
+        None => {
+            eprintln!("Error: TERMSURF_GUI_SOCKET not set");
+            eprintln!("The coordinator requires the GUI socket to be available.");
+            eprintln!("Run this command from within a WezTerm terminal.");
+            std::process::exit(1);
+        }
+    };
 
-        match wait_for_socket(&socket_path, Duration::from_secs(10)) {
-            Ok(stream) => {
-                println!("Connected to profile server");
-                stream
-            }
-            Err(e) => {
-                eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
+    let pane_id = match pane_id {
+        Some(id) => id,
+        None => {
+            eprintln!("Error: WEZTERM_PANE not set");
+            eprintln!("The coordinator requires a pane ID to display the webview.");
+            eprintln!("Run this command from within a WezTerm terminal.");
+            std::process::exit(1);
+        }
+    };
+
+    // Get this executable's path to pass as the engine
+    let engine = env::current_exe().expect("Failed to get current executable path");
+
+    // Connect to GUI socket
+    let mut gui_stream = match try_connect(&gui_socket) {
+        Some(stream) => {
+            println!("Connected to GUI socket at {:?}", gui_socket);
+            stream
+        }
+        None => {
+            eprintln!("Error: Could not connect to GUI socket at {:?}", gui_socket);
+            std::process::exit(1);
         }
     };
 
@@ -1275,33 +1243,32 @@ fn run_coordinator(profile: ProfileMode, url: Option<String>) {
     // TODO: Get actual terminal dimensions
     let (width, height) = (800u32, 600u32);
 
-    // Open a webview via profile server
-    println!("Opening webview: {}", url);
+    // Send open_webview to GUI - GUI will spawn/manage the profile server
+    println!("Opening webview: {} (profile={})", url, profile.display_name());
     let response = send_request(
-        &mut profile_stream,
-        "open",
+        &mut gui_stream,
+        "open_webview",
         Some(serde_json::json!({
+            "engine": engine.to_string_lossy(),
+            "profile": profile.display_name(),
             "url": url,
+            "pane_id": pane_id,
             "width": width,
             "height": height
         })),
     );
 
-    let (iosurface_id, actual_width, actual_height) = match response {
+    match response {
         Ok(resp) if resp.status == "ok" => {
             if let Some(data) = &resp.data {
-                let iosurface_id = data.get("iosurface_id").and_then(|id| id.as_u64()).unwrap_or(0);
                 let webview_id = data.get("webview_id").and_then(|id| id.as_u64()).unwrap_or(0);
-                let w = data.get("width").and_then(|w| w.as_u64()).unwrap_or(width as u64) as u32;
-                let h = data.get("height").and_then(|h| h.as_u64()).unwrap_or(height as u64) as u32;
+                let iosurface_id = data.get("iosurface_id").and_then(|id| id.as_u64()).unwrap_or(0);
+                let w = data.get("width").and_then(|w| w.as_u64()).unwrap_or(width as u64);
+                let h = data.get("height").and_then(|h| h.as_u64()).unwrap_or(height as u64);
                 println!(
-                    "Webview opened: id={}, iosurface_id={}, size={}x{}",
+                    "Webview opened: webview_id={}, iosurface_id={}, size={}x{}",
                     webview_id, iosurface_id, w, h
                 );
-                (iosurface_id as u32, w, h)
-            } else {
-                eprintln!("Failed to open webview: no data in response");
-                std::process::exit(1);
             }
         }
         Ok(resp) => {
@@ -1314,67 +1281,6 @@ fn run_coordinator(profile: ProfileMode, url: Option<String>) {
         Err(e) => {
             eprintln!("Failed to open webview: {}", e);
             std::process::exit(1);
-        }
-    };
-
-    // Connect to GUI socket and send display_webview command
-    let mut gui_stream = if let (Some(pane_id), Some(ref gui_socket)) = (pane_id, &gui_socket_path)
-    {
-        if let Some(mut gui_stream) = try_connect(gui_socket) {
-            println!("Connected to GUI socket at {:?}", gui_socket);
-
-            // Send display_webview command
-            let display_response = send_request(
-                &mut gui_stream,
-                "display_webview",
-                Some(serde_json::json!({
-                    "pane_id": pane_id,
-                    "iosurface_id": iosurface_id,
-                    "width": actual_width,
-                    "height": actual_height
-                })),
-            );
-
-            match display_response {
-                Ok(resp) if resp.status == "ok" => {
-                    println!("Webview displayed in pane {}", pane_id);
-                }
-                Ok(resp) => {
-                    eprintln!(
-                        "Failed to display webview: {}",
-                        resp.error.unwrap_or_default()
-                    );
-                }
-                Err(e) => {
-                    eprintln!("Failed to send display_webview: {}", e);
-                }
-            }
-
-            Some(gui_stream)
-        } else {
-            println!("Warning: Could not connect to GUI socket at {:?}", gui_socket);
-            None
-        }
-    } else {
-        if pane_id.is_none() {
-            println!("Note: WEZTERM_PANE not set - running standalone");
-        }
-        if gui_socket_path.is_none() {
-            println!("Note: TERMSURF_GUI_SOCKET not set - webview will not be displayed");
-        }
-        None
-    };
-
-    // Get profile server status
-    if let Ok(resp) = send_request(&mut profile_stream, "get_status", None) {
-        if let Some(data) = resp.data {
-            println!(
-                "Profile server status: pid={}, webviews={}",
-                data.get("pid").and_then(|p| p.as_u64()).unwrap_or(0),
-                data.get("webview_count")
-                    .and_then(|c| c.as_u64())
-                    .unwrap_or(0)
-            );
         }
     }
 
@@ -1390,35 +1296,31 @@ fn run_coordinator(profile: ProfileMode, url: Option<String>) {
     let _ = rx.recv();
     println!("\nShutting down...");
 
-    // Send close_webview to GUI if connected
-    if let (Some(ref mut gui_stream), Some(pane_id)) = (&mut gui_stream, pane_id) {
-        let close_response = send_request(
-            gui_stream,
-            "close_webview",
-            Some(serde_json::json!({
-                "pane_id": pane_id
-            })),
-        );
+    // Send close_webview to GUI
+    let close_response = send_request(
+        &mut gui_stream,
+        "close_webview",
+        Some(serde_json::json!({
+            "pane_id": pane_id
+        })),
+    );
 
-        match close_response {
-            Ok(resp) if resp.status == "ok" => {
-                println!("Webview closed in pane {}", pane_id);
-            }
-            Ok(resp) => {
-                eprintln!(
-                    "Failed to close webview: {}",
-                    resp.error.unwrap_or_default()
-                );
-            }
-            Err(e) => {
-                eprintln!("Failed to send close_webview: {}", e);
-            }
+    match close_response {
+        Ok(resp) if resp.status == "ok" => {
+            println!("Webview closed in pane {}", pane_id);
+        }
+        Ok(resp) => {
+            eprintln!(
+                "Failed to close webview: {}",
+                resp.error.unwrap_or_default()
+            );
+        }
+        Err(e) => {
+            eprintln!("Failed to send close_webview: {}", e);
         }
     }
 
-    // Profile stream is dropped here, closing the connection
-    // The profile server will detect EOF and close our webview
-    println!("Disconnected from profile server");
+    println!("Done");
 }
 
 // ============================================================================
