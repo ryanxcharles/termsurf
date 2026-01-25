@@ -302,6 +302,31 @@ fn handle_claim_session(session_id) -> endpoint {
 
 **Info.plist:** Registers as `com.termsurf.launcher`
 
+**Sandbox Note:** XPC services are sandboxed by default and may not be able to
+spawn child processes. The launcher needs one of:
+
+- **Option A:** Disable sandbox via entitlements:
+  ```xml
+  <!-- termsurf-launcher.entitlements -->
+  <key>com.apple.security.app-sandbox</key>
+  <false/>
+  ```
+
+- **Option B:** Keep sandbox but add process execution entitlement:
+  ```xml
+  <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+  <array>
+      <string>com.apple.runningboard</string>
+  </array>
+  ```
+
+- **Option C:** Restructure so GUI spawns test sender directly (launcher only
+  relays endpoints, never spawns). This avoids sandbox issues entirely but
+  changes the architecture slightly.
+
+For this experiment, **Option A** (disable sandbox) is simplest. Production may
+want to revisit with tighter security.
+
 ##### 2. Test Sender (`ts3/termsurf-test-sender/`)
 
 Minimal binary that creates and sends a test IOSurface:
