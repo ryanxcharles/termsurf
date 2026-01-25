@@ -976,12 +976,17 @@ With all XPC primitives validated, Experiment 2 integrates with the real app:
 
 ### Experiment 2: XPC IOSurface Transfer with Test Texture
 
-**Status:** PLANNED
+**Status:** SUCCESS
 
 **Goal:** Validate the complete XPC architecture by displaying a test texture in
 the terminal pane. Running `web google.com` will display a pink 100x100 texture
 stretched to fill the pane, proving the entire IPC pipeline works before
 integrating CEF.
+
+**Result:** Running `web google.com` successfully displays a pink texture
+stretched to fill the entire terminal window. The complete IPC pipeline works:
+web CLI → Unix socket → GUI → XPC → launcher → test-sender → XPC Mach port →
+GUI → IOSurfaceLookupFromMachPort → wgpu texture import → render pipeline.
 
 **Key Insight:** IOSurface IDs cannot be shared via Unix sockets on macOS.
 `IOSurfaceLookupByID()` requires Mach port authorization. XPC with Mach port
@@ -1651,12 +1656,12 @@ set_new_connection_handler(&listener, move |peer| {
 
 #### Success Criteria
 
-- [ ] `web google.com` displays solid pink in the pane
-- [ ] Pink fills entire pane (stretched from 100x100)
+- [x] `web google.com` displays solid pink in the pane
+- [x] Pink fills entire pane (stretched from 100x100)
 - [ ] Resizing pane re-stretches the pink (no flicker, no re-fetch)
-- [ ] Ctrl+C exits cleanly, terminal restored
-- [ ] Logs show: "IOSurfaceLookupFromMachPort returned valid handle"
-- [ ] Socket server still handles control messages correctly
+- [x] Ctrl+C exits cleanly, terminal restored
+- [x] Logs show: "IOSurfaceLookupFromMachPort returned valid handle"
+- [x] Socket server still handles control messages correctly
 
 #### What This Proves
 
