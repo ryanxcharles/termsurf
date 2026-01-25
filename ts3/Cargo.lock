@@ -5922,6 +5922,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "termsurf-xpc"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "termtree"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
