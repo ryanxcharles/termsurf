@@ -247,5 +247,145 @@ architectural change to process spawning.
 
 ## Experiments
 
-_Experiments will be added as we explore solutions to cross-process texture
-sharing._
+### Experiment 1: GUI-Spawned Profile Servers
+
+**Status:** PLANNED
+
+**Goal:** Re-architect ts3 so that wezterm-gui spawns profile servers instead of
+the coordinator. This is a prerequisite for testing Hypothesis 2 (process
+ancestry enables IOSurface lookup).
+
+#### Current Architecture
+
+```
+coordinator (web CLI)
+    ├── spawns profile server (termsurf-web)
+    │       └── spawns WezTerm Helper (CEF GPU)
+    ├── connects to profile server socket
+    ├── sends "open" to profile server
+    ├── receives IOSurface ID from profile server
+    ├── connects to GUI socket
+    └── sends "display_webview" with IOSurface ID to GUI
+            └── GUI tries IOSurfaceLookup() → FAILS (not ancestor)
+```
+
+#### Target Architecture
+
+```
+coordinator (web CLI)
+    └── connects to GUI socket
+        └── sends "open_webview" (profile, URL) to GUI
+                │
+                GUI
+                ├── spawns profile server if not running
+                │       └── spawns WezTerm Helper (CEF GPU)
+                ├── connects to profile server socket
+                ├── sends "open" to profile server
+                ├── receives IOSurface ID
+                └── tries IOSurfaceLookup() → may work (is ancestor)
+```
+
+#### Protocol Changes
+
+**Coordinator → GUI message (new):**
+
+```json
+{
+  "action": "open_webview",
+  "data": {
+    "engine": "/path/to/termsurf-web",
+    "profile": "default",
+    "url": "https://google.com",
+    "width": 800,
+    "height": 600
+  }
+}
+```
+
+The `engine` field specifies which browser engine executable to run. This makes
+the protocol generic - any browser engine that implements the profile server
+socket protocol can be used. Future possibilities:
+
+- CEF/Chromium (current): `termsurf-web`
+- WebKit: hypothetical `termsurf-webkit`
+- Firefox/Gecko: hypothetical `termsurf-gecko`
+- Servo: hypothetical `termsurf-servo`
+
+The GUI doesn't care which engine it spawns - it just needs the engine to
+implement the standard socket protocol (open, close, get_status, etc.) and
+return IOSurface IDs.
+
+**GUI → Coordinator response:**
+
+```json
+{
+  "status": "ok",
+  "data": {
+    "webview_id": 1
+  }
+}
+```
+
+The coordinator no longer needs to know about IOSurface IDs - that's now
+internal to the GUI.
+
+#### Implementation Steps
+
+1. **Modify GUI socket server** (`webview_socket.rs`)
+   - Add `open_webview` action handler
+   - Implement profile server spawning logic
+   - Implement profile server connection management
+   - Track which profile servers are running
+
+2. **Add profile server management to GUI**
+   - Spawn profile server process when needed
+   - Connect to profile server socket
+   - Send `open` request, receive IOSurface ID
+   - Store IOSurface ID in overlay state
+
+3. **Simplify coordinator** (`termsurf-web/src/main.rs`)
+   - Remove profile server spawning code
+   - Remove profile server socket connection
+   - Only connect to GUI socket
+   - Send `open_webview` instead of `display_webview`
+
+4. **Test IOSurface lookup**
+   - Re-enable the `IOSurfaceLookup()` code in `draw.rs`
+   - Verify if lookup succeeds now that GUI is ancestor
+
+#### Files to Modify
+
+| File                                           | Changes                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------ |
+| `wezterm-gui/src/termwindow/webview_socket.rs` | Add `open_webview` handler, profile server spawning                |
+| `termsurf-web/src/main.rs`                     | Remove profile server spawning, simplify to GUI-only communication |
+| `wezterm-gui/src/termwindow/render/draw.rs`    | Re-enable IOSurface lookup code                                    |
+| `wezterm-gui/src/termwindow/webgpu.rs`         | Re-add webview render pipeline                                     |
+
+#### Success Criteria
+
+- [ ] Coordinator only communicates with GUI (not profile server directly)
+- [ ] GUI spawns profile server on first `open_webview` for a profile
+- [ ] GUI connects to profile server and receives IOSurface ID
+- [ ] `IOSurfaceLookup()` returns a valid handle (not NULL)
+- [ ] Texture renders correctly in the pane
+
+#### Failure Criteria
+
+If `IOSurfaceLookup()` still returns NULL after this change:
+
+- Hypothesis 2 is disproven
+- Process ancestry does not enable IOSurface sharing
+- Must fall back to Mach ports, XPC, or shared memory
+
+#### Notes
+
+- Profile server code remains mostly unchanged (still creates CEF browser,
+  returns IOSurface ID)
+- Socket protocol between GUI and profile server remains the same
+- Only the spawning relationship changes
+- Coordinator's role becomes minimal (just a CLI that talks to GUI)
+- The `engine` field enables future browser engine diversity - any engine that
+  implements the socket protocol can be used
+- GUI manages engine processes by (engine, profile) tuple - one process per
+  engine/profile combination
