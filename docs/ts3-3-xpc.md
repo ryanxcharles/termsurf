@@ -326,96 +326,121 @@ Receiver                      Launcher                     Sender
 
 ##### 1. XPC Service (Launcher)
 
-**Location:** `ts3/termsurf-xpc/launcher/`
+**Location:** `ts3/termsurf-xpc/examples/launcher.rs`
 
-XPC service that spawns child processes and relays endpoints:
+XPC service that spawns child processes and relays endpoints. Written in pure
+Rust using the `termsurf-xpc` bindings:
 
-```
-ts3/termsurf-xpc/launcher/
-├── Info.plist                       # Service registration + entitlements
-├── main.swift                       # ~80 lines
-└── termsurf-xpc-test.entitlements   # Sandbox disabled for spawning
-```
+```rust
+// examples/launcher.rs
+use termsurf_xpc::*;
+use std::collections::HashMap;
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::env;
 
-```swift
-// launcher/main.swift
-import Foundation
+fn main() -> Result<()> {
+    println!("Launcher: Starting...");
 
-class Launcher: NSObject, NSXPCListenerDelegate {
-    var pendingSessions: [String: xpc_endpoint_t] = [:]
-    let senderPath: String
+    // Session storage: session_id -> receiver endpoint
+    let sessions: Arc<Mutex<HashMap<String, XpcEndpoint>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
-    init(senderPath: String) {
-        self.senderPath = senderPath
-    }
+    // Path to sender binary (sibling in same directory)
+    let exe_path = env::current_exe().expect("Failed to get exe path");
+    let exe_dir = exe_path.parent().expect("Failed to get exe directory");
+    let sender_path = exe_dir.join("sender");
 
-    func listener(_ listener: NSXPCListener,
-                  shouldAcceptNewConnection conn: NSXPCConnection) -> Bool {
-        conn.exportedInterface = NSXPCInterface(with: LauncherProtocol.self)
-        conn.exportedObject = self
-        conn.resume()
-        return true
-    }
+    // Create listener for this XPC service
+    let listener = XpcListener::new_mach_service("com.termsurf.xpc-test")?;
+
+    // Handle incoming connections
+    let sessions_clone = sessions.clone();
+    let sender_path_clone = sender_path.clone();
+
+    set_new_connection_handler(&listener, move |conn| {
+        println!("Launcher: New connection");
+
+        let sessions = sessions_clone.clone();
+        let sender_path = sender_path_clone.clone();
+
+        set_event_handler(&conn, move |event| {
+            match event {
+                Ok(msg) => {
+                    let action = msg.get_string("action").unwrap_or_default();
+
+                    match action.as_str() {
+                        "spawn_sender" => {
+                            let session_id = msg.get_string("session_id")
+                                .expect("Missing session_id");
+                            let endpoint = msg.get_endpoint("receiver_endpoint")
+                                .expect("Missing receiver_endpoint");
+
+                            // Store endpoint for sender to claim
+                            {
+                                let mut sessions = sessions.lock().unwrap();
+                                sessions.insert(session_id.clone(), endpoint);
+                            }
+
+                            // Spawn sender as child process
+                            match Command::new(&sender_path)
+                                .args(["--session", &session_id])
+                                .spawn()
+                            {
+                                Ok(_) => println!("Launcher: Spawned sender for {}", session_id),
+                                Err(e) => eprintln!("Launcher: Failed to spawn: {}", e),
+                            }
+                        }
+
+                        "claim_session" => {
+                            let session_id = msg.get_string("session_id")
+                                .expect("Missing session_id");
+
+                            let endpoint = {
+                                let mut sessions = sessions.lock().unwrap();
+                                sessions.remove(&session_id)
+                            };
+
+                            // Send reply with endpoint
+                            let reply = XpcDictionary::create_reply(&msg)
+                                .expect("Failed to create reply");
+
+                            if let Some(ep) = endpoint {
+                                reply.set_endpoint("endpoint", ep);
+                                println!("Launcher: Session {} claimed", session_id);
+                            } else {
+                                reply.set_string("error", "session not found");
+                                eprintln!("Launcher: Session {} not found", session_id);
+                            }
+
+                            conn.send(&reply);
+                        }
+
+                        _ => {
+                            eprintln!("Launcher: Unknown action: {}", action);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Launcher: Connection error: {}", e);
+                }
+            }
+        });
+
+        conn.resume();
+    });
+
+    listener.resume();
+
+    println!("Launcher: Running...");
+    run_loop();
 }
-
-extension Launcher: LauncherProtocol {
-    func spawnSender(receiverEndpoint: xpc_endpoint_t, sessionId: String) {
-        // Store endpoint for sender to claim
-        pendingSessions[sessionId] = receiverEndpoint
-
-        // Spawn sender as child process
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: senderPath)
-        task.arguments = ["--session", sessionId]
-
-        do {
-            try task.run()
-            print("Launcher: Spawned sender for session \(sessionId)")
-        } catch {
-            print("Launcher: Failed to spawn sender: \(error)")
-        }
-    }
-
-    func claimSession(sessionId: String, reply: @escaping (xpc_endpoint_t?) -> Void) {
-        let endpoint = pendingSessions.removeValue(forKey: sessionId)
-        reply(endpoint)
-    }
-}
-
-// Main
-let bundlePath = Bundle.main.bundlePath
-let senderPath = (bundlePath as NSString)
-    .deletingLastPathComponent
-    .appending("/sender")
-
-let launcher = Launcher(senderPath: senderPath)
-let listener = NSXPCListener(machServiceName: "com.termsurf.xpc-test")
-listener.delegate = launcher
-listener.resume()
-
-print("Launcher: Running...")
-RunLoop.main.run()
 ```
 
-**Entitlements (sandbox disabled):**
+**Info.plist** (required for XPC service registration):
 
 ```xml
-<!-- launcher/termsurf-xpc-test.entitlements -->
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>com.apple.security.app-sandbox</key>
-    <false/>
-</dict>
-</plist>
-```
-
-**Info.plist:**
-
-```xml
-<!-- launcher/Info.plist -->
+<!-- xpc-service/Info.plist -->
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -426,7 +451,7 @@ RunLoop.main.run()
     <key>CFBundleName</key>
     <string>termsurf-xpc-test</string>
     <key>CFBundleExecutable</key>
-    <string>termsurf-xpc-test</string>
+    <string>launcher</string>
     <key>XPCService</key>
     <dict>
         <key>ServiceType</key>
@@ -435,6 +460,10 @@ RunLoop.main.run()
 </dict>
 </plist>
 ```
+
+**Note on sandboxing:** XPC services are sandboxed by default. To spawn child
+processes, either disable the sandbox via entitlements or restructure so the
+main app spawns processes instead. For this test, we run unsigned/unsandboxed.
 
 ##### 2. Receiver (Rust)
 
@@ -620,13 +649,11 @@ ts3/termsurf-xpc/
 │   ├── block.rs                  # Safe block wrappers (uses block2)
 │   └── runloop.rs                # CFRunLoop wrapper
 ├── examples/
-│   ├── receiver.rs
-│   └── sender.rs
-├── launcher/
-│   ├── Info.plist
-│   ├── main.swift
-│   ├── LauncherProtocol.swift
-│   └── termsurf-xpc-test.entitlements
+│   ├── launcher.rs               # XPC service (spawns sender)
+│   ├── receiver.rs               # Test receiver (simulates GUI)
+│   └── sender.rs                 # Test sender (simulates profile server)
+├── xpc-service/
+│   └── Info.plist                # XPC service bundle metadata
 └── scripts/
     ├── build-test.sh             # Build everything
     └── run-test.sh               # Run the test
@@ -643,14 +670,10 @@ cd "$(dirname "$0")/.."
 
 echo "=== Building XPC Test Bundle ==="
 
-# Build Rust binaries
+# Build all Rust binaries
+cargo build --release --example launcher
 cargo build --release --example receiver
 cargo build --release --example sender
-
-# Build Swift XPC service
-swiftc -o launcher/termsurf-xpc-test \
-    launcher/main.swift \
-    launcher/LauncherProtocol.swift
 
 # Create test app bundle structure
 APP="TestXPC.app"
@@ -661,11 +684,11 @@ mkdir -p "$APP/Contents/XPCServices/com.termsurf.xpc-test.xpc/Contents/MacOS"
 # Copy binaries
 cp ../../target/release/examples/receiver "$APP/Contents/MacOS/"
 cp ../../target/release/examples/sender "$APP/Contents/MacOS/"
-cp launcher/termsurf-xpc-test \
+cp ../../target/release/examples/launcher \
    "$APP/Contents/XPCServices/com.termsurf.xpc-test.xpc/Contents/MacOS/"
 
-# Copy XPC service plists
-cp launcher/Info.plist \
+# Copy XPC service Info.plist
+cp xpc-service/Info.plist \
    "$APP/Contents/XPCServices/com.termsurf.xpc-test.xpc/Contents/"
 
 # Create app Info.plist
