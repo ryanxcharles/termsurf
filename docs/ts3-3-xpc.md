@@ -24,7 +24,7 @@ The profile server renders web content to an IOSurface. The GUI needs to display
 that texture. The challenge: how do you share a GPU texture between separate
 processes on macOS?
 
-## Why Earlier Attempst Failed
+## Why Earlier Attempts Failed
 
 ### Attempt 1: IOSurface Global ID Lookup
 
