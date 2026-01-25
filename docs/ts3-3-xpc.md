@@ -346,6 +346,11 @@ fn main() -> Result<()> {
     let sessions: Arc<Mutex<HashMap<String, XpcEndpoint>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
+    // CRITICAL: Store client connections to keep them alive!
+    // Without this, connections are canceled when the handler returns.
+    let clients: Arc<Mutex<Vec<XpcConnection>>> =
+        Arc::new(Mutex::new(Vec::new()));
+
     // Path to sender binary (sibling in same directory)
     let exe_path = env::current_exe().expect("Failed to get exe path");
     let exe_dir = exe_path.parent().expect("Failed to get exe directory");
@@ -356,6 +361,7 @@ fn main() -> Result<()> {
 
     // Handle incoming connections
     let sessions_clone = sessions.clone();
+    let clients_clone = clients.clone();
     let sender_path_clone = sender_path.clone();
 
     set_new_connection_handler(&listener, move |conn| {
@@ -428,6 +434,9 @@ fn main() -> Result<()> {
         });
 
         conn.resume();
+
+        // CRITICAL: Store the connection to keep it alive!
+        clients_clone.lock().unwrap().push(conn);
     });
 
     listener.resume();
@@ -475,9 +484,14 @@ sender:
 ```rust
 // examples/receiver.rs
 use termsurf_xpc::*;
+use std::sync::{Arc, Mutex};
 
 fn main() -> Result<()> {
     println!("Receiver: Starting...");
+
+    // CRITICAL: Storage for peer connections - must keep them alive!
+    let peers: Arc<Mutex<Vec<XpcConnection>>> = Arc::new(Mutex::new(Vec::new()));
+    let peers_clone = peers.clone();
 
     // 1. Connect to launcher
     let launcher = XpcConnection::connect_mach_service("com.termsurf.xpc-test")?;
@@ -496,7 +510,7 @@ fn main() -> Result<()> {
     println!("Receiver: Created anonymous listener");
 
     // 3. Set up handler for incoming peer connections
-    set_new_connection_handler(&listener, |peer| {
+    set_new_connection_handler(&listener, move |peer| {
         println!("Receiver: Sender connected!");
 
         set_event_handler(&peer, |event| {
@@ -506,16 +520,19 @@ fn main() -> Result<()> {
                     if action == "send_surface" {
                         // Receive IOSurface Mach port
                         let port = msg.copy_mach_send("iosurface_port");
-                        let handle = unsafe { IOSurfaceLookupFromMachPort(port) };
+                        let handle = iosurface::lookup_from_mach_port(port);
 
-                        if handle.is_null() {
-                            eprintln!("FAILED: IOSurfaceLookupFromMachPort returned NULL");
-                            std::process::exit(1);
-                        }
+                        let handle = match handle {
+                            Some(h) => h,
+                            None => {
+                                eprintln!("FAILED: lookup_from_mach_port returned None");
+                                std::process::exit(1);
+                            }
+                        };
 
                         // Verify dimensions
-                        let width = unsafe { IOSurfaceGetWidth(handle) };
-                        let height = unsafe { IOSurfaceGetHeight(handle) };
+                        let width = iosurface::get_width(handle);
+                        let height = iosurface::get_height(handle);
 
                         if width != 100 || height != 100 {
                             eprintln!("FAILED: Expected 100x100, got {}x{}", width, height);
@@ -523,8 +540,8 @@ fn main() -> Result<()> {
                         }
 
                         // Verify pixel color (hot pink: 0xFF69B4)
-                        let pixel = read_pixel(handle, 0, 0);
-                        let expected = 0xFF69B4FF; // RGBA
+                        let pixel = iosurface::read_pixel(handle, 0, 0);
+                        let expected = 0xFF69B4FF_u32; // RGBA
 
                         if pixel != expected {
                             eprintln!("FAILED: Expected pixel 0x{:08X}, got 0x{:08X}",
@@ -542,6 +559,9 @@ fn main() -> Result<()> {
             }
         });
         peer.resume();
+
+        // CRITICAL: Store the peer to keep connection alive!
+        peers_clone.lock().unwrap().push(peer);
     });
     listener.resume();
 
@@ -553,8 +573,9 @@ fn main() -> Result<()> {
     launcher.send(&msg);
     println!("Receiver: Requested sender spawn");
 
-    // 5. Run event loop
+    // 5. Run event loop (keep peers in scope!)
     println!("Receiver: Waiting for sender...");
+    let _keep_alive = peers;
     run_loop();
 }
 ```
@@ -570,6 +591,8 @@ IOSurface:
 // examples/sender.rs
 use termsurf_xpc::*;
 use clap::Parser;
+use std::time::Duration;
+use std::thread;
 
 #[derive(Parser)]
 struct Args {
@@ -586,14 +609,8 @@ fn main() -> Result<()> {
     launcher.resume();
     println!("Sender: Connected to launcher");
 
-    // 2. Claim session, get receiver endpoint
-    let msg = XpcDictionary::new();
-    msg.set_string("action", "claim_session");
-    msg.set_string("session_id", &args.session);
-    let reply = launcher.send_with_reply_sync(&msg)?;
-
-    let receiver_endpoint = reply.get_endpoint("endpoint")
-        .ok_or_else(|| XpcError::Unknown("No endpoint in reply".into()))?;
+    // 2. Claim session with retry (session may not be registered yet)
+    let receiver_endpoint = claim_session_with_retry(&launcher, &args.session)?;
     println!("Sender: Got receiver endpoint");
 
     // 3. Connect directly to receiver
@@ -607,29 +624,78 @@ fn main() -> Result<()> {
     println!("Sender: Connected to receiver");
 
     // 4. Create pink IOSurface (100x100, hot pink 0xFF69B4)
-    let surface = create_iosurface(100, 100)?;
-    fill_with_color(surface, 0xFF, 0x69, 0xB4, 0xFF); // Hot pink, full alpha
+    let surface = iosurface::create_iosurface(100, 100)?;
+    iosurface::fill_with_color(surface, 0xFF, 0x69, 0xB4, 0xFF); // Hot pink
     println!("Sender: Created 100x100 pink IOSurface");
 
     // 5. Send Mach port to receiver
-    let port = unsafe { IOSurfaceCreateMachPort(surface) };
+    let port = iosurface::create_mach_port(surface);
     if port == 0 {
-        return Err(XpcError::Unknown("IOSurfaceCreateMachPort failed".into()));
+        return Err(XpcError::Unknown("create_mach_port failed".into()));
     }
 
     let msg = XpcDictionary::new();
     msg.set_string("action", "send_surface");
     msg.set_mach_send("iosurface_port", port);
-    msg.set_int64("width", 100);
-    msg.set_int64("height", 100);
+    msg.set_i64("width", 100);
+    msg.set_i64("height", 100);
     receiver.send(&msg);
     println!("Sender: Sent IOSurface Mach port");
 
     // 6. Keep alive briefly to ensure message delivered
-    std::thread::sleep(std::time::Duration::from_secs(2));
+    thread::sleep(Duration::from_secs(2));
     println!("Sender: Done");
 
     Ok(())
+}
+
+/// Claim session with exponential backoff retry.
+/// The session may not be registered yet if we start before the launcher
+/// finishes processing the spawn request.
+fn claim_session_with_retry(
+    launcher: &XpcConnection,
+    session_id: &str,
+) -> Result<XpcEndpoint> {
+    let max_retries = 5;
+    let mut delay = Duration::from_millis(100);
+
+    for attempt in 1..=max_retries {
+        let msg = XpcDictionary::new();
+        msg.set_string("action", "claim_session");
+        msg.set_string("session_id", session_id);
+
+        match launcher.send_with_reply_sync(&msg) {
+            Ok(reply) => {
+                // Check for error in reply
+                if let Some(err) = reply.get_string("error") {
+                    println!("Sender: Attempt {}/{}: {}", attempt, max_retries, err);
+                    if attempt < max_retries {
+                        thread::sleep(delay);
+                        delay *= 2; // Exponential backoff
+                        continue;
+                    }
+                    return Err(XpcError::Unknown(err));
+                }
+
+                // Success - get endpoint
+                if let Some(endpoint) = reply.get_endpoint("endpoint") {
+                    return Ok(endpoint);
+                }
+                return Err(XpcError::Unknown("No endpoint in reply".into()));
+            }
+            Err(e) => {
+                println!("Sender: Attempt {}/{}: {:?}", attempt, max_retries, e);
+                if attempt < max_retries {
+                    thread::sleep(delay);
+                    delay *= 2;
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+
+    Err(XpcError::Unknown("Max retries exceeded".into()))
 }
 ```
 
@@ -670,10 +736,39 @@ cd "$(dirname "$0")/.."
 
 echo "=== Building XPC Test Bundle ==="
 
+# Validate required files exist
+echo "Checking prerequisites..."
+if [ ! -f "xpc-service/Info.plist" ]; then
+    echo "ERROR: xpc-service/Info.plist not found!"
+    echo "Create this file with the XPC service configuration."
+    exit 1
+fi
+
+# Validate Info.plist has required keys
+if ! grep -q "com.termsurf.xpc-test" xpc-service/Info.plist; then
+    echo "ERROR: Info.plist missing CFBundleIdentifier 'com.termsurf.xpc-test'"
+    exit 1
+fi
+if ! grep -q "XPCService" xpc-service/Info.plist; then
+    echo "ERROR: Info.plist missing XPCService dictionary"
+    exit 1
+fi
+echo "Prerequisites OK"
+
 # Build all Rust binaries
+echo "Building Rust binaries..."
 cargo build --release --example launcher
 cargo build --release --example receiver
 cargo build --release --example sender
+
+# Verify binaries were created
+for bin in launcher receiver sender; do
+    if [ ! -f "../../target/release/examples/$bin" ]; then
+        echo "ERROR: Failed to build $bin"
+        exit 1
+    fi
+done
+echo "Binaries built successfully"
 
 # Create test app bundle structure
 APP="TestXPC.app"
@@ -709,13 +804,54 @@ cat > "$APP/Contents/Info.plist" << 'EOF'
 EOF
 
 # Sign the XPC service (required for launchd to load it)
+echo "Signing XPC service..."
 codesign --force --sign - \
     "$APP/Contents/XPCServices/com.termsurf.xpc-test.xpc"
 
 # Sign the app
+echo "Signing app bundle..."
 codesign --force --sign - "$APP"
 
+# Validate bundle structure
+echo "Validating bundle structure..."
+ERRORS=0
+
+check_file() {
+    if [ ! -f "$1" ]; then
+        echo "  MISSING: $1"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "  OK: $1"
+    fi
+}
+
+check_file "$APP/Contents/Info.plist"
+check_file "$APP/Contents/MacOS/receiver"
+check_file "$APP/Contents/MacOS/sender"
+check_file "$APP/Contents/XPCServices/com.termsurf.xpc-test.xpc/Contents/Info.plist"
+check_file "$APP/Contents/XPCServices/com.termsurf.xpc-test.xpc/Contents/MacOS/launcher"
+
+if [ $ERRORS -gt 0 ]; then
+    echo "ERROR: Bundle validation failed with $ERRORS errors"
+    exit 1
+fi
+
+# Verify code signing
+echo "Verifying code signatures..."
+codesign --verify --verbose "$APP" 2>&1 || {
+    echo "ERROR: App signature verification failed"
+    exit 1
+}
+codesign --verify --verbose "$APP/Contents/XPCServices/com.termsurf.xpc-test.xpc" 2>&1 || {
+    echo "ERROR: XPC service signature verification failed"
+    exit 1
+}
+
+echo ""
 echo "=== Build complete: $APP ==="
+echo ""
+echo "Bundle structure:"
+find "$APP" -type f | sed 's/^/  /'
 ```
 
 #### Test Script
@@ -894,7 +1030,7 @@ web CLI                    GUI                         Launcher (XPC)           
 
 #### Components
 
-##### 1. Launcher XPC Service (`ts3/termsurf-launcher/`) — Swift, macOS-only
+##### 1. Launcher XPC Service (`ts3/termsurf-launcher/`) — Rust, macOS-only
 
 **Why macOS-only?** The launcher exists solely because XPC is required for Mach
 port transfer. Other platforms don't need it:
@@ -905,76 +1041,123 @@ port transfer. Other platforms don't need it:
 On Linux/Windows, the GUI spawns profile servers directly and passes texture
 handles over existing IPC. No launcher needed.
 
-**Why Swift?** Swift has first-class XPC support (`NSXPCConnection`,
-`NSXPCListener`). No need for Rust FFI bindings to XPC APIs. The launcher is
-small (~100 lines) and macOS-specific, so using a macOS-native language makes
-sense.
+**Why Rust?** Experiment 1 validates that Rust XPC bindings work correctly.
+Using Rust for the launcher maintains consistency with the rest of the codebase
+and avoids introducing a second language. The `termsurf-xpc` crate provides all
+needed functionality.
 
-Minimal XPC service that relays endpoints between GUI and spawned processes:
+The launcher is identical to Experiment 1's launcher, just with production
+service name (`com.termsurf.launcher` instead of `com.termsurf.xpc-test`):
 
-```swift
-// termsurf-launcher/main.swift
-import Foundation
+```rust
+// ts3/termsurf-launcher/src/main.rs
+use termsurf_xpc::*;
+use std::collections::HashMap;
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::env;
 
-class LauncherDelegate: NSObject, NSXPCListenerDelegate {
-    var pendingSessions: [String: NSXPCListenerEndpoint] = [:]
+fn main() -> Result<()> {
+    println!("Launcher: Starting...");
 
-    func listener(_ listener: NSXPCListener,
-                  shouldAcceptNewConnection conn: NSXPCConnection) -> Bool {
-        conn.exportedInterface = NSXPCInterface(with: LauncherProtocol.self)
-        conn.exportedObject = self
-        conn.resume()
-        return true
-    }
+    // Session storage: session_id -> GUI endpoint
+    let sessions: Arc<Mutex<HashMap<String, XpcEndpoint>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
-    func spawnProfile(endpoint: NSXPCListenerEndpoint,
-                      profile: String,
-                      sessionId: String) {
-        pendingSessions[sessionId] = endpoint
-        let task = Process()
-        task.executableURL = Bundle.main.url(forAuxiliaryExecutable: "termsurf-test-sender")
-        task.arguments = ["--session-id", sessionId]
-        try? task.run()
-    }
+    // CRITICAL: Store client connections to keep them alive
+    let clients: Arc<Mutex<Vec<XpcConnection>>> =
+        Arc::new(Mutex::new(Vec::new()));
 
-    func claimSession(sessionId: String) -> NSXPCListenerEndpoint? {
-        return pendingSessions.removeValue(forKey: sessionId)
-    }
+    // Path to test sender binary
+    let exe_path = env::current_exe().expect("Failed to get exe path");
+    let exe_dir = exe_path.parent().expect("Failed to get exe directory");
+    let sender_path = exe_dir.join("termsurf-test-sender");
+
+    // Create listener for this XPC service
+    let listener = XpcListener::new_mach_service("com.termsurf.launcher")?;
+
+    let sessions_clone = sessions.clone();
+    let clients_clone = clients.clone();
+    let sender_path_clone = sender_path.clone();
+
+    set_new_connection_handler(&listener, move |conn| {
+        println!("Launcher: New connection");
+
+        let sessions = sessions_clone.clone();
+        let sender_path = sender_path_clone.clone();
+
+        set_event_handler(&conn, move |event| {
+            match event {
+                Ok(msg) => {
+                    let action = msg.get_string("action").unwrap_or_default();
+
+                    match action.as_str() {
+                        "spawn_profile" => {
+                            let session_id = msg.get_string("session_id")
+                                .expect("Missing session_id");
+                            let endpoint = msg.get_endpoint("gui_endpoint")
+                                .expect("Missing gui_endpoint");
+
+                            // Store endpoint for sender to claim
+                            sessions.lock().unwrap().insert(session_id.clone(), endpoint);
+
+                            // Spawn test sender as child process
+                            match Command::new(&sender_path)
+                                .args(["--session-id", &session_id])
+                                .spawn()
+                            {
+                                Ok(_) => println!("Launcher: Spawned sender for {}", session_id),
+                                Err(e) => eprintln!("Launcher: Failed to spawn: {}", e),
+                            }
+                        }
+
+                        "claim_session" => {
+                            let session_id = msg.get_string("session_id")
+                                .expect("Missing session_id");
+
+                            let endpoint = sessions.lock().unwrap().remove(&session_id);
+
+                            let reply = XpcDictionary::create_reply(&msg)
+                                .expect("Failed to create reply");
+
+                            if let Some(ep) = endpoint {
+                                reply.set_endpoint("endpoint", ep);
+                            } else {
+                                reply.set_string("error", "session not found");
+                            }
+
+                            conn.send(&reply);
+                        }
+
+                        _ => eprintln!("Launcher: Unknown action: {}", action),
+                    }
+                }
+                Err(e) => eprintln!("Launcher: Connection error: {}", e),
+            }
+        });
+
+        conn.resume();
+
+        // CRITICAL: Store connection to keep it alive
+        clients_clone.lock().unwrap().push(conn);
+    });
+
+    listener.resume();
+    println!("Launcher: Running...");
+    run_loop();
 }
-
-let delegate = LauncherDelegate()
-let listener = NSXPCListener(machServiceName: "com.termsurf.launcher")
-listener.delegate = delegate
-listener.resume()
-RunLoop.main.run()
 ```
 
 **Info.plist:** Registers as `com.termsurf.launcher`
 
-**Sandbox Note:** XPC services are sandboxed by default and may not be able to
-spawn child processes. The launcher needs one of:
+**Sandbox Note:** XPC services are sandboxed by default. To spawn child
+processes, disable the sandbox via entitlements:
 
-- **Option A:** Disable sandbox via entitlements:
-  ```xml
-  <!-- termsurf-launcher.entitlements -->
-  <key>com.apple.security.app-sandbox</key>
-  <false/>
-  ```
-
-- **Option B:** Keep sandbox but add process execution entitlement:
-  ```xml
-  <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
-  <array>
-      <string>com.apple.runningboard</string>
-  </array>
-  ```
-
-- **Option C:** Restructure so GUI spawns test sender directly (launcher only
-  relays endpoints, never spawns). This avoids sandbox issues entirely but
-  changes the architecture slightly.
-
-For this experiment, **Option A** (disable sandbox) is simplest. Production may
-want to revisit with tighter security.
+```xml
+<!-- termsurf-launcher.entitlements -->
+<key>com.apple.security.app-sandbox</key>
+<false/>
+```
 
 ##### 2. Test Sender (`ts3/termsurf-test-sender/`)
 
@@ -1029,15 +1212,15 @@ handles everything internally.
 
 #### Files to Create
 
-| File                                                   | Purpose                              |
-| ------------------------------------------------------ | ------------------------------------ |
-| `ts3/termsurf-launcher/main.swift`                     | XPC service implementation (Swift)   |
-| `ts3/termsurf-launcher/LauncherProtocol.swift`         | XPC protocol definition              |
-| `ts3/termsurf-launcher/Info.plist`                     | XPC service registration             |
-| `ts3/termsurf-launcher/termsurf-launcher.entitlements` | Sandbox disabled                     |
-| `ts3/termsurf-test-sender/Cargo.toml`                  | Test sender crate manifest           |
-| `ts3/termsurf-test-sender/src/main.rs`                 | IOSurface creation + send            |
-| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`        | XPC client + listener (Rust via FFI) |
+| File                                                   | Purpose                            |
+| ------------------------------------------------------ | ---------------------------------- |
+| `ts3/termsurf-launcher/Cargo.toml`                     | Launcher crate manifest            |
+| `ts3/termsurf-launcher/src/main.rs`                    | XPC service implementation (Rust)  |
+| `ts3/termsurf-launcher/Info.plist`                     | XPC service registration           |
+| `ts3/termsurf-launcher/termsurf-launcher.entitlements` | Sandbox disabled                   |
+| `ts3/termsurf-test-sender/Cargo.toml`                  | Test sender crate manifest         |
+| `ts3/termsurf-test-sender/src/main.rs`                 | IOSurface creation + send          |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`        | XPC client + listener              |
 
 #### Files to Modify
 
@@ -1048,6 +1231,184 @@ handles everything internally.
 | `ts3/wezterm-gui/src/termwindow/render/*.rs`       | Render stretched texture        |
 | `ts3/Cargo.toml`                                   | Add workspace members           |
 | Build scripts                                      | Bundle XPC service in app       |
+
+#### IOSurface → wgpu Import
+
+The GUI receives a Mach port and must import it as a wgpu texture. This uses
+cef-rs's existing IOSurface import code from `cef/src/osr_texture_import/`.
+
+**Step-by-step import:**
+
+```rust
+// In webview_xpc.rs
+
+use cef::osr_texture_import::IOSurfaceImporter;
+
+/// Import IOSurface from Mach port into wgpu texture
+fn import_iosurface(
+    device: &wgpu::Device,
+    port: mach_port_t,
+    width: u32,
+    height: u32,
+) -> Option<wgpu::Texture> {
+    // 1. Reconstruct IOSurface handle from Mach port
+    let handle = unsafe { IOSurfaceLookupFromMachPort(port) };
+    if handle.is_null() {
+        return None;
+    }
+
+    // 2. Create importer (caches Metal texture)
+    let importer = IOSurfaceImporter::new(
+        device,
+        handle,
+        wgpu::TextureFormat::Bgra8UnormSrgb,  // sRGB for correct gamma
+        width,
+        height,
+    )?;
+
+    // 3. Get wgpu texture
+    Some(importer.texture().clone())
+}
+```
+
+**Critical: Use sRGB format.** The IOSurface from CEF (and our test texture) is
+in linear color space. Using `Bgra8Unorm` (no sRGB) would result in incorrect
+gamma — colors appear washed out. Always use `Bgra8UnormSrgb` for the texture
+view.
+
+**Metal interop:** The `IOSurfaceImporter` wraps Metal's
+`newTextureWithDescriptor:iosurface:plane:` API, which creates a Metal texture
+backed by the IOSurface memory. wgpu can then use this texture via its Metal
+backend. No pixel copying occurs — it's zero-copy GPU-to-GPU sharing.
+
+#### Texture Lifecycle
+
+When a new IOSurface is received (e.g., on resize), the old texture must be
+released before importing the new one. GPU resources aren't automatically
+garbage collected.
+
+**State to track:**
+
+```rust
+struct WebviewOverlay {
+    pane_id: PaneId,
+    texture: wgpu::Texture,
+    texture_view: wgpu::TextureView,
+    importer: IOSurfaceImporter,  // Holds Metal texture reference
+    width: u32,
+    height: u32,
+}
+
+struct WebviewState {
+    overlays: HashMap<PaneId, WebviewOverlay>,
+}
+```
+
+**On new IOSurface received:**
+
+```rust
+fn update_overlay(
+    &mut self,
+    device: &wgpu::Device,
+    pane_id: PaneId,
+    port: mach_port_t,
+    width: u32,
+    height: u32,
+) {
+    // 1. Remove old overlay (drops texture, importer, frees GPU memory)
+    if let Some(old) = self.overlays.remove(&pane_id) {
+        drop(old);  // Explicit for clarity
+    }
+
+    // 2. Import new IOSurface
+    if let Some(new_overlay) = self.create_overlay(device, pane_id, port, width, height) {
+        self.overlays.insert(pane_id, new_overlay);
+    }
+}
+```
+
+**Why explicit drop matters:** The `IOSurfaceImporter` holds a reference to the
+Metal texture, which holds a reference to the IOSurface. If you don't drop the
+old importer before creating a new one, you may hit memory limits on systems
+with limited VRAM.
+
+**For this experiment:** Since we only send one test texture (no resize), this
+is less critical. But the code should be correct from the start to avoid bugs
+when CEF sends new textures on every paint.
+
+#### Connection Management
+
+The GUI must maintain XPC connections and state across multiple webview
+lifecycles.
+
+**State required:**
+
+```rust
+struct XpcManager {
+    // Connection to launcher (persistent, reused for all webviews)
+    launcher: Option<XpcConnection>,
+
+    // Anonymous listener for profile servers to connect
+    listener: XpcListener,
+    listener_endpoint: XpcEndpoint,
+
+    // CRITICAL: Store peer connections to keep them alive
+    peers: Arc<Mutex<Vec<XpcConnection>>>,
+
+    // Active overlays per pane
+    overlays: HashMap<PaneId, WebviewOverlay>,
+
+    // Pending sessions (waiting for profile server to connect)
+    pending_sessions: HashMap<SessionId, PaneId>,
+}
+```
+
+**Connection lifecycle:**
+
+1. **GUI startup:**
+   - Create anonymous XPC listener
+   - Get endpoint from listener
+   - Connect to launcher (lazy, on first webview request)
+
+2. **`open_webview` request:**
+   - Generate unique session ID
+   - Store in `pending_sessions`
+   - Send `spawn_profile` to launcher with endpoint + session ID
+
+3. **Profile server connects:**
+   - Received in `set_new_connection_handler` callback
+   - **CRITICAL:** Store connection in `peers` to keep it alive
+   - Wait for `session_id` message to match with `pending_sessions`
+   - Remove from `pending_sessions`, associate connection with pane
+
+4. **IOSurface received:**
+   - Look up pane from connection
+   - Import texture, store in `overlays`
+
+5. **`close_webview` request:**
+   - Remove from `overlays` (drops texture)
+   - Drop peer connection (cancels XPC connection)
+   - Profile server receives disconnect, exits
+
+**Critical pattern reminder:** Every connection received in
+`set_new_connection_handler` must be stored. If you don't store it, the
+connection is canceled when the handler returns:
+
+```rust
+// WRONG - connection canceled immediately!
+set_new_connection_handler(&listener, |peer| {
+    set_event_handler(&peer, |event| { ... });
+    peer.resume();
+    // peer dropped here → connection canceled
+});
+
+// CORRECT - store peer to keep it alive
+set_new_connection_handler(&listener, move |peer| {
+    set_event_handler(&peer, |event| { ... });
+    peer.resume();
+    peers_clone.lock().unwrap().push(peer);  // Keep alive!
+});
+```
 
 #### Success Criteria
 

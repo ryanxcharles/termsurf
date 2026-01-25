@@ -58,15 +58,40 @@ where
 /// For XPC service listeners, each incoming client gets its own connection.
 /// For anonymous listeners, this receives peer connections.
 ///
+/// # CRITICAL: Peer Connection Lifetime
+///
+/// **You MUST store the peer connection to keep it alive.** When the handler
+/// returns, the `XpcConnection` is dropped, which cancels the connection.
+/// If you don't store the peer, you'll see "connection interrupted" errors
+/// and messages won't be delivered.
+///
 /// # Example
 ///
 /// ```ignore
-/// set_new_connection_handler(&listener, |peer| {
+/// // Storage for peer connections - REQUIRED
+/// let peers: Arc<Mutex<Vec<XpcConnection>>> = Arc::new(Mutex::new(Vec::new()));
+/// let peers_clone = peers.clone();
+///
+/// set_new_connection_handler(&listener, move |peer| {
 ///     println!("New connection!");
 ///     set_event_handler(&peer, |event| {
 ///         // Handle messages from this peer
 ///     });
 ///     peer.resume();
+///
+///     // CRITICAL: Store the peer to keep it alive!
+///     peers_clone.lock().unwrap().push(peer);
+/// });
+/// ```
+///
+/// # Common Mistake
+///
+/// ```ignore
+/// // WRONG - peer is dropped when handler returns, connection canceled!
+/// set_new_connection_handler(&listener, |peer| {
+///     set_event_handler(&peer, |event| { ... });
+///     peer.resume();
+///     // peer dropped here → connection immediately canceled
 /// });
 /// ```
 pub fn set_new_connection_handler<F>(listener: &XpcListener, handler: F)
