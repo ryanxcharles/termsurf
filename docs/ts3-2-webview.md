@@ -296,11 +296,14 @@ coordinator (web CLI)
     "engine": "/path/to/termsurf-web",
     "profile": "default",
     "url": "https://google.com",
+    "pane_id": 0,
     "width": 800,
     "height": 600
   }
 }
 ```
+
+Note: `pane_id` specifies which terminal pane to render the webview in.
 
 The `engine` field specifies which browser engine executable to run. This makes
 the protocol generic - any browser engine that implements the profile server
@@ -335,32 +338,42 @@ internal to the GUI.
    - Add `open_webview` action handler
    - Implement profile server spawning logic
    - Implement profile server connection management
-   - Track which profile servers are running
+   - Track which profile servers are running by (engine, profile) tuple
 
 2. **Add profile server management to GUI**
    - Spawn profile server process when needed
+   - **Socket path convention**: `~/.config/termsurf/sockets/{profile}.sock`
+   - **Retry logic**: Wait for socket to exist with exponential backoff (up to
+     5s)
    - Connect to profile server socket
    - Send `open` request, receive IOSurface ID
-   - Store IOSurface ID in overlay state
+   - Store IOSurface ID in overlay state for the specified `pane_id`
 
-3. **Simplify coordinator** (`termsurf-web/src/main.rs`)
+3. **Modify profile server to wait for first paint**
+   (`termsurf-web/src/main.rs`)
+   - After creating browser, wait for first `on_accelerated_paint` callback
+   - Only then return the IOSurface ID in the `open` response
+   - This ensures the IOSurface ID is valid, not 0 or stale
+
+4. **Simplify coordinator** (`termsurf-web/src/main.rs`)
    - Remove profile server spawning code
    - Remove profile server socket connection
    - Only connect to GUI socket
    - Send `open_webview` instead of `display_webview`
+   - Include `pane_id` from `WEZTERM_PANE` environment variable
 
-4. **Test IOSurface lookup**
+5. **Test IOSurface lookup**
    - Re-enable the `IOSurfaceLookup()` code in `draw.rs`
    - Verify if lookup succeeds now that GUI is ancestor
 
 #### Files to Modify
 
-| File                                           | Changes                                                            |
-| ---------------------------------------------- | ------------------------------------------------------------------ |
-| `wezterm-gui/src/termwindow/webview_socket.rs` | Add `open_webview` handler, profile server spawning                |
-| `termsurf-web/src/main.rs`                     | Remove profile server spawning, simplify to GUI-only communication |
-| `wezterm-gui/src/termwindow/render/draw.rs`    | Re-enable IOSurface lookup code                                    |
-| `wezterm-gui/src/termwindow/webgpu.rs`         | Re-add webview render pipeline                                     |
+| File                                           | Changes                                                          |
+| ---------------------------------------------- | ---------------------------------------------------------------- |
+| `wezterm-gui/src/termwindow/webview_socket.rs` | Add `open_webview` handler, profile server spawning, retry logic |
+| `termsurf-web/src/main.rs`                     | Wait for first paint in `open`; simplify coordinator to GUI-only |
+| `wezterm-gui/src/termwindow/render/draw.rs`    | Re-enable IOSurface lookup code                                  |
+| `wezterm-gui/src/termwindow/webgpu.rs`         | Re-add webview render pipeline                                   |
 
 #### Success Criteria
 
@@ -378,10 +391,32 @@ If `IOSurfaceLookup()` still returns NULL after this change:
 - Process ancestry does not enable IOSurface sharing
 - Must fall back to Mach ports, XPC, or shared memory
 
+#### Key Assumption
+
+This experiment tests whether **grandparent** process ancestry enables IOSurface
+lookup:
+
+```
+Chromium internal:  Browser → GPU (parent → child, known to work)
+Our architecture:   GUI → Profile Server → GPU (grandparent → grandchild, untested)
+```
+
+Chromium's browser process is the **direct parent** of the GPU process. In our
+architecture, the GUI is the **grandparent** (two hops away). This is the core
+hypothesis being tested - if it fails, grandparent relationships don't enable
+IOSurface sharing.
+
+#### Deferred Items
+
+- **Close/cleanup handling**: When coordinator disconnects or sends
+  `close_webview`, need to close browser and potentially shut down idle profile
+  servers. Defer to later experiment.
+- **Error handling**: Engine not found, profile server crash, CEF init failure.
+  Add basic error responses but defer comprehensive handling.
+
 #### Notes
 
-- Profile server code remains mostly unchanged (still creates CEF browser,
-  returns IOSurface ID)
+- Profile server code changes slightly (wait for first paint before responding)
 - Socket protocol between GUI and profile server remains the same
 - Only the spawning relationship changes
 - Coordinator's role becomes minimal (just a CLI that talks to GUI)
