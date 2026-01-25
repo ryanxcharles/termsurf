@@ -95,12 +95,12 @@ impl XpcListener {
     ///
     /// The endpoint can be sent to other processes via XPC message.
     /// They can then use `XpcConnection::from_endpoint()` to connect.
-    pub fn get_endpoint(&self) -> Result<ffi::xpc_endpoint_t> {
+    pub fn get_endpoint(&self) -> Result<crate::XpcEndpoint> {
         let endpoint = unsafe { ffi::xpc_endpoint_create(self.raw) };
         if endpoint.is_null() {
             return Err(XpcError::NullPointer("xpc_endpoint_create"));
         }
-        Ok(endpoint)
+        Ok(unsafe { crate::XpcEndpoint::from_raw(endpoint) })
     }
 }
 

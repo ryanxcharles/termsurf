@@ -40,11 +40,11 @@ impl XpcConnection {
     ///
     /// This is used after receiving an endpoint via XPC message to establish
     /// a direct connection to the original listener.
-    pub fn from_endpoint(endpoint: ffi::xpc_endpoint_t) -> Result<Self> {
+    pub fn from_endpoint(endpoint: crate::XpcEndpoint) -> Result<Self> {
         if endpoint.is_null() {
             return Err(XpcError::NullPointer("XpcConnection::from_endpoint"));
         }
-        let raw = unsafe { ffi::xpc_connection_create_from_endpoint(endpoint) };
+        let raw = unsafe { ffi::xpc_connection_create_from_endpoint(endpoint.as_raw()) };
         if raw.is_null() {
             return Err(XpcError::NullPointer(
                 "xpc_connection_create_from_endpoint",
@@ -166,12 +166,12 @@ impl XpcConnection {
     ///
     /// The endpoint can be sent to other processes, allowing them to
     /// establish a direct connection back to this connection's listener.
-    pub fn create_endpoint(&self) -> Result<ffi::xpc_endpoint_t> {
+    pub fn create_endpoint(&self) -> Result<crate::XpcEndpoint> {
         let endpoint = unsafe { ffi::xpc_endpoint_create(self.raw) };
         if endpoint.is_null() {
             return Err(XpcError::NullPointer("xpc_endpoint_create"));
         }
-        Ok(endpoint)
+        Ok(unsafe { crate::XpcEndpoint::from_raw(endpoint) })
     }
 }
 

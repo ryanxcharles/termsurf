@@ -107,10 +107,10 @@ impl XpcDictionary {
     }
 
     /// Set an XPC endpoint.
-    pub fn set_endpoint(&self, key: &str, endpoint: ffi::xpc_endpoint_t) {
+    pub fn set_endpoint(&self, key: &str, endpoint: crate::XpcEndpoint) {
         let key_c = CString::new(key).unwrap();
         unsafe {
-            ffi::xpc_dictionary_set_value(self.raw, key_c.as_ptr(), endpoint);
+            ffi::xpc_dictionary_set_value(self.raw, key_c.as_ptr(), endpoint.as_raw());
         }
     }
 
@@ -160,7 +160,7 @@ impl XpcDictionary {
     }
 
     /// Get an XPC endpoint.
-    pub fn get_endpoint(&self, key: &str) -> Option<ffi::xpc_endpoint_t> {
+    pub fn get_endpoint(&self, key: &str) -> Option<crate::XpcEndpoint> {
         let key_c = CString::new(key).unwrap();
         let value = unsafe { ffi::xpc_dictionary_get_value(self.raw, key_c.as_ptr()) };
         if value.is_null() {
@@ -170,7 +170,8 @@ impl XpcDictionary {
             return None;
         }
         // Retain since get_value doesn't transfer ownership
-        Some(unsafe { ffi::xpc_retain(value) })
+        let retained = unsafe { ffi::xpc_retain(value) };
+        Some(unsafe { crate::XpcEndpoint::from_raw(retained) })
     }
 }
 

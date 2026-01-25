@@ -109,8 +109,41 @@ pub use runloop::{dispatch_main, run_loop};
 // Re-export types for convenience
 #[cfg(target_os = "macos")]
 pub use ffi::mach_port_t;
+
+/// A Send-safe wrapper around XPC endpoint.
+///
+/// XPC endpoints are opaque handles that can be safely transferred between
+/// threads and processes. This wrapper makes the raw pointer Send + Sync.
 #[cfg(target_os = "macos")]
-pub type XpcEndpoint = ffi::xpc_endpoint_t;
+#[derive(Clone, Copy)]
+pub struct XpcEndpoint(ffi::xpc_endpoint_t);
+
+#[cfg(target_os = "macos")]
+impl XpcEndpoint {
+    /// Create from raw pointer.
+    ///
+    /// # Safety
+    /// The pointer must be a valid xpc_endpoint_t.
+    pub unsafe fn from_raw(ptr: ffi::xpc_endpoint_t) -> Self {
+        Self(ptr)
+    }
+
+    /// Get the raw pointer.
+    pub fn as_raw(&self) -> ffi::xpc_endpoint_t {
+        self.0
+    }
+
+    /// Check if the endpoint is null.
+    pub fn is_null(&self) -> bool {
+        self.0.is_null()
+    }
+}
+
+// XPC endpoints are thread-safe handles
+#[cfg(target_os = "macos")]
+unsafe impl Send for XpcEndpoint {}
+#[cfg(target_os = "macos")]
+unsafe impl Sync for XpcEndpoint {}
 
 // Stub implementations for non-macOS platforms
 #[cfg(not(target_os = "macos"))]
