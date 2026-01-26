@@ -95,6 +95,7 @@ $ web --profile myprofile google.com
 
 - Terminal pane shows Google's homepage (not pink)
 - Page is static (no scrolling, clicking, or typing — display only)
+- Page is essentially a screenshot of the first render
 - `~/.config/termsurf/cef/myprofile/` exists with CEF data files
 - Ctrl+C exits cleanly
 
@@ -142,12 +143,12 @@ web CLI                    GUI                      Launcher              termsu
 CEF inherits Chromium's multi-process design. When `termsurf-profile` calls
 `cef_initialize()`, CEF spawns several child subprocesses:
 
-| Subprocess | Purpose |
-| ---------- | ------- |
-| GPU | Hardware-accelerated rendering |
-| Renderer | V8 JavaScript, DOM, layout |
-| Utility | Network, audio, etc. |
-| Alerts | System dialogs (macOS only) |
+| Subprocess | Purpose                        |
+| ---------- | ------------------------------ |
+| GPU        | Hardware-accelerated rendering |
+| Renderer   | V8 JavaScript, DOM, layout     |
+| Utility    | Network, audio, etc.           |
+| Alerts     | System dialogs (macOS only)    |
 
 These subprocesses run a **helper binary** — a minimal executable that calls
 `execute_process()` and lets CEF determine the subprocess role from command-line
@@ -175,8 +176,8 @@ TermSurf.app/Contents/
 #### Profile Isolation Strategy
 
 **Why ts3 succeeds where ts2 couldn't:** ts2 discovered that CEF's per-browser
-request contexts with custom `cache_path` don't work reliably. ts2 was forced
-to use a single global context for all browsers.
+request contexts with custom `cache_path` don't work reliably. ts2 was forced to
+use a single global context for all browsers.
 
 ts3 solves this through **process separation**. Each profile runs in its own
 `termsurf-profile` process with its own `cef_initialize()` call and its own
@@ -272,7 +273,8 @@ fn main() {
     // 4. Initialize CEF with profile-specific settings
     let settings = Settings {
         windowless_rendering_enabled: 1,
-        external_message_pump: 1,       // Integrate with CFRunLoop
+        // No external_message_pump — we call run_message_loop() below,
+        // which means CEF owns the event loop. No competing loop exists.
         no_sandbox: 1,                  // Required for development
         root_cache_path: CefString::from(cache_path.to_str().unwrap()),
         browser_subprocess_path: CefString::from(helper_path.to_str().unwrap()),
@@ -280,7 +282,7 @@ fn main() {
         ..Default::default()
     };
 
-    let mut app = create_app(); // BrowserProcessHandler for message pump
+    let mut app = create_app();
     cef::initialize(
         Some(cef_args.as_main_args()),
         Some(&settings),
@@ -312,13 +314,19 @@ fn main() {
         None, // request_context (uses global with our root_cache_path)
     );
 
-    // 7. Run CEF message loop
+    // 7. Install signal handler for clean shutdown
+    ctrlc::set_handler(|| {
+        cef::quit_message_loop();
+    }).expect("Failed to set Ctrl+C handler");
+
+    // 8. Run CEF message loop (blocks until quit_message_loop is called)
     cef::run_message_loop();
     cef::shutdown();
 }
 
 struct ProfileRenderHandler {
     gui: Arc<XpcConnection>,
+    last_handle: AtomicPtr<c_void>, // Track IOSurface handle for dedup
 }
 
 impl RenderHandler for ProfileRenderHandler {
@@ -352,8 +360,16 @@ impl RenderHandler for ProfileRenderHandler {
     ) {
         let Some(info) = info else { return };
 
+        // Dedup: only send when IOSurface handle changes (avoids flooding
+        // XPC with redundant Mach port transfers on every frame)
+        let handle = info.shared_texture_io_surface as *mut c_void;
+        let prev = self.last_handle.swap(handle, Ordering::Relaxed);
+        if handle == prev {
+            return;
+        }
+
         // Create Mach port from IOSurface
-        let port = unsafe { IOSurfaceCreateMachPort(info.shared_texture_io_surface) };
+        let port = termsurf_xpc::iosurface::create_mach_port(info.shared_texture_io_surface);
         if port == 0 { return; }
 
         // Send to GUI via XPC
@@ -372,10 +388,29 @@ impl RenderHandler for ProfileRenderHandler {
 - Loads CEF framework via `LibraryLoader` (macOS requirement)
 - Calls `execute_process()` first for subprocess handling
 - Sets `browser_subprocess_path` to shared helper binary
-- Sets `external_message_pump: 1` for CFRunLoop integration
+- Uses `run_message_loop()` (no external pump needed — no competing event loop)
 - Implements `view_rect()` and `screen_info()` for proper DPI handling
 - Uses `shared_texture_enabled: 1` in WindowInfo for IOSurface
 - Sets `windowless_frame_rate: 60`
+- Deduplicates `on_accelerated_paint` by tracking IOSurface handle changes
+
+**Paint Callback Optimization:**
+
+CEF calls `on_accelerated_paint` on every frame — cursor blinks, animations,
+and repaints all trigger it. ts2 and the cef-rs OSR example process every paint
+without deduplication because they are in-process (no IPC overhead). In ts3,
+each paint would create a Mach port via `IOSurfaceCreateMachPort` and transfer
+it over XPC to another process. At 60fps, that's 60 Mach port transfers/second
+even for a static page.
+
+The dedup check (`last_handle` comparison) avoids this: when CEF repaints into
+the same IOSurface buffer, the handle pointer doesn't change, so we skip the
+XPC send. With CEF's double-buffering (alternating IOSurface handles), we still
+send on buffer swaps, which is acceptable for MVP.
+
+Future optimization: have the GUI read directly from a shared IOSurface without
+per-frame Mach port transfers (the GUI imports once and re-reads the same
+surface).
 
 ##### 2. CEF Helper Binary
 
@@ -446,9 +481,8 @@ Settings {
     // Enable off-screen rendering (no visible window)
     windowless_rendering_enabled: 1,
 
-    // Use external message pump (CFRunLoop on macOS)
-    // Required for proper event loop integration
-    external_message_pump: 1,
+    // No external_message_pump — termsurf-profile has no competing event loop,
+    // so CEF owns the loop via run_message_loop().
 
     // Path to shared helper binary
     browser_subprocess_path: ".../TermSurf Helper.app/Contents/MacOS/TermSurf Helper",
@@ -497,14 +531,91 @@ experiment will read the actual DPI from the GUI.
 
 #### Message Pump
 
-ts2 uses `external_message_pump: 1`, which means CEF doesn't run its own event
-loop. Instead, it calls `on_schedule_message_pump_work(delay_ms)` on the
-BrowserProcessHandler, and we schedule a CFRunLoop timer to call
-`cef::do_message_loop_work()` at the right time.
+`termsurf-profile` uses `cef::run_message_loop()`, which lets CEF own and manage
+the event loop. This is the correct choice because `termsurf-profile` is a
+dedicated CEF process with no competing event loop (unlike ts2, which shares a
+thread with WezTerm's GUI).
 
-For this experiment, we can use `cef::run_message_loop()` as a simpler
-alternative (CEF manages its own loop). If this causes issues with XPC event
-delivery, we switch to external message pump with CFRunLoop integration.
+**Why NOT `external_message_pump`:** ts2 and the cef-rs OSR example both use
+`external_message_pump: 1` because they integrate CEF into an existing
+application loop (WezTerm's GUI loop and winit's event loop, respectively). They
+must call `do_message_loop_work()` on a timer. `termsurf-profile` has no such
+constraint — XPC uses GCD dispatch queues that run independently of CEF's
+message loop, so there is no conflict.
+
+#### Mach Port Lifecycle
+
+Mach ports are a finite kernel resource. Leaking them causes
+`__THE_SYSTEM_HAS_NO_PORTS_AVAILABLE__` crashes (Chrome has hit this). The
+sender and receiver have different ownership rules:
+
+**Sender side (`termsurf-profile`):**
+
+- `IOSurfaceCreateMachPort()` creates a send right
+- `xpc_dictionary_set_mach_send()` moves the port into XPC — XPC takes
+  ownership, sender does NOT need to deallocate
+
+**Receiver side (GUI):**
+
+- `xpc_dictionary_copy_mach_send()` creates a NEW send right — **caller MUST
+  deallocate** via `mach_port_deallocate(mach_task_self(), port)`
+- After `IOSurfaceLookupFromMachPort(port)`, the IOSurface is referenced
+  independently through the IOSurfaceRef — the Mach port can (and must) be
+  deallocated immediately
+
+**Required changes to `termsurf-xpc`:**
+
+1. **`termsurf-xpc/src/ffi.rs`** — Add FFI bindings:
+
+   ```rust
+   extern "C" {
+       pub fn mach_port_deallocate(task: mach_port_t, name: mach_port_t) -> kern_return_t;
+       pub fn mach_task_self_() -> mach_port_t; // Note: actual symbol has trailing _
+   }
+   ```
+
+2. **`termsurf-xpc/src/iosurface.rs`** — Add deallocation helper:
+
+   ```rust
+   pub fn deallocate_mach_port(port: mach_port_t) {
+       unsafe {
+           ffi::mach_port_deallocate(ffi::mach_task_self_(), port);
+       }
+   }
+   ```
+
+3. **GUI receiver** (`webview_xpc.rs`) — After `IOSurfaceLookupFromMachPort`
+   succeeds, immediately call `termsurf_xpc::iosurface::deallocate_mach_port(port)`.
+   The IOSurface is now referenced through the IOSurfaceRef, not the Mach port.
+
+4. **GUI import caching** — Instead of reimporting from Mach port every frame
+   (as `draw.rs:218` currently does), import once when a new surface arrives and
+   cache the wgpu texture/bind group. Only re-import when a NEW Mach port
+   arrives. This eliminates the need to keep Mach ports alive across frames.
+
+#### Clean Shutdown
+
+`cef::run_message_loop()` blocks indefinitely. Without a signal handler, Ctrl+C
+sends SIGINT which terminates the process without running `cef::shutdown()`,
+risking profile directory corruption (incomplete writes to cookies, local
+storage, etc.).
+
+**Solution:** Install a signal handler that calls `cef::quit_message_loop()`
+(which is thread-safe per CEF docs). After `run_message_loop()` returns,
+`cef::shutdown()` runs for clean cleanup.
+
+```rust
+// In main(), before run_message_loop():
+ctrlc::set_handler(|| {
+    // Thread-safe: quit_message_loop posts to CEF's message loop
+    cef::quit_message_loop();
+}).expect("Failed to set Ctrl+C handler");
+
+cef::run_message_loop();
+cef::shutdown();
+```
+
+Add `ctrlc` to `termsurf-profile/Cargo.toml` dependencies.
 
 #### Files to Create
 
@@ -512,6 +623,14 @@ delivery, we switch to external message pump with CFRunLoop integration.
 | ---------------------------------- | ------------------ |
 | `ts3/termsurf-profile/Cargo.toml`  | Package manifest   |
 | `ts3/termsurf-profile/src/main.rs` | CEF profile server |
+
+**Dependencies for `termsurf-profile/Cargo.toml`:**
+
+- `cef` (from workspace)
+- `clap` with `derive` feature
+- `termsurf-xpc` (from workspace — XPC session claiming, Mach port helpers)
+- `ctrlc` (signal handling for clean shutdown)
+- `dirs` (config directory resolution)
 
 #### Files to Modify
 
@@ -522,6 +641,8 @@ delivery, we switch to external message pump with CFRunLoop integration.
 | `ts3/wezterm-gui/src/termwindow/webview_socket.rs` | Extract profile from request                    |
 | `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`    | Pass profile/URL to launcher                    |
 | `ts3/Cargo.toml`                                   | Add termsurf-profile to workspace               |
+| `ts3/termsurf-xpc/src/ffi.rs`                      | Add `mach_port_deallocate` and `mach_task_self` FFI bindings |
+| `ts3/termsurf-xpc/src/iosurface.rs`                | Add `deallocate_mach_port()` helper             |
 | Build scripts                                      | Bundle termsurf-profile and helper in app       |
 
 #### Success Criteria
