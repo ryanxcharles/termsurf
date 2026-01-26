@@ -77,11 +77,21 @@ Once basic webpage rendering with profiles works:
 
 ### Experiment 1: CEF Profile Server (Display Only)
 
-**Status:** PLANNED
+**Status:** FAILED
 
 **Goal:** Create `termsurf-profile`, a CEF-based profile server that renders
 real webpages and sends them to the GUI via XPC. Verify that profile directories
 are created correctly.
+
+**Failure:** The implementation was completed (new `termsurf-profile` package,
+URL/profile threading through the pipeline, updated build scripts), but the app
+still displays the pink 100x100 test surface instead of a real webpage. The root
+cause is that macOS caches XPC service registrations — launchd continues loading
+the old `termsurf-launcher` binary (from a previous `LauncherTest.app` build)
+which spawns `termsurf-test-sender` instead of the new `termsurf-profile`. Even
+clean rebuilds with `--clean` do not clear the stale XPC service cache. The
+fundamental issue is that the XPC service discovery mechanism is not under the
+app's control, making it unreliable for development iteration.
 
 **Scope:** Display only. No keyboard input, no mouse input, no scrolling, no
 clicking. The page renders once and remains static. Interactivity is a separate
