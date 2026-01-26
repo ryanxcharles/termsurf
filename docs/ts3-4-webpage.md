@@ -920,3 +920,123 @@ The logs will show which step in the pipeline failed:
 - Profile log but no CEF init → CEF framework failed to load
 - CEF init but no paint → browser didn't render
 - Paint but no Mach port → IOSurface transfer failed
+
+---
+
+### Experiment 4: Restore launchd Mach Service Registration
+
+**Status:** PLANNED
+
+**Goal:** Re-register the launcher as a launchd Mach service in the build
+scripts, restoring the mechanism that made the pink screen work in Experiment 2.
+
+#### Root Cause
+
+The pink screen worked because `run-test.sh` creates a launchd plist at
+`/tmp/com.termsurf.launcher.plist` and loads it via `launchctl load`. This tells
+launchd: "when someone connects to the Mach service `com.termsurf.launcher`,
+launch this binary." The launcher code uses `xpc_connection_create_mach_service`
+on both sides (listener and client), which requires this launchd registration.
+
+When the code was moved into `build-debug.sh`, the registration was removed
+(`launchctl bootout`) but never re-created. The launcher binary was placed in
+`Contents/XPCServices/` (embedded XPC service model), but the code still uses
+Mach service APIs that talk to launchd's registry — not embedded service
+discovery. Result: launchd says "never heard of it," connection invalid, launcher
+never starts.
+
+#### Fix
+
+Add launchd plist creation and `launchctl bootstrap` to the build scripts, after
+bundling and signing, before launching. This mirrors what `run-test.sh` does.
+
+##### 1. Build scripts: register Mach service with launchd
+
+**Files:** `ts3/scripts/build-debug.sh`, `ts3/scripts/build-release.sh`
+
+After the `codesign` step and before the `open` step, add:
+
+```bash
+# 10. Register XPC launcher as launchd Mach service
+LAUNCHER_BIN="$APP_BUNDLE/Contents/XPCServices/com.termsurf.launcher.xpc/Contents/MacOS/termsurf-launcher"
+PLIST_PATH="/tmp/com.termsurf.launcher.plist"
+
+cat > "$PLIST_PATH" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.termsurf.launcher</string>
+    <key>MachServices</key>
+    <dict>
+        <key>com.termsurf.launcher</key>
+        <true/>
+    </dict>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$LAUNCHER_BIN</string>
+    </array>
+</dict>
+</plist>
+EOF
+
+launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
+echo "Registered com.termsurf.launcher with launchd"
+```
+
+The existing `launchctl bootout` at the top of the script already cleans up
+stale registrations from previous runs, so the sequence is:
+
+1. `bootout` (top of script) — remove old registration
+2. Build, bundle, sign
+3. `bootstrap` (before launch) — register with new binary path
+4. `open` — launch app, GUI connects to Mach service, launchd starts launcher
+
+##### 2. No code changes
+
+The launcher, GUI, profile server, and termsurf-xpc code are unchanged. The Mach
+service APIs (`connect_mach_service`, `new_mach_service`) are correct for this
+model — they just need launchd to know about the service.
+
+#### Files to Modify
+
+| File                         | Changes                                      |
+| ---------------------------- | -------------------------------------------- |
+| `ts3/scripts/build-debug.sh` | Add plist creation + `launchctl bootstrap`   |
+| `ts3/scripts/build-release.sh` | Same                                       |
+
+#### Verification
+
+```bash
+cd ts3
+./scripts/build-debug.sh --open
+# In terminal:
+web google.com
+# Check all three logs:
+cat /tmp/termsurf-gui.log
+cat /tmp/termsurf-launcher.log
+cat /tmp/termsurf-profile-*.log
+```
+
+#### Expected Log Progression
+
+With the Mach service registered, the logs should advance beyond Experiment 3:
+
+- `/tmp/termsurf-gui.log` — No more "connection invalid"; should show
+  `spawn_profile` sent and surface received
+- `/tmp/termsurf-launcher.log` — Should exist and show "Starting...", connection
+  events, spawn requests, session claims
+- `/tmp/termsurf-profile-*.log` — Should exist and show CEF initialization,
+  browser creation, accelerated paint callbacks
+
+If the launcher log appears but the profile log doesn't, the next failure point
+is CEF framework loading or the profile server's own XPC claim-session call.
+
+#### Success Criteria
+
+- [ ] `/tmp/termsurf-launcher.log` exists and shows "Launcher: Starting..."
+- [ ] `/tmp/termsurf-profile-*.log` exists and shows "Profile: Starting..."
+- [ ] `web google.com` does not timeout (or fails at a later stage, past XPC)
+- [ ] `launchctl list | grep com.termsurf.launcher` shows the service registered
