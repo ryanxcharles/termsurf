@@ -162,6 +162,32 @@ ls ~/.config/termsurf/cef/
 
 ---
 
+## What We Accomplished
+
+One experiment, one fix. Replaced `dirs_next::config_dir()` (which returns
+`~/Library/Application Support/` on macOS) with `$HOME/.config/termsurf/cef/` to
+match ts2's behavior. Removed the `dirs-next` dependency entirely.
+
+Verified that `default`, `test1`, and `test2` profiles each create separate
+directories under `~/.config/termsurf/cef/`. The `--profile` flag works as
+designed: omitting it uses `default`, and each named profile gets its own CEF
+data directory.
+
+**Not yet verified:** actual session isolation (logging into Google in one
+profile and confirming the other profile is not logged in). The directory
+structure is correct, but cookie/storage isolation is assumed from CEF's
+`root_cache_path` behavior rather than tested directly.
+
+**State of the system after ts3-4 + ts3-5:**
+
+- `web <url>` renders a real webpage in the terminal via CEF
+- `web --profile <name> <url>` creates an isolated CEF profile at
+  `~/.config/termsurf/cef/<name>/`
+- The full pipeline (CLI → socket → GUI → XPC → launcher → profile server → CEF
+  → IOSurface → wgpu) is working end-to-end
+
+---
+
 ### Next Steps (After This Document)
 
 Once profile isolation is verified:
