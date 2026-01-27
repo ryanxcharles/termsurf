@@ -34,6 +34,10 @@ if [ "$CLEAN" = true ]; then
     echo "Cleared target/release"
 fi
 
+# Clean stale XPC service registration (prevents launchd from loading old binary)
+launchctl bootout "gui/$(id -u)/com.termsurf.launcher" 2>/dev/null || true
+rm -f /private/tmp/com.termsurf.launcher.plist
+
 echo "=== Building TermSurf 3.0 (Release) ==="
 
 # 1. Build cef-rs helpers first (needed for bundle)
@@ -66,6 +70,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp "$REPO_DIR/target/release/wezterm-gui" "$APP_BUNDLE/Contents/MacOS/"
 cp "$REPO_DIR/target/release/wezterm" "$APP_BUNDLE/Contents/MacOS/"
 cp "$REPO_DIR/target/release/web" "$APP_BUNDLE/Contents/MacOS/"
+cp "$REPO_DIR/target/release/termsurf-profile" "$APP_BUNDLE/Contents/MacOS/"
 
 # 5. Copy CEF framework
 echo "Copying CEF framework..."
@@ -88,7 +93,15 @@ for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
     fi
 done
 
-# 7. Create Info.plist
+# 7. Copy XPC launcher service
+echo "Copying XPC launcher service..."
+mkdir -p "$APP_BUNDLE/Contents/XPCServices/com.termsurf.launcher.xpc/Contents/MacOS"
+cp "$REPO_DIR/target/release/termsurf-launcher" \
+   "$APP_BUNDLE/Contents/XPCServices/com.termsurf.launcher.xpc/Contents/MacOS/"
+cp "$REPO_DIR/termsurf-launcher/xpc-service/Info.plist" \
+   "$APP_BUNDLE/Contents/XPCServices/com.termsurf.launcher.xpc/Contents/"
+
+# 8. Create Info.plist
 cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -113,22 +126,52 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
 </plist>
 PLIST
 
-# 8. Sign the bundle
+# 9. Sign the bundle
 echo "Signing bundle..."
 codesign --sign - --force --deep "$APP_BUNDLE"
+
+# 10. Register XPC launcher as launchd Mach service
+LAUNCHER_BIN="$APP_BUNDLE/Contents/XPCServices/com.termsurf.launcher.xpc/Contents/MacOS/termsurf-launcher"
+PLIST_PATH="/tmp/com.termsurf.launcher.plist"
+
+cat > "$PLIST_PATH" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.termsurf.launcher</string>
+    <key>MachServices</key>
+    <dict>
+        <key>com.termsurf.launcher</key>
+        <true/>
+    </dict>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$LAUNCHER_BIN</string>
+    </array>
+</dict>
+</plist>
+EOF
+
+launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
+echo "Registered com.termsurf.launcher with launchd"
 
 echo ""
 echo "=== Release Build Complete ==="
 echo "App bundle: $APP_BUNDLE"
-echo "  Contents/MacOS/wezterm-gui  (terminal)"
-echo "  Contents/MacOS/wezterm      (CLI)"
-echo "  Contents/MacOS/web          (web coordinator)"
+echo "  Contents/MacOS/wezterm-gui       (terminal)"
+echo "  Contents/MacOS/wezterm           (CLI)"
+echo "  Contents/MacOS/web               (web coordinator)"
+echo "  Contents/MacOS/termsurf-profile  (CEF profile server)"
 echo ""
 
 # Open if requested
 if [ "$OPEN" = true ]; then
     echo "Running wezterm-gui..."
-    "$APP_BUNDLE/Contents/MacOS/wezterm-gui"
+    open --stdout /tmp/termsurf-gui.log --stderr /tmp/termsurf-gui.log "$APP_BUNDLE"
+    echo "Logs: /tmp/termsurf-gui.log"
 fi
 
 if [ "$OPEN_WEB" = true ]; then

@@ -5916,6 +5916,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "termsurf-profile"
+version = "0.1.0"
+dependencies = [
+ "cef",
+ "clap",
+ "ctrlc",
+ "dirs-next",
+ "termsurf-xpc",
+]
+
+[[package]]
 name = "termsurf-test-sender"
 version = "0.1.0"
 dependencies = [

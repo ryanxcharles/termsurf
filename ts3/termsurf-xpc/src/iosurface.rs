@@ -170,3 +170,14 @@ pub fn lookup_from_mach_port(port: ffi::mach_port_t) -> Option<IOSurfaceRef> {
         Some(surface)
     }
 }
+
+/// Deallocate a Mach port send right.
+///
+/// Call this after `lookup_from_mach_port()` — the IOSurface is referenced
+/// independently through the IOSurfaceRef, so the Mach port is no longer needed
+/// and must be deallocated to avoid leaking kernel resources.
+pub fn deallocate_mach_port(port: ffi::mach_port_t) {
+    unsafe {
+        ffi::mach_port_deallocate(ffi::mach_task_self(), port);
+    }
+}

@@ -1,0 +1,19 @@
+[package]
+name = "termsurf-profile"
+version = "0.1.0"
+edition = "2021"
+description = "CEF profile server - renders webpages and sends IOSurface via XPC"
+license = "MIT"
+
+[[bin]]
+name = "termsurf-profile"
+path = "src/main.rs"
+
+[dependencies]
+termsurf-xpc = { path = "../termsurf-xpc" }
+clap = { workspace = true }
+dirs-next = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cef = { path = "../../cef-rs/cef", features = ["accelerated_osr"] }
+ctrlc = "3.4"

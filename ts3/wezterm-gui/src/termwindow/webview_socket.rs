@@ -376,14 +376,19 @@ fn handle_request(
                 url
             );
 
-            // Use XPC to spawn test-sender via launcher
+            // Use XPC to spawn profile server via launcher
             let xpc_manager = match super::webview_xpc::get_xpc_manager() {
                 Some(m) => m,
                 None => return Response::error(&request.id, "XPC manager not available"),
             };
 
-            // Request profile spawn (this triggers launcher -> test-sender -> Mach port transfer)
-            let session_id = match xpc_manager.request_profile_spawn(pane_id) {
+            let profile = data
+                .get("profile")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default");
+
+            // Request profile spawn (this triggers launcher -> termsurf-profile -> Mach port transfer)
+            let session_id = match xpc_manager.request_profile_spawn(pane_id, url, profile) {
                 Ok(id) => id,
                 Err(e) => {
                     log::error!("[GUI Socket] Failed to request profile spawn: {}", e);
@@ -522,7 +527,7 @@ fn handle_request(
                 None => return Response::error(&request.id, "XPC manager not available"),
             };
 
-            match xpc_manager.request_profile_spawn(pane_id) {
+            match xpc_manager.request_profile_spawn(pane_id, "about:blank", "default") {
                 Ok(session_id) => {
                     log::info!("[GUI Socket] test_xpc: spawned with session_id={}", session_id);
                     Response::ok(

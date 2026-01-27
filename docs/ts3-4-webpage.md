@@ -1062,10 +1062,15 @@ is CEF framework loading or the profile server's own XPC claim-session call.
 
 ### Experiment 5: Fix CEF API Version Initialization
 
-**Status:** PLANNED
+**Status:** SUCCESS
 
 **Goal:** Get past the CEF initialization crash by adding the missing
 `api_hash()` call that ts2 has and ts3's profile server lacks.
+
+**Result:** Adding `cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0)` before
+creating the App object fixed the CEF initialization crash. The profile server
+now initializes CEF, creates a browser, renders google.com, and sends the
+IOSurface to the GUI. An image of google.com appeared in the terminal.
 
 #### Root Cause
 

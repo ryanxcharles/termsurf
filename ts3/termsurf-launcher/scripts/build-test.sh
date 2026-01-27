@@ -7,6 +7,10 @@
 set -e
 cd "$(dirname "$0")/.."
 
+# Clean stale XPC service registration (prevents launchd from loading old binary)
+launchctl bootout "gui/$(id -u)/com.termsurf.launcher" 2>/dev/null || true
+rm -f /private/tmp/com.termsurf.launcher.plist
+
 echo "=== Building Launcher XPC Test Bundle ==="
 
 # Validate required files exist
@@ -27,6 +31,7 @@ echo "Prerequisites OK"
 echo "Building Rust binaries..."
 cargo build --release -p termsurf-launcher
 cargo build --release -p termsurf-test-sender
+cargo build --release -p termsurf-profile
 
 # Find the target directory
 if [ -d "../target/release" ]; then
@@ -40,7 +45,7 @@ fi
 echo "Target directory: $TARGET_DIR"
 
 # Verify binaries were created
-for bin in termsurf-launcher termsurf-test-sender; do
+for bin in termsurf-launcher termsurf-test-sender termsurf-profile; do
     if [ ! -f "$TARGET_DIR/$bin" ]; then
         echo "ERROR: Failed to build $bin"
         exit 1
@@ -57,8 +62,9 @@ mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/XPCServices/com.termsurf.launcher.xpc/Contents/MacOS"
 
 # Copy binaries
-# The test-sender goes in MacOS (it will be spawned by the launcher)
+# The test-sender and profile server go in MacOS (spawned by the launcher)
 cp "$TARGET_DIR/termsurf-test-sender" "$APP/Contents/MacOS/"
+cp "$TARGET_DIR/termsurf-profile" "$APP/Contents/MacOS/"
 
 # The launcher goes in the XPC service bundle
 cp "$TARGET_DIR/termsurf-launcher" \
@@ -111,6 +117,7 @@ check_file() {
 
 check_file "$APP/Contents/Info.plist"
 check_file "$APP/Contents/MacOS/termsurf-test-sender"
+check_file "$APP/Contents/MacOS/termsurf-profile"
 check_file "$APP/Contents/XPCServices/com.termsurf.launcher.xpc/Contents/Info.plist"
 check_file "$APP/Contents/XPCServices/com.termsurf.launcher.xpc/Contents/MacOS/termsurf-launcher"
 

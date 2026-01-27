@@ -21,6 +21,7 @@ members = [
   "termsurf-xpc",
   "termsurf-launcher",
   "termsurf-test-sender",
+  "termsurf-profile",
 ]
 resolver = "2"
 exclude = [

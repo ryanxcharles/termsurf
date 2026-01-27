@@ -8,11 +8,32 @@
 
 use std::collections::HashMap;
 use std::env;
+use std::fs::File;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use termsurf_xpc::*;
 
+extern "C" {
+    fn dup2(oldfd: i32, newfd: i32) -> i32;
+}
+
+fn redirect_output() {
+    use std::os::unix::io::AsRawFd;
+    let file = match File::create("/tmp/termsurf-launcher.log") {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    let fd = file.as_raw_fd();
+    unsafe {
+        dup2(fd, 1); // stdout
+        dup2(fd, 2); // stderr
+    }
+    // Leak the file so the fd stays open for the process lifetime
+    std::mem::forget(file);
+}
+
 fn main() {
+    redirect_output();
     println!("Launcher: Starting...");
 
     // Session storage: session_id -> GUI endpoint
@@ -21,25 +42,25 @@ fn main() {
     // CRITICAL: Store client connections to keep them alive!
     let clients: Arc<Mutex<Vec<Arc<XpcConnection>>>> = Arc::new(Mutex::new(Vec::new()));
 
-    // Path to test sender binary
+    // Path to profile server binary
     // Launcher is at: .app/Contents/XPCServices/com.termsurf.launcher.xpc/Contents/MacOS/termsurf-launcher
-    // Sender is at:   .app/Contents/MacOS/termsurf-test-sender
+    // Profile is at:  .app/Contents/MacOS/termsurf-profile
     let exe_path = env::current_exe().expect("Failed to get exe path");
-    let sender_path = exe_path
+    let profile_bin_path = exe_path
         .parent() // MacOS
         .and_then(|p| p.parent()) // Contents
         .and_then(|p| p.parent()) // com.termsurf.launcher.xpc
         .and_then(|p| p.parent()) // XPCServices
         .and_then(|p| p.parent()) // Contents
-        .map(|p| p.join("MacOS").join("termsurf-test-sender"))
+        .map(|p| p.join("MacOS").join("termsurf-profile"))
         .unwrap_or_else(|| {
             // Fallback for testing outside app bundle
             exe_path
                 .parent()
-                .map(|p| p.join("termsurf-test-sender"))
+                .map(|p| p.join("termsurf-profile"))
                 .unwrap_or_default()
         });
-    println!("Launcher: Sender path: {:?}", sender_path);
+    println!("Launcher: Profile binary path: {:?}", profile_bin_path);
 
     // Create listener for this XPC service
     let listener = match XpcListener::new_mach_service("com.termsurf.launcher") {
@@ -65,7 +86,7 @@ fn main() {
         let conn_for_handler = conn.clone();
 
         let sessions = sessions_clone.clone();
-        let sender_path = sender_path.clone();
+        let profile_bin_path = profile_bin_path.clone();
         let clients_inner = clients_clone.clone();
 
         set_event_handler(&*conn, move |event| match event {
@@ -98,17 +119,37 @@ fn main() {
                             sessions.insert(session_id.clone(), endpoint);
                         }
 
-                        // Spawn test sender as child process
-                        println!("Launcher: Spawning sender...");
-                        match Command::new(&sender_path)
-                            .args(["--session-id", &session_id])
-                            .spawn()
-                        {
+                        // Extract URL and profile from message
+                        let url = msg
+                            .get_string("url")
+                            .unwrap_or_else(|| "about:blank".to_string());
+                        let profile = msg
+                            .get_string("profile")
+                            .unwrap_or_else(|| "default".to_string());
+
+                        // Spawn profile server as child process
+                        println!(
+                            "Launcher: Spawning profile server (url={}, profile={})...",
+                            url, profile
+                        );
+                        let log_path =
+                            format!("/tmp/termsurf-profile-{}.log", session_id);
+                        let mut cmd = Command::new(&profile_bin_path);
+                        cmd.args(["--session-id", &session_id])
+                            .args(["--url", &url])
+                            .args(["--profile", &profile]);
+                        if let Ok(log_file) = File::create(&log_path) {
+                            if let Ok(log_file2) = log_file.try_clone() {
+                                cmd.stdout(log_file).stderr(log_file2);
+                            }
+                        }
+                        match cmd.spawn() {
                             Ok(child) => {
                                 println!(
-                                    "Launcher: Spawned sender for {} (pid: {})",
+                                    "Launcher: Spawned profile for {} (pid: {}, log: {})",
                                     session_id,
-                                    child.id()
+                                    child.id(),
+                                    log_path
                                 )
                             }
                             Err(e) => eprintln!("Launcher: Failed to spawn: {}", e),

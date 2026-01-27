@@ -114,7 +114,12 @@ impl XpcManager {
 
     /// Request a profile to be spawned for a pane.
     /// Returns a session_id that will be used to correlate the incoming surface.
-    pub fn request_profile_spawn(self: &Arc<Self>, pane_id: PaneId) -> anyhow::Result<String> {
+    pub fn request_profile_spawn(
+        self: &Arc<Self>,
+        pane_id: PaneId,
+        url: &str,
+        profile: &str,
+    ) -> anyhow::Result<String> {
         let session_id = format!("pane-{}-{}", pane_id, std::process::id());
 
         log::info!(
@@ -232,6 +237,8 @@ impl XpcManager {
         let msg = XpcDictionary::new();
         msg.set_string("action", "spawn_profile");
         msg.set_string("session_id", &session_id);
+        msg.set_string("url", url);
+        msg.set_string("profile", profile);
         msg.set_endpoint("gui_endpoint", endpoint);
 
         self._launcher.send(&msg);

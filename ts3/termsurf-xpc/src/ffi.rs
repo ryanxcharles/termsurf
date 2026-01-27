@@ -193,6 +193,25 @@ pub fn dispatch_get_main_queue() -> dispatch_queue_t {
     unsafe { &_dispatch_main_q as *const _ as dispatch_queue_t }
 }
 
+// === Mach port deallocation ===
+
+pub type kern_return_t = i32;
+
+extern "C" {
+    pub fn mach_port_deallocate(task: mach_port_t, name: mach_port_t) -> kern_return_t;
+
+    // mach_task_self() is a macro that expands to mach_task_self_()
+    pub fn mach_task_self_() -> mach_port_t;
+}
+
+/// Get the current task's Mach port.
+///
+/// This is equivalent to the `mach_task_self()` macro in C.
+#[inline]
+pub fn mach_task_self() -> mach_port_t {
+    unsafe { mach_task_self_() }
+}
+
 // === CoreFoundation (for run loop) ===
 
 #[link(name = "CoreFoundation", kind = "framework")]
