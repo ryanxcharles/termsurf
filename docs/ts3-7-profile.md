@@ -520,7 +520,7 @@ ps aux | grep termsurf-launcher
 
 ### Experiment 2: One Process Per Profile
 
-**Status:** SUCCESS
+**Status:** FAILED
 
 **Goal:** Implement the core architectural requirement: exactly one
 `termsurf-profile` process per browser profile, with multiple webviews (CEF
@@ -1131,7 +1131,7 @@ ps aux | grep termsurf-profile
 
 ### Experiment 3: Fix Pane Dimension Calculation
 
-**Status:** SUCCESS
+**Status:** FAILED
 
 **Prerequisite:** Builds on Experiment 2 code (one process per profile). That
 code compiles but cannot be tested due to this bug.
