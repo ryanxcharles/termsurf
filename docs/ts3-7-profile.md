@@ -1131,13 +1131,111 @@ ps aux | grep termsurf-profile
 
 ### Experiment 3: Fix Pane Dimension Calculation
 
-**Status:** PLANNED
+**Status:** FAILED
 
 **Prerequisite:** Builds on Experiment 2 code (one process per profile). That
 code compiles but cannot be tested due to this bug.
 
 **Goal:** Fix the browser sizing bug where webviews render at window size
 instead of pane size. This is blocking all multi-pane testing.
+
+#### Failure Analysis
+
+**Symptoms:** After implementing the dimension calculation fix, the browser
+receives the correct pane dimensions (verified in logs), but the rendered
+webview is stretched to fill the entire window instead of being positioned
+within the pane bounds.
+
+For example, with a vertical split:
+- Log shows: `79cols x 72rows, cell=13x30, physical=1027x2160, logical=513x1080`
+- Profile server receives: `size=513x1080` (correct half-width)
+- IOSurface created at: `1026x2160` (correct: 513×2 for Retina)
+- **But the texture is stretched to fill the full window**
+
+**Root cause:** The dimension calculation was fixed correctly. The bug is in the
+**rendering code**, not the dimension calculation. In
+`ts3/wezterm-gui/src/termwindow/render/draw.rs` lines 308-317:
+
+```rust
+// Set viewport to fill the entire screen for now
+// TODO: Use pane bounds when integrating with real panes
+render_pass.set_viewport(
+    0.0,
+    0.0,
+    self.dimensions.pixel_width as f32,
+    self.dimensions.pixel_height as f32,
+    0.0,
+    1.0,
+);
+```
+
+The viewport is hardcoded to full window dimensions (`self.dimensions`). The
+webview texture, regardless of its actual size, is stretched to fill this
+viewport. The TODO comment confirms this was always a known limitation.
+
+**What worked:**
+- Cell size sharing via global atomics
+- Dimension calculation using `cols × cell_size / scale`
+- Profile server receiving correct dimensions
+- CEF rendering at correct size
+
+**What failed:**
+- The rendering code ignores the pane's position and size
+- The texture is drawn to a full-window viewport instead of pane bounds
+
+**Conclusion:** Experiment 3's dimension fix is correct and complete. The
+remaining issue is a separate rendering bug that requires using `PositionedPane`
+data to set the viewport correctly.
+
+#### Proposed Fix for Experiment 4
+
+The rendering code needs to:
+
+1. Look up the `PositionedPane` for the overlay's `pane_id`
+2. Calculate pixel position: `left × cell_width`, `top × cell_height`
+3. Set the viewport to the pane's bounds instead of full window
+
+The `PositionedPane` struct (from `mux/src/tab.rs`) provides:
+- `left`, `top` — position in cells (multiply by cell size for pixels)
+- `pixel_width`, `pixel_height` — size in pixels
+
+**File to modify:** `ts3/wezterm-gui/src/termwindow/render/draw.rs`
+
+Replace the hardcoded viewport with pane-aware positioning:
+
+```rust
+// Get positioned panes to find this pane's screen location
+let panes = self.get_panes_to_render();
+let positioned_pane = panes.iter().find(|p| p.pane.pane_id() == *pane_id);
+
+let (viewport_x, viewport_y, viewport_w, viewport_h) = match positioned_pane {
+    Some(pos) => {
+        // Convert cell position to pixels
+        let cell_width = self.render_metrics.cell_size.width as f32;
+        let cell_height = self.render_metrics.cell_size.height as f32;
+
+        let x = pos.left as f32 * cell_width;
+        let y = pos.top as f32 * cell_height + self.tab_bar_pixel_height();
+        let w = pos.pixel_width as f32;
+        let h = pos.pixel_height as f32;
+
+        (x, y, w, h)
+    }
+    None => {
+        // Fallback to full window if pane not found
+        (0.0, 0.0, self.dimensions.pixel_width as f32, self.dimensions.pixel_height as f32)
+    }
+};
+
+render_pass.set_viewport(viewport_x, viewport_y, viewport_w, viewport_h, 0.0, 1.0);
+```
+
+This change is straightforward but requires careful handling of:
+- Tab bar offset (panes start below the tab bar)
+- Padding and borders (if configured)
+- Coordinate system (wgpu viewport origin is top-left)
+
+---
 
 #### Problem Analysis
 
@@ -1358,17 +1456,20 @@ ps aux | grep termsurf-profile
 - [ ] Log shows correct dimension calculation using cols × cell_width
 - [ ] Second webview reuses existing profile process (Experiment 2 validation)
 
-#### Why This Works
+#### What the Dimension Fix Achieved
 
-1. **Cell size is relatively stable.** It changes only when fonts or DPI change,
-   not on every resize. Atomic operations are sufficient.
+The dimension calculation changes from Experiment 3 are correct and should be
+kept:
 
-2. **Grid dimensions are always correct.** `dims.cols` and `dims.viewport_rows`
-   accurately reflect the pane's current size in terminal cells, even after
-   splits.
+1. **Cell size sharing works.** Global atomics updated by TermWindow, read by
+   socket handler.
 
-3. **Matches ts2's approach.** We're using the same formula, just with the cell
-   size coming from a global instead of `self.render_metrics`.
+2. **Grid-based calculation works.** `dims.cols × cell_width` gives correct pane
+   pixel dimensions.
 
-4. **Minimal coupling.** The socket handler doesn't need a reference to
-   TermWindow. It just reads two atomic integers.
+3. **Profile server receives correct size.** Logs confirm the right dimensions
+   arrive.
+
+4. **CEF renders at correct size.** The IOSurface is the right dimensions.
+
+The only remaining issue is viewport positioning in the rendering code.
