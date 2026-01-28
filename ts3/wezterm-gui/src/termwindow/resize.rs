@@ -108,6 +108,13 @@ impl super::TermWindow {
         match RenderMetrics::new(&self.fonts) {
             Ok(metrics) => {
                 self.render_metrics = metrics;
+
+                // Update global cell size for webview pane dimension calculations
+                #[cfg(target_os = "macos")]
+                super::webview_socket::set_cell_size(
+                    self.render_metrics.cell_size.width as u32,
+                    self.render_metrics.cell_size.height as u32,
+                );
             }
             Err(err) => {
                 log::error!(

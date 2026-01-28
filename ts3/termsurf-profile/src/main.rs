@@ -7,13 +7,19 @@
 //!
 //! Architecture:
 //! 1. Load CEF framework, handle subprocess early return
-//! 2. Claim XPC session from launcher, get direct GUI endpoint
+//! 2. Connect to launcher, claim initial session
 //! 3. Initialize CEF with profile-specific cache path
-//! 4. Create browser in on_context_initialized callback
-//! 5. on_accelerated_paint sends IOSurface Mach port to GUI
-//! 6. run_message_loop() blocks until Ctrl+C
+//! 4. Create command listener and register with launcher
+//! 5. Create initial browser in on_context_initialized callback
+//! 6. Handle create_browser commands from launcher for additional browsers
+//! 7. on_accelerated_paint sends IOSurface Mach port to GUI (per-browser)
+//! 8. run_message_loop() blocks until Ctrl+C
 
 use clap::Parser;
+use std::collections::HashMap;
+use std::ffi::c_void;
+use std::sync::atomic::{AtomicPtr, AtomicU32};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use termsurf_xpc::*;
@@ -60,6 +66,42 @@ fn main() {
     }
 }
 
+// ============================================================================
+// Profile State (multi-browser support)
+// ============================================================================
+
+/// Info for creating the initial browser (from CLI args)
+struct InitialBrowserInfo {
+    url: String,
+    session_id: String,
+    gui_endpoint: XpcEndpoint,
+    width: u32,
+    height: u32,
+}
+
+/// Per-browser state
+struct BrowserState {
+    session_id: String,
+    gui: Arc<XpcConnection>,
+    width: AtomicU32,
+    height: AtomicU32,
+    last_handle: AtomicPtr<c_void>,
+}
+
+/// Profile-wide state (shared across all browsers in this process)
+struct ProfileState {
+    scale: f32,
+    profile: String,
+    initial_browser_info: Mutex<Option<InitialBrowserInfo>>,
+    browsers: Mutex<HashMap<i32, Arc<BrowserState>>>,
+    command_connections: Mutex<Vec<Arc<XpcConnection>>>,
+    /// Pending browser creation requests (session_id, url, gui_endpoint, width, height)
+    pending_browsers: Mutex<Vec<(String, String, XpcEndpoint, u32, u32)>>,
+}
+
+/// Global profile state, set once during initialization
+static PROFILE_STATE: OnceLock<Arc<ProfileState>> = OnceLock::new();
+
 #[cfg(target_os = "macos")]
 fn run_profile_server(args: Args) {
     use cef::library_loader::LibraryLoader;
@@ -90,18 +132,54 @@ fn run_profile_server(args: Args) {
     }
     println!("Profile: Main process (ret={})", exit_code);
 
-    // 3. Connect to launcher, claim session, get GUI endpoint
-    let gui = connect_and_claim_session(&args.session_id);
-    let gui = std::sync::Arc::new(gui);
-    println!("Profile: Connected to GUI");
+    // 3. Connect to launcher
+    println!("Profile: Connecting to launcher...");
+    let launcher = XpcConnection::connect_mach_service("com.termsurf.launcher")
+        .expect("Failed to connect to launcher");
 
-    // 4. Compute paths
+    set_event_handler(&launcher, |event| {
+        if let Err(e) = event {
+            eprintln!("Profile: Launcher error: {}", e);
+        }
+    });
+    launcher.resume();
+    thread::sleep(Duration::from_millis(100));
+
+    // 4. Claim initial session (gets gui_endpoint for first browser)
+    println!("Profile: Claiming session '{}'...", args.session_id);
+    let initial_gui_endpoint = claim_session_with_retry(&launcher, &args.session_id)
+        .expect("Failed to claim session");
+    println!("Profile: Got GUI endpoint for initial browser");
+
+    // 5. Initialize ProfileState BEFORE CEF init
+    let profile_state = Arc::new(ProfileState {
+        scale: args.scale,
+        profile: args.profile.clone(),
+        initial_browser_info: Mutex::new(Some(InitialBrowserInfo {
+            url: args.url.clone(),
+            session_id: args.session_id.clone(),
+            gui_endpoint: initial_gui_endpoint,
+            width: args.width,
+            height: args.height,
+        })),
+        browsers: Mutex::new(HashMap::new()),
+        command_connections: Mutex::new(Vec::new()),
+        pending_browsers: Mutex::new(Vec::new()),
+    });
+    // Store in global state (panics if already set, which shouldn't happen)
+    let _ = PROFILE_STATE.set(Arc::clone(&profile_state));
+
+    // 6. Compute paths
     let app_contents = exe.parent().unwrap().parent().unwrap();
     let helper_path = app_contents
         .join("Frameworks")
         .join("WezTerm Helper.app")
         .join("Contents/MacOS/WezTerm Helper");
-    println!("Profile: Helper: {:?} (exists={})", helper_path, helper_path.exists());
+    println!(
+        "Profile: Helper: {:?} (exists={})",
+        helper_path,
+        helper_path.exists()
+    );
 
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let cache_path = std::path::PathBuf::from(home)
@@ -110,7 +188,7 @@ fn run_profile_server(args: Args) {
     std::fs::create_dir_all(&cache_path).ok();
     println!("Profile: Cache: {:?}", cache_path);
 
-    // 5. Initialize CEF
+    // 7. Initialize CEF
     let settings = cef::Settings {
         windowless_rendering_enabled: 1,
         no_sandbox: 1,
@@ -120,14 +198,7 @@ fn run_profile_server(args: Args) {
         ..Default::default()
     };
 
-    let shared = std::sync::Arc::new(SharedState {
-        gui,
-        url: args.url,
-        width: std::sync::atomic::AtomicU32::new(args.width),
-        height: std::sync::atomic::AtomicU32::new(args.height),
-        scale: args.scale,
-    });
-    let mut app = cef_handlers::create_app(shared);
+    let mut app = cef_handlers::create_app(Arc::clone(&profile_state));
 
     let init_result = cef::initialize(
         Some(cef_args.as_main_args()),
@@ -141,66 +212,110 @@ fn run_profile_server(args: Args) {
     }
     println!("Profile: CEF initialized");
 
-    // 6. Install Ctrl+C handler for clean shutdown
+    // 8. Create command listener and register with launcher (AFTER CEF init, BEFORE message loop)
+    let command_listener = XpcListener::new_anonymous().expect("Failed to create command listener");
+    let command_endpoint = command_listener
+        .get_endpoint()
+        .expect("Failed to get command endpoint");
+
+    // Set up handler for create_browser commands from launcher
+    let profile_state_for_handler = Arc::clone(&profile_state);
+    let launcher_for_claim = Arc::new(launcher);
+    let launcher_for_handler = Arc::clone(&launcher_for_claim);
+
+    set_new_connection_handler(&command_listener, move |conn| {
+        println!("Profile: New command connection from launcher");
+        let conn = Arc::new(conn);
+        let state = Arc::clone(&profile_state_for_handler);
+        let state_for_event = Arc::clone(&state);
+        let launcher = Arc::clone(&launcher_for_handler);
+
+        set_event_handler(&*conn, move |event| match event {
+            Ok(msg) => {
+                let action = msg.get_string("action").unwrap_or_default();
+                println!("Profile: Received command action: {}", action);
+
+                if action == "create_browser" {
+                    handle_create_browser(&msg, &state_for_event, &launcher);
+                }
+            }
+            Err(e) => {
+                eprintln!("Profile: Command connection error: {}", e);
+            }
+        });
+        conn.resume();
+
+        state.command_connections.lock().unwrap().push(conn);
+    });
+    command_listener.resume();
+    println!("Profile: Command listener ready");
+
+    // Register with launcher so it can forward subsequent create_browser commands
+    let register_msg = XpcDictionary::new();
+    register_msg.set_string("action", "register_profile");
+    register_msg.set_string("profile", &args.profile);
+    register_msg.set_endpoint("endpoint", command_endpoint);
+    launcher_for_claim.send(&register_msg);
+    println!("Profile: Registered with launcher as '{}'", args.profile);
+
+    // 9. Install Ctrl+C handler for clean shutdown
     ctrlc::set_handler(|| {
         println!("Profile: Ctrl+C, quitting...");
         cef::quit_message_loop();
     })
     .expect("Failed to set Ctrl+C handler");
 
-    // 7. Run CEF message loop (blocks until quit_message_loop)
-    // on_context_initialized fires during this loop, creating the browser.
+    // 10. Run CEF message loop (blocks until quit_message_loop)
+    // on_context_initialized fires during this loop, creating the initial browser.
     // on_accelerated_paint fires when pages render, sending IOSurface to GUI.
     println!("Profile: Running message loop...");
     cef::run_message_loop();
 
-    // 8. Shutdown
+    // 11. Shutdown
     println!("Profile: Shutting down...");
     cef::shutdown();
     println!("Profile: Done");
     // _loader dropped here, unloading CEF framework
 }
 
-/// Shared state accessible to CEF handlers via Arc
-struct SharedState {
-    gui: std::sync::Arc<XpcConnection>,
-    url: String,
-    width: std::sync::atomic::AtomicU32,
-    height: std::sync::atomic::AtomicU32,
-    scale: f32,
-}
+/// Handle create_browser command from launcher (for additional browsers in this profile)
+#[cfg(target_os = "macos")]
+fn handle_create_browser(
+    msg: &XpcDictionary,
+    state: &Arc<ProfileState>,
+    launcher: &XpcConnection,
+) {
+    let session_id = msg.get_string("session_id").unwrap_or_default();
+    let url = msg.get_string("url").unwrap_or_default();
+    let width = msg.get_i64("width") as u32;
+    let height = msg.get_i64("height") as u32;
 
-/// Connect to launcher, claim session, and establish direct GUI connection
-fn connect_and_claim_session(session_id: &str) -> XpcConnection {
-    println!("Profile: Connecting to launcher...");
-    let launcher = XpcConnection::connect_mach_service("com.termsurf.launcher")
-        .expect("Failed to connect to launcher");
+    println!(
+        "Profile: create_browser session={}, url={}, size={}x{}",
+        session_id, url, width, height
+    );
 
-    set_event_handler(&launcher, |event| {
-        if let Err(e) = event {
-            eprintln!("Profile: Launcher error: {}", e);
+    // Claim GUI endpoint from launcher
+    let gui_endpoint = match claim_session_with_retry(launcher, &session_id) {
+        Ok(ep) => ep,
+        Err(e) => {
+            eprintln!("Profile: Failed to claim session for browser: {}", e);
+            return;
         }
-    });
-    launcher.resume();
-    thread::sleep(Duration::from_millis(100));
+    };
 
-    // Claim session with retry (session may not be registered yet)
-    println!("Profile: Claiming session '{}'...", session_id);
-    let gui_endpoint =
-        claim_session_with_retry(&launcher, session_id).expect("Failed to claim session");
-    println!("Profile: Got GUI endpoint");
+    // Store pending browser request and post task to process it on UI thread
+    state.pending_browsers.lock().unwrap().push((
+        session_id.to_string(),
+        url.to_string(),
+        gui_endpoint,
+        width,
+        height,
+    ));
 
-    // Connect directly to GUI
-    let gui = XpcConnection::from_endpoint(gui_endpoint).expect("Failed to connect to GUI");
-    set_event_handler(&gui, |event| {
-        if let Err(e) = event {
-            eprintln!("Profile: GUI error: {}", e);
-        }
-    });
-    gui.resume();
-    thread::sleep(Duration::from_millis(100));
-
-    gui
+    // Post task to CEF UI thread to process pending browsers
+    let mut task = cef_handlers::CreateBrowserTask::new(Arc::clone(state));
+    cef::post_task(cef::ThreadId::UI, Some(&mut task));
 }
 
 /// Claim session with exponential backoff retry
@@ -253,32 +368,32 @@ fn claim_session_with_retry(
 
 #[cfg(target_os = "macos")]
 mod cef_handlers {
-    use super::SharedState;
+    use super::{BrowserState, ProfileState};
     use cef::rc::Rc;
     use cef::{
         wrap_app, wrap_browser_process_handler, wrap_client, wrap_context_menu_handler,
-        wrap_render_handler, AcceleratedPaintInfo, App, Browser, BrowserProcessHandler,
-        BrowserSettings, Client, ContextMenuHandler, ContextMenuParams, Frame, ImplApp,
-        ImplBrowserProcessHandler, ImplClient, ImplCommandLine, ImplContextMenuHandler,
-        ImplMenuModel, ImplRenderHandler, MenuModel, PaintElementType, Rect, RenderHandler,
-        ScreenInfo, WindowInfo, WrapApp, WrapBrowserProcessHandler, WrapClient,
-        WrapContextMenuHandler, WrapRenderHandler,
+        wrap_render_handler, wrap_task, AcceleratedPaintInfo, App, Browser,
+        BrowserProcessHandler, BrowserSettings, Client, ContextMenuHandler, ContextMenuParams,
+        Frame, ImplApp, ImplBrowser, ImplBrowserProcessHandler, ImplClient, ImplCommandLine,
+        ImplContextMenuHandler, ImplMenuModel, ImplRenderHandler, ImplTask, MenuModel,
+        PaintElementType, Rect, RenderHandler, ScreenInfo, Task, WindowInfo, WrapApp,
+        WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler, WrapRenderHandler,
+        WrapTask,
     };
-    use std::ffi::c_void;
-    use std::sync::atomic::{AtomicPtr, Ordering};
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
     use termsurf_xpc::*;
 
     // ====== Render Handler ======
     //
     // Sends IOSurface Mach ports to the GUI via XPC when CEF paints.
+    // Each browser gets its own render handler with per-browser state.
     // Deduplicates by tracking the last IOSurface handle pointer.
 
     #[derive(Clone)]
     struct RenderHandlerInner {
-        gui: Arc<XpcConnection>,
-        last_handle: Arc<AtomicPtr<c_void>>,
-        state: Arc<SharedState>,
+        state: Arc<BrowserState>, // Per-browser state
+        scale: f32,               // From profile-wide state
     }
 
     wrap_render_handler! {
@@ -300,7 +415,7 @@ mod cef_handlers {
                 screen_info: Option<&mut ScreenInfo>,
             ) -> ::std::os::raw::c_int {
                 if let Some(info) = screen_info {
-                    info.device_scale_factor = self.inner.state.scale;
+                    info.device_scale_factor = self.inner.scale;
                     return 1;
                 }
                 0
@@ -324,11 +439,11 @@ mod cef_handlers {
                 // CEF calls on_accelerated_paint every frame (cursor blinks, etc.)
                 // but reuses the same IOSurface buffer. We only need to send a new
                 // Mach port when the buffer changes (double-buffering swap).
-                let handle = info.shared_texture_io_surface as *mut c_void;
+                let handle = info.shared_texture_io_surface as *mut std::ffi::c_void;
                 if handle.is_null() {
                     return;
                 }
-                let prev = self.inner.last_handle.swap(handle, Ordering::Relaxed);
+                let prev = self.inner.state.last_handle.swap(handle, Ordering::Relaxed);
                 if handle == prev {
                     return;
                 }
@@ -342,15 +457,18 @@ mod cef_handlers {
 
                 let width = info.extra.coded_size.width;
                 let height = info.extra.coded_size.height;
-                println!("Profile: Sending IOSurface {}x{} (port={})", width, height, port);
+                println!(
+                    "Profile: [{}] Sending IOSurface {}x{} (port={})",
+                    self.inner.state.session_id, width, height, port
+                );
 
-                // Send to GUI via XPC
+                // Send to this browser's GUI connection via XPC
                 let msg = XpcDictionary::new();
                 msg.set_string("action", "display_surface");
                 msg.set_mach_send("iosurface_port", port);
                 msg.set_i64("width", width as i64);
                 msg.set_i64("height", height as i64);
-                self.inner.gui.send(&msg);
+                self.inner.state.gui.send(&msg);
             }
         }
     }
@@ -403,53 +521,36 @@ mod cef_handlers {
 
     // ====== Browser Process Handler ======
     //
-    // Creates the browser in on_context_initialized, which fires during
+    // Creates the initial browser in on_context_initialized, which fires during
     // run_message_loop() when CEF is fully ready.
 
     wrap_browser_process_handler! {
         pub struct ProfileBPH {
-            state: Arc<SharedState>,
+            state: Arc<ProfileState>,
         }
 
         impl BrowserProcessHandler {
             fn on_context_initialized(&self) {
-                println!("Profile: CEF context initialized, creating browser...");
+                println!("Profile: CEF context initialized");
 
-                let inner = RenderHandlerInner {
-                    gui: self.state.gui.clone(),
-                    last_handle: Arc::new(AtomicPtr::new(std::ptr::null_mut())),
-                    state: Arc::clone(&self.state),
-                };
+                // Take the initial browser info (only runs once)
+                let info = self.state.initial_browser_info.lock().unwrap().take();
 
-                let render_handler = ProfileRenderHandler::new(inner);
-                let context_menu_handler = ProfileContextMenuHandler::new(ContextMenuInner);
-                let mut client = ProfileClient::new(render_handler, context_menu_handler);
-
-                let window_info = WindowInfo {
-                    windowless_rendering_enabled: 1,
-                    shared_texture_enabled: 1,
-                    ..Default::default()
-                };
-
-                let browser_settings = BrowserSettings {
-                    windowless_frame_rate: 60,
-                    ..Default::default()
-                };
-
-                let url: cef::CefString = self.state.url.as_str().into();
-
-                let browser = cef::browser_host_create_browser_sync(
-                    Some(&window_info),
-                    Some(&mut client),
-                    Some(&url),
-                    Some(&browser_settings),
-                    None, // extra_info
-                    None, // request_context (uses global with our root_cache_path)
-                );
-
-                match browser {
-                    Some(_) => println!("Profile: Browser created for '{}'", self.state.url),
-                    None => eprintln!("Profile: Failed to create browser"),
+                if let Some(info) = info {
+                    println!(
+                        "Profile: Creating initial browser for session '{}', url='{}'",
+                        info.session_id, info.url
+                    );
+                    create_browser_on_ui_thread(
+                        &info.url,
+                        &info.session_id,
+                        info.gui_endpoint,
+                        info.width,
+                        info.height,
+                        &self.state,
+                    );
+                } else {
+                    println!("Profile: No initial browser info (unexpected)");
                 }
             }
         }
@@ -479,8 +580,128 @@ mod cef_handlers {
         }
     }
 
-    pub fn create_app(state: Arc<SharedState>) -> App {
+    pub fn create_app(state: Arc<ProfileState>) -> App {
         let handler = ProfileBPH::new(state);
         ProfileCefApp::new(handler)
+    }
+
+    // ====== Create Browser Task ======
+    //
+    // Task for creating browsers on the UI thread when requested via XPC.
+
+    wrap_task! {
+        pub struct CreateBrowserTask {
+            state: Arc<ProfileState>,
+        }
+
+        impl Task {
+            fn execute(&self) {
+                // Process all pending browser creation requests
+                let pending: Vec<_> = self.state.pending_browsers.lock().unwrap().drain(..).collect();
+
+                for (session_id, url, gui_endpoint, width, height) in pending {
+                    println!(
+                        "Profile: Processing pending browser: session='{}', url='{}'",
+                        session_id, url
+                    );
+                    create_browser_on_ui_thread(
+                        &url,
+                        &session_id,
+                        gui_endpoint,
+                        width,
+                        height,
+                        &self.state,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Create a browser on the CEF UI thread.
+    /// Used by both initial browser creation (on_context_initialized) and
+    /// subsequent browser creation (create_browser command from launcher).
+    pub fn create_browser_on_ui_thread(
+        url: &str,
+        session_id: &str,
+        gui_endpoint: XpcEndpoint,
+        width: u32,
+        height: u32,
+        state: &Arc<ProfileState>,
+    ) {
+        use std::sync::atomic::AtomicPtr;
+
+        // Connect to GUI for this browser
+        let gui = match XpcConnection::from_endpoint(gui_endpoint) {
+            Ok(c) => Arc::new(c),
+            Err(e) => {
+                eprintln!("Profile: Failed to connect to GUI: {}", e);
+                return;
+            }
+        };
+        set_event_handler(&*gui, |event| {
+            if let Err(e) = event {
+                eprintln!("Profile: GUI connection error: {}", e);
+            }
+        });
+        gui.resume();
+
+        // Create per-browser state
+        let browser_state = Arc::new(BrowserState {
+            session_id: session_id.to_string(),
+            gui,
+            width: std::sync::atomic::AtomicU32::new(width),
+            height: std::sync::atomic::AtomicU32::new(height),
+            last_handle: AtomicPtr::new(std::ptr::null_mut()),
+        });
+
+        // Create render handler with browser-specific state
+        let inner = RenderHandlerInner {
+            state: Arc::clone(&browser_state),
+            scale: state.scale,
+        };
+
+        let render_handler = ProfileRenderHandler::new(inner);
+        let context_menu_handler = ProfileContextMenuHandler::new(ContextMenuInner);
+        let mut client = ProfileClient::new(render_handler, context_menu_handler);
+
+        let window_info = WindowInfo {
+            windowless_rendering_enabled: 1,
+            shared_texture_enabled: 1,
+            ..Default::default()
+        };
+
+        let browser_settings = BrowserSettings {
+            windowless_frame_rate: 60,
+            ..Default::default()
+        };
+
+        let url_cef: cef::CefString = url.into();
+
+        let browser = cef::browser_host_create_browser_sync(
+            Some(&window_info),
+            Some(&mut client),
+            Some(&url_cef),
+            Some(&browser_settings),
+            None, // extra_info
+            None, // request_context (uses global with our root_cache_path)
+        );
+
+        match browser {
+            Some(browser) => {
+                let browser_id = browser.identifier();
+                println!(
+                    "Profile: Browser {} created for '{}' (session='{}')",
+                    browser_id, url, session_id
+                );
+
+                // Store browser state by ID
+                state
+                    .browsers
+                    .lock()
+                    .unwrap()
+                    .insert(browser_id, browser_state);
+            }
+            None => eprintln!("Profile: Failed to create browser for '{}'", url),
+        }
     }
 }

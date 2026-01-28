@@ -39,6 +39,10 @@ fn main() {
     // Session storage: session_id -> GUI endpoint
     let sessions: Arc<Mutex<HashMap<String, XpcEndpoint>>> = Arc::new(Mutex::new(HashMap::new()));
 
+    // Running profile processes: profile_name -> XpcConnection to that profile's command listener
+    let running_profiles: Arc<Mutex<HashMap<String, Arc<XpcConnection>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
     // CRITICAL: Store client connections to keep them alive!
     let clients: Arc<Mutex<Vec<Arc<XpcConnection>>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -77,6 +81,7 @@ fn main() {
     // Handle incoming connections
     let sessions_clone = sessions.clone();
     let clients_clone = clients.clone();
+    let running_profiles_clone = running_profiles.clone();
 
     set_new_connection_handler(&listener, move |conn| {
         println!("Launcher: New connection");
@@ -88,6 +93,7 @@ fn main() {
         let sessions = sessions_clone.clone();
         let profile_bin_path = profile_bin_path.clone();
         let clients_inner = clients_clone.clone();
+        let running_profiles = running_profiles_clone.clone();
 
         set_event_handler(&*conn, move |event| match event {
             Ok(msg) => {
@@ -103,21 +109,13 @@ fn main() {
                                 return;
                             }
                         };
-                        let endpoint = match msg.get_endpoint("gui_endpoint") {
+                        let gui_endpoint = match msg.get_endpoint("gui_endpoint") {
                             Some(ep) => ep,
                             None => {
                                 eprintln!("Launcher: Missing gui_endpoint");
                                 return;
                             }
                         };
-
-                        println!("Launcher: Storing endpoint for session {}", session_id);
-
-                        // Store endpoint for sender to claim
-                        {
-                            let mut sessions = sessions.lock().unwrap();
-                            sessions.insert(session_id.clone(), endpoint);
-                        }
 
                         // Extract URL, profile, and dimensions from message
                         let url = msg
@@ -132,36 +130,107 @@ fn main() {
                             .get_string("scale")
                             .unwrap_or_else(|| "2.0".to_string());
 
-                        // Spawn profile server as child process
-                        println!(
-                            "Launcher: Spawning profile server (url={}, profile={}, size={}x{}, scale={})...",
-                            url, profile, width, height, scale
-                        );
-                        let log_path =
-                            format!("/tmp/termsurf-profile-{}.log", session_id);
-                        let mut cmd = Command::new(&profile_bin_path);
-                        cmd.args(["--session-id", &session_id])
-                            .args(["--url", &url])
-                            .args(["--profile", &profile])
-                            .args(["--width", &width.to_string()])
-                            .args(["--height", &height.to_string()])
-                            .args(["--scale", &scale]);
-                        if let Ok(log_file) = File::create(&log_path) {
-                            if let Ok(log_file2) = log_file.try_clone() {
-                                cmd.stdout(log_file).stderr(log_file2);
+                        // Always store GUI endpoint for claiming (by profile process)
+                        println!("Launcher: Storing endpoint for session {}", session_id);
+                        sessions
+                            .lock()
+                            .unwrap()
+                            .insert(session_id.clone(), gui_endpoint);
+
+                        // Check if profile process already running
+                        let existing_conn = running_profiles.lock().unwrap().get(&profile).cloned();
+
+                        if let Some(profile_conn) = existing_conn {
+                            // Forward to existing profile process
+                            println!(
+                                "Launcher: Forwarding to existing profile '{}' (session={}, url={})",
+                                profile, session_id, url
+                            );
+
+                            let create_msg = XpcDictionary::new();
+                            create_msg.set_string("action", "create_browser");
+                            create_msg.set_string("session_id", &session_id);
+                            create_msg.set_string("url", &url);
+                            create_msg.set_i64("width", width);
+                            create_msg.set_i64("height", height);
+                            create_msg.set_string("scale", &scale);
+
+                            profile_conn.send(&create_msg);
+                        } else {
+                            // Spawn new profile process
+                            println!(
+                                "Launcher: Spawning new profile '{}' (session={}, url={}, size={}x{}, scale={})...",
+                                profile, session_id, url, width, height, scale
+                            );
+                            let log_path = format!("/tmp/termsurf-profile-{}.log", profile);
+                            let mut cmd = Command::new(&profile_bin_path);
+                            cmd.args(["--session-id", &session_id])
+                                .args(["--url", &url])
+                                .args(["--profile", &profile])
+                                .args(["--width", &width.to_string()])
+                                .args(["--height", &height.to_string()])
+                                .args(["--scale", &scale]);
+                            if let Ok(log_file) = File::create(&log_path) {
+                                if let Ok(log_file2) = log_file.try_clone() {
+                                    cmd.stdout(log_file).stderr(log_file2);
+                                }
+                            }
+                            match cmd.spawn() {
+                                Ok(child) => {
+                                    println!(
+                                        "Launcher: Spawned profile '{}' (pid: {}, log: {})",
+                                        profile,
+                                        child.id(),
+                                        log_path
+                                    )
+                                }
+                                Err(e) => eprintln!("Launcher: Failed to spawn: {}", e),
                             }
                         }
-                        match cmd.spawn() {
-                            Ok(child) => {
-                                println!(
-                                    "Launcher: Spawned profile for {} (pid: {}, log: {})",
-                                    session_id,
-                                    child.id(),
-                                    log_path
-                                )
+                    }
+
+                    "register_profile" => {
+                        let profile = match msg.get_string("profile") {
+                            Some(p) => p,
+                            None => {
+                                eprintln!("Launcher: register_profile missing profile");
+                                return;
                             }
-                            Err(e) => eprintln!("Launcher: Failed to spawn: {}", e),
-                        }
+                        };
+                        let endpoint = match msg.get_endpoint("endpoint") {
+                            Some(ep) => ep,
+                            None => {
+                                eprintln!("Launcher: register_profile missing endpoint");
+                                return;
+                            }
+                        };
+
+                        // Create persistent connection from endpoint
+                        let profile_conn = match XpcConnection::from_endpoint(endpoint) {
+                            Ok(c) => Arc::new(c),
+                            Err(e) => {
+                                eprintln!("Launcher: Failed to connect to profile: {}", e);
+                                return;
+                            }
+                        };
+
+                        let profile_name = profile.to_string();
+                        set_event_handler(&*profile_conn, move |event| {
+                            if let Err(e) = event {
+                                eprintln!(
+                                    "Launcher: Profile '{}' connection error: {}",
+                                    profile_name, e
+                                );
+                            }
+                        });
+                        profile_conn.resume();
+
+                        running_profiles
+                            .lock()
+                            .unwrap()
+                            .insert(profile.to_string(), profile_conn);
+
+                        println!("Launcher: Profile '{}' registered", profile);
                     }
 
                     "claim_session" => {

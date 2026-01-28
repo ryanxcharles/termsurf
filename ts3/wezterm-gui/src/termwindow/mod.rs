@@ -794,6 +794,13 @@ impl TermWindow {
             opengl_info: None,
         };
 
+        // Update global cell size for webview pane dimension calculations
+        #[cfg(target_os = "macos")]
+        webview_socket::set_cell_size(
+            render_metrics.cell_size.width as u32,
+            render_metrics.cell_size.height as u32,
+        );
+
         let tw = Rc::new(RefCell::new(myself));
         let tw_event = Rc::clone(&tw);
 

@@ -16,9 +16,33 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
+
+// ============================================================================
+// Cell Size for Pane Dimension Calculation
+// ============================================================================
+
+/// Global cell size for pane dimension calculations.
+/// Updated by TermWindow when render_metrics changes.
+static CELL_WIDTH: AtomicU32 = AtomicU32::new(8);
+static CELL_HEIGHT: AtomicU32 = AtomicU32::new(16);
+
+/// Update the global cell size. Called by TermWindow.
+pub fn set_cell_size(width: u32, height: u32) {
+    CELL_WIDTH.store(width, Ordering::Relaxed);
+    CELL_HEIGHT.store(height, Ordering::Relaxed);
+    log::debug!("[GUI Socket] Cell size updated: {}x{}", width, height);
+}
+
+fn get_cell_size() -> (u32, u32) {
+    (
+        CELL_WIDTH.load(Ordering::Relaxed),
+        CELL_HEIGHT.load(Ordering::Relaxed),
+    )
+}
 
 // ============================================================================
 // Global Server Instance
@@ -387,18 +411,29 @@ fn handle_request(
                 .and_then(|v| v.as_str())
                 .unwrap_or("default");
 
-            // Look up pane pixel dimensions from Mux to pass to profile server
+            // Look up pane grid dimensions from Mux, compute pixel size using cell size
             let (logical_width, logical_height, scale) = match mux::Mux::try_get() {
                 Some(mux) => match mux.get_pane(pane_id) {
                     Some(pane) => {
                         let dims = pane.get_dimensions();
+                        let (cell_width, cell_height) = get_cell_size();
+
+                        // Compute scale factor (macOS base DPI = 72)
                         let scale = dims.dpi as f32 / 72.0;
                         let scale = if scale <= 0.0 { 2.0 } else { scale };
-                        let lw = (dims.pixel_width as f32 / scale) as u32;
-                        let lh = (dims.pixel_height as f32 / scale) as u32;
+
+                        // Physical pixels = grid cells × cell size
+                        let physical_width = dims.cols as f32 * cell_width as f32;
+                        let physical_height = dims.viewport_rows as f32 * cell_height as f32;
+
+                        // Logical pixels = physical / scale (CEF expects DIP coordinates)
+                        let lw = (physical_width / scale) as u32;
+                        let lh = (physical_height / scale) as u32;
+
                         log::info!(
-                            "[GUI Socket] Pane {} dimensions: {}x{} px, dpi={}, scale={}, logical={}x{}",
-                            pane_id, dims.pixel_width, dims.pixel_height, dims.dpi, scale, lw, lh
+                            "[GUI Socket] Pane {} dimensions: {}cols x {}rows, cell={}x{}, physical={}x{}, scale={}, logical={}x{}",
+                            pane_id, dims.cols, dims.viewport_rows, cell_width, cell_height,
+                            physical_width, physical_height, scale, lw, lh
                         );
                         (lw, lh, scale)
                     }
