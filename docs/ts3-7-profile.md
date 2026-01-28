@@ -1147,6 +1147,7 @@ webview is stretched to fill the entire window instead of being positioned
 within the pane bounds.
 
 For example, with a vertical split:
+
 - Log shows: `79cols x 72rows, cell=13x30, physical=1027x2160, logical=513x1080`
 - Profile server receives: `size=513x1080` (correct half-width)
 - IOSurface created at: `1026x2160` (correct: 513×2 for Retina)
@@ -1174,12 +1175,14 @@ webview texture, regardless of its actual size, is stretched to fill this
 viewport. The TODO comment confirms this was always a known limitation.
 
 **What worked:**
+
 - Cell size sharing via global atomics
 - Dimension calculation using `cols × cell_size / scale`
 - Profile server receiving correct dimensions
 - CEF rendering at correct size
 
 **What failed:**
+
 - The rendering code ignores the pane's position and size
 - The texture is drawn to a full-window viewport instead of pane bounds
 
@@ -1196,6 +1199,7 @@ The rendering code needs to:
 3. Set the viewport to the pane's bounds instead of full window
 
 The `PositionedPane` struct (from `mux/src/tab.rs`) provides:
+
 - `left`, `top` — position in cells (multiply by cell size for pixels)
 - `pixel_width`, `pixel_height` — size in pixels
 
@@ -1231,6 +1235,7 @@ render_pass.set_viewport(viewport_x, viewport_y, viewport_w, viewport_h, 0.0, 1.
 ```
 
 This change is straightforward but requires careful handling of:
+
 - Tab bar offset (panes start below the tab bar)
 - Padding and borders (if configured)
 - Coordinate system (wgpu viewport origin is top-left)
@@ -1473,3 +1478,192 @@ kept:
 4. **CEF renders at correct size.** The IOSurface is the right dimensions.
 
 The only remaining issue is viewport positioning in the rendering code.
+
+---
+
+### Experiment 4: Fix Viewport Rendering for Pane Bounds
+
+**Status:** PLANNED
+
+**Prerequisite:** Builds on Experiment 3 code. The dimension calculation is
+correct; only the viewport rendering needs to be fixed.
+
+**Goal:** Render webview textures within their pane bounds instead of stretching
+them to fill the entire window.
+
+#### Problem
+
+The rendering code in `render/draw.rs` uses a hardcoded full-window viewport:
+
+```rust
+render_pass.set_viewport(
+    0.0,
+    0.0,
+    self.dimensions.pixel_width as f32,
+    self.dimensions.pixel_height as f32,
+    0.0,
+    1.0,
+);
+```
+
+The webview texture (which is correctly sized for the pane) gets stretched to
+fill this full-window viewport. The fix is to set the viewport to the pane's
+actual screen position and size.
+
+#### Solution
+
+Use `PositionedPane` data to calculate the correct viewport for each webview
+overlay:
+
+1. Call `self.get_panes_to_render()` to get all positioned panes
+2. Find the pane matching the overlay's `pane_id`
+3. Convert the pane's cell position (`left`, `top`) to pixels using cell size
+4. Add offsets for tab bar and OS border
+5. Set the viewport to the pane's pixel bounds
+
+#### Changes
+
+**File:** `ts3/wezterm-gui/src/termwindow/render/draw.rs`
+
+**1. Change the loop to use pane_id (not ignore it)**
+
+```rust
+// Before
+for (_pane_id, overlay) in overlays.overlays.iter() {
+
+// After
+for (pane_id, overlay) in overlays.overlays.iter() {
+```
+
+**2. Get positioned panes before the loop**
+
+After the `overlays.overlays.is_empty()` check, add:
+
+```rust
+// Get positioned panes for viewport calculation
+let positioned_panes = self.get_panes_to_render();
+```
+
+**3. Replace the hardcoded viewport with pane-aware positioning**
+
+Replace lines 308-317 with:
+
+```rust
+// Find this pane's position in the current layout
+let positioned_pane = positioned_panes.iter().find(|p| p.pane.pane_id() == *pane_id);
+
+let (viewport_x, viewport_y, viewport_w, viewport_h) = match positioned_pane {
+    Some(pos) => {
+        // Convert cell position to pixels
+        let cell_width = self.render_metrics.cell_size.width as f32;
+        let cell_height = self.render_metrics.cell_size.height as f32;
+
+        // Get offsets for tab bar and borders
+        let tab_bar_height = self.tab_bar_pixel_height().unwrap_or(0.);
+        let border = self.get_os_border();
+
+        // Calculate pixel position
+        // Pane's left/top are in cells, relative to the content area
+        let x = pos.left as f32 * cell_width + border.left.get() as f32;
+        let y = pos.top as f32 * cell_height + tab_bar_height + border.top.get() as f32;
+
+        // Pane's pixel_width/height are already in pixels
+        let w = pos.pixel_width as f32;
+        let h = pos.pixel_height as f32;
+
+        log::info!(
+            "[Render] Pane {} viewport: ({}, {}) {}x{}",
+            pane_id, x, y, w, h
+        );
+
+        (x, y, w, h)
+    }
+    None => {
+        // Pane not found in current layout - maybe it was closed?
+        // Fall back to full window (maintains old behavior)
+        log::warn!(
+            "[Render] Pane {} not found in layout, using full window",
+            pane_id
+        );
+        (
+            0.0,
+            0.0,
+            self.dimensions.pixel_width as f32,
+            self.dimensions.pixel_height as f32,
+        )
+    }
+};
+
+render_pass.set_viewport(viewport_x, viewport_y, viewport_w, viewport_h, 0.0, 1.0);
+```
+
+#### Files to Modify
+
+| Action | File                                            | Change                       |
+| ------ | ----------------------------------------------- | ---------------------------- |
+| Modify | `ts3/wezterm-gui/src/termwindow/render/draw.rs` | Use pane bounds for viewport |
+
+#### Verification
+
+```bash
+cd ts3
+./scripts/build-debug.sh --open
+
+# Create a vertical split (Cmd+Shift+D or use the menu)
+# This creates pane 0 (left) and pane 1 (right)
+
+# In left pane (pane 0):
+web google.com
+
+# In right pane (pane 1):
+web github.com
+
+# Expected: Both webviews render within their respective pane bounds
+# Google on left, GitHub on right, side by side
+
+# Check logs for viewport calculations
+cat /tmp/termsurf-gui.log | grep "viewport"
+# Should show: "[Render] Pane 0 viewport: (0, 30) 640x768"
+# Should show: "[Render] Pane 1 viewport: (648, 30) 640x768"
+# (Numbers will vary based on window size, font, split position)
+
+# Verify both webviews render at correct size
+cat /tmp/termsurf-gui.log | grep "IOSurface"
+# Should show two different sizes for the two panes
+
+# Verify process reuse (Experiment 2)
+ps aux | grep termsurf-profile
+# Should show 1 process (both browsers share the profile)
+```
+
+#### Success Criteria
+
+- [ ] Split window into two panes side by side
+- [ ] `web google.com` in left pane renders **within left pane bounds**
+- [ ] `web github.com` in right pane renders **within right pane bounds**
+- [ ] Both webviews visible simultaneously without overlapping
+- [ ] Webviews do not stretch beyond their pane boundaries
+- [ ] Logs show correct viewport calculations for each pane
+- [ ] Second webview reuses existing profile process (Experiment 2 validation)
+- [ ] Tab bar remains visible above the webviews
+- [ ] Terminal content in other panes (if any) remains visible
+
+#### Edge Cases to Consider
+
+1. **Single pane (no split):** Pane should fill the content area below tab bar.
+   This is the degenerate case where `left=0`, `top=0`, and dimensions match the
+   terminal area.
+
+2. **Horizontal split (top/bottom):** `top` will be non-zero for the bottom
+   pane. Height will be roughly half.
+
+3. **Complex layouts (multiple splits):** Each pane has its own `left`, `top`,
+   `pixel_width`, `pixel_height`. The code handles this naturally.
+
+4. **Pane closed while webview active:** The fallback to full window handles
+   this gracefully, though the webview should ideally be destroyed when its pane
+   closes (deferred work).
+
+5. **Window resize during webview display:** The viewport is recalculated on
+   each frame, so resizes should work. However, the webview texture size doesn't
+   change until the profile server is notified (deferred: dynamic resize).
