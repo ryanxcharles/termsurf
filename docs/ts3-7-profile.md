@@ -187,7 +187,7 @@ forward. The GUI doesn't need to know.
 
 ### Experiment 1: Merge Launcher into GUI
 
-**Status:** PLANNED
+**Status:** FAILED
 
 **Goal:** Simplify the architecture by eliminating the separate launcher process.
 The GUI becomes the Mach service that profile servers connect to. This
@@ -202,6 +202,44 @@ eliminates one process and one IPC hop:
 Before: CLI → GUI → Launcher (spawn) → Profile → Launcher (claim) → GUI
 After:  CLI → GUI (spawn) → Profile → GUI (claim)
 ```
+
+#### Failure Analysis
+
+**Crash:** `EXC_BREAKPOINT` with `_xpc_api_misuse` at
+`xpc_connection_set_event_handler`
+
+**Root cause:** XPC API misuse when the GUI (acting as a Mach service) receives
+connections from profile servers. The crash occurs at line 52 of
+`webview_xpc.rs` in the `set_new_connection_handler` closure when calling
+`set_event_handler` on peer connections.
+
+**Why it failed:**
+
+1. **Mach service peer connection semantics differ from anonymous listeners.**
+   When using `XpcListener::new_mach_service()`, connections received in
+   `set_new_connection_handler` have different lifecycle and handler semantics
+   than anonymous XPC listeners. Calling `xpc_connection_set_event_handler` on
+   peer connections in this context triggers API misuse.
+
+2. **Stale profile servers from previous runs.** A profile server from a
+   previous session connected immediately at GUI startup (log shows "New
+   connection from profile server" before any `web` command), triggering the
+   handler code path before the GUI was ready.
+
+3. **The GUI is not a proper XPC service.** The launcher was a dedicated XPC
+   service binary managed by launchd with proper lifecycle control. When the GUI
+   tries to be a Mach service, it's just a regular app with a registered Mach
+   service name — the XPC framework expects services registered via launchd to
+   follow specific patterns that a GUI app doesn't follow.
+
+**Conclusion:** The separate launcher process is architecturally necessary, not
+just a design choice. The launcher provides:
+
+- Proper XPC service lifecycle management by launchd
+- Isolation from GUI crashes/restarts
+- Correct Mach service semantics for peer connections
+
+The experiment has been reverted. The launcher-based architecture remains.
 
 #### Changes
 
