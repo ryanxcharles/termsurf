@@ -1126,3 +1126,249 @@ ps aux | grep termsurf-profile
 - [ ] Profile logs show "New command connection from launcher" on second request
 - [ ] Profile logs show two separate "Created browser" entries
 - [ ] No CEF SingletonLock errors
+
+---
+
+### Experiment 3: Fix Pane Dimension Calculation
+
+**Status:** PLANNED
+
+**Prerequisite:** Builds on Experiment 2 code (one process per profile). That
+code compiles but cannot be tested due to this bug.
+
+**Goal:** Fix the browser sizing bug where webviews render at window size
+instead of pane size. This is blocking all multi-pane testing.
+
+#### Problem Analysis
+
+**ts3 (broken):** Uses `dims.pixel_width` and `dims.pixel_height` directly.
+
+```rust
+// ts3/wezterm-gui/src/termwindow/webview_socket.rs (lines 394-398)
+let dims = pane.get_dimensions();
+let scale = dims.dpi as f32 / 72.0;
+let lw = (dims.pixel_width as f32 / scale) as u32;
+let lh = (dims.pixel_height as f32 / scale) as u32;
+```
+
+**ts2 (correct):** Uses grid dimensions × cell size.
+
+```rust
+// ts2/wezterm-gui/src/termwindow/mod.rs (lines 3868-3875)
+let dims = pane.get_dimensions();
+let physical_width = dims.cols as f32 * self.render_metrics.cell_size.width as f32;
+let physical_height = dims.viewport_rows as f32 * self.render_metrics.cell_size.height as f32;
+let logical_width = (physical_width / device_scale_factor) as u32;
+let logical_height = (physical_height / device_scale_factor) as u32;
+```
+
+**Root cause:** `dims.pixel_width` and `dims.pixel_height` are not the current
+pane's rendered size. They appear to be window dimensions or values set at pane
+creation that don't reflect the current split layout.
+
+The correct formula is:
+
+```
+pane_pixels = grid_cells × cell_size_in_pixels
+logical_pixels = pane_pixels / scale_factor
+```
+
+Where:
+
+- `grid_cells` = `dims.cols` or `dims.viewport_rows`
+- `cell_size_in_pixels` = `render_metrics.cell_size.width` or `.height`
+- `scale_factor` = `dims.dpi / 72.0` (macOS base DPI)
+
+#### Why ts3 Can't Just Copy ts2
+
+In ts2, browser creation happens inside `TermWindow::open_webview()` in
+`termwindow/mod.rs`, where `self.render_metrics` is directly accessible.
+
+In ts3, browser creation is triggered from `webview_socket.rs`, which runs on a
+**background thread** without access to the TermWindow. The socket handler only
+has access to:
+
+- The global Mux (for pane dimensions)
+- The XPC manager (for IPC)
+
+It does **not** have access to:
+
+- `render_metrics.cell_size` (lives in TermWindow)
+- Any per-window state
+
+#### Solution: Share Cell Size Globally
+
+Create a global shared state that stores the current cell size. The TermWindow
+updates this whenever `render_metrics` changes, and the socket handler reads it
+when calculating pane dimensions.
+
+**1. Add shared cell size state**
+
+**File:** `ts3/wezterm-gui/src/termwindow/webview_socket.rs`
+
+Add near the top with other globals:
+
+```rust
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Global cell size for pane dimension calculations.
+/// Updated by TermWindow when render_metrics changes.
+/// The socket handler reads this to calculate correct pane pixel dimensions.
+static CELL_WIDTH: AtomicU32 = AtomicU32::new(8);   // Default 8px
+static CELL_HEIGHT: AtomicU32 = AtomicU32::new(16); // Default 16px
+
+/// Update the global cell size. Called by TermWindow after render_metrics changes.
+pub fn set_cell_size(width: u32, height: u32) {
+    CELL_WIDTH.store(width, Ordering::Relaxed);
+    CELL_HEIGHT.store(height, Ordering::Relaxed);
+    log::debug!("[GUI Socket] Cell size updated: {}x{}", width, height);
+}
+
+/// Get the current cell size.
+fn get_cell_size() -> (u32, u32) {
+    (
+        CELL_WIDTH.load(Ordering::Relaxed),
+        CELL_HEIGHT.load(Ordering::Relaxed),
+    )
+}
+```
+
+**2. Update cell size from TermWindow**
+
+**File:** `ts3/wezterm-gui/src/termwindow/mod.rs`
+
+In `TermWindow::new()` or wherever render_metrics is first computed, add:
+
+```rust
+// After render_metrics is computed or updated
+super::webview_socket::set_cell_size(
+    self.render_metrics.cell_size.width as u32,
+    self.render_metrics.cell_size.height as u32,
+);
+```
+
+**File:** `ts3/wezterm-gui/src/termwindow/resize.rs`
+
+In `apply_dimensions()` after `self.render_metrics = metrics;`, add:
+
+```rust
+super::webview_socket::set_cell_size(
+    self.render_metrics.cell_size.width as u32,
+    self.render_metrics.cell_size.height as u32,
+);
+```
+
+**3. Fix dimension calculation in socket handler**
+
+**File:** `ts3/wezterm-gui/src/termwindow/webview_socket.rs`
+
+Replace the dimension calculation (around line 390-417):
+
+```rust
+// Look up pane grid dimensions from Mux, compute pixel size using cell size
+let (logical_width, logical_height, scale) = match mux::Mux::try_get() {
+    Some(mux) => match mux.get_pane(pane_id) {
+        Some(pane) => {
+            let dims = pane.get_dimensions();
+            let (cell_width, cell_height) = get_cell_size();
+
+            // Compute scale factor (macOS base DPI = 72)
+            let scale = dims.dpi as f32 / 72.0;
+            let scale = if scale <= 0.0 { 2.0 } else { scale };
+
+            // Physical pixels = grid cells × cell size
+            let physical_width = dims.cols as f32 * cell_width as f32;
+            let physical_height = dims.viewport_rows as f32 * cell_height as f32;
+
+            // Logical pixels = physical / scale (CEF expects DIP coordinates)
+            let lw = (physical_width / scale) as u32;
+            let lh = (physical_height / scale) as u32;
+
+            log::info!(
+                "[GUI Socket] Pane {} dimensions: {}cols x {}rows, cell={}x{}, \
+                 physical={}x{}, scale={}, logical={}x{}",
+                pane_id,
+                dims.cols,
+                dims.viewport_rows,
+                cell_width,
+                cell_height,
+                physical_width,
+                physical_height,
+                scale,
+                lw,
+                lh
+            );
+            (lw, lh, scale)
+        }
+        None => {
+            log::warn!(
+                "[GUI Socket] Pane {} not found, using default 800x600",
+                pane_id
+            );
+            (800u32, 600u32, 2.0f32)
+        }
+    },
+    None => {
+        log::warn!("[GUI Socket] Mux not available, using default 800x600");
+        (800u32, 600u32, 2.0f32)
+    }
+};
+```
+
+#### Files to Modify
+
+| Action | File                                               | Change                          |
+| ------ | -------------------------------------------------- | ------------------------------- |
+| Modify | `ts3/wezterm-gui/src/termwindow/webview_socket.rs` | Add cell size globals, fix calc |
+| Modify | `ts3/wezterm-gui/src/termwindow/mod.rs`            | Call set_cell_size on init      |
+| Modify | `ts3/wezterm-gui/src/termwindow/resize.rs`         | Call set_cell_size on resize    |
+
+#### Verification
+
+```bash
+cd ts3
+./scripts/build-debug.sh --open
+
+# Create a split (Cmd+Shift+D or similar)
+# In left pane:
+web google.com
+
+# In right pane:
+web github.com
+
+# Both webviews should render at pane size, not window size
+# They should be side by side, not overlapping
+
+# Check logs for correct dimension calculation
+cat /tmp/termsurf-gui.log | grep "Pane.*dimensions"
+# Should show: "80cols x 24rows, cell=8x16, physical=640x384"
+# NOT: "pixel_width=1280" (window size)
+
+# Check process count
+ps aux | grep termsurf-profile
+# Should show 1 process (both browsers in same profile)
+```
+
+#### Success Criteria
+
+- [ ] Split window into two panes side by side
+- [ ] `web google.com` in left pane renders at left pane size
+- [ ] `web github.com` in right pane renders at right pane size
+- [ ] Both webviews visible simultaneously without overlapping
+- [ ] Log shows correct dimension calculation using cols × cell_width
+- [ ] Second webview reuses existing profile process (Experiment 2 validation)
+
+#### Why This Works
+
+1. **Cell size is relatively stable.** It changes only when fonts or DPI change,
+   not on every resize. Atomic operations are sufficient.
+
+2. **Grid dimensions are always correct.** `dims.cols` and `dims.viewport_rows`
+   accurately reflect the pane's current size in terminal cells, even after
+   splits.
+
+3. **Matches ts2's approach.** We're using the same formula, just with the cell
+   size coming from a global instead of `self.render_metrics`.
+
+4. **Minimal coupling.** The socket handler doesn't need a reference to
+   TermWindow. It just reads two atomic integers.
