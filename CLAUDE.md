@@ -31,7 +31,7 @@ The project has evolved through three generations:
 - `ts2/` — TermSurf 2.0 (WezTerm fork + in-process CEF). Superseded.
 - `ts1/` — TermSurf 1.x (Ghostty fork + WKWebView). Legacy, still builds.
 - `cef-rs/` — CEF Rust bindings. Used by `ts3/termsurf-profile/`.
-- `docs/` — All documentation across all generations.
+- `worklog/` — All documentation across all generations.
 
 ## TermSurf 3.0 (ts3/) — Active Development
 
@@ -195,7 +195,7 @@ ts2 embedded CEF directly inside WezTerm's process. CEF allows only one
 TermSurf requires multiple profiles (like Chrome profiles), so CEF had to move
 to separate processes — one per profile. That's ts3.
 
-Historical docs: `docs/ts2-*.md`
+Historical docs: `worklog/ts2-*.md`
 
 ## TermSurf 1.x (ts1/) — Legacy
 
@@ -308,40 +308,40 @@ testbed before ts1 integration. Changes made to the example:
 
 ### TermSurf 3.0 (active)
 
-- `docs/ts3-1-architecture.md` — High-level architecture overview
-- `docs/ts3-2-webview.md` — Webview rendering implementation
-- `docs/ts3-3-xpc.md` — XPC architecture for inter-process communication
-- `docs/ts3-4-webpage.md` — Webpage rendering solutions
-- `docs/ts3-5-profile.md` — Profile isolation for browser data
-- `docs/ts3-6-resize.md` — Resize support implementation
+- `worklog/ts3-1-architecture.md` — High-level architecture overview
+- `worklog/ts3-2-webview.md` — Webview rendering implementation
+- `worklog/ts3-3-xpc.md` — XPC architecture for inter-process communication
+- `worklog/ts3-4-webpage.md` — Webpage rendering solutions
+- `worklog/ts3-5-profile.md` — Profile isolation for browser data
+- `worklog/ts3-6-resize.md` — Resize support implementation
 
 ### TermSurf 2.0 (historical)
 
-- `docs/ts2-architecture.md` — Technical decisions and design rationale
-- `docs/ts2-cef.md` — CEF integration via cef-rs
-- `docs/ts2-cef-wezterm.md` — CEF + WezTerm integration details
-- `docs/ts2-cef-mvp.md` through `ts2-cef-mvp5.md` — MVP iteration experiments
-- `docs/ts2-profile.md` — CEF browser profile research
-- `docs/ts2-web.md` — Web command experiments
-- `docs/ts2-wezterm-analysis.md` — WezTerm + cef-rs architecture analysis
+- `worklog/ts2-architecture.md` — Technical decisions and design rationale
+- `worklog/ts2-cef.md` — CEF integration via cef-rs
+- `worklog/ts2-cef-wezterm.md` — CEF + WezTerm integration details
+- `worklog/ts2-cef-mvp.md` through `ts2-cef-mvp5.md` — MVP iteration experiments
+- `worklog/ts2-profile.md` — CEF browser profile research
+- `worklog/ts2-web.md` — Web command experiments
+- `worklog/ts2-wezterm-analysis.md` — WezTerm + cef-rs architecture analysis
 
 ### TermSurf 1.x (legacy)
 
-- `docs/ts1-bookmarks.md` — Bookmarks implementation plan
-- `docs/ts1-build.md` — Build instructions and troubleshooting
-- `docs/ts1-console.md` — Console bridging and JavaScript API
-- `docs/ts1-ctrl-z.md` — ctrl+z/fg analysis (deferred)
-- `docs/ts1-keybindings.md` — Webview keyboard shortcuts and modes
-- `docs/ts1-libghostty.md` — Changes to libghostty
-- `docs/ts1-release.md` — Release procedure and versioning
-- `docs/ts1-target-blank.md` — target="_blank" link handling
-- `docs/ts1-webview.md` — WebView implementation and API checklist
+- `worklog/ts1-bookmarks.md` — Bookmarks implementation plan
+- `worklog/ts1-build.md` — Build instructions and troubleshooting
+- `worklog/ts1-console.md` — Console bridging and JavaScript API
+- `worklog/ts1-ctrl-z.md` — ctrl+z/fg analysis (deferred)
+- `worklog/ts1-keybindings.md` — Webview keyboard shortcuts and modes
+- `worklog/ts1-libghostty.md` — Changes to libghostty
+- `worklog/ts1-release.md` — Release procedure and versioning
+- `worklog/ts1-target-blank.md` — target="_blank" link handling
+- `worklog/ts1-webview.md` — WebView implementation and API checklist
 
 ### General
 
-- `docs/merge-upstream.md` — How to merge changes from upstream repos
-- `docs/competitors.md` — Terminal-browser hybrid comparison
-- `docs/website.md` — termsurf.com website
+- `worklog/merge-upstream.md` — How to merge changes from upstream repos
+- `worklog/competitors.md` — Terminal-browser hybrid comparison
+- `worklog/website.md` — termsurf.com website
 
 ## AI Reminder
 
