@@ -199,10 +199,13 @@ impl crate::TermWindow {
             return Ok(());
         }
 
+        // Get positioned panes for viewport calculation
+        let positioned_panes = self.get_panes_to_render();
+
         let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // For each overlay, import the IOSurface and render it
-        for (_pane_id, overlay) in overlays.overlays.iter() {
+        for (pane_id, overlay) in overlays.overlays.iter() {
             if overlay.mach_port == 0 {
                 continue;
             }
@@ -305,16 +308,56 @@ impl crate::TermWindow {
                 render_pass.set_pipeline(&webgpu.webview_render_pipeline);
                 render_pass.set_bind_group(0, &bind_group, &[]);
 
-                // Set viewport to fill the entire screen for now
-                // TODO: Use pane bounds when integrating with real panes
-                render_pass.set_viewport(
-                    0.0,
-                    0.0,
-                    self.dimensions.pixel_width as f32,
-                    self.dimensions.pixel_height as f32,
-                    0.0,
-                    1.0,
-                );
+                // Find this pane's position in the current layout
+                let positioned_pane = positioned_panes.iter().find(|p| p.pane.pane_id() == *pane_id);
+
+                let (viewport_x, viewport_y, viewport_w, viewport_h) = match positioned_pane {
+                    Some(pos) => {
+                        // Convert cell position to pixels
+                        let cell_width = self.render_metrics.cell_size.width as f32;
+                        let cell_height = self.render_metrics.cell_size.height as f32;
+
+                        // Get offsets for tab bar and borders
+                        // Note: must check show_tab_bar, as tab_bar_pixel_height() always returns a value
+                        let tab_bar_height = if self.show_tab_bar {
+                            self.tab_bar_pixel_height().unwrap_or(0.)
+                        } else {
+                            0.0
+                        };
+                        let border = self.get_os_border();
+
+                        // Calculate pixel position
+                        // Pane's left/top are in cells, relative to the content area
+                        let x = pos.left as f32 * cell_width + border.left.get() as f32;
+                        let y = pos.top as f32 * cell_height + tab_bar_height + border.top.get() as f32;
+
+                        // Pane's pixel_width/height are already in pixels
+                        let w = pos.pixel_width as f32;
+                        let h = pos.pixel_height as f32;
+
+                        log::info!(
+                            "[Render] Pane {} viewport: ({}, {}) {}x{}",
+                            pane_id, x, y, w, h
+                        );
+
+                        (x, y, w, h)
+                    }
+                    None => {
+                        // Pane not found in current layout - fall back to full window
+                        log::warn!(
+                            "[Render] Pane {} not found in layout, using full window",
+                            pane_id
+                        );
+                        (
+                            0.0,
+                            0.0,
+                            self.dimensions.pixel_width as f32,
+                            self.dimensions.pixel_height as f32,
+                        )
+                    }
+                };
+
+                render_pass.set_viewport(viewport_x, viewport_y, viewport_w, viewport_h, 0.0, 1.0);
 
                 // Draw a single triangle that covers the viewport
                 render_pass.draw(0..3, 0..1);
