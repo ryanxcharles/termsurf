@@ -986,7 +986,7 @@ perspective.
 
 ### Experiment 4: Diagnose invalidate() Behavior
 
-**Status:** PENDING
+**Status:** SUCCESS
 
 **Goal:** Add diagnostic logging to determine whether `window.invalidate()` is
 being called and whether it's actually triggering render passes. This will
@@ -1127,10 +1127,213 @@ tail -f /tmp/termsurf-gui.log | grep "\[DEBOUNCE\]\|\[RENDER-LOOP\]"
 
 #### Success Criteria
 
-- [ ] All 6 log points implemented
-- [ ] Can observe render loop frequency via timestamps
-- [ ] Can trace exact debounce state transitions
-- [ ] Can confirm whether invalidate() is called
-- [ ] Can confirm whether invalidate() triggers another render
-- [ ] Have data to design Experiment 5 (the fix)
+- [x] All 6 log points implemented
+- [x] Can observe render loop frequency via timestamps
+- [x] Can trace exact debounce state transitions
+- [x] Can confirm whether invalidate() is called
+- [x] Can confirm whether invalidate() triggers another render
+- [x] Have data to design Experiment 5 (the fix)
 
+#### Findings
+
+The logs revealed that **the debounce logic is working correctly**:
+
+1. `invalidate()` IS being called and IS triggering renders during the WAITING
+   phase
+2. SENDING fires correctly after 30ms of stable size
+3. Resize commands are received by profile server
+4. Profile server sends new IOSurface back (~30-40ms after resize)
+5. GUI receives the new texture via XPC
+
+**The real bug**: After SENDING, we hit FAST_PATH which does NOT call
+`invalidate()`. The render loop goes idle. When the new texture arrives via XPC,
+nothing triggers a render to display it:
+
+```
+08:04:17.907  SENDING 2060x1245
+08:04:17.944  TEXTURE-RX 4120x2490  ← New texture arrives via XPC
+08:04:18.831  RENDER-LOOP           ← 887ms gap! No render to display new texture
+```
+
+The texture sits in `received_surfaces` until something else triggers a render
+(mouse move, click, etc.). This explains the "sometimes works, sometimes
+doesn't" behavior — it depends on whether incidental events trigger renders.
+
+**Root cause**: Unlike ts2 where CEF is in-process and calls
+`invalidate_callback()` on every paint, ts3's XPC handler has no way to notify
+the window that a new texture has arrived and needs to be displayed.
+
+---
+
+### Experiment 5: Invalidate Callback for XPC Texture Receipt
+
+**Status:** PENDING
+
+**Goal:** When the XPC handler receives a new texture from the profile server,
+trigger a window invalidate so the render loop runs and displays the new
+texture. This mirrors ts2's `invalidate_callback` pattern.
+
+#### Background
+
+Experiment 4 revealed that the debounce logic works correctly, but there's a gap
+in the notification chain:
+
+| ts2 (in-process CEF)                                  | ts3 (out-of-process CEF)                              |
+| ----------------------------------------------------- | ----------------------------------------------------- |
+| CEF paints → `invalidate_callback()` → window redraws | Profile sends IOSurface → XPC handler stores it → ??? |
+
+ts2's `invalidate_callback` is passed to BrowserState when creating the browser.
+CEF's `on_accelerated_paint` calls it directly, triggering a window redraw.
+
+ts3 needs the same pattern: when the XPC handler receives a `display_surface`
+message, it should trigger a window invalidate.
+
+#### The Challenge
+
+The XPC event handler runs on a background thread (XPC dispatch queue) and has
+no direct access to TermWindow. We need to bridge this gap safely.
+
+#### Solution Design
+
+**1. Add callback storage to XpcManager**
+
+```rust
+// In XpcManager struct
+invalidate_callbacks: Mutex<HashMap<PaneId, Arc<dyn Fn() + Send + Sync>>>,
+```
+
+**2. Register callback when spawning browser**
+
+The spawn request originates from TermWindow (via webview_socket), where we have
+access to `self.window`. Pass an invalidate callback:
+
+```rust
+// In request_profile_spawn signature
+pub fn request_profile_spawn(
+    self: &Arc<Self>,
+    pane_id: PaneId,
+    url: &str,
+    profile: &str,
+    width: u32,
+    height: u32,
+    scale: f32,
+    invalidate_callback: Arc<dyn Fn() + Send + Sync>,  // NEW
+) -> anyhow::Result<String>
+```
+
+**3. Create callback in webview_socket.rs**
+
+When handling the spawn_browser command:
+
+```rust
+// Create invalidate callback that captures window reference
+let window = term_window.window.clone();
+let invalidate_callback = Arc::new(move || {
+    if let Some(ref w) = window {
+        w.invalidate();
+    }
+});
+
+xpc_manager.request_profile_spawn(
+    pane_id,
+    &url,
+    &profile,
+    logical_width,
+    logical_height,
+    scale,
+    invalidate_callback,  // Pass the callback
+)?;
+```
+
+**4. Store callback in XpcManager**
+
+In `request_profile_spawn`:
+
+```rust
+// Store invalidate callback for this pane
+self.invalidate_callbacks
+    .lock()
+    .unwrap()
+    .insert(pane_id, invalidate_callback);
+```
+
+**5. Call callback when texture arrives**
+
+In the XPC event handler, after storing the received surface:
+
+```rust
+if action == "display_surface" {
+    // ... existing code to extract port, width, height ...
+    // ... store in received_surfaces ...
+
+    // NEW: Trigger window invalidate
+    if let Some(callback) = manager.invalidate_callbacks.lock().unwrap().get(&pane_id) {
+        callback();
+    }
+}
+```
+
+**6. Clean up callback when pane closes**
+
+In `remove_surface` or a new cleanup method:
+
+```rust
+pub fn remove_surface(&self, pane_id: PaneId) {
+    self.received_surfaces.lock().unwrap().remove(&pane_id);
+    self.invalidate_callbacks.lock().unwrap().remove(&pane_id);  // NEW
+    // ... rest of cleanup ...
+}
+```
+
+#### Why This Works
+
+1. **Thread safety**: `window.invalidate()` on macOS posts to the main thread
+   via Cocoa's `setNeedsDisplay`, which is safe to call from any thread.
+
+2. **Ownership**: TermWindow creates and owns the callback. XpcManager just
+   holds a reference. When the pane closes, we clean up.
+
+3. **Per-pane**: Each pane has its own callback, correctly handling multiple
+   webviews across different windows.
+
+4. **Event-driven**: No polling. Invalidate fires exactly when a new texture
+   arrives.
+
+#### Files to Modify
+
+| File                                               | Changes                                                                                                  |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`    | Add `invalidate_callbacks` field, update `request_profile_spawn` signature, call callback in XPC handler |
+| `ts3/wezterm-gui/src/termwindow/webview_socket.rs` | Create and pass invalidate callback when spawning                                                        |
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Test 1: Basic resize
+web google.com
+# Drag window edge, stop
+# Expected: Webview re-renders immediately after resize (no click needed)
+
+# Test 2: Check logs
+tail -f /tmp/termsurf-gui.log | grep "\[TEXTURE-RX\]\|\[RENDER-LOOP\]"
+# Expected: RENDER-LOOP entry shortly after each TEXTURE-RX
+
+# Test 3: Multiple rapid resizes
+# Drag continuously, then stop
+# Expected: Final resize renders correctly without user interaction
+
+# Test 4: Static terminal (no cursor blink)
+# Resize and stop
+# Expected: Still works (callback triggers render, not relying on terminal activity)
+```
+
+#### Success Criteria
+
+- [ ] `invalidate_callbacks` HashMap added to XpcManager
+- [ ] Callback registered during `request_profile_spawn`
+- [ ] Callback invoked when `display_surface` received
+- [ ] Window redraws immediately after new texture arrives
+- [ ] No user interaction needed to see resized content
+- [ ] Cleanup works when pane closes
