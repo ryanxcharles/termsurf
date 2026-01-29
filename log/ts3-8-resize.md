@@ -672,3 +672,249 @@ communication. Possible explanations:
    handler is set before resume
 3. This may require creating a placeholder `Arc<Mutex<Option<BrowserState>>>`
    that gets populated after browser creation
+
+### Experiment 2: Fix XPC Event Handler Order
+
+**Status:** PLANNED
+
+**Goal:** Fix the XPC event handler ordering bug from Experiment 1. The event
+handler must be set BEFORE `gui.resume()` to avoid undefined behavior.
+
+#### The Problem
+
+In Experiment 1, the code in `create_browser_on_ui_thread` was:
+
+```rust
+let gui = XpcConnection::from_endpoint(gui_endpoint)?;
+gui.resume();  // WRONG: resume before handler
+
+let browser_state = Arc::new(BrowserState { ... });
+
+set_event_handler(&*gui, move |event| {
+    // Handler set AFTER resume - too late!
+    ...
+});
+```
+
+XPC connections should have their event handler set before being resumed. Setting
+the handler after resume may cause race conditions where messages arrive before
+the handler is ready.
+
+#### The Challenge
+
+The event handler needs access to `browser_state` for resize operations, but
+`browser_state` doesn't exist until after the connection is created. We can't
+set the handler before creating browser_state, and we can't create browser_state
+before we have the gui connection.
+
+#### Solution: Deferred State Wrapper
+
+Use an `Arc<Mutex<Option<BrowserState>>>` wrapper that starts as `None` and gets
+populated after browser creation:
+
+```rust
+// 1. Create connection (don't resume yet)
+let gui = XpcConnection::from_endpoint(gui_endpoint)?;
+let gui = Arc::new(gui);
+
+// 2. Create deferred state wrapper (empty for now)
+let deferred_state: Arc<Mutex<Option<Arc<BrowserState>>>> =
+    Arc::new(Mutex::new(None));
+
+// 3. Set event handler BEFORE resume (with deferred state)
+let deferred_for_handler = Arc::clone(&deferred_state);
+set_event_handler(&*gui, move |event| {
+    // Get state from wrapper (may be None early in lifecycle)
+    let state_guard = deferred_for_handler.lock().unwrap();
+    let Some(state) = state_guard.as_ref() else {
+        return;  // State not ready yet, ignore message
+    };
+    // ... handle resize ...
+});
+
+// 4. NOW resume the connection
+gui.resume();
+
+// 5. Create browser_state (now that gui is ready)
+let browser_state = Arc::new(BrowserState { ... });
+
+// 6. Populate the deferred wrapper
+*deferred_state.lock().unwrap() = Some(Arc::clone(&browser_state));
+```
+
+This ensures:
+- Event handler is set before resume
+- Handler can safely access browser_state once it's populated
+- Early messages (before state is ready) are ignored harmlessly
+
+#### Changes
+
+**File:** `ts3/termsurf-profile/src/main.rs`
+
+Replace the browser creation code in `create_browser_on_ui_thread`:
+
+```rust
+pub fn create_browser_on_ui_thread(
+    url: &str,
+    session_id: &str,
+    gui_endpoint: XpcEndpoint,
+    width: u32,
+    height: u32,
+    state: &Arc<ProfileState>,
+) {
+    use std::sync::atomic::AtomicPtr;
+
+    // 1. Connect to GUI (don't resume yet)
+    let gui = match XpcConnection::from_endpoint(gui_endpoint) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            eprintln!("Profile: Failed to connect to GUI: {}", e);
+            return;
+        }
+    };
+
+    // 2. Create deferred state wrapper (will be populated after browser creation)
+    let deferred_state: Arc<Mutex<Option<Arc<BrowserState>>>> =
+        Arc::new(Mutex::new(None));
+
+    // 3. Set event handler BEFORE resume
+    let deferred_for_handler = Arc::clone(&deferred_state);
+    set_event_handler(&*gui, move |event| {
+        match event {
+            Ok(msg) => {
+                let action = msg.get_string("action").unwrap_or_default();
+                match action.as_str() {
+                    "resize_browser" => {
+                        // Get state from deferred wrapper
+                        let state_guard = deferred_for_handler.lock().unwrap();
+                        let Some(bs) = state_guard.as_ref() else {
+                            println!("Profile: resize_browser ignored (state not ready)");
+                            return;
+                        };
+
+                        let width = msg.get_i64("width") as u32;
+                        let height = msg.get_i64("height") as u32;
+                        println!("Profile: resize_browser {}x{}", width, height);
+
+                        let bs = Arc::clone(bs);
+                        drop(state_guard);  // Release lock before post_task
+
+                        let mut task = ResizeBrowserTask::new(bs, width, height);
+                        cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                    }
+                    _ => {}
+                }
+            }
+            Err(e) => {
+                eprintln!("Profile: GUI connection error: {}", e);
+            }
+        }
+    });
+
+    // 4. NOW resume the connection (handler is ready)
+    gui.resume();
+
+    // 5. Create per-browser state
+    let browser_state = Arc::new(BrowserState {
+        session_id: session_id.to_string(),
+        gui: Arc::clone(&gui),
+        width: std::sync::atomic::AtomicU32::new(width),
+        height: std::sync::atomic::AtomicU32::new(height),
+        last_handle: AtomicPtr::new(std::ptr::null_mut()),
+        browser: Mutex::new(None),
+    });
+
+    // ... create render handler, client, browser ...
+
+    match browser {
+        Some(b) => {
+            let browser_id = b.identifier();
+            println!(
+                "Profile: Browser {} created for '{}' (session='{}')",
+                browser_id, url, session_id
+            );
+
+            // Store browser reference for resize operations
+            *browser_state.browser.lock().unwrap() = Some(b);
+
+            // 6. Populate deferred state (handler can now access it)
+            *deferred_state.lock().unwrap() = Some(Arc::clone(&browser_state));
+
+            // Store browser state by ID
+            state.browsers.lock().unwrap().insert(browser_id, browser_state);
+        }
+        None => eprintln!("Profile: Failed to create browser for '{}'", url),
+    }
+}
+```
+
+#### Why This Works
+
+1. **Handler before resume** — The event handler is set before `gui.resume()`,
+   following XPC best practices.
+
+2. **Safe state access** — The handler checks if state is available before using
+   it. Early messages (unlikely but possible) are safely ignored.
+
+3. **No race condition** — The browser is created synchronously on the UI thread.
+   By the time the browser is ready to receive resize commands, the state wrapper
+   is already populated.
+
+4. **Lock discipline** — The lock is dropped before `post_task` to avoid holding
+   it during CEF operations.
+
+#### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `ts3/termsurf-profile/src/main.rs` | Reorder event handler before resume, use deferred state wrapper |
+
+No changes needed to the GUI side — the XPC connection storage and resize
+detection from Experiment 1 are correct.
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Open a webview - should work now (no crash)
+web google.com
+
+# Check profile logs for successful browser creation
+cat /tmp/termsurf-profile-*.log | grep -E "(Browser.*created|resize)"
+# Should show: "Browser 1 created for 'https://google.com'"
+
+# Split the pane (Cmd+Shift+D)
+# Webview should re-render at new smaller size
+
+# Check resize was sent and handled
+cat /tmp/termsurf-gui.log | grep "Sent resize"
+cat /tmp/termsurf-profile-*.log | grep -E "(resize_browser|was_resized)"
+# Should show resize commands being received and processed
+
+# Test edge case: very fast resize (drag window corner rapidly)
+# Should debounce and not overwhelm CEF
+```
+
+#### Success Criteria
+
+- [ ] `web google.com` works (no crash, page renders)
+- [ ] Profile logs show browser creation completed
+- [ ] GUI logs show peer connection stored
+- [ ] Split pane triggers resize command
+- [ ] Profile receives resize and calls was_resized()
+- [ ] Page re-renders at new size (text remains crisp)
+- [ ] Multiple webviews work independently
+
+#### Risks
+
+1. **Deferred state overhead** — Extra `Arc<Mutex<Option<>>>` wrapper adds
+   indirection. Performance impact should be negligible since resize events
+   are infrequent.
+
+2. **Dropped early messages** — If the GUI sends a resize before state is
+   populated, it's ignored. This is acceptable since the browser hasn't
+   rendered yet anyway.
+
+3. **Lock contention** — The mutex is only held briefly during message handling.
+   Not a concern at normal resize frequencies.
