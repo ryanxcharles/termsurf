@@ -279,13 +279,24 @@ GUI                                     Profile Server
 Each pane has its own bidirectional connection. No session_id routing needed—
 the connection itself identifies the browser.
 
+#### Why No Handshake Is Needed
+
+The GUI creates **one listener per pane**. When a connection arrives on that
+listener, the GUI already knows the `pane_id` — it's captured in the closure
+from `spawn_profile_for_pane`. The current code already looks up `pane_id` from
+`session_id` via `pending_sessions`. We just need to store the connection by
+`pane_id` instead of pushing to a Vec.
+
+No `register_browser` message needed. No session routing. The listener itself
+provides the context.
+
 #### Changes
 
 **1. GUI: Store peer connections by pane_id**
 
 **File:** `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`
 
-Change from `Vec` to `HashMap`:
+Change `connections: Vec` to `peer_connections: HashMap`:
 
 ```rust
 pub struct XpcManager {
@@ -297,102 +308,68 @@ pub struct XpcManager {
 }
 ```
 
-In `new_connection_handler` (around line 227), store by pane_id instead of
-pushing to Vec:
+In `set_new_connection_handler` (around line 227), the connection is already
+wrapped in `Arc` and `pane_id` is already looked up. Change:
 
 ```rust
-// Store the peer connection for sending commands back
-// The pane_id comes from the display_surface message
-manager.peer_connections.lock().unwrap().insert(pane_id, Arc::new(conn));
-log::info!("[XPC] Stored peer connection for pane {}", pane_id);
-```
+// Before (line 227):
+manager_for_storage.connections.lock().unwrap().push(conn);
 
-**Issue:** The pane_id is extracted from the first `display_surface` message,
-but we receive the connection before the first message. Two options:
-
-1. Store connection temporarily, then move to HashMap when first message arrives
-2. Have profile server send pane_id in an initial handshake message
-
-**Simpler approach:** Store in the `display_surface` handler:
-
-```rust
-"display_surface" => {
-    // ... existing extraction ...
-
-    // Store peer connection if not already stored
-    if !manager.peer_connections.lock().unwrap().contains_key(&pane_id) {
-        // The 'conn' here is the connection that sent this message
-        // We need to capture it in the handler closure
-        manager.peer_connections.lock().unwrap().insert(pane_id, conn.clone());
-        log::info!("[XPC] Stored peer connection for pane {}", pane_id);
-    }
+// After:
+if let Some(pane_id) = pane_id {
+    manager_for_storage.peer_connections.lock().unwrap()
+        .insert(pane_id, Arc::clone(&conn));
+    log::info!("[XPC] Stored peer connection for pane {}", pane_id);
 }
 ```
 
-This requires passing `conn` into the message handler, which may need
-restructuring of the event handler closure.
+Note: `pane_id` is already in scope — it's looked up on lines 187-190 from
+`pending_sessions.get(&session_id)`.
 
-**Alternative:** Send pane_id in a separate `register_browser` message before
-`display_surface`:
-
-```rust
-// In profile server, after connecting to GUI:
-let register_msg = XpcDictionary::new();
-register_msg.set_string("action", "register_browser");
-register_msg.set_i64("pane_id", pane_id as i64);
-gui.send(&register_msg);
-```
-
-Then GUI stores connection when `register_browser` arrives. This is cleaner.
-
-**2. GUI: Add method to send resize command**
+**2. GUI: Add method to send commands**
 
 **File:** `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`
 
 ```rust
 impl XpcManager {
-    /// Send a resize command to the browser in the given pane
-    pub fn send_resize(&self, pane_id: u64, width: u32, height: u32) -> bool {
+    /// Send a command to the browser in the given pane
+    pub fn send_command(&self, pane_id: u64, msg: &XpcDictionary) -> bool {
         let connections = self.peer_connections.lock().unwrap();
         if let Some(conn) = connections.get(&pane_id) {
-            let msg = termsurf_xpc::XpcDictionary::new();
-            msg.set_string("action", "resize_browser");
-            msg.set_i64("width", width as i64);
-            msg.set_i64("height", height as i64);
-            conn.send(&msg);
+            conn.send(msg);
+            true
+        } else {
+            log::warn!("[XPC] No connection for pane {}", pane_id);
+            false
+        }
+    }
+
+    /// Send a resize command to the browser in the given pane
+    pub fn send_resize(&self, pane_id: u64, width: u32, height: u32) -> bool {
+        let msg = XpcDictionary::new();
+        msg.set_string("action", "resize_browser");
+        msg.set_i64("width", width as i64);
+        msg.set_i64("height", height as i64);
+
+        if self.send_command(pane_id, &msg) {
             log::info!("[XPC] Sent resize to pane {}: {}x{}", pane_id, width, height);
             true
         } else {
-            log::warn!("[XPC] No connection for pane {} to send resize", pane_id);
             false
         }
     }
 }
 ```
 
-**3. Profile Server: Send `register_browser` message**
+**3. Profile Server: Add event handler for commands**
 
 **File:** `ts3/termsurf-profile/src/main.rs`
 
-In `create_browser_on_ui_thread`, after connecting to GUI:
+Currently, the GUI connection has no event handler (or only logs errors). Add
+a handler to process incoming commands:
 
 ```rust
-// Send registration so GUI can map connection to pane
-let register_msg = XpcDictionary::new();
-register_msg.set_string("action", "register_browser");
-register_msg.set_i64("pane_id", pane_id as i64);
-gui.send(&register_msg);
-println!("Profile: Sent register_browser for pane {}", pane_id);
-```
-
-**4. Profile Server: Handle resize_browser command**
-
-**File:** `ts3/termsurf-profile/src/main.rs`
-
-Add event handler to the GUI connection to receive commands:
-
-```rust
-// After gui.resume():
+// In create_browser_on_ui_thread, after creating gui connection:
 
 let browser_state_clone = Arc::clone(&browser_state);
 set_event_handler(&gui, move |event| {
@@ -405,15 +382,12 @@ set_event_handler(&gui, move |event| {
                     let height = msg.get_i64("height") as u32;
                     println!("Profile: resize_browser {}x{}", width, height);
 
-                    // Store pending resize and post to UI thread
                     let bs = Arc::clone(&browser_state_clone);
                     cef::post_task(cef::ThreadId::UI, move || {
-                        resize_browser_on_ui_thread(width, height, &bs);
+                        resize_browser(&bs, width, height);
                     });
                 }
-                other => {
-                    println!("Profile: Unknown command: {}", other);
-                }
+                _ => {}
             }
         }
         Err(e) => {
@@ -423,7 +397,7 @@ set_event_handler(&gui, move |event| {
 });
 ```
 
-**5. Profile Server: Store Browser reference for resize**
+**4. Profile Server: Store Browser reference**
 
 **File:** `ts3/termsurf-profile/src/main.rs`
 
@@ -440,33 +414,29 @@ struct BrowserState {
 }
 ```
 
-In `create_browser_on_ui_thread`, store the browser:
+In `create_browser_on_ui_thread`, store the browser after creation:
 
 ```rust
-match browser {
-    Some(b) => {
-        let browser_id = b.identifier();
-        *browser_state.browser.lock().unwrap() = Some(b);
-        // ... rest of existing code ...
-    }
-    None => { /* ... */ }
+if let Some(b) = browser {
+    *browser_state.browser.lock().unwrap() = Some(b);
+    // ... existing code ...
 }
 ```
 
-**6. Profile Server: Resize function**
+**5. Profile Server: Resize function**
 
 **File:** `ts3/termsurf-profile/src/main.rs`
 
 ```rust
-fn resize_browser_on_ui_thread(width: u32, height: u32, state: &BrowserState) {
-    // Update stored dimensions
+fn resize_browser(state: &BrowserState, width: u32, height: u32) {
+    // Update stored dimensions (used by get_view_rect)
     state.width.store(width, Ordering::Relaxed);
     state.height.store(height, Ordering::Relaxed);
 
-    // Notify CEF
+    // Notify CEF of size change
     if let Some(ref browser) = *state.browser.lock().unwrap() {
         if let Some(host) = browser.host() {
-            println!("Profile: Calling was_resized ({}x{})", width, height);
+            println!("Profile: was_resized {}x{}", width, height);
             host.was_resized();
             host.invalidate(cef::PaintElementType::View);
         }
@@ -474,78 +444,64 @@ fn resize_browser_on_ui_thread(width: u32, height: u32, state: &BrowserState) {
 }
 ```
 
-**7. GUI: Detect size change and debounce**
+**6. GUI: Add debounce state**
 
 **File:** `ts3/wezterm-gui/src/termwindow/webview_socket.rs`
 
-Add debounce state to `WebviewOverlay`:
+Add debounce tracking to `WebviewOverlay`:
 
 ```rust
 pub struct WebviewOverlay {
     pub mach_port: u32,
     pub width: u32,
     pub height: u32,
-    // Debounce state:
+    // Debounce state for resize:
     pub last_sent_size: Option<(u32, u32)>,
-    pub pending_size: Option<(u32, u32)>,
-    pub last_resize_time: Option<std::time::Instant>,
+    pub pending_resize: Option<(u32, u32, std::time::Instant)>,
 }
 ```
+
+**7. GUI: Detect size change and send resize**
 
 **File:** `ts3/wezterm-gui/src/termwindow/render/draw.rs`
 
 In `render_webview_overlays_webgpu`, after calculating viewport dimensions:
 
 ```rust
-use std::time::{Duration, Instant};
-
 const SETTLE_DELAY: Duration = Duration::from_millis(30);
-
-// After calculating (viewport_x, viewport_y, viewport_w, viewport_h):
 
 let current_size = (viewport_w as u32, viewport_h as u32);
 
-// Check if size changed from what we last sent
-let size_changed = overlay.last_sent_size != Some(current_size);
-
-if size_changed {
-    // Size changed - update pending and mark time
-    if overlay.pending_size != Some(current_size) {
-        overlay.pending_size = Some(current_size);
-        overlay.last_resize_time = Some(Instant::now());
+// Track pending resize with timestamp
+if overlay.last_sent_size != Some(current_size) {
+    // Size changed - record pending resize
+    if overlay.pending_resize.map(|(w, h, _)| (w, h)) != Some(current_size) {
+        overlay.pending_resize = Some((current_size.0, current_size.1, Instant::now()));
     }
 }
 
-// Check if we should send resize command
-if let Some(pending) = overlay.pending_size {
-    let should_send = overlay.last_resize_time
-        .map(|t| t.elapsed() >= SETTLE_DELAY)
-        .unwrap_or(false);
-
-    if should_send {
-        // Send resize via XPC
+// Send resize after settle delay
+if let Some((w, h, time)) = overlay.pending_resize {
+    if time.elapsed() >= SETTLE_DELAY {
         if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
-            xpc_manager.send_resize(*pane_id, pending.0, pending.1);
+            xpc_manager.send_resize(*pane_id, w, h);
         }
-
-        overlay.last_sent_size = Some(pending);
-        overlay.pending_size = None;
-        overlay.last_resize_time = None;
+        overlay.last_sent_size = Some((w, h));
+        overlay.pending_resize = None;
     }
 }
 ```
 
-**Note:** The overlay struct needs mutable access for debounce state. This may
-require changing the overlay iteration to use mutable references, or storing
-debounce state separately.
+**Note:** Requires mutable access to overlay. May need to store debounce state
+in a separate `HashMap<PaneId, ResizeState>` if overlay iteration is immutable.
 
 #### Files to Modify
 
 | File | Changes |
 |------|---------|
-| `ts3/termsurf-profile/src/main.rs` | Send `register_browser`, handle `resize_browser` on gui connection, store Browser ref |
-| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | Store peer connections by pane_id, add `send_resize()` method |
-| `ts3/wezterm-gui/src/termwindow/webview_socket.rs` | Add debounce state to WebviewOverlay |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | Change `connections` Vec to `peer_connections` HashMap, add `send_command()` and `send_resize()` |
+| `ts3/termsurf-profile/src/main.rs` | Add event handler on gui connection, store Browser ref, add `resize_browser()` |
+| `ts3/wezterm-gui/src/termwindow/webview_socket.rs` | Add debounce fields to WebviewOverlay |
 | `ts3/wezterm-gui/src/termwindow/render/draw.rs` | Detect size change, 30ms debounce, call `send_resize()` |
 
 #### Verification
@@ -556,12 +512,9 @@ cd ts3 && ./scripts/build-debug.sh --open
 # Open a webview
 web google.com
 
-# Check that connection was registered
+# Check that connection was stored
 cat /tmp/termsurf-gui.log | grep "peer connection"
 # Should show: "[XPC] Stored peer connection for pane 0"
-
-cat /tmp/termsurf-profile-*.log | grep "register_browser"
-# Should show: "Sent register_browser for pane 0"
 
 # Split the pane (Cmd+Shift+D)
 # The webview should re-render at the new smaller size
@@ -569,7 +522,7 @@ cat /tmp/termsurf-profile-*.log | grep "register_browser"
 # Check profile logs for resize handling
 cat /tmp/termsurf-profile-*.log | grep -i resize
 # Should show: "resize_browser 640x768"
-# Should show: "Calling was_resized (640x768)"
+# Should show: "was_resized 640x768"
 
 # Check GUI logs for resize commands
 cat /tmp/termsurf-gui.log | grep "Sent resize"
@@ -581,15 +534,12 @@ web github.com
 cat /tmp/termsurf-gui.log | grep "peer connection"
 # Should show: "[XPC] Stored peer connection for pane 1"
 
-# Both panes should resize correctly when window is resized
-
 # Drag the window edge to resize
 # Both webviews should update after 30ms settle delay
 ```
 
 #### Success Criteria
 
-- [ ] Profile server sends `register_browser` with pane_id
 - [ ] GUI stores peer connection by pane_id in HashMap
 - [ ] GUI can send `resize_browser` command via stored connection
 - [ ] Profile server receives command on gui connection's event handler
@@ -602,30 +552,31 @@ cat /tmp/termsurf-gui.log | grep "peer connection"
 - [ ] Multiple webviews each have independent connections
 - [ ] Each webview resizes independently
 
-#### Advantages Over Original Design
+#### Forwards Compatibility
 
-1. **Simpler** — No `register_commands`, no profile-level connections, no
-   session_id routing
-2. **Natural mapping** — Connection ↔ browser is 1:1, no lookup needed
-3. **Reuses existing infrastructure** — Same connection used for both directions
-4. **Less state to manage** — No separate command listener, no profile tracking
+This architecture supports future input handling with no changes:
+
+```rust
+// Keyboard (future)
+xpc_manager.send_command(pane_id, &key_event_msg);
+
+// Mouse (future)
+xpc_manager.send_command(pane_id, &mouse_event_msg);
+```
+
+Same connection, same pattern. The `send_command()` method is generic.
 
 #### Risks and Mitigations
 
-1. **Connection capture in handler** — Need to pass connection reference into
-   the `display_surface` handler. May require restructuring closure capture.
+1. **Debounce timing** — 30ms may be too short or too long. Start with 30ms (ts2
+   default), adjust based on feel.
 
-2. **Debounce timing** — 30ms may be too short or too long. Start with 30ms (ts2
-   default), adjust if needed based on feel.
+2. **Race conditions** — Resize commands may arrive while CEF is already
+   rendering. CEF should handle this gracefully.
 
-3. **Race conditions** — Resize commands may arrive while CEF is already
-   rendering. CEF should handle this gracefully, but watch for crashes or
-   hangs.
+3. **Browser reference lifetime** — Storing `Browser` in `BrowserState` requires
+   the browser to outlive the state. CEF manages browser lifetime internally.
 
-4. **Browser reference lifetime** — Storing `Browser` in `BrowserState` requires
-   careful lifetime management. The browser must outlive the state, or we need
-   weak references.
-
-5. **Mutable overlay access** — Debounce state requires mutable access to
-   overlays during render. May need to store debounce state separately or
-   restructure the render loop.
+4. **Mutable overlay access** — Debounce state requires mutable access to
+   overlays during render. If problematic, store debounce state in a separate
+   `HashMap<PaneId, ResizeState>` in XpcManager.
