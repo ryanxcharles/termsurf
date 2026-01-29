@@ -126,7 +126,109 @@ The following are explicitly **not** part of this task:
 
 ## Research
 
-_To be filled in during implementation planning._
+### IPC Decision: XPC over Unix Sockets
+
+ts3 uses two IPC mechanisms:
+
+- **XPC** — GUI ↔ Launcher, Launcher → Profile, Profile → GUI (IOSurface transfer)
+- **Unix domain sockets** — CLI → GUI (the `web` command)
+
+For GUI → Profile resize communication, **XPC is the correct choice**:
+
+1. Profile server already has an XPC command listener (used by launcher for
+   `create_browser` commands)
+2. XPC is already used for the Profile → GUI direction
+3. The architecture is macOS-specific anyway (IOSurface, Mach ports)
+4. Adding Unix sockets would require profile server to manage two IPC mechanisms
+
+### Current Communication Gap
+
+The current XPC flow is **one-way**:
+
+```
+Profile Server ──display_surface──▶ GUI (working)
+GUI ──???──▶ Profile Server (not implemented)
+```
+
+The profile server creates a command listener in `main.rs:216-250` and registers
+it with the launcher. The launcher connects to send `create_browser` commands.
+But the GUI never receives this endpoint—it can only receive surfaces, not send
+commands back.
+
+**Solution:** Profile server must share its command endpoint with the GUI. The
+simplest approach is to include it in the first `display_surface` message.
+
+### How ts2 Handles Resize
+
+ts2 implements resize in `ts2/wezterm-gui/src/cef_browser/mod.rs:262-291` and
+`ts2/wezterm-gui/src/termwindow/render/pane.rs:813-880`:
+
+1. **Debounce with 30ms settle delay** — Every frame, check if size changed. If
+   so, record the pending size and mark the time. Only send resize after 30ms of
+   no further changes.
+
+2. **CEF resize API** — Call `host.was_resized()` to notify CEF that dimensions
+   changed, then `host.invalidate()` to force a repaint.
+
+3. **Message loop pump** — ts2 calls `cef::do_message_loop_work()` after resize
+   because CEF runs in-process and shares the event loop. ts3 does NOT need this
+   because the profile server has its own process and event loop.
+
+Key code from ts2:
+
+```rust
+const SETTLE_DELAY: Duration = Duration::from_millis(30);
+
+// In BrowserState::resize()
+host.was_resized();
+host.invalidate(PaintElementType::default());
+```
+
+### CEF Automatic Re-rendering
+
+CEF automatically handles animation and content updates without explicit resize:
+
+- `windowless_frame_rate: 60` causes CEF to render at 60 FPS
+- When content changes (animations, scrolling, DOM updates), CEF renders a new
+  frame and calls `on_accelerated_paint`
+- The profile server's dedup logic detects when the IOSurface buffer pointer
+  changes and sends the new Mach port to GUI
+
+**This already works.** Animations and dynamic content automatically flow to the
+GUI. The only missing piece is triggering a re-render when the **size** changes.
+
+### ts3 Cell-Based Sizing
+
+Unlike ts2 which uses exact pixel dimensions, ts3 sizes browsers to cell
+boundaries (`cols × cell_width`, `rows × cell_height`). This means:
+
+- Fewer resize events (size only changes when grid dimensions change)
+- More predictable dimensions
+- Slightly less precise fit, but acceptable for terminal integration
+
+The 30ms debounce is still valuable for rapid window resizing, but cell-based
+sizing naturally reduces resize frequency.
+
+### CEF Thread Safety
+
+XPC callbacks run on libdispatch queues, not the CEF UI thread. Browser
+operations (including resize) must be marshalled to the CEF UI thread:
+
+```rust
+cef::post_task(cef::ThreadId::UI, move || {
+    // Safe to call host.was_resized() here
+});
+```
+
+### Key Files
+
+| File | Role |
+|------|------|
+| `ts3/termsurf-profile/src/main.rs` | Command listener, resize handler |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | Store command connection |
+| `ts3/wezterm-gui/src/termwindow/render/draw.rs` | Detect size change, debounce |
+| `ts2/wezterm-gui/src/cef_browser/mod.rs` | Reference implementation |
+| `ts2/wezterm-gui/src/termwindow/render/pane.rs` | Reference debounce logic |
 
 ## Experiments
 
