@@ -527,7 +527,7 @@ continuously during resize. This causes a persistent mismatch.
 
 ### Experiment 2: Remove Debounce
 
-**Status:** PENDING
+**Status:** SUCCESS
 
 **Goal:** Remove the 30ms debounce logic entirely and send resize commands on
 every frame where the size changes. This tests whether CEF can keep up with
@@ -628,10 +628,10 @@ cat /tmp/termsurf-profile-*.log | grep "\[RESIZE-RX\]" | wc -l
 
 #### Success Criteria
 
-- [ ] Resize commands sent on every size change (no 30ms wait)
-- [ ] App remains stable during rapid resize
-- [ ] Determine if debounce removal improves or worsens UX
-- [ ] Identify actual bottleneck if UX doesn't improve
+- [x] Resize commands sent on every size change (no 30ms wait)
+- [x] App remains stable during rapid resize
+- [x] Determine if debounce removal improves or worsens UX
+- [x] Identify actual bottleneck if UX doesn't improve
 
 #### Risks
 
@@ -643,3 +643,232 @@ cat /tmp/termsurf-profile-*.log | grep "\[RESIZE-RX\]" | wc -l
 
 If performance degrades significantly, we'll know the debounce was necessary and
 can explore middle-ground solutions (e.g., 10ms debounce, or throttle to 60fps).
+
+#### Outcome
+
+Removing debounce entirely fixed the resize behavior. Resize commands now fire
+immediately when size changes, and the webview updates responsively during drag.
+Some remaining issues exist but are unrelated to debounce timing.
+
+---
+
+### Experiment 3: Correct Debounce Pattern (from ts2)
+
+**Status:** PENDING
+
+**Goal:** Implement the correct debounce pattern from ts2, which properly waits
+for size to "settle" before sending resize commands. This provides the best of
+both worlds: responsive resize during drag AND reduced XPC traffic.
+
+#### Background
+
+Experiment 2 removed debounce entirely and worked, but sends many resize
+commands during drag (potentially wasteful). ts2 has a debounce that works
+perfectly. The difference:
+
+**ts3's broken debounce (Experiment 1):**
+
+```rust
+// BUG: Timer reset EVERY frame because we compared to last_sent_size
+if state.last_sent_size != Some(current_size) {
+    if state.pending_resize.map(|(w, h, _)| (w, h)) != Some(current_size) {
+        state.pending_resize = Some((width, height, now));  // Timer reset!
+    }
+}
+```
+
+Since `last_sent_size` is `None` until we actually send, every frame saw a
+"change" and reset the timer. The 30ms never elapsed until dragging stopped.
+
+**ts2's correct debounce:**
+
+```rust
+// Only reset timer when TARGET changes (not when it differs from sent)
+if browser.get_pending_size() != Some(target_size) {
+    browser.set_pending_size(logical_width, logical_height);
+    browser.mark_resize_time();  // Timer resets ONLY here
+}
+
+// Check if we've waited long enough since target last changed
+if let Some(elapsed) = browser.time_since_last_resize() {
+    if elapsed >= SETTLE_DELAY {
+        browser.resize(logical_width, logical_height);
+        browser.clear_resize_time();
+        browser.clear_pending_size();
+    }
+}
+```
+
+The key insight: **reset timer only when the target size changes, not when it
+differs from what we last sent.**
+
+#### The Pattern
+
+Two pieces of state:
+
+| State             | Purpose                                           |
+| ----------------- | ------------------------------------------------- |
+| `pending_size`    | The target size we want to resize to              |
+| `last_resize_time`| When the target last changed (timer start)        |
+| `last_sent_size`  | What we actually sent (for dedup on stable sizes) |
+
+Flow:
+
+1. Every frame, compare current size to `pending_size`
+2. If different: update `pending_size`, reset timer
+3. If same: check if 30ms elapsed since timer start
+4. If elapsed: send resize, clear timer and pending
+
+This means:
+- During fast drag: timer keeps resetting, no resize sent (debounced)
+- When drag slows/stops: timer runs out, resize sent
+- On stable size: no timer, no sends (deduplicated by `last_sent_size`)
+
+#### Changes
+
+**webview_xpc.rs — Fix debounce logic**
+
+Replace the `ResizeDebounceState` and `check_and_send_resize`:
+
+```rust
+/// State for debouncing resize commands.
+/// Uses the ts2 pattern: track pending target separately from timer.
+struct ResizeDebounceState {
+    /// The target size we want to resize to (reset timer when this changes)
+    pending_size: Option<(u32, u32)>,
+    /// When pending_size last changed (timer start)
+    pending_since: Option<Instant>,
+    /// What we last successfully sent (for dedup on stable sizes)
+    last_sent_size: Option<(u32, u32)>,
+}
+
+/// Check if resize should be sent after debounce delay.
+/// Uses ts2's pattern: only reset timer when target size changes.
+pub fn check_and_send_resize(&self, pane_id: PaneId, width: u32, height: u32) -> bool {
+    use std::time::Duration;
+    const SETTLE_DELAY: Duration = Duration::from_millis(30);
+
+    let current_size = (width, height);
+    let now = Instant::now();
+
+    let mut debounce = self.resize_debounce.lock().unwrap();
+    let state = debounce.entry(pane_id).or_insert(ResizeDebounceState {
+        pending_size: None,
+        pending_since: None,
+        last_sent_size: None,
+    });
+
+    // Fast path: size unchanged from last sent, nothing to do
+    if state.last_sent_size == Some(current_size) {
+        // Clear any pending state since we're at the correct size
+        state.pending_size = None;
+        state.pending_since = None;
+        return false;
+    }
+
+    // Check if target changed (this is where ts2 differs from broken ts3)
+    if state.pending_size != Some(current_size) {
+        // Target changed! Update pending and reset timer
+        log::info!(
+            "[DEBOUNCE] pane={} target changed {}x{} -> {}x{}",
+            pane_id,
+            state.pending_size.map(|(w,h)| format!("{}x{}", w, h)).unwrap_or("None".into()),
+            width,
+            height,
+            width,
+            height
+        );
+        state.pending_size = Some(current_size);
+        state.pending_since = Some(now);
+        return false;  // Don't send yet, wait for settle
+    }
+
+    // Target unchanged, check if timer expired
+    if let Some(since) = state.pending_since {
+        let elapsed = since.elapsed();
+        if elapsed >= SETTLE_DELAY {
+            log::info!(
+                "[DEBOUNCE] pane={} SENDING {}x{} (settled for {:?})",
+                pane_id,
+                width,
+                height,
+                elapsed
+            );
+
+            state.last_sent_size = Some(current_size);
+            state.pending_size = None;
+            state.pending_since = None;
+            drop(debounce);
+
+            return self.send_resize(pane_id, width, height);
+        } else {
+            log::debug!(
+                "[DEBOUNCE] pane={} waiting {}ms more",
+                pane_id,
+                (SETTLE_DELAY - elapsed).as_millis()
+            );
+        }
+    }
+
+    false
+}
+```
+
+#### Files to Modify
+
+| File                                            | Changes                           |
+| ----------------------------------------------- | --------------------------------- |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | Fix ResizeDebounceState and logic |
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Test 1: Fast drag (debounce should activate)
+web google.com
+# Rapidly drag window edge
+# Watch logs: should see "target changed" but few "SENDING"
+tail -f /tmp/termsurf-gui.log | grep "\[DEBOUNCE\]"
+
+# Test 2: Slow drag (should send on each pause)
+# Slowly drag, pausing occasionally
+# Watch logs: should see "SENDING" after each 30ms pause
+
+# Test 3: Compare with Experiment 2
+cat /tmp/termsurf-gui.log | grep "SENDING" | wc -l
+# Expected: Fewer sends than Experiment 2, but still responsive
+
+# Test 4: Verify no timer reset spam
+cat /tmp/termsurf-gui.log | grep "target changed" | wc -l
+# Expected: Only when size actually changes direction/amount
+```
+
+#### Expected Behavior
+
+| Scenario            | Experiment 1 (broken) | Experiment 2 (no debounce) | Experiment 3 (fixed) |
+| ------------------- | --------------------- | -------------------------- | -------------------- |
+| Fast continuous drag| No sends until stop   | Send every frame           | No sends until pause |
+| Drag with pauses    | Send after each stop  | Send every frame           | Send after 30ms pause|
+| Stable size         | No sends              | No sends                   | No sends             |
+| XPC traffic         | Low but delayed       | High                       | Moderate             |
+
+#### Success Criteria
+
+- [ ] Timer only resets when target size changes
+- [ ] Resize sends after 30ms of stable target
+- [ ] Fewer resize commands than Experiment 2
+- [ ] UX remains responsive (not noticeably worse than Exp 2)
+- [ ] App stable during rapid resize
+
+#### Why This Should Work
+
+The broken debounce compared against `last_sent_size`, which is `None` until
+first send. So every frame looked like "size changed from what we sent" and
+reset the timer.
+
+The fixed debounce compares against `pending_size`, which is the target we're
+waiting to send. If the user keeps dragging at constant speed, `pending_size`
+keeps changing → timer keeps resetting → no sends (correct debounce). When the
+user pauses or slows down, `pending_size` stabilizes → timer runs → send after
+30ms (correct behavior).
