@@ -241,30 +241,96 @@ webviews re-render at the correct size when panes are resized.
 
 #### Overview
 
-Currently, the GUI can receive IOSurface frames from the profile server but
-cannot send commands back. This experiment establishes bidirectional
-communication by:
+The profile server acts like a browser with tabs—one process manages N webviews
+for a single profile. The GUI needs to:
 
-1. Having the profile server share its command endpoint with the GUI
-2. GUI stores a connection to send resize commands
-3. GUI detects pane size changes with 30ms debounce
-4. Profile server handles resize commands and triggers CEF re-render
+1. Know which profile server to talk to for each pane
+2. Have a command connection per profile (not per pane)
+3. Include session_id in commands to identify which "tab" to affect
+
+This experiment establishes bidirectional communication:
+
+1. Profile server sends a `register_commands` message with its command endpoint
+2. GUI stores one command connection per profile
+3. GUI tracks which profile each pane belongs to
+4. GUI detects pane size changes with 30ms debounce
+5. GUI sends resize commands with session_id to identify the browser
+6. Profile server handles resize and triggers CEF re-render
+
+#### Architecture
+
+```
+GUI                                     Profile Server (default)
+┌─────────────────────┐                 ┌─────────────────────────┐
+│                     │                 │                         │
+│  Pane 0 (google)   ◄──display_surface─┤  Browser 0 (google)     │
+│    session: abc     │                 │    session: abc         │
+│    profile: default │                 │                         │
+│                     │                 │                         │
+│  Pane 1 (github)   ◄──display_surface─┤  Browser 1 (github)     │
+│    session: def     │                 │    session: def         │
+│    profile: default │                 │                         │
+│                     │                 │                         │
+│  Profile Connections│                 │  Command Listener       │
+│  ┌─────────────────┐│                 │  (one per profile)      │
+│  │ default ────────┼┼──resize_browser─► handles all browsers    │
+│  └─────────────────┘│                 │                         │
+└─────────────────────┘                 └─────────────────────────┘
+```
 
 #### Changes
 
-**1. Profile Server: Include command endpoint in display_surface**
+**1. Profile Server: Send `register_commands` message**
 
 **File:** `ts3/termsurf-profile/src/main.rs`
 
-In `on_accelerated_paint`, include the command endpoint in the message. The
-endpoint only needs to be sent once per browser session (first frame).
-
-Add to `BrowserState`:
+After creating the command listener and before running the message loop, send
+the command endpoint to the GUI via the initial browser's GUI connection:
 
 ```rust
-struct BrowserState {
-    // ... existing fields ...
-    command_endpoint_sent: AtomicBool,  // Track if we've sent endpoint
+// After command_listener is created and profile is registered with launcher...
+
+// Send command endpoint to GUI (via initial browser's connection)
+// This happens ONCE per profile, before the message loop starts
+let initial_info = profile_state.initial_browser_info.lock().unwrap();
+if let Some(ref info) = *initial_info {
+    // Connect to GUI temporarily to send registration
+    let gui = XpcConnection::from_endpoint(info.gui_endpoint.clone())?;
+    gui.resume();
+
+    let register_msg = XpcDictionary::new();
+    register_msg.set_string("action", "register_commands");
+    register_msg.set_string("profile", &args.profile);
+    register_msg.set_endpoint("command_endpoint", command_endpoint);
+    gui.send(&register_msg);
+
+    println!("Profile: Sent command endpoint to GUI for profile '{}'", args.profile);
+}
+```
+
+**Issue:** The GUI endpoint is consumed when the browser connects to it. We need
+a different approach—send `register_commands` through the existing browser
+connection after it's established.
+
+**Better approach:** In `create_browser_on_ui_thread`, after connecting to GUI,
+send `register_commands` if this is the first browser:
+
+```rust
+// In create_browser_on_ui_thread, after gui.resume():
+
+// Send command endpoint registration (first browser only)
+if !state.command_endpoint_registered.swap(true, Ordering::Relaxed) {
+    if let Some(endpoint) = state.command_listener.lock().unwrap()
+        .as_ref()
+        .and_then(|l| l.get_endpoint().ok())
+    {
+        let register_msg = XpcDictionary::new();
+        register_msg.set_string("action", "register_commands");
+        register_msg.set_string("profile", &state.profile);
+        register_msg.set_endpoint("command_endpoint", endpoint);
+        gui.send(&register_msg);
+        println!("Profile: Sent command endpoint to GUI");
+    }
 }
 ```
 
@@ -273,27 +339,32 @@ Add to `ProfileState`:
 ```rust
 struct ProfileState {
     // ... existing fields ...
-    command_endpoint: Mutex<Option<XpcEndpoint>>,  // Cloneable endpoint
+    profile: String,
+    command_listener: Mutex<Option<XpcListener>>,  // Store listener to get endpoints
+    command_endpoint_registered: AtomicBool,       // Only send once
 }
 ```
 
-In `on_accelerated_paint`, when sending `display_surface`:
+**2. Profile Server: Include session_id and profile in display_surface**
+
+**File:** `ts3/termsurf-profile/src/main.rs`
+
+Every `display_surface` message must include `session_id` and `profile` so the
+GUI can track which pane belongs to which profile:
 
 ```rust
-// Send command endpoint with first frame only
-if !self.inner.state.command_endpoint_sent.swap(true, Ordering::Relaxed) {
-    if let Some(endpoint) = profile_state.command_endpoint.lock().unwrap().clone() {
-        msg.set_endpoint("command_endpoint", endpoint);
-    }
-}
+// In on_accelerated_paint:
+let msg = XpcDictionary::new();
+msg.set_string("action", "display_surface");
+msg.set_string("session_id", &self.inner.state.session_id);  // NEW
+msg.set_string("profile", &profile_state.profile);            // NEW
+msg.set_mach_send("iosurface_port", port);
+msg.set_i64("width", width as i64);
+msg.set_i64("height", height as i64);
+self.inner.state.gui.send(&msg);
 ```
 
-Note: XPC endpoints can only be sent once. The profile server must create the
-endpoint in a way that allows cloning, or create a new endpoint per browser.
-Alternative: send a separate `register_commands` message before the first
-surface.
-
-**2. Profile Server: Handle resize_browser command**
+**3. Profile Server: Handle resize_browser command**
 
 **File:** `ts3/termsurf-profile/src/main.rs`
 
@@ -409,49 +480,131 @@ fn resize_browser_on_ui_thread(
 }
 ```
 
-**5. GUI: Store command connection per overlay**
+**5. GUI: Store command connections per profile**
 
 **File:** `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`
 
-Extend the overlay state to include command connection and debounce state:
+Add profile-level command connections to XpcManager:
+
+```rust
+pub struct XpcManager {
+    // ... existing fields ...
+
+    /// Command connections per profile (for sending resize, input, etc.)
+    profile_connections: Mutex<HashMap<String, Arc<XpcConnection>>>,
+}
+```
+
+Handle `register_commands` action in the event handler:
+
+```rust
+"register_commands" => {
+    let profile = msg.get_string("profile").unwrap_or_default();
+    let endpoint = match msg.get_endpoint("command_endpoint") {
+        Some(ep) => ep,
+        None => {
+            log::error!("[XPC] register_commands missing endpoint");
+            return;
+        }
+    };
+
+    match XpcConnection::from_endpoint(endpoint) {
+        Ok(conn) => {
+            let profile_clone = profile.clone();
+            set_event_handler(&conn, move |event| {
+                if let Err(e) = event {
+                    log::error!(
+                        "[XPC] Command connection error for profile '{}': {}",
+                        profile_clone, e
+                    );
+                }
+            });
+            conn.resume();
+
+            manager.profile_connections
+                .lock().unwrap()
+                .insert(profile.clone(), Arc::new(conn));
+
+            log::info!(
+                "[XPC] Stored command connection for profile '{}'",
+                profile
+            );
+        }
+        Err(e) => {
+            log::error!(
+                "[XPC] Failed to connect to command endpoint for '{}': {}",
+                profile, e
+            );
+        }
+    }
+}
+```
+
+Add method to get command connection:
+
+```rust
+impl XpcManager {
+    pub fn get_command_connection(&self, profile: &str) -> Option<Arc<XpcConnection>> {
+        self.profile_connections.lock().unwrap().get(profile).cloned()
+    }
+}
+```
+
+**6. GUI: Track session_id and profile per pane**
+
+**File:** `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`
+
+Update `ReceivedSurface` to include session_id and profile:
+
+```rust
+pub struct ReceivedSurface {
+    pub mach_port: u32,
+    pub width: u32,
+    pub height: u32,
+    pub session_id: String,  // NEW
+    pub profile: String,     // NEW
+}
+```
+
+When receiving `display_surface`, extract and store these:
+
+```rust
+"display_surface" => {
+    let session_id = msg.get_string("session_id").unwrap_or_default();
+    let profile = msg.get_string("profile").unwrap_or_default();
+    // ... existing port/width/height extraction ...
+
+    let surface = ReceivedSurface {
+        mach_port: port,
+        width,
+        height,
+        session_id,
+        profile,
+    };
+
+    manager.received_surfaces.lock().unwrap().insert(pane_id, surface);
+}
+```
+
+**File:** `ts3/wezterm-gui/src/termwindow/webview_socket.rs`
+
+Update `WebviewOverlay` to match:
 
 ```rust
 pub struct WebviewOverlay {
     pub mach_port: u32,
     pub width: u32,
     pub height: u32,
-    pub session_id: String,
-    // NEW fields for resize:
-    pub command_conn: Option<Arc<XpcConnection>>,
+    pub session_id: String,  // NEW
+    pub profile: String,     // NEW
+    // Debounce state:
     pub last_sent_size: Option<(u32, u32)>,
     pub pending_size: Option<(u32, u32)>,
     pub last_resize_time: Option<std::time::Instant>,
 }
 ```
 
-When receiving `display_surface`, check for command endpoint:
-
-```rust
-if let Some(endpoint) = msg.get_endpoint("command_endpoint") {
-    match XpcConnection::from_endpoint(endpoint) {
-        Ok(conn) => {
-            set_event_handler(&conn, |event| {
-                if let Err(e) = event {
-                    eprintln!("[XPC] Command connection error: {}", e);
-                }
-            });
-            conn.resume();
-            overlay.command_conn = Some(Arc::new(conn));
-            log::info!("[XPC] Stored command connection for pane {}", pane_id);
-        }
-        Err(e) => {
-            log::error!("[XPC] Failed to connect to command endpoint: {}", e);
-        }
-    }
-}
-```
-
-**6. GUI: Detect size change and debounce**
+**7. GUI: Detect size change and debounce**
 
 **File:** `ts3/wezterm-gui/src/termwindow/render/draw.rs`
 
@@ -484,18 +637,26 @@ if let Some(pending) = overlay.pending_size {
         .unwrap_or(false);
 
     if should_send {
-        if let Some(ref conn) = overlay.command_conn {
-            let msg = termsurf_xpc::XpcDictionary::new();
-            msg.set_string("action", "resize_browser");
-            msg.set_string("session_id", &overlay.session_id);
-            msg.set_i64("width", pending.0 as i64);
-            msg.set_i64("height", pending.1 as i64);
-            conn.send(&msg);
+        // Look up command connection by profile
+        if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+            if let Some(conn) = xpc_manager.get_command_connection(&overlay.profile) {
+                let msg = termsurf_xpc::XpcDictionary::new();
+                msg.set_string("action", "resize_browser");
+                msg.set_string("session_id", &overlay.session_id);
+                msg.set_i64("width", pending.0 as i64);
+                msg.set_i64("height", pending.1 as i64);
+                conn.send(&msg);
 
-            log::info!(
-                "[Render] Sent resize for pane {}: {}x{}",
-                pane_id, pending.0, pending.1
-            );
+                log::info!(
+                    "[Render] Sent resize for session '{}' (profile '{}'): {}x{}",
+                    overlay.session_id, overlay.profile, pending.0, pending.1
+                );
+            } else {
+                log::warn!(
+                    "[Render] No command connection for profile '{}'",
+                    overlay.profile
+                );
+            }
         }
 
         overlay.last_sent_size = Some(pending);
@@ -505,19 +666,18 @@ if let Some(pending) = overlay.pending_size {
 }
 ```
 
-**7. GUI: Pass session_id to overlay**
-
-The overlay needs the `session_id` to include in resize commands. This should
-already be available from the XPC message flow—verify it's stored in the overlay
-struct.
+**Note:** The overlay struct needs mutable access for debounce state. This may
+require changing the overlay iteration to use mutable references, or storing
+debounce state separately.
 
 #### Files to Modify
 
 | File | Changes |
 |------|---------|
-| `ts3/termsurf-profile/src/main.rs` | Send command endpoint, handle `resize_browser`, store Browser ref |
-| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | Store command connection and debounce state |
-| `ts3/wezterm-gui/src/termwindow/render/draw.rs` | Detect size change, 30ms debounce, send resize |
+| `ts3/termsurf-profile/src/main.rs` | Send `register_commands`, include session_id/profile in surfaces, handle `resize_browser`, store Browser ref |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | Handle `register_commands`, store profile connections, add session_id/profile to ReceivedSurface |
+| `ts3/wezterm-gui/src/termwindow/webview_socket.rs` | Add session_id/profile to WebviewOverlay, add debounce state |
+| `ts3/wezterm-gui/src/termwindow/render/draw.rs` | Detect size change, 30ms debounce, look up connection by profile, send resize |
 
 #### Verification
 
@@ -527,20 +687,33 @@ cd ts3 && ./scripts/build-debug.sh --open
 # Open a webview
 web google.com
 
+# Check that command endpoint was registered
+cat /tmp/termsurf-gui.log | grep "command connection"
+# Should show: "[XPC] Stored command connection for profile 'default'"
+
+cat /tmp/termsurf-profile-*.log | grep "command endpoint"
+# Should show: "Sent command endpoint to GUI"
+
 # Split the pane (Cmd+Shift+D)
 # The webview should re-render at the new smaller size
 
 # Check profile logs for resize handling
-cat /tmp/termsurf-profile-*.log | grep resize
+cat /tmp/termsurf-profile-*.log | grep -i resize
 # Should show: "resize_browser session=..., size=..."
 # Should show: "Calling was_resized for session..."
 
 # Check GUI logs for resize commands
 cat /tmp/termsurf-gui.log | grep "Sent resize"
-# Should show: "[Render] Sent resize for pane 0: 640x768"
+# Should show: "[Render] Sent resize for session 'abc' (profile 'default'): 640x768"
+
+# Open second webview in same profile
+web github.com
+# Should reuse same command connection (no new "Stored command connection" log)
+
+# Both panes should resize correctly when window is resized
 
 # Drag the window edge to resize
-# Webview should update after 30ms settle delay
+# Both webviews should update after 30ms settle delay
 
 # Close the split pane
 # Remaining webview should expand and re-render at full size
@@ -548,21 +721,25 @@ cat /tmp/termsurf-gui.log | grep "Sent resize"
 
 #### Success Criteria
 
-- [ ] Profile server sends command endpoint with first `display_surface`
-- [ ] GUI stores command connection per overlay
+- [ ] Profile server sends `register_commands` with command endpoint
+- [ ] GUI stores ONE command connection per profile (not per pane)
+- [ ] `display_surface` includes session_id and profile
+- [ ] GUI tracks session_id and profile per pane
 - [ ] Splitting a pane triggers resize command after 30ms
+- [ ] Resize command includes correct session_id
 - [ ] Profile server receives `resize_browser` and calls `was_resized()`
 - [ ] CEF re-renders at new size
 - [ ] New IOSurface is sent to GUI with correct dimensions
 - [ ] Dragging window edge triggers resize after 30ms settle
 - [ ] Text remains crisp after resize (not stretched)
-- [ ] Multiple webviews in same window each resize independently
+- [ ] Multiple webviews in same profile share one command connection
+- [ ] Multiple webviews each resize independently via their session_id
 
 #### Risks and Mitigations
 
-1. **XPC endpoint cloning** — XPC endpoints may only be usable once. If so,
-   profile server must create a fresh endpoint per browser or send endpoint via
-   a separate message before the first surface.
+1. **XPC endpoint from listener** — Need to verify `listener.get_endpoint()` can
+   be called after listener is already active. If not, must get endpoint before
+   setting up the handler.
 
 2. **Debounce timing** — 30ms may be too short or too long. Start with 30ms (ts2
    default), adjust if needed based on feel.
@@ -574,3 +751,7 @@ cat /tmp/termsurf-gui.log | grep "Sent resize"
 4. **Browser reference lifetime** — Storing `Browser` in `BrowserState` requires
    careful lifetime management. The browser must outlive the state, or we need
    weak references.
+
+5. **Mutable overlay access** — Debounce state requires mutable access to
+   overlays during render. May need to store debounce state separately or
+   restructure the render loop.
