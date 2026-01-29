@@ -234,7 +234,7 @@ cef::post_task(cef::ThreadId::UI, move || {
 
 ### Experiment 1: Implement Dynamic Resize via Bidirectional XPC
 
-**Status:** PLANNED
+**Status:** FAILED
 
 **Goal:** Enable the GUI to send resize commands to the profile server so that
 webviews re-render at the correct size when panes are resized.
@@ -616,3 +616,59 @@ removed from the overlays map).
 4. **Mutable overlay access** — Debounce state requires mutable access to
    overlays during render. If problematic, store debounce state in a separate
    `HashMap<PaneId, ResizeState>` in XpcManager.
+
+#### Conclusion
+
+**Result:** FAILED — CEF helper subprocess crashes during browser creation.
+
+**Symptoms:**
+- `web google.com` times out after 5 seconds waiting for IOSurface
+- Profile server logs show browser creation started but never completed
+- CEF helper subprocess crashes with:
+  ```
+  bootstrap_look_up org.wezfurlong.wezterm.MachPortRendezvousServer.1: Unknown service name (1102)
+  No rendezvous client, terminating process (parent died?)
+  ```
+
+**What Changed:**
+
+In `create_browser_on_ui_thread`, the original code was:
+```rust
+set_event_handler(&*gui, |event| { /* log errors */ });
+gui.resume();
+```
+
+The implementation changed this to:
+```rust
+gui.resume();
+// ... create browser_state ...
+set_event_handler(&*gui, move |event| { /* handle resize + log errors */ });
+```
+
+**Hypothesis:**
+
+The order change — calling `gui.resume()` before setting the event handler — may
+have caused the failure. XPC connections should have their event handler set
+before being resumed to avoid race conditions or undefined behavior.
+
+However, this doesn't fully explain why CEF's internal Mach port rendezvous
+fails. The GUI XPC connection is separate from CEF's internal process
+communication. Possible explanations:
+
+1. **XPC event handler order matters** — Setting the handler after resume may
+   cause the connection to behave unexpectedly, possibly dropping or corrupting
+   messages that affect CEF initialization.
+
+2. **Timing/race condition** — The delayed event handler setup may have changed
+   timing in a way that affects CEF subprocess spawning.
+
+3. **Unrelated environmental issue** — The CEF helper crash may be coincidental
+   (code signing, sandbox, or CEF state corruption from previous runs).
+
+**Proposed Fix for Experiment 2:**
+
+1. Restore the original order: set event handler BEFORE `gui.resume()`
+2. Capture `browser_state` in the closure after it's created, but ensure the
+   handler is set before resume
+3. This may require creating a placeholder `Arc<Mutex<Option<BrowserState>>>`
+   that gets populated after browser creation
