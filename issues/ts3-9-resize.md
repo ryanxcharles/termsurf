@@ -200,3 +200,244 @@ issues:
 
 5. **Unify scale factor source** — Use the same DPI source for both initial
    spawn and resize
+
+---
+
+## Experiments
+
+### Experiment 1: Diagnostic Logging
+
+**Status:** PENDING
+
+**Goal:** Add comprehensive logging throughout the resize pipeline to pinpoint
+the true cause of inconsistent resize behavior.
+
+#### The Problem
+
+Resize behavior is unpredictable:
+
+- Sometimes resize triggers, sometimes it doesn't
+- Sometimes the webview appears stretched
+- Sometimes it doesn't fill the pane correctly
+- The same action may work one time and fail the next
+
+We have multiple hypotheses but no data to confirm which is correct. Before
+attempting fixes, we need visibility into what's actually happening.
+
+#### Logging Strategy
+
+Add logging at 8 key points in the resize pipeline:
+
+| # | Location | Purpose |
+|---|----------|---------|
+| 1 | Initial spawn | Capture baseline dimensions |
+| 2 | Render loop layout | See pane dimensions from layout |
+| 3 | Debounce logic | See when resize is sent vs blocked |
+| 4 | Profile resize handler | Confirm receipt of resize command |
+| 5 | CEF view_rect | What dimensions CEF thinks it has |
+| 6 | Texture sending | Actual IOSurface dimensions |
+| 7 | Texture receiving | What GUI receives via XPC |
+| 8 | Texture rendering | Compare texture vs viewport |
+
+#### Changes
+
+**1. Initial Spawn (webview_socket.rs)**
+
+After calculating dimensions in `spawn_browser` handler:
+
+```rust
+log::info!(
+    "[SPAWN] pane={} cols={} rows={} cell={}x{} physical={}x{} dpi={} scale={:.2} logical={}x{}",
+    pane_id,
+    dims.cols,
+    dims.viewport_rows,
+    cell_width,
+    cell_height,
+    physical_width,
+    physical_height,
+    dims.dpi,
+    scale,
+    lw,
+    lh
+);
+```
+
+**2. Render Loop Layout (draw.rs)**
+
+After finding pane position, before resize check:
+
+```rust
+log::info!(
+    "[LAYOUT] pane={} pos.left={} pos.top={} pos.pixel={}x{} cell={}x{} window.dpi={}",
+    pane_id,
+    pos.left,
+    pos.top,
+    pos.pixel_width,
+    pos.pixel_height,
+    self.render_metrics.cell_size.width,
+    self.render_metrics.cell_size.height,
+    self.dimensions.dpi
+);
+```
+
+**3. Debounce Logic (webview_xpc.rs)**
+
+At the start of `check_and_send_resize`:
+
+```rust
+log::info!(
+    "[DEBOUNCE] pane={} current={}x{} last_sent={:?} pending={:?}",
+    pane_id,
+    width,
+    height,
+    state.last_sent_size,
+    state.pending_resize.map(|(w, h, t)| (w, h, t.elapsed().as_millis()))
+);
+```
+
+When resize is actually sent:
+
+```rust
+log::info!("[DEBOUNCE] pane={} SENDING {}x{}", pane_id, w, h);
+```
+
+When resize is skipped (add new log):
+
+```rust
+// If size unchanged from last_sent
+log::info!("[DEBOUNCE] pane={} SKIP size unchanged", pane_id);
+
+// If still waiting for settle delay
+log::info!(
+    "[DEBOUNCE] pane={} WAIT {}ms remaining",
+    pane_id,
+    (SETTLE_DELAY - time.elapsed()).as_millis()
+);
+```
+
+**4. Profile Resize Handler (termsurf-profile/src/main.rs)**
+
+When resize command is received:
+
+```rust
+println!(
+    "[RESIZE-RX] width={} height={} prev_state={}x{}",
+    width,
+    height,
+    bs.width.load(Ordering::Relaxed),
+    bs.height.load(Ordering::Relaxed)
+);
+```
+
+After calling `was_resized()`:
+
+```rust
+println!("[RESIZE-RX] called was_resized() and invalidate()");
+```
+
+**5. CEF view_rect (termsurf-profile/src/main.rs)**
+
+In the `view_rect` callback:
+
+```rust
+println!(
+    "[VIEW_RECT] returning {}x{}",
+    w,
+    h
+);
+```
+
+**6. Texture Sending (termsurf-profile/src/main.rs)**
+
+In `on_accelerated_paint` when sending:
+
+```rust
+println!(
+    "[TEXTURE-TX] handle={:p} iosurface={}x{} view_rect={}x{}",
+    handle,
+    info.width,
+    info.height,
+    self.state.width.load(Ordering::Relaxed),
+    self.state.height.load(Ordering::Relaxed)
+);
+```
+
+**7. Texture Receiving (webview_xpc.rs)**
+
+In the XPC handler for `display_surface`:
+
+```rust
+log::info!(
+    "[TEXTURE-RX] pane={} mach_port={} size={}x{}",
+    pane_id,
+    port,
+    width,
+    height
+);
+```
+
+**8. Texture Rendering (draw.rs)**
+
+Before importing the texture:
+
+```rust
+log::info!(
+    "[RENDER] pane={} texture={}x{} viewport={}x{} match={}",
+    pane_id,
+    surface.width,
+    surface.height,
+    viewport_w as u32,
+    viewport_h as u32,
+    surface.width == viewport_w as u32 && surface.height == viewport_h as u32
+);
+```
+
+#### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `ts3/wezterm-gui/src/termwindow/webview_socket.rs` | Add [SPAWN] log |
+| `ts3/wezterm-gui/src/termwindow/render/draw.rs` | Add [LAYOUT] and [RENDER] logs |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | Add [DEBOUNCE] and [TEXTURE-RX] logs |
+| `ts3/termsurf-profile/src/main.rs` | Add [RESIZE-RX], [VIEW_RECT], [TEXTURE-TX] logs |
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Test 1: Initial spawn
+web google.com
+cat /tmp/termsurf-gui.log | grep -E "\[SPAWN\]|\[LAYOUT\]|\[RENDER\]"
+cat /tmp/termsurf-profile-*.log | grep -E "\[VIEW_RECT\]|\[TEXTURE-TX\]"
+# Expected: See baseline dimensions, verify texture matches viewport
+
+# Test 2: Split pane (Cmd+Shift+D)
+cat /tmp/termsurf-gui.log | grep -E "\[DEBOUNCE\]|\[TEXTURE-RX\]"
+cat /tmp/termsurf-profile-*.log | grep -E "\[RESIZE-RX\]|\[VIEW_RECT\]"
+# Expected: See resize command sent, received, and new texture
+
+# Test 3: Drag window edge
+# Watch logs in real-time:
+tail -f /tmp/termsurf-gui.log | grep -E "\[DEBOUNCE\]|\[RENDER\]"
+# Expected: See debounce behavior, texture/viewport comparison
+```
+
+#### What Each Log Reveals
+
+| Issue | Log to Check | What to Look For |
+|-------|--------------|------------------|
+| Resize doesn't trigger | [DEBOUNCE] | SKIP or WAIT instead of SENDING |
+| Stretched appearance | [RENDER] | texture size != viewport size |
+| Doesn't fill pane | [LAYOUT] vs [SPAWN] | pixel dimensions differ |
+| Profile not resizing | [RESIZE-RX] | Missing or wrong dimensions |
+| CEF not updating | [VIEW_RECT] | Returns old dimensions after resize |
+| Wrong texture sent | [TEXTURE-TX] | iosurface size != view_rect size |
+
+#### Success Criteria
+
+- [ ] All 8 logging points are implemented
+- [ ] Logs are parseable with grep patterns
+- [ ] Can trace a complete resize from detection to render
+- [ ] Can identify WHERE in the pipeline failures occur
+- [ ] Have data to inform Experiment 2 (the actual fix)
