@@ -210,6 +210,21 @@ impl XpcManager {
                                 height
                             );
 
+                            // Look up pane_id early for logging
+                            let pane_id_for_log = {
+                                let pending = manager.pending_sessions.lock().unwrap();
+                                pending.get(&session_id).copied()
+                            };
+                            if let Some(pid) = pane_id_for_log {
+                                log::info!(
+                                    "[TEXTURE-RX] pane={} mach_port={} size={}x{}",
+                                    pid,
+                                    port,
+                                    width,
+                                    height
+                                );
+                            }
+
                             // Look up pane_id from session
                             let pane_id = {
                                 let pending = manager.pending_sessions.lock().unwrap();
@@ -349,6 +364,16 @@ impl XpcManager {
             pending_resize: None,
         });
 
+        // Log debounce state
+        log::info!(
+            "[DEBOUNCE] pane={} current={}x{} last_sent={:?} pending={:?}",
+            pane_id,
+            width,
+            height,
+            state.last_sent_size,
+            state.pending_resize.map(|(w, h, t)| (w, h, t.elapsed().as_millis()))
+        );
+
         // Check if size changed from what we last sent
         if state.last_sent_size != Some(current_size) {
             // Size changed - update pending if different from current pending
@@ -361,14 +386,12 @@ impl XpcManager {
         if let Some((w, h, time)) = state.pending_resize {
             if time.elapsed() >= SETTLE_DELAY {
                 // Drop the lock before sending to avoid holding it during XPC
-                let should_send = true;
                 state.last_sent_size = Some((w, h));
                 state.pending_resize = None;
                 drop(debounce);
 
-                if should_send {
-                    return self.send_resize(pane_id, w, h);
-                }
+                log::info!("[DEBOUNCE] pane={} SENDING {}x{}", pane_id, w, h);
+                return self.send_resize(pane_id, w, h);
             }
         }
 

@@ -207,7 +207,7 @@ issues:
 
 ### Experiment 1: Diagnostic Logging
 
-**Status:** PENDING
+**Status:** SUCCESS
 
 **Goal:** Add comprehensive logging throughout the resize pipeline to pinpoint
 the true cause of inconsistent resize behavior.
@@ -228,16 +228,16 @@ attempting fixes, we need visibility into what's actually happening.
 
 Add logging at 8 key points in the resize pipeline:
 
-| # | Location | Purpose |
-|---|----------|---------|
-| 1 | Initial spawn | Capture baseline dimensions |
-| 2 | Render loop layout | See pane dimensions from layout |
-| 3 | Debounce logic | See when resize is sent vs blocked |
-| 4 | Profile resize handler | Confirm receipt of resize command |
-| 5 | CEF view_rect | What dimensions CEF thinks it has |
-| 6 | Texture sending | Actual IOSurface dimensions |
-| 7 | Texture receiving | What GUI receives via XPC |
-| 8 | Texture rendering | Compare texture vs viewport |
+| # | Location               | Purpose                            |
+| - | ---------------------- | ---------------------------------- |
+| 1 | Initial spawn          | Capture baseline dimensions        |
+| 2 | Render loop layout     | See pane dimensions from layout    |
+| 3 | Debounce logic         | See when resize is sent vs blocked |
+| 4 | Profile resize handler | Confirm receipt of resize command  |
+| 5 | CEF view_rect          | What dimensions CEF thinks it has  |
+| 6 | Texture sending        | Actual IOSurface dimensions        |
+| 7 | Texture receiving      | What GUI receives via XPC          |
+| 8 | Texture rendering      | Compare texture vs viewport        |
 
 #### Changes
 
@@ -394,12 +394,12 @@ log::info!(
 
 #### Files to Modify
 
-| File | Changes |
-|------|---------|
-| `ts3/wezterm-gui/src/termwindow/webview_socket.rs` | Add [SPAWN] log |
-| `ts3/wezterm-gui/src/termwindow/render/draw.rs` | Add [LAYOUT] and [RENDER] logs |
-| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | Add [DEBOUNCE] and [TEXTURE-RX] logs |
-| `ts3/termsurf-profile/src/main.rs` | Add [RESIZE-RX], [VIEW_RECT], [TEXTURE-TX] logs |
+| File                                               | Changes                                         |
+| -------------------------------------------------- | ----------------------------------------------- |
+| `ts3/wezterm-gui/src/termwindow/webview_socket.rs` | Add [SPAWN] log                                 |
+| `ts3/wezterm-gui/src/termwindow/render/draw.rs`    | Add [LAYOUT] and [RENDER] logs                  |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`    | Add [DEBOUNCE] and [TEXTURE-RX] logs            |
+| `ts3/termsurf-profile/src/main.rs`                 | Add [RESIZE-RX], [VIEW_RECT], [TEXTURE-TX] logs |
 
 #### Verification
 
@@ -425,19 +425,100 @@ tail -f /tmp/termsurf-gui.log | grep -E "\[DEBOUNCE\]|\[RENDER\]"
 
 #### What Each Log Reveals
 
-| Issue | Log to Check | What to Look For |
-|-------|--------------|------------------|
-| Resize doesn't trigger | [DEBOUNCE] | SKIP or WAIT instead of SENDING |
-| Stretched appearance | [RENDER] | texture size != viewport size |
-| Doesn't fill pane | [LAYOUT] vs [SPAWN] | pixel dimensions differ |
-| Profile not resizing | [RESIZE-RX] | Missing or wrong dimensions |
-| CEF not updating | [VIEW_RECT] | Returns old dimensions after resize |
-| Wrong texture sent | [TEXTURE-TX] | iosurface size != view_rect size |
+| Issue                  | Log to Check        | What to Look For                    |
+| ---------------------- | ------------------- | ----------------------------------- |
+| Resize doesn't trigger | [DEBOUNCE]          | SKIP or WAIT instead of SENDING     |
+| Stretched appearance   | [RENDER]            | texture size != viewport size       |
+| Doesn't fill pane      | [LAYOUT] vs [SPAWN] | pixel dimensions differ             |
+| Profile not resizing   | [RESIZE-RX]         | Missing or wrong dimensions         |
+| CEF not updating       | [VIEW_RECT]         | Returns old dimensions after resize |
+| Wrong texture sent     | [TEXTURE-TX]        | iosurface size != view_rect size    |
 
 #### Success Criteria
 
-- [ ] All 8 logging points are implemented
-- [ ] Logs are parseable with grep patterns
-- [ ] Can trace a complete resize from detection to render
-- [ ] Can identify WHERE in the pipeline failures occur
-- [ ] Have data to inform Experiment 2 (the actual fix)
+- [x] All 8 logging points are implemented
+- [x] Logs are parseable with grep patterns
+- [x] Can trace a complete resize from detection to render
+- [x] Can identify WHERE in the pipeline failures occur
+- [x] Have data to inform Experiment 2 (the actual fix)
+
+#### Findings
+
+Logging revealed the true causes of inconsistent resize behavior:
+
+**1. Viewport updates correctly, texture lags far behind**
+
+The pane dimensions (`pos.pixel`) update on every frame during resize:
+
+```
+pos.pixel=2054x1920 → 2002x1890 → 1898x1800 → ... → 1599x1590
+```
+
+But the texture only updates after: (a) user stops resizing for 30ms, (b) resize
+command sent via XPC, (c) CEF re-renders, (d) new IOSurface sent back. This
+takes **1-1.5 seconds** total.
+
+**2. Debounce resets continuously during active resize**
+
+Every frame during resize changes the viewport size, which resets the 30ms
+debounce timer. Resize commands only send after the user **completely stops**
+resizing for 30ms:
+
+```
+[DEBOUNCE] pane=0 current=1040x1080 last_sent=None pending=Some((1040, 1080, 1515))
+[DEBOUNCE] pane=0 SENDING 1040x1080  ← only after 30ms of no changes
+```
+
+This is correct debounce behavior, but means texture is always wrong during
+active resize.
+
+**3. Texture/viewport mismatch causes stretching**
+
+The `[RENDER]` logs show `match=false` almost continuously during resize:
+
+```
+[RENDER] pane=0 texture=2820x2130 viewport=1599x1590 match=false  ← stretched!
+[RENDER] pane=0 texture=1598x1590 viewport=2990x2190 match=false  ← stretched!
+[RENDER] pane=0 texture=2990x2190 viewport=2990x2190 match=true   ← finally correct
+```
+
+The texture is rendered at its native size into a differently-sized viewport,
+causing the stretched appearance.
+
+**4. CEF pipeline is working correctly**
+
+The profile logs show CEF is doing its job:
+
+```
+[RESIZE-RX] session=pane-0-2208 width=799 height=795 prev=1040x1080
+[VIEW_RECT] session=pane-0-2208 returning 799x795
+[TEXTURE-TX] session=pane-0-2208 iosurface=1598x1590 view_rect=799x795
+```
+
+CEF receives resize, updates view_rect, and sends correctly-sized IOSurface
+(1598×1590 = 799×2 × 795×2 for Retina). The issue is timing, not CEF.
+
+#### Root Cause Summary
+
+| Symptom                   | Actual Cause                                                                       |
+| ------------------------- | ---------------------------------------------------------------------------------- |
+| "Usually doesn't resize"  | Debounce keeps resetting during active resize; only sends when user stops for 30ms |
+| "Wrong size when it does" | By the time new texture arrives (1+ second), user has already changed size again   |
+| "Stretched appearance"    | Texture rendered 1:1 but viewport size has changed, causing aspect ratio mismatch  |
+
+#### Conclusion
+
+The resize **pipeline** works correctly. The problem is the **rendering
+strategy**: we render the texture at its native size, but the viewport changes
+continuously during resize. This causes a persistent mismatch.
+
+**Potential fixes for Experiment 2:**
+
+1. **Scale texture to fit viewport** — Instead of rendering texture 1:1, scale
+   it to fill the viewport. Will be slightly blurry but not stretched.
+
+2. **Send resize more aggressively** — Send interim resizes during active drag
+   (every 100ms?) instead of only after stopping.
+
+3. **Speed up CEF response** — Investigate why it takes 1+ seconds for CEF to
+   produce a new texture after resize command.

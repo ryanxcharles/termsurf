@@ -431,6 +431,20 @@ fn handle_request(
                             pane_id, dims.cols, dims.viewport_rows, cell_width, cell_height,
                             physical_width, physical_height, scale, lw, lh
                         );
+                        log::info!(
+                            "[SPAWN] pane={} cols={} rows={} cell={}x{} physical={}x{} dpi={} scale={:.2} logical={}x{}",
+                            pane_id,
+                            dims.cols,
+                            dims.viewport_rows,
+                            cell_width,
+                            cell_height,
+                            physical_width,
+                            physical_height,
+                            dims.dpi,
+                            scale,
+                            lw,
+                            lh
+                        );
                         (lw, lh, scale)
                     }
                     None => {

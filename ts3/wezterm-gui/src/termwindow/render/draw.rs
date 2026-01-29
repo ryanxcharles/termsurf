@@ -232,6 +232,9 @@ impl crate::TermWindow {
                 surface.height
             );
 
+            // Note: viewport_w/h calculated later, so we log texture size here
+            // and will log comparison after viewport calculation
+
             // Import IOSurface from Mach port
             let importer = match IOSurfaceImporter::from_mach_port(
                 surface.mach_port,
@@ -354,6 +357,18 @@ impl crate::TermWindow {
                             "[Render] Pane {} viewport: ({}, {}) {}x{}",
                             pane_id, x, y, w, h
                         );
+                        log::info!(
+                            "[LAYOUT] pane={} pos.left={} pos.top={} pos.pixel={}x{} cell={}x{} tab_bar={} window.dpi={}",
+                            pane_id,
+                            pos.left,
+                            pos.top,
+                            pos.pixel_width,
+                            pos.pixel_height,
+                            cell_width,
+                            cell_height,
+                            tab_bar_height,
+                            self.dimensions.dpi
+                        );
 
                         (x, y, w, h)
                     }
@@ -373,6 +388,17 @@ impl crate::TermWindow {
                 };
 
                 render_pass.set_viewport(viewport_x, viewport_y, viewport_w, viewport_h, 0.0, 1.0);
+
+                // Log texture vs viewport comparison
+                log::info!(
+                    "[RENDER] pane={} texture={}x{} viewport={}x{} match={}",
+                    pane_id,
+                    surface.width,
+                    surface.height,
+                    viewport_w as u32,
+                    viewport_h as u32,
+                    surface.width == viewport_w as u32 && surface.height == viewport_h as u32
+                );
 
                 // Check if we need to send a resize command (with 30ms debounce)
                 if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {

@@ -408,6 +408,12 @@ mod cef_handlers {
                 if let Some(rect) = rect {
                     rect.width = self.inner.state.width.load(Ordering::Relaxed) as i32;
                     rect.height = self.inner.state.height.load(Ordering::Relaxed) as i32;
+                    println!(
+                        "[VIEW_RECT] session={} returning {}x{}",
+                        self.inner.state.session_id,
+                        rect.width,
+                        rect.height
+                    );
                 }
             }
 
@@ -462,6 +468,14 @@ mod cef_handlers {
                 println!(
                     "Profile: [{}] Sending IOSurface {}x{} (port={})",
                     self.inner.state.session_id, width, height, port
+                );
+                println!(
+                    "[TEXTURE-TX] session={} iosurface={}x{} view_rect={}x{}",
+                    self.inner.state.session_id,
+                    width,
+                    height,
+                    self.inner.state.width.load(Ordering::Relaxed),
+                    self.inner.state.height.load(Ordering::Relaxed)
                 );
 
                 // Send to this browser's GUI connection via XPC
@@ -663,6 +677,14 @@ mod cef_handlers {
                             let width = msg.get_i64("width") as u32;
                             let height = msg.get_i64("height") as u32;
                             println!("Profile: resize_browser {}x{}", width, height);
+                            println!(
+                                "[RESIZE-RX] session={} width={} height={} prev={}x{}",
+                                bs.session_id,
+                                width,
+                                height,
+                                bs.width.load(Ordering::Relaxed),
+                                bs.height.load(Ordering::Relaxed)
+                            );
 
                             let bs = Arc::clone(bs);
                             drop(state_guard); // Release lock before post_task
