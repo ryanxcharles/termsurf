@@ -710,25 +710,38 @@ differs from what we last sent.**
 ts2 puts the debounce logic **inline in the render function**, not in a separate
 method. This gives direct access to `self.window` for invalidation.
 
-Two pieces of state per pane:
+Three pieces of state per pane:
 
 | State             | Purpose                                    |
 | ----------------- | ------------------------------------------ |
 | `pending_size`    | The target size we want to resize to       |
 | `pending_since`   | When the target last changed (timer start) |
+| `last_sent_size`  | What we last sent via XPC (for dedup)      |
+
+**Why ts3 needs `last_sent_size` but ts2 doesn't:**
+
+- ts2's `browser.resize()` is in-process and synchronous — resizing to the same
+  size is a cheap no-op
+- ts3's resize goes over XPC and triggers IOSurface recreation — redundant
+  resizes would flood the profile server
+
+Without `last_sent_size`, after sending we'd clear `pending_size`, then on the
+next frame see `None != Some(current)` and start the timer again, creating an
+infinite loop of resizes every 30ms.
 
 Flow:
 
-1. Every frame, compare current size to `pending_size`
-2. If different: update `pending_size`, reset timer
-3. If same: check if 30ms elapsed since timer start
-4. If elapsed: send resize, clear pending state
+1. Fast path: if `last_sent_size == current`, skip (already correct)
+2. If `pending_size != current`: update `pending_size`, reset timer
+3. If `pending_size == current`: check if 30ms elapsed
+4. If elapsed: send resize, record in `last_sent_size`, clear pending
 5. If not elapsed: call `window.invalidate()` to ensure we check again
 
 This means:
 
 - During fast drag: timer keeps resetting, no resize sent (debounced)
 - When drag slows/stops: timer runs out, resize sent
+- After send: `last_sent_size` prevents re-triggering until size changes
 - **Critical:** `window.invalidate()` ensures render loop runs to check timer
 
 #### Changes
@@ -739,12 +752,16 @@ Keep `ResizeDebounceState` but remove the debounce logic from `check_and_send_re
 The method becomes a simple state accessor + sender:
 
 ```rust
-/// State for debouncing resize commands (ts2 pattern).
+/// State for debouncing resize commands (ts2 pattern + last_sent for XPC dedup).
 pub struct ResizeDebounceState {
     /// The target size we want to resize to
     pub pending_size: Option<(u32, u32)>,
     /// When pending_size last changed (timer start)
     pub pending_since: Option<Instant>,
+    /// What we last sent via XPC (prevents infinite loop after send)
+    /// Note: ts2 doesn't need this because in-process resize is a cheap no-op.
+    /// ts3 needs it because XPC resize triggers IOSurface recreation.
+    pub last_sent_size: Option<(u32, u32)>,
 }
 
 impl XpcManager {
@@ -778,36 +795,47 @@ if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
     let state = debounce.entry(*pane_id).or_insert(ResizeDebounceState {
         pending_size: None,
         pending_since: None,
+        last_sent_size: None,
     });
 
-    // Check if target size changed (compare against pending, not sent)
-    if state.pending_size != Some(target_size) {
-        state.pending_size = Some(target_size);
-        state.pending_since = Some(Instant::now());
-        log::debug!(
-            "[DEBOUNCE] pane={} target changed to {}x{}",
-            pane_id, logical_w, logical_h
-        );
-    }
-
-    // Settle-and-send logic
-    if let Some(since) = state.pending_since {
-        let elapsed = since.elapsed();
-        if elapsed >= SETTLE_DELAY {
-            log::info!(
-                "[DEBOUNCE] pane={} SENDING {}x{} (settled {:?})",
-                pane_id, logical_w, logical_h, elapsed
+    // Fast path: size unchanged from last sent, nothing to do
+    // This prevents infinite loop: send → clear pending → set pending → send...
+    if state.last_sent_size == Some(target_size) {
+        state.pending_size = None;
+        state.pending_since = None;
+        drop(debounce);
+        // Already at correct size, skip debounce logic
+    } else {
+        // Check if target size changed (compare against pending, not sent)
+        if state.pending_size != Some(target_size) {
+            state.pending_size = Some(target_size);
+            state.pending_since = Some(Instant::now());
+            log::debug!(
+                "[DEBOUNCE] pane={} target changed to {}x{}",
+                pane_id, logical_w, logical_h
             );
-            // Clear state before sending
-            state.pending_size = None;
-            state.pending_since = None;
-            drop(debounce);  // Release lock before XPC call
-            xpc_manager.send_resize(*pane_id, logical_w, logical_h);
-        } else {
-            // Not settled yet — ensure render loop runs again
-            drop(debounce);  // Release lock before window call
-            if let Some(ref w) = self.window {
-                w.invalidate();
+        }
+
+        // Settle-and-send logic
+        if let Some(since) = state.pending_since {
+            let elapsed = since.elapsed();
+            if elapsed >= SETTLE_DELAY {
+                log::info!(
+                    "[DEBOUNCE] pane={} SENDING {}x{} (settled {:?})",
+                    pane_id, logical_w, logical_h, elapsed
+                );
+                // Record what we sent and clear pending state
+                state.last_sent_size = Some(target_size);
+                state.pending_size = None;
+                state.pending_since = None;
+                drop(debounce);  // Release lock before XPC call
+                xpc_manager.send_resize(*pane_id, logical_w, logical_h);
+            } else {
+                // Not settled yet — ensure render loop runs again
+                drop(debounce);  // Release lock before window call
+                if let Some(ref w) = self.window {
+                    w.invalidate();
+                }
             }
         }
     }
