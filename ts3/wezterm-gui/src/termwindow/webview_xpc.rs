@@ -348,15 +348,10 @@ impl XpcManager {
         log::info!("[XPC] Removed connection for pane {}", pane_id);
     }
 
-    /// Check if resize should be sent and send it if debounce delay has passed.
-    /// Call this from the render loop with the current viewport size.
-    /// Returns true if a resize was sent.
+    /// Send resize command immediately if size changed from last sent.
+    /// No debouncing — send on every frame where size differs.
     pub fn check_and_send_resize(&self, pane_id: PaneId, width: u32, height: u32) -> bool {
-        use std::time::Duration;
-        const SETTLE_DELAY: Duration = Duration::from_millis(30);
-
         let current_size = (width, height);
-        let now = Instant::now();
 
         let mut debounce = self.resize_debounce.lock().unwrap();
         let state = debounce.entry(pane_id).or_insert(ResizeDebounceState {
@@ -364,38 +359,24 @@ impl XpcManager {
             pending_resize: None,
         });
 
-        // Log debounce state
+        // Only send if size actually changed
+        if state.last_sent_size == Some(current_size) {
+            return false;
+        }
+
         log::info!(
-            "[DEBOUNCE] pane={} current={}x{} last_sent={:?} pending={:?}",
+            "[RESIZE] pane={} SENDING {}x{} (was {:?})",
             pane_id,
             width,
             height,
-            state.last_sent_size,
-            state.pending_resize.map(|(w, h, t)| (w, h, t.elapsed().as_millis()))
+            state.last_sent_size
         );
 
-        // Check if size changed from what we last sent
-        if state.last_sent_size != Some(current_size) {
-            // Size changed - update pending if different from current pending
-            if state.pending_resize.map(|(w, h, _)| (w, h)) != Some(current_size) {
-                state.pending_resize = Some((width, height, now));
-            }
-        }
+        state.last_sent_size = Some(current_size);
+        state.pending_resize = None;
+        drop(debounce);
 
-        // Check if we should send resize command
-        if let Some((w, h, time)) = state.pending_resize {
-            if time.elapsed() >= SETTLE_DELAY {
-                // Drop the lock before sending to avoid holding it during XPC
-                state.last_sent_size = Some((w, h));
-                state.pending_resize = None;
-                drop(debounce);
-
-                log::info!("[DEBOUNCE] pane={} SENDING {}x{}", pane_id, w, h);
-                return self.send_resize(pane_id, w, h);
-            }
-        }
-
-        false
+        self.send_resize(pane_id, width, height)
     }
 }
 
