@@ -695,6 +695,9 @@ if let Some(elapsed) = browser.time_since_last_resize() {
         browser.resize(logical_width, logical_height);
         browser.clear_resize_time();
         browser.clear_pending_size();
+    } else {
+        // CRITICAL: Ensure render loop runs again to check timer
+        self.window.invalidate();
     }
 }
 ```
@@ -704,121 +707,131 @@ differs from what we last sent.**
 
 #### The Pattern
 
-Two pieces of state:
+ts2 puts the debounce logic **inline in the render function**, not in a separate
+method. This gives direct access to `self.window` for invalidation.
 
-| State             | Purpose                                           |
-| ----------------- | ------------------------------------------------- |
-| `pending_size`    | The target size we want to resize to              |
-| `last_resize_time`| When the target last changed (timer start)        |
-| `last_sent_size`  | What we actually sent (for dedup on stable sizes) |
+Two pieces of state per pane:
+
+| State             | Purpose                                    |
+| ----------------- | ------------------------------------------ |
+| `pending_size`    | The target size we want to resize to       |
+| `pending_since`   | When the target last changed (timer start) |
 
 Flow:
 
 1. Every frame, compare current size to `pending_size`
 2. If different: update `pending_size`, reset timer
 3. If same: check if 30ms elapsed since timer start
-4. If elapsed: send resize, clear timer and pending
+4. If elapsed: send resize, clear pending state
+5. If not elapsed: call `window.invalidate()` to ensure we check again
 
 This means:
+
 - During fast drag: timer keeps resetting, no resize sent (debounced)
 - When drag slows/stops: timer runs out, resize sent
-- On stable size: no timer, no sends (deduplicated by `last_sent_size`)
+- **Critical:** `window.invalidate()` ensures render loop runs to check timer
 
 #### Changes
 
-**webview_xpc.rs — Fix debounce logic**
+**webview_xpc.rs — Simplify to just state + send**
 
-Replace the `ResizeDebounceState` and `check_and_send_resize`:
+Keep `ResizeDebounceState` but remove the debounce logic from `check_and_send_resize`.
+The method becomes a simple state accessor + sender:
 
 ```rust
-/// State for debouncing resize commands.
-/// Uses the ts2 pattern: track pending target separately from timer.
-struct ResizeDebounceState {
-    /// The target size we want to resize to (reset timer when this changes)
-    pending_size: Option<(u32, u32)>,
+/// State for debouncing resize commands (ts2 pattern).
+pub struct ResizeDebounceState {
+    /// The target size we want to resize to
+    pub pending_size: Option<(u32, u32)>,
     /// When pending_size last changed (timer start)
-    pending_since: Option<Instant>,
-    /// What we last successfully sent (for dedup on stable sizes)
-    last_sent_size: Option<(u32, u32)>,
+    pub pending_since: Option<Instant>,
 }
 
-/// Check if resize should be sent after debounce delay.
-/// Uses ts2's pattern: only reset timer when target size changes.
-pub fn check_and_send_resize(&self, pane_id: PaneId, width: u32, height: u32) -> bool {
-    use std::time::Duration;
-    const SETTLE_DELAY: Duration = Duration::from_millis(30);
+impl XpcManager {
+    /// Get mutable access to debounce state for a pane.
+    pub fn get_resize_state(&self, pane_id: PaneId) -> std::sync::MutexGuard<'_, HashMap<PaneId, ResizeDebounceState>> {
+        self.resize_debounce.lock().unwrap()
+    }
 
-    let current_size = (width, height);
-    let now = Instant::now();
+    /// Send resize command to profile server.
+    pub fn send_resize(&self, pane_id: PaneId, width: u32, height: u32) -> bool {
+        // ... existing send_resize implementation ...
+    }
+}
+```
 
-    let mut debounce = self.resize_debounce.lock().unwrap();
-    let state = debounce.entry(pane_id).or_insert(ResizeDebounceState {
+**draw.rs — Inline debounce logic (like ts2)**
+
+In `render_webview_overlays_webgpu`, replace the `check_and_send_resize` call
+with inline debounce logic:
+
+```rust
+// Inside render_webview_overlays_webgpu, after calculating logical_w/logical_h:
+
+use std::time::{Duration, Instant};
+const SETTLE_DELAY: Duration = Duration::from_millis(30);
+
+let target_size = (logical_w, logical_h);
+
+if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+    let mut debounce = xpc_manager.get_resize_state(*pane_id);
+    let state = debounce.entry(*pane_id).or_insert(ResizeDebounceState {
         pending_size: None,
         pending_since: None,
-        last_sent_size: None,
     });
 
-    // Fast path: size unchanged from last sent, nothing to do
-    if state.last_sent_size == Some(current_size) {
-        // Clear any pending state since we're at the correct size
-        state.pending_size = None;
-        state.pending_since = None;
-        return false;
-    }
-
-    // Check if target changed (this is where ts2 differs from broken ts3)
-    if state.pending_size != Some(current_size) {
-        // Target changed! Update pending and reset timer
-        log::info!(
-            "[DEBOUNCE] pane={} target changed {}x{} -> {}x{}",
-            pane_id,
-            state.pending_size.map(|(w,h)| format!("{}x{}", w, h)).unwrap_or("None".into()),
-            width,
-            height,
-            width,
-            height
+    // Check if target size changed (compare against pending, not sent)
+    if state.pending_size != Some(target_size) {
+        state.pending_size = Some(target_size);
+        state.pending_since = Some(Instant::now());
+        log::debug!(
+            "[DEBOUNCE] pane={} target changed to {}x{}",
+            pane_id, logical_w, logical_h
         );
-        state.pending_size = Some(current_size);
-        state.pending_since = Some(now);
-        return false;  // Don't send yet, wait for settle
     }
 
-    // Target unchanged, check if timer expired
+    // Settle-and-send logic
     if let Some(since) = state.pending_since {
         let elapsed = since.elapsed();
         if elapsed >= SETTLE_DELAY {
             log::info!(
-                "[DEBOUNCE] pane={} SENDING {}x{} (settled for {:?})",
-                pane_id,
-                width,
-                height,
-                elapsed
+                "[DEBOUNCE] pane={} SENDING {}x{} (settled {:?})",
+                pane_id, logical_w, logical_h, elapsed
             );
-
-            state.last_sent_size = Some(current_size);
+            // Clear state before sending
             state.pending_size = None;
             state.pending_since = None;
-            drop(debounce);
-
-            return self.send_resize(pane_id, width, height);
+            drop(debounce);  // Release lock before XPC call
+            xpc_manager.send_resize(*pane_id, logical_w, logical_h);
         } else {
-            log::debug!(
-                "[DEBOUNCE] pane={} waiting {}ms more",
-                pane_id,
-                (SETTLE_DELAY - elapsed).as_millis()
-            );
+            // Not settled yet — ensure render loop runs again
+            drop(debounce);  // Release lock before window call
+            if let Some(ref w) = self.window {
+                w.invalidate();
+            }
         }
     }
-
-    false
 }
 ```
 
 #### Files to Modify
 
-| File                                            | Changes                           |
-| ----------------------------------------------- | --------------------------------- |
-| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | Fix ResizeDebounceState and logic |
+| File                                             | Changes                                   |
+| ------------------------------------------------ | ----------------------------------------- |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`  | Simplify: expose state, keep send_resize  |
+| `ts3/wezterm-gui/src/termwindow/render/draw.rs`  | Inline debounce logic with invalidate()   |
+
+#### Why Inline Matters
+
+The previous approach put debounce logic in `XpcManager::check_and_send_resize`,
+which had no access to `self.window`. Without `window.invalidate()`:
+
+- If terminal content is static (no cursor blink, no animations)
+- The render loop might not run frequently
+- The 30ms timer could expire but never get checked
+
+By inlining the logic in `draw.rs` (like ts2), we have direct access to
+`self.window` and can ensure the render loop keeps running while waiting.
 
 #### Verification
 
@@ -839,9 +852,9 @@ tail -f /tmp/termsurf-gui.log | grep "\[DEBOUNCE\]"
 cat /tmp/termsurf-gui.log | grep "SENDING" | wc -l
 # Expected: Fewer sends than Experiment 2, but still responsive
 
-# Test 4: Verify no timer reset spam
-cat /tmp/termsurf-gui.log | grep "target changed" | wc -l
-# Expected: Only when size actually changes direction/amount
+# Test 4: Static terminal (cursor blink disabled)
+# Resize window, then stop
+# Verify resize still fires after 30ms (invalidate working)
 ```
 
 #### Expected Behavior
@@ -852,23 +865,13 @@ cat /tmp/termsurf-gui.log | grep "target changed" | wc -l
 | Drag with pauses    | Send after each stop  | Send every frame           | Send after 30ms pause|
 | Stable size         | No sends              | No sends                   | No sends             |
 | XPC traffic         | Low but delayed       | High                       | Moderate             |
+| Static terminal     | Timer never fires     | N/A                        | Timer fires (invalidate) |
 
 #### Success Criteria
 
+- [ ] Debounce logic is inline in draw.rs (like ts2)
+- [ ] `window.invalidate()` called when waiting for timer
 - [ ] Timer only resets when target size changes
 - [ ] Resize sends after 30ms of stable target
 - [ ] Fewer resize commands than Experiment 2
-- [ ] UX remains responsive (not noticeably worse than Exp 2)
-- [ ] App stable during rapid resize
-
-#### Why This Should Work
-
-The broken debounce compared against `last_sent_size`, which is `None` until
-first send. So every frame looked like "size changed from what we sent" and
-reset the timer.
-
-The fixed debounce compares against `pending_size`, which is the target we're
-waiting to send. If the user keeps dragging at constant speed, `pending_size`
-keeps changing → timer keeps resetting → no sends (correct debounce). When the
-user pauses or slows down, `pending_size` stabilizes → timer runs → send after
-30ms (correct behavior).
+- [ ] Works even with static terminal content
