@@ -308,40 +308,40 @@ testbed before ts1 integration. Changes made to the example:
 
 ### TermSurf 3.0 (active)
 
-- `docs/issues/ts3-001-architecture.md` — High-level architecture overview
-- `docs/issues/ts3-002-webview.md` — Webview rendering implementation
-- `docs/issues/ts3-003-xpc.md` — XPC architecture for inter-process communication
-- `docs/issues/ts3-004-webpage.md` — Webpage rendering solutions
-- `docs/issues/ts3-005-profile.md` — Profile isolation for browser data
-- `docs/issues/ts3-006-resize.md` — Resize support implementation
+- `docs/issues/301-architecture.md` — High-level architecture overview
+- `docs/issues/302-webview.md` — Webview rendering implementation
+- `docs/issues/303-xpc.md` — XPC architecture for inter-process communication
+- `docs/issues/304-webpage.md` — Webpage rendering solutions
+- `docs/issues/305-profile.md` — Profile isolation for browser data
+- `docs/issues/306-resize.md` — Resize support implementation
 
 ### TermSurf 2.0 (historical)
 
-- `docs/issues/ts2-architecture.md` — Technical decisions and design rationale
-- `docs/issues/ts2-cef.md` — CEF integration via cef-rs
-- `docs/issues/ts2-cef-wezterm.md` — CEF + WezTerm integration details
-- `docs/issues/ts2-cef-mvp.md` through `ts2-cef-mvp5.md` — MVP iteration experiments
-- `docs/issues/ts2-profile.md` — CEF browser profile research
-- `docs/issues/ts2-web.md` — Web command experiments
-- `docs/issues/ts2-wezterm-analysis.md` — WezTerm + cef-rs architecture analysis
+- `docs/issues/200-architecture.md` — Technical decisions and design rationale
+- `docs/issues/201-cef.md` — CEF integration via cef-rs
+- `docs/issues/207-cef-wezterm.md` — CEF + WezTerm integration details
+- `docs/issues/202-cef-mvp.md` through `206-cef-mvp5.md` — MVP iteration experiments
+- `docs/issues/208-profile.md` — CEF browser profile research
+- `docs/issues/209-web.md` — Web command experiments
+- `docs/issues/210-wezterm-analysis.md` — WezTerm + cef-rs architecture analysis
 
 ### TermSurf 1.x (legacy)
 
-- `docs/issues/ts1-bookmarks.md` — Bookmarks implementation plan
-- `docs/issues/ts1-build.md` — Build instructions and troubleshooting
-- `docs/issues/ts1-console.md` — Console bridging and JavaScript API
-- `docs/issues/ts1-ctrl-z.md` — ctrl+z/fg analysis (deferred)
-- `docs/issues/ts1-keybindings.md` — Webview keyboard shortcuts and modes
-- `docs/issues/ts1-libghostty.md` — Changes to libghostty
-- `docs/issues/ts1-release.md` — Release procedure and versioning
-- `docs/issues/ts1-target-blank.md` — target="_blank" link handling
-- `docs/issues/ts1-webview.md` — WebView implementation and API checklist
+- `docs/issues/100-bookmarks.md` — Bookmarks implementation plan
+- `docs/issues/101-build.md` — Build instructions and troubleshooting
+- `docs/issues/102-console.md` — Console bridging and JavaScript API
+- `docs/issues/103-ctrl-z.md` — ctrl+z/fg analysis (deferred)
+- `docs/issues/104-keybindings.md` — Webview keyboard shortcuts and modes
+- `docs/issues/105-libghostty.md` — Changes to libghostty
+- `docs/issues/106-release.md` — Release procedure and versioning
+- `docs/issues/107-target-blank.md` — target="_blank" link handling
+- `docs/issues/108-webview.md` — WebView implementation and API checklist
 
 ### General
 
-- `docs/issues/merge-upstream.md` — How to merge changes from upstream repos
-- `docs/issues/competitors.md` — Terminal-browser hybrid comparison
-- `docs/issues/website.md` — termsurf.com website
+- `docs/issues/002-merge-upstream.md` — How to merge changes from upstream repos
+- `docs/issues/001-competitors.md` — Terminal-browser hybrid comparison
+- `docs/issues/003-website.md` — termsurf.com website
 
 ## AI Reminder
 

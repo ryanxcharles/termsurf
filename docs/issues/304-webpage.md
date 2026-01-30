@@ -2,10 +2,10 @@
 
 ## Background
 
-This document continues from [ts3-003-xpc.md](./ts3-003-xpc.md), which solved
+This document continues from [303-xpc.md](./303-xpc.md), which solved
 cross-process GPU texture sharing on macOS.
 
-### What We Accomplished (ts3-003-xpc)
+### What We Accomplished (303-xpc)
 
 **The Problem:** TermSurf 3.0 runs CEF in a separate process (profile server)
 for browser isolation. The GUI needs to display textures rendered by CEF, but
@@ -111,7 +111,7 @@ $ web --profile myprofile google.com
 
 #### Architecture
 
-Same as ts3-003-xpc Experiment 2, but `termsurf-profile` replaces
+Same as 303-xpc Experiment 2, but `termsurf-profile` replaces
 `termsurf-test-sender`:
 
 ```
@@ -715,7 +715,7 @@ actually run.
 #### Problem
 
 macOS caches XPC service registrations in launchd. When `LauncherTest.app` was
-run during Experiment 2 of ts3-003-xpc, launchd registered the old launcher binary
+run during Experiment 2 of 303-xpc, launchd registered the old launcher binary
 at:
 
 ```

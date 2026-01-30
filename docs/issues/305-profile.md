@@ -2,7 +2,7 @@
 
 ## Background
 
-This document continues from [ts3-004-webpage.md](./ts3-004-webpage.md), which got
+This document continues from [304-webpage.md](./304-webpage.md), which got
 CEF rendering real webpages in the terminal.
 
 ### What We Accomplished (ts3-4)

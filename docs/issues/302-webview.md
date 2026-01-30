@@ -3,7 +3,7 @@
 ## Background
 
 This document continues the work started in
-[ts3-001-architecture.md](./ts3-001-architecture.md), which established the core
+[301-architecture.md](./301-architecture.md), which established the core
 process model for TermSurf 3.0.
 
 ### What We Accomplished
