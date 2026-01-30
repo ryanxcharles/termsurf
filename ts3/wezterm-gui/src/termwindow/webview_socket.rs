@@ -9,6 +9,7 @@
 //! Socket path: /tmp/termsurf-gui-{pid}.sock
 
 use mux::pane::PaneId;
+use mux::tab::TabId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -322,6 +323,8 @@ impl ProfileServerManager {
 pub struct WebviewOverlay {
     /// Session ID for this webview (for cleanup/debugging)
     pub session_id: String,
+    /// Tab ID that owns this webview (for filtering during render)
+    pub tab_id: TabId,
 }
 
 /// Tracks active webview overlays (global, not per-window)
@@ -500,8 +503,24 @@ fn handle_request(
             // (texture data stays in XpcManager::received_surfaces)
             let webview_id = profile_manager.lock().unwrap().next_webview_id();
 
+            // Get tab_id for this pane (used for filtering during render)
+            let tab_id = match mux::Mux::try_get() {
+                Some(mux) => match mux.resolve_pane_id(pane_id) {
+                    Some((_domain_id, _window_id, tab_id)) => tab_id,
+                    None => {
+                        log::warn!("[GUI Socket] Could not resolve tab_id for pane {}", pane_id);
+                        return Response::error(&request.id, "Could not resolve pane to tab");
+                    }
+                },
+                None => {
+                    log::warn!("[GUI Socket] Mux not available for tab_id lookup");
+                    return Response::error(&request.id, "Mux not available");
+                }
+            };
+
             let overlay = WebviewOverlay {
                 session_id: session_id.clone(),
+                tab_id,
             };
 
             state.write().unwrap().add_overlay(pane_id, overlay);
@@ -538,8 +557,24 @@ fn handle_request(
             let _width = data.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
             let _height = data.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
 
+            // Get tab_id for this pane (used for filtering during render)
+            let tab_id = match mux::Mux::try_get() {
+                Some(mux) => match mux.resolve_pane_id(pane_id) {
+                    Some((_domain_id, _window_id, tab_id)) => tab_id,
+                    None => {
+                        log::warn!("[GUI Socket] Could not resolve tab_id for pane {}", pane_id);
+                        return Response::error(&request.id, "Could not resolve pane to tab");
+                    }
+                },
+                None => {
+                    log::warn!("[GUI Socket] Mux not available for tab_id lookup");
+                    return Response::error(&request.id, "Mux not available");
+                }
+            };
+
             let overlay = WebviewOverlay {
                 session_id: format!("legacy-pane-{}", pane_id),
+                tab_id,
             };
 
             state.write().unwrap().add_overlay(pane_id, overlay);

@@ -215,10 +215,30 @@ impl crate::TermWindow {
         // Get positioned panes for viewport calculation
         let positioned_panes = self.get_panes_to_render();
 
+        // Get active tab_id to filter overlays (only render overlays from active tab)
+        let active_tab_id = match mux::Mux::try_get() {
+            Some(mux) => match mux.get_active_tab_for_window(self.mux_window_id) {
+                Some(tab) => tab.tab_id(),
+                None => {
+                    log::debug!("[Render] No active tab, skipping webview overlays");
+                    return Ok(());
+                }
+            },
+            None => return Ok(()),
+        };
+
         let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // For each webview pane, get CURRENT texture from XpcManager
-        for (pane_id, _overlay) in webview_panes.overlays.iter() {
+        for (pane_id, overlay) in webview_panes.overlays.iter() {
+            // Skip overlays from other tabs (fixes tab leak bug)
+            if overlay.tab_id != active_tab_id {
+                log::debug!(
+                    "[Render] Skipping overlay for pane {} (tab {} != active {})",
+                    pane_id, overlay.tab_id, active_tab_id
+                );
+                continue;
+            }
             // Register invalidate callback if not already registered.
             // This allows XPC to trigger a window redraw when new textures arrive.
             if !xpc_manager.has_invalidate_callback(*pane_id) {

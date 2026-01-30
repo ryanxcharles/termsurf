@@ -168,7 +168,13 @@ Cmd+T                 # Tab 2 should be clean terminal
 
 ### Success Criteria
 
-- [ ] New tabs do not show browser overlays from other tabs
-- [ ] Tab bar remains visible when switching tabs
-- [ ] Browser overlay reappears when switching back to its owning tab
-- [ ] Multiple browser panes in different tabs work independently
+- [x] New tabs do not show browser overlays from other tabs
+- [x] Tab bar remains visible when switching tabs
+- [x] Browser overlay reappears when switching back to its owning tab
+- [x] Multiple browser panes in different tabs work independently
+
+### Result: Success
+
+Experiment 1 fixed the tab leak issue. The fix stores `tab_id` in each
+`WebviewOverlay` when created, then filters overlays during render to only
+display those belonging to the active tab.
