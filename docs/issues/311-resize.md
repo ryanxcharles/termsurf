@@ -394,6 +394,60 @@ tail -f /tmp/termsurf-profile-*.log | grep "RESIZE-RECV"
 
 #### Success Criteria
 
-- [ ] Logs clearly show the source of size mismatches
+- [x] Logs clearly show the source of size mismatches
 - [ ] Can correlate texture/viewport divergence with visible borders
 - [ ] Can measure latency between RESIZE-SEND and TEXTURE-SIZE update
+
+#### Result: FAILED
+
+The experiment failed to meet 2 of 3 success criteria.
+
+#### Conclusion
+
+**Bug in the diagnostic code itself:**
+
+The SIZE-MISMATCH calculation assumes `surface.width/height` are logical pixels
+and multiplies by scale:
+
+```rust
+let texture_physical_w = (surface.width as f32 * scale) as u32;
+```
+
+However, the texture dimensions from IOSurface are already in **physical**
+pixels. Multiplying by scale (2.0 on Retina) incorrectly doubles them.
+
+Evidence from logs:
+
+```
+[TEXTURE-SIZE] pane=1 received=1872x2190 (mach_port=...)
+[SIZE-MISMATCH] pane=1 texture_physical=3744x4380 viewport=1547x1950 diff=(2197, 2430)
+```
+
+The diagnostic computes 1872 × 2 = 3744, but 1872 is already the physical size.
+
+**Actual mismatch (correcting for the bug):**
+
+| Dimension | Texture (physical) | Viewport (physical) | Diff   |
+| --------- | ------------------ | ------------------- | ------ |
+| Width     | 1872               | 1547                | +325   |
+| Height    | 2190               | 1950                | +240   |
+
+The texture is **larger** than the viewport, not smaller. This confirms Issue 2
+from the Summary: the texture is sized based on grid dimensions (cols ×
+cell_width) while the viewport uses exact pixel bounds from the pane layout.
+
+**Key insight:**
+
+The SIZE-MISMATCH comparison should be direct physical-to-physical:
+
+```rust
+if surface.width != viewport_w as u32 || surface.height != viewport_h as u32
+```
+
+Not `surface.width * scale` vs `viewport_w`.
+
+**Next steps:**
+
+1. Fix the SIZE-MISMATCH diagnostic to compare physical-to-physical
+2. Investigate why spawn-time sizing produces larger dimensions than render-time
+   viewport (grid-based calculation vs exact pixel bounds)

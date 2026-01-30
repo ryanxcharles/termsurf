@@ -207,11 +207,11 @@ impl XpcManager {
                             };
                             if let Some(pid) = pane_id_for_log {
                                 log::info!(
-                                    "[TEXTURE-RX] pane={} mach_port={} size={}x{}",
+                                    "[TEXTURE-SIZE] pane={} received={}x{} (mach_port={})",
                                     pid,
-                                    port,
                                     width,
-                                    height
+                                    height,
+                                    port
                                 );
                             }
 

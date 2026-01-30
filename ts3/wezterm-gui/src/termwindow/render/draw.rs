@@ -433,17 +433,6 @@ impl crate::TermWindow {
 
                 render_pass.set_viewport(viewport_x, viewport_y, viewport_w, viewport_h, 0.0, 1.0);
 
-                // Log texture vs viewport comparison
-                log::info!(
-                    "[RENDER] pane={} texture={}x{} viewport={}x{} match={}",
-                    pane_id,
-                    surface.width,
-                    surface.height,
-                    viewport_w as u32,
-                    viewport_h as u32,
-                    surface.width == viewport_w as u32 && surface.height == viewport_h as u32
-                );
-
                 // Debounce resize commands (ts2 pattern)
                 {
                     use std::time::{Duration, Instant};
@@ -451,8 +440,30 @@ impl crate::TermWindow {
 
                     let scale = self.dimensions.dpi as f32 / 72.0;
                     let scale = if scale <= 0.0 { 2.0 } else { scale };
+
+                    // Log viewport dimensions
                     let logical_w = (viewport_w / scale) as u32;
                     let logical_h = (viewport_h / scale) as u32;
+                    log::info!(
+                        "[VIEWPORT-SIZE] pane={} viewport={}x{} logical={}x{} scale={:.2}",
+                        pane_id, viewport_w as u32, viewport_h as u32, logical_w, logical_h, scale
+                    );
+
+                    // Check for size mismatch between texture and viewport
+                    // Texture size from CEF is in logical pixels, convert to physical for comparison
+                    let texture_physical_w = (surface.width as f32 * scale) as u32;
+                    let texture_physical_h = (surface.height as f32 * scale) as u32;
+                    if texture_physical_w != viewport_w as u32 || texture_physical_h != viewport_h as u32 {
+                        log::warn!(
+                            "[SIZE-MISMATCH] pane={} texture_physical={}x{} viewport={}x{} diff=({}, {})",
+                            pane_id,
+                            texture_physical_w, texture_physical_h,
+                            viewport_w as u32, viewport_h as u32,
+                            texture_physical_w as i32 - viewport_w as i32,
+                            texture_physical_h as i32 - viewport_h as i32
+                        );
+                    }
+
                     let target_size = (logical_w, logical_h);
 
                     let mut resize_state = self.webview_resize_state.borrow_mut();
@@ -487,8 +498,11 @@ impl crate::TermWindow {
                             let elapsed = since.elapsed();
                             if elapsed >= SETTLE_DELAY {
                                 log::info!(
-                                    "[DEBOUNCE] pane={} SENDING {}x{} (settled {:?})",
-                                    pane_id, logical_w, logical_h, elapsed
+                                    "[RESIZE-SEND] pane={} logical={}x{} (physical={}x{} at scale={:.2})",
+                                    pane_id, logical_w, logical_h,
+                                    (logical_w as f32 * scale) as u32,
+                                    (logical_h as f32 * scale) as u32,
+                                    scale
                                 );
                                 state.last_sent_size = Some(target_size);
                                 state.pending_size = None;

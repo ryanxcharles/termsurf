@@ -661,6 +661,7 @@ mod cef_handlers {
 
         // 3. Set event handler BEFORE resume
         let deferred_for_handler = Arc::clone(&deferred_state);
+        let scale_for_handler = state.scale;
         set_event_handler(&*gui, move |event| {
             match event {
                 Ok(msg) => {
@@ -676,12 +677,11 @@ mod cef_handlers {
 
                             let width = msg.get_i64("width") as u32;
                             let height = msg.get_i64("height") as u32;
-                            println!("Profile: resize_browser {}x{}", width, height);
                             println!(
-                                "[RESIZE-RX] session={} width={} height={} prev={}x{}",
-                                bs.session_id,
-                                width,
-                                height,
+                                "[RESIZE-RECV] logical={}x{} scale={:.2} -> physical={}x{} (prev={}x{})",
+                                width, height, scale_for_handler,
+                                (width as f32 * scale_for_handler) as u32,
+                                (height as f32 * scale_for_handler) as u32,
                                 bs.width.load(Ordering::Relaxed),
                                 bs.height.load(Ordering::Relaxed)
                             );
