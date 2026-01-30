@@ -771,6 +771,64 @@ grep "BORDER-VISIBLE" /tmp/termsurf-gui.log | tail -10
 
 #### Success Criteria
 
-- [ ] No 1-pixel border at steady state after resize completes
-- [ ] Texture dimensions >= viewport dimensions
-- [ ] No regression in resize behavior during transitions
+- [x] No 1-pixel border at steady state after resize completes
+- [x] Texture dimensions >= viewport dimensions
+- [x] No regression in resize behavior during transitions
+
+#### Result: PASSED
+
+All three success criteria met.
+
+#### Conclusion
+
+**The 1-pixel truncation bug is fixed.**
+
+Before this experiment, the GUI converted viewport to logical pixels using
+truncation, then sent logical pixels to the profile server:
+
+```
+viewport_w = 1547 (physical)
+logical_w = (1547 / 2.0) as u32 = 773  // truncates 773.5 → 773
+send logical_w to profile server
+profile server: texture = 773 * 2 = 1546  // 1 pixel short!
+```
+
+After this experiment, the GUI sends physical pixels directly, and the profile
+server converts using `ceil()`:
+
+```
+viewport_w = 4225 (physical)
+send physical_w to profile server
+profile server: logical = ceil(4225 / 2.0) = 2113
+profile server: texture = 2113 * 2 = 4226  // 1 pixel larger, covers viewport!
+```
+
+**Log evidence:**
+
+Before (Experiment 2):
+```
+texture=1130x1650 viewport=1131x1650 diff=(-1, 0)
+[BORDER-VISIBLE] gap=(1, 0)  ← permanent 1px border
+```
+
+After (Experiment 3):
+```
+texture=4226x2490 viewport=4225x2490 diff=(1, 0)
+(no BORDER-VISIBLE at steady state)  ← border eliminated
+```
+
+**Remaining issue: async lag during resize transitions.**
+
+BORDER-VISIBLE still fires during active resize when the old texture hasn't
+caught up to the new viewport. This is inherent to the XPC architecture
+(74-378ms latency) and represents acceptable UX—borders appear only while
+actively dragging, not at rest.
+
+**Summary of changes:**
+
+1. Added `send_resize_physical()` to XpcManager (sends physical dimensions)
+2. Changed draw.rs debounce to track physical pixels
+3. Profile server uses `ceil()` when converting physical → logical
+
+This fix eliminates the permanent 1-pixel border that appeared at steady state
+after every resize operation.

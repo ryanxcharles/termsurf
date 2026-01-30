@@ -474,7 +474,10 @@ impl crate::TermWindow {
                         );
                     }
 
-                    let target_size = (logical_w, logical_h);
+                    // Use physical pixels for debounce tracking (avoids truncation issues)
+                    let physical_w = viewport_w as u32;
+                    let physical_h = viewport_h as u32;
+                    let target_size = (physical_w, physical_h);
 
                     let mut resize_state = self.webview_resize_state.borrow_mut();
                     let state = resize_state.entry(*pane_id).or_insert(crate::termwindow::WebviewResizeState {
@@ -487,7 +490,7 @@ impl crate::TermWindow {
                     if state.last_sent_size == Some(target_size) {
                         log::info!(
                             "[DEBOUNCE] pane={} FAST_PATH size={}x{} (already sent)",
-                            pane_id, logical_w, logical_h
+                            pane_id, physical_w, physical_h
                         );
                         state.pending_size = None;
                         state.pending_since = None;
@@ -499,7 +502,7 @@ impl crate::TermWindow {
                             state.pending_since = Some(Instant::now());
                             log::info!(
                                 "[DEBOUNCE] pane={} TARGET_CHANGED to {}x{} (timer reset)",
-                                pane_id, logical_w, logical_h
+                                pane_id, physical_w, physical_h
                             );
                         }
 
@@ -508,10 +511,8 @@ impl crate::TermWindow {
                             let elapsed = since.elapsed();
                             if elapsed >= SETTLE_DELAY {
                                 log::info!(
-                                    "[RESIZE-SEND] pane={} logical={}x{} physical={}x{} timestamp={:?}",
-                                    pane_id, logical_w, logical_h,
-                                    (logical_w as f32 * scale) as u32,
-                                    (logical_h as f32 * scale) as u32,
+                                    "[RESIZE-SEND] pane={} physical={}x{} scale={:.2} timestamp={:?}",
+                                    pane_id, physical_w, physical_h, scale,
                                     SystemTime::now()
                                 );
                                 state.last_sent_size = Some(target_size);
@@ -520,7 +521,7 @@ impl crate::TermWindow {
                                 drop(resize_state);
 
                                 if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
-                                    xpc_manager.send_resize(*pane_id, logical_w, logical_h);
+                                    xpc_manager.send_resize_physical(*pane_id, physical_w, physical_h, scale);
                                 }
                             } else {
                                 let remaining = SETTLE_DELAY.saturating_sub(elapsed);

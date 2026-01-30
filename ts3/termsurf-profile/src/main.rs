@@ -675,16 +675,37 @@ mod cef_handlers {
                                 return;
                             };
 
-                            let width = msg.get_i64("width") as u32;
-                            let height = msg.get_i64("height") as u32;
-                            println!(
-                                "[RESIZE-RECV] logical={}x{} scale={:.2} -> physical={}x{} (prev={}x{})",
-                                width, height, scale_for_handler,
-                                (width as f32 * scale_for_handler) as u32,
-                                (height as f32 * scale_for_handler) as u32,
-                                bs.width.load(Ordering::Relaxed),
-                                bs.height.load(Ordering::Relaxed)
-                            );
+                            // Check for physical dimensions first (new protocol)
+                            let (width, height) = if msg.get_i64("physical_width") != 0 {
+                                let physical_w = msg.get_i64("physical_width") as u32;
+                                let physical_h = msg.get_i64("physical_height") as u32;
+                                let scale_str = msg.get_string("scale").unwrap_or_default();
+                                let scale: f32 = scale_str.parse().unwrap_or(scale_for_handler);
+                                // Convert to logical, rounding up to ensure texture >= viewport
+                                let logical_w = (physical_w as f32 / scale).ceil() as u32;
+                                let logical_h = (physical_h as f32 / scale).ceil() as u32;
+                                println!(
+                                    "[RESIZE-RECV] physical={}x{} scale={:.2} -> logical={}x{} (ceil) (prev={}x{})",
+                                    physical_w, physical_h, scale,
+                                    logical_w, logical_h,
+                                    bs.width.load(Ordering::Relaxed),
+                                    bs.height.load(Ordering::Relaxed)
+                                );
+                                (logical_w, logical_h)
+                            } else {
+                                // Fallback to legacy logical dimensions
+                                let width = msg.get_i64("width") as u32;
+                                let height = msg.get_i64("height") as u32;
+                                println!(
+                                    "[RESIZE-RECV] logical={}x{} scale={:.2} -> physical={}x{} (prev={}x{})",
+                                    width, height, scale_for_handler,
+                                    (width as f32 * scale_for_handler) as u32,
+                                    (height as f32 * scale_for_handler) as u32,
+                                    bs.width.load(Ordering::Relaxed),
+                                    bs.height.load(Ordering::Relaxed)
+                                );
+                                (width, height)
+                            };
 
                             let bs = Arc::clone(bs);
                             drop(state_guard); // Release lock before post_task

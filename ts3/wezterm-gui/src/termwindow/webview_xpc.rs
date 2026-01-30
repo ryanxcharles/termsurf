@@ -331,7 +331,7 @@ impl XpcManager {
         }
     }
 
-    /// Send a resize command to the browser in the given pane
+    /// Send a resize command to the browser in the given pane (legacy logical pixels)
     pub fn send_resize(&self, pane_id: PaneId, width: u32, height: u32) -> bool {
         let msg = XpcDictionary::new();
         msg.set_string("action", "resize_browser");
@@ -340,6 +340,26 @@ impl XpcManager {
 
         if self.send_command(pane_id, &msg) {
             log::info!("[XPC] Sent resize to pane {}: {}x{}", pane_id, width, height);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Send a resize command using physical pixel dimensions.
+    /// Profile server will convert to logical using ceil() to ensure texture >= viewport.
+    pub fn send_resize_physical(&self, pane_id: PaneId, width: u32, height: u32, scale: f32) -> bool {
+        let msg = XpcDictionary::new();
+        msg.set_string("action", "resize_browser");
+        msg.set_i64("physical_width", width as i64);
+        msg.set_i64("physical_height", height as i64);
+        msg.set_string("scale", &format!("{}", scale));
+
+        if self.send_command(pane_id, &msg) {
+            log::info!(
+                "[XPC] Sent resize_physical to pane {}: {}x{} scale={}",
+                pane_id, width, height, scale
+            );
             true
         } else {
             false
