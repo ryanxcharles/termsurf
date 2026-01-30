@@ -5922,6 +5922,7 @@ dependencies = [
  "cef",
  "clap",
  "ctrlc",
+ "objc",
  "termsurf-xpc",
 ]
 
