@@ -1628,6 +1628,312 @@ cat /tmp/termsurf-profile-*.log | grep "CLIPBOARD-DEBUG"
 - [ ] Normal terminal Cmd+C/V still works when no webview active
 - [ ] No regressions in terminal keybinding behavior
 
+#### Result: PARTIAL SUCCESS (KeyEvents generated, but clipboard still doesn't work)
+
+Experiment 5 successfully made Cmd+C/V/X/A generate KeyEvents. The logs confirm
+the full pipeline is working:
+
+```
+GUI: [CLIPBOARD-DEBUG] Forwarding Cmd+v to pane 0: down=true, raw=Some(9)
+
+Profile: [CLIPBOARD-DEBUG] Cmd+V received: key_is_down=true, raw_code=0x9, char_code=118 ('v'), modifiers=[...meta=true]
+Profile: [CLIPBOARD-DEBUG] CEF event: windows_vk=0x56 (expected V=0x56), modifiers=0x80 (COMMAND_DOWN=0x80)
+Profile: [CLIPBOARD-DEBUG] Calling set_focus(true) before clipboard operation
+Profile: [CLIPBOARD-DEBUG] send_key_event called for KEYDOWN
+Profile: [CLIPBOARD-DEBUG] CHAR event also sent
+```
+
+However, the clipboard operations still don't work in the browser.
+
+#### Conclusion
+
+**What worked:**
+
+- `perform_key_equivalent` now intercepts Cmd+C/V/X/A
+- KeyEvents are synthesized via `key_common()`
+- Events flow through the full pipeline: GUI → XPC → profile server → CEF
+- CEF receives correct VK codes (0x43 for C, 0x56 for V)
+- CEF receives correct modifiers (0x80 = COMMAND_DOWN)
+- `set_focus(1)` is called before clipboard operations
+
+**What didn't work:**
+
+CEF receives the Cmd+V key event but does not perform the paste operation.
+
+**Root cause hypothesis: macOS process-level clipboard restrictions**
+
+macOS restricts clipboard access based on application state:
+
+1. **Active application**: Only the frontmost app has full clipboard access
+2. **Process isolation**: Background processes have limited clipboard capabilities
+
+The `termsurf-profile` process:
+- Runs CEF in off-screen, headless mode
+- Is NOT the active/frontmost application (wezterm-gui is)
+- May be denied clipboard read/write by macOS security policies
+- Even with correct key events, CEF cannot access the system clipboard
+
+**Why ts2 works:** CEF runs in-process with the GUI, so it inherits the GUI's
+clipboard access as the active application.
+
+**Why ts3 fails:** CEF runs in a separate background process that lacks clipboard
+privileges, regardless of whether it receives the correct key events.
+
+**Potential solutions for future experiments:**
+
+1. **Proxy clipboard via XPC**: GUI reads clipboard (it has access), sends
+   contents to profile server via XPC, profile server injects text into CEF
+   programmatically (not via key events)
+
+2. **Custom CefClipboardHandler**: Implement CEF's clipboard handler interface
+   to proxy clipboard operations back to the GUI process
+
+3. **JavaScript injection**: For paste, inject clipboard contents via JavaScript
+   (`document.execCommand('insertText', ...)` or Clipboard API)
+
+The key insight is that **key events alone cannot solve this** — the profile
+server process fundamentally lacks clipboard access on macOS.
+
+---
+
+### Experiment 6: Proxy Clipboard via XPC
+
+**Goal:** Implement clipboard paste by proxying clipboard contents from the GUI
+process to the profile server, bypassing macOS's process-level clipboard
+restrictions.
+
+#### Background
+
+Experiment 5 proved that key events reach CEF correctly, but clipboard operations
+fail because the profile server process lacks clipboard access. The GUI process
+(as the active application) has full clipboard access.
+
+Solution: When Cmd+V is pressed in Browse mode, the GUI reads the clipboard and
+sends the contents to the profile server via XPC. The profile server injects the
+text into the browser using JavaScript.
+
+#### Approach
+
+**Phase 1: Paste (Cmd+V) — GUI → Profile**
+
+```
+User presses Cmd+V
+    │
+    ▼
+GUI: handle_webview_key_event detects Cmd+V in Browse mode
+    │
+    ▼
+GUI: Read clipboard contents using window::Clipboard
+    │
+    ▼
+GUI: Send XPC message { action: "paste_text", text: "..." }
+    │
+    ▼
+Profile: Receive paste_text action
+    │
+    ▼
+Profile: Execute JavaScript to insert text at cursor
+    │
+    ▼
+Browser: Text appears in focused input
+```
+
+**Part A: Detect Cmd+V and read clipboard (keyevent.rs)**
+
+In `handle_webview_key_event`, intercept Cmd+V before forwarding:
+
+```rust
+WebviewMode::Browse => {
+    if is_ctrl_c {
+        // ... existing Ctrl+C handling
+    }
+
+    // Handle Cmd+V (paste) - proxy clipboard contents
+    let is_cmd_v = window_key.key_is_down
+        && window_key.modifiers.contains(Modifiers::SUPER)
+        && matches!(&window_key.key, KeyCode::Char('v') | KeyCode::Char('V'));
+
+    if is_cmd_v {
+        drop(overlays); // Release lock before clipboard access
+        if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+            // Read clipboard
+            if let Some(clipboard) = self.clipboard.as_ref() {
+                if let Ok(text) = clipboard.get_contents() {
+                    log::info!("[CLIPBOARD] Cmd+V: sending {} chars to browser", text.len());
+                    xpc_manager.send_paste_text(pane_id, &text);
+                }
+            }
+        }
+        return Some(true); // Consume the key
+    }
+
+    // Forward other keys to browser via XPC
+    // ...
+}
+```
+
+**Part B: Add send_paste_text to XpcManager (webview_xpc.rs)**
+
+```rust
+/// Send clipboard text to paste into the browser
+pub fn send_paste_text(&self, pane_id: PaneId, text: &str) -> bool {
+    let msg = XpcDictionary::new();
+    msg.set_string("action", "paste_text");
+    msg.set_string("text", text);
+
+    if self.send_command(pane_id, &msg) {
+        log::info!("[XPC] Sent paste_text to pane {} ({} chars)", pane_id, text.len());
+        true
+    } else {
+        false
+    }
+}
+```
+
+**Part C: Handle paste_text in profile server (main.rs)**
+
+Add handler in the XPC event handler:
+
+```rust
+"paste_text" => {
+    let text = msg.get_string("text").unwrap_or_default();
+    println!("[CLIPBOARD] Received paste_text: {} chars", text.len());
+
+    let state_guard = deferred_for_handler.lock().unwrap();
+    let Some(bs) = state_guard.as_ref() else {
+        println!("Profile: paste_text ignored (state not ready)");
+        return;
+    };
+
+    let bs = Arc::clone(bs);
+    let text = text.to_string();
+    drop(state_guard);
+
+    // Post to CEF UI thread
+    let mut task = PasteTextTask::new(bs, text);
+    cef::post_task(cef::ThreadId::UI, Some(&mut task));
+}
+```
+
+**Part D: Inject text via JavaScript (main.rs)**
+
+```rust
+wrap_task! {
+    pub struct PasteTextTask {
+        state: Arc<BrowserState>,
+        text: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            paste_text_to_browser(&self.state, &self.text);
+        }
+    }
+}
+
+fn paste_text_to_browser(state: &BrowserState, text: &str) {
+    let browser = match state.browser.lock().unwrap().as_ref() {
+        Some(b) => b.clone(),
+        None => return,
+    };
+
+    let frame = match browser.main_frame() {
+        Some(f) => f,
+        None => return,
+    };
+
+    // Escape text for JavaScript string
+    let escaped = text
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r");
+
+    // Insert text at cursor using execCommand (works in contenteditable and inputs)
+    let js = format!(
+        "document.execCommand('insertText', false, '{}');",
+        escaped
+    );
+
+    println!("[CLIPBOARD] Executing JS to paste {} chars", text.len());
+    frame.execute_java_script(Some(&js.into()), None, 0);
+}
+```
+
+#### Why JavaScript Injection?
+
+Several options were considered:
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| `document.execCommand('insertText')` | Works in inputs, textareas, contenteditable | Deprecated but widely supported |
+| Clipboard API (`navigator.clipboard`) | Modern standard | Requires async, may need permissions |
+| Simulate key events per character | Pure CEF | Slow, doesn't handle special chars |
+| CEF IME APIs | Native | Complex, designed for input methods |
+
+`execCommand('insertText')` is chosen because:
+- Synchronous and simple
+- Works in all editable contexts
+- Handles Unicode correctly
+- Still supported in all browsers (deprecation is theoretical)
+
+#### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `ts3/wezterm-gui/src/termwindow/keyevent.rs` | Intercept Cmd+V, read clipboard, call send_paste_text |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | Add `send_paste_text()` method |
+| `ts3/termsurf-profile/src/main.rs` | Handle `paste_text` action, JavaScript injection |
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Test 1: Basic paste
+# Copy "hello world" from another app
+web google.com
+# Click in search box (or Tab to focus)
+# Press Cmd+V
+# Expected: "hello world" appears in search box
+
+# Test 2: Multi-line paste
+# Copy multi-line text from another app
+# Press Cmd+V in a textarea (e.g., web github.com, open an issue)
+# Expected: Multi-line text pastes correctly
+
+# Test 3: Special characters
+# Copy text with quotes, backslashes, unicode
+# Press Cmd+V
+# Expected: All characters paste correctly
+
+# Test 4: Empty clipboard
+# Clear clipboard
+# Press Cmd+V
+# Expected: Nothing happens, no crash
+
+# Check logs
+cat /tmp/termsurf-gui.log | grep "CLIPBOARD"
+cat /tmp/termsurf-profile-*.log | grep "CLIPBOARD"
+```
+
+#### Success Criteria
+
+- [ ] Cmd+V in Browse mode triggers clipboard read in GUI
+- [ ] Clipboard contents sent to profile server via XPC
+- [ ] Profile server receives text and executes JavaScript
+- [ ] Text appears in focused input/textarea in browser
+- [ ] Multi-line text works
+- [ ] Special characters (quotes, backslashes, unicode) work
+- [ ] Empty clipboard doesn't crash
+- [ ] Normal terminal Cmd+V still works when no webview
+
+#### Future Work (Not in This Experiment)
+
+- **Cmd+C (copy)**: Query selected text from browser via JavaScript, send to GUI, write to clipboard
+- **Cmd+X (cut)**: Copy + delete selection
+- **Cmd+A (select all)**: Could work with key events, or use `document.execCommand('selectAll')`
+
 #### Result
 
 *Pending*
