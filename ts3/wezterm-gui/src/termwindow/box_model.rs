@@ -829,6 +829,18 @@ impl super::TermWindow {
         gl_state: &RenderState,
         inherited_colors: Option<&ElementColors>,
     ) -> anyhow::Result<()> {
+        self.render_element_with_hsv(element, gl_state, inherited_colors, None)
+    }
+
+    /// Render an element with optional HSB transformation (for dimming).
+    /// Used by webview control panel to apply inactive_pane_hsb dimming.
+    pub fn render_element_with_hsv<'a>(
+        &self,
+        element: &ComputedElement,
+        gl_state: &RenderState,
+        inherited_colors: Option<&ElementColors>,
+        hsv: Option<config::HsbTransform>,
+    ) -> anyhow::Result<()> {
         let layer = gl_state.layer_for_zindex(element.zindex)?;
         let mut layers = layer.quad_allocator();
 
@@ -855,7 +867,7 @@ impl super::TermWindow {
             None => &element.colors,
         };
 
-        self.render_element_background(element, colors, &mut layers, inherited_colors)?;
+        self.render_element_background_with_hsv(element, colors, &mut layers, inherited_colors, hsv)?;
         let left = self.dimensions.pixel_width as f32 / -2.0;
         let top = self.dimensions.pixel_height as f32 / -2.0;
         match &element.content {
@@ -884,7 +896,7 @@ impl super::TermWindow {
                             );
                             self.resolve_text(colors, inherited_colors).apply(&mut quad);
                             quad.set_texture(sprite.texture_coords());
-                            quad.set_hsv(None);
+                            quad.set_hsv(hsv);
                             pos_x += width as f32;
                         }
                         ElementCell::Glyph(glyph) => {
@@ -912,7 +924,7 @@ impl super::TermWindow {
                                 self.resolve_text(colors, inherited_colors).apply(&mut quad);
                                 quad.set_texture(texture.texture_coords());
                                 quad.set_has_color(glyph.has_color);
-                                quad.set_hsv(None);
+                                quad.set_hsv(hsv);
                             }
                             pos_x += glyph.x_advance.get() as f32;
                         }
@@ -923,7 +935,7 @@ impl super::TermWindow {
                 drop(layers);
 
                 for kid in kids {
-                    self.render_element(kid, gl_state, Some(colors))?;
+                    self.render_element_with_hsv(kid, gl_state, Some(colors), hsv)?;
                 }
             }
             ComputedElementContent::Poly { poly, line_width } => {
@@ -938,6 +950,7 @@ impl super::TermWindow {
                         LinearRgba::TRANSPARENT,
                     )?;
                     self.resolve_text(colors, inherited_colors).apply(&mut quad);
+                    quad.set_hsv(hsv);
                 }
             }
         }
@@ -1005,6 +1018,20 @@ impl super::TermWindow {
                 }
             }
         }
+    }
+
+    fn render_element_background_with_hsv<'a>(
+        &self,
+        element: &ComputedElement,
+        colors: &ElementColors,
+        layers: &mut TripleLayerQuadAllocator,
+        inherited_colors: Option<&ElementColors>,
+        _hsv: Option<config::HsbTransform>,
+    ) -> anyhow::Result<()> {
+        // Note: HSV is not applied to backgrounds for now - the main visible
+        // dimming effect comes from text. Background HSV would require changes
+        // to filled_rectangle and poly_quad to accept HSV parameter.
+        self.render_element_background(element, colors, layers, inherited_colors)
     }
 
     fn render_element_background<'a>(

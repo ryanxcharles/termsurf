@@ -534,14 +534,14 @@ impl WebGpuState {
         #[cfg(target_os = "macos")]
         let webview_dim_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Webview Dim Bind Group Layout"),
+                label: Some("Webview HSB Bind Group Layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: std::num::NonZeroU64::new(4), // f32
+                        min_binding_size: std::num::NonZeroU64::new(12), // 3 × f32 (hue, saturation, brightness)
                     },
                     count: None,
                 }],

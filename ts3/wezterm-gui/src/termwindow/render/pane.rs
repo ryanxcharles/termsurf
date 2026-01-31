@@ -776,11 +776,37 @@ impl crate::TermWindow {
             (pos.width as f32 * cell_width) + width_delta
         };
 
-        // Render control bar background
+        // Render control bar background with HSV dimming
         let palette = self.palette().clone();
         let bg_color = palette.background.to_linear();
         let control_bar_rect = euclid::rect(x, y, width, control_bar_height);
-        self.filled_rectangle(layers, 0, control_bar_rect, bg_color)?;
+        let mut quad = self.filled_rectangle(layers, 0, control_bar_rect, bg_color)?;
+
+        // Get overlay mode to determine if background should be dimmed
+        use crate::termwindow::webview_socket::{get_server, WebviewMode};
+        let pane_id = pos.pane.pane_id();
+        let panel_hsv = if let Some(server) = get_server() {
+            let state = server.state();
+            let overlays = state.read().unwrap();
+            if let Some(overlay) = overlays.overlays.get(&pane_id) {
+                // Dimmed when: Browse mode OR pane is inactive
+                let should_dim = match overlay.mode {
+                    WebviewMode::Browse => true,
+                    WebviewMode::Control => !pos.is_active,
+                };
+                if should_dim {
+                    Some(self.config.inactive_pane_hsb)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        quad.set_hsv(panel_hsv);
 
         Ok(())
     }
@@ -844,6 +870,12 @@ impl crate::TermWindow {
                 None => continue,
             };
 
+            // Find positioned pane to get viewport bounds and active state
+            let pos = match positioned_panes.iter().find(|p| p.pane.pane_id() == *pane_id) {
+                Some(p) => p,
+                None => continue,
+            };
+
             // Choose text based on mode
             use crate::termwindow::webview_socket::WebviewMode;
             let display_text = match overlay.mode {
@@ -851,10 +883,17 @@ impl crate::TermWindow {
                 WebviewMode::Control => "Enter to browse. Ctrl+C to exit.".to_string(),
             };
 
-            // Find positioned pane to get viewport bounds
-            let pos = match positioned_panes.iter().find(|p| p.pane.pane_id() == *pane_id) {
-                Some(p) => p,
-                None => continue,
+            // Determine if control panel should be dimmed using HSB from config
+            // Dimmed when: Browse mode (webview is active) OR pane is inactive
+            let panel_should_dim = match overlay.mode {
+                WebviewMode::Browse => true,             // Always dim in Browse mode
+                WebviewMode::Control => !pos.is_active, // Only dim if pane inactive
+            };
+
+            let panel_hsv = if panel_should_dim {
+                Some(self.config.inactive_pane_hsb)
+            } else {
+                None
             };
 
             // Calculate viewport bounds (same logic as render_webview_overlays_webgpu)
@@ -948,8 +987,8 @@ impl crate::TermWindow {
             // Translate to final position
             computed.translate(euclid::vec2(x, y));
 
-            // Render the element (safe now - layers are dropped)
-            self.render_element(&computed, gl_state, None)?;
+            // Render the element with HSV dimming (safe now - layers are dropped)
+            self.render_element_with_hsv(&computed, gl_state, None, panel_hsv)?;
         }
 
         Ok(())

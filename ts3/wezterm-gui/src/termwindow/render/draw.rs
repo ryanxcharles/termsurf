@@ -344,26 +344,43 @@ impl crate::TermWindow {
                 ],
             });
 
-            // Create dim uniform based on mode (0.0 = full brightness, 0.5 = 50% dimmed)
+            // Determine if webview should be dimmed using HSB from config
+            // Dimmed when: Control mode OR pane is inactive
             use crate::termwindow::webview_socket::WebviewMode;
-            let dim_factor: f32 = match overlay.mode {
-                WebviewMode::Browse => 0.0,
-                WebviewMode::Control => 0.5,
+
+            // Find if this pane is active
+            let pane_is_active = positioned_panes
+                .iter()
+                .find(|p| p.pane.pane_id() == *pane_id)
+                .map(|p| p.is_active)
+                .unwrap_or(false);
+
+            let webview_should_dim = match overlay.mode {
+                WebviewMode::Browse => !pane_is_active, // Only dim if pane inactive
+                WebviewMode::Control => true,           // Always dim in Control mode
             };
-            let dim_buffer =
+
+            let (hue, saturation, brightness) = if webview_should_dim {
+                let hsb = self.config.inactive_pane_hsb;
+                (hsb.hue, hsb.saturation, hsb.brightness)
+            } else {
+                (1.0, 1.0, 1.0) // No transformation
+            };
+
+            let hsb_buffer =
                 webgpu
                     .device
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Webview Dim Buffer"),
-                        contents: bytemuck::cast_slice(&[dim_factor]),
+                        label: Some("Webview HSB Buffer"),
+                        contents: bytemuck::cast_slice(&[hue, saturation, brightness]),
                         usage: wgpu::BufferUsages::UNIFORM,
                     });
-            let dim_bind_group = webgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Webview Dim Bind Group"),
+            let hsb_bind_group = webgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Webview HSB Bind Group"),
                 layout: &webgpu.webview_dim_bind_group_layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: dim_buffer.as_entire_binding(),
+                    resource: hsb_buffer.as_entire_binding(),
                 }],
             });
 
@@ -392,7 +409,7 @@ impl crate::TermWindow {
 
                 render_pass.set_pipeline(&webgpu.webview_render_pipeline);
                 render_pass.set_bind_group(0, &bind_group, &[]);
-                render_pass.set_bind_group(1, &dim_bind_group, &[]);
+                render_pass.set_bind_group(1, &hsb_bind_group, &[]);
 
                 // Find this pane's position in the current layout
                 let positioned_pane = positioned_panes.iter().find(|p| p.pane.pane_id() == *pane_id);
