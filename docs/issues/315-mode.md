@@ -235,16 +235,16 @@ web google.com
 
 ## Success Criteria
 
-1. [ ] `WebviewMode` enum exists (Browse, Control)
-2. [ ] Mode state stored per webview pane
-3. [ ] Keys intercepted when webview is visible
-4. [ ] No keys reach terminal underneath
-5. [ ] Ctrl+C in Browse mode → Control mode
-6. [ ] Enter in Control mode → Browse mode
-7. [ ] Ctrl+C in Control mode → Exit browser
-8. [ ] Control panel text changes based on mode
-9. [ ] Visual dimming in Control mode
-10. [ ] WezTerm keybindings work in both modes
+1. [x] `WebviewMode` enum exists (Browse, Control)
+2. [x] Mode state stored per webview pane
+3. [x] Keys intercepted when webview is visible
+4. [x] No keys reach terminal underneath
+5. [x] Ctrl+C in Browse mode → Control mode
+6. [x] Enter in Control mode → Browse mode
+7. [x] Ctrl+C in Control mode → Exit browser
+8. [x] Control panel text changes based on mode
+9. [x] Visual dimming in Control mode
+10. [x] WezTerm keybindings work in both modes
 
 ## References
 
@@ -825,7 +825,41 @@ web google.com
 
 #### Success Criteria
 
-1. [ ] Webview renders at full brightness in Browse mode
-2. [ ] Webview is visibly dimmed in Control mode
-3. [ ] Dimming transitions immediately on mode switch
-4. [ ] No visual artifacts or flickering
+1. [x] Webview renders at full brightness in Browse mode
+2. [x] Webview is visibly dimmed in Control mode
+3. [x] Dimming transitions immediately on mode switch
+4. [x] No visual artifacts or flickering
+
+#### Result
+
+**Success.** Visual dimming now provides clear feedback when in Control mode.
+
+#### Conclusion
+
+**What was accomplished:**
+
+The webview now dims to 50% brightness when entering Control mode, providing
+clear visual feedback that the browser is not receiving input:
+
+- **Browse mode**: Full brightness (dim_factor = 0.0)
+- **Control mode**: 50% brightness (dim_factor = 0.5)
+
+**Implementation details:**
+
+- Added `DimUniforms` struct to webview shader with `dim_factor` uniform
+- Fragment shader multiplies RGB by `(1.0 - dim_factor)` for dimming effect
+- Created new bind group layout for dim uniforms in WebGpuState
+- Updated pipeline layout to include both texture and dim bind groups
+- Render code checks `overlay.mode` and creates appropriate dim buffer
+
+**Files modified:**
+
+- `ts3/wezterm-gui/src/webview_shader.wgsl` — Added dim uniform and dimming logic
+- `ts3/wezterm-gui/src/termwindow/webgpu.rs` — Added dim bind group layout
+- `ts3/wezterm-gui/src/termwindow/render/draw.rs` — Pass dim_factor based on mode
+
+**Issue 315 complete.** All three experiments succeeded:
+
+1. **Experiment 1**: Mode state and key interception
+2. **Experiment 2**: Mode-aware control panel text
+3. **Experiment 3**: Visual dimming in Control mode
