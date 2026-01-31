@@ -334,3 +334,63 @@ true background process that cannot activate or appear in the dock.
 
 This is a minimal, non-invasive fix that requires no build system changes or app
 bundle restructuring.
+
+---
+
+## Conclusion
+
+### Goal
+
+The goal of this issue was to fix a critical UX problem: every time a user
+opened a webview with `web ...`, the terminal window lost keyboard focus. This
+forced users to click back on their terminal after every webview command,
+breaking their workflow and making the feature frustrating to use.
+
+### What We Did
+
+1. **Diagnosed the root cause.** We traced the problem to macOS treating the
+   `termsurf-profile` process as a regular application. When CEF initialized
+   NSApplication without an explicit activation policy, macOS defaulted to
+   showing a dock icon and giving the process focus.
+
+2. **Researched solutions.** We identified four potential approaches:
+   - Option A: Set activation policy programmatically (simplest)
+   - Option B: Bundle as a separate helper app with LSUIElement
+   - Option C: Modify main app Info.plist (not viable)
+   - Option D: CEF-specific settings (uncertain feasibility)
+
+3. **Implemented Option A.** We added a single function that sets
+   `NSApplicationActivationPolicyProhibited` at the very start of `main()`,
+   before CEF has a chance to initialize NSApplication. This required adding the
+   `objc` crate as a dependency.
+
+4. **Verified the fix.** All success criteria passed:
+   - No dock icon appears for the profile process
+   - Terminal retains keyboard focus after opening webviews
+   - Users can continue typing immediately
+   - Webview rendering and resize behavior remain unaffected
+
+### Files Modified
+
+| File                               | Change                                   |
+| ---------------------------------- | ---------------------------------------- |
+| `ts3/termsurf-profile/src/main.rs` | Added `set_background_activation_policy` |
+| `ts3/termsurf-profile/Cargo.toml`  | Added `objc = "0.2"` dependency          |
+
+### Next Steps
+
+1. **Consider Option B for robustness.** While the programmatic fix works, the
+   "proper" macOS pattern is to bundle helper processes as separate `.app`
+   bundles with `LSUIElement=1` in their Info.plist. This would make the fix
+   declarative and immune to any future changes in CEF's NSApplication handling.
+   However, this requires build script modifications and is lower priority now
+   that the issue is resolved.
+
+2. **Test on different macOS versions.** The fix was tested on the current
+   development machine. Verify behavior on older macOS versions (11, 12, 13) to
+   ensure the activation policy API behaves consistently.
+
+3. **Monitor for regressions.** If future CEF updates change how NSApplication
+   is initialized (e.g., calling `sharedApplication` before our code runs), the
+   fix may need adjustment. The current placement at the very start of `main()`
+   should be robust, but it's worth keeping in mind.
