@@ -681,20 +681,81 @@ grep "viewport" /tmp/termsurf-gui.log
 
 **Part A (viewport adjustment):**
 
-1. [ ] Control bar height calculated as 2 cell heights
-2. [ ] Webview viewport starts below control bar (Y offset)
-3. [ ] Webview viewport height reduced by control bar height
-4. [ ] CEF receives correct reduced height in resize commands
-5. [ ] Control bar area visible (even if just terminal background showing through)
-6. [ ] No visual overlap between control bar area and webview
+1. [x] Control bar height calculated as 2 cell heights
+2. [x] Webview viewport starts below control bar (Y offset)
+3. [x] Webview viewport height reduced by control bar height
+4. [x] CEF receives correct reduced height in resize commands
+5. [x] Control bar area visible (even if just terminal background showing through)
+6. [x] No visual overlap between control bar area and webview
 
 **Part B (text rendering):**
 
-1. [ ] URL retrieved from ReceivedSurface
+1. [x] URL retrieved from ReceivedSurface
 2. [ ] URL rendered with half-cell margins
 3. [ ] Text uses terminal palette colors
 4. [ ] Long URLs truncate gracefully
 
 #### Result
 
-_Pending_
+**Partial success.** Part A works. Part B failed — text is not visible.
+
+#### Conclusion
+
+**What worked (Part A):**
+
+- Control bar height calculated correctly (2 cell heights)
+- Webview viewport adjusted to start below control bar
+- CEF receives correct reduced height in resize commands
+- Control bar area is visible (terminal background shows through)
+- No visual overlap between control bar and webview
+
+**What didn't work (Part B):**
+
+- Text rendering code executes without errors
+- URL is retrieved from `ReceivedSurface` correctly
+- `render_element` is called with correct parameters
+- **But no text appears on screen**
+
+**Root cause:**
+
+The text rendering happens at the wrong point in the render pipeline.
+
+**ts2 (works):**
+```
+paint_pass() {
+    render content to layers
+    drop(layers)
+    paint_browser_control_bars()  ← render_element called HERE
+    paint_modal()
+}
+call_draw()  ← submits to GPU
+```
+
+**ts3 (broken):**
+```
+paint_pass() {
+    render content to layers
+    drop(layers)
+    paint_modal()
+}
+call_draw_webgpu() {
+    submit main content to GPU  ← buffers already sent
+    render_webview_overlays_webgpu()
+    render_control_bar_text()   ← render_element called HERE (too late!)
+}
+```
+
+`render_element` writes to WezTerm's layer buffers. In ts3, we call it *after*
+those buffers have already been submitted to the GPU. The text is rendered to
+buffers that are no longer being displayed.
+
+**Hypothesis for fix:**
+
+Move control bar text rendering from `call_draw_webgpu()` to `paint_pass()`.
+Call it after `drop(layers)` but before `paint_modal()`, exactly where ts2
+places `paint_browser_control_bars()`. This requires calculating viewport
+bounds in `paint_pass()` rather than in `render_webview_overlays_webgpu()`.
+
+**Files modified (to be reverted or fixed):**
+
+- `ts3/wezterm-gui/src/termwindow/render/draw.rs` — Added broken text rendering
