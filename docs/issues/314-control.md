@@ -759,3 +759,267 @@ bounds in `paint_pass()` rather than in `render_webview_overlays_webgpu()`.
 **Files modified (to be reverted or fixed):**
 
 - `ts3/wezterm-gui/src/termwindow/render/draw.rs` — Added broken text rendering
+
+---
+
+### Experiment 3: Text Rendering in paint_pass()
+
+**Goal:** Fix the control bar text rendering by calling it from `paint_pass()`
+after `drop(layers)`, matching ts2's architecture.
+
+**Background:**
+
+Experiment 2 failed because `render_control_bar_text()` was called from
+`call_draw_webgpu()` after the layer buffers had already been submitted to the
+GPU. The fix is to call text rendering from `paint_pass()`, exactly where ts2
+calls `paint_browser_control_bars()`.
+
+**ts2 architecture (works):**
+
+```rust
+// paint.rs:274-282
+drop(layers);
+
+#[cfg(all(target_os = "macos", feature = "cef"))]
+self.paint_browser_control_bars()
+    .context("paint_browser_control_bars")?;
+
+self.paint_modal().context("paint_modal")?;
+```
+
+**ts3 current (broken):**
+
+```rust
+// paint.rs:274-275
+drop(layers);
+self.paint_modal().context("paint_modal")?;
+
+// draw.rs:172-180 (called AFTER GPU submission)
+let control_bars = self.render_webview_overlays_webgpu(...)?;
+for (x, y, width, height, url) in control_bars {
+    self.render_control_bar_text(...);  // Too late!
+}
+```
+
+#### Approach
+
+**Step 1: Create `paint_webview_control_bars()` function**
+
+Create a new function in `pane.rs` that:
+1. Iterates through webview overlays (like `paint_browser_control_bars` in ts2)
+2. Gets URL from `ReceivedSurface` via XPC manager
+3. Calculates control bar bounds using positioned panes
+4. Creates and renders Element with URL text
+
+**Step 2: Call from `paint_pass()` after `drop(layers)`**
+
+Insert the call between `drop(layers)` and `paint_modal()` in `paint.rs:274-275`.
+
+**Step 3: Clean up `draw.rs`**
+
+Remove the broken `render_control_bar_text()` function and its call site.
+Keep the `ControlBarInfo` collection logic only if needed for other purposes
+(may also be removable).
+
+#### Changes
+
+**File: `ts3/wezterm-gui/src/termwindow/render/pane.rs`**
+
+Add new function (similar to ts2's `paint_browser_control_bars`):
+
+```rust
+/// Paint control bar text for all webview panes.
+/// Must be called AFTER layers are dropped (like paint_modal).
+#[cfg(target_os = "macos")]
+pub fn paint_webview_control_bars(&mut self) -> anyhow::Result<()> {
+    use crate::termwindow::webview_socket::get_server;
+    use crate::utilsprites::RenderMetrics;
+    use config::{Dimension, DimensionContext};
+
+    // Get webview overlays
+    let server = match get_server() {
+        Some(s) => s,
+        None => return Ok(()),
+    };
+    let state = server.state();
+    let webview_panes = state.read().unwrap();
+
+    if webview_panes.overlays.is_empty() {
+        return Ok(());
+    }
+
+    // Get XPC manager for URLs
+    let xpc_manager = match crate::termwindow::webview_xpc::get_xpc_manager() {
+        Some(m) => m,
+        None => return Ok(()),
+    };
+
+    // Get active tab to filter overlays
+    let active_tab_id = match mux::Mux::try_get() {
+        Some(mux) => match mux.get_active_tab_for_window(self.mux_window_id) {
+            Some(tab) => tab.tab_id(),
+            None => return Ok(()),
+        },
+        None => return Ok(()),
+    };
+
+    // Get positioned panes for viewport calculation
+    let positioned_panes = self.get_panes_to_render();
+
+    let palette = self.palette().clone();
+    let font = self.fonts.default_font()?;
+    let metrics = RenderMetrics::with_font_metrics(&font.metrics());
+    let cell_height = metrics.cell_size.height as f32;
+    let half_cell_height = cell_height / 2.0;
+    let half_cell_width = metrics.cell_size.width as f32 / 2.0;
+    let control_bar_height = cell_height * 2.0;
+
+    for (pane_id, overlay) in webview_panes.overlays.iter() {
+        // Skip overlays from other tabs
+        if overlay.tab_id != active_tab_id {
+            continue;
+        }
+
+        // Get URL from received surface
+        let url = match xpc_manager.get_received_surface(*pane_id) {
+            Some(surface) => surface.url.clone(),
+            None => continue,
+        };
+
+        // Find positioned pane to get viewport bounds
+        let pos = match positioned_panes.iter().find(|p| p.pane.pane_id() == *pane_id) {
+            Some(p) => p,
+            None => continue,
+        };
+
+        // Calculate viewport bounds (same calculation as render_webview_overlays_webgpu)
+        let (x, y, width, _height) = self.calculate_pane_pixel_bounds(pos)?;
+
+        // Create text element with padding for margins (matching ts2)
+        let element = Element::new(&font, ElementContent::Text(url))
+            .colors(ElementColors {
+                border: BorderColor::default(),
+                bg: palette.background.to_linear().into(),
+                text: palette.foreground.to_linear().into(),
+            })
+            .min_width(Some(Dimension::Pixels(width)))
+            .min_height(Some(Dimension::Pixels(control_bar_height)))
+            .padding(BoxDimension {
+                left: Dimension::Pixels(half_cell_width),
+                top: Dimension::Pixels(half_cell_height),
+                right: Dimension::Pixels(0.),
+                bottom: Dimension::Pixels(half_cell_height),
+            });
+
+        // Compute element
+        let gl_state = self.render_state.as_ref().unwrap();
+        let mut computed = self.compute_element(
+            &LayoutContext {
+                height: DimensionContext {
+                    dpi: self.dimensions.dpi as f32,
+                    pixel_max: self.dimensions.pixel_height as f32,
+                    pixel_cell: metrics.cell_size.height as f32,
+                },
+                width: DimensionContext {
+                    dpi: self.dimensions.dpi as f32,
+                    pixel_max: self.dimensions.pixel_width as f32,
+                    pixel_cell: metrics.cell_size.width as f32,
+                },
+                bounds: euclid::rect(0., 0., width, control_bar_height),
+                metrics: &metrics,
+                gl_state,
+                zindex: 0,
+            },
+            &element,
+        )?;
+
+        // Translate to final position
+        computed.translate(euclid::vec2(x, y));
+
+        // Render the element (safe now - layers are dropped)
+        self.render_element(&computed, gl_state, None)?;
+    }
+
+    Ok(())
+}
+```
+
+**File: `ts3/wezterm-gui/src/termwindow/render/paint.rs`**
+
+Add call after `drop(layers)`:
+
+```rust
+drop(layers);
+
+// Render webview control bar text after layers are dropped
+// (render_element needs to map its own buffers)
+#[cfg(target_os = "macos")]
+self.paint_webview_control_bars()
+    .context("paint_webview_control_bars")?;
+
+self.paint_modal().context("paint_modal")?;
+```
+
+**File: `ts3/wezterm-gui/src/termwindow/render/draw.rs`**
+
+Clean up:
+
+1. Remove `render_control_bar_text()` function entirely
+2. Remove the loop that calls it in `call_draw_webgpu()`
+3. Change `render_webview_overlays_webgpu()` return type from
+   `Vec<(f32, f32, f32, f32, String)>` back to `()`
+4. Remove `ControlBarInfo` struct and collection logic
+
+#### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `ts3/wezterm-gui/src/termwindow/render/pane.rs` | Add `paint_webview_control_bars()` |
+| `ts3/wezterm-gui/src/termwindow/render/paint.rs` | Call `paint_webview_control_bars()` after `drop(layers)` |
+| `ts3/wezterm-gui/src/termwindow/render/draw.rs` | Remove broken text rendering code |
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# 1. Open webview
+web google.com
+
+# 2. Verify control bar renders
+# - Should see 2-cell-height bar at top of webview pane
+# - Should display "https://www.google.com/" with half-cell margins
+# - Background should be terminal background color
+# - Text should be terminal foreground color
+
+# 3. Test with long URL
+web https://example.com/some/very/long/path/that/should/eventually/truncate
+
+# 4. Test resize
+# - Drag window edge
+# - Control bar should resize with pane
+# - Text should remain visible during resize
+
+# 5. Test splits
+split-pane
+web github.com
+# Each webview pane should have its own control bar with its own URL
+
+# 6. Check logs
+grep "paint_webview_control_bars" /tmp/termsurf-gui.log
+```
+
+#### Success Criteria
+
+1. [ ] `paint_webview_control_bars()` function exists in pane.rs
+2. [ ] Function called from `paint_pass()` after `drop(layers)`
+3. [ ] Control bar text renders visibly on screen
+4. [ ] URL displays with half-cell margins (left, top, bottom)
+5. [ ] Text uses terminal palette colors (foreground on background)
+6. [ ] Multiple webview panes each show their own URL
+7. [ ] Broken code removed from draw.rs
+8. [ ] No rendering artifacts or visual glitches
+
+#### Result
+
+(Pending)
