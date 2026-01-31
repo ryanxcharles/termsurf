@@ -667,3 +667,165 @@ webview mode:
 **Next steps:**
 
 - Experiment 3: Add visual dimming in Control mode
+
+### Experiment 3: Visual Dimming in Control Mode
+
+**Goal:** Dim the webview when in Control mode to provide visual feedback that
+the browser is not active.
+
+**Background:**
+
+The issue requirements specify Option B: "Overlay semi-transparent layer." After
+analyzing the render pipeline, a cleaner approach is to pass a dimming factor to
+the webview shader via a uniform buffer. This avoids adding a second render pass
+and keeps the code simple.
+
+Current render flow:
+1. Terminal/UI layers rendered via `call_draw_webgpu`
+2. Webview texture rendered via `render_webview_overlays_webgpu`
+3. Webview shader samples texture and outputs color directly
+
+The webview shader is simple (lines 41-47 of `webview_shader.wgsl`):
+
+```wgsl
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    let color = textureSample(webview_texture, webview_sampler, input.tex_coord);
+    return color;
+}
+```
+
+#### Approach
+
+Add a uniform buffer to pass a `dim_factor` value to the shader. In Control
+mode, multiply the RGB values by `(1.0 - dim_factor)` to darken the output.
+
+**Part A: Update webview shader**
+
+Add uniform struct and modify fragment shader:
+
+```wgsl
+// Add after texture/sampler bindings
+struct DimUniforms {
+    dim_factor: f32,
+}
+@group(1) @binding(0) var<uniform> dim_uniforms: DimUniforms;
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    let color = textureSample(webview_texture, webview_sampler, input.tex_coord);
+    // Apply dimming: reduce brightness in Control mode
+    let brightness = 1.0 - dim_uniforms.dim_factor;
+    return vec4<f32>(color.rgb * brightness, color.a);
+}
+```
+
+**Part B: Add bind group layout in webgpu.rs**
+
+Create a new bind group layout for the dim uniforms:
+
+```rust
+let webview_dim_bind_group_layout =
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Webview Dim Bind Group Layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: Some(std::num::NonZeroU64::new(4).unwrap()), // f32
+            },
+            count: None,
+        }],
+    });
+```
+
+Update the pipeline layout to include both bind groups:
+
+```rust
+let webview_pipeline_layout =
+    device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Webview Pipeline Layout"),
+        bind_group_layouts: &[&webview_bind_group_layout, &webview_dim_bind_group_layout],
+        push_constant_ranges: &[],
+    });
+```
+
+Store the layout on WebGpuState:
+
+```rust
+pub webview_dim_bind_group_layout: wgpu::BindGroupLayout,
+```
+
+**Part C: Pass dim_factor in render_webview_overlays_webgpu**
+
+After getting the overlay, check the mode and create a uniform buffer:
+
+```rust
+// Get dim factor based on mode
+use crate::termwindow::webview_socket::WebviewMode;
+let dim_factor: f32 = match overlay.mode {
+    WebviewMode::Browse => 0.0,
+    WebviewMode::Control => 0.5, // 50% dimming
+};
+
+// Create uniform buffer for dim factor
+let dim_buffer = webgpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    label: Some("Webview Dim Buffer"),
+    contents: bytemuck::cast_slice(&[dim_factor]),
+    usage: wgpu::BufferUsages::UNIFORM,
+});
+
+let dim_bind_group = webgpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+    label: Some("Webview Dim Bind Group"),
+    layout: &webgpu.webview_dim_bind_group_layout,
+    entries: &[wgpu::BindGroupEntry {
+        binding: 0,
+        resource: dim_buffer.as_entire_binding(),
+    }],
+});
+
+// In the render pass, set both bind groups
+render_pass.set_bind_group(0, &bind_group, &[]);
+render_pass.set_bind_group(1, &dim_bind_group, &[]);
+```
+
+#### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `ts3/wezterm-gui/src/webview_shader.wgsl` | Add DimUniforms struct, apply dimming |
+| `ts3/wezterm-gui/src/termwindow/webgpu.rs` | Add dim bind group layout, update pipeline |
+| `ts3/wezterm-gui/src/termwindow/render/draw.rs` | Pass dim_factor based on mode |
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# 1. Open webview (starts in Browse mode)
+web google.com
+
+# 2. Verify Browse mode
+# - Webview renders at full brightness
+# - Control panel shows URL
+
+# 3. Press Ctrl+C — switch to Control mode
+# - Webview is visibly dimmed (50% darker)
+# - Control panel shows "Enter to browse. Ctrl+C to exit."
+
+# 4. Press Enter — switch back to Browse mode
+# - Webview returns to full brightness
+# - Control panel shows URL again
+
+# 5. Toggle back and forth
+# - Dimming should be immediate on each transition
+```
+
+#### Success Criteria
+
+1. [ ] Webview renders at full brightness in Browse mode
+2. [ ] Webview is visibly dimmed in Control mode
+3. [ ] Dimming transitions immediately on mode switch
+4. [ ] No visual artifacts or flickering
