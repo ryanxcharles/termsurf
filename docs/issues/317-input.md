@@ -854,19 +854,20 @@ keyboard.
    webview. This reveals a fundamental issue: **WezTerm keybindings are being
    processed before keys are forwarded to the browser.**
 
-   The current flow is:
+   **Root cause:** WezTerm has TWO key event handlers:
+
+   1. `raw_key_event_impl` — handles `RawKeyEvent`, processes keybindings FIRST
+   2. `key_event_impl` — handles `KeyEvent`, where our webview interception lives
+
+   The actual flow is:
    ```
-   Key event → handle_webview_key_event (forwards to CEF) → process_key (WezTerm keybindings)
+   RawKeyEvent → raw_key_event_impl → process_key (keybindings execute here!)
+   KeyEvent → key_event_impl → handle_webview_key_event → forwards to CEF
    ```
 
-   But `process_key` happens AFTER our handler returns, and keybindings like
-   Cmd+V still execute because they're processed in the normal WezTerm key
-   handling path that runs after `handle_webview_key_event`.
-
-   **Root cause:** In `key_event_impl`, our webview handler returns `Some(true)`
-   to consume the key, but this only prevents the key from reaching the
-   terminal's PTY. It does NOT prevent WezTerm from processing its own
-   keybindings (which happens earlier in the flow via `process_key`).
+   Cmd+V is matched as a keybinding in `raw_key_event_impl` and pastes to the
+   terminal BEFORE `key_event_impl` even runs. Our webview handler only
+   intercepts the second event, by which time the damage is done.
 
 2. **Cmd+C also affected**
 
@@ -875,9 +876,139 @@ keyboard.
 
 **Fix required:**
 
-The key interception needs to happen BEFORE `process_key` in `key_event_impl`,
-not after. When a webview pane is active in Browse mode, WezTerm keybindings
-should be suppressed (except for explicitly allowed ones like Ctrl+Shift+T for
-new tab).
+Add webview interception to `raw_key_event_impl` that:
+1. Checks if pane has webview in Browse mode
+2. Calls `key.set_handled()` to prevent keybinding processing
+3. Does NOT forward to CEF (that happens in `key_event_impl`)
 
 This will be addressed in Experiment 2.
+
+---
+
+### Experiment 2: Block Keybindings in Browse Mode
+
+**Goal:** Prevent WezTerm keybindings (like Cmd+V paste) from executing when a
+webview pane is active in Browse mode. Keys should go to the browser, not the
+terminal.
+
+#### Background
+
+Experiment 1 discovered that WezTerm processes keybindings in `raw_key_event_impl`
+BEFORE our webview handler in `key_event_impl` runs. This causes Cmd+V to paste
+into the terminal instead of the browser.
+
+The fix is to add an early check in `raw_key_event_impl` that marks the key as
+handled when a webview is active in Browse mode.
+
+#### Approach
+
+**Add webview check to raw_key_event_impl (keyevent.rs)**
+
+Insert at the beginning of `raw_key_event_impl`, right after getting the pane:
+
+```rust
+pub fn raw_key_event_impl(&mut self, key: RawKeyEvent, context: &dyn WindowOps) {
+    // ... leader key handling ...
+
+    let pane = match self.get_active_pane_or_overlay() {
+        Some(pane) => pane,
+        None => return,
+    };
+
+    // Block keybindings when webview is active in Browse mode
+    #[cfg(target_os = "macos")]
+    {
+        use crate::termwindow::webview_socket::{get_server, WebviewMode};
+
+        let pane_id = pane.pane_id();
+        if let Some(server) = get_server() {
+            let state = server.state();
+            let overlays = state.read().unwrap();
+            if let Some(overlay) = overlays.overlays.get(&pane_id) {
+                if overlay.mode == WebviewMode::Browse {
+                    // In Browse mode: block all keybindings except explicit allowlist
+                    // Keys will be forwarded to CEF via key_event_impl
+                    if key.key_is_down {
+                        log::debug!(
+                            "[Webview] Blocking keybinding in Browse mode: {:?}",
+                            key.key
+                        );
+                    }
+                    key.set_handled();
+                    return;
+                }
+            }
+        }
+    }
+
+    // ... rest of raw_key_event_impl ...
+}
+```
+
+#### Allowlist Consideration
+
+Some keybindings should still work even in Browse mode:
+
+| Keybinding     | Action                    | Allow in Browse? |
+| -------------- | ------------------------- | ---------------- |
+| Ctrl+Shift+T   | New tab                   | Yes              |
+| Ctrl+Shift+W   | Close tab                 | Yes              |
+| Ctrl+Shift+N   | New window                | Yes              |
+| Cmd+Q          | Quit app                  | Yes              |
+| Cmd+,          | Open preferences          | Yes              |
+| Cmd+V          | Paste                     | **No** (→ browser) |
+| Cmd+C          | Copy                      | **No** (→ browser) |
+| Cmd+A          | Select all                | **No** (→ browser) |
+
+For Phase 1, we'll block ALL keybindings in Browse mode. This is the simplest
+approach and matches user expectations (Browse mode = browser has focus). Users
+can press Ctrl+C to enter Control mode if they need WezTerm keybindings.
+
+If specific keybindings are needed in Browse mode, we can add an allowlist in a
+future experiment.
+
+#### Files to Modify
+
+| File                                         | Changes                                  |
+| -------------------------------------------- | ---------------------------------------- |
+| `ts3/wezterm-gui/src/termwindow/keyevent.rs` | Add Browse mode check to `raw_key_event_impl` |
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Test 1: Cmd+V in Browse mode
+web google.com
+# Type "hello" in search box
+# Copy text from elsewhere (e.g., another app)
+# Press Cmd+V in the browser
+# Expected: Text pastes into browser search box, NOT terminal
+
+# Test 2: Cmd+C in Browse mode
+# Select text in browser with Shift+Arrow keys
+# Press Cmd+C
+# Expected: Text copied from browser (test by pasting elsewhere)
+
+# Test 3: Ctrl+C still works
+# Press Ctrl+C
+# Expected: Switch to Control mode (webview dims)
+
+# Test 4: Control mode keybindings work
+# In Control mode, press Ctrl+Shift+T
+# Expected: New tab opens
+
+# Test 5: Return to Browse mode
+# Press Enter
+# Expected: Return to Browse mode, keybindings blocked again
+```
+
+#### Success Criteria
+
+- [ ] `raw_key_event_impl` checks for webview Browse mode
+- [ ] Keybindings are blocked in Browse mode (`key.set_handled()`)
+- [ ] Cmd+V pastes into browser, not terminal
+- [ ] Cmd+C copies from browser
+- [ ] Ctrl+C still switches to Control mode
+- [ ] Control mode keybindings still work
+- [ ] Browse mode keybindings blocked (all of them)
