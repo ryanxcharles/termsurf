@@ -486,19 +486,23 @@ let resolver = if helper { "../../.." } else { "../Frameworks" };
 ```
 
 - `helper: false` → `../Frameworks` (for binaries in `Contents/MacOS/`)
-- `helper: true` → `../../..` (for binaries in `Contents/Frameworks/Helper.app/Contents/MacOS/`)
+- `helper: true` → `../../..` (for binaries in
+  `Contents/Frameworks/Helper.app/Contents/MacOS/`)
 
 The current code in `termsurf-profile/src/main.rs:115` calls:
+
 ```rust
 let _loader = LibraryLoader::new(&exe, false);
 ```
 
 With the binary now at:
+
 ```
 Contents/Frameworks/TermSurf Profile Helper.app/Contents/MacOS/termsurf-profile
 ```
 
 The `false` (non-helper) path resolves to:
+
 ```
 Contents/Frameworks/TermSurf Profile Helper.app/Contents/Frameworks/
 ```
@@ -506,6 +510,7 @@ Contents/Frameworks/TermSurf Profile Helper.app/Contents/Frameworks/
 This path doesn't exist, causing `canonicalize().unwrap()` to panic.
 
 **Error from log:**
+
 ```
 thread 'main' panicked at library_loader.rs:20:14:
 called `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: "No such file or directory" }
@@ -520,6 +525,7 @@ let _loader = LibraryLoader::new(&exe, true);
 ```
 
 This will use the `../../..` resolver, which correctly navigates from:
+
 ```
 Contents/Frameworks/TermSurf Profile Helper.app/Contents/MacOS/
     ↑ ..    → Contents/Frameworks/TermSurf Profile Helper.app/Contents/
@@ -551,11 +557,13 @@ loader use the correct path resolution for helper app binaries.
 **File: `ts3/termsurf-profile/src/main.rs`**
 
 Change line ~115 from:
+
 ```rust
 let _loader = LibraryLoader::new(&exe, false);
 ```
 
 To:
+
 ```rust
 let _loader = LibraryLoader::new(&exe, true);
 ```
@@ -595,17 +603,80 @@ web apple.com
 
 #### Success Criteria
 
-1. [ ] Helper app bundle exists at `Frameworks/TermSurf Profile Helper.app`
-2. [ ] `Info.plist` contains `LSUIElement=1`
-3. [ ] Binary located inside helper app, not in `Contents/MacOS/`
-4. [ ] Launcher finds and spawns the binary correctly
-5. [ ] CEF framework loads successfully (no panic)
+1. [x] Helper app bundle exists at `Frameworks/TermSurf Profile Helper.app`
+2. [x] `Info.plist` contains `LSUIElement=1`
+3. [x] Binary located inside helper app, not in `Contents/MacOS/`
+4. [x] Launcher finds and spawns the binary correctly
+5. [x] CEF framework loads successfully (no panic)
 6. [ ] No dock icon when opening webviews
 7. [ ] No focus stealing
 8. [ ] Webviews render correctly
 9. [ ] Resize still works (issue 311 fixes intact)
-10. [ ] `objc` dependency removed, workaround code deleted
+10. [x] `objc` dependency removed, workaround code deleted
 
 #### Result
 
-_Pending_
+**Failed.** The CEF framework now loads successfully, but the GPU and network
+subprocesses crash immediately, preventing any rendering.
+
+#### Conclusion
+
+The `LibraryLoader` fix worked — CEF framework loading succeeded. However, a new
+path resolution problem emerged: the CEF helper subprocess path is now wrong.
+
+**Symptom:**
+
+The profile log shows:
+
+```
+Profile: Helper: ".../TermSurf Profile Helper.app/Contents/Frameworks/WezTerm Helper.app/..." (exists=false)
+```
+
+Followed by GPU process crashes:
+
+```
+GPU process launch failed: error_code=1003
+GPU process isn't usable. Goodbye.
+```
+
+**Root Cause:**
+
+The helper path is computed at `termsurf-profile/src/main.rs:175-179`:
+
+```rust
+let app_contents = exe.parent().unwrap().parent().unwrap();
+let helper_path = app_contents
+    .join("Frameworks")
+    .join("WezTerm Helper.app")
+    .join("Contents/MacOS/WezTerm Helper");
+```
+
+This assumes the binary is 2 levels deep from `Contents/`:
+
+- Old location: `Contents/MacOS/termsurf-profile` → `.parent().parent()` =
+  `Contents/` ✓
+
+But now the binary is 5 levels deep:
+
+- New location:
+  `Contents/Frameworks/TermSurf Profile Helper.app/Contents/MacOS/termsurf-profile`
+- `.parent().parent()` = `TermSurf Profile Helper.app/Contents/` ✗
+
+The code looks for `WezTerm Helper.app` inside the profile helper app instead of
+at the main app's Frameworks level.
+
+**Hypothesis for Fix:**
+
+Change the path computation to go up 5 levels instead of 2:
+
+```rust
+let app_contents = exe
+    .parent().unwrap()  // MacOS/
+    .parent().unwrap()  // Contents/
+    .parent().unwrap()  // TermSurf Profile Helper.app/
+    .parent().unwrap()  // Frameworks/
+    .parent().unwrap(); // Contents/ (of main app)
+```
+
+This is becoming complex. Moving a binary into a helper app bundle requires
+updating every relative path calculation in the code.
