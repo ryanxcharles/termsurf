@@ -1,0 +1,302 @@
+# Issue 313: Bundle termsurf-profile as Helper App
+
+## Background
+
+### Current State
+
+In issue 312, we fixed the focus-stealing problem by programmatically setting
+`NSApplicationActivationPolicyProhibited` at the start of `termsurf-profile`'s
+`main()` function. This works, but it's not the "proper" macOS pattern for
+background helper processes.
+
+Currently, `termsurf-profile` is placed directly in:
+
+```
+wezterm-gui.app/Contents/MacOS/termsurf-profile
+```
+
+This is unconventional. macOS expects helper processes to be bundled as separate
+`.app` bundles inside the `Frameworks` directory, each with their own
+`Info.plist` that declares `LSUIElement=1`.
+
+### The Proper Pattern
+
+CEF's own helper processes follow this pattern:
+
+```
+wezterm-gui.app/
+└── Contents/
+    └── Frameworks/
+        ├── WezTerm Helper.app/
+        │   └── Contents/
+        │       ├── MacOS/WezTerm Helper
+        │       └── Info.plist          ← Contains LSUIElement=1
+        ├── WezTerm Helper (GPU).app/
+        ├── WezTerm Helper (Renderer).app/
+        └── ...
+```
+
+Each helper app has an `Info.plist` with:
+
+```xml
+<key>LSUIElement</key>
+<string>1</string>
+```
+
+This tells macOS at the bundle level that this is a UI Element (background
+process) that should never appear in the dock or receive focus.
+
+### Why This Matters
+
+1. **Declarative vs Imperative**: `LSUIElement` is a static declaration that
+   macOS reads when the process launches. Our current fix requires code to run
+   before CEF initializes — if CEF ever changes its initialization order, our
+   fix could break.
+
+2. **Code Signing**: Proper helper app bundles are easier to code sign correctly
+   for distribution. Apple's notarization process expects this structure.
+
+3. **Consistency**: Following the same pattern as CEF's own helpers makes the
+   bundle structure more predictable and maintainable.
+
+4. **Removal of Workaround**: Once bundled properly, we can remove the
+   `set_background_activation_policy()` function and the `objc` dependency from
+   termsurf-profile — the `Info.plist` handles it declaratively.
+
+## Goal
+
+Bundle `termsurf-profile` as `TermSurf Profile Helper.app` inside the Frameworks
+directory, with proper `Info.plist` containing `LSUIElement=1`.
+
+## Implementation
+
+### New Bundle Structure
+
+```
+wezterm-gui.app/
+└── Contents/
+    ├── MacOS/
+    │   ├── wezterm-gui
+    │   ├── wezterm
+    │   └── web
+    └── Frameworks/
+        ├── Chromium Embedded Framework.framework/
+        ├── WezTerm Helper.app/
+        ├── WezTerm Helper (GPU).app/
+        ├── WezTerm Helper (Renderer).app/
+        ├── WezTerm Helper (Plugin).app/
+        ├── WezTerm Helper (Alerts).app/
+        └── TermSurf Profile Helper.app/      ← NEW
+            └── Contents/
+                ├── MacOS/
+                │   └── termsurf-profile
+                └── Info.plist
+```
+
+### Files to Create
+
+**`ts3/termsurf-profile/helper-app/Info.plist`**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>TermSurf Profile Helper</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.termsurf.profile-helper</string>
+    <key>CFBundleDisplayName</key>
+    <string>TermSurf Profile Helper</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>English</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleExecutable</key>
+    <string>termsurf-profile</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>LSEnvironment</key>
+    <dict>
+        <key>MallocNanoZone</key>
+        <string>0</string>
+    </dict>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>LSUIElement</key>
+    <string>1</string>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+</dict>
+</plist>
+```
+
+### Files to Modify
+
+**`ts3/scripts/build-debug.sh`**
+
+Replace the current termsurf-profile copy (line 73):
+
+```bash
+cp "$REPO_DIR/target/debug/termsurf-profile" "$APP_BUNDLE/Contents/MacOS/"
+```
+
+With helper app creation:
+
+```bash
+# Create TermSurf Profile Helper app bundle
+PROFILE_HELPER="$APP_BUNDLE/Contents/Frameworks/TermSurf Profile Helper.app"
+mkdir -p "$PROFILE_HELPER/Contents/MacOS"
+cp "$REPO_DIR/target/debug/termsurf-profile" "$PROFILE_HELPER/Contents/MacOS/"
+cp "$REPO_DIR/termsurf-profile/helper-app/Info.plist" "$PROFILE_HELPER/Contents/"
+```
+
+Also update the build summary (lines 164-168) to reflect the new location.
+
+**`ts3/scripts/build-release.sh`**
+
+Make the same changes as build-debug.sh.
+
+**`ts3/termsurf-launcher/src/main.rs`**
+
+Update the path resolution (lines 49-66):
+
+```rust
+// Path to profile server binary
+// Launcher is at: .app/Contents/XPCServices/com.termsurf.launcher.xpc/Contents/MacOS/termsurf-launcher
+// Profile is at:  .app/Contents/Frameworks/TermSurf Profile Helper.app/Contents/MacOS/termsurf-profile
+let exe_path = env::current_exe().expect("Failed to get exe path");
+let profile_bin_path = exe_path
+    .parent() // MacOS
+    .and_then(|p| p.parent()) // Contents
+    .and_then(|p| p.parent()) // com.termsurf.launcher.xpc
+    .and_then(|p| p.parent()) // XPCServices
+    .and_then(|p| p.parent()) // Contents
+    .map(|p| {
+        p.join("Frameworks")
+            .join("TermSurf Profile Helper.app")
+            .join("Contents/MacOS/termsurf-profile")
+    })
+    .unwrap_or_else(|| {
+        // Fallback for testing outside app bundle
+        exe_path
+            .parent()
+            .map(|p| p.join("termsurf-profile"))
+            .unwrap_or_default()
+    });
+```
+
+**`ts3/termsurf-profile/src/main.rs`**
+
+Remove the programmatic activation policy code (optional but recommended):
+
+- Delete the `set_background_activation_policy()` function
+- Delete the call to it in `main()`
+
+**`ts3/termsurf-profile/Cargo.toml`**
+
+Remove the `objc` dependency (optional but recommended):
+
+```diff
+ [target.'cfg(target_os = "macos")'.dependencies]
+ cef = { path = "../../cef-rs/cef", features = ["accelerated_osr"] }
+ ctrlc = "3.4"
+-objc = "0.2"
+```
+
+## Verification
+
+```bash
+# Build and open
+cd ts3 && ./scripts/build-debug.sh --open
+
+# 1. Verify bundle structure
+ls -la target/debug/wezterm-gui.app/Contents/Frameworks/ | grep Profile
+# Expected: "TermSurf Profile Helper.app"
+
+ls -la "target/debug/wezterm-gui.app/Contents/Frameworks/TermSurf Profile Helper.app/Contents/MacOS/"
+# Expected: termsurf-profile binary
+
+cat "target/debug/wezterm-gui.app/Contents/Frameworks/TermSurf Profile Helper.app/Contents/Info.plist" | grep -A1 LSUIElement
+# Expected: <key>LSUIElement</key> followed by <string>1</string>
+
+# 2. Verify termsurf-profile NOT in MacOS folder
+ls target/debug/wezterm-gui.app/Contents/MacOS/ | grep profile
+# Expected: no output (termsurf-profile should not be there)
+
+# 3. Test functionality
+web google.com
+# Expected: No dock icon, no focus stealing, webview renders
+
+# 4. Test multiple webviews
+web github.com
+web apple.com
+# Expected: All work, no dock icons
+
+# 5. Check logs for correct path
+grep "Profile binary path" /tmp/termsurf-launcher.log
+# Expected: Path includes "Frameworks/TermSurf Profile Helper.app"
+```
+
+## Success Criteria
+
+1. [ ] `TermSurf Profile Helper.app` exists in Frameworks directory
+2. [ ] Helper app contains correct `Info.plist` with `LSUIElement=1`
+3. [ ] `termsurf-profile` binary is inside helper app, not in MacOS folder
+4. [ ] Launcher correctly resolves path to helper app binary
+5. [ ] No dock icon appears when opening webviews
+6. [ ] No focus stealing occurs
+7. [ ] Webviews render and resize correctly
+8. [ ] (Optional) `objc` dependency removed from termsurf-profile
+
+## Next Steps for ts3
+
+After completing this issue, the following work remains for ts3:
+
+### High Priority
+
+1. **Input Forwarding** — Keyboard and mouse events need to be forwarded from
+   the terminal to the webview. Currently webviews are display-only.
+
+2. **Profile Process Reuse** — When a second `web` command uses the same
+   profile, it should reuse the existing profile process rather than spawning a
+   new one. The launcher has infrastructure for this (`running_profiles` map)
+   but it needs testing and polish.
+
+3. **Dynamic Resize** — Issue 311 fixed resize accuracy, but resize commands
+   need to be sent when panes change size (splits, window resize). This may
+   already work but needs verification.
+
+### Medium Priority
+
+4. **Webview Pane Lifecycle** — Clean up resources when a webview pane is
+   closed. Remove XPC connections, deallocate textures, potentially shut down
+   profile process if no browsers remain.
+
+5. **Error Handling** — Handle profile process crashes gracefully. Show error in
+   pane, allow retry.
+
+6. **Multiple Profiles** — Test and verify that different profiles (e.g.,
+   `web --profile work google.com`) use separate CEF processes with isolated
+   cookies/storage.
+
+### Lower Priority
+
+7. **Navigation Commands** — Back, forward, refresh, stop, go to URL.
+
+8. **DevTools** — Open Chrome DevTools for debugging web pages.
+
+9. **Tab Bar / URL Display** — Show current URL, loading state, page title.
+
+10. **Bookmarks** — Save and restore URLs.
+
+## References
+
+- Issue 312: Focus stealing fix (programmatic approach)
+- [Apple: LSUIElement](https://developer.apple.com/documentation/bundleresources/information_property_list/lsuielement)
+- [Apple: Bundle Structure](https://developer.apple.com/library/archive/documentation/CoreFoundation/Conceptual/CFBundles/BundleTypes/BundleTypes.html)
