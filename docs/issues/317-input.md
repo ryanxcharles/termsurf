@@ -1051,3 +1051,109 @@ Instead of calling `key.set_handled()`, we should:
 
 The key insight is: we want to skip the keybinding processing, not consume the
 key entirely.
+
+---
+
+### Experiment 3: Skip Keybindings Without Consuming Key
+
+**Goal:** Same as experiment 2 (prevent WezTerm keybindings in Browse mode), but
+without breaking keyboard input entirely.
+
+#### Background
+
+Experiment 2 failed because `key.set_handled()` on `RawKeyEvent` prevents the
+corresponding `KeyEvent` from being dispatched. This broke all keyboard input.
+
+The fix is simple: return early WITHOUT calling `set_handled()`. This:
+- Skips keybinding processing in `raw_key_event_impl`
+- Allows `KeyEvent` to still be generated and dispatched
+- `key_event_impl` handles webview forwarding and Ctrl+C as normal
+
+#### Approach
+
+**Modify raw_key_event_impl (keyevent.rs)**
+
+Same location as experiment 2, but WITHOUT `set_handled()`:
+
+```rust
+let pane = match self.get_active_pane_or_overlay() {
+    Some(pane) => pane,
+    None => return,
+};
+
+// Skip keybinding processing when webview is active in Browse mode
+// Do NOT call set_handled() - we want KeyEvent to still be dispatched
+// so key_event_impl can forward to CEF and handle Ctrl+C
+#[cfg(target_os = "macos")]
+{
+    use crate::termwindow::webview_socket::{get_server, WebviewMode};
+
+    let pane_id = pane.pane_id();
+    if let Some(server) = get_server() {
+        let state = server.state();
+        let overlays = state.read().unwrap();
+        if let Some(overlay) = overlays.overlays.get(&pane_id) {
+            if overlay.mode == WebviewMode::Browse {
+                // In Browse mode: skip keybinding processing
+                // but let KeyEvent flow through to key_event_impl
+                if key.key_is_down {
+                    log::debug!(
+                        "[Webview] Skipping keybindings in Browse mode: {:?}",
+                        key.key
+                    );
+                }
+                return; // Early return, NO set_handled()
+            }
+        }
+    }
+}
+
+// First, try to match raw physical key
+// ... rest of function
+```
+
+The only difference from experiment 2: `return` instead of `key.set_handled(); return`.
+
+#### Files to Modify
+
+| File                                         | Changes                                  |
+| -------------------------------------------- | ---------------------------------------- |
+| `ts3/wezterm-gui/src/termwindow/keyevent.rs` | Add Browse mode check, return without set_handled |
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Test 1: Basic keyboard still works
+web google.com
+# Type "hello" in search box
+# Expected: Text appears (same as experiment 1)
+
+# Test 2: Ctrl+C still works
+# Press Ctrl+C
+# Expected: Switch to Control mode (CRITICAL - was broken in exp 2)
+
+# Test 3: Cmd+V in Browse mode
+# Copy text from another app
+# Press Cmd+V in browser
+# Expected: Pastes into browser, NOT terminal
+
+# Test 4: Cmd+C in Browse mode
+# Select text with Shift+arrows
+# Press Cmd+C
+# Expected: Copies from browser
+
+# Test 5: Control mode keybindings still work
+# In Control mode, press Ctrl+Shift+T
+# Expected: New tab opens
+```
+
+#### Success Criteria
+
+- [ ] Keyboard input works (typing in text fields)
+- [ ] Ctrl+C switches to Control mode (CRITICAL)
+- [ ] Keybindings skipped in Browse mode (no terminal paste)
+- [ ] Cmd+V pastes into browser
+- [ ] Cmd+C copies from browser
+- [ ] Control mode keybindings still work
