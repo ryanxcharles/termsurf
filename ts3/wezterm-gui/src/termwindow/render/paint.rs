@@ -272,6 +272,13 @@ impl crate::TermWindow {
         self.paint_window_borders(&mut layers)
             .context("paint_window_borders")?;
         drop(layers);
+
+        // Render webview control bar text after layers are dropped
+        // (render_element needs to map its own buffers)
+        #[cfg(target_os = "macos")]
+        self.paint_webview_control_bars()
+            .context("paint_webview_control_bars")?;
+
         self.paint_modal().context("paint_modal")?;
 
         Ok(())

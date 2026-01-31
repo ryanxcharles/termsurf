@@ -38,6 +38,16 @@ impl crate::TermWindow {
             return self.paint_pane_box_model(pos);
         }
 
+        // Check if this pane has a webview overlay - render control bar background only
+        #[cfg(target_os = "macos")]
+        {
+            let pane_id = pos.pane.pane_id();
+            if self.has_webview_overlay(pane_id) {
+                // Render control bar background only (text done in paint_webview_control_bars)
+                return self.paint_webview_overlay_background(pos, layers);
+            }
+        }
+
         self.check_for_dirty_lines_and_invalidate_selection(&pos.pane);
         /*
         let zone = {
@@ -685,5 +695,256 @@ impl crate::TermWindow {
             baseline: 1.0,
             content: ComputedElementContent::Children(vec![]),
         })
+    }
+
+    /// Check if a pane has an active webview overlay
+    #[cfg(target_os = "macos")]
+    fn has_webview_overlay(&self, pane_id: PaneId) -> bool {
+        use crate::termwindow::webview_socket::get_server;
+
+        let server = match get_server() {
+            Some(s) => s,
+            None => return false,
+        };
+        let state = server.state();
+        let overlays = state.read().unwrap();
+        overlays.overlays.contains_key(&pane_id)
+    }
+
+    /// Paint webview overlay background (control bar only).
+    /// Called during paint_pane while layers buffer is mapped.
+    /// Text rendering is done separately in paint_webview_control_bars().
+    #[cfg(target_os = "macos")]
+    fn paint_webview_overlay_background(
+        &mut self,
+        pos: &PositionedPane,
+        layers: &mut TripleLayerQuadAllocator,
+    ) -> anyhow::Result<()> {
+        use config::DimensionContext;
+
+        let cell_height = self.render_metrics.cell_size.height as f32;
+        let cell_width = self.render_metrics.cell_size.width as f32;
+        let control_bar_height = cell_height * 2.0;
+
+        // Calculate viewport bounds (same logic as other viewport calculations)
+        let tab_bar_height = if self.show_tab_bar {
+            self.tab_bar_pixel_height().unwrap_or(0.)
+        } else {
+            0.0
+        };
+
+        let border = self.get_os_border();
+        let border_left = border.left.get() as f32;
+        let border_top = border.top.get() as f32;
+
+        let h_context = DimensionContext {
+            dpi: self.dimensions.dpi as f32,
+            pixel_max: self.dimensions.pixel_width as f32,
+            pixel_cell: cell_width,
+        };
+        let v_context = DimensionContext {
+            dpi: self.dimensions.dpi as f32,
+            pixel_max: self.dimensions.pixel_height as f32,
+            pixel_cell: cell_height,
+        };
+        let padding_left = self.config.window_padding.left.evaluate_as_pixels(h_context);
+        let padding_top = self.config.window_padding.top.evaluate_as_pixels(v_context);
+
+        let terminal_cols = self.terminal_size.cols as usize;
+        let pixel_width = self.dimensions.pixel_width as f32;
+        let top_pixel_y = tab_bar_height + padding_top + border_top;
+
+        // X coordinate
+        let (x, width_delta) = if pos.left == 0 {
+            (0.0, padding_left + border_left + (cell_width / 2.0))
+        } else {
+            let x = padding_left + border_left + (pos.left as f32 * cell_width) - (cell_width / 2.0);
+            (x, cell_width)
+        };
+
+        // Y coordinate
+        let y = if pos.top == 0 {
+            top_pixel_y - padding_top
+        } else {
+            top_pixel_y + (pos.top as f32 * cell_height) - (cell_height / 2.0)
+        };
+
+        // Width
+        let width = if pos.left + pos.width >= terminal_cols {
+            pixel_width - x
+        } else {
+            (pos.width as f32 * cell_width) + width_delta
+        };
+
+        // Render control bar background
+        let palette = self.palette().clone();
+        let bg_color = palette.background.to_linear();
+        let control_bar_rect = euclid::rect(x, y, width, control_bar_height);
+        self.filled_rectangle(layers, 0, control_bar_rect, bg_color)?;
+
+        Ok(())
+    }
+
+    /// Paint control bar text for all webview panes.
+    /// Must be called AFTER layers are dropped (like paint_modal).
+    #[cfg(target_os = "macos")]
+    pub fn paint_webview_control_bars(&mut self) -> anyhow::Result<()> {
+        use crate::termwindow::webview_socket::get_server;
+        use crate::utilsprites::RenderMetrics;
+        use config::{Dimension, DimensionContext};
+
+        // Get webview overlays
+        let server = match get_server() {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+        let state = server.state();
+        let webview_panes = state.read().unwrap();
+
+        if webview_panes.overlays.is_empty() {
+            return Ok(());
+        }
+
+        // Get XPC manager for URLs
+        let xpc_manager = match crate::termwindow::webview_xpc::get_xpc_manager() {
+            Some(m) => m,
+            None => return Ok(()),
+        };
+
+        // Get active tab to filter overlays
+        let active_tab_id = match mux::Mux::try_get() {
+            Some(mux) => match mux.get_active_tab_for_window(self.mux_window_id) {
+                Some(tab) => tab.tab_id(),
+                None => return Ok(()),
+            },
+            None => return Ok(()),
+        };
+
+        // Get positioned panes for viewport calculation
+        let positioned_panes = self.get_panes_to_render();
+
+        let palette = self.palette().clone();
+        let font = self.fonts.default_font()?;
+        let metrics = RenderMetrics::with_font_metrics(&font.metrics());
+        let cell_height = metrics.cell_size.height as f32;
+        let cell_width = metrics.cell_size.width as f32;
+        let half_cell_height = cell_height / 2.0;
+        let half_cell_width = cell_width / 2.0;
+        let control_bar_height = cell_height * 2.0;
+
+        for (pane_id, overlay) in webview_panes.overlays.iter() {
+            // Skip overlays from other tabs
+            if overlay.tab_id != active_tab_id {
+                continue;
+            }
+
+            // Get URL from received surface
+            let url = match xpc_manager.get_received_surface(*pane_id) {
+                Some(surface) => surface.url.clone(),
+                None => continue,
+            };
+
+            // Find positioned pane to get viewport bounds
+            let pos = match positioned_panes.iter().find(|p| p.pane.pane_id() == *pane_id) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            // Calculate viewport bounds (same logic as render_webview_overlays_webgpu)
+            let tab_bar_height = if self.show_tab_bar {
+                self.tab_bar_pixel_height().unwrap_or(0.)
+            } else {
+                0.0
+            };
+
+            let border = self.get_os_border();
+            let border_left = border.left.get() as f32;
+            let border_top = border.top.get() as f32;
+
+            let h_context = DimensionContext {
+                dpi: self.dimensions.dpi as f32,
+                pixel_max: self.dimensions.pixel_width as f32,
+                pixel_cell: cell_width,
+            };
+            let v_context = DimensionContext {
+                dpi: self.dimensions.dpi as f32,
+                pixel_max: self.dimensions.pixel_height as f32,
+                pixel_cell: cell_height,
+            };
+            let padding_left = self.config.window_padding.left.evaluate_as_pixels(h_context);
+            let padding_top = self.config.window_padding.top.evaluate_as_pixels(v_context);
+
+            let terminal_cols = self.terminal_size.cols as usize;
+            let pixel_width = self.dimensions.pixel_width as f32;
+            let top_pixel_y = tab_bar_height + padding_top + border_top;
+
+            // X coordinate
+            let (x, width_delta) = if pos.left == 0 {
+                (0.0, padding_left + border_left + (cell_width / 2.0))
+            } else {
+                let x = padding_left + border_left + (pos.left as f32 * cell_width) - (cell_width / 2.0);
+                (x, cell_width)
+            };
+
+            // Y coordinate
+            let y = if pos.top == 0 {
+                top_pixel_y - padding_top
+            } else {
+                top_pixel_y + (pos.top as f32 * cell_height) - (cell_height / 2.0)
+            };
+
+            // Width
+            let width = if pos.left + pos.width >= terminal_cols {
+                pixel_width - x
+            } else {
+                (pos.width as f32 * cell_width) + width_delta
+            };
+
+            // Create text element with padding for margins (matching ts2)
+            let element = Element::new(&font, ElementContent::Text(url))
+                .colors(ElementColors {
+                    border: BorderColor::default(),
+                    bg: palette.background.to_linear().into(),
+                    text: palette.foreground.to_linear().into(),
+                })
+                .min_width(Some(Dimension::Pixels(width)))
+                .min_height(Some(Dimension::Pixels(control_bar_height)))
+                .padding(BoxDimension {
+                    left: Dimension::Pixels(half_cell_width),
+                    top: Dimension::Pixels(half_cell_height),
+                    right: Dimension::Pixels(0.),
+                    bottom: Dimension::Pixels(half_cell_height),
+                });
+
+            // Compute element
+            let gl_state = self.render_state.as_ref().unwrap();
+            let mut computed = self.compute_element(
+                &LayoutContext {
+                    height: DimensionContext {
+                        dpi: self.dimensions.dpi as f32,
+                        pixel_max: self.dimensions.pixel_height as f32,
+                        pixel_cell: metrics.cell_size.height as f32,
+                    },
+                    width: DimensionContext {
+                        dpi: self.dimensions.dpi as f32,
+                        pixel_max: self.dimensions.pixel_width as f32,
+                        pixel_cell: metrics.cell_size.width as f32,
+                    },
+                    bounds: euclid::rect(0., 0., width, control_bar_height),
+                    metrics: &metrics,
+                    gl_state,
+                    zindex: 0,
+                },
+                &element,
+            )?;
+
+            // Translate to final position
+            computed.translate(euclid::vec2(x, y));
+
+            // Render the element (safe now - layers are dropped)
+            self.render_element(&computed, gl_state, None)?;
+        }
+
+        Ok(())
     }
 }

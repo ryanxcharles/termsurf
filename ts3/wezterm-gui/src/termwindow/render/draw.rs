@@ -163,12 +163,10 @@ impl crate::TermWindow {
         // submit will accept anything that implements IntoIter
         webgpu.queue.submit(std::iter::once(encoder.finish()));
 
-        // Render webview overlays after main content (Experiment 2: pink test texture via XPC)
+        // Render webview overlays after main content
         // This uses its own encoder and submits separately
         #[cfg(target_os = "macos")]
-        {
-            self.render_webview_overlays_webgpu(webgpu, &output.texture)?;
-        }
+        self.render_webview_overlays_webgpu(webgpu, &output.texture)?;
 
         output.present();
 
@@ -376,7 +374,7 @@ impl crate::TermWindow {
                 // Calculate pane pixel bounds using ts2's half-cell boundary logic.
                 // Pane dividers occupy one full cell, but each adjacent pane claims half.
                 // This ensures webviews fill panes precisely.
-                let (viewport_x, viewport_y, viewport_w, viewport_h) = match positioned_pane {
+                let (viewport_x, viewport_y, viewport_w, viewport_h, cell_height) = match positioned_pane {
                     Some(pos) => {
                         let cell_width = self.render_metrics.cell_size.width as f32;
                         let cell_height = self.render_metrics.cell_size.height as f32;
@@ -462,7 +460,7 @@ impl crate::TermWindow {
                             x, y, w, h
                         );
 
-                        (x, y, w, h)
+                        (x, y, w, h, cell_height)
                     }
                     None => {
                         // Pane not found in current layout - fall back to full window
@@ -475,11 +473,24 @@ impl crate::TermWindow {
                             0.0,
                             self.dimensions.pixel_width as f32,
                             self.dimensions.pixel_height as f32,
+                            self.render_metrics.cell_size.height as f32,
                         )
                     }
                 };
 
-                render_pass.set_viewport(viewport_x, viewport_y, viewport_w, viewport_h, 0.0, 1.0);
+                // Control bar: 2 cell heights at top of pane (matching ts2)
+                let control_bar_height = cell_height * 2.0;
+
+                // Webview renders below the control bar
+                let webview_y = viewport_y + control_bar_height;
+                let webview_h = viewport_h - control_bar_height;
+
+                log::info!(
+                    "[CONTROL-BAR] pane={} control_bar_height={:.0} webview_y={:.0} webview_h={:.0}",
+                    pane_id, control_bar_height, webview_y, webview_h
+                );
+
+                render_pass.set_viewport(viewport_x, webview_y, viewport_w, webview_h, 0.0, 1.0);
 
                 // Debounce resize commands (ts2 pattern)
                 {
@@ -489,42 +500,42 @@ impl crate::TermWindow {
                     let scale = self.dimensions.dpi as f32 / 72.0;
                     let scale = if scale <= 0.0 { 2.0 } else { scale };
 
-                    // Log viewport dimensions
+                    // Log viewport dimensions (using webview dimensions, not full pane)
                     let logical_w = (viewport_w / scale) as u32;
-                    let logical_h = (viewport_h / scale) as u32;
+                    let logical_h = (webview_h / scale) as u32;
                     log::info!(
-                        "[VIEWPORT-SIZE] pane={} viewport={}x{} logical={}x{} scale={:.2}",
-                        pane_id, viewport_w as u32, viewport_h as u32, logical_w, logical_h, scale
+                        "[VIEWPORT-SIZE] pane={} webview={}x{} logical={}x{} scale={:.2}",
+                        pane_id, viewport_w as u32, webview_h as u32, logical_w, logical_h, scale
                     );
 
-                    // Check for size mismatch between texture and viewport
+                    // Check for size mismatch between texture and webview area
                     // Texture size from IOSurface is already in physical pixels
-                    if surface.width != viewport_w as u32 || surface.height != viewport_h as u32 {
+                    if surface.width != viewport_w as u32 || surface.height != webview_h as u32 {
                         log::warn!(
-                            "[SIZE-MISMATCH] pane={} texture={}x{} viewport={}x{} diff=({}, {})",
+                            "[SIZE-MISMATCH] pane={} texture={}x{} webview={}x{} diff=({}, {})",
                             pane_id,
                             surface.width, surface.height,
-                            viewport_w as u32, viewport_h as u32,
+                            viewport_w as u32, webview_h as u32,
                             surface.width as i32 - viewport_w as i32,
-                            surface.height as i32 - viewport_h as i32
+                            surface.height as i32 - webview_h as i32
                         );
                     }
 
-                    // Detect when borders would be visible (texture smaller than viewport)
-                    if surface.width < viewport_w as u32 || surface.height < viewport_h as u32 {
+                    // Detect when borders would be visible (texture smaller than webview area)
+                    if surface.width < viewport_w as u32 || surface.height < webview_h as u32 {
                         log::warn!(
-                            "[BORDER-VISIBLE] pane={} texture={}x{} < viewport={}x{} gap=({}, {})",
+                            "[BORDER-VISIBLE] pane={} texture={}x{} < webview={}x{} gap=({}, {})",
                             pane_id,
                             surface.width, surface.height,
-                            viewport_w as u32, viewport_h as u32,
+                            viewport_w as u32, webview_h as u32,
                             viewport_w as i32 - surface.width as i32,
-                            viewport_h as i32 - surface.height as i32
+                            webview_h as i32 - surface.height as i32
                         );
                     }
 
-                    // Use physical pixels for debounce tracking (avoids truncation issues)
+                    // Use physical pixels for debounce tracking (webview area, not full pane)
                     let physical_w = viewport_w as u32;
-                    let physical_h = viewport_h as u32;
+                    let physical_h = webview_h as u32;
                     let target_size = (physical_w, physical_h);
 
                     let mut resize_state = self.webview_resize_state.borrow_mut();

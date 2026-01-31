@@ -1292,15 +1292,54 @@ web github.com
 
 #### Success Criteria
 
-1. [ ] `has_webview_overlay()` helper function exists
-2. [ ] `paint_webview_overlay_background()` function exists
-3. [ ] Function called from `paint_pane` for webview panes
-4. [ ] Control bar background is solid (not transparent)
-5. [ ] Background uses terminal palette background color
-6. [ ] No terminal text visible behind control bar
-7. [ ] Background renders correctly during resize
-8. [ ] Multiple webview panes each have solid backgrounds
+1. [x] `has_webview_overlay()` helper function exists
+2. [x] `paint_webview_overlay_background()` function exists
+3. [x] Function called from `paint_pane` for webview panes
+4. [x] Control bar background is solid (not transparent)
+5. [x] Background uses terminal palette background color
+6. [x] No terminal text visible behind control bar
+7. [x] Background renders correctly during resize
+8. [x] Multiple webview panes each have solid backgrounds
 
 #### Result
 
-(Pending)
+**Success.** Control bar now has solid opaque background.
+
+#### Conclusion
+
+**What was accomplished:**
+
+The control bar now renders with a solid background, matching ts2's appearance.
+This completes the two-phase rendering approach:
+
+1. **Phase 1** (`paint_webview_overlay_background`): Called during `paint_pane`
+   while layers buffer is mapped. Uses `filled_rectangle` to draw solid
+   background.
+
+2. **Phase 2** (`paint_webview_control_bars`): Called after `drop(layers)`.
+   Uses `render_element` to draw URL text.
+
+**Implementation details:**
+
+- `has_webview_overlay()` checks if a pane has an active webview overlay
+- `paint_webview_overlay_background()` calculates viewport bounds and calls
+  `filled_rectangle` with the terminal palette background color
+- `paint_pane` intercepts webview panes and renders only the control bar
+  background, skipping terminal content rendering
+
+**Files modified:**
+
+- `ts3/wezterm-gui/src/termwindow/render/pane.rs` — Added helper functions and
+  paint_pane intercept
+- `ts3/wezterm-gui/src/termwindow/render/paint.rs` — Calls paint_webview_control_bars
+- `ts3/wezterm-gui/src/termwindow/render/draw.rs` — Cleaned up broken code from
+  Experiment 2
+
+**Phase 1 complete.** The control panel renders correctly with:
+- Solid background (terminal palette background)
+- URL text with half-cell margins
+- Proper viewport adjustment for webview content below
+
+**Next steps (Phase 2):**
+- Add Control mode / Browse mode switching
+- Add keyboard/mouse input forwarding to CEF
