@@ -300,3 +300,171 @@ After completing this issue, the following work remains for ts3:
 - Issue 312: Focus stealing fix (programmatic approach)
 - [Apple: LSUIElement](https://developer.apple.com/documentation/bundleresources/information_property_list/lsuielement)
 - [Apple: Bundle Structure](https://developer.apple.com/library/archive/documentation/CoreFoundation/Conceptual/CFBundles/BundleTypes/BundleTypes.html)
+
+---
+
+## Experiments
+
+### Experiment 1: Bundle as Helper App with LSUIElement
+
+**Goal:** Replace the programmatic activation policy workaround with proper
+macOS helper app bundling, using `LSUIElement=1` in the helper's `Info.plist`.
+
+**Hypothesis:** If we bundle `termsurf-profile` inside a proper `.app` bundle
+with `LSUIElement=1`, macOS will treat it as a background process declaratively,
+and we can remove the `objc` dependency and runtime workaround code.
+
+#### Changes
+
+**Step 1: Create Info.plist for helper app**
+
+Create `ts3/termsurf-profile/helper-app/Info.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>TermSurf Profile Helper</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.termsurf.profile-helper</string>
+    <key>CFBundleDisplayName</key>
+    <string>TermSurf Profile Helper</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>English</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleExecutable</key>
+    <string>termsurf-profile</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>LSEnvironment</key>
+    <dict>
+        <key>MallocNanoZone</key>
+        <string>0</string>
+    </dict>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>LSUIElement</key>
+    <string>1</string>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+</dict>
+</plist>
+```
+
+**Step 2: Update build-debug.sh**
+
+Replace line 73:
+
+```bash
+cp "$REPO_DIR/target/debug/termsurf-profile" "$APP_BUNDLE/Contents/MacOS/"
+```
+
+With:
+
+```bash
+# Create TermSurf Profile Helper app bundle (proper macOS helper pattern)
+PROFILE_HELPER="$APP_BUNDLE/Contents/Frameworks/TermSurf Profile Helper.app"
+mkdir -p "$PROFILE_HELPER/Contents/MacOS"
+cp "$REPO_DIR/target/debug/termsurf-profile" "$PROFILE_HELPER/Contents/MacOS/"
+cp "$REPO_DIR/termsurf-profile/helper-app/Info.plist" "$PROFILE_HELPER/Contents/"
+```
+
+Update the build summary to show new location.
+
+**Step 3: Update build-release.sh**
+
+Make the same changes as build-debug.sh (adjust path for release build).
+
+**Step 4: Update launcher path resolution**
+
+In `ts3/termsurf-launcher/src/main.rs`, update the path to find the helper app:
+
+```rust
+// Path to profile server binary
+// Launcher is at: .app/Contents/XPCServices/com.termsurf.launcher.xpc/Contents/MacOS/termsurf-launcher
+// Profile is at:  .app/Contents/Frameworks/TermSurf Profile Helper.app/Contents/MacOS/termsurf-profile
+let exe_path = env::current_exe().expect("Failed to get exe path");
+let profile_bin_path = exe_path
+    .parent() // MacOS
+    .and_then(|p| p.parent()) // Contents
+    .and_then(|p| p.parent()) // com.termsurf.launcher.xpc
+    .and_then(|p| p.parent()) // XPCServices
+    .and_then(|p| p.parent()) // Contents
+    .map(|p| {
+        p.join("Frameworks")
+            .join("TermSurf Profile Helper.app")
+            .join("Contents/MacOS/termsurf-profile")
+    })
+    .unwrap_or_else(|| {
+        // Fallback for testing outside app bundle
+        exe_path
+            .parent()
+            .map(|p| p.join("termsurf-profile"))
+            .unwrap_or_default()
+    });
+```
+
+**Step 5: Remove workaround code (optional)**
+
+In `ts3/termsurf-profile/src/main.rs`:
+
+- Delete `set_background_activation_policy()` function
+- Delete the call to it in `main()`
+
+In `ts3/termsurf-profile/Cargo.toml`:
+
+- Remove `objc = "0.2"` dependency
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# 1. Verify helper app exists
+ls -la target/debug/wezterm-gui.app/Contents/Frameworks/ | grep Profile
+
+# 2. Verify binary is in helper app
+ls "target/debug/wezterm-gui.app/Contents/Frameworks/TermSurf Profile Helper.app/Contents/MacOS/"
+
+# 3. Verify LSUIElement in Info.plist
+grep -A1 LSUIElement "target/debug/wezterm-gui.app/Contents/Frameworks/TermSurf Profile Helper.app/Contents/Info.plist"
+
+# 4. Verify NOT in MacOS folder
+ls target/debug/wezterm-gui.app/Contents/MacOS/ | grep -c profile
+# Expected: 0
+
+# 5. Check launcher log for correct path
+grep "Profile binary path" /tmp/termsurf-launcher.log
+
+# 6. Test webview functionality
+web google.com
+# No dock icon, no focus stealing, renders correctly
+
+# 7. Test multiple webviews
+web github.com
+web apple.com
+```
+
+#### Success Criteria
+
+1. [ ] Helper app bundle created at `Frameworks/TermSurf Profile Helper.app`
+2. [ ] `Info.plist` contains `LSUIElement=1`
+3. [ ] Binary located inside helper app, not in `Contents/MacOS/`
+4. [ ] Launcher finds and spawns the binary correctly
+5. [ ] No dock icon when opening webviews
+6. [ ] No focus stealing
+7. [ ] Webviews render correctly
+8. [ ] Resize still works (issue 311 fixes intact)
+9. [ ] (Optional) `objc` dependency removed, workaround code deleted
+
+#### Result
+
+_Pending_
