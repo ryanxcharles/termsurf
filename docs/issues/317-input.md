@@ -1005,10 +1005,49 @@ web google.com
 
 #### Success Criteria
 
-- [ ] `raw_key_event_impl` checks for webview Browse mode
-- [ ] Keybindings are blocked in Browse mode (`key.set_handled()`)
+- [x] `raw_key_event_impl` checks for webview Browse mode
+- [x] Keybindings are blocked in Browse mode (`key.set_handled()`)
 - [ ] Cmd+V pastes into browser, not terminal
 - [ ] Cmd+C copies from browser
 - [ ] Ctrl+C still switches to Control mode
 - [ ] Control mode keybindings still work
 - [ ] Browse mode keybindings blocked (all of them)
+
+#### Result: FAILURE
+
+Keyboard completely broken. Ctrl+C stopped working. User had to force-quit the
+application.
+
+#### Conclusion
+
+**What went wrong:**
+
+Calling `key.set_handled()` on the `RawKeyEvent` signals to the underlying
+windowing system that the key was consumed. This prevents the corresponding
+`KeyEvent` from ever being generated or dispatched.
+
+The result:
+1. `raw_key_event_impl` marks ALL keys as handled in Browse mode
+2. `KeyEvent` is never dispatched to `key_event_impl`
+3. Our webview handler in `key_event_impl` never runs
+4. Ctrl+C handling never runs (it's in `key_event_impl`)
+5. CEF key forwarding never runs (also in `key_event_impl`)
+6. Keyboard completely dead, no way to exit Browse mode
+
+**Hypothesis:**
+
+The `RawKeyEvent` and `KeyEvent` are not independent events. The `RawKeyEvent`
+is the low-level event from the OS, and calling `set_handled()` on it tells the
+windowing system "I consumed this, don't generate the higher-level KeyEvent."
+
+**Fix for Experiment 3:**
+
+Instead of calling `key.set_handled()`, we should:
+
+1. Return early from `raw_key_event_impl` WITHOUT calling `set_handled()`
+2. This skips keybinding processing in `raw_key_event_impl`
+3. But still allows `KeyEvent` to be generated and dispatched
+4. `key_event_impl` then handles webview forwarding and Ctrl+C as before
+
+The key insight is: we want to skip the keybinding processing, not consume the
+key entirely.
