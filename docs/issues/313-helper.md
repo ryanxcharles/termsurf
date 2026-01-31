@@ -245,14 +245,14 @@ grep "Profile binary path" /tmp/termsurf-launcher.log
 
 ## Success Criteria
 
-1. [ ] `TermSurf Profile Helper.app` exists in Frameworks directory
-2. [ ] Helper app contains correct `Info.plist` with `LSUIElement=1`
-3. [ ] `termsurf-profile` binary is inside helper app, not in MacOS folder
-4. [ ] Launcher correctly resolves path to helper app binary
-5. [ ] No dock icon appears when opening webviews
-6. [ ] No focus stealing occurs
-7. [ ] Webviews render and resize correctly
-8. [ ] (Optional) `objc` dependency removed from termsurf-profile
+1. [x] `TermSurf Profile Helper.app` exists in Frameworks directory
+2. [x] Helper app contains correct `Info.plist` with `LSUIElement=1`
+3. [x] `termsurf-profile` binary is inside helper app, not in MacOS folder
+4. [x] Launcher correctly resolves path to helper app binary
+5. [x] No dock icon appears when opening webviews
+6. [x] No focus stealing occurs
+7. [x] Webviews render and resize correctly
+8. [x] (Optional) `objc` dependency removed from termsurf-profile
 
 ## Next Steps for ts3
 
@@ -693,8 +693,8 @@ path is still computed assuming the binary is 2 levels from `Contents/`. Now
 that it's 5 levels deep, the path resolves inside the profile helper app instead
 of at the main app's Frameworks level.
 
-**Hypothesis:** Changing `exe.parent().parent()` to go up 5 levels will correctly
-resolve to the main app's `Contents/` directory.
+**Hypothesis:** Changing `exe.parent().parent()` to go up 5 levels will
+correctly resolve to the main app's `Contents/` directory.
 
 #### Changes
 
@@ -752,19 +752,85 @@ web apple.com
 
 #### Success Criteria
 
-1. [ ] Helper app bundle exists at `Frameworks/TermSurf Profile Helper.app`
-2. [ ] `Info.plist` contains `LSUIElement=1`
-3. [ ] Binary located inside helper app, not in `Contents/MacOS/`
-4. [ ] Launcher finds and spawns the binary correctly
-5. [ ] CEF framework loads successfully
-6. [ ] WezTerm Helper path resolves correctly (exists=true)
-7. [ ] No GPU process launch failures
-8. [ ] No dock icon when opening webviews
-9. [ ] No focus stealing
-10. [ ] Webviews render correctly
-11. [ ] Resize still works (issue 311 fixes intact)
-12. [ ] `objc` dependency removed, workaround code deleted
+1. [x] Helper app bundle exists at `Frameworks/TermSurf Profile Helper.app`
+2. [x] `Info.plist` contains `LSUIElement=1`
+3. [x] Binary located inside helper app, not in `Contents/MacOS/`
+4. [x] Launcher finds and spawns the binary correctly
+5. [x] CEF framework loads successfully
+6. [x] WezTerm Helper path resolves correctly (exists=true)
+7. [x] No GPU process launch failures
+8. [x] No dock icon when opening webviews
+9. [x] No focus stealing
+10. [x] Webviews render correctly
+11. [x] Resize still works (issue 311 fixes intact)
+12. [x] `objc` dependency removed, workaround code deleted
 
 #### Result
 
-_Pending_
+**Success.** All criteria met. The webview renders correctly, no dock icon
+appears, and resize continues to work.
+
+#### Conclusion
+
+**What we did:**
+
+We bundled `termsurf-profile` as a proper macOS helper app
+(`TermSurf Profile Helper.app`) inside `Contents/Frameworks/`, with an
+`Info.plist` declaring `LSUIElement=1`. This replaces the runtime workaround
+from issue 312 (programmatically setting
+`NSApplicationActivationPolicyProhibited` via the `objc` crate) with the
+declarative macOS pattern.
+
+**Why we did it:**
+
+1. **Declarative vs Imperative** — `LSUIElement` is read by macOS at launch
+   time, before any code runs. The previous workaround required code to execute
+   before CEF initialized, which was fragile.
+
+2. **Code signing compatibility** — Proper helper app bundles are the expected
+   structure for notarization and distribution. Apple's tooling assumes this
+   layout.
+
+3. **Consistency** — CEF's own helpers (GPU, Renderer, etc.) follow this exact
+   pattern. Our profile server now matches their structure.
+
+4. **Reduced dependencies** — Removed the `objc` crate dependency and ~20 lines
+   of unsafe FFI workaround code.
+
+**How it worked:**
+
+The implementation required three experiments to get all the path resolutions
+correct:
+
+| Experiment | Problem                                  | Fix                                                  |
+| ---------- | ---------------------------------------- | ---------------------------------------------------- |
+| 1          | CEF framework not found                  | — (identified root cause)                            |
+| 2          | `LibraryLoader` used wrong path resolver | Changed `helper: false` → `helper: true`             |
+| 3          | Helper subprocess path wrong             | Changed `app_contents` from 2 to 5 `.parent()` calls |
+
+The key insight is that moving a binary into a helper app bundle changes its
+depth from 2 levels (`Contents/MacOS/`) to 5 levels
+(`Contents/Frameworks/Helper.app/Contents/MacOS/`). Every relative path
+calculation must account for this.
+
+**Files modified:**
+
+- `ts3/termsurf-profile/helper-app/Info.plist` — NEW: Declares LSUIElement=1
+- `ts3/scripts/build-debug.sh` — Creates helper app bundle in Frameworks/
+- `ts3/scripts/build-release.sh` — Same for release builds
+- `ts3/termsurf-launcher/src/main.rs` — Updated path to find binary in helper
+  app
+- `ts3/termsurf-profile/src/main.rs` — Fixed LibraryLoader and app_contents
+  paths
+- `ts3/termsurf-profile/Cargo.toml` — Removed `objc` dependency
+
+**Next steps:**
+
+This issue is complete. The remaining ts3 work (from the "Next Steps" section
+above) includes:
+
+1. **Input forwarding** — Keyboard and mouse events to webviews
+2. **Profile process reuse** — Reuse existing profile process for same-profile
+   webviews
+3. **Dynamic resize** — Send resize commands when panes change size
+4. **Webview lifecycle** — Clean up resources when panes close
