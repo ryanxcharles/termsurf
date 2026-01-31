@@ -680,3 +680,91 @@ let app_contents = exe
 
 This is becoming complex. Moving a binary into a helper app bundle requires
 updating every relative path calculation in the code.
+
+---
+
+### Experiment 3: Fix CEF Helper Subprocess Path
+
+**Goal:** Fix the WezTerm Helper path resolution so CEF can launch its GPU and
+network subprocesses.
+
+**Problem:** Experiment 2 fixed CEF framework loading, but the helper subprocess
+path is still computed assuming the binary is 2 levels from `Contents/`. Now
+that it's 5 levels deep, the path resolves inside the profile helper app instead
+of at the main app's Frameworks level.
+
+**Hypothesis:** Changing `exe.parent().parent()` to go up 5 levels will correctly
+resolve to the main app's `Contents/` directory.
+
+#### Changes
+
+**File: `ts3/termsurf-profile/src/main.rs`**
+
+Change the `app_contents` computation (around line 175) from:
+
+```rust
+let app_contents = exe.parent().unwrap().parent().unwrap();
+```
+
+To:
+
+```rust
+// Navigate from helper app binary to main app's Contents/
+// Binary is at: Contents/Frameworks/TermSurf Profile Helper.app/Contents/MacOS/termsurf-profile
+let app_contents = exe
+    .parent().unwrap()  // MacOS/
+    .parent().unwrap()  // Contents/ (of helper app)
+    .parent().unwrap()  // TermSurf Profile Helper.app/
+    .parent().unwrap()  // Frameworks/
+    .parent().unwrap(); // Contents/ (of main app)
+```
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# 1. Verify helper app structure
+ls -la target/debug/wezterm-gui.app/Contents/Frameworks/ | grep Profile
+
+# 2. Check profile log for successful helper path
+grep "Helper:" /tmp/termsurf-profile-default.log
+# Expected: Path should end with ".app/Contents/Frameworks/WezTerm Helper.app/..." and (exists=true)
+
+# 3. Check for CEF initialization success
+grep "CEF initialized" /tmp/termsurf-profile-default.log
+
+# 4. Check for NO GPU errors
+grep -c "GPU process launch failed" /tmp/termsurf-profile-default.log
+# Expected: 0
+
+# 5. Test webview functionality
+web google.com
+# Expected: No dock icon, no focus stealing, webview renders
+
+# 6. Test multiple webviews
+web github.com
+web apple.com
+
+# 7. Test resize
+# Drag window edge, verify no black borders
+```
+
+#### Success Criteria
+
+1. [ ] Helper app bundle exists at `Frameworks/TermSurf Profile Helper.app`
+2. [ ] `Info.plist` contains `LSUIElement=1`
+3. [ ] Binary located inside helper app, not in `Contents/MacOS/`
+4. [ ] Launcher finds and spawns the binary correctly
+5. [ ] CEF framework loads successfully
+6. [ ] WezTerm Helper path resolves correctly (exists=true)
+7. [ ] No GPU process launch failures
+8. [ ] No dock icon when opening webviews
+9. [ ] No focus stealing
+10. [ ] Webviews render correctly
+11. [ ] Resize still works (issue 311 fixes intact)
+12. [ ] `objc` dependency removed, workaround code deleted
+
+#### Result
+
+_Pending_
