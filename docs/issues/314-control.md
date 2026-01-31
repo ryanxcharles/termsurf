@@ -111,7 +111,8 @@ the URL. Two options:
 2. Store it in `WebviewOverlay` when the command is received
 3. Use stored URL for display (won't update on navigation)
 
-For Phase 1, Option B is simpler. Option A can be added later for navigation.
+**Decision: Option A.** We want the URL to update when the user navigates, so
+we'll add URL to the XPC protocol from the start.
 
 ### Rendering Architecture
 
@@ -298,3 +299,173 @@ web github.com
 - `docs/issues/205-cef-mvp4.md` — ts2 control panel specification
 - `ts2/wezterm-gui/src/termwindow/render/pane.rs:813-966` — ts2 rendering code
 - `ts2/wezterm-gui/src/cef_browser/mod.rs:28-57` — ts2 BrowserState struct
+
+---
+
+## Experiments
+
+### Experiment 1: Add URL to XPC Protocol
+
+**Goal:** Transmit the current URL from the profile server to the GUI via XPC,
+so the control panel can display it. The URL should update when pages navigate.
+
+**Background:**
+
+Currently, the `display_surface` XPC message contains:
+
+```rust
+msg.set_string("action", "display_surface");
+msg.set_mach_send("iosurface_port", port);
+msg.set_i64("width", width as i64);
+msg.set_i64("height", height as i64);
+```
+
+We need to add the URL to this message. The URL is available in CEF via the
+`Browser::get_main_frame().get_url()` method.
+
+#### Changes
+
+**Step 1: Store URL in BrowserState (profile server)**
+
+**File: `ts3/termsurf-profile/src/main.rs`**
+
+Add `url` field to `BrowserState`:
+
+```rust
+struct BrowserState {
+    session_id: String,
+    gui: Arc<XpcConnection>,
+    width: AtomicU32,
+    height: AtomicU32,
+    last_handle: AtomicPtr<c_void>,
+    browser: Mutex<Option<cef::Browser>>,
+    url: Mutex<String>,  // NEW: Current URL for this browser
+}
+```
+
+Initialize with the URL from browser creation:
+
+```rust
+let browser_state = Arc::new(BrowserState {
+    session_id: session_id.to_string(),
+    gui: gui_connection,
+    width: AtomicU32::new(width),
+    height: AtomicU32::new(height),
+    last_handle: AtomicPtr::new(std::ptr::null_mut()),
+    browser: Mutex::new(None),
+    url: Mutex::new(url.to_string()),  // NEW
+});
+```
+
+**Step 2: Update URL on navigation (profile server)**
+
+CEF provides `on_address_change` callback via the `DisplayHandler`. We need to
+implement this to update the stored URL when navigation occurs.
+
+Add to `RenderHandler` (or create separate `DisplayHandler`):
+
+```rust
+impl DisplayHandler for RenderHandler {
+    fn on_address_change(
+        &self,
+        _browser: &Browser,
+        _frame: &Frame,
+        url: &CefString,
+    ) {
+        let url_str = url.to_string();
+        *self.inner.state.url.lock().unwrap() = url_str.clone();
+        println!("Profile: URL changed to '{}'", url_str);
+    }
+}
+```
+
+**Step 3: Add URL to display_surface message (profile server)**
+
+**File: `ts3/termsurf-profile/src/main.rs`** (in `on_paint`)
+
+Add URL to the XPC message:
+
+```rust
+let msg = XpcDictionary::new();
+msg.set_string("action", "display_surface");
+msg.set_mach_send("iosurface_port", port);
+msg.set_i64("width", width as i64);
+msg.set_i64("height", height as i64);
+msg.set_string("url", &self.inner.state.url.lock().unwrap());  // NEW
+self.inner.state.gui.send(&msg);
+```
+
+**Step 4: Add URL to ReceivedSurface (GUI)**
+
+**File: `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`**
+
+Add `url` field to `ReceivedSurface`:
+
+```rust
+pub struct ReceivedSurface {
+    pub mach_port: u32,
+    pub width: u32,
+    pub height: u32,
+    pub url: String,  // NEW: Current URL from profile server
+}
+```
+
+**Step 5: Extract URL from XPC message (GUI)**
+
+**File: `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`** (in message handler)
+
+Extract URL when receiving `display_surface`:
+
+```rust
+"display_surface" => {
+    let port = msg.copy_mach_send("iosurface_port");
+    let width = msg.get_i64("width").unwrap_or(0) as u32;
+    let height = msg.get_i64("height").unwrap_or(0) as u32;
+    let url = msg.get_string("url").unwrap_or_default();  // NEW
+
+    // ... existing port handling ...
+
+    let surface = ReceivedSurface {
+        mach_port: port,
+        width,
+        height,
+        url,  // NEW
+    };
+
+    manager.received_surfaces.lock().unwrap().insert(pane_id, surface);
+}
+```
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# 1. Open a webview
+web google.com
+
+# 2. Check profile log for URL storage
+grep "URL changed" /tmp/termsurf-profile-default.log
+# Expected: "Profile: URL changed to 'https://www.google.com/'"
+
+# 3. Check GUI log for URL receipt
+grep "url=" /tmp/termsurf-gui.log
+# Expected: URL appears in display_surface message handling
+
+# 4. (Future) Verify URL updates on navigation
+# Once input forwarding is implemented, clicking links should update the URL
+```
+
+#### Success Criteria
+
+1. [ ] `BrowserState` in profile server stores URL
+2. [ ] URL initialized from browser creation arguments
+3. [ ] `on_address_change` callback updates URL on navigation
+4. [ ] `display_surface` XPC message includes URL
+5. [ ] `ReceivedSurface` in GUI stores URL
+6. [ ] URL extracted from XPC message correctly
+7. [ ] URL updates when page navigates (requires input forwarding to test fully)
+
+#### Result
+
+_Pending_
