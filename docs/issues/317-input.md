@@ -1151,9 +1151,61 @@ web google.com
 
 #### Success Criteria
 
-- [ ] Keyboard input works (typing in text fields)
-- [ ] Ctrl+C switches to Control mode (CRITICAL)
-- [ ] Keybindings skipped in Browse mode (no terminal paste)
+- [x] Keyboard input works (typing in text fields)
+- [x] Ctrl+C switches to Control mode (CRITICAL)
+- [x] Keybindings skipped in Browse mode (no terminal paste)
 - [ ] Cmd+V pastes into browser
 - [ ] Cmd+C copies from browser
-- [ ] Control mode keybindings still work
+- [x] Control mode keybindings still work
+
+#### Result: PARTIAL SUCCESS
+
+The primary goal was achieved: keybindings are now skipped in Browse mode, so
+Cmd+V no longer pastes into the terminal. Ctrl+C works correctly (fixed from
+experiment 2's complete failure).
+
+However, copy/paste does not work IN the browser — Cmd+V doesn't paste, Cmd+C
+doesn't copy.
+
+#### Conclusion
+
+**What worked:**
+
+- Keyboard input (typing, arrows, Tab, Enter, Backspace)
+- Ctrl+C switches to Control mode
+- WezTerm keybindings are skipped (no accidental terminal paste)
+- Control mode keybindings still work
+
+**What didn't work:**
+
+- Cmd+V does not paste into browser text fields
+- Cmd+C does not copy selected text from browser
+
+**Hypothesis:**
+
+The keys ARE being forwarded to CEF (we can verify via logs), but copy/paste
+isn't working. Possible reasons:
+
+1. **macOS clipboard integration** — CEF's clipboard access may require proper
+   NSApplication integration. Since CEF is running in an off-screen/headless
+   context in a separate process, it may not have access to the system
+   pasteboard.
+
+2. **Focus state** — CEF may need to believe it has system focus to handle
+   clipboard operations. Our off-screen browser may not have proper focus state.
+
+3. **Key event format** — macOS system shortcuts may need to go through the
+   responder chain rather than being synthesized as key events. CEF might
+   receive our Cmd+V key event but not trigger the actual paste action.
+
+4. **Separate process isolation** — The profile server process runs CEF. System
+   clipboard access may be restricted or require entitlements we haven't
+   configured.
+
+**Next steps:**
+
+This is a deeper CEF integration issue that may require:
+- Investigating CEF's clipboard handler APIs
+- Checking if off-screen browsers have clipboard limitations
+- Possibly implementing explicit clipboard commands via XPC rather than relying
+  on key events
