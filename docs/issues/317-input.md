@@ -1347,8 +1347,8 @@ fn send_key_event_to_cef(
 
     // Also try sending focus event to ensure CEF thinks it has focus
     if is_potential_paste && key_is_down {
-        println!("[CLIPBOARD-DEBUG] Calling send_focus_event(true) before paste");
-        host.send_focus_event(1); // 1 = focused
+        println!("[CLIPBOARD-DEBUG] Calling set_focus(true) before paste");
+        host.set_focus(1); // 1 = focused
     }
 }
 ```
@@ -1370,7 +1370,7 @@ match browser {
         // Ensure browser has focus for clipboard operations
         if let Some(host) = b.host() {
             println!("[FOCUS-DEBUG] Sending initial focus event to browser");
-            host.send_focus_event(1);
+            host.set_focus(1);
         }
 
         // Store browser reference...
@@ -1408,7 +1408,7 @@ Expected log output to analyze:
 # Profile side:
 [CLIPBOARD-DEBUG] Cmd+V received: key_is_down=true, raw_code=9, char_code=118, modifiers=[shift=false, ctrl=false, alt=false, meta=true]
 [CLIPBOARD-DEBUG] CEF event: windows_vk=0x56 (expected V=0x56), native=9, modifiers=0x80 (COMMAND_DOWN=0x80)
-[CLIPBOARD-DEBUG] Calling send_focus_event(true) before paste
+[CLIPBOARD-DEBUG] Calling set_focus(true) before paste
 [CLIPBOARD-DEBUG] send_key_event called for KEYDOWN
 ```
 
@@ -1427,10 +1427,49 @@ Expected log output to analyze:
 - [ ] Focus event sent to CEF when clipboard shortcut detected
 - [ ] Analysis of logs reveals root cause
 
-#### Result
+#### Result: SUCCESS (Root Cause Found)
 
-*Pending*
+The diagnostic logging revealed the root cause of the clipboard issue.
 
 #### Conclusion
 
-*Pending*
+**Findings from logs:**
+
+1. GUI log shows NO `[CLIPBOARD-DEBUG]` entries for Cmd+V/C
+2. Regular keys (a, s, d, f, arrows) DO reach the profile server
+3. Ctrl+C correctly triggers mode switching
+4. Profile server only shows `[FOCUS-DEBUG] Sending initial focus event to browser 1`
+
+**Root cause:**
+
+Cmd+C/V/X are **not generating KeyEvents** on macOS. This is standard Cocoa behavior:
+
+1. When you press Cmd+V, macOS interprets it as a "key equivalent"
+2. The `performKeyEquivalent:` method on the NSView is called
+3. WezTerm's implementation returns `NO` for Cmd+V (see `window/src/os/macos/window.rs:2829`)
+4. macOS then routes it to the menu system as a `paste:` action
+5. Since there's no `paste:` handler, nothing happens
+6. **No KeyEvent is ever generated**
+
+**Why ts2 works but ts3 doesn't:**
+
+| Aspect | ts2 | ts3 |
+|--------|-----|-----|
+| CEF location | In-process | Out-of-process |
+| First responder | CEF browser view | WezTerm GUI window |
+| Cmd+V handling | CEF's native Cocoa integration | Lost to menu system |
+
+In ts2, CEF runs in the same process and has native Cocoa clipboard integration.
+In ts3, CEF runs in a separate process and never sees Cmd+V.
+
+**The fix:**
+
+Modify `perform_key_equivalent` in `ts3/window/src/os/macos/window.rs` to:
+1. Intercept Cmd+C/V/X (and Cmd+A for select all)
+2. Synthesize key events via `Self::key_common()` (like it already does for Cmd+.)
+3. Return `YES` to prevent macOS from handling it
+
+This will generate KeyEvents for clipboard shortcuts, allowing our webview key handler
+to forward them to CEF via XPC.
+
+**Next experiment:** Implement the `perform_key_equivalent` fix.
