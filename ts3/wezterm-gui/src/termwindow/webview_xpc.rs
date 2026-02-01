@@ -520,6 +520,20 @@ impl XpcManager {
         }
     }
 
+    /// Issue 329: Send focus command to the browser
+    pub fn send_focus(&self, pane_id: PaneId, focused: bool) -> bool {
+        let msg = XpcDictionary::new();
+        msg.set_string("action", "focus");
+        msg.set_bool("focused", focused);
+
+        if self.send_command(pane_id, &msg) {
+            log::info!("[XPC] Sent focus to pane {}: {}", pane_id, focused);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Send mouse move event to the browser (issue 319, experiment 1)
     pub fn send_mouse_move(&self, pane_id: PaneId, x: i32, y: i32, modifiers: u32) -> bool {
         let msg = XpcDictionary::new();

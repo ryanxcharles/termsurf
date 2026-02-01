@@ -956,8 +956,11 @@ impl super::TermWindow {
                 if is_ctrl_c {
                     log::info!("[Webview] Ctrl+C in Browse mode → Control mode");
                     overlay.mode = WebviewMode::Control;
-                    // Trigger redraw for visual feedback
+                    // Issue 329: Unfocus webview to stop caret blinking
                     drop(overlays);
+                    if let Some(xpc) = crate::termwindow::webview_xpc::get_xpc_manager() {
+                        xpc.send_focus(pane_id, false);
+                    }
                     if let Some(ref w) = self.window {
                         w.invalidate();
                     }
@@ -1061,7 +1064,11 @@ impl super::TermWindow {
                 if is_enter {
                     log::info!("[Webview] Enter in Control mode → Browse mode");
                     overlay.mode = WebviewMode::Browse;
+                    // Issue 329: Refocus webview to resume caret blinking
                     drop(overlays);
+                    if let Some(xpc) = crate::termwindow::webview_xpc::get_xpc_manager() {
+                        xpc.send_focus(pane_id, true);
+                    }
                     if let Some(ref w) = self.window {
                         w.invalidate();
                     }

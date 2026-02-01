@@ -988,6 +988,23 @@ mod cef_handlers {
                             cef::post_task(cef::ThreadId::UI, Some(&mut task));
                             println!("[MOUSE] post_task returned");
                         }
+                        "focus" => {
+                            // Issue 329: Focus/unfocus browser for caret control
+                            let state_guard = deferred_for_handler.lock().unwrap();
+                            let Some(bs) = state_guard.as_ref() else {
+                                println!("Profile: focus ignored (state not ready)");
+                                return;
+                            };
+
+                            let focused = msg.get_bool("focused");
+                            println!("[FOCUS] Received focus command: {}", focused);
+
+                            let bs = Arc::clone(bs);
+                            drop(state_guard);
+
+                            let mut task = FocusTask::new(bs, focused);
+                            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                        }
                         // Issue 319, experiment 2: Log unhandled actions
                         other => {
                             println!("[XPC-RECV] Unhandled action: {:?}", other);
@@ -1125,6 +1142,28 @@ mod cef_handlers {
                 host.was_resized();
                 // PaintElementType::default() is PET_VIEW (0)
                 host.invalidate(PaintElementType::default());
+            }
+        }
+    }
+
+    // ====== Focus Task ======
+    //
+    // Issue 329: Task for setting browser focus state on the UI thread.
+
+    wrap_task! {
+        pub struct FocusTask {
+            state: Arc<BrowserState>,
+            focused: bool,
+        }
+
+        impl Task {
+            fn execute(&self) {
+                if let Some(ref browser) = *self.state.browser.lock().unwrap() {
+                    if let Some(host) = browser.host() {
+                        println!("[FOCUS] Setting focus to {}", self.focused);
+                        host.set_focus(if self.focused { 1 } else { 0 });
+                    }
+                }
             }
         }
     }
