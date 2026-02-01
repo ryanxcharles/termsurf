@@ -259,8 +259,9 @@ GUI:
 
 **Conclusion:**
 
-The bug is **not** that both CONN-0 and CONN-1 receive errors. Instead, **CONN-1's
-error handler fires twice**. Both disconnect messages show `[CONN-1]`.
+The bug is **not** that both CONN-0 and CONN-1 receive errors. Instead,
+**CONN-1's error handler fires twice**. Both disconnect messages show
+`[CONN-1]`.
 
 The sequence of events:
 
@@ -268,7 +269,8 @@ The sequence of events:
 2. XPC invalidates the connection
 3. Profile server's CONN-1 error handler fires (count: 2 → 1)
 4. Something triggers a reconnection attempt to pane-1's listener
-5. GUI accepts this new connection (listener is still alive in `Vec<XpcListener>`)
+5. GUI accepts this new connection (listener is still alive in
+   `Vec<XpcListener>`)
 6. This new connection immediately fails
 7. CONN-1's error handler fires again (count: 1 → 0)
 8. Profile server exits
@@ -294,6 +296,124 @@ reconnections.
 **Hypothesis:** The mystery reconnection occurs because the listener for pane 1
 remains active after the webview closes. By removing the listener when the
 webview closes, we can prevent the reconnection and the double error callback.
+
+**Changes:**
+
+1. **Change listener storage from Vec to HashMap**
+   (`ts3/wezterm-gui/src/termwindow/webview_xpc.rs`)
+
+   The current structure stores listeners in a Vec with no way to look them up:
+
+   ```rust
+   // Current (line 94)
+   listeners: Mutex<Vec<XpcListener>>,
+   ```
+
+   Change to a HashMap keyed by pane ID:
+
+   ```rust
+   // New
+   listeners: Mutex<HashMap<PaneId, XpcListener>>,
+   ```
+
+2. **Update listener storage in `request_profile_spawn`**
+
+   Current code (line 316):
+
+   ```rust
+   self.listeners.lock().unwrap().push(listener);
+   ```
+
+   Change to:
+
+   ```rust
+   self.listeners.lock().unwrap().insert(pane_id, listener);
+   ```
+
+3. **Update initialization in `new()`**
+
+   Current code (line 127):
+
+   ```rust
+   listeners: Mutex::new(Vec::new()),
+   ```
+
+   Change to:
+
+   ```rust
+   listeners: Mutex::new(HashMap::new()),
+   ```
+
+4. **Add `remove_listener` method**
+
+   Add a new method to remove the listener when a webview closes:
+
+   ```rust
+   /// Remove the XPC listener for a pane (prevents spurious reconnections)
+   pub fn remove_listener(&self, pane_id: PaneId) {
+       if let Some(_listener) = self.listeners.lock().unwrap().remove(&pane_id) {
+           log::info!("[XPC] Removed listener for pane {}", pane_id);
+           // listener is dropped here, closing the XPC endpoint
+       }
+   }
+   ```
+
+5. **Call `remove_listener` during webview cleanup**
+   (`ts3/wezterm-gui/src/termwindow/keyevent.rs`)
+
+   In `close_webview_for_pane`, add listener removal before connection removal:
+
+   ```rust
+   // Before removing connection, remove the listener to prevent reconnections
+   xpc_manager.remove_listener(pane_id);
+   xpc_manager.remove_connection(pane_id);
+   ```
+
+**Files to modify:**
+
+| File                                            | Changes                             |
+| ----------------------------------------------- | ----------------------------------- |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | HashMap for listeners, add method   |
+| `ts3/wezterm-gui/src/termwindow/keyevent.rs`    | Call `remove_listener` during close |
+
+**Verification:**
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Test: Open two webviews, close one
+web google.com
+# Split pane
+web google.com
+# Close second webview (Ctrl+C twice)
+
+# Check profile server logs
+cat /tmp/termsurf-profile-*.log | grep "CONN-"
+# Expected:
+# [CONN-0] GUI connection established (total: 1)
+# [CONN-1] GUI connection established (total: 2)
+# [CONN-1] GUI disconnected (remaining: 1)  <- Only ONE disconnect for CONN-1
+# NO "[CONN-1] GUI disconnected (remaining: 0)" line
+
+# Check GUI logs
+cat /tmp/termsurf-gui.log | grep -E "(Removed listener|Removing connection)"
+# Expected:
+# [XPC] Removed listener for pane 1
+# [XPC] Removing connection for pane 1: 0xABCD (dropping Arc)
+# NO "New connection for session pane-1" after removal
+```
+
+**Success criteria:**
+
+- [ ] Listener is removed before connection during webview close
+- [ ] No "New connection" appears after removing pane 1's listener
+- [ ] CONN-1's error handler fires only once
+- [ ] Profile server remains running with count = 1
+- [ ] Pane 0's webview continues to receive frames
+
+**Expected outcome:** By removing the listener before dropping the connection,
+the mystery reconnection will have nowhere to connect to. This should prevent
+the double error callback and keep the profile server alive.
 
 ### Future Experiments
 
