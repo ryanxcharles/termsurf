@@ -80,6 +80,8 @@ be unlimited profiles. We need to close unused ones to free resources.
 
 ## Experiment 1: Unregister dead profiles on connection error
 
+**Status: Failed**
+
 Implement the safety net (Option 2). When the launcher detects a profile
 connection error, unregister it so the next request spawns a fresh process.
 
@@ -133,3 +135,21 @@ web google.com   # Should spawn new profile and work
 tail -f /tmp/termsurf-launcher.log
 # Expected: "Unregistered dead profile 'default'" then "Spawning new profile"
 ```
+
+### Conclusion
+
+The unregistration works, but it's **too late**. The sequence is:
+
+1. `spawn_profile` received for second webview
+2. Launcher forwards to existing profile via `send()` (fire-and-forget)
+3. Error handler fires asynchronously, unregisters profile ✓
+4. But the GUI has already given up waiting and disconnected
+5. Launcher exits because no GUI connections remain
+
+The fix only helps *future* requests, but the *current* request is already lost.
+
+**Hypothesis:** The safety net (Option 2) cannot work alone because the error is
+detected too late. We must implement Option 4 first: the profile notifies the
+launcher before exiting. This ensures the profile is already unregistered when
+the second request arrives, so the launcher spawns fresh instead of forwarding
+to a dead process.
