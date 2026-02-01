@@ -823,6 +823,23 @@ mod cef_handlers {
                             let mut task = CopyTask::new(bs);
                             cef::post_task(cef::ThreadId::UI, Some(&mut task));
                         }
+                        "do_cut" => {
+                            // Issue 318, experiment 2: Cut selection to clipboard via CEF
+                            let state_guard = deferred_for_handler.lock().unwrap();
+                            let Some(bs) = state_guard.as_ref() else {
+                                println!("Profile: do_cut ignored (state not ready)");
+                                return;
+                            };
+
+                            println!("[CLIPBOARD] Received do_cut command");
+
+                            let bs = Arc::clone(bs);
+                            drop(state_guard); // Release lock before post_task
+
+                            // Post to CEF UI thread
+                            let mut task = CutTask::new(bs);
+                            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                        }
                         _ => {}
                     }
                 }
@@ -1024,6 +1041,32 @@ mod cef_handlers {
                     }
                 } else {
                     println!("[CLIPBOARD] CopyTask: no browser");
+                }
+            }
+        }
+    }
+
+    // ====== Cut Task ======
+    //
+    // Task for cutting selected text to clipboard via CEF's native frame.cut().
+    // Issue 318, experiment 2: Like copy, but also deletes the selection.
+
+    wrap_task! {
+        pub struct CutTask {
+            state: Arc<BrowserState>,
+        }
+
+        impl Task {
+            fn execute(&self) {
+                if let Some(browser) = self.state.browser.lock().unwrap().as_ref() {
+                    if let Some(frame) = browser.main_frame() {
+                        println!("[CLIPBOARD] Calling frame.cut()");
+                        frame.cut();
+                    } else {
+                        println!("[CLIPBOARD] CutTask: no main frame");
+                    }
+                } else {
+                    println!("[CLIPBOARD] CutTask: no browser");
                 }
             }
         }

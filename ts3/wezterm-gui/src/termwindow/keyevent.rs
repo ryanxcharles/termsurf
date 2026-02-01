@@ -1006,6 +1006,20 @@ impl super::TermWindow {
                     return Some(true); // Consume the key
                 }
 
+                // Handle Cmd+X (cut) - call CEF's native cut (issue 318, experiment 2)
+                let is_cmd_x = window_key.key_is_down
+                    && window_key.modifiers.contains(Modifiers::SUPER)
+                    && matches!(&window_key.key, KeyCode::Char('x') | KeyCode::Char('X'));
+
+                if is_cmd_x {
+                    log::info!("[CLIPBOARD] Cmd+X detected, sending do_cut to browser");
+                    drop(overlays); // Release lock before XPC call
+                    if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+                        xpc_manager.send_cut(pane_id);
+                    }
+                    return Some(true); // Consume the key
+                }
+
                 // Forward other keys to browser via XPC
                 drop(overlays); // Release lock before XPC call
                 if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
