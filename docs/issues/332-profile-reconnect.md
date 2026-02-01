@@ -75,3 +75,61 @@ be unlimited profiles. We need to close unused ones to free resources.
 - `ts3/termsurf-profile/src/main.rs` - Profile server exit logic
 - `ts3/termsurf-launcher/src/main.rs` - Profile registration and forwarding
   logic
+
+---
+
+## Experiment 1: Unregister dead profiles on connection error
+
+Implement the safety net (Option 2). When the launcher detects a profile
+connection error, unregister it so the next request spawns a fresh process.
+
+### Current Behavior
+
+In `register_profile` handler (lines 228-235), the event handler logs the error
+but doesn't remove the profile from `running_profiles`:
+
+```rust
+let profile_name = profile.to_string();
+set_event_handler(&*profile_conn, move |event| {
+    if let Err(e) = event {
+        eprintln!(
+            "Launcher: Profile '{}' connection error: {}",
+            profile_name, e
+        );
+    }
+});
+```
+
+### Fix
+
+Pass `running_profiles` into the closure and remove the profile on error:
+
+```rust
+let profile_name = profile.to_string();
+let running_profiles_for_handler = running_profiles.clone();
+set_event_handler(&*profile_conn, move |event| {
+    if let Err(e) = event {
+        eprintln!(
+            "Launcher: Profile '{}' connection error: {}",
+            profile_name, e
+        );
+        // Unregister so next request spawns fresh
+        running_profiles_for_handler
+            .lock()
+            .unwrap()
+            .remove(&profile_name);
+        println!("Launcher: Unregistered dead profile '{}'", profile_name);
+    }
+});
+```
+
+### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+web google.com   # Opens webview
+# Close with Ctrl+C twice
+web google.com   # Should spawn new profile and work
+tail -f /tmp/termsurf-launcher.log
+# Expected: "Unregistered dead profile 'default'" then "Spawning new profile"
+```
