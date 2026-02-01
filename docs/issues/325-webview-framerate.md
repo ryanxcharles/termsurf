@@ -4,8 +4,8 @@ Webview content does not refresh at 60fps, causing visible lag.
 
 ## Status
 
-Experiment 3 designed. Testing whether `do_message_loop_work()` polling improves
-frame rate over blocking `run_message_loop()`.
+Experiment 3 success. Polling with `do_message_loop_work()` achieves 60fps.
+Root cause confirmed: `run_message_loop()` doesn't pump work fast enough.
 
 ## Product Requirements
 
@@ -631,7 +631,57 @@ web google.com
 - **Ctrl+C handling** — Need to restructure shutdown logic since
   `quit_message_loop()` won't work with a custom loop.
 
-**Status:** Not started.
+**Status:** Success.
+
+**Result:** Frame rate improved from 12-20fps to ~60fps during active scrolling.
+
+**Observed frame intervals (during scroll):**
+
+```
+908→909: 18ms    915→916: 16ms
+909→910: 16ms    916→917: 16ms
+910→911: 18ms    917→918: 15ms
+911→912: 15ms    918→919: 18ms
+912→913: 17ms    919→920: 18ms
+913→914: 15ms    920→921: 16ms
+914→915: 19ms    921→922: 16ms
+```
+
+**Calculation:** 19 frames over 320ms = **59.4 fps** ✓
+
+**Conclusion:** The polling loop with `do_message_loop_work()` achieves 60fps.
+The original `run_message_loop()` was not pumping CEF's message queue frequently
+enough, causing the low frame rate. This confirms the ts2 comparison findings —
+the message loop integration is critical for frame rate.
+
+### Testing Note: Background Process Lifecycle
+
+During testing, initial results were inconsistent (~26fps). This was caused by
+**stale background processes not reloading** after rebuilds. The profile server
+and launcher processes persist after the GUI closes, so code changes weren't
+taking effect.
+
+**Workaround:** Kill background processes before testing:
+
+```bash
+pkill -f termsurf-profile
+pkill -f termsurf-launcher
+```
+
+**Root cause:** When the GUI app closes, the profile server and launcher
+processes are not terminated. This is a separate bug that should be fixed —
+the GUI should signal child processes to exit on shutdown.
+
+### Next Steps
+
+1. **Fix process lifecycle** — GUI should terminate profile/launcher processes
+   on exit. This is blocking effective development iteration.
+
+2. **Optimize polling** — The 1ms sleep works but wastes CPU. Implement proper
+   `on_schedule_message_pump_work` callback like ts2 for demand-driven pumping.
+
+3. **Verify all success criteria** — Confirm hover effects, text selection, and
+   typing all feel responsive at 60fps.
 
 ## References
 
