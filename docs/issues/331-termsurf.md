@@ -153,3 +153,32 @@ cd ts3 && ./scripts/build-debug.sh --open
 # Create ~/.config/termsurf/termsurf.lua with: return {}
 # App should load the new config location
 ```
+
+---
+
+## Experiment 6: Rename config env vars
+
+Rename `WEZTERM_CONFIG_FILE` → `TERMSURF_CONFIG_FILE` and `WEZTERM_CONFIG_DIR` → `TERMSURF_CONFIG_DIR`.
+
+### Changes
+
+| File | Line | Change |
+|------|------|--------|
+| `ts3/config/src/config.rs` | 1029 | GET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
+| `ts3/config/src/config.rs` | 1030 | log message update |
+| `ts3/config/src/config.rs` | 1061 | REMOVE: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
+| `ts3/config/src/config.rs` | 1062 | REMOVE: `"WEZTERM_CONFIG_DIR"` → `"TERMSURF_CONFIG_DIR"` |
+| `ts3/config/src/config.rs` | 1133 | SET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
+| `ts3/config/src/config.rs` | 1135 | SET: `"WEZTERM_CONFIG_DIR"` → `"TERMSURF_CONFIG_DIR"` |
+| `ts3/wezterm-mux-server-impl/src/sessionhandler.rs` | 862 | GET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
+| `ts3/wezterm-gui/src/main.rs` | 564 | GET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
+| `ts3/env-bootstrap/src/lib.rs` | 89 | REMOVE: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
+| `ts3/env-bootstrap/src/lib.rs` | 90 | REMOVE: `"WEZTERM_CONFIG_DIR"` → `"TERMSURF_CONFIG_DIR"` |
+
+### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+# Set TERMSURF_CONFIG_FILE=/path/to/custom.lua before launch
+# App should use the custom config path
+```
