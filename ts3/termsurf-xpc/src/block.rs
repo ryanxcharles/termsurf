@@ -27,11 +27,11 @@ use std::sync::Arc;
 /// });
 /// ```
 ///
-/// # Safety Note
+/// # Memory Management
 ///
-/// The handler block is leaked to ensure it lives as long as the connection.
-/// This is acceptable for long-lived connections but will leak memory if
-/// connections are created and destroyed frequently.
+/// XPC copies the block via `Block_copy()` internally, so we pass a reference
+/// and let our `RcBlock` drop after the call. When the connection is canceled,
+/// XPC releases its copy via the block's normal ref-counting.
 pub fn set_event_handler<F>(conn: &XpcConnection, handler: F)
 where
     F: Fn(Result<XpcDictionary>) + Send + 'static,
@@ -43,14 +43,15 @@ where
         handler(result);
     });
 
-    // Leak the block to ensure it lives forever.
-    // This is necessary because XPC holds a reference to the block
-    // and we have no way to know when XPC is done with it.
-    let block_ptr = RcBlock::into_raw(block);
-
+    // XPC copies the block via Block_copy(), so we can let ours drop.
+    // When the connection is canceled, XPC releases its copy.
     unsafe {
-        ffi::xpc_connection_set_event_handler(conn.as_raw(), block_ptr as *mut _);
+        ffi::xpc_connection_set_event_handler(
+            conn.as_raw(),
+            &*block as *const _ as *mut std::ffi::c_void,
+        );
     }
+    // block drops here, decrementing ref count (XPC still has its copy)
 }
 
 /// Set a handler for new incoming connections on a listener.
@@ -117,10 +118,13 @@ where
         }
     });
 
-    // Leak the block
-    let block_ptr = RcBlock::into_raw(block);
-
+    // XPC copies the block via Block_copy(), so we can let ours drop.
+    // When the listener is canceled, XPC releases its copy.
     unsafe {
-        ffi::xpc_connection_set_event_handler(listener.as_raw(), block_ptr as *mut _);
+        ffi::xpc_connection_set_event_handler(
+            listener.as_raw(),
+            &*block as *const _ as *mut std::ffi::c_void,
+        );
     }
+    // block drops here, decrementing ref count (XPC still has its copy)
 }

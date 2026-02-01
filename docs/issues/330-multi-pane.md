@@ -821,13 +821,13 @@ done
 
 **Success criteria:**
 
-- [ ] Blocks not leaked (no `into_raw()` calls)
-- [ ] XPC event handling still works (messages received)
-- [ ] Webview open/close still works
-- [ ] No crashes or memory corruption
+- [x] Blocks not leaked (no `into_raw()` calls)
+- [x] XPC event handling still works (messages received)
+- [x] Webview open/close still works
+- [x] No crashes or memory corruption
 
-**Risk:** Medium. Changing block lifetime semantics could cause use-after-free if
-our understanding of XPC's `Block_copy` behavior is wrong. Careful testing required.
+**Result: Success.** XPC copies blocks via `Block_copy()` as documented. Events
+(focus, key_event, frames) continue to be delivered correctly. No regressions.
 
 ## Success Criteria
 
