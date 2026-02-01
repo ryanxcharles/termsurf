@@ -435,6 +435,10 @@ pub struct TermWindow {
     #[cfg(target_os = "macos")]
     webview_mouse_buttons: RefCell<HashMap<PaneId, u32>>,
 
+    /// Issue 329: Last focused pane for webview focus tracking
+    #[cfg(target_os = "macos")]
+    last_focused_pane: Option<PaneId>,
+
     window_background: Vec<LoadedBackgroundLayer>,
 
     current_modifier_and_leds: (Modifiers, KeyboardLedStatus),
@@ -815,6 +819,8 @@ impl TermWindow {
             click_state: RefCell::new(HashMap::new()),
             #[cfg(target_os = "macos")]
             webview_mouse_buttons: RefCell::new(HashMap::new()),
+            #[cfg(target_os = "macos")]
+            last_focused_pane: None,
             ui_items: vec![],
             dragging: None,
             last_ui_item: None,
@@ -1338,7 +1344,40 @@ impl TermWindow {
                 MuxNotification::SaveToDownloads { .. } => {
                     // Handled by frontend
                 }
-                MuxNotification::PaneFocused(_) => {
+                MuxNotification::PaneFocused(new_pane_id) => {
+                    // Issue 329: Handle webview focus on pane change
+                    #[cfg(target_os = "macos")]
+                    {
+                        use crate::termwindow::webview_socket::{get_server, WebviewMode};
+                        use crate::termwindow::webview_xpc::get_xpc_manager;
+
+                        let old_pane_id = self.last_focused_pane;
+                        self.last_focused_pane = Some(new_pane_id);
+
+                        if let (Some(xpc), Some(server)) = (get_xpc_manager(), get_server()) {
+                            let state = server.state();
+                            let overlays = state.read().unwrap();
+
+                            // Unfocus old webview (if it had one)
+                            if let Some(old_id) = old_pane_id {
+                                if old_id != new_pane_id {
+                                    if overlays.overlays.contains_key(&old_id) {
+                                        log::info!("[FOCUS] Pane change: unfocusing old pane {}", old_id);
+                                        xpc.send_focus(old_id, false);
+                                    }
+                                }
+                            }
+
+                            // Focus new webview if in Browse mode
+                            if let Some(overlay) = overlays.overlays.get(&new_pane_id) {
+                                if overlay.mode == WebviewMode::Browse {
+                                    log::info!("[FOCUS] Pane change: focusing new pane {} (Browse mode)", new_pane_id);
+                                    xpc.send_focus(new_pane_id, true);
+                                }
+                            }
+                        }
+                    }
+
                     // Also handled by clientpane
                     self.update_title_post_status();
                 }
