@@ -4,8 +4,8 @@ Webview content does not refresh at 60fps, causing visible lag.
 
 ## Status
 
-Experiment 3 success. Polling with `do_message_loop_work()` achieves 60fps.
-Root cause confirmed: `run_message_loop()` doesn't pump work fast enough.
+Experiment 4 designed. Optimizing CPU usage with demand-driven CFRunLoop timers
+(like ts2) instead of 1ms polling.
 
 ## Product Requirements
 
@@ -682,6 +682,151 @@ the GUI should signal child processes to exit on shutdown.
 
 3. **Verify all success criteria** — Confirm hover effects, text selection, and
    typing all feel responsive at 60fps.
+
+### Experiment 4: Demand-Driven Message Pump (like ts2)
+
+**Goal:** Replace the 1ms polling loop with proper `on_schedule_message_pump_work`
+callback, matching ts2's architecture for efficient CPU usage.
+
+**Hypothesis:** CEF will call `on_schedule_message_pump_work(delay_ms)` to tell
+us exactly when to pump work. Using CFRunLoop timers like ts2, we can pump work
+precisely when needed — no wasted CPU cycles.
+
+**Approach:** Port ts2's CFRunLoop timer pattern to ts3's profile server.
+
+**Reference implementation (ts2):**
+
+```rust
+// ts2/wezterm-gui/src/cef_integration.rs
+
+wrap_browser_process_handler! {
+    struct WezTermBrowserProcessHandler;
+    impl BrowserProcessHandler {
+        fn on_schedule_message_pump_work(&self, delay_ms: i64) {
+            schedule_cef_work(delay_ms);
+        }
+    }
+}
+
+fn schedule_cef_work(delay_ms: i64) {
+    cancel_timer();
+    let delay_secs = if delay_ms <= 0 { 0.0 } else { delay_ms as f64 / 1000.0 };
+
+    let timer = CFRunLoopTimerCreate(
+        std::ptr::null(),
+        CFAbsoluteTimeGetCurrent() + delay_secs,  // fire time
+        0.0,                                       // non-repeating
+        0, 0,
+        timer_callback,
+        std::ptr::null_mut(),
+    );
+    CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
+}
+
+extern "C" fn timer_callback(...) {
+    cef::do_message_loop_work();
+}
+```
+
+**Changes for ts3:**
+
+1. **`ts3/termsurf-profile/src/main.rs`** — Add CFRunLoop timer infrastructure:
+
+   ```rust
+   use core_foundation::runloop::{
+       kCFRunLoopCommonModes, CFRunLoopAddTimer, CFRunLoopGetMain,
+       CFRunLoopRun, CFRunLoopStop, CFRunLoopTimerCreate,
+       CFRunLoopTimerInvalidate, CFRunLoopTimerRef,
+   };
+   use core_foundation_sys::date::CFAbsoluteTimeGetCurrent;
+
+   static CEF_TIMER: Mutex<Option<SendableTimer>> = Mutex::new(None);
+
+   struct SendableTimer(CFRunLoopTimerRef);
+   unsafe impl Send for SendableTimer {}
+   ```
+
+2. **Update `BrowserProcessHandler`** — Add `on_schedule_message_pump_work`:
+
+   ```rust
+   wrap_browser_process_handler! {
+       pub struct ProfileBPH {
+           state: Arc<ProfileState>,
+       }
+
+       impl BrowserProcessHandler {
+           fn on_context_initialized(&self) { /* existing code */ }
+
+           fn on_schedule_message_pump_work(&self, delay_ms: i64) {
+               schedule_cef_work(delay_ms);
+           }
+       }
+   }
+   ```
+
+3. **Replace polling loop with CFRunLoop**:
+
+   Before (polling):
+   ```rust
+   while !quit_flag.load(...) {
+       cef::do_message_loop_work();
+       std::thread::sleep(Duration::from_millis(1));
+   }
+   ```
+
+   After (CFRunLoop):
+   ```rust
+   // Run the CFRunLoop - timers will fire and call do_message_loop_work()
+   println!("Profile: Running CFRunLoop...");
+   unsafe { CFRunLoopRun(); }
+   ```
+
+4. **Update Ctrl+C handler** to stop CFRunLoop:
+
+   ```rust
+   ctrlc::set_handler(move || {
+       println!("Profile: Ctrl+C, stopping CFRunLoop...");
+       unsafe { CFRunLoopStop(CFRunLoopGetMain()); }
+   })
+   ```
+
+5. **Add `core-foundation` dependency** to `termsurf-profile/Cargo.toml`:
+
+   ```toml
+   [dependencies]
+   core-foundation = "0.9"
+   core-foundation-sys = "0.8"
+   ```
+
+**Verification:**
+
+```bash
+# Kill any stale processes first!
+pkill -f termsurf-profile
+pkill -f termsurf-launcher
+
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Monitor CPU usage (should be near 0% when idle):
+top -pid $(pgrep -f termsurf-profile)
+
+# Watch frame rate during scroll:
+tail -f /tmp/termsurf-profile-*.log | grep FRAME-TX
+
+# Test scrolling - should still be ~60fps
+web google.com
+```
+
+**Expected outcome:**
+
+| Metric | Polling (Exp 3) | CFRunLoop (Exp 4) |
+|--------|-----------------|-------------------|
+| FPS during scroll | ~60 | ~60 |
+| CPU when idle | ~5-10% | ~0% |
+| CPU during scroll | ~5-10% | ~1-2% |
+| Wakeups when idle | ~1000/sec | ~0/sec |
+
+**Status:** Not started.
 
 ## References
 
