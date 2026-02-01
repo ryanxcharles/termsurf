@@ -1314,8 +1314,8 @@ impl super::TermWindow {
             }
             WMEK::VertWheel(amount) => {
                 // Issue 321, experiment 2: Smooth trackpad scrolling
-                // * 120 was blocky, * 1 was too slow, trying * 2 (cef-rs default)
-                let delta_y = (*amount as i32) * 2;
+                // * 120 was blocky, * 1 was too slow, * 2 (cef-rs default), * 5 feels faster
+                let delta_y = (*amount as i32) * 5;
                 log::info!(
                     "[SCROLL-DEBUG] VertWheel pane={} raw_amount={} delta_y={}",
                     pane_id, amount, delta_y
@@ -1324,8 +1324,8 @@ impl super::TermWindow {
                 Some(cursor)
             }
             WMEK::HorzWheel(amount) => {
-                // Issue 321, experiment 2: Smooth trackpad scrolling
-                let delta_x = (*amount as i32) * 2;
+                // Issue 321, experiment 2: Smooth trackpad scrolling (5x for faster scroll)
+                let delta_x = (*amount as i32) * 5;
                 log::info!(
                     "[SCROLL-DEBUG] HorzWheel pane={} raw_amount={} delta_x={}",
                     pane_id, amount, delta_x
