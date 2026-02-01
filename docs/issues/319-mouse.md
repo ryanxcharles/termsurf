@@ -215,6 +215,378 @@ clicking links works before adding wheel, modifiers, and click counting.
 - [ ] Hover effects work (CSS :hover, tooltips)
 - [ ] Cursor changes appropriately (pointer, text, etc.)
 
+---
+
+## Experiment 1: Mouse Move and Left Click
+
+Start with the minimal implementation: mouse movement and left-button clicks. Verify
+that clicking links works before adding scrolling, modifiers, or click counting.
+
+### Goal
+
+- Mouse hover over webview pane triggers CEF hover effects
+- Left-click on links navigates to the link target
+
+### Files to Modify
+
+| File                                                 | Changes                                    |
+| ---------------------------------------------------- | ------------------------------------------ |
+| `ts3/wezterm-gui/src/termwindow/webview_xpc.rs`      | Add `send_mouse_move`, `send_mouse_click`  |
+| `ts3/wezterm-gui/src/termwindow/mouseevent.rs`       | Intercept mouse events for webview panes   |
+| `ts3/termsurf-profile/src/main.rs`                   | Handle XPC messages, call CEF host methods |
+
+### Part 1: XPC Methods (webview_xpc.rs)
+
+Add two methods to XpcManager after the existing `send_select_all` method:
+
+```rust
+/// Send mouse move event to the browser (issue 319, experiment 1)
+pub fn send_mouse_move(&self, pane_id: PaneId, x: i32, y: i32, modifiers: u32) -> bool {
+    let msg = XpcDictionary::new();
+    msg.set_string("action", "mouse_move");
+    msg.set_i64("x", x as i64);
+    msg.set_i64("y", y as i64);
+    msg.set_i64("modifiers", modifiers as i64);
+
+    if self.send_command(pane_id, &msg) {
+        log::trace!("[XPC] Sent mouse_move to pane {}: ({}, {})", pane_id, x, y);
+        true
+    } else {
+        false
+    }
+}
+
+/// Send mouse click event to the browser (issue 319, experiment 1)
+pub fn send_mouse_click(
+    &self,
+    pane_id: PaneId,
+    x: i32,
+    y: i32,
+    button: u32,
+    is_up: bool,
+    click_count: i32,
+    modifiers: u32,
+) -> bool {
+    let msg = XpcDictionary::new();
+    msg.set_string("action", "mouse_click");
+    msg.set_i64("x", x as i64);
+    msg.set_i64("y", y as i64);
+    msg.set_i64("button", button as i64);
+    msg.set_bool("is_up", is_up);
+    msg.set_i64("click_count", click_count as i64);
+    msg.set_i64("modifiers", modifiers as i64);
+
+    if self.send_command(pane_id, &msg) {
+        log::debug!(
+            "[XPC] Sent mouse_click to pane {}: ({}, {}) btn={} up={} count={}",
+            pane_id, x, y, button, is_up, click_count
+        );
+        true
+    } else {
+        false
+    }
+}
+```
+
+### Part 2: Intercept Mouse Events (mouseevent.rs)
+
+Add a new method to TermWindow and call it early in `mouse_event_impl`:
+
+**2a. Add helper method to check webview pane bounds**
+
+```rust
+/// Check if mouse event is over a webview pane in Browse mode.
+/// Returns Some((pane_id, rel_x, rel_y, scale)) if so, None otherwise.
+#[cfg(target_os = "macos")]
+fn mouse_over_webview(&self, event: &MouseEvent) -> Option<(mux::pane::PaneId, f32, f32, f32)> {
+    use crate::termwindow::webview_socket::{get_server, WebviewMode};
+
+    let server = get_server()?;
+    let state = server.state();
+    let overlays = state.read().unwrap();
+
+    // Check each pane to find if mouse is over a webview
+    for pos in self.get_panes_to_render() {
+        let pane_id = pos.pane.pane_id();
+
+        // Only consider panes with webview overlays in Browse mode
+        let overlay = overlays.overlays.get(&pane_id)?;
+        if overlay.mode != WebviewMode::Browse {
+            continue;
+        }
+
+        // Calculate viewport bounds (same logic as render_webview_overlays_webgpu)
+        let border = self.get_os_border();
+        let tab_bar_height = if self.show_tab_bar && !self.config.tab_bar_at_bottom {
+            self.tab_bar_pixel_height().unwrap_or(0.)
+        } else {
+            0.
+        };
+
+        let pane_x = pos.left as f32 * self.render_metrics.cell_size.width as f32
+            + border.left.get() as f32;
+        let pane_y = pos.top as f32 * self.render_metrics.cell_size.height as f32
+            + border.top.get() as f32
+            + tab_bar_height;
+        let pane_w = pos.width as f32 * self.render_metrics.cell_size.width as f32;
+        let pane_h = pos.height as f32 * self.render_metrics.cell_size.height as f32;
+
+        // Check if mouse is within pane bounds
+        let mx = event.coords.x as f32;
+        let my = event.coords.y as f32;
+
+        if mx >= pane_x && mx < pane_x + pane_w && my >= pane_y && my < pane_y + pane_h {
+            // Calculate relative position within pane
+            let rel_x = mx - pane_x;
+            let rel_y = my - pane_y;
+
+            // Get scale factor
+            let scale = self.dimensions.dpi as f32 / 72.0;
+            let scale = if scale <= 0.0 { 2.0 } else { scale };
+
+            return Some((pane_id, rel_x, rel_y, scale));
+        }
+    }
+
+    None
+}
+```
+
+**2b. Add method to handle webview mouse events**
+
+```rust
+/// Handle mouse events for webview panes in Browse mode.
+/// Returns true if the event was consumed.
+#[cfg(target_os = "macos")]
+fn handle_webview_mouse_event(&mut self, event: &MouseEvent) -> bool {
+    use ::window::MouseEventKind as WMEK;
+    use ::window::MousePress;
+
+    let (pane_id, rel_x, rel_y, scale) = match self.mouse_over_webview(event) {
+        Some(info) => info,
+        None => return false,
+    };
+
+    // Convert to logical (CEF DIP) coordinates
+    let cef_x = (rel_x / scale) as i32;
+    let cef_y = (rel_y / scale) as i32;
+
+    let xpc_manager = match crate::termwindow::webview_xpc::get_xpc_manager() {
+        Some(m) => m,
+        None => return false,
+    };
+
+    match &event.kind {
+        WMEK::Move => {
+            xpc_manager.send_mouse_move(pane_id, cef_x, cef_y, 0);
+            true
+        }
+        WMEK::Press(MousePress::Left) => {
+            xpc_manager.send_mouse_click(pane_id, cef_x, cef_y, 0, false, 1, 0);
+            true
+        }
+        WMEK::Release(MousePress::Left) => {
+            xpc_manager.send_mouse_click(pane_id, cef_x, cef_y, 0, true, 1, 0);
+            true
+        }
+        _ => false, // Let other events pass through for now
+    }
+}
+```
+
+**2c. Add early intercept in mouse_event_impl**
+
+At the start of `mouse_event_impl`, after getting the pane:
+
+```rust
+pub fn mouse_event_impl(&mut self, event: MouseEvent, context: &dyn WindowOps) {
+    log::trace!("{:?}", event);
+    let pane = match self.get_active_pane_or_overlay() {
+        Some(pane) => pane,
+        None => return,
+    };
+
+    // Check for webview mouse event (issue 319)
+    #[cfg(target_os = "macos")]
+    if self.handle_webview_mouse_event(&event) {
+        return; // Event consumed by webview
+    }
+
+    self.current_mouse_event.replace(event.clone());
+    // ... rest of existing code
+```
+
+### Part 3: CEF Mouse Event Handling (main.rs)
+
+**3a. Add XPC message handlers in the event handler**
+
+In `create_browser_on_ui_thread`, add cases for mouse events:
+
+```rust
+"mouse_move" => {
+    let state_guard = deferred_for_handler.lock().unwrap();
+    let Some(bs) = state_guard.as_ref() else {
+        return;
+    };
+
+    let x = msg.get_i64("x") as i32;
+    let y = msg.get_i64("y") as i32;
+    let modifiers = msg.get_i64("modifiers") as u32;
+
+    let bs = Arc::clone(bs);
+    drop(state_guard);
+
+    let mut task = MouseMoveTask::new(bs, x, y, modifiers);
+    cef::post_task(cef::ThreadId::UI, Some(&mut task));
+}
+"mouse_click" => {
+    let state_guard = deferred_for_handler.lock().unwrap();
+    let Some(bs) = state_guard.as_ref() else {
+        return;
+    };
+
+    let x = msg.get_i64("x") as i32;
+    let y = msg.get_i64("y") as i32;
+    let button = msg.get_i64("button") as u32;
+    let is_up = msg.get_bool("is_up");
+    let click_count = msg.get_i64("click_count") as i32;
+    let modifiers = msg.get_i64("modifiers") as u32;
+
+    let bs = Arc::clone(bs);
+    drop(state_guard);
+
+    let mut task = MouseClickTask::new(bs, x, y, button, is_up, click_count, modifiers);
+    cef::post_task(cef::ThreadId::UI, Some(&mut task));
+}
+```
+
+**3b. Add MouseMoveTask**
+
+```rust
+// ====== Mouse Move Task ======
+//
+// Task for sending mouse move events to CEF on the UI thread.
+// Issue 319, experiment 1.
+
+wrap_task! {
+    pub struct MouseMoveTask {
+        state: Arc<BrowserState>,
+        x: i32,
+        y: i32,
+        modifiers: u32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            if let Some(browser) = self.state.browser.lock().unwrap().as_ref() {
+                if let Some(host) = browser.host() {
+                    let mouse_event = cef::MouseEvent {
+                        x: self.x,
+                        y: self.y,
+                        modifiers: self.modifiers,
+                    };
+                    // mouse_leave = false (mouse is over the view)
+                    host.send_mouse_move_event(Some(&mouse_event), 0);
+                }
+            }
+        }
+    }
+}
+```
+
+**3c. Add MouseClickTask**
+
+```rust
+// ====== Mouse Click Task ======
+//
+// Task for sending mouse click events to CEF on the UI thread.
+// Issue 319, experiment 1.
+
+wrap_task! {
+    pub struct MouseClickTask {
+        state: Arc<BrowserState>,
+        x: i32,
+        y: i32,
+        button: u32,
+        is_up: bool,
+        click_count: i32,
+        modifiers: u32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            if let Some(browser) = self.state.browser.lock().unwrap().as_ref() {
+                if let Some(host) = browser.host() {
+                    let mouse_event = cef::MouseEvent {
+                        x: self.x,
+                        y: self.y,
+                        modifiers: self.modifiers,
+                    };
+                    // button: 0=left, 1=middle, 2=right (CEF MouseButtonType)
+                    let button_type = match self.button {
+                        0 => cef::MouseButtonType::MBT_LEFT,
+                        1 => cef::MouseButtonType::MBT_MIDDLE,
+                        2 => cef::MouseButtonType::MBT_RIGHT,
+                        _ => cef::MouseButtonType::MBT_LEFT,
+                    };
+                    let mouse_up = if self.is_up { 1 } else { 0 };
+                    host.send_mouse_click_event(
+                        Some(&mouse_event),
+                        button_type,
+                        mouse_up,
+                        self.click_count,
+                    );
+                }
+            }
+        }
+    }
+}
+```
+
+### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Test 1: Hover effects
+web google.com
+# Move mouse over search button
+# Expected: Cursor changes, hover effects visible
+
+# Test 2: Click links
+web example.com
+# Click the "More information..." link
+# Expected: Navigates to IANA page
+
+# Test 3: Click form elements
+web google.com
+# Click in search box
+# Expected: Text cursor appears, can type
+
+# Log verification
+tail -f /tmp/termsurf-gui.log | grep -E "\[XPC\] Sent mouse"
+tail -f /tmp/termsurf-profile-*.log | grep -i mouse
+```
+
+### Success Criteria for Experiment 1
+
+- [ ] Mouse movement sends events to CEF (visible in logs)
+- [ ] Hover over links shows pointer cursor
+- [ ] Click on links navigates to URL
+- [ ] Click in text fields focuses them
+- [ ] Click on buttons activates them
+
+### Known Limitations (Experiment 1)
+
+These will be addressed in later experiments:
+
+- No scroll wheel support
+- No modifiers (Shift-click, Cmd-click)
+- No click counting (double/triple click)
+- No drag support (text selection)
+- No right-click support
+- No middle-click support
+
 ## References
 
 - `docs/issues/317-input.md` — Keyboard input (completed)
