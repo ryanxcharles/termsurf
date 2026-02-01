@@ -342,6 +342,8 @@ pub struct WebviewOverlay {
     pub tab_id: TabId,
     /// Current input mode (Browse or Control)
     pub mode: WebviewMode,
+    /// Browser profile name (for control panel display)
+    pub profile: String,
 }
 
 /// Tracks active webview overlays (global, not per-window)
@@ -538,6 +540,7 @@ fn handle_request(
                 session_id: session_id.clone(),
                 tab_id,
                 mode: WebviewMode::default(),
+                profile: profile.to_string(),
             };
 
             state.write().unwrap().add_overlay(pane_id, overlay);
@@ -593,6 +596,7 @@ fn handle_request(
                 session_id: format!("legacy-pane-{}", pane_id),
                 tab_id,
                 mode: WebviewMode::default(),
+                profile: "default".to_string(),
             };
 
             state.write().unwrap().add_overlay(pane_id, overlay);

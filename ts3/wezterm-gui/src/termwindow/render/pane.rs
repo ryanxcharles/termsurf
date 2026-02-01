@@ -876,12 +876,11 @@ impl crate::TermWindow {
                 None => continue,
             };
 
-            // Choose text based on mode
+            // Get profile name for right-aligned display
             use crate::termwindow::webview_socket::WebviewMode;
-            let display_text = match overlay.mode {
-                WebviewMode::Browse => url,
-                WebviewMode::Control => "Enter to browse. Ctrl+C to exit.".to_string(),
-            };
+            let profile_name = overlay.profile.clone();
+            let profile_padding = cell_width * 2.0; // Space between URL and profile
+            let profile_char_width = profile_name.len() as f32 * cell_width;
 
             // Determine if control panel should be dimmed using HSB from config
             // Dimmed when: Browse mode (webview is active) OR pane is inactive
@@ -946,6 +945,23 @@ impl crate::TermWindow {
                 (pos.width as f32 * cell_width) + width_delta
             };
 
+            // Calculate display text with truncation for profile name space
+            let profile_reserved = profile_char_width + profile_padding + half_cell_width;
+            let display_text = match overlay.mode {
+                WebviewMode::Browse => {
+                    // Truncate URL if it would overlap with profile name
+                    let url_max_chars = ((width - half_cell_width - profile_reserved) / cell_width) as usize;
+                    if url.len() <= url_max_chars {
+                        url
+                    } else if url_max_chars > 3 {
+                        format!("{}...", &url[..url_max_chars - 3])
+                    } else {
+                        "...".to_string()
+                    }
+                }
+                WebviewMode::Control => "Enter to browse. Ctrl+C to exit.".to_string(),
+            };
+
             // Create text element with padding for margins (matching ts2)
             let element = Element::new(&font, ElementContent::Text(display_text))
                 .colors(ElementColors {
@@ -989,6 +1005,46 @@ impl crate::TermWindow {
 
             // Render the element with HSV dimming (safe now - layers are dropped)
             self.render_element_with_hsv(&computed, gl_state, None, panel_hsv)?;
+
+            // Render profile name (right-aligned)
+            let profile_element = Element::new(&font, ElementContent::Text(profile_name.clone()))
+                .colors(ElementColors {
+                    border: BorderColor::default(),
+                    bg: palette.background.to_linear().into(),
+                    text: palette.foreground.to_linear().into(),
+                })
+                .padding(BoxDimension {
+                    left: Dimension::Pixels(0.),
+                    top: Dimension::Pixels(half_cell_height),
+                    right: Dimension::Pixels(half_cell_width),
+                    bottom: Dimension::Pixels(half_cell_height),
+                });
+
+            let mut profile_computed = self.compute_element(
+                &LayoutContext {
+                    height: DimensionContext {
+                        dpi: self.dimensions.dpi as f32,
+                        pixel_max: self.dimensions.pixel_height as f32,
+                        pixel_cell: metrics.cell_size.height as f32,
+                    },
+                    width: DimensionContext {
+                        dpi: self.dimensions.dpi as f32,
+                        pixel_max: self.dimensions.pixel_width as f32,
+                        pixel_cell: metrics.cell_size.width as f32,
+                    },
+                    bounds: euclid::rect(0., 0., profile_char_width + half_cell_width, control_bar_height),
+                    metrics: &metrics,
+                    gl_state,
+                    zindex: 0,
+                },
+                &profile_element,
+            )?;
+
+            // Position at right edge
+            let profile_x = x + width - profile_char_width - half_cell_width;
+            profile_computed.translate(euclid::vec2(profile_x, y));
+
+            self.render_element_with_hsv(&profile_computed, gl_state, None, panel_hsv)?;
         }
 
         Ok(())

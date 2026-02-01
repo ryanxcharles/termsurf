@@ -42,6 +42,8 @@ right-aligned.
 
 ## Experiment 1: Display profile name right-aligned
 
+**Status: Success**
+
 Add the profile name to the control panel, right-aligned, with URL truncation
 when they would overlap.
 
@@ -148,3 +150,34 @@ cd ts3 && ./scripts/build-debug.sh --open
 web google.com                    # Short URL - profile visible on right
 web google.com/very/long/path...  # Long URL - truncated with ellipsis
 ```
+
+---
+
+## Conclusion
+
+The control panel now displays the browser profile name right-aligned, making it
+easy to identify which profile is active for each webview.
+
+### Implementation Summary
+
+| Component | Change |
+|-----------|--------|
+| `WebviewOverlay` struct | Added `profile: String` field |
+| Overlay creation | Profile name captured from `web` command (defaults to "default") |
+| URL rendering | Truncated with `...` when space is limited |
+| Profile rendering | Separate element positioned at right edge |
+
+### Key Design Decisions
+
+1. **Two separate elements** - URL and profile are rendered as independent
+   elements rather than a single formatted string. This allows precise
+   positioning and independent styling if needed later.
+
+2. **Character-based truncation** - URL truncation is calculated based on
+   available character width, accounting for the profile name, padding, and
+   margins.
+
+3. **Profile on top (z-order)** - The profile element is rendered after the URL
+   element, so if they somehow overlap, the profile name remains visible.
+
+This is new functionality not present in ts2, which only displayed the URL.
