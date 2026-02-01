@@ -1247,22 +1247,22 @@ impl super::TermWindow {
                 true
             }
             WMEK::VertWheel(amount) => {
-                // Issue 321, experiment 1: Scroll support
-                // CEF expects delta in "wheel ticks" where 120 = 1 line
-                let delta_y = (*amount as i32) * 120;
+                // Issue 321, experiment 2: Smooth trackpad scrolling
+                // * 120 was blocky, * 1 was too slow, trying * 2 (cef-rs default)
+                let delta_y = (*amount as i32) * 2;
                 log::info!(
-                    "[MOUSE] VertWheel pane={} cef=({}, {}) amount={} delta_y={}",
-                    pane_id, cef_x, cef_y, amount, delta_y
+                    "[SCROLL-DEBUG] VertWheel pane={} raw_amount={} delta_y={}",
+                    pane_id, amount, delta_y
                 );
                 xpc_manager.send_mouse_wheel(pane_id, cef_x, cef_y, 0, delta_y, 0);
                 true
             }
             WMEK::HorzWheel(amount) => {
-                // Issue 321, experiment 1: Scroll support
-                let delta_x = (*amount as i32) * 120;
+                // Issue 321, experiment 2: Smooth trackpad scrolling
+                let delta_x = (*amount as i32) * 2;
                 log::info!(
-                    "[MOUSE] HorzWheel pane={} cef=({}, {}) amount={} delta_x={}",
-                    pane_id, cef_x, cef_y, amount, delta_x
+                    "[SCROLL-DEBUG] HorzWheel pane={} raw_amount={} delta_x={}",
+                    pane_id, amount, delta_x
                 );
                 xpc_manager.send_mouse_wheel(pane_id, cef_x, cef_y, delta_x, 0, 0);
                 true
