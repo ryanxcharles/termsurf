@@ -4,7 +4,7 @@ The webview caret blinks even when the webview should not have focus.
 
 ## Status
 
-**Open.** Follow-up to issue 328 (caret visibility).
+**Resolved.** Focus commands now sent on mode change and pane switch.
 
 ## Problem
 
@@ -178,9 +178,9 @@ web google.com
 
 - [x] Caret stops blinking when entering Control mode
 - [x] Caret resumes blinking when entering Browse mode
-- [ ] Caret stops blinking when switching to another pane
-- [ ] Caret resumes blinking when switching back to webview in Browse mode
-- [ ] Multiple webviews: only active one has blinking caret
+- [x] Caret stops blinking when switching to another pane
+- [x] Caret resumes blinking when switching back to webview in Browse mode
+- [x] Multiple webviews: only active one has blinking caret
 - [x] No regression in keyboard/mouse input
 
 ## Experiments
@@ -503,12 +503,14 @@ cat /tmp/termsurf-gui.log | grep "\[FOCUS\]"
 
 **Success criteria:**
 
-- [ ] Caret stops blinking when clicking on another pane
-- [ ] Caret resumes blinking when clicking back on webview (Browse mode)
-- [ ] Caret does NOT resume if webview is in Control mode
-- [ ] Keyboard pane navigation triggers same behavior
-- [ ] Multiple webviews: only active one has blinking caret
-- [ ] No regression in mode switching (experiment 1)
+- [x] Caret stops blinking when clicking on another pane
+- [x] Caret resumes blinking when clicking back on webview (Browse mode)
+- [x] Caret does NOT resume if webview is in Control mode
+- [x] Keyboard pane navigation triggers same behavior
+- [x] Multiple webviews: only active one has blinking caret
+- [x] No regression in mode switching (experiment 1)
+
+**Status:** Success.
 
 **Risks:**
 
@@ -521,6 +523,44 @@ cat /tmp/termsurf-gui.log | grep "\[FOCUS\]"
 
 3. **Rapid clicking** — Multiple rapid clicks could cause focus state churn.
    This should be benign since each click will eventually settle.
+
+## Conclusion
+
+Both experiments succeeded. The webview caret now correctly:
+
+- Stops blinking when entering Control mode (Ctrl+C)
+- Resumes blinking when returning to Browse mode (Enter)
+- Stops blinking when switching to another pane
+- Resumes blinking when switching back to a webview in Browse mode
+
+### Unrelated Issue Discovered During Testing
+
+While testing experiment 2 with multiple webviews, we observed that closing one
+webview caused the profile server to exit, making the other webview inactive.
+Investigation of the logs revealed:
+
+```
+Profile: GUI connection established (total: 1)
+Profile: GUI connection established (total: 2)
+Profile: GUI disconnected (remaining: 1)
+Profile: GUI disconnected (remaining: 0)
+Profile: No more GUI connections, exiting gracefully
+```
+
+Both GUI connections were being disconnected when only one webview was closed.
+The GUI-side logs confirmed proper tracking (separate connections for pane 0 and
+pane 1), but an "XPC connection invalid" error appeared immediately after
+removing one connection.
+
+After reverting the experiment 2 code changes, the issue persisted, confirming
+this is a **pre-existing bug** unrelated to the focus lifecycle changes. The bug
+likely exists in:
+
+- The XPC connection cleanup logic
+- The profile server's handling of multiple browser instances
+- Or macOS XPC behavior when closing one of multiple connections
+
+This issue should be tracked separately (see issue 330 when created).
 
 ## References
 
