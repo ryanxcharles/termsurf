@@ -7,7 +7,7 @@ drag, and scroll within browser panes using their mouse or trackpad.
 
 ## Status
 
-Not started.
+**In progress.** Basic mouse move and left-click working. See Conclusion for details.
 
 ## Requirements
 
@@ -206,13 +206,13 @@ clicking links works before adding wheel, modifiers, and click counting.
 
 ## Success Criteria
 
-- [ ] Can click links to navigate
-- [ ] Can click buttons and form elements
+- [x] Can click links to navigate
+- [x] Can click buttons and form elements
 - [ ] Can double-click to select words
 - [ ] Can click and drag to select text
 - [ ] Can scroll with mouse wheel
 - [ ] Can scroll with trackpad gestures
-- [ ] Hover effects work (CSS :hover, tooltips)
+- [x] Hover effects work (CSS :hover, tooltips)
 - [ ] Cursor changes appropriately (pointer, text, etc.)
 
 ---
@@ -1493,6 +1493,122 @@ After the fix:
 - Links highlight when cursor is directly over them
 - Clicks register at the intended location
 - Control panel area correctly excluded from webview events
+
+---
+
+## Conclusion
+
+### What Was Accomplished
+
+Basic mouse input for webviews in ts3 is now working:
+
+1. **Mouse move events** — Forwarded via XPC to CEF, triggering hover states
+2. **Left-click events** — Press and release forwarded, enabling link clicks and
+   button activation
+3. **Coordinate transformation** — Physical window coordinates correctly converted
+   to logical CEF coordinates with proper DPI scaling
+4. **Control panel handling** — Mouse events over the control panel area are
+   correctly excluded from webview forwarding
+
+### What We Learned
+
+1. **The XPC pipeline works reliably** — Despite initial concerns about message
+   delivery, experiments 2-4 proved that GUI → XPC → Profile → CEF is solid.
+   All messages arrive and are processed correctly.
+
+2. **Coordinate systems require careful alignment** — The root cause of broken
+   mouse input was a 32-pixel Y offset. The webview texture renders below a
+   control panel, but mouse coordinates were calculated from the pane top. This
+   type of off-by-N bug is easy to introduce when rendering and input handling
+   are in different code paths.
+
+3. **Diagnostic logging is essential** — The iterative approach of adding
+   increasingly detailed logging (experiments 2 → 3 → 5) was effective. Each
+   experiment ruled out hypotheses and narrowed the search space.
+
+4. **User observations are valuable** — The breakthrough came from observing
+   that hovering *above* a link triggered the hover state. This directly
+   pointed to a coordinate offset problem.
+
+### Architecture Summary
+
+```
+Mouse Event Flow (ts3):
+
+Window System
+    │
+    ▼
+mouse_event_impl() ─────────────────────────────────────┐
+    │                                                    │
+    ▼                                                    │
+handle_webview_mouse_event()                             │
+    │                                                    │
+    ├─ mouse_over_webview()                              │
+    │   ├─ Check if over webview pane in Browse mode     │
+    │   ├─ Calculate webview_top (pane_y + control_panel)│
+    │   └─ Return (pane_id, rel_x, rel_y, scale)         │
+    │                                                    │
+    ├─ Convert to logical coords: cef_x, cef_y           │
+    │                                                    │
+    └─ xpc_manager.send_mouse_move/click()               │
+            │                                            │
+            ▼                                            │
+        XPC Message ──────────────────────────┐          │
+            │                                 │          │
+            ▼                                 │          │
+    Profile Server (termsurf-profile)         │          │
+            │                                 │          │
+            ▼                                 │          │
+    XPC Event Handler                         │          │
+            │                                 │          │
+            ▼                                 │          │
+    post_task(MouseMoveTask/MouseClickTask)   │          │
+            │                                 │          │
+            ▼                                 │          │
+    CEF UI Thread                             │          │
+            │                                 │          │
+            ▼                                 │          │
+    host.send_mouse_*_event()                 │          │
+            │                                 │          │
+            ▼                                 │          │
+    CEF renders hover/click feedback ─────────┴──────────┘
+```
+
+### Current Limitations
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Mouse move | ✅ Working | Hover states trigger correctly |
+| Left click | ✅ Working | Links and buttons work |
+| Right click | ❌ Not implemented | Needs handler in mouseevent.rs |
+| Middle click | ❌ Not implemented | Needs handler in mouseevent.rs |
+| Double-click | ❌ Not implemented | Needs click counting logic |
+| Triple-click | ❌ Not implemented | Needs click counting logic |
+| Text selection (drag) | ❌ Not implemented | Needs drag tracking |
+| Scroll wheel | ❌ Not implemented | Needs send_mouse_wheel() |
+| Trackpad scroll | ❌ Not implemented | Same as scroll wheel |
+| Cursor changes | ❌ Not implemented | CEF → GUI reverse channel needed |
+| Modifiers | ❌ Not implemented | Shift-click, Cmd-click, etc. |
+
+### Next Steps
+
+1. **Scroll wheel support** — Add `send_mouse_wheel()` to XpcManager and handle
+   `WMEK::VertWheel`/`WMEK::HorzWheel` events. CEF expects delta × 120.
+
+2. **Click counting** — Track click timestamps to detect double/triple clicks.
+   Send appropriate `click_count` to CEF for word/line selection.
+
+3. **Modifier keys** — Build modifiers bitmask from event.modifiers and pass
+   to CEF. Required for Shift-click (extend selection), Cmd-click (new tab), etc.
+
+4. **Right-click** — Add handler for `MousePress::Right`. Consider whether to
+   forward to CEF (for web context menus) or handle in GUI (for TermSurf menu).
+
+5. **Drag/selection** — Track mouse button state across move events. When left
+   button is held during move, CEF interprets this as text selection drag.
+
+6. **Cursor feedback** — CEF can report cursor changes via `OnCursorChange`.
+   Would need reverse XPC channel (Profile → GUI) to update window cursor.
 
 ---
 
