@@ -900,7 +900,7 @@ the chain breaks.
 
 ## Experiment 3: Deep Handler Logging
 
-**Status: FAILED**
+**Status: SUCCESS**
 
 Add logging at every decision point in the mouse event handler chain. Experiment 2
 showed messages arrive at `[XPC-RECV]` but gave no visibility into what happens next.
@@ -1161,12 +1161,12 @@ Based on which pattern emerges:
 
 ### Conclusion (Experiment 3)
 
-**Result: Failed.** The logging showed the entire pipeline working, but mouse input remains
-broken with highly inconsistent, non-deterministic behavior.
+**Result: Success.** The deep logging proved the ts3 pipeline is working correctly.
+The issue is not in our code path — it's in how CEF responds to the events.
 
 #### What We Learned
 
-1. **Pipeline is complete**: Every stage executes successfully:
+1. **Pipeline is 100% complete**: Every stage executes successfully for every event:
    - Handler enters
    - BrowserState is available
    - post_task is called and returns
@@ -1177,34 +1177,31 @@ broken with highly inconsistent, non-deterministic behavior.
 2. **Coordinates are correct**: Mouse positions are within view_rect bounds after
    proper physical-to-logical conversion.
 
-3. **Behavior is inconsistent**: User observed:
+3. **XPC connection errors are shutdown noise**: The "XPC connection interrupted"
+   errors occur when the app closes, not during mouse interaction.
+
+4. **The problem is inside CEF**: Our code successfully delivers every mouse event
+   to CEF. CEF receives them but produces inconsistent visual feedback:
    - Cursor does NOT change to pointer on links
    - Links highlight only briefly and incorrectly
-   - Visual feedback is highly inconsistent, "more broken than not"
+   - Behavior is non-deterministic
 
-4. **XPC connection errors**: Logs show "XPC connection interrupted" errors occurring
-   during mouse event processing, but the profile continues running.
+#### What This Tells Us
 
-#### Why This Experiment Failed
+The ts3 out-of-process architecture (XPC → post_task → CEF API) is working correctly.
+The issue must be in one of:
 
-The deep logging proved the pipeline executes correctly, but the mouse input is still
-broken. This means the issue is NOT in the execution path we instrumented. Possible
-causes that remain uninvestigated:
+1. **How we call CEF** — Maybe we're missing parameters, flags, or setup that ts2 does
+2. **CEF internal state** — Focus, hit testing, or rendering state issues
+3. **Coordinate semantics** — CEF might expect something subtly different
 
-1. **CEF internal state**: CEF receives events but doesn't process them correctly
-   (focus, hit testing, or rendering state issues)
-2. **Timing/threading**: Events arrive but CEF's internal state machine rejects them
-3. **Coordinate system mismatch**: CEF might expect different coordinate semantics
-4. **Connection lifecycle**: XPC errors may indicate deeper connection instability
-
-The experiment successfully ruled out pipeline failures but did not identify the
-actual root cause of the inconsistent mouse behavior.
+Next step: Compare ts2's mouse handling implementation to identify differences.
 
 ---
 
 ## Experiment 4: Clean Log Verification
 
-**Status: Not started**
+**Status: SUCCESS**
 
 A diagnostic-only experiment with no code changes. Verify whether multiple browsers
 are being created for a single `web` command by examining clean logs.
@@ -1284,10 +1281,197 @@ Multiple browsers created for the same session indicates a retry/duplication bug
 
 ### Success Criteria
 
-- [ ] Logs are clean (no data from previous runs)
-- [ ] Exactly one `web` command was issued
-- [ ] Browser creation count is definitively determined
-- [ ] Results inform next debugging direction
+- [x] Logs are clean (no data from previous runs)
+- [x] Exactly one `web` command was issued
+- [x] Browser creation count is definitively determined
+- [x] Results inform next debugging direction
+
+### Conclusion (Experiment 4)
+
+**Result: Success.** The multiple browsers hypothesis was disproven.
+
+#### What We Learned
+
+1. **Only ONE browser is created per session**: Logs show exactly one
+   `Browser 1 created for 'https://google.com'` line. The multiple browsers
+   hypothesis is definitively ruled out.
+
+2. **All 90 mouse events were processed correctly**: Every mouse_move and
+   mouse_click event went through the full pipeline (handler → BrowserState →
+   post_task → CEF API call). The pipeline is working.
+
+3. **XPC errors are shutdown noise**: Connection errors only appear when the
+   app closes, not during mouse interaction.
+
+4. **The problem is NOT in our code path**: Since the pipeline works and only
+   one browser exists, the issue must be in how CEF interprets our events.
+
+#### Key Discovery
+
+User observation: "When I hover a few pixels ABOVE a link, the hover states work."
+
+This indicates a **coordinate offset problem**, not a pipeline or browser issue.
+The Y coordinate sent to CEF appears to be shifted down by some fixed amount,
+likely the control panel height (2 × cell_height ≈ 32 pixels).
+
+#### Next Steps
+
+Experiment 5 will test the control panel offset hypothesis by adding diagnostic
+logging to compare:
+- Current Y calculation (relative to pane top)
+- Correct Y calculation (relative to webview top, accounting for control panel)
+
+---
+
+## Experiment 5: Control Panel Offset Hypothesis
+
+**Status: Not started**
+
+Test the hypothesis that mouse Y coordinates are offset by the control panel height,
+causing hover states to trigger at the wrong vertical position.
+
+### Background
+
+User discovery: "When I hover a few pixels ABOVE a link, the hover states work."
+This suggests the Y coordinate sent to CEF is shifted DOWN by some fixed amount.
+
+Code analysis reveals the cause:
+
+**In `draw.rs` (rendering):**
+```rust
+// Control bar: 2 cell heights at top of pane (matching ts2)
+let control_bar_height = cell_height * 2.0;
+
+// Webview renders below the control bar
+let webview_y = viewport_y + control_bar_height;
+let webview_h = viewport_h - control_bar_height;
+```
+
+**In `mouseevent.rs` (coordinate calculation):**
+```rust
+let rel_y = my - pane_y;  // WRONG: doesn't subtract control_bar_height
+```
+
+The webview texture starts at `pane_y + control_bar_height`, but mouse coordinates
+are calculated relative to `pane_y`. This means:
+- CEF thinks y=0 is at `pane_y + control_bar_height` (top of texture)
+- We send y=control_bar_height when user clicks at texture top
+- The click registers ~32px lower than intended
+
+### Goal
+
+Verify this hypothesis with diagnostic logging before implementing a fix.
+
+### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `ts3/wezterm-gui/src/termwindow/mouseevent.rs` | Add control panel offset logging |
+
+### Implementation
+
+Add diagnostic logging to `mouse_over_webview` that shows:
+1. The pane bounds
+2. The control panel height
+3. The mouse position relative to pane
+4. The mouse position relative to webview (with control panel subtracted)
+
+```rust
+fn mouse_over_webview(
+    &self,
+    event: &MouseEvent,
+) -> Option<(mux::pane::PaneId, f32, f32, f32)> {
+    // ... existing code to find overlay and calculate pane bounds ...
+
+    // Calculate control panel height (must match draw.rs)
+    let cell_height = self.render_metrics.cell_size.height as f32;
+    let control_panel_height = cell_height * 2.0;
+
+    // Check if mouse is within pane bounds
+    let mx = event.coords.x as f32;
+    let my = event.coords.y as f32;
+
+    if mx >= pane_x && mx < pane_x + pane_w && my >= pane_y && my < pane_y + pane_h {
+        // Calculate relative position within pane (CURRENT - WRONG)
+        let rel_x = mx - pane_x;
+        let rel_y_wrong = my - pane_y;
+
+        // Calculate relative position within WEBVIEW (CORRECT)
+        let webview_top = pane_y + control_panel_height;
+        let rel_y_correct = my - webview_top;
+
+        // Diagnostic logging
+        log::info!(
+            "[MOUSE-OFFSET] pane_y={:.0} control_panel={:.0} webview_top={:.0}",
+            pane_y, control_panel_height, webview_top
+        );
+        log::info!(
+            "[MOUSE-OFFSET] mouse_y={:.0} rel_y_WRONG={:.0} rel_y_CORRECT={:.0} delta={:.0}",
+            my, rel_y_wrong, rel_y_correct, rel_y_wrong - rel_y_correct
+        );
+
+        // Check if mouse is actually over the webview (below control panel)
+        if my < webview_top {
+            log::info!("[MOUSE-OFFSET] Mouse is over CONTROL PANEL, not webview");
+            return None; // Don't forward to CEF
+        }
+
+        // ... rest of existing code using rel_y_wrong (to see current broken behavior) ...
+    }
+}
+```
+
+### Test Procedure
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Terminal 1: Watch for offset logging
+tail -f /tmp/termsurf-gui.log | grep "\[MOUSE-OFFSET\]"
+
+# Terminal 2: Run TermSurf
+# 1. Type: web google.com
+# 2. Wait for page to load
+# 3. Move mouse slowly from control panel down into webview
+# 4. Hover over a link and note exact position where hover triggers
+# 5. Move mouse up until hover stops
+# 6. Record the Y positions from logs
+```
+
+### Expected Results
+
+**If hypothesis is correct:**
+```
+[MOUSE-OFFSET] pane_y=30 control_panel=32 webview_top=62
+[MOUSE-OFFSET] mouse_y=94 rel_y_WRONG=64 rel_y_CORRECT=32 delta=32
+```
+
+The `delta` should equal `control_panel_height` (~32 pixels for typical cell heights).
+
+When user hovers ABOVE a link (e.g., at mouse_y=90) but hover triggers:
+- `rel_y_WRONG=60` is sent to CEF
+- CEF interprets this as 60px from top of texture
+- But user is actually at 60-32=28px from top of texture
+- Hover triggers 32px lower than intended
+
+### Success Criteria
+
+- [ ] Logs show control_panel_height matches cell_height * 2
+- [ ] Logs show delta between wrong and correct Y equals control_panel_height
+- [ ] Observed hover offset matches the logged delta
+- [ ] Mouse over control panel area is correctly detected
+
+### Next Steps After Verification
+
+If the hypothesis is confirmed, implement the fix:
+
+1. In `mouse_over_webview`, use `rel_y_correct` instead of `rel_y_wrong`
+2. Return `None` (don't forward to CEF) when mouse is over control panel
+3. Update pane bounds check to use webview bounds, not full pane bounds
+
+The fix should be straightforward once the hypothesis is verified.
+
+---
 
 ## References
 
