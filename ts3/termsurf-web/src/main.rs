@@ -295,10 +295,10 @@ fn load_cef(profile: &ProfileMode) -> Result<(), String> {
         .parent()
         .unwrap()
         .join("Frameworks")
-        .join("WezTerm Helper.app")
+        .join("TermSurf Helper.app")
         .join("Contents")
         .join("MacOS")
-        .join("WezTerm Helper");
+        .join("TermSurf Helper");
     let helper_path_str = helper_path.to_string_lossy().to_string();
     println!("[Profile] Helper path: {:?}", helper_path_str);
     println!("[Profile] Helper exists: {}", helper_path.exists());

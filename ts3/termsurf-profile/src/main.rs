@@ -200,8 +200,8 @@ fn run_profile_server(args: Args) {
         .parent().unwrap(); // Contents/ (of main app)
     let helper_path = app_contents
         .join("Frameworks")
-        .join("WezTerm Helper.app")
-        .join("Contents/MacOS/WezTerm Helper");
+        .join("TermSurf Helper.app")
+        .join("Contents/MacOS/TermSurf Helper");
     println!(
         "Profile: Helper: {:?} (exists={})",
         helper_path,

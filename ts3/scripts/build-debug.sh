@@ -87,13 +87,13 @@ cp -R "$CEF_RS_DIR/cef-osr.app/Contents/Frameworks/Chromium Embedded Framework.f
 echo "Copying CEF helper apps..."
 for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
     src="$CEF_RS_DIR/cef-osr.app/Contents/Frameworks/cef-osr Helper${suffix}.app"
-    dst="$APP_BUNDLE/Contents/Frameworks/WezTerm Helper${suffix}.app"
+    dst="$APP_BUNDLE/Contents/Frameworks/TermSurf Helper${suffix}.app"
     if [ -d "$src" ]; then
         cp -R "$src" "$dst"
-        # Update Info.plist to rename from cef-osr to WezTerm
-        sed -i '' 's/cef-osr/WezTerm/g' "$dst/Contents/Info.plist"
+        # Update Info.plist to rename from cef-osr to TermSurf
+        sed -i '' 's/cef-osr/TermSurf/g' "$dst/Contents/Info.plist"
         # Rename the binary inside the helper app
-        mv "$dst/Contents/MacOS/cef-osr Helper${suffix}" "$dst/Contents/MacOS/WezTerm Helper${suffix}"
+        mv "$dst/Contents/MacOS/cef-osr Helper${suffix}" "$dst/Contents/MacOS/TermSurf Helper${suffix}"
     else
         echo "WARNING: Helper not found: $src"
     fi

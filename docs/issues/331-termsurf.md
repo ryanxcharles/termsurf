@@ -187,9 +187,11 @@ cd ts3 && ./scripts/build-debug.sh --open
 
 ---
 
-## Experiment 7: Rename CEF helper apps
+## Experiment 7: Rename CEF helper apps ✓
 
 Rename "WezTerm Helper" to "TermSurf Helper" in build scripts and source code.
+
+**Status: Success**
 
 ### Changes
 
