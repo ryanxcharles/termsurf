@@ -125,3 +125,28 @@ Rename `CFBundleName` from "WezTerm" to "TermSurf" so the main menu bar shows "T
 cd ts3 && ./scripts/build-debug.sh --open
 # Main menu bar item should show "TermSurf" (bold, next to Apple logo)
 ```
+
+---
+
+## Experiment 5: Rename config directory and file
+
+Rename `~/.config/wezterm/wezterm.lua` to `~/.config/termsurf/termsurf.lua`.
+
+### Changes
+
+| File                       | Line | Change                                  |
+| -------------------------- | ---- | --------------------------------------- |
+| `ts3/config/src/lib.rs`    | 386  | `"wezterm"` → `"termsurf"` (XDG path)   |
+| `ts3/config/src/lib.rs`    | 388  | `"wezterm"` → `"termsurf"` (home path)  |
+| `ts3/config/src/lib.rs`    | 398  | `"wezterm"` → `"termsurf"` (split path) |
+| `ts3/config/src/config.rs` | 1009 | `".wezterm.lua"` → `".termsurf.lua"`    |
+| `ts3/config/src/config.rs` | 1011 | `"wezterm.lua"` → `"termsurf.lua"`      |
+| `ts3/config/src/config.rs` | 1025 | `"wezterm.lua"` → `"termsurf.lua"`      |
+
+### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+# Create ~/.config/termsurf/termsurf.lua with: return {}
+# App should load the new config location
+```
