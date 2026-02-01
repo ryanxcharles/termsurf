@@ -992,6 +992,20 @@ impl super::TermWindow {
                     return Some(true); // Consume the key
                 }
 
+                // Handle Cmd+C (copy) - call CEF's native copy (issue 318, experiment 1)
+                let is_cmd_c = window_key.key_is_down
+                    && window_key.modifiers.contains(Modifiers::SUPER)
+                    && matches!(&window_key.key, KeyCode::Char('c') | KeyCode::Char('C'));
+
+                if is_cmd_c {
+                    log::info!("[CLIPBOARD] Cmd+C detected, sending do_copy to browser");
+                    drop(overlays); // Release lock before XPC call
+                    if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+                        xpc_manager.send_copy(pane_id);
+                    }
+                    return Some(true); // Consume the key
+                }
+
                 // Forward other keys to browser via XPC
                 drop(overlays); // Release lock before XPC call
                 if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {

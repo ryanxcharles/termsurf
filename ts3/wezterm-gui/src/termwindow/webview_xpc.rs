@@ -440,6 +440,19 @@ impl XpcManager {
         }
     }
 
+    /// Send copy command to the browser (issue 318, experiment 1)
+    pub fn send_copy(&self, pane_id: PaneId) -> bool {
+        let msg = XpcDictionary::new();
+        msg.set_string("action", "do_copy");
+
+        if self.send_command(pane_id, &msg) {
+            log::info!("[XPC] Sent do_copy to pane {}", pane_id);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Remove a peer connection (e.g., when webview pane is closed)
     pub fn remove_connection(&self, pane_id: PaneId) {
         self.peer_connections.lock().unwrap().remove(&pane_id);

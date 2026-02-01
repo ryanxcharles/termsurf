@@ -806,6 +806,23 @@ mod cef_handlers {
                             let mut task = PasteTextTask::new(bs, text);
                             cef::post_task(cef::ThreadId::UI, Some(&mut task));
                         }
+                        "do_copy" => {
+                            // Issue 318, experiment 1: Copy selection to clipboard via CEF
+                            let state_guard = deferred_for_handler.lock().unwrap();
+                            let Some(bs) = state_guard.as_ref() else {
+                                println!("Profile: do_copy ignored (state not ready)");
+                                return;
+                            };
+
+                            println!("[CLIPBOARD] Received do_copy command");
+
+                            let bs = Arc::clone(bs);
+                            drop(state_guard); // Release lock before post_task
+
+                            // Post to CEF UI thread
+                            let mut task = CopyTask::new(bs);
+                            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                        }
                         _ => {}
                     }
                 }
@@ -981,6 +998,33 @@ mod cef_handlers {
         impl Task {
             fn execute(&self) {
                 paste_text_to_browser(&self.state, &self.text);
+            }
+        }
+    }
+
+    // ====== Copy Task ======
+    //
+    // Task for copying selected text to clipboard via CEF's native frame.copy().
+    // Issue 318, experiment 1: Unlike paste (which requires proxying), copy writes
+    // to the clipboard which may work from a background process.
+
+    wrap_task! {
+        pub struct CopyTask {
+            state: Arc<BrowserState>,
+        }
+
+        impl Task {
+            fn execute(&self) {
+                if let Some(browser) = self.state.browser.lock().unwrap().as_ref() {
+                    if let Some(frame) = browser.main_frame() {
+                        println!("[CLIPBOARD] Calling frame.copy()");
+                        frame.copy();
+                    } else {
+                        println!("[CLIPBOARD] CopyTask: no main frame");
+                    }
+                } else {
+                    println!("[CLIPBOARD] CopyTask: no browser");
+                }
             }
         }
     }
