@@ -142,7 +142,173 @@ After double-click, these features remain for full mouse support:
 
 ## Experiments
 
-*No experiments yet.*
+### Experiment 1: Click Counting State
+
+**Status:** Not started
+
+**Hypothesis:** Adding click timing/position tracking to TermWindow and computing
+click_count based on thresholds will enable CEF to receive double/triple clicks.
+
+**Approach:** The XPC infrastructure already passes `click_count` to CEF — it's
+just hardcoded to 1. Add per-pane click state and compute the count dynamically.
+
+#### 1a. Add Click State Struct
+
+In `mouseevent.rs`, add a struct to track click history:
+
+```rust
+/// State for tracking multi-click sequences (double-click, triple-click)
+#[derive(Debug, Clone)]
+pub struct ClickState {
+    /// Timestamp of last click
+    pub last_time: std::time::Instant,
+    /// Position of last click (CEF coordinates)
+    pub last_pos: (i32, i32),
+    /// Current click count (1, 2, or 3)
+    pub count: u32,
+}
+
+impl Default for ClickState {
+    fn default() -> Self {
+        Self {
+            last_time: std::time::Instant::now(),
+            last_pos: (0, 0),
+            count: 0,
+        }
+    }
+}
+```
+
+#### 1b. Add State to TermWindow
+
+In `mod.rs`, add a field to TermWindow:
+
+```rust
+/// Per-pane click state for double/triple-click detection
+click_state: RefCell<HashMap<PaneId, ClickState>>,
+```
+
+Initialize in `new_window()`:
+
+```rust
+click_state: RefCell::new(HashMap::new()),
+```
+
+#### 1c. Implement Click Counting Function
+
+In `mouseevent.rs`, add a method to compute click count:
+
+```rust
+impl super::TermWindow {
+    /// Compute click count based on timing and position.
+    /// Returns 1, 2, or 3 depending on rapid successive clicks.
+    fn compute_click_count(&self, pane_id: PaneId, x: i32, y: i32) -> u32 {
+        use std::time::{Duration, Instant};
+
+        const DOUBLE_CLICK_TIME: Duration = Duration::from_millis(500);
+        const DOUBLE_CLICK_DISTANCE: i32 = 5;
+
+        let mut states = self.click_state.borrow_mut();
+        let state = states.entry(pane_id).or_default();
+
+        let now = Instant::now();
+        let elapsed = now.duration_since(state.last_time);
+        let dx = (x - state.last_pos.0).abs();
+        let dy = (y - state.last_pos.1).abs();
+
+        let new_count = if elapsed < DOUBLE_CLICK_TIME
+            && dx <= DOUBLE_CLICK_DISTANCE
+            && dy <= DOUBLE_CLICK_DISTANCE
+        {
+            // Rapid click near same position: increment (max 3)
+            (state.count + 1).min(3)
+        } else {
+            // Too slow or too far: reset to 1
+            1
+        };
+
+        // Update state for next click
+        state.last_time = now;
+        state.last_pos = (x, y);
+        state.count = new_count;
+
+        log::info!(
+            "[CLICK] pane={} pos=({},{}) elapsed={:?} distance=({},{}) count={}",
+            pane_id, x, y, elapsed, dx, dy, new_count
+        );
+
+        new_count
+    }
+}
+```
+
+#### 1d. Use Click Count in Handler
+
+Modify `handle_webview_mouse_event()` to use computed count:
+
+```rust
+WMEK::Press(MousePress::Left) => {
+    let click_count = self.compute_click_count(pane_id, cef_x, cef_y);
+    log::info!(
+        "[MOUSE] Press LEFT pane={} cef=({}, {}) click_count={}",
+        pane_id, cef_x, cef_y, click_count
+    );
+    xpc_manager.send_mouse_click(pane_id, cef_x, cef_y, 0, false, click_count as i32, 0);
+    true
+}
+WMEK::Release(MousePress::Left) => {
+    // Use same count as press (don't re-compute on release)
+    let click_count = {
+        let states = self.click_state.borrow();
+        states.get(&pane_id).map(|s| s.count).unwrap_or(1)
+    };
+    log::info!(
+        "[MOUSE] Release LEFT pane={} cef=({}, {}) click_count={}",
+        pane_id, cef_x, cef_y, click_count
+    );
+    xpc_manager.send_mouse_click(pane_id, cef_x, cef_y, 0, true, click_count as i32, 0);
+    true
+}
+```
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Test 1: Single click
+web google.com
+# Click once on text
+# Expected log: "[CLICK] ... count=1"
+
+# Test 2: Double-click
+# Double-click on a word
+# Expected log: "[CLICK] ... count=2"
+# Expected result: Word is selected
+
+# Test 3: Triple-click
+# Triple-click on a line
+# Expected log: "[CLICK] ... count=3"
+# Expected result: Line/paragraph is selected
+
+# Test 4: Slow clicks (should reset)
+# Click, wait 1 second, click again
+# Expected: count=1 both times
+
+# Test 5: Distant clicks (should reset)
+# Click at one position, quickly click far away
+# Expected: count=1 for second click
+
+tail -f /tmp/termsurf-gui.log | grep "\[CLICK\]"
+```
+
+#### Success Criteria
+
+- [ ] Log shows count=2 for rapid double-clicks
+- [ ] Log shows count=3 for rapid triple-clicks
+- [ ] Log shows count=1 for slow or distant clicks
+- [ ] Double-click selects word in webview
+- [ ] Triple-click selects line/paragraph in webview
 
 ## References
 
