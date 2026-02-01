@@ -368,6 +368,157 @@ cat /tmp/termsurf-profile-*.log | grep "\[FOCUS\]"
    get out of sync. This is acceptable for now; experiment 2 (pane switching)
    may need more robust state tracking.
 
+### Experiment 2: Focus on Pane Change
+
+**Goal:** Stop the caret from blinking when switching to another pane, and
+resume blinking when switching back to a webview pane in Browse mode.
+
+**Hypothesis:** When the active pane changes (via click or keyboard navigation),
+we can detect the change in `MuxNotification::PaneFocused` handler and send
+focus commands to the affected webviews.
+
+**Scope:** Pane switching via mouse click and keyboard navigation.
+
+**Background:**
+
+When a user clicks on a different pane:
+1. `mouse_event_terminal` calls `tab.set_active_idx(pos.index)` (mouseevent.rs:712)
+2. This triggers `MuxNotification::PaneFocused(pane_id)`
+3. Handler at mod.rs:1341 currently just calls `update_title_post_status()`
+
+We need to:
+- Track which pane was previously focused
+- When focus changes, unfocus the old webview (if any)
+- Focus the new webview if it's in Browse mode
+
+**Changes:**
+
+1. **Add `last_focused_pane` field to TermWindow**
+   (`ts3/wezterm-gui/src/termwindow/mod.rs`, in the struct definition)
+
+   ```rust
+   /// Issue 329: Last focused pane for webview focus tracking
+   #[cfg(target_os = "macos")]
+   last_focused_pane: Option<PaneId>,
+   ```
+
+2. **Initialize field in `new_window`**
+   (`ts3/wezterm-gui/src/termwindow/mod.rs`)
+
+   ```rust
+   #[cfg(target_os = "macos")]
+   last_focused_pane: None,
+   ```
+
+3. **Handle focus change in `MuxNotification::PaneFocused`**
+   (`ts3/wezterm-gui/src/termwindow/mod.rs`, around line 1341)
+
+   ```rust
+   MuxNotification::PaneFocused(new_pane_id) => {
+       // Issue 329: Handle webview focus on pane change
+       #[cfg(target_os = "macos")]
+       {
+           use crate::termwindow::webview_socket::{get_server, WebviewMode};
+           use crate::termwindow::webview_xpc::get_xpc_manager;
+
+           let old_pane_id = self.last_focused_pane;
+           self.last_focused_pane = Some(new_pane_id);
+
+           if let (Some(xpc), Some(server)) = (get_xpc_manager(), get_server()) {
+               let state = server.state();
+               let overlays = state.read().unwrap();
+
+               // Unfocus old webview (if it had one)
+               if let Some(old_id) = old_pane_id {
+                   if old_id != new_pane_id {
+                       if overlays.overlays.contains_key(&old_id) {
+                           log::info!("[FOCUS] Pane change: unfocusing old pane {}", old_id);
+                           xpc.send_focus(old_id, false);
+                       }
+                   }
+               }
+
+               // Focus new webview if in Browse mode
+               if let Some(overlay) = overlays.overlays.get(&new_pane_id) {
+                   if overlay.mode == WebviewMode::Browse {
+                       log::info!("[FOCUS] Pane change: focusing new pane {} (Browse mode)", new_pane_id);
+                       xpc.send_focus(new_pane_id, true);
+                   }
+               }
+           }
+       }
+
+       // Existing code
+       self.update_title_post_status();
+   }
+   ```
+
+**Files to modify:**
+
+| File                                    | Changes                                    |
+| --------------------------------------- | ------------------------------------------ |
+| `ts3/wezterm-gui/src/termwindow/mod.rs` | Add field, initialize, handle PaneFocused  |
+
+**Verification:**
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Test 1: Click on different pane unfocuses webview
+web google.com
+# Click in search box, caret should blink
+# Split pane: Ctrl+Shift+E (or similar)
+# Click on the terminal pane
+# Expected: Webview caret stops blinking
+
+# Check logs
+cat /tmp/termsurf-gui.log | grep "\[FOCUS\]"
+# Expected: "[FOCUS] Pane change: unfocusing old pane X"
+
+# Test 2: Click back on webview refocuses
+# Click on the webview pane
+# Expected: Caret resumes blinking (if in Browse mode)
+
+# Check logs
+cat /tmp/termsurf-gui.log | grep "\[FOCUS\]"
+# Expected: "[FOCUS] Pane change: focusing new pane Y (Browse mode)"
+
+# Test 3: Click on webview in Control mode
+# Press Ctrl+C to enter Control mode
+# Click on terminal pane, then back on webview
+# Expected: Caret does NOT resume (still in Control mode)
+
+# Test 4: Keyboard navigation
+# Use Ctrl+Shift+Arrow to navigate between panes
+# Expected: Same focus behavior as mouse click
+
+# Test 5: Multiple webviews
+# Open webview in both panes: web google.com (in each)
+# Switch between them
+# Expected: Only the active webview has blinking caret
+```
+
+**Success criteria:**
+
+- [ ] Caret stops blinking when clicking on another pane
+- [ ] Caret resumes blinking when clicking back on webview (Browse mode)
+- [ ] Caret does NOT resume if webview is in Control mode
+- [ ] Keyboard pane navigation triggers same behavior
+- [ ] Multiple webviews: only active one has blinking caret
+- [ ] No regression in mode switching (experiment 1)
+
+**Risks:**
+
+1. **Initialization race** — `last_focused_pane` starts as `None`, so the first
+   pane switch won't unfocus anything. This is acceptable since there's no
+   prior webview to unfocus.
+
+2. **Tab switching** — Switching tabs may also trigger `PaneFocused`. Need to
+   verify this works correctly across tabs.
+
+3. **Rapid clicking** — Multiple rapid clicks could cause focus state churn.
+   This should be benign since each click will eventually settle.
+
 ## References
 
 - Issue 328 — Initial caret fix (focus toggle on first paint)
