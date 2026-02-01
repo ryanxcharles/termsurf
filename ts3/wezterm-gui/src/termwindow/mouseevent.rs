@@ -1072,6 +1072,26 @@ impl super::TermWindow {
     }
 }
 
+/// Convert WezTerm keyboard modifiers to CEF event flags (issue 323).
+#[cfg(target_os = "macos")]
+fn modifiers_to_cef_flags(mods: ::window::Modifiers) -> u32 {
+    use ::window::Modifiers;
+    let mut flags = 0u32;
+    if mods.contains(Modifiers::SHIFT) {
+        flags |= 0x02; // EVENTFLAG_SHIFT_DOWN
+    }
+    if mods.contains(Modifiers::CTRL) {
+        flags |= 0x04; // EVENTFLAG_CONTROL_DOWN
+    }
+    if mods.contains(Modifiers::ALT) {
+        flags |= 0x08; // EVENTFLAG_ALT_DOWN
+    }
+    if mods.contains(Modifiers::SUPER) {
+        flags |= 0x80; // EVENTFLAG_COMMAND_DOWN
+    }
+    flags
+}
+
 /// Check if mouse event is over a webview pane in Browse mode.
 /// Returns Some((pane_id, rel_x, rel_y, scale)) if so, None otherwise.
 /// Issue 319, experiment 1 (updated in experiment 5 with control panel offset logging).
@@ -1237,12 +1257,15 @@ impl super::TermWindow {
                     *state |= 0x10; // EVENTFLAG_LEFT_MOUSE_BUTTON
                 }
 
+                // Issue 323: Include keyboard modifiers for Shift-click
+                let kb_modifiers = modifiers_to_cef_flags(event.modifiers);
+
                 let click_count = self.compute_click_count(pane_id, cef_x, cef_y);
                 log::info!(
-                    "[MOUSE] Press LEFT pane={} cef=({}, {}) click_count={}",
-                    pane_id, cef_x, cef_y, click_count
+                    "[MOUSE] Press LEFT pane={} cef=({}, {}) click_count={} modifiers=0x{:x}",
+                    pane_id, cef_x, cef_y, click_count, kb_modifiers
                 );
-                xpc_manager.send_mouse_click(pane_id, cef_x, cef_y, 0, false, click_count as i32, 0);
+                xpc_manager.send_mouse_click(pane_id, cef_x, cef_y, 0, false, click_count as i32, kb_modifiers);
                 true
             }
             WMEK::Release(MousePress::Left) => {
@@ -1254,16 +1277,19 @@ impl super::TermWindow {
                     }
                 }
 
+                // Issue 323: Include keyboard modifiers
+                let kb_modifiers = modifiers_to_cef_flags(event.modifiers);
+
                 // Use same count as press (don't re-compute on release)
                 let click_count = {
                     let states = self.click_state.borrow();
                     states.get(&pane_id).map(|s| s.count).unwrap_or(1)
                 };
                 log::info!(
-                    "[MOUSE] Release LEFT pane={} cef=({}, {}) click_count={}",
-                    pane_id, cef_x, cef_y, click_count
+                    "[MOUSE] Release LEFT pane={} cef=({}, {}) click_count={} modifiers=0x{:x}",
+                    pane_id, cef_x, cef_y, click_count, kb_modifiers
                 );
-                xpc_manager.send_mouse_click(pane_id, cef_x, cef_y, 0, true, click_count as i32, 0);
+                xpc_manager.send_mouse_click(pane_id, cef_x, cef_y, 0, true, click_count as i32, kb_modifiers);
                 true
             }
             WMEK::VertWheel(amount) => {

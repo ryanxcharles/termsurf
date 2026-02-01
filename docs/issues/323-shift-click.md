@@ -183,7 +183,129 @@ After Shift-click, these features remain:
 
 ## Experiments
 
-*No experiments yet.*
+### Experiment 1: Pass Keyboard Modifiers to Click Events
+
+**Status:** Not started
+
+**Hypothesis:** Converting WezTerm's keyboard modifiers to CEF flags and passing
+them with click events will enable Shift-click selection extension.
+
+**Approach:** The infrastructure already exists — `send_mouse_click` accepts
+modifiers, we just pass 0. Add a conversion function and use it.
+
+#### 1a. Add Modifier Conversion Function
+
+In `mouseevent.rs`, add a helper function to convert WezTerm modifiers to CEF:
+
+```rust
+/// Convert WezTerm keyboard modifiers to CEF event flags (issue 323)
+#[cfg(target_os = "macos")]
+fn modifiers_to_cef_flags(mods: ::window::Modifiers) -> u32 {
+    use ::window::Modifiers;
+    let mut flags = 0u32;
+    if mods.contains(Modifiers::SHIFT) {
+        flags |= 0x02; // EVENTFLAG_SHIFT_DOWN
+    }
+    if mods.contains(Modifiers::CTRL) {
+        flags |= 0x04; // EVENTFLAG_CONTROL_DOWN
+    }
+    if mods.contains(Modifiers::ALT) {
+        flags |= 0x08; // EVENTFLAG_ALT_DOWN
+    }
+    if mods.contains(Modifiers::SUPER) {
+        flags |= 0x80; // EVENTFLAG_COMMAND_DOWN
+    }
+    flags
+}
+```
+
+#### 1b. Update Press Handler
+
+Include keyboard modifiers in the click event:
+
+```rust
+WMEK::Press(MousePress::Left) => {
+    // Issue 322: Track button state for drag selection
+    {
+        let mut buttons = self.webview_mouse_buttons.borrow_mut();
+        let state = buttons.entry(pane_id).or_insert(0);
+        *state |= 0x10; // EVENTFLAG_LEFT_MOUSE_BUTTON
+    }
+
+    // Issue 323: Include keyboard modifiers for Shift-click
+    let kb_modifiers = modifiers_to_cef_flags(event.modifiers);
+
+    let click_count = self.compute_click_count(pane_id, cef_x, cef_y);
+    log::info!(
+        "[MOUSE] Press LEFT pane={} cef=({}, {}) click_count={} modifiers=0x{:x}",
+        pane_id, cef_x, cef_y, click_count, kb_modifiers
+    );
+    xpc_manager.send_mouse_click(
+        pane_id, cef_x, cef_y, 0, false, click_count as i32, kb_modifiers as i32
+    );
+    true
+}
+```
+
+#### 1c. Update Release Handler
+
+Include keyboard modifiers in the release event too:
+
+```rust
+WMEK::Release(MousePress::Left) => {
+    // Issue 322: Clear button state
+    {
+        let mut buttons = self.webview_mouse_buttons.borrow_mut();
+        if let Some(state) = buttons.get_mut(&pane_id) {
+            *state &= !0x10;
+        }
+    }
+
+    // Issue 323: Include keyboard modifiers
+    let kb_modifiers = modifiers_to_cef_flags(event.modifiers);
+
+    let click_count = {
+        let states = self.click_state.borrow();
+        states.get(&pane_id).map(|s| s.count).unwrap_or(1)
+    };
+    log::info!(
+        "[MOUSE] Release LEFT pane={} cef=({}, {}) click_count={} modifiers=0x{:x}",
+        pane_id, cef_x, cef_y, click_count, kb_modifiers
+    );
+    xpc_manager.send_mouse_click(
+        pane_id, cef_x, cef_y, 0, true, click_count as i32, kb_modifiers as i32
+    );
+    true
+}
+```
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+
+# Test 1: Shift-click extends selection
+web google.com
+# Double-click a word to select it
+# Hold Shift, click on another word
+# Expected: Selection extends from first word to second
+
+# Test 2: Check logs
+tail -f /tmp/termsurf-gui.log | grep "\[MOUSE\]"
+# Shift-click should show modifiers=0x2
+
+# Test 3: Backwards extension
+# Select a word, Shift-click BEFORE it
+# Expected: Selection extends backwards
+```
+
+#### Success Criteria
+
+- [ ] Log shows modifiers=0x2 when Shift is held during click
+- [ ] Shift-click after double-click extends selection
+- [ ] Shift-click after drag extends selection
+- [ ] Extension works forwards (click after selection)
+- [ ] Extension works backwards (click before selection)
 
 ## References
 
