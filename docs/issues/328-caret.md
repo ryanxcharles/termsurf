@@ -4,7 +4,7 @@ The blinking text cursor (caret) does not appear in webview text inputs.
 
 ## Status
 
-**Open.** Hypothesis identified from ts2 implementation.
+**Resolved.** Focus toggle on first paint enables caret rendering.
 
 ## Problem
 
@@ -312,13 +312,15 @@ cat /tmp/termsurf-profile-*.log | grep "FOCUS"
 
 **Success criteria:**
 
-- [ ] Caret appears in Google search box on page load
-- [ ] Caret blinks (~500ms interval)
-- [ ] Caret moves when clicking in text field
-- [ ] Caret follows typed characters
-- [ ] Keyboard input still works
-- [ ] Clipboard paste still works
-- [ ] Log shows focus toggle on first paint
+- [x] Caret appears in Google search box on page load
+- [x] Caret blinks (~500ms interval)
+- [x] Caret moves when clicking in text field
+- [x] Caret follows typed characters
+- [x] Keyboard input still works
+- [x] Clipboard paste still works
+- [x] Log shows focus toggle on first paint
+
+**Status:** Success.
 
 **Risks:**
 

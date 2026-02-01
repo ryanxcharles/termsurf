@@ -17,7 +17,7 @@
 
 use clap::Parser;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -98,6 +98,8 @@ struct BrowserState {
     browser: Mutex<Option<cef::Browser>>,
     /// Current URL (updated on navigation via DisplayHandler)
     url: Mutex<String>,
+    /// Issue 328: Whether initial focus has been set (must wait for first paint)
+    initial_focus_set: AtomicBool,
 }
 
 /// Profile-wide state (shared across all browsers in this process)
@@ -406,7 +408,7 @@ mod cef_handlers {
         WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler, WrapDisplayHandler,
         WrapRenderHandler, WrapTask,
     };
-    use std::sync::atomic::Ordering;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
     use termsurf_xpc::*;
 
@@ -465,6 +467,19 @@ mod cef_handlers {
                 // Only handle PET_VIEW (skip popups)
                 if type_ != PaintElementType::default() {
                     return;
+                }
+
+                // Issue 328: Set initial focus on first paint (browser is now ready)
+                // Toggle unfocus/refocus to properly initialize focus state (from ts2)
+                if !self.inner.state.initial_focus_set.load(Ordering::Relaxed) {
+                    if let Some(browser) = self.inner.state.browser.lock().unwrap().as_ref() {
+                        if let Some(host) = browser.host() {
+                            println!("[FOCUS] First paint: toggling focus (0 then 1) for caret");
+                            host.set_focus(0);
+                            host.set_focus(1);
+                            self.inner.state.initial_focus_set.store(true, Ordering::Relaxed);
+                        }
+                    }
                 }
 
                 // Send every frame — GUI needs to know when content changes,
@@ -1009,6 +1024,8 @@ mod cef_handlers {
             height: std::sync::atomic::AtomicU32::new(height),
             browser: Mutex::new(None),
             url: Mutex::new(url.to_string()),
+            // Issue 328: Initialize to false; will be set on first paint
+            initial_focus_set: AtomicBool::new(false),
         });
 
         // Create render handler with browser-specific state
@@ -1057,11 +1074,8 @@ mod cef_handlers {
                     browser_id, url, session_id
                 );
 
-                // Ensure browser has focus for clipboard operations (experiment 4)
-                if let Some(host) = b.host() {
-                    println!("[FOCUS-DEBUG] Sending initial focus event to browser {}", browser_id);
-                    host.set_focus(1); // 1 = focused
-                }
+                // Issue 328: Removed early set_focus(1) call. Focus is now set on first
+                // paint in on_accelerated_paint with unfocus/refocus toggle (from ts2).
 
                 // Store browser reference for resize operations
                 *browser_state.browser.lock().unwrap() = Some(b);
