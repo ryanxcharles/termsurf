@@ -4,7 +4,8 @@ Webview content does not refresh at 60fps, causing visible lag.
 
 ## Status
 
-Experiment 2 designed. Ready to add diagnostic logging to identify bottleneck.
+Experiment 2 complete. CEF confirmed as bottleneck — producing ~12-20fps instead
+of 60fps. XPC and WezTerm rendering are not the issue.
 
 ## Product Requirements
 
@@ -427,7 +428,69 @@ web google.com
 | INVALIDATE without RENDER | WezTerm batching/dropping repaints |
 | Growing delta over time | Backpressure / queue buildup |
 
-**Status:** Not started.
+**Status:** Success.
+
+**Result:** Diagnostic logging confirmed that the bottleneck is CEF itself, not
+XPC or WezTerm rendering.
+
+**Findings:**
+
+| Metric | Observed | Expected |
+|--------|----------|----------|
+| Scroll events received | 57 | — |
+| Frames produced | 35 | ~57 |
+| Frame interval | 9-588ms | 16.7ms |
+| Effective FPS | ~12-20 | 60 |
+| XPC latency | ~10-30ms | — |
+| Invalidate→Render gap | ~10-30ms | — |
+
+Key observations:
+
+1. **CEF is the bottleneck** — `on_accelerated_paint` is called at 12-20fps, not
+   60fps, despite `windowless_frame_rate: 60` being set.
+
+2. **XPC is fast enough** — Frames arrive at the GUI within milliseconds of
+   being sent. No significant queue buildup.
+
+3. **WezTerm renders promptly** — INVALIDATE triggers RENDER within ~10-30ms.
+   No frames dropped on the GUI side.
+
+4. **CEF batches input** — 57 scroll events produced only 35 frames. CEF
+   combines multiple inputs per render, which is normal, but the render rate
+   itself is too low.
+
+**Conclusion:** The lag is caused by CEF's off-screen rendering not hitting
+60fps. The `windowless_frame_rate` setting appears to be ignored or overridden.
+
+### Next Steps
+
+Investigate CEF's rendering pipeline:
+
+1. **Verify frame rate setting** — Call `host.get_windowless_frame_rate()` to
+   confirm CEF actually has 60fps configured internally.
+
+2. **Force invalidate after input** — Call `host.invalidate()` after each scroll
+   event to request immediate repaint. This may force CEF to render more
+   frequently.
+
+3. **External begin frame mode** — CEF supports `SendExternalBeginFrame` for
+   explicit frame scheduling. This gives full control over when frames render
+   but requires more integration work.
+
+4. **Message loop investigation** — Check if `run_message_loop()` is the right
+   approach. Alternatives:
+   - `do_message_loop_work()` in a tighter custom loop
+   - Multi-threaded message loop mode
+   - External message pump
+
+5. **CEF settings review** — Check for other settings that might affect
+   rendering performance:
+   - `background_color` (transparency overhead?)
+   - `webgl_antialiasing` / other GPU settings
+   - Chrome command-line switches for off-screen rendering
+
+6. **Profile CEF internally** — Use Chrome's tracing (`--enable-tracing`) to
+   see where time is spent inside CEF's rendering pipeline.
 
 ## References
 
