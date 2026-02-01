@@ -58,7 +58,7 @@ cd "$REPO_DIR"
 cargo build
 
 # 3. Create app bundle
-APP_BUNDLE="$REPO_DIR/target/debug/wezterm-gui.app"
+APP_BUNDLE="$REPO_DIR/target/debug/termsurf-gui.app"
 echo "Creating app bundle at $APP_BUNDLE..."
 
 rm -rf "$APP_BUNDLE"
