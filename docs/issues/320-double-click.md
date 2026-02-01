@@ -4,7 +4,7 @@ Double-click to select words in webview panes.
 
 ## Status
 
-Not started.
+**Complete.** Double-click and triple-click working. See Conclusion for details.
 
 ## Product Requirements
 
@@ -120,11 +120,11 @@ Standard double-click thresholds:
 
 ## Success Criteria
 
-- [ ] Double-click selects word
-- [ ] Triple-click selects line/paragraph
-- [ ] Click count resets after timeout
-- [ ] Click count resets if mouse moves too far
-- [ ] Selection highlight is visible
+- [x] Double-click selects word
+- [x] Triple-click selects line/paragraph
+- [x] Click count resets after timeout
+- [x] Click count resets if mouse moves too far
+- [x] Selection highlight is visible
 
 ## Next Steps (Other Mouse Input)
 
@@ -144,7 +144,7 @@ After double-click, these features remain for full mouse support:
 
 ### Experiment 1: Click Counting State
 
-**Status:** Not started
+**Status:** SUCCESS
 
 **Hypothesis:** Adding click timing/position tracking to TermWindow and computing
 click_count based on thresholds will enable CEF to receive double/triple clicks.
@@ -304,11 +304,95 @@ tail -f /tmp/termsurf-gui.log | grep "\[CLICK\]"
 
 #### Success Criteria
 
-- [ ] Log shows count=2 for rapid double-clicks
-- [ ] Log shows count=3 for rapid triple-clicks
-- [ ] Log shows count=1 for slow or distant clicks
-- [ ] Double-click selects word in webview
-- [ ] Triple-click selects line/paragraph in webview
+- [x] Log shows count=2 for rapid double-clicks
+- [x] Log shows count=3 for rapid triple-clicks
+- [x] Log shows count=1 for slow or distant clicks
+- [x] Double-click selects word in webview
+- [x] Triple-click selects line/paragraph in webview
+
+---
+
+## Conclusion
+
+### What Was Accomplished
+
+Double-click and triple-click text selection now works in ts3 webviews:
+
+1. **Double-click selects word** — Two rapid clicks on a word highlight the
+   entire word, matching standard browser behavior.
+
+2. **Triple-click selects line/paragraph** — Three rapid clicks select the
+   full line or paragraph element.
+
+3. **Automatic reset** — Click count resets to 1 if more than 500ms passes
+   between clicks or if the mouse moves more than 5 pixels.
+
+### What We Learned
+
+1. **The XPC infrastructure was already complete** — The `send_mouse_click()`
+   method already accepted a `click_count` parameter; it was simply hardcoded
+   to 1. No changes to XPC or CEF-side code were needed.
+
+2. **Per-pane state is essential** — Click tracking must be per-pane because
+   users may click in different webview panes. Using a global click state would
+   incorrectly detect double-clicks across panes.
+
+3. **Press computes, Release reuses** — The click count is computed on Press
+   and stored. Release reuses the same count rather than recomputing, ensuring
+   CEF receives matching Press/Release click counts.
+
+### Implementation Summary
+
+```
+Click Counting Flow:
+
+MousePress event arrives
+    │
+    ▼
+compute_click_count(pane_id, x, y)
+    │
+    ├─ Lookup ClickState for pane (or create default)
+    │
+    ├─ Check elapsed time since last click
+    │   └─ If > 500ms: reset to count=1
+    │
+    ├─ Check distance from last click
+    │   └─ If > 5px: reset to count=1
+    │
+    ├─ Otherwise: increment count (max 3)
+    │
+    └─ Store new timestamp, position, count
+           │
+           ▼
+    Return count (1, 2, or 3)
+           │
+           ▼
+    send_mouse_click(..., click_count)
+           │
+           ▼
+    CEF selects nothing / word / line
+```
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `mouseevent.rs` | Added `ClickState` struct, `compute_click_count()` method |
+| `mod.rs` | Added `click_state: RefCell<HashMap<PaneId, ClickState>>` field |
+
+### What's Next
+
+With double-click complete, these mouse features remain:
+
+| Feature | Priority | Notes |
+|---------|----------|-------|
+| Scroll wheel | High | Most requested after click/selection |
+| Drag selection | Medium | Click-and-drag to select text ranges |
+| Modifier keys | Medium | Shift-click to extend selection |
+| Right-click | Medium | Context menus |
+| Cursor feedback | Low | Change cursor shape over links, text, etc. |
+
+Recommended next issue: **321-scroll** for scroll wheel support.
 
 ## References
 
