@@ -25,3 +25,24 @@ Rename user-facing elements from "WezTerm" to "TermSurf". Internal crate names a
 - Internal crate names: `wezterm-term`, `wezterm-font`, `wezterm-client`, etc.
 - GitHub issue URLs in comments
 - Author attribution
+
+---
+
+## Experiment 1: Rename GUI binary
+
+Rename `wezterm-gui` to `termsurf-gui`.
+
+### Changes
+
+| File | Change |
+|------|--------|
+| `ts3/wezterm-gui/Cargo.toml` | `name = "wezterm-gui"` → `name = "termsurf-gui"` |
+| `ts3/scripts/build-debug.sh` | `cp .../wezterm-gui` → `cp .../termsurf-gui` |
+| `ts3/scripts/build-release.sh` | `cp .../wezterm-gui` → `cp .../termsurf-gui` |
+
+### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+# App should launch and function normally
+```
