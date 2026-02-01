@@ -711,7 +711,10 @@ mod cef_handlers {
         set_event_handler(&*gui, move |event| {
             match event {
                 Ok(msg) => {
+                    // Issue 319, experiment 2: Log ALL incoming messages before action parsing
                     let action = msg.get_string("action").unwrap_or_default();
+                    println!("[XPC-RECV] Received message: action={}", action);
+
                     match action.as_str() {
                         "resize_browser" => {
                             // Get state from deferred wrapper
@@ -857,7 +860,64 @@ mod cef_handlers {
                             let mut task = SelectAllTask::new(bs);
                             cef::post_task(cef::ThreadId::UI, Some(&mut task));
                         }
-                        _ => {}
+                        "mouse_move" => {
+                            // Issue 319, experiment 3: Deep handler logging
+                            println!("[MOUSE] mouse_move handler entered");
+
+                            let state_guard = deferred_for_handler.lock().unwrap();
+                            let Some(bs) = state_guard.as_ref() else {
+                                println!("[MOUSE] FAIL: deferred_for_handler is None");
+                                return;
+                            };
+                            println!("[MOUSE] BrowserState available, posting task");
+
+                            let x = msg.get_i64("x") as i32;
+                            let y = msg.get_i64("y") as i32;
+                            let modifiers = msg.get_i64("modifiers") as u32;
+                            println!("[MOUSE] mouse_move coords: ({}, {}) mods={}", x, y, modifiers);
+
+                            let bs = Arc::clone(bs);
+                            drop(state_guard);
+
+                            let mut task = MouseMoveTask::new(bs, x, y, modifiers);
+                            println!("[MOUSE] Calling post_task for MouseMoveTask");
+                            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                            println!("[MOUSE] post_task returned");
+                        }
+                        "mouse_click" => {
+                            // Issue 319, experiment 3: Deep handler logging
+                            println!("[MOUSE] mouse_click handler entered");
+
+                            let state_guard = deferred_for_handler.lock().unwrap();
+                            let Some(bs) = state_guard.as_ref() else {
+                                println!("[MOUSE] FAIL: deferred_for_handler is None");
+                                return;
+                            };
+                            println!("[MOUSE] BrowserState available, posting task");
+
+                            let x = msg.get_i64("x") as i32;
+                            let y = msg.get_i64("y") as i32;
+                            let button = msg.get_i64("button") as u32;
+                            let is_up = msg.get_bool("is_up");
+                            let click_count = msg.get_i64("click_count") as i32;
+                            let modifiers = msg.get_i64("modifiers") as u32;
+                            println!(
+                                "[MOUSE] mouse_click coords: ({}, {}) btn={} up={} count={}",
+                                x, y, button, is_up, click_count
+                            );
+
+                            let bs = Arc::clone(bs);
+                            drop(state_guard);
+
+                            let mut task = MouseClickTask::new(bs, x, y, button, is_up, click_count, modifiers);
+                            println!("[MOUSE] Calling post_task for MouseClickTask");
+                            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                            println!("[MOUSE] post_task returned");
+                        }
+                        // Issue 319, experiment 2: Log unhandled actions
+                        other => {
+                            println!("[XPC-RECV] Unhandled action: {:?}", other);
+                        }
                     }
                 }
                 Err(e) => {
@@ -867,6 +927,8 @@ mod cef_handlers {
         });
 
         // 4. NOW resume the connection (handler is ready)
+        // Issue 319, experiment 2: Log that event handler is registered
+        println!("[XPC] Event handler registered on GUI connection");
         gui.resume();
 
         // 5. Create per-browser state
@@ -1111,6 +1173,105 @@ mod cef_handlers {
                 } else {
                     println!("[CLIPBOARD] SelectAllTask: no browser");
                 }
+            }
+        }
+    }
+
+    // ====== Mouse Move Task ======
+    //
+    // Task for sending mouse move events to CEF on the UI thread.
+    // Issue 319, experiment 3: Deep task execution logging.
+
+    wrap_task! {
+        pub struct MouseMoveTask {
+            state: Arc<BrowserState>,
+            x: i32,
+            y: i32,
+            modifiers: u32,
+        }
+
+        impl Task {
+            fn execute(&self) {
+                println!("[MOUSE-TASK] MouseMoveTask::execute() called");
+
+                let browser_guard = self.state.browser.lock().unwrap();
+                let Some(browser) = browser_guard.as_ref() else {
+                    println!("[MOUSE-TASK] FAIL: browser is None");
+                    return;
+                };
+                println!("[MOUSE-TASK] Browser obtained");
+
+                let Some(host) = browser.host() else {
+                    println!("[MOUSE-TASK] FAIL: browser.host() is None");
+                    return;
+                };
+                println!("[MOUSE-TASK] Host obtained, calling send_mouse_move_event");
+
+                let mouse_event = cef::MouseEvent {
+                    x: self.x,
+                    y: self.y,
+                    modifiers: self.modifiers,
+                };
+                // mouse_leave = 0 (mouse is over the view)
+                host.send_mouse_move_event(Some(&mouse_event), 0);
+                println!("[MOUSE-TASK] send_mouse_move_event returned");
+            }
+        }
+    }
+
+    // ====== Mouse Click Task ======
+    //
+    // Task for sending mouse click events to CEF on the UI thread.
+    // Issue 319, experiment 3: Deep task execution logging.
+
+    wrap_task! {
+        pub struct MouseClickTask {
+            state: Arc<BrowserState>,
+            x: i32,
+            y: i32,
+            button: u32,
+            is_up: bool,
+            click_count: i32,
+            modifiers: u32,
+        }
+
+        impl Task {
+            fn execute(&self) {
+                println!("[MOUSE-TASK] MouseClickTask::execute() called");
+
+                let browser_guard = self.state.browser.lock().unwrap();
+                let Some(browser) = browser_guard.as_ref() else {
+                    println!("[MOUSE-TASK] FAIL: browser is None");
+                    return;
+                };
+                println!("[MOUSE-TASK] Browser obtained");
+
+                let Some(host) = browser.host() else {
+                    println!("[MOUSE-TASK] FAIL: browser.host() is None");
+                    return;
+                };
+                println!("[MOUSE-TASK] Host obtained, calling send_mouse_click_event");
+
+                let mouse_event = cef::MouseEvent {
+                    x: self.x,
+                    y: self.y,
+                    modifiers: self.modifiers,
+                };
+                // button: 0=left, 1=middle, 2=right
+                let button_type = match self.button {
+                    0 => cef::MouseButtonType::LEFT,
+                    1 => cef::MouseButtonType::MIDDLE,
+                    2 => cef::MouseButtonType::RIGHT,
+                    _ => cef::MouseButtonType::LEFT,
+                };
+                let mouse_up = if self.is_up { 1 } else { 0 };
+                host.send_mouse_click_event(
+                    Some(&mouse_event),
+                    button_type,
+                    mouse_up,
+                    self.click_count,
+                );
+                println!("[MOUSE-TASK] send_mouse_click_event returned");
             }
         }
     }

@@ -65,6 +65,12 @@ impl super::TermWindow {
             None => return,
         };
 
+        // Check for webview mouse event (issue 319)
+        #[cfg(target_os = "macos")]
+        if self.handle_webview_mouse_event(&event) {
+            return; // Event consumed by webview
+        }
+
         self.current_mouse_event.replace(event.clone());
 
         let border = self.get_os_border();
@@ -1039,6 +1045,182 @@ impl super::TermWindow {
             WMEK::Move => {}
             _ => {
                 context.invalidate();
+            }
+        }
+    }
+}
+
+/// Check if mouse event is over a webview pane in Browse mode.
+/// Returns Some((pane_id, rel_x, rel_y, scale)) if so, None otherwise.
+/// Issue 319, experiment 1 (updated in experiment 5 with control panel offset logging).
+#[cfg(target_os = "macos")]
+impl super::TermWindow {
+    fn mouse_over_webview(
+        &self,
+        event: &MouseEvent,
+    ) -> Option<(mux::pane::PaneId, f32, f32, f32)> {
+        use crate::termwindow::webview_socket::{get_server, WebviewMode};
+
+        let server = get_server()?;
+        let state = server.state();
+        let overlays = state.read().unwrap();
+
+        // Check each pane to find if mouse is over a webview
+        for pos in self.get_panes_to_render() {
+            let pane_id = pos.pane.pane_id();
+
+            // Only consider panes with webview overlays in Browse mode
+            let overlay = match overlays.overlays.get(&pane_id) {
+                Some(o) => o,
+                None => continue,
+            };
+            if overlay.mode != WebviewMode::Browse {
+                continue;
+            }
+
+            // Calculate viewport bounds (same logic as render_webview_overlays_webgpu)
+            let border = self.get_os_border();
+            let tab_bar_height = if self.show_tab_bar && !self.config.tab_bar_at_bottom {
+                self.tab_bar_pixel_height().unwrap_or(0.)
+            } else {
+                0.
+            };
+
+            let cell_height = self.render_metrics.cell_size.height as f32;
+
+            let pane_x = pos.left as f32 * self.render_metrics.cell_size.width as f32
+                + border.left.get() as f32;
+            let pane_y = pos.top as f32 * cell_height
+                + border.top.get() as f32
+                + tab_bar_height;
+            let pane_w = pos.width as f32 * self.render_metrics.cell_size.width as f32;
+            let pane_h = pos.height as f32 * cell_height;
+
+            // Issue 319, experiment 5: Control panel offset
+            // The webview texture renders BELOW the control panel (2 cell heights).
+            // Mouse coordinates must be relative to webview top, not pane top.
+            let control_panel_height = cell_height * 2.0;
+            let webview_top = pane_y + control_panel_height;
+            let webview_h = pane_h - control_panel_height;
+
+            // Check if mouse is within pane bounds
+            let mx = event.coords.x as f32;
+            let my = event.coords.y as f32;
+
+            // Debug: log bounds and offset periodically
+            static LAST_LOG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let last = LAST_LOG.load(std::sync::atomic::Ordering::Relaxed);
+            if now - last > 500 {
+                LAST_LOG.store(now, std::sync::atomic::Ordering::Relaxed);
+
+                // Calculate both coordinate systems for comparison
+                let rel_y_wrong = my - pane_y;
+                let rel_y_correct = my - webview_top;
+
+                log::info!(
+                    "[MOUSE-OFFSET] pane_y={:.0} control_panel={:.0} webview_top={:.0}",
+                    pane_y, control_panel_height, webview_top
+                );
+                log::info!(
+                    "[MOUSE-OFFSET] mouse_y={:.0} rel_y_WRONG={:.0} rel_y_CORRECT={:.0} delta={:.0}",
+                    my, rel_y_wrong, rel_y_correct, control_panel_height
+                );
+            }
+
+            // Check if mouse is within pane X bounds
+            if mx < pane_x || mx >= pane_x + pane_w {
+                continue;
+            }
+
+            // Check if mouse is over control panel (above webview)
+            if my >= pane_y && my < webview_top {
+                log::debug!(
+                    "[MOUSE-OFFSET] Mouse over CONTROL PANEL (y={:.0}, webview starts at {:.0})",
+                    my, webview_top
+                );
+                // Don't forward control panel clicks to CEF
+                return None;
+            }
+
+            // Check if mouse is within webview bounds
+            if my >= webview_top && my < webview_top + webview_h {
+                // Calculate relative position within WEBVIEW (not pane!)
+                let rel_x = mx - pane_x;
+                let rel_y = my - webview_top;  // FIXED: subtract webview_top, not pane_y
+
+                // Get scale factor
+                let scale = self.dimensions.dpi as f32 / 72.0;
+                let scale = if scale <= 0.0 { 2.0 } else { scale };
+
+                log::debug!(
+                    "[MOUSE-OFFSET] WEBVIEW hit: rel=({:.0}, {:.0}) scale={:.2}",
+                    rel_x, rel_y, scale
+                );
+
+                return Some((pane_id, rel_x, rel_y, scale));
+            }
+        }
+
+        None
+    }
+
+    /// Handle mouse events for webview panes in Browse mode.
+    /// Returns true if the event was consumed.
+    /// Issue 319, experiment 1.
+    fn handle_webview_mouse_event(&mut self, event: &MouseEvent) -> bool {
+        use ::window::MouseEventKind as WMEK;
+        use ::window::MousePress;
+
+        let (pane_id, rel_x, rel_y, scale) = match self.mouse_over_webview(event) {
+            Some(info) => info,
+            None => {
+                // Log when mouse is NOT over webview (could indicate boundary issues)
+                log::trace!("[MOUSE] Not over webview: coords=({}, {})", event.coords.x, event.coords.y);
+                return false;
+            }
+        };
+
+        // Convert to logical (CEF DIP) coordinates
+        let cef_x = (rel_x / scale) as i32;
+        let cef_y = (rel_y / scale) as i32;
+
+        let xpc_manager = match crate::termwindow::webview_xpc::get_xpc_manager() {
+            Some(m) => m,
+            None => return false,
+        };
+
+        match &event.kind {
+            WMEK::Move => {
+                log::info!(
+                    "[MOUSE] Move pane={} physical=({}, {}) rel=({:.1}, {:.1}) cef=({}, {}) scale={:.2}",
+                    pane_id, event.coords.x, event.coords.y, rel_x, rel_y, cef_x, cef_y, scale
+                );
+                xpc_manager.send_mouse_move(pane_id, cef_x, cef_y, 0);
+                true
+            }
+            WMEK::Press(MousePress::Left) => {
+                log::info!(
+                    "[MOUSE] Press LEFT pane={} cef=({}, {})",
+                    pane_id, cef_x, cef_y
+                );
+                xpc_manager.send_mouse_click(pane_id, cef_x, cef_y, 0, false, 1, 0);
+                true
+            }
+            WMEK::Release(MousePress::Left) => {
+                log::info!(
+                    "[MOUSE] Release LEFT pane={} cef=({}, {})",
+                    pane_id, cef_x, cef_y
+                );
+                xpc_manager.send_mouse_click(pane_id, cef_x, cef_y, 0, true, 1, 0);
+                true
+            }
+            other => {
+                log::debug!("[MOUSE] Ignored event: {:?}", other);
+                false // Let other events pass through for now
             }
         }
     }

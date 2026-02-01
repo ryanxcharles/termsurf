@@ -1325,7 +1325,7 @@ logging to compare:
 
 ## Experiment 5: Control Panel Offset Hypothesis
 
-**Status: Not started**
+**Status: SUCCESS**
 
 Test the hypothesis that mouse Y coordinates are offset by the control panel height,
 causing hover states to trigger at the wrong vertical position.
@@ -1456,20 +1456,43 @@ When user hovers ABOVE a link (e.g., at mouse_y=90) but hover triggers:
 
 ### Success Criteria
 
-- [ ] Logs show control_panel_height matches cell_height * 2
-- [ ] Logs show delta between wrong and correct Y equals control_panel_height
-- [ ] Observed hover offset matches the logged delta
-- [ ] Mouse over control panel area is correctly detected
+- [x] Logs show control_panel_height matches cell_height * 2
+- [x] Logs show delta between wrong and correct Y equals control_panel_height
+- [x] Observed hover offset matches the logged delta
+- [x] Mouse over control panel area is correctly detected
 
-### Next Steps After Verification
+### Conclusion (Experiment 5)
 
-If the hypothesis is confirmed, implement the fix:
+**Result: Success.** The control panel offset hypothesis was confirmed and fixed.
 
-1. In `mouse_over_webview`, use `rel_y_correct` instead of `rel_y_wrong`
-2. Return `None` (don't forward to CEF) when mouse is over control panel
-3. Update pane bounds check to use webview bounds, not full pane bounds
+#### The Bug
 
-The fix should be straightforward once the hypothesis is verified.
+Mouse Y coordinates were calculated relative to `pane_y` (top of pane), but the
+webview texture renders at `pane_y + control_panel_height` (below the control
+panel). This caused all mouse events to be offset downward by ~32 pixels
+(2 × cell_height).
+
+#### The Fix
+
+In `mouse_over_webview()`:
+
+1. Calculate `webview_top = pane_y + control_panel_height`
+2. Use `rel_y = my - webview_top` instead of `rel_y = my - pane_y`
+3. Return `None` when mouse is over the control panel (don't forward to CEF)
+
+#### Files Modified
+
+| File | Changes |
+|------|---------|
+| `ts3/wezterm-gui/src/termwindow/mouseevent.rs` | Fixed Y coordinate calculation |
+
+#### Verification
+
+After the fix:
+- Hover states trigger at the correct position
+- Links highlight when cursor is directly over them
+- Clicks register at the intended location
+- Control panel area correctly excluded from webview events
 
 ---
 

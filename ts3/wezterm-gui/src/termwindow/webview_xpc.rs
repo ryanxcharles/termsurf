@@ -171,9 +171,19 @@ impl XpcManager {
 
             // Store connection by pane_id for sending commands back
             if let Some(pane_id) = pane_id {
-                manager.peer_connections.lock().unwrap()
-                    .insert(pane_id, Arc::clone(&conn));
-                log::info!("[XPC] Stored peer connection for pane {}", pane_id);
+                let mut peer_connections = manager.peer_connections.lock().unwrap();
+                // Issue 319, experiment 2: Log when connection is replaced
+                if let Some(old_conn) = peer_connections.get(&pane_id) {
+                    log::warn!(
+                        "[XPC-CONN] Replacing connection for pane {}: old={:p} new={:p}",
+                        pane_id, Arc::as_ptr(old_conn), Arc::as_ptr(&conn)
+                    );
+                }
+                peer_connections.insert(pane_id, Arc::clone(&conn));
+                log::info!(
+                    "[XPC-CONN] Stored connection for pane {}: {:p}",
+                    pane_id, Arc::as_ptr(&conn)
+                );
             }
 
             set_event_handler(&*conn, move |event| {
@@ -331,6 +341,12 @@ impl XpcManager {
     pub fn send_command(&self, pane_id: PaneId, msg: &XpcDictionary) -> bool {
         let connections = self.peer_connections.lock().unwrap();
         if let Some(conn) = connections.get(&pane_id) {
+            // Issue 319, experiment 2: Log connection pointer and action for debugging
+            let action = msg.get_string("action").unwrap_or_default();
+            log::info!(
+                "[XPC-SEND] pane={} action={} conn={:p}",
+                pane_id, action, Arc::as_ptr(conn)
+            );
             conn.send(msg);
             true
         } else {
@@ -473,6 +489,53 @@ impl XpcManager {
 
         if self.send_command(pane_id, &msg) {
             log::info!("[XPC] Sent do_select_all to pane {}", pane_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Send mouse move event to the browser (issue 319, experiment 1)
+    pub fn send_mouse_move(&self, pane_id: PaneId, x: i32, y: i32, modifiers: u32) -> bool {
+        let msg = XpcDictionary::new();
+        msg.set_string("action", "mouse_move");
+        msg.set_i64("x", x as i64);
+        msg.set_i64("y", y as i64);
+        msg.set_i64("modifiers", modifiers as i64);
+
+        if self.send_command(pane_id, &msg) {
+            log::trace!("[XPC] Sent mouse_move to pane {}: ({}, {})", pane_id, x, y);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Send mouse click event to the browser (issue 319, experiment 1)
+    pub fn send_mouse_click(
+        &self,
+        pane_id: PaneId,
+        x: i32,
+        y: i32,
+        button: u32,
+        is_up: bool,
+        click_count: i32,
+        modifiers: u32,
+    ) -> bool {
+        let msg = XpcDictionary::new();
+        msg.set_string("action", "mouse_click");
+        msg.set_i64("x", x as i64);
+        msg.set_i64("y", y as i64);
+        msg.set_i64("button", button as i64);
+        msg.set_bool("is_up", is_up);
+        msg.set_i64("click_count", click_count as i64);
+        msg.set_i64("modifiers", modifiers as i64);
+
+        if self.send_command(pane_id, &msg) {
+            log::debug!(
+                "[XPC] Sent mouse_click to pane {}: ({}, {}) btn={} up={} count={}",
+                pane_id, x, y, button, is_up, click_count
+            );
             true
         } else {
             false
