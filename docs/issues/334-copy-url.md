@@ -55,6 +55,8 @@ control mode. Show a brief confirmation message.
 
 ## Experiment 1: Copy URL with feedback message
 
+**Status: Failed**
+
 Add Cmd+C handling in Control mode to copy the URL and show brief feedback.
 
 ### Step 1: Add feedback state to WebviewOverlay
@@ -194,3 +196,8 @@ web google.com                    # Opens webview
 # Expected: "url copied" appears briefly, then reverts to normal
 # Check clipboard: pbpaste should show the URL
 ```
+
+### Conclusion
+
+Cmd+C in Control mode did not trigger the handler. The key event was not reaching
+`handle_webview_key_event`.
