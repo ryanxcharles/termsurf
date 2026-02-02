@@ -89,7 +89,7 @@ server.
 
 ### Experiment 1: XPC-based navigation commands
 
-**Status: Pending**
+**Status: Success**
 
 Use XPC messages (Option B) to send navigation commands from GUI to profile
 server. This follows the established pattern used for copy/cut/select_all
@@ -306,3 +306,26 @@ Check logs:
 tail -f /tmp/termsurf-gui.log | grep NAV
 tail -f /tmp/termsurf-profile-*.log | grep NAV
 ```
+
+---
+
+## Conclusion
+
+Browser navigation with Cmd+[ (back) and Cmd+] (forward) is now implemented.
+The feature works in both Browse mode and Control mode, following the
+established XPC pattern used for clipboard operations (issue 318).
+
+### Implementation Summary
+
+| Component       | Change                                                    |
+| --------------- | --------------------------------------------------------- |
+| webview_xpc.rs  | Added `send_go_back()` and `send_go_forward()` methods    |
+| keyevent.rs     | Intercept Cmd+[/] in Browse and Control modes             |
+| termsurf-profile| Added `GoBackTask`, `GoForwardTask`, and XPC handlers     |
+
+### User Experience
+
+- **Cmd+[** navigates back in browser history
+- **Cmd+]** navigates forward in browser history
+- Works in both Browse mode (typing in page) and Control mode (terminal focus)
+- Silent no-op if no history exists (matches native browser behavior)

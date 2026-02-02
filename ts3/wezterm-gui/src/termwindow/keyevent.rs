@@ -1037,6 +1037,34 @@ impl super::TermWindow {
                     return Some(true); // Consume the key
                 }
 
+                // Handle Cmd+[ (go back) - issue 335
+                let is_cmd_bracket_left = window_key.key_is_down
+                    && window_key.modifiers.contains(Modifiers::SUPER)
+                    && matches!(&window_key.key, KeyCode::Char('['));
+
+                if is_cmd_bracket_left {
+                    log::info!("[NAV] Cmd+[ detected, sending go_back to browser");
+                    drop(overlays);
+                    if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+                        xpc_manager.send_go_back(pane_id);
+                    }
+                    return Some(true);
+                }
+
+                // Handle Cmd+] (go forward) - issue 335
+                let is_cmd_bracket_right = window_key.key_is_down
+                    && window_key.modifiers.contains(Modifiers::SUPER)
+                    && matches!(&window_key.key, KeyCode::Char(']'));
+
+                if is_cmd_bracket_right {
+                    log::info!("[NAV] Cmd+] detected, sending go_forward to browser");
+                    drop(overlays);
+                    if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+                        xpc_manager.send_go_forward(pane_id);
+                    }
+                    return Some(true);
+                }
+
                 // Forward other keys to browser via XPC
                 drop(overlays); // Release lock before XPC call
                 if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
@@ -1080,6 +1108,35 @@ impl super::TermWindow {
                     self.close_webview_for_pane(pane_id);
                     return Some(true);
                 }
+
+                // Handle Cmd+[ (go back) in Control mode - issue 335
+                let is_cmd_bracket_left = window_key.key_is_down
+                    && window_key.modifiers.contains(Modifiers::SUPER)
+                    && matches!(&window_key.key, KeyCode::Char('['));
+
+                if is_cmd_bracket_left {
+                    log::info!("[NAV] Cmd+[ in Control mode, sending go_back");
+                    drop(overlays);
+                    if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+                        xpc_manager.send_go_back(pane_id);
+                    }
+                    return Some(true);
+                }
+
+                // Handle Cmd+] (go forward) in Control mode - issue 335
+                let is_cmd_bracket_right = window_key.key_is_down
+                    && window_key.modifiers.contains(Modifiers::SUPER)
+                    && matches!(&window_key.key, KeyCode::Char(']'));
+
+                if is_cmd_bracket_right {
+                    log::info!("[NAV] Cmd+] in Control mode, sending go_forward");
+                    drop(overlays);
+                    if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+                        xpc_manager.send_go_forward(pane_id);
+                    }
+                    return Some(true);
+                }
+
                 // In Control mode, return Some(false) to allow keybindings
                 // Terminal input will be blocked after process_key
                 Some(false)

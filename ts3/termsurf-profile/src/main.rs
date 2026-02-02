@@ -922,6 +922,38 @@ mod cef_handlers {
                             let mut task = SelectAllTask::new(bs);
                             cef::post_task(cef::ThreadId::UI, Some(&mut task));
                         }
+                        "go_back" => {
+                            // Issue 335: Navigate back in browser history
+                            let state_guard = deferred_for_handler.lock().unwrap();
+                            let Some(bs) = state_guard.as_ref() else {
+                                println!("Profile: go_back ignored (state not ready)");
+                                return;
+                            };
+
+                            println!("[NAV] Received go_back command");
+
+                            let bs = Arc::clone(bs);
+                            drop(state_guard);
+
+                            let mut task = GoBackTask::new(bs);
+                            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                        }
+                        "go_forward" => {
+                            // Issue 335: Navigate forward in browser history
+                            let state_guard = deferred_for_handler.lock().unwrap();
+                            let Some(bs) = state_guard.as_ref() else {
+                                println!("Profile: go_forward ignored (state not ready)");
+                                return;
+                            };
+
+                            println!("[NAV] Received go_forward command");
+
+                            let bs = Arc::clone(bs);
+                            drop(state_guard);
+
+                            let mut task = GoForwardTask::new(bs);
+                            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                        }
                         "mouse_move" => {
                             // Issue 319, experiment 3: Deep handler logging
                             println!("[MOUSE] mouse_move handler entered");
@@ -1342,6 +1374,50 @@ mod cef_handlers {
                     }
                 } else {
                     println!("[CLIPBOARD] SelectAllTask: no browser");
+                }
+            }
+        }
+    }
+
+    // ====== Go Back Task ======
+    //
+    // Task for navigating back in browser history via CEF's browser.go_back().
+    // Issue 335: Browser navigation.
+
+    wrap_task! {
+        pub struct GoBackTask {
+            state: Arc<BrowserState>,
+        }
+
+        impl Task {
+            fn execute(&self) {
+                if let Some(browser) = self.state.browser.lock().unwrap().as_ref() {
+                    println!("[NAV] Calling browser.go_back()");
+                    browser.go_back();
+                } else {
+                    println!("[NAV] GoBackTask: no browser");
+                }
+            }
+        }
+    }
+
+    // ====== Go Forward Task ======
+    //
+    // Task for navigating forward in browser history via CEF's browser.go_forward().
+    // Issue 335: Browser navigation.
+
+    wrap_task! {
+        pub struct GoForwardTask {
+            state: Arc<BrowserState>,
+        }
+
+        impl Task {
+            fn execute(&self) {
+                if let Some(browser) = self.state.browser.lock().unwrap().as_ref() {
+                    println!("[NAV] Calling browser.go_forward()");
+                    browser.go_forward();
+                } else {
+                    println!("[NAV] GoForwardTask: no browser");
                 }
             }
         }

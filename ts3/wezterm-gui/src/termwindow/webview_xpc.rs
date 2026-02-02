@@ -520,6 +520,32 @@ impl XpcManager {
         }
     }
 
+    /// Send go_back command to the browser (issue 335)
+    pub fn send_go_back(&self, pane_id: PaneId) -> bool {
+        let msg = XpcDictionary::new();
+        msg.set_string("action", "go_back");
+
+        if self.send_command(pane_id, &msg) {
+            log::info!("[XPC] Sent go_back to pane {}", pane_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Send go_forward command to the browser (issue 335)
+    pub fn send_go_forward(&self, pane_id: PaneId) -> bool {
+        let msg = XpcDictionary::new();
+        msg.set_string("action", "go_forward");
+
+        if self.send_command(pane_id, &msg) {
+            log::info!("[XPC] Sent go_forward to pane {}", pane_id);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Issue 329: Send focus command to the browser
     pub fn send_focus(&self, pane_id: PaneId, focused: bool) -> bool {
         let msg = XpcDictionary::new();
