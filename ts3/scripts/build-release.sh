@@ -44,7 +44,7 @@ echo "=== Building TermSurf 3.0 (Release) ==="
 echo "Building CEF helpers..."
 cd "$CEF_RS_DIR"
 cargo build --release -p cef-osr
-cargo run --release -p cef --bin bundle-cef-app -- cef-osr -o cef-osr.app --release
+cargo run --release -p cef --bin bundle-cef-app -- cef-osr -o cef-osr.app
 
 # Verify cef-osr.app was created
 if [ ! -d "$CEF_RS_DIR/cef-osr.app" ]; then
