@@ -87,4 +87,222 @@ server.
 
 ## Experiments
 
-(To be designed)
+### Experiment 1: XPC-based navigation commands
+
+**Status: Pending**
+
+Use XPC messages (Option B) to send navigation commands from GUI to profile
+server. This follows the established pattern used for copy/cut/select_all
+(issue 318).
+
+#### Step 1: Add XPC methods in GUI (webview_xpc.rs)
+
+Add `send_go_back()` and `send_go_forward()` methods after `send_select_all()`
+(around line 521):
+
+```rust
+/// Send go_back command to the browser (issue 335)
+pub fn send_go_back(&self, pane_id: PaneId) -> bool {
+    let msg = XpcDictionary::new();
+    msg.set_string("action", "go_back");
+
+    if self.send_command(pane_id, &msg) {
+        log::info!("[XPC] Sent go_back to pane {}", pane_id);
+        true
+    } else {
+        false
+    }
+}
+
+/// Send go_forward command to the browser (issue 335)
+pub fn send_go_forward(&self, pane_id: PaneId) -> bool {
+    let msg = XpcDictionary::new();
+    msg.set_string("action", "go_forward");
+
+    if self.send_command(pane_id, &msg) {
+        log::info!("[XPC] Sent go_forward to pane {}", pane_id);
+        true
+    } else {
+        false
+    }
+}
+```
+
+#### Step 2: Intercept Cmd+[/] in Browse mode (keyevent.rs)
+
+In `handle_webview_key_event`, add handlers in the `WebviewMode::Browse` arm
+after the Cmd+A handler (around line 1038):
+
+```rust
+// Handle Cmd+[ (go back) - issue 335
+let is_cmd_bracket_left = window_key.key_is_down
+    && window_key.modifiers.contains(Modifiers::SUPER)
+    && matches!(&window_key.key, KeyCode::Char('['));
+
+if is_cmd_bracket_left {
+    log::info!("[NAV] Cmd+[ detected, sending go_back to browser");
+    drop(overlays);
+    if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+        xpc_manager.send_go_back(pane_id);
+    }
+    return Some(true);
+}
+
+// Handle Cmd+] (go forward) - issue 335
+let is_cmd_bracket_right = window_key.key_is_down
+    && window_key.modifiers.contains(Modifiers::SUPER)
+    && matches!(&window_key.key, KeyCode::Char(']'));
+
+if is_cmd_bracket_right {
+    log::info!("[NAV] Cmd+] detected, sending go_forward to browser");
+    drop(overlays);
+    if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+        xpc_manager.send_go_forward(pane_id);
+    }
+    return Some(true);
+}
+```
+
+#### Step 3: Intercept Cmd+[/] in Control mode (keyevent.rs)
+
+In the `WebviewMode::Control` arm, add handlers before the final `Some(false)`
+return (around line 1083):
+
+```rust
+// Handle Cmd+[ (go back) in Control mode - issue 335
+let is_cmd_bracket_left = window_key.key_is_down
+    && window_key.modifiers.contains(Modifiers::SUPER)
+    && matches!(&window_key.key, KeyCode::Char('['));
+
+if is_cmd_bracket_left {
+    log::info!("[NAV] Cmd+[ in Control mode, sending go_back");
+    drop(overlays);
+    if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+        xpc_manager.send_go_back(pane_id);
+    }
+    return Some(true);
+}
+
+// Handle Cmd+] (go forward) in Control mode - issue 335
+let is_cmd_bracket_right = window_key.key_is_down
+    && window_key.modifiers.contains(Modifiers::SUPER)
+    && matches!(&window_key.key, KeyCode::Char(']'));
+
+if is_cmd_bracket_right {
+    log::info!("[NAV] Cmd+] in Control mode, sending go_forward");
+    drop(overlays);
+    if let Some(xpc_manager) = crate::termwindow::webview_xpc::get_xpc_manager() {
+        xpc_manager.send_go_forward(pane_id);
+    }
+    return Some(true);
+}
+```
+
+#### Step 4: Add navigation tasks in profile server (termsurf-profile/src/main.rs)
+
+Add GoBackTask and GoForwardTask after SelectAllTask (around line 1340):
+
+```rust
+// ====== Go Back Task ======
+//
+// Task for navigating back in browser history via CEF's browser.go_back().
+// Issue 335: Browser navigation.
+
+wrap_task! {
+    pub struct GoBackTask {
+        state: Arc<BrowserState>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            if let Some(browser) = self.state.browser.lock().unwrap().as_ref() {
+                println!("[NAV] Calling browser.go_back()");
+                browser.go_back();
+            } else {
+                println!("[NAV] GoBackTask: no browser");
+            }
+        }
+    }
+}
+
+// ====== Go Forward Task ======
+//
+// Task for navigating forward in browser history via CEF's browser.go_forward().
+// Issue 335: Browser navigation.
+
+wrap_task! {
+    pub struct GoForwardTask {
+        state: Arc<BrowserState>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            if let Some(browser) = self.state.browser.lock().unwrap().as_ref() {
+                println!("[NAV] Calling browser.go_forward()");
+                browser.go_forward();
+            } else {
+                println!("[NAV] GoForwardTask: no browser");
+            }
+        }
+    }
+}
+```
+
+#### Step 5: Handle XPC actions in profile server (termsurf-profile/src/main.rs)
+
+Add handlers for "go_back" and "go_forward" actions in the XPC message handler,
+after the "do_select_all" case (around line 924):
+
+```rust
+"go_back" => {
+    // Issue 335: Navigate back in browser history
+    let state_guard = deferred_for_handler.lock().unwrap();
+    let Some(bs) = state_guard.as_ref() else {
+        println!("Profile: go_back ignored (state not ready)");
+        return;
+    };
+
+    println!("[NAV] Received go_back command");
+
+    let bs = Arc::clone(bs);
+    drop(state_guard);
+
+    let mut task = GoBackTask::new(bs);
+    cef::post_task(cef::ThreadId::UI, Some(&mut task));
+}
+"go_forward" => {
+    // Issue 335: Navigate forward in browser history
+    let state_guard = deferred_for_handler.lock().unwrap();
+    let Some(bs) = state_guard.as_ref() else {
+        println!("Profile: go_forward ignored (state not ready)");
+        return;
+    };
+
+    println!("[NAV] Received go_forward command");
+
+    let bs = Arc::clone(bs);
+    drop(state_guard);
+
+    let mut task = GoForwardTask::new(bs);
+    cef::post_task(cef::ThreadId::UI, Some(&mut task));
+}
+```
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+web google.com                    # Opens webview
+# Click a link to navigate to another page
+# Press Cmd+[ → should go back to google.com
+# Press Cmd+] → should go forward to the linked page
+# Press Ctrl+C to enter Control mode
+# Press Cmd+[ → should still navigate back
+# Press Cmd+] → should still navigate forward
+```
+
+Check logs:
+```bash
+tail -f /tmp/termsurf-gui.log | grep NAV
+tail -f /tmp/termsurf-profile-*.log | grep NAV
+```
