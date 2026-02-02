@@ -273,7 +273,7 @@ tail -f /tmp/termsurf-profile-*.log | grep NAV
 
 ### Experiment 2: Remove Cmd+R from WezTerm's default keybindings
 
-**Status: Pending**
+**Status: Partial Success**
 
 Remove the Cmd+R → ReloadConfiguration default keybinding. WezTerm auto-reloads
 config files when they change, so the manual reload shortcut is unnecessary.
@@ -339,3 +339,23 @@ Check logs:
 tail -f /tmp/termsurf-gui.log | grep NAV
 tail -f /tmp/termsurf-profile-*.log | grep NAV
 ```
+
+#### Conclusion
+
+**What works:**
+- Cmd+R successfully reloads the browser page
+- Removing the default keybinding allowed our handler in `key_event_impl` to
+  receive the key
+
+**What doesn't work:**
+- Cmd+Shift+R (hard reload) does not trigger
+- The Ctrl+Shift+R binding for ReloadConfiguration still exists in WezTerm's
+  defaults (see `default-keys.md` line 68), but Cmd+Shift+R is a different
+  combination and should not conflict
+- The issue may be with how the Shift modifier affects key detection — ts2 notes
+  that Cmd+Shift+R produces uppercase `'R'` due to the Shift modifier
+
+**Next steps:**
+- Investigate why Cmd+Shift+R is not being detected
+- Check if the key arrives as `KeyCode::Char('R')` (uppercase) vs
+  `KeyCode::Char('r')` (lowercase) when Shift is held
