@@ -359,3 +359,72 @@ tail -f /tmp/termsurf-profile-*.log | grep NAV
 - Investigate why Cmd+Shift+R is not being detected
 - Check if the key arrives as `KeyCode::Char('R')` (uppercase) vs
   `KeyCode::Char('r')` (lowercase) when Shift is held
+
+---
+
+### Experiment 3: Match uppercase 'R' without checking SHIFT modifier
+
+**Status: Pending**
+
+Follow ts2's pattern: match on `KeyCode::Char('R')` directly instead of checking
+for `Modifiers::SHIFT`. When Shift is held, the character arrives as uppercase.
+
+#### Rationale
+
+ts2's working implementation (lines 497-511) does NOT check for `Modifiers::SHIFT`:
+
+```rust
+// ts2 only checks SUPER, then matches on character case
+if key.key_is_down && key.modifiers.contains(Modifiers::SUPER) {
+    let handled = match &key.key {
+        KeyCode::Char('r') => { /* Cmd+R */ }
+        KeyCode::Char('R') => { /* Cmd+Shift+R - uppercase from Shift */ }
+        _ => false,
+    };
+}
+```
+
+Our ts3 code redundantly checks both `Modifiers::SHIFT` AND the character, which
+may cause the match to fail if the SHIFT modifier is consumed when producing the
+uppercase character.
+
+#### Step 1: Simplify Cmd+Shift+R detection in Browse mode (keyevent.rs)
+
+Replace the current `is_cmd_shift_r` check:
+
+```rust
+// Before:
+let is_cmd_shift_r = window_key.key_is_down
+    && window_key.modifiers.contains(Modifiers::SUPER)
+    && window_key.modifiers.contains(Modifiers::SHIFT)
+    && matches!(&window_key.key, KeyCode::Char('r') | KeyCode::Char('R'));
+
+// After:
+let is_cmd_shift_r = window_key.key_is_down
+    && window_key.modifiers.contains(Modifiers::SUPER)
+    && matches!(&window_key.key, KeyCode::Char('R'));
+```
+
+Note: Only match uppercase `'R'` — this implicitly requires Shift to be held.
+
+#### Step 2: Apply same fix in Control mode (keyevent.rs)
+
+Apply the same simplification to the Control mode handler.
+
+#### Verification
+
+```bash
+cd ts3 && ./scripts/build-debug.sh --open
+web example.com
+# Press Cmd+R → page should reload
+# Press Cmd+Shift+R → page should hard reload (bypass cache)
+# Press Ctrl+C to enter Control mode
+# Press Cmd+Shift+R → should still hard reload
+```
+
+Check logs:
+```bash
+tail -f /tmp/termsurf-gui.log | grep NAV
+tail -f /tmp/termsurf-profile-*.log | grep NAV
+# Expected: "[NAV] Cmd+Shift+R detected" when pressing Cmd+Shift+R
+```
