@@ -81,9 +81,14 @@ Note: Cmd+Shift+R produces uppercase `'R'` due to the Shift modifier.
 
 ### Experiment 1: XPC-based reload commands
 
-**Status: Pending**
+**Status: Failed**
 
 Follow the same pattern as issue 335 (back/forward navigation).
+
+**Failure reason:** Cmd+R is intercepted by WezTerm's default keybinding for
+`ReloadConfiguration` before our `handle_webview_key_event` handler runs. Unlike
+Cmd+[ and Cmd+] which have no default bindings, Cmd+R is bound in WezTerm's
+default key table (see `docs/config/default-keys.md` line 67).
 
 #### Step 1: Add XPC methods in GUI (webview_xpc.rs)
 
