@@ -331,7 +331,8 @@ fn load_cef(profile: &ProfileMode) -> Result<(), String> {
     let start = std::time::Instant::now();
     while !cef_app::is_context_initialized() {
         cef::do_message_loop_work();
-        if start.elapsed() > Duration::from_secs(10) {
+        // 30s to allow time for keychain password entry on first run
+        if start.elapsed() > Duration::from_secs(30) {
             return Err("Timeout waiting for CEF context initialization".into());
         }
         thread::sleep(Duration::from_millis(10));

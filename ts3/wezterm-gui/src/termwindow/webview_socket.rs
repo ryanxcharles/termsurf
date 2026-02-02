@@ -497,7 +497,8 @@ fn handle_request(
             log::info!("[GUI Socket] Spawned profile with session_id={}", session_id);
 
             // Wait for surface to be received via XPC (poll with timeout)
-            let max_wait = std::time::Duration::from_secs(5);
+            // 15s to allow time for keychain password entry on first run
+            let max_wait = std::time::Duration::from_secs(15);
             let poll_interval = std::time::Duration::from_millis(100);
             let start = std::time::Instant::now();
 
