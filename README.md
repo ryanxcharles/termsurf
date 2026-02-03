@@ -9,7 +9,7 @@ window switching. No context loss. Just web.
 web google.com
 ```
 
-<!-- TODO: Add screenshot/GIF showing web command in action -->
+![TermSurf screenshot showing a browser pane alongside terminal panes](assets/screenshot.png)
 
 ## Why TermSurf?
 
