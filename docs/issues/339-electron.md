@@ -194,26 +194,34 @@ are viable.
 **Goal:** Understand exactly how Electron implements `FrameSinkVideoCapturer`
 and what Chromium APIs it uses.
 
+**Local repo:** `/electron/` (cloned for local study, gitignored)
+
 **Tasks:**
 
-1. Read [Electron PR #42953](https://github.com/electron/electron/pull/42953)
-   - What files were changed?
-   - What Chromium headers are included?
-   - How is the capturer configured?
+1. Study [PR #42953](https://github.com/electron/electron/pull/42953) using local
+   source code:
+   - Identify the key files implementing GPU OSR
+   - Understand what Chromium headers are included
+   - Document how the capturer is configured
 
-2. Study the key classes:
+2. Read the key source files in `/electron/shell/browser/osr/`:
+   - `osr_video_consumer.cc` — Frame capture consumer
+   - `osr_host_display_client.cc` — Display client integration
+   - `osr_render_widget_host_view.cc` — Render widget host
+
+3. Study the key Chromium classes (referenced in Electron code):
    - `viz::FrameSinkVideoCapturer` — What is it? How is it created?
    - `media::VideoFrame` — How are frames delivered?
    - `kGpuMemoryBuffer` — How does zero-copy work on macOS?
 
-3. Trace the data flow:
+4. Trace the data flow through the code:
    - Browser renders to compositor
    - Compositor → FrameSinkVideoCapturer
    - Capturer → VideoFrame callback
    - VideoFrame → texture extraction
    - Texture → application
 
-4. Document dependencies:
+5. Document dependencies:
    - What Chromium components are required?
    - Are there macOS-specific APIs?
    - What's the minimum Chromium version?
