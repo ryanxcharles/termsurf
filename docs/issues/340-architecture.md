@@ -8,6 +8,10 @@ Electron and Steam have done.
 
 This forces us to reconsider nearly every architectural choice made to date.
 
+**Update (Research 3):** The cef-rs OSR example achieves 60fps with the same CEF
+version. The bottleneck may be ts3's XPC multi-process layer, not CEF itself.
+This reopens simpler options before committing to an architecture rewrite.
+
 ## Why This Changes Everything
 
 ### The Original Architecture (ts3)
@@ -62,6 +66,8 @@ This breaks the Rust assumption.
 
 - [x] Survey of C++ terminals (Alacritty's C++ predecessors, etc.)
 - [x] Feasibility of Rust + C++ FFI for Chromium embedding
+- [x] Investigate cef-rs OSR example performance (spoiler: CEF works fine!)
+- [ ] Profile ts3's XPC layer to find the real bottleneck
 - [ ] Electron as a platform (not just browser component)
 - [ ] Alternative approaches (WebGPU terminals, etc.)
 - [ ] Decision framework and recommendation
@@ -127,15 +133,17 @@ The C++ terminal ecosystem doesn't have what we need. Options:
 
 ### Research 2: High-FPS Chromium Integration Options
 
-**Question:** What are our options for achieving 60fps browser rendering? Can CEF
-ever work, or must we integrate Chromium directly?
+**Question:** What are our options for achieving 60fps browser rendering? Can
+CEF ever work, or must we integrate Chromium directly?
 
 **Answer:** CEF cannot deliver 60fps. Direct Chromium integration is required.
-Our XPC architecture already supports swapping the profile server implementation.
+Our XPC architecture already supports swapping the profile server
+implementation.
 
 #### The Definitive Answer on CEF
 
-CEF's frame throttling is hard-coded in `CefCopyFrameGenerator::GenerateCopyFrame()`:
+CEF's frame throttling is hard-coded in
+`CefCopyFrameGenerator::GenerateCopyFrame()`:
 
 ```cpp
 if (frame_in_progress_)
@@ -152,7 +160,8 @@ This is not configurable. Issue 338 documented five failed experiments:
 | 4          | `external_begin_frame_enabled` | Reduced stutters, still ~20fps   |
 | 5          | Chrome command-line flags      | Flags don't affect OSR code path |
 
-Someone achieved [1100 FPS on CEF 85 (2020)](https://magpcss.org/ceforum/viewtopic.php?f=6&t=19628)
+Someone achieved
+[1100 FPS on CEF 85 (2020)](https://magpcss.org/ceforum/viewtopic.php?f=6&t=19628)
 with `--disable-frame-rate-limit --disable-gpu-vsync`. This stopped working in
 newer versions—we're on CEF 143.
 
@@ -188,12 +197,12 @@ The profile server doesn't need to be Rust. It just needs to:
 
 #### The Four Options
 
-| Option                         | FPS | Effort    | Maintenance              | Risk    |
-| ------------------------------ | --- | --------- | ------------------------ | ------- |
-| **A. Embed Electron**          | 240 | Medium    | Low (Electron team)      | Low     |
-| **B. Chromium direct (C++)**   | 240 | Very High | High (track Chromium)    | Medium  |
-| **C. Patch CEF**               | 240 | High      | High (fork forever)      | Medium  |
-| **D. OBS's CEF fork**          | ?   | Medium    | Medium (depends on OBS)  | Unknown |
+| Option                       | FPS | Effort    | Maintenance             | Risk    |
+| ---------------------------- | --- | --------- | ----------------------- | ------- |
+| **A. Embed Electron**        | 240 | Medium    | Low (Electron team)     | Low     |
+| **B. Chromium direct (C++)** | 240 | Very High | High (track Chromium)   | Medium  |
+| **C. Patch CEF**             | 240 | High      | High (fork forever)     | Medium  |
+| **D. OBS's CEF fork**        | ?   | Medium    | Medium (depends on OBS) | Unknown |
 
 ##### Option A: Embed Electron (Recommended)
 
@@ -202,7 +211,8 @@ Use Electron as a headless OSR renderer in the profile server process:
 - **Proven:** 240fps in VS Code, Figma, Slack
 - **Maintained:** Large team tracking Chromium updates
 - **Same pipeline:** IOSurface → Mach port → GUI (unchanged)
-- **Reference code:** [Electron's OSR implementation](https://github.com/electron/electron/blob/main/shell/browser/osr/)
+- **Reference code:**
+  [Electron's OSR implementation](https://github.com/electron/electron/blob/main/shell/browser/osr/)
 
 ##### Option B: Chromium Direct (C++)
 
@@ -232,23 +242,100 @@ Significant C++ work requiring deep CEF/Chromium knowledge.
 ##### Option D: OBS's CEF Fork
 
 [OBS has a custom CEF fork](https://github.com/obsproject/cef) for streaming
-overlays. However, [their PR discussions](https://github.com/obsproject/obs-browser/pull/310)
-show `OnAcceleratedPaint` doesn't trigger on macOS arm64.
+overlays. However,
+[their PR discussions](https://github.com/obsproject/obs-browser/pull/310) show
+`OnAcceleratedPaint` doesn't trigger on macOS arm64.
 
 #### Conclusion
 
-| Question                          | Answer                                    |
-| --------------------------------- | ----------------------------------------- |
-| Will CEF ever deliver 60fps?      | **No.** Architectural limit.              |
-| Must we integrate Chromium directly? | **Yes**, for 60fps GPU OSR.            |
-| Can we embed just Electron's OSR? | **Yes.** Headless Electron as profile server. |
-| Can we write our own C++ wrapper? | **Yes.** Same as Electron but without Node. |
+| Question                             | Answer                                        |
+| ------------------------------------ | --------------------------------------------- |
+| Will CEF ever deliver 60fps?         | **No.** Architectural limit.                  |
+| Must we integrate Chromium directly? | **Yes**, for 60fps GPU OSR.                   |
+| Can we embed just Electron's OSR?    | **Yes.** Headless Electron as profile server. |
+| Can we write our own C++ wrapper?    | **Yes.** Same as Electron but without Node.   |
 
 **Recommendation:** Embed Electron (Option A). It's proven, maintained, and our
 XPC architecture already supports swapping the profile server implementation.
 
 If we need maximum control later, Option B (Chromium direct) remains available—
 it's the same path Steam and Brave took.
+
+### Research 3: cef-rs OSR Example Achieves 60fps
+
+**Question:** Is CEF's 20fps limitation fundamental, or specific to ts3?
+
+**Answer:** The cef-rs OSR example runs at visibly higher frame rates than ts3.
+**CEF can deliver 60fps.** The bottleneck is our XPC multi-process architecture,
+not CEF itself.
+
+#### The Discovery
+
+Running the cef-rs OSR example (`cef-rs/examples/osr/`) shows smooth, responsive
+rendering—noticeably better than ts3's laggy 20fps. Both use:
+
+- `shared_texture_enabled: true`
+- `windowless_frame_rate: 60`
+- `on_accelerated_paint` callback
+- Same CEF version (143)
+
+#### The Critical Difference
+
+| Aspect              | cef-rs OSR example                      | ts3                                                             |
+| ------------------- | --------------------------------------- | --------------------------------------------------------------- |
+| **Architecture**    | Single process                          | Multi-process (XPC)                                             |
+| **Texture path**    | Direct import in same process           | Mach port transfer across processes                             |
+| **IOSurface**       | `SharedTextureHandle::import_texture()` | `IOSurfaceCreateMachPort` → XPC → `IOSurfaceLookupFromMachPort` |
+| **Frame signaling** | Lightweight `EventLoopProxy`            | XPC message per frame                                           |
+
+The cef-rs example imports the IOSurface directly into wgpu within the same
+process:
+
+```rust
+// cef-rs example: direct import, same process
+let shared_handle = SharedTextureHandle::new(info);
+let texture = shared_handle.import_texture(&device);
+```
+
+ts3 creates a Mach port and sends it across processes:
+
+```rust
+// ts3: cross-process via XPC
+let port = IOSurfaceCreateMachPort(handle);
+xpc_msg.set_mach_send("iosurface_port", port);
+// ... XPC transfer ...
+let surface = IOSurfaceLookupFromMachPort(port);
+```
+
+#### What This Means
+
+**Research 2's conclusion was wrong.** CEF is not the bottleneck—our XPC layer
+is. The 20fps limitation is introduced by either:
+
+1. **XPC transport overhead** — message batching, latency, or coalescing
+2. **Profile server message loop** — different pump timing than the example
+3. **Per-frame XPC messages** — ts3 sends an XPC message for every frame
+
+#### Implications
+
+This changes the option space significantly:
+
+| Option                  | Previously     | Now                                  |
+| ----------------------- | -------------- | ------------------------------------ |
+| **Fix ts3's XPC layer** | Not considered | **New option—lowest effort**         |
+| **Embed Electron**      | Recommended    | Still viable, but may be unnecessary |
+| **Chromium direct**     | Backup option  | Overkill if XPC is the issue         |
+
+#### Next Steps
+
+Before abandoning CEF or rewriting in C++, we should:
+
+1. **Profile the XPC path** — measure latency at each stage
+2. **Compare message loops** — what does the cef-rs example do differently?
+3. **Test single-process** — run CEF in the GUI process temporarily to confirm
+
+If the XPC layer can be fixed, we keep the current Rust architecture and avoid
+the complexity of Electron or direct Chromium embedding.
 
 ## Related Issues
 
