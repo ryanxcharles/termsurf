@@ -124,6 +124,21 @@ The key difference: `FrameSinkVideoCapturer` operates at the compositor level,
 capturing frames directly from the GPU without the frame-dropping logic in CEF's
 `CefCopyFrameGenerator`.
 
+## Ideas for Future Experiments
+
+These ideas may become experiments after we complete the initial research. What
+we learn from studying Electron's implementation will inform which approaches
+are viable.
+
+- **Assess integration options** — Evaluate paths: patch CEF, use libcef +
+  Chromium APIs, embed Electron, or custom Chromium embedding
+- **Prototype FrameSinkVideoCapturer** — Standalone proof-of-concept that
+  captures frames and renders via wgpu
+- **Integrate into TermSurf** — Replace CEF's `OnAcceleratedPaint` with the new
+  capture API in termsurf-profile
+- **Optimize and polish** — Frame pacing, vsync alignment, edge cases, production
+  quality
+
 ## Experiments
 
 ### Experiment 1: Study Electron's Implementation
@@ -158,120 +173,6 @@ and what Chromium APIs it uses.
    - What's the minimum Chromium version?
 
 **Deliverable:** Architecture document explaining Electron's approach in detail.
-
----
-
-### Experiment 2: Assess Integration Options
-
-**Status:** NOT STARTED
-
-**Goal:** Determine the best way to get `FrameSinkVideoCapturer` into TermSurf.
-
-**Options to evaluate:**
-
-| Option                       | Description                                   | Pros                      | Cons                      |
-| ---------------------------- | --------------------------------------------- | ------------------------- | ------------------------- |
-| A: Patch CEF                 | Add FrameSinkVideoCapturer to CEF             | Keep current architecture | Must maintain CEF fork    |
-| B: Use libcef + Chromium     | Use CEF for browser, Chromium API for capture | Cleaner separation        | Complex integration       |
-| C: Embed Electron            | Use Electron's OSR directly                   | Proven solution           | Different embedding model |
-| D: Custom Chromium embedding | Build minimal browser with capture            | Full control              | Highest effort            |
-
-**Tasks:**
-
-1. For each option:
-   - Estimate implementation effort
-   - Identify blockers and risks
-   - Assess maintenance burden
-   - Check macOS compatibility
-
-2. Prototype feasibility:
-   - Can we call Chromium APIs from Rust?
-   - What bindings exist or need to be created?
-   - How does memory/texture ownership work?
-
-**Deliverable:** Decision document with recommended approach.
-
----
-
-### Experiment 3: Prototype FrameSinkVideoCapturer
-
-**Status:** NOT STARTED
-
-**Goal:** Create a minimal proof-of-concept that captures frames using
-`FrameSinkVideoCapturer` and renders them via wgpu.
-
-**Scope:** Standalone prototype, not integrated into TermSurf yet.
-
-**Tasks:**
-
-1. Set up build environment for Chromium/Electron APIs
-2. Create minimal browser instance
-3. Configure `FrameSinkVideoCapturer`
-4. Implement frame callback
-5. Extract IOSurface from GPU memory buffer
-6. Render to wgpu surface
-7. Measure frame rate
-
-**Success criteria:**
-
-- [ ] Prototype compiles and runs on macOS
-- [ ] Webpage renders correctly
-- [ ] Frame rate measured at 60+ fps
-- [ ] No visible lag in scrolling
-
-**Deliverable:** Working prototype with measured performance data.
-
----
-
-### Experiment 4: Integrate into TermSurf
-
-**Status:** NOT STARTED
-
-**Goal:** Replace CEF's `OnAcceleratedPaint` with `FrameSinkVideoCapturer` in
-TermSurf's profile server.
-
-**Tasks:**
-
-1. Adapt prototype to TermSurf's architecture
-2. Modify `termsurf-profile` to use new capture API
-3. Update IPC to handle new frame format (if needed)
-4. Preserve existing features:
-   - Profile isolation
-   - Multiple webviews per profile
-   - Input forwarding
-   - Navigation (back/forward/reload)
-5. Performance testing and tuning
-
-**Success criteria:**
-
-- [ ] All existing features still work
-- [ ] Frame rate at 60fps (measured)
-- [ ] Scrolling feels as smooth as Chrome
-- [ ] No regression in memory usage
-- [ ] No regression in CPU usage
-
-**Deliverable:** TermSurf running at 60fps.
-
----
-
-### Experiment 5: Optimize and Polish
-
-**Status:** NOT STARTED
-
-**Goal:** Fine-tune the implementation for production quality.
-
-**Tasks:**
-
-1. Profile and optimize hot paths
-2. Tune frame pacing for vsync alignment
-3. Handle edge cases:
-   - Window resize
-   - Display change (resolution, refresh rate)
-   - Low memory conditions
-4. Ensure proper cleanup on exit
-5. Update documentation
-
-**Deliverable:** Production-ready 60fps implementation.
 
 ---
 
@@ -313,11 +214,10 @@ TermSurf's profile server.
 
 This is a significant undertaking. Rough phases:
 
-1. **Research** (Exp 1-2): Understand Electron's approach, choose integration
-   strategy
-2. **Prototype** (Exp 3): Prove feasibility with standalone demo
-3. **Integrate** (Exp 4): Bring into TermSurf
-4. **Polish** (Exp 5): Production-ready quality
+1. **Research**: Understand Electron's approach, choose integration strategy
+2. **Prototype**: Prove feasibility with standalone demo
+3. **Integrate**: Bring into TermSurf
+4. **Polish**: Production-ready quality
 
 Each phase should be completed before starting the next. Findings from earlier
-experiments may change the approach for later ones.
+phases may change the approach for later ones.
