@@ -301,7 +301,7 @@ bottleneck.
 
 ### Experiment 3: Measure cef-rs Example Frame Rate
 
-**Status:** Not started
+**Status:** CONFIRMED — cef-rs achieves 60fps, proving CEF can deliver high frame rates
 
 **Goal:** Measure the actual frame rate in the cef-rs OSR example to determine
 whether it truly achieves 60fps or just feels smoother for other reasons.
@@ -320,17 +320,53 @@ more complex experiments, we should verify this assumption.
 
 #### Implementation Steps
 
-1. Add frame timing to `cef-rs/examples/osr/src/webrender.rs` in the
+1. ✅ Add frame timing to `cef-rs/examples/osr/src/webrender.rs` in the
    `on_accelerated_paint` handler (similar to ts3's `[FRAME-TX]` logging)
-2. Run the example, scroll around on a content-heavy page
-3. Analyze the frame intervals using the same methodology as Experiment 2
+2. ✅ Run the example, scroll around on a content-heavy page
+3. ✅ Analyze the frame intervals using the same methodology as Experiment 2
 
-#### Why This Experiment First
+#### Results
 
-- Requires no changes to ts3
-- Validates (or invalidates) the core assumption driving this investigation
-- If cef-rs also runs at ~30fps, we can stop chasing the "60fps CEF" goal and
-  focus on latency/smoothness instead
+**Overall stats:** 305 frames over 8279ms = **36.8 fps average** (includes idle
+periods and stalls during page load).
+
+**Sustained rendering (frames 10-80):** 70 frames over 1149ms = **60.9 fps**
+
+**Frame interval analysis:**
+
+```
+frame 13→14: 163-146 = 17ms
+frame 14→15: 179-163 = 16ms
+frame 15→16: 196-179 = 17ms
+frame 16→17: 212-196 = 16ms
+```
+
+The intervals are consistently **16-17ms** during active rendering. This is
+**60fps**.
+
+**Note:** The example runs two browser windows (github.com and google.com).
+Duplicate timestamps (e.g., frames 116-117 both at 1846ms) show both browsers
+sometimes paint simultaneously.
+
+#### Comparison
+
+| Metric         | cef-rs example | ts3     |
+| -------------- | -------------- | ------- |
+| Frame interval | 16-17ms        | 33-34ms |
+| Active FPS     | ~60fps         | ~30fps  |
+| With stalls    | ~37fps         | ~17fps  |
+
+#### Conclusion
+
+**CEF can deliver 60fps.** The cef-rs example proves it. The problem is specific
+to ts3's profile server environment, not CEF's fundamental capability.
+
+This invalidates the conclusions from Issues 338 and 339 which claimed CEF had a
+hard-coded 30fps cap. The cap exists somewhere in ts3's implementation, not in
+CEF itself.
+
+**Next step:** Identify what ts3's profile server does differently from the
+cef-rs example that causes the 30fps throttling
 
 ## Related Issues
 
