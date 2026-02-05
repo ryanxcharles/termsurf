@@ -123,7 +123,90 @@ window, CEF's compositor will behave normally.
 
 ## Experiments
 
-Not started yet.
+### Experiment 1: Document the Process Architecture
+
+**Goal:** Understand the architectural difference between cef-rs OSR (fast) and
+ts3 (slow) to identify where the bottleneck occurs.
+
+#### cef-rs OSR Example (2 processes)
+
+```
+┌─────────────────────────────────────────┐
+│ App Process (Browser Process)           │
+│ - CEF initialization                    │
+│ - winit event loop                      │
+│ - on_accelerated_paint receives texture │
+│ - wgpu renders to window                │
+└─────────────────────────────────────────┘
+              ▲
+              │ IOSurface (Chromium internal IPC)
+              │
+┌─────────────────────────────────────────┐
+│ GPU Process (spawned by CEF)            │
+│ - Compositor                            │
+│ - Creates IOSurface                     │
+└─────────────────────────────────────────┘
+```
+
+The GPU process is spawned automatically by CEF/Chromium. It handles all GPU
+operations and creates IOSurfaces that are passed back to the browser process
+via Chromium's internal IPC.
+
+#### ts3 (3 processes)
+
+```
+┌─────────────────────────────────────────┐
+│ GUI Process (WezTerm)                   │
+│ - wgpu renders to window                │
+│ - Receives IOSurface via Mach port      │
+└─────────────────────────────────────────┘
+              ▲
+              │ IOSurface (ts3 XPC protocol)
+              │
+┌─────────────────────────────────────────┐
+│ Profile Server (Browser Process)        │
+│ - CEF initialization                    │
+│ - on_accelerated_paint receives texture │
+│ - Forwards IOSurface via Mach port      │
+└─────────────────────────────────────────┘
+              ▲
+              │ IOSurface (Chromium internal IPC)
+              │
+┌─────────────────────────────────────────┐
+│ GPU Process (spawned by CEF)            │
+│ - Compositor                            │
+│ - Creates IOSurface                     │
+└─────────────────────────────────────────┘
+```
+
+ts3 adds an extra process (Profile Server) between the GPU and the GUI. This
+creates an additional IPC hop for texture sharing.
+
+#### IPC Hop Comparison
+
+| Path | cef-rs | ts3 |
+|------|--------|-----|
+| GPU → Browser Process | Chromium internal IPC | Chromium internal IPC |
+| Browser Process → GUI | Same process (direct) | ts3 XPC (Mach port) |
+| **Total hops** | 1 | 2 |
+
+#### Key Finding: The Extra Hop Is Not the Bottleneck
+
+Issue 338's measurements showed that the Profile Server → GUI hop was fast
+(frames arrived within milliseconds of production). The bottleneck was CEF
+producing frames at ~20fps in the profile server, not the XPC transport.
+
+This means the problem is not the extra IPC hop—it's something about the
+profile server's environment that causes CEF to throttle frame production.
+
+#### Conclusion
+
+The architecture difference (2 vs 3 processes) is not directly causing the
+slowdown. The profile server receives IOSurfaces from the GPU process at the
+same rate as the cef-rs example would—but CEF isn't producing them at 60fps.
+
+The root cause is likely in how the profile server runs CEF (no event loop, no
+window, no display connection), not in the texture forwarding to the GUI.
 
 ## Related Issues
 
