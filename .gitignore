@@ -38,6 +38,7 @@ ts1/vgcore.*
 
 # Analysis repos (not part of TermSurf)
 /wezterm/
+/electron/
 
 # cef-rs build outputs
 cef-rs/target/
