@@ -124,6 +124,52 @@ The key difference: `FrameSinkVideoCapturer` operates at the compositor level,
 capturing frames directly from the GPU without the frame-dropping logic in CEF's
 `CefCopyFrameGenerator`.
 
+## Key Resources
+
+### Electron Implementation
+
+- [PR #42953: GPU OSR with FrameSinkVideoCapturer](https://github.com/electron/electron/pull/42953)
+- [Electron OSR documentation](https://www.electronjs.org/docs/latest/tutorial/offscreen-rendering)
+
+### Chromium APIs
+
+- `viz::FrameSinkVideoCapturer` — Frame capture from compositor
+- `media::VideoFrame` — Frame container with GPU memory buffer
+- `gpu::GpuMemoryBufferHandle` — Cross-process texture handle
+
+### CEF Reference (what we're replacing)
+
+- `CefRenderHandler::OnAcceleratedPaint` — Current callback
+- `CefCopyFrameGenerator::GenerateCopyFrame` — The throttling code
+- [CEF Issue #1368: OSR frame rate limit](https://bitbucket.org/chromiumembedded/cef/issues/1368)
+
+### Previous Work
+
+- [Issue 338: Browser lag investigation](./338-lag.md) — Full context on why CEF
+  doesn't work
+
+## Success Criteria
+
+| Metric                 | Current | Target        |
+| ---------------------- | ------- | ------------- |
+| Frame rate             | ~20fps  | 60fps         |
+| Frame interval         | 50ms    | 16ms          |
+| Stutter frames (>50ms) | 14%     | <1%           |
+| Scrolling feel         | Laggy   | Chrome-smooth |
+| Input latency          | ~100ms  | <32ms         |
+
+## Timeline
+
+This is a significant undertaking. Rough phases:
+
+1. **Research**: Understand Electron's approach, choose integration strategy
+2. **Prototype**: Prove feasibility with standalone demo
+3. **Integrate**: Bring into TermSurf
+4. **Polish**: Production-ready quality
+
+Each phase should be completed before starting the next. Findings from earlier
+phases may change the approach for later ones.
+
 ## Ideas for Future Experiments
 
 These ideas may become experiments after we complete the initial research. What
@@ -173,51 +219,3 @@ and what Chromium APIs it uses.
    - What's the minimum Chromium version?
 
 **Deliverable:** Architecture document explaining Electron's approach in detail.
-
----
-
-## Key Resources
-
-### Electron Implementation
-
-- [PR #42953: GPU OSR with FrameSinkVideoCapturer](https://github.com/electron/electron/pull/42953)
-- [Electron OSR documentation](https://www.electronjs.org/docs/latest/tutorial/offscreen-rendering)
-
-### Chromium APIs
-
-- `viz::FrameSinkVideoCapturer` — Frame capture from compositor
-- `media::VideoFrame` — Frame container with GPU memory buffer
-- `gpu::GpuMemoryBufferHandle` — Cross-process texture handle
-
-### CEF Reference (what we're replacing)
-
-- `CefRenderHandler::OnAcceleratedPaint` — Current callback
-- `CefCopyFrameGenerator::GenerateCopyFrame` — The throttling code
-- [CEF Issue #1368: OSR frame rate limit](https://bitbucket.org/chromiumembedded/cef/issues/1368)
-
-### Previous Work
-
-- [Issue 338: Browser lag investigation](./338-lag.md) — Full context on why CEF
-  doesn't work
-
-## Success Criteria
-
-| Metric                 | Current | Target        |
-| ---------------------- | ------- | ------------- |
-| Frame rate             | ~20fps  | 60fps         |
-| Frame interval         | 50ms    | 16ms          |
-| Stutter frames (>50ms) | 14%     | <1%           |
-| Scrolling feel         | Laggy   | Chrome-smooth |
-| Input latency          | ~100ms  | <32ms         |
-
-## Timeline
-
-This is a significant undertaking. Rough phases:
-
-1. **Research**: Understand Electron's approach, choose integration strategy
-2. **Prototype**: Prove feasibility with standalone demo
-3. **Integrate**: Bring into TermSurf
-4. **Polish**: Production-ready quality
-
-Each phase should be completed before starting the next. Findings from earlier
-phases may change the approach for later ones.
