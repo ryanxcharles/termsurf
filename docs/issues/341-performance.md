@@ -370,7 +370,7 @@ cef-rs example that causes the 30fps throttling
 
 ### Experiment 4: Enable `external_message_pump`
 
-**Status:** Not started
+**Status:** PARTIAL SUCCESS — 60fps frames now dominant, but stalls remain
 
 **Goal:** Fix the configuration mismatch between ts3 and the cef-rs example by
 enabling `external_message_pump` in CEF settings.
@@ -432,12 +432,47 @@ while !QUIT_FLAG.load(Ordering::Relaxed) {
 | ~60fps       | `external_message_pump` was the missing setting. Keep this fix.         |
 | Still ~30fps | The setting alone isn't enough. Investigate other differences (window). |
 
-#### Notes
+#### Results
 
-- This is intentionally minimal — one setting change, no other modifications
-- If this fails, a secondary difference to investigate is the cef-rs example's
-  `NSApplicationActivationPolicyRegular` call, which makes the process a
-  foreground GUI app and may affect macOS frame scheduling
+**Overall stats:** 234 frames over 10631ms = **22.0 fps average**
+
+**Sustained rendering (frames 20-180, excluding page load):**
+
+| Interval             | Count | Percentage |
+| -------------------- | ----- | ---------- |
+| 6-20ms (~60fps)      | 79    | **52%**    |
+| 21-40ms (~30fps)     | 28    | 19%        |
+| 41-70ms (~15fps)     | 12    | 8%         |
+| 71-110ms (~10fps)    | 11    | 7%         |
+| >110ms (stall)       | 16    | 11%        |
+| 0-5ms (burst)        | 5     | 3%         |
+
+**Most common intervals:** 17ms (59 occurrences), 16ms (30 occurrences) — both
+are 60fps.
+
+#### Comparison Across All Experiments
+
+| Metric               | Exp 2 (no change) | Exp 4 (ext pump) | cef-rs example |
+| -------------------- | ----------------- | ----------------- | -------------- |
+| Average FPS          | 17.0              | **22.0**          | 60.9           |
+| Frames at ~60fps     | 3%                | **52%**           | ~90%           |
+| Frames at ~30fps     | 80%               | 19%               | ~5%            |
+| Frames >110ms        | 7%                | 11%               | rare           |
+| Most common interval | 33ms              | **17ms**          | 16ms           |
+
+#### Conclusion
+
+`external_message_pump` made a significant difference — the most common frame
+interval flipped from 33ms to **17ms**. CEF is now *trying* to run at 60fps,
+but something still causes it to drop frames and stall.
+
+The bimodal distribution (sometimes 16ms, sometimes 33ms+) suggests CEF is
+intermittently throttling — possibly because the process lacks a window/display
+connection that the cef-rs example has.
+
+**Next step:** Investigate the remaining difference: the cef-rs example has a
+visible window and sets `NSApplicationActivationPolicyRegular`, making it a
+foreground GUI app. The profile server has neither.
 
 ## Related Issues
 
