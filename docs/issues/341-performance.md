@@ -806,7 +806,7 @@ dramatic improvement and likely sufficient for smooth user experience.
 
 ### Experiment 8: Replace Hidden Window with CVDisplayLink
 
-**Status:** Not started
+**Status:** FAILED — CVDisplayLink alone does not provide what CEF needs
 
 **Goal:** Get the vsync timing signal from Experiment 7 without a window, by
 creating a CVDisplayLink directly.
@@ -906,14 +906,51 @@ display timing, the bare CVDisplayLink won't help.
 | ~78%+ at 60fps | CVDisplayLink alone provides the timing. Clean solution, no window.    |
 | Back to ~52% | The window itself matters, not just the display link. Need window fix. |
 
-#### Notes
+#### Results
 
-- Removes the `winit` dependency entirely — simpler, fewer transitive deps
-- The CVDisplayLink callback can be empty — its mere existence registers the
-  process with CoreVideo's display timing
-- `external_message_pump: 1` should still be set (best config from Exp 4)
-- If this fails, fall back to the hidden window approach but fix focus stealing
-  via `NSApplicationActivationPolicyAccessory` + `cocoa` dependency
+**Overall stats:** 230 frames over 12.6s = **18.2 fps average**
+
+| Interval             | Count | Percentage |
+| -------------------- | ----- | ---------- |
+| Burst (0-5ms)        | 9     | 4%         |
+| 60fps (6-20ms)       | 69    | **30%**    |
+| 30fps (21-40ms)      | 47    | 21%        |
+| Mid (41-70ms)        | 37    | 16%        |
+| Low (>70ms)          | 67    | **29%**    |
+
+**Most common intervals:** 10ms (19), 9ms (9), 11ms (9) — no dominant 16-17ms
+peak. The intervals are scattered rather than clustered at vsync boundaries.
+
+**Max consecutive 60fps frames:** Only **4** (compared to 57 in Experiment 7).
+
+#### Comparison Across Key Experiments
+
+| Metric               | Exp 4 (ext pump) | **Exp 7 (window)** | **Exp 8 (CVDisplayLink)** | cef-rs |
+| -------------------- | ---------------- | ------------------ | ------------------------- | ------ |
+| Average FPS          | 22.0             | **25.7**           | **18.2**                  | 60.9   |
+| Frames at ~60fps     | 52%              | **78%**            | **30%**                   | ~90%   |
+| Avg interval         | 45ms             | **39ms**           | **55ms**                  | ~16ms  |
+| Max consecutive 60fps| 5                | **57**             | **4**                     | —      |
+
+#### Conclusion
+
+The CVDisplayLink alone does **not** work. Performance is worse than Experiment 4
+(30% vs 52% at 60fps) and far worse than Experiment 7 (30% vs 78%). The "Why
+This Might NOT Work" prediction was correct.
+
+CEF's compositor does not use process-level CVDisplayLink timing. It relies on
+the **window server's per-window vsync notifications**, which only exist for
+actual windows. A bare CVDisplayLink registers with CoreVideo but doesn't create
+the window-server connection that CEF depends on.
+
+**Next step:** Revert to the hidden window approach (Experiment 7) and fix the
+focus-stealing problem. Two viable options:
+
+1. **`NSApplicationActivationPolicyAccessory`** — Makes the process an
+   "accessory" app that can own windows but doesn't appear in the Dock and
+   doesn't steal focus from other apps. Requires `cocoa` dependency.
+2. **Native NSWindow with `canBecomeKey: NO`** — Create the window via AppKit
+   directly, overriding focus behavior at the Cocoa level.
 
 ## Related Issues
 
