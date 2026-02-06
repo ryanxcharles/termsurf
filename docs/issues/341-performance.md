@@ -680,7 +680,7 @@ hidden 1x1 window to provide a CVDisplayLink/display connection.
 
 ### Experiment 7: Add a Hidden 1x1 Window
 
-**Status:** Not started
+**Status:** SIGNIFICANT SUCCESS — 78% of frames at 60fps, sustained runs of 57 frames
 
 **Goal:** Provide the process with a display link by creating a hidden window,
 closing the last remaining gap between ts3 and the cef-rs example.
@@ -740,13 +740,180 @@ impl ApplicationHandler for MinimalApp {
 | ~60fps       | The display link was the missing piece. Keep the hidden window.           |
 | Still ~22fps | It's not the display link. Try adding a wgpu surface on the window next.  |
 
+#### Results
+
+**Overall stats:** 647 frames over 25.2s = **25.7 fps average**
+
+| Interval             | Count | Percentage |
+| -------------------- | ----- | ---------- |
+| Burst (0-5ms)        | 23    | 4%         |
+| 60fps (6-20ms)       | 503   | **78%**    |
+| 30fps (21-40ms)      | 39    | 6%         |
+| Mid (41-70ms)        | 17    | 3%         |
+| Low (>70ms)          | 64    | 10%        |
+
+**Most common intervals:** 17ms (327), 16ms (174) — overwhelmingly **60fps**.
+
+**Sustained rendering:** Max consecutive 60fps frames: **57** (nearly a full
+second). Multiple long streaks: 38, 34, 32, 29, 28 consecutive frames. This
+is qualitatively different from all prior experiments where the max was 5.
+
+**Stalls:** The remaining 10% of "Low" frames are mostly 100ms+ stalls, likely
+caused by page load, layout, or JavaScript execution — not systematic
+throttling.
+
+#### Comparison Across All Experiments
+
+| Metric               | Exp 4  | Exp 5  | Exp 6  | **Exp 7**  | cef-rs |
+| -------------------- | ------ | ------ | ------ | ---------- | ------ |
+| Average FPS          | 22.0   | 19.1   | 18.1   | **25.7**   | 60.9   |
+| Frames at ~60fps     | 52%    | 42%    | 24%    | **78%**    | ~90%   |
+| Avg interval         | 45ms   | 52ms   | 55ms   | **39ms**   | ~16ms  |
+| Low (>70ms)          | —      | 15%    | 34%    | **10%**    | rare   |
+| Max consecutive 60fps| 5      | —      | 5      | **57**     | —      |
+| Dominant pattern     | bimodal| bimodal| ~75ms  | **steady** | steady |
+
+#### Conclusion
+
+The hidden window hypothesis was **correct**. The display link provided by the
+window gives CEF's compositor the vsync timing signal it needs.
+
+The bimodal pattern from Experiment 4 is largely gone. CEF now sustains 60fps
+in long uninterrupted runs (up to 57 consecutive frames). The 25.7 fps average
+is dragged down by idle periods and page load stalls, not by systematic frame
+dropping during active rendering.
+
+**What the window provides:** On macOS, a window connected to the window server
+receives a CVDisplayLink callback at the monitor's refresh rate (60Hz). This
+callback flows through winit's `pump_app_events`, giving the process a
+hardware-synchronized timing heartbeat. Without it, CEF's compositor had no
+vsync reference and dropped frames unpredictably.
+
+**Remaining gap from cef-rs (78% vs 90% at 60fps):** The cef-rs example renders
+directly to its window via wgpu. ts3's profile server creates the window but
+doesn't render to it — the actual rendering happens in the GUI process. This
+may mean the display link integration is slightly less effective without an
+active rendering surface. However, 78% at 60fps with sustained runs is a
+dramatic improvement and likely sufficient for smooth user experience.
+
 #### Notes
 
 - The window is invisible (`with_visible(false)`) — no UI impact
-- No wgpu surface or rendering is needed — just the window's existence
-- If this works, the hidden window is a clean permanent solution: minimal
-  overhead, no visible artifacts, just a display link anchor
-- This does NOT require `cocoa` — winit handles window creation natively
+- No wgpu surface or rendering needed — just the window's existence
+- The `cocoa` dependency (from Experiment 5) was not needed — winit handles
+  window creation natively
+- This is a clean permanent solution: minimal overhead, no visible artifacts
+
+### Experiment 8: Replace Hidden Window with CVDisplayLink
+
+**Status:** Not started
+
+**Goal:** Get the vsync timing signal from Experiment 7 without a window, by
+creating a CVDisplayLink directly.
+
+**Problem with Experiment 7:** The hidden 1x1 window steals focus from the GUI
+when the profile server process starts. `with_active(false)` did not prevent
+this. On macOS, creating an NSWindow — even an invisible one — can cause the
+process to activate and steal focus from the frontmost application.
+
+Other window-based fixes (NSApplicationActivationPolicyAccessory, overriding
+canBecomeKey/canBecomeMain) are fragile and fight the window system. The
+cleanest solution is to not create a window at all.
+
+**Insight from Experiment 7:** What we actually need is not the window itself —
+it's the **CVDisplayLink** that comes with it. A CVDisplayLink is a CoreVideo
+timer that fires a callback synchronized to the display's refresh rate. When a
+process has a window, the window server provides this automatically. But a
+CVDisplayLink can also be created **without a window** via the CoreVideo API.
+
+#### Implementation
+
+Replace the winit event loop and hidden window with a CVDisplayLink created via
+CoreVideo FFI:
+
+1. Remove `winit` dependency (no longer needed)
+2. Add CoreVideo FFI bindings for CVDisplayLink
+3. Create a CVDisplayLink at startup, before CEF init
+4. Use a simple polling loop (like the original sleep loop from before Exp 2)
+   with `do_message_loop_work()`
+5. The CVDisplayLink runs on its own thread and provides the vsync timing that
+   CEF needs, independent of the message loop
+
+```rust
+// CoreVideo FFI (minimal bindings needed)
+extern "C" {
+    fn CVDisplayLinkCreateWithActiveCGDisplays(link: *mut *mut c_void) -> i32;
+    fn CVDisplayLinkSetOutputCallback(
+        link: *mut c_void,
+        callback: extern "C" fn(*mut c_void, *const c_void, *const c_void,
+                                 u64, *mut u64, *mut c_void) -> i32,
+        userInfo: *mut c_void,
+    ) -> i32;
+    fn CVDisplayLinkStart(link: *mut c_void) -> i32;
+    fn CVDisplayLinkStop(link: *mut c_void) -> i32;
+    fn CVDisplayLinkRelease(link: *mut c_void);
+}
+
+// Callback does nothing — we just need the display link to exist
+extern "C" fn display_link_callback(
+    _link: *mut c_void, _now: *const c_void, _output_time: *const c_void,
+    _flags_in: u64, _flags_out: *mut u64, _ctx: *mut c_void,
+) -> i32 {
+    0 // kCVReturnSuccess
+}
+
+// Create and start a display link
+let mut link: *mut c_void = std::ptr::null_mut();
+CVDisplayLinkCreateWithActiveCGDisplays(&mut link);
+CVDisplayLinkSetOutputCallback(link, display_link_callback, std::ptr::null_mut());
+CVDisplayLinkStart(link);
+```
+
+The main loop simplifies back to:
+
+```rust
+loop {
+    if QUIT_FLAG.load(Ordering::Relaxed) {
+        break;
+    }
+    cef::do_message_loop_work();
+    std::thread::sleep(Duration::from_millis(1));
+}
+
+// Cleanup
+CVDisplayLinkStop(link);
+CVDisplayLinkRelease(link);
+```
+
+#### Why This Might Work
+
+Experiment 7 proved that the process needs a connection to the display server's
+timing. A CVDisplayLink provides exactly this — it registers the process with
+CoreVideo's display timing system. The hidden window was just an indirect way to
+get a display link; this creates one directly.
+
+#### Why This Might NOT Work
+
+It's possible that CEF's compositor doesn't use CVDisplayLink directly. It may
+rely on the window server's per-window vsync notifications (which only exist for
+actual windows). If CEF checks for window-level vsync rather than process-level
+display timing, the bare CVDisplayLink won't help.
+
+#### Success Criteria
+
+| Result       | Conclusion                                                               |
+| ------------ | ------------------------------------------------------------------------ |
+| ~78%+ at 60fps | CVDisplayLink alone provides the timing. Clean solution, no window.    |
+| Back to ~52% | The window itself matters, not just the display link. Need window fix. |
+
+#### Notes
+
+- Removes the `winit` dependency entirely — simpler, fewer transitive deps
+- The CVDisplayLink callback can be empty — its mere existence registers the
+  process with CoreVideo's display timing
+- `external_message_pump: 1` should still be set (best config from Exp 4)
+- If this fails, fall back to the hidden window approach but fix focus stealing
+  via `NSApplicationActivationPolicyAccessory` + `cocoa` dependency
 
 ## Related Issues
 
