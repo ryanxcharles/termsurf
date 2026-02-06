@@ -1225,9 +1225,66 @@ display link tied to the window — that our raw NSWindow doesn't have. A bare
 NSWindow created with `orderBack:` may not be fully registered with the window
 server's compositing pipeline.
 
-**Next step:** Either investigate what winit does differently (CALayer setup,
-`makeKeyAndOrderFront:` vs `orderBack:`, content view configuration), or return
-to the winit window and find a different way to prevent focus stealing.
+**Next step:** Try `orderFront:` instead of `orderBack:` — the window may need
+to be fully on-screen for the window server to send vsync notifications.
+
+### Experiment 12: orderFront instead of orderBack
+
+**Status:** Not started
+
+**Goal:** Fix the vsync regression from Experiment 11 by using `orderFront:nil`
+instead of `orderBack:nil`. Keep `canBecomeKey: NO` to prevent focus stealing.
+
+**Problem:** Experiment 11 proved that a native NSWindow with `canBecomeKey: NO`
+prevents focus stealing, but `orderBack:` caused a vsync regression. The window
+was not fully registered with the window server's compositing pipeline.
+
+**Hypothesis:** `orderBack:` puts the window in a partially-registered state
+where the window server doesn't include it in its vsync notification list.
+`orderFront:nil` fully registers the window with the compositing pipeline.
+Since `canBecomeKey` returns `NO`, the window cannot become the key window even
+when ordered front — keyboard focus should stay with WezTerm.
+
+The macOS window server tracks "on-screen" windows for compositing and vsync.
+`orderBack:` may place the window below everything (possibly off-screen to the
+compositor), while `orderFront:` ensures the window is actively composited.
+
+#### Changes
+
+1. **One-line change:** Replace `orderBack:nil` with `orderFront:nil` in the
+   native NSWindow creation code
+2. **Everything else stays the same:** `canBecomeKey: NO` subclass,
+   `NSApplicationActivationPolicyAccessory`, simple sleep+pump loop
+
+#### Expected Outcome
+
+| Result                       | Meaning                                                          |
+| ---------------------------- | ---------------------------------------------------------------- |
+| Focus stays + vsync restored | Both problems solved. Ship it.                                   |
+| Focus stolen                 | `orderFront:` activates the app despite Accessory policy and canBecomeKey: NO. Need another approach. |
+| Vsync still missing          | The issue isn't orderBack vs orderFront. Winit does something else (CALayer, content view, etc.). |
+
+#### Why This Should Work
+
+`canBecomeKey` and `orderFront:` are orthogonal:
+
+- `orderFront:` controls window **visibility and compositing** — it tells the
+  window server "this window is on-screen, include it in your rendering pipeline"
+- `canBecomeKey` controls **keyboard focus** — it determines whether the window
+  can receive keyboard events
+
+A window can be ordered front (visible, composited, receiving vsync) without
+being key (receiving keyboard input). This is exactly how utility/palette windows
+work in macOS — they're visible and rendered but don't steal the text cursor.
+
+#### Notes
+
+- This is a one-line change from Experiment 11
+- The window is 1×1 borderless at origin (0,0) — effectively invisible even
+  when ordered front
+- If `orderFront:` doesn't work either, the next step is to investigate winit's
+  source code to find what window setup step triggers vsync registration
+  (likely CALayer backing or content view creation)
 
 ## Related Issues
 
