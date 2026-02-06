@@ -1025,6 +1025,79 @@ code difference.
 
 **Next step:** Fix the focus-stealing problem with the hidden window.
 
+### Experiment 10: NSApplicationActivationPolicyAccessory
+
+**Status:** Not started
+
+**Goal:** Prevent the hidden window from stealing focus by setting the profile
+process's activation policy to `NSApplicationActivationPolicyAccessory`.
+
+**Problem:** When `termsurf-profile` creates a winit window (for vsync), macOS
+activates that process and pulls focus from the WezTerm GUI. The user has to
+click back on the terminal window to interact with the webview. We already tried
+winit's `with_active(false)` — it didn't work.
+
+**Hypothesis:** `NSApplicationActivationPolicyAccessory` (value `1`) tells macOS
+that this process is a background helper. It can own windows but won't appear in
+the Dock and won't steal focus from the foreground app. This is different from
+`NSApplicationActivationPolicyRegular` (value `0`, used in Exp 5 for App Nap),
+which makes the app fully foreground-capable.
+
+The three activation policies:
+
+| Policy        | Value | Dock icon | Can own windows | Steals focus |
+| ------------- | ----- | --------- | --------------- | ------------ |
+| Regular       | 0     | Yes       | Yes             | Yes          |
+| **Accessory** | **1** | **No**    | **Yes**         | **No**       |
+| Prohibited    | 2     | No        | No              | No           |
+
+`Prohibited` won't work because it prevents window creation entirely. `Accessory`
+is the sweet spot — windows are allowed (for the vsync signal) but the process
+stays in the background.
+
+#### Changes
+
+1. **Add `cocoa` dependency** to `Cargo.toml` (for `objc` FFI)
+2. **Set activation policy before window creation** — call
+   `[NSApplication sharedApplication] setActivationPolicy:1` before the winit
+   event loop creates the hidden window
+3. **No other changes** — same hidden window, same pump loop, same CEF settings
+
+#### Implementation
+
+```rust
+// Set before EventLoop::new()
+unsafe {
+    let app: id = msg_send![class!(NSApplication), sharedApplication];
+    let _: () = msg_send![app, setActivationPolicy: 1i64];
+}
+```
+
+#### Expected Outcome
+
+| Result                    | Meaning                                                    |
+| ------------------------- | ---------------------------------------------------------- |
+| Focus stays on WezTerm    | Fix works. Hidden window provides vsync without side effects. |
+| Focus still stolen        | Accessory policy doesn't prevent winit's window activation. Need native NSWindow approach. |
+| Performance regression    | Accessory policy interferes with vsync notifications. Unlikely but possible. |
+
+#### Why This Should Work
+
+macOS decides which app to activate based on activation policy. When a `Regular`
+app creates a window, the window server activates it. An `Accessory` app can
+create windows that participate in the window server (receiving vsync
+notifications) but the app itself won't be activated — focus stays wherever it
+was.
+
+#### Notes
+
+- This is a single line of code change (plus dependency)
+- If this works, it fully solves the hidden window approach with no downsides
+- Performance should remain identical to Experiments 7/9 since the window still
+  exists and still receives vsync notifications
+- The `cocoa` crate provides the `objc` macros (`msg_send!`, `class!`) needed
+  for the FFI call
+
 ## Related Issues
 
 - [Issue 338: Browser lag investigation](./338-lag.md) — Original performance
