@@ -1320,8 +1320,87 @@ creates an `NSView` as the content view and enables layer backing
 cycle.
 
 **Next step:** Add a layer-backed NSView as the content view to the native
-NSWindow, or investigate winit's source code to identify the exact setup that
-triggers vsync registration.
+NSWindow.
+
+### Experiment 13: Add Layer-Backed Content View
+
+**Status:** Not started
+
+**Goal:** Restore vsync by adding an NSView with `wantsLayer = YES` as the
+content view of our native NSWindow. Keep `canBecomeKey: NO` to prevent focus
+stealing.
+
+**Problem:** Experiments 11 and 12 proved that a native NSWindow with
+`canBecomeKey: NO` prevents focus stealing, but the window doesn't get vsync
+notifications — regardless of `orderBack:` vs `orderFront:`. Winit's window
+gets vsync but steals focus. The difference must be in how winit configures the
+window beyond creation and ordering.
+
+**Hypothesis:** On macOS, the window server's compositing pipeline is driven by
+Core Animation (CA) layers, not NSWindow objects directly. The vsync cycle is:
+
+1. Window server sends a display link callback to each compositing layer
+2. CA layers that need redrawing are composited
+3. The result is displayed on the next vsync
+
+A bare NSWindow without a layer-backed content view doesn't participate in this
+pipeline. Winit creates an NSView with `wantsLayer = YES` as the content view,
+which creates a backing CALayer. This CALayer is what registers the window with
+the window server's compositing cycle, enabling vsync notifications.
+
+#### Changes
+
+1. **Add three lines of objc FFI** after window creation:
+   - Create an `NSView` with the window's frame
+   - Set `wantsLayer = YES` on the view
+   - Set it as the window's content view
+2. **Everything else stays the same:** `canBecomeKey: NO` subclass,
+   `NSApplicationActivationPolicyAccessory`, `orderFront:nil`, simple
+   sleep+pump loop
+
+#### Implementation
+
+```rust
+// After creating the window...
+let view: id = msg_send![class!(NSView), alloc];
+let view: id = msg_send![view, initWithFrame:rect];
+let _: () = msg_send![view, setWantsLayer:YES];
+let _: () = msg_send![window, setContentView:view];
+```
+
+#### Expected Outcome
+
+| Result                       | Meaning                                                          |
+| ---------------------------- | ---------------------------------------------------------------- |
+| Vsync restored + no focus    | CALayer was the missing piece. Problem fully solved.             |
+| Vsync still missing          | CALayer is not sufficient. Need to investigate winit's source code for other setup (e.g., display link, NSOpenGLContext). |
+| Focus stolen                 | The content view somehow triggers activation. Unlikely since canBecomeKey is still NO. |
+
+#### Why This Should Work
+
+Core Animation layers are the fundamental unit of compositing on macOS. The
+window server doesn't directly composite NSWindows — it composites CALayers
+within those windows. When an NSView has `wantsLayer = YES`:
+
+1. AppKit creates a backing CALayer for the view
+2. The layer is registered with the window server's compositing tree
+3. The window server includes this layer in its vsync-driven render pass
+
+Without a layer-backed view, the window exists in the window list but has
+nothing to composite — so the window server has no reason to include it in the
+vsync cycle.
+
+#### Notes
+
+- This is 4 additional lines on top of Experiment 12's code
+- Uses `YES` from `cocoa::base` (already imported)
+- No new dependencies needed
+- If this works, the complete solution is:
+  1. `NSApplicationActivationPolicyAccessory` (app-level)
+  2. `CEFHostWindow` with `canBecomeKey: NO` (window-level)
+  3. Layer-backed NSView content view (vsync registration)
+  4. `orderFront:nil` (window placement)
+  5. Simple sleep+pump loop with `do_message_loop_work()` (CEF driving)
 
 ## Related Issues
 
