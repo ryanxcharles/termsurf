@@ -1324,7 +1324,7 @@ NSWindow.
 
 ### Experiment 13: Add Layer-Backed Content View
 
-**Status:** Not started
+**Status:** FAILED — CALayer did not restore vsync
 
 **Goal:** Restore vsync by adding an NSView with `wantsLayer = YES` as the
 content view of our native NSWindow. Keep `canBecomeKey: NO` to prevent focus
@@ -1390,17 +1390,58 @@ Without a layer-backed view, the window exists in the window list but has
 nothing to composite — so the window server has no reason to include it in the
 vsync cycle.
 
-#### Notes
+#### Results
 
-- This is 4 additional lines on top of Experiment 12's code
-- Uses `YES` from `cocoa::base` (already imported)
-- No new dependencies needed
-- If this works, the complete solution is:
-  1. `NSApplicationActivationPolicyAccessory` (app-level)
-  2. `CEFHostWindow` with `canBecomeKey: NO` (window-level)
-  3. Layer-backed NSView content view (vsync registration)
-  4. `orderFront:nil` (window placement)
-  5. Simple sleep+pump loop with `do_message_loop_work()` (CEF driving)
+**Focus:** SUCCESS — The main window retained focus.
+
+**Performance:** Still no vsync — identical to Experiments 11 and 12.
+
+**Overall stats:** 194 frames over 9.0s = **21.5 fps average**
+
+| Interval             | Count | Percentage |
+| -------------------- | ----- | ---------- |
+| Burst (0-5ms)        | 11    | 5%         |
+| 60fps (6-20ms)       | 70    | **36%**    |
+| 30fps (21-40ms)      | 9     | 4%         |
+| Mid (41-70ms)        | 48    | 24%        |
+| Low (>70ms)          | 55    | 28%        |
+
+**Dominant intervals:** Scattered (10ms, 11ms, 5ms, 76ms) — no 16-17ms vsync
+peak.
+
+**Max consecutive 60fps frames:** Only **3**
+
+#### Comparison Across Native Window Experiments
+
+| Metric                | Exp 9 (winit) | Exp 11 (orderBack) | Exp 12 (orderFront) | **Exp 13 (CALayer)** |
+| --------------------- | ------------- | ------------------- | -------------------- | -------------------- |
+| Frames at ~60fps      | 61%           | 34%                 | 34%                  | **36%**              |
+| Max consecutive 60fps | 35            | 4                   | 4                    | **3**                |
+| Dominant interval     | 16-17ms       | scattered           | scattered            | **scattered**        |
+
+#### Conclusion
+
+The CALayer hypothesis was wrong. All three native NSWindow experiments (11, 12,
+13) produce the same ~34-36% at 60fps with max streak of 3-4, regardless of
+ordering method or layer backing. Winit's window produces 61-78% with streaks
+of 35-57.
+
+The difference isn't the window configuration — it's the **event loop**. Winit's
+`pump_app_events` integrates with the macOS `NSRunLoop`, which is what drives
+the window server's display refresh callbacks. Our simple
+`sleep(1ms) + do_message_loop_work()` loop doesn't run the `NSRunLoop` at all.
+
+The two remaining candidates:
+
+1. **Winit's NSRunLoop integration** — `pump_app_events` calls
+   `NSApplication.nextEventMatchingMask:` which runs the macOS run loop,
+   triggering display refresh callbacks tied to the window.
+2. **NSApplication event pumping** — The macOS window server delivers vsync
+   notifications as events through `NSApplication`, not directly to windows.
+   Without pumping `NSApplication`, the events never arrive.
+
+**Next step:** Add `NSApplication` event pumping to the native window loop, or
+return to winit and find a different approach to the focus problem.
 
 ## Related Issues
 
