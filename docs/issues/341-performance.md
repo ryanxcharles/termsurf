@@ -474,6 +474,57 @@ connection that the cef-rs example has.
 visible window and sets `NSApplicationActivationPolicyRegular`, making it a
 foreground GUI app. The profile server has neither.
 
+### Experiment 5: Set `NSApplicationActivationPolicyRegular`
+
+**Status:** Not started
+
+**Goal:** Tell macOS the profile server is a foreground GUI app to prevent
+background process throttling.
+
+**Rationale:** macOS aggressively throttles background processes via **App Nap**:
+timer coalescing, reduced scheduling priority, and lower CPU allocation. The
+profile server has no window and no activation policy — macOS treats it as a
+background process.
+
+This perfectly explains the bimodal distribution from Experiment 4: sometimes the
+process gets scheduled on time (16ms), sometimes macOS delays it (33ms+). App
+Nap doesn't fully block the process — it just makes scheduling inconsistent,
+which is exactly what we observe.
+
+The cef-rs example calls `NSApplicationActivationPolicyRegular` before CEF init.
+ts3's profile server does not.
+
+#### Implementation
+
+One line before CEF initialization in `ts3/termsurf-profile/src/main.rs`:
+
+```rust
+// Issue 341, Experiment 5: Tell macOS this is a foreground GUI app
+// to prevent App Nap from throttling timer/scheduling precision.
+#[cfg(target_os = "macos")]
+unsafe {
+    use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicyRegular};
+    NSApp().setActivationPolicy_(NSApplicationActivationPolicyRegular);
+}
+```
+
+May require adding `cocoa` as a dependency to `termsurf-profile/Cargo.toml`.
+
+#### Success Criteria
+
+| Result       | Conclusion                                                                |
+| ------------ | ------------------------------------------------------------------------- |
+| ~60fps       | App Nap was throttling the process. Keep this fix.                        |
+| Still ~22fps | Activation policy alone isn't enough. Try adding a hidden 1x1 window.    |
+
+#### Notes
+
+- This does not create a visible window — it only changes how macOS schedules
+  the process
+- If this fails, the follow-up would be creating a hidden 1x1 window to further
+  convince macOS the process deserves foreground treatment
+- The `cocoa` crate may already be a transitive dependency via winit or CEF
+
 ## Related Issues
 
 - [Issue 338: Browser lag investigation](./338-lag.md) — Original performance
