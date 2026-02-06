@@ -476,7 +476,7 @@ foreground GUI app. The profile server has neither.
 
 ### Experiment 5: Set `NSApplicationActivationPolicyRegular`
 
-**Status:** Not started
+**Status:** FAILED — Activation policy had no effect on frame rate
 
 **Goal:** Tell macOS the profile server is a foreground GUI app to prevent
 background process throttling.
@@ -501,29 +501,58 @@ One line before CEF initialization in `ts3/termsurf-profile/src/main.rs`:
 ```rust
 // Issue 341, Experiment 5: Tell macOS this is a foreground GUI app
 // to prevent App Nap from throttling timer/scheduling precision.
-#[cfg(target_os = "macos")]
 unsafe {
     use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicyRegular};
     NSApp().setActivationPolicy_(NSApplicationActivationPolicyRegular);
 }
 ```
 
-May require adding `cocoa` as a dependency to `termsurf-profile/Cargo.toml`.
+Added `cocoa = { workspace = true }` to `termsurf-profile/Cargo.toml`.
 
-#### Success Criteria
+#### Results
 
-| Result       | Conclusion                                                                |
-| ------------ | ------------------------------------------------------------------------- |
-| ~60fps       | App Nap was throttling the process. Keep this fix.                        |
-| Still ~22fps | Activation policy alone isn't enough. Try adding a hidden 1x1 window.    |
+**Overall stats:** 270 frames over 14.1s = **19.1 fps average**
 
-#### Notes
+| Interval             | Count | Percentage |
+| -------------------- | ----- | ---------- |
+| 0ms (burst/double)   | 32    | 12%        |
+| 6-20ms (~60fps)      | 113   | **42%**    |
+| 21-40ms (~30fps)     | 17    | 6%         |
+| 41-70ms (~15fps)     | 50    | 19%        |
+| 71-110ms (~10fps)    | 39    | 15%        |
+| >110ms (stall)       | 18    | 7%         |
 
-- This does not create a visible window — it only changes how macOS schedules
-  the process
-- If this fails, the follow-up would be creating a hidden 1x1 window to further
-  convince macOS the process deserves foreground treatment
-- The `cocoa` crate may already be a transitive dependency via winit or CEF
+**Most common intervals:** 17ms (70), 16ms (37), 0ms (32)
+
+#### Comparison Across All Experiments
+
+| Metric               | Exp 2  | Exp 4 (+ext pump) | Exp 5 (+activation) | cef-rs |
+| -------------------- | ------ | ------------------ | -------------------- | ------ |
+| Average FPS          | 17.0   | 22.0               | **19.1**             | 60.9   |
+| Frames at ~60fps     | 3%     | 52%                | 42%                  | ~90%   |
+| Most common interval | 33ms   | 17ms               | 17ms                 | 16ms   |
+| Avg interval         | 59ms   | 45ms               | **52ms**             | ~16ms  |
+
+#### Conclusion
+
+`NSApplicationActivationPolicyRegular` did **not** improve frame rate. The
+results are virtually unchanged from Experiment 4 — slightly worse if anything
+(19.1 fps vs 22.0 fps, within noise).
+
+**App Nap is not the cause.** The bimodal distribution persists despite telling
+macOS this is a foreground GUI app. The large gaps (50ms, 67ms, 83ms) are exact
+multiples of ~16.7ms (vsync), which points to **dropped vsync beats** rather
+than process scheduling delays.
+
+Notable: 32 frames arrived at 0ms intervals (pairs of frames at the same
+millisecond), meaning CEF sometimes double-paints. Combined with the
+vsync-multiple gaps, this suggests the `pump_app_events` +
+`do_message_loop_work()` polling loop is not synchronized with CEF's internal
+compositor timing.
+
+The key remaining difference from the cef-rs example: it has an actual **window**
+connected to a display, which provides a real vsync signal. The profile server
+has no window — CEF's compositor has no display link to synchronize against.
 
 ## Related Issues
 
