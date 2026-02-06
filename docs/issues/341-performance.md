@@ -554,6 +554,87 @@ The key remaining difference from the cef-rs example: it has an actual **window*
 connected to a display, which provides a real vsync signal. The profile server
 has no window — CEF's compositor has no display link to synchronize against.
 
+### Experiment 6: Use `run_message_loop()` Instead of Manual Pump
+
+**Status:** Not started
+
+**Goal:** Test whether CEF's built-in message loop achieves 60fps, eliminating
+our manual polling loop as the cause.
+
+**Rationale:** After Experiments 2-5, the ts3 profile server now has identical
+CEF settings to the cef-rs example:
+
+| Setting                            | cef-rs example | ts3 (after Exp 5) |
+| ---------------------------------- | -------------- | ----------------- |
+| `external_message_pump`            | `true`         | `true`            |
+| `windowless_rendering_enabled`     | `true`         | `true`            |
+| `no_sandbox`                       | `true`         | `true`            |
+| `NSApplicationActivationPolicy`    | Regular        | Regular           |
+| winit event loop                   | Yes            | Yes               |
+| `on_schedule_message_pump_work`    | Not impl'd     | Not impl'd        |
+| `ControlFlow::Poll`               | Yes            | Yes               |
+
+The only remaining difference is that the cef-rs example has **real windows**
+with wgpu surfaces connected to the display. These provide a CVDisplayLink — a
+hardware-driven 60Hz callback synchronized to the monitor's refresh rate.
+
+Before adding a window (complex), we should test something simpler:
+`cef::run_message_loop()`. This is CEF's built-in blocking message loop. On
+macOS, it runs an `NSRunLoop`/`CFRunLoop` which may handle timing and display
+integration differently than our manual `do_message_loop_work()` polling. Our
+manual pump may be fighting CEF's internal scheduling.
+
+#### Implementation
+
+Replace the manual pump loop with CEF's built-in loop:
+
+```rust
+// Remove external_message_pump from settings (run_message_loop is the
+// non-external-pump mode)
+let settings = cef::Settings {
+    windowless_rendering_enabled: 1,
+    no_sandbox: 1,
+    // external_message_pump: REMOVED
+    root_cache_path: ...,
+    browser_subprocess_path: ...,
+    persist_session_cookies: 1,
+    ..Default::default()
+};
+
+// Replace winit event loop with CEF's own loop
+println!("Profile: Running CEF message loop...");
+cef::run_message_loop();
+```
+
+Change shutdown to use `cef::quit_message_loop()`:
+
+```rust
+// Ctrl+C handler and GUI disconnect handler
+cef::quit_message_loop();
+```
+
+#### Why This Is Safe
+
+- XPC handlers run on dispatch queue threads, not the main thread
+- `run_message_loop()` blocks the main thread, but XPC events still fire
+- `quit_message_loop()` can be called from any thread to unblock it
+
+#### Success Criteria
+
+| Result       | Conclusion                                                               |
+| ------------ | ------------------------------------------------------------------------ |
+| ~60fps       | Our manual pump was the problem. Keep `run_message_loop()`.              |
+| Still ~20fps | CEF's own loop can't do 60fps here either. The process needs a window.   |
+
+#### Notes
+
+- This removes winit entirely — the profile server doesn't need an event loop
+  if CEF manages its own
+- If this succeeds, the winit dependency (added in Experiment 2) and cocoa
+  dependency (added in Experiment 5) can be removed
+- If this fails, Experiment 7 should add a hidden 1x1 window to provide a
+  CVDisplayLink/display connection
+
 ## Related Issues
 
 - [Issue 338: Browser lag investigation](./338-lag.md) — Original performance
