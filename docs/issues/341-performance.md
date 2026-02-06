@@ -1444,7 +1444,7 @@ The two remaining candidates:
 
 ### Experiment 14: NSApplication Event Pumping
 
-**Status:** Not started
+**Status:** FAILED — NSApp event pumping did not restore vsync
 
 **Goal:** Restore vsync by pumping `NSApplication` events in the main loop,
 replacing the naive `sleep(1ms)` polling. Keep the native NSWindow with
@@ -1536,12 +1536,54 @@ these — it runs the underlying `CFRunLoop`, which processes:
 Without this event pumping, the window exists but the process never
 processes the vsync events the window server sends to it.
 
-#### Follow-up
+#### Results
 
-If this experiment succeeds (vsync restored with native window + event pumping),
-the next test is removing the window entirely to see if event pumping alone is
-sufficient. This would answer whether the window is needed at all, or whether
-it's purely the event loop that matters.
+**Focus:** SUCCESS — The main window retained focus.
+
+**Performance:** Still no vsync — same as Experiments 11-13.
+
+**Overall stats:** 278 frames over 11.4s = **24.3 fps average**
+
+| Interval             | Count | Percentage |
+| -------------------- | ----- | ---------- |
+| Burst (0-5ms)        | 19    | 6%         |
+| 60fps (6-20ms)       | 92    | **33%**    |
+| 30fps (21-40ms)      | 55    | 19%        |
+| Mid (41-70ms)        | 54    | 19%        |
+| Low (>70ms)          | 57    | 20%        |
+
+**Dominant intervals:** Scattered (10ms, 11ms, 14ms, 31ms) — no 16-17ms vsync
+peak.
+
+**Max consecutive 60fps frames:** Only **4**
+
+#### Comparison Across All Native Window Experiments
+
+| Metric                | Exp 11 (orderBack) | Exp 12 (orderFront) | Exp 13 (CALayer) | **Exp 14 (NSApp pump)** |
+| --------------------- | ------------------- | -------------------- | ---------------- | ----------------------- |
+| Frames at ~60fps      | 34%                 | 34%                  | 36%              | **33%**                 |
+| Max consecutive 60fps | 4                   | 4                    | 3                | **4**                   |
+| Dominant interval     | scattered           | scattered            | scattered        | **scattered**           |
+
+#### Conclusion
+
+NSApplication event pumping made no difference. Every attempt to replicate
+winit's vsync benefit with a native window has failed (Exp 11-14):
+
+- `orderBack:` — no vsync
+- `orderFront:` — no vsync
+- Layer-backed content view — no vsync
+- NSApp event pumping — no vsync
+
+Whatever winit does to enable vsync, it's something deeper than window
+configuration or event pumping — possibly a `CFRunLoop` observer,
+`CADisplayLink`, or its own `CVDisplayLink` tied to the window's display
+connection. The mechanism is internal to winit's macOS backend.
+
+**Next step:** Stop trying to replicate winit's internals. Go back to winit
+(which gives vsync) and fix focus stealing from the other direction — let winit
+create and manage the window, then use objc to immediately resign focus after
+the window is created.
 
 ## Related Issues
 
