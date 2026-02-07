@@ -763,3 +763,166 @@ the display link was wrong. The display link requires more than just a running
 run loop — it likely requires a connection to the window server's display
 hardware, which a windowless process doesn't have. The question is now whether we
 can create a CVDisplayLink or CADisplayLink directly without a window.
+
+### Experiment 4: CFRunLoop + `external_message_pump` + `on_schedule_message_pump_work`
+
+**Status:** Not started
+
+**Goal:** Replace the blind 1ms polling loop with CEF's cooperative scheduling
+system. Enable `external_message_pump`, implement `on_schedule_message_pump_work`
+to schedule CFRunLoop timers, and run `CFRunLoopRun()` as the main loop. This is
+how CEF is _designed_ to be driven when you own the message loop.
+
+**Rationale:** Experiments 1-3 revealed:
+
+- Exp 1: CEF's internal `ExternalBeginFrameSourceMac.DisplayLink` only fires 3
+  times — the process lacks a running CFRunLoop to deliver callbacks.
+- Exp 2: `NSApplication` init alone doesn't fix it — the run loop must be
+  actively serviced.
+- Exp 3: `run_message_loop()` ran a CFRunLoop but regressed to 19fps and
+  produced zero display link histograms — suggesting it uses a different code
+  path that doesn't activate the display link frame source.
+
+The reference implementation in
+`cef-rs/examples/tests_shared/src/browser/main_message_loop_external_pump/mac.rs`
+shows exactly how macOS CEF is meant to be driven: `on_schedule_message_pump_work`
+is called by CEF from any thread with a `delay_ms` value. The callback marshals
+to the main thread, creates an `NSTimer` on the CFRunLoop, and when the timer
+fires it calls `do_message_loop_work()`. The main loop is `NSApp().run()`.
+
+We adapt this for a windowless process by replacing `NSApp().run()` with
+`CFRunLoopRun()` — the raw Core Foundation primitive that NSApplication wraps.
+This gives us a running run loop without AppKit overhead.
+
+**Key insight from the reference implementation:**
+
+1. `on_schedule_message_pump_work(delay_ms)` can be called from ANY thread
+2. It uses `performSelector:onThread:` to marshal to the main thread
+3. On the main thread, it creates a one-shot `NSTimer` with the given delay
+4. When the timer fires, it calls `do_message_loop_work()`
+5. After `do_message_loop_work()`, if no timer is pending, it schedules a
+   fallback timer at `MAX_TIMER_DELAY` (33ms = 30fps floor)
+6. Reentrancy guard: if `do_message_loop_work()` triggers another
+   `on_schedule_message_pump_work(0)` call while already active, it defers
+   rather than recursing
+
+**Why CFRunLoop instead of NSApp().run():**
+
+`NSApp().run()` requires `NSApplication` initialization and enters AppKit's event
+processing loop. `CFRunLoopRun()` is the lower-level primitive — it services
+timer sources and run loop sources without any AppKit dependency. NSTimers added
+to the current thread's run loop will fire when `CFRunLoopRun()` is active. This
+is the minimal loop needed to service CEF's timer-based scheduling.
+
+**Changes to `ts3/termsurf-profile/src/main.rs`:**
+
+1. **Enable `external_message_pump` in CEF Settings:**
+
+```rust
+let settings = cef::Settings {
+    windowless_rendering_enabled: 1,
+    external_message_pump: 1,
+    no_sandbox: 1,
+    // ... rest unchanged
+};
+```
+
+2. **Add `on_schedule_message_pump_work` to `ProfileBPH`:**
+
+The `wrap_browser_process_handler!` macro already supports this callback. Add it
+to our `ProfileBPH` implementation. It must be safe to call from any thread.
+
+The callback posts a CFRunLoopTimer to the main thread's run loop:
+
+```rust
+fn on_schedule_message_pump_work(&self, delay_ms: i64) {
+    // Marshal to main thread via CFRunLoop source
+    // Schedule a timer that calls do_message_loop_work() after delay_ms
+}
+```
+
+3. **Implement a minimal CFRunLoop-based pump:**
+
+Use Core Foundation FFI directly (no `objc` crate needed for CF APIs):
+
+```rust
+// Core Foundation FFI
+extern "C" {
+    fn CFRunLoopGetMain() -> *mut std::ffi::c_void;
+    fn CFRunLoopRun();
+    fn CFRunLoopStop(rl: *mut std::ffi::c_void);
+    fn CFRunLoopTimerCreate(
+        allocator: *const std::ffi::c_void,
+        fire_date: f64,
+        interval: f64,
+        flags: u64,
+        order: i64,
+        callout: extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void),
+        context: *mut CFRunLoopTimerContext,
+    ) -> *mut std::ffi::c_void;
+    fn CFRunLoopAddTimer(
+        rl: *mut std::ffi::c_void,
+        timer: *mut std::ffi::c_void,
+        mode: *const std::ffi::c_void,
+    );
+    fn CFRunLoopTimerInvalidate(timer: *mut std::ffi::c_void);
+    fn CFAbsoluteTimeGetCurrent() -> f64;
+    static kCFRunLoopCommonModes: *const std::ffi::c_void;
+}
+```
+
+The pump state machine (adapted from the reference implementation):
+
+- `is_active: bool` — reentrancy guard
+- `reentrancy_detected: bool` — flag for deferred re-execution
+- `pending_timer: Option<*mut c_void>` — current CFRunLoopTimer, if any
+
+When `on_schedule_message_pump_work(delay)` fires:
+- If `delay <= 0`: post immediate work (timer with fire date = now)
+- If `delay > 0`: post delayed work (timer with fire date = now + delay/1000)
+- Cap delay at 33ms (30fps floor, matching reference implementation)
+
+When the timer fires:
+- Invalidate the timer
+- Call `do_message_loop_work()`
+- If reentrancy was detected, reschedule immediately
+- Otherwise schedule a fallback timer at 33ms
+
+4. **Replace the main loop:**
+
+```rust
+// Issue 342, Experiment 4: CFRunLoop-based cooperative scheduling.
+println!("Profile: Running message loop (CFRunLoop + external_message_pump)...");
+unsafe { CFRunLoopRun(); }
+```
+
+5. **Shutdown:** Replace QUIT_FLAG-based exit with `CFRunLoopStop()`:
+
+```rust
+// Ctrl+C handler:
+QUIT_FLAG.store(true, Ordering::Relaxed);
+unsafe { CFRunLoopStop(CFRunLoopGetMain()); }
+
+// XPC disconnect handler:
+QUIT_FLAG.store(true, Ordering::Relaxed);
+unsafe { CFRunLoopStop(CFRunLoopGetMain()); }
+```
+
+**Thread safety considerations:**
+
+`on_schedule_message_pump_work` is called from CEF's internal threads. CFRunLoop
+timers can be added from any thread — `CFRunLoopAddTimer` with
+`CFRunLoopGetMain()` is thread-safe. The timer callback fires on the main thread,
+where `do_message_loop_work()` must be called. This avoids the `performSelector`
+cross-thread marshaling that the reference implementation uses (that approach
+requires NSObject/NSThread, which we're trying to avoid).
+
+**What to look for:**
+
+- `Viz.ExternalBeginFrameSourceMac.DisplayLink` — does the running CFRunLoop
+  unlock the display link?
+- Frame rate vs baseline (28.5fps) and Exp 3 (19.2fps)
+- Whether `on_schedule_message_pump_work` is actually called (log the delay
+  values)
+- Interval distribution — do we see consistent 16ms intervals?
+- Whether `CFRunLoopRun()` blocks correctly and timers fire as expected
