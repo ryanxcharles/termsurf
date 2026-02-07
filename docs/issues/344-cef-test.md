@@ -684,6 +684,15 @@ cef-test-profile binary, renamed helpers, and the CEF framework.
   60fps during active rendering — the frame rate question will need interactive
   content (scrolling, animation) to answer definitively
 
+**Conclusion:** We have 60fps. This is the critical baseline. The headless CEF
+process — identical message loop, identical settings, identical
+`do_message_loop_work()` + `cfrunloop::run_for(0.001)` — produces frames at
+60fps during active rendering. Every subsequent phase adds one layer of
+complexity (XPC, Mach ports, IOSurface transfer, GUI rendering). If any phase
+drops below 60fps, we know exactly which layer caused the regression. Measure
+frame rate at every phase boundary. Do not proceed past a phase that loses
+frames without understanding why.
+
 ### Phase 3: GUI — Window + Split Rendering
 
 Build `cef-test-gui` with a winit window and wgpu rendering pipeline. No CEF
