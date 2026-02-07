@@ -755,6 +755,20 @@ bundle.
 halves from Phase 3. The launcher binary exists at the correct path inside the
 bundle.
 
+**Results:**
+
+- `./cef-test-scripts/build.sh` builds all three binaries and creates CefTest.app
+- Bundle structure verified:
+  - `Contents/MacOS/cef-test-gui` — main binary
+  - `Contents/Frameworks/cef-test-profile` — profile server binary
+  - `Contents/Frameworks/Chromium Embedded Framework.framework/` — CEF
+  - `Contents/Frameworks/cef-test-profile Helper*.app/` — renamed CEF helpers
+  - `Contents/XPCServices/com.cef-test.launcher.xpc/` — launcher + Info.plist
+- `com.cef-test.launcher` registered with launchd as Mach service
+- GUI opens from app bundle, shows blue/green split — same as Phase 3
+- Build script also registers the launcher with launchd (same pattern as ts3's
+  build-debug.sh), cleans stale registrations on re-run
+
 ### Phase 5: Launcher & XPC Bootstrap
 
 Implement the launcher and the XPC connection chain: GUI → Launcher → Profile
