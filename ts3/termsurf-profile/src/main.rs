@@ -40,6 +40,31 @@ static LAUNCHER_CONNECTION: OnceLock<Arc<XpcConnection>> = OnceLock::new();
 fn active_connections() -> &'static Mutex<HashSet<u64>> {
     ACTIVE_CONNECTIONS.get_or_init(|| Mutex::new(HashSet::new()))
 }
+
+// Issue 342, Experiment 5: Minimal CFRunLoop FFI for servicing run loop sources.
+#[cfg(target_os = "macos")]
+mod cfrunloop {
+    use std::ffi::c_void;
+
+    type CFStringRef = *const c_void;
+    type CFTimeInterval = f64;
+
+    extern "C" {
+        static kCFRunLoopDefaultMode: CFStringRef;
+        fn CFRunLoopRunInMode(
+            mode: CFStringRef,
+            seconds: CFTimeInterval,
+            return_after_source_handled: u8,
+        ) -> i32;
+    }
+
+    /// Run the main thread's CFRunLoop for up to `seconds`, returning after
+    /// one source is handled or the timeout expires.
+    pub fn run_for(seconds: f64) -> i32 {
+        unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, 1) }
+    }
+}
+
 use termsurf_xpc::*;
 
 #[derive(Parser)]
@@ -301,10 +326,14 @@ fn run_profile_server(args: Args) {
     .expect("Failed to set Ctrl+C handler");
 
     // 10. Run CEF message loop with high-frequency polling
-    // Issue 325, Experiment 3: Replace run_message_loop() with polling loop.
-    println!("Profile: Running message loop (polling mode)...");
+    // Issue 342, Experiment 5: Service the CFRunLoop instead of dead sleeping.
+    // This allows CEF's internal timer sources and display link callbacks to fire.
+    println!("Profile: Running message loop (polling + CFRunLoop)...");
     while !QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
         cef::do_message_loop_work();
+        #[cfg(target_os = "macos")]
+        cfrunloop::run_for(0.001); // 1ms
+        #[cfg(not(target_os = "macos"))]
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
 
