@@ -343,6 +343,16 @@ fn run_profile_server(args: Args) {
     let mut mlw_spike_count: u64 = 0;
     let mut cfl_instant_count: u64 = 0;
 
+    // Issue 345: Scroll simulation state (benchmark mode)
+    let scroll_interval = Duration::from_millis(8); // ~125Hz, matching Apple mouse polling
+    let mut last_scroll_time = Instant::now();
+    let mut scroll_started = false;
+    let mut scroll_direction: i32 = -1; // -1 = down, +1 = up
+    let scroll_delta: i32 = 120; // standard scroll unit (one "notch")
+    let direction_switch_every: u64 = 25; // reverse every 25 events (~200ms)
+    let mut events_since_switch: u64 = 0;
+    let mut scroll_event_count: u64 = 0;
+
     while !QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
         let t0 = Instant::now();
 
@@ -372,6 +382,51 @@ fn run_profile_server(args: Args) {
                 "[LOOP-TIMING] iter={} max_mlw={}us max_cfl={}us max_total={}us mlw_spikes={} cfl_instant={}",
                 loop_count, max_mlw_us, max_cfl_us, max_total_us, mlw_spike_count, cfl_instant_count
             );
+        }
+
+        // Issue 345: Scroll simulation in benchmark mode
+        if args.benchmark && PAGE_LOADED.load(std::sync::atomic::Ordering::Relaxed) {
+            if !scroll_started {
+                println!("[SCROLL] Page loaded, starting simulated scroll at ~125Hz");
+                scroll_started = true;
+                last_scroll_time = Instant::now();
+            }
+
+            let now = Instant::now();
+            if now.duration_since(last_scroll_time) >= scroll_interval {
+                last_scroll_time = now;
+
+                // Reverse direction every N events to oscillate without hitting page boundaries
+                events_since_switch += 1;
+                if events_since_switch >= direction_switch_every {
+                    scroll_direction *= -1;
+                    events_since_switch = 0;
+                }
+
+                // Get first browser and send scroll event directly
+                let browsers = profile_state.browsers.lock().unwrap();
+                if let Some((_, bs)) = browsers.iter().next() {
+                    if let Some(browser) = bs.browser.lock().unwrap().as_ref() {
+                        use cef::{ImplBrowser, ImplBrowserHost};
+                        if let Some(host) = browser.host() {
+                            let mouse_event = cef::MouseEvent {
+                                x: (args.width / 2) as i32,
+                                y: (args.height / 2) as i32,
+                                modifiers: 0,
+                            };
+                            host.send_mouse_wheel_event(
+                                Some(&mouse_event),
+                                0,
+                                scroll_delta * scroll_direction,
+                            );
+                            scroll_event_count += 1;
+                            if scroll_event_count % 125 == 0 {
+                                println!("[SCROLL] {} events sent", scroll_event_count);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

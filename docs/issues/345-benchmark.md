@@ -322,6 +322,12 @@ cef-test-profile's scroll loop.
 messages. The webview should scroll automatically without any manual input.
 Visually confirm the page scrolls up and down.
 
+**Result:** Done. `web benchmark` scrolls automatically — 1,250 scroll events
+sent over ~21s before Ctrl+C. Log shows `[SCROLL] Page loaded, starting
+simulated scroll at ~125Hz` followed by periodic `[SCROLL] N events sent`
+milestones. Cursor type oscillates between 0 and 2 confirming page scrolls over
+different elements. Early framerate read: ~42fps (883 frames in 21.05s).
+
 ### Phase 5: FrameStats collection (`log output`)
 
 Add `FrameStats` tracking to the profile server. Record frame intervals in
@@ -387,6 +393,6 @@ needed.
 | 1     | `--benchmark` flag parsed   | `cargo check -p termsurf-profile` | Done   |
 | 2     | Flag threaded through chain | `cargo check` (full workspace)    | Done   |
 | 3     | Page load detection         | Log shows `[LOAD]` message        | Done   |
-| 4     | Scroll simulation           | Log shows `[SCROLL]`, page moves  |        |
+| 4     | Scroll simulation           | Log shows `[SCROLL]`, page moves  | Done   |
 | 5     | FrameStats + auto-quit      | Log shows `[PERF]` every 10s      |        |
 | 6     | Stats printed to terminal   | `web benchmark` prints results    |        |
