@@ -214,4 +214,38 @@ Run each 3 times and compare.
   overhead accounts for some of the gap, but other factors (L2–L4) also
   contribute.
 
-**Status:** Not started
+**Result:**
+
+Release build dramatically improves cef-test performance:
+
+| Build   | FPS        | p50    | p95    | p99    | 60fps% | Streak |
+| ------- | ---------- | ------ | ------ | ------ | ------ | ------ |
+| Debug   | 37.8–39.5  | 16.8ms | 50.0ms | 83.3ms | 51–59% | 59–67  |
+| Release | 50.3–51.6  | 16.7ms | 33.6ms | 33.9ms | 81–85% | 69–109 |
+
+**Findings:**
+
+1. **Debug overhead accounts for ~12fps.** Release jumps from ~38 to ~51fps — a
+   33% improvement from compiler optimizations alone.
+
+2. **The bimodal pattern is gone.** Debug had random "good mode" (p95=50ms) vs
+   "bad mode" (p95=83ms). Release is consistently p95=33.6ms. The system no
+   longer randomly enters a bad state.
+
+3. **The p95 is now exactly 2 vsync intervals (33.3ms).** The p50 is a perfect
+   16.7ms (1/60s). About 85% of frames land on the first vsync, and the
+   remaining ~15% miss by just enough to wait for the next one — costing exactly
+   one extra frame interval.
+
+4. **CEF OSR is NOT the ceiling.** The ~38fps was debug overhead, not an inherent
+   OSR limitation. At ~51fps with 85% of frames at 60fps, there's a clear path
+   to smoother rendering.
+
+5. **The remaining gap to 60fps is small.** The ~15% of frames that slip past
+   the vsync deadline are likely caused by IOSurface → Mach port → IPC transfer
+   time occasionally pushing a frame just past the 16.7ms boundary. This is what
+   L3/L4/L6 would investigate.
+
+**Next step:** Test ts3 in release mode to confirm it sees the same improvement.
+
+**Status:** Done

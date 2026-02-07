@@ -2,7 +2,7 @@
 # Build and bundle CefTest.app — the full cef-test harness
 #
 # Usage:
-#   cd ts3 && ./cef-test-scripts/build.sh [--clean] [--open]
+#   cd ts3 && ./cef-test-scripts/build.sh [--clean] [--open] [--release]
 #
 # Produces: ts3/CefTest.app
 # Run with: ./CefTest.app/Contents/MacOS/cef-test-gui
@@ -16,12 +16,22 @@ CEF_RS_DIR="$(dirname "$TS3_DIR")/cef-rs"
 # Parse flags
 CLEAN=false
 OPEN=false
+RELEASE=false
 for arg in "$@"; do
     case $arg in
         --clean) CLEAN=true ;;
         --open) OPEN=true ;;
+        --release) RELEASE=true ;;
     esac
 done
+
+if [ "$RELEASE" = true ]; then
+    CARGO_FLAGS="--release"
+    PROFILE="release"
+else
+    CARGO_FLAGS=""
+    PROFILE="debug"
+fi
 
 if [ "$CLEAN" = true ]; then
     echo "=== Cleaning ==="
@@ -48,7 +58,7 @@ fi
 # 2. Build all three cef-test binaries
 echo "=== Building cef-test binaries ==="
 cd "$TS3_DIR"
-cargo build -p cef-test-gui -p cef-test-profile -p cef-test-launcher
+cargo build $CARGO_FLAGS -p cef-test-gui -p cef-test-profile -p cef-test-launcher
 
 # 3. Create app bundle
 APP="$TS3_DIR/CefTest.app"
@@ -59,10 +69,10 @@ mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Frameworks"
 
 # 4. Copy main binary
-cp "$TS3_DIR/target/debug/cef-test-gui" "$APP/Contents/MacOS/"
+cp "$TS3_DIR/target/$PROFILE/cef-test-gui" "$APP/Contents/MacOS/"
 
 # 5. Copy profile server binary
-cp "$TS3_DIR/target/debug/cef-test-profile" "$APP/Contents/Frameworks/"
+cp "$TS3_DIR/target/$PROFILE/cef-test-profile" "$APP/Contents/Frameworks/"
 
 # 6. Copy CEF framework
 echo "Copying CEF framework..."
@@ -87,7 +97,7 @@ done
 # 8. Copy XPC launcher service
 echo "Copying XPC launcher service..."
 mkdir -p "$APP/Contents/XPCServices/com.cef-test.launcher.xpc/Contents/MacOS"
-cp "$TS3_DIR/target/debug/cef-test-launcher" \
+cp "$TS3_DIR/target/$PROFILE/cef-test-launcher" \
    "$APP/Contents/XPCServices/com.cef-test.launcher.xpc/Contents/MacOS/"
 cp "$TS3_DIR/cef-test-launcher/xpc-service/Info.plist" \
    "$APP/Contents/XPCServices/com.cef-test.launcher.xpc/Contents/"
