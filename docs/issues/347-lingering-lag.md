@@ -313,3 +313,40 @@ ts3 release improves over debug but falls short of cef-test release:
 presentation timing) are the highest-value investigations.
 
 **Status:** Done
+
+## Conclusion
+
+Two experiments isolated the layers of the performance problem:
+
+| Source   | Build   | FPS       | p50    | p95    | 60fps% |
+| -------- | ------- | --------- | ------ | ------ | ------ |
+| Chrome   | —       | 60 (est.) | 16.7ms | 16.7ms | 100%   |
+| cef-test | Release | 50.3–51.6 | 16.7ms | 33.6ms | 81–85% |
+| ts3      | Release | 45.8–51.8 | 18.9ms | 34.1ms | 47–55% |
+| ts3      | Debug   | 33.7–46.6 | 16.9ms | 49.7ms | —      |
+
+The gap between Chrome (60fps) and TermSurf (~48fps) breaks down into three
+distinct layers:
+
+1. **Debug build overhead (~12fps).** Eliminated by compiling with `--release`.
+   This was the single largest factor. No further action needed — just ship
+   release builds.
+
+2. **CEF OSR baseline gap (~9fps).** cef-test is a minimal app with no TermSurf
+   code, yet it only reaches ~51fps in release mode. About 15% of frames miss
+   the vsync deadline. This gap exists before any TermSurf pipeline code runs.
+   The cause is unknown — candidates include the 1ms message loop sleep (L2),
+   CEF's `windowless_frame_rate` setting, or inherent cost of off-screen
+   rendering. This is the next area to investigate.
+
+3. **TermSurf pipeline overhead (~2ms per frame).** ts3 release has
+   p50=18.9ms vs cef-test's 16.7ms. The extra ~2ms comes from the IPC path:
+   IOSurface → Mach port → XPC → GUI import → wgpu render. This pushes ts3's
+   60fps hit rate from ~83% down to ~51%. However, this layer only matters after
+   the cef-test baseline is understood — if cef-test can be brought to 60fps,
+   the pipeline overhead may shrink or become irrelevant.
+
+**Recommended next step:** Investigate why cef-test tops out at ~51fps before
+diving into ts3 pipeline details. cef-test is a smaller codebase, changes are
+cheaper to test, and any improvement directly benefits ts3. The most likely
+candidates are message loop cadence (L2) and CEF's frame rate configuration.
