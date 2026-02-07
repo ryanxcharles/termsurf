@@ -613,3 +613,62 @@ Effectively zero. `QOS_CLASS_USER_INTERACTIVE` is what every GUI app's main
 thread runs at. It increases CPU priority and timer precision — it cannot make
 timers less accurate. The only cost is slightly higher power consumption, which
 is irrelevant for a process that's already polling at 1ms intervals.
+
+#### Results
+
+**Status: FAILED** — Performance regressed despite QoS being set successfully.
+
+QoS was confirmed set: `Profile: Set QoS to USER_INTERACTIVE: ok`
+
+**Overall stats:** 298 frames over 10.2s = **28.9 fps average**
+
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 18    | 6.1%       |
+| 60fps (6-20ms)  | 192   | **64.6%**  |
+| 30fps (21-40ms) | 23    | 7.7%       |
+| Mid (41-70ms)   | 42    | **14.1%**  |
+| Low (>70ms)     | 22    | 7.4%       |
+
+**Dominant intervals:** 17ms (126), 16ms (62) — vsync-aligned peak intact.
+New cluster at 50ms (25 occurrences) and 66-67ms (10 combined) that did not
+exist in the baseline.
+
+**Max consecutive 60fps frames:** **61** (top streaks: 61, 35, 18, 7, 7)
+
+CEF debug log histograms:
+
+- `Viz.ExternalBeginFrameSourceMac.DisplayLink`: 3 samples (unchanged)
+- `Viz.ExternalBeginFrameSource.Interval`: 17 samples, mean 16ms (down from 19)
+- `Viz.FrameSinkVideoCapturer.CaptureDuration`: 297 samples, mean 8.4ms
+- `Graphics.Smoothness.PercentDroppedFrames3.AllSequences`: **22.5%** (up from
+  19%)
+
+#### Comparison
+
+| Metric                    | Issue 342 Exp 5 (baseline) | **Exp 2 (QoS)** |
+| ------------------------- | -------------------------- | ---------------- |
+| Average FPS               | 38.2                       | **28.9**         |
+| Frames at 60fps           | 71%                        | **64.6%**        |
+| Frames at 30fps           | ~15%                       | **7.7%**         |
+| Mid (41-70ms)             | —                          | **14.1%**        |
+| Max consecutive 60fps     | 424                        | **61**           |
+| SyntheticBeginFrame fires | 19                         | **17**           |
+| PercentDroppedFrames      | 19%                        | **22.5%**        |
+
+#### Conclusion
+
+QoS made things worse. While the 30fps bucket improved (7.7% vs ~15%), a new
+41-70ms cluster appeared (14.1%), centered on 50ms (3 vsync beats) and 66ms
+(4 vsync beats). These multi-beat misses didn't exist in the baseline and
+dragged the average FPS down from 38.2 to 28.9.
+
+The higher scheduling priority may have changed how macOS interleaves the main
+thread with CEF's internal threads (GPU process communication, IPC handlers).
+With `QOS_CLASS_USER_INTERACTIVE`, the main thread gets more aggressive
+scheduling, potentially starving CEF's background threads that feed work into
+the compositor pipeline.
+
+**H10 is ruled out.** Timer coalescing was not the cause of the 30fps drops.
+The problem is not scheduling precision — it's something in the interaction
+between `do_message_loop_work()`, CFRunLoop, and CEF's internal task pipeline.
