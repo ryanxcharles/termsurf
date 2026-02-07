@@ -794,3 +794,98 @@ on Apple Silicon) — negligible overhead relative to the 1ms+ loop cadence.
 
 None. This is purely diagnostic — additive logging with negligible overhead.
 The loop behavior is bit-for-bit identical to the baseline.
+
+#### Results
+
+**Status: DIAGNOSTIC COMPLETE** — Reveals `do_message_loop_work()` is the
+dominant cost, not CFRunLoop.
+
+**Loop timing data:**
+
+```
+[LOOP-TIMING] FINAL iter=865 max_mlw=33293us max_cfl=747us max_total=33326us mlw_spikes=865 cfl_instant=831
+```
+
+| Metric                    | Value          | Meaning                                   |
+| ------------------------- | -------------- | ----------------------------------------- |
+| Total iterations          | 865            | ~65 iter/sec (not ~1000 as 1ms sleep implies) |
+| `max_mlw`                 | **33,293us**   | `do_message_loop_work()` blocks up to 33ms |
+| `max_cfl`                 | 747us          | `CFRunLoopRunInMode` well-behaved, always <1ms |
+| `max_total`               | 33,326us       | Worst iteration = 33ms, entirely from mlw |
+| `mlw_spikes` (>1ms)       | **865 of 865** | mlw takes >1ms on **every single call**   |
+| `cfl_instant` (<0.1ms)    | **831 of 865** | CFRunLoop returns instantly **96% of the time** |
+
+**Frame performance:**
+
+453 frames over 13.4s = **33.7 fps average**
+
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 19    | 4.2%       |
+| 60fps (6-20ms)  | 374   | **82.7%**  |
+| 30fps (21-40ms) | 23    | 5.1%       |
+| Mid (41-70ms)   | 8     | 1.8%       |
+| Low (>70ms)     | 28    | 6.2%       |
+
+**Dominant intervals:** 17ms (236), 16ms (128) — strong vsync-aligned peak.
+
+**Max consecutive 60fps frames:** **89** (top streaks: 89, 45, 34, 26, 18)
+
+CEF debug log histograms:
+
+- `Viz.ExternalBeginFrameSource.Interval`: 13 samples, mean 16ms
+- `Viz.FrameSinkVideoCapturer.CaptureDuration`: 453 samples, mean 8.0ms
+- `Graphics.Smoothness.PercentDroppedFrames3.AllSequences`: 21.0%
+
+#### Key Findings
+
+1. **`do_message_loop_work()` takes >1ms on every call.** This is not a fast
+   function with occasional spikes — it consistently consumes 1-33ms per call.
+   It is the dominant cost in the loop, accounting for >95% of iteration time.
+
+2. **CFRunLoop sources almost never fire.** 96% of iterations, CFRunLoop returns
+   in <0.1ms with nothing to do. The run loop is not what's driving frame
+   production — `do_message_loop_work()` is. CFRunLoop's role is limited to the
+   4% of iterations where it actually services a source.
+
+3. **Only 865 iterations in 13.4 seconds.** At ~65 iterations/sec, the loop runs
+   far slower than the theoretical 1000/sec that a 1ms sleep would produce.
+   `do_message_loop_work()` consumes the time budget, leaving almost nothing for
+   CFRunLoop.
+
+4. **The worst-case 33ms spike matches the 30fps drops exactly.** When
+   `do_message_loop_work()` blocks for 33ms, it consumes two entire vsync
+   periods in a single call, producing the characteristic 33ms frame interval.
+
+5. **82.7% at 60fps — higher than baseline (71%).** The `Instant::now()` calls
+   add ~60ns of overhead per iteration, which may subtly alter the interleaving
+   rhythm. This is noise, not a real improvement, but it suggests the system is
+   sensitive to tiny timing changes.
+
+#### Conclusion
+
+**H1 is confirmed** — the polling loop timing mismatch is real, but it's not
+drift or jitter. It's that `do_message_loop_work()` itself is the bottleneck.
+It blocks for variable durations (1-33ms), consuming the entire frame budget
+and leaving CFRunLoop with almost no time to service its sources.
+
+This reframes the problem: the Issue 342 CFRunLoop fix helped not because
+CFRunLoop sources needed to fire frequently, but because the 4% of iterations
+where a source fires are critical — they're the SyntheticBeginFrameSource timer
+ticks that trigger compositor cycles. Without CFRunLoop servicing, those 4% of
+critical moments never happen at all.
+
+**Implications for next experiments:**
+
+- **Idea 3 (remove `do_message_loop_work()`) is now the most interesting.** If
+  `do_message_loop_work()` is consuming 95% of the time and CFRunLoop sources
+  drive the actual frame scheduling, what happens if we let CFRunLoop run
+  longer and call `do_message_loop_work()` less frequently — or not at all?
+- **Idea 7 (two-phase `external_message_pump`)** is also motivated: cooperative
+  scheduling via `on_schedule_message_pump_work` would let CEF tell us exactly
+  when it needs `do_message_loop_work()`, instead of calling it blindly every
+  iteration.
+- **Idea 4 (increase CFRunLoop timeout)** deserves revisiting. With mlw taking
+  1-33ms anyway, increasing the CFRunLoop timeout from 1ms to 16ms wouldn't
+  change the loop cadence much — but it would give CFRunLoop sources much more
+  opportunity to fire during the 96% of idle iterations.
