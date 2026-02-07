@@ -327,15 +327,51 @@ fn run_profile_server(args: Args) {
 
     // 10. Run CEF message loop with high-frequency polling
     // Issue 342, Experiment 5: Service the CFRunLoop instead of dead sleeping.
-    // This allows CEF's internal timer sources and display link callbacks to fire.
-    println!("Profile: Running message loop (polling + CFRunLoop)...");
+    // Issue 343, Experiment 3: Instrumented with microsecond timing.
+    println!("Profile: Running message loop (instrumented)...");
+    let mut loop_count: u64 = 0;
+    let mut max_mlw_us: u128 = 0;
+    let mut max_cfl_us: u128 = 0;
+    let mut max_total_us: u128 = 0;
+    let mut mlw_spike_count: u64 = 0;
+    let mut cfl_instant_count: u64 = 0;
+
     while !QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
+        let t0 = Instant::now();
+
         cef::do_message_loop_work();
+        let t1 = Instant::now();
+
         #[cfg(target_os = "macos")]
-        cfrunloop::run_for(0.001); // 1ms
+        cfrunloop::run_for(0.001);
         #[cfg(not(target_os = "macos"))]
         std::thread::sleep(std::time::Duration::from_millis(1));
+        let t2 = Instant::now();
+
+        let mlw_us = (t1 - t0).as_micros();
+        let cfl_us = (t2 - t1).as_micros();
+        let total_us = (t2 - t0).as_micros();
+
+        if mlw_us > max_mlw_us { max_mlw_us = mlw_us; }
+        if cfl_us > max_cfl_us { max_cfl_us = cfl_us; }
+        if total_us > max_total_us { max_total_us = total_us; }
+        if mlw_us > 1000 { mlw_spike_count += 1; }
+        if cfl_us < 100 { cfl_instant_count += 1; }
+
+        loop_count += 1;
+
+        if loop_count % 1000 == 0 {
+            println!(
+                "[LOOP-TIMING] iter={} max_mlw={}us max_cfl={}us max_total={}us mlw_spikes={} cfl_instant={}",
+                loop_count, max_mlw_us, max_cfl_us, max_total_us, mlw_spike_count, cfl_instant_count
+            );
+        }
     }
+
+    println!(
+        "[LOOP-TIMING] FINAL iter={} max_mlw={}us max_cfl={}us max_total={}us mlw_spikes={} cfl_instant={}",
+        loop_count, max_mlw_us, max_cfl_us, max_total_us, mlw_spike_count, cfl_instant_count
+    );
 
     // 11. Shutdown
     println!("Profile: Shutting down...");
