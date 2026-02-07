@@ -1595,3 +1595,36 @@ Low. This is additive — we keep the proven baseline (`do_message_loop_work()` 
 NSApplication pump has no events to process (likely in a headless process), it
 returns immediately and the behavior is identical to baseline. Worst case is the
 same performance as before.
+
+#### Results
+
+**Status: FAILED — webview did not open. Same total failure as Exp 7.**
+
+Adding `nsapp::pump_events()` alongside `cfrunloop::run_for()` broke the app
+just as completely as replacing it did in Exp 7. The webview never rendered.
+
+#### Conclusion
+
+The NSApplication event pump via raw `objc_msgSend` FFI is fundamentally
+incompatible with CEF's process in its current form. Three possible
+explanations:
+
+1. **NSApp is null.** CEF in windowless/off-screen mode may never call
+   `[NSApplication sharedApplication]`, so the `NSApp` global is nil. Calling
+   `objc_msgSend` on nil returns nil (no crash), but the pump loop may interact
+   badly with CEF's internal state or thread expectations.
+
+2. **The `objc_msgSend` variadic FFI is incorrect.** The calling convention for
+   `nextEventMatchingMask:untilDate:inMode:dequeue:` involves mixed parameter
+   types (u64, pointer, pointer, int) through a C variadic function. If the ABI
+   is wrong, it could corrupt the stack or CEF's state silently.
+
+3. **CEF's internal NSApplication subclass conflicts.** CEF may install its own
+   NSApplication delegate or subclass (like `CefAppProtocol` seen in the
+   cefsimple example). Pumping events outside CEF's control may bypass its
+   event routing and break its internal assumptions.
+
+**The NSApplication event pump approach is abandoned.** Experiments 7 and 8
+both produced total failures. The raw FFI approach to NSApplication event
+pumping is either incorrect or fundamentally incompatible with CEF's headless
+process model. A different direction is needed.
