@@ -1195,6 +1195,21 @@ fn send_request(
     serde_json::from_str(&response_line).map_err(|e| format!("Invalid response JSON: {}", e))
 }
 
+/// Extract a value from a "key=value" pattern in a log line.
+/// Returns the substring from after the key to the next whitespace (or end of line).
+fn extract_stat(line: &str, key: &str) -> String {
+    if let Some(pos) = line.find(key) {
+        let start = pos + key.len();
+        let rest = &line[start..];
+        let end = rest
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(rest.len());
+        rest[..end].to_string()
+    } else {
+        String::new()
+    }
+}
+
 fn run_coordinator(profile: ProfileMode, url: Option<String>) {
     // Detect benchmark mode: `web benchmark` triggers automated framerate test
     let is_benchmark = url.as_deref() == Some("benchmark");
@@ -1292,17 +1307,74 @@ fn run_coordinator(profile: ProfileMode, url: Option<String>) {
         }
     }
 
-    // Wait for Ctrl+C
-    println!("\nPress Ctrl+C to close webview...");
-    let (tx, rx) = std::sync::mpsc::channel();
-    ctrlc::set_handler(move || {
-        let _ = tx.send(());
-    })
-    .expect("Error setting Ctrl+C handler");
+    if is_benchmark {
+        // Benchmark mode: poll profile log for completion, then print stats
+        println!("\nBenchmark running (70 seconds)...");
 
-    // Block until Ctrl+C
-    let _ = rx.recv();
-    println!("\nShutting down...");
+        let log_path = format!("/tmp/termsurf-profile-{}.log", profile.display_name());
+        let timeout = Duration::from_secs(90);
+        let start = std::time::Instant::now();
+
+        let mut found = false;
+        while start.elapsed() < timeout {
+            if let Ok(content) = fs::read_to_string(&log_path) {
+                if content.contains("[BENCHMARK] 70 seconds elapsed") {
+                    found = true;
+
+                    // Find the final [PERF] lines after the [BENCHMARK] marker
+                    let lines: Vec<&str> = content.lines().collect();
+                    if let Some(idx) = lines.iter().rposition(|l| l.contains("[BENCHMARK]")) {
+                        let perf_line1 = lines.get(idx + 1).copied().unwrap_or("");
+                        let perf_line2 = lines.get(idx + 2).copied().unwrap_or("");
+
+                        let frames = extract_stat(perf_line1, "frames=");
+                        let duration = extract_stat(perf_line1, "duration=");
+                        let avg_fps = extract_stat(perf_line1, "avg_fps=");
+                        let pct_60fps = extract_stat(perf_line1, "60fps%=");
+                        let max_streak = extract_stat(perf_line1, "max_streak=");
+
+                        let p50_str = extract_stat(perf_line2, "p50=");
+                        let p95_str = extract_stat(perf_line2, "p95=");
+                        let p50_ms = p50_str
+                            .trim_end_matches("us")
+                            .parse::<f64>()
+                            .unwrap_or(0.0)
+                            / 1000.0;
+                        let p95_ms = p95_str
+                            .trim_end_matches("us")
+                            .parse::<f64>()
+                            .unwrap_or(0.0)
+                            / 1000.0;
+
+                        println!("\n=== ts3 Benchmark (70s) ===\n");
+                        println!(
+                            "{} fps | {}% at 60fps | streak: {} | p50: {:.1}ms | p95: {:.1}ms\n",
+                            avg_fps, pct_60fps, max_streak, p50_ms, p95_ms
+                        );
+                        println!("{} frames over {}", frames, duration);
+                    }
+                    break;
+                }
+            }
+            thread::sleep(Duration::from_secs(1));
+        }
+
+        if !found {
+            eprintln!("\nBenchmark timed out after 90 seconds");
+        }
+    } else {
+        // Normal mode: wait for Ctrl+C
+        println!("\nPress Ctrl+C to close webview...");
+        let (tx, rx) = std::sync::mpsc::channel();
+        ctrlc::set_handler(move || {
+            let _ = tx.send(());
+        })
+        .expect("Error setting Ctrl+C handler");
+
+        // Block until Ctrl+C
+        let _ = rx.recv();
+        println!("\nShutting down...");
+    }
 
     // Send close_webview to GUI
     let close_response = send_request(

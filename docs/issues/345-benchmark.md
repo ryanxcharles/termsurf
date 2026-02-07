@@ -392,6 +392,13 @@ prints them to the user's terminal. This completes the user-facing feature.
 prints formatted stats directly to the terminal. No manual log inspection
 needed.
 
+**Result:** Done. `web benchmark` prints formatted stats directly to the
+terminal after 70s, then auto-closes the webview. Clean run result: 51.5fps,
+55.4% at 60fps, streak 25, p50 18.7ms, p95 33.9ms, 3646 frames over 70.8s.
+This matches cef-test's ~50fps — confirming the input hypothesis: ts3's
+rendering pipeline is fine, the 38fps during manual scrolling was caused by
+insufficient input rate through the GUI → XPC → profile path.
+
 ### Phase summary
 
 | Phase | What                        | Test                              | Status |
@@ -401,4 +408,4 @@ needed.
 | 3     | Page load detection         | Log shows `[LOAD]` message        | Done   |
 | 4     | Scroll simulation           | Log shows `[SCROLL]`, page moves  | Done   |
 | 5     | FrameStats + auto-quit      | Log shows `[PERF]` every 10s      | Done   |
-| 6     | Stats printed to terminal   | `web benchmark` prints results    |        |
+| 6     | Stats printed to terminal   | `web benchmark` prints results    | Done   |
