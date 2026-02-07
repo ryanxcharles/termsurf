@@ -1880,7 +1880,7 @@ in the profile server process.
 
 ### Experiment 17: External Begin Frame at 60Hz
 
-**Status:** Not started
+**Status:** FAILED — Worst results of any experiment
 
 **Goal:** Achieve flawless 60fps by taking direct control of CEF's frame
 production using `send_external_begin_frame`, driven by a high-resolution timer.
@@ -2049,6 +2049,52 @@ needed that we missed what the CEF *API* offered.
   efficiency can be optimized later.
 - No `cocoa`, `objc`, or `winit` dependencies needed. Pure Rust + CEF.
 - No focus stealing possible — no window is created.
+
+#### Results
+
+**Overall stats:** 218 frames over 14.8s = **14.8 fps average**
+
+| Interval             | Count | Percentage |
+| -------------------- | ----- | ---------- |
+| Burst (0-5ms)        | 4     | 1%         |
+| 60fps (6-20ms)       | 23    | **10%**    |
+| 30fps (21-40ms)      | 46    | 21%        |
+| Mid (41-70ms)        | 68    | 31%        |
+| Low (>70ms)          | 76    | **35%**    |
+
+**Dominant intervals:** None — completely scattered (23ms, 62ms, 44ms, 65ms,
+41ms). No vsync-aligned peak, no consistent cadence at all.
+
+**Max consecutive 60fps frames:** 2
+
+#### Comparison
+
+| Metric                | Baseline (Exp 9) | **Exp 17**  |
+| --------------------- | ---------------- | ----------- |
+| Average FPS           | 24.5             | **14.8**    |
+| Frames at ~60fps      | 70%              | **10%**     |
+| Low (>70ms)           | 11%              | **35%**     |
+| Max consecutive 60fps | 40               | **2**       |
+| Dominant interval     | 16-17ms          | **none**    |
+
+#### Conclusion
+
+**FAILED.** `send_external_begin_frame()` does not work as expected. Despite
+being called at a precise 60Hz by a high-resolution timer, CEF produced frames
+at only 14.8fps — worse than every prior experiment including the original
+sleep loop (Exp 2: 17fps).
+
+The frame intervals are completely scattered with no pattern, suggesting
+`send_external_begin_frame()` does not directly trigger frame production. The
+call likely posts an internal task to CEF's compositor, which then needs
+`do_message_loop_work()` to process it. But the compositor may require multiple
+message loop iterations to complete a frame, meaning a single
+begin-frame + message-loop-work per tick is insufficient.
+
+The `external_begin_frame` API appears to be designed for a different use case
+than ours — likely for embedders with their own compositor that need to
+synchronize CEF's rendering with an existing frame pipeline, not for headless
+processes trying to drive frame production from scratch.
 
 ## Related Issues
 
