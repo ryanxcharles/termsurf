@@ -964,33 +964,7 @@ Key implementation details:
 - No GUI-side changes needed for input — profile server drives scrolling
   entirely on its own.
 
-### Phase 9: Keyboard Input & Focus
-
-Route keyboard events to the focused profile. This completes the core user
-interaction — typing into forms, submitting searches.
-
-**Steps:**
-
-1. Track focus state in GUI (which side was last clicked)
-2. On `MouseInput` (click): set focus to the side the click landed on
-3. Send `focus` message: `{focused: 0}` to old side, `{focused: 1}` to new side
-4. On `KeyboardInput`: convert to CEF key event (native key code, char code,
-   modifiers)
-5. Send `key_event` to focused profile
-6. Handle special keys: Tab, Enter, Backspace, arrow keys, copy/paste shortcuts
-7. Update `cef-test-profile`: receive `key_event`, forward to CEF `BrowserHost`
-   as `KEYDOWN` then `CHAR` events
-
-**Test:** Click on Google's search box on the right side. Type a search query.
-Press Enter. Search results appear. Click a link. Navigate back. Switch focus to
-the left side (github.com) by clicking it. Type in GitHub's search box. Both
-browsers respond to keyboard input independently.
-
-**Acceptance test:** This is the full user scenario — "open github.com on the
-left and google.com on the right, type something into google.com, search, and
-scroll around."
-
-### Phase 10: Performance Measurement & Analysis
+### Phase 9: Performance Measurement & Analysis
 
 Instrument everything and collect the data that answers the fundamental question:
 does the multi-process architecture reproduce the performance problem?
