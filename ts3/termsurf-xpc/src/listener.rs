@@ -84,6 +84,16 @@ impl XpcListener {
         self.set_event_handler_raw(handler);
     }
 
+    /// Set the target queue to the default background queue.
+    ///
+    /// By default, XPC listeners dispatch events on the main queue.
+    /// Call this before `resume()` to dispatch on a background queue instead.
+    pub fn set_target_queue_background(&self) {
+        unsafe {
+            ffi::xpc_connection_set_target_queue(self.raw, std::ptr::null_mut());
+        }
+    }
+
     /// Resume the listener (listeners start suspended).
     pub fn resume(&self) {
         unsafe {

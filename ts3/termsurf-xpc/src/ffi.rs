@@ -103,6 +103,14 @@ extern "C" {
     /// Cancel a connection.
     pub fn xpc_connection_cancel(connection: xpc_connection_t);
 
+    /// Set the target dispatch queue for a connection.
+    /// Pass NULL to use the default (background) target queue.
+    /// Must be called before xpc_connection_resume().
+    pub fn xpc_connection_set_target_queue(
+        connection: xpc_connection_t,
+        targetq: dispatch_queue_t,
+    );
+
     /// Send a message (fire-and-forget).
     pub fn xpc_connection_send_message(
         connection: xpc_connection_t,

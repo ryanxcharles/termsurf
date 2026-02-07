@@ -104,6 +104,18 @@ impl XpcConnection {
         XpcDictionary::from_raw(event, false)
     }
 
+    /// Set the target queue to the default background queue.
+    ///
+    /// By default, XPC connections dispatch events on the main queue.
+    /// Call this before `resume()` to dispatch on a background queue instead.
+    /// This is useful when the main thread runs its own event loop (e.g. winit)
+    /// that would conflict with XPC's main queue dispatching.
+    pub fn set_target_queue_background(&self) {
+        unsafe {
+            ffi::xpc_connection_set_target_queue(self.raw, std::ptr::null_mut());
+        }
+    }
+
     /// Resume the connection (connections start suspended).
     pub fn resume(&self) {
         unsafe {

@@ -580,6 +580,7 @@ fn create_profile_listener(
 
     set_new_connection_handler(&listener, move |conn| {
         println!("GUI: Profile '{}' connected", label);
+        conn.set_target_queue_background();
         let conn = Arc::new(conn);
         let pending = Arc::clone(&pending);
 
@@ -623,6 +624,7 @@ fn create_profile_listener(
         conns_for_handler.lock().unwrap().push(conn);
     });
 
+    listener.set_target_queue_background();
     listener.resume();
     Some((listener, endpoint, conns))
 }
@@ -645,6 +647,7 @@ fn bootstrap_xpc(pending: SharedPendingSurfaces) -> Option<XpcState> {
             eprintln!("GUI: Launcher connection error: {}", e);
         }
     });
+    launcher.set_target_queue_background();
     launcher.resume();
     println!("GUI: Connected to launcher");
 
