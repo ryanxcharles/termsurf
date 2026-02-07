@@ -240,3 +240,48 @@ wgpu texture import cost. The remaining ~5fps gap likely comes from per-frame
 kernel calls and GPU resource creation.
 
 **Status:** Done
+
+### Experiment 2: Check IOSurface handle reuse
+
+**Goal:** Determine whether CEF reuses the same IOSurface handle across frames
+or allocates a new one each time. If the handle is stable, we can send the Mach
+port once and skip the per-frame `IOSurfaceCreateMachPort` +
+`IOSurfaceLookupFromMachPort` kernel calls — eliminating per-frame overhead that
+may account for the remaining ~5fps gap.
+
+**What needs to change:**
+
+One log line in `cef-test-profile/src/main.rs`, inside `on_accelerated_paint`
+(around line 442):
+
+```rust
+// After extracting the handle:
+let handle = info.shared_texture_io_surface as *mut std::ffi::c_void;
+println!("[HANDLE] frame={} handle={:?}", frame_id, handle);
+```
+
+This logs the raw pointer value of the IOSurface handle. If CEF reuses the same
+IOSurface (updating its contents in place), the pointer will be the same across
+all frames. If CEF allocates a new IOSurface per frame, the pointer will change.
+
+**How to test:**
+
+1. Add the log line
+2. `cd ts3 && ./cef-test-scripts/benchmark.sh --release`
+3. After the run, check: `grep '\[HANDLE\]' /tmp/cef-test-gui.log | head -20`
+4. Count unique handle values: `grep '\[HANDLE\]' /tmp/cef-test-gui.log | sed 's/.*handle=//' | sort -u | wc -l`
+
+**What the results tell us:**
+
+- If 1 unique handle: CEF reuses the IOSurface. We can send the Mach port once
+  at the first frame, then signal "new frame" with a lightweight XPC message
+  (no Mach port) for subsequent frames. The GUI reuses the wgpu texture, just
+  re-rendering from the same IOSurface. This eliminates per-frame kernel calls
+  and GPU resource creation.
+- If many unique handles: CEF allocates new IOSurfaces. The per-frame Mach port
+  transfer is unavoidable. Look elsewhere for the remaining gap.
+- If a small number (2–3): CEF double- or triple-buffers IOSurfaces. We can
+  cache the Mach port per handle and only create a new one when the handle
+  changes.
+
+**Status:** Not started
