@@ -41,7 +41,7 @@ cef-test doesn't.
 | GUI event loop          | winit (simple)      | WezTerm (complex)                    |
 | Terminal rendering      | None                | Active (pane rendering)              |
 | Render scheduling       | Manual redraw       | WezTerm's frame scheduler            |
-| XPC architecture        | Direct              | Via launcher relay                   |
+| XPC architecture        | Via launcher relay  | Via launcher relay (same)            |
 | Number of panes         | 2 (left/right)      | Terminal + webview                   |
 | wgpu surface management | Single window       | Per-window, multi-pane               |
 | Process count           | 3 (gui, 2x profile) | 4+ (gui, launcher, profile, web CLI) |
@@ -78,19 +78,7 @@ no competing render source.
 blink, no output) and compare with an active terminal. If the bimodal pattern
 disappears with an idle terminal, render scheduling contention is the cause.
 
-### L3: XPC launcher relay latency
-
-In cef-test, the profile server connects directly to the GUI via an XPC
-endpoint. In ts3, the connection is established through the launcher as a relay
-— the GUI sends its endpoint to the launcher, the profile server claims it. Once
-established, the connection should be direct, but if there's any difference in
-the XPC connection quality or routing, it could add variable latency.
-
-**Test:** Verify that the ts3 XPC connection is truly direct after setup by
-logging connection details. Compare XPC message delivery time between cef-test
-and ts3.
-
-### L4: WezTerm event loop interaction with vsync
+### L3: WezTerm event loop interaction with vsync
 
 WezTerm's event loop may have a different relationship with vsync than winit's
 `pump_app_events`. If WezTerm's loop runs on a timer or is driven by a display
@@ -104,7 +92,7 @@ between runs: the phase relationship is set at startup and persists.
 **Test:** Investigate WezTerm's main loop timing. Does it use a display link? A
 timer? How does it decide when to present frames?
 
-### L5: Process startup timing
+### L4: Process startup timing
 
 The bimodal pattern may be determined by the relative startup timing of the
 profile server and GUI. If the profile server's first frame happens to align
@@ -119,8 +107,7 @@ GUI to see if good-mode runs have different phase alignment than bad-mode runs.
 
 ## Recommended experiment order
 
-1. **L1 + L4:** Investigate WezTerm's render scheduling and event loop (code
+1. **L1 + L3:** Investigate WezTerm's render scheduling and event loop (code
    reading, no changes needed — highest information value)
 2. **L2:** Test with idle terminal (quick behavioral test)
-3. **L5:** Timestamp first frames to check phase alignment (diagnostic)
-4. **L3:** Verify XPC connection is direct (quick check)
+3. **L4:** Timestamp first frames to check phase alignment (diagnostic)
