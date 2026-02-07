@@ -219,9 +219,12 @@ fn run_profile_server(args: Args) {
     println!("Profile: Cache: {:?}", cache_path);
 
     // 7. Initialize CEF
+    // Issue 342, Experiment 1: Enable CEF debug logging to diagnose frame scheduling.
     let settings = cef::Settings {
         windowless_rendering_enabled: 1,
         no_sandbox: 1,
+        log_severity: cef::LogSeverity::VERBOSE,
+        log_file: cef::CefString::from("/tmp/cef-debug.log"),
         root_cache_path: cef::CefString::from(cache_path.to_str().unwrap()),
         browser_subprocess_path: cef::CefString::from(helper_path.to_str().unwrap()),
         persist_session_cookies: 1,
@@ -682,6 +685,12 @@ mod cef_handlers {
             ) {
                 if let Some(command_line) = command_line {
                     command_line.append_switch(Some(&"no-startup-window".into()));
+                    // Issue 342, Experiment 1: Enable Chromium internal logging.
+                    command_line.append_switch(Some(&"enable-logging".into()));
+                    command_line.append_switch_with_value(
+                        Some(&"v".into()),
+                        Some(&"1".into()),
+                    );
                 }
             }
 
