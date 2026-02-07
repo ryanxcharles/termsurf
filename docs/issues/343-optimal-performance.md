@@ -528,8 +528,9 @@ CFRunLoop drive everything) or by tuning the balance between the two calls.
 
 **Status:** Not started
 
-**Goal:** Eliminate macOS timer coalescing as a source of missed compositor beats
-by setting the main thread's Quality of Service class to the highest level.
+**Goal:** Eliminate macOS timer coalescing as a source of missed compositor
+beats by setting the main thread's Quality of Service class to the highest
+level.
 
 **Hypothesis tested:** H10 (process priority and QoS)
 
@@ -545,24 +546,24 @@ macOS assigns a QoS class to every thread. The QoS class determines:
 
 The five QoS classes, from lowest to highest:
 
-| QoS Class              | Value | Timer behavior                     |
-| ---------------------- | ----- | ---------------------------------- |
-| `QOS_CLASS_BACKGROUND` | 0x09  | Aggressive coalescing, low priority |
-| `QOS_CLASS_UTILITY`    | 0x11  | Moderate coalescing                |
-| `QOS_CLASS_DEFAULT`    | 0x15  | Standard behavior                  |
-| `QOS_CLASS_USER_INITIATED` | 0x19 | Reduced coalescing              |
-| `QOS_CLASS_USER_INTERACTIVE` | 0x21 | **Minimal coalescing, highest priority** |
+| QoS Class                    | Value | Timer behavior                           |
+| ---------------------------- | ----- | ---------------------------------------- |
+| `QOS_CLASS_BACKGROUND`       | 0x09  | Aggressive coalescing, low priority      |
+| `QOS_CLASS_UTILITY`          | 0x11  | Moderate coalescing                      |
+| `QOS_CLASS_DEFAULT`          | 0x15  | Standard behavior                        |
+| `QOS_CLASS_USER_INITIATED`   | 0x19  | Reduced coalescing                       |
+| `QOS_CLASS_USER_INTERACTIVE` | 0x21  | **Minimal coalescing, highest priority** |
 
 The profile server is a windowless background process. macOS likely assigns it
 `QOS_CLASS_DEFAULT` or lower. At this level, the system is permitted to coalesce
-CFRunLoop timer firings by several milliseconds — grouping them with other timers
-to reduce CPU wake-ups and save power.
+CFRunLoop timer firings by several milliseconds — grouping them with other
+timers to reduce CPU wake-ups and save power.
 
-CEF's `SyntheticBeginFrameSource` is a CFRunLoop timer set to fire every 16.67ms.
-If macOS coalesces this timer even slightly (e.g., delays it by 2-3ms), the
-callback fires at 19ms instead of 16.67ms. The compositor misses its deadline
-for the current vsync beat and the frame slips to the next one — producing a
-33ms interval (30fps) instead of 16ms (60fps).
+CEF's `SyntheticBeginFrameSource` is a CFRunLoop timer set to fire every
+16.67ms. If macOS coalesces this timer even slightly (e.g., delays it by 2-3ms),
+the callback fires at 19ms instead of 16.67ms. The compositor misses its
+deadline for the current vsync beat and the frame slips to the next one —
+producing a 33ms interval (30fps) instead of 16ms (60fps).
 
 This would explain the bimodal pattern: most frames hit 16-17ms (timer fires on
 time), but ~20% land at 33-35ms (timer coalesced past the deadline). The pattern
@@ -588,9 +589,9 @@ unsafe {
 ```
 
 This goes just before the `while !QUIT_FLAG` loop, after Ctrl+C handler setup.
-The call sets the current thread (main thread) to the highest QoS class,
-telling the kernel this thread is doing user-interactive work that requires
-maximum responsiveness.
+The call sets the current thread (main thread) to the highest QoS class, telling
+the kernel this thread is doing user-interactive work that requires maximum
+responsiveness.
 
 #### What Stays the Same
 
@@ -601,11 +602,11 @@ maximum responsiveness.
 
 #### Expected Outcomes
 
-| Result                         | Meaning                                           |
-| ------------------------------ | ------------------------------------------------- |
-| >80% at 60fps, fewer 33ms drops | Timer coalescing was the cause. H10 confirmed.   |
-| ~71% at 60fps (unchanged)      | Timer precision is already adequate. H10 ruled out. |
-| Performance regression         | Extremely unlikely — higher QoS cannot reduce timer precision. |
+| Result                          | Meaning                                                        |
+| ------------------------------- | -------------------------------------------------------------- |
+| >80% at 60fps, fewer 33ms drops | Timer coalescing was the cause. H10 confirmed.                 |
+| ~71% at 60fps (unchanged)       | Timer precision is already adequate. H10 ruled out.            |
+| Performance regression          | Extremely unlikely — higher QoS cannot reduce timer precision. |
 
 #### Risk
 
@@ -630,9 +631,9 @@ QoS was confirmed set: `Profile: Set QoS to USER_INTERACTIVE: ok`
 | Mid (41-70ms)   | 42    | **14.1%**  |
 | Low (>70ms)     | 22    | 7.4%       |
 
-**Dominant intervals:** 17ms (126), 16ms (62) — vsync-aligned peak intact.
-New cluster at 50ms (25 occurrences) and 66-67ms (10 combined) that did not
-exist in the baseline.
+**Dominant intervals:** 17ms (126), 16ms (62) — vsync-aligned peak intact. New
+cluster at 50ms (25 occurrences) and 66-67ms (10 combined) that did not exist in
+the baseline.
 
 **Max consecutive 60fps frames:** **61** (top streaks: 61, 35, 18, 7, 7)
 
@@ -647,21 +648,21 @@ CEF debug log histograms:
 #### Comparison
 
 | Metric                    | Issue 342 Exp 5 (baseline) | **Exp 2 (QoS)** |
-| ------------------------- | -------------------------- | ---------------- |
-| Average FPS               | 38.2                       | **28.9**         |
-| Frames at 60fps           | 71%                        | **64.6%**        |
-| Frames at 30fps           | ~15%                       | **7.7%**         |
-| Mid (41-70ms)             | —                          | **14.1%**        |
-| Max consecutive 60fps     | 424                        | **61**           |
-| SyntheticBeginFrame fires | 19                         | **17**           |
-| PercentDroppedFrames      | 19%                        | **22.5%**        |
+| ------------------------- | -------------------------- | --------------- |
+| Average FPS               | 38.2                       | **28.9**        |
+| Frames at 60fps           | 71%                        | **64.6%**       |
+| Frames at 30fps           | ~15%                       | **7.7%**        |
+| Mid (41-70ms)             | —                          | **14.1%**       |
+| Max consecutive 60fps     | 424                        | **61**          |
+| SyntheticBeginFrame fires | 19                         | **17**          |
+| PercentDroppedFrames      | 19%                        | **22.5%**       |
 
 #### Conclusion
 
 QoS made things worse. While the 30fps bucket improved (7.7% vs ~15%), a new
-41-70ms cluster appeared (14.1%), centered on 50ms (3 vsync beats) and 66ms
-(4 vsync beats). These multi-beat misses didn't exist in the baseline and
-dragged the average FPS down from 38.2 to 28.9.
+41-70ms cluster appeared (14.1%), centered on 50ms (3 vsync beats) and 66ms (4
+vsync beats). These multi-beat misses didn't exist in the baseline and dragged
+the average FPS down from 38.2 to 28.9.
 
 The higher scheduling priority may have changed how macOS interleaves the main
 thread with CEF's internal threads (GPU process communication, IPC handlers).
@@ -669,9 +670,9 @@ With `QOS_CLASS_USER_INTERACTIVE`, the main thread gets more aggressive
 scheduling, potentially starving CEF's background threads that feed work into
 the compositor pipeline.
 
-**H10 is ruled out.** Timer coalescing was not the cause of the 30fps drops.
-The problem is not scheduling precision — it's something in the interaction
-between `do_message_loop_work()`, CFRunLoop, and CEF's internal task pipeline.
+**H10 is ruled out.** Timer coalescing was not the cause of the 30fps drops. The
+problem is not scheduling precision — it's something in the interaction between
+`do_message_loop_work()`, CFRunLoop, and CEF's internal task pipeline.
 
 ### Experiment 3: Measure Loop Iteration Timing
 
@@ -766,12 +767,12 @@ on Apple Silicon) — negligible overhead relative to the 1ms+ loop cadence.
 
 #### What This Measures
 
-| Metric | What it tells us |
-| --- | --- |
-| `max_mlw` | Worst-case `do_message_loop_work()` duration. If >5ms, it's eating into the frame budget. |
-| `max_cfl` | Worst-case `CFRunLoopRunInMode` duration. Should be ~1ms (timeout). If much longer, macOS is blocking us. |
-| `max_total` | Worst-case loop iteration. If >16ms, we're guaranteed to miss a beat. |
-| `mlw_spikes` | How often `do_message_loop_work()` takes >1ms. Frequent spikes = H1 confirmed. |
+| Metric        | What it tells us                                                                                                           |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `max_mlw`     | Worst-case `do_message_loop_work()` duration. If >5ms, it's eating into the frame budget.                                  |
+| `max_cfl`     | Worst-case `CFRunLoopRunInMode` duration. Should be ~1ms (timeout). If much longer, macOS is blocking us.                  |
+| `max_total`   | Worst-case loop iteration. If >16ms, we're guaranteed to miss a beat.                                                      |
+| `mlw_spikes`  | How often `do_message_loop_work()` takes >1ms. Frequent spikes = H1 confirmed.                                             |
 | `cfl_instant` | How often CFRunLoop returns instantly (<0.1ms). High count = sources rarely fire (most iterations are just timeout waits). |
 
 #### What Stays the Same
@@ -783,17 +784,17 @@ on Apple Silicon) — negligible overhead relative to the 1ms+ loop cadence.
 
 #### Expected Outcomes
 
-| Pattern | Meaning | Next step |
-| --- | --- | --- |
-| `mlw_spikes` is high, correlates with drops | `do_message_loop_work()` occasionally blocks. H1 confirmed. | Try `external_message_pump` (idea 7) for cooperative scheduling |
-| `cfl_instant` is very high (>90%) | CFRunLoop sources rarely fire — most iterations are idle waits | The 1ms timeout is mostly wasted. Try shorter timeout or busy-poll |
-| `max_total` stays under 2ms | Loop cadence is rock-solid. The problem is not in the loop. | Investigate CEF internals (idea 9) or GUI side (idea 10) |
-| `max_mlw` or `max_total` occasionally >10ms | Rare but large spikes cause the 33ms drops | Try yielding differently after spikes, or cap iteration time |
+| Pattern                                     | Meaning                                                        | Next step                                                          |
+| ------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `mlw_spikes` is high, correlates with drops | `do_message_loop_work()` occasionally blocks. H1 confirmed.    | Try `external_message_pump` (idea 7) for cooperative scheduling    |
+| `cfl_instant` is very high (>90%)           | CFRunLoop sources rarely fire — most iterations are idle waits | The 1ms timeout is mostly wasted. Try shorter timeout or busy-poll |
+| `max_total` stays under 2ms                 | Loop cadence is rock-solid. The problem is not in the loop.    | Investigate CEF internals (idea 9) or GUI side (idea 10)           |
+| `max_mlw` or `max_total` occasionally >10ms | Rare but large spikes cause the 33ms drops                     | Try yielding differently after spikes, or cap iteration time       |
 
 #### Risk
 
-None. This is purely diagnostic — additive logging with negligible overhead.
-The loop behavior is bit-for-bit identical to the baseline.
+None. This is purely diagnostic — additive logging with negligible overhead. The
+loop behavior is bit-for-bit identical to the baseline.
 
 #### Results
 
@@ -806,14 +807,14 @@ dominant cost, not CFRunLoop.
 [LOOP-TIMING] FINAL iter=865 max_mlw=33293us max_cfl=747us max_total=33326us mlw_spikes=865 cfl_instant=831
 ```
 
-| Metric                    | Value          | Meaning                                   |
-| ------------------------- | -------------- | ----------------------------------------- |
-| Total iterations          | 865            | ~65 iter/sec (not ~1000 as 1ms sleep implies) |
-| `max_mlw`                 | **33,293us**   | `do_message_loop_work()` blocks up to 33ms |
-| `max_cfl`                 | 747us          | `CFRunLoopRunInMode` well-behaved, always <1ms |
-| `max_total`               | 33,326us       | Worst iteration = 33ms, entirely from mlw |
-| `mlw_spikes` (>1ms)       | **865 of 865** | mlw takes >1ms on **every single call**   |
-| `cfl_instant` (<0.1ms)    | **831 of 865** | CFRunLoop returns instantly **96% of the time** |
+| Metric                 | Value          | Meaning                                         |
+| ---------------------- | -------------- | ----------------------------------------------- |
+| Total iterations       | 865            | ~65 iter/sec (not ~1000 as 1ms sleep implies)   |
+| `max_mlw`              | **33,293us**   | `do_message_loop_work()` blocks up to 33ms      |
+| `max_cfl`              | 747us          | `CFRunLoopRunInMode` well-behaved, always <1ms  |
+| `max_total`            | 33,326us       | Worst iteration = 33ms, entirely from mlw       |
+| `mlw_spikes` (>1ms)    | **865 of 865** | mlw takes >1ms on **every single call**         |
+| `cfl_instant` (<0.1ms) | **831 of 865** | CFRunLoop returns instantly **96% of the time** |
 
 **Frame performance:**
 
@@ -865,9 +866,9 @@ CEF debug log histograms:
 #### Conclusion
 
 **H1 is confirmed** — the polling loop timing mismatch is real, but it's not
-drift or jitter. It's that `do_message_loop_work()` itself is the bottleneck.
-It blocks for variable durations (1-33ms), consuming the entire frame budget
-and leaving CFRunLoop with almost no time to service its sources.
+drift or jitter. It's that `do_message_loop_work()` itself is the bottleneck. It
+blocks for variable durations (1-33ms), consuming the entire frame budget and
+leaving CFRunLoop with almost no time to service its sources.
 
 This reframes the problem: the Issue 342 CFRunLoop fix helped not because
 CFRunLoop sources needed to fire frequently, but because the 4% of iterations
@@ -879,8 +880,8 @@ critical moments never happen at all.
 
 - **Idea 3 (remove `do_message_loop_work()`) is now the most interesting.** If
   `do_message_loop_work()` is consuming 95% of the time and CFRunLoop sources
-  drive the actual frame scheduling, what happens if we let CFRunLoop run
-  longer and call `do_message_loop_work()` less frequently — or not at all?
+  drive the actual frame scheduling, what happens if we let CFRunLoop run longer
+  and call `do_message_loop_work()` less frequently — or not at all?
 - **Idea 7 (two-phase `external_message_pump`)** is also motivated: cooperative
   scheduling via `on_schedule_message_pump_work` would let CEF tell us exactly
   when it needs `do_message_loop_work()`, instead of calling it blindly every
@@ -909,11 +910,12 @@ example calls the same function in the same loop pattern and achieves 60fps.
 Either:
 
 1. **`do_message_loop_work()` is faster in the example** — perhaps because the
-   visible window and event loop provide a different execution context that makes
-   CEF process tasks more efficiently.
-2. **`do_message_loop_work()` is equally slow, but `pump_app_events` compensates**
-   — winit's event pump does something that our `CFRunLoopRunInMode(0.001)` does
-   not, and that something is what actually drives frame production.
+   visible window and event loop provide a different execution context that
+   makes CEF process tasks more efficiently.
+2. **`do_message_loop_work()` is equally slow, but `pump_app_events`
+   compensates** — winit's event pump does something that our
+   `CFRunLoopRunInMode(0.001)` does not, and that something is what actually
+   drives frame production.
 3. **`do_message_loop_work()` is equally slow, and the example's overall FPS is
    closer to ours than we thought** — Issue 341 Exp 3 measured 36.8fps overall
    (60fps only during sustained active rendering). Perhaps the gap is smaller
@@ -977,13 +979,13 @@ println!(
 
 #### What We're Comparing
 
-| Metric | Profile server (Exp 3) | cef-rs OSR (this exp) |
-| --- | --- | --- |
-| `do_message_loop_work()` duration | >1ms every call, max 33ms | ? |
-| Event pump duration | <0.1ms 96% of the time | ? |
-| Total iteration | ~65 iter/sec | ? |
-| `mlw_spikes` (>1ms) | 100% | ? |
-| Event pump instant (<0.1ms) | 96% | ? |
+| Metric                            | Profile server (Exp 3)    | cef-rs OSR (this exp) |
+| --------------------------------- | ------------------------- | --------------------- |
+| `do_message_loop_work()` duration | >1ms every call, max 33ms | ?                     |
+| Event pump duration               | <0.1ms 96% of the time    | ?                     |
+| Total iteration                   | ~65 iter/sec              | ?                     |
+| `mlw_spikes` (>1ms)               | 100%                      | ?                     |
+| Event pump instant (<0.1ms)       | 96%                       | ?                     |
 
 If `do_message_loop_work()` behaves identically in both processes, then the
 difference is entirely in `pump_app_events` vs `CFRunLoopRunInMode`. If mlw is
@@ -1000,8 +1002,8 @@ it. The timing data will print to stdout.
 
 #### Risk
 
-None. Purely diagnostic. The cef-rs example is a standalone test app — no
-impact on the profile server or GUI.
+None. Purely diagnostic. The cef-rs example is a standalone test app — no impact
+on the profile server or GUI.
 
 #### Results
 
@@ -1013,23 +1015,23 @@ impact on the profile server or GUI.
 [LOOP-TIMING] iter=1000 max_mlw=12702us max_pae=570855us max_total=570861us mlw_spikes=57 pae_instant=0
 ```
 
-| Metric                      | Value          | Meaning                                      |
-| --------------------------- | -------------- | -------------------------------------------- |
-| Total iterations            | 1000           | Sample at the 1000th iteration checkpoint    |
-| `max_mlw`                   | **12,702us**   | `do_message_loop_work()` max is 12.7ms       |
-| `max_pae`                   | **570,855us**  | `pump_app_events` blocks up to 570ms         |
-| `max_total`                 | 570,861us      | Worst iteration dominated by pae             |
-| `mlw_spikes` (>1ms)         | **57 of 1000** | mlw takes >1ms on only **5.7%** of calls     |
-| `pae_instant` (<0.1ms)      | **0 of 1000**  | `pump_app_events` **never** returns instantly |
+| Metric                 | Value          | Meaning                                       |
+| ---------------------- | -------------- | --------------------------------------------- |
+| Total iterations       | 1000           | Sample at the 1000th iteration checkpoint     |
+| `max_mlw`              | **12,702us**   | `do_message_loop_work()` max is 12.7ms        |
+| `max_pae`              | **570,855us**  | `pump_app_events` blocks up to 570ms          |
+| `max_total`            | 570,861us      | Worst iteration dominated by pae              |
+| `mlw_spikes` (>1ms)    | **57 of 1000** | mlw takes >1ms on only **5.7%** of calls      |
+| `pae_instant` (<0.1ms) | **0 of 1000**  | `pump_app_events` **never** returns instantly |
 
 #### Comparison
 
-| Metric                    | Profile server (Exp 3) | **cef-rs OSR (Exp 4)** |
-| ------------------------- | ---------------------- | ---------------------- |
-| `mlw_spikes` (>1ms)       | 865 of 865 (100%)      | **57 of 1000 (5.7%)**  |
-| `max_mlw`                 | 33,293us (33ms)        | **12,702us (12.7ms)**  |
-| Event pump instant        | 831 of 865 (96%)       | **0 of 1000 (0%)**     |
-| `max` event pump          | 747us                  | **570,855us (570ms)**  |
+| Metric              | Profile server (Exp 3) | **cef-rs OSR (Exp 4)** |
+| ------------------- | ---------------------- | ---------------------- |
+| `mlw_spikes` (>1ms) | 865 of 865 (100%)      | **57 of 1000 (5.7%)**  |
+| `max_mlw`           | 33,293us (33ms)        | **12,702us (12.7ms)**  |
+| Event pump instant  | 831 of 865 (96%)       | **0 of 1000 (0%)**     |
+| `max` event pump    | 747us                  | **570,855us (570ms)**  |
 
 #### Conclusion
 
@@ -1046,21 +1048,20 @@ server events, display link callbacks, and Core Animation commits. When the
 event pump handles these tasks, `do_message_loop_work()` finds an almost-empty
 queue and returns in microseconds.
 
-In the profile server, `CFRunLoopRunInMode(0.001)` returns instantly 96% of
-the time with nothing to do. All the work accumulates in CEF's internal task
-queue, and `do_message_loop_work()` has to process the entire backlog on every
-call — taking 1-33ms.
+In the profile server, `CFRunLoopRunInMode(0.001)` returns instantly 96% of the
+time with nothing to do. All the work accumulates in CEF's internal task queue,
+and `do_message_loop_work()` has to process the entire backlog on every call —
+taking 1-33ms.
 
-The fix is not about timer precision (Exp 2), source draining (Exp 1), or
-thread priority. It's that our event pump equivalent is too weak. We need to
-run the macOS event loop more thoroughly between `do_message_loop_work()` calls,
-so that system-level tasks get processed by the OS instead of piling up in
-CEF's queue.
+The fix is not about timer precision (Exp 2), source draining (Exp 1), or thread
+priority. It's that our event pump equivalent is too weak. We need to run the
+macOS event loop more thoroughly between `do_message_loop_work()` calls, so that
+system-level tasks get processed by the OS instead of piling up in CEF's queue.
 
 **Three directions this points to:**
 
-1. **Longer CFRunLoop timeout.** Increase from 1ms to 16ms so CFRunLoop has
-   time to process pending sources instead of timing out instantly. With mlw
+1. **Longer CFRunLoop timeout.** Increase from 1ms to 16ms so CFRunLoop has time
+   to process pending sources instead of timing out instantly. With mlw
    averaging several milliseconds anyway, the extra timeout won't slow the loop.
 2. **Use `NSApplication` event pumping.** Issue 341 Exp 14 tried this with a
    native NSWindow and it didn't help — but that was before the CFRunLoop fix
@@ -1075,8 +1076,8 @@ CEF's queue.
 
 **Status:** Not started
 
-**Goal:** Give CFRunLoop enough time to catch pending timer sources by increasing
-the timeout from 1ms to 16ms — one full vsync period.
+**Goal:** Give CFRunLoop enough time to catch pending timer sources by
+increasing the timeout from 1ms to 16ms — one full vsync period.
 
 **Hypothesis tested:** H1 (timing mismatch), informed by Exp 3 and Exp 4 data.
 
@@ -1090,7 +1091,7 @@ Experiments 3 and 4 revealed that:
   5.7% in the example (Exp 3 vs Exp 4)
 
 The 96% instant return rate could mean CFRunLoop sources are scheduled to fire
-*after* the 1ms timeout expires. The SyntheticBeginFrameSource fires every
+_after_ the 1ms timeout expires. The SyntheticBeginFrameSource fires every
 16.67ms. If it's scheduled to fire in 2ms at the moment we call
 `CFRunLoopRunInMode(0.001)`, we timeout after 1ms and miss it. The source fires
 unhandled, and `do_message_loop_work()` has to process the resulting backlog.
@@ -1103,14 +1104,14 @@ always fire within our timeout window.
 
 Experiment 1 (drain) failed because it made **many rapid-fire short calls** to
 CFRunLoop, delaying the return to `do_message_loop_work()`. This experiment
-makes **one longer call**, giving the run loop continuous time to process sources
-naturally. The distinction:
+makes **one longer call**, giving the run loop continuous time to process
+sources naturally. The distinction:
 
-| Approach | CFRunLoop calls per iteration | Time in CFRunLoop | Time before next mlw |
-| --- | --- | --- | --- |
-| Baseline (1ms) | 1 × 1ms | ~0.1ms (96% instant) | ~0.1ms |
-| Exp 1 (drain) | N × 1ms (loop until timeout) | Variable, delays mlw | Variable |
-| **Exp 5 (16ms)** | **1 × 16ms** | **Up to 16ms, but returns early on source** | **Immediate after source handled** |
+| Approach         | CFRunLoop calls per iteration | Time in CFRunLoop                           | Time before next mlw               |
+| ---------------- | ----------------------------- | ------------------------------------------- | ---------------------------------- |
+| Baseline (1ms)   | 1 × 1ms                       | ~0.1ms (96% instant)                        | ~0.1ms                             |
+| Exp 1 (drain)    | N × 1ms (loop until timeout)  | Variable, delays mlw                        | Variable                           |
+| **Exp 5 (16ms)** | **1 × 16ms**                  | **Up to 16ms, but returns early on source** | **Immediate after source handled** |
 
 With `return_after_source_handled: true`, CFRunLoop returns as soon as it
 handles one source — it doesn't block for the full 16ms. The 16ms is a maximum
@@ -1140,11 +1141,11 @@ That's it. One number change.
 
 #### Expected Outcomes
 
-| Result | Meaning |
-| --- | --- |
-| >80% at 60fps, `cfl_instant` drops | Sources are firing within the 16ms window that the 1ms timeout was missing. The timing mismatch was the cause. |
-| ~71% at 60fps (unchanged) | Sources aren't pending — the 96% instant rate means there truly are no sources to process, not that we're timing out too early. The problem is elsewhere. |
-| Performance regression | The 16ms timeout delays `do_message_loop_work()` on iterations where no source fires, starving CEF's task queue. |
+| Result                             | Meaning                                                                                                                                                   |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| >80% at 60fps, `cfl_instant` drops | Sources are firing within the 16ms window that the 1ms timeout was missing. The timing mismatch was the cause.                                            |
+| ~71% at 60fps (unchanged)          | Sources aren't pending — the 96% instant rate means there truly are no sources to process, not that we're timing out too early. The problem is elsewhere. |
+| Performance regression             | The 16ms timeout delays `do_message_loop_work()` on iterations where no source fires, starving CEF's task queue.                                          |
 
 #### Risk
 
@@ -1153,21 +1154,21 @@ when a source fires — the 16ms is only the maximum wait. On iterations where a
 source fires quickly, the behavior is identical to the 1ms timeout. The only
 difference is on the 96% of iterations where no source fires: those will now
 wait up to 16ms instead of 1ms. But since `do_message_loop_work()` already takes
-1-33ms per call, an extra 15ms of waiting on empty iterations may not change
-the effective cadence much — or it may give CEF's internal threads time to post
-work that `do_message_loop_work()` can then process more efficiently.
+1-33ms per call, an extra 15ms of waiting on empty iterations may not change the
+effective cadence much — or it may give CEF's internal threads time to post work
+that `do_message_loop_work()` can then process more efficiently.
 
 #### Results
 
 **Status: FAILED — regression across all metrics.**
 
-| Metric | Baseline | Exp 5 | Delta |
-| --- | --- | --- | --- |
-| Total frames | — | 390 | — |
-| Duration | — | 12.4s | — |
-| Average FPS | 38.2 | 31.3 | -18% |
-| 60fps range (excl dup) | 71.0% | 65.8% | -5.2pp |
-| Max streak | 424 | 24 | -94% |
+| Metric                 | Baseline | Exp 5 | Delta  |
+| ---------------------- | -------- | ----- | ------ |
+| Total frames           | —        | 390   | —      |
+| Duration               | —        | 12.4s | —      |
+| Average FPS            | 38.2     | 31.3  | -18%   |
+| 60fps range (excl dup) | 71.0%    | 65.8% | -5.2pp |
+| Max streak             | 424      | 24    | -94%   |
 
 **Loop timing (instrumentation from Exp 3):**
 
@@ -1182,24 +1183,24 @@ FINAL iter=810 max_mlw=33244us max_cfl=953us max_total=33278us mlw_spikes=810 cf
 
 **Frame interval distribution (389 intervals):**
 
-| Bucket | Count | Percent |
-| --- | --- | --- |
-| 0-1ms (batch/duplicate) | 56 | 14.4% |
-| 13-20ms (60fps, good) | 219 | 56.3% |
-| 21-34ms (30-47fps) | 50 | 12.9% |
-| 35-50ms (missed) | 14 | 3.6% |
-| 51-100ms (stall) | 38 | 9.8% |
-| 101-200ms (very bad) | 5 | 1.3% |
-| 200+ms (terrible) | 7 | 1.8% |
+| Bucket                  | Count | Percent |
+| ----------------------- | ----- | ------- |
+| 0-1ms (batch/duplicate) | 56    | 14.4%   |
+| 13-20ms (60fps, good)   | 219   | 56.3%   |
+| 21-34ms (30-47fps)      | 50    | 12.9%   |
+| 35-50ms (missed)        | 14    | 3.6%    |
+| 51-100ms (stall)        | 38    | 9.8%    |
+| 101-200ms (very bad)    | 5     | 1.3%    |
+| 200+ms (terrible)       | 7     | 1.8%    |
 
 #### Conclusion
 
 The 16ms timeout matched the "Performance regression" expected outcome. The
 longer timeout did not catch any additional CFRunLoop sources — `max_cfl` was
 only 953us, meaning CFRunLoop never waited anywhere close to 16ms. The instant
-return rate dropped from 96% to 57.5%, but that's because the longer timeout
-let some sub-1ms sources fire that previously timed out — not because we caught
-any new 2-15ms sources.
+return rate dropped from 96% to 57.5%, but that's because the longer timeout let
+some sub-1ms sources fire that previously timed out — not because we caught any
+new 2-15ms sources.
 
 The max streak collapse from 424 to 24 is the most telling result. The longer
 timeout introduced unpredictable delays that disrupted the frame cadence without
@@ -1212,24 +1213,24 @@ cannot sustain it past ~24 frames before a stall interrupts.
   proposed (1ms timeout missing sources scheduled 2-16ms in the future) is
   disproven. CFRunLoop sources are not pending at those timescales. However, H1
   in the broader sense (our event pump is inadequate compared to
-  `pump_app_events`) remains open — the problem may not be *when* we pump but
-  *what* we pump.
+  `pump_app_events`) remains open — the problem may not be _when_ we pump but
+  _what_ we pump.
 
-**Key insight:** The difference between our `CFRunLoopRunInMode` and the
-cef-rs example's `pump_app_events` is not about timeout duration. It's about
-what each function processes. `pump_app_events` runs the full `NSApplication`
-event loop including `nextEventMatchingMask:untilDate:inMode:dequeue:`, which
-processes window server events, display link callbacks, and Core Animation
-commits. `CFRunLoopRunInMode` only processes CFRunLoop sources. The work that
-makes `do_message_loop_work()` spike to >1ms on every call may be work that
-should have been handled by the NSApplication event loop instead.
+**Key insight:** The difference between our `CFRunLoopRunInMode` and the cef-rs
+example's `pump_app_events` is not about timeout duration. It's about what each
+function processes. `pump_app_events` runs the full `NSApplication` event loop
+including `nextEventMatchingMask:untilDate:inMode:dequeue:`, which processes
+window server events, display link callbacks, and Core Animation commits.
+`CFRunLoopRunInMode` only processes CFRunLoop sources. The work that makes
+`do_message_loop_work()` spike to >1ms on every call may be work that should
+have been handled by the NSApplication event loop instead.
 
 ### Experiment 6: Remove `do_message_loop_work()`
 
 **Status:** Not started
 
-**Goal:** Determine whether `do_message_loop_work()` is redundant when
-CFRunLoop is being serviced — and whether removing it improves frame delivery.
+**Goal:** Determine whether `do_message_loop_work()` is redundant when CFRunLoop
+is being serviced — and whether removing it improves frame delivery.
 
 **Hypothesis tested:** H3 (`do_message_loop_work()` and CFRunLoop fighting).
 
@@ -1244,17 +1245,17 @@ Five experiments have established a clear picture:
 - Increasing CFRunLoop timeout to 16ms didn't help — no sources are pending at
   longer timescales (Exp 5)
 
-The consistent finding is that `do_message_loop_work()` is doing *all* the
-work while CFRunLoop does *nothing*. But in the cef-rs example, the opposite
-is true — the event pump does the heavy lifting. This suggests the two systems
-may be fighting: `do_message_loop_work()` drains the task queue before
-CFRunLoop sources have a chance to fire, making CFRunLoop perpetually empty.
+The consistent finding is that `do_message_loop_work()` is doing _all_ the work
+while CFRunLoop does _nothing_. But in the cef-rs example, the opposite is true
+— the event pump does the heavy lifting. This suggests the two systems may be
+fighting: `do_message_loop_work()` drains the task queue before CFRunLoop
+sources have a chance to fire, making CFRunLoop perpetually empty.
 
-If we remove `do_message_loop_work()`, CEF's internal timers and sources on
-the CFRunLoop may process the same work organically — the way they were
-designed to when a run loop is active. The question is whether CEF posts all
-its work as CFRunLoop sources, or whether some work only lives in the internal
-task queue that `do_message_loop_work()` drains.
+If we remove `do_message_loop_work()`, CEF's internal timers and sources on the
+CFRunLoop may process the same work organically — the way they were designed to
+when a run loop is active. The question is whether CEF posts all its work as
+CFRunLoop sources, or whether some work only lives in the internal task queue
+that `do_message_loop_work()` drains.
 
 #### Changes
 
@@ -1275,8 +1276,8 @@ while !QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
 The Exp 3 instrumentation is removed since there's no `do_message_loop_work()`
 to time. Frame delivery is still measured by the existing `[FRAME-TX]` logging.
 
-We use 16ms (one vsync period) so CFRunLoop has enough time to catch any
-pending sources per frame.
+We use 16ms (one vsync period) so CFRunLoop has enough time to catch any pending
+sources per frame.
 
 #### What Stays the Same
 
@@ -1287,11 +1288,11 @@ pending sources per frame.
 
 #### Expected Outcomes
 
-| Result | Meaning |
-| --- | --- |
-| Frames still delivered, quality improves | CFRunLoop sources handle the work that `do_message_loop_work()` was doing. The explicit call was redundant and its overhead was causing stalls. H3 confirmed. |
-| Frames still delivered, quality similar or worse | CFRunLoop can drive CEF but not efficiently. The work isn't fought over — it's just slow either way. Need to explore NSApplication event loop (idea 7). |
-| No frames delivered (OnPaint stops firing) | `do_message_loop_work()` is essential — CFRunLoop sources alone cannot drive CEF's rendering pipeline. H3 ruled out. Need a different approach entirely. |
+| Result                                           | Meaning                                                                                                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frames still delivered, quality improves         | CFRunLoop sources handle the work that `do_message_loop_work()` was doing. The explicit call was redundant and its overhead was causing stalls. H3 confirmed. |
+| Frames still delivered, quality similar or worse | CFRunLoop can drive CEF but not efficiently. The work isn't fought over — it's just slow either way. Need to explore NSApplication event loop (idea 7).       |
+| No frames delivered (OnPaint stops firing)       | `do_message_loop_work()` is essential — CFRunLoop sources alone cannot drive CEF's rendering pipeline. H3 ruled out. Need a different approach entirely.      |
 
 #### Risk
 
@@ -1306,7 +1307,8 @@ or not, and we can kill the process and revert.
 
 The app launched but the webview never rendered. No `[FRAME-TX]` entries were
 logged. CEF's `OnPaint` callback never fired. The log file was not updated
-(still contained Exp 5 data with "Running message loop (instrumented)..." header).
+(still contained Exp 5 data with "Running message loop (instrumented)..."
+header).
 
 This matches the third expected outcome: "No frames delivered (OnPaint stops
 firing)."
@@ -1317,14 +1319,14 @@ firing)."
 CEF's rendering pipeline. Without the explicit call, CEF never processes its
 internal task queue, never triggers layout/paint, and never calls `OnPaint`.
 
-**H3 ruled out.** The two systems are not fighting — `do_message_loop_work()`
-is doing work that CFRunLoop sources simply don't cover. CEF does not post its
-core rendering tasks as CFRunLoop sources. The internal task queue that
+**H3 ruled out.** The two systems are not fighting — `do_message_loop_work()` is
+doing work that CFRunLoop sources simply don't cover. CEF does not post its core
+rendering tasks as CFRunLoop sources. The internal task queue that
 `do_message_loop_work()` drains is the only path to rendering.
 
 This also reframes the Exp 3/4 comparison: the reason `pump_app_events` reduces
 `do_message_loop_work()` spike rate in the cef-rs example isn't because it
-handles the *same* work — it's because it handles *complementary* work
+handles the _same_ work — it's because it handles _complementary_ work
 (NSApplication events, display link, Core Animation) that reduces the total
 workload CEF needs to process internally. Our CFRunLoop call doesn't process
 that complementary work, so `do_message_loop_work()` has to do everything.
@@ -1333,9 +1335,9 @@ that complementary work, so `do_message_loop_work()` has to do everything.
 
 **Status:** Not started
 
-**Goal:** Replace `CFRunLoopRunInMode` with an NSApplication event pump —
-the same mechanism that winit's `pump_app_events` uses internally — to process
-the complementary work that reduces `do_message_loop_work()` overhead.
+**Goal:** Replace `CFRunLoopRunInMode` with an NSApplication event pump — the
+same mechanism that winit's `pump_app_events` uses internally — to process the
+complementary work that reduces `do_message_loop_work()` overhead.
 
 **Hypothesis tested:** Direct consequence of Exp 3, 4, 5, 6 findings.
 
@@ -1344,13 +1346,13 @@ the complementary work that reduces `do_message_loop_work()` overhead.
 Six experiments have converged on a single conclusion:
 
 1. `do_message_loop_work()` is essential and cannot be removed (Exp 6)
-2. `do_message_loop_work()` takes >1ms on 100% of calls in our process but
-   only 5.7% in the cef-rs example (Exp 3 vs Exp 4)
+2. `do_message_loop_work()` takes >1ms on 100% of calls in our process but only
+   5.7% in the cef-rs example (Exp 3 vs Exp 4)
 3. The difference is `pump_app_events` — it handles complementary work
    (NSApplication events, display link, Core Animation) that our
    `CFRunLoopRunInMode` doesn't touch (Exp 4, 5, 6 conclusions)
-4. `CFRunLoopRunInMode` returns instantly 96% of the time regardless of
-   timeout (Exp 3, 5) — it's not processing the right kind of work
+4. `CFRunLoopRunInMode` returns instantly 96% of the time regardless of timeout
+   (Exp 3, 5) — it's not processing the right kind of work
 
 The cef-rs example achieves low mlw spike rates because winit's
 `pump_app_events` internally calls:
@@ -1365,8 +1367,8 @@ The cef-rs example achieves low mlw spike rates because winit's
 
 This processes the macOS application event queue: window server messages,
 display link callbacks, Core Animation layer commits, and other system events
-that CEF's internal threads post. Without processing these, the work
-accumulates and `do_message_loop_work()` has to handle it all.
+that CEF's internal threads post. Without processing these, the work accumulates
+and `do_message_loop_work()` has to handle it all.
 
 #### Changes
 
@@ -1445,8 +1447,8 @@ mod nsapp {
 ```
 
 This uses raw FFI to call the same Objective-C methods that winit calls
-internally. No new crate dependencies — just `extern "C"` bindings to
-AppKit, the Objective-C runtime, and CoreFoundation.
+internally. No new crate dependencies — just `extern "C"` bindings to AppKit,
+the Objective-C runtime, and CoreFoundation.
 
 **2. Replace `cfrunloop::run_for(0.001)` with `nsapp::pump_events()` in the
 loop:**
@@ -1473,11 +1475,11 @@ The Exp 3 instrumentation is kept to compare mlw spike rates directly.
 
 #### Expected Outcomes
 
-| Result | Meaning |
-| --- | --- |
-| mlw spike rate drops from 100% toward 5.7%, fps improves | NSApplication events were the missing complementary work. The event pump offloads work from CEF's internal queue, matching the cef-rs example's behavior. |
-| mlw spike rate unchanged, fps unchanged | NSApplication events aren't relevant in a headless (no window) process. The cef-rs example is fast because it *has a window*, not because of the event pump itself. Need to investigate window-dependent pathways. |
-| Crash or hang | NSApp may not be initialized in our process since CEF doesn't create one for headless/windowless mode. Would need to call `[NSApplication sharedApplication]` first. |
+| Result                                                   | Meaning                                                                                                                                                                                                            |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| mlw spike rate drops from 100% toward 5.7%, fps improves | NSApplication events were the missing complementary work. The event pump offloads work from CEF's internal queue, matching the cef-rs example's behavior.                                                          |
+| mlw spike rate unchanged, fps unchanged                  | NSApplication events aren't relevant in a headless (no window) process. The cef-rs example is fast because it _has a window_, not because of the event pump itself. Need to investigate window-dependent pathways. |
+| Crash or hang                                            | NSApp may not be initialized in our process since CEF doesn't create one for headless/windowless mode. Would need to call `[NSApplication sharedApplication]` first.                                               |
 
 #### Risk
 
@@ -1502,22 +1504,21 @@ frames.
 The NSApplication event pump **replaced** CFRunLoop servicing rather than
 **complementing** it. The problem is that `nsapp::pump_events()` drains the
 NSApplication event queue but does not service CFRunLoop sources — and Exp 6
-already proved that CFRunLoop servicing is necessary for `do_message_loop_work()`
-to produce frames.
+already proved that CFRunLoop servicing is necessary for
+`do_message_loop_work()` to produce frames.
 
-The failure reveals a misconception: we assumed `pump_app_events` was a
-superset of `CFRunLoopRunInMode` (processing NSApplication events *and*
-CFRunLoop sources). In reality, they may process different layers of the macOS
-event system. Our NSApplication pump only calls
+The failure reveals a misconception: we assumed `pump_app_events` was a superset
+of `CFRunLoopRunInMode` (processing NSApplication events _and_ CFRunLoop
+sources). In reality, they may process different layers of the macOS event
+system. Our NSApplication pump only calls
 `nextEventMatchingMask:untilDate:inMode:dequeue:` + `sendEvent:`, which handles
 the NSApplication event queue. But `CFRunLoopRunInMode` services CFRunLoop
 sources (timers, ports, observers) that CEF depends on for frame scheduling.
 
 **The fix for a future experiment:** call **both** — `nsapp::pump_events()` for
-NSApplication events *and* `cfrunloop::run_for()` for CFRunLoop sources. The
-cef-rs example's `pump_app_events` likely does both internally via winit's
-macOS backend, which runs a full `NSRunLoop` iteration that encompasses both
-layers.
+NSApplication events _and_ `cfrunloop::run_for()` for CFRunLoop sources. The
+cef-rs example's `pump_app_events` likely does both internally via winit's macOS
+backend, which runs a full `NSRunLoop` iteration that encompasses both layers.
 
 ### Experiment 8: NSApplication Event Pump + CFRunLoop Together
 
@@ -1539,11 +1540,11 @@ Experiments 6 and 7 each removed one half of the equation and both failed:
 Both failures confirm that CFRunLoop servicing is essential — CEF's internal
 timers (SyntheticBeginFrameSource) are CFRunLoop sources, not NSApplication
 events. But the Exp 4 comparison showed that `pump_app_events` processes
-*complementary* work that reduces `do_message_loop_work()` overhead from 100%
+_complementary_ work that reduces `do_message_loop_work()` overhead from 100%
 spike rate to 5.7%.
 
 The hypothesis: `pump_app_events` works because it does **both** — it runs a
-full NSRunLoop iteration that services CFRunLoop sources *and* processes
+full NSRunLoop iteration that services CFRunLoop sources _and_ processes
 NSApplication events. Our previous experiments tried one or the other. This
 experiment tries both together.
 
@@ -1568,9 +1569,9 @@ while !QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
 }
 ```
 
-NSApplication pump runs first to drain any pending system events, then
-CFRunLoop services CEF's timer sources. The Exp 3 instrumentation is kept to
-compare mlw spike rates.
+NSApplication pump runs first to drain any pending system events, then CFRunLoop
+services CEF's timer sources. The Exp 3 instrumentation is kept to compare mlw
+spike rates.
 
 #### What Stays the Same
 
@@ -1582,11 +1583,11 @@ compare mlw spike rates.
 
 #### Expected Outcomes
 
-| Result | Meaning |
-| --- | --- |
-| mlw spike rate drops, fps improves | NSApplication events are the complementary work. Adding them alongside CFRunLoop matches what `pump_app_events` does. |
-| No change from baseline | NSApplication events don't exist in a headless process. The cef-rs example is fast because of its window, not the event type. |
-| Regression or broken | The two pumps interfere with each other, or the NSApplication pump disrupts CEF's internal state. |
+| Result                             | Meaning                                                                                                                       |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| mlw spike rate drops, fps improves | NSApplication events are the complementary work. Adding them alongside CFRunLoop matches what `pump_app_events` does.         |
+| No change from baseline            | NSApplication events don't exist in a headless process. The cef-rs example is fast because of its window, not the event type. |
+| Regression or broken               | The two pumps interfere with each other, or the NSApplication pump disrupts CEF's internal state.                             |
 
 #### Risk
 
@@ -1621,21 +1622,21 @@ explanations:
 
 3. **CEF's internal NSApplication subclass conflicts.** CEF may install its own
    NSApplication delegate or subclass (like `CefAppProtocol` seen in the
-   cefsimple example). Pumping events outside CEF's control may bypass its
-   event routing and break its internal assumptions.
+   cefsimple example). Pumping events outside CEF's control may bypass its event
+   routing and break its internal assumptions.
 
-**The NSApplication event pump approach is abandoned.** Experiments 7 and 8
-both produced total failures. The raw FFI approach to NSApplication event
-pumping is either incorrect or fundamentally incompatible with CEF's headless
-process model. A different direction is needed.
+**The NSApplication event pump approach is abandoned.** Experiments 7 and 8 both
+produced total failures. The raw FFI approach to NSApplication event pumping is
+either incorrect or fundamentally incompatible with CEF's headless process
+model. A different direction is needed.
 
 ### Experiment 9: Question the Assumption — cef-rs OSR Without a Window
 
-**Status:** Not started
+**Status:** Not tried — changing direction
 
 **Goal:** Determine whether the cef-rs OSR example's 60fps performance comes
-from `pump_app_events` or from having a window with a Metal layer (which
-creates a CVDisplayLink under the hood).
+from `pump_app_events` or from having a window with a Metal layer (which creates
+a CVDisplayLink under the hood).
 
 **Hypothesis tested:** Is the window the key, not the event pump?
 
@@ -1651,11 +1652,11 @@ The cef-rs OSR example has three things our profile server doesn't:
 2. A winit window with a wgpu/Metal surface — creates a CVDisplayLink
 3. `pump_app_events` processing the winit event loop
 
-We assumed #3 was the cause of 60fps (Exp 4 conclusion). But what if it's #2?
-A Metal layer implicitly creates a CVDisplayLink, which provides a hardware
-60Hz vsync signal. This signal drives Core Animation and may also drive CEF's
-`SyntheticBeginFrameSource` timer scheduling. Without a display link, macOS
-may coalesce timers and deliver them at a degraded cadence — explaining why
+We assumed #3 was the cause of 60fps (Exp 4 conclusion). But what if it's #2? A
+Metal layer implicitly creates a CVDisplayLink, which provides a hardware 60Hz
+vsync signal. This signal drives Core Animation and may also drive CEF's
+`SyntheticBeginFrameSource` timer scheduling. Without a display link, macOS may
+coalesce timers and deliver them at a degraded cadence — explaining why
 CFRunLoop returns instantly 96% of the time (no sources pending because the
 display link never fires).
 
@@ -1668,13 +1669,13 @@ One change to `cef-rs/examples/osr/src/main.rs`:
 
 **Skip window creation in `create_browser_window`.** Replace the window + wgpu
 setup with a minimal headless browser that still calls `on_accelerated_paint`
-but doesn't render to a window. The simplest approach: skip `create_browser_window`
-entirely and create the browser directly with a minimal render handler, similar
-to how the profile server does it.
+but doesn't render to a window. The simplest approach: skip
+`create_browser_window` entirely and create the browser directly with a minimal
+render handler, similar to how the profile server does it.
 
-However, since the example's architecture is deeply coupled to the window
-(wgpu State, BrowserInstance, window events), the cleaner approach is to
-**comment out the window creation and wgpu setup** while keeping:
+However, since the example's architecture is deeply coupled to the window (wgpu
+State, BrowserInstance, window events), the cleaner approach is to **comment out
+the window creation and wgpu setup** while keeping:
 
 - The winit event loop and `pump_app_events` (the control variable)
 - CEF initialization with the same settings
@@ -1706,7 +1707,8 @@ rate, similar to the profile server's `[FRAME-TX]` logging.
 
 #### What Stays the Same
 
-- winit event loop created and `pump_app_events` called (the thing we're testing)
+- winit event loop created and `pump_app_events` called (the thing we're
+  testing)
 - `NSApplicationActivationPolicyRegular` still set
 - `do_message_loop_work()` still called every iteration
 - `external_message_pump: true` in CEF settings
@@ -1714,14 +1716,105 @@ rate, similar to the profile server's `[FRAME-TX]` logging.
 
 #### Expected Outcomes
 
-| Result | Meaning |
-| --- | --- |
-| fps drops to ~38 (matches profile server) | The **window/display link** is the key, not `pump_app_events`. Our headless process can never match 60fps without a display link. Next step: install a CVDisplayLink or create a hidden CAMetalLayer. |
-| fps stays at ~60 | `pump_app_events` really is the key. Our raw FFI attempts (Exp 7, 8) failed due to implementation bugs, not because the approach is wrong. Next step: use winit properly or fix the FFI. |
-| fps drops to an intermediate value (~45-55) | Both the window and `pump_app_events` contribute. The event pump helps but the display link provides additional timing precision. |
+| Result                                      | Meaning                                                                                                                                                                                               |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| fps drops to ~38 (matches profile server)   | The **window/display link** is the key, not `pump_app_events`. Our headless process can never match 60fps without a display link. Next step: install a CVDisplayLink or create a hidden CAMetalLayer. |
+| fps stays at ~60                            | `pump_app_events` really is the key. Our raw FFI attempts (Exp 7, 8) failed due to implementation bugs, not because the approach is wrong. Next step: use winit properly or fix the FFI.              |
+| fps drops to an intermediate value (~45-55) | Both the window and `pump_app_events` contribute. The event pump helps but the display link provides additional timing precision.                                                                     |
 
 #### Risk
 
-Low. This only modifies the cef-rs example, not the profile server. The
-example is a test harness — no production impact. If the modification is too
-invasive, we can create a separate minimal example instead.
+Low. This only modifies the cef-rs example, not the profile server. The example
+is a test harness — no production impact. If the modification is too invasive,
+we can create a separate minimal example instead.
+
+## Conclusion (After 8 Experiments)
+
+### What We Learned
+
+**The core bottleneck is clear:** `do_message_loop_work()` takes >1ms on 100% of
+calls in the profile server (Exp 3), versus only 5.7% in the cef-rs example (Exp
+4). This single function consuming 1-33ms per call is why we can't sustain
+60fps.
+
+**Why it's slow:** The cef-rs example has `pump_app_events` (winit) which
+processes macOS system events — window server messages, display link callbacks,
+Core Animation commits — as complementary work. This offloads tasks from CEF's
+internal queue, so `do_message_loop_work()` finds an almost-empty queue and
+returns in microseconds. Our profile server has no equivalent — all the work
+piles up in CEF's internal queue and `do_message_loop_work()` processes
+everything.
+
+**What we can't do about it:** Three experiments (6, 7, 8) tried to replicate
+`pump_app_events` via raw FFI. All three produced total failures — the webview
+stopped rendering entirely. The NSApplication event pump approach via
+`objc_msgSend` is either fundamentally incompatible with CEF's headless process
+model, or our FFI implementation was wrong.
+
+### Hypotheses Resolved
+
+| Hypothesis                             | Status        | Evidence                                                         |
+| -------------------------------------- | ------------- | ---------------------------------------------------------------- |
+| H1: Polling loop timing mismatch       | **Confirmed** | Exp 3: mlw dominates loop at 1-33ms per call                     |
+| H2: CFRunLoop 1ms timeout too short    | **Ruled out** | Exp 1, 5: longer timeouts and draining both made things worse    |
+| H3: mlw and CFRunLoop fighting         | **Ruled out** | Exp 6: removing mlw produced zero frames — they're not redundant |
+| H9: `return_after_source_handled` flag | **Ruled out** | Exp 1: draining all sources hurt performance                     |
+| H10: Process QoS too low               | **Ruled out** | Exp 2: USER_INTERACTIVE QoS caused regressions                   |
+| H4-H8: remaining                       | **Untested**  | —                                                                |
+
+### What Made Things Better
+
+Nothing. Every intervention either regressed or broke the app:
+
+| Experiment               | Change                     | Result                 |
+| ------------------------ | -------------------------- | ---------------------- |
+| Exp 1: Drain CFRunLoop   | Loop until timed-out       | -20% fps, -85% streak  |
+| Exp 2: QoS               | USER_INTERACTIVE           | -24% fps, -86% streak  |
+| Exp 3: Instrument loop   | Diagnostic                 | Baseline (no change)   |
+| Exp 4: Instrument cef-rs | Diagnostic                 | Baseline (no change)   |
+| Exp 5: 16ms timeout      | Increase CFRunLoop timeout | -18% fps, -94% streak  |
+| Exp 6: Remove mlw        | CFRunLoop only             | **Broken** — no frames |
+| Exp 7: NSApp pump        | Replace CFRunLoop          | **Broken** — no frames |
+| Exp 8: NSApp + CFRunLoop | Add NSApp alongside        | **Broken** — no frames |
+
+The baseline from Issue 342 Exp 5 (38.2fps, 71% at 60fps, max streak 424)
+remains the best result achieved. No experiment in this issue improved on it.
+
+### What's Left to Try
+
+The untested hypotheses and ideas that remain viable:
+
+1. **H4: `external_message_pump` with deadlock workaround** — Issue 342 Exp 4
+   failed due to a chicken-and-egg deadlock during init. A two-phase approach
+   (poll during init, switch to cooperative scheduling after
+   `on_context_initialized`) might solve this. The cef-rs example uses
+   `external_message_pump: true` and achieves 60fps.
+
+2. **H6: CVDisplayLink + CFRunLoop** — Issue 341 Exp 8 tried CVDisplayLink alone
+   (failed), but that was before the CFRunLoop fix. Combining hardware vsync
+   timing with CFRunLoop servicing is untested.
+
+3. **H8: Mach port caching** — Eliminating redundant kernel syscalls on every
+   frame. Likely marginal but could reduce per-frame overhead.
+
+4. **H5/H7: Diagnostic experiments** — Correlating SyntheticBeginFrameSource
+   timing with frame drops (H5), or measuring GUI-side frame pacing (H7).
+
+5. **The inverse test** — Instead of removing the window from the cef-rs example
+   (Exp 9, abandoned as impractical), replace `pump_app_events` in the cef-rs
+   example with `CFRunLoopRunInMode`. If fps drops to ~38, it confirms
+   `pump_app_events` is the key. If fps stays at ~60, the window is what
+   matters.
+
+6. **Use winit in the profile server** — Instead of raw FFI, add winit as a
+   dependency and use `pump_app_events` directly. This would replicate the
+   cef-rs example's architecture exactly, but adds a significant dependency to a
+   headless process.
+
+### Status
+
+**Issue 343 is unresolved.** The goal of perfect 60fps has not been achieved.
+The baseline remains 38.2fps / 71% at 60fps. The root cause is understood
+(inadequate event pump in a headless process) but no solution has been found
+within the constraints (no hidden windows, no focus stealing, no winit
+dependency).
