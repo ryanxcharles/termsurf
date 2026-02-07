@@ -462,3 +462,64 @@ Low. The drain loop adds at most a few microseconds per extra source handled.
 If only one source ever fires (the common case today), the behavior is identical
 to the current code — one call returns 4, the next returns 3, loop exits after
 two calls instead of one.
+
+#### Results
+
+**Status: FAILED** — Performance regressed across every metric.
+
+**Overall stats:** 495 frames over 16.1s = **30.6 fps average**
+
+| Interval             | Count | Percentage |
+| -------------------- | ----- | ---------- |
+| Burst (0-5ms)        | 18    | 3.6%       |
+| 60fps (6-20ms)       | 303   | **61.3%**  |
+| 30fps (21-40ms)      | 108   | 21.9%      |
+| Mid (41-70ms)        | 25    | 5.1%       |
+| Low (>70ms)          | 40    | 8.1%       |
+
+**Dominant intervals:** 17ms (79), 16ms (76), 18ms (70) — still vsync-aligned,
+but weaker than before. Secondary peak at 33-35ms (87 combined).
+
+**Max consecutive 60fps frames:** **62** (top streaks: 62, 21, 20, 19, 18)
+
+CEF debug log histograms:
+
+- `Viz.ExternalBeginFrameSourceMac.DisplayLink`: 3 samples (unchanged)
+- `Viz.ExternalBeginFrameSource.Interval`: **11 samples**, mean 16ms (down from
+  19 in Issue 342 Exp 5 — SyntheticBeginFrameSource firing less often)
+- `Viz.FrameSinkVideoCapturer.CaptureDuration`: 494 samples, mean 7.6ms
+- `Graphics.Smoothness.PercentDroppedFrames3.AllSequences`: **22.2%** (up from
+  19% — more frames dropped)
+
+#### Comparison
+
+| Metric                     | Issue 342 Exp 5 (baseline) | **Exp 1 (drain)** |
+| -------------------------- | -------------------------- | ----------------- |
+| Average FPS                | 38.2                       | **30.6**          |
+| Frames at 60fps            | 71%                        | **61.3%**         |
+| Frames at 30fps            | ~15%                       | **21.9%**         |
+| Max consecutive 60fps      | 424                        | **62**            |
+| SyntheticBeginFrame fires  | 19                         | **11**            |
+| PercentDroppedFrames       | 19%                        | **22.2%**         |
+
+#### Conclusion
+
+Draining all CFRunLoop sources made everything worse. The
+SyntheticBeginFrameSource dropped from 19 to 11 samples — we starved it more,
+not less. The max streak collapsed from 424 to 62.
+
+The cause: draining multiple sources delays the return to
+`do_message_loop_work()`. CEF's compositor posts tasks to its internal queue
+that require `do_message_loop_work()` to process. By spending extra time in the
+CFRunLoop drain loop, we defer that processing, causing missed compositor beats.
+
+This rules out **H2** (timeout too short) and **H9**
+(`return_after_source_handled` flag). The single-source-per-call behavior in
+Issue 342 Exp 5 was actually optimal — it provides the tightest interleaving
+between CFRunLoop source handling and `do_message_loop_work()` task processing.
+
+The result supports **H3** (the two systems fighting): `do_message_loop_work()`
+and CFRunLoop need tight, alternating interleaving. More aggressive draining of
+either side hurts the other. The next experiment should investigate this
+relationship — either by removing `do_message_loop_work()` entirely (letting
+CFRunLoop drive everything) or by tuning the balance between the two calls.
