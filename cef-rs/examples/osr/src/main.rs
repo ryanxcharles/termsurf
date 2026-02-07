@@ -698,15 +698,52 @@ fn main() -> std::process::ExitCode {
         proxy,
     );
 
+    // Issue 343, Experiment 4: Instrumented loop timing.
+    let mut loop_count: u64 = 0;
+    let mut max_mlw_us: u128 = 0;
+    let mut max_pae_us: u128 = 0;
+    let mut max_total_us: u128 = 0;
+    let mut mlw_spike_count: u64 = 0;
+    let mut pae_instant_count: u64 = 0;
+
     let ret = loop {
+        let t0 = std::time::Instant::now();
+
         do_message_loop_work();
+        let t1 = std::time::Instant::now();
+
         let timeout = Some(Duration::from_millis(1));
         let status = event_loop.pump_app_events(timeout, &mut app);
+        let t2 = std::time::Instant::now();
+
+        let mlw_us = (t1 - t0).as_micros();
+        let pae_us = (t2 - t1).as_micros();
+        let total_us = (t2 - t0).as_micros();
+
+        if mlw_us > max_mlw_us { max_mlw_us = mlw_us; }
+        if pae_us > max_pae_us { max_pae_us = pae_us; }
+        if total_us > max_total_us { max_total_us = total_us; }
+        if mlw_us > 1000 { mlw_spike_count += 1; }
+        if pae_us < 100 { pae_instant_count += 1; }
+
+        loop_count += 1;
+
+        if loop_count % 1000 == 0 {
+            println!(
+                "[LOOP-TIMING] iter={} max_mlw={}us max_pae={}us max_total={}us mlw_spikes={} pae_instant={}",
+                loop_count, max_mlw_us, max_pae_us, max_total_us, mlw_spike_count, pae_instant_count
+            );
+        }
 
         if let PumpStatus::Exit(exit_code) = status {
             break ExitCode::from(exit_code as u8);
         }
     };
+
+    println!(
+        "[LOOP-TIMING] FINAL iter={} max_mlw={}us max_pae={}us max_total={}us mlw_spikes={} pae_instant={}",
+        loop_count, max_mlw_us, max_pae_us, max_total_us, mlw_spike_count, pae_instant_count
+    );
 
     for _ in 0..10 {
         do_message_loop_work();
