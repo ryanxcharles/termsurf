@@ -275,4 +275,41 @@ TermSurf pipeline adds no overhead beyond CEF OSR itself.
   to find where.
 - If ts3 release reaches ~60fps: we're done. Ship release builds.
 
-**Status:** Not started
+**Result:**
+
+ts3 release improves over debug but falls short of cef-test release:
+
+| Source   | Build   | FPS        | p50    | p95    | 60fps% | Streak |
+| -------- | ------- | ---------- | ------ | ------ | ------ | ------ |
+| cef-test | Release | 50.3–51.6  | 16.7ms | 33.6ms | 81–85% | 69–109 |
+| ts3      | Release | 45.8–51.8  | 18.9ms | 34.1ms | 47–55% | 20–43  |
+| ts3      | Debug   | 33.7–46.6  | 16.9ms | 49.7ms | —      | —      |
+
+**Findings:**
+
+1. **The TermSurf pipeline adds ~2ms per frame.** cef-test release has
+   p50=16.7ms (exactly one vsync). ts3 release has p50=18.9–19.6ms —
+   consistently 2–3ms above the vsync deadline. This extra latency is in the
+   TermSurf-specific path: IOSurface → Mach port → XPC → GUI import → wgpu
+   render.
+
+2. **The 2ms cliff-edge effect is devastating.** That ~2ms pushes the majority
+   of frames past the 16.7ms vsync boundary. cef-test lands 81–85% of frames on
+   the first vsync; ts3 lands only 47–55%. A small absolute latency causes a
+   large fps drop because of the quantized vsync deadline.
+
+3. **Run-to-run variance persists in ts3.** cef-test release eliminated the
+   bimodal pattern entirely (consistent p95=33.6ms across runs). ts3 release
+   still shows it: Run 1 had p95=34.1ms, Run 2 had p95=52.8ms. Something in the
+   TermSurf pipeline introduces variable latency that cef-test avoids.
+
+4. **Release mode still helps ts3.** ts3 debug was 33.7–46.6fps; release is
+   45.8–51.8fps. The floor is higher. But the improvement is less dramatic than
+   for cef-test, because the pipeline overhead masks some of the compiler
+   optimization gains.
+
+**Next step:** The ~2ms pipeline overhead is now the primary target. L3
+(pipeline timestamps), L4 (IOSurface handle reuse), and L6 (GUI-side
+presentation timing) are the highest-value investigations.
+
+**Status:** Done
