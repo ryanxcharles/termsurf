@@ -23,8 +23,8 @@ simpler: **input rate**.
 
 cef-test's benchmark sends simulated scroll events at ~125Hz (8ms intervals)
 directly inside the profile server via `BrowserHost::send_mouse_wheel_event()`.
-This bypasses all input routing and guarantees a continuous stream of events that
-force CEF to re-render every frame.
+This bypasses all input routing and guarantees a continuous stream of events
+that force CEF to re-render every frame.
 
 ts3's input path is very different:
 
@@ -56,8 +56,8 @@ CEF renders
 If any stage in this pipeline drops events, batches them, or introduces latency,
 the effective input rate reaching CEF could be far lower than 125Hz. A lower
 input rate means fewer scroll events per second, which means fewer frames where
-the page content actually changes, which means fewer
-`on_accelerated_paint` callbacks, which means lower measured fps.
+the page content actually changes, which means fewer `on_accelerated_paint`
+callbacks, which means lower measured fps.
 
 In other words: **ts3 might not be rendering slowly — it might not be asking CEF
 to render often enough**, because the input isn't arriving fast enough.
@@ -73,8 +73,8 @@ But manual scrolling introduces uncontrolled variables:
   rendering entirely
 - **Different content** — the page being scrolled affects rendering cost
 
-cef-test solved this by simulating scrolling directly in the profile server.
-ts3 needs the same capability to produce a valid comparison.
+cef-test solved this by simulating scrolling directly in the profile server. ts3
+needs the same capability to produce a valid comparison.
 
 ## Plan
 
@@ -96,8 +96,8 @@ This command:
 6. Closes the webview
 
 The simulated scrolling happens entirely inside the profile server — no mouse
-events traverse the GUI → XPC → profile path. This eliminates input routing as
-a variable and isolates the rendering pipeline.
+events traverse the GUI → XPC → profile path. This eliminates input routing as a
+variable and isolates the rendering pipeline.
 
 ### Simulated scroll behavior
 
@@ -113,7 +113,7 @@ Identical to cef-test's Phase 8:
 
 ### Statistics output
 
-After 70 seconds, print to the terminal:
+After 70 seconds, close the webview, and then print to the terminal:
 
 ```
 === ts3 Benchmark (70s) ===
@@ -161,10 +161,10 @@ The `web` command already sends a JSON message over a Unix socket to the GUI,
 which triggers an XPC `spawn_profile` to the launcher. The benchmark variant
 needs to tell the profile server to enable simulated scrolling. Options:
 
-1. **CLI arg to profile server** — Add `--benchmark` flag to
-   `termsurf-profile`. When set, the profile server simulates scrolling after
-   page load, exactly like cef-test-profile does. The GUI passes this flag
-   through the launcher's `spawn_profile` message.
+1. **CLI arg to profile server** — Add `--benchmark` flag to `termsurf-profile`.
+   When set, the profile server simulates scrolling after page load, exactly
+   like cef-test-profile does. The GUI passes this flag through the launcher's
+   `spawn_profile` message.
 
 2. **XPC command after connection** — GUI sends a `start_benchmark` XPC message
    to the profile server after the connection is established. Profile server
@@ -188,17 +188,17 @@ type.
 
 ### Relationship to cef-test's benchmark
 
-| Aspect              | cef-test benchmark              | ts3 `web benchmark`            |
-| ------------------- | ------------------------------- | ------------------------------ |
-| GUI                 | Bare winit + wgpu               | WezTerm (full terminal)        |
-| Profile server      | cef-test-profile                | termsurf-profile               |
-| Input simulation    | Direct in profile server        | Direct in profile server       |
-| IOSurface transfer  | XPC Mach port                   | XPC Mach port                  |
-| Texture import      | Standalone wgpu pipeline        | WezTerm's wgpu integration     |
-| Event loop          | Simple pump_app_events          | WezTerm's event loop           |
-| Scroll rate         | ~125Hz (8ms)                    | ~125Hz (8ms)                   |
-| Duration            | 70s                             | 70s                            |
-| Input routing       | None (simulated in-process)     | None (simulated in-process)    |
+| Aspect             | cef-test benchmark          | ts3 `web benchmark`         |
+| ------------------ | --------------------------- | --------------------------- |
+| GUI                | Bare winit + wgpu           | WezTerm (full terminal)     |
+| Profile server     | cef-test-profile            | termsurf-profile            |
+| Input simulation   | Direct in profile server    | Direct in profile server    |
+| IOSurface transfer | XPC Mach port               | XPC Mach port               |
+| Texture import     | Standalone wgpu pipeline    | WezTerm's wgpu integration  |
+| Event loop         | Simple pump_app_events      | WezTerm's event loop        |
+| Scroll rate        | ~125Hz (8ms)                | ~125Hz (8ms)                |
+| Duration           | 70s                         | 70s                         |
+| Input routing      | None (simulated in-process) | None (simulated in-process) |
 
 The only differences are on the GUI side: WezTerm's renderer vs bare wgpu. If
 the results match (~50fps), then WezTerm's integration is not the problem and
