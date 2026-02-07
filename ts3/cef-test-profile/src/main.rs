@@ -21,6 +21,8 @@ static START_TIME: OnceLock<Instant> = OnceLock::new();
 static QUIT_FLAG: AtomicBool = AtomicBool::new(false);
 /// Set to true when the page finishes loading (is_loading=0).
 static PAGE_LOADED: AtomicBool = AtomicBool::new(false);
+/// Timestamp of last on_accelerated_paint call (for interval measurement).
+static LAST_PAINT_TIME: Mutex<Option<Instant>> = Mutex::new(None);
 
 #[cfg(target_os = "macos")]
 mod cfrunloop {
@@ -234,8 +236,8 @@ fn run(args: Args) {
     let mut scroll_started = false;
     let mut scroll_direction: i32 = -1; // -1 = down, +1 = up
     let scroll_delta: i32 = 120; // standard scroll unit (one "notch")
-    let direction_switch_interval = Duration::from_secs(3); // reverse every 3s
-    let mut last_direction_switch = Instant::now();
+    let direction_switch_every: u64 = 25; // reverse every 25 events (~200ms)
+    let mut events_since_switch: u64 = 0;
     let mut scroll_event_count: u64 = 0;
 
     while !QUIT_FLAG.load(Ordering::Relaxed) {
@@ -266,25 +268,20 @@ fn run(args: Args) {
                 println!("[SCROLL] Page loaded, starting simulated scroll at ~125Hz");
                 scroll_started = true;
                 last_scroll_time = Instant::now();
-                last_direction_switch = Instant::now();
             }
 
             let now = Instant::now();
 
-            // Reverse direction every 3 seconds
-            if now.duration_since(last_direction_switch) >= direction_switch_interval {
-                scroll_direction *= -1;
-                last_direction_switch = now;
-                println!(
-                    "[SCROLL] Direction switch: {} (events so far: {})",
-                    if scroll_direction < 0 { "DOWN" } else { "UP" },
-                    scroll_event_count
-                );
-            }
-
             // Send scroll event at ~125Hz
             if now.duration_since(last_scroll_time) >= scroll_interval {
                 last_scroll_time = now;
+
+                // Reverse direction every N events to oscillate over a small region
+                events_since_switch += 1;
+                if events_since_switch >= direction_switch_every {
+                    scroll_direction *= -1;
+                    events_since_switch = 0;
+                }
                 if let Some(browser) = state.browser.lock().unwrap().as_ref() {
                     use cef::{ImplBrowser, ImplBrowserHost};
                     if let Some(host) = browser.host() {
@@ -447,12 +444,21 @@ mod cef_handlers {
                     return;
                 }
 
+                let now = std::time::Instant::now();
                 let frame_id =
                     crate::FRAME_COUNTER.fetch_add(1, crate::Ordering::Relaxed);
-                let start = *crate::START_TIME.get_or_init(std::time::Instant::now);
+                let start = *crate::START_TIME.get_or_init(|| now);
                 let t_ms = start.elapsed().as_millis() as i64;
                 let w = info.extra.coded_size.width;
                 let h = info.extra.coded_size.height;
+
+                // Measure interval since last paint
+                let interval_us = {
+                    let mut guard = crate::LAST_PAINT_TIME.lock().unwrap();
+                    let interval = guard.map(|prev| now.duration_since(prev).as_micros() as u64);
+                    *guard = Some(now);
+                    interval
+                };
 
                 // Create Mach port from IOSurface handle
                 let port = termsurf_xpc::iosurface::create_mach_port(handle);
@@ -461,9 +467,13 @@ mod cef_handlers {
                     return;
                 }
 
+                let interval_str = match interval_us {
+                    Some(us) => format!("{}us", us),
+                    None => "first".to_string(),
+                };
                 println!(
-                    "[FRAME-TX] frame={} w={} h={} time={}ms port={}",
-                    frame_id, w, h, t_ms, port
+                    "[FRAME-TX] frame={} w={} h={} time={}ms interval={} port={}",
+                    frame_id, w, h, t_ms, interval_str, port
                 );
 
                 // Send to GUI via XPC

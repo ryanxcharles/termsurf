@@ -1005,3 +1005,38 @@ a performance summary. The numbers tell us which path to take:
   the reference, bisect ts3.
 - **Something in between:** Both factors contribute. Identify which experiments
   close the remaining gap.
+
+**Result:** Something in between. 60-second run with continuous scrolling:
+
+   | Source                  | fps  | 60fps % | Max streak | p50    | p95    |
+   | ----------------------- | ---- | ------- | ---------- | ------ | ------ |
+   | cef-rs OSR (in-process) | ~60  | ~95%    | ~400+      | ~16ms  | ~17ms  |
+   | ts3 profile server      | 38.2 | 71%     | 424        | —      | —      |
+   | cef-test left profile   | 49.7 | 82.6%   | 58         | 16.7ms | 33.6ms |
+   | cef-test right profile  | 48.8 | 80.7%   | 45         | 16.7ms | 33.6ms |
+
+Key observations:
+
+- **p50 = 16.7ms (60fps).** The median frame lands exactly at 60fps. Most frames
+  are on time — the average is dragged down by periodic spikes.
+- **p95 = 33.6ms (~30fps).** Roughly 1 in 20 frames takes double the expected
+  time. These are the `do_message_loop_work` spikes visible in the profile's
+  `[LOOP-TIMING]` data (max_mlw > 30ms).
+- **82% at 60fps vs ts3's 71%.** cef-test is measurably better, confirming that
+  some of the problem is in ts3's integration, not just multi-process CEF.
+- **Max streak of 45-58 vs cef-rs's 400+.** The periodic spikes break long
+  streaks. This is consistent with CEF's internal scheduling interacting with
+  the manual `do_message_loop_work` + `CFRunLoopRunInMode` pump pattern.
+- **Both profiles perform nearly identically** (~49-50fps), confirming that
+  running two CEF processes doesn't materially degrade per-profile performance.
+
+Key implementation details:
+
+- Scroll oscillation: reversed direction every 25 events (~200ms at 125Hz) to
+  keep the page in constant visual motion without hitting top/bottom stalls.
+- Profile server logs frame intervals in `on_accelerated_paint` via
+  `LAST_PAINT_TIME` mutex.
+- GUI tracks per-side `FrameStats` with frame count, intervals, and computes
+  avg fps, 60fps%, max streak, percentiles. Summary prints every 10 seconds.
+- `PendingSurface` includes `rx_time` timestamp for accurate GUI-side interval
+  measurement.

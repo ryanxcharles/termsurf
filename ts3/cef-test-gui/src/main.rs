@@ -6,7 +6,7 @@
 //! Both send IOSurface Mach ports via XPC, GUI imports and renders both.
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
@@ -56,6 +56,7 @@ struct PendingSurface {
     mach_port: u32,
     width: u32,
     height: u32,
+    rx_time: Instant,
 }
 
 /// Two pending surface slots — one per browser half.
@@ -67,6 +68,99 @@ struct PendingSurfaces {
 
 #[cfg(target_os = "macos")]
 type SharedPendingSurfaces = Arc<Mutex<PendingSurfaces>>;
+
+/// Per-side frame statistics tracked by the GUI.
+struct FrameStats {
+    label: &'static str,
+    frame_count: u64,
+    last_rx_time: Option<Instant>,
+    first_rx_time: Option<Instant>,
+    /// Frame intervals in microseconds (for computing stats at the end).
+    intervals_us: Vec<u64>,
+}
+
+impl FrameStats {
+    fn new(label: &'static str) -> Self {
+        Self {
+            label,
+            frame_count: 0,
+            last_rx_time: None,
+            first_rx_time: None,
+            intervals_us: Vec::with_capacity(8000),
+        }
+    }
+
+    fn record_frame(&mut self, rx_time: Instant) {
+        self.frame_count += 1;
+        if self.first_rx_time.is_none() {
+            self.first_rx_time = Some(rx_time);
+        }
+        if let Some(prev) = self.last_rx_time {
+            let interval_us = rx_time.duration_since(prev).as_micros() as u64;
+            self.intervals_us.push(interval_us);
+        }
+        self.last_rx_time = Some(rx_time);
+    }
+
+    fn print_summary(&self) {
+        let n = self.intervals_us.len();
+        if n == 0 {
+            println!("[PERF-{}] No frames recorded", self.label);
+            return;
+        }
+
+        let total_duration = match (self.first_rx_time, self.last_rx_time) {
+            (Some(first), Some(last)) => last.duration_since(first),
+            _ => Duration::ZERO,
+        };
+        let total_secs = total_duration.as_secs_f64();
+        let avg_fps = if total_secs > 0.0 {
+            self.frame_count as f64 / total_secs
+        } else {
+            0.0
+        };
+
+        // Count frames at 60fps (interval 10-20ms to allow some jitter)
+        let at_60fps = self
+            .intervals_us
+            .iter()
+            .filter(|&&i| i >= 10_000 && i <= 20_000)
+            .count();
+        let pct_60fps = (at_60fps as f64 / n as f64) * 100.0;
+
+        // Max consecutive 60fps streak
+        let mut max_streak = 0u64;
+        let mut current_streak = 0u64;
+        for &interval in &self.intervals_us {
+            if interval >= 10_000 && interval <= 20_000 {
+                current_streak += 1;
+                if current_streak > max_streak {
+                    max_streak = current_streak;
+                }
+            } else {
+                current_streak = 0;
+            }
+        }
+
+        // Percentiles
+        let mut sorted = self.intervals_us.clone();
+        sorted.sort();
+        let p50 = sorted[n / 2];
+        let p95 = sorted[(n as f64 * 0.95) as usize];
+        let p99 = sorted[(n as f64 * 0.99) as usize];
+        let min = sorted[0];
+        let max = sorted[n - 1];
+
+        println!(
+            "[PERF-{}] frames={} duration={:.1}s avg_fps={:.1} 60fps%={:.1} max_streak={}",
+            self.label, self.frame_count, total_secs, avg_fps, pct_60fps, max_streak
+        );
+        println!(
+            "[PERF-{}] intervals: min={}us p50={}us p95={}us p99={}us max={}us",
+            self.label, min, p50, p95, p99, max
+        );
+    }
+}
 
 // ============================================================================
 // Vertex
@@ -543,6 +637,7 @@ fn create_profile_listener(
                             mach_port: port,
                             width,
                             height,
+                            rx_time: std::time::Instant::now(),
                         });
                     }
                 }
@@ -647,6 +742,8 @@ struct App {
     pending: SharedPendingSurfaces,
     #[cfg(target_os = "macos")]
     _xpc: Option<XpcState>,
+    left_stats: FrameStats,
+    right_stats: FrameStats,
 }
 
 impl ApplicationHandler for App {
@@ -723,6 +820,7 @@ impl App {
         let mut needs_redraw = false;
 
         if let Some(surface) = left {
+            self.left_stats.record_frame(surface.rx_time);
             if let Some(gpu) = &mut self.gpu {
                 if let Some(bind_group) = gpu.import_surface(&surface) {
                     gpu.left_bind_group = bind_group;
@@ -732,6 +830,7 @@ impl App {
         }
 
         if let Some(surface) = right {
+            self.right_stats.record_frame(surface.rx_time);
             if let Some(gpu) = &mut self.gpu {
                 if let Some(bind_group) = gpu.import_surface(&surface) {
                     gpu.right_bind_group = bind_group;
@@ -766,7 +865,12 @@ fn main() {
         pending,
         #[cfg(target_os = "macos")]
         _xpc: None,
+        left_stats: FrameStats::new("LEFT"),
+        right_stats: FrameStats::new("RIGHT"),
     };
+
+    let mut last_summary = Instant::now();
+    let summary_interval = Duration::from_secs(10);
 
     loop {
         let status = event_loop.pump_app_events(Some(Duration::from_millis(1)), &mut app);
@@ -777,10 +881,20 @@ fn main() {
         #[cfg(target_os = "macos")]
         app.process_pending_surfaces();
 
+        // Print periodic performance summary
+        if last_summary.elapsed() >= summary_interval {
+            app.left_stats.print_summary();
+            app.right_stats.print_summary();
+            last_summary = Instant::now();
+        }
+
         if let PumpStatus::Exit(_) = status {
             break;
         }
     }
 
+    println!("GUI: === Final Performance Summary ===");
+    app.left_stats.print_summary();
+    app.right_stats.print_summary();
     println!("GUI: Done");
 }
