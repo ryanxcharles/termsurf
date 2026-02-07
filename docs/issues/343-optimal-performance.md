@@ -1070,3 +1070,89 @@ CEF's queue.
    macOS backend runs `nextEventMatchingMask:untilDate:inMode:dequeue:` which
    drives the full `NSRunLoop`. There may be a specific run loop mode or
    configuration that we need to match.
+
+### Experiment 5: Increase CFRunLoop Timeout to 16ms
+
+**Status:** Not started
+
+**Goal:** Give CFRunLoop enough time to catch pending timer sources by increasing
+the timeout from 1ms to 16ms — one full vsync period.
+
+**Hypothesis tested:** H1 (timing mismatch), informed by Exp 3 and Exp 4 data.
+
+#### Motivation
+
+Experiments 3 and 4 revealed that:
+
+- `CFRunLoopRunInMode(0.001)` returns instantly 96% of the time (Exp 3)
+- `pump_app_events` in the cef-rs example **never** returns instantly (Exp 4)
+- `do_message_loop_work()` takes >1ms on 100% of calls in our process but only
+  5.7% in the example (Exp 3 vs Exp 4)
+
+The 96% instant return rate could mean CFRunLoop sources are scheduled to fire
+*after* the 1ms timeout expires. The SyntheticBeginFrameSource fires every
+16.67ms. If it's scheduled to fire in 2ms at the moment we call
+`CFRunLoopRunInMode(0.001)`, we timeout after 1ms and miss it. The source fires
+unhandled, and `do_message_loop_work()` has to process the resulting backlog.
+
+With a 16ms timeout, we'd wait long enough to catch any source scheduled within
+the current frame period. The SyntheticBeginFrameSource at 16.67ms would almost
+always fire within our timeout window.
+
+#### Why This Is Different from Experiment 1
+
+Experiment 1 (drain) failed because it made **many rapid-fire short calls** to
+CFRunLoop, delaying the return to `do_message_loop_work()`. This experiment
+makes **one longer call**, giving the run loop continuous time to process sources
+naturally. The distinction:
+
+| Approach | CFRunLoop calls per iteration | Time in CFRunLoop | Time before next mlw |
+| --- | --- | --- | --- |
+| Baseline (1ms) | 1 × 1ms | ~0.1ms (96% instant) | ~0.1ms |
+| Exp 1 (drain) | N × 1ms (loop until timeout) | Variable, delays mlw | Variable |
+| **Exp 5 (16ms)** | **1 × 16ms** | **Up to 16ms, but returns early on source** | **Immediate after source handled** |
+
+With `return_after_source_handled: true`, CFRunLoop returns as soon as it
+handles one source — it doesn't block for the full 16ms. The 16ms is a maximum
+wait, not a minimum. If a source fires after 3ms, we get it and return to
+`do_message_loop_work()` immediately.
+
+#### Changes
+
+One change to `ts3/termsurf-profile/src/main.rs`:
+
+**Change the CFRunLoop timeout from 0.001 to 0.016:**
+
+```rust
+#[cfg(target_os = "macos")]
+cfrunloop::run_for(0.016); // 16ms — one vsync period
+```
+
+That's it. One number change.
+
+#### What Stays the Same
+
+- `do_message_loop_work()` still called every iteration
+- `return_after_source_handled` still true (returns early on source)
+- CEF settings unchanged
+- No new dependencies
+- All other code unchanged
+
+#### Expected Outcomes
+
+| Result | Meaning |
+| --- | --- |
+| >80% at 60fps, `cfl_instant` drops | Sources are firing within the 16ms window that the 1ms timeout was missing. The timing mismatch was the cause. |
+| ~71% at 60fps (unchanged) | Sources aren't pending — the 96% instant rate means there truly are no sources to process, not that we're timing out too early. The problem is elsewhere. |
+| Performance regression | The 16ms timeout delays `do_message_loop_work()` on iterations where no source fires, starving CEF's task queue. |
+
+#### Risk
+
+Low. With `return_after_source_handled: true`, the function returns immediately
+when a source fires — the 16ms is only the maximum wait. On iterations where a
+source fires quickly, the behavior is identical to the 1ms timeout. The only
+difference is on the 96% of iterations where no source fires: those will now
+wait up to 16ms instead of 1ms. But since `do_message_loop_work()` already takes
+1-33ms per call, an extra 15ms of waiting on empty iterations may not change
+the effective cadence much — or it may give CEF's internal threads time to post
+work that `do_message_loop_work()` can then process more efficiently.
