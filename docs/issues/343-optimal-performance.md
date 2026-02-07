@@ -1518,3 +1518,80 @@ NSApplication events *and* `cfrunloop::run_for()` for CFRunLoop sources. The
 cef-rs example's `pump_app_events` likely does both internally via winit's
 macOS backend, which runs a full `NSRunLoop` iteration that encompasses both
 layers.
+
+### Experiment 8: NSApplication Event Pump + CFRunLoop Together
+
+**Status:** Not started
+
+**Goal:** Call both `nsapp::pump_events()` and `cfrunloop::run_for()` in each
+loop iteration, combining the NSApplication event processing that the cef-rs
+example benefits from with the CFRunLoop servicing that CEF requires.
+
+**Hypothesis tested:** Same as Exp 7, corrected for the two-layer insight.
+
+#### Motivation
+
+Experiments 6 and 7 each removed one half of the equation and both failed:
+
+- Exp 6: Removed `do_message_loop_work()`, kept CFRunLoop → no frames
+- Exp 7: Replaced CFRunLoop with NSApplication pump → no frames
+
+Both failures confirm that CFRunLoop servicing is essential — CEF's internal
+timers (SyntheticBeginFrameSource) are CFRunLoop sources, not NSApplication
+events. But the Exp 4 comparison showed that `pump_app_events` processes
+*complementary* work that reduces `do_message_loop_work()` overhead from 100%
+spike rate to 5.7%.
+
+The hypothesis: `pump_app_events` works because it does **both** — it runs a
+full NSRunLoop iteration that services CFRunLoop sources *and* processes
+NSApplication events. Our previous experiments tried one or the other. This
+experiment tries both together.
+
+#### Changes
+
+Two changes to `ts3/termsurf-profile/src/main.rs`:
+
+**1. Add the `nsapp` module from Exp 7** (same raw FFI code).
+
+**2. Call both in the loop — NSApplication pump first, then CFRunLoop:**
+
+```rust
+while !QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
+    cef::do_message_loop_work();
+    #[cfg(target_os = "macos")]
+    {
+        nsapp::pump_events();
+        cfrunloop::run_for(0.001);
+    }
+    #[cfg(not(target_os = "macos"))]
+    std::thread::sleep(std::time::Duration::from_millis(1));
+}
+```
+
+NSApplication pump runs first to drain any pending system events, then
+CFRunLoop services CEF's timer sources. The Exp 3 instrumentation is kept to
+compare mlw spike rates.
+
+#### What Stays the Same
+
+- `do_message_loop_work()` still called every iteration
+- CFRunLoop timeout unchanged at 1ms
+- CEF settings unchanged
+- No new crate dependencies
+- `[FRAME-TX]` frame logging still active
+
+#### Expected Outcomes
+
+| Result | Meaning |
+| --- | --- |
+| mlw spike rate drops, fps improves | NSApplication events are the complementary work. Adding them alongside CFRunLoop matches what `pump_app_events` does. |
+| No change from baseline | NSApplication events don't exist in a headless process. The cef-rs example is fast because of its window, not the event type. |
+| Regression or broken | The two pumps interfere with each other, or the NSApplication pump disrupts CEF's internal state. |
+
+#### Risk
+
+Low. This is additive — we keep the proven baseline (`do_message_loop_work()` +
+`cfrunloop::run_for(0.001)`) and add `nsapp::pump_events()` before it. If the
+NSApplication pump has no events to process (likely in a headless process), it
+returns immediately and the behavior is identical to baseline. Worst case is the
+same performance as before.
