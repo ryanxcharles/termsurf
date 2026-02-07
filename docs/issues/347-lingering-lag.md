@@ -249,3 +249,30 @@ Release build dramatically improves cef-test performance:
 **Next step:** Test ts3 in release mode to confirm it sees the same improvement.
 
 **Status:** Done
+
+### Experiment 2: ts3 release build benchmark
+
+**Goal:** Confirm that ts3 sees the same ~12fps improvement from release mode
+that cef-test did. If ts3 release matches cef-test release (~51fps), the
+TermSurf pipeline adds no overhead beyond CEF OSR itself.
+
+**Implementation:** No code changes needed. ts3 already has `build-release.sh`.
+
+**How to test:**
+
+1. Build release: `cd ts3 && ./scripts/build-release.sh`
+2. Run benchmark: `./target/release/termsurf-gui.app/Contents/MacOS/web benchmark`
+3. Run 3 times with no mouse movement, record fps/p50/p95
+
+**What the results tell us:**
+
+- If ts3 release matches cef-test release (~51fps, p95=33.6ms): the TermSurf
+  pipeline (XPC, launcher, profile server, GUI) adds no measurable overhead
+  beyond what cef-test already incurs. The remaining gap to 60fps is in CEF OSR
+  or the IOSurface transfer, shared by both.
+- If ts3 release is significantly worse than cef-test release (e.g., ~45fps):
+  the TermSurf pipeline adds overhead that cef-test avoids. Investigate L3/L4/L6
+  to find where.
+- If ts3 release reaches ~60fps: we're done. Ship release builds.
+
+**Status:** Not started
