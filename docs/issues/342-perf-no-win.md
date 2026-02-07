@@ -967,7 +967,7 @@ starts relative to CEF initialization. A future attempt would need to either:
 
 ### Experiment 5: Replace `sleep(1ms)` with `CFRunLoopRunInMode`
 
-**Status:** Not started
+**Status:** Complete — SUCCESS (38.2fps, 71% at 60fps, max streak 424)
 
 **Goal:** Replace the dead `thread::sleep(1ms)` in the polling loop with a live
 `CFRunLoopRunInMode` call that services the main thread's CFRunLoop for 1ms. This
@@ -1072,3 +1072,76 @@ while !QUIT_FLAG.load(Ordering::Relaxed) {
 - CPU usage — `CFRunLoopRunInMode` with `return_after_source_handled=true`
   returns immediately if no sources fire, so it shouldn't spin the CPU more than
   `sleep` does
+
+#### Results
+
+593 frames over ~15s. **38.2fps** — a 34% improvement over the 28.5fps baseline.
+
+| Metric                  | Exp 5 (CFRunLoop) | Baseline (sleep) | Change  |
+| ----------------------- | ----------------- | ---------------- | ------- |
+| Frames                  | 593               | 314              | +89%    |
+| Duration                | ~15s              | ~11s             | longer  |
+| Mean interval           | 26.1ms            | 35.1ms           | -26%    |
+| Effective fps           | 38.2              | 28.5             | **+34%** |
+| At 60fps (14-19ms)      | 71%               | 40%              | **+31pp** |
+| At 30fps (30-36ms)      | 11%               | 23%              | -12pp   |
+| Slow (>50ms)            | 6%                | 18%              | **-12pp** |
+| Max 60fps streak        | 424               | 11               | **38x** |
+
+Interval distribution:
+
+| Bucket   | Count |
+| -------- | ----- |
+| 0-9ms    | 53    |
+| 10-19ms  | 426   |
+| 20-29ms  | 1     |
+| 30-39ms  | 67    |
+| 40-49ms  | 0     |
+| 50-59ms  | 7     |
+| 60-79ms  | 9     |
+| 80-99ms  | 19    |
+| 100+ms   | 10    |
+
+The 10-19ms bucket dominates with 426 intervals (72%). The old bimodal 16ms/33ms
+distribution is nearly gone — replaced by a strong 16ms peak with a small 33ms
+tail.
+
+CEF debug log histograms:
+
+- `Viz.ExternalBeginFrameSourceMac.DisplayLink`: 3 samples (unchanged — display
+  link still not working)
+- `Viz.ExternalBeginFrameSource.Interval`: 19 samples, mean 16ms (up from 3 in
+  Exp 1 — the begin frame source is firing more consistently)
+- `Viz.FrameSinkVideoCapturer.CaptureDuration`: 593 samples, mean 9.3ms (capture
+  is fast, well within the 16ms budget)
+- `Graphics.Smoothness.PercentDroppedFrames3.AllSequences`: 19% (down from
+  27-28% in baseline)
+- `Event.ScrollJank.MissedVsyncs.PerFrame`: still astronomically high (349K) —
+  no real vsync signal, but frames are produced more consistently anyway
+
+#### Conclusion
+
+One line of code made the biggest difference of any experiment across both Issue
+341 and Issue 342. Replacing `thread::sleep(1ms)` with
+`CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.001, true)` jumped the frame rate
+from 28.5fps to 38.2fps with 71% of frames at perfect 60fps cadence and a max
+streak of 424 consecutive 60fps frames (~7 seconds unbroken).
+
+The root cause was simple: CEF has internal CFRunLoop timer sources (including
+the `SyntheticBeginFrameSource` that drives the compositor) that need the run
+loop to be serviced. `thread::sleep()` blocks the thread without servicing the
+run loop, starving these sources. `CFRunLoopRunInMode` runs one iteration of the
+run loop, delivering pending timer callbacks, then returns — keeping our polling
+cadence while feeding CEF's internal scheduling.
+
+The display link itself (3 samples) still isn't working — that requires a window
+server connection we don't have. But the `SyntheticBeginFrameSource` is now
+firing much more consistently (19 samples vs 3), and the interval is correctly
+16ms. The remaining 29% of non-60fps frames likely come from occasional run loop
+contention or GC pauses.
+
+This is not yet a perfect 60fps, but it's a massive step forward. The next
+experiments should focus on eliminating the remaining 30fps and slow-frame tail —
+possibly by combining this approach with `external_message_pump` cooperative
+scheduling (fixing Exp 4's deadlock) or by adding a CVDisplayLink for
+vsync-aligned timing on top of the CFRunLoop servicing.
