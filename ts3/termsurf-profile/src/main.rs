@@ -434,13 +434,7 @@ fn run_profile_server(args: Args) {
     // 10. Run CEF message loop with high-frequency polling
     // Issue 342, Experiment 5: Service the CFRunLoop instead of dead sleeping.
     // Issue 343, Experiment 3: Instrumented with microsecond timing.
-    println!("Profile: Running message loop (instrumented)...");
-    let mut loop_count: u64 = 0;
-    let mut max_mlw_us: u128 = 0;
-    let mut max_cfl_us: u128 = 0;
-    let mut max_total_us: u128 = 0;
-    let mut mlw_spike_count: u64 = 0;
-    let mut cfl_instant_count: u64 = 0;
+    println!("Profile: Running message loop...");
 
     // Issue 345: Scroll simulation state (benchmark mode)
     let scroll_interval = Duration::from_millis(8); // ~125Hz, matching Apple mouse polling
@@ -465,35 +459,12 @@ fn run_profile_server(args: Args) {
     let mut last_cursor_rate_count: u64 = 0;
 
     while !QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
-        let t0 = Instant::now();
-
         cef::do_message_loop_work();
-        let t1 = Instant::now();
 
         #[cfg(target_os = "macos")]
         cfrunloop::run_for(0.001);
         #[cfg(not(target_os = "macos"))]
         std::thread::sleep(std::time::Duration::from_millis(1));
-        let t2 = Instant::now();
-
-        let mlw_us = (t1 - t0).as_micros();
-        let cfl_us = (t2 - t1).as_micros();
-        let total_us = (t2 - t0).as_micros();
-
-        if mlw_us > max_mlw_us { max_mlw_us = mlw_us; }
-        if cfl_us > max_cfl_us { max_cfl_us = cfl_us; }
-        if total_us > max_total_us { max_total_us = total_us; }
-        if mlw_us > 1000 { mlw_spike_count += 1; }
-        if cfl_us < 100 { cfl_instant_count += 1; }
-
-        loop_count += 1;
-
-        if loop_count % 1000 == 0 {
-            println!(
-                "[LOOP-TIMING] iter={} max_mlw={}us max_cfl={}us max_total={}us mlw_spikes={} cfl_instant={}",
-                loop_count, max_mlw_us, max_cfl_us, max_total_us, mlw_spike_count, cfl_instant_count
-            );
-        }
 
         // Issue 345: Scroll simulation in benchmark mode
         if args.benchmark && PAGE_LOADED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -586,11 +557,6 @@ fn run_profile_server(args: Args) {
             }
         }
     }
-
-    println!(
-        "[LOOP-TIMING] FINAL iter={} max_mlw={}us max_cfl={}us max_total={}us mlw_spikes={} cfl_instant={}",
-        loop_count, max_mlw_us, max_cfl_us, max_total_us, mlw_spike_count, cfl_instant_count
-    );
 
     // 11. Shutdown
     println!("Profile: Shutting down...");
@@ -788,7 +754,7 @@ mod cef_handlers {
                 let frame_id = crate::FRAME_COUNTER.fetch_add(1, crate::AtomicOrdering::Relaxed);
                 let start = *crate::PROFILE_START_TIME.get_or_init(std::time::Instant::now);
                 let tx_time_ms = start.elapsed().as_millis() as i64;
-                println!("[FRAME-TX] frame={} t={}ms", frame_id, tx_time_ms);
+                // Issue 346, Experiment 3: [FRAME-TX] logging removed from hot path
 
                 // Issue 345: Record frame for benchmark stats
                 if let Some(stats) = crate::BENCHMARK_STATS.get() {
@@ -889,7 +855,7 @@ mod cef_handlers {
                 // Convert CursorType to i64 for XPC
                 let cef_type: cef::sys::cef_cursor_type_t = type_.into();
                 let cursor_type = cef_type as i64;
-                println!("Profile: Cursor changed to type {}", cursor_type);
+                // Issue 346, Experiment 3: cursor type logging removed from hot path
 
                 // Send to GUI via XPC
                 let msg = XpcDictionary::new();
@@ -1104,9 +1070,7 @@ mod cef_handlers {
         set_event_handler(&*gui, move |event| {
             match event {
                 Ok(msg) => {
-                    // Issue 319, experiment 2: Log ALL incoming messages before action parsing
                     let action = msg.get_string("action").unwrap_or_default();
-                    println!("[XPC-RECV] Received message: action={}", action);
 
                     match action.as_str() {
                         "resize_browser" => {
@@ -1321,39 +1285,26 @@ mod cef_handlers {
                             // Issue 346, Experiment 1: Count mouse_move events
                             crate::MOUSE_MOVE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-                            // Issue 319, experiment 3: Deep handler logging
-                            println!("[MOUSE] mouse_move handler entered");
-
                             let state_guard = deferred_for_handler.lock().unwrap();
                             let Some(bs) = state_guard.as_ref() else {
-                                println!("[MOUSE] FAIL: deferred_for_handler is None");
                                 return;
                             };
-                            println!("[MOUSE] BrowserState available, posting task");
 
                             let x = msg.get_i64("x") as i32;
                             let y = msg.get_i64("y") as i32;
                             let modifiers = msg.get_i64("modifiers") as u32;
-                            println!("[MOUSE] mouse_move coords: ({}, {}) mods={}", x, y, modifiers);
 
                             let bs = Arc::clone(bs);
                             drop(state_guard);
 
                             let mut task = MouseMoveTask::new(bs, x, y, modifiers);
-                            println!("[MOUSE] Calling post_task for MouseMoveTask");
                             cef::post_task(cef::ThreadId::UI, Some(&mut task));
-                            println!("[MOUSE] post_task returned");
                         }
                         "mouse_click" => {
-                            // Issue 319, experiment 3: Deep handler logging
-                            println!("[MOUSE] mouse_click handler entered");
-
                             let state_guard = deferred_for_handler.lock().unwrap();
                             let Some(bs) = state_guard.as_ref() else {
-                                println!("[MOUSE] FAIL: deferred_for_handler is None");
                                 return;
                             };
-                            println!("[MOUSE] BrowserState available, posting task");
 
                             let x = msg.get_i64("x") as i32;
                             let y = msg.get_i64("y") as i32;
@@ -1361,26 +1312,16 @@ mod cef_handlers {
                             let is_up = msg.get_bool("is_up");
                             let click_count = msg.get_i64("click_count") as i32;
                             let modifiers = msg.get_i64("modifiers") as u32;
-                            println!(
-                                "[MOUSE] mouse_click coords: ({}, {}) btn={} up={} count={}",
-                                x, y, button, is_up, click_count
-                            );
 
                             let bs = Arc::clone(bs);
                             drop(state_guard);
 
                             let mut task = MouseClickTask::new(bs, x, y, button, is_up, click_count, modifiers);
-                            println!("[MOUSE] Calling post_task for MouseClickTask");
                             cef::post_task(cef::ThreadId::UI, Some(&mut task));
-                            println!("[MOUSE] post_task returned");
                         }
                         "mouse_wheel" => {
-                            // Issue 321, experiment 1: Scroll support
-                            println!("[MOUSE] mouse_wheel handler entered");
-
                             let state_guard = deferred_for_handler.lock().unwrap();
                             let Some(bs) = state_guard.as_ref() else {
-                                println!("[MOUSE] FAIL: deferred_for_handler is None");
                                 return;
                             };
 
@@ -1389,18 +1330,12 @@ mod cef_handlers {
                             let delta_x = msg.get_i64("delta_x") as i32;
                             let delta_y = msg.get_i64("delta_y") as i32;
                             let modifiers = msg.get_i64("modifiers") as u32;
-                            println!(
-                                "[MOUSE] mouse_wheel coords: ({}, {}) delta=({}, {})",
-                                x, y, delta_x, delta_y
-                            );
 
                             let bs = Arc::clone(bs);
                             drop(state_guard);
 
                             let mut task = MouseWheelTask::new(bs, x, y, delta_x, delta_y, modifiers);
-                            println!("[MOUSE] Calling post_task for MouseWheelTask");
                             cef::post_task(cef::ThreadId::UI, Some(&mut task));
-                            println!("[MOUSE] post_task returned");
                         }
                         "focus" => {
                             // Issue 329: Focus/unfocus browser for caret control
@@ -1850,20 +1785,13 @@ mod cef_handlers {
 
         impl Task {
             fn execute(&self) {
-                println!("[MOUSE-TASK] MouseMoveTask::execute() called");
-
                 let browser_guard = self.state.browser.lock().unwrap();
                 let Some(browser) = browser_guard.as_ref() else {
-                    println!("[MOUSE-TASK] FAIL: browser is None");
                     return;
                 };
-                println!("[MOUSE-TASK] Browser obtained");
-
                 let Some(host) = browser.host() else {
-                    println!("[MOUSE-TASK] FAIL: browser.host() is None");
                     return;
                 };
-                println!("[MOUSE-TASK] Host obtained, calling send_mouse_move_event");
 
                 let mouse_event = cef::MouseEvent {
                     x: self.x,
@@ -1872,7 +1800,6 @@ mod cef_handlers {
                 };
                 // mouse_leave = 0 (mouse is over the view)
                 host.send_mouse_move_event(Some(&mouse_event), 0);
-                println!("[MOUSE-TASK] send_mouse_move_event returned");
             }
         }
     }
@@ -1895,20 +1822,13 @@ mod cef_handlers {
 
         impl Task {
             fn execute(&self) {
-                println!("[MOUSE-TASK] MouseClickTask::execute() called");
-
                 let browser_guard = self.state.browser.lock().unwrap();
                 let Some(browser) = browser_guard.as_ref() else {
-                    println!("[MOUSE-TASK] FAIL: browser is None");
                     return;
                 };
-                println!("[MOUSE-TASK] Browser obtained");
-
                 let Some(host) = browser.host() else {
-                    println!("[MOUSE-TASK] FAIL: browser.host() is None");
                     return;
                 };
-                println!("[MOUSE-TASK] Host obtained, calling send_mouse_click_event");
 
                 let mouse_event = cef::MouseEvent {
                     x: self.x,
@@ -1929,7 +1849,6 @@ mod cef_handlers {
                     mouse_up,
                     self.click_count,
                 );
-                println!("[MOUSE-TASK] send_mouse_click_event returned");
             }
         }
     }
@@ -1948,19 +1867,13 @@ mod cef_handlers {
 
         impl Task {
             fn execute(&self) {
-                println!("[MOUSE-TASK] MouseWheelTask::execute() called");
-
                 let browser_guard = self.state.browser.lock().unwrap();
                 let Some(browser) = browser_guard.as_ref() else {
-                    println!("[MOUSE-TASK] FAIL: browser is None");
                     return;
                 };
-
                 let Some(host) = browser.host() else {
-                    println!("[MOUSE-TASK] FAIL: browser.host() is None");
                     return;
                 };
-                println!("[MOUSE-TASK] Host obtained, calling send_mouse_wheel_event");
 
                 let mouse_event = cef::MouseEvent {
                     x: self.x,
@@ -1972,7 +1885,6 @@ mod cef_handlers {
                     self.delta_x,
                     self.delta_y,
                 );
-                println!("[MOUSE-TASK] send_mouse_wheel_event returned");
             }
         }
     }
