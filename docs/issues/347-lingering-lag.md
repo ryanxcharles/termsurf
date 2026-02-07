@@ -162,3 +162,56 @@ interval between receiving a Mach port and presenting the frame.
 2. **L4:** Check if IOSurface handle is reused (quick log check)
 3. **L3 + L6:** Pipeline timestamp instrumentation (more involved)
 4. **L2:** Message loop tuning (only if L1 doesn't explain the gap)
+
+## Experiments
+
+### Experiment 1: cef-test release build benchmark
+
+**Goal:** Determine whether the ~38fps ceiling is a debug build artifact or an
+inherent limit of CEF off-screen rendering. cef-test is the minimal reference
+app with no TermSurf code — if it can't hit 60fps in release mode, CEF OSR is
+the bottleneck.
+
+**What needs to change:**
+
+The build script (`cef-test-scripts/build.sh`) and benchmark script
+(`cef-test-scripts/benchmark.sh`) are hardcoded for debug builds:
+
+1. `build.sh` line 51: `cargo build` → needs `--release`
+2. `build.sh` line 62: `target/debug/cef-test-gui` → `target/release/`
+3. `build.sh` line 65: `target/debug/cef-test-profile` → `target/release/`
+4. `build.sh` line 90: `target/debug/cef-test-launcher` → `target/release/`
+
+**Implementation plan:**
+
+Add a `--release` flag to both scripts:
+
+1. In `build.sh`:
+   - Parse `--release` flag alongside existing `--clean` and `--open`
+   - Set `PROFILE=release` or `PROFILE=debug` based on flag
+   - Use `cargo build --release` when flag is present
+   - Use `target/$PROFILE/` for all binary paths
+
+2. In `benchmark.sh`:
+   - Parse `--release` flag
+   - Pass it through to `build.sh`
+
+**How to test:**
+
+1. `cd ts3 && ./cef-test-scripts/benchmark.sh` — debug build (existing behavior)
+2. `cd ts3 && ./cef-test-scripts/benchmark.sh --release` — release build
+
+Run each 3 times and compare.
+
+**What the results tell us:**
+
+- If release cef-test hits ~60fps: debug overhead is the bottleneck. The path to
+  60fps for ts3 is simply building in release mode.
+- If release cef-test stays at ~38fps: CEF OSR has an inherent fps ceiling. The
+  gap between us and Chrome is the cost of off-screen rendering + IPC, not our
+  code.
+- If release cef-test improves but doesn't reach 60fps (e.g., ~50fps): debug
+  overhead accounts for some of the gap, but other factors (L2–L4) also
+  contribute.
+
+**Status:** Not started
