@@ -2189,6 +2189,103 @@ The revert is complete. This is the clean pre-performance baseline: a simple
 `sleep(1ms)` + `do_message_loop_work()` polling loop running at ~28fps with
 unstable timing. Any future experiments start from this foundation.
 
+## Summary of All Experiments
+
+| # | Experiment | Result | Key Metric |
+|---|-----------|--------|------------|
+| 1 | Document Process Architecture | PARTIAL | Identified extra IPC hop, but hop wasn't the bottleneck |
+| 2 | Add Event Loop to Profile Server | FAILED | 17fps — winit event loop alone didn't help |
+| 3 | Measure cef-rs Example Frame Rate | SUCCESS | 60.9fps — proved CEF can deliver 60fps |
+| 4 | Enable `external_message_pump` | PARTIAL | 22fps, 52% at 60fps — config mismatch was real |
+| 5 | `NSApplicationActivationPolicyRegular` | FAILED | 19fps — App Nap not the cause |
+| 6 | Use `run_message_loop()` | FAILED | 18fps — CEF's own loop was worse |
+| 7 | Add Hidden 1x1 Window | SUCCESS | 78% at 60fps, streak of 57 — window provides vsync |
+| 8 | Replace Window with CVDisplayLink | FAILED | 30% at 60fps — bare display link insufficient |
+| 9 | Restore Hidden Window Baseline | SUCCESS | 61% at 60fps — confirmed window is the key |
+| 10 | `NSApplicationActivationPolicyAccessory` | FAILED | Focus still stolen — winit calls `makeKeyAndOrderFront:` |
+| 11 | Native NSWindow with `canBecomeKey: NO` | PARTIAL | 20.7fps — no focus steal, but lost vsync |
+| 12 | `orderFront` instead of `orderBack` | PARTIAL | 34% at 60fps — still no vsync recovery |
+| 13 | Add Layer-Backed Content View | FAILED | 34-36% at 60fps — CALayer didn't restore vsync |
+| 14 | NSApplication Event Pumping | FAILED | 34-36% at 60fps — NSApp pumping couldn't replicate winit |
+| 15 | Swizzle `canBecomeKey` on Winit's Window | FAILED | Broke CEF — global swizzle hit CEF's internal windows |
+| 16 | GUI-Side Focus Reclaim | PARTIAL | Focus reclaimed, but vsync destroyed (20% at 60fps) |
+| 17 | External Begin Frame at 60Hz | FAILED | 14.8fps — worst result, API doesn't work as expected |
+| 18 | Revert to Baseline | COMPLETE | 28.5fps, 40% at 60fps — clean foundation restored |
+
+## Conclusions
+
+### What We Know
+
+1. **CEF can deliver 60fps.** The cef-rs OSR example sustains 60.9fps with
+   consistent 16-17ms intervals (Exp 3). The problem is not CEF itself.
+
+2. **A hidden window provides vsync.** Creating a 1x1 window gives the process a
+   CVDisplayLink via the window server's compositing pipeline, boosting
+   performance from ~20fps to 60-78% at 60fps (Exp 7, 9). This is the only
+   approach that achieved near-60fps in 18 experiments.
+
+3. **The hidden window is unacceptable.** It steals focus from the GUI. Every
+   attempt to fix focus stealing either destroyed the vsync signal (Exp 11-14,
+   16), broke CEF entirely (Exp 15), or had no effect (Exp 10). Focus and vsync
+   are fundamentally coupled through the window — you cannot have one without the
+   other.
+
+4. **`external_message_pump` helps but isn't enough.** Enabling it raised
+   performance from 17fps to 22fps (Exp 4), but consistent 60fps still requires
+   a display connection.
+
+5. **CEF's frame scheduling APIs don't work as expected.**
+   `send_external_begin_frame()` produced the worst results of any experiment at
+   14.8fps (Exp 17). The API does not directly trigger frame production.
+
+6. **The bottleneck is the process environment, not the code.** No amount of
+   polling strategy, event loop design, or timer precision can compensate for the
+   lack of a window server connection. A headless process on macOS does not
+   receive vsync callbacks.
+
+### What Didn't Work
+
+- **Event loop variations** (Exp 2, 6, 14) — polling, `run_message_loop()`, and
+  NSApp event pumping all failed equally.
+- **Activation policies** (Exp 5, 10) — neither Regular nor Accessory policy
+  affected frame timing or focus behavior.
+- **Native NSWindow without winit** (Exp 11-13) — creating a raw NSWindow with
+  `canBecomeKey: NO` solved focus but lost the vsync signal. Adding a CALayer
+  didn't help.
+- **Global method swizzling** (Exp 15) — broke CEF's internal windows.
+- **Focus reclaim from GUI** (Exp 16) — deactivating the profile server before
+  window creation destroyed the vsync signal.
+- **External frame timing** (Exp 17) — `send_external_begin_frame()` at 60Hz
+  was worse than doing nothing.
+
+### Current Baseline
+
+The profile server is reverted to the pre-performance state: a simple
+`sleep(1ms)` + `do_message_loop_work()` polling loop producing ~28.5fps with
+bimodal 16/33ms intervals. 40% of frames land at 60fps with a max streak of 11.
+
+### Next Steps
+
+Explore every option to increase frame rate **without launching a hidden
+window**. Potential directions:
+
+1. **CADisplayLink (macOS 14+)** — Apple's newer display link API that may work
+   without a window, unlike the older CVDisplayLink.
+2. **IOSurface frame pacing** — Attach a
+   `CFRunLoopObserver`/`CADisplayLink`-style callback on the GUI side and drive
+   frame requests from there back to the profile server.
+3. **CEF `run_message_loop()` with `OnScheduleMessagePumpWork`** — Let CEF
+   manage its own scheduling but intercept the pump work callback to integrate
+   with a high-resolution timer.
+4. **Move CEF rendering into the GUI process** — Eliminate the separate profile
+   server for rendering (requires solving the one-profile-per-process constraint
+   differently).
+5. **Shared memory / double-buffering** — Decouple frame production from frame
+   display so the GUI renders at 60fps independently of CEF's frame rate.
+6. **Investigate winit's magic** — Deep-dive into exactly what winit does during
+   window creation that provides the vsync signal, and replicate only that
+   specific mechanism.
+
 ## Related Issues
 
 - [Issue 338: Browser lag investigation](./338-lag.md) — Original performance
