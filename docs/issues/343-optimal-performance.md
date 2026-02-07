@@ -348,3 +348,117 @@ Ordered by likelihood of impact and implementation simplicity:
   breakthrough, current 38.2fps baseline established
 
 ## Experiments
+
+### Experiment 1: Drain CFRunLoop Fully
+
+**Status:** Not started
+
+**Goal:** Service all pending CFRunLoop sources per loop iteration instead of
+just one, eliminating timing gaps where CEF's internal timers fire but their
+callbacks are deferred to the next iteration.
+
+**Hypotheses tested:** H2 (timeout too short), H9 (`return_after_source_handled`
+flag)
+
+#### Problem
+
+The current code calls `CFRunLoopRunInMode` once per loop iteration with
+`return_after_source_handled: true` (1). This means:
+
+1. If a timer source fires → it's handled → function returns immediately
+2. If no source fires within 1ms → function returns on timeout
+3. **Either way, at most one source is processed per call**
+
+`CFRunLoopRunInMode` returns one of four values:
+
+| Return value                    | Int | Meaning                              |
+| ------------------------------- | --- | ------------------------------------ |
+| `kCFRunLoopRunFinished`         | 1   | No sources or timers in this mode    |
+| `kCFRunLoopRunStopped`          | 2   | Stopped via `CFRunLoopStop()`        |
+| `kCFRunLoopRunTimedOut`         | 3   | Timeout expired, no source handled   |
+| `kCFRunLoopRunHandledSource`    | 4   | A source was handled (early return)  |
+
+When the return value is 4, there may be additional sources ready to fire. The
+current code ignores this and proceeds to the next `do_message_loop_work()` +
+`CFRunLoopRunInMode` cycle. If CEF has multiple run loop sources that need to
+fire within a single 16.67ms compositor window (e.g., SyntheticBeginFrameSource
+tick + compositor dispatch + IPC callback), the second and third sources are
+delayed by one full loop iteration (~1-2ms). Over several cycles this drift
+accumulates, eventually causing a missed compositor beat — which shows up as a
+33ms frame (30fps) instead of 16ms (60fps).
+
+#### Changes
+
+Two modifications to `ts3/termsurf-profile/src/main.rs`:
+
+**1. Add a `drain()` function to the `cfrunloop` module:**
+
+Replace the single `run_for()` function with a `drain()` that loops until the
+run loop has no more sources to handle:
+
+```rust
+/// Drain all pending CFRunLoop sources. Calls CFRunLoopRunInMode in a
+/// loop until it returns kCFRunLoopRunTimedOut (3), meaning no more
+/// sources are ready. Uses a minimal timeout (0.001s = 1ms) per call
+/// to avoid blocking indefinitely.
+pub fn drain() {
+    const TIMED_OUT: i32 = 3;
+    loop {
+        let result = unsafe {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.001, 1)
+        };
+        if result != 4 {
+            // Not kCFRunLoopRunHandledSource — either timed out,
+            // finished, or stopped. No more sources to drain.
+            break;
+        }
+        // A source was handled. There may be more — loop again
+        // with a fresh timeout.
+    }
+}
+```
+
+The key insight: when `CFRunLoopRunInMode` returns 4
+(`kCFRunLoopRunHandledSource`), we immediately call it again with a fresh 1ms
+timeout. This continues until it returns 3 (`kCFRunLoopRunTimedOut`), meaning
+all pending sources have been serviced.
+
+Safety: the loop cannot spin forever because each call either handles a source
+(finite number pending) or times out after 1ms. In the worst case (no sources),
+this behaves identically to the current single call.
+
+**2. Replace `cfrunloop::run_for(0.001)` with `cfrunloop::drain()` in the
+polling loop:**
+
+```rust
+while !QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
+    cef::do_message_loop_work();
+    #[cfg(target_os = "macos")]
+    cfrunloop::drain();
+    #[cfg(not(target_os = "macos"))]
+    std::thread::sleep(std::time::Duration::from_millis(1));
+}
+```
+
+#### What Stays the Same
+
+- `do_message_loop_work()` is still called every iteration
+- CEF settings unchanged (no `external_message_pump`)
+- No new dependencies
+- Non-macOS fallback still uses `sleep(1ms)`
+- All XPC, shutdown, and browser creation code unchanged
+
+#### Expected Outcomes
+
+| Result                    | Meaning                                            |
+| ------------------------- | -------------------------------------------------- |
+| >80% at 60fps, higher streak | Multiple sources were being starved. H2/H9 confirmed. |
+| ~71% at 60fps (unchanged) | Only one source fires per cycle anyway. H2/H9 ruled out. Investigate H1/H3 next. |
+| Performance regression    | Draining too aggressively delays `do_message_loop_work()`. Try capping drain iterations. |
+
+#### Risk
+
+Low. The drain loop adds at most a few microseconds per extra source handled.
+If only one source ever fires (the common case today), the behavior is identical
+to the current code — one call returns 4, the next returns 3, loop exits after
+two calls instead of one.
