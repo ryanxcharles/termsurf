@@ -301,8 +301,8 @@ fn run_profile_server(args: Args) {
 
     // 4. Claim initial session (gets gui_endpoint for first browser)
     println!("Profile: Claiming session '{}'...", args.session_id);
-    let initial_gui_endpoint = claim_session_with_retry(&launcher, &args.session_id)
-        .expect("Failed to claim session");
+    let initial_gui_endpoint =
+        claim_session_with_retry(&launcher, &args.session_id).expect("Failed to claim session");
     println!("Profile: Got GUI endpoint for initial browser");
 
     // 5. Initialize ProfileState BEFORE CEF init
@@ -327,11 +327,16 @@ fn run_profile_server(args: Args) {
     // Navigate from helper app binary to main app's Contents/
     // Binary is at: Contents/Frameworks/TermSurf Profile Helper.app/Contents/MacOS/termsurf-profile
     let app_contents = exe
-        .parent().unwrap()  // MacOS/
-        .parent().unwrap()  // Contents/ (of helper app)
-        .parent().unwrap()  // TermSurf Profile Helper.app/
-        .parent().unwrap()  // Frameworks/
-        .parent().unwrap(); // Contents/ (of main app)
+        .parent()
+        .unwrap() // MacOS/
+        .parent()
+        .unwrap() // Contents/ (of helper app)
+        .parent()
+        .unwrap() // TermSurf Profile Helper.app/
+        .parent()
+        .unwrap() // Frameworks/
+        .parent()
+        .unwrap(); // Contents/ (of main app)
     let helper_path = app_contents
         .join("Frameworks")
         .join("TermSurf Helper.app")
@@ -462,7 +467,7 @@ fn run_profile_server(args: Args) {
         cef::do_message_loop_work();
 
         #[cfg(target_os = "macos")]
-        cfrunloop::run_for(0.001);
+        cfrunloop::run_for(0.000);
         #[cfg(not(target_os = "macos"))]
         std::thread::sleep(std::time::Duration::from_millis(1));
 
@@ -519,7 +524,10 @@ fn run_profile_server(args: Args) {
                 let current_count = MOUSE_MOVE_COUNT.load(std::sync::atomic::Ordering::Relaxed);
                 let events_this_second = current_count - last_mouse_rate_count;
                 if events_this_second > 0 {
-                    println!("[MOUSE-RATE] {} mouse_move events in last second", events_this_second);
+                    println!(
+                        "[MOUSE-RATE] {} mouse_move events in last second",
+                        events_this_second
+                    );
                 }
                 last_mouse_rate_count = current_count;
 
@@ -527,7 +535,10 @@ fn run_profile_server(args: Args) {
                 let current_cursor = CURSOR_CHANGE_COUNT.load(std::sync::atomic::Ordering::Relaxed);
                 let cursors_this_second = current_cursor - last_cursor_rate_count;
                 if cursors_this_second > 0 {
-                    println!("[CURSOR-RATE] {} cursor_change callbacks in last second", cursors_this_second);
+                    println!(
+                        "[CURSOR-RATE] {} cursor_change callbacks in last second",
+                        cursors_this_second
+                    );
                 }
                 last_cursor_rate_count = current_cursor;
 
@@ -567,11 +578,7 @@ fn run_profile_server(args: Args) {
 
 /// Handle create_browser command from launcher (for additional browsers in this profile)
 #[cfg(target_os = "macos")]
-fn handle_create_browser(
-    msg: &XpcDictionary,
-    state: &Arc<ProfileState>,
-    launcher: &XpcConnection,
-) {
+fn handle_create_browser(msg: &XpcDictionary, state: &Arc<ProfileState>, launcher: &XpcConnection) {
     let session_id = msg.get_string("session_id").unwrap_or_default();
     let url = msg.get_string("url").unwrap_or_default();
     let width = msg.get_i64("width") as u32;
@@ -606,10 +613,7 @@ fn handle_create_browser(
 }
 
 /// Claim session with exponential backoff retry
-fn claim_session_with_retry(
-    launcher: &XpcConnection,
-    session_id: &str,
-) -> Result<XpcEndpoint> {
+fn claim_session_with_retry(launcher: &XpcConnection, session_id: &str) -> Result<XpcEndpoint> {
     let max_retries = 10;
     let mut delay = Duration::from_millis(100);
 
@@ -662,10 +666,10 @@ mod cef_handlers {
         wrap_display_handler, wrap_load_handler, wrap_render_handler, wrap_task,
         AcceleratedPaintInfo, App, Browser, BrowserProcessHandler, BrowserSettings, CefString,
         Client, ContextMenuHandler, ContextMenuParams, CursorInfo, CursorType, DisplayHandler,
-        Frame, ImplApp, ImplBrowser, ImplBrowserHost, ImplFrame, ImplBrowserProcessHandler,
-        ImplClient, ImplCommandLine, ImplContextMenuHandler, ImplDisplayHandler, ImplLoadHandler,
-        ImplMenuModel, ImplRenderHandler, ImplTask, LoadHandler, MenuModel, PaintElementType,
-        Rect, RenderHandler, ScreenInfo, Task, WindowInfo, WrapApp, WrapBrowserProcessHandler,
+        Frame, ImplApp, ImplBrowser, ImplBrowserHost, ImplBrowserProcessHandler, ImplClient,
+        ImplCommandLine, ImplContextMenuHandler, ImplDisplayHandler, ImplFrame, ImplLoadHandler,
+        ImplMenuModel, ImplRenderHandler, ImplTask, LoadHandler, MenuModel, PaintElementType, Rect,
+        RenderHandler, ScreenInfo, Task, WindowInfo, WrapApp, WrapBrowserProcessHandler,
         WrapClient, WrapContextMenuHandler, WrapDisplayHandler, WrapLoadHandler, WrapRenderHandler,
         WrapTask,
     };
@@ -1056,12 +1060,14 @@ mod cef_handlers {
         {
             let mut conns = crate::active_connections().lock().unwrap();
             conns.insert(conn_id);
-            println!("[CONN-{}] GUI connection established (active: {:?})", conn_id, conns);
+            println!(
+                "[CONN-{}] GUI connection established (active: {:?})",
+                conn_id, conns
+            );
         }
 
         // 2. Create deferred state wrapper (will be populated after browser creation)
-        let deferred_state: Arc<Mutex<Option<Arc<BrowserState>>>> =
-            Arc::new(Mutex::new(None));
+        let deferred_state: Arc<Mutex<Option<Arc<BrowserState>>>> = Arc::new(Mutex::new(None));
 
         // 3. Set event handler BEFORE resume
         let deferred_for_handler = Arc::clone(&deferred_state);
@@ -1142,8 +1148,15 @@ mod cef_handlers {
 
                             // Post to CEF UI thread
                             let mut task = KeyEventTask::new(
-                                bs, key_is_down, key_type, raw_code, char_code,
-                                shift, ctrl, alt, meta
+                                bs,
+                                key_is_down,
+                                key_type,
+                                raw_code,
+                                char_code,
+                                shift,
+                                ctrl,
+                                alt,
+                                meta,
                             );
                             cef::post_task(cef::ThreadId::UI, Some(&mut task));
                         }
@@ -1283,7 +1296,8 @@ mod cef_handlers {
                         }
                         "mouse_move" => {
                             // Issue 346, Experiment 1: Count mouse_move events
-                            crate::MOUSE_MOVE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            crate::MOUSE_MOVE_COUNT
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                             let state_guard = deferred_for_handler.lock().unwrap();
                             let Some(bs) = state_guard.as_ref() else {
@@ -1316,7 +1330,15 @@ mod cef_handlers {
                             let bs = Arc::clone(bs);
                             drop(state_guard);
 
-                            let mut task = MouseClickTask::new(bs, x, y, button, is_up, click_count, modifiers);
+                            let mut task = MouseClickTask::new(
+                                bs,
+                                x,
+                                y,
+                                button,
+                                is_up,
+                                click_count,
+                                modifiers,
+                            );
                             cef::post_task(cef::ThreadId::UI, Some(&mut task));
                         }
                         "mouse_wheel" => {
@@ -1334,7 +1356,8 @@ mod cef_handlers {
                             let bs = Arc::clone(bs);
                             drop(state_guard);
 
-                            let mut task = MouseWheelTask::new(bs, x, y, delta_x, delta_y, modifiers);
+                            let mut task =
+                                MouseWheelTask::new(bs, x, y, delta_x, delta_y, modifiers);
                             cef::post_task(cef::ThreadId::UI, Some(&mut task));
                         }
                         "focus" => {
@@ -1393,7 +1416,8 @@ mod cef_handlers {
                                         }
                                     }
 
-                                    crate::QUIT_FLAG.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    crate::QUIT_FLAG
+                                        .store(true, std::sync::atomic::Ordering::Relaxed);
                                 }
                             } else {
                                 // Already disconnected - ignore duplicate error
@@ -1403,7 +1427,9 @@ mod cef_handlers {
                                 );
                             }
                         }
-                        _ => eprintln!("[CONN-{}] GUI connection error: {}", conn_id_for_handler, e),
+                        _ => {
+                            eprintln!("[CONN-{}] GUI connection error: {}", conn_id_for_handler, e)
+                        }
                     }
                 }
             }
@@ -1441,7 +1467,12 @@ mod cef_handlers {
 
         let context_menu_handler = ProfileContextMenuHandler::new(ContextMenuInner);
         let load_handler = ProfileLoadHandler::new(LoadHandlerInner);
-        let mut client = ProfileClient::new(render_handler, context_menu_handler, display_handler, load_handler);
+        let mut client = ProfileClient::new(
+            render_handler,
+            context_menu_handler,
+            display_handler,
+            load_handler,
+        );
 
         let window_info = WindowInfo {
             windowless_rendering_enabled: 1,
@@ -1917,10 +1948,7 @@ mod cef_handlers {
 
         // Use execCommand to insert text at the current cursor position
         // This works in input fields, textareas, and contenteditable elements
-        let js = format!(
-            "document.execCommand('insertText', false, '{}');",
-            escaped
-        );
+        let js = format!("document.execCommand('insertText', false, '{}');", escaped);
 
         println!("[CLIPBOARD] Executing JS to paste {} chars", text.len());
         let js_cef: CefString = js.as_str().into();
