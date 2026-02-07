@@ -1002,3 +1002,71 @@ it. The timing data will print to stdout.
 
 None. Purely diagnostic. The cef-rs example is a standalone test app — no
 impact on the profile server or GUI.
+
+#### Results
+
+**Status: DIAGNOSTIC COMPLETE** — Reveals the root cause of the performance gap.
+
+**Loop timing data (at 1000 iterations):**
+
+```
+[LOOP-TIMING] iter=1000 max_mlw=12702us max_pae=570855us max_total=570861us mlw_spikes=57 pae_instant=0
+```
+
+| Metric                      | Value          | Meaning                                      |
+| --------------------------- | -------------- | -------------------------------------------- |
+| Total iterations            | 1000           | Sample at the 1000th iteration checkpoint    |
+| `max_mlw`                   | **12,702us**   | `do_message_loop_work()` max is 12.7ms       |
+| `max_pae`                   | **570,855us**  | `pump_app_events` blocks up to 570ms         |
+| `max_total`                 | 570,861us      | Worst iteration dominated by pae             |
+| `mlw_spikes` (>1ms)         | **57 of 1000** | mlw takes >1ms on only **5.7%** of calls     |
+| `pae_instant` (<0.1ms)      | **0 of 1000**  | `pump_app_events` **never** returns instantly |
+
+#### Comparison
+
+| Metric                    | Profile server (Exp 3) | **cef-rs OSR (Exp 4)** |
+| ------------------------- | ---------------------- | ---------------------- |
+| `mlw_spikes` (>1ms)       | 865 of 865 (100%)      | **57 of 1000 (5.7%)**  |
+| `max_mlw`                 | 33,293us (33ms)        | **12,702us (12.7ms)**  |
+| Event pump instant        | 831 of 865 (96%)       | **0 of 1000 (0%)**     |
+| `max` event pump          | 747us                  | **570,855us (570ms)**  |
+
+#### Conclusion
+
+**The root cause of the performance gap is identified.**
+
+`do_message_loop_work()` is **17x less likely to spike** in the cef-rs example
+(5.7% vs 100%). The same function, the same CEF version — but radically
+different behavior depending on what happens between calls.
+
+The explanation: **`pump_app_events` offloads work that would otherwise
+accumulate in CEF's internal task queue.** Winit's `pump_app_events` runs the
+full macOS `NSApplication` event loop — processing CFRunLoop sources, window
+server events, display link callbacks, and Core Animation commits. When the
+event pump handles these tasks, `do_message_loop_work()` finds an almost-empty
+queue and returns in microseconds.
+
+In the profile server, `CFRunLoopRunInMode(0.001)` returns instantly 96% of
+the time with nothing to do. All the work accumulates in CEF's internal task
+queue, and `do_message_loop_work()` has to process the entire backlog on every
+call — taking 1-33ms.
+
+The fix is not about timer precision (Exp 2), source draining (Exp 1), or
+thread priority. It's that our event pump equivalent is too weak. We need to
+run the macOS event loop more thoroughly between `do_message_loop_work()` calls,
+so that system-level tasks get processed by the OS instead of piling up in
+CEF's queue.
+
+**Three directions this points to:**
+
+1. **Longer CFRunLoop timeout.** Increase from 1ms to 16ms so CFRunLoop has
+   time to process pending sources instead of timing out instantly. With mlw
+   averaging several milliseconds anyway, the extra timeout won't slow the loop.
+2. **Use `NSApplication` event pumping.** Issue 341 Exp 14 tried this with a
+   native NSWindow and it didn't help — but that was before the CFRunLoop fix
+   and without `external_message_pump`. Combining NSApp event pumping with our
+   current setup may produce different results.
+3. **Investigate what `pump_app_events` actually does internally.** Winit's
+   macOS backend runs `nextEventMatchingMask:untilDate:inMode:dequeue:` which
+   drives the full `NSRunLoop`. There may be a specific run loop mode or
+   configuration that we need to match.
