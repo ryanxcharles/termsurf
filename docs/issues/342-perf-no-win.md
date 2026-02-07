@@ -419,33 +419,29 @@ catastrophic. Only revisit if all other approaches fail.
 
 Ordered by likelihood of success and implementation effort:
 
-- [ ] **1. CEF debug logging** (Idea 10) — Zero code changes, may reveal root
-      cause
-- [ ] **2. `run_message_loop()` clean test** (Idea 3) — Simplest code change,
-      may have been misconfigured in Exp 6
-- [ ] **3. NSApplication init without window** (Idea 12) — One line of code, may
-      unlock CEF timers
-- [ ] **4. CFRunLoop-based pump** (Idea 2) — Addresses the likely root cause
-      (timer infrastructure)
-- [ ] **5. OnScheduleMessagePumpWork** (Idea 1) — The "correct" way to drive CEF
-      externally
-- [ ] **6. CVDisplayLink from display ID** (Idea 4) — Proven timing source,
-      needs proper integration
-- [ ] **7. GUI-driven frame requests** (Idea 7) — Architectural change, but
-      fundamentally sound
-- [ ] **8. Instrument SyntheticBeginFrameSource** (Idea 9) — Deep investigation
-      if above ideas fail
-- [ ] **9. Compare process environments** (Idea 11) — Diagnostic, helps guide
-      further experiments
-- [ ] **10. CADisplayLink via NSScreen** (Idea 5) — Modern API, requires macOS
-      14+
-- [ ] **11. dispatch_source timer** (Idea 6) — Simple fallback, not
-      vsync-aligned
-- [ ] **12. Double buffering** (Idea 8) — Doesn't solve 60fps, papers over the
-      problem
-- [ ] **13. Invalidate() at 60Hz** (Idea 13) — Hack, unlikely to work
-- [ ] **14. external_begin_frame correct usage** (Idea 14) — Fragile API, last
-      resort
+- [x] **1. CEF debug logging** (Idea 10) — Exp 1: Revealed display link only
+      fires 3x, SyntheticBeginFrameSource starved
+- [x] **2. `run_message_loop()` clean test** (Idea 3) — Exp 3: FAILED, regressed
+      to 19fps, zero display link histograms
+- [x] **3. NSApplication init without window** (Idea 12) — Exp 2: FAILED,
+      display link still only 3 samples
+- [x] **4. CFRunLoop-based pump** (Idea 2) — Exp 4: FAILED, chicken-and-egg
+      deadlock, webview never opens
+- [x] **5. OnScheduleMessagePumpWork** (Idea 1) — Exp 4: FAILED (combined with
+      item 4)
+- [x] **Unplanned: CFRunLoopRunInMode** — Exp 5: SUCCESS, 38.2fps, 71% at 60fps,
+      max streak 424. Root cause was starved CFRunLoop sources.
+- [ ] **6. CVDisplayLink from display ID** (Idea 4) — Not attempted (deferred)
+- [ ] **7. GUI-driven frame requests** (Idea 7) — Not attempted (deferred)
+- [ ] **8. Instrument SyntheticBeginFrameSource** (Idea 9) — Not attempted
+      (deferred)
+- [ ] **9. Compare process environments** (Idea 11) — Not attempted (deferred)
+- [ ] **10. CADisplayLink via NSScreen** (Idea 5) — Not attempted (deferred)
+- [ ] **11. dispatch_source timer** (Idea 6) — Not attempted (deferred)
+- [ ] **12. Double buffering** (Idea 8) — Not attempted (deferred)
+- [ ] **13. Invalidate() at 60Hz** (Idea 13) — Not attempted (deferred)
+- [ ] **14. external_begin_frame correct usage** (Idea 14) — Not attempted
+      (deferred)
 
 ## Constraints
 
@@ -1145,3 +1141,94 @@ experiments should focus on eliminating the remaining 30fps and slow-frame tail 
 possibly by combining this approach with `external_message_pump` cooperative
 scheduling (fixing Exp 4's deadlock) or by adding a CVDisplayLink for
 vsync-aligned timing on top of the CFRunLoop servicing.
+
+## Resolution
+
+**Status: SOLVED** — Experiment 5 achieved the best frame rate of any experiment
+across both Issue 341 (18 experiments) and Issue 342 (5 experiments), without
+creating any window.
+
+### Summary
+
+Issue 342 set out to answer a single question: can we achieve 60fps from a
+windowless CEF process? Five experiments tested four distinct approaches:
+
+| Exp | Approach                    | Result  | FPS   | 60fps% | Streak |
+| --- | --------------------------- | ------- | ----- | ------ | ------ |
+| 1   | CEF debug logging           | Diag    | —     | —      | —      |
+| 2   | NSApplication init          | Failed  | 28.5  | 40%    | 11     |
+| 3   | `run_message_loop()`        | Failed  | 19.2  | —      | —      |
+| 4   | CFRunLoop + external pump   | Failed  | 0     | 0%     | 0      |
+| 5   | `CFRunLoopRunInMode` swap   | Success | 38.2  | 71%    | 424    |
+
+### Root Cause
+
+The diagnostic experiment (Exp 1) revealed that CEF's
+`SyntheticBeginFrameSource` — the timer-based frame scheduler that replaces
+hardware vsync in windowless mode — was being starved. It had the correct 16ms
+interval but was firing only 3 times across the entire session.
+
+The cause: our polling loop used `thread::sleep(1ms)` between calls to
+`do_message_loop_work()`. On macOS, CEF's internal timers are CFRunLoop timer
+sources. `thread::sleep()` suspends the thread without servicing the run loop,
+so these timer callbacks never fire. The `SyntheticBeginFrameSource` was
+configured correctly but never got a chance to run.
+
+### The Fix
+
+One line of code:
+
+```rust
+// Before (starves CFRunLoop sources):
+std::thread::sleep(std::time::Duration::from_millis(1));
+
+// After (services CFRunLoop sources):
+cfrunloop::run_for(0.001); // CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.001, true)
+```
+
+`CFRunLoopRunInMode` runs one iteration of the main thread's run loop for up to
+1ms, delivering any pending timer callbacks, then returns. This feeds CEF's
+internal scheduling while maintaining our polling cadence.
+
+### What We Learned
+
+1. **CEF on macOS is deeply tied to CFRunLoop.** Even in "windowless" mode, CEF
+   schedules work via CFRunLoop timer sources. Any polling loop that doesn't
+   service the run loop will starve CEF's internal compositor scheduling.
+
+2. **`run_message_loop()` is not equivalent to polling + run loop.** Experiment
+   3 showed that `run_message_loop()` uses a different internal code path that
+   actually performed worse (19fps). The polling approach gives us more control.
+
+3. **`external_message_pump` has an initialization deadlock.** Experiment 4's
+   chicken-and-egg problem — CEF needs `do_message_loop_work()` during init, but
+   the timers that call it only fire once the run loop starts after init — means
+   this approach requires careful sequencing that our architecture doesn't
+   currently support.
+
+4. **Display link is not required for good frame rates.** The display link
+   (`ExternalBeginFrameSourceMac.DisplayLink`) still only fires 3 times — it
+   needs a window server connection we don't have. But the
+   `SyntheticBeginFrameSource` alone, when properly fed by CFRunLoop servicing,
+   delivers 71% of frames at perfect 60fps cadence.
+
+5. **The hidden window was a red herring.** Issue 341's hidden window worked not
+   because of its vsync signal, but likely because having a window caused macOS
+   to service the run loop more aggressively. The CFRunLoop fix achieves better
+   results without any window.
+
+### Remaining Work
+
+The 38.2fps average with 71% at 60fps is a major advance but not the finish
+line. The remaining 29% of non-60fps frames and the 30fps secondary mode suggest
+further optimization is possible. Deferred experiments that may help:
+
+- **CVDisplayLink** (checklist item 6) — Could provide a real vsync signal for
+  the remaining frames
+- **GUI-driven frame requests** (item 7) — Align frame production with the GUI's
+  actual render cadence
+- **`external_message_pump` with corrected init** (items 4-5) — Cooperative
+  scheduling could eliminate the polling overhead entirely
+
+These are tracked as future work, not blockers. The current fix is stable and
+ships as-is.
