@@ -889,3 +889,116 @@ critical moments never happen at all.
   1-33ms anyway, increasing the CFRunLoop timeout from 1ms to 16ms wouldn't
   change the loop cadence much — but it would give CFRunLoop sources much more
   opportunity to fire during the 96% of idle iterations.
+
+### Experiment 4: Instrument cef-rs OSR Example Loop
+
+**Status:** Not started
+
+**Goal:** Add the same microsecond-precision timing instrumentation from
+Experiment 3 to the cef-rs OSR example's main loop, so we can compare the two
+processes side-by-side and understand what's different about the 60fps example.
+
+**Target:** `cef-rs/examples/osr/src/main.rs` (not `termsurf-profile`)
+
+#### Motivation
+
+Experiment 3 revealed that `do_message_loop_work()` takes >1ms on every call in
+the profile server, consuming 95% of the loop's time budget. But the cef-rs OSR
+example calls the same function in the same loop pattern and achieves 60fps.
+
+Either:
+
+1. **`do_message_loop_work()` is faster in the example** — perhaps because the
+   visible window and event loop provide a different execution context that makes
+   CEF process tasks more efficiently.
+2. **`do_message_loop_work()` is equally slow, but `pump_app_events` compensates**
+   — winit's event pump does something that our `CFRunLoopRunInMode(0.001)` does
+   not, and that something is what actually drives frame production.
+3. **`do_message_loop_work()` is equally slow, and the example's overall FPS is
+   closer to ours than we thought** — Issue 341 Exp 3 measured 36.8fps overall
+   (60fps only during sustained active rendering). Perhaps the gap is smaller
+   than assumed.
+
+This experiment answers which of these three is true.
+
+#### Changes
+
+One modification to `cef-rs/examples/osr/src/main.rs`:
+
+**Instrument the main loop with the same timing as Experiment 3:**
+
+```rust
+let mut loop_count: u64 = 0;
+let mut max_mlw_us: u128 = 0;
+let mut max_pae_us: u128 = 0;  // pump_app_events instead of CFRunLoop
+let mut max_total_us: u128 = 0;
+let mut mlw_spike_count: u64 = 0;
+let mut pae_instant_count: u64 = 0;
+
+let ret = loop {
+    let t0 = std::time::Instant::now();
+
+    do_message_loop_work();
+    let t1 = std::time::Instant::now();
+
+    let timeout = Some(Duration::from_millis(1));
+    let status = event_loop.pump_app_events(timeout, &mut app);
+    let t2 = std::time::Instant::now();
+
+    let mlw_us = (t1 - t0).as_micros();
+    let pae_us = (t2 - t1).as_micros();
+    let total_us = (t2 - t0).as_micros();
+
+    if mlw_us > max_mlw_us { max_mlw_us = mlw_us; }
+    if pae_us > max_pae_us { max_pae_us = pae_us; }
+    if total_us > max_total_us { max_total_us = total_us; }
+    if mlw_us > 1000 { mlw_spike_count += 1; }
+    if pae_us < 100 { pae_instant_count += 1; }
+
+    loop_count += 1;
+
+    if loop_count % 1000 == 0 {
+        println!(
+            "[LOOP-TIMING] iter={} max_mlw={}us max_pae={}us max_total={}us mlw_spikes={} pae_instant={}",
+            loop_count, max_mlw_us, max_pae_us, max_total_us, mlw_spike_count, pae_instant_count
+        );
+    }
+
+    if let PumpStatus::Exit(exit_code) = status {
+        break ExitCode::from(exit_code as u8);
+    }
+};
+
+println!(
+    "[LOOP-TIMING] FINAL iter={} max_mlw={}us max_pae={}us max_total={}us mlw_spikes={} pae_instant={}",
+    loop_count, max_mlw_us, max_pae_us, max_total_us, mlw_spike_count, pae_instant_count
+);
+```
+
+#### What We're Comparing
+
+| Metric | Profile server (Exp 3) | cef-rs OSR (this exp) |
+| --- | --- | --- |
+| `do_message_loop_work()` duration | >1ms every call, max 33ms | ? |
+| Event pump duration | <0.1ms 96% of the time | ? |
+| Total iteration | ~65 iter/sec | ? |
+| `mlw_spikes` (>1ms) | 100% | ? |
+| Event pump instant (<0.1ms) | 96% | ? |
+
+If `do_message_loop_work()` behaves identically in both processes, then the
+difference is entirely in `pump_app_events` vs `CFRunLoopRunInMode`. If mlw is
+faster in the example, then the visible window changes CEF's internal behavior.
+
+#### Build and Run
+
+```bash
+cd cef-rs && ./scripts/build-osr.sh --open
+```
+
+Interact with the app for 10-15 seconds (scroll, click, navigate), then close
+it. The timing data will print to stdout.
+
+#### Risk
+
+None. Purely diagnostic. The cef-rs example is a standalone test app — no
+impact on the profile server or GUI.
