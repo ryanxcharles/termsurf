@@ -523,3 +523,93 @@ and CFRunLoop need tight, alternating interleaving. More aggressive draining of
 either side hurts the other. The next experiment should investigate this
 relationship — either by removing `do_message_loop_work()` entirely (letting
 CFRunLoop drive everything) or by tuning the balance between the two calls.
+
+### Experiment 2: Set Thread QoS to USER_INTERACTIVE
+
+**Status:** Not started
+
+**Goal:** Eliminate macOS timer coalescing as a source of missed compositor beats
+by setting the main thread's Quality of Service class to the highest level.
+
+**Hypothesis tested:** H10 (process priority and QoS)
+
+#### Problem
+
+macOS assigns a QoS class to every thread. The QoS class determines:
+
+- **Scheduling priority** — how quickly the thread gets CPU time after becoming
+  runnable
+- **Timer precision** — whether timers fire at their exact deadline or get
+  coalesced with nearby timers to save power
+- **Timer leeway** — the system-imposed tolerance on timer firing times
+
+The five QoS classes, from lowest to highest:
+
+| QoS Class              | Value | Timer behavior                     |
+| ---------------------- | ----- | ---------------------------------- |
+| `QOS_CLASS_BACKGROUND` | 0x09  | Aggressive coalescing, low priority |
+| `QOS_CLASS_UTILITY`    | 0x11  | Moderate coalescing                |
+| `QOS_CLASS_DEFAULT`    | 0x15  | Standard behavior                  |
+| `QOS_CLASS_USER_INITIATED` | 0x19 | Reduced coalescing              |
+| `QOS_CLASS_USER_INTERACTIVE` | 0x21 | **Minimal coalescing, highest priority** |
+
+The profile server is a windowless background process. macOS likely assigns it
+`QOS_CLASS_DEFAULT` or lower. At this level, the system is permitted to coalesce
+CFRunLoop timer firings by several milliseconds — grouping them with other timers
+to reduce CPU wake-ups and save power.
+
+CEF's `SyntheticBeginFrameSource` is a CFRunLoop timer set to fire every 16.67ms.
+If macOS coalesces this timer even slightly (e.g., delays it by 2-3ms), the
+callback fires at 19ms instead of 16.67ms. The compositor misses its deadline
+for the current vsync beat and the frame slips to the next one — producing a
+33ms interval (30fps) instead of 16ms (60fps).
+
+This would explain the bimodal pattern: most frames hit 16-17ms (timer fires on
+time), but ~20% land at 33-35ms (timer coalesced past the deadline). The pattern
+is not random jitter — it's the exact missed-beat signature of timer coalescing.
+
+#### Changes
+
+One addition to `ts3/termsurf-profile/src/main.rs`:
+
+**Add a `pthread_set_qos_class_self_np` call before the polling loop:**
+
+```rust
+// Issue 343, Experiment 2: Set highest QoS for maximum timer precision.
+#[cfg(target_os = "macos")]
+unsafe {
+    extern "C" {
+        fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
+    }
+    let QOS_CLASS_USER_INTERACTIVE: u32 = 0x21;
+    let ret = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+    println!("Profile: Set QoS to USER_INTERACTIVE: {}", if ret == 0 { "ok" } else { "failed" });
+}
+```
+
+This goes just before the `while !QUIT_FLAG` loop, after Ctrl+C handler setup.
+The call sets the current thread (main thread) to the highest QoS class,
+telling the kernel this thread is doing user-interactive work that requires
+maximum responsiveness.
+
+#### What Stays the Same
+
+- Polling loop structure unchanged (`do_message_loop_work()` + `run_for(0.001)`)
+- CEF settings unchanged
+- No new dependencies (uses raw FFI to a single POSIX function)
+- All other code unchanged
+
+#### Expected Outcomes
+
+| Result                         | Meaning                                           |
+| ------------------------------ | ------------------------------------------------- |
+| >80% at 60fps, fewer 33ms drops | Timer coalescing was the cause. H10 confirmed.   |
+| ~71% at 60fps (unchanged)      | Timer precision is already adequate. H10 ruled out. |
+| Performance regression         | Extremely unlikely — higher QoS cannot reduce timer precision. |
+
+#### Risk
+
+Effectively zero. `QOS_CLASS_USER_INTERACTIVE` is what every GUI app's main
+thread runs at. It increases CPU priority and timer precision — it cannot make
+timers less accurate. The only cost is slightly higher power consumption, which
+is irrelevant for a process that's already polling at 1ms intervals.
