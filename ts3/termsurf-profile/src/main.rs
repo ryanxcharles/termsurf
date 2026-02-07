@@ -29,6 +29,9 @@ static PROFILE_START_TIME: OnceLock<Instant> = OnceLock::new();
 // Issue 326, Experiment 1: Global quit flag for graceful shutdown on GUI disconnect
 static QUIT_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+// Issue 345: Set to true when the page finishes loading (for benchmark scroll start)
+static PAGE_LOADED: AtomicBool = AtomicBool::new(false);
+
 // Issue 330, Experiment 3: Track active connections by ID for idempotent cleanup
 // Replaces the old GUI_CONNECTION_COUNT counter which could be decremented multiple times
 static CONNECTION_ID: AtomicU64 = AtomicU64::new(0);
@@ -478,14 +481,15 @@ mod cef_handlers {
     use cef::rc::Rc;
     use cef::{
         wrap_app, wrap_browser_process_handler, wrap_client, wrap_context_menu_handler,
-        wrap_display_handler, wrap_render_handler, wrap_task, AcceleratedPaintInfo, App, Browser,
-        BrowserProcessHandler, BrowserSettings, CefString, Client, ContextMenuHandler,
-        ContextMenuParams, CursorInfo, CursorType, DisplayHandler, Frame, ImplApp, ImplBrowser,
-        ImplBrowserHost, ImplFrame, ImplBrowserProcessHandler, ImplClient, ImplCommandLine,
-        ImplContextMenuHandler, ImplDisplayHandler, ImplMenuModel, ImplRenderHandler, ImplTask,
-        MenuModel, PaintElementType, Rect, RenderHandler, ScreenInfo, Task, WindowInfo, WrapApp,
-        WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler, WrapDisplayHandler,
-        WrapRenderHandler, WrapTask,
+        wrap_display_handler, wrap_load_handler, wrap_render_handler, wrap_task,
+        AcceleratedPaintInfo, App, Browser, BrowserProcessHandler, BrowserSettings, CefString,
+        Client, ContextMenuHandler, ContextMenuParams, CursorInfo, CursorType, DisplayHandler,
+        Frame, ImplApp, ImplBrowser, ImplBrowserHost, ImplFrame, ImplBrowserProcessHandler,
+        ImplClient, ImplCommandLine, ImplContextMenuHandler, ImplDisplayHandler, ImplLoadHandler,
+        ImplMenuModel, ImplRenderHandler, ImplTask, LoadHandler, MenuModel, PaintElementType,
+        Rect, RenderHandler, ScreenInfo, Task, WindowInfo, WrapApp, WrapBrowserProcessHandler,
+        WrapClient, WrapContextMenuHandler, WrapDisplayHandler, WrapLoadHandler, WrapRenderHandler,
+        WrapTask,
     };
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
@@ -678,6 +682,34 @@ mod cef_handlers {
         }
     }
 
+    // ====== Load Handler ======
+    //
+    // Issue 345: Detects page load completion for benchmark scroll start.
+
+    #[derive(Clone)]
+    struct LoadHandlerInner;
+
+    wrap_load_handler! {
+        pub struct ProfileLoadHandler {
+            inner: LoadHandlerInner,
+        }
+
+        impl LoadHandler {
+            fn on_loading_state_change(
+                &self,
+                _browser: Option<&mut Browser>,
+                is_loading: ::std::os::raw::c_int,
+                _can_go_back: ::std::os::raw::c_int,
+                _can_go_forward: ::std::os::raw::c_int,
+            ) {
+                if is_loading == 0 {
+                    println!("[LOAD] Page finished loading");
+                    crate::PAGE_LOADED.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
     // ====== Client ======
 
     wrap_client! {
@@ -685,6 +717,7 @@ mod cef_handlers {
             render_handler: RenderHandler,
             context_menu_handler: ContextMenuHandler,
             display_handler: DisplayHandler,
+            load_handler: LoadHandler,
         }
 
         impl Client {
@@ -698,6 +731,10 @@ mod cef_handlers {
 
             fn display_handler(&self) -> Option<DisplayHandler> {
                 Some(self.display_handler.clone())
+            }
+
+            fn load_handler(&self) -> Option<LoadHandler> {
+                Some(self.load_handler.clone())
             }
         }
     }
@@ -1245,7 +1282,8 @@ mod cef_handlers {
         let display_handler = ProfileDisplayHandler::new(display_inner);
 
         let context_menu_handler = ProfileContextMenuHandler::new(ContextMenuInner);
-        let mut client = ProfileClient::new(render_handler, context_menu_handler, display_handler);
+        let load_handler = ProfileLoadHandler::new(LoadHandlerInner);
+        let mut client = ProfileClient::new(render_handler, context_menu_handler, display_handler, load_handler);
 
         let window_info = WindowInfo {
             windowless_rendering_enabled: 1,

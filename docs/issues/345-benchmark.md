@@ -293,6 +293,10 @@ cef-test-profile already has this pattern (`TestLoadHandler` +
 `/tmp/termsurf-profile-default.log` for `[LOAD] Page finished loading` message.
 This confirms the load handler fires in the real ts3 pipeline.
 
+**Result:** Done. Ran `web google.com` — line 31 of the profile log shows
+`[LOAD] Page finished loading`. Load handler fires correctly in the real ts3
+pipeline.
+
 ### Phase 4: Scroll simulation in benchmark mode (`log output`)
 
 When `--benchmark` is set, inject simulated scroll events at ~125Hz after
@@ -382,7 +386,7 @@ needed.
 | ----- | --------------------------- | --------------------------------- | ------ |
 | 1     | `--benchmark` flag parsed   | `cargo check -p termsurf-profile` | Done   |
 | 2     | Flag threaded through chain | `cargo check` (full workspace)    | Done   |
-| 3     | Page load detection         | Log shows `[LOAD]` message        |        |
+| 3     | Page load detection         | Log shows `[LOAD]` message        | Done   |
 | 4     | Scroll simulation           | Log shows `[SCROLL]`, page moves  |        |
 | 5     | FrameStats + auto-quit      | Log shows `[PERF]` every 10s      |        |
 | 6     | Stats printed to terminal   | `web benchmark` prints results    |        |
