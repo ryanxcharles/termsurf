@@ -718,6 +718,18 @@ adding IOSurface import complexity.
 green right half. Resizing the window updates the surface correctly. Closing the
 window exits cleanly.
 
+**Results:**
+
+- Window opens at 3200x1600 physical (1600x800 logical on Retina) — correct
+- Left half renders dark blue, right half renders dark green — correct
+- Resize events fire and surface reconfigures without crashes
+- Window close exits cleanly
+- ts3 workspace still builds (`cargo check -p termsurf-gui` passes)
+- Uses `run_app` event loop (not `pump_app_events`) — no CEF interleaving needed
+  in the GUI process at this phase
+- Surface format: Bgra8Unorm (not Bgra8UnormSrgb — sRGB correction applies to
+  IOSurface texture views in later phases, not the window surface)
+
 ### Phase 4: Build Script & App Bundle
 
 Create the build script and macOS app bundle structure. This is needed before
