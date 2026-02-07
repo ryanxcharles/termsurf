@@ -1328,3 +1328,162 @@ handles the *same* work — it's because it handles *complementary* work
 (NSApplication events, display link, Core Animation) that reduces the total
 workload CEF needs to process internally. Our CFRunLoop call doesn't process
 that complementary work, so `do_message_loop_work()` has to do everything.
+
+### Experiment 7: NSApplication Event Pump
+
+**Status:** Not started
+
+**Goal:** Replace `CFRunLoopRunInMode` with an NSApplication event pump —
+the same mechanism that winit's `pump_app_events` uses internally — to process
+the complementary work that reduces `do_message_loop_work()` overhead.
+
+**Hypothesis tested:** Direct consequence of Exp 3, 4, 5, 6 findings.
+
+#### Motivation
+
+Six experiments have converged on a single conclusion:
+
+1. `do_message_loop_work()` is essential and cannot be removed (Exp 6)
+2. `do_message_loop_work()` takes >1ms on 100% of calls in our process but
+   only 5.7% in the cef-rs example (Exp 3 vs Exp 4)
+3. The difference is `pump_app_events` — it handles complementary work
+   (NSApplication events, display link, Core Animation) that our
+   `CFRunLoopRunInMode` doesn't touch (Exp 4, 5, 6 conclusions)
+4. `CFRunLoopRunInMode` returns instantly 96% of the time regardless of
+   timeout (Exp 3, 5) — it's not processing the right kind of work
+
+The cef-rs example achieves low mlw spike rates because winit's
+`pump_app_events` internally calls:
+
+```objc
+[NSApp nextEventMatchingMask:NSEventMaskAny
+                   untilDate:[NSDate distantPast]
+                      inMode:NSDefaultRunLoopMode
+                     dequeue:YES];
+[NSApp sendEvent:event];
+```
+
+This processes the macOS application event queue: window server messages,
+display link callbacks, Core Animation layer commits, and other system events
+that CEF's internal threads post. Without processing these, the work
+accumulates and `do_message_loop_work()` has to handle it all.
+
+#### Changes
+
+Two changes to `ts3/termsurf-profile/src/main.rs`:
+
+**1. Add an `nsapp` module alongside the existing `cfrunloop` module:**
+
+```rust
+#[cfg(target_os = "macos")]
+mod nsapp {
+    use std::ffi::c_void;
+
+    type Id = *mut c_void;
+
+    #[link(name = "AppKit", kind = "framework")]
+    extern "C" {
+        // NSApp global
+        static NSApp: Id;
+    }
+
+    extern "C" {
+        // NSDate
+        fn objc_msgSend(receiver: Id, sel: *const c_void, ...) -> Id;
+        fn sel_registerName(name: *const u8) -> *const c_void;
+    }
+
+    /// Drain pending NSApplication events without blocking.
+    pub fn pump_events() {
+        unsafe {
+            let distant_past: Id = objc_msgSend(
+                objc_msgSend(
+                    class(b"NSDate\0"),
+                    sel_registerName(b"distantPast\0" as *const u8),
+                ),
+                sel_registerName(b"self\0" as *const u8), // identity, just to get the value
+            );
+
+            // NSEventMaskAny = NSUIntegerMax
+            let mask: u64 = u64::MAX;
+            let mode = kCFRunLoopDefaultMode; // NSDefaultRunLoopMode == kCFRunLoopDefaultMode
+
+            loop {
+                let event: Id = objc_msgSend(
+                    NSApp,
+                    sel_registerName(
+                        b"nextEventMatchingMask:untilDate:inMode:dequeue:\0" as *const u8,
+                    ),
+                    mask,
+                    distant_past,
+                    mode,
+                    true as i8, // YES = dequeue
+                );
+                if event.is_null() {
+                    break;
+                }
+                objc_msgSend(
+                    NSApp,
+                    sel_registerName(b"sendEvent:\0" as *const u8),
+                    event,
+                );
+            }
+        }
+    }
+
+    unsafe fn class(name: &[u8]) -> Id {
+        extern "C" {
+            fn objc_getClass(name: *const u8) -> Id;
+        }
+        objc_getClass(name.as_ptr())
+    }
+
+    extern "C" {
+        static kCFRunLoopDefaultMode: *const c_void;
+    }
+}
+```
+
+This uses raw FFI to call the same Objective-C methods that winit calls
+internally. No new crate dependencies — just `extern "C"` bindings to
+AppKit, the Objective-C runtime, and CoreFoundation.
+
+**2. Replace `cfrunloop::run_for(0.001)` with `nsapp::pump_events()` in the
+loop:**
+
+```rust
+while !QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
+    cef::do_message_loop_work();
+    #[cfg(target_os = "macos")]
+    nsapp::pump_events();
+    #[cfg(not(target_os = "macos"))]
+    std::thread::sleep(std::time::Duration::from_millis(1));
+}
+```
+
+The Exp 3 instrumentation is kept to compare mlw spike rates directly.
+
+#### What Stays the Same
+
+- `do_message_loop_work()` still called every iteration
+- CEF settings unchanged
+- No new crate dependencies
+- XPC, IOSurface, render handler all unchanged
+- `[FRAME-TX]` frame logging still active
+
+#### Expected Outcomes
+
+| Result | Meaning |
+| --- | --- |
+| mlw spike rate drops from 100% toward 5.7%, fps improves | NSApplication events were the missing complementary work. The event pump offloads work from CEF's internal queue, matching the cef-rs example's behavior. |
+| mlw spike rate unchanged, fps unchanged | NSApplication events aren't relevant in a headless (no window) process. The cef-rs example is fast because it *has a window*, not because of the event pump itself. Need to investigate window-dependent pathways. |
+| Crash or hang | NSApp may not be initialized in our process since CEF doesn't create one for headless/windowless mode. Would need to call `[NSApplication sharedApplication]` first. |
+
+#### Risk
+
+Medium. The raw `objc_msgSend` FFI is unsafe and calling conventions must be
+exact. However, the pattern is well-established (winit, cocoa crate, and the
+cef-rs cefsimple example all do the same thing). If NSApp is null because CEF
+never initialized it, the first `objc_msgSend` will crash — but we'll see that
+immediately in the log and can add `[NSApplication sharedApplication]`
+initialization. The `cfrunloop` module is kept intact for easy revert.
