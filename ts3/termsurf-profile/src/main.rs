@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 static FRAME_COUNTER: AtomicU64 = AtomicU64::new(0);
 static PROFILE_START_TIME: OnceLock<Instant> = OnceLock::new();
 
-// Issue 341, Experiment 7: Quit flag for graceful shutdown with manual pump loop
+// Issue 326, Experiment 1: Global quit flag for graceful shutdown on GUI disconnect
 static QUIT_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 // Issue 330, Experiment 3: Track active connections by ID for idempotent cleanup
@@ -219,11 +219,9 @@ fn run_profile_server(args: Args) {
     println!("Profile: Cache: {:?}", cache_path);
 
     // 7. Initialize CEF
-    // Issue 341, Experiment 9: Restore hidden window from Exp 7.
     let settings = cef::Settings {
         windowless_rendering_enabled: 1,
         no_sandbox: 1,
-        external_message_pump: 1,
         root_cache_path: cef::CefString::from(cache_path.to_str().unwrap()),
         browser_subprocess_path: cef::CefString::from(helper_path.to_str().unwrap()),
         persist_session_cookies: 1,
@@ -299,62 +297,12 @@ fn run_profile_server(args: Args) {
     })
     .expect("Failed to set Ctrl+C handler");
 
-    // 10. Issue 341, Experiment 9: Restore hidden 1x1 window from Exp 7.
-    // The hidden window registers the process with the window server, which
-    // provides per-window vsync notifications that CEF's compositor relies on.
-    use winit::application::ApplicationHandler;
-    use winit::event::WindowEvent;
-    use winit::event_loop::EventLoop;
-    use winit::platform::pump_events::EventLoopExtPumpEvents;
-    use winit::window::Window;
-
-    struct MinimalApp {
-        window: Option<Window>,
-    }
-
-    impl ApplicationHandler for MinimalApp {
-        fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-            if self.window.is_none() {
-                let attrs = Window::default_attributes()
-                    .with_title("CEF Host")
-                    .with_inner_size(winit::dpi::LogicalSize::new(1.0, 1.0))
-                    .with_visible(false);
-                match event_loop.create_window(attrs) {
-                    Ok(w) => {
-                        println!("Profile: Hidden window created");
-                        self.window = Some(w);
-                    }
-                    Err(e) => eprintln!("Profile: Failed to create window: {}", e),
-                }
-            }
-        }
-
-        fn window_event(
-            &mut self,
-            _event_loop: &winit::event_loop::ActiveEventLoop,
-            _window_id: winit::window::WindowId,
-            _event: WindowEvent,
-        ) {
-        }
-
-        fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
-            cef::do_message_loop_work();
-            if QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
-                _event_loop.exit();
-            }
-        }
-    }
-
-    let mut event_loop = EventLoop::new().expect("Failed to create event loop");
-    let mut app = MinimalApp { window: None };
-
-    println!("Profile: Running message loop (hidden window mode)...");
-    loop {
-        if QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
-            break;
-        }
-        event_loop.pump_app_events(Some(Duration::ZERO), &mut app);
-        std::thread::sleep(Duration::from_millis(1));
+    // 10. Run CEF message loop with high-frequency polling
+    // Issue 325, Experiment 3: Replace run_message_loop() with polling loop.
+    println!("Profile: Running message loop (polling mode)...");
+    while !QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
+        cef::do_message_loop_work();
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
 
     // 11. Shutdown

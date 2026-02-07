@@ -16,4 +16,3 @@ clap = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 cef = { path = "../../cef-rs/cef", features = ["accelerated_osr"] }
 ctrlc = "3.4"
-winit = "0.30"
