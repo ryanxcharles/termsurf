@@ -2,9 +2,23 @@ import AppKit
 import IOSurface
 import XIPC
 
+/// Context object passed through XPC callbacks to identify which pane sent the frame.
+class XPCContext {
+    let delegate: AppDelegate
+    let pane: String // "terminal" or "browser"
+
+    init(delegate: AppDelegate, pane: String) {
+        self.delegate = delegate
+        self.pane = pane
+    }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var metalView: MetalView!
+    // Retain XPC contexts to prevent deallocation
+    var terminalContext: XPCContext!
+    var browserContext: XPCContext!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let windowRect = NSRect(x: 100, y: 100, width: 800, height: 600)
@@ -26,37 +40,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
-        let context = Unmanaged.passUnretained(self).toOpaque()
         let callback: xipc_frame_callback = { port, width, height, context in
             guard let context = context else { return }
-            let delegate = Unmanaged<AppDelegate>.fromOpaque(context).takeUnretainedValue()
-            delegate.handleFrame(port: port, width: width, height: height)
+            let xpcContext = Unmanaged<XPCContext>.fromOpaque(context).takeUnretainedValue()
+            xpcContext.delegate.handleFrame(
+                pane: xpcContext.pane, port: port, width: width, height: height
+            )
         }
 
-        // Connect to the Rust terminal service (blue)
+        // Connect to the Rust terminal service (blue, left pane)
+        terminalContext = XPCContext(delegate: self, pane: "terminal")
+        let terminalPtr = Unmanaged.passUnretained(terminalContext!).toOpaque()
         NSLog("[Window] Connecting to com.termsurf.ts4.terminal")
-        xipc_connect("com.termsurf.ts4.terminal", callback, context)
+        xipc_connect("com.termsurf.ts4.terminal", callback, terminalPtr)
 
-        // Connect to the C++ browser service (green)
+        // Connect to the C++ browser service (green, right pane)
+        browserContext = XPCContext(delegate: self, pane: "browser")
+        let browserPtr = Unmanaged.passUnretained(browserContext!).toOpaque()
         NSLog("[Window] Connecting to com.termsurf.ts4.browser")
-        xipc_connect("com.termsurf.ts4.browser", callback, context)
+        xipc_connect("com.termsurf.ts4.browser", callback, browserPtr)
     }
 
-    private func handleFrame(port: mach_port_t, width: UInt32, height: UInt32) {
-        NSLog("[Window] Received frame: port=%u, %ux%u", port, width, height)
+    private func handleFrame(pane: String, port: mach_port_t, width: UInt32, height: UInt32) {
+        NSLog("[Window] Received %@ frame: port=%u, %ux%u", pane, port, width, height)
 
         guard let surfacePtr = xipc_import_iosurface(port) else {
-            NSLog("[Window] Failed to import IOSurface")
+            NSLog("[Window] Failed to import IOSurface for %@", pane)
             return
         }
 
         // IOSurfaceLookupFromMachPort returns +1 retained reference
         let ioSurface = Unmanaged<IOSurface>.fromOpaque(surfacePtr).takeRetainedValue()
 
-        NSLog("[Window] IOSurface imported: %dx%d",
-              IOSurfaceGetWidth(ioSurface), IOSurfaceGetHeight(ioSurface))
+        NSLog("[Window] IOSurface imported for %@: %dx%d",
+              pane, IOSurfaceGetWidth(ioSurface), IOSurfaceGetHeight(ioSurface))
 
-        metalView.setExternalSurface(ioSurface)
+        switch pane {
+        case "terminal":
+            metalView.setTerminalSurface(ioSurface)
+        case "browser":
+            metalView.setBrowserSurface(ioSurface)
+        default:
+            break
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

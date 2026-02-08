@@ -9,7 +9,9 @@ class MetalView: NSView {
     private var metalLayer: CAMetalLayer!
     private var displayLink: CVDisplayLink?
     private var pipelineState: MTLRenderPipelineState?
-    private var externalTexture: MTLTexture?
+    private var terminalTexture: MTLTexture?
+    private var browserTexture: MTLTexture?
+    private var frameCount: UInt64 = 0
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -105,8 +107,8 @@ class MetalView: NSView {
         }
     }
 
-    /// Accept an external IOSurface and create a Metal texture backed by it (zero-copy).
-    func setExternalSurface(_ surface: IOSurface) {
+    /// Create a Metal texture backed by an IOSurface (zero-copy).
+    private func makeTextureFromSurface(_ surface: IOSurface) -> MTLTexture? {
         let width = IOSurfaceGetWidth(surface)
         let height = IOSurfaceGetHeight(surface)
 
@@ -126,11 +128,21 @@ class MetalView: NSView {
         )
 
         if let texture = texture {
-            externalTexture = texture
             NSLog("[MetalView] Created texture from IOSurface: %dx%d", width, height)
         } else {
             NSLog("[MetalView] Failed to create texture from IOSurface")
         }
+        return texture
+    }
+
+    /// Set the terminal pane's IOSurface (left, blue).
+    func setTerminalSurface(_ surface: IOSurface) {
+        terminalTexture = makeTextureFromSurface(surface)
+    }
+
+    /// Set the browser pane's IOSurface (right, green).
+    func setBrowserSurface(_ surface: IOSurface) {
+        browserTexture = makeTextureFromSurface(surface)
     }
 
     override func viewDidChangeBackingProperties() {
@@ -169,6 +181,8 @@ class MetalView: NSView {
     private func render() {
         guard let drawable = metalLayer.nextDrawable() else { return }
 
+        let startTime = CACurrentMediaTime()
+
         let passDescriptor = MTLRenderPassDescriptor()
         passDescriptor.colorAttachments[0].texture = drawable.texture
         passDescriptor.colorAttachments[0].loadAction = .clear
@@ -181,16 +195,46 @@ class MetalView: NSView {
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: passDescriptor)
         else { return }
 
-        // If we have an external texture and pipeline, render it
-        if let pipeline = pipelineState, let texture = externalTexture {
+        let drawableWidth = Double(drawable.texture.width)
+        let drawableHeight = Double(drawable.texture.height)
+        let halfWidth = drawableWidth / 2.0
+
+        if let pipeline = pipelineState {
             encoder.setRenderPipelineState(pipeline)
-            encoder.setFragmentTexture(texture, index: 0)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+
+            // Left pane: terminal (blue)
+            if let texture = terminalTexture {
+                encoder.setViewport(MTLViewport(
+                    originX: 0, originY: 0,
+                    width: halfWidth, height: drawableHeight,
+                    znear: 0, zfar: 1
+                ))
+                encoder.setFragmentTexture(texture, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            }
+
+            // Right pane: browser (green)
+            if let texture = browserTexture {
+                encoder.setViewport(MTLViewport(
+                    originX: halfWidth, originY: 0,
+                    width: drawableWidth - halfWidth, height: drawableHeight,
+                    znear: 0, zfar: 1
+                ))
+                encoder.setFragmentTexture(texture, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            }
         }
 
         encoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
+
+        // Log frame time every 60 frames
+        frameCount += 1
+        if frameCount % 60 == 0 {
+            let elapsed = (CACurrentMediaTime() - startTime) * 1000.0
+            NSLog("[MetalView] Frame %llu composite: %.2fms", frameCount, elapsed)
+        }
     }
 
     deinit {
