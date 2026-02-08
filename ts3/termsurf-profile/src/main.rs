@@ -46,6 +46,9 @@ static ACTIVE_CONNECTIONS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
 // Issue 332, Experiment 2: Store launcher connection for unregister notification
 static LAUNCHER_CONNECTION: OnceLock<Arc<XpcConnection>> = OnceLock::new();
 
+// Issue 350, Experiment 5: Profile name for early unregister in benchmark tick_callback
+static PROFILE_NAME: OnceLock<String> = OnceLock::new();
+
 fn active_connections() -> &'static Mutex<HashSet<u64>> {
     ACTIVE_CONNECTIONS.get_or_init(|| Mutex::new(HashSet::new()))
 }
@@ -614,6 +617,20 @@ mod benchmark_timers {
             }
 
             if elapsed >= Duration::from_secs(ctx.benchmark_duration) {
+                // Issue 350, Experiment 5: Unregister FIRST — before printing
+                // results that trigger the coordinator to start the next trial.
+                // This closes the race window where the launcher would forward
+                // the next trial's spawn_profile to this dying process.
+                if let Some(launcher) = crate::LAUNCHER_CONNECTION.get() {
+                    if let Some(profile) = crate::PROFILE_NAME.get() {
+                        let msg = termsurf_xpc::XpcDictionary::new();
+                        msg.set_string("action", "unregister_profile");
+                        msg.set_string("profile", profile);
+                        launcher.send(&msg);
+                        println!("Profile: Early unregister for benchmark handoff");
+                    }
+                }
+
                 println!(
                     "[BENCHMARK-DONE] {} seconds elapsed",
                     ctx.benchmark_duration
@@ -750,6 +767,9 @@ fn run_profile_server(args: Args) {
         std::process::exit(exit_code);
     }
     println!("Profile: Main process (ret={})", exit_code);
+
+    // Issue 350, Experiment 5: Store profile name for early unregister in tick_callback
+    let _ = PROFILE_NAME.set(args.profile.clone());
 
     // 3. Connect to launcher
     println!("Profile: Connecting to launcher...");

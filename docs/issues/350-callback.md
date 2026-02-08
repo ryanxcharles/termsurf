@@ -649,4 +649,54 @@ handles duplicate unregisters gracefully).
 Experiment 4 architectural changes (dual-mode timers, NSApp) get a proper
 evaluation across all 7 trials.
 
-**Status:** Not started
+**Status:** Failed (fixed launcher race, exposed CEF SingletonLock race)
+
+**Results (1 of 7 trials completed before hang):**
+
+```
+[BENCH] Trial 1/7: 30.2fps  15.6% @60fps  p50=24.4ms  p95=91.0ms
+```
+
+Trial 1 completed. Trial 2's process spawned but CEF failed to initialize. The
+browser never appeared. Required Ctrl+C to exit.
+
+**The launcher race is fixed.** The launcher log confirms the early unregister
+worked correctly:
+
+```
+Launcher: Received action: register_profile       ← Trial 1 registers
+Launcher: Received action: unregister_profile     ← Early unregister (from tick_callback)
+Launcher: Profile 'default' connection error      ← Trial 1 process dies
+Launcher: Received action: spawn_profile          ← Trial 2 → new process spawned (not forwarded!)
+Launcher: Spawned profile 'default' (pid: 43100)
+Launcher: Received action: claim_session          ← Trial 2 claims successfully
+```
+
+Trial 2 correctly got its own fresh process. The forwarding bug from Experiment 4
+is gone.
+
+**New failure: CEF `SingletonLock` contention.**
+
+Trial 2's profile log:
+
+```
+Profile: Cache: "/Users/ryan/.config/termsurf/cef/default"
+Profile: CEF initialize failed (returned 0)
+```
+
+CEF's `SingletonLock` file in the `root_cache_path` prevents two processes from
+using the same profile directory simultaneously. Trial 1's early unregister
+happens in `tick_callback`, but `cef::shutdown()` hasn't run yet — the
+`SingletonLock` is still held. Trial 2 spawns, tries to initialize CEF with the
+same `root_cache_path`, and CEF rejects it.
+
+This is the foundational constraint from CLAUDE.md: one CEF process per profile,
+enforced by `SingletonLock`. The early unregister solved the launcher-level race
+but exposed a deeper process-level race — the new process spawns before the old
+process has released the CEF lock.
+
+**Conclusion:** Two-stage race condition. Experiment 5 fixed stage 1 (launcher
+forwarding). Stage 2 (CEF lock) requires the old process to complete
+`cef::shutdown()` before the new process can initialize. The fix must ensure
+the old profile process fully exits (or at least releases the CEF lock) before
+the launcher spawns the replacement.
