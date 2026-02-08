@@ -451,3 +451,92 @@ timer invalidation) that outweighs any benefit from eliminating supersession.
 Next steps: revert to the timer-only approach (Experiment 1) and investigate the
 remaining ideas — benchmark timer contention (the 8ms scroll timer competing for
 main thread time) or replacing bare `CFRunLoopRun()` with `NSApp().run()`.
+
+### Reference implementation analysis
+
+After Experiments 1-3 failed to close the gap, we compared the cef-rs reference
+external pump (`cef-rs/examples/tests_shared/src/browser/main_message_loop_external_pump/`)
+with our `cef_pump` module. The reference gets ~50fps. We get ~22-29fps. Three
+critical differences:
+
+**1. NSApp().run() instead of CFRunLoopRun()**
+
+The reference creates an NSApplication subclass (`SimpleApplication`) and runs
+`NSApp(mtm).run()`. We use bare `CFRunLoopRun()`. NSApp manages all run loop
+modes automatically — it is the intended way to run a Cocoa event loop.
+
+**2. Timers registered in two run loop modes (the root cause)**
+
+Reference (`mac.rs:118-119`):
+
+```rust
+owner_runloop.addTimer_forMode(&timer, NSRunLoopCommonModes);
+owner_runloop.addTimer_forMode(&timer, NSEventTrackingRunLoopMode);
+```
+
+Our code only adds timers to `kCFRunLoopCommonModes`. When scroll events are
+processed, the run loop enters `NSEventTrackingRunLoopMode` — and our timers
+don't fire. The pump starves until the 33ms fallback kicks in, capping fps at
+~30. This matches our observed numbers exactly.
+
+**3. performSelector:onThread: for thread marshaling**
+
+The reference uses `performSelector_onThread_withObject_waitUntilDone` to safely
+marshal `on_schedule_message_pump_work` calls to the main thread. We use direct
+CFRunLoop signaling with a mutex.
+
+**Comparison:**
+
+| Aspect            | Reference (50fps)              | TermSurf (~22-29fps)        |
+| ----------------- | ------------------------------ | --------------------------- |
+| Main loop         | `NSApp().run()`                | `CFRunLoopRun()`            |
+| Timer modes       | CommonModes + EventTracking    | CommonModes only            |
+| Timer API         | NSTimer                        | CFRunLoopTimer              |
+| Thread marshaling | performSelector:onThread:      | Direct CFRunLoop + mutex    |
+| NSApplication     | Yes (SimpleApplication)        | No                          |
+
+### Experiment 4: Match reference architecture
+
+**Goal:** Revert to the timer-only approach (Experiment 1 was our best result at
+~29fps) and close the gap with the reference by adopting its two key patterns:
+`NSApp().run()` and dual-mode timer registration.
+
+**What to change:**
+
+1. **Revert cef_pump to timer-only.** Remove the CFRunLoopSource code from
+   Experiments 2-3. Go back to the Experiment 1 architecture where every
+   `schedule_work` call creates a CFRunLoopTimer. Keep the diagnostic counters
+   (use the Experiment 1 log format with `cb` and `fb` fire counts).
+
+2. **Register timers in both modes.** Add `NSEventTrackingRunLoopMode` to
+   `cfrunloop::create_timer` and `cfrunloop::create_repeating_timer`. This
+   requires importing the `NSEventTrackingRunLoopMode` constant — it lives in
+   AppKit, not CoreFoundation. Since we use raw FFI, we need the
+   `CFStringRef` for this mode. It can be obtained via:
+   ```rust
+   extern "C" {
+       static NSEventTrackingRunLoopMode: CFStringRef;
+   }
+   ```
+   Then add a second `CFRunLoopAddTimer` call for each timer.
+
+3. **Replace CFRunLoopRun() with NSApp().run().** Create an NSApplication with
+   activation policy `.prohibited` (no dock icon, no menu bar — appropriate for
+   a headless helper process). This is Idea 4 from the original list. The
+   reference does this with objc2 crates; we can do a minimal version with raw
+   FFI or use the objc2 crates already available in the workspace.
+
+4. **Keep the benchmark scroll timer and diagnostic logging.** The 8ms scroll
+   timer should also be registered in both modes (it already goes through
+   `create_repeating_timer`, so fix #2 covers it).
+
+**Implementation order:** Apply all three changes together. They work as a unit —
+the reference uses all three, and testing them individually would take three more
+experiments without clear signal (any one change alone might not close the gap).
+
+**Expected outcome:** If the run loop mode starvation is the root cause (and the
+diagnostic data from Experiment 1 strongly suggests it is — fires ≈ 30/sec
+matches the 33ms fallback rate), fps should jump significantly. Target: ≥45fps
+(matching the reference's ~50fps minus overhead from out-of-process IPC).
+
+**Status:** Not started
