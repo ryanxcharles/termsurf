@@ -292,4 +292,53 @@ jump significantly (from ~100 to several hundred), and fps should increase
 proportionally. If fps stays at ~29, the bottleneck is elsewhere (run loop
 iteration speed, benchmark timer contention, or NSApp vs CFRunLoop).
 
-**Status:** Not started
+**Status:** Complete (bug found)
+
+**Results (trial 7 of benchmark, last profile log preserved):**
+
+```
+[PUMP] callbacks=1107(imm=1107 def=0) fires=18820(src=1042 tmr=0 fb=17778) reentrant=0 work=18820
+[PUMP] callbacks=244(imm=207 def=37) fires=27161(src=130 tmr=14 fb=27017) reentrant=0 work=27161
+[PUMP] callbacks=167(imm=167 def=0) fires=31042(src=119 tmr=0 fb=30923) reentrant=0 work=31042
+[PUMP] callbacks=261(imm=178 def=83) fires=32932(src=134 tmr=32 fb=32766) reentrant=0 work=32932
+[PUMP] callbacks=160(imm=124 def=36) fires=34450(src=89 tmr=13 fb=34348) reentrant=0 work=34450
+[PUMP] callbacks=174(imm=112 def=62) fires=35810(src=78 tmr=21 fb=35711) reentrant=0 work=35810
+[PUMP] callbacks=195(imm=126 def=69) fires=38537(src=89 tmr=28 fb=38420) reentrant=0 work=38537
+[PUMP] callbacks=223(imm=104 def=119) fires=37076(src=71 tmr=46 fb=36959) reentrant=0 work=37076
+[PUMP] callbacks=266(imm=138 def=128) fires=39110(src=73 tmr=46 fb=38991) reentrant=0 work=39110
+[PUMP] callbacks=170(imm=121 def=49) fires=41017(src=90 tmr=19 fb=40908) reentrant=0 work=41017
+```
+
+Benchmark: ~22fps (down from ~29fps in Experiment 1), thermal nominal. Performance
+got worse, not better.
+
+**Findings: zombie timer leak**
+
+The fallback count is exploding: 17k → 27k → 31k → 35k → 41k fires/sec, growing
+every second and never stabilizing. This is a cascading timer leak caused by two
+bugs in the source+timer interaction:
+
+**Bug 1: Timer reference dropped without invalidation.** When the source callback
+fires, `do_pump_work()` unconditionally sets `pump.timer = None`. If a fallback
+timer was already pending, dropping the reference does NOT remove it from the run
+loop — it becomes a zombie. The zombie still fires, calls `do_pump_work`, and
+schedules yet another fallback. Each source fire (~100/sec) leaks one zombie.
+After a few seconds, thousands of zombies are firing in a chain reaction.
+
+**Bug 2: No source-pending tracking.** After `do_message_loop_work()`, if CEF
+called `schedule_work(0)` (signaling the source), we don't detect that.
+`was_reentrant` is false (schedule_work doesn't set `reentrancy_detected`),
+`has_timer` is false (source doesn't create a timer). So we schedule a fallback
+even though the source is already signaled for the next iteration.
+
+**Fixes needed:**
+
+1. **Invalidate, don't just clear:** `do_pump_work` must invalidate any pending
+   timer before clearing: `if let Some(timer) = pump.timer.take() { invalidate(timer); }`
+2. **Track source pending state:** Add `source_pending: bool` to PumpState.
+   `schedule_work(0)` sets it true. Source callback sets it false. Don't schedule
+   fallback if `source_pending` is true.
+
+These are implementation bugs, not architectural problems. The CFRunLoopSource
+approach is sound — we just need to fix the source/timer interaction before we
+can evaluate whether it improves fps.

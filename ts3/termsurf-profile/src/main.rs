@@ -155,6 +155,24 @@ mod cfrunloop {
     type CFRunLoopRef = *mut c_void;
     type CFIndex = isize;
 
+    pub type CFRunLoopSourceRef = *mut c_void;
+
+    /// CFRunLoopSourceContext for version 0 sources.
+    /// Most fields are unused — only `perform` is needed.
+    #[repr(C)]
+    struct CFRunLoopSourceContext {
+        version: CFIndex,
+        info: *mut c_void,
+        retain: *const c_void,
+        release: *const c_void,
+        copy_description: *const c_void,
+        equal: *const c_void,
+        hash: *const c_void,
+        schedule: *const c_void,
+        cancel: *const c_void,
+        perform: unsafe extern "C" fn(*mut c_void),
+    }
+
     extern "C" {
         static kCFRunLoopCommonModes: CFStringRef;
         fn CFRunLoopGetMain() -> CFRunLoopRef;
@@ -173,6 +191,13 @@ mod cfrunloop {
         ) -> CFRunLoopTimerRef;
         fn CFRunLoopTimerInvalidate(timer: CFRunLoopTimerRef);
         fn CFAbsoluteTimeGetCurrent() -> CFAbsoluteTime;
+        fn CFRunLoopSourceCreate(
+            allocator: *const c_void,
+            order: CFIndex,
+            context: *const CFRunLoopSourceContext,
+        ) -> CFRunLoopSourceRef;
+        fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef);
+        fn CFRunLoopSourceSignal(source: CFRunLoopSourceRef);
     }
 
     /// Block on the main thread's CFRunLoop until stopped.
@@ -236,12 +261,46 @@ mod cfrunloop {
     pub fn invalidate_timer(timer: CFRunLoopTimerRef) {
         unsafe { CFRunLoopTimerInvalidate(timer) }
     }
+
+    /// Create a persistent source on the main run loop. The callback fires
+    /// on the next run loop iteration after `signal_source()` is called.
+    pub fn create_source(
+        callback: unsafe extern "C" fn(*mut c_void),
+    ) -> CFRunLoopSourceRef {
+        unsafe {
+            let context = CFRunLoopSourceContext {
+                version: 0,
+                info: std::ptr::null_mut(),
+                retain: std::ptr::null(),
+                release: std::ptr::null(),
+                copy_description: std::ptr::null(),
+                equal: std::ptr::null(),
+                hash: std::ptr::null(),
+                schedule: std::ptr::null(),
+                cancel: std::ptr::null(),
+                perform: callback,
+            };
+            let source = CFRunLoopSourceCreate(std::ptr::null(), 0, &context);
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
+            source
+        }
+    }
+
+    /// Signal a source and wake the run loop. Multiple signals before the
+    /// callback fires coalesce into one fire.
+    pub fn signal_source(source: CFRunLoopSourceRef) {
+        unsafe {
+            CFRunLoopSourceSignal(source);
+            CFRunLoopWakeUp(CFRunLoopGetMain());
+        }
+    }
 }
 
-// Issue 349, Experiment 3: Event-driven CEF message pump.
-// Replaces the busy-wait loop with CFRunLoop timer-based scheduling.
-// CEF calls on_schedule_message_pump_work when it needs do_message_loop_work(),
-// we schedule a one-shot CFRunLoop timer, and the timer callback does the work.
+// Issue 350, Experiment 2: Event-driven CEF message pump with CFRunLoopSource.
+// Experiment 1 showed that timer-only scheduling loses ~30-50% of callbacks
+// to supersession. This version uses a persistent CFRunLoopSource for delay=0
+// (immediate) work — signaling is O(1) with no allocation. Timers are kept
+// only for delay>0 (deferred) work and the 33ms fallback.
 #[cfg(target_os = "macos")]
 mod cef_pump {
     use std::ffi::c_void;
@@ -254,44 +313,60 @@ mod cef_pump {
     // Issue 350, Experiment 1: Diagnostic counters
     static SCHED_IMMEDIATE: AtomicU64 = AtomicU64::new(0);
     static SCHED_DEFERRED: AtomicU64 = AtomicU64::new(0);
-    static FIRE_CALLBACK: AtomicU64 = AtomicU64::new(0);
+    static FIRE_SOURCE: AtomicU64 = AtomicU64::new(0);
+    static FIRE_TIMER: AtomicU64 = AtomicU64::new(0);
     static FIRE_FALLBACK: AtomicU64 = AtomicU64::new(0);
     static REENTRANT: AtomicU64 = AtomicU64::new(0);
     static WORK_DONE: AtomicU64 = AtomicU64::new(0);
     static LAST_LOG: Mutex<Option<Instant>> = Mutex::new(None);
 
     struct PumpState {
-        timer: Option<SendableTimer>,
+        source: Option<SendablePtr>,
+        timer: Option<SendablePtr>,
         is_active: bool,
         reentrancy_detected: bool,
         is_fallback_timer: bool,
     }
 
-    struct SendableTimer(*mut c_void);
-    unsafe impl Send for SendableTimer {}
+    struct SendablePtr(*mut c_void);
+    unsafe impl Send for SendablePtr {}
 
     static PUMP: Mutex<PumpState> = Mutex::new(PumpState {
+        source: None,
         timer: None,
         is_active: false,
         reentrancy_detected: false,
         is_fallback_timer: false,
     });
 
+    /// Initialize the persistent CFRunLoopSource. Must be called once on the
+    /// main thread before `cfrunloop::run()`.
+    pub fn init() {
+        let source = super::cfrunloop::create_source(source_callback);
+        let mut pump = PUMP.lock().unwrap();
+        pump.source = Some(SendablePtr(source));
+    }
+
     /// Called from on_schedule_message_pump_work (any thread) and initial kick-start.
     /// Increments callback counters to track CEF's scheduling requests.
     pub fn schedule_work(delay_ms: i64) {
         if delay_ms <= 0 {
             SCHED_IMMEDIATE.fetch_add(1, Ordering::Relaxed);
+            // Signal the persistent source — O(1), no timer allocation
+            let pump = PUMP.lock().unwrap();
+            if let Some(ref source) = pump.source {
+                super::cfrunloop::signal_source(source.0);
+            }
         } else {
             SCHED_DEFERRED.fetch_add(1, Ordering::Relaxed);
+            schedule_timer(delay_ms, false);
         }
-        schedule_timer(delay_ms, false);
     }
 
-    /// Called internally from pump_timer_callback for reentrant/fallback scheduling.
+    /// Called internally from do_pump_work for fallback scheduling.
     /// Does not increment callback counters — these are not CEF requests.
-    fn schedule_internal(delay_ms: i64, is_fallback: bool) {
-        schedule_timer(delay_ms, is_fallback);
+    fn schedule_fallback() {
+        schedule_timer(MAX_TIMER_DELAY_MS, true);
     }
 
     fn schedule_timer(delay_ms: i64, is_fallback: bool) {
@@ -303,30 +378,38 @@ mod cef_pump {
         }
 
         // Cap delay at MAX_TIMER_DELAY_MS
-        let delay_ms = if delay_ms <= 0 {
-            0
-        } else {
-            delay_ms.min(MAX_TIMER_DELAY_MS)
-        };
+        let delay_ms = delay_ms.max(1).min(MAX_TIMER_DELAY_MS);
         let delay_secs = delay_ms as f64 / 1000.0;
 
         // Create one-shot timer on main run loop
-        let timer = super::cfrunloop::create_timer(delay_secs, pump_timer_callback);
-        pump.timer = Some(SendableTimer(timer));
+        let timer = super::cfrunloop::create_timer(delay_secs, timer_callback);
+        pump.timer = Some(SendablePtr(timer));
         pump.is_fallback_timer = is_fallback;
     }
 
-    unsafe extern "C" fn pump_timer_callback(_timer: *mut c_void, _info: *mut c_void) {
-        let mut pump = PUMP.lock().unwrap();
+    /// CFRunLoopSource callback — fires for delay=0 (immediate) work.
+    unsafe extern "C" fn source_callback(_info: *mut c_void) {
+        FIRE_SOURCE.fetch_add(1, Ordering::Relaxed);
+        do_pump_work();
+    }
 
-        // Track which kind of timer fired
+    /// CFRunLoopTimer callback — fires for delay>0 (deferred) work and fallback.
+    unsafe extern "C" fn timer_callback(_timer: *mut c_void, _info: *mut c_void) {
+        let pump = PUMP.lock().unwrap();
         if pump.is_fallback_timer {
             FIRE_FALLBACK.fetch_add(1, Ordering::Relaxed);
         } else {
-            FIRE_CALLBACK.fetch_add(1, Ordering::Relaxed);
+            FIRE_TIMER.fetch_add(1, Ordering::Relaxed);
         }
+        drop(pump);
+        do_pump_work();
+    }
 
-        // Clear the fired timer reference
+    /// Shared pump logic for both source and timer callbacks.
+    fn do_pump_work() {
+        let mut pump = PUMP.lock().unwrap();
+
+        // Clear fired timer reference (source stays registered)
         pump.timer = None;
 
         // Reentrancy guard
@@ -353,11 +436,14 @@ mod cef_pump {
         drop(pump);
 
         if was_reentrant {
-            // Reentrant call detected — schedule immediate work
-            schedule_internal(0, false);
+            // Reentrant call detected — signal source for immediate work
+            let pump = PUMP.lock().unwrap();
+            if let Some(ref source) = pump.source {
+                super::cfrunloop::signal_source(source.0);
+            }
         } else if !has_timer {
             // No new work requested — schedule fallback timer (30fps floor)
-            schedule_internal(MAX_TIMER_DELAY_MS, true);
+            schedule_fallback();
         }
 
         // Per-second diagnostic summary
@@ -388,13 +474,14 @@ mod cef_pump {
         if should_log {
             let imm = SCHED_IMMEDIATE.swap(0, Ordering::Relaxed);
             let def = SCHED_DEFERRED.swap(0, Ordering::Relaxed);
-            let cb = FIRE_CALLBACK.swap(0, Ordering::Relaxed);
+            let src = FIRE_SOURCE.swap(0, Ordering::Relaxed);
+            let tmr = FIRE_TIMER.swap(0, Ordering::Relaxed);
             let fb = FIRE_FALLBACK.swap(0, Ordering::Relaxed);
             let re = REENTRANT.swap(0, Ordering::Relaxed);
             let work = WORK_DONE.swap(0, Ordering::Relaxed);
             eprintln!(
-                "[PUMP] callbacks={}(imm={} def={}) fires={}(cb={} fb={}) reentrant={} work={}",
-                imm + def, imm, def, cb + fb, cb, fb, re, work
+                "[PUMP] callbacks={}(imm={} def={}) fires={}(src={} tmr={} fb={}) reentrant={} work={}",
+                imm + def, imm, def, src + tmr + fb, src, tmr, fb, re, work
             );
         }
     }
@@ -863,6 +950,10 @@ fn run_profile_server(args: Args) {
         let _scroll_timer =
             cfrunloop::create_repeating_timer(0.008, benchmark_timers::tick_callback);
     }
+
+    // Initialize the persistent CFRunLoopSource for immediate work
+    #[cfg(target_os = "macos")]
+    cef_pump::init();
 
     // Kick-start the pump — CEF will call on_schedule_message_pump_work as needed
     #[cfg(target_os = "macos")]
