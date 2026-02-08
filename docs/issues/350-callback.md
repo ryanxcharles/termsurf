@@ -592,3 +592,61 @@ before printing benchmark results (moving unregister into `tick_callback`), or
 (b) having the benchmark coordinator wait for profile process death before
 starting the next trial. The architectural changes (dual-mode timers, NSApp)
 cannot be evaluated until the race condition is fixed.
+
+### Experiment 5: Fix benchmark race condition
+
+**Goal:** Fix the race condition that prevented Experiment 4 from completing
+multi-trial benchmarks, then re-run the benchmark to properly evaluate dual-mode
+timers and `NSApp().run()`.
+
+**The race:** When the benchmark ends, `tick_callback` prints `[BENCHMARK-DONE]`
+and calls `nsapp::stop()`. The benchmark coordinator sees the result and
+immediately sends `spawn_profile` for the next trial. But the profile process
+hasn't unregistered yet — `nsapp::run()` hasn't returned, so the shutdown code
+(which sends `unregister_profile`) hasn't executed. The launcher sees the profile
+still registered and forwards to the dying process.
+
+**Fix: unregister from the launcher in `tick_callback` before stopping.**
+
+The `LAUNCHER_CONNECTION` global is already accessible from `tick_callback`. The
+profile name is not — it lives in `args.profile` which is local to
+`run_profile_server`. Add a `static PROFILE_NAME: OnceLock<String>` global, set
+it during initialization, and use it in `tick_callback`.
+
+In `tick_callback`, when the benchmark duration is reached:
+
+```rust
+if elapsed >= Duration::from_secs(ctx.benchmark_duration) {
+    // Unregister FIRST — before printing results that trigger the next trial
+    if let Some(launcher) = crate::LAUNCHER_CONNECTION.get() {
+        if let Some(profile) = crate::PROFILE_NAME.get() {
+            let msg = termsurf_xpc::XpcDictionary::new();
+            msg.set_string("action", "unregister_profile");
+            msg.set_string("profile", profile);
+            launcher.send(&msg);
+        }
+    }
+
+    println!("[BENCHMARK-DONE] ...");
+    stats.print_summary();
+    QUIT_FLAG.store(true, ...);
+    nsapp::stop();
+}
+```
+
+In the shutdown code in `run_profile_server`, skip the duplicate unregister if
+`PROFILE_NAME` was already consumed (or just let it send twice — the launcher
+handles duplicate unregisters gracefully).
+
+**What to change:**
+
+1. Add `static PROFILE_NAME: OnceLock<String>` alongside the other globals
+2. Set it early in `run_profile_server`: `PROFILE_NAME.set(args.profile.clone())`
+3. In `tick_callback`: unregister from launcher before `[BENCHMARK-DONE]`
+4. Keep the existing shutdown unregister as a fallback (non-benchmark exits)
+
+**Expected outcome:** Multi-trial benchmarks complete without hanging. The
+Experiment 4 architectural changes (dual-mode timers, NSApp) get a proper
+evaluation across all 7 trials.
+
+**Status:** Not started
