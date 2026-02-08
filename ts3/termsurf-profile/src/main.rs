@@ -245,14 +245,26 @@ mod cfrunloop {
 #[cfg(target_os = "macos")]
 mod cef_pump {
     use std::ffi::c_void;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex;
+    use std::time::Instant;
 
     const MAX_TIMER_DELAY_MS: i64 = 33; // 30fps floor (matches reference impl)
+
+    // Issue 350, Experiment 1: Diagnostic counters
+    static SCHED_IMMEDIATE: AtomicU64 = AtomicU64::new(0);
+    static SCHED_DEFERRED: AtomicU64 = AtomicU64::new(0);
+    static FIRE_CALLBACK: AtomicU64 = AtomicU64::new(0);
+    static FIRE_FALLBACK: AtomicU64 = AtomicU64::new(0);
+    static REENTRANT: AtomicU64 = AtomicU64::new(0);
+    static WORK_DONE: AtomicU64 = AtomicU64::new(0);
+    static LAST_LOG: Mutex<Option<Instant>> = Mutex::new(None);
 
     struct PumpState {
         timer: Option<SendableTimer>,
         is_active: bool,
         reentrancy_detected: bool,
+        is_fallback_timer: bool,
     }
 
     struct SendableTimer(*mut c_void);
@@ -262,11 +274,27 @@ mod cef_pump {
         timer: None,
         is_active: false,
         reentrancy_detected: false,
+        is_fallback_timer: false,
     });
 
-    /// Called from on_schedule_message_pump_work (any thread).
-    /// Schedules a CFRunLoop timer to call do_message_loop_work on the main thread.
+    /// Called from on_schedule_message_pump_work (any thread) and initial kick-start.
+    /// Increments callback counters to track CEF's scheduling requests.
     pub fn schedule_work(delay_ms: i64) {
+        if delay_ms <= 0 {
+            SCHED_IMMEDIATE.fetch_add(1, Ordering::Relaxed);
+        } else {
+            SCHED_DEFERRED.fetch_add(1, Ordering::Relaxed);
+        }
+        schedule_timer(delay_ms, false);
+    }
+
+    /// Called internally from pump_timer_callback for reentrant/fallback scheduling.
+    /// Does not increment callback counters — these are not CEF requests.
+    fn schedule_internal(delay_ms: i64, is_fallback: bool) {
+        schedule_timer(delay_ms, is_fallback);
+    }
+
+    fn schedule_timer(delay_ms: i64, is_fallback: bool) {
         let mut pump = PUMP.lock().unwrap();
 
         // Kill existing timer
@@ -285,10 +313,18 @@ mod cef_pump {
         // Create one-shot timer on main run loop
         let timer = super::cfrunloop::create_timer(delay_secs, pump_timer_callback);
         pump.timer = Some(SendableTimer(timer));
+        pump.is_fallback_timer = is_fallback;
     }
 
     unsafe extern "C" fn pump_timer_callback(_timer: *mut c_void, _info: *mut c_void) {
         let mut pump = PUMP.lock().unwrap();
+
+        // Track which kind of timer fired
+        if pump.is_fallback_timer {
+            FIRE_FALLBACK.fetch_add(1, Ordering::Relaxed);
+        } else {
+            FIRE_CALLBACK.fetch_add(1, Ordering::Relaxed);
+        }
 
         // Clear the fired timer reference
         pump.timer = None;
@@ -296,6 +332,7 @@ mod cef_pump {
         // Reentrancy guard
         if pump.is_active {
             pump.reentrancy_detected = true;
+            REENTRANT.fetch_add(1, Ordering::Relaxed);
             return;
         }
 
@@ -307,6 +344,7 @@ mod cef_pump {
         drop(pump);
 
         cef::do_message_loop_work();
+        WORK_DONE.fetch_add(1, Ordering::Relaxed);
 
         let mut pump = PUMP.lock().unwrap();
         pump.is_active = false;
@@ -316,15 +354,48 @@ mod cef_pump {
 
         if was_reentrant {
             // Reentrant call detected — schedule immediate work
-            schedule_work(0);
+            schedule_internal(0, false);
         } else if !has_timer {
             // No new work requested — schedule fallback timer (30fps floor)
-            schedule_work(MAX_TIMER_DELAY_MS);
+            schedule_internal(MAX_TIMER_DELAY_MS, true);
         }
 
+        // Per-second diagnostic summary
+        log_summary();
+
         // Check quit flag after each pump cycle
-        if crate::QUIT_FLAG.load(std::sync::atomic::Ordering::Relaxed) {
+        if crate::QUIT_FLAG.load(Ordering::Relaxed) {
             super::cfrunloop::stop();
+        }
+    }
+
+    fn log_summary() {
+        let mut last_log = LAST_LOG.lock().unwrap();
+        let now = Instant::now();
+        let should_log = match *last_log {
+            None => {
+                *last_log = Some(now);
+                false // Don't log on first call — wait one second
+            }
+            Some(t) if now.duration_since(t).as_secs() >= 1 => {
+                *last_log = Some(now);
+                true
+            }
+            _ => false,
+        };
+        drop(last_log);
+
+        if should_log {
+            let imm = SCHED_IMMEDIATE.swap(0, Ordering::Relaxed);
+            let def = SCHED_DEFERRED.swap(0, Ordering::Relaxed);
+            let cb = FIRE_CALLBACK.swap(0, Ordering::Relaxed);
+            let fb = FIRE_FALLBACK.swap(0, Ordering::Relaxed);
+            let re = REENTRANT.swap(0, Ordering::Relaxed);
+            let work = WORK_DONE.swap(0, Ordering::Relaxed);
+            eprintln!(
+                "[PUMP] callbacks={}(imm={} def={}) fires={}(cb={} fb={}) reentrant={} work={}",
+                imm + def, imm, def, cb + fb, cb, fb, re, work
+            );
         }
     }
 }

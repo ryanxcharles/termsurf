@@ -159,4 +159,55 @@ whether this timer was scheduled by a callback or the fallback path. Increment
 Print the summary every second using a timestamp check in `pump_timer_callback`
 (since it's the only code that runs regularly on the main thread).
 
-**Status:** Not started
+**Status:** Complete
+
+**Results (trial 7 of benchmark, last profile log preserved):**
+
+```
+[PUMP] callbacks=753(imm=753 def=0) fires=758(cb=752 fb=6) reentrant=0 work=758  ← page load burst
+[PUMP] callbacks=149(imm=127 def=22) fires=133(cb=127 fb=6) reentrant=0 work=133
+[PUMP] callbacks=135(imm=125 def=10) fires=129(cb=125 fb=4) reentrant=0 work=129
+[PUMP] callbacks=142(imm=128 def=14) fires=134(cb=128 fb=6) reentrant=0 work=134
+[PUMP] callbacks=101(imm=87 def=14) fires=93(cb=86 fb=7) reentrant=0 work=93
+[PUMP] callbacks=127(imm=93 def=34) fires=97(cb=93 fb=4) reentrant=0 work=97
+[PUMP] callbacks=132(imm=87 def=45) fires=92(cb=87 fb=5) reentrant=0 work=92
+[PUMP] callbacks=141(imm=65 def=76) fires=65(cb=65 fb=0) reentrant=0 work=65
+[PUMP] callbacks=187(imm=99 def=88) fires=99(cb=99 fb=0) reentrant=0 work=99
+[PUMP] callbacks=114(imm=88 def=26) fires=93(cb=88 fb=5) reentrant=0 work=93
+```
+
+Benchmark: ~29fps across all 7 trials, thermal nominal. First trial anomaly: the
+browser never appeared on screen but fps was still collected (the profile server
+counted frames internally even though they may not have reached the GUI).
+
+**Findings:**
+
+1. **The callback fires reliably.** CEF sends 100-190
+   `on_schedule_message_pump_work` calls per second, overwhelmingly delay=0
+   (immediate). This rules out "callback not firing" as the cause.
+
+2. **Nearly zero fallback.** Only 0-7 fallback fires per second. The pump is
+   genuinely callback-driven, not limping on the 33ms fallback timer.
+
+3. **Zero reentrancy.** No contention within the pump itself.
+
+4. **Timers are being superseded (callbacks > fires).** On second 8: 141
+   callbacks but only 65 fires. Each `schedule_work(0)` kills the pending timer
+   and creates a new one. If two callbacks arrive between run loop iterations,
+   the first timer never fires.
+
+5. **~65-134 work/sec yields ~29fps — about 3-4 `do_message_loop_work()` calls
+   per frame.** Each call processes one internal CEF pipeline stage. With ~10ms
+   between work calls (100 work/sec), a 3-stage frame takes ~30ms — matching the
+   observed p50 of 25ms.
+
+**Conclusion:** The bottleneck is timer scheduling latency for immediate work.
+When CEF says "I need work NOW" (delay=0), we create a new `CFRunLoopTimer`. But
+timer creation + run loop registration is heavyweight. Before the timer fires,
+another callback arrives and supersedes it. The work rate is throttled by how
+fast the run loop processes timers, not by how fast CEF requests work.
+
+This directly points to Idea 3 (CFRunLoopSource) as the next experiment. A
+persistent `CFRunLoopSource` for delay=0 work avoids timer creation entirely —
+signaling is just setting a flag, and it fires on the very next run loop
+iteration regardless of how many times it's been signaled.
