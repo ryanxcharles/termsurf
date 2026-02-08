@@ -432,4 +432,102 @@ is a headless process — it needs to run its own CFRunLoop.
 - If fps drops below 50: the timer precision may be too coarse — check whether
   CEF is requesting sub-millisecond delays that CFRunLoop can't deliver.
 
-**Status:** Not started
+**Implementation notes:**
+
+All three missing pieces from the reference implementation were added:
+
+1. `cef_pump` module: reentrancy guard (`is_active` / `reentrancy_detected`),
+   one-shot CFRunLoop timer scheduling, 33ms fallback timer after each
+   `do_message_loop_work()`.
+2. `benchmark_timers` module: moved scroll simulation and monitoring from the
+   while-loop into an 8ms repeating CFRunLoop timer callback.
+3. `external_message_pump: 1` in CEF settings, `on_schedule_message_pump_work`
+   callback in `ProfileBPH` forwarding to `cef_pump::schedule_work()`.
+4. Main loop replaced with `cfrunloop::run()` (blocking). Quit paths updated to
+   call `cfrunloop::stop()`.
+5. The init deadlock from Issue 342 E4 did not occur — `cef::initialize()`
+   returned successfully before `CFRunLoopRun()` started. A kick-start call
+   (`cef_pump::schedule_work(0)`) bootstraps the pump.
+
+**Results (run 1 — fresh app, thermal nominal):**
+
+```
+[BENCH] Trial 1/7: 29.0fps  10.0% @60fps  p50=24.9ms  p95=84.7ms
+[BENCH] Trial 2/7: 32.1fps  16.2% @60fps  p50=21.8ms  p95=83.1ms
+[BENCH] Trial 3/7: 30.8fps  15.9% @60fps  p50=24.8ms  p95=83.5ms
+[BENCH] Trial 4/7: 30.7fps  13.7% @60fps  p50=23.5ms  p95=83.4ms
+[BENCH] Trial 5/7: 29.8fps  11.1% @60fps  p50=26.3ms  p95=80.6ms
+[BENCH] Trial 6/7: 27.7fps  12.3% @60fps  p50=26.8ms  p95=84.8ms
+[BENCH] Trial 7/7: 30.0fps  13.4% @60fps  p50=25.3ms  p95=84.0ms
+
+Summary: 0/7 good mode, 7/7 bad mode (bimodal: NO)
+```
+
+**Results (run 2 — fresh app, thermal still nominal):**
+
+```
+[BENCH] Trial 1/7: 29.1fps  11.1% @60fps  p50=25.2ms  p95=85.4ms
+[BENCH] Trial 2/7: 27.2fps   7.6% @60fps  p50=31.1ms  p95=90.0ms
+[BENCH] Trial 3/7: 28.3fps  11.4% @60fps  p50=25.5ms  p95=85.2ms
+[BENCH] Trial 4/7: 27.6fps  15.5% @60fps  p50=24.7ms  p95=88.0ms
+[BENCH] Trial 5/7: 27.6fps  15.6% @60fps  p50=24.9ms  p95=91.1ms
+[BENCH] Trial 6/7: 28.4fps  15.8% @60fps  p50=24.9ms  p95=86.2ms
+[BENCH] Trial 7/7: 26.7fps  17.6% @60fps  p50=24.6ms  p95=89.6ms
+
+Summary: 0/7 good mode, 7/7 bad mode (bimodal: NO)
+```
+
+**Analysis:**
+
+The event-driven pump is significantly worse than the busy-wait loop:
+
+| Metric     | Busy-wait (Exp 2 run 1) | Event-driven (Exp 3) |
+| ---------- | ----------------------- | -------------------- |
+| Avg fps    | ~50                     | ~29                  |
+| @60fps     | 75–85%                  | 10–17%               |
+| p50        | 17–19ms                 | 25ms                 |
+| p95        | 33ms                    | 83–91ms              |
+
+Key findings:
+
+1. **~30fps matches the 33ms fallback timer exactly.** The fallback timer is the
+   dominant scheduling mechanism. CEF's `on_schedule_message_pump_work` callback
+   is not firing reliably enough to drive 60fps rendering — after the initial
+   burst, the callback stops being the primary work driver, and the 33ms fallback
+   becomes the ceiling.
+
+2. **p50 of ~25ms = 1.5 vsync intervals.** Frames land between vsync boundaries
+   because `do_message_loop_work()` isn't called quickly enough after CEF has
+   work ready. The timer scheduling overhead (create timer → run loop iteration
+   → fire timer) adds latency that the busy-wait loop didn't have.
+
+3. **No init deadlock.** The two-phase approach wasn't even needed —
+   `cef::initialize()` returned successfully before `CFRunLoopRun()`. This rules
+   out Issue 342 E4's failure mode.
+
+4. **No bimodality, just consistently bad.** Every trial is ~29fps across both
+   runs. The callback-driven timing is uniformly slow rather than bistable.
+
+5. **This matches Issue 325 E5's core problem** — the callback stops being
+   reliable after initial frames — but the fallback timer (which E5 lacked)
+   prevents a complete stall. The fallback keeps the pump alive at 30fps instead
+   of dying at 3 frames.
+
+**Why the reference implementation works but ts3 doesn't:** The reference uses
+`NSApp(mtm).run()` (AppKit's full event loop), not bare `CFRunLoopRun()`. NSApp
+dispatches Cocoa-level events, display link callbacks, and other AppKit-internal
+machinery that CEF's Chrome runtime may depend on. A headless process with bare
+`CFRunLoopRun()` only processes timers and run loop sources — it misses the
+AppKit event dispatching layer. The ts2 implementation worked because CEF ran
+in-process with WezTerm, which had a full NSApplication event loop.
+
+**Conclusion:** The `on_schedule_message_pump_work` callback approach does not
+work for 60fps rendering in a headless CEF process on macOS. The callback is
+unreliable after the initial burst, and bare `CFRunLoopRun()` lacks the AppKit
+event dispatching that CEF apparently needs. The busy-wait loop, despite its CPU
+cost, remains necessary for frame throughput. The fix for thermal throttling
+should instead focus on reducing the busy-wait frequency (e.g.,
+`cfrunloop::run_for(0.001)` instead of `0.000`) rather than eliminating the loop
+entirely.
+
+**Status:** Done — reverted to busy-wait approach
