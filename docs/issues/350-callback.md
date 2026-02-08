@@ -700,3 +700,59 @@ forwarding). Stage 2 (CEF lock) requires the old process to complete
 `cef::shutdown()` before the new process can initialize. The fix must ensure
 the old profile process fully exits (or at least releases the CEF lock) before
 the launcher spawns the replacement.
+
+### Experiment 6: Retry CEF initialization on SingletonLock failure
+
+**Goal:** Handle the CEF `SingletonLock` contention from Experiment 5 so
+multi-trial benchmarks can run. Combined with Experiment 5's early unregister
+(which fixed the launcher forwarding race), this should allow the Experiment 4
+architecture to be properly evaluated.
+
+**The problem:** The benchmark coordinator starts trial 2 before trial 1's
+`cef::shutdown()` has released the `SingletonLock`. Trial 2's process spawns
+correctly (Experiment 5 fixed the forwarding), but `cef::initialize()` fails
+because the lock file is still held by the dying trial 1 process.
+
+We can't control when the coordinator starts trial 2 — it reacts to benchmark
+results, not process exit. And we can't call `cef::shutdown()` from inside
+`tick_callback` (it would destroy CEF while we're in a CEF-driven timer). The
+shutdown sequence is inherently asynchronous.
+
+**Fix: retry loop around `cef::initialize()`.**
+
+```rust
+let mut init_result = 0;
+for attempt in 0..15 {
+    init_result = cef::initialize(...);
+    if init_result == 1 {
+        break;
+    }
+    if attempt < 14 {
+        eprintln!("Profile: CEF init attempt {} failed, retrying in 200ms...", attempt + 1);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+if init_result != 1 {
+    eprintln!("Profile: CEF initialize failed after 15 attempts");
+    std::process::exit(1);
+}
+```
+
+15 attempts at 200ms = 3 seconds maximum wait. In practice, `cef::shutdown()` in
+the old process should release the lock within 1-2 seconds, so retries should
+succeed within a few attempts.
+
+**What to change:**
+
+1. Wrap the existing `cef::initialize()` call in a retry loop (15 attempts, 200ms
+   between retries)
+2. Log each retry attempt for diagnostics
+3. Keep `std::process::exit(1)` if all retries exhausted
+
+**Expected outcome:** Trial 2 retries `cef::initialize()` until trial 1 releases
+the lock. Combined with Experiment 5's early unregister, both race conditions are
+handled: the launcher spawns a new process (not forwarding), and the new process
+waits for the lock. The Experiment 4 dual-mode timers and NSApp get a full 7-trial
+benchmark.
+
+**Status:** Not started
