@@ -96,3 +96,67 @@ would close the gap between bare `CFRunLoopRun()` and the reference
 implementation's `NSApp().run()`.
 
 ## Experiments
+
+### Experiment 1: Diagnostic logging of the pump cycle
+
+**Goal:** Determine whether the performance gap is caused by the callback not
+firing, or by our timer scheduling adding too much latency. Without this data,
+every fix is a guess.
+
+**Method:** Add counters and per-second summary logging to the `cef_pump` module.
+No architectural changes — just instrumentation.
+
+**What to measure (per-second counters):**
+
+1. `schedule_work` calls with delay=0 (CEF wants immediate work)
+2. `schedule_work` calls with delay>0 (CEF wants deferred work)
+3. Fallback timer fires (the 33ms timer scheduled when no callback arrives)
+4. Callback-scheduled timer fires (timers created from `schedule_work`)
+5. Reentrancy detections (`is_active` was true when timer fired)
+6. `do_message_loop_work()` calls actually executed
+
+Print a one-line summary every second:
+
+```
+[PUMP] callbacks=247(imm=180 def=67) fires=62(cb=31 fb=31) reentrant=0 work=62
+```
+
+This tells us:
+
+- **callbacks >> fires**: timer scheduling is the bottleneck — callbacks fire
+  but timers don't keep up (new timers supersede old ones before they fire)
+- **fires ≈ 30, mostly fallback**: callback isn't driving the pump — we're
+  running at the fallback rate
+- **callbacks ≈ 30**: CEF itself only requests work ~30 times/sec — the problem
+  is upstream of our scheduling
+- **callbacks >> 60, fires ≈ 60**: pump is working correctly, problem is
+  elsewhere (GUI-side presentation, etc.)
+
+**What to change in `cef_pump`:**
+
+Add atomic counters (no mutex needed for counters):
+
+```rust
+static SCHED_IMMEDIATE: AtomicU64 = AtomicU64::new(0);
+static SCHED_DEFERRED: AtomicU64 = AtomicU64::new(0);
+static FIRE_CALLBACK: AtomicU64 = AtomicU64::new(0);
+static FIRE_FALLBACK: AtomicU64 = AtomicU64::new(0);
+static REENTRANT: AtomicU64 = AtomicU64::new(0);
+static WORK_DONE: AtomicU64 = AtomicU64::new(0);
+```
+
+In `schedule_work`: increment `SCHED_IMMEDIATE` or `SCHED_DEFERRED` based on
+whether the original `delay_ms` was <= 0 or > 0. Track whether the timer being
+scheduled is a fallback (called from `pump_timer_callback` with
+`MAX_TIMER_DELAY_MS`) by adding a `is_fallback: bool` parameter or a separate
+`schedule_fallback` function.
+
+In `pump_timer_callback`: increment `FIRE_CALLBACK` or `FIRE_FALLBACK` based on
+whether this timer was scheduled by a callback or the fallback path. Increment
+`WORK_DONE` after each `do_message_loop_work()`. Increment `REENTRANT` when
+`is_active` is true.
+
+Print the summary every second using a timestamp check in `pump_timer_callback`
+(since it's the only code that runs regularly on the main thread).
+
+**Status:** Not started
