@@ -14,26 +14,140 @@ TermSurf is a terminal emulator with an integrated web browser. Users type
 terminal pane, sharing cookies and sessions across tabs within the same browser
 profile.
 
-The project has evolved through three generations:
+The project has evolved through four generations:
 
 - **ts1** (Ghostty + WKWebView) — macOS-only. WKWebView had limited API and no
   cross-platform path. Abandoned in favor of CEF.
 - **ts2** (WezTerm + in-process CEF) — Embedded CEF directly in WezTerm. CEF
   allows only one `root_cache_path` per process, meaning one browser profile per
   application. Multiple profiles required moving CEF out-of-process. Abandoned.
-- **ts3** (WezTerm + out-of-process CEF via XPC) — **Active development.** Each
-  browser profile gets its own CEF process, solving the one-profile-per-process
-  limitation. Processes communicate with the GUI via XPC Mach port transfer.
+- **ts3** (WezTerm + out-of-process CEF via XPC) — Each browser profile gets its
+  own CEF process, solving the one-profile-per-process limitation. Processes
+  communicate with the GUI via XPC Mach port transfer. Superseded by ts4 after
+  26 experiments (Issues 325–350) proved CEF's headless off-screen rendering
+  caps at ~31fps on macOS.
+- **ts4** (Ghostty fork + in-process Chromium) — **Active development.** Forks
+  Ghostty as the application (terminal panes are native, in-process). Embeds
+  Chromium directly via the Content API (not CEF) for browser panes, with
+  multiple browser profiles coexisting in one process. No custom XPC protocol.
 
 **Directory structure:**
 
-- `ts3/` — TermSurf 3.0 (WezTerm fork + out-of-process CEF). Active work.
+- `ts4/` — TermSurf 4.0 (Ghostty fork + in-process Chromium). Active work.
+- `ts3/` — TermSurf 3.0 (WezTerm fork + out-of-process CEF). Superseded.
 - `ts2/` — TermSurf 2.0 (WezTerm fork + in-process CEF). Superseded.
 - `ts1/` — TermSurf 1.x (Ghostty fork + WKWebView). Legacy, still builds.
 - `cef-rs/` — CEF Rust bindings. Used by `ts3/termsurf-profile/`.
 - `docs/issues/` — All documentation across all generations.
 
-## TermSurf 3.0 (ts3/) — Active Development
+## TermSurf 4.0 (ts4/) — Active Development
+
+### Architecture
+
+ts4 returns to the ts1 approach — fork Ghostty as the application — with the
+critical fix: replace WKWebView (which was too limited) with Chromium embedded
+directly via the Content API (not CEF, which cannot sustain 60fps headless).
+
+```
+Ghostty Fork (Zig + Swift macOS shell)
+├── Terminal panes (in-process, native Ghostty rendering)
+├── Browser panes (in-process Chromium via Content API)
+│   ├── BrowserContext "work" (Profile 1)
+│   ├── BrowserContext "personal" (Profile 2)
+│   └── BrowserContext "guest" (Profile N)
+├── Pane/tab/split management (inherited from Ghostty)
+├── Keybindings, configuration (inherited from Ghostty)
+└── Metal renderer (inherited from Ghostty)
+```
+
+**Key architectural decisions:**
+
+- **Chromium is in-process.** The browser host runs inside the Ghostty fork's
+  process. Chromium may still spawn its own renderer and GPU sub-processes
+  internally (this is Chromium's own multi-process architecture and is
+  expected). We do not invent a custom XPC or IPC protocol.
+- **Multiple profiles in one process.** Chromium's `content::BrowserContext`
+  supports multiple instances with different storage paths. Each gets isolated
+  cookies, localStorage, and cache. This is what Chrome and Electron do. The
+  one-profile-per-process constraint was a CEF limitation, not a Chromium
+  limitation (Issue 406).
+- **No CEF.** CEF's headless off-screen rendering caps at ~31fps on macOS with
+  an event-driven pump, or ~50fps with a busy-wait loop at 100% CPU. 26
+  experiments across Issues 325–350 proved this is architectural, not
+  configurable. The Content API eliminates every CEF limitation.
+- **Fallback.** If multiple profiles cannot coexist in one process in practice,
+  we may fall back to a multi-process approach with one Chromium process per
+  profile, communicating via XPC (similar to ts3's architecture but with the
+  Content API instead of CEF).
+
+### How We Got Here
+
+| Issue | Finding |
+| ----- | ------- |
+| 400   | Original ts4 vision: own everything, use Content API directly |
+| 401   | Content API feasibility study; ~2000 lines of OSR code needed |
+| 402   | WezTerm vs Alacritty for terminal (superseded by Issue 404) |
+| 403   | Proved multi-process IOSurface compositing works at 60fps |
+| 404   | Selected Ghostty as terminal emulator (Metal renderer, IOSurface) |
+| 405   | Fork Ghostty with browser out-of-process (Option B selected) |
+| 406   | Profile isolation is CEF-only; Content API supports multiple profiles; CEF ruled out |
+| 407   | In-process Chromium PoC: two profiles, side by side, high framerate |
+
+### Current Work: Issue 407 PoC
+
+The PoC modifies Chromium's `content_shell` (the minimal Content API embedder)
+inside the Chromium source tree. The modifications are small (~5 files) and use
+Chromium's native windowed rendering. The resulting `.app` bundle is built by
+Chromium's GN/Ninja build system.
+
+**Phases:**
+
+1. **Test page** — Bun app serving a blue spinning square with localStorage
+   identity and FPS counter (`ts4/public/index.html`, `ts4/server.ts`)
+2. **Merge Chromium** — Fork Chromium into `ts4/termsurf-chromium/` following
+   the merge-upstream pattern (depot_tools fetch, move to subdirectory, merge
+   unrelated histories)
+3. **Build Chromium** — Configure GN, build content_shell with
+   `autoninja -C out/Default content_shell`
+4. **Modify content_shell** — Add second `ShellBrowserContext` with different
+   storage path, display two `WebContents` side by side in one window
+5. **Measure** — Verify profile isolation, measure framerate, document findings
+
+**Success criteria:** Two panes in one window, each showing a different
+localStorage string that persists across restarts. Both rendering at 60fps or
+higher. No custom XPC/IPC protocol.
+
+### Directory Structure
+
+- `ts4/public/index.html` — Test page (blue spinning square, localStorage, FPS)
+- `ts4/server.ts` — Bun HTTP server on port 9407
+- `ts4/termsurf-chromium/` — Chromium source tree (fork)
+  - `content/shell/` — content_shell (the embedder we modify)
+  - `out/Default/` — Build output (gitignored)
+
+### Build Commands
+
+```bash
+# Test page server
+cd ts4 && bun run server.ts
+
+# Chromium (after depot_tools is installed and source is fetched)
+cd ts4/termsurf-chromium
+gn gen out/Default --args='is_debug=false symbol_level=0 enable_nacl=false is_component_build=true'
+autoninja -C out/Default content_shell
+```
+
+### Profile Data
+
+- `~/.config/termsurf/poc/profile-a/` — Profile A storage (PoC)
+- `~/.config/termsurf/poc/profile-b/` — Profile B storage (PoC)
+
+## TermSurf 3.0 (ts3/) — Superseded
+
+ts3 used out-of-process CEF via XPC for browser rendering. Superseded by ts4
+after 26 experiments (Issues 325–350) proved CEF's headless off-screen rendering
+cannot sustain 60fps on macOS. The XPC and IOSurface patterns developed in ts3
+remain valuable reference for ts4's fallback architecture.
 
 ### Foundational Constraint: One CEF Process Per Profile
 
@@ -306,7 +420,22 @@ testbed before ts1 integration. Changes made to the example:
 
 ## Documentation
 
-### TermSurf 3.0 (active)
+### TermSurf 4.0 (active)
+
+- `docs/issues/400-a-new-hope.md` — Original ts4 vision and architecture sketch
+- `docs/issues/401-chromium-feasibility.md` — Content API surface analysis
+- `docs/issues/401-programming-language.md` — Language selection (Rust + C++)
+- `docs/issues/402-wezterm-vs-alacritty.md` — Terminal emulator comparison
+  (superseded by Issue 404)
+- `docs/issues/403-swift-rust-cpp.md` — Multi-process IOSurface compositing PoC
+- `docs/issues/404-terminal-emulator.md` — Terminal emulator evaluation (Ghostty
+  selected)
+- `docs/issues/405-architecture-comparison.md` — In-process vs out-of-process
+  terminal (Ghostty fork selected)
+- `docs/issues/406-chromium.md` — Profile isolation analysis; CEF ruled out
+- `docs/issues/407-chromium-poc.md` — In-process Chromium PoC plan
+
+### TermSurf 3.0
 
 - `docs/issues/301-architecture.md` — High-level architecture overview
 - `docs/issues/302-webview.md` — Webview rendering implementation
