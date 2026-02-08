@@ -1212,3 +1212,95 @@ means the loop is working — most pump calls happen without timer overhead.
 - **~26fps, work ~400+/sec, repump ~300:** Same problem as Experiment 8 — the
   re-pump loop starves the scroll timer. The 10-iteration cap needs to be lower,
   or the approach is fundamentally flawed.
+
+**Status:** Failed (re-pump loop is a no-op; fallback timer causes cascade)
+
+**Results (all 7 trials completed):**
+
+```
+[BENCH] Trial 1/7: 23.9fps  9.0% @60fps  p50=44.2ms  p95=83.3ms
+[BENCH] Trial 2/7: 25.1fps  14.8% @60fps  p50=41.6ms  p95=82.2ms
+[BENCH] Trial 3/7: 24.0fps  15.7% @60fps  p50=44.1ms  p95=79.8ms
+[BENCH] Trial 4/7: 24.3fps  14.8% @60fps  p50=41.2ms  p95=86.8ms
+[BENCH] Trial 5/7: 23.2fps  11.2% @60fps  p50=43.5ms  p95=86.8ms
+[BENCH] Trial 6/7: 22.0fps  9.7% @60fps  p50=48.3ms  p95=89.0ms
+[BENCH] Trial 7/7: 23.8fps  8.2% @60fps  p50=39.9ms  p95=83.5ms
+```
+
+Average: ~24fps, p50 ~42ms. Worse than every previous experiment.
+
+**PUMP diagnostics (trial 7):**
+
+```
+[PUMP] callbacks=561(imm=561 def=0) work=9093 repump=22 idle=0
+[PUMP] callbacks=196(imm=173 def=23) work=15460 repump=17 idle=0
+[PUMP] callbacks=164(imm=136 def=28) work=18579 repump=6 idle=0
+[PUMP] callbacks=226(imm=181 def=45) work=22523 repump=13 idle=0
+[PUMP] callbacks=154(imm=107 def=47) work=26533 repump=8 idle=0
+[PUMP] callbacks=238(imm=145 def=93) work=35561 repump=10 idle=0
+[PUMP] callbacks=248(imm=145 def=103) work=35279 repump=7 idle=0
+[PUMP] callbacks=203(imm=127 def=76) work=32261 repump=6 idle=0
+[PUMP] callbacks=179(imm=123 def=56) work=29369 repump=4 idle=0
+[PUMP] callbacks=114(imm=95 def=19) work=27712 repump=3 idle=0
+```
+
+**Findings:**
+
+1. **repump is near zero (3-22/sec out of 9,000-35,000 work).** CEF's
+   `on_schedule_message_pump_work` fires from a background thread, after the
+   pump callback has already returned. `IMMEDIATE_REQUESTED` is never set when
+   the re-pump loop checks it. The loop is a no-op — every pump goes through a
+   timer round-trip regardless.
+
+2. **Cascading timer accumulation from the 33ms fallback.** Every
+   `pump_callback` invocation creates a 33ms fallback timer. Each fallback fires
+   and creates another. Combined with ~248 new timers/sec from `schedule_work`
+   (which always creates deferred timers), the count grows linearly:
+   9k → 15k → 22k → 35k work/sec until CPU-saturated. This is the same class
+   of bug as Experiment 2's zombie timer leak.
+
+3. **~24fps with p50=42ms — worst result yet.** The 35,000 idle
+   `do_message_loop_work()` calls per second starve the scroll timer even more
+   aggressively than Experiment 8's ~470/sec.
+
+4. **Implementation bug: `schedule_work(delay > 0)` always creates timers.**
+   The initial implementation skipped timer creation when `IS_ACTIVE` was true,
+   which killed the pump entirely (no surface reached the GUI). The fix —
+   always creating deferred timers — prevented the deadlock but introduced
+   the cascading accumulation because no timer is ever invalidated.
+
+**Comparison across all experiments:**
+
+| Experiment | Approach                          | fps   | p50   | work/sec  |
+| ---------- | --------------------------------- | ----- | ----- | --------- |
+| 1          | Timer-only, CFRunLoopRun          | ~29   | 25ms  | ~100      |
+| 3          | Source (fixed)                    | ~22   | 44ms  | ~100-180  |
+| 7          | Timer-only, NSApp, dual-mode      | ~31.5 | 22ms  | ~100      |
+| 8          | 1ms repeating, 1000Hz             | ~26   | 15ms  | ~470      |
+| 9          | Re-pump loop + fallback cascade   | ~24   | 42ms  | ~9k-35k   |
+| Reference  | Busy-wait (100% CPU)              | ~50   | 17ms  | ~∞        |
+
+**Conclusion:** The hypothesis is disproven. The ~31fps cap is NOT caused by
+timer round-trip overhead between CEF pipeline stages. CEF does not call
+`on_schedule_message_pump_work(0)` synchronously during `do_message_loop_work()`
+— it fires from a background thread after the callback returns. There are no
+consecutive pipeline stages to batch. The re-pump loop never triggers.
+
+This, combined with Experiment 8's finding, definitively rules out pump-side
+scheduling as the bottleneck. Both approaches to increasing pump frequency —
+unconditional polling (Exp 8) and conditional re-pumping (Exp 9) — made
+performance worse by starving the scroll timer. The on-demand timer approach in
+Experiment 7 (~100 work/sec, ~31.5fps) is the optimal event-driven result.
+
+The remaining gap to ~50fps (reference busy-wait) must come from a factor
+outside the pump architecture:
+
+- **IPC overhead:** IOSurface Mach port transfer adds per-frame latency not
+  present in the in-process reference
+- **CEF's internal frame pacing:** CEF may pace frame delivery differently
+  in external pump mode vs its own message loop
+- **GUI presentation timing:** The GUI's wgpu texture import and rendering
+  pipeline may introduce latency
+
+Experiment 7's architecture should be restored as the final event-driven pump
+implementation.
