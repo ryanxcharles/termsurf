@@ -89,16 +89,26 @@ Questions to answer:
 
 **Weight: High**
 
-The IOSurface must be created and rendered to via Metal (or wgpu targeting
-Metal). The closer the renderer is to raw Metal, the simpler the IOSurface
-integration.
+On macOS, Metal is the only native GPU API. Everything else is a translation
+layer on top of Metal:
+
+- **wgpu** translates to Metal via its `wgpu-hal` Metal backend
+- **OpenGL** translates to Metal via Apple's deprecated compatibility layer
+  (no longer maintained, but still functional)
+- **Vulkan** translates to Metal via MoltenVK
+
+There is no way to talk to the GPU on macOS without going through Metal. Any
+of these APIs can work — the IOSurface just needs to end up as a Metal texture
+at some point. But using Metal directly is the shortest path: no translation
+layer to configure, and `MTLTexture` has native IOSurface support via
+`device.makeTexture(descriptor:iosurface:plane:)`. With wgpu or OpenGL, you
+must drop into the underlying Metal layer to set up the IOSurface backing.
 
 Questions to answer:
 
 - What GPU API does the renderer use? (Metal, wgpu, OpenGL, custom)
-- If OpenGL, is there a Metal migration path or would it need rewriting?
-- If wgpu, how hard is it to access the underlying Metal texture for IOSurface
-  backing?
+- If not Metal, how much work is needed to access the underlying Metal texture
+  for IOSurface backing?
 - Does the renderer use any platform-specific GPU abstractions that complicate
   offscreen use?
 
