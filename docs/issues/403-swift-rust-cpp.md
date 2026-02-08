@@ -228,7 +228,7 @@ let texture = device.makeTexture(
 **Key components:**
 
 ```
-termsurf-blue/
+termsurf-terminal/
 ├── Cargo.toml
 └── src/
     ├── main.rs         Entry point, XPC connection, render loop
@@ -257,7 +257,7 @@ wgpu's Metal backend can create textures from IOSurface via
 **Key components:**
 
 ```
-termsurf-green/
+termsurf-browser/
 ├── CMakeLists.txt      (or Makefile)
 └── src/
     ├── main.cpp        Entry point, XPC connection, render loop
@@ -293,11 +293,11 @@ Three independent builds, no cross-dependencies:
 cd ts4/termsurf-window && swift build
 # or: xcodebuild -scheme TermSurf
 
-# Rust blue pane
-cd ts4/termsurf-blue && cargo build
+# Rust terminal (blue pane for now)
+cd ts4/termsurf-terminal && cargo build
 
-# C++ green pane
-cd ts4/termsurf-green && make
+# C++ browser (green pane for now)
+cd ts4/termsurf-browser && make
 # or: cmake --build build
 ```
 
@@ -308,10 +308,10 @@ ts4/
 ├── termsurf-window/        Swift (SwiftPM or Xcode)
 │   ├── Package.swift
 │   └── Sources/
-├── termsurf-blue/          Rust
+├── termsurf-terminal/      Rust
 │   ├── Cargo.toml
 │   └── src/
-├── termsurf-green/         C++/Obj-C++
+├── termsurf-browser/       C++/Obj-C++
 │   ├── Makefile
 │   └── src/
 └── termsurf-xpc/           Rust XPC library (shared, from ts3)
