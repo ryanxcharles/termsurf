@@ -184,7 +184,58 @@ the present mode is the cause.
 
 **Status:** Done
 
-### Experiment 2: Change WezTerm present mode to AutoVsync
+### Experiment 2: Multi-trial benchmark for bimodality detection
+
+**Goal:** Modify `web benchmark` to run multiple short trials with independent
+profile server restarts, so that bimodality can be detected statistically rather
+than by running 70-second benchmarks one at a time.
+
+**Rationale:** The current benchmark runs one 70-second trial per invocation.
+Detecting bimodality requires running the benchmark repeatedly and comparing
+results across runs. But since the mode is determined at startup and is stable
+within a run, a single 70-second run only gives us one sample. We need multiple
+independent samples to see the distribution.
+
+By restarting the profile server between trials, we get a fresh phase
+relationship between CEF's frame production and the GUI's vsync cycle each time
+— an independent coin flip. A 10-second trial is long enough to clearly identify
+which mode the system is in (p50 of ~16.7ms vs ~33ms is obvious within seconds).
+
+**Design:**
+
+- 7 trials of 10 seconds each (~70s total, same as current benchmark)
+- Full profile server restart between trials (independent phase alignment)
+- ~1 second pause between trials (let the wgpu FIFO queue drain)
+- Per-trial stats printed on one line each
+- Summary at end showing distribution across trials
+
+**What the output should look like:**
+
+```
+[BENCH] Trial 1/7: 52.1fps  85% @60fps  p50=16.7ms  p95=33.4ms
+[BENCH] Trial 2/7: 34.2fps  42% @60fps  p50=33.1ms  p95=66.8ms
+[BENCH] Trial 3/7: 51.8fps  84% @60fps  p50=16.7ms  p95=33.5ms
+...
+[BENCH] Summary: 4/7 good mode, 3/7 bad mode (bimodal: YES)
+```
+
+After Experiment 3 (present mode fix), the same test should show:
+
+```
+[BENCH] Trial 1/7: 51.2fps  83% @60fps  p50=16.7ms  p95=33.4ms
+[BENCH] Trial 2/7: 50.8fps  82% @60fps  p50=16.8ms  p95=33.5ms
+...
+[BENCH] Summary: 7/7 good mode, 0/7 bad mode (bimodal: NO)
+```
+
+**Implementation scope:** Changes needed in the coordinator
+(`termsurf-web/src/main.rs`) to loop over trials, and in the profile server
+(`termsurf-profile/src/main.rs`) to support shorter trial durations. The GUI and
+launcher should not need changes — each trial is a normal spawn/quit cycle.
+
+**Status:** Not started
+
+### Experiment 3: Change WezTerm present mode to AutoVsync
 
 **Goal:** Test whether changing WezTerm's wgpu present mode from `Fifo` to
 `AutoVsync` eliminates the bimodal pattern.
@@ -210,9 +261,8 @@ present_mode: wgpu::PresentMode::AutoVsync,
 
 1. Make the change
 2. `cd ts3 && ./scripts/build-release.sh --open`
-3. Run `web benchmark` 3–5 times
-4. Check for bimodal pattern: are results consistent across runs, or still
-   random?
+3. Run `web benchmark` (multi-trial mode from Experiment 2)
+4. Check for bimodal pattern: are all trials in good mode, or still split?
 
 **What the results tell us:**
 
