@@ -412,13 +412,13 @@ cd ts4/termsurf-browser && make && ./termsurf-browser
 Create a macOS window with a CAMetalLayer that clears to a solid color each
 frame. This proves AppKit + Metal works before adding any IPC.
 
-- [ ] Create `NSApplication` and `NSWindow` in Swift (no storyboard, no XIB —
+- [x] Create `NSApplication` and `NSWindow` in Swift (no storyboard, no XIB —
       pure code)
-- [ ] Add an `NSView` subclass backed by `CAMetalLayer`
-- [ ] Create `MTLDevice` and `MTLCommandQueue`
-- [ ] Implement a render loop (CVDisplayLink or `MTKView`) that clears the
+- [x] Add an `NSView` subclass backed by `CAMetalLayer`
+- [x] Create `MTLDevice` and `MTLCommandQueue`
+- [x] Implement a render loop (CVDisplayLink or `MTKView`) that clears the
       drawable to dark gray at 60fps
-- [ ] Window is resizable and handles resolution changes (Retina)
+- [x] Window is resizable and handles resolution changes (Retina)
 
 **Test:** Run `termsurf-window`. A dark gray window appears. Resizing is smooth.
 Activity Monitor shows one process. Close the window and the process exits.
