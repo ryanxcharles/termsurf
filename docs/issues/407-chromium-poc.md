@@ -140,3 +140,148 @@ The Bun app is minimal:
 If this PoC succeeds, we proceed to integrate Chromium into the Ghostty fork
 (the architecture from Issue 405). If it fails, we revisit the embedding
 strategy before touching Ghostty.
+
+## Implementation Plan
+
+The PoC modifies Chromium's `content_shell` — the minimal Content API embedder
+that ships with the Chromium source — inside the Chromium source tree. The
+modifications are small (~5 files changed) and use Chromium's native windowed
+rendering, not off-screen capture. The resulting `.app` bundle is built by
+Chromium's GN/Ninja build system.
+
+content_shell already uses Objective-C++ for its macOS shell, so the PoC is
+written in ObjC++, not Swift. The Swift integration comes later when we
+integrate with the Ghostty fork (which has a Swift macOS shell).
+
+### Phase 1: Create the test page
+
+Write the spinning blue square page and its HTTP server.
+
+**`ts4/public/index.html`** — Self-contained HTML page:
+
+- Blue spinning square via Canvas 2D, rotating 360 deg/sec (1 Hz)
+- Rotation angle computed from `performance.now()` (wall-clock time, not frame
+  count), so the rotation rate is consistent regardless of framerate
+- On first load: generate a random 8-character string, store in `localStorage`
+- On subsequent loads: read and display the stored string above the canvas
+- FPS counter: track last 60 `requestAnimationFrame` timestamps in a ring
+  buffer, display average FPS updated once per second
+- No external dependencies — all CSS, JS, and HTML in one file
+
+**`ts4/server.ts`** — Bun HTTP server:
+
+- `Bun.serve()` on port 9407 (matching issue number)
+- Serves `ts4/public/index.html` on `GET /`
+- HTTP origin needed because `file://` URLs restrict localStorage in some
+  Chromium configurations
+
+**Verification:** Open `http://localhost:9407` in Chrome. Square spins, FPS
+counter shows ~60fps, random string appears. Reload — same string persists. Open
+in incognito — different string appears.
+
+### Phase 2: Build Chromium from source
+
+Get `content_shell` building and running on macOS.
+
+- [ ] Install depot_tools (`git clone` into `~/depot_tools`, add to `PATH`)
+- [ ] Fetch Chromium source into `/Users/ryan/dev/chromium/`:
+      `mkdir /Users/ryan/dev/chromium && cd /Users/ryan/dev/chromium
+      caffeinate fetch --no-history chromium`
+      ~30–50 GB. Takes hours. `--no-history` saves disk. `caffeinate` prevents
+      sleep. The existing `/Users/ryan/dev/termsurf/chromium/` is a shallow
+      read-only clone from Issue 401 research — it cannot be built.
+- [ ] Exclude `/Users/ryan/dev/chromium` from Spotlight indexing
+- [ ] Configure GN:
+      `cd /Users/ryan/dev/chromium/src
+      gn gen out/Default --args='
+        is_debug = false
+        symbol_level = 0
+        enable_nacl = false
+        is_component_build = true
+      '`
+- [ ] Build content_shell: `autoninja -C out/Default content_shell` (1–7 hours
+      depending on hardware)
+- [ ] Verify it runs:
+      `./out/Default/Content\ Shell.app/Contents/MacOS/Content\ Shell \
+        http://localhost:9407`
+      Start the Bun server first. Confirm the test page loads with spinning
+      square, FPS counter, and localStorage string.
+
+### Phase 3: Modify content_shell for dual profiles
+
+Modify ~5 files inside the Chromium tree to create two `ShellBrowserContext`
+instances with different storage paths and display two `WebContents` side by
+side in one window.
+
+**Step 1: Add custom-path constructor to ShellBrowserContext**
+
+`content/shell/browser/shell_browser_context.h` and `.cc` — Add a constructor
+that accepts a `base::FilePath` so two instances can have different storage
+directories:
+
+- Profile A: `~/.config/termsurf/poc/profile-a/`
+- Profile B: `~/.config/termsurf/poc/profile-b/`
+
+**Step 2: Create two BrowserContexts in ShellBrowserMainParts**
+
+`content/shell/browser/shell_browser_main_parts.h` — Add members:
+
+```cpp
+std::unique_ptr<ShellBrowserContext> browser_context_b_;
+std::unique_ptr<WebContents> web_contents_b_;
+```
+
+`content/shell/browser/shell_browser_main_parts.cc` — Modify:
+
+- `InitializeBrowserContexts()`: Create `browser_context_` with profile-a path,
+  `browser_context_b_` with profile-b path
+- `InitializeMessageLoopContext()`: Create Shell A with `browser_context_`
+  loading `http://localhost:9407`. Create a second `WebContents` with
+  `browser_context_b_` loading the same URL. Add the second WebContents view to
+  Shell A's window (right half).
+- `PostMainMessageLoopRun()`: Clean up `web_contents_b_` and
+  `browser_context_b_`
+
+**Step 3: Side-by-side layout on macOS**
+
+`content/shell/browser/shell_platform_delegate_mac.mm` or
+`shell_browser_main_parts_mac.mm` — After both WebContents are created:
+
+- Get Shell A's NSWindow contentView
+- Set Shell A's WebContents view frame to the left half of the window
+- Set Shell B's WebContents view frame to the right half
+- Add both as subviews with autoresizing masks
+
+**Step 4: Build and run**
+
+```
+autoninja -C out/Default content_shell
+```
+
+Incremental build after ~5 file changes: 1–5 minutes.
+
+```
+# Terminal 1:
+cd /Users/ryan/dev/termsurf/ts4 && bun run server.ts
+
+# Terminal 2:
+/Users/ryan/dev/chromium/src/out/Default/Content\ Shell.app/Contents/MacOS/Content\ Shell \
+  --hide-toolbar
+```
+
+**Expected result:** One window, two panes. Both show the blue spinning square.
+Left pane shows one localStorage string, right pane shows a different one. Both
+strings persist across app restarts.
+
+### Phase 4: Measure and document
+
+- [ ] Verify profile isolation: two different localStorage strings, persisting
+      across restarts. Check `~/.config/termsurf/poc/profile-a/` and
+      `profile-b/` exist with separate data on disk.
+- [ ] Measure framerate from FPS counters in both panes. On 60Hz display: expect
+      ~60fps. On ProMotion: expect up to 120fps.
+- [ ] Test higher framerates with `--disable-frame-rate-limit` and
+      `--disable-gpu-vsync` flags. These affect the in-process windowed
+      rendering path (unlike CEF's OSR path where they had no effect).
+- [ ] Measure CPU usage via Activity Monitor or `top`.
+- [ ] Document findings in this issue.
