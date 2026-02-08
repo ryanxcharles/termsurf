@@ -475,18 +475,18 @@ Connect the Swift window to the Rust process via XPC. The Rust process sends its
 blue IOSurface Mach port. The Swift window imports it and renders it full-screen
 (not split yet — that's Phase 7).
 
-- [ ] Swift registers a named Mach service (e.g., `com.termsurf.window.<pid>`)
+- [x] Swift registers a named Mach service (e.g., `com.termsurf.window.<pid>`)
       or creates an XPC listener
-- [ ] Swift spawns `termsurf-terminal` as a child process, passing the service
+- [x] Swift spawns `termsurf-terminal` as a child process, passing the service
       name as a CLI argument
-- [ ] Rust connects to the named service via `termsurf-xpc`
-- [ ] Rust renders blue to IOSurface, creates Mach port, sends XPC message:
+- [x] Rust connects to the named service via `termsurf-xpc`
+- [x] Rust renders blue to IOSurface, creates Mach port, sends XPC message:
       `{ action: "frame", iosurface_port: <port>, width: N, height: N }`
-- [ ] Swift receives the message, extracts the Mach port via
+- [x] Swift receives the message, extracts the Mach port via
       `xpc_dictionary_copy_mach_send`
-- [ ] Swift calls `IOSurfaceLookupFromMachPort` to import the IOSurface
-- [ ] Swift creates a `MTLTexture` from the imported IOSurface
-- [ ] Swift renders the texture as a full-screen quad in its Metal render pass
+- [x] Swift calls `IOSurfaceLookupFromMachPort` to import the IOSurface
+- [x] Swift creates a `MTLTexture` from the imported IOSurface
+- [x] Swift renders the texture as a full-screen quad in its Metal render pass
 
 **Test:** Run `termsurf-window`. A blue window appears. Activity Monitor shows
 two processes (`termsurf-window` and `termsurf-terminal`). Closing the window
@@ -498,13 +498,13 @@ Same as Phase 5 but with the C++ process. After this phase, Swift can receive
 IOSurface from both Rust and C++ — but only one at a time. Split view comes in
 Phase 7.
 
-- [ ] Swift spawns `termsurf-browser` as a second child process with its own XPC
+- [x] Swift spawns `termsurf-browser` as a second child process with its own XPC
       channel
-- [ ] C++ connects to the Swift window's XPC service using `libxpc` C API
-- [ ] C++ renders green to IOSurface, creates Mach port, sends XPC message:
+- [x] C++ connects to the Swift window's XPC service using `libxpc` C API
+- [x] C++ renders green to IOSurface, creates Mach port, sends XPC message:
       `{ action: "frame", iosurface_port: <port>, width: N, height: N }`
-- [ ] Swift receives the message and imports the IOSurface as a Metal texture
-- [ ] Swift renders the C++ texture as a full-screen quad (temporarily replacing
+- [x] Swift receives the message and imports the IOSurface as a Metal texture
+- [x] Swift renders the C++ texture as a full-screen quad (temporarily replacing
       the Rust texture, or displayed alongside — either confirms it works)
 
 **Test:** Run `termsurf-window`. A green window appears (or green replaces
@@ -516,17 +516,17 @@ three.
 Composite both textures side by side in the Swift window. This is the target
 state described in the product requirements.
 
-- [ ] Swift Metal render pass draws two textured quads: left half (Rust/blue)
+- [x] Swift Metal render pass draws two textured quads: left half (Rust/blue)
       and right half (C++/green)
-- [ ] Vertex shader positions quads at `[-1, -1] to [0, 1]` (left) and
+- [x] Vertex shader positions quads at `[-1, -1] to [0, 1]` (left) and
       `[0, -1] to [1, 1]` (right)
-- [ ] Fragment shader samples from the correct IOSurface-backed texture for each
+- [x] Fragment shader samples from the correct IOSurface-backed texture for each
       quad
-- [ ] Both child processes send frames; Swift composites them in the same render
+- [x] Both child processes send frames; Swift composites them in the same render
       pass
-- [ ] Frame timing: Swift renders at display refresh rate (CVDisplayLink), using
+- [x] Frame timing: Swift renders at display refresh rate (CVDisplayLink), using
       the latest IOSurface from each child
-- [ ] Measure and log compositing performance (time from IOSurface receive to
+- [x] Measure and log compositing performance (time from IOSurface receive to
       present, target: <2ms)
 
 **Test:** Run `termsurf-window`. Window shows blue on the left, green on the
