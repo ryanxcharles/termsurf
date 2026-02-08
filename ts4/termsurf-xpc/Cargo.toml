@@ -1,0 +1,13 @@
+[package]
+name = "termsurf-xpc"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal XPC bindings for TermSurf cross-process communication"
+license = "MIT"
+
+[dependencies]
+libc.workspace = true
+block2.workspace = true
+
+[dev-dependencies]
+clap.workspace = true

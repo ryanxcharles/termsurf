@@ -43,5 +43,12 @@ ts1/vgcore.*
 /cef/
 /chromium/
 
+# TermSurf 4.0 (ts4/) build outputs
+ts4/termsurf-window/.build/
+ts4/termsurf-terminal/target/
+ts4/termsurf-browser/termsurf-browser
+ts4/termsurf-browser/src/*.o
+ts4/termsurf-xpc/target/
+
 # cef-rs build outputs
 cef-rs/target/

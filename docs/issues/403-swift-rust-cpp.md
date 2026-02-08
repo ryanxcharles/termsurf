@@ -389,15 +389,15 @@ checklist item is checked.
 Create the `ts4/` directory at the repo root with three empty packages that
 build successfully. No functionality yet — just the scaffolding.
 
-- [ ] Create `ts4/` directory
-- [ ] Create `ts4/termsurf-window/` as a Swift package (Package.swift +
+- [x] Create `ts4/` directory
+- [x] Create `ts4/termsurf-window/` as a Swift package (Package.swift +
       Sources/main.swift) that prints "hello from window" and exits
-- [ ] Create `ts4/termsurf-terminal/` as a Rust package (Cargo.toml +
+- [x] Create `ts4/termsurf-terminal/` as a Rust package (Cargo.toml +
       src/main.rs) that prints "hello from terminal" and exits
-- [ ] Create `ts4/termsurf-browser/` as a C++/Obj-C++ package (Makefile +
+- [x] Create `ts4/termsurf-browser/` as a C++/Obj-C++ package (Makefile +
       src/main.cpp) that prints "hello from browser" and exits
-- [ ] Copy `ts3/termsurf-xpc/` to `ts4/termsurf-xpc/` for the Rust XPC bindings
-- [ ] Add `ts4/` build outputs to `.gitignore`
+- [x] Copy `ts3/termsurf-xpc/` to `ts4/termsurf-xpc/` for the Rust XPC bindings
+- [x] Add `ts4/` build outputs to `.gitignore`
 
 **Test:** Run all three binaries and see their hello messages.
 
