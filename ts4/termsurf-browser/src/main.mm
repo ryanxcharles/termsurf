@@ -6,14 +6,13 @@
 #include <cstdio>
 #include <mach/mach.h>
 
-int main() {
-    fprintf(stderr, "[Browser] Starting...\n");
-
-    // Step 1: Create IOSurface (BGRA8, 800x600)
-    int width = 800;
-    int height = 600;
+/// Create an IOSurface, render it green via Metal, and return the handle.
+/// The caller is responsible for releasing the IOSurface when done.
+static IOSurfaceRef render_green(id<MTLDevice> device, id<MTLCommandQueue> commandQueue,
+                                  int width, int height) {
     int bytesPerElement = 4;
-    int bytesPerRow = width * bytesPerElement;
+    // Metal requires bytesPerRow aligned to 16 bytes for IOSurface-backed textures.
+    int bytesPerRow = (width * bytesPerElement + 15) & ~15;
     OSType pixelFormat = 'BGRA';
 
     NSDictionary *properties = @{
@@ -26,23 +25,11 @@ int main() {
 
     IOSurfaceRef surface = IOSurfaceCreate((__bridge CFDictionaryRef)properties);
     if (!surface) {
-        fprintf(stderr, "[Browser] ERROR: Failed to create IOSurface\n");
-        return 1;
+        fprintf(stderr, "[Browser] ERROR: Failed to create IOSurface %dx%d\n", width, height);
+        return nullptr;
     }
 
-    fprintf(stderr, "[Browser] IOSurface created: %zux%zu\n",
-            IOSurfaceGetWidth(surface),
-            IOSurfaceGetHeight(surface));
-
-    // Step 2: Create Metal device and render green
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-    if (!device) {
-        fprintf(stderr, "[Browser] ERROR: No Metal device available\n");
-        return 1;
-    }
-
-    id<MTLCommandQueue> commandQueue = [device newCommandQueue];
-    fprintf(stderr, "[Browser] Metal device: %s\n", [[device name] UTF8String]);
+    fprintf(stderr, "[Browser] IOSurface created: %dx%d\n", width, height);
 
     // Create Metal texture backed by the IOSurface (zero-copy)
     MTLTextureDescriptor *texDesc = [MTLTextureDescriptor
@@ -57,8 +44,9 @@ int main() {
                                                     iosurface:surface
                                                         plane:0];
     if (!texture) {
-        fprintf(stderr, "[Browser] ERROR: Failed to create Metal texture from IOSurface\n");
-        return 1;
+        fprintf(stderr, "[Browser] ERROR: Failed to create Metal texture\n");
+        CFRelease(surface);
+        return nullptr;
     }
 
     // Render clear-to-green
@@ -82,7 +70,44 @@ int main() {
     IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, nullptr);
     fprintf(stderr, "[Browser] Rendered green, pixel (0,0): (%u, %u, %u, %u)\n", r0, g0, b0, a0);
 
-    // Step 3: Set up XPC listener
+    return surface;
+}
+
+/// Send a frame message with the IOSurface Mach port via the given connection.
+static void send_frame(xpc_connection_t peer, IOSurfaceRef surface, int width, int height) {
+    mach_port_t port = IOSurfaceCreateMachPort(surface);
+    fprintf(stderr, "[Browser] Created Mach port: %u\n", port);
+
+    xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
+    xpc_dictionary_set_string(msg, "action", "frame");
+    xpc_dictionary_set_mach_send(msg, "iosurface_port", port);
+    xpc_dictionary_set_uint64(msg, "width", (uint64_t)width);
+    xpc_dictionary_set_uint64(msg, "height", (uint64_t)height);
+    xpc_connection_send_message(peer, msg);
+
+    fprintf(stderr, "[Browser] Frame sent: %dx%d\n", width, height);
+}
+
+int main() {
+    fprintf(stderr, "[Browser] Starting...\n");
+
+    // Step 1: Create Metal device (reused across resizes).
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (!device) {
+        fprintf(stderr, "[Browser] ERROR: No Metal device available\n");
+        return 1;
+    }
+
+    id<MTLCommandQueue> commandQueue = [device newCommandQueue];
+    fprintf(stderr, "[Browser] Metal device: %s\n", [[device name] UTF8String]);
+
+    // Step 2: Render initial green IOSurface.
+    int width = 800;
+    int height = 600;
+    IOSurfaceRef surface = render_green(device, commandQueue, width, height);
+    if (!surface) return 1;
+
+    // Step 3: Set up XPC listener.
     const char *service_name = "com.termsurf.ts4.browser";
     xpc_connection_t listener = xpc_connection_create_mach_service(
         service_name,
@@ -114,30 +139,31 @@ int main() {
             if (xpc_get_type(event) != XPC_TYPE_DICTIONARY) return;
 
             const char *action = xpc_dictionary_get_string(event, "action");
-            if (action) {
-                fprintf(stderr, "[Browser] Received: %s\n", action);
+            if (!action) return;
+
+            fprintf(stderr, "[Browser] Received: %s\n", action);
+
+            if (strcmp(action, "resize") == 0) {
+                int w = (int)xpc_dictionary_get_uint64(event, "width");
+                int h = (int)xpc_dictionary_get_uint64(event, "height");
+                fprintf(stderr, "[Browser] Resizing to %dx%d\n", w, h);
+
+                IOSurfaceRef new_surface = render_green(device, commandQueue, w, h);
+                if (new_surface) {
+                    xpc_connection_t remote = xpc_dictionary_get_remote_connection(event);
+                    send_frame(remote, new_surface, w, h);
+                }
             }
         });
         xpc_connection_resume(peer);
 
-        // Create Mach port and send frame
-        mach_port_t port = IOSurfaceCreateMachPort(surface);
-        fprintf(stderr, "[Browser] Created Mach port: %u\n", port);
-
-        xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
-        xpc_dictionary_set_string(msg, "action", "frame");
-        xpc_dictionary_set_mach_send(msg, "iosurface_port", port);
-        xpc_dictionary_set_uint64(msg, "width", (uint64_t)width);
-        xpc_dictionary_set_uint64(msg, "height", (uint64_t)height);
-        xpc_connection_send_message(peer, msg);
-        // msg is released by ARC (xpc objects are Obj-C objects under ARC)
-
-        fprintf(stderr, "[Browser] Frame sent: %dx%d\n", width, height);
+        // Send initial frame.
+        send_frame(peer, surface, width, height);
     });
 
     xpc_connection_resume(listener);
     fprintf(stderr, "[Browser] Listening on %s\n", service_name);
 
-    // Block forever, processing XPC events
+    // Step 4: Block forever, processing XPC events.
     dispatch_main();
 }

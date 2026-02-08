@@ -5,7 +5,7 @@
 #include <string.h>
 #include <dispatch/dispatch.h>
 
-void xipc_connect(const char *service_name, xipc_frame_callback callback, void *context) {
+xipc_connection_t xipc_connect(const char *service_name, xipc_frame_callback callback, void *context) {
     xpc_connection_t conn = xpc_connection_create_mach_service(
         service_name,
         dispatch_get_main_queue(),
@@ -14,7 +14,7 @@ void xipc_connect(const char *service_name, xipc_frame_callback callback, void *
 
     if (!conn) {
         fprintf(stderr, "[XIPC] Failed to connect to %s\n", service_name);
-        return;
+        return NULL;
     }
 
     fprintf(stderr, "[XIPC] Connecting to %s\n", service_name);
@@ -57,6 +57,22 @@ void xipc_connect(const char *service_name, xipc_frame_callback callback, void *
     xpc_release(hello);
 
     fprintf(stderr, "[XIPC] Sent hello to %s\n", service_name);
+
+    return (xipc_connection_t)conn;
+}
+
+void xipc_send_resize(xipc_connection_t conn, uint32_t width, uint32_t height, const char *scale) {
+    if (!conn) return;
+
+    xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
+    xpc_dictionary_set_string(msg, "action", "resize");
+    xpc_dictionary_set_uint64(msg, "width", (uint64_t)width);
+    xpc_dictionary_set_uint64(msg, "height", (uint64_t)height);
+    xpc_dictionary_set_string(msg, "scale", scale);
+    xpc_connection_send_message((xpc_connection_t)conn, msg);
+    xpc_release(msg);
+
+    fprintf(stderr, "[XIPC] Sent resize: %ux%u scale=%s\n", width, height, scale);
 }
 
 void *xipc_import_iosurface(mach_port_t port) {
@@ -65,6 +81,10 @@ void *xipc_import_iosurface(mach_port_t port) {
         fprintf(stderr, "[XIPC] IOSurfaceLookupFromMachPort(%u) failed\n", port);
     }
     return (void *)surface;
+}
+
+void xipc_deallocate_port(mach_port_t port) {
+    mach_port_deallocate(mach_task_self(), port);
 }
 
 size_t xipc_iosurface_width(void *surface) {

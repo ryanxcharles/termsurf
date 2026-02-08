@@ -80,7 +80,7 @@ mod dictionary;
 #[cfg(target_os = "macos")]
 mod error;
 #[cfg(target_os = "macos")]
-mod ffi;
+pub mod ffi;
 #[cfg(target_os = "macos")]
 pub mod iosurface;
 #[cfg(target_os = "macos")]
@@ -109,6 +109,7 @@ pub use runloop::{dispatch_main, run_loop, stop_run_loop};
 // Re-export types for convenience
 #[cfg(target_os = "macos")]
 pub use ffi::mach_port_t;
+
 
 /// A Send-safe wrapper around XPC endpoint.
 ///

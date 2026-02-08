@@ -5,14 +5,15 @@ use termsurf_xpc::*;
 fn main() {
     eprintln!("[Terminal] Starting...");
 
-    // Step 1: Create IOSurface + render blue UPFRONT (before entering dispatch loop).
-    // This happens while the listener is not yet active, so XPC events queue up
-    // on the main dispatch queue and are processed once dispatch_main() starts.
+    // Step 1: Create wgpu device (reused across resizes).
+    let (device, queue) = create_wgpu_device();
+
+    // Step 2: Render initial blue IOSurface.
     let width: u32 = 800;
     let height: u32 = 600;
-    let surface_addr = render_blue(width, height) as usize;
+    let surface_addr = render_blue(&device, &queue, width, height) as usize;
 
-    // Step 2: Set up XPC listener
+    // Step 3: Set up XPC listener.
     let service_name = "com.termsurf.ts4.terminal";
     let listener =
         XpcListener::new_mach_service(service_name).expect("Failed to create XPC listener");
@@ -20,25 +21,57 @@ fn main() {
     let peers: Arc<Mutex<Vec<XpcConnection>>> = Arc::new(Mutex::new(Vec::new()));
     let peers_clone = peers.clone();
 
+    // Share device and queue with event handlers.
+    let device = Arc::new(device);
+    let queue = Arc::new(queue);
+
     set_new_connection_handler(&listener, move |peer| {
         eprintln!("[Terminal] New client connected");
 
-        set_event_handler(&peer, |event| match event {
+        let dev = device.clone();
+        let q = queue.clone();
+
+        set_event_handler(&peer, move |event| match event {
             Ok(dict) => {
                 if let Some(action) = dict.get_string("action") {
                     eprintln!("[Terminal] Received: {}", action);
+
+                    if action == "resize" {
+                        let w = dict.get_u64("width") as u32;
+                        let h = dict.get_u64("height") as u32;
+                        eprintln!("[Terminal] Resizing to {}x{}", w, h);
+
+                        let new_surface = render_blue(&dev, &q, w, h);
+                        let port = iosurface::create_mach_port(new_surface);
+
+                        let msg = XpcDictionary::new();
+                        msg.set_string("action", "frame");
+                        msg.set_mach_send("iosurface_port", port);
+                        msg.set_u64("width", w as u64);
+                        msg.set_u64("height", h as u64);
+
+                        // Send back via the connection that sent this message.
+                        let remote = unsafe {
+                            ffi::xpc_dictionary_get_remote_connection(dict.as_raw())
+                        };
+                        if !remote.is_null() {
+                            unsafe {
+                                ffi::xpc_connection_send_message(remote, msg.as_raw());
+                            }
+                        }
+                        eprintln!("[Terminal] Resized frame sent: {}x{}", w, h);
+                    }
                 }
             }
             Err(e) => eprintln!("[Terminal] Event error: {}", e),
         });
         peer.resume();
 
-        // Create a fresh Mach port for this client
+        // Send initial frame.
         let surface = surface_addr as iosurface::IOSurfaceRef;
         let port = iosurface::create_mach_port(surface);
         eprintln!("[Terminal] Created Mach port: {}", port);
 
-        // Send frame message
         let msg = XpcDictionary::new();
         msg.set_string("action", "frame");
         msg.set_mach_send("iosurface_port", port);
@@ -48,29 +81,19 @@ fn main() {
 
         eprintln!("[Terminal] Frame sent: {}x{}", width, height);
 
-        // Store peer to keep connection alive
+        // Store peer to keep connection alive.
         peers_clone.lock().unwrap().push(peer);
     });
 
     listener.resume();
     eprintln!("[Terminal] Listening on {}", service_name);
 
-    // Step 3: Block forever, processing XPC events on main dispatch queue.
-    // Queued events (from clients that connected during rendering) are now processed.
+    // Step 4: Block forever, processing XPC events.
     dispatch_main();
 }
 
-/// Create an IOSurface, render it blue via wgpu, and return the handle.
-fn render_blue(width: u32, height: u32) -> iosurface::IOSurfaceRef {
-    let surface =
-        iosurface::create_iosurface(width, height).expect("Failed to create IOSurface");
-    eprintln!(
-        "[Terminal] IOSurface created: {}x{}",
-        iosurface::get_width(surface),
-        iosurface::get_height(surface)
-    );
-
-    // Create wgpu device
+/// Create wgpu device and queue (Metal backend).
+fn create_wgpu_device() -> (wgpu::Device, wgpu::Queue) {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::METAL,
         ..Default::default()
@@ -93,6 +116,19 @@ fn render_blue(width: u32, height: u32) -> iosurface::IOSurfaceRef {
     .expect("Failed to create wgpu device");
 
     eprintln!("[Terminal] wgpu device: {:?}", adapter.get_info().name);
+
+    (device, queue)
+}
+
+/// Create an IOSurface, render it blue via wgpu, and return the handle.
+fn render_blue(device: &wgpu::Device, queue: &wgpu::Queue, width: u32, height: u32) -> iosurface::IOSurfaceRef {
+    let surface =
+        iosurface::create_iosurface(width, height).expect("Failed to create IOSurface");
+    eprintln!(
+        "[Terminal] IOSurface created: {}x{}",
+        iosurface::get_width(surface),
+        iosurface::get_height(surface)
+    );
 
     // Create render target
     let texture = device.create_texture(&wgpu::TextureDescriptor {
