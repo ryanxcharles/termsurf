@@ -1304,3 +1304,184 @@ outside the pump architecture:
 
 Experiment 7's architecture should be restored as the final event-driven pump
 implementation.
+
+## Performance Journey Summary (Issues 325–350)
+
+This section reviews the full arc of performance work across TermSurf 3.0,
+tracking what was accomplished, what was learned, and what problems remain.
+
+### The arc
+
+**Issue 325 — Webview Frame Rate (12fps → 60fps).** The first performance issue.
+CEF's `run_message_loop()` didn't pump frequently enough. Replacing it with a
+custom polling loop calling `do_message_loop_work()` every 1ms achieved ~60fps.
+This established the busy-wait pattern that all subsequent work builds on.
+
+**Issue 338 — Browser Lag (~20fps).** Five experiments tried to fix lag through
+CEF configuration: IOSurface caching, `windowless_frame_rate`,
+`multi_threaded_message_loop`, `external_begin_frame_enabled`, Chrome
+command-line flags. All failed. Root cause identified:
+`CefCopyFrameGenerator::GenerateCopyFrame()` discards frames when one is
+in-progress. This is baked into CEF's C++ code and cannot be configured away.
+
+**Issue 339 — Electron Study.** Studied how Electron achieves 240fps using
+Chromium's `FrameSinkVideoCapturer` API with `kGpuMemoryBuffer` — a completely
+different capture path than CEF's `OnAcceleratedPaint`. Concluded that CEF's
+architecture might be fundamentally limited.
+
+**Issue 340 — Architecture Reconsideration.** Began evaluating whether to abandon
+CEF entirely and embed Chromium directly (C++ rewrite). However, research
+revealed the cef-rs OSR example achieves 60fps with the same CEF version. The
+bottleneck wasn't CEF itself — it was ts3's integration. This reopened
+optimization before committing to a rewrite.
+
+**Issue 341 — Performance Investigation (18 experiments).** Systematic search for
+why ts3 gets ~20fps while the cef-rs example gets ~60fps. Tried winit event
+loops, `external_message_pump`, NSApplication initialization, hidden windows,
+CVDisplayLink, activation policies. A hidden 1x1 window achieved 60fps but
+steals focus — architectural dead end. Root cause: CEF's
+`SyntheticBeginFrameSource` needs either a CFRunLoop or display link.
+
+**Issue 342 — 60fps Without a Window (20fps → 38fps).** Replacing
+`thread::sleep(1ms)` with `CFRunLoopRunInMode(0.001)` unlocked 38fps. The
+breakthrough: CEF's timer sources were being starved by dead sleeping instead
+of run loop servicing. This was the first real architectural fix.
+
+**Issue 343 — Optimal Performance (38fps → stuck).** Eight experiments tried to
+close the gap from 38fps to 60fps. All failed or regressed. Key finding:
+`do_message_loop_work()` takes >1ms on 100% of calls in ts3 vs only 5.7% in the
+cef-rs example. CEF's internal task queue backs up because complementary work
+(NSApplication events) isn't processed.
+
+**Issue 344 — cef-test Harness (~50fps).** Built a minimal 3-process CEF test
+harness to isolate the multi-process architecture from WezTerm. Result: ~50fps
+with two profiles. Proved the multi-process XPC + IOSurface Mach port
+architecture is sound. The 12fps gap between cef-test (50fps) and ts3 (38fps)
+came from input routing overhead.
+
+**Issue 345 — Automated Benchmark (51fps without mouse, 39fps with).** Created
+`web benchmark` with simulated scroll input directly in the profile server,
+eliminating manual scrolling variability. Discovery: 51.5fps with no mouse
+movement, 39fps with continuous mouse movement. Mouse move events forwarded
+over XPC cause frame drops.
+
+**Issue 346 — Mouse Performance (problem didn't exist).** Three experiments
+investigated the 12fps mouse penalty. Finding: the "mouse performance problem"
+disappeared after removing debug logging from hot paths. Performance is bimodal
+(good mode vs bad mode), and the mouse movement correlation was coincidental.
+Run-to-run variance dominates the signal.
+
+**Issue 347 — Lingering Lag (debug → release = +12fps).** Release builds
+improved cef-test from 38fps to 51fps and eliminated "bad mode." TermSurf
+pipeline adds ~2ms per frame vs cef-test (p50: 18.9ms vs 16.7ms). That 2ms
+pushes frames past the 16.7ms vsync deadline, reducing 60fps hit rate from
+81-85% to 47-55%.
+
+**Issue 348 — CEF Test Ceiling (~51fps hard limit).** Investigated why cef-test
+plateaus at ~51fps. Removing 1ms sleeps pushed to 55.7fps but caused thermal
+throttling (46.7fps → 33.7fps → 27.9fps across runs). IOSurface handles are
+NOT reused by CEF (~850 unique handles per ~3000 frames), ruling out "send Mach
+port once" optimization. The ~15% vsync miss rate is fundamental to the CEF OSR
+→ IOSurface → Mach port → wgpu pipeline.
+
+**Issue 349 — Bimodal Pattern.** Investigated why frame rates cluster into
+distinct "good" and "bad" modes. Likely cause: WezTerm uses `PresentMode::Fifo`
+(strict queue) vs cef-test's `AutoVsync` (mailbox). In Fifo, one late frame
+desynchronizes the entire queue. Also introduced `external_message_pump` mode
+with CEF callbacks, which dropped fps from ~50 to ~29 — the starting point for
+Issue 350.
+
+**Issue 350 — Event-Driven CEF Message Pump (this issue).** Nine experiments to
+close the gap between the event-driven pump (~29fps) and the busy-wait (~50fps).
+Best result: Experiment 7 at ~31.5fps using NSApp, dual-mode timers, and three
+infrastructure fixes (early launcher unregister, CEF init retry, dummy NSEvent
+for clean shutdown). Experiments 8 and 9 definitively proved that pump-side
+scheduling is not the bottleneck — more pumping only starves the scroll timer.
+
+### What was accomplished
+
+1. **50fps rendering pipeline.** Out-of-process CEF with IOSurface Mach port
+   transfer achieves ~50fps in release builds — close to the 60fps target and
+   smooth enough for real use.
+
+2. **Automated benchmarking.** `web benchmark` provides deterministic,
+   multi-trial measurement with simulated scroll input, eliminating manual
+   testing variability.
+
+3. **Event-driven pump.** `external_message_pump` mode with on-demand timers
+   achieves ~31.5fps at <5% CPU. The busy-wait reference burns 100% CPU for
+   ~50fps. The event-driven architecture is the correct production approach
+   despite the fps gap.
+
+4. **Multi-trial reliability.** Three infrastructure fixes (early launcher
+   unregister, CEF init retry loop, dummy NSEvent posting) enable reliable
+   multi-trial benchmarking across profile process restarts.
+
+5. **Multi-process architecture validated.** cef-test proved the XPC + Mach port
+   + IOSurface pipeline is sound. The architecture supports multiple profiles,
+   each in its own process, with near-reference-level performance.
+
+### What was learned
+
+1. **CEF's `on_schedule_message_pump_work` fires from a background thread.**
+   It does not fire synchronously during `do_message_loop_work()`. This means
+   there is no opportunity for immediate re-pumping inside the callback — every
+   pump cycle requires a timer round-trip through the run loop.
+
+2. **~100 work/sec is the optimal pump rate.** Experiment 7 achieves ~31.5fps
+   at ~100 `do_message_loop_work()` calls per second. Pumping faster (470/sec
+   in Exp 8, 35k/sec in Exp 9) makes things worse by starving the scroll timer.
+   `do_message_loop_work()` takes ~2ms even with no work pending.
+
+3. **Timer scheduling overhead is not the bottleneck.** Creating one-shot
+   CFRunLoopTimers for each pump is cheap enough at ~100/sec. The gap to ~50fps
+   is not caused by timer allocation or run loop scheduling latency.
+
+4. **NSApp + dual-mode timers provide a small improvement (~2.5fps).** Switching
+   from bare `CFRunLoopRun()` to `NSApp().run()` and registering timers in both
+   `kCFRunLoopCommonModes` and `NSEventTrackingRunLoopMode` helps marginally.
+
+5. **Debug builds cost ~12fps.** Release builds are essential for performance
+   work. Debug logging in hot paths (XPC event handlers, frame callbacks) also
+   causes measurable regression.
+
+6. **Performance is bimodal due to `PresentMode::Fifo`.** The GUI's strict vsync
+   queue means one late frame desynchronizes subsequent frames. This creates
+   distinct "good mode" (~50fps) and "bad mode" (~35fps) clusters that appear
+   random but are deterministic based on initial vsync phase alignment.
+
+7. **IOSurface handles are not reused.** CEF allocates ~850 unique IOSurfaces
+   per ~3000 frames. Each frame requires a fresh Mach port transfer. The "cache
+   the Mach port" optimization is impossible with the current CEF API.
+
+8. **`NSApp.stop()` requires a dummy event.** In a headless process with no
+   windows, `[NSApp stop:nil]` sets a flag but `NSApp.run()` blocks on
+   `nextEventMatchingMask:` forever. Posting `NSEventTypeApplicationDefined`
+   after `stop:` is the standard Cocoa fix.
+
+### What problems remain
+
+1. **The 19fps gap between event-driven (~31fps) and busy-wait (~50fps).** This
+   is the central unsolved problem. Nine experiments have ruled out pump-side
+   scheduling as the cause. The gap likely comes from one or more of:
+   - CEF's internal frame pacing in `external_message_pump` mode vs its own loop
+   - The busy-wait's `cfrunloop::run_for(0.0)` processing run loop events inline
+     with pumping, giving CEF tighter integration than timer-based pumping
+   - Interaction between the event-driven pump and the scroll timer's 8ms cadence
+
+2. **The ~10fps gap between busy-wait (~50fps) and 60fps.** Even the best
+   busy-wait result misses ~15% of vsync deadlines. This is fundamental to the
+   out-of-process pipeline: CEF render → IOSurface → Mach port → wgpu import →
+   present. Each step adds latency that the in-process cef-rs example avoids.
+
+3. **`PresentMode::Fifo` bimodality.** The GUI's strict vsync queue amplifies
+   single frame drops into sustained mode shifts. Switching to `AutoVsync`
+   (mailbox) would absorb late frames gracefully but hasn't been tested in ts3.
+
+4. **100% CPU in the busy-wait.** The ~50fps busy-wait burns one full CPU core,
+   causing thermal throttling within minutes. The event-driven pump solves this
+   but at a 19fps cost. No middle ground has been found.
+
+5. **Experiment 7 code needs to be restored.** The codebase currently has
+   Experiment 9's failed re-pump loop and cascading fallback timers. The code
+   should be reverted to Experiment 7's clean on-demand timer architecture.
