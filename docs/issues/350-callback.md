@@ -211,3 +211,85 @@ This directly points to Idea 3 (CFRunLoopSource) as the next experiment. A
 persistent `CFRunLoopSource` for delay=0 work avoids timer creation entirely —
 signaling is just setting a flag, and it fires on the very next run loop
 iteration regardless of how many times it's been signaled.
+
+### Experiment 2: CFRunLoopSource for immediate work
+
+**Goal:** Eliminate timer creation overhead for delay=0 requests. Experiment 1
+showed that CEF sends 100-190 immediate callbacks/sec but only 65-134 timers
+fire — the rest are superseded before they get a chance. A persistent
+`CFRunLoopSource` avoids timer allocation entirely.
+
+**How CFRunLoopSource works:**
+
+- Created once at init with `CFRunLoopSourceCreate()`, added to the run loop
+  with `CFRunLoopAddSource()`
+- Signaled with `CFRunLoopSourceSignal()` — just sets a flag, O(1), no
+  allocation
+- Followed by `CFRunLoopWakeUp()` to wake the run loop if it's sleeping
+- On the next run loop iteration, the source's callback fires
+- Multiple signals before the callback fires coalesce into one fire — but that
+  one fire calls `do_message_loop_work()` which processes ALL pending CEF work
+- The source stays registered — no re-creation needed
+
+**Architecture:**
+
+- **delay=0 (immediate):** Signal the persistent source + wake the run loop.
+  No timer creation, no timer supersession. This is the fast path — Experiment 1
+  showed ~75% of callbacks are immediate.
+- **delay>0 (deferred):** Keep using `CFRunLoopTimer` as before. These are
+  infrequent (~25% of callbacks) and legitimately need a delay.
+- **Fallback:** Keep the 33ms fallback timer. Although Experiment 1 showed it
+  rarely fires, it's a safety net.
+
+**What to add to `cfrunloop` module:**
+
+```rust
+type CFRunLoopSourceRef = *mut c_void;
+
+// CFRunLoopSourceContext — 10-field struct, only `perform` callback needed
+#[repr(C)]
+struct CFRunLoopSourceContext {
+    version: CFIndex,
+    info: *mut c_void,
+    retain: *const c_void,
+    release: *const c_void,
+    copy_description: *const c_void,
+    equal: *const c_void,
+    hash: *const c_void,
+    schedule: *const c_void,
+    cancel: *const c_void,
+    perform: unsafe extern "C" fn(*mut c_void),
+}
+
+extern "C" {
+    fn CFRunLoopSourceCreate(
+        allocator: *const c_void,
+        order: CFIndex,
+        context: *const CFRunLoopSourceContext,
+    ) -> CFRunLoopSourceRef;
+    fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFStringRef);
+    fn CFRunLoopSourceSignal(source: CFRunLoopSourceRef);
+    fn CFRunLoopSourceInvalidate(source: CFRunLoopSourceRef);
+}
+```
+
+Helper functions: `create_source(callback) -> CFRunLoopSourceRef`,
+`signal_source(source)`.
+
+**What to change in `cef_pump`:**
+
+- Add `init()` function that creates and registers the persistent source. Call
+  it once before `cfrunloop::run()`.
+- `schedule_work(delay_ms)` with delay<=0: signal the source + `wake_up()`.
+  No timer involved.
+- `schedule_work(delay_ms)` with delay>0: create a `CFRunLoopTimer` as before.
+- Source callback: same reentrancy guard, `do_message_loop_work()`, fallback
+  scheduling as current `pump_timer_callback`.
+- Keep all diagnostic counters from Experiment 1 (add a `FIRE_SOURCE` counter).
+
+**Expected outcome:** If timer supersession was the bottleneck, work/sec should
+jump significantly (from ~100 to several hundred), and fps should increase
+proportionally. If fps stays at ~29, the bottleneck is elsewhere (run loop
+iteration speed, benchmark timer contention, or NSApp vs CFRunLoop).
+
+**Status:** Not started
