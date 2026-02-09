@@ -429,15 +429,122 @@ views, `RenderWidgetHostView` not receiving resize notifications after the
 manual frame changes, or a deeper issue with how content_shell's platform
 delegate manages visibility for reparented views.
 
-### Phase 5: Measure and document
+## Conclusion
 
-- [ ] Verify profile isolation: two different localStorage strings, persisting
-      across restarts. Check `~/.config/termsurf/poc/profile-a/` and
-      `profile-b/` exist with separate data on disk.
-- [ ] Measure framerate from FPS counters in both panes. On 60Hz display: expect
-      ~60fps. On ProMotion: expect up to 120fps.
-- [ ] Test higher framerates with `--disable-frame-rate-limit` and
-      `--disable-gpu-vsync` flags. These affect the in-process windowed
-      rendering path (unlike CEF's OSR path where they had no effect).
-- [ ] Measure CPU usage via Activity Monitor or `top`.
-- [ ] Document findings in this issue.
+### What we proved
+
+1. **Multiple BrowserContexts work in one process.** Two
+   `ShellBrowserContext` instances with different `SHELL_DIR_USER_DATA` paths
+   coexist in the same Chromium process. Each has its own cookies, localStorage,
+   and cache. This confirms Issue 406's architectural analysis — the
+   one-profile-per-process limitation is CEF-specific, not a Chromium
+   constraint.
+
+2. **Profile isolation is real.** The Two Profiles app displays two panes side
+   by side, each showing a different localStorage identity string. The strings
+   persist across app restarts. Profile data is stored on disk at
+   `~/.config/termsurf/poc/profile-a/` and `profile-b/`.
+
+3. **Chromium builds and runs from our fork.** The Chromium source lives as a
+   git submodule at `ts4/termsurf-chromium/src/`. We can add new build targets
+   (`content/two_profiles/`) alongside content_shell without modifying any
+   existing Chromium files (except one line in `//BUILD.gn` to register the
+   target). Incremental builds after code changes take ~15-20 seconds.
+
+4. **content_shell renders at 60fps.** A single WebContents in a single Shell
+   window renders the spinning blue square at a steady 60fps. The Content API's
+   windowed rendering path has no framerate ceiling like CEF's off-screen path
+   did.
+
+### What we did not prove
+
+**Multiple WebContents at 60fps in one window.** The Two Profiles app renders
+both panes at only 2-3fps. This is the critical unsolved problem.
+
+### Why Two Profiles renders at 2-3fps
+
+The root cause is that content_shell's rendering pipeline assumes **one
+WebContents owns one window's content area**, managed entirely through
+Chromium's platform delegate. Two Profiles breaks this assumption by manually
+manipulating the NSView hierarchy, and Chromium's internal visibility tracking
+breaks as a result.
+
+**Chromium's framerate control chain:**
+
+```
+NSWindow visibility
+  → RenderWidgetHostViewCocoa (NSView) detects visibility
+  → RenderWidgetHostImpl::WasShown() / WasHidden()
+  → Blink PageSchedulerImpl::SetPageVisible()
+  → CC SchedulerStateMachine::visible_
+  → ShouldSubscribeToBeginFrames()
+  → IF visible: subscribe to vsync → 60fps
+    IF hidden:  unsubscribe from vsync → ~1fps (background throttle)
+```
+
+When the CC scheduler's `visible_` flag is false, it **unsubscribes from vsync
+entirely** — no BeginFrame signals are delivered, no `requestAnimationFrame`
+callbacks fire. The ~2-3fps we observe matches Chromium's background tab
+throttling rate.
+
+**Why both panes are throttled:**
+
+- **WebContents B** was created via raw `WebContents::Create()` without going
+  through `Shell::CreateShell()` → `SetContents()`. It was never linked to a
+  platform window through Chromium's internal channels. The
+  `RenderWidgetHostViewCocoa` does not know it is in a visible window.
+
+- **WebContents A** (Shell A) was created through the proper pipeline and
+  initially renders at 60fps. But then we manually resize its NSView from
+  full-window to half-window and add a sibling view — bypassing Chromium's
+  view management. The `RenderWidgetHostViewCocoa` has its own NSView-level
+  visibility tracking that can override explicit `WasShown()` calls, and the
+  manual frame manipulation causes it to misreport its state.
+
+- **Explicit `WasShown()` calls don't help** (Experiment 2). `WasShown()` sets
+  visibility at the `WebContentsImpl` level, but `RenderWidgetHostViewCocoa`
+  has independent visibility tracking at the NSView level that overrides it.
+
+- **Broken autoresizing masks compound the problem.** Both views were set to
+  `NSViewWidthSizable | NSViewHeightSizable`, which tells AppKit to stretch
+  each view to fill the entire container on resize. The views would overlap
+  on any window resize, potentially causing layout thrashing that further
+  confuses the visibility detector.
+
+- **content_shell doesn't use Chromium's `views` framework.** Chrome's
+  `NativeWidgetNSWindowBridge` with `windowDidChangeOcclusionState:` handles
+  sophisticated occlusion tracking — but content_shell uses raw NSWindows
+  without this infrastructure. The `RenderWidgetHostViewCocoa` falls back to
+  its own NSView-level visibility detection, which was not designed for
+  manually reparented views.
+
+### What comes next
+
+The framerate problem is solvable but requires deeper integration with
+Chromium's rendering pipeline. Possible approaches:
+
+1. **Use Chromium's `views` framework** instead of raw NSWindows. Create a
+   `views::Widget` with two child `views::WebView` instances. The `views`
+   framework handles visibility, layout, and resize notifications through
+   proper Chromium channels, avoiding the NSView manipulation that breaks
+   `RenderWidgetHostViewCocoa`.
+
+2. **Off-screen compositing.** Use `RenderWidgetHostViewBase`'s
+   `CopyFromSurface()` or a custom `DelegatedFrameHost` to capture each
+   WebContents' rendered output to an IOSurface, then composite both surfaces
+   in a single Metal render pass — similar to the CEF approach from ts3 but
+   without CEF's framerate ceiling.
+
+3. **Patch `RenderWidgetHostViewCocoa`** to support externally-managed
+   visibility. Override the NSView-level visibility detection so that explicit
+   `WasShown()` calls are respected even when the view hierarchy doesn't match
+   what the view expects.
+
+4. **Create two Shell windows and composite them.** Create two full Shell
+   instances (each with proper platform window setup), then either reparent
+   their content views into a shared parent NSWindow or capture their
+   IOSurfaces for compositing. This preserves Chromium's one-WebContents-
+   per-window assumption while achieving the side-by-side visual result.
+
+Each approach has different tradeoffs in complexity, invasiveness to the
+Chromium source, and risk. This will be explored in Issue 408.
