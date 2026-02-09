@@ -188,9 +188,9 @@ cd ts4/termsurf-chromium/src
 git push origin 146.0.7650.0-electron 146.0.7650.0-termsurf
 ```
 
-- [ ] Upstream repo checked out at 146.0.7650.0
-- [ ] Submodule fetched and on the same commit
-- [ ] Version verified
+- [x] Upstream repo checked out at 146.0.7650.0
+- [x] Submodule fetched and on the same commit
+- [x] Version verified — both at `8a0719fc70ef6`
 
 ### Phase 3: Apply the Electron patch set
 
