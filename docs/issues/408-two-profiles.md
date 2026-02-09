@@ -130,15 +130,15 @@ approach requires deep understanding of Chromium's GPU compositing pipeline.
 
 Electron faces the exact same problem — multiple WebContents in a single
 BrowserWindow — and solves it with **three coordinated patches to Chromium**
-that disable visibility throttling at every layer of the rendering pipeline.
-A single-layer fix (like our Experiment 2's `WasShown()` call) is insufficient
+that disable visibility throttling at every layer of the rendering pipeline. A
+single-layer fix (like our Experiment 2's `WasShown()` call) is insufficient
 because Chromium has three independent throttling systems that all must be
 bypassed.
 
 ### Layer 1: RenderWidgetHost — `disable_hidden.patch`
 
-Adds a `disable_hidden_` flag to `RenderWidgetHostImpl`. When set,
-`WasHidden()` becomes a no-op — the widget never enters the hidden state:
+Adds a `disable_hidden_` flag to `RenderWidgetHostImpl`. When set, `WasHidden()`
+becomes a no-op — the widget never enters the hidden state:
 
 ```cpp
 void RenderWidgetHostImpl::WasHidden() {
@@ -155,9 +155,9 @@ prevents `WasHidden()` from taking effect at all.
 
 ### Layer 2: Blink scheduler — `allow_disabling_blink_scheduler_throttling_per_renderview.patch`
 
-Adds `SetSchedulerThrottling()` to `WebViewImpl`. When disabled, the Blink
-page scheduler is forced to treat the page as visible regardless of actual
-visibility state:
+Adds `SetSchedulerThrottling()` to `WebViewImpl`. When disabled, the Blink page
+scheduler is forced to treat the page as visible regardless of actual visibility
+state:
 
 ```cpp
 void WebViewImpl::SetPageLifecycleStateInternal(...) {
@@ -188,8 +188,8 @@ mechanism that directly controls BeginFrame delivery.
 
 ### How Electron wires it up
 
-Electron exposes a `backgroundThrottling` property on each WebContents. When
-set to `false`, all three layers are activated:
+Electron exposes a `backgroundThrottling` property on each WebContents. When set
+to `false`, all three layers are activated:
 
 ```cpp
 void WebContents::SetBackgroundThrottling(bool allowed) {
@@ -221,18 +221,18 @@ just handles layout, resize, and compositing of the already-rendering surfaces.
 
 ### What this means for us
 
-Our Experiment 2 (`WasShown()` only) addressed one layer out of three, which
-is why it failed. Electron's approach confirms that all three throttling systems
-must be disabled simultaneously. The patches are surgical and well-defined —
-we can apply the same pattern to our Chromium fork.
+Our Experiment 2 (`WasShown()` only) addressed one layer out of three, which is
+why it failed. Electron's approach confirms that all three throttling systems
+must be disabled simultaneously. The patches are surgical and well-defined — we
+can apply the same pattern to our Chromium fork.
 
 ## Approach Selection
 
 **Approach 3 (patch visibility), informed by Electron's three-layer pattern.**
 Apply Electron's three patches to our Chromium fork:
 
-1. Add `disable_hidden_` to `RenderWidgetHostImpl` and set it on our
-   WebContents instances.
+1. Add `disable_hidden_` to `RenderWidgetHostImpl` and set it on our WebContents
+   instances.
 2. Add `SetSchedulerThrottling()` to `WebViewImpl` and disable it for our
    WebContents.
 3. Patch `ui::Compositor::SetVisible()` to bypass `SetDisplayVisible(false)`
@@ -248,6 +248,164 @@ resize, and compositing through Chromium's own channels.
 
 If the three-patch approach works (high confidence given Electron's track
 record), further approaches are unnecessary.
+
+## Electron's Full Patch Inventory
+
+Electron maintains 147 patches against Chromium (version 146.0.7650.0). The
+patches live at `electron/patches/chromium/` in our repo. Below is a complete
+inventory organized by category, with an assessment of relevance to TermSurf.
+
+### Summary by category
+
+| Category                         | Count | Relevance to TermSurf |
+| -------------------------------- | ----- | --------------------- |
+| Build system / compilation       | 22    | None                  |
+| Node.js / V8 integration         | 18    | None                  |
+| Window management / UI           | 16    | Some                  |
+| WebContents / renderer hooks     | 12    | Some                  |
+| Network / protocol handling      | 8     | Low                   |
+| Visibility / throttling          | 7     | **Critical**          |
+| macOS-specific fixes             | 7     | Some                  |
+| Windows-specific fixes           | 7     | None (macOS-only now) |
+| Linux-specific fixes             | 7     | None (macOS-only now) |
+| Chrome dependency removal        | 7     | Some                  |
+| Off-screen rendering (OSR)       | 5     | Worth studying        |
+| Security / sandboxing            | 5     | Low                   |
+| Crash reporting / stability      | 5     | Low                   |
+| Media keys / input               | 5     | None                  |
+| Spellcheck                       | 4     | None                  |
+| Desktop capture / screen sharing | 3     | None                  |
+| Process singleton / lifecycle    | 3     | None                  |
+| Printing                         | 2     | None                  |
+| Notifications                    | 1     | None                  |
+| DOM storage                      | 1     | Maybe                 |
+| USB                              | 1     | None                  |
+| Accelerator / shortcuts          | 1     | None                  |
+| Service process                  | 1     | None                  |
+
+### Visibility / throttling (7 patches) — CRITICAL
+
+These are the patches that directly solve our 2-3fps problem.
+
+- **`disable_hidden.patch`** — Adds `disable_hidden_` flag to
+  `RenderWidgetHostImpl`. When set, `WasHidden()` is a no-op.
+- **`allow_disabling_blink_scheduler_throttling_per_renderview.patch`** — Adds
+  `SetSchedulerThrottling()` to `WebViewImpl`. Forces page to appear visible to
+  the Blink scheduler.
+- **`fix_disabling_background_throttling_in_compositor.patch`** — Patches
+  `ui::Compositor::SetVisible()` to keep `SetDisplayVisible(true)` when
+  throttling is disabled.
+- **`disable_compositor_recycling.patch`** — Prevents compositor destruction
+  when a macOS view is hidden but still attached. Without this, show/hide cycles
+  cause expensive compositor rebuilds.
+- **`revert_remove_the_allowaggressivethrottlingwithwebsocket_feature.patch`** —
+  Re-adds `AllowAggressiveThrottlingWithWebSocket` feature flag that Chromium
+  removed.
+- **`revert_code_health_clean_up_stale_macwebcontentsocclusion.patch`** —
+  Restores legacy macOS WebContents occlusion behavior.
+- **`refactor_unfilter_unresponsive_events.patch`** — Removes renderer
+  unresponsive event filters so the embedder can handle them.
+
+### Build system / compilation (22 patches) — NOT NEEDED
+
+All specific to Electron's build configuration: `is_electron_build` and
+`is_mas_build` flags, BoringSSL extensions for Node.js, grit resource IDs,
+libc++ ABI settings, `.gitignore` entries for Electron directories, license
+credits. None apply to our build.
+
+### Node.js / V8 integration (18 patches) — NOT NEEDED
+
+Electron embeds Node.js inside Chromium's renderer process. These patches add V8
+platform hooks, isolate holders, module import/meta hooks, worker context
+destruction callbacks, and ScriptState hardening for Node.js contexts. TermSurf
+does not embed Node.js.
+
+### Window management / UI (16 patches) — SOME RELEVANT
+
+Mostly Electron-specific UI features (aspect ratio control, frameless windows,
+picture-in-picture, dark mode override, menu item customization, fullscreen
+access). A few may be useful:
+
+- **`webview_fullscreen.patch`** — Propagates fullscreen state from webview
+  child frames to the embedder. May be needed if users full-screen a web page.
+- **`feat_add_set_theme_source_to_allow_apps_to.patch`** — Overrides NativeTheme
+  light/dark. Useful if TermSurf needs to control dark mode for web content.
+
+### WebContents / renderer hooks (12 patches) — SOME RELEVANT
+
+Hooks for intercepting window creation, site instance creation, per-window
+WebPreferences, cursor changes, and script injection. Potentially useful:
+
+- **`can_create_window.patch`** — Intercepts `window.open()` calls. Needed to
+  prevent popups or redirect them to new TermSurf panes.
+- **`allow_in-process_windows_to_have_different_web_prefs.patch`** — Per-window
+  WebPreferences (context isolation, etc.). Useful for different security
+  settings per profile.
+
+### Off-screen rendering (5 patches) — WORTH STUDYING
+
+Electron's OSR patches show what's needed to make off-screen rendering work with
+the viz compositor. Even though we're targeting windowed rendering, these are
+instructive:
+
+- **`feat_enable_offscreen_rendering_with_viz_compositor.patch`** — Custom
+  `HostDisplayClient` and `LayeredWindowUpdater` for OSR via viz.
+- **`osr_shared_texture_remove_keyed_mutex_on_win_dxgi.patch`** — Removes DXGI
+  keyed mutex for OSR texture sharing (performance fix, Windows-only).
+- **`patch_osr_control_screen_info.patch`** — Makes `GetNewScreenInfosForUpdate`
+  virtual for custom screen info in OSR.
+
+### Chrome dependency removal (7 patches) — SOME RELEVANT
+
+Decouples Electron from Chrome-specific infrastructure (Profile, themes,
+ExtensionSystem). We face the same problem — content_shell doesn't have Chrome's
+`Profile` class. Patches like `proxy_config_monitor.patch` and
+`chore_patch_out_profile_methods.patch` show how Electron avoids these
+dependencies.
+
+### macOS-specific fixes (7 patches) — SOME RELEVANT
+
+- **`render_widget_host_view_mac.patch`** — Overrides `acceptsFirstMouse` and
+  `disableAutoHideCursor`. May be needed for mouse handling in web panes.
+- **`fix_restore_original_resize_performance_on_macos.patch`** — Reverts an
+  Android-specific change that regressed macOS resize performance. Likely
+  needed.
+- **`fix_add_macos_memory_query_fallback_to_avoid_crash.patch`** — Fallback for
+  memory query to avoid sandbox crash. May be needed.
+
+### Network / protocol handling (8 patches) — LOW RELEVANCE
+
+Custom protocol handlers, raw response headers, streaming protocols, service
+worker fetching. Most are Electron API features. One may be useful:
+
+- **`feat_allow_code_cache_in_custom_schemes.patch`** — Enables V8 code cache
+  for custom schemes. Relevant if TermSurf uses custom URL schemes.
+
+### Windows/Linux-specific (14 patches) — NOT NEEDED NOW
+
+TermSurf is macOS-only for now. These can be revisited if/when we go
+cross-platform.
+
+### Everything else (25 patches) — NOT NEEDED
+
+Security/permissions, crash reporting, media keys, spellcheck, desktop capture,
+process singleton, printing, notifications, USB, accelerators, service process.
+All Electron-specific features that TermSurf does not use.
+
+### Conclusion: which patches to apply
+
+**Must apply (7):** All visibility/throttling patches. These solve the core
+2-3fps problem.
+
+**Should review (5-10):** macOS-specific fixes, resize performance, window
+creation hooks, per-window WebPreferences, Chrome dependency removal patterns.
+
+**Skip (~130):** Build system, Node.js, Windows/Linux, spellcheck, printing,
+media keys, desktop capture, and other Electron-specific features.
+
+We do not need to apply Electron's full 147-patch set. A targeted subset of
+~10-15 patches should be sufficient. The three core throttling patches are the
+minimum viable set.
 
 ## Relationship to Other Issues
 
