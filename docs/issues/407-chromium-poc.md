@@ -416,17 +416,18 @@ call, so Chromium treated it as a background tab. Shell A's WebContents may
 also have been affected by the manual NSView frame manipulation disrupting
 the Shell's internal visibility tracking.
 
-##### Experiment 2: Fix visibility throttling
+##### Experiment 2: WasShown() calls (3fps — failed)
 
-Call `web_contents_b_->WasShown()` after attaching WebContents B to the view
-hierarchy, so the compositor knows both panes are visible and should render at
-full framerate. If Shell A's WebContents is also throttled, ensure its
-visibility state is correct after the layout change.
+Added `web_contents_b_->WasShown()` and `shell_a->web_contents()->WasShown()`
+after laying out both views side by side. The hypothesis was that Chromium was
+throttling `requestAnimationFrame` because it considered the WebContents hidden.
 
-If `WasShown()` alone doesn't resolve the issue, investigate whether the
-`RenderWidgetHostView` needs explicit resize or
-`WasResized()` notifications after the manual frame changes, or whether
-Chromium's occlusion detection on macOS is misclassifying the views.
+**Result:** Failed. Framerate went from ~2fps to ~3fps — no meaningful
+improvement. `WasShown()` alone does not fix the throttling. The root cause
+is something else — possibly macOS occlusion detection misclassifying the
+views, `RenderWidgetHostView` not receiving resize notifications after the
+manual frame changes, or a deeper issue with how content_shell's platform
+delegate manages visibility for reparented views.
 
 ### Phase 5: Measure and document
 
