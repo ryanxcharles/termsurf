@@ -119,8 +119,8 @@ git checkout 146.0.7650.0
 git checkout -b 146.0.7650.0-termsurf
 ```
 
-- [ ] Submodule on `146.0.7650.0-termsurf` branched from vanilla Chromium
-- [ ] Content Shell builds on vanilla Chromium (sanity check)
+- [x] Submodule on `146.0.7650.0-termsurf` branched from vanilla Chromium
+- [x] Content Shell builds on vanilla Chromium (sanity check)
 
 ### Phase 2: Extract and apply the three throttling patches
 
