@@ -218,3 +218,49 @@ This means the race condition is not the root cause, or at least not the only
 cause. Something about the Two Profiles app's setup — possibly the dual
 `SHELL_DIR_USER_DATA` override, the second `ShellBrowserContext`, or the storage
 service crash — is interfering with Shell A's rendering too.
+
+## Conclusion
+
+### What we know
+
+Content Shell runs at 60fps with a single profile. The Two Profiles app runs at
+2fps — not just the second pane, but both panes, including Shell A which uses
+the exact same `Shell::CreateNewWindow` code path. The race condition hypothesis
+(visibility signal consumed before the renderer exists) may contribute to
+WebContents B's problems, but it cannot explain Shell A's 2fps since Shell A
+goes through the standard Content Shell lifecycle.
+
+The deferred view attachment fix made things worse: WebContents B never appeared
+at all (likely because the storage service crash prevented navigation from
+completing), and Shell A remained at 2fps.
+
+### What we don't know
+
+We don't know which specific change between Content Shell and Two Profiles
+causes the 2fps. The Two Profiles app differs from Content Shell in several
+ways:
+
+1. Custom `TwoProfilesMainParts` class (instead of `ShellBrowserMainParts`)
+2. `SHELL_DIR_USER_DATA` path override (called twice, ending on profile-b)
+3. Second `ShellBrowserContext` with a different storage path
+4. Second `WebContents` created and navigated
+5. View hierarchy manipulation (adding view_b, resizing view_a)
+
+Any one of these could be the culprit. The storage service crash (profile-b's
+paths can't be made relative to profile-a's root) is a strong candidate since
+it affects utility processes that both profiles depend on.
+
+### Next step: isolate the cause
+
+The next issue will use an incremental isolation approach. Start from a minimal
+app that is nearly identical to Content Shell, then add changes one at a time
+until the fps drops from 60 to 2. The step where the drop occurs identifies the
+exact cause:
+
+1. Custom MainParts with single `Shell::CreateNewWindow` (no overrides)
+2. Add `SHELL_DIR_USER_DATA` override for profile-a
+3. Add second `ShellBrowserContext` (created but unused)
+4. Add second `WebContents` (created and navigated but view not attached)
+
+Each step adds one variable. This turns a complex multi-variable problem into a
+binary search.
