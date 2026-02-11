@@ -29,9 +29,10 @@ time.
 
 ## Branch
 
-Use the existing `146.0.7650.0-issue-411` branch in the `termsurf-chromium`
-submodule (vanilla Chromium + Two Profiles app code). Each step modifies the Two
-Profiles app in place and rebuilds.
+Create a new branch `146.0.7650.0-issue-412` in the `termsurf-chromium`
+submodule, starting from the vanilla Chromium `146.0.7650.0` tag. Cherry-pick
+the Two Profiles app commit to get the build scaffolding, then apply each step
+as a commit on top.
 
 ## Steps
 
@@ -127,3 +128,59 @@ For each step:
 4. Record the result (fps for each visible pane).
 5. If fps dropped, stop — the cause is identified. Investigate further.
 6. If fps is still 60, proceed to the next step.
+
+## Experiments
+
+### Experiment 1: Step 1 baseline
+
+#### Branch setup
+
+1. `cd ts4/termsurf-chromium/src`
+2. `git checkout -b 146.0.7650.0-issue-412 146.0.7650.0`
+3. Write the One Profile app from scratch in `content/one_profile/`:
+   - `BUILD.gn` — modeled on Content Shell's build target but for our app
+   - `one_profile_main_parts.h` and `one_profile_main_parts.mm` — the main parts
+     subclass
+   - Delegates, plists, and main entry point — minimal scaffolding to produce a
+     `.app` bundle
+4. Add `//content/one_profile` to the root `BUILD.gn` `gn_all` group.
+5. Build with `autoninja -C out/Default one_profile`.
+
+#### Hypothesis
+
+The One Profile app is a minimal Content API embedder written from scratch. It
+creates a single `WebContents` with one `ShellBrowserContext` and displays it in
+a window we control. The key difference from Content Shell is that we own the
+`NSWindow` — Content Shell's `Shell` class creates and manages its own window,
+but we need to control the window ourselves so that later steps can place
+multiple WebContents in it.
+
+If this baseline runs at 60fps, the app scaffolding is sound and we can proceed
+to add a second profile. If it runs at 2fps, then controlling the window
+ourselves (rather than letting `Shell` do it) is the problem, and we need to
+understand why.
+
+#### Design
+
+`OneProfileMainParts` inherits from `ShellBrowserMainParts`.
+
+- Do NOT override `InitializeBrowserContexts`. The base class creates a single
+  `ShellBrowserContext` with the default path.
+- Override `InitializeMessageLoopContext`:
+  1. Create an `NSWindow` (1200x600, titled, `makeKeyAndOrderFront`).
+  2. Create a `WebContents` with `browser_context()`.
+  3. Navigate it to `http://localhost:9407`.
+  4. Get the `WebContentsViewCocoa` via `GetNativeView()`.
+  5. Add it as a subview of the window's `contentView`.
+  6. Set its frame to fill the window.
+
+No `Shell` is used. No second BrowserContext, no second WebContents, no
+`SHELL_DIR_USER_DATA` override. This is the minimal code needed to display a
+single WebContents in a window we control — the foundation that a second profile
+will eventually be added to.
+
+#### Expected result
+
+60fps. If this is 2fps, controlling the window ourselves rather than using
+`Shell::CreateNewWindow` is the cause, and we need to understand what `Shell`
+does that we're missing.
