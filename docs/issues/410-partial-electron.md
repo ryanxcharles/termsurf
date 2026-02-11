@@ -2,10 +2,12 @@
 
 ## Goal
 
-Apply only the Electron patches that TermSurf actually needs to our Chromium
-fork. Start with the three throttling patches identified in Issue 408, verify
-they build and work on vanilla Chromium, then add more patches individually as
-the need arises.
+Fix the 2-3fps throttling problem from Issue 407. Apply only the Electron
+patches that TermSurf actually needs to our Chromium fork, rebuild the Two
+Profiles app using the new throttling bypass APIs, and prove both profiles
+render at 60fps side by side in one window. Start with the three throttling
+patches identified in Issue 408, then add more patches individually as the need
+arises.
 
 ## Background
 
@@ -18,6 +20,25 @@ The three throttling patches identified in Issue 408, however, are pure Chromium
 modifications. They add flags and methods to Chromium's rendering pipeline with
 no external dependencies. They should apply and build cleanly on vanilla
 Chromium.
+
+## The Two Profiles App
+
+The Two Profiles app is a minimal Content API embedder built inside the Chromium
+source tree at `content/two_profiles/`. It creates two `ShellBrowserContext`
+instances with different storage paths (`~/.config/termsurf/poc/profile-a/` and
+`profile-b/`) and displays two `WebContents` side by side in one NSWindow. Each
+profile gets isolated cookies, localStorage, and cache.
+
+Issue 407 built the first version of this app (15 files, based on content_shell).
+It proved profile isolation works — each pane showed a different localStorage
+identity string that persisted across restarts. But rendering was throttled to
+2-3fps because Chromium's three independent throttling layers all treated the
+second WebContents as hidden.
+
+This issue rebuilds the Two Profiles app on top of the three throttling patches.
+The patches add APIs (`disable_hidden_`, `SetSchedulerThrottling`,
+`SetBackgroundThrottling`) that bypass each throttling layer. With all three
+bypassed, both profiles should render at 60fps.
 
 ## Principles
 
@@ -50,7 +71,7 @@ Chromium.
 | 407   | Proved multi-profile works; identified 2-3fps throttling          |
 | 408   | Traced throttling to three layers; discovered Electron's solution |
 | 409   | Attempted full patch set; failed at build due to Electron deps    |
-| 410   | This issue — applies only the patches we need                     |
+| 410   | This issue — applies throttling patches, rebuilds Two Profiles at 60fps |
 
 ## The Three Throttling Patches
 
