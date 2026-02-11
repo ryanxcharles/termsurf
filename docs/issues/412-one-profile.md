@@ -139,9 +139,9 @@ For each step:
 2. `git checkout -b 146.0.7650.0-issue-412 146.0.7650.0`
 3. Clone `content/shell/` to `content/one_profile/`. Rename classes, targets,
    and bundle names from "Content Shell" / "content_shell" to "One Profile" /
-   "one_profile". The behavior is identical — same delegates, same `Shell` class,
-   same `ShellBrowserMainParts`, same window management. The only difference is
-   the name.
+   "one_profile". The behavior is identical — same delegates, same `Shell`
+   class, same `ShellBrowserMainParts`, same window management. The only
+   difference is the name.
 4. Add `//content/one_profile` to the root `BUILD.gn` `gn_all` group.
 5. Build with `autoninja -C out/Default one_profile`.
 
@@ -154,19 +154,94 @@ regressions. It gives us a known-good starting point to iterate from.
 
 #### Design
 
-Copy the Content Shell source files into `content/one_profile/`. Do a
-find-and-replace rename:
+Copy the entire `content/shell/` directory to `content/one_profile/`. This
+includes everything: browser/, renderer/, common/, utility/, gpu/, app/,
+BUILD.gn, plists, resources. One Profile is a fully independent copy of Content
+Shell — its own libraries, its own app target, its own bundle.
 
-- `content_shell` → `one_profile`
-- `ContentShell` → `OneProfile`
-- `Content Shell` → `One Profile`
-- `Shell` class references stay as-is (we still use the `Shell` class from
-  `content/shell/browser/`)
+Find-and-replace rename across all copied files:
 
-The One Profile app links against the same Content Shell browser/renderer
-libraries. It is Content Shell under a different name. No behavioral changes.
+- `content/shell` → `content/one_profile` (include paths, GN source paths)
+- `content_shell` → `one_profile` (target names, identifiers, bundle IDs)
+- `ContentShell` → `OneProfile` (class names using this form)
+- `Content Shell` → `One Profile` (strings, bundle names, plists)
+- `CONTENT_SHELL_` → `CONTENT_ONE_PROFILE_` (include guards)
+- `content.shell` → `content.one_profile` (Java package names, if any)
+- `Shell` class references stay as-is (ShellBrowserMainParts,
+  ShellContentBrowserClient, Shell, ShellBrowserContext, etc.)
+
+GN deps that point to `//content/shell/...` within the copied BUILD.gn files
+must be updated to `//content/one_profile/...` so One Profile builds against its
+own copy. External deps (to `//content/public/...`, `//base/...`, etc.) stay
+as-is.
+
+No behavioral changes. One Profile is Content Shell under a different name.
 
 #### Expected result
 
 60fps. This must pass before any further steps. If this is not 60fps, something
 is wrong with the clone and we fix it before proceeding.
+
+#### Build issues
+
+Three issues prevented a straight copy-and-rename from compiling.
+
+**1. GN visibility restrictions.** Several Chromium components restrict who can
+depend on them via `visibility` and `friend` lists that include
+`//content/shell/*` but not `//content/one_profile/*`. Four files needed
+patching:
+
+- `components/cdm/renderer/BUILD.gn` — added `//content/one_profile/*` to
+  visibility
+- `components/cdm/browser/BUILD.gn` — same
+- `components/cdm/common/BUILD.gn` — same
+- `net/dns/BUILD.gn` — added `//content/one_profile:one_profile_lib` to friend
+  list
+
+**2. Duplicate resource output.** Both Content Shell and One Profile define a
+`copy_shell_resources` target that outputs `shell_resources.pak` to
+`$root_out_dir`. Renamed One Profile's target to `copy_one_profile_resources`
+with output `one_profile_resources.pak`. Also added a grit resource ID entry for
+`content/one_profile/shell_resources.grd` in
+`tools/gritsettings/resource_ids.spec` (ID 8010, before Content Shell's 8020 to
+maintain monotonic ordering).
+
+**3. Web test class name collisions.** Content Shell serves double duty: it is
+both a minimal Content API embedder and the host for Chromium's "web tests"
+(formerly "layout tests") — the test suite that verifies web platform behavior
+(HTML rendering, CSS, JavaScript APIs). Content Shell's `shell_main_delegate.cc`
+conditionally includes `content/web_test/` headers, which subclass Content
+Shell's `ShellContentBrowserClient` and `ShellContentRendererClient`. Because
+our rename kept the `Shell*` class names unchanged (they're the Content API
+classes, not Content Shell-specific), both copies define identically-named
+classes in the `content` namespace. When `shell_main_delegate.cc` includes
+`content/web_test/...` which transitively includes `content/shell/...`, the
+compiler sees two definitions of `ShellContentBrowserClient`,
+`ShellSpeechRecognitionManagerDelegate`, and `ShellContentRendererClient`.
+
+Fixed by removing web test support from One Profile entirely:
+
+- Removed `content/web_test` includes from `app/shell_main_delegate.cc`
+- Removed web test conditional code in `BasicStartupComplete()`, `RunProcess()`,
+  `CreateContentBrowserClient()`, and `CreateContentRendererClient()`
+- Removed `WebTestBrowserMainRunner` member and `OsSettingsProvider` member from
+  `app/shell_main_delegate.h`
+- Removed `//content/web_test:*` deps from `BUILD.gn`
+
+One Profile doesn't need web test support — it exists purely for our fps
+isolation experiments.
+
+#### Result: PASSED
+
+One Profile runs at 60fps. The spinning blue square renders smoothly with the
+same framerate as Content Shell. The baseline is established — our build
+scaffolding, renamed targets, and independent copy of the Content Shell
+libraries do not introduce any rendering regressions.
+
+#### Conclusion
+
+One Profile is a confirmed 60fps clone of Content Shell. The three build issues
+were all mechanical (GN visibility, resource naming, web test collisions) and do
+not affect runtime behavior. We now have a known-good starting point from which
+to add changes incrementally toward two profiles. The next experiment adds the
+`SHELL_DIR_USER_DATA` override (Step 2).
