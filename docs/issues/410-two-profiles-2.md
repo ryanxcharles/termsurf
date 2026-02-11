@@ -423,3 +423,74 @@ but the compositor is shut down immediately afterward.
    `browser_compositor_->SetRenderWidgetHostIsHidden(true)` when
    `disable_hidden_` is set. This is a Chromium patch rather than an app-level
    fix.
+
+### Experiment 2: Log the call sequence and re-show the view
+
+#### Hypothesis
+
+Experiment 1 failed because `BrowserCompositorMac` transitions to
+`HasNoCompositor` independently of the `disable_hidden_` flag. But we don't
+know the exact sequence — whether `Hide()` is called before or after
+`RenderFrameCreated`, whether it's called once or repeatedly, or what triggers
+it. This experiment adds logging to answer those questions, and simultaneously
+tries re-showing the view from the observer to restart the compositor.
+
+#### Design
+
+Two changes in one build:
+
+**Part A: Logging.** Add `LOG(ERROR)` lines to trace the exact call sequence
+with timestamps. No stack traces (too noisy) — just method name, pointer
+address, and key state.
+
+Add logging to:
+
+- `RenderWidgetHostViewMac::Hide()` — log `this` and `host()` pointers
+- `RenderWidgetHostViewMac::WasOccluded()` — log whether `host()->IsHidden()`
+- `RenderWidgetHostViewMac::ShowWithVisibility()` — log when the view is shown
+- `RenderWidgetHostImpl::WasHidden()` — log whether `disable_hidden_` is set
+- `ThrottleBypassObserver::ApplyBypass()` — already has logging from Experiment 1
+
+This reveals the ordering: does `Hide()` fire before or after
+`RenderFrameCreated`? Is it called once or many times? Does our observer's
+`WasShown()` call get immediately undone by a subsequent `Hide()`?
+
+**Part B: Re-show the view.** After setting bypass flags in `ApplyBypass()`,
+call `ShowWithVisibility(PageVisibilityState::kVisible)` on the
+`RenderWidgetHostView`. This is a method on the base class
+(`RenderWidgetHostView`), so no macOS-specific cast is needed. It calls through
+to `RenderWidgetHostViewMac::ShowWithVisibility()`, which:
+
+1. Sets `is_visible_ = true`
+2. Calls `browser_compositor_->SetViewVisible(true)`
+3. Calls `OnShowWithPageVisibility(kVisible)` — sends visibility to renderer
+
+This directly restarts the compositor, which Experiment 1's `WasShown({})` on
+the RenderWidgetHostImpl did not do.
+
+#### What this tests
+
+- The exact call sequence of `Hide()`, `WasOccluded()`, `RenderFrameCreated`,
+  and `ApplyBypass` (Q1, via logging)
+- Whether re-showing the view from the observer restarts the compositor and
+  restores 60fps (Q5)
+- Whether `Hide()` is called again after our re-show, undoing the fix
+
+#### What determines success or failure
+
+- **60fps:** The `ShowWithVisibility` call restarts the compositor. Logging
+  reveals the sequence for documentation.
+- **Still 2-3fps, Hide() called after ApplyBypass:** `Hide()` is called after
+  our observer fires, immediately re-hiding the view. The fix is to prevent
+  `Hide()` at the source (Experiment 3: patch `WasOccluded()`).
+- **Still 2-3fps, Hide() called before ApplyBypass:** Our re-show works
+  momentarily but something else re-hides it. Logging reveals the culprit.
+
+#### Files to modify
+
+- `content/browser/renderer_host/render_widget_host_view_mac.mm` — add logging
+  to `Hide()`, `WasOccluded()`, `ShowWithVisibility()`
+- `content/browser/renderer_host/render_widget_host_impl.cc` — add logging to
+  `WasHidden()`
+- `content/two_profiles/two_profiles_main_parts.mm` — add
+  `ShowWithVisibility(kVisible)` call in `ApplyBypass()`
