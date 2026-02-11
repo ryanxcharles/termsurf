@@ -29,11 +29,11 @@ instances with different storage paths (`~/.config/termsurf/poc/profile-a/` and
 `profile-b/`) and displays two `WebContents` side by side in one NSWindow. Each
 profile gets isolated cookies, localStorage, and cache.
 
-Issue 407 built the first version of this app (15 files, based on content_shell).
-It proved profile isolation works — each pane showed a different localStorage
-identity string that persisted across restarts. But rendering was throttled to
-2-3fps because Chromium's three independent throttling layers all treated the
-second WebContents as hidden.
+Issue 407 built the first version of this app (15 files, based on
+content_shell). It proved profile isolation works — each pane showed a different
+localStorage identity string that persisted across restarts. But rendering was
+throttled to 2-3fps because Chromium's three independent throttling layers all
+treated the second WebContents as hidden.
 
 This issue rebuilds the Two Profiles app on top of the three throttling patches.
 The patches add APIs (`disable_hidden_`, `SetSchedulerThrottling`,
@@ -55,9 +55,9 @@ bypassed, both profiles should render at 60fps.
 3. **Apply only what we need.** Each patch in our fork exists because TermSurf
    requires it. No speculative patches, no "might need it later."
 
-4. **Adapt patches when necessary.** Electron's patches may need modification
-   to work without the rest of the Electron build system. That's fine — we own
-   our fork and can fix whatever needs fixing.
+4. **Adapt patches when necessary.** Electron's patches may need modification to
+   work without the rest of the Electron build system. That's fine — we own our
+   fork and can fix whatever needs fixing.
 
 5. **One branch per Chromium version.** The branch `146.0.7650.0-termsurf` is
    based directly on the vanilla Chromium `146.0.7650.0` tag. There is no
@@ -66,11 +66,11 @@ bypassed, both profiles should render at 60fps.
 
 ## Relationship to Other Issues
 
-| Issue | Relationship                                                      |
-| ----- | ----------------------------------------------------------------- |
-| 407   | Proved multi-profile works; identified 2-3fps throttling          |
-| 408   | Traced throttling to three layers; discovered Electron's solution |
-| 409   | Attempted full patch set; failed at build due to Electron deps    |
+| Issue | Relationship                                                            |
+| ----- | ----------------------------------------------------------------------- |
+| 407   | Proved multi-profile works; identified 2-3fps throttling                |
+| 408   | Traced throttling to three layers; discovered Electron's solution       |
+| 409   | Attempted full patch set; failed at build due to Electron deps          |
 | 410   | This issue — applies throttling patches, rebuilds Two Profiles at 60fps |
 
 ## The Three Throttling Patches
@@ -162,8 +162,8 @@ For each patch:
 1. Read the patch file from the Electron repo
 2. Verify it modifies only Chromium core code (no `//electron/` references)
 3. If clean, apply it directly with `git am`
-4. If it has Electron-specific parts, extract only the relevant hunks and
-   adapt as needed
+4. If it has Electron-specific parts, extract only the relevant hunks and adapt
+   as needed
 
 - [x] Layer 1 patch applied (disable_hidden)
 - [x] Layer 2 patch applied (scheduler throttling)
@@ -193,8 +193,8 @@ web_contents->GetRenderViewHost()->SetSchedulerThrottling(false);  // Layer 2
 // Layer 3 is handled automatically by the compositor patch
 ```
 
-- [ ] Two Profiles app created with throttling bypass
-- [ ] App builds successfully
+- [x] Two Profiles app created with throttling bypass
+- [x] App builds successfully
 
 ### Phase 5: Verify Two Profiles at 60fps
 
