@@ -202,18 +202,18 @@ addresses differ, the hypothesis is confirmed.
 
 ### Question 3: Does RenderFrameCreated fire at the right time?
 
-Electron uses `RenderFrameCreated()` as its hook. Add a
-`WebContentsObserver` to both WebContents that logs when `RenderFrameCreated()`
-fires and what `RenderWidgetHostImpl` is active at that point. If the instance
-is different from what we set during initialization, we've found the fix.
+Electron uses `RenderFrameCreated()` as its hook. Add a `WebContentsObserver` to
+both WebContents that logs when `RenderFrameCreated()` fires and what
+`RenderWidgetHostImpl` is active at that point. If the instance is different
+from what we set during initialization, we've found the fix.
 
 ### Question 4: Does WasShown() bypass everything?
 
 Electron's `SetBackgroundThrottling()` calls `rwh_impl->WasShown({})` if the
-widget is currently hidden. This is a brute-force approach: instead of preventing
-individual throttling layers, just tell the widget it's visible again. Test
-whether calling `WasShown({})` from a `RenderFrameCreated` observer restores
-60fps.
+widget is currently hidden. This is a brute-force approach: instead of
+preventing individual throttling layers, just tell the widget it's visible
+again. Test whether calling `WasShown({})` from a `RenderFrameCreated` observer
+restores 60fps.
 
 ### Question 5: Does BrowserCompositorMac need its own bypass?
 
@@ -316,3 +316,55 @@ This is still unknown. Candidates:
 - macOS occlusion detection marking the view as hidden
 - The NSView not being properly added to the window's view hierarchy before
   visibility is evaluated
+
+## Experiments
+
+### Experiment 1: RenderFrameCreated observer with force-show
+
+**Hypothesis:** The bypass calls in Phase 4 failed because they ran during
+`InitializeMessageLoopContext()`, before renderer processes exist. The
+`RenderWidgetHostImpl` set at that point is a placeholder that gets replaced
+when navigation commits. Electron solves this by setting bypass flags in a
+`RenderFrameCreated()` WebContentsObserver hook, which fires after the renderer
+is alive and the correct RenderWidgetHostImpl is active.
+
+**Design:**
+
+1. Create a `ThrottleBypassObserver` class that implements `WebContentsObserver`
+2. Override `RenderFrameCreated(RenderFrameHost*)`:
+   - Get the `RenderWidgetHostView` from the render frame host
+   - Cast to `RenderWidgetHostImpl` and set `disable_hidden_ = true`
+   - Call `SetSchedulerThrottling(false)` on the render view host
+   - If the RenderWidgetHostImpl is currently hidden (`IsHidden()`), call
+     `WasShown({})` to force it back to visible state
+3. Override `RenderFrameHostChanged(old_host, new_host)` to repeat the bypass on
+   the new host (handles cross-origin navigations)
+4. Attach one observer to each WebContents in `InitializeMessageLoopContext()`
+5. Remove the existing bypass calls from `InitializeMessageLoopContext()` — the
+   observer handles timing
+
+**What this tests:**
+
+- Whether `RenderFrameCreated` fires at the right lifecycle point (Q3)
+- Whether `WasShown({})` reverses the hiding done by `Hide()` (Q4)
+- Whether `disable_hidden_` prevents re-hiding once set on the correct instance
+
+**What this does NOT test:**
+
+- Whether the `BrowserCompositorMac` also needs to be re-shown (Q5). The
+  `WasShown({})` call on `RenderWidgetHostImpl` does not touch the compositor.
+  If the compositor has transitioned to `HasNoCompositor`, frames still won't be
+  produced. If this experiment fails, the next step is to also call
+  `ShowWithVisibility()` on the `RenderWidgetHostViewMac` to re-show the
+  compositor.
+
+**Files to modify:**
+
+- `content/two_profiles/two_profiles_main_parts.h` — add
+  `ThrottleBypassObserver` class declaration and observer member pointers
+- `content/two_profiles/two_profiles_main_parts.mm` — implement the observer,
+  attach to both WebContents, remove old bypass calls
+
+**Expected result:** Both panes at 60fps. If only one pane improves, or if fps
+increases but doesn't reach 60, the BrowserCompositorMac bypass is likely needed
+as a follow-up.
