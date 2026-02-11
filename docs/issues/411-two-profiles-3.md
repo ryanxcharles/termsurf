@@ -117,30 +117,6 @@ entirely.
 
 ## Experiment 1
 
-### Branch setup
-
-Create a new branch `146.0.7650.0-issue-411` in the `termsurf-chromium`
-submodule, starting from the vanilla Chromium `146.0.7650.0` tag. No Electron
-patches are applied.
-
-Steps:
-
-1. `cd ts4/termsurf-chromium/src`
-2. `git checkout -b 146.0.7650.0-issue-411 146.0.7650.0`
-3. Cherry-pick the Two Profiles app commit from `146.0.7650.0-termsurf`. This
-   brings in `content/two_profiles/` (BUILD.gn, header, implementation) and the
-   root `BUILD.gn` change that adds `//content/two_profiles` to `gn_all`. The
-   commit includes the `ThrottleBypassObserver`, which we will simplify.
-4. Apply the race condition fix (the experiment itself).
-5. Build with `autoninja -C out/Default two_profiles`.
-
-The `146.0.7650.0-termsurf` branch (with Electron patches) remains untouched.
-If this experiment succeeds, the fix can be brought back to the main termsurf
-branch. If it fails, we still have the patched branch to fall back on.
-
-After the experiment, update the main repo's submodule pointer to the new branch
-and commit.
-
 ### Hypothesis
 
 The 2fps is caused by the `WebContentsViewCocoa` being added to the window
@@ -185,3 +161,27 @@ bypass.
 
 Both panes at 60fps. Profile isolation still works (different localStorage
 strings). No Electron patches needed.
+
+### Branch setup
+
+Create a new branch `146.0.7650.0-issue-411` in the `termsurf-chromium`
+submodule, starting from the vanilla Chromium `146.0.7650.0` tag. No Electron
+patches are applied.
+
+Steps:
+
+1. `cd ts4/termsurf-chromium/src`
+2. `git checkout -b 146.0.7650.0-issue-411 146.0.7650.0`
+3. Cherry-pick the Two Profiles app commit from `146.0.7650.0-termsurf`. This
+   brings in `content/two_profiles/` (BUILD.gn, header, implementation) and the
+   root `BUILD.gn` change that adds `//content/two_profiles` to `gn_all`. The
+   commit includes the `ThrottleBypassObserver`, which we will simplify.
+4. Apply the race condition fix (the experiment itself).
+5. Build with `autoninja -C out/Default two_profiles`.
+
+The `146.0.7650.0-termsurf` branch (with Electron patches) remains untouched. If
+this experiment succeeds, the fix can be brought back to the main termsurf
+branch. If it fails, we still have the patched branch to fall back on.
+
+After the experiment, update the main repo's submodule pointer to the new branch
+and commit.
