@@ -185,3 +185,36 @@ branch. If it fails, we still have the patched branch to fall back on.
 
 After the experiment, update the main repo's submodule pointer to the new branch
 and commit.
+
+### Result: FAILED
+
+Only one pane appeared (Shell A, profile A). It rendered at 2fps. WebContents B
+never appeared — the `RenderFrameCreated` log message was absent from the
+output, meaning the observer either never fired or fired after the app was
+closed.
+
+### Conclusion
+
+The deferred view attachment approach failed on both fronts:
+
+1. **WebContents B never appeared.** `RenderFrameCreated` didn't fire during the
+   observation window. The navigation for WebContents B may have been blocked by
+   the storage service crash (the storage service utility process crashes
+   because profile-b's paths can't be made relative to profile-a's root — a
+   separate bug in how `SHELL_DIR_USER_DATA` is overridden globally). Without a
+   functioning storage service, the navigation may not complete and the renderer
+   may never be created.
+
+2. **Shell A is at 2fps.** This is the same 2fps observed in every previous
+   experiment. Shell A is created via `Shell::CreateNewWindow` — the exact same
+   code path that Content Shell uses to achieve 60fps. The only difference is
+   that the Two Profiles app also creates a second `ShellBrowserContext` and a
+   second `WebContents`. The race condition hypothesis cannot explain Shell A's
+   2fps because Shell A goes through the standard lifecycle — its view is added
+   to the window by `Shell::SetContents`, which is the proven Content Shell
+   path.
+
+This means the race condition is not the root cause, or at least not the only
+cause. Something about the Two Profiles app's setup — possibly the dual
+`SHELL_DIR_USER_DATA` override, the second `ShellBrowserContext`, or the storage
+service crash — is interfering with Shell A's rendering too.
