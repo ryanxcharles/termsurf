@@ -245,3 +245,28 @@ cd /Users/ryan/dev/termsurf/ts4/box-demo && bun run server.ts &
 60fps. This is a data-path-only change with no effect on the rendering pipeline,
 compositor lifecycle, or view hierarchy. The storage service should handle the
 custom path identically to the default path.
+
+#### Result: PASSED
+
+60fps. The spinning blue square renders smoothly at full framerate with the
+profile data stored at `~/.config/termsurf/poc/profile-a`.
+
+#### Build note
+
+`autoninja` is at `/Users/ryan/depot_tools/autoninja` and is not in the default
+shell PATH. When building from a script or automation, prefix with
+`PATH="/Users/ryan/depot_tools:$PATH"`. The incremental build compiled only 8
+steps (~12 seconds) since the only change was `shell_browser_main_parts.cc`.
+
+#### Conclusion
+
+The `SHELL_DIR_USER_DATA` path override has no effect on rendering. Redirecting
+profile storage from the default macOS location to a custom path under
+`~/.config/termsurf/poc/` does not degrade framerate, break the storage service,
+or interfere with any utility processes. The storage service, network service,
+and compositor all function identically with the custom path.
+
+This eliminates the path override as a cause of the 2fps degradation seen in the
+Two Profiles app. The next experiment (Step 2) adds a second
+`ShellBrowserContext` — the first change that introduces a second profile into
+the process.
