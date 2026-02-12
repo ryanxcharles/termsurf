@@ -883,3 +883,84 @@ cd /Users/ryan/dev/termsurf/ts4/box-demo && bun run server.ts &
 Content Shell is minimal but should inherit the same compositor scheduling.
 This is the most important experiment in the series — it determines the
 architecture of TermSurf.
+
+#### Result: PASSED
+
+60fps. Shell A renders the spinning blue square at full framerate with a second
+navigating WebContents sharing the same BrowserContext (profile A).
+
+#### Conclusion
+
+**The architecture question is answered.** Two WebContents within the same
+BrowserContext coexist at 60fps. Two WebContents from different BrowserContexts
+drop to 2fps. The problem is multi-profile-in-one-process, not
+multi-WebContents.
+
+This is the most important finding of the entire Issue 413 series:
+
+| Experiment | Change | FPS | Verdict |
+| --- | --- | --- | --- |
+| 1 | Path override | 60 | Harmless |
+| 2 | Second BrowserContext (unused) | 60 | Harmless |
+| 3 | Custom window + reparented view | 60 | Harmless |
+| 4 | Second WebContents, **different profile** | 2 | **Root cause** |
+| 5 | Second WebContents, **same profile** | 60 | Confirmed |
+
+The 2fps degradation is caused specifically by navigating a WebContents from a
+second BrowserContext. Creating the second BrowserContext alone is fine
+(Experiment 2), but the moment a WebContents backed by that second context
+starts navigating — activating its StoragePartition, network context, and
+renderer — something in Chromium's per-profile infrastructure contends with the
+first profile and drags both down to 2fps.
+
+Chrome never does this. When you switch Chrome profiles, each profile gets its
+own window and its own browser-side coordination. Chrome does not place two
+different profiles' WebContents in the same renderer scheduling context.
+
+## Issue 413 Conclusion
+
+### The architecture of TermSurf
+
+The experiments prove that **one Content API process per profile** is the correct
+architecture. Within a single process, multiple WebContents sharing one
+BrowserContext render at 60fps. Across different BrowserContexts in one process,
+rendering collapses to 2fps.
+
+The architecture:
+
+```
+TermSurf (Ghostty fork, parent process)
+├── Terminal panes (in-process, native Metal rendering)
+├── Browser profile "work" (child process, Content API)
+│   ├── WebContents 1 ──IOSurface──▶ parent
+│   └── WebContents 2 ──IOSurface──▶ parent
+├── Browser profile "personal" (child process, Content API)
+│   └── WebContents 3 ──IOSurface──▶ parent
+└── Ghostty Metal compositor (composites all IOSurfaces + terminal panes)
+```
+
+This combines the best of ts3 and ts4:
+
+- **From ts3:** One process per profile. Processes communicate via IOSurface
+  Mach port transfer (proven at 60fps in Issue 403).
+- **From ts4:** Content API instead of CEF. No 31fps ceiling. Multiple
+  WebContents per profile share cookies, localStorage, and sessions — like tabs
+  in a browser.
+- **From Ghostty:** Metal renderer composites IOSurfaces from all profile
+  processes alongside terminal panes. Native terminal rendering stays
+  in-process.
+
+### What's next
+
+This issue's experiments are complete. The next issue should plan the
+process-per-profile architecture in detail:
+
+1. **Content API embedder per profile.** Each child process runs a minimal
+   Content API embedder (derived from the One Profile app) with off-screen
+   rendering to IOSurface.
+2. **IOSurface sharing.** Profile processes send IOSurface Mach ports to the
+   Ghostty parent via XPC (the ts3 pattern, already proven).
+3. **Ghostty integration.** The parent process composites IOSurfaces as Metal
+   textures alongside terminal panes.
+4. **Process lifecycle.** The parent spawns and manages profile processes.
+   Multiple `web` commands within the same profile reuse the existing process.
