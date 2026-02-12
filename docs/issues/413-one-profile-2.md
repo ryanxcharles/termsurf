@@ -135,4 +135,113 @@ For each step:
 
 ## Experiments
 
-(Experiments will be recorded here as they are conducted.)
+### Experiment 1: Override SHELL_DIR_USER_DATA (Step 1)
+
+#### Hypothesis
+
+The `SHELL_DIR_USER_DATA` path override changes where Chromium stores profile
+data but should not affect the rendering pipeline. One Profile currently uses
+the default macOS path (`~/Library/Application Support/Chromium One Profile`).
+Overriding it to `~/.config/termsurf/poc/profile-a` should have no effect on
+framerate.
+
+If this drops to 2fps, the path override itself interferes with some subsystem
+(e.g., the storage service, the network service, or the path provider's
+interaction with utility processes). This would be a significant finding — it
+would mean the Two Profiles 2fps problem starts with the very first change.
+
+#### Design
+
+Override `InitializeBrowserContexts()` in `shell_browser_main_parts.cc` to call
+`base::PathService::Override(SHELL_DIR_USER_DATA, ...)` before constructing the
+`ShellBrowserContext`. The context's constructor calls `InitWhileIOAllowed()`,
+which calls `base::PathService::Get(SHELL_DIR_USER_DATA, &path_)` — so the
+override must happen before construction.
+
+The profile path is `~/.config/termsurf/poc/profile-a`. Resolve the home
+directory via `base::GetHomeDir()`.
+
+The change to `InitializeBrowserContexts()`:
+
+```cpp
+void ShellBrowserMainParts::InitializeBrowserContexts() {
+  base::FilePath profile_path =
+      base::GetHomeDir()
+          .Append(".config")
+          .Append("termsurf")
+          .Append("poc")
+          .Append("profile-a");
+  base::PathService::Override(SHELL_DIR_USER_DATA, profile_path);
+
+  set_browser_context(new ShellBrowserContext(false));
+  set_off_the_record_browser_context(new ShellBrowserContext(true));
+  browser_context()->GetOriginTrialsControllerDelegate();
+  off_the_record_browser_context()->GetOriginTrialsControllerDelegate();
+}
+```
+
+Two includes are needed at the top of the file:
+
+```cpp
+#include "base/path_service.h"
+#include "content/one_profile/common/shell_paths.h"
+```
+
+(`base/files/file_path.h` is already present.)
+
+Everything else stays the same. `InitializeMessageLoopContext()` still calls
+`Shell::CreateNewWindow(browser_context(), GetStartupURL(), nullptr,
+gfx::Size())`
+— a single Shell, single profile, standard lifecycle.
+
+#### Branch setup
+
+```bash
+cd ts4/termsurf-chromium/src
+git checkout -b 146.0.7650.0-issue-413 146.0.7650.0-issue-412
+```
+
+This starts from Issue 412's confirmed 60fps baseline.
+
+#### Files to modify
+
+- `content/one_profile/browser/shell_browser_main_parts.cc` — add
+  `PathService::Override` call in `InitializeBrowserContexts()`, add two
+  includes
+
+#### Build and run
+
+```bash
+autoninja -C out/Default one_profile
+cd /Users/ryan/dev/termsurf/ts4/box-demo && bun run server.ts &
+./out/Default/One\ Profile.app/Contents/MacOS/One\ Profile http://localhost:9407
+```
+
+#### What this tests
+
+- Whether overriding `SHELL_DIR_USER_DATA` to a custom path affects rendering
+  framerate
+- Whether the storage service, network service, and other utility processes
+  function correctly with a non-default profile path
+- Whether localStorage persists correctly at the new path
+  (`~/.config/termsurf/poc/profile-a`)
+
+#### What determines success or failure
+
+- **60fps + localStorage persists at the new path:** The override is harmless.
+  Proceed to Experiment 2 (Step 2: add second BrowserContext).
+- **2fps:** The path override is the root cause (or a contributing factor).
+  Investigate which subsystem breaks — likely the storage service failing to
+  initialize at the custom path, falling back to degraded mode. Compare with
+  `--user-data-dir=~/.config/termsurf/poc/profile-a` on vanilla Content Shell to
+  see if the same override works there.
+- **Crash or failure to launch:** The custom path doesn't exist or can't be
+  created. Ensure `~/.config/termsurf/poc/profile-a` exists before running, or
+  let Chromium create it (it should — `ShellBrowserContext` doesn't require the
+  directory to pre-exist).
+
+#### Expected result
+
+60fps. This is a data-path-only change with no effect on the rendering pipeline,
+compositor lifecycle, or view hierarchy. The storage service should handle the
+custom path identically to the default path.
