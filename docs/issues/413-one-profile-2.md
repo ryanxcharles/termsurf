@@ -270,3 +270,129 @@ This eliminates the path override as a cause of the 2fps degradation seen in the
 Two Profiles app. The next experiment (Step 2) adds a second
 `ShellBrowserContext` — the first change that introduces a second profile into
 the process.
+
+### Experiment 2: Add second BrowserContext (Step 2)
+
+#### Hypothesis
+
+Creating a second `ShellBrowserContext` with a different storage path should not
+affect Shell A's rendering. The `BrowserContext` is a data container — it holds
+cookies, localStorage, and cache configuration. It does not interact with the
+compositor, the view hierarchy, or the rendering pipeline.
+
+If this drops to 2fps, the second `BrowserContext` itself degrades Shell A. The
+most likely mechanism is the storage service: `ShellBrowserContext`'s
+constructor calls `CreateBrowserContextServices(this)`, which may trigger the
+storage service to initialize for the new context. Issue 411 observed a storage
+service crash when two profiles coexisted — the service couldn't make
+profile-b's paths relative to profile-a's root. If the crash or error handling
+blocks or degrades the storage service for profile-a too, that could explain the
+systemic 2fps.
+
+#### Design
+
+Add a `browser_context_b_` member to `ShellBrowserMainParts`. In
+`InitializeBrowserContexts()`, after creating the profile-a context, override
+`SHELL_DIR_USER_DATA` to profile-b and create a second `ShellBrowserContext`.
+Don't use it for anything — no `WebContents`, no navigation. Clean it up in
+`PostMainMessageLoopRun()`.
+
+The change to the header (`shell_browser_main_parts.h`), add one member:
+
+```cpp
+private:
+ std::unique_ptr<ShellBrowserContext> browser_context_;
+ std::unique_ptr<ShellBrowserContext> off_the_record_browser_context_;
+ std::unique_ptr<ShellBrowserContext> browser_context_b_;
+```
+
+The change to `InitializeBrowserContexts()`:
+
+```cpp
+void ShellBrowserMainParts::InitializeBrowserContexts() {
+  base::FilePath profile_a_path =
+      base::GetHomeDir()
+          .Append(".config")
+          .Append("termsurf")
+          .Append("poc")
+          .Append("profile-a");
+  base::PathService::Override(SHELL_DIR_USER_DATA, profile_a_path);
+
+  set_browser_context(new ShellBrowserContext(false));
+  set_off_the_record_browser_context(new ShellBrowserContext(true));
+  browser_context()->GetOriginTrialsControllerDelegate();
+  off_the_record_browser_context()->GetOriginTrialsControllerDelegate();
+
+  base::FilePath profile_b_path =
+      base::GetHomeDir()
+          .Append(".config")
+          .Append("termsurf")
+          .Append("poc")
+          .Append("profile-b");
+  base::PathService::Override(SHELL_DIR_USER_DATA, profile_b_path);
+
+  browser_context_b_ = std::make_unique<ShellBrowserContext>(false);
+}
+```
+
+The change to `PostMainMessageLoopRun()`, add cleanup before the existing
+context resets:
+
+```cpp
+browser_context_b_.reset();
+browser_context_.reset();
+off_the_record_browser_context_.reset();
+```
+
+Note: after both contexts are created, the global `SHELL_DIR_USER_DATA` is left
+pointing at profile-b. This is the same state the old Two Profiles app was in.
+If this causes the storage service to resolve paths against profile-b instead of
+profile-a for Shell A's context, that's a finding — but it should not affect
+rendering since the storage path is read once during `InitWhileIOAllowed()` and
+cached in `ShellBrowserContext::path_`.
+
+#### Files to modify
+
+- `content/one_profile/browser/shell_browser_main_parts.h` — add
+  `browser_context_b_` member
+- `content/one_profile/browser/shell_browser_main_parts.cc` — expand
+  `InitializeBrowserContexts()` with profile-b context creation, add cleanup in
+  `PostMainMessageLoopRun()`
+
+#### Build and run
+
+```bash
+autoninja -C out/Default one_profile
+cd /Users/ryan/dev/termsurf/ts4/box-demo && bun run server.ts &
+./out/Default/One\ Profile.app/Contents/MacOS/One\ Profile http://localhost:9407
+```
+
+#### What this tests
+
+- Whether creating a second `ShellBrowserContext` (unused) degrades Shell A's
+  framerate
+- Whether the storage service can handle two `BrowserContext` instances with
+  different storage paths without crashing or degrading
+- Whether `CreateBrowserContextServices()` for the second context has any side
+  effects on the first
+
+#### What determines success or failure
+
+- **60fps:** The second `BrowserContext` is harmless. Proceed to Experiment 3
+  (Step 3: own the window).
+- **2fps:** The second `BrowserContext` is the culprit. Investigate the storage
+  service — check for crashes in the console output (`[ERROR:storage_...]`),
+  check whether
+  `browser_context_b_ = std::make_unique<ShellBrowserContext>(false, /*delay_services_creation=*/true)`
+  (delaying service creation) restores 60fps. If it does,
+  `CreateBrowserContextServices` is the trigger.
+- **Crash:** Likely the storage service crash from Issue 411. Check whether the
+  second `PathService::Override` leaves the storage service in a broken state
+  for profile-a.
+
+#### Expected result
+
+60fps. The second `BrowserContext` is a data object with no rendering side
+effects. But this is the first experiment that introduces a second profile into
+the process, which is exactly what distinguishes the Two Profiles app from
+Content Shell — so a failure here would be a major finding.
