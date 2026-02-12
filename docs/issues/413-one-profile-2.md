@@ -405,11 +405,11 @@ Content Shell — so a failure here would be a major finding.
 #### Conclusion
 
 A second `BrowserContext` with a different storage path has no effect on Shell
-A's rendering. The storage service handles two `BrowserContext` instances without
-crashing or degrading. `CreateBrowserContextServices()` for the second context
-has no observable side effects on the first. The global `SHELL_DIR_USER_DATA`
-being left pointing at profile-b after initialization does not matter — each
-context cached its path during construction.
+A's rendering. The storage service handles two `BrowserContext` instances
+without crashing or degrading. `CreateBrowserContextServices()` for the second
+context has no observable side effects on the first. The global
+`SHELL_DIR_USER_DATA` being left pointing at profile-b after initialization does
+not matter — each context cached its path during construction.
 
 This eliminates the second `BrowserContext` as the cause of the 2fps
 degradation. Two suspects remain: the window ownership change (Step 3) and the
@@ -432,8 +432,8 @@ macOS fires `viewDidMoveToWindow`, which triggers Chromium's visibility chain
 (`UpdateWebContentsVisibility` → `WasShown` → `ShowWithVisibility`). If the
 renderer and `RenderWidgetHostView` already exist at the time of the reparent
 (which they do — Shell creates the renderer before we reparent), the
-`BrowserCompositorMac` should transition to `HasOwnCompositor` in the new
-window and continue producing frames.
+`BrowserCompositorMac` should transition to `HasOwnCompositor` in the new window
+and continue producing frames.
 
 If this drops to 2fps, the reparenting itself is the problem — the compositor
 lifecycle doesn't survive moving between windows. This would explain why the
@@ -562,9 +562,9 @@ cd /Users/ryan/dev/termsurf/ts4/box-demo && bun run server.ts &
 - **2fps in the custom window:** The reparent breaks the compositor lifecycle.
   The `BrowserCompositorMac` either stays in `HasNoCompositor` or fails to
   re-attach to the new window's display link. This would explain the Two
-  Profiles 2fps and point to a fix: ensure the compositor is properly
-  restarted after reparenting (e.g., by calling `WasShown` or
-  `ShowWithVisibility` after the view is in the new window).
+  Profiles 2fps and point to a fix: ensure the compositor is properly restarted
+  after reparenting (e.g., by calling `WasShown` or `ShowWithVisibility` after
+  the view is in the new window).
 - **Blank window / no rendering:** The web view moved but the compositor didn't
   follow. Check if the view is visible (`isHiddenOrHasHiddenAncestor`), if the
   window is on screen, and if the compositor state is `HasNoCompositor`.
@@ -577,3 +577,34 @@ cd /Users/ryan/dev/termsurf/ts4/box-demo && bun run server.ts &
 visibility chain with the renderer already present. The `BrowserCompositorMac`
 should transition correctly. But this is the most likely experiment to fail —
 it's the first change that breaks the assumption that Shell owns the window.
+
+#### Result: PASSED
+
+60fps. The spinning blue square renders at full framerate in the custom window
+titled "One Profile (Custom Window)". Shell's original window is hidden and the
+reparented WebContents view renders correctly.
+
+#### Conclusion
+
+Reparenting a WebContents NSView from Shell's NSWindow into a custom NSWindow
+does not break the compositor lifecycle. The `BrowserCompositorMac` survives the
+window change — `viewDidMoveToWindow` fires, the visibility chain runs with the
+renderer already present, and the compositor transitions to `HasOwnCompositor`
+in the new window. Frames flow at 60fps.
+
+This is a major finding. It means TermSurf can own its own window and place
+Chromium WebContents views into it without any rendering penalty. The
+`Shell::CreateNewWindow` lifecycle creates the renderer and compositor correctly,
+and the subsequent reparent is transparent to the rendering pipeline.
+
+Three of five steps now pass at 60fps:
+
+1. Path override — harmless
+2. Second BrowserContext — harmless
+3. Custom window with reparented view — harmless
+
+The remaining suspects are the second WebContents itself (Step 4) and attaching
+both views side by side (Step 5). If Step 4 passes, the root cause is isolated
+to the side-by-side view attachment — which is where the original Two Profiles
+app's visibility race condition (Issue 411) would apply, but only to the second
+view.
