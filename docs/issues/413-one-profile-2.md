@@ -417,3 +417,163 @@ second `WebContents` (Steps 4–5). The next experiment is the critical one — 
 3 takes window ownership away from Chromium's `Shell` class and into our own
 NSWindow, which is the fundamental architectural change needed for side-by-side
 rendering.
+
+### Experiment 3: Own the window (Step 3)
+
+#### Hypothesis
+
+In Content Shell and One Profile, Chromium's `Shell` class creates the NSWindow,
+manages the toolbar, and places the WebContents view as the sole occupant. To
+render two profiles side by side, we need to own the window ourselves.
+
+Reparenting a single WebContents view from Shell's NSWindow into a custom
+NSWindow should not break rendering. When the NSView moves between windows,
+macOS fires `viewDidMoveToWindow`, which triggers Chromium's visibility chain
+(`UpdateWebContentsVisibility` → `WasShown` → `ShowWithVisibility`). If the
+renderer and `RenderWidgetHostView` already exist at the time of the reparent
+(which they do — Shell creates the renderer before we reparent), the
+`BrowserCompositorMac` should transition to `HasOwnCompositor` in the new
+window and continue producing frames.
+
+If this drops to 2fps, the reparenting itself is the problem — the compositor
+lifecycle doesn't survive moving between windows. This would explain why the
+original Two Profiles app was at 2fps: it wasn't the second profile or the
+second WebContents, it was the act of placing a WebContents view into a window
+that Shell didn't create.
+
+#### Design
+
+Let `Shell::CreateNewWindow()` do its normal thing (create window, add
+WebContents view, start navigation). Then immediately after, create our own
+NSWindow, reparent the WebContents' NSView into it, and hide Shell's original
+window.
+
+The reparenting logic requires Objective-C (NSWindow, NSView). Since
+`shell_browser_main_parts.cc` is compiled as C++, the macOS-specific code goes
+in `shell_browser_main_parts_mac.mm` as a free function, forward-declared in the
+.cc file.
+
+**In `shell_browser_main_parts.cc`**, change `InitializeMessageLoopContext()`:
+
+```cpp
+#if BUILDFLAG(IS_MAC)
+namespace content {
+void ReparentToCustomWindow(Shell* shell);
+}
+#endif
+
+void ShellBrowserMainParts::InitializeMessageLoopContext() {
+  Shell* shell = Shell::CreateNewWindow(browser_context_.get(), GetStartupURL(),
+                                        nullptr, gfx::Size());
+#if BUILDFLAG(IS_MAC)
+  ReparentToCustomWindow(shell);
+#endif
+}
+```
+
+**In `shell_browser_main_parts_mac.mm`**, add the reparenting function:
+
+```cpp
+#include "content/one_profile/browser/shell.h"
+#include "content/public/browser/web_contents.h"
+
+namespace content {
+
+static NSWindow* g_custom_window = nil;
+
+void ReparentToCustomWindow(Shell* shell) {
+  // Create our own NSWindow
+  NSRect frame = NSMakeRect(200, 200, 800, 600);
+  NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                     NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+  g_custom_window = [[NSWindow alloc] initWithContentRect:frame
+                                                styleMask:style
+                                                  backing:NSBackingStoreBuffered
+                                                    defer:NO];
+  g_custom_window.title = @"One Profile (Custom Window)";
+  g_custom_window.releasedWhenClosed = NO;
+
+  // Get the WebContents' native NSView
+  NSView* web_view =
+      shell->web_contents()->GetNativeView().GetNativeNSView();
+
+  // Remove from Shell's window
+  [web_view removeFromSuperview];
+
+  // Add to our window
+  [g_custom_window.contentView addSubview:web_view];
+  web_view.frame = g_custom_window.contentView.bounds;
+  web_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+
+  // Hide Shell's original window (orderOut doesn't trigger windowShouldClose)
+  NSWindow* shell_window = shell->window().GetNativeNSWindow();
+  [shell_window orderOut:nil];
+
+  // Show our window
+  [g_custom_window makeKeyAndOrderFront:nil];
+}
+
+}  // namespace content
+```
+
+Key details:
+
+- `g_custom_window` is a file-static strong reference to prevent deallocation.
+- `orderOut:nil` hides Shell's window without triggering the
+  `OneProfileWindowDelegate`'s `windowShouldClose:` (which would call
+  `Shell::ClearAndDelete()` and destroy the WebContents). The Shell stays alive.
+- The WebContents view is removed from Shell's `contentView` and added to ours.
+  This triggers `viewDidMoveToWindow` on the NSView, which Chromium uses to
+  drive compositor visibility.
+- `Shell::CreateNewWindow` returns `Shell*`. The current code discards it; we
+  capture it.
+
+#### Files to modify
+
+- `content/one_profile/browser/shell_browser_main_parts.cc` — capture `Shell*`
+  return value, call `ReparentToCustomWindow(shell)` behind
+  `#if BUILDFLAG(IS_MAC)`, add forward declaration
+- `content/one_profile/browser/shell_browser_main_parts_mac.mm` — implement
+  `ReparentToCustomWindow`, add includes for Shell and WebContents
+
+No header changes needed (forward declaration is local to the .cc file). No
+BUILD.gn changes needed (both files are already in the build).
+
+#### Build and run
+
+```bash
+autoninja -C out/Default one_profile
+cd /Users/ryan/dev/termsurf/ts4/box-demo && bun run server.ts &
+./out/Default/One\ Profile.app/Contents/MacOS/One\ Profile http://localhost:9407
+```
+
+#### What this tests
+
+- Whether reparenting a WebContents NSView from Shell's NSWindow to a custom
+  NSWindow breaks the compositor lifecycle
+- Whether `viewDidMoveToWindow` fires correctly and the `BrowserCompositorMac`
+  transitions to `HasOwnCompositor` in the new window
+- Whether the renderer continues producing frames at 60fps in a non-Shell window
+
+#### What determines success or failure
+
+- **60fps in the custom window:** Reparenting works. The compositor survives the
+  window change. Proceed to Experiment 4 (Step 4: add second WebContents).
+- **2fps in the custom window:** The reparent breaks the compositor lifecycle.
+  The `BrowserCompositorMac` either stays in `HasNoCompositor` or fails to
+  re-attach to the new window's display link. This would explain the Two
+  Profiles 2fps and point to a fix: ensure the compositor is properly
+  restarted after reparenting (e.g., by calling `WasShown` or
+  `ShowWithVisibility` after the view is in the new window).
+- **Blank window / no rendering:** The web view moved but the compositor didn't
+  follow. Check if the view is visible (`isHiddenOrHasHiddenAncestor`), if the
+  window is on screen, and if the compositor state is `HasNoCompositor`.
+- **Crash:** Likely a use-after-free if Shell's cleanup runs unexpectedly, or a
+  compositor assertion. Check the crash log for the specific failure.
+
+#### Expected result
+
+60fps. The reparenting should trigger `viewDidMoveToWindow`, which re-runs the
+visibility chain with the renderer already present. The `BrowserCompositorMac`
+should transition correctly. But this is the most likely experiment to fail —
+it's the first change that breaks the assumption that Shell owns the window.
