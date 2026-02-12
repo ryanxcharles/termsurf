@@ -594,8 +594,8 @@ in the new window. Frames flow at 60fps.
 
 This is a major finding. It means TermSurf can own its own window and place
 Chromium WebContents views into it without any rendering penalty. The
-`Shell::CreateNewWindow` lifecycle creates the renderer and compositor correctly,
-and the subsequent reparent is transparent to the rendering pipeline.
+`Shell::CreateNewWindow` lifecycle creates the renderer and compositor
+correctly, and the subsequent reparent is transparent to the rendering pipeline.
 
 Three of five steps now pass at 60fps:
 
@@ -608,3 +608,126 @@ both views side by side (Step 5). If Step 4 passes, the root cause is isolated
 to the side-by-side view attachment — which is where the original Two Profiles
 app's visibility race condition (Issue 411) would apply, but only to the second
 view.
+
+### Experiment 4: Add second WebContents, no view attachment (Step 4)
+
+#### Hypothesis
+
+Creating a second `WebContents` with `browser_context_b_` and navigating it to
+the test page should not affect Shell A's rendering. The second WebContents has
+no view attached to any window — it exists in memory with a live renderer
+process, but its `WebContentsViewCocoa` is never added to the view hierarchy.
+
+If this drops to 2fps, the mere act of creating and navigating a second
+WebContents degrades Shell A. This would point to renderer process contention,
+GPU process resource sharing, or compositor interference between two active
+WebContents in the same process. This would be a Chromium-level issue rather
+than a view hierarchy issue.
+
+#### Design
+
+Create a bare `WebContents` (not wrapped in a `Shell`) using
+`browser_context_b_` and navigate it to the test page URL. Store it as a member,
+clean it up on shutdown. The second WebContents' view is never added to any
+window.
+
+The change to the header (`shell_browser_main_parts.h`), add a forward
+declaration and member:
+
+```cpp
+namespace content {
+class WebContents;
+// ...
+class ShellBrowserMainParts : public BrowserMainParts {
+  // ...
+ private:
+  // ...
+  std::unique_ptr<ShellBrowserContext> browser_context_b_;
+  std::unique_ptr<WebContents> web_contents_b_;
+```
+
+The change to `InitializeMessageLoopContext()`:
+
+```cpp
+void ShellBrowserMainParts::InitializeMessageLoopContext() {
+  Shell* shell = Shell::CreateNewWindow(browser_context_.get(), GetStartupURL(),
+                                        nullptr, gfx::Size());
+#if BUILDFLAG(IS_MAC)
+  ReparentToCustomWindow(shell);
+#endif
+
+  // Create second WebContents with profile B, navigate but don't attach view.
+  WebContents::CreateParams params(browser_context_b_.get());
+  web_contents_b_ = WebContents::Create(params);
+  NavigationController::LoadURLParams load_params(GetStartupURL());
+  load_params.transition_type = ui::PageTransitionFromInt(
+      ui::PAGE_TRANSITION_TYPED | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
+  web_contents_b_->GetController().LoadURLWithParams(load_params);
+}
+```
+
+The change to `PostMainMessageLoopRun()`, add cleanup before context resets:
+
+```cpp
+web_contents_b_.reset();
+browser_context_b_.reset();
+browser_context_.reset();
+off_the_record_browser_context_.reset();
+```
+
+Additional includes needed in `shell_browser_main_parts.cc`:
+
+```cpp
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/web_contents.h"
+#include "ui/base/page_transition_types.h"
+```
+
+Note: `GetStartupURL()` is a file-local function already defined in the .cc
+file. Both WebContents load the same URL (the box-demo test page).
+
+#### Files to modify
+
+- `content/one_profile/browser/shell_browser_main_parts.h` — forward-declare
+  `WebContents`, add `web_contents_b_` member
+- `content/one_profile/browser/shell_browser_main_parts.cc` — create and
+  navigate second WebContents in `InitializeMessageLoopContext()`, add cleanup
+  in `PostMainMessageLoopRun()`, add includes
+
+#### Build and run
+
+```bash
+autoninja -C out/Default one_profile
+cd /Users/ryan/dev/termsurf/ts4/box-demo && bun run server.ts &
+./out/Default/One\ Profile.app/Contents/MacOS/One\ Profile http://localhost:9407
+```
+
+#### What this tests
+
+- Whether a second navigating WebContents (with a live renderer) degrades Shell
+  A's framerate even when the second view is not attached to any window
+- Whether renderer process contention or GPU process resource sharing between
+  two active WebContents causes degradation
+- Whether the storage service handles two active WebContents from two different
+  BrowserContexts without crashing
+
+#### What determines success or failure
+
+- **60fps:** The second WebContents is harmless when not attached. Proceed to
+  Experiment 5 (Step 5: attach both views side by side). This would isolate the
+  root cause to the view attachment step itself.
+- **2fps:** The second WebContents degrades Shell A even without a view. This
+  points to process-level interference — renderer contention, GPU resource
+  sharing, or compositor crosstalk. Investigate by checking if the second
+  WebContents' renderer is consuming excessive resources (Activity Monitor), or
+  try creating the WebContents without navigating it to see if navigation is the
+  trigger.
+- **Crash:** Likely the storage service crash from Issue 411 (profile-b paths
+  can't be made relative to profile-a's root). Check console output for storage
+  service errors.
+
+#### Expected result
+
+60fps. A WebContents without a view shouldn't participate in the rendering
+pipeline — no compositor, no BeginFrame signals, no display link subscription.
+The renderer process exists but has nothing to paint to.
