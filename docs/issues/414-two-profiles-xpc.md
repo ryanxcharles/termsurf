@@ -613,3 +613,229 @@ Key observations:
 This proves the capture mechanism for the profile server. Each frame is already
 an IOSurface — ready for `IOSurfaceCreateMachPort()` and XPC transfer to the
 GUI process.
+
+### Experiment 2: XPC frame delivery to a receiver process
+
+#### Hypothesis
+
+IOSurface Mach ports created from `FrameSinkVideoCapturer` frames can be
+transferred via XPC to a separate process and reconstructed at 60fps. This
+proves the critical link in the architecture: the profile server's captured
+IOSurfaces can cross process boundaries without GPU-to-CPU readback.
+
+#### Background
+
+Experiment 1 proved that `FrameSinkVideoCapturer` delivers IOSurfaces at 60fps.
+The next step is to verify that these IOSurfaces — which are allocated by
+Chromium's GPU process — support `IOSurfaceCreateMachPort()` for cross-process
+transfer. This is not guaranteed; the IOSurface must be backed by a kernel
+object accessible to other processes.
+
+The XPC transfer pattern is well-established from cef-test and ts3: the sender
+calls `IOSurfaceCreateMachPort()` on the IOSurface, embeds the port in an XPC
+dictionary via `xpc_dictionary_set_mach_send()`, and sends it. The receiver
+calls `xpc_dictionary_copy_mach_send()` to extract the port, then
+`IOSurfaceLookupFromMachPort()` to reconstruct the IOSurface. Both sides call
+`mach_port_deallocate()` to avoid leaking kernel resources.
+
+Key reference: `ts3/cef-test-profile/src/main.rs` (Mach port creation and send),
+`ts3/cef-test-gui/src/main.rs` (Mach port receive and IOSurface import),
+`ts3/termsurf-xpc/src/iosurface.rs` (IOSurface Mach port API wrappers).
+
+#### Design
+
+Two binaries, communicating via XPC:
+
+1. **Profile server** — The One Profile app from Experiment 1, modified to
+   create Mach ports from captured IOSurfaces and send them via XPC. Keeps its
+   window — useful for debugging, and headless mode is a separate concern.
+2. **Receiver** — A minimal standalone Objective-C program that receives
+   IOSurface Mach ports via XPC and logs their dimensions and frame rate. No
+   Metal rendering — this just proves the transfer works. Rendering is a
+   separate experiment.
+
+##### Step 1: Build the receiver
+
+Create `ts4/two-profiles-receiver/main.m`, a standalone Objective-C program
+(~100 lines). It runs as an XPC Mach service listener:
+
+1. Call
+   `xpc_connection_create_mach_service("com.termsurf.two-profiles", queue, XPC_CONNECTION_MACH_SERVICE_LISTENER)`
+   to register as a listener on the Mach service name.
+2. Set a new-connection handler. For each incoming connection, set an event
+   handler that processes `display_surface` messages:
+   ```c
+   mach_port_t port = xpc_dictionary_copy_mach_send(msg, "iosurface_port");
+   IOSurfaceRef surface = IOSurfaceLookupFromMachPort(port);
+   size_t w = IOSurfaceGetWidth(surface);
+   size_t h = IOSurfaceGetHeight(surface);
+   // Log dimensions, increment frame counter, log FPS once per second
+   CFRelease(surface);
+   mach_port_deallocate(mach_task_self(), port);
+   ```
+3. Run the dispatch loop with `dispatch_main()`.
+
+Build with:
+```bash
+clang -framework Foundation -framework IOSurface -o receiver main.m
+```
+
+##### Step 2: Register the Mach service
+
+Create a launchd agent plist (`ts4/two-profiles-receiver/com.termsurf.two-profiles.plist`)
+that registers the `com.termsurf.two-profiles` Mach service name. This is
+required — `xpc_connection_create_mach_service` with the listener flag only
+works for launchd-registered services.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.termsurf.two-profiles</string>
+    <key>MachServices</key>
+    <dict>
+        <key>com.termsurf.two-profiles</key>
+        <true/>
+    </dict>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/two-profiles-receiver</string>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/tmp/two-profiles-receiver.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/two-profiles-receiver.log</string>
+</dict>
+</plist>
+```
+
+Install with:
+```bash
+# Symlink so plist doesn't need updating on rebuilds
+ln -sf $(pwd)/ts4/two-profiles-receiver/receiver /usr/local/bin/two-profiles-receiver
+# Register the service
+cp ts4/two-profiles-receiver/com.termsurf.two-profiles.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.termsurf.two-profiles.plist
+```
+
+When the profile server connects to the service name, launchd starts the
+receiver on demand. Output goes to `/tmp/two-profiles-receiver.log`.
+
+For interactive debugging, skip the plist and run:
+```bash
+launchctl debug gui/com.termsurf.two-profiles -- $(pwd)/ts4/two-profiles-receiver/receiver
+```
+
+##### Step 3: Modify the profile server
+
+Extend `ShellVideoConsumer` to send captured IOSurfaces via XPC:
+
+**XPC connection.** Add a `ConnectToService(const std::string& name)` method:
+
+```cpp
+#include <xpc/xpc.h>
+
+void ShellVideoConsumer::ConnectToService(const std::string& name) {
+  xpc_connection_ = xpc_connection_create_mach_service(
+      name.c_str(), nullptr, 0);  // Client mode (no listener flag)
+  xpc_connection_set_event_handler(xpc_connection_, ^(xpc_object_t event) {
+    if (xpc_get_type(event) == XPC_TYPE_ERROR) {
+      LOG(ERROR) << "[ShellVideoConsumer] XPC error";
+    }
+  });
+  xpc_connection_resume(xpc_connection_);
+  LOG(INFO) << "[ShellVideoConsumer] Connected to XPC service: " << name;
+}
+```
+
+**Mach port send.** In `OnFrameCaptured()`, after extracting the IOSurface:
+
+```cpp
+if (xpc_connection_) {
+  mach_port_t port = IOSurfaceCreateMachPort(io_surface);
+  if (port != MACH_PORT_NULL) {
+    xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
+    xpc_dictionary_set_string(msg, "action", "display_surface");
+    xpc_dictionary_set_mach_send(msg, "iosurface_port", port);
+    xpc_dictionary_set_int64(msg, "width", (int64_t)width);
+    xpc_dictionary_set_int64(msg, "height", (int64_t)height);
+    xpc_connection_send_message(xpc_connection_, msg);  // Async, no reply
+    xpc_release(msg);
+    mach_port_deallocate(mach_task_self(), port);
+  }
+}
+```
+
+`xpc_connection_send_message` is fire-and-forget — it returns immediately after
+queuing the message. The Mach port send right is copied into the XPC message, so
+we deallocate our copy after sending.
+
+**CLI flag.** Add `--xpc-service <name>` to the One Profile app. Parse it in
+`ShellBrowserMainParts::InitializeMessageLoopContext()` and pass to the video
+consumer's `ConnectToService()` before calling `Attach()`.
+
+##### Step 4: Run and verify
+
+1. `cd ts4/box-demo && bun run server.ts` — Start the test page
+2. The receiver starts automatically via launchd when the profile server
+   connects, or use `launchctl debug` for interactive mode
+3. Start the profile server:
+   ```bash
+   out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+     --xpc-service com.termsurf.two-profiles \
+     http://localhost:9407 2>&1
+   ```
+4. Check receiver output: `tail -f /tmp/two-profiles-receiver.log`
+
+#### What we're creating
+
+- `ts4/two-profiles-receiver/main.m` — Receiver program (standalone ObjC)
+- `ts4/two-profiles-receiver/com.termsurf.two-profiles.plist` — Launchd agent
+- `ts4/two-profiles-receiver/Makefile` — Build script
+
+#### What we're modifying
+
+- `content/one_profile/browser/shell_video_consumer.{h,cc}` — Add XPC client
+  connection, Mach port creation/send in `OnFrameCaptured()`
+- `content/one_profile/browser/shell_browser_main_parts.cc` — Parse
+  `--xpc-service` flag, call `ConnectToService()` before `Attach()`
+- `content/one_profile/BUILD.gn` — May need additional framework deps
+  (XPC is part of libSystem so likely no changes)
+
+#### Expected result
+
+Receiver logs showing 60 IOSurface reconstructions per second:
+
+```
+[Receiver] Profile server connected
+[Receiver] 60 frames in 1.00s (60.0 fps) | IOSurface 640x360
+[Receiver] 61 frames in 1.02s (59.8 fps) | IOSurface 640x360
+[Receiver] 60 frames in 1.00s (60.0 fps) | IOSurface 640x360
+```
+
+Profile server logs showing Mach port sends alongside the existing capture logs
+from Experiment 1.
+
+#### What a failure would mean
+
+- **`IOSurfaceCreateMachPort()` returns `MACH_PORT_NULL`:** The IOSurfaces from
+  `FrameSinkVideoCapturer` don't support Mach port creation. This would mean
+  Chromium allocates them in a way that prevents cross-process sharing. Check
+  whether the `GpuMemoryBufferHandle` carries an IOSurface that's backed by a
+  real kernel object (not a process-local mapping).
+- **`IOSurfaceLookupFromMachPort()` returns NULL:** The Mach port arrived but
+  the IOSurface can't be reconstructed. Verify that `copy_mach_send` (not
+  `get_mach_send`) is used on the receive side. Check that
+  `mach_port_deallocate` isn't called before lookup.
+- **< 60fps in receiver:** XPC message overhead is significant. Measure
+  per-message latency. The cef-test benchmark showed XPC overhead was
+  negligible (~0.1ms per message), so this would be surprising.
+- **Launchd won't start the receiver:** Plist syntax error or wrong binary
+  path. Check `launchctl list | grep termsurf` and
+  `launchctl print gui/com.termsurf.two-profiles`.
+- **Profile server can't connect:** The Mach service name isn't registered yet.
+  Add retry with exponential backoff (100ms initial, 10 attempts) to
+  `ConnectToService()`.
