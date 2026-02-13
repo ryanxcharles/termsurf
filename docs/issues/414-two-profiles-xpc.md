@@ -36,8 +36,9 @@ compositing. The Content API should eliminate this ceiling entirely.
 
 - **One Profile app** (Issue 412–413) — A Content Shell clone that renders at
   60fps. This becomes the basis for each profile server process.
-- **cef-test** — Three-process architecture (GUI, launcher, profile server) with
-  proven XPC protocol. Port the architecture, replace CEF with Content API.
+- **cef-test** — Multi-process architecture with proven XPC protocol and
+  IOSurface compositing. Port the frame delivery and compositing code, replace
+  CEF with Content API, simplify bootstrap by eliminating the launcher.
 - **termsurf-xpc** — Rust XPC bindings used by cef-test and ts3. Wraps
   `xpc_connection`, `xpc_dictionary`, Mach port transfer, IOSurface
   create/lookup.
@@ -45,41 +46,68 @@ compositing. The Content API should eliminate this ceiling entirely.
 ## Architecture
 
 ```
-Two Profiles GUI (Cocoa/Metal window)
-├── XPC connection to launcher
-├── Left pane ◀── IOSurface Mach port ── Profile A server (Content API)
-└── Right pane ◀── IOSurface Mach port ── Profile B server (Content API)
+Two Profiles GUI (Cocoa/Metal window + XPC Mach service)
+├── Listens on com.termsurf.two-profiles
+├── Spawns profile-a server → connects back to GUI
+│   └── Left pane ◀── IOSurface Mach port ── Profile A server (Content API)
+├── Spawns profile-b server → connects back to GUI
+│   └── Right pane ◀── IOSurface Mach port ── Profile B server (Content API)
+└── Composites both IOSurfaces into one window
 ```
 
-Three processes:
+Two process types (no launcher):
 
-1. **GUI process** — Creates a single window with two Metal quads. Receives
-   IOSurface Mach ports from both profile servers via XPC. Imports each as a
-   Metal texture and composites them side by side. No browser code runs here.
+1. **GUI process** — Creates a single window with two Metal quads. Registers as
+   a named XPC Mach service (`com.termsurf.two-profiles`). Spawns profile server
+   processes as children, passing the service name and a session ID as CLI args.
+   Receives IOSurface Mach ports from both profile servers via XPC. Imports each
+   as a Metal texture and composites them side by side. No browser code runs
+   here.
 
 2. **Profile server process** (one per profile) — Runs the Content API with a
    single `BrowserContext`. Navigates a `WebContents` to the test page. Captures
-   the composited output as an IOSurface. Sends the IOSurface Mach port to the
-   GUI via XPC every frame.
+   the composited output as an IOSurface. Connects to the GUI's Mach service by
+   name and sends IOSurface Mach ports every frame.
 
-3. **Launcher process** — XPC Mach service that relays endpoints between GUI and
-   profile servers. Spawns profile server processes on demand. Identical role to
-   cef-test's launcher.
+### Why no launcher?
+
+In cef-test and ts3, a separate launcher process acted as a middleman: the GUI
+sent an anonymous XPC endpoint to the launcher, the launcher stored it, and the
+profile server claimed it. This relay was necessary because XPC endpoints can
+only be transferred over existing XPC connections — two processes with no shared
+channel have no way to exchange endpoints.
+
+The launcher solved the bootstrap problem, but it was a third process (~220
+lines) that existed solely to relay one message per profile. A simpler
+alternative: **make the GUI itself the named Mach service.** The GUI registers a
+hard-coded service name (e.g., `com.termsurf.two-profiles`) via a launchd plist.
+Profile servers receive this name as a CLI argument and connect directly. No
+endpoint relay, no session claiming, no middleman.
+
+The connection is bidirectional — once established, the profile server sends
+IOSurface frames to the GUI, and the GUI sends input events (keyboard, mouse,
+resize) back to the profile server over the same connection. This is the same
+communication pattern as cef-test, just with one fewer process.
+
+If the GUI-as-service approach hits problems (e.g., multiple GUI instances
+conflicting on the service name), we can fall back to the launcher pattern. For
+the PoC with a single window, the simpler approach should work.
 
 ### XPC protocol
 
-Reuse the cef-test/ts3 protocol exactly:
+**Bootstrap (simplified from cef-test):**
 
-**Bootstrap:**
+1. GUI registers as Mach service `com.termsurf.two-profiles` (via launchd plist)
+2. GUI spawns profile-a server with args:
+   `--service com.termsurf.two-profiles
+   --session-id profile-a --profile profile-a --url <url>`
+3. Profile-a server connects to `com.termsurf.two-profiles` by name
+4. Profile-a server sends `register` message with its session ID
+5. GUI maps the connection to the left pane
+6. Repeat for profile-b (right pane)
 
-1. GUI connects to launcher Mach service
-2. GUI creates anonymous XPC listeners (one per profile)
-3. GUI sends `spawn_profile` to launcher with `gui_endpoint`, URL, profile name,
-   dimensions, scale factor
-4. Launcher stores `gui_endpoint`, spawns profile server with args
-5. Profile server connects to launcher, sends `claim_session`
-6. Launcher returns stored `gui_endpoint`
-7. Profile server connects directly to GUI via endpoint
+No anonymous listeners, no endpoint relay, no claim handshake. Each profile
+server connects directly to the GUI.
 
 **Frame delivery (fast path, every frame):**
 
@@ -90,6 +118,16 @@ Profile server → GUI:
   iosurface_port: <mach_port_t>,  // set_mach_send()
   width: i64,                      // physical pixels
   height: i64,                     // physical pixels
+}
+```
+
+**Input forwarding (GUI → profile server, same connection):**
+
+```
+GUI → Profile server:
+{
+  action: "key_event" | "mouse_click" | "mouse_move" | "resize" | ...,
+  ... event-specific fields ...
 }
 ```
 
@@ -176,17 +214,21 @@ Chromium's compositor. Worth exploring in a later experiment.
 
 ### From cef-test
 
-- **Three-process architecture:** GUI, launcher, profile server. Identical
-  topology.
-- **XPC bootstrap protocol:** `spawn_profile` → `claim_session` → direct
-  connection. Proven reliable.
+cef-test used a three-process architecture (GUI, launcher, profile server) where
+the launcher relayed XPC endpoints between the GUI and profile servers. We're
+simplifying to two process types (GUI + profile servers) by making the GUI the
+named Mach service, but the frame delivery and compositing code is directly
+reusable:
+
 - **Frame delivery protocol:** `display_surface` message with `iosurface_port`.
-  One message per frame, ~100 bytes + Mach port.
+  One message per frame, ~100 bytes + Mach port. Identical to what we need.
 - **GUI compositing:** wgpu render pipeline with two quads (left/right),
   IOSurface import via `IOSurfaceLookupFromMachPort`, sRGB texture views.
 - **Background dispatch queue for XPC callbacks:** Critical discovery — XPC
   handlers must dispatch on a background queue, not the main queue, to avoid
   conflicts with the GUI event loop.
+- **Benchmark harness:** 60-second automated run with frame interval statistics
+  (avg fps, % at 60fps, p50/p95/p99, max consecutive streak).
 
 ### From termsurf-xpc
 
@@ -209,21 +251,21 @@ Chromium's compositor. Worth exploring in a later experiment.
 
 ## Language choice for the PoC
 
-The PoC involves three binaries:
+The PoC involves two binaries:
 
-- **Launcher:** Minimal XPC relay. Any language works. Simplest in Swift or Rust
-  (reuse cef-test-launcher almost unchanged).
 - **Profile server:** Must link against Chromium (C++). XPC calls from C++ use
   Apple's C API directly (`<xpc/xpc.h>`). No bindings crate needed.
-- **GUI:** Needs Metal rendering + XPC reception. Options:
+- **GUI:** Needs Metal rendering + XPC Mach service registration. Options:
+  - **Rust + wgpu:** Reuse cef-test-gui compositing code. Proven pipeline. Mach
+    service registration via termsurf-xpc's `XpcListener::new_mach_service`.
   - **Swift + Metal:** Native macOS approach. Easy XPC, easy Metal.
-  - **Rust + wgpu:** Reuse cef-test-gui nearly unchanged. Proven.
   - **C++ + Metal:** Consistent with profile server language.
 
-Recommendation: **Rust GUI + Rust launcher** (reuse cef-test code with minimal
-changes) + **C++ profile server** (modify One Profile app). This minimizes new
-code — the GUI and launcher are nearly identical to cef-test, and the profile
-server is the One Profile app with IOSurface capture added.
+Recommendation: **Rust GUI** (reuse cef-test-gui compositing and termsurf-xpc
+for Mach service registration) + **C++ profile server** (modify One Profile
+app). The GUI is cef-test-gui with the launcher logic moved in and the anonymous
+endpoint relay removed. The profile server is the One Profile app with IOSurface
+capture and XPC frame delivery added.
 
 ## Experiments
 
@@ -249,13 +291,13 @@ Start with the CALayer backing store approach. If that doesn't work, try
 **Goal:** Prove IOSurface Mach port transfer from a Content API process to a
 separate GUI process works at 60fps.
 
-Three components:
+Two components:
 
-1. **Profile server** (modified One Profile app) — captures frames as
-   IOSurfaces, sends Mach ports to GUI via XPC
-2. **Launcher** (reuse cef-test-launcher) — relays XPC endpoints
-3. **GUI** (reuse cef-test-gui, modified for one pane) — receives Mach ports,
+1. **GUI** (Rust, reuse cef-test-gui compositing) — registers as Mach service
+   `com.termsurf.two-profiles`, spawns profile server, receives Mach ports,
    imports as Metal textures, renders to window
+2. **Profile server** (modified One Profile app) — captures frames as
+   IOSurfaces, connects to GUI's Mach service, sends Mach ports via XPC
 
 This proves the full pipeline: Content API → IOSurface → Mach port → XPC → GPU
 texture → window. If this hits 60fps, the architecture is validated.
