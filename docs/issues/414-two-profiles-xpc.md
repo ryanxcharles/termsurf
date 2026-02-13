@@ -305,7 +305,7 @@ Key reference files:
 
 ## Ideas for Experiments
 
-### Idea 1: FrameSinkVideoCapturer (Electron's primary path)
+### Idea 1: FrameSinkVideoCapturer
 
 **Goal:** Capture composited frames as IOSurfaces at 60fps using Chromium's
 built-in video capture API.
@@ -405,132 +405,153 @@ Once this PoC works, the path to TermSurf is clear:
 
 ## Experiments
 
-### Experiment 1: Intercept the compositor's IOSurface
+### Experiment 1: Capture frames with FrameSinkVideoCapturer
 
 #### Hypothesis
 
-Chromium's macOS compositor already produces IOSurfaces as part of its normal
-rendering pipeline. We don't need `CopyFromSurface()` or any capture mechanism —
-we just need to intercept the existing IOSurface at the right point. If we can
-grab it at 60fps, the entire frame delivery pipeline (IOSurface → Mach port →
-XPC → GUI) is a solved problem.
+Chromium's `FrameSinkVideoCapturer` — the same API Electron uses for off-screen
+rendering — can capture composited frames from a `WebContents` as IOSurfaces at
+60fps. If this works, the profile server's capture mechanism is solved: each
+frame is already an IOSurface, ready for Mach port transfer via XPC.
 
-#### Background: how Chromium presents frames on macOS
+#### Background
 
-Research into Chromium's macOS rendering pipeline reveals a clean architecture:
+Electron's GPU-accelerated OSR path uses `ClientFrameSinkVideoCapturer`, which
+implements `viz::mojom::FrameSinkVideoConsumer`. The capturer attaches to a
+`FrameSinkId` (identifying which compositor output to capture), issues
+`CopyOutputRequest`s at the viz layer, and delivers frames as
+`GpuMemoryBufferHandle`s. On macOS, these handles contain IOSurfaces.
 
-```
-GPU process (or GPU thread if in-process)
-  ↓ Compositor produces frames
-CALayerTreeCoordinator
-  ↓ GetContentIOSurface() → raw IOSurface
-  ↓ IOSurfaceCreateMachPort() → Mach port
-  ↓ Packages into CALayerParams { ca_context_id OR io_surface_mach_port }
-Browser process
-  ↓ DisplayCALayerTree::UpdateCALayerTree(ca_layer_params)
-  ↓ IOSurfaceLookupFromMachPort() → IOSurface
-  ↓ Sets CALayer.contents = io_surface
-CoreAnimation
-  ↓ Presents to screen
-```
+The API is designed for continuous capture — Chrome uses it for tab capture,
+WebRTC screen sharing, and remote display. It has a 10-frame buffer pool,
+built-in frame rate control, and damage tracking.
 
-Two rendering modes exist:
-
-1. **Remote layers (`ca_context_id`):** The GPU process creates a `CAContext`
-   with a layer tree. The browser process creates a `CALayerHost` with the
-   context ID. WindowServer composites remotely. Used when GPU is in-process.
-
-2. **IOSurface Mach port:** The GPU process extracts the IOSurface from the
-   layer tree via `GetContentIOSurface()`, creates a Mach port via
-   `IOSurfaceCreateMachPort()`, and sends it in `CALayerParams`. The browser
-   process imports it via `IOSurfaceLookupFromMachPort()`. Used when GPU is
-   out-of-process.
-
-The key files:
-
-- `ui/accelerated_widget_mac/ca_layer_tree_coordinator.{h,mm}` — GPU-side.
-  Manages the layer tree, calls `GetContentIOSurface()`, creates Mach ports.
-- `ui/accelerated_widget_mac/ca_renderer_layer_tree.{h,mm}` — Builds the
-  hierarchy of CALayers from compositor output. Each `ContentLayer` holds an
-  `io_surface_` member.
-- `ui/accelerated_widget_mac/display_ca_layer_tree.{h,mm}` — Browser-side.
-  Receives `CALayerParams`, imports IOSurfaces, assigns to CALayers.
-- `ui/gfx/ca_layer_params.h` — The IPC structure: `ca_context_id` (uint32) or
-  `io_surface_mach_port` (scoped Mach port), plus `pixel_size` and
-  `scale_factor`.
-
-The critical insight: **Chromium already creates IOSurface Mach ports.** We
-don't need to invent a capture mechanism. We need to intercept what Chromium
-already produces.
+Key reference: `electron/shell/browser/osr/osr_video_consumer.{h,cc}`.
 
 #### Design
 
-Modify the One Profile app to intercept frames at the
-`DisplayCALayerTree::UpdateCALayerTree()` call site and log what arrives.
+Modify the One Profile app to attach a `FrameSinkVideoCapturer` to the first
+`WebContents` and log every captured frame. The WebContents still renders
+normally in its window — we're just tapping the compositor output.
 
-##### Step 1: Determine which rendering path content_shell uses
+##### Step 1: Create a video consumer class
 
-Add logging to `DisplayCALayerTree::UpdateCALayerTree()` (or its equivalent in
-the One Profile app's rendering path) to check which `CALayerParams` field is
-populated:
+Add a new file `shell_video_consumer.{h,cc}` in
+`content/one_profile/browser/`. It implements
+`viz::mojom::FrameSinkVideoConsumer`:
 
-- If `ca_layer_params.ca_context_id != 0` → remote layer path (in-process GPU)
-- If `ca_layer_params.io_surface_mach_port` → IOSurface Mach port path
+```cpp
+#include "components/viz/host/client_frame_sink_video_capturer.h"
+#include "content/browser/compositor/surface_utils.h"
+#include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/web_contents.h"
+#include "services/viz/privileged/mojom/compositing/frame_sink_video_capture.mojom.h"
 
-This tells us which intercept strategy to use.
+class ShellVideoConsumer : public viz::mojom::FrameSinkVideoConsumer {
+ public:
+  void Attach(content::WebContents* web_contents);
 
-##### Step 2: Grab the IOSurface
+  // viz::mojom::FrameSinkVideoConsumer:
+  void OnFrameCaptured(
+      media::mojom::VideoBufferHandlePtr data,
+      media::mojom::VideoFrameInfoPtr info,
+      const gfx::Rect& content_rect,
+      mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
+          callbacks) override;
+  void OnNewCaptureVersion(
+      const media::CaptureVersion& capture_version) override {}
+  void OnFrameWithEmptyRegionCapture() override {}
+  void OnStopped() override {}
+  void OnLog(const std::string& message) override {}
 
-- **If IOSurface Mach port path:** Call
-  `IOSurfaceLookupFromMachPort(ca_layer_params.io_surface_mach_port.get())` to
-  get the IOSurface. Log its dimensions (`IOSurfaceGetWidth`,
-  `IOSurfaceGetHeight`). Increment a frame counter.
+ private:
+  std::unique_ptr<viz::ClientFrameSinkVideoCapturer> capturer_;
+  int frame_count_ = 0;
+  base::TimeTicks last_log_time_;
+};
+```
 
-- **If remote layer path:** We need to either:
-  - (a) Force the IOSurface Mach port path by disabling remote layers (e.g.,
-    `--disable-gpu-compositing` or similar flag), or
-  - (b) Intercept earlier at `CALayerTreeCoordinator` where
-    `GetContentIOSurface()` is called before the CA context ID path is chosen,
-    or
-  - (c) Intercept at the `CARendererLayerTree::ContentLayer` level where each
-    layer holds an `io_surface_` member directly.
+##### Step 2: Configure and start capture
 
-##### Step 3: Measure the rate
+In `Attach()`:
 
-Add a frame counter and a periodic log (once per second) that reports:
+1. Get the `HostFrameSinkManager` via `content::GetHostFrameSinkManager()`
+2. Create a capturer via `manager->CreateVideoCapturer()`
+3. Configure: `SetFormat(media::PIXEL_FORMAT_ARGB)`,
+   `SetMinCapturePeriod(base::Milliseconds(16))` (60fps),
+   `SetAutoThrottlingEnabled(false)`
+4. Get the `FrameSinkId` from the WebContents:
+   `web_contents->GetRenderWidgetHostView()->GetRenderWidgetHost()->GetFrameSinkId()`
+5. Set target: `capturer_->ChangeTarget(viz::VideoCaptureTarget(frame_sink_id), 0)`
+6. Start: `capturer_->Start(this, viz::mojom::BufferFormatPreference::kPreferMappableSharedImage)`
 
-- Frames in the last second
-- IOSurface dimensions
-- Which rendering path was used
+The `kPreferMappableSharedImage` preference is what makes Chromium deliver
+IOSurfaces (GPU memory buffers) instead of shared memory bitmaps.
+
+##### Step 3: Handle captured frames
+
+In `OnFrameCaptured()`:
+
+1. Check `data->is_gpu_memory_buffer_handle()` — if false, log a warning (means
+   we got shared memory instead of an IOSurface)
+2. Extract the handle: `data->get_gpu_memory_buffer_handle()`
+3. On macOS, the handle contains an IOSurface:
+   `gmb_handle.io_surface().get()` returns an `IOSurfaceRef`
+4. Log the IOSurface dimensions via `IOSurfaceGetWidth()` /
+   `IOSurfaceGetHeight()`
+5. Increment frame counter, log fps once per second
+6. **Signal done immediately:** create a `mojo::Remote` from the `callbacks`
+   pending remote and call `Done()`. This returns the buffer to the pool. If we
+   don't call `Done()`, the 10-frame pool depletes and capture stalls.
+
+##### Step 4: Wire it up
+
+In `ShellBrowserMainParts::InitializeMessageLoopContext()`, after creating the
+Shell and WebContents, create a `ShellVideoConsumer` and call
+`Attach(web_contents)`. The consumer must outlive the WebContents — store it as
+a member of `ShellBrowserMainParts`.
+
+Note: the `RenderWidgetHostView` may not exist immediately after
+`Shell::CreateNewWindow()`. If `GetRenderWidgetHostView()` returns null, defer
+attachment. The simplest approach: post a delayed task (e.g., 1 second) to allow
+navigation to complete. A production implementation would use
+`WebContentsObserver::RenderViewReady()`, but for the PoC a delay is fine.
 
 #### What we're modifying
 
-The One Profile app in `content/one_profile/`. The exact file depends on which
-intercept point works best:
+- **New files:** `content/one_profile/browser/shell_video_consumer.{h,cc}`
+- **Modified:** `content/one_profile/browser/shell_browser_main_parts.{h,cc}` —
+  add `ShellVideoConsumer` member, wire up in `InitializeMessageLoopContext()`
+- **Modified:** `content/one_profile/BUILD.gn` — add new source files
 
-- **Minimal change:** Add logging to `display_ca_layer_tree.mm` in the
-  `ui/accelerated_widget_mac/` directory. This is Chromium code (not One Profile
-  code), so the change is a Chromium fork modification.
-- **Cleaner change:** Override the relevant method in the One Profile app's
-  `ShellBrowserMainParts` or platform delegate, if the rendering path is
-  hookable from the embedder level.
-
-The experiment will reveal which approach is practical.
+No changes to Chromium's own code. Everything uses public Content API +
+`content/browser/compositor/surface_utils.h` (internal but stable).
 
 #### Expected result
 
-60 frames per second with IOSurface dimensions matching the window size (e.g.,
-1600×1200 physical pixels for an 800×600 logical window at 2x Retina). This
-proves that we can intercept Chromium's compositor output at full framerate
-without any additional capture mechanism.
+Log output showing 60 captured frames per second, each with an IOSurface of
+the correct dimensions (e.g., 1200×1200 physical pixels for a 600×600 logical
+view at 2x Retina). The window still displays normally — we're capturing
+alongside the regular rendering path.
+
+```
+[INFO] Frame 1: 1200x1200 IOSurface (gpu_memory_buffer)
+[INFO] Frame 2: 1200x1200 IOSurface (gpu_memory_buffer)
+...
+[INFO] 60 frames in last 1.00s (60.0 fps)
+```
 
 #### What a failure would mean
 
-- **0 frames (wrong path):** Content_shell uses the remote layer path and we
-  can't easily intercept IOSurfaces. Fix: force the IOSurface path or intercept
-  earlier in the pipeline.
-- **< 60fps:** The intercept itself is adding overhead (unlikely for a simple
-  log). Investigate.
-- **IOSurface is null or wrong size:** The compositor isn't producing
-  single-surface frames (multi-layer tree). Need to understand the layer
-  structure and potentially composite multiple IOSurfaces ourselves.
+- **`is_gpu_memory_buffer_handle()` returns false:** We got shared memory
+  instead of an IOSurface. Check that `kPreferMappableSharedImage` was passed to
+  `Start()`, and that GPU acceleration is enabled (no `--disable-gpu` flag).
+- **0 frames:** The capturer didn't attach to the right `FrameSinkId`, or the
+  `RenderWidgetHostView` wasn't ready. Check timing and frame sink resolution.
+- **< 60fps:** The `CopyOutputRequest` overhead is significant, or
+  auto-throttling is still enabled. Try `SetAutoThrottlingEnabled(false)` and
+  `SetMinCapturePeriod(base::TimeDelta())` (unlimited).
+- **Crash in `io_surface()`:** The `GpuMemoryBufferHandle` type on macOS
+  doesn't use IOSurface in this build configuration. Investigate the handle type
+  and platform-specific extraction.
