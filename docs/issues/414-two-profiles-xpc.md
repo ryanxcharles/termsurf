@@ -574,3 +574,42 @@ the regular rendering path.
 - **Crash in `io_surface()`:** The `GpuMemoryBufferHandle` type on macOS doesn't
   use IOSurface in this build configuration. Investigate the handle type and
   platform-specific extraction.
+
+#### Result: PASSED
+
+`FrameSinkVideoCapturer` delivers IOSurfaces at a rock-solid 60fps. Every frame
+arrives as a `gpu_memory_buffer_handle` containing a valid IOSurface.
+
+```
+[ShellVideoConsumer] Attached to FrameSinkId FrameSinkId(5, 3), starting capture
+[ShellVideoConsumer] 61 frames in 1.0047s (60.7144 fps) | IOSurface 640x360
+[ShellVideoConsumer] 60 frames in 1.00019s (59.9889 fps) | IOSurface 640x360
+[ShellVideoConsumer] 61 frames in 1.0165s (60.0097 fps) | IOSurface 640x360
+[ShellVideoConsumer] 61 frames in 1.0167s (59.9982 fps) | IOSurface 640x360
+[ShellVideoConsumer] 60 frames in 1.00249s (59.8507 fps) | IOSurface 640x360
+[ShellVideoConsumer] 61 frames in 1.01447s (60.1299 fps) | IOSurface 640x360
+[ShellVideoConsumer] 61 frames in 1.01616s (60.0299 fps) | IOSurface 640x360
+[ShellVideoConsumer] 60 frames in 1.00022s (59.9868 fps) | IOSurface 640x360
+[ShellVideoConsumer] 60 frames in 1.00013s (59.992 fps) | IOSurface 640x360
+[ShellVideoConsumer] 61 frames in 1.0166s (60.0041 fps) | IOSurface 640x360
+[ShellVideoConsumer] 60 frames in 1.00004s (59.9974 fps) | IOSurface 640x360
+[ShellVideoConsumer] 61 frames in 1.0164s (60.0155 fps) | IOSurface 640x360
+```
+
+Key observations:
+
+- **60fps sustained.** Every 1-second interval reports exactly 60 or 61 frames.
+  No drops, no jitter.
+- **IOSurfaces, not shared memory.** Every frame arrived as a
+  `gpu_memory_buffer_handle`. The `kPreferMappableSharedImage` preference
+  worked as expected.
+- **640x360 IOSurface.** This matches the window's content view size. The
+  capturer respects the actual rendered resolution.
+- **No impact on windowed rendering.** The page renders normally in its window
+  while the capturer taps the compositor output in parallel.
+- **2-second delayed attach worked.** The `RenderWidgetHostView` was available
+  by the time the delayed task fired.
+
+This proves the capture mechanism for the profile server. Each frame is already
+an IOSurface — ready for `IOSurfaceCreateMachPort()` and XPC transfer to the
+GUI process.
