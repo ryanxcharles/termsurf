@@ -793,3 +793,14 @@ git subtree pull --prefix=ts5 upstream main
 
 Steps 2–8 from Experiment 1 remain the same (submodules, `.gitignore`, docs,
 build verification, commit).
+
+#### Result
+
+Success. `ts5/` contains the full Ghostty source tree (`build.zig`, `src/`,
+`macos/`, `pkg/`, etc.). No files were placed outside `ts5/`. The command
+created a merge commit with the upstream history mapped under the prefix.
+
+#### Conclusion
+
+`git subtree add` works. It bypasses the three-way merge against the fork point
+entirely, avoiding the rename detection issues that broke Experiments 1 and 2.
