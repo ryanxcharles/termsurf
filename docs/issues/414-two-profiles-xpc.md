@@ -2037,3 +2037,287 @@ The full pipeline is now proven at production quality:
 
 What remains is running two profile servers simultaneously into one window with
 side-by-side compositing — the target architecture.
+
+### Experiment 7: Two profile servers side by side
+
+#### Hypothesis
+
+Two hidden profile server processes — each with its own `BrowserContext` and
+storage path — can simultaneously send IOSurface frames via XPC to a single
+receiver that composites them side by side in one window at 60fps. This is the
+target architecture for TermSurf.
+
+#### Background
+
+Experiments 1–6 proved every component of the single-profile pipeline:
+
+| Component          | Experiment | Result        |
+| ------------------ | ---------- | ------------- |
+| Frame capture      | 1          | 60fps         |
+| XPC transfer       | 2          | 60fps         |
+| Hidden sender      | 3–4        | 60fps         |
+| Retina quality     | 5–6        | Pixel-perfect |
+
+Issue 413 Experiment 4 proved the core constraint: two `BrowserContext` instances
+in one Chromium process drop rendering to 2fps. The solution is one profile per
+process. This experiment proves that architecture end-to-end: two processes, two
+profiles, one window.
+
+The box-demo test page generates a random 8-character identity string and stores
+it in `localStorage`. Each profile has its own storage, so two profiles will show
+different identity strings. If both panes show different strings that persist
+across restarts, profile isolation is proven.
+
+#### Design
+
+Three processes:
+
+1. **Profile server A** — One Profile app, `--user-data-dir` pointing to profile
+   A storage, `--session-id=profile-a`, hidden, sending to
+   `com.termsurf.two-profiles`
+2. **Profile server B** — Same binary, different `--user-data-dir`, different
+   `--session-id`, hidden, sending to the same XPC service
+3. **Receiver** — Accepts both connections, tracks two IOSurface streams by
+   session ID, composites them side by side in a Metal window
+
+##### Sender changes
+
+###### New switch: `--session-id`
+
+Add `kSessionId` to `shell_switches.h`:
+
+```cpp
+// Session identifier sent with every XPC frame message. The receiver uses
+// this to map frames to the correct pane.
+inline constexpr char kSessionId[] = "session-id";
+```
+
+###### Video consumer: session ID in every message
+
+Add a `session_id_` member to `ShellVideoConsumer` and a setter:
+
+```cpp
+void SetSessionId(const std::string& session_id);
+```
+
+In `OnFrameCaptured()`, include the session ID in every `display_surface`
+message:
+
+```cpp
+xpc_dictionary_set_string(msg, "session_id", session_id_.c_str());
+```
+
+###### Browser main parts: pass session ID
+
+In `InitializeMessageLoopContext()`, after creating the video consumer:
+
+```cpp
+if (cmd->HasSwitch(switches::kSessionId)) {
+  video_consumer_->SetSessionId(
+      cmd->GetSwitchValueASCII(switches::kSessionId));
+}
+```
+
+##### Receiver changes
+
+The receiver (`ts4/two-profiles-receiver/main.mm`) needs major changes:
+
+###### Multiple peer connections
+
+Replace the single `g_peer` with a vector:
+
+```cpp
+static std::vector<xpc_connection_t> g_peers;
+```
+
+The listener's event handler pushes each new connection onto the vector.
+
+###### Two IOSurface slots
+
+Replace the single `g_pending_surface` with two slots indexed by pane:
+
+```cpp
+enum Pane { LEFT = 0, RIGHT = 1, PANE_COUNT = 2 };
+
+static IOSurfaceRef g_pending_surface[PANE_COUNT] = { nullptr, nullptr };
+static id<MTLTexture> g_current_texture[PANE_COUNT] = { nil, nil };
+```
+
+###### Session ID → pane mapping
+
+In `handle_message()`, read `session_id` from the XPC dictionary and map to a
+pane:
+
+```cpp
+const char *session_id = xpc_dictionary_get_string(msg, "session_id");
+Pane pane = LEFT;  // default
+if (session_id && strcmp(session_id, "profile-b") == 0)
+  pane = RIGHT;
+```
+
+Store the IOSurface in the corresponding slot: `g_pending_surface[pane]`.
+
+###### Window size: 1600×600 logical
+
+The window is wide enough for two 800×600 panes side by side:
+
+```objc
+NSRect frame = NSMakeRect(100, 100, 1600, 600);
+```
+
+With `contentsScale = 2.0`, the drawable is 3200×1200 physical. Each pane is
+1600×1200 — matching the IOSurface dimensions exactly.
+
+###### Side-by-side rendering with viewports
+
+In `render_frame()`, draw two quads using Metal viewports:
+
+```objc
+double drawableW = g_metal_layer.drawableSize.width;
+double drawableH = g_metal_layer.drawableSize.height;
+double halfW = drawableW / 2.0;
+
+// Left pane (profile-a)
+if (g_current_texture[LEFT]) {
+    MTLViewport vp = { 0, 0, halfW, drawableH, 0, 1 };
+    [encoder setViewport:vp];
+    [encoder setFragmentTexture:g_current_texture[LEFT] atIndex:0];
+    [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
+                vertexStart:0 vertexCount:4];
+}
+
+// Right pane (profile-b)
+if (g_current_texture[RIGHT]) {
+    MTLViewport vp = { halfW, 0, halfW, drawableH, 0, 1 };
+    [encoder setViewport:vp];
+    [encoder setFragmentTexture:g_current_texture[RIGHT] atIndex:0];
+    [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
+                vertexStart:0 vertexCount:4];
+}
+```
+
+The existing fullscreen quad shader is reused unchanged — the viewport restricts
+where each quad draws. Each 1600×1200 IOSurface maps 1:1 to its half of the
+3200×1200 drawable.
+
+###### FPS logging per pane
+
+Track frame counts for each pane independently:
+
+```cpp
+static int g_frame_count[PANE_COUNT] = { 0, 0 };
+```
+
+Log both in a single line: `[Receiver] L: 60fps R: 60fps | IOSurface 1600x1200`.
+
+#### What we're modifying
+
+**Sender (submodule):**
+
+- `content/one_profile/common/shell_switches.h` — add `kSessionId`
+- `content/one_profile/browser/shell_video_consumer.h` — add `session_id_`
+  member and `SetSessionId()`
+- `content/one_profile/browser/shell_video_consumer.cc` — include `session_id`
+  in XPC messages
+- `content/one_profile/browser/shell_browser_main_parts.cc` — parse
+  `--session-id`, pass to video consumer
+
+**Receiver:**
+
+- `ts4/two-profiles-receiver/main.mm` — multiple connections, two IOSurface
+  slots, session ID mapping, side-by-side viewports, wider window
+
+No changes to shaders, Makefile, or plist. The same `com.termsurf.two-profiles`
+Mach service name is shared — both senders connect to it, and the receiver
+accepts both connections.
+
+#### Run and verify
+
+1. `cd ts4/box-demo && bun run server.ts` — start the test page
+2. Build the sender (Chromium):
+   ```bash
+   cd ~/dev/termsurf/ts4/termsurf-chromium/src
+   export PATH="$(cd ../depot_tools && pwd):$PATH"
+   autoninja -C out/Default one_profile
+   ```
+3. Build the receiver:
+   ```bash
+   cd ~/dev/termsurf/ts4/two-profiles-receiver && make
+   ```
+4. Reload the launchd plist:
+   ```bash
+   launchctl unload ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist
+   launchctl load ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist
+   ```
+5. Start profile server A:
+   ```bash
+   cd ~/dev/termsurf/ts4/termsurf-chromium/src
+   out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+     --hidden \
+     --xpc-service=com.termsurf.two-profiles \
+     --session-id=profile-a \
+     --user-data-dir=$HOME/.config/termsurf/poc/profile-a \
+     http://localhost:9407 2>&1
+   ```
+6. Start profile server B:
+   ```bash
+   cd ~/dev/termsurf/ts4/termsurf-chromium/src
+   out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+     --hidden \
+     --xpc-service=com.termsurf.two-profiles \
+     --session-id=profile-b \
+     --user-data-dir=$HOME/.config/termsurf/poc/profile-b \
+     http://localhost:9407 2>&1
+   ```
+7. Verify:
+   - Receiver window shows two panes side by side, each with a spinning blue
+     square
+   - Different localStorage identity strings in each pane (profile isolation)
+   - Receiver logs: `L: 60fps R: 60fps`
+   - Both sender processes report 60fps capture
+   - No sender windows visible
+
+#### Expected result
+
+```
+┌─────────────────────────────────────┐
+│  Profile A          │  Profile B    │
+│  ┌──────────┐       │  ┌──────────┐ │
+│  │ ■ (blue) │       │  │ ■ (blue) │ │
+│  │ 60 fps   │       │  │ 60 fps   │ │
+│  │ a3k9m2p1 │       │  │ x7f4n8q2 │ │
+│  └──────────┘       │  └──────────┘ │
+│  800×600 logical    │  800×600      │
+└─────────────────────────────────────┘
+```
+
+Two different identity strings prove profile isolation. Two spinning squares at
+60fps prove the architecture handles concurrent frame delivery.
+
+#### What a failure would mean
+
+- **Second sender can't connect:** Launchd may not deliver a second connection
+  to the already-running receiver. Check that `XPC_CONNECTION_MACH_SERVICE_LISTENER`
+  handles multiple clients. If not, use two separate Mach service names.
+- **Frames from one sender overwrite the other:** The session ID mapping is
+  wrong or missing. Log `session_id` for every received frame to debug.
+- **< 60fps in one or both panes:** Two simultaneous `CopyOutputRequest` streams
+  may saturate the GPU. Check per-sender fps. If both are at 30fps, the GPU is
+  alternating between them. Try staggering the `SetMinCapturePeriod` start times.
+- **Same identity string in both panes:** `--user-data-dir` didn't take effect.
+  Verify the paths exist and are different. Check Chromium logs for the actual
+  profile path being used.
+- **Second sender crashes on launch:** Two Chromium processes may conflict on
+  singleton locks or GPU process ownership. Check if `--no-sandbox` or a unique
+  `--gpu-process-unique-id` is needed. If Chromium's multi-process internals
+  conflict, try launching the second sender with a delay (5 seconds).
+
+#### Success criteria
+
+This is the primary goal of Issue 414:
+
+- Two panes in one window
+- Different localStorage identity in each pane (profile isolation)
+- Both at 60fps sustained for 60+ seconds
+- CPU usage well below 100%
+- IOSurface transfer via XPC (not shared memory, not window capture)
