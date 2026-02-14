@@ -2,54 +2,62 @@
 
 ## Goal
 
-Port the Swift Two Profiles receiver from ts4 (Issue 415) into
-`ts5/two-profiles` as a standalone SwiftPM app. Two hidden Chromium profile
-servers send IOSurface frames via XPC to a Swift receiver that composites them
-side by side in one Metal window at 60fps.
+Build a clean two-profile browser demo in ts5: a minimal Chromium embedder
+(`termsurf-browser`) that renders webpages to IOSurfaces and sends them via XPC,
+and a Swift compositor (`ts5/two-profiles/`) that receives and displays them
+side by side at 60fps.
 
-This is the same proven architecture from Issues 414 and 415, relocated to the
-ts5 directory where active development happens.
+This replaces the ts4 proof-of-concept code (Issues 412–416) with
+production-quality implementations that will serve as the foundation for
+Ghostty's browser pane integration.
 
 ## Motivation
 
-ts5 will embed Chromium browser panes alongside Ghostty terminal panes. Before
-touching Ghostty's rendering pipeline, we need a working Two Profiles receiver
-in the ts5 tree that can serve as:
+The ts4 experiments proved the architecture works. But the Chromium side was
+built as a rapid PoC with problems that need fixing before we build on top of
+it:
 
-1. **A reference implementation.** The receiver demonstrates the exact IOSurface
-   import, Metal compositing, and XPC patterns that will eventually live inside
-   Ghostty's Swift shell.
+1. **218-file Content Shell copy.** The One Profile app is a wholesale copy of
+   `content/shell/` with renamed identifiers. Most of those files are irrelevant
+   (DevTools, web test infrastructure, Linux/Windows platform code). The actual
+   delta we need is ~10 files.
 
-2. **A test harness.** As we modify the Chromium fork (branch changes, Content
-   API experiments), the receiver provides a quick way to verify that profile
-   servers still deliver frames correctly.
+2. **Bad naming.** "One Profile" describes an architectural constraint, not what
+   the app does. It's a headless browser renderer — a profile server.
 
-3. **A starting point for integration.** The ~330 lines of Swift in the receiver
-   map directly to what Ghostty's `MetalView` (or equivalent) will need to
-   composite browser panes.
+3. **Dock icon.** The `--hidden` flag hides the window with `orderOut:nil`, but
+   the app is still a regular `NSApplication` that shows in the Dock. Each
+   profile server adds a Dock icon, which is unacceptable.
+
+4. **Fragile capturer attachment.** The video consumer is wired up via a
+   hardcoded 2-second `PostDelayedTask` to wait for the `RenderWidgetHostView`
+   to exist. This is a race condition waiting to happen.
+
+Since the architecture is proven, we can afford to get this right.
 
 ## Background
 
 ### What's proven
 
-| Issue | Finding                                                                                                                                                 |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 406   | Chromium Content API supports multiple `BrowserContext` instances in one process with isolated storage. CEF ruled out (31fps ceiling).                  |
-| 407   | In-process Chromium PoC: two profiles coexist, single pane renders at 60fps. Dual-pane hit 2fps due to visibility tracking.                             |
-| 414   | XPC + IOSurface Mach port transfer solves the dual-pane problem: two hidden Chromium profile servers, one Objective-C++ Metal receiver, 60fps per pane. |
-| 415   | Same architecture in pure Swift. Proves XPC C API, IOSurface, Metal, and CADisplayLink all work natively in Swift.                                      |
+| Issue | Finding                                                                                                                                           |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 406   | Chromium Content API supports multiple `BrowserContext` instances with isolated storage. CEF ruled out (31fps ceiling).                           |
+| 407   | In-process Chromium PoC: two profiles coexist, single pane at 60fps. Dual-pane hit 2fps due to visibility tracking.                               |
+| 413   | Root cause: two `BrowserContext` in one process = 2fps. Two `WebContents` sharing one `BrowserContext` = 60fps. One profile per process required. |
+| 414   | XPC + IOSurface Mach port transfer solves the dual-pane problem. `FrameSinkVideoCapturer` delivers IOSurfaces at 60fps even with hidden window.   |
+| 415   | Same architecture in pure Swift. XPC C API, IOSurface, Metal, CADisplayLink all work natively.                                                    |
 
 ### Architecture
 
 ```
-Profile Server A (hidden Chromium)     Profile Server B (hidden Chromium)
---session-id=profile-a                 --session-id=profile-b
-IOSurface 1600x1200 @ 60fps           IOSurface 1600x1200 @ 60fps
-        |                                      |
-        | XPC Mach port                        | XPC Mach port
-        v                                      v
+termsurf-browser A (headless)         termsurf-browser B (headless)
+--session-id=profile-a                --session-id=profile-b
+IOSurface 1600x1200 @ 60fps          IOSurface 1600x1200 @ 60fps
+        |                                     |
+        | XPC Mach port                       | XPC Mach port
+        v                                     v
     +--------------------------------------+
-    |     Swift Receiver (Metal)           |
+    |     Swift Compositor (Metal)         |
     |  +----------------+----------------+ |
     |  |  Left viewport | Right viewport | |
     |  |  profile-a     | profile-b      | |
@@ -58,200 +66,275 @@ IOSurface 1600x1200 @ 60fps           IOSurface 1600x1200 @ 60fps
     +--------------------------------------+
 ```
 
-Two process types (no launcher):
+Two process types:
 
-1. **Receiver** (this app) — Creates a macOS window with two Metal viewports.
-   Registers as XPC Mach service. Receives IOSurface Mach ports from profile
-   servers, reconstructs IOSurfaces, creates Metal textures, composites at 60fps
-   via CADisplayLink.
+1. **termsurf-browser** — Headless Chromium embedder. One instance per browser
+   profile. Renders a webpage via the Content API, captures frames with
+   `FrameSinkVideoCapturer`, sends IOSurface Mach ports to the compositor via
+   XPC. No Dock icon, no visible window.
 
-2. **Profile servers** — Hidden Chromium instances (One Profile app from the
-   Chromium fork). Each renders a webpage off-screen to an IOSurface, sends the
-   Mach port to the receiver via XPC. One process per browser profile.
+2. **Compositor** (`ts5/two-profiles/`) — Swift app that registers as an XPC
+   Mach service, receives IOSurface Mach ports, and composites two panes side by
+   side in a Metal window at 60fps.
 
 ### XPC protocol
 
-Messages from profile server to receiver:
+Messages from termsurf-browser to compositor:
 
 - **`display_surface`** —
   `{ action: "display_surface", session_id: "<id>",
-  iosurface_port: <mach_send> }`
+  iosurface_port: <mach_send>, width: <int64>, height: <int64> }`
 - **`register`** — `{ action: "register", session_id: "<id>" }`
 
-The receiver maps `session_id` to a pane: `"profile-b"` goes right, everything
+The compositor maps `session_id` to a pane: `"profile-b"` goes right, everything
 else goes left.
 
-## Chromium sender
+## Part 1: termsurf-browser (Chromium)
 
-### No new Chromium modifications needed
+### Naming
 
-The One Profile app already exists at `chromium/src/content/one_profile/` with
-full XPC frame delivery support. It was built across Issues 412–414 and is
-ready to use as-is.
+The Chromium embedder is called `termsurf-browser`. This describes its role: it
+is the browser engine backend for TermSurf. Inside the Chromium source tree, the
+directory follows Chromium's underscore convention: `content/termsurf_browser/`.
 
-### Branch
+The build target is `termsurf_browser`. The output app bundle is
+`TermSurf Browser.app`.
 
-Use branch `146.0.7650.0-issue-414` (or any descendant — `issue-415`,
-`issue-416`). The current checked-out branch is `146.0.7650.0-issue-416`.
-All branches from Issue 414 onward contain the XPC frame delivery code.
+### Approach: link against content_shell_lib, don't copy it
 
-### What the One Profile app is
+The ts4 approach copied all 218 files from `content/shell/`. The better approach
+is to link against `//content/shell:content_shell_lib` as a dependency and
+subclass only what we need. This is the same pattern used in Issue 407's
+`content/two_profiles/` directory, which worked with ~10 files.
 
-A Content Shell clone at `chromium/src/content/one_profile/` — an independent
-copy of Chromium's reference Content API embedder (`content/shell/`) with
-renamed identifiers and web test support removed. It creates a single
-`BrowserContext` and renders a webpage via the Content API.
+Content Shell provides:
 
-Key classes (all in `content/one_profile/`):
+- `Shell` — Window and WebContents lifecycle
+- `ShellBrowserContext` — Profile storage with `GetPath()`
+- `ShellBrowserMainParts` — Browser lifecycle
+- `ShellContentBrowserClient` — Browser client delegate
+- `ShellMainDelegate` — Application entry point
 
-- **`OneProfileMainDelegate`** — Application entry point. Replaces
-  `ShellMainDelegate`.
-- **`OneProfileBrowserMainParts`** — Browser lifecycle. Creates the
-  `ShellBrowserContext`, wires up the `ShellVideoConsumer`.
-- **`OneProfileContentBrowserClient`** — Browser client delegate.
-- **`ShellBrowserContext`** — Profile storage. `GetPath()` returns the
-  `--user-data-dir` path, isolating cookies/localStorage/cache per profile.
-- **`ShellVideoConsumer`** — Frame capture and XPC delivery (the critical
-  piece). Implements `viz::mojom::FrameSinkVideoConsumer`.
+We subclass the parts we need to override and leave everything else to
+content_shell_lib.
 
-### How frame capture works
+### Files
 
-`ShellVideoConsumer` (added in Issue 414) captures rendered frames and sends
-them over XPC:
+```
+chromium/src/content/termsurf_browser/
+├── BUILD.gn
+├── termsurf_browser_main.cc          — Entry point
+├── termsurf_browser_main_mac.cc      — macOS entry (framework loading)
+├── termsurf_browser_main_delegate.h  — Subclass ShellMainDelegate
+├── termsurf_browser_main_delegate.cc
+├── termsurf_browser_main_parts.h     — Subclass ShellBrowserMainParts
+├── termsurf_browser_main_parts.cc
+├── termsurf_browser_context.h        — Subclass ShellBrowserContext
+├── termsurf_browser_context.cc
+├── termsurf_video_consumer.h         — FrameSinkVideoCapturer + XPC sender
+├── termsurf_video_consumer.cc
+└── Info.plist                        — LSUIElement = true
+```
 
-1. Creates a `viz::ClientFrameSinkVideoCapturer` from Chromium's
-   `HostFrameSinkManager`.
-2. Configures capture: `PIXEL_FORMAT_ARGB`, 16ms minimum capture period
-   (60fps), auto-throttling disabled.
-3. Gets the `FrameSinkId` from the WebContents' `RenderWidgetHostView`.
-4. Starts capture with `kPreferMappableSharedImage` — on macOS this delivers
-   GPU memory buffers backed by IOSurfaces.
-5. On each `OnFrameCaptured` callback:
-   - Extracts the `IOSurfaceRef` from the GPU memory buffer handle
-   - Creates a Mach port: `IOSurfaceCreateMachPort(io_surface)`
-   - Builds an XPC message: `{ action: "display_surface",
-     iosurface_port: <mach_send>, width: <int64>, height: <int64>,
-     session_id: "<id>" }`
-   - Sends via `xpc_connection_send_message()` (async, no reply)
-   - Deallocates the Mach port and signals `Done()` to release the buffer
+~12 files instead of 218.
+
+### Key classes
+
+**`TermSurfBrowserMainDelegate`** — Extends `ShellMainDelegate`. Overrides
+`CreateContentBrowserClient()` to return our custom browser client that uses
+`TermSurfBrowserMainParts`.
+
+**`TermSurfBrowserMainParts`** — Extends `ShellBrowserMainParts`. Overrides
+browser context creation to use `TermSurfBrowserContext` with the
+`--user-data-dir` path. Wires up `TermSurfVideoConsumer` with proper lifecycle
+hooks (not a hardcoded 2-second delay).
+
+**`TermSurfBrowserContext`** — Extends `ShellBrowserContext`. Overrides
+`GetPath()` to return the `--user-data-dir` path, giving each instance isolated
+cookies, localStorage, and cache.
+
+**`TermSurfVideoConsumer`** — Implements `viz::mojom::FrameSinkVideoConsumer`.
+This is the core of the frame delivery pipeline:
+
+1. Creates a `viz::ClientFrameSinkVideoCapturer` from `HostFrameSinkManager`
+2. Configures: `PIXEL_FORMAT_ARGB`, 16ms min capture period, auto-throttling
+   disabled
+3. Attaches to the WebContents' `FrameSinkId`
+4. On `OnFrameCaptured`: extracts `IOSurfaceRef` from the GPU memory buffer,
+   creates a Mach port with `IOSurfaceCreateMachPort()`, sends via XPC, signals
+   `Done()` to release the buffer
+
+Ported from `ShellVideoConsumer` in the One Profile app, but with proper
+lifecycle management.
+
+### Dock icon fix: LSUIElement
+
+The Info.plist sets `LSUIElement = true`, making termsurf-browser a background
+app with no Dock icon and no menu bar. This is the standard macOS mechanism for
+helper processes.
+
+The risk is that `LSUIElement` might affect Chromium's compositor visibility
+chain — the same chain that causes 2fps when a `BrowserContext`'s views aren't
+"visible." However, `LSUIElement` only removes the Dock icon; it does not affect
+window existence or NSView visibility. The existing `orderOut:nil` approach
+already proved that hiding the window doesn't affect `FrameSinkVideoCapturer`
+(Issue 414). `LSUIElement` is a strictly less invasive change than hiding the
+window, so it should not introduce new problems. This needs verification in
+Experiment 1.
 
 ### CLI flags
 
-| Flag | Purpose |
-| ---- | ------- |
-| `--hidden` | Hide the window after creation (`orderOut:nil`). The capturer keeps delivering at 60fps. |
-| `--xpc-service=<name>` | Connect to a named XPC Mach service as a client. |
-| `--session-id=<id>` | Identifier sent with every frame message. The receiver maps this to a pane. |
-| `--user-data-dir=<path>` | Profile storage directory. Each instance gets a different path for isolation. |
-| (positional URL) | The webpage to load (e.g., `http://localhost:9407`). |
+Same flags as the One Profile app, carried forward:
+
+| Flag                     | Purpose                                          |
+| ------------------------ | ------------------------------------------------ |
+| `--hidden`               | Hide the window after creation (`orderOut:nil`). |
+| `--xpc-service=<name>`   | Connect to a named XPC Mach service.             |
+| `--session-id=<id>`      | Identifier sent with every frame.                |
+| `--user-data-dir=<path>` | Profile storage directory.                       |
+| (positional URL)         | Webpage to load.                                 |
+
+### Chromium branch
+
+Create a new branch `146.0.7650.0-issue-501` in `chromium/src/`, forked from the
+vanilla `146.0.7650.0` tag (not from Issue 414). This is a clean rewrite, not a
+continuation of the One Profile app. The One Profile code at
+`content/one_profile/` remains on its own branches as historical reference.
+
+```bash
+cd chromium/src
+git checkout -b 146.0.7650.0-issue-501 146.0.7650.0
+```
+
+### BUILD.gn
+
+```gn
+import("//build/config/features.gni")
+
+source_set("termsurf_browser_lib") {
+  sources = [
+    "termsurf_browser_main_delegate.cc",
+    "termsurf_browser_main_delegate.h",
+    "termsurf_browser_main_parts.cc",
+    "termsurf_browser_main_parts.h",
+    "termsurf_browser_context.cc",
+    "termsurf_browser_context.h",
+    "termsurf_video_consumer.cc",
+    "termsurf_video_consumer.h",
+  ]
+
+  deps = [
+    "//content/shell:content_shell_lib",
+    "//components/viz/host:host",
+    "//services/viz/privileged/mojom/compositing:compositing_interfaces",
+    "//media",
+  ]
+}
+
+# macOS app bundle
+mac_app_bundle("termsurf_browser") {
+  output_name = "TermSurf Browser"
+  sources = [
+    "termsurf_browser_main.cc",
+    "termsurf_browser_main_mac.cc",
+  ]
+  deps = [
+    ":termsurf_browser_lib",
+    "//content/shell:content_shell_framework",
+  ]
+  info_plist = "Info.plist"
+}
+```
+
+Register in root BUILD.gn:
+
+```gn
+group("gn_all") {
+  deps = [
+    ...
+    "//content/termsurf_browser:termsurf_browser",
+  ]
+}
+```
 
 ### Build command
 
 ```bash
 cd chromium/src
 export PATH="$(cd ../depot_tools && pwd):$PATH"
-autoninja -C out/Default one_profile
+autoninja -C out/Default termsurf_browser
 ```
 
-Build time: ~15–20 seconds incremental (after initial full build of ~1.5 hours).
+## Part 2: Swift compositor (ts5/two-profiles/)
 
-The output is `chromium/src/out/Default/One Profile.app`.
-
-## Project structure
+### Project structure
 
 ```
 ts5/two-profiles/
 ├── Package.swift                           — SwiftPM manifest
 ├── Sources/
 │   └── TwoProfiles/
-│       ├── main.swift                      — Entry point, XPC listener, Metal
-│       │                                     setup, rendering (single file)
+│       ├── main.swift                      — Entry point, XPC, Metal, rendering
 │       └── Shaders.metal                   — Vertex + fragment shaders
-├── com.termsurf.two-profiles-ts5.plist     — Launchd agent definition
+├── com.termsurf.two-profiles.plist         — Launchd agent definition
 └── Makefile                                — Build shaders + swift build
 ```
 
-### Why a single file
+Ported from `ts4/two-profiles-swift/Sources/Receiver/main.swift` (328 lines).
+The code is small enough that a single file with MARK sections is clearer than
+multiple files.
 
-The ts4/two-profiles-swift receiver is 328 lines in a single `main.swift`. At
-this size, splitting into AppDelegate/XPCListener/Renderer adds indirection
-without clarity. The code splits naturally into MARK sections: XPC state,
-message handler, XPC listener, Metal setup, render loop, main.
+### Changes from ts4
 
-### Why a new XPC service name
+1. **XPC service name.** `com.termsurf.two-profiles` (no `-swift` or `-ts5`
+   suffix — this is the canonical name going forward).
+2. **Target name.** `TwoProfiles` instead of `Receiver`.
+3. **Makefile.** Compiles Metal shaders with `xcrun metal` / `xcrun metallib`
+   (SPM does not compile `.metal` files).
+4. **Log path.** `~/dev/termsurf/logs/two-profiles.log`.
 
-`com.termsurf.two-profiles-ts5` avoids conflicting with the existing
-`com.termsurf.two-profiles-swift` (ts4). Both can coexist in launchd for
-side-by-side comparison.
+No functional changes to XPC handling, Metal pipeline, or rendering logic.
 
-## Differences from ts4/two-profiles-swift
+### Known Swift gotchas (resolved in Issue 415)
 
-The port is nearly identical. The differences are:
-
-1. **Location.** `ts5/two-profiles/` instead of `ts4/two-profiles-swift/`.
-2. **XPC service name.** `com.termsurf.two-profiles-ts5` instead of
-   `com.termsurf.two-profiles-swift`.
-3. **Target name.** `TwoProfiles` instead of `Receiver`.
-4. **Makefile.** Adds a `make` target that compiles Metal shaders and runs
-   `swift build` in one step (SPM does not compile `.metal` files).
-5. **Log paths.** `~/dev/termsurf/logs/two-profiles-ts5.log`.
-
-No functional changes to the receiver logic, Metal pipeline, or XPC handling.
-
-## Launchd service
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.termsurf.two-profiles-ts5</string>
-    <key>MachServices</key>
-    <dict>
-        <key>com.termsurf.two-profiles-ts5</key>
-        <true/>
-    </dict>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/Users/ryan/dev/termsurf/ts5/two-profiles/.build/debug/TwoProfiles</string>
-    </array>
-    <key>StandardOutPath</key>
-    <string>/Users/ryan/dev/termsurf/logs/two-profiles-ts5.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/ryan/dev/termsurf/logs/two-profiles-ts5.log</string>
-</dict>
-</plist>
-```
+1. SPM does not compile `.metal` files — use `xcrun metal` / `xcrun metallib`.
+2. `mach_task_self()` is a C macro — use `mach_task_self_` in Swift.
+3. Pixel format is `.bgra8Unorm_srgb` (lowercase) in Swift.
+4. `MTLTextureUsage.shaderRead` needs the explicit type prefix.
+5. `IOSurfaceRef` is ARC-managed — no `CFRetain`/`CFRelease`.
 
 ## Build and run
 
 ```bash
-# Build receiver
+# 1. Build termsurf-browser (Chromium)
+cd chromium/src
+export PATH="$(cd ../depot_tools && pwd):$PATH"
+autoninja -C out/Default termsurf_browser
+
+# 2. Build compositor (Swift)
 cd ts5/two-profiles
 make
 
-# Load launchd plist
+# 3. Load compositor as launchd service
 launchctl bootstrap gui/$(id -u) \
-  ~/dev/termsurf/ts5/two-profiles/com.termsurf.two-profiles-ts5.plist
+  ~/dev/termsurf/ts5/two-profiles/com.termsurf.two-profiles.plist
 
-# Start test page server
+# 4. Start test page server
 cd ts4/box-demo && bun run server.ts &
 
-# Start profile servers (One Profile app from Chromium fork)
+# 5. Start two profile servers
 cd chromium/src
 
-out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+out/Default/TermSurf\ Browser.app/Contents/MacOS/TermSurf\ Browser \
   --hidden \
-  --xpc-service=com.termsurf.two-profiles-ts5 \
+  --xpc-service=com.termsurf.two-profiles \
   --session-id=profile-a \
   --user-data-dir=$HOME/.config/termsurf/poc/profile-a \
   http://localhost:9407 2>&1 &
 
-out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+out/Default/TermSurf\ Browser.app/Contents/MacOS/TermSurf\ Browser \
   --hidden \
-  --xpc-service=com.termsurf.two-profiles-ts5 \
+  --xpc-service=com.termsurf.two-profiles \
   --session-id=profile-b \
   --user-data-dir=$HOME/.config/termsurf/poc/profile-b \
   http://localhost:9407 2>&1 &
@@ -262,111 +345,108 @@ out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
 - Two panes in one window, each showing the spinning blue square
 - Different localStorage identity in each pane (profile isolation)
 - Both at 60fps sustained for 60+ seconds
-- Pixel-perfect Retina quality (1600x1200 IOSurface, sRGB, 1:1 mapping)
-- Pure Swift receiver, builds with `make` (SwiftPM + xcrun metal)
-- Uses CADisplayLink (not deprecated CVDisplayLink)
-
-## Known issues from ts4
-
-These were resolved in Issue 415 and the solutions carry forward:
-
-1. **SPM does not compile `.metal` files.** Compile manually with `xcrun metal`
-   / `xcrun metallib`. The Makefile handles this.
-2. **`mach_task_self()` is a C macro.** Use `mach_task_self_` in Swift.
-3. **Pixel format naming.** `.bgra8Unorm_srgb` (lowercase) in Swift.
-4. **`MTLTextureUsage.shaderRead`** needs the explicit type prefix.
-5. **CFRetain/CFRelease unnecessary.** Swift manages `IOSurfaceRef` via ARC.
+- Pixel-perfect Retina quality (1600x1200 IOSurface, sRGB)
+- No Dock icon for termsurf-browser processes
+- Pure Swift compositor, builds with `make`
+- Chromium embedder is ~12 files linking against content_shell_lib (not a copy)
 
 ## Experiments
 
-### Experiment 1: Port the receiver
+### Experiment 1: Build termsurf-browser
 
 #### Hypothesis
 
-Copying the proven ts4/two-profiles-swift code into ts5/two-profiles with
-updated paths and service names will produce an identical working receiver. No
-new unknowns — every API and pattern was validated in Issue 415.
+A minimal Chromium target at `content/termsurf_browser/` that links against
+`content_shell_lib` and subclasses only what's needed (~12 files) will produce a
+working headless browser that captures frames and sends IOSurface Mach ports via
+XPC at 60fps — without a Dock icon.
+
+#### Steps
+
+##### Step 1: Create Chromium branch
+
+```bash
+cd chromium/src
+git checkout -b 146.0.7650.0-issue-501 146.0.7650.0
+```
+
+##### Step 2: Create directory and BUILD.gn
+
+Create `content/termsurf_browser/` with the BUILD.gn from the design above.
+Register the target in the root BUILD.gn.
+
+##### Step 3: Write the entry points
+
+- `termsurf_browser_main.cc` — Calls `content::ContentMain()` with our delegate
+- `termsurf_browser_main_mac.cc` — macOS framework loading (same pattern as
+  content_shell)
+
+##### Step 4: Write the delegate classes
+
+- `TermSurfBrowserMainDelegate` — Extends `ShellMainDelegate`, overrides
+  `CreateContentBrowserClient()` to return our browser client
+- `TermSurfBrowserMainParts` — Extends `ShellBrowserMainParts`, overrides
+  browser context creation, wires up `TermSurfVideoConsumer`
+- `TermSurfBrowserContext` — Extends `ShellBrowserContext`, overrides
+  `GetPath()` for `--user-data-dir`
+
+##### Step 5: Write the video consumer
+
+Port `ShellVideoConsumer` from the One Profile app as `TermSurfVideoConsumer`.
+Same `FrameSinkVideoCapturer` + XPC pipeline, but with proper lifecycle
+management instead of a hardcoded delay.
+
+##### Step 6: Create Info.plist with LSUIElement
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>LSUIElement</key>
+    <true/>
+    ...
+</dict>
+</plist>
+```
+
+##### Step 7: Build and test
+
+```bash
+autoninja -C out/Default termsurf_browser
+```
+
+Test with the existing ts4/two-profiles-swift receiver to verify frames arrive
+at 60fps. Verify no Dock icon appears.
+
+### Experiment 2: Build Swift compositor
+
+#### Hypothesis
+
+Porting the ts4/two-profiles-swift receiver into ts5/two-profiles with updated
+names and paths will produce an identical working compositor. No new unknowns.
 
 #### Steps
 
 ##### Step 1: Create project structure
 
-Create the SwiftPM project at `ts5/two-profiles/`:
+- `Package.swift` — macOS 14+, target `TwoProfiles`
+- `Sources/TwoProfiles/main.swift` — Port from ts4 with updated XPC service name
+  (`com.termsurf.two-profiles`)
+- `Sources/TwoProfiles/Shaders.metal` — Copy from ts4
+- `Makefile` — Compile shaders + `swift build`
+- `com.termsurf.two-profiles.plist` — Launchd agent
 
-- `Package.swift` — macOS 14+, target `TwoProfiles`, link Cocoa/Metal/
-  QuartzCore/IOSurface frameworks
-- `Sources/TwoProfiles/main.swift` — Port from
-  `ts4/two-profiles-swift/Sources/Receiver/main.swift` with updated XPC service
-  name (`com.termsurf.two-profiles-ts5`) and window title
-- `Sources/TwoProfiles/Shaders.metal` — Copy from
-  `ts4/two-profiles-swift/Sources/Receiver/Shaders.metal`
-
-##### Step 2: Create Makefile
-
-```makefile
-.PHONY: build clean
-
-build: shaders
-	swift build
-
-shaders: .build/debug/shaders.metallib
-
-.build/debug/shaders.metallib: Sources/TwoProfiles/Shaders.metal
-	mkdir -p .build/debug
-	xcrun metal -c $< -o .build/debug/Shaders.air
-	xcrun metallib .build/debug/Shaders.air -o $@
-
-clean:
-	swift package clean
-	rm -f .build/debug/Shaders.air .build/debug/shaders.metallib
-```
-
-##### Step 3: Create launchd plist
-
-Create `com.termsurf.two-profiles-ts5.plist` with service name
-`com.termsurf.two-profiles-ts5`, binary path pointing to
-`.build/debug/TwoProfiles`, logs to `~/dev/termsurf/logs/two-profiles-ts5.log`.
-
-##### Step 4: Build and verify
+##### Step 2: Build and verify
 
 ```bash
 cd ts5/two-profiles
 make
 ```
 
-Verify that `.build/debug/TwoProfiles` and `.build/debug/shaders.metallib` are
-produced.
+##### Step 3: End-to-end test
 
-##### Step 5: Run with profile servers
-
-```bash
-# Load launchd plist
-launchctl bootstrap gui/$(id -u) \
-  ~/dev/termsurf/ts5/two-profiles/com.termsurf.two-profiles-ts5.plist
-
-# Start test server
-cd ts4/box-demo && bun run server.ts &
-
-# Start two profile servers
-cd chromium/src
-out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
-  --hidden \
-  --xpc-service=com.termsurf.two-profiles-ts5 \
-  --session-id=profile-a \
-  --user-data-dir=$HOME/.config/termsurf/poc/profile-a \
-  http://localhost:9407 2>&1 &
-
-out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
-  --hidden \
-  --xpc-service=com.termsurf.two-profiles-ts5 \
-  --session-id=profile-b \
-  --user-data-dir=$HOME/.config/termsurf/poc/profile-b \
-  http://localhost:9407 2>&1 &
-```
-
-Verify:
-
-- Window appears with two panes
-- Both panes show spinning blue square at 60fps
-- Different localStorage identity in each pane
-- Logs show `L: 60 (60.0 fps) R: 60 (60.0 fps)`
+Load the launchd plist, start the test page server, launch two termsurf-browser
+instances (from Experiment 1), and verify two panes at 60fps with different
+localStorage identities.
