@@ -138,7 +138,7 @@ implemented in ts5.
 
 - `ts4/box-demo/public/index.html` — Test page (blue spinning square, localStorage, FPS)
 - `ts4/box-demo/server.ts` — Bun HTTP server on port 9407
-- `termsurf-chromium/` — Chromium build workspace (gitignored, top level)
+- `chromium/` — Chromium build workspace (gitignored, top level)
   - `src/` — Chromium source tree (git repo)
   - `src/content/shell/` — content_shell (the embedder we modify)
   - `src/out/Default/` — Build output
@@ -150,8 +150,8 @@ implemented in ts5.
 # Test page server
 cd ts4/box-demo && bun run server.ts
 
-# Chromium (depot_tools lives at termsurf-chromium/depot_tools)
-cd termsurf-chromium/src
+# Chromium (depot_tools lives at chromium/depot_tools)
+cd chromium/src
 export PATH="$(cd ../depot_tools && pwd):$PATH"
 gn gen out/Default --args='is_debug=false symbol_level=0 enable_nacl=false is_component_build=true'
 autoninja -C out/Default content_shell

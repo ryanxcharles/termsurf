@@ -11,11 +11,11 @@ Build the Chromium fork for TermSurf. Everything stays inside the repo.
 
 | What | Path |
 |------|------|
-| depot_tools | `termsurf-chromium/depot_tools` |
-| Source root | `termsurf-chromium/src` |
-| Build output | `termsurf-chromium/src/out/Default/` |
-| Built app | `termsurf-chromium/src/out/Default/One Profile.app/` |
-| GN args | `termsurf-chromium/src/out/Default/args.gn` |
+| depot_tools | `chromium/depot_tools` |
+| Source root | `chromium/src` |
+| Build output | `chromium/src/out/Default/` |
+| Built app | `chromium/src/out/Default/One Profile.app/` |
+| GN args | `chromium/src/out/Default/args.gn` |
 
 All paths are relative to `~/dev/termsurf`.
 
@@ -25,17 +25,17 @@ depot_tools must be on PATH before running any build tool (`autoninja`, `gn`,
 `gclient`, etc.):
 
 ```bash
-export PATH="$HOME/dev/termsurf/termsurf-chromium/depot_tools:$PATH"
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
 ```
 
 ## Build Commands
 
 ```bash
 # Navigate to source root
-cd ~/dev/termsurf/termsurf-chromium/src
+cd ~/dev/termsurf/chromium/src
 
 # Add depot_tools to PATH
-export PATH="$HOME/dev/termsurf/termsurf-chromium/depot_tools:$PATH"
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
 
 # Generate build files (only needed once, or after changing args.gn)
 gn gen out/Default
@@ -74,7 +74,7 @@ outside the repo without explicit user approval.
 
 ## Branches
 
-The Chromium fork at `termsurf-chromium/src` uses branches named
+The Chromium fork at `chromium/src` uses branches named
 `{version}-termsurf` or `{version}-issue-{N}` (e.g.,
 `146.0.7650.0-issue-414`). These are built as commits on top of the vanilla
 Chromium version tag.

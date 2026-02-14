@@ -35,7 +35,7 @@ issue-specific branches.
 
 ## Local Setup
 
-The `termsurf-chromium/` directory at the repo root is a Chromium build
+The `chromium/` directory at the repo root is a Chromium build
 workspace, gitignored from the main repo. The `src/` subdirectory is the
 Chromium git repo (Chromium requires it to be named `src/`). To set up from
 scratch, use `fetch chromium` from depot_tools or clone from upstream and apply

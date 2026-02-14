@@ -63,10 +63,9 @@ vendor/wezterm/
 vendor/electron/
 vendor/alacritty/
 vendor/cef/
-vendor/chromium/
 
 # Chromium build workspace (gitignored; src/ requires directory named "src")
-/termsurf-chromium/
+/chromium/
 
 # TermSurf 4.0 (ts4/) build outputs
 ts4/termsurf-window/.build/

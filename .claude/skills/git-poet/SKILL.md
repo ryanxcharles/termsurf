@@ -76,7 +76,7 @@ Now npm audit says: "Well done!"
 
 ## Chromium Fork Workflow
 
-The Chromium fork at `termsurf-chromium/src/` is a separate git repo (gitignored
+The Chromium fork at `chromium/src/` is a separate git repo (gitignored
 from the main TermSurf repo). It doesn't use `main`. Branches are named
 `{version}-termsurf` (e.g., `146.0.7650.0-termsurf`), built as a series of
 commits on top of the vanilla Chromium version tag. The branch name encodes the
@@ -91,7 +91,7 @@ authorship.
 
 **Typical flow:**
 
-1. Work inside `termsurf-chromium/src/` on the `{version}-termsurf` branch
+1. Work inside `chromium/src/` on the `{version}-termsurf` branch
 2. Commit with git-poet
 3. Return to the main repo
 4. Update `docs/chromium.md` if the branch or version changed
