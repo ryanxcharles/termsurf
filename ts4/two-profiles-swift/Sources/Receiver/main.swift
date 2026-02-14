@@ -1,22 +1,35 @@
 // Copyright 2025 TermSurf
 // Swift Metal receiver: receives IOSurface Mach ports via XPC and renders them.
-// Part of Issue 415 Experiment 1: single-pane Swift receiver.
+// Part of Issue 415 Experiment 2: two-pane Swift receiver.
 
 import Cocoa
 import Metal
 import QuartzCore
 import IOSurface
 
+// MARK: - Pane indices
+
+enum Pane: Int {
+    case left = 0
+    case right = 1
+    static let count = 2
+}
+
+func paneForSession(_ sessionId: String?) -> Pane {
+    if sessionId == "profile-b" { return .right }
+    return .left
+}
+
 // MARK: - XPC state (strong globals to prevent ARC release)
 
 var gListener: xpc_connection_t?
-var gPeer: xpc_connection_t?
+var gPeers: [xpc_connection_t] = []
 
 // MARK: - Shared state between XPC queue and main thread
 
 let gSurfaceLock = NSLock()
-var gPendingSurface: IOSurfaceRef?
-var gFrameCount = 0
+var gPendingSurface: [IOSurfaceRef?] = [nil, nil]
+var gFrameCount: [Int] = [0, 0]
 var gLastLogTime: UInt64 = 0
 
 // MARK: - Metal state
@@ -26,7 +39,7 @@ var gCommandQueue: MTLCommandQueue!
 var gPipeline: MTLRenderPipelineState!
 var gSampler: MTLSamplerState!
 var gMetalLayer: CAMetalLayer!
-var gCurrentTexture: MTLTexture?
+var gCurrentTexture: [MTLTexture?] = [nil, nil]
 
 // MARK: - XPC message handler
 
@@ -48,13 +61,18 @@ func handleMessage(_ msg: xpc_object_t) {
         }
         mach_port_deallocate(mach_task_self_, port)
 
-        // Swap in the new surface. ARC releases the old one automatically.
+        // Map session_id to pane.
+        let sessionIdPtr = xpc_dictionary_get_string(msg, "session_id")
+        let sessionId = sessionIdPtr != nil ? String(cString: sessionIdPtr!) : nil
+        let pane = paneForSession(sessionId)
+
+        // Swap in the new surface for this pane.
         gSurfaceLock.lock()
-        gPendingSurface = surface
+        gPendingSurface[pane.rawValue] = surface
         gSurfaceLock.unlock()
 
-        // FPS logging.
-        gFrameCount += 1
+        // FPS logging (per-pane counts, single log line).
+        gFrameCount[pane.rawValue] += 1
         let now = mach_absolute_time()
         if gLastLogTime == 0 { gLastLogTime = now }
         var info = mach_timebase_info_data_t()
@@ -64,10 +82,15 @@ func handleMessage(_ msg: xpc_object_t) {
         if elapsed >= 1.0 {
             let w = IOSurfaceGetWidth(surface)
             let h = IOSurfaceGetHeight(surface)
-            let fps = Double(gFrameCount) / elapsed
-            fputs("[Receiver] \(gFrameCount) frames (%.1f fps) | IOSurface \(w)x\(h)\n"
-                .replacingOccurrences(of: "%.1f", with: String(format: "%.1f", fps)), stderr)
-            gFrameCount = 0
+            let fpsL = Double(gFrameCount[Pane.left.rawValue]) / elapsed
+            let fpsR = Double(gFrameCount[Pane.right.rawValue]) / elapsed
+            let fpsLStr = String(format: "%.1f", fpsL)
+            let fpsRStr = String(format: "%.1f", fpsR)
+            fputs("[Receiver] L: \(gFrameCount[Pane.left.rawValue]) (\(fpsLStr) fps) " +
+                  "R: \(gFrameCount[Pane.right.rawValue]) (\(fpsRStr) fps) | " +
+                  "IOSurface \(w)x\(h)\n", stderr)
+            gFrameCount[Pane.left.rawValue] = 0
+            gFrameCount[Pane.right.rawValue] = 0
             gLastLogTime = now
         }
     } else if actionStr == "register" {
@@ -90,9 +113,9 @@ func startXPCListener() {
 
     xpc_connection_set_event_handler(listener) { peer in
         if xpc_get_type(peer) == XPC_TYPE_CONNECTION {
-            fputs("[Receiver] Profile server connected\n", stderr)
             let peerConn = peer as xpc_connection_t
-            gPeer = peerConn
+            gPeers.append(peerConn)
+            fputs("[Receiver] Profile server connected (\(gPeers.count) total)\n", stderr)
 
             xpc_connection_set_event_handler(peerConn) { event in
                 if xpc_get_type(event) == XPC_TYPE_DICTIONARY {
@@ -122,14 +145,14 @@ class ReceiverAppDelegate: NSObject, NSApplicationDelegate {
     var displayLink: CADisplayLink?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Create window: 800x600 logical = one pane.
-        let frame = NSRect(x: 100, y: 100, width: 800, height: 600)
+        // Create window: 1600x600 logical = two 800x600 panes side by side.
+        let frame = NSRect(x: 100, y: 100, width: 1600, height: 600)
         window = NSWindow(
             contentRect: frame,
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false)
-        window.title = "Swift Receiver"
+        window.title = "Two Profiles Swift Receiver"
         window.makeKeyAndOrderFront(nil)
 
         setupMetal(view: window.contentView!)
@@ -216,29 +239,33 @@ class ReceiverAppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Render
 
     @objc func render() {
-        // Grab the latest IOSurface. ARC retains via the local variable.
+        // Grab the latest IOSurface for each pane.
         gSurfaceLock.lock()
-        let surface = gPendingSurface
+        let surfaces = gPendingSurface
         gSurfaceLock.unlock()
 
-        // Update Metal texture from new IOSurface.
-        if let surface = surface {
-            let desc = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: .bgra8Unorm_srgb,
-                width: IOSurfaceGetWidth(surface),
-                height: IOSurfaceGetHeight(surface),
-                mipmapped: false)
-            desc.usage = MTLTextureUsage.shaderRead
-            let newTexture = gDevice.makeTexture(
-                descriptor: desc,
-                iosurface: surface,
-                plane: 0)
-            if let newTexture = newTexture {
-                gCurrentTexture = newTexture
+        // Update Metal textures from new IOSurfaces.
+        for i in 0..<Pane.count {
+            if let surface = surfaces[i] {
+                let desc = MTLTextureDescriptor.texture2DDescriptor(
+                    pixelFormat: .bgra8Unorm_srgb,
+                    width: IOSurfaceGetWidth(surface),
+                    height: IOSurfaceGetHeight(surface),
+                    mipmapped: false)
+                desc.usage = MTLTextureUsage.shaderRead
+                let newTexture = gDevice.makeTexture(
+                    descriptor: desc,
+                    iosurface: surface,
+                    plane: 0)
+                if let newTexture = newTexture {
+                    gCurrentTexture[i] = newTexture
+                }
             }
         }
 
-        guard gCurrentTexture != nil else { return }
+        // Need at least one texture to render.
+        guard gCurrentTexture[Pane.left.rawValue] != nil ||
+              gCurrentTexture[Pane.right.rawValue] != nil else { return }
         guard let drawable = gMetalLayer.nextDrawable() else { return }
 
         let passDesc = MTLRenderPassDescriptor()
@@ -258,13 +285,27 @@ class ReceiverAppDelegate: NSObject, NSApplicationDelegate {
 
         let drawableW = gMetalLayer.drawableSize.width
         let drawableH = gMetalLayer.drawableSize.height
-        let viewport = MTLViewport(
-            originX: 0, originY: 0,
-            width: drawableW, height: drawableH,
-            znear: 0, zfar: 1)
-        encoder.setViewport(viewport)
-        encoder.setFragmentTexture(gCurrentTexture, index: 0)
-        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        let halfW = drawableW / 2.0
+
+        // Left pane (profile-a).
+        if let tex = gCurrentTexture[Pane.left.rawValue] {
+            let vp = MTLViewport(originX: 0, originY: 0,
+                                 width: halfW, height: drawableH,
+                                 znear: 0, zfar: 1)
+            encoder.setViewport(vp)
+            encoder.setFragmentTexture(tex, index: 0)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
+
+        // Right pane (profile-b).
+        if let tex = gCurrentTexture[Pane.right.rawValue] {
+            let vp = MTLViewport(originX: halfW, originY: 0,
+                                 width: halfW, height: drawableH,
+                                 znear: 0, zfar: 1)
+            encoder.setViewport(vp)
+            encoder.setFragmentTexture(tex, index: 0)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
 
         encoder.endEncoding()
         cmdBuf.present(drawable)

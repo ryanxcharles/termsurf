@@ -703,3 +703,34 @@ out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
 - Pixel-perfect Retina quality (1600x1200 IOSurface, sRGB, 1:1 mapping)
 - Receiver is pure Swift, builds with `swift build`
 - Matches Issue 414 Experiment 7 output exactly
+
+#### Result: PASSED
+
+The two-pane Swift receiver matches Issue 414 Experiment 7 exactly. Two profile
+servers, two panes, both at 60fps, pixel-perfect Retina, pure Swift.
+
+**Logs (excerpt):**
+
+```
+[Receiver] Listening on com.termsurf.two-profiles-swift...
+[Receiver] Profile server connected (1 total)
+[Receiver] Profile server connected (2 total)
+[Receiver] Loaded shaders from .build/debug/shaders.metallib
+[Receiver] Window and Metal pipeline ready
+[Receiver] L: 74 (73.8 fps) R: 74 (73.8 fps) | IOSurface 1600x1200
+[Receiver] L: 60 (60.0 fps) R: 60 (60.0 fps) | IOSurface 1600x1200
+[Receiver] L: 61 (60.0 fps) R: 61 (60.0 fps) | IOSurface 1600x1200
+...sustained 60fps on both panes for 60+ seconds...
+```
+
+Issue 415 is complete. All success criteria met:
+
+- Two panes in one window, each showing the spinning blue square
+- Different localStorage identity in each pane (profile isolation confirmed)
+- Both at 60fps sustained
+- Pixel-perfect Retina quality (1600x1200 IOSurface, sRGB, 1:1 mapping)
+- IOSurface transfer via XPC Mach ports
+- Receiver written entirely in Swift — no Objective-C bridging headers
+- Builds with `swift build` (SPM)
+- Uses `CADisplayLink` instead of deprecated `CVDisplayLink`
+- Same sender binary as Issue 414, same XPC protocol, same visual output
