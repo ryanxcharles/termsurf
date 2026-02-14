@@ -722,3 +722,21 @@ moved Ghostty's files into `ts1/`) and tried to merge upstream changes into
 `/foo` was renamed to `ts1/foo` on our side, it merges upstream's changes to
 `/foo` into `ts1/foo` regardless of the subtree option. The subtree strategy
 only works when there is no competing rename history.
+
+### Experiment 2: Subtree merge with rename detection disabled
+
+**Hypothesis:** Experiment 1 failed because rename detection found the `/ →
+ts1/` renames and overrode the subtree mapping. The `-X no-renames` strategy
+option disables rename detection entirely. Without rename detection, git won't
+find the ts1/ renames and the `-X subtree=ts5` mapping should work cleanly —
+placing all upstream files into `ts5/` as new additions.
+
+**Command:**
+
+```bash
+git fetch upstream
+git merge -X subtree=ts5 -X no-renames upstream/main --no-commit
+```
+
+The plan (Steps 1–8 from Experiment 1) remains the same — only the merge command
+in Step 1 changes.
