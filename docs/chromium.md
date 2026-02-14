@@ -35,8 +35,40 @@ issue-specific branches.
 
 ## Local Setup
 
-The `chromium/` directory at the repo root is a Chromium build
-workspace, gitignored from the main repo. The `src/` subdirectory is the
-Chromium git repo (Chromium requires it to be named `src/`). To set up from
-scratch, use `fetch chromium` from depot_tools or clone from upstream and apply
-our patches (patch distribution TBD).
+The `chromium/` directory at the repo root is a Chromium build workspace,
+gitignored from the main repo. The `src/` subdirectory is the Chromium git repo
+(Chromium requires it to be named `src/`). `depot_tools/` lives at
+`chromium/depot_tools/`. To set up from scratch, use `fetch chromium` from
+depot_tools or clone from upstream and apply our patches (patch distribution
+TBD).
+
+```
+chromium/
+├── depot_tools/   — Chromium build tools (gclient, gn, autoninja, etc.)
+└── src/           — Chromium source tree (git repo)
+    ├── content/   — Content API (where our code lives)
+    └── out/       — Build output
+```
+
+## Build
+
+Set the PATH so that `gn` and `autoninja` are available:
+
+```bash
+cd chromium/src
+export PATH="$(cd ../depot_tools && pwd):$PATH"
+```
+
+Configure the build (one time):
+
+```bash
+gn gen out/Default --args='is_debug=false symbol_level=0 enable_nacl=false is_component_build=true'
+```
+
+Build a target:
+
+```bash
+autoninja -C out/Default content_shell
+```
+
+Build times: ~1.5 hours for a full build, 15–20 seconds incremental.
