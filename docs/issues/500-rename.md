@@ -367,3 +367,29 @@ cd ts5 && zig build
 ```
 
 Verify the output app is named `TermSurf.app` (not `Ghostty.app`).
+
+#### Result
+
+Partial success. `TermSurf.app` builds and runs at `ts5/zig-out/TermSurf.app`.
+Menu bar shows "TermSurf" correctly. However, the app icon is still the Ghostty
+ghost — the icon replacement in step 7 did not take effect. Needs investigation
+in a follow-up experiment.
+
+Steps 1–7 went as planned. Step 8 revealed two issues that required additional
+work beyond what the plan specified:
+
+1. **`ghostty_config_load_files` doesn't exist in upstream Ghostty.** This was a
+   custom C API function added in ts1. Ported three pieces from ts1:
+   - `appSupportDirWithBundleId` in `ts5/src/os/macos.zig`
+   - `loadFiles` method in `ts5/src/config/Config.zig`
+   - `ghostty_config_load_files` C API export in `ts5/src/config/CApi.zig`
+   - C header declaration in `ts5/include/ghostty.h`
+
+2. **`PRODUCT_NAME = "$(TARGET_NAME)"` resolves to `Ghostty`.** Changed
+   `PRODUCT_NAME` to `TermSurf` in the three main app build configurations
+   (Debug, Release, ReleaseLocal). Also updated the Zig build system's app path
+   in `ts5/src/build/GhosttyXcodebuild.zig` from `Ghostty.app` to
+   `TermSurf.app`.
+
+Additionally changed `within Ghostty` → `within TermSurf` in all permission
+dialog strings in `project.pbxproj` (user-facing but not in the original plan).
