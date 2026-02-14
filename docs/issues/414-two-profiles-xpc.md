@@ -926,205 +926,253 @@ There are no more architectural risks. The Content API captures at 60fps, the
 IOSurfaces support Mach port creation, and XPC delivers them to another process
 without measurable overhead. Every component in the pipeline is proven.
 
-### Experiment 3: Two profile servers, one window
+### Experiment 3: Hidden sender, visible receiver
 
 #### Hypothesis
 
-Two profile server processes — each running a separate `BrowserContext` with
-isolated storage — can send IOSurface frames via XPC to a single GUI process
-that composites them side by side in one Metal window at 60fps. This is the
-target architecture for TermSurf.
+A hidden (windowless) profile server can capture and send IOSurface frames via
+XPC to a separate receiver process that renders them as Metal textures in a
+visible window at 60fps. This inverts the Experiment 2 topology — the window
+the user sees belongs to the receiver, not the sender.
 
 #### Background
 
-Experiments 1 and 2 proved the pipeline for a single profile server: capture at
-60fps, transfer via XPC at 60fps. Experiment 3 adds the missing pieces:
+In Experiments 1 and 2, the profile server displayed its own window. The
+receiver was invisible (logging only). But in TermSurf's target architecture,
+the GUI process owns the window and the profile servers are headless background
+processes. This experiment proves that inversion works:
 
-1. **A GUI that renders.** The Experiment 2 receiver only logged frames. Now the
-   GUI must import IOSurfaces as Metal textures and composite two quads.
-2. **Two simultaneous profile servers.** Each sends frames independently. The
-   GUI must track which connection maps to which pane.
-3. **Profile isolation.** Each profile server uses a different
-   `--user-data-dir`, proving that cookies and localStorage are separate.
+1. **Hidden sender.** The profile server runs without a visible window. The
+   `FrameSinkVideoCapturer` must still capture frames when the window is hidden.
+   If macOS throttles the compositor for hidden windows, we need to know now.
+2. **Visible receiver.** The receiver renders received IOSurfaces as Metal
+   textures in a window. This proves the GPU texture import path:
+   `IOSurfaceLookupFromMachPort()` → `newTextureWithDescriptor:iosurface:plane:`
+   → Metal render pass → screen.
 
-The cef-test GUI (`ts3/cef-test-gui/src/main.rs`) solved this exact problem with
-wgpu: two vertex buffers (left/right quads in NDC), two bind groups (one
-texture+sampler per pane), two draw calls per frame. The pattern translates
-directly to Metal or Objective-C++.
+This is a single-profile test. Two profiles side by side is the next experiment.
 
 #### Design
 
-Three processes:
+Two processes:
 
-1. **GUI** (`ts4/two-profiles-gui/`) — Objective-C++ app. Creates a Metal
-   window, registers as XPC Mach service `com.termsurf.two-profiles`, spawns two
-   profile servers, receives IOSurface Mach ports from both, composites side by
-   side.
-2. **Profile server A** — The One Profile app with
-   `--xpc-service=com.termsurf.two-profiles --session-id=profile-a
-   --user-data-dir=~/.config/termsurf/poc/profile-a http://localhost:9407`
-3. **Profile server B** — Same binary with
-   `--xpc-service=com.termsurf.two-profiles --session-id=profile-b
-   --user-data-dir=~/.config/termsurf/poc/profile-b http://localhost:9407`
+1. **Profile server** — The One Profile app with a new `--hidden` flag that
+   hides the window after creation. Still captures via `FrameSinkVideoCapturer`
+   and sends IOSurface Mach ports via XPC (unchanged from Experiment 2).
+2. **Receiver** (`ts4/two-profiles-receiver/`) — Replace the current log-only
+   receiver with an Objective-C++ program that creates a Metal window and
+   renders each received IOSurface as a fullscreen textured quad.
 
-The profile servers keep their windows (as in Experiment 2) — useful for
-debugging. Headless mode is a separate concern.
+##### Step 1: Add `--hidden` flag to the profile server
 
-##### Step 1: Add session ID to the profile server
-
-Add `--session-id <id>` to the One Profile app. After connecting to the XPC
-service, send a `register` message with the session ID:
+Add a `--hidden` switch to `shell_switches.h`. In the macOS platform delegate,
+after the window is created, hide it:
 
 ```cpp
-xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
-xpc_dictionary_set_string(msg, "action", "register");
-xpc_dictionary_set_string(msg, "session_id", session_id.c_str());
-xpc_connection_send_message(xpc_connection_, msg);
-xpc_release(msg);
+// In shell_platform_delegate_mac.mm, after window creation:
+if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kHidden)) {
+  [shell->window() orderOut:nil];
+}
 ```
 
-The GUI uses the session ID to map each connection to left or right pane.
+`orderOut:nil` removes the window from the screen without closing it. The
+compositor and `FrameSinkVideoCapturer` should continue running because the
+`WebContents` and its `RenderWidgetHostView` are still alive.
 
-##### Step 2: Build the GUI
+If `orderOut:` causes macOS to throttle or pause the compositor, try
+`[shell->window() setAlphaValue:0]` (invisible but on-screen) or
+`[NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory]` (no dock
+icon, no menu bar) as alternatives.
 
-Create `ts4/two-profiles-gui/main.mm`, a standalone Objective-C++ program. It
-does four things:
+##### Step 2: Build the Metal receiver
 
-**a) XPC Mach service listener.** Same pattern as the Experiment 2 receiver, but
-tracks two connections by session ID:
+Replace `ts4/two-profiles-receiver/main.m` with `main.mm` (Objective-C++) that
+renders received IOSurfaces in a Metal window. The program does three things:
+
+**a) XPC Mach service listener.** Same as the current receiver — listen on
+`com.termsurf.two-profiles`, handle `display_surface` messages. When a frame
+arrives:
 
 ```objc
-// Per-pane state
-typedef struct {
-    IOSurfaceRef surface;
-    id<MTLTexture> texture;
-    int frame_count;
-    struct timespec last_log_time;
-} PaneState;
-
-static PaneState g_left = {};
-static PaneState g_right = {};
+mach_port_t port = xpc_dictionary_copy_mach_send(msg, "iosurface_port");
+IOSurfaceRef surface = IOSurfaceLookupFromMachPort(port);
+// Store surface + dimensions in shared state (protected by lock or atomic swap)
+mach_port_deallocate(mach_task_self(), port);
 ```
 
-When a `register` message arrives, map the connection to left or right based on
-the session ID (e.g., first connection = left, second = right, or match on the
-session ID string). When a `display_surface` message arrives, extract the Mach
-port, call `IOSurfaceLookupFromMachPort()`, and store the IOSurface in the
-appropriate pane state.
+Store the latest IOSurface in a shared variable. The render loop reads it. Old
+IOSurfaces are released when replaced.
 
-**b) Metal window.** Create an `NSWindow` with a `CAMetalLayer`-backed view. Set
-the layer's `framebufferOnly = NO` and `pixelFormat =
-MTLPixelFormatBGRA8Unorm`.
-Size: 1280x720 (640x360 per pane at 1x, or 1280x720 at 2x Retina).
-
-**c) Metal render pipeline.** Two textured quads (left half, right half):
-
-- Vertex data: two quad strips in NDC. Left quad: x in [-1, 0]. Right quad: x in
-  [0, +1]. Both with texture coords [0, 1].
-- Vertex shader: passthrough (position + texcoord).
-- Fragment shader: sample texture at texcoord.
-- Two `MTLTexture` objects created from IOSurfaces via
-  `newTextureWithDescriptor:iosurface:plane:`.
-
-**d) Render loop.** Use a `CVDisplayLink` or `CADisplayLink` to drive rendering
-at vsync. Each frame:
-
-1. Check if either pane has a new IOSurface (atomic flag or lock).
-2. If so, create a new `MTLTexture` from the IOSurface.
-3. Begin a render pass, draw left quad with left texture, draw right quad with
-   right texture, present.
-
-The cef-test GUI used wgpu (Rust). This experiment uses Metal directly
-(Objective-C++) to stay in one language with Chromium and avoid a Rust
-dependency. The rendering logic is simpler in raw Metal — two draw calls with
-different textures.
-
-##### Step 3: Spawn profile servers from the GUI
-
-The GUI spawns two profile server processes as children using `NSTask` (or
-`posix_spawn`). Each gets different arguments:
+**b) Metal window.** Create an `NSWindow` with a `CAMetalLayer`-backed
+`NSView`:
 
 ```objc
-// Profile A (left pane)
-NSTask *profileA = [[NSTask alloc] init];
-profileA.launchPath = @"out/Default/One Profile.app/Contents/MacOS/One Profile";
-profileA.arguments = @[
-    @"--xpc-service=com.termsurf.two-profiles",
-    @"--session-id=profile-a",
-    @"--user-data-dir=/Users/ryan/.config/termsurf/poc/profile-a",
-    @"http://localhost:9407"
-];
-[profileA launch];
-
-// Profile B (right pane)
-// Same but --session-id=profile-b, --user-data-dir=.../profile-b
+CAMetalLayer *metalLayer = [CAMetalLayer layer];
+metalLayer.device = MTLCreateSystemDefaultDevice();
+metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+metalLayer.framebufferOnly = NO;
+[view setWantsLayer:YES];
+[view setLayer:metalLayer];
 ```
 
-The GUI waits for both `register` messages before starting the render loop, or
-renders a black pane until each profile connects.
+Window size: 640x360 (matching the IOSurface dimensions from Experiment 2).
 
-##### Step 4: Run and verify
+**c) Metal render pipeline.** A single fullscreen textured quad:
+
+- **Vertex data:** Four vertices forming a triangle strip covering the entire
+  NDC range ([-1,-1] to [+1,+1]) with texture coords [0,0] to [1,1].
+- **Vertex shader:** Passthrough — position and texcoord.
+- **Fragment shader:** Sample the texture at the interpolated texcoord.
+- **Texture creation from IOSurface:**
+  ```objc
+  MTLTextureDescriptor *desc = [MTLTextureDescriptor
+      texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+      width:IOSurfaceGetWidth(surface)
+      height:IOSurfaceGetHeight(surface)
+      mipmapped:NO];
+  desc.usage = MTLTextureUsageShaderRead;
+  id<MTLTexture> texture = [device
+      newTextureWithDescriptor:desc
+      iosurface:surface
+      plane:0];
+  ```
+
+**d) Render loop.** Use `CVDisplayLink` to drive rendering at vsync:
+
+1. Check if a new IOSurface is available (atomic swap or lock).
+2. If so, create a new `MTLTexture` from it. Release the old texture.
+3. If a texture exists, begin a render pass: clear to black, draw the fullscreen
+   quad with the texture, present the drawable.
+4. Log fps once per second.
+
+If no IOSurface has arrived yet, render a black frame.
+
+##### Step 3: Metal shader file
+
+Create `ts4/two-profiles-receiver/shaders.metal`:
+
+```metal
+#include <metal_stdlib>
+using namespace metal;
+
+struct VertexOut {
+    float4 position [[position]];
+    float2 texcoord;
+};
+
+vertex VertexOut vertex_main(uint vid [[vertex_id]]) {
+    // Fullscreen triangle strip: 4 vertices
+    float2 positions[4] = {
+        float2(-1, -1), float2(1, -1),
+        float2(-1,  1), float2(1,  1)
+    };
+    float2 texcoords[4] = {
+        float2(0, 1), float2(1, 1),
+        float2(0, 0), float2(1, 0)
+    };
+    VertexOut out;
+    out.position = float4(positions[vid], 0, 1);
+    out.texcoord = texcoords[vid];
+    return out;
+}
+
+fragment float4 fragment_main(VertexOut in [[stage_in]],
+                               texture2d<float> tex [[texture(0)]],
+                               sampler samp [[sampler(0)]]) {
+    return tex.sample(samp, in.texcoord);
+}
+```
+
+No vertex buffer needed — the vertex shader generates positions from
+`vertex_id`. This eliminates buffer management for the PoC.
+
+##### Step 4: Build
+
+Update the Makefile to compile Objective-C++ with Metal:
+
+```makefile
+all: receiver shaders.metallib
+
+receiver: main.mm
+	clang++ -std=c++17 -framework Foundation -framework IOSurface \
+	  -framework Metal -framework QuartzCore -framework AppKit \
+	  -framework CoreVideo -o receiver main.mm
+
+shaders.metallib: shaders.metal
+	xcrun -sdk macosx metal -c shaders.metal -o shaders.air
+	xcrun -sdk macosx metallib shaders.air -o shaders.metallib
+	rm -f shaders.air
+
+clean:
+	rm -f receiver shaders.metallib shaders.air
+```
+
+##### Step 5: Run and verify
 
 1. `cd ts4/box-demo && bun run server.ts` — Start the test page
 2. Load the launchd plist (if not already loaded):
-   `launchctl load ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist`
-   — or create a new plist for `two-profiles-gui` if it replaces the receiver
-3. Run the GUI:
    ```bash
-   cd ts4/two-profiles-gui && make && ./gui
+   launchctl load ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist
    ```
-   The GUI spawns both profile servers automatically.
-4. Verify:
-   - Two panes visible in one window, each showing the spinning blue square
-   - Each pane shows a different localStorage identity (profile isolation)
-   - Both panes rendering at 60fps
-   - Check `~/dev/termsurf/logs/two-profiles-gui.log` for fps stats
+3. Start the profile server (hidden):
+   ```bash
+   cd ~/dev/termsurf/ts4/termsurf-chromium/src
+   out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+     --hidden --xpc-service=com.termsurf.two-profiles \
+     http://localhost:9407 2>&1
+   ```
+4. The receiver starts automatically via launchd when the profile server
+   connects.
+5. Verify:
+   - The receiver window shows the spinning blue square
+   - No profile server window is visible
+   - Receiver logs 60fps in `~/dev/termsurf/logs/two-profiles-receiver.log`
+   - Profile server logs 60fps capture (same as Experiments 1 and 2)
 
 #### What we're creating
 
-- `ts4/two-profiles-gui/main.mm` — GUI program (Objective-C++, Metal)
-- `ts4/two-profiles-gui/Makefile` — Build script
-- `ts4/two-profiles-gui/shaders.metal` — Vertex + fragment shaders
+- `ts4/two-profiles-receiver/main.mm` — Metal receiver (replaces `main.m`)
+- `ts4/two-profiles-receiver/shaders.metal` — Vertex + fragment shaders
 
 #### What we're modifying
 
-- `content/one_profile/common/shell_switches.h` — Add `kSessionId` switch
-- `content/one_profile/browser/shell_video_consumer.{h,cc}` — Send `register`
-  message with session ID after connecting
-- `content/one_profile/browser/shell_browser_main_parts.cc` — Parse
-  `--session-id` flag
+- `ts4/two-profiles-receiver/Makefile` — Updated for Objective-C++ and Metal
+  shader compilation
+- `content/one_profile/common/shell_switches.h` — Add `kHidden` switch
+- `content/one_profile/browser/shell_platform_delegate_mac.mm` — Hide window
+  when `--hidden` is passed
 
 #### Expected result
 
-A single window with two side-by-side panes, each showing the spinning blue
-square. The localStorage identity differs between panes (e.g., left shows
-"Profile A - session 1234", right shows "Profile B - session 5678"), confirming
-profile isolation. Both panes render at 60fps.
+The receiver window shows the spinning blue square, rendered from an IOSurface
+received via XPC. No sender window is visible. Both processes report 60fps.
 
 ```
-┌─────────────────────────────────────────┐
-│  ┌─────────────┐  ┌─────────────┐       │
-│  │  ■ (blue)   │  │  ■ (blue)   │       │
-│  │  Profile A  │  │  Profile B  │       │
-│  │  60 fps     │  │  60 fps     │       │
-│  └─────────────┘  └─────────────┘       │
-│  Two Profiles GUI                       │
-└─────────────────────────────────────────┘
+Profile server (hidden)          Receiver (visible)
+┌──────────────────┐            ┌──────────────────┐
+│  No window       │            │  ┌──────────┐    │
+│  Capturing at    │──IOSurface─│  │ ■ (blue) │    │
+│  60fps           │  via XPC   │  │ 60 fps   │    │
+│  Sending Mach    │            │  └──────────┘    │
+│  ports           │            │  Metal window    │
+└──────────────────┘            └──────────────────┘
 ```
 
 #### What a failure would mean
 
-- **One pane renders, other is black:** The session ID mapping is wrong, or one
-  profile server failed to connect. Check the `register` messages in the GUI
-  log.
-- **< 60fps in either pane:** Metal texture import from IOSurface is slow.
-  Profile the `newTextureWithDescriptor:iosurface:plane:` call. In cef-test this
-  was <0.1ms — should not be a bottleneck.
-- **Same localStorage in both panes:** `--user-data-dir` isn't being respected.
-  Check that each profile server process has a different data directory.
-- **Crash on second profile server:** Two Chromium processes fighting over a
-  shared resource (GPU process, singleton lock). Check for conflicting lock
-  files in the user data dirs.
-- **Tearing or visual artifacts:** The render loop isn't synchronized with
-  vsync. Ensure `CVDisplayLink` or `CADisplayLink` drives rendering, not a busy
-  loop.
+- **0fps from hidden sender:** macOS throttles or pauses the compositor for
+  hidden windows. Try alternatives: `setAlphaValue:0` (invisible but on-screen),
+  `NSApplicationActivationPolicyAccessory` (background app), or Chromium's
+  `--disable-backgrounding-occluded-windows` flag.
+- **IOSurface renders as black or garbled:** The texture format doesn't match.
+  Check that `MTLPixelFormatBGRA8Unorm` matches the IOSurface pixel format. CEF
+  used BGRA8888 — Chromium's `FrameSinkVideoCapturer` should be the same.
+  Also check sRGB: if the IOSurface is sRGB, use `MTLPixelFormatBGRA8Unorm_sRGB`
+  for the texture view (the cef-test GUI had this exact bug).
+- **Receiver crashes on `newTextureWithDescriptor:iosurface:`:** The IOSurface
+  dimensions don't match the texture descriptor. Use `IOSurfaceGetWidth()` and
+  `IOSurfaceGetHeight()` from the actual surface, not the XPC message values.
+- **< 60fps in receiver:** `CVDisplayLink` callback is too slow. Profile the
+  texture creation and render pass. Both should be <1ms.
+- **Tearing:** `CAMetalLayer` isn't presenting at vsync. Ensure
+  `displaySyncEnabled = YES` on the layer (default is YES).
