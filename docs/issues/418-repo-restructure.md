@@ -527,12 +527,21 @@ Update all references to `cef-rs/` to `vendor/cef-rs/`:
 Stage all changes (`vendor/cef-rs/` move, ts3 path updates, `.gitignore`,
 `CLAUDE.md`) and commit.
 
-### Change 3: Merge Ghostty into `ts5/`
+## Experiments
 
-This repo was originally forked from Ghostty — Ghostty's full commit history is
-already part of our history. The files were subsequently moved into `ts1/`. We
-use the same subtree merge strategy to bring the latest upstream Ghostty into
-`ts5/`.
+### Experiment 1: Subtree merge with `-X subtree=ts5`
+
+**Hypothesis:** Since our repo shares history with Ghostty (it was originally
+forked), `git merge -X subtree=ts5 upstream/main` should map upstream's `/` to
+`ts5/`. Since `ts5/` doesn't exist on our side, all upstream files should be
+clean additions with no conflicts.
+
+**Command:**
+
+```bash
+git fetch upstream
+git merge -X subtree=ts5 upstream/main --no-commit
+```
 
 **Why not copy ts1?** ts5 starts from a clean upstream Ghostty. The ts1
 modifications (WKWebView browser panes, `web` CLI command) are specific to ts1's
@@ -688,3 +697,28 @@ If this fails, debug and fix before committing. Common issues:
 Stage all changes (`.gitmodules`, `.gitignore`, `CLAUDE.md`,
 `docs/issues/002-merge-upstream.md`, `.claude/skills/merge-upstream/SKILL.md`)
 and commit. The Ghostty import itself (Step 1) is already committed separately.
+
+#### Result
+
+Massive conflicts. Git's rename detection found the ts1/ renames (from when we
+moved Ghostty's files into `ts1/`) and tried to merge upstream changes into
+`ts1/` instead of `ts5/`. Specific problems:
+
+1. **modify/delete conflicts** — `.github/workflows/*.yml` files were deleted on
+   our side (moved to `ts1/`) but modified upstream. Git placed them at the root
+   instead of `ts5/`.
+2. **file location conflicts** — Upstream added new files in directories that
+   git detected as renamed to `ts1/`. Git suggested moving them to `ts1/`, not
+   `ts5/`.
+3. **content conflicts in ts1/** — Files like `ts1/src/config/CApi.zig` got
+   upstream changes merged into them. The subtree option was overridden by
+   rename detection.
+4. **rename/delete conflicts** — Files renamed to `ts1/` on our side but deleted
+   upstream.
+
+#### Conclusion
+
+`-X subtree=ts5` does not override git's rename detection. When git detects that
+`/foo` was renamed to `ts1/foo` on our side, it merges upstream's changes to
+`/foo` into `ts1/foo` regardless of the subtree option. The subtree strategy
+only works when there is no competing rename history.
