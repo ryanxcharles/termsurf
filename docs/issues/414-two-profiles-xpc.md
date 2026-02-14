@@ -1176,3 +1176,111 @@ Profile server (hidden)          Receiver (visible)
   texture creation and render pass. Both should be <1ms.
 - **Tearing:** `CAMetalLayer` isn't presenting at vsync. Ensure
   `displaySyncEnabled = YES` on the layer (default is YES).
+
+#### Result: FAILED
+
+The hidden sender works perfectly — `FrameSinkVideoCapturer` sustains 60fps with
+the window hidden via `orderOut:nil`. However, the receiver window opened blank.
+No frames were ever rendered because the XPC connection died immediately after
+being established.
+
+Receiver log:
+
+```
+[Receiver] Listening on com.termsurf.two-profiles...
+[Receiver] Profile server connected
+[Receiver] Connection closed
+[Receiver] Window and Metal pipeline ready
+```
+
+Profile server log:
+
+```
+[ShellVideoConsumer] Connected to XPC service: com.termsurf.two-profiles
+[ShellVideoConsumer] Attached to FrameSinkId FrameSinkId(5, 3), starting capture
+[ShellVideoConsumer] XPC connection interrupted
+[ShellVideoConsumer] 61 frames in 1.01s (60.28 fps) | IOSurface 640x360
+[ShellVideoConsumer] 60 frames in 1.00s (60.00 fps) | IOSurface 640x360
+... (continues at 60fps indefinitely, sending into a dead connection)
+```
+
+The sequence of events:
+
+1. Profile server launches and calls
+   `xpc_connection_create_mach_service("com.termsurf.two-profiles", ...)`
+2. Launchd starts the receiver on-demand to service the connection
+3. Receiver's `applicationDidFinishLaunching:` runs: creates window, sets up
+   Metal, starts XPC listener, starts CVDisplayLink
+4. XPC listener fires on its background dispatch queue — "Profile server
+   connected"
+5. The peer connection is immediately invalidated — "Connection closed"
+6. Back on the main thread, CVDisplayLink starts — "Window and Metal pipeline
+   ready"
+7. Profile server sees "XPC connection interrupted", but
+   `FrameSinkVideoCapturer` keeps delivering IOSurfaces at 60fps. The capture
+   pipeline is healthy; there's just nowhere to send the frames.
+8. Receiver window is black — it never received a single IOSurface.
+
+#### Conclusion
+
+**What passed:**
+
+- **Hidden sender at 60fps.** The `--hidden` flag works. `[window orderOut:nil]`
+  hides the window and `FrameSinkVideoCapturer` continues capturing at a
+  rock-solid 60fps. macOS does not throttle the compositor for hidden windows.
+  This is a key finding — it means profile server processes can be truly headless
+  background processes.
+
+**What failed:**
+
+- **XPC connection dies on arrival.** The peer connection from the profile server
+  is invalidated immediately after being established. The receiver never receives
+  a single `display_surface` message.
+
+**Root cause analysis:**
+
+The most likely cause is an XPC peer connection retention issue. The receiver
+compiles with `-fobjc-arc`, and on modern macOS SDKs, XPC objects are
+Objective-C objects managed by ARC. In the listener's event handler block, the
+`peer` connection is cast and used but never stored in a strong reference outside
+the block. When the event handler block returns, ARC may release the peer,
+causing the connection to be invalidated.
+
+In Experiment 2's log-only receiver (compiled as plain C with
+`-framework Foundation`), this wasn't an issue because XPC objects were managed
+via manual retain/release, and the XPC runtime's internal references kept the
+connection alive. The switch to Objective-C++ with ARC changed the memory
+management semantics for XPC objects.
+
+An alternative explanation: the initialization order matters. The Metal setup
+happens on the main thread while the XPC connection arrives on a background
+dispatch queue. If `NSApplication`'s event loop isn't fully running when the
+connection fires, the connection lifecycle might be disrupted. The logs show
+"Connection closed" before "Window and Metal pipeline ready", confirming the
+timing overlap.
+
+**What we learned:**
+
+1. `orderOut:nil` is the correct way to hide the sender window — 60fps capture
+   is unaffected.
+2. XPC peer connections need explicit retention in ARC environments. The
+   Experiment 2 receiver (plain C, `dispatch_main()`) avoided this because it
+   didn't use ARC.
+3. Launchd on-demand launch introduces timing complexity when the launched
+   process has a heavyweight initialization path (NSApplication + Metal +
+   CVDisplayLink). The XPC connection arrives before the process is fully ready.
+
+**Possible fixes for the next attempt:**
+
+1. **Store the peer connection in a global.** Assign the peer to a `static
+   xpc_connection_t` (or `__strong` Objective-C variable) so ARC doesn't release
+   it when the event handler block returns.
+2. **Start the XPC listener before `[NSApp run]`.** Move `start_xpc_listener()`
+   to `main()` before entering the NSApplication event loop. The XPC listener
+   runs on its own dispatch queue and doesn't need NSApplication.
+3. **Compile without ARC for XPC code.** Use `-fno-objc-arc` or isolate the XPC
+   code in a plain C file to avoid ARC interference with XPC object lifetimes.
+4. **Use `dispatch_main()` instead of `[NSApp run]`.** Drive the Metal rendering
+   from a dispatch source (e.g., `dispatch_source_create` with a timer) instead
+   of CVDisplayLink + NSApplication. This matches the Experiment 2 receiver's
+   architecture and avoids the NSApplication initialization race entirely.
