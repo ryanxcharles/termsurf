@@ -35,7 +35,7 @@ registered as a git submodule (in `.gitmodules`, pointing to a local path
 Instead:
 
 - Add `/termsurf-chromium/` to `.gitignore`
-- Document the tracked branch/commit in this issue and in CLAUDE.md
+- Document the tracked branch/commit in `docs/chromium.md`
 - The local clone is a **shallow clone** of origin
 
 **Remote configuration for `termsurf-chromium/src/`:**
