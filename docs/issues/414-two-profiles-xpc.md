@@ -932,8 +932,8 @@ without measurable overhead. Every component in the pipeline is proven.
 
 A hidden (windowless) profile server can capture and send IOSurface frames via
 XPC to a separate receiver process that renders them as Metal textures in a
-visible window at 60fps. This inverts the Experiment 2 topology — the window
-the user sees belongs to the receiver, not the sender.
+visible window at 60fps. This inverts the Experiment 2 topology — the window the
+user sees belongs to the receiver, not the sender.
 
 #### Background
 
@@ -1003,8 +1003,7 @@ mach_port_deallocate(mach_task_self(), port);
 Store the latest IOSurface in a shared variable. The render loop reads it. Old
 IOSurfaces are released when replaced.
 
-**b) Metal window.** Create an `NSWindow` with a `CAMetalLayer`-backed
-`NSView`:
+**b) Metal window.** Create an `NSWindow` with a `CAMetalLayer`-backed `NSView`:
 
 ```objc
 CAMetalLayer *metalLayer = [CAMetalLayer layer];
@@ -1166,9 +1165,9 @@ Profile server (hidden)          Receiver (visible)
   `--disable-backgrounding-occluded-windows` flag.
 - **IOSurface renders as black or garbled:** The texture format doesn't match.
   Check that `MTLPixelFormatBGRA8Unorm` matches the IOSurface pixel format. CEF
-  used BGRA8888 — Chromium's `FrameSinkVideoCapturer` should be the same.
-  Also check sRGB: if the IOSurface is sRGB, use `MTLPixelFormatBGRA8Unorm_sRGB`
-  for the texture view (the cef-test GUI had this exact bug).
+  used BGRA8888 — Chromium's `FrameSinkVideoCapturer` should be the same. Also
+  check sRGB: if the IOSurface is sRGB, use `MTLPixelFormatBGRA8Unorm_sRGB` for
+  the texture view (the cef-test GUI had this exact bug).
 - **Receiver crashes on `newTextureWithDescriptor:iosurface:`:** The IOSurface
   dimensions don't match the texture descriptor. Use `IOSurfaceGetWidth()` and
   `IOSurfaceGetHeight()` from the actual surface, not the XPC message values.
@@ -1228,23 +1227,23 @@ The sequence of events:
 - **Hidden sender at 60fps.** The `--hidden` flag works. `[window orderOut:nil]`
   hides the window and `FrameSinkVideoCapturer` continues capturing at a
   rock-solid 60fps. macOS does not throttle the compositor for hidden windows.
-  This is a key finding — it means profile server processes can be truly headless
-  background processes.
+  This is a key finding — it means profile server processes can be truly
+  headless background processes.
 
 **What failed:**
 
-- **XPC connection dies on arrival.** The peer connection from the profile server
-  is invalidated immediately after being established. The receiver never receives
-  a single `display_surface` message.
+- **XPC connection dies on arrival.** The peer connection from the profile
+  server is invalidated immediately after being established. The receiver never
+  receives a single `display_surface` message.
 
 **Root cause analysis:**
 
 The most likely cause is an XPC peer connection retention issue. The receiver
 compiles with `-fobjc-arc`, and on modern macOS SDKs, XPC objects are
 Objective-C objects managed by ARC. In the listener's event handler block, the
-`peer` connection is cast and used but never stored in a strong reference outside
-the block. When the event handler block returns, ARC may release the peer,
-causing the connection to be invalidated.
+`peer` connection is cast and used but never stored in a strong reference
+outside the block. When the event handler block returns, ARC may release the
+peer, causing the connection to be invalidated.
 
 In Experiment 2's log-only receiver (compiled as plain C with
 `-framework Foundation`), this wasn't an issue because XPC objects were managed
@@ -1272,9 +1271,10 @@ timing overlap.
 
 **Possible fixes for the next attempt:**
 
-1. **Store the peer connection in a global.** Assign the peer to a `static
-   xpc_connection_t` (or `__strong` Objective-C variable) so ARC doesn't release
-   it when the event handler block returns.
+1. **Store the peer connection in a global.** Assign the peer to a
+   `static
+   xpc_connection_t` (or `__strong` Objective-C variable) so ARC
+   doesn't release it when the event handler block returns.
 2. **Start the XPC listener before `[NSApp run]`.** Move `start_xpc_listener()`
    to `main()` before entering the NSApplication event loop. The XPC listener
    runs on its own dispatch queue and doesn't need NSApplication.
@@ -1298,23 +1298,24 @@ restructuring initialization order will fix the blank window.
 Comparing the working Experiment 2 receiver with the failing Experiment 3
 receiver reveals the exact root cause:
 
-**Experiment 2 (works):** Plain Objective-C (`main.m`). The `xpc_connection_t
-listener` is a local variable in `main()`. After setup, `main()` calls
-`dispatch_main()`, which never returns. The local variable lives forever on the
-stack. ARC never releases it. The listener stays alive, and all peer connections
-delivered through it stay alive.
+**Experiment 2 (works):** Plain Objective-C (`main.m`). The
+`xpc_connection_t
+listener` is a local variable in `main()`. After setup,
+`main()` calls `dispatch_main()`, which never returns. The local variable lives
+forever on the stack. ARC never releases it. The listener stays alive, and all
+peer connections delivered through it stay alive.
 
 **Experiment 3 (fails):** Objective-C++ (`main.mm`, `-fobjc-arc`). The
 `xpc_connection_t listener` is a local variable in `start_xpc_listener()`. This
 function returns immediately after `xpc_connection_resume()`. ARC releases the
 listener when the local goes out of scope. The listener dies, which invalidates
-all peer connections — including the one that just connected. This is why the log
-shows "Profile server connected" → "Connection closed" in rapid succession.
+all peer connections — including the one that just connected. This is why the
+log shows "Profile server connected" → "Connection closed" in rapid succession.
 
 The peer connection has the same problem. In the listener's event handler block,
 the `peer` parameter is used (cast, configured, resumed) but never stored. The
-block captures it, but the block itself is ephemeral — it fires once per incoming
-connection and then the captured reference goes away.
+block captures it, but the block itself is ephemeral — it fires once per
+incoming connection and then the captured reference goes away.
 
 The fix is mechanical: store the listener and peer connection(s) as `static`
 globals so ARC cannot release them.
@@ -1356,7 +1357,8 @@ xpc_connection_set_event_handler(g_listener, ^(xpc_object_t peer) {
 
 This is the minimum change. The listener persists because `g_listener` holds a
 strong reference. The peer persists because `g_peer` holds a strong reference.
-ARC manages the retain/release automatically — we just need the globals to exist.
+ARC manages the retain/release automatically — we just need the globals to
+exist.
 
 ##### Fix 2: Start XPC listener before `[NSApp run]`
 
@@ -1380,9 +1382,9 @@ launchd launches the process. The Metal window, CVDisplayLink, and everything
 else can initialize later in `applicationDidFinishLaunching:`. Frames will queue
 up in the mutex-protected `g_pending_surface` until the render loop starts.
 
-This also eliminates the timing issue from Experiment 3 where "Connection closed"
-fired before "Window and Metal pipeline ready". The connection can now be
-established and start receiving frames while Metal initializes on the main
+This also eliminates the timing issue from Experiment 3 where "Connection
+closed" fired before "Window and Metal pipeline ready". The connection can now
+be established and start receiving frames while Metal initializes on the main
 thread.
 
 #### What we're modifying
@@ -1437,12 +1439,12 @@ without "XPC connection interrupted".
 
 - **Same "Connection closed" immediately:** The retention fix didn't help. The
   issue might be deeper — e.g., launchd delivers the connection before
-  `xpc_connection_resume()` on the listener, and the connection is rejected.
-  Try adding a retry in the profile server: if the connection is interrupted,
-  wait 500ms and reconnect.
+  `xpc_connection_resume()` on the listener, and the connection is rejected. Try
+  adding a retry in the profile server: if the connection is interrupted, wait
+  500ms and reconnect.
 - **Receiver gets frames but window is black:** The XPC fix worked but Metal
-  rendering has a bug. Check that `g_pending_surface` is being set (add a log
-  in `handle_message`), that `render_frame()` is being called (add a log in the
+  rendering has a bug. Check that `g_pending_surface` is being set (add a log in
+  `handle_message`), that `render_frame()` is being called (add a log in the
   CVDisplayLink callback), and that the texture format matches.
 - **Receiver gets frames but image is garbled/wrong colors:** Pixel format
   mismatch. Try `MTLPixelFormatBGRA8Unorm_sRGB` instead of
@@ -1574,7 +1576,7 @@ size multiplied by the device scale factor.
 
 Note: Chromium also has a `SetScaleOverrideForCapture()` mechanism on
 `RenderWidgetHostViewBase` that multiplies the device_scale_factor for HiDPI
-capture mode. This is designed for capturing at *higher* than native resolution.
+capture mode. This is designed for capturing at _higher_ than native resolution.
 Since we just want native Retina resolution (not super-resolution), setting
 explicit resolution constraints is the simpler and more direct fix.
 
@@ -1699,15 +1701,15 @@ Receiver:        IOSurface 1280x720  (was 640x360)
   sanity check. If hardcoding works, the issue is in how we read the view's
   properties.
 - **IOSurface is 1280x720 but receiver still blurry:** The `contentsScale` fix
-  didn't take effect. Verify that `drawableSize` is being set *after* the layer
+  didn't take effect. Verify that `drawableSize` is being set _after_ the layer
   is attached to the view. Log `g_metal_layer.contentsScale` and
   `g_metal_layer.drawableSize` to confirm.
 - **Colors wrong or washed out:** sRGB double-correction (same bug as cef-test).
   The IOSurface is sRGB but the Metal texture descriptor specifies linear. Use
   `MTLPixelFormatBGRA8Unorm_sRGB` for the texture created from the IOSurface.
-- **< 60fps:** Capturing at 2x resolution (4x the pixel count) may increase
-  GPU load. Check if the profile server maintains 60fps at 1280x720. If not,
-  try `SetAutoThrottlingEnabled(true)` or reduce the window size.
+- **< 60fps:** Capturing at 2x resolution (4x the pixel count) may increase GPU
+  load. Check if the profile server maintains 60fps at 1280x720. If not, try
+  `SetAutoThrottlingEnabled(true)` or reduce the window size.
 
 #### Result: FAILED
 
@@ -1764,16 +1766,16 @@ Two problems remain:
 
 1. **Size mismatch between source and receiver.** The sender's Content Shell
    window is 800x600 logical (1600x1200 physical), but the receiver window is
-   640x360 logical (1280x720 physical). The 1600x1200 IOSurface is being
-   sampled and rendered into a 1280x720 drawable — a non-integer downscale that
+   640x360 logical (1280x720 physical). The 1600x1200 IOSurface is being sampled
+   and rendered into a 1280x720 drawable — a non-integer downscale that
    introduces bilinear filtering blur. For pixel-perfect rendering, the source
    and destination must be the same size (1:1 pixel mapping).
 
-2. **No resize coordination.** The receiver window size is hardcoded at creation.
-   There's no mechanism to tell the sender what resolution to capture at, or to
-   update the receiver's drawable when the window is resized. In the target
-   architecture, the GUI sends resize messages to the profile server, which
-   adjusts its `WebContents` size accordingly.
+2. **No resize coordination.** The receiver window size is hardcoded at
+   creation. There's no mechanism to tell the sender what resolution to capture
+   at, or to update the receiver's drawable when the window is resized. In the
+   target architecture, the GUI sends resize messages to the profile server,
+   which adjusts its `WebContents` size accordingly.
 
 3. **Possible additional issues:**
    - The `CopyOutputRequest` in `FrameSinkVideoCapturer` may introduce subtle
@@ -1799,11 +1801,11 @@ Two problems remain:
 
 1. **Match sizes.** Set the receiver window to the same logical size as the
    sender's Content Shell window (800x600), or set the sender's window size to
-   match the receiver (640x360). The IOSurface dimensions and drawable dimensions
-   must be identical.
-2. **Try nearest-neighbor sampling.** Use `MTLSamplerMinMagFilterNearest` instead
-   of linear to see if the blur is purely from the size mismatch (nearest won't
-   blur but will show aliasing if sizes differ).
+   match the receiver (640x360). The IOSurface dimensions and drawable
+   dimensions must be identical.
+2. **Try nearest-neighbor sampling.** Use `MTLSamplerMinMagFilterNearest`
+   instead of linear to see if the blur is purely from the size mismatch
+   (nearest won't blur but will show aliasing if sizes differ).
 3. **Try sRGB texture format.** Use `MTLPixelFormatBGRA8Unorm_sRGB` for the
    Metal texture created from the IOSurface. This was the exact fix for the
    cef-test sRGB double-correction bug.
@@ -1825,14 +1827,14 @@ receiver window to 800x600 logical — matching the sender's Content Shell defau
 Experiment 5 fixed the resolution from 1x to 2x on both sides, but the sender
 and receiver windows have different logical sizes:
 
-| Component         | Logical     | Physical (2x Retina) |
-| ----------------- | ----------- | -------------------- |
-| Sender (One Profile) | 800×600  | 1600×1200            |
-| Receiver (Exp 5)  | 640×360     | 1280×720             |
+| Component            | Logical | Physical (2x Retina) |
+| -------------------- | ------- | -------------------- |
+| Sender (One Profile) | 800×600 | 1600×1200            |
+| Receiver (Exp 5)     | 640×360 | 1280×720             |
 
 The 1600×1200 IOSurface is sampled by bilinear filtering into a 1280×720
-drawable. This is a non-integer downscale (0.8× horizontally, 0.6× vertically)
-— every destination pixel samples a weighted average of multiple source pixels,
+drawable. This is a non-integer downscale (0.8× horizontally, 0.6× vertically) —
+every destination pixel samples a weighted average of multiple source pixels,
 producing blur. No sampler configuration can avoid this; the data is being
 destroyed by the downscale.
 
@@ -1873,11 +1875,13 @@ exactly one destination pixel. No scaling, no filtering, no blur.
 Change all three pixel format declarations in the receiver to sRGB:
 
 **a) CAMetalLayer pixel format** (in `setup_metal()`):
+
 ```objc
 g_metal_layer.pixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
 ```
 
 **b) IOSurface texture descriptor** (in `render_frame()`):
+
 ```objc
 MTLTextureDescriptor *desc = [MTLTextureDescriptor
     texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm_sRGB
@@ -1885,11 +1889,13 @@ MTLTextureDescriptor *desc = [MTLTextureDescriptor
 ```
 
 **c) Render pipeline color attachment** (in `setup_metal()`):
+
 ```objc
 pipelineDesc.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
 ```
 
 All three must use the same format. With `_sRGB`:
+
 - Metal decodes sRGB→linear when sampling the IOSurface texture in the fragment
   shader
 - Metal encodes linear→sRGB when writing to the drawable
@@ -1898,9 +1904,9 @@ All three must use the same format. With `_sRGB`:
   rendering
 
 If Chromium's IOSurfaces are already raw linear data (not sRGB-encoded), this
-format declaration will apply an unwanted gamma curve — making colors too bright.
-If that happens, revert to `MTLPixelFormatBGRA8Unorm`. The size fix alone may be
-sufficient.
+format declaration will apply an unwanted gamma curve — making colors too
+bright. If that happens, revert to `MTLPixelFormatBGRA8Unorm`. The size fix
+alone may be sufficient.
 
 #### What we're modifying
 
@@ -1944,8 +1950,8 @@ Same procedure as Experiment 5:
 #### Expected result
 
 The receiver window shows the spinning blue square with pixel-perfect quality
-matching Chrome. The 1600×1200 IOSurface maps 1:1 to the 1600×1200 drawable —
-no scaling, no filtering artifacts.
+matching Chrome. The 1600×1200 IOSurface maps 1:1 to the 1600×1200 drawable — no
+scaling, no filtering artifacts.
 
 ```
 Sender (800×600 logical)     Receiver (800×600 logical)
@@ -1971,8 +1977,8 @@ IOSurface 1600×1200    ──►   Drawable 1600×1200
 
 #### Result: PASSED
 
-Pixel-perfect Retina rendering at 60fps. The receiver window is visually crisp
-— indistinguishable from Chrome rendering the same page directly.
+Pixel-perfect Retina rendering at 60fps. The receiver window is visually crisp —
+indistinguishable from Chrome rendering the same page directly.
 
 Receiver log:
 
@@ -2051,22 +2057,22 @@ target architecture for TermSurf.
 
 Experiments 1–6 proved every component of the single-profile pipeline:
 
-| Component          | Experiment | Result        |
-| ------------------ | ---------- | ------------- |
-| Frame capture      | 1          | 60fps         |
-| XPC transfer       | 2          | 60fps         |
-| Hidden sender      | 3–4        | 60fps         |
-| Retina quality     | 5–6        | Pixel-perfect |
+| Component      | Experiment | Result        |
+| -------------- | ---------- | ------------- |
+| Frame capture  | 1          | 60fps         |
+| XPC transfer   | 2          | 60fps         |
+| Hidden sender  | 3–4        | 60fps         |
+| Retina quality | 5–6        | Pixel-perfect |
 
-Issue 413 Experiment 4 proved the core constraint: two `BrowserContext` instances
-in one Chromium process drop rendering to 2fps. The solution is one profile per
-process. This experiment proves that architecture end-to-end: two processes, two
-profiles, one window.
+Issue 413 Experiment 4 proved the core constraint: two `BrowserContext`
+instances in one Chromium process drop rendering to 2fps. The solution is one
+profile per process. This experiment proves that architecture end-to-end: two
+processes, two profiles, one window.
 
 The box-demo test page generates a random 8-character identity string and stores
-it in `localStorage`. Each profile has its own storage, so two profiles will show
-different identity strings. If both panes show different strings that persist
-across restarts, profile isolation is proven.
+it in `localStorage`. Each profile has its own storage, so two profiles will
+show different identity strings. If both panes show different strings that
+persist across restarts, profile isolation is proven.
 
 #### Design
 
@@ -2297,13 +2303,15 @@ Two different identity strings prove profile isolation. Two spinning squares at
 #### What a failure would mean
 
 - **Second sender can't connect:** Launchd may not deliver a second connection
-  to the already-running receiver. Check that `XPC_CONNECTION_MACH_SERVICE_LISTENER`
-  handles multiple clients. If not, use two separate Mach service names.
+  to the already-running receiver. Check that
+  `XPC_CONNECTION_MACH_SERVICE_LISTENER` handles multiple clients. If not, use
+  two separate Mach service names.
 - **Frames from one sender overwrite the other:** The session ID mapping is
   wrong or missing. Log `session_id` for every received frame to debug.
 - **< 60fps in one or both panes:** Two simultaneous `CopyOutputRequest` streams
   may saturate the GPU. Check per-sender fps. If both are at 30fps, the GPU is
-  alternating between them. Try staggering the `SetMinCapturePeriod` start times.
+  alternating between them. Try staggering the `SetMinCapturePeriod` start
+  times.
 - **Same identity string in both panes:** `--user-data-dir` didn't take effect.
   Verify the paths exist and are different. Check Chromium logs for the actual
   profile path being used.
@@ -2456,19 +2464,19 @@ restarts.
 
 ### Experiment summary
 
-| #   | Goal                           | Result | Key finding                                                    |
-| --- | ------------------------------ | ------ | -------------------------------------------------------------- |
-| 1   | Capture frames as IOSurfaces   | PASS   | `FrameSinkVideoCapturer` delivers 60fps IOSurfaces             |
-| 2   | XPC transfer to another process| PASS   | `IOSurfaceCreateMachPort` works on Chromium's IOSurfaces       |
-| 3   | Hidden sender, visible receiver| FAIL   | ARC released XPC connections; `orderOut:nil` works at 60fps    |
-| 4   | Fix XPC retention              | PASS   | Static globals + listener before `[NSApp run]`                 |
-| 5   | Fix Retina capture resolution  | FAIL   | `SetResolutionConstraints` works; size mismatch still blurs    |
-| 6   | Match window sizes + sRGB      | PASS   | 1:1 pixel mapping + `MTLPixelFormatBGRA8Unorm_sRGB`           |
-| 7   | Two profiles side by side      | PASS   | Two processes, two profiles, one window, both 60fps            |
+| # | Goal                            | Result | Key finding                                                 |
+| - | ------------------------------- | ------ | ----------------------------------------------------------- |
+| 1 | Capture frames as IOSurfaces    | PASS   | `FrameSinkVideoCapturer` delivers 60fps IOSurfaces          |
+| 2 | XPC transfer to another process | PASS   | `IOSurfaceCreateMachPort` works on Chromium's IOSurfaces    |
+| 3 | Hidden sender, visible receiver | FAIL   | ARC released XPC connections; `orderOut:nil` works at 60fps |
+| 4 | Fix XPC retention               | PASS   | Static globals + listener before `[NSApp run]`              |
+| 5 | Fix Retina capture resolution   | FAIL   | `SetResolutionConstraints` works; size mismatch still blurs |
+| 6 | Match window sizes + sRGB       | PASS   | 1:1 pixel mapping + `MTLPixelFormatBGRA8Unorm_sRGB`         |
+| 7 | Two profiles side by side       | PASS   | Two processes, two profiles, one window, both 60fps         |
 
 The two failures (Experiments 3 and 5) were instructive, not blocking. Each
-failure isolated a specific problem — ARC lifetime semantics for XPC objects, and
-the distinction between capture resolution and display resolution — that was
+failure isolated a specific problem — ARC lifetime semantics for XPC objects,
+and the distinction between capture resolution and display resolution — that was
 fixed in the subsequent experiment.
 
 ### Key technical findings
@@ -2506,14 +2514,14 @@ fixed in the subsequent experiment.
 
 7. **Two Chromium processes coexist without conflict.** Separate
    `--user-data-dir` paths prevent singleton lock conflicts. Each process spawns
-   its own GPU subprocess internally (Chromium's own multi-process architecture),
-   and these don't interfere with each other.
+   its own GPU subprocess internally (Chromium's own multi-process
+   architecture), and these don't interfere with each other.
 
 8. **The Content API eliminates CEF's fps ceiling.** CEF's headless off-screen
    rendering capped at ~50fps per profile (31fps with event-driven pumping) due
-   to `do_message_loop_work()` jitter. The Content API's `FrameSinkVideoCapturer`
-   sustains a perfect 60fps — the bottleneck that motivated the entire ts3→ts4
-   transition is gone.
+   to `do_message_loop_work()` jitter. The Content API's
+   `FrameSinkVideoCapturer` sustains a perfect 60fps — the bottleneck that
+   motivated the entire ts3→ts4 transition is gone.
 
 ### What's next
 
@@ -2547,6 +2555,6 @@ TermSurf is integration, not research:
    `WebContents` and the receiver maps each to a different pane.
 
 6. **Stress testing and benchmarking.** Run the two-profile setup for extended
-   periods under load. Measure frame interval distributions (p50, p95, p99),
-   CPU usage, memory growth, and compare against cef-test's benchmark results
+   periods under load. Measure frame interval distributions (p50, p95, p99), CPU
+   usage, memory growth, and compare against cef-test's benchmark results
    (50fps, 80.8% at 60fps).
