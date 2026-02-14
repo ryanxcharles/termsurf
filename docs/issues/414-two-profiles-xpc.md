@@ -712,10 +712,14 @@ works for launchd-registered services.
 </plist>
 ```
 
-Install with:
+Load with:
 ```bash
-cp ts4/two-profiles-receiver/com.termsurf.two-profiles.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.termsurf.two-profiles.plist
+launchctl load ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist
+```
+
+Unload with:
+```bash
+launchctl unload ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist
 ```
 
 When the profile server connects to the service name, launchd starts the
