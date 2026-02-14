@@ -51,13 +51,18 @@ Instead:
 
 **Remote configuration for `termsurf-chromium/src/`:**
 
-| Remote   | URL                                     | Purpose                  |
-| -------- | --------------------------------------- | ------------------------ |
-| origin   | `github.com/termsurf/termsurf-chromium` | Our fork                 |
-| upstream | `github.com/chromium/chromium`          | Official Chromium mirror |
+| Remote   | URL                                                  | Purpose            |
+| -------- | ---------------------------------------------------- | ------------------ |
+| origin   | `~/dev/chromium` (local)                             | Our fork           |
+| upstream | `https://chromium.googlesource.com/chromium/src.git` | Official Chromium  |
 
 We regularly pull `main` and tags from upstream to origin. Our working branches
 follow the pattern `{version}-termsurf` (e.g., `146.0.7650.0-termsurf`).
+
+**Note:** Origin is a local repo (`~/dev/chromium`) for now. Remote hosting will
+be decided later — most likely as a patch set rather than a full fork, since
+Chromium is too large for standard GitHub hosting. Anyone wanting to build
+TermSurf's Chromium fork would fork Chromium themselves and apply our patches.
 
 **Branch strategy:** Track the same Chromium version as Electron. This lets us
 reference Electron's patches and solutions even though we use the Content API
@@ -68,8 +73,7 @@ directly (not Electron itself). To find the current version:
 3. Create `{version}-termsurf` branch on top of the tag
 
 **Push local branches to origin.** Several local branches exist that have never
-been pushed to `github.com/termsurf/termsurf-chromium`. Push them all before the
-move:
+been pushed to `~/dev/chromium`. Push them all before the move:
 
 | Branch                   | Status                      |
 | ------------------------ | --------------------------- |
@@ -254,16 +258,16 @@ historical reference.
 
 The `termsurf-chromium/src/` repo currently has `origin` pointing to a local
 path (`/Users/ryan/dev/termsurf-chromium/src`). Seven local branches have never
-been pushed to `github.com/termsurf/termsurf-chromium`.
+been pushed to `~/dev/chromium`.
 
 ```bash
 cd ts4/termsurf-chromium/src
 
-# Change origin to the GitHub fork
-git remote set-url origin git@github.com:termsurf/termsurf-chromium.git
+# Change origin to the local Chromium fork
+git remote set-url origin ~/dev/chromium
 
-# Add upstream (official Chromium mirror)
-git remote add upstream https://github.com/chromium/chromium.git
+# Add upstream (official Chromium — Google's canonical source, not GitHub mirror)
+git remote add upstream https://chromium.googlesource.com/chromium/src.git
 
 # Push all local branches to origin
 git push origin 146.0.7650.0-termsurf
@@ -328,8 +332,9 @@ cd ~/dev/termsurf
 mv ts4/termsurf-chromium termsurf-chromium
 ```
 
-The `.gclient` file inside `termsurf-chromium/` already has the correct URL
-(`git@github.com:termsurf/termsurf-chromium.git`) and does not need updating.
+The `.gclient` file inside `termsurf-chromium/` may need its URL updated to
+match the new origin (`~/dev/chromium`) if it references the old local path or
+a GitHub URL.
 
 #### Step 5: Update `.gitignore`
 
@@ -405,10 +410,10 @@ in a dedicated file so it's easy to find:
 
 ## Repository
 
-| Remote   | URL                                           |
-| -------- | --------------------------------------------- |
-| origin   | git@github.com:termsurf/termsurf-chromium.git |
-| upstream | https://github.com/chromium/chromium.git      |
+| Remote   | URL                                                  |
+| -------- | ---------------------------------------------------- |
+| origin   | ~/dev/chromium (local)                               |
+| upstream | https://chromium.googlesource.com/chromium/src.git   |
 
 ## Current State
 
@@ -441,7 +446,7 @@ The `termsurf-chromium/` directory at the repo root is a shallow clone,
 gitignored from the main repo. To set up from scratch:
 
     git clone --depth 1 --branch 146.0.7650.0-termsurf \
-      git@github.com:termsurf/termsurf-chromium.git termsurf-chromium/src
+      ~/dev/chromium termsurf-chromium/src
 ```
 
 #### Step 10: Verify test apps
