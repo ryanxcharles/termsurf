@@ -601,8 +601,8 @@ Key observations:
 - **60fps sustained.** Every 1-second interval reports exactly 60 or 61 frames.
   No drops, no jitter.
 - **IOSurfaces, not shared memory.** Every frame arrived as a
-  `gpu_memory_buffer_handle`. The `kPreferMappableSharedImage` preference
-  worked as expected.
+  `gpu_memory_buffer_handle`. The `kPreferMappableSharedImage` preference worked
+  as expected.
 - **640x360 IOSurface.** This matches the window's content view size. The
   capturer respects the actual rendered resolution.
 - **No impact on windowed rendering.** The page renders normally in its window
@@ -611,8 +611,8 @@ Key observations:
   by the time the delayed task fired.
 
 This proves the capture mechanism for the profile server. Each frame is already
-an IOSurface — ready for `IOSurfaceCreateMachPort()` and XPC transfer to the
-GUI process.
+an IOSurface — ready for `IOSurfaceCreateMachPort()` and XPC transfer to the GUI
+process.
 
 ### Experiment 2: XPC frame delivery to a receiver process
 
@@ -676,16 +676,18 @@ Create `ts4/two-profiles-receiver/main.m`, a standalone Objective-C program
 3. Run the dispatch loop with `dispatch_main()`.
 
 Build with:
+
 ```bash
 clang -framework Foundation -framework IOSurface -o receiver main.m
 ```
 
 ##### Step 2: Register the Mach service
 
-Create a launchd agent plist (`ts4/two-profiles-receiver/com.termsurf.two-profiles.plist`)
-that registers the `com.termsurf.two-profiles` Mach service name. This is
-required — `xpc_connection_create_mach_service` with the listener flag only
-works for launchd-registered services.
+Create a launchd agent plist
+(`ts4/two-profiles-receiver/com.termsurf.two-profiles.plist`) that registers the
+`com.termsurf.two-profiles` Mach service name. This is required —
+`xpc_connection_create_mach_service` with the listener flag only works for
+launchd-registered services.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -713,19 +715,23 @@ works for launchd-registered services.
 ```
 
 Load with:
+
 ```bash
 launchctl load ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist
 ```
 
 Unload with:
+
 ```bash
 launchctl unload ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist
 ```
 
 When the profile server connects to the service name, launchd starts the
-receiver on demand. Output goes to `/Users/ryan/dev/termsurf/logs/two-profiles-receiver.log`.
+receiver on demand. Output goes to
+`/Users/ryan/dev/termsurf/logs/two-profiles-receiver.log`.
 
 For interactive debugging, skip the plist and run:
+
 ```bash
 launchctl debug gui/com.termsurf.two-profiles -- $(pwd)/ts4/two-profiles-receiver/receiver
 ```
@@ -789,7 +795,8 @@ consumer's `ConnectToService()` before calling `Attach()`.
      --xpc-service com.termsurf.two-profiles \
      http://localhost:9407 2>&1
    ```
-4. Check receiver output: `tail -f /Users/ryan/dev/termsurf/logs/two-profiles-receiver.log`
+4. Check receiver output:
+   `tail -f /Users/ryan/dev/termsurf/logs/two-profiles-receiver.log`
 
 #### What we're creating
 
@@ -803,8 +810,8 @@ consumer's `ConnectToService()` before calling `Attach()`.
   connection, Mach port creation/send in `OnFrameCaptured()`
 - `content/one_profile/browser/shell_browser_main_parts.cc` — Parse
   `--xpc-service` flag, call `ConnectToService()` before `Attach()`
-- `content/one_profile/BUILD.gn` — May need additional framework deps
-  (XPC is part of libSystem so likely no changes)
+- `content/one_profile/BUILD.gn` — May need additional framework deps (XPC is
+  part of libSystem so likely no changes)
 
 #### Expected result
 
@@ -832,10 +839,10 @@ from Experiment 1.
   `get_mach_send`) is used on the receive side. Check that
   `mach_port_deallocate` isn't called before lookup.
 - **< 60fps in receiver:** XPC message overhead is significant. Measure
-  per-message latency. The cef-test benchmark showed XPC overhead was
-  negligible (~0.1ms per message), so this would be surprising.
-- **Launchd won't start the receiver:** Plist syntax error or wrong binary
-  path. Check `launchctl list | grep termsurf` and
+  per-message latency. The cef-test benchmark showed XPC overhead was negligible
+  (~0.1ms per message), so this would be surprising.
+- **Launchd won't start the receiver:** Plist syntax error or wrong binary path.
+  Check `launchctl list | grep termsurf` and
   `launchctl print gui/com.termsurf.two-profiles`.
 - **Profile server can't connect:** The Mach service name isn't registered yet.
   Add retry with exponential backoff (100ms initial, 10 attempts) to
@@ -888,14 +895,14 @@ Key observations:
   valid 640x360 IOSurface in the receiver process.
 - **XPC overhead is negligible.** Both sender and receiver report identical fps,
   confirming that XPC message delivery adds no measurable latency.
-- **Launchd on-demand launch works.** The receiver started automatically when the
-  profile server first connected to the Mach service name.
+- **Launchd on-demand launch works.** The receiver started automatically when
+  the profile server first connected to the Mach service name.
 - **CLI flag gotcha.** Chromium's `CommandLine` requires `=` syntax for switch
   values: `--xpc-service=com.termsurf.two-profiles` (not space-separated).
 
 This proves the full pipeline: Content API → FrameSinkVideoCapturer → IOSurface
-→ Mach port → XPC → IOSurface reconstruction in a separate process, all at
-60fps with zero frame drops.
+→ Mach port → XPC → IOSurface reconstruction in a separate process, all at 60fps
+with zero frame drops.
 
 #### Conclusion
 
@@ -918,3 +925,206 @@ What remains is integration work, not research:
 There are no more architectural risks. The Content API captures at 60fps, the
 IOSurfaces support Mach port creation, and XPC delivers them to another process
 without measurable overhead. Every component in the pipeline is proven.
+
+### Experiment 3: Two profile servers, one window
+
+#### Hypothesis
+
+Two profile server processes — each running a separate `BrowserContext` with
+isolated storage — can send IOSurface frames via XPC to a single GUI process
+that composites them side by side in one Metal window at 60fps. This is the
+target architecture for TermSurf.
+
+#### Background
+
+Experiments 1 and 2 proved the pipeline for a single profile server: capture at
+60fps, transfer via XPC at 60fps. Experiment 3 adds the missing pieces:
+
+1. **A GUI that renders.** The Experiment 2 receiver only logged frames. Now the
+   GUI must import IOSurfaces as Metal textures and composite two quads.
+2. **Two simultaneous profile servers.** Each sends frames independently. The
+   GUI must track which connection maps to which pane.
+3. **Profile isolation.** Each profile server uses a different
+   `--user-data-dir`, proving that cookies and localStorage are separate.
+
+The cef-test GUI (`ts3/cef-test-gui/src/main.rs`) solved this exact problem with
+wgpu: two vertex buffers (left/right quads in NDC), two bind groups (one
+texture+sampler per pane), two draw calls per frame. The pattern translates
+directly to Metal or Objective-C++.
+
+#### Design
+
+Three processes:
+
+1. **GUI** (`ts4/two-profiles-gui/`) — Objective-C++ app. Creates a Metal
+   window, registers as XPC Mach service `com.termsurf.two-profiles`, spawns two
+   profile servers, receives IOSurface Mach ports from both, composites side by
+   side.
+2. **Profile server A** — The One Profile app with
+   `--xpc-service=com.termsurf.two-profiles --session-id=profile-a
+   --user-data-dir=~/.config/termsurf/poc/profile-a http://localhost:9407`
+3. **Profile server B** — Same binary with
+   `--xpc-service=com.termsurf.two-profiles --session-id=profile-b
+   --user-data-dir=~/.config/termsurf/poc/profile-b http://localhost:9407`
+
+The profile servers keep their windows (as in Experiment 2) — useful for
+debugging. Headless mode is a separate concern.
+
+##### Step 1: Add session ID to the profile server
+
+Add `--session-id <id>` to the One Profile app. After connecting to the XPC
+service, send a `register` message with the session ID:
+
+```cpp
+xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
+xpc_dictionary_set_string(msg, "action", "register");
+xpc_dictionary_set_string(msg, "session_id", session_id.c_str());
+xpc_connection_send_message(xpc_connection_, msg);
+xpc_release(msg);
+```
+
+The GUI uses the session ID to map each connection to left or right pane.
+
+##### Step 2: Build the GUI
+
+Create `ts4/two-profiles-gui/main.mm`, a standalone Objective-C++ program. It
+does four things:
+
+**a) XPC Mach service listener.** Same pattern as the Experiment 2 receiver, but
+tracks two connections by session ID:
+
+```objc
+// Per-pane state
+typedef struct {
+    IOSurfaceRef surface;
+    id<MTLTexture> texture;
+    int frame_count;
+    struct timespec last_log_time;
+} PaneState;
+
+static PaneState g_left = {};
+static PaneState g_right = {};
+```
+
+When a `register` message arrives, map the connection to left or right based on
+the session ID (e.g., first connection = left, second = right, or match on the
+session ID string). When a `display_surface` message arrives, extract the Mach
+port, call `IOSurfaceLookupFromMachPort()`, and store the IOSurface in the
+appropriate pane state.
+
+**b) Metal window.** Create an `NSWindow` with a `CAMetalLayer`-backed view. Set
+the layer's `framebufferOnly = NO` and `pixelFormat =
+MTLPixelFormatBGRA8Unorm`.
+Size: 1280x720 (640x360 per pane at 1x, or 1280x720 at 2x Retina).
+
+**c) Metal render pipeline.** Two textured quads (left half, right half):
+
+- Vertex data: two quad strips in NDC. Left quad: x in [-1, 0]. Right quad: x in
+  [0, +1]. Both with texture coords [0, 1].
+- Vertex shader: passthrough (position + texcoord).
+- Fragment shader: sample texture at texcoord.
+- Two `MTLTexture` objects created from IOSurfaces via
+  `newTextureWithDescriptor:iosurface:plane:`.
+
+**d) Render loop.** Use a `CVDisplayLink` or `CADisplayLink` to drive rendering
+at vsync. Each frame:
+
+1. Check if either pane has a new IOSurface (atomic flag or lock).
+2. If so, create a new `MTLTexture` from the IOSurface.
+3. Begin a render pass, draw left quad with left texture, draw right quad with
+   right texture, present.
+
+The cef-test GUI used wgpu (Rust). This experiment uses Metal directly
+(Objective-C++) to stay in one language with Chromium and avoid a Rust
+dependency. The rendering logic is simpler in raw Metal — two draw calls with
+different textures.
+
+##### Step 3: Spawn profile servers from the GUI
+
+The GUI spawns two profile server processes as children using `NSTask` (or
+`posix_spawn`). Each gets different arguments:
+
+```objc
+// Profile A (left pane)
+NSTask *profileA = [[NSTask alloc] init];
+profileA.launchPath = @"out/Default/One Profile.app/Contents/MacOS/One Profile";
+profileA.arguments = @[
+    @"--xpc-service=com.termsurf.two-profiles",
+    @"--session-id=profile-a",
+    @"--user-data-dir=/Users/ryan/.config/termsurf/poc/profile-a",
+    @"http://localhost:9407"
+];
+[profileA launch];
+
+// Profile B (right pane)
+// Same but --session-id=profile-b, --user-data-dir=.../profile-b
+```
+
+The GUI waits for both `register` messages before starting the render loop, or
+renders a black pane until each profile connects.
+
+##### Step 4: Run and verify
+
+1. `cd ts4/box-demo && bun run server.ts` — Start the test page
+2. Load the launchd plist (if not already loaded):
+   `launchctl load ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist`
+   — or create a new plist for `two-profiles-gui` if it replaces the receiver
+3. Run the GUI:
+   ```bash
+   cd ts4/two-profiles-gui && make && ./gui
+   ```
+   The GUI spawns both profile servers automatically.
+4. Verify:
+   - Two panes visible in one window, each showing the spinning blue square
+   - Each pane shows a different localStorage identity (profile isolation)
+   - Both panes rendering at 60fps
+   - Check `~/dev/termsurf/logs/two-profiles-gui.log` for fps stats
+
+#### What we're creating
+
+- `ts4/two-profiles-gui/main.mm` — GUI program (Objective-C++, Metal)
+- `ts4/two-profiles-gui/Makefile` — Build script
+- `ts4/two-profiles-gui/shaders.metal` — Vertex + fragment shaders
+
+#### What we're modifying
+
+- `content/one_profile/common/shell_switches.h` — Add `kSessionId` switch
+- `content/one_profile/browser/shell_video_consumer.{h,cc}` — Send `register`
+  message with session ID after connecting
+- `content/one_profile/browser/shell_browser_main_parts.cc` — Parse
+  `--session-id` flag
+
+#### Expected result
+
+A single window with two side-by-side panes, each showing the spinning blue
+square. The localStorage identity differs between panes (e.g., left shows
+"Profile A - session 1234", right shows "Profile B - session 5678"), confirming
+profile isolation. Both panes render at 60fps.
+
+```
+┌─────────────────────────────────────────┐
+│  ┌─────────────┐  ┌─────────────┐       │
+│  │  ■ (blue)   │  │  ■ (blue)   │       │
+│  │  Profile A  │  │  Profile B  │       │
+│  │  60 fps     │  │  60 fps     │       │
+│  └─────────────┘  └─────────────┘       │
+│  Two Profiles GUI                       │
+└─────────────────────────────────────────┘
+```
+
+#### What a failure would mean
+
+- **One pane renders, other is black:** The session ID mapping is wrong, or one
+  profile server failed to connect. Check the `register` messages in the GUI
+  log.
+- **< 60fps in either pane:** Metal texture import from IOSurface is slow.
+  Profile the `newTextureWithDescriptor:iosurface:plane:` call. In cef-test this
+  was <0.1ms — should not be a bottleneck.
+- **Same localStorage in both panes:** `--user-data-dir` isn't being respected.
+  Check that each profile server process has a different data directory.
+- **Crash on second profile server:** Two Chromium processes fighting over a
+  shared resource (GPU process, singleton lock). Check for conflicting lock
+  files in the user data dirs.
+- **Tearing or visual artifacts:** The render loop isn't synchronized with
+  vsync. Ensure `CVDisplayLink` or `CADisplayLink` drives rendering, not a busy
+  loop.
