@@ -1810,3 +1810,161 @@ Two problems remain:
 4. **Add resize coordination.** When the receiver window resizes, send the new
    dimensions to the sender, which adjusts its `WebContents` size and capturer
    resolution constraints accordingly.
+
+### Experiment 6: Match window sizes for pixel-perfect rendering
+
+#### Hypothesis
+
+The remaining blur is caused by a size mismatch between the source IOSurface
+(1600x1200 physical) and the receiver drawable (1280x720 physical). Setting the
+receiver window to 800x600 logical — matching the sender's Content Shell default
+— will produce a 1:1 pixel mapping and eliminate the blur entirely.
+
+#### Background
+
+Experiment 5 fixed the resolution from 1x to 2x on both sides, but the sender
+and receiver windows have different logical sizes:
+
+| Component         | Logical     | Physical (2x Retina) |
+| ----------------- | ----------- | -------------------- |
+| Sender (One Profile) | 800×600  | 1600×1200            |
+| Receiver (Exp 5)  | 640×360     | 1280×720             |
+
+The 1600×1200 IOSurface is sampled by bilinear filtering into a 1280×720
+drawable. This is a non-integer downscale (0.8× horizontally, 0.6× vertically)
+— every destination pixel samples a weighted average of multiple source pixels,
+producing blur. No sampler configuration can avoid this; the data is being
+destroyed by the downscale.
+
+The Content Shell window defaults to 800×600 DIP (defined by
+`kDefaultTestWindowWidthDip` and `kDefaultTestWindowHeightDip` in `shell.cc`,
+configurable via `--content-shell-host-window-size`). The receiver must match
+this size exactly.
+
+A secondary concern is sRGB color space handling. Chromium's compositor likely
+outputs sRGB-encoded pixel data, but the receiver creates Metal textures with
+`MTLPixelFormatBGRA8Unorm` (no color space awareness). If Metal and the display
+pipeline interpret these bytes differently, text and edges may appear subtly
+softer. The cef-test project had this exact bug (documented in Issue 200):
+textures declared as linear when the data was sRGB caused "washed out" colors.
+
+#### Design
+
+Two changes to the receiver, no changes to the sender:
+
+##### Fix 1: Match receiver window size to sender
+
+Change the window creation in `applicationDidFinishLaunching:`:
+
+```objc
+// Before (Experiment 5):
+NSRect frame = NSMakeRect(100, 100, 640, 360);
+
+// After:
+NSRect frame = NSMakeRect(100, 100, 800, 600);
+```
+
+With `contentsScale = 2.0`, this produces a 1600×1200 drawable — exactly
+matching the 1600×1200 IOSurface from the sender. Every source pixel maps to
+exactly one destination pixel. No scaling, no filtering, no blur.
+
+##### Fix 2: Use sRGB pixel format
+
+Change all three pixel format declarations in the receiver to sRGB:
+
+**a) CAMetalLayer pixel format** (in `setup_metal()`):
+```objc
+g_metal_layer.pixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
+```
+
+**b) IOSurface texture descriptor** (in `render_frame()`):
+```objc
+MTLTextureDescriptor *desc = [MTLTextureDescriptor
+    texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm_sRGB
+    ...];
+```
+
+**c) Render pipeline color attachment** (in `setup_metal()`):
+```objc
+pipelineDesc.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
+```
+
+All three must use the same format. With `_sRGB`:
+- Metal decodes sRGB→linear when sampling the IOSurface texture in the fragment
+  shader
+- Metal encodes linear→sRGB when writing to the drawable
+- The net effect is a no-op on the values (sRGB→linear→sRGB), but it tells
+  macOS's display pipeline that the framebuffer is sRGB, ensuring correct
+  rendering
+
+If Chromium's IOSurfaces are already raw linear data (not sRGB-encoded), this
+format declaration will apply an unwanted gamma curve — making colors too bright.
+If that happens, revert to `MTLPixelFormatBGRA8Unorm`. The size fix alone may be
+sufficient.
+
+#### What we're modifying
+
+- `ts4/two-profiles-receiver/main.mm`:
+  - Window size: 640×360 → 800×600
+  - Pixel format: `MTLPixelFormatBGRA8Unorm` → `MTLPixelFormatBGRA8Unorm_sRGB`
+    (layer, texture, pipeline)
+
+No changes to the sender, shaders, Makefile, or plist.
+
+#### Run and verify
+
+Same procedure as Experiment 5:
+
+1. `cd ts4/box-demo && bun run server.ts`
+2. Rebuild the receiver:
+   ```bash
+   cd ~/dev/termsurf/ts4/two-profiles-receiver && make
+   ```
+3. Reload the launchd plist:
+   ```bash
+   launchctl unload ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist
+   launchctl load ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist
+   ```
+4. Start the hidden profile server:
+   ```bash
+   cd ~/dev/termsurf/ts4/termsurf-chromium/src
+   out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+     --hidden --xpc-service=com.termsurf.two-profiles \
+     http://localhost:9407 2>&1
+   ```
+5. Verify:
+   - Receiver logs: `IOSurface 1600x1200` (same as Experiment 5)
+   - Receiver window: 800×600 logical, crisp text and edges
+   - Side-by-side comparison with Chrome at 800×600 — quality should be
+     indistinguishable
+   - Both processes at 60fps
+   - If colors look wrong (too bright/washed), revert the sRGB change and test
+     with `MTLPixelFormatBGRA8Unorm` only
+
+#### Expected result
+
+The receiver window shows the spinning blue square with pixel-perfect quality
+matching Chrome. The 1600×1200 IOSurface maps 1:1 to the 1600×1200 drawable —
+no scaling, no filtering artifacts.
+
+```
+Sender (800×600 logical)     Receiver (800×600 logical)
+IOSurface 1600×1200    ──►   Drawable 1600×1200
+                              1:1 pixel mapping
+                              No blur
+```
+
+#### What a failure would mean
+
+- **Still blurry with matching sizes:** The blur isn't from scaling. Investigate
+  whether `FrameSinkVideoCapturer`'s `CopyOutputRequest` introduces quality loss
+  compared to Chrome's direct `CALayer` compositing path. Try
+  `SetScaleOverrideForCapture()` on the `RenderWidgetHostView` to capture at 3×
+  or 4× and compare.
+- **Colors too bright / washed out with sRGB:** Chromium's IOSurfaces are not
+  sRGB-encoded (or Metal handles sRGB differently than expected). Revert to
+  `MTLPixelFormatBGRA8Unorm` — the size fix alone should resolve the blur.
+- **Correct colors but subtle softness:** The bilinear sampler is still
+  interpolating due to floating-point texture coordinate imprecision. Try
+  `MTLSamplerMinMagFilterNearest` as a diagnostic — if nearest looks identical
+  to linear, the coordinates are precise and the softness has another cause.
