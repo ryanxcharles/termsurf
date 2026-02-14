@@ -1080,3 +1080,120 @@ processing the first IOSurface message.
 - `ts4/termsurf-xpc/src/ffi.rs` — Changed `mach_task_self_` from `pub fn` to
   `pub static`. This fixes a crash in `deallocate_mach_port` that would affect
   any consumer of the crate.
+
+### Experiment 2: Fix invocation and re-test
+
+#### Hypothesis
+
+Experiment 1 failed because the sender was launched with `--service` instead of
+`--xpc-service`. The Chromium source code
+(`content/one_profile/common/shell_switches.h`) defines the flag as
+`xpc-service`, and `shell_browser_main_parts.cc` reads it with
+`cmd->HasSwitch(switches::kXpcService)`. With the wrong flag name, the sender
+never called `xpc_connection_create_mach_service()`, so launchd never started the
+receiver.
+
+The `mach_task_self_` FFI bug from Experiment 1 has already been fixed (changed
+from `pub fn` to `pub static` in `ffi.rs`). With the correct sender flag and the
+crash fix, the receiver should start, receive IOSurface frames, and render them.
+
+This experiment makes **zero code changes**. It re-runs the Experiment 1 code
+with the correct command line.
+
+#### What changed from Experiment 1
+
+1. **Sender CLI flag:** `--xpc-service=com.termsurf.two-profiles-rust` (not
+   `--service`). Verified against Chromium source:
+   - Flag defined in `shell_switches.h`
+   - Read in `shell_browser_main_parts.cc` lines 161–172
+   - Passed to `ShellVideoConsumer::ConnectToService()` which calls
+     `xpc_connection_create_mach_service(name, nullptr, 0)` in
+     `shell_video_consumer.cc`
+
+2. **`mach_task_self_` FFI fix:** Already applied in Experiment 1 (not yet
+   committed). The `deallocate_mach_port` function will no longer crash.
+
+#### Unknowns being tested
+
+The three untested unknowns from Experiment 1:
+
+1. **IOSurface reconstruction** — `iosurface::lookup_from_mach_port(port)`
+   returns a valid IOSurface handle from a Mach port received via XPC.
+
+2. **IOSurface → Metal → wgpu texture** — The five-step unsafe pipeline:
+   `device.as_hal::<Metal>()` → Metal texture descriptor → `msg_send!
+   [device, newTextureWithDescriptor:iosurface:plane:]` →
+   `Device::texture_from_raw()` → `device.create_texture_from_hal()`.
+
+3. **Cross-thread IOSurface handoff** — `SendPtr` wrapper with
+   `Mutex<Option<SendPtr>>` and `EventLoopProxy` wake. XPC dispatch queue thread
+   stores the surface, winit event loop thread consumes it.
+
+Plus re-validation of the four that passed in Experiment 1: workspace build, XPC
+listener, winit+wgpu pipeline, WGSL shader.
+
+#### Build and run
+
+No rebuild needed — the binary from Experiment 1 already includes the
+`mach_task_self_` fix. If the binary was rebuilt after the fix, skip step 1.
+
+```bash
+# 0. Ensure box-demo server is running
+cd ~/dev/termsurf/ts4/box-demo && bun run server.ts &
+
+# 1. Rebuild only if needed (binary already includes the fix)
+cd ~/dev/termsurf/ts4
+cargo build -p two-profiles-rust
+
+# 2. Load launchd plist
+launchctl load ~/dev/termsurf/ts4/two-profiles-rust/com.termsurf.two-profiles-rust.plist
+
+# 3. Start ONE profile server with CORRECT flag (--xpc-service, not --service)
+cd ~/dev/termsurf/ts4/termsurf-chromium/src
+out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+  --hidden \
+  --xpc-service=com.termsurf.two-profiles-rust \
+  --session-id=profile-a \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-a \
+  http://localhost:9407 2>&1 &
+
+# 4. Watch logs
+tail -f ~/dev/termsurf/logs/two-profiles-rust.log
+```
+
+#### Success criteria
+
+Same as Experiment 1:
+
+- One pane showing the spinning blue square with localStorage identity
+- 60fps sustained for 60+ seconds
+- Pixel-perfect Retina quality (1600x1200 IOSurface in 800x600 logical window)
+- sRGB color correctness (blue square matches Chrome)
+- FPS logged to `~/dev/termsurf/logs/two-profiles-rust.log`
+
+#### What could go wrong
+
+1. **IOSurface format mismatch.** The Metal texture uses `BGRA8Unorm_sRGB` and
+   the wgpu texture uses `Bgra8UnormSrgb`. If the Chromium sender's IOSurface
+   uses a different pixel format, the texture import may produce garbage or crash.
+   Fix: check the IOSurface pixel format with `IOSurfaceGetPixelFormat()` and
+   match it.
+
+2. **Metal texture creation returns nil.** The `msg_send!` call to
+   `newTextureWithDescriptor:iosurface:plane:` may return nil if the descriptor
+   doesn't match the IOSurface properties. The current code doesn't check for
+   nil — a nil Metal texture passed to `texture_from_raw()` will crash.
+
+3. **wgpu HAL texture wrapping fails.** The `create_texture_from_hal` call may
+   panic if the texture format, dimensions, or usage flags don't match the
+   descriptor. This would be a wgpu validation error, not a segfault.
+
+4. **CFRelease timing.** The renderer calls `CFRelease(surface)` after importing
+   the IOSurface as a Metal texture. If Metal hasn't retained the IOSurface yet,
+   releasing it invalidates the backing memory. The current code assumes Metal
+   retains immediately — this is true for `newTextureWithDescriptor:iosurface:`
+   but should be verified.
+
+5. **Window not visible.** The receiver runs as a launchd service, which may not
+   have access to the WindowServer. If the window doesn't appear, try running the
+   receiver binary directly (not via launchd) with the plist unloaded.
