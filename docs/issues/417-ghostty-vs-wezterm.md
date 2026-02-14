@@ -375,10 +375,82 @@ awareness that MIT allows unrestricted forking. WezTerm bundles fonts under OFL
 | **Multiplexer**                  | Local only (tabs/splits)                               | Local + remote (SSH, TLS, Unix)                 | WezTerm |
 | **License**                      | MIT                                                    | MIT                                             | Tie     |
 
-## Experiments
-
-(To be designed after research review.)
-
 ## Conclusion
 
-(To be written after experiments.)
+**Decision: Ghostty.**
+
+Ghostty wins on the factors that matter most for TermSurf — custom pane
+integration, upstream merge difficulty, community health, and prior integration
+experience. The scorecard shows 8 factors favoring Ghostty, 5 favoring WezTerm,
+and 2 ties, but the raw count understates the gap: Ghostty's advantages are in
+the high-impact categories while WezTerm's are in secondary ones.
+
+### Why Ghostty
+
+**Custom pane integration is the deciding factor.** TermSurf's core feature is
+rendering a browser inside a terminal pane. ts1 proved this requires exactly 1
+line changed in Ghostty's core — everything else lives in isolated new files.
+WezTerm's Pane trait is terminal-only (returns `Vec<Line>`, cursor cell
+positions, terminal palettes), forcing an overlay workaround that bypasses the
+pane abstraction entirely. This isn't a minor inconvenience; it's a fundamental
+architectural mismatch. Every future feature (input routing, resize sync, focus
+management) must work around the fact that webview panes aren't really panes.
+
+**Upstream mergeability compounds over time.** ts1's modifications were
+trivially isolated — a monolithic Zig core with clean platform boundaries means
+our changes don't collide with upstream. WezTerm's 19+ interconnected crates
+with feature flag cascading, plus a community-contributed Wayland rewrite in
+progress, means more merge conflicts on every upstream sync. Over the life of
+the project, this difference adds up.
+
+**Community health is a long-term bet.** Ghostty transitioned to non-profit
+status (Hack Club 501(c)(3)) with public finances, $60/hr paid contributor
+contracts, and 8 subsystem maintainers. WezTerm is a spare-time project whose
+sole maintainer described moving countries, hospitalization, and insufficient
+sponsorship income in December 2025. The last stable WezTerm release was
+February 2024 — over two years ago. Forking WezTerm is a bet that either the
+upstream recovers or we're prepared to maintain 150,000+ lines of Rust
+ourselves. Ghostty's trajectory is the opposite.
+
+### Why not WezTerm's advantages
+
+**Windows support** is WezTerm's strongest card, but it's not a dealbreaker.
+Ghostty's Windows support is actively in progress (Discussion #2563) with shared
+dependencies compiling, tests passing, and CI established. The remaining work
+(DirectWrite, DirectX, native UI) is estimated for Ghostty 1.4 or 1.5. TermSurf
+is not shipping tomorrow — the Chromium integration alone (Issue 407) has months
+of work ahead. By the time TermSurf is ready for users, Ghostty will likely have
+Windows support. And if it doesn't, we can still ship macOS + Linux first (where
+most web developers work) and add Windows later.
+
+**Language alignment** sounds important but is overstated. The browser runs
+out-of-process via IPC. The language boundary is at the protocol level (XPC
+dictionaries, Mach ports), not at function calls. ts1 proved this works: Zig
+core + Swift UI + Unix socket IPC to Rust-based web commands. Issue 416 proved
+that C++, Swift, and Rust all achieve identical 60fps IOSurface compositing —
+the language doesn't matter for the hot path.
+
+**Lua scripting, remote multiplexing, and graphics protocols** are nice-to-haves
+that don't affect TermSurf's core value proposition. TermSurf's differentiator
+is the browser-in-terminal experience, not configuration extensibility or remote
+session management. These features can be added later if needed — and Ghostty's
+200+ config options and built-in tabs/splits/windows cover the baseline.
+
+### Risks to monitor
+
+1. **Ghostty Windows timeline.** If Ghostty's Windows support slips past 1.5, we
+   may need to contribute to it directly or accept a macOS+Linux-only launch.
+2. **Zig compiler stability.** Zig is pre-1.0. Ghostty must track compiler
+   changes, and so must our fork. This adds build maintenance overhead that
+   Cargo/Rust doesn't have.
+3. **libghostty API stability.** The C API is public alpha and "not yet released
+   as a standalone library." Breaking changes are possible. Our fork should
+   track Ghostty's internal APIs rather than relying on the public C ABI.
+
+### What this means for ts4
+
+ts4 returns to ts1's approach: fork Ghostty as the application. The critical fix
+is replacing WKWebView (which was too limited) with Chromium embedded via the
+Content API (not CEF, which cannot sustain 60fps). This was already the plan
+from Issue 405 (Option B: Ghostty fork with browser out-of-process). This
+research confirms that decision with concrete data from both codebases.
