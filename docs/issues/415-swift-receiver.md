@@ -274,6 +274,238 @@ Plus:
 - **mach_task_self.** The C macro `mach_task_self()` is not available in Swift.
   Use the global `mach_task_self_` instead.
 
+## Experiments
+
+### Experiment 1: Single-pane Swift receiver
+
+#### Hypothesis
+
+Swift can receive an IOSurface Mach port via the C XPC API, reconstruct the
+IOSurface, create a Metal texture from it, and render it in a window at 60fps
+using `CADisplayLink`. If this works, every Swift-specific unknown is resolved
+and Experiment 2 just adds the second pane.
+
+#### Why single-pane first
+
+The architecture is proven from Issue 414. The question is whether Swift can do
+the same work. There are five independent unknowns:
+
+1. **XPC C API bridging** — `xpc_connection_create_mach_service()`,
+   `xpc_dictionary_copy_mach_send()`, `xpc_get_type()` comparisons
+2. **IOSurface reconstruction** — `IOSurfaceLookupFromMachPort()` returning
+   `IOSurfaceRef?` in Swift, `mach_task_self_` instead of `mach_task_self()`
+3. **Metal texture from IOSurface** — `device.makeTexture(descriptor:iosurface:plane:)`
+4. **CADisplayLink** — replaces the deprecated `CVDisplayLink` from Issue 414
+5. **SPM Metal shader compilation** — `.metal` files in `Sources/` must be
+   compiled automatically by `swift build`
+
+If any of these fail, a single-pane setup makes debugging straightforward. Once
+all five work together, adding the second pane is mechanical.
+
+#### Design
+
+##### Project setup
+
+Create the SPM project at `ts4/two-profiles-swift/`:
+
+**`Package.swift`:**
+
+```swift
+// swift-tools-version: 5.9
+import PackageDescription
+
+let package = Package(
+    name: "TwoProfilesSwift",
+    platforms: [.macOS(.v14)],
+    targets: [
+        .executableTarget(
+            name: "Receiver",
+            path: "Sources/Receiver",
+            linkerSettings: [
+                .linkedFramework("Cocoa"),
+                .linkedFramework("Metal"),
+                .linkedFramework("QuartzCore"),
+                .linkedFramework("IOSurface"),
+            ]
+        )
+    ]
+)
+```
+
+Platform is `.macOS(.v14)` because `CADisplayLink` requires macOS 14+.
+
+##### Shaders
+
+Copy `ts4/two-profiles-receiver/shaders.metal` to
+`ts4/two-profiles-swift/Sources/Receiver/Shaders.metal`. Identical shader code —
+fullscreen quad triangle strip, texture sampling. SPM should compile this
+automatically. If not, fall back to manual `xcrun metal` / `xcrun metallib`.
+
+##### Module structure (single-pane)
+
+For Experiment 1, all code lives in `main.swift` — a single file, same as Issue
+414's early experiments. If this works, Experiment 2 splits into the multi-file
+layout described in the issue design (AppDelegate, XPCListener, Renderer).
+
+**`main.swift`** does everything:
+
+1. **XPC listener** — Create Mach service `com.termsurf.two-profiles-swift` with
+   `xpc_connection_create_mach_service()` and the listener flag. Accept one peer
+   connection (stored in a global to prevent ARC release). Handle
+   `display_surface` messages by extracting the Mach port with
+   `xpc_dictionary_copy_mach_send()`.
+
+2. **IOSurface** — `IOSurfaceLookupFromMachPort(port)` returns `IOSurfaceRef?`.
+   Store the latest surface in a global, protected by `NSLock`. Deallocate the
+   Mach port with `mach_port_deallocate(mach_task_self_, port)`.
+
+3. **NSApplication + window** — Create `NSApplication`, set activation policy to
+   `.regular`, create an 800x600 window (one pane). Set up `CAMetalLayer` on the
+   content view with `.bgra8Unorm_sRGB`, `contentsScale` = backing scale factor.
+
+4. **Metal pipeline** — Create device, command queue, render pipeline with
+   sRGB pixel format. Load the shader library from the SPM build output. SPM
+   places compiled Metal libraries in the bundle or alongside the binary — the
+   exact path may need discovery (try `Bundle.main`, then fall back to
+   executable-relative path).
+
+5. **CADisplayLink** — Create via `NSScreen.main!.displayLink(target:selector:)`.
+   Add to `RunLoop.main` with `.common` mode. On each tick, grab the latest
+   IOSurface, create a Metal texture, draw the fullscreen quad.
+
+6. **FPS logging** — Count frames per second, log to stderr with IOSurface
+   dimensions. Same format as Issue 414.
+
+##### XPC details
+
+```swift
+let queue = DispatchQueue(label: "com.termsurf.two-profiles-swift.xpc")
+let listener = xpc_connection_create_mach_service(
+    "com.termsurf.two-profiles-swift",
+    queue,
+    UInt64(XPC_CONNECTION_MACH_SERVICE_LISTENER))
+
+// Store globally to prevent ARC release
+gListener = listener
+
+xpc_connection_set_event_handler(listener) { peer in
+    guard xpc_get_type(peer) == XPC_TYPE_CONNECTION else { return }
+    let peerConn = peer as xpc_connection_t
+    gPeer = peerConn  // strong reference
+
+    xpc_connection_set_event_handler(peerConn) { event in
+        guard xpc_get_type(event) == XPC_TYPE_DICTIONARY else { return }
+        handleMessage(event)
+    }
+    xpc_connection_resume(peerConn)
+}
+xpc_connection_resume(listener)
+```
+
+Key Swift-isms to watch:
+- `XPC_CONNECTION_MACH_SERVICE_LISTENER` may need casting to `UInt64`
+- `xpc_get_type()` comparison with `XPC_TYPE_CONNECTION` — these are global
+  constants, should be available via bridging
+- `xpc_dictionary_get_string()` returns `UnsafePointer<CChar>?` — wrap with
+  `String(cString:)`
+
+##### CADisplayLink details
+
+```swift
+let displayLink = self.window.screen!.displayLink(
+    target: self, selector: #selector(render))
+displayLink.add(to: .main, forMode: .common)
+```
+
+Or if using `NSScreen`:
+
+```swift
+let displayLink = NSScreen.main!.displayLink(
+    target: self, selector: #selector(render))
+displayLink.add(to: .main, forMode: .common)
+```
+
+The render method is called on the main thread (unlike `CVDisplayLink` which
+called back on a display link thread). This simplifies threading — no lock
+needed for Metal state. The IOSurface handoff from the XPC queue still needs a
+lock.
+
+##### Shader library loading
+
+SPM compiles `.metal` files into a `.metallib` and places it in the bundle's
+resource directory. For a command-line executable (no `.app` bundle), SPM may
+place it alongside the binary or in a `_Resources` directory. Try:
+
+```swift
+// Option 1: Bundle.module (SPM resource bundle)
+let library = try device.makeDefaultLibrary(bundle: Bundle.module)
+
+// Option 2: Executable-relative
+let execURL = URL(fileURLWithPath: CommandLine.arguments[0])
+    .deletingLastPathComponent()
+let libURL = execURL.appendingPathComponent("Receiver_Receiver.metallib")
+let library = try device.makeLibrary(URL: libURL)
+
+// Option 3: Default library (may work if SPM sets up the bundle correctly)
+let library = device.makeDefaultLibrary()
+```
+
+This is the most likely point of friction. If none of the automatic paths work,
+compile manually:
+
+```bash
+xcrun metal -c Sources/Receiver/Shaders.metal -o Shaders.air
+xcrun metallib Shaders.air -o .build/debug/Shaders.metallib
+```
+
+#### Launchd plist
+
+Use the plist from the issue design (`com.termsurf.two-profiles-swift.plist`).
+The binary path points to `.build/debug/Receiver`.
+
+#### Build and run
+
+```bash
+# Build
+cd ts4/two-profiles-swift
+swift build
+
+# Load launchd plist
+launchctl load ~/dev/termsurf/ts4/two-profiles-swift/com.termsurf.two-profiles-swift.plist
+
+# Start ONE profile server (single pane)
+cd ~/dev/termsurf/ts4/termsurf-chromium/src
+out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+  --hidden \
+  --xpc-service=com.termsurf.two-profiles-swift \
+  --session-id=profile-a \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-a \
+  http://localhost:9407 2>&1 &
+```
+
+#### Success criteria
+
+- One pane showing the spinning blue square with localStorage identity
+- 60fps sustained for 60+ seconds
+- Pixel-perfect Retina quality (1600x1200 IOSurface in 800x600 logical window)
+- sRGB color correctness (blue square matches Chrome)
+- Receiver is pure Swift — no bridging header, no Objective-C files
+- Builds with `swift build`
+- Uses `CADisplayLink` (not deprecated `CVDisplayLink`)
+
+#### What could go wrong
+
+- **SPM doesn't compile `.metal` files.** Fall back to manual `xcrun metal` /
+  `xcrun metallib` and load from an explicit path.
+- **`XPC_CONNECTION_MACH_SERVICE_LISTENER` not visible in Swift.** May need to
+  use the raw integer value (`2`).
+- **`CADisplayLink` doesn't fire when added to `RunLoop.main`.** May need to be
+  added inside `applicationDidFinishLaunching` after the run loop is running.
+- **`IOSurfaceLookupFromMachPort` not available in Swift.** The function is in
+  the IOSurface C API — should bridge automatically, but if not, a tiny C shim
+  file would be needed (which would violate the "pure Swift" goal — worth
+  knowing early).
+
 ## What this unlocks
 
 A working Swift receiver proves that every API in the pipeline (XPC, IOSurface,
