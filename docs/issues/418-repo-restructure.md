@@ -339,15 +339,24 @@ termsurf-chromium/src/out/
 These are no longer needed since the entire directory is gitignored at the top
 level.
 
-#### Step 6: Update `.claude/skills/build-chromium/SKILL.md`
+#### Step 6: Update Claude skills
 
-All paths change from `ts4/termsurf-chromium/` to `termsurf-chromium/`:
+**`.claude/skills/build-chromium/SKILL.md`** — All paths change from
+`ts4/termsurf-chromium/` to `termsurf-chromium/`:
 
 | Old path                                 | New path                             |
 | ---------------------------------------- | ------------------------------------ |
 | `ts4/termsurf-chromium/depot_tools`      | `termsurf-chromium/depot_tools`      |
 | `ts4/termsurf-chromium/src`              | `termsurf-chromium/src`              |
 | `ts4/termsurf-chromium/src/out/Default/` | `termsurf-chromium/src/out/Default/` |
+
+**`.claude/skills/git-poet/SKILL.md`** — Update the Submodule Workflow section:
+
+- `ts4/termsurf-chromium/src/` → `termsurf-chromium/src/`
+- Remove the instruction to `git add ts4/termsurf-chromium/src` (no longer a
+  submodule — Chromium is gitignored and tracked separately)
+- Update the workflow to reflect that Chromium commits happen in the
+  `termsurf-chromium/` repo independently, not as submodule pointer updates
 
 #### Step 7: Update `CLAUDE.md`
 
