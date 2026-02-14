@@ -10,7 +10,7 @@ historical directories (ts1–ts4), vendored code, and documentation alongside i
 Keeping Ghostty in its own subdirectory (rather than at the repo root) avoids
 conflicts with our own top-level files (README.md, docs/, etc.) and makes future
 upstream merges cleaner. The Chromium fork moves from a submodule inside ts4 to
-a top-level gitignored directory with proper origin/upstream configuration.
+a top-level gitignored directory with upstream configured.
 
 ## Changes
 
@@ -47,22 +47,24 @@ Instead:
 
 - Add `/termsurf-chromium/` to `.gitignore`
 - Document the tracked branch/commit in `docs/chromium.md`
-- The local clone is a **shallow clone** of origin
+- `termsurf-chromium/src/` is the Chromium git repo; `termsurf-chromium/` also
+  contains `depot_tools/`, `.gclient`, and other build infrastructure (Chromium
+  requires the repo directory to be named `src/`)
 
 **Remote configuration for `termsurf-chromium/src/`:**
 
-| Remote   | URL                                                  | Purpose            |
-| -------- | ---------------------------------------------------- | ------------------ |
-| origin   | `~/dev/chromium` (local)                             | Our fork           |
-| upstream | `https://chromium.googlesource.com/chromium/src.git` | Official Chromium  |
+| Remote   | URL                                                  | Purpose           |
+| -------- | ---------------------------------------------------- | ----------------- |
+| upstream | `https://chromium.googlesource.com/chromium/src.git` | Official Chromium |
 
-We regularly pull `main` and tags from upstream to origin. Our working branches
-follow the pattern `{version}-termsurf` (e.g., `146.0.7650.0-termsurf`).
+We regularly pull `main` and tags from upstream. Our working branches follow the
+pattern `{version}-termsurf` (e.g., `146.0.7650.0-termsurf`).
 
-**Note:** Origin is a local repo (`~/dev/chromium`) for now. Remote hosting will
-be decided later — most likely as a patch set rather than a full fork, since
-Chromium is too large for standard GitHub hosting. Anyone wanting to build
-TermSurf's Chromium fork would fork Chromium themselves and apply our patches.
+**Note:** There is no `origin` remote for now. The only remote is `upstream`
+(Google's official Chromium source). Remote hosting for our fork will be decided
+later — most likely as a patch set rather than a full fork, since Chromium is
+too large for standard GitHub hosting. Anyone wanting to build TermSurf's
+Chromium fork would fork Chromium themselves and apply our patches.
 
 **Branch strategy:** Track the same Chromium version as Electron. This lets us
 reference Electron's patches and solutions even though we use the Content API
@@ -72,20 +74,22 @@ directly (not Electron itself). To find the current version:
 2. Use that version tag as our base
 3. Create `{version}-termsurf` branch on top of the tag
 
-**Push local branches to origin.** Several local branches exist that have never
-been pushed to `~/dev/chromium`. Push them all before the move:
+**Local branches.** The following branches exist locally:
 
-| Branch                   | Status                      |
-| ------------------------ | --------------------------- |
-| `146.0.7650.0-termsurf`  | Local only — push to origin |
-| `146.0.7650.0-issue-411` | Local only — push to origin |
-| `146.0.7650.0-issue-412` | Local only — push to origin |
-| `146.0.7650.0-issue-413` | Local only — push to origin |
-| `146.0.7650.0-issue-414` | Local only — push to origin |
-| `146.0.7650.0-issue-415` | Local only — push to origin |
-| `146.0.7650.0-issue-416` | Local only — push to origin |
-| `146.0.7650.0-electron`  | Local only — push to origin |
-| `main`                   | Already on origin           |
+| Branch                   |
+| ------------------------ |
+| `146.0.7650.0-termsurf`  |
+| `146.0.7650.0-issue-411` |
+| `146.0.7650.0-issue-412` |
+| `146.0.7650.0-issue-413` |
+| `146.0.7650.0-issue-414` |
+| `146.0.7650.0-issue-415` |
+| `146.0.7650.0-issue-416` |
+| `146.0.7650.0-electron`  |
+| `main`                   |
+
+These are local-only for now. They will be pushed to a remote once hosting is
+decided.
 
 **Verify ts4 test apps still work after the move.** Several ts4 apps and scripts
 reference `ts4/termsurf-chromium/` paths (for `content_shell`, build output,
@@ -146,7 +150,7 @@ ts4/termsurf-chromium/depot_tools/
 Add:
 
 ```
-# Chromium fork (managed separately, shallow clone)
+# Chromium build workspace (gitignored; src/ requires directory named "src")
 /termsurf-chromium/
 
 # Vendored analysis repos (not committed)
@@ -174,9 +178,9 @@ submodule tracking in the git index.
 
 Update the project overview and directory structure sections to reflect:
 
-- `termsurf-chromium/` at top level (gitignored, shallow clone)
+- `termsurf-chromium/` at top level (gitignored build workspace)
 - `vendor/` directory for analysis repos and vendored code
-- Chromium remote configuration (origin = termsurf fork, upstream = official)
+- Chromium remote configuration (upstream = official Google source)
 - Chromium branch strategy (track Electron's version)
 - Current tracked version and commit
 
@@ -198,7 +202,10 @@ termsurf/                        (root — TermSurf repo)
 │   ├── build.zig.zon            (Ghostty dependencies)
 │   └── include/                 (libghostty C API headers)
 │
-├── termsurf-chromium/           (gitignored — Chromium fork, shallow clone)
+├── termsurf-chromium/           (gitignored — Chromium build workspace)
+│   ├── src/                    (Chromium git repo)
+│   ├── depot_tools/            (Chromium build tools)
+│   └── .gclient                (gclient config)
 │
 ├── ts1/                         (historical — Ghostty + WKWebView)
 ├── ts2/                         (historical — WezTerm + in-process CEF)
@@ -254,68 +261,35 @@ historical reference.
 
 ### Change 1: Move `termsurf-chromium` to top level
 
-#### Step 1: Push local branches to origin
+#### Step 1: Update remotes
 
 The `termsurf-chromium/src/` repo currently has `origin` pointing to a local
-path (`/Users/ryan/dev/termsurf-chromium/src`). Seven local branches have never
-been pushed to `~/dev/chromium`.
+path (`/Users/ryan/dev/termsurf-chromium/src`). Remove it and add `upstream`
+instead.
 
 ```bash
 cd ts4/termsurf-chromium/src
 
-# Change origin to the local Chromium fork
-git remote set-url origin ~/dev/chromium
+# Remove old origin (local path that will no longer be used)
+git remote remove origin
 
-# Add upstream (official Chromium — Google's canonical source, not GitHub mirror)
+# Add upstream (official Chromium — Google's canonical source)
 git remote add upstream https://chromium.googlesource.com/chromium/src.git
-
-# Push all local branches to origin
-git push origin 146.0.7650.0-termsurf
-git push origin 146.0.7650.0-issue-411
-git push origin 146.0.7650.0-issue-412
-git push origin 146.0.7650.0-issue-413
-git push origin 146.0.7650.0-issue-414
-git push origin 146.0.7650.0-issue-415
-git push origin 146.0.7650.0-issue-416
 ```
 
-Verify with `git branch -r` that all branches appear on origin.
+Verify with `git remote -v` that only `upstream` exists.
 
-#### Step 2: Remove the submodule
+#### Step 2: Convert submodule to standalone repo
 
-From the main repo root:
+The `src/` directory currently has a `.git` file (not a directory) containing a
+relative path like `gitdir: ../../../.git/modules/ts4/termsurf-chromium/src`.
+This pointer will break when we move the directory. Convert it to a standalone
+repo first, before removing submodule tracking or moving anything:
 
 ```bash
 cd ~/dev/termsurf
 
-# Remove submodule entry from the git index
-git rm --cached ts4/termsurf-chromium/src
-
-# Remove submodule config from .git/config
-git config --remove-section submodule.ts4/termsurf-chromium/src
-
-# Remove submodule metadata
-rm -rf .git/modules/ts4/termsurf-chromium
-
-# Remove the submodule entry from .gitmodules
-# (edit .gitmodules to remove the [submodule "ts4/termsurf-chromium/src"] block)
-```
-
-The ts2 and ts3 submodules (freetype, harfbuzz, etc.) remain unchanged.
-
-#### Step 3: Convert submodule to standalone repo
-
-The `src/` directory currently has a `.git` file (not a directory) containing a
-relative path like `gitdir: ../../../.git/modules/ts4/termsurf-chromium/src`.
-After the `git rm --cached` in Step 2, this pointer still exists but will break
-when we move the directory. Convert it to a standalone repo before moving:
-
-```bash
-# Read the current gitdir path
-cat ts4/termsurf-chromium/src/.git
-# e.g.: gitdir: ../../../.git/modules/ts4/termsurf-chromium/src
-
-# Replace the .git file with the actual .git directory
+# Replace the .git file with the actual .git directory (62 GB of git data)
 rm ts4/termsurf-chromium/src/.git
 mv .git/modules/ts4/termsurf-chromium/src ts4/termsurf-chromium/src/.git
 
@@ -326,15 +300,41 @@ git config --unset core.worktree 2>/dev/null || true
 cd ~/dev/termsurf
 ```
 
+Verify with `cd ts4/termsurf-chromium/src && git status` that the repo works as
+a standalone git repo.
+
+#### Step 3: Remove the submodule
+
+Now that the git data has been moved out of `.git/modules/`, remove the
+submodule tracking from the main repo:
+
+```bash
+cd ~/dev/termsurf
+
+# Remove submodule entry from the git index
+git rm --cached ts4/termsurf-chromium/src
+
+# Remove submodule config from .git/config
+git config --remove-section submodule.ts4/termsurf-chromium/src
+
+# Clean up the now-empty .git/modules directory
+rm -rf .git/modules/ts4/termsurf-chromium
+
+# Remove the submodule entry from .gitmodules
+# (edit .gitmodules to remove the [submodule "ts4/termsurf-chromium/src"] block)
+```
+
+The ts2 and ts3 submodules (freetype, harfbuzz, etc.) remain unchanged.
+
 #### Step 4: Move the directory
 
 ```bash
 mv ts4/termsurf-chromium termsurf-chromium
 ```
 
-The `.gclient` file inside `termsurf-chromium/` may need its URL updated to
-match the new origin (`~/dev/chromium`) if it references the old local path or
-a GitHub URL.
+The `.gclient` file inside `termsurf-chromium/` may need its URL updated since
+there is no longer an origin remote. It currently references
+`git@github.com:termsurf/termsurf-chromium.git`.
 
 #### Step 5: Update `.gitignore`
 
@@ -347,7 +347,7 @@ ts4/termsurf-chromium/depot_tools/
 Add:
 
 ```
-# Chromium fork (managed separately, shallow clone of termsurf/termsurf-chromium)
+# Chromium build workspace (gitignored; src/ requires directory named "src")
 /termsurf-chromium/
 ```
 
@@ -410,10 +410,11 @@ in a dedicated file so it's easy to find:
 
 ## Repository
 
-| Remote   | URL                                                  |
-| -------- | ---------------------------------------------------- |
-| origin   | ~/dev/chromium (local)                               |
-| upstream | https://chromium.googlesource.com/chromium/src.git   |
+| Remote   | URL                                                |
+| -------- | -------------------------------------------------- |
+| upstream | https://chromium.googlesource.com/chromium/src.git |
+
+No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
@@ -442,11 +443,11 @@ issue-specific branches.
 
 ## Local Setup
 
-The `termsurf-chromium/` directory at the repo root is a shallow clone,
-gitignored from the main repo. To set up from scratch:
-
-    git clone --depth 1 --branch 146.0.7650.0-termsurf \
-      ~/dev/chromium termsurf-chromium/src
+The `termsurf-chromium/` directory at the repo root is a Chromium build
+workspace, gitignored from the main repo. The `src/` subdirectory is the
+Chromium git repo (Chromium requires it to be named `src/`). To set up from
+scratch, use `fetch chromium` from depot_tools or clone from upstream and apply
+our patches (patch distribution TBD).
 ```
 
 #### Step 10: Verify test apps
