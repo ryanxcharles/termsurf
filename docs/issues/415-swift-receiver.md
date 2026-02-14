@@ -257,10 +257,11 @@ Plus:
 
 ## Potential issues
 
-- **CVDisplayLink in Swift.** `CVDisplayLink` is deprecated in macOS 15. Swift
-  may require a different approach — `CADisplayLink` (macOS 14+) or
-  `NSView.displayLink(target:selector:)`. If `CVDisplayLink` works, use it for
-  consistency with Issue 414. If not, try `CADisplayLink`.
+- **CVDisplayLink is deprecated.** Issue 414 used `CVDisplayLink`, which Apple
+  deprecated in macOS 14 (Sonoma). It still compiles and runs, but the Swift
+  receiver should use the replacement: `CADisplayLink` (macOS 14+). The API is
+  cleaner in Swift — target/selector instead of a C callback — and aligns with
+  the direction for Ghostty integration.
 
 - **XPC type checking in Swift.** `xpc_get_type()` returns `xpc_type_t`, which
   compares with global constants (`XPC_TYPE_CONNECTION`, `XPC_TYPE_DICTIONARY`).
