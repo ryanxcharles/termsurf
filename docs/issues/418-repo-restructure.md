@@ -5,10 +5,13 @@ to fork Ghostty (Issue 417), clean up vendored dependencies, and prepare for the
 Ghostty merge.
 
 **Context:** With Ghostty selected as the terminal emulator (Issue 417), the
-repo will become primarily a Ghostty fork. The top level will contain Ghostty's
-source tree, with historical directories (ts1–ts4), vendored code, and
-documentation alongside it. The Chromium fork moves from a submodule inside ts4
-to a top-level gitignored directory with proper origin/upstream configuration.
+repo will contain Ghostty's source tree inside a `termsurf-ghostty/` directory,
+with historical directories (ts1–ts4), vendored code, and documentation
+alongside it. Keeping Ghostty in its own subdirectory (rather than at the repo
+root) avoids conflicts with our own top-level files (README.md, docs/, etc.)
+and makes future upstream merges cleaner. The Chromium fork moves from a
+submodule inside ts4 to a top-level gitignored directory with proper
+origin/upstream configuration.
 
 ## Changes
 
@@ -69,7 +72,7 @@ move:
 | `146.0.7650.0-issue-414` | Local only — push to origin |
 | `146.0.7650.0-issue-415` | Local only — push to origin |
 | `146.0.7650.0-issue-416` | Local only — push to origin |
-| `146.0.7650.0-electron`  | Already on origin           |
+| `146.0.7650.0-electron`  | Local only — push to origin |
 | `main`                   | Already on origin           |
 
 **Verify ts4 test apps still work after the move.** Several ts4 apps and scripts
@@ -165,19 +168,24 @@ Update the project overview and directory structure sections to reflect:
 - Chromium branch strategy (track Electron's version)
 - Current tracked version and commit
 
-### 6. Merge Ghostty into top level
+### 6. Merge Ghostty into `termsurf-ghostty/`
 
-After the restructure is complete, merge the latest Ghostty into the top level
-of the repo. The repo becomes primarily a Ghostty fork:
+After the restructure is complete, merge the latest Ghostty into a
+`termsurf-ghostty/` subdirectory. Keeping Ghostty in its own directory avoids
+conflicts with TermSurf's top-level files (README.md, .gitignore, docs/, etc.)
+and makes future upstream merges cleaner — Ghostty's files never collide with
+ours.
 
 ```
-termsurf/                        (root — Ghostty fork)
-├── src/                         (libghostty — Zig core)
-├── macos/                       (Ghostty macOS app — Swift)
-├── pkg/                         (Ghostty platform packages)
-├── build.zig                    (Ghostty build system)
-├── build.zig.zon                (Ghostty dependencies)
-├── include/                     (libghostty C API headers)
+termsurf/                        (root — TermSurf repo)
+│
+├── termsurf-ghostty/            (Ghostty fork)
+│   ├── src/                     (libghostty — Zig core)
+│   ├── macos/                   (Ghostty macOS app — Swift)
+│   ├── pkg/                     (Ghostty platform packages)
+│   ├── build.zig                (Ghostty build system)
+│   ├── build.zig.zon            (Ghostty dependencies)
+│   └── include/                 (libghostty C API headers)
 │
 ├── termsurf-chromium/           (gitignored — Chromium fork, shallow clone)
 │
@@ -206,15 +214,17 @@ termsurf/                        (root — Ghostty fork)
 └── TODO.md
 ```
 
-**Merge strategy:** Add Ghostty as a remote, fetch, and merge with
-`--allow-unrelated-histories`. This preserves both Ghostty's commit history and
-TermSurf's commit history. Conflicts (README.md, .gitignore, etc.) are resolved
-in favor of TermSurf's versions where appropriate.
+**Merge strategy:** Add Ghostty as a remote, fetch, then use `git merge` with
+`--allow-unrelated-histories` into a temporary branch. Use `git read-tree` or
+equivalent to place Ghostty's tree under `termsurf-ghostty/`, preserving
+Ghostty's full commit history. This is the same pattern used by projects like
+git-subtree: the upstream history is preserved, and future merges from Ghostty
+can be pulled and re-prefixed into `termsurf-ghostty/`.
 
-**After the merge:** The top level is a buildable Ghostty. `zig build` should
-work. The macOS app builds. From this point forward, TermSurf development means
-modifying Ghostty's source tree to add browser pane support, and the ts1–ts4
-directories are historical reference.
+**After the merge:** `cd termsurf-ghostty && zig build` should work. The macOS
+app builds from `termsurf-ghostty/`. From this point forward, TermSurf
+development means modifying files inside `termsurf-ghostty/` to add browser
+pane support, and the ts1–ts4 directories are historical reference.
 
 ## Order of Operations
 
@@ -225,6 +235,6 @@ directories are historical reference.
 5. Update `.gitignore`
 6. Update `CLAUDE.md`
 7. Commit the restructure
-8. Merge Ghostty into top level
-9. Resolve conflicts, verify build
+8. Merge Ghostty into `termsurf-ghostty/`
+9. Verify build (`cd termsurf-ghostty && zig build`)
 10. Commit the merge
