@@ -892,3 +892,32 @@ If this fails, debug and fix before committing. Common issues:
 - Zig version mismatch (check ts5's `.zigversion` or `build.zig.zon`)
 
 #### Step 7: Commit
+
+#### Result
+
+All steps completed. `.gitignore` updated with ts5 build patterns, `CLAUDE.md`
+updated with ts5 as the active generation and ts4 marked superseded,
+merge-upstream skill rewritten for `git subtree pull`, and `cd ts5 && zig build`
+produces `ts5/zig-out/Ghostty.app` successfully.
+
+## Conclusion
+
+The repo restructure is complete. Three changes were made:
+
+1. **Chromium moved to top level.** `termsurf-chromium/` is now a gitignored
+   directory at the repo root, no longer a submodule inside ts4. Tracked in
+   `docs/chromium.md`.
+
+2. **Vendored repos moved to `vendor/`.** Analysis copies (wezterm, cef,
+   alacritty, electron, chromium) and `cef-rs` now live under `vendor/`.
+
+3. **Ghostty imported as ts5.** Three experiments were needed to find a working
+   merge strategy. `git merge -X subtree` failed in both configurations
+   (Experiments 1–2) because git's rename detection found the original
+   `/ → ts1/` move and misrouted upstream changes. `git subtree add` bypassed
+   this entirely (Experiment 3). Post-import configuration completed in
+   Experiment 4.
+
+The upstream merge strategy is documented in `docs/ghostty.md` and the
+`/merge-upstream` skill. Future Ghostty merges use
+`git subtree pull --prefix=ts5 upstream main`.
