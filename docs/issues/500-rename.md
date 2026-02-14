@@ -13,7 +13,7 @@ ts1 created a parallel `termsurf-macos/` directory alongside the upstream
 at the time but is unnecessary for ts5 — we're just forking Ghostty. We modify
 `ts5/macos/` directly.
 
-ts1's rename research is still the reference for *what* to change. Internal
+ts1's rename research is still the reference for _what_ to change. Internal
 identifiers (`com.mitchellh.ghostty.*` notification names, `GhosttyKit`
 framework name, `Ghostty.*` Swift namespace, C API function names) stay
 unchanged — they're internal plumbing and renaming them creates unnecessary
@@ -186,12 +186,14 @@ These internal identifiers stayed as-is in ts1 to minimize merge conflicts:
 Modify `ts5/macos/Ghostty.xcodeproj/project.pbxproj` directly:
 
 1. Bundle identifier: `com.mitchellh.ghostty` → `com.termsurf`
-2. Bundle identifier (debug): `com.mitchellh.ghostty.debug` → `com.termsurf.debug`
+2. Bundle identifier (debug): `com.mitchellh.ghostty.debug` →
+   `com.termsurf.debug`
 3. Display name: `Ghostty` → `TermSurf`
 4. Display name (debug): `Ghostty[DEBUG]` → `TermSurf[DEBUG]`
 5. Product name: `Ghostty` → `TermSurf`
 
 Rename files in `ts5/macos/`:
+
 - `Ghostty-Info.plist` → `TermSurf-Info.plist`
 - `Ghostty.entitlements` → `TermSurf.entitlements`
 - `GhosttyDebug.entitlements` → `TermSurfDebug.entitlements`
@@ -222,8 +224,10 @@ In `ts5/src/`:
 
 In `ts5/macos/Sources/`:
 
-1. `Ghostty/Ghostty.Config.swift` — Use `ghostty_config_load_files(cfg,
-   "termsurf", "com.termsurf")` instead of `ghostty_config_load_default_files`
+1. `Ghostty/Ghostty.Config.swift` — Use
+   `ghostty_config_load_files(cfg,
+   "termsurf", "com.termsurf")` instead of
+   `ghostty_config_load_default_files`
 2. `Ghostty/Ghostty.Config.swift` — Icon path →
    `~/.config/termsurf/TermSurf.icns`
 3. `Features/Settings/SettingsView.swift` — Config path and app name in
@@ -242,6 +246,7 @@ Copy TermSurf icon assets from ts1 into `ts5/macos/Assets.xcassets/`:
   `ts5/macos/Assets.xcassets/AppIconImage.imageset/`
 
 Copy icon source files:
+
 - `ts1/termsurf-macos/icon-source/` → `ts5/macos/icon-source/`
 
 ## Scope
@@ -256,3 +261,109 @@ All changes are in files that upstream Ghostty also modifies, so future
 `git subtree pull` may produce conflicts. The conflicts will be small and
 predictable — keep our version of the renamed strings, resolve Xcode project
 changes manually if upstream restructures build settings.
+
+## Experiments
+
+### Experiment 1: Implement All Name Changes
+
+#### Hypothesis
+
+Applying all five changes (Xcode project, Info.plist, CLI text, config paths,
+icons) in one pass will produce a working `TermSurf.app` that builds with
+`cd ts5 && zig build`.
+
+#### Steps
+
+##### Step 1: Rename plist and entitlements files
+
+```bash
+cd ts5/macos
+git mv Ghostty-Info.plist TermSurf-Info.plist
+git mv Ghostty.entitlements TermSurf.entitlements
+git mv GhosttyDebug.entitlements TermSurfDebug.entitlements
+git mv GhosttyReleaseLocal.entitlements TermSurfReleaseLocal.entitlements
+```
+
+##### Step 2: Update `project.pbxproj`
+
+In `ts5/macos/Ghostty.xcodeproj/project.pbxproj`:
+
+- Replace file references: `Ghostty-Info.plist` → `TermSurf-Info.plist`,
+  `Ghostty.entitlements` → `TermSurf.entitlements`, `GhosttyDebug.entitlements`
+  → `TermSurfDebug.entitlements`, `GhosttyReleaseLocal.entitlements` →
+  `TermSurfReleaseLocal.entitlements`
+- Replace `PRODUCT_BUNDLE_IDENTIFIER = com.mitchellh.ghostty` →
+  `PRODUCT_BUNDLE_IDENTIFIER = com.termsurf` (all variants including `.debug`)
+- Replace `INFOPLIST_KEY_CFBundleDisplayName = Ghostty` →
+  `INFOPLIST_KEY_CFBundleDisplayName = TermSurf` (including debug `[DEBUG]`
+  variant)
+- Replace `PRODUCT_NAME = Ghostty` → `PRODUCT_NAME = TermSurf`
+
+Do NOT rename the `Ghostty.xcodeproj` directory itself,
+`GhosttyKit.xcframework`, or any `Ghostty.*` Swift namespace references — those
+are internal.
+
+##### Step 3: Update `TermSurf-Info.plist`
+
+- Add `TermSurfBuild` key (empty string, like ts1)
+- Add `TermSurfCommit` key (empty string, like ts1)
+- Change UTType description: `"Ghostty Surface Identifier"` →
+  `"TermSurf Surface Identifier"`
+
+##### Step 4: Update CLI text
+
+- `ts5/src/cli/help.zig` — All instances of "ghostty"/"Ghostty" →
+  "termsurf"/"TermSurf"
+- `ts5/src/cli/version.zig` — `"Ghostty {s}"` → `"TermSurf {s}"`
+- `ts5/src/cli/list_themes.zig` — `"👻 Ghostty Theme Preview 👻"` →
+  `"🏄 TermSurf Theme Preview 🏄"`
+
+##### Step 5: Update config paths in Swift
+
+- `ts5/macos/Sources/Ghostty/Ghostty.Config.swift` — Change
+  `ghostty_config_load_default_files(cfg)` to
+  `ghostty_config_load_files(cfg, "termsurf", "com.termsurf")`
+- `ts5/macos/Sources/Ghostty/Ghostty.Config.swift` — Change custom icon path
+  from `~/.config/ghostty/Ghostty.icns` to `~/.config/termsurf/TermSurf.icns`
+- `ts5/macos/Sources/Features/Settings/SettingsView.swift` — Change
+  `$HOME/.config/ghostty/config.ghostty and restart Ghostty` to
+  `$HOME/.config/termsurf/config and restart TermSurf`
+
+##### Step 6: Update About view
+
+- `ts5/macos/Sources/Features/About/AboutView.swift` — Change `"Ghostty"` title
+  to `"TermSurf"`
+- Add subtitle:
+  `"Terminal emulator with integrated browser,\nbuilt on Ghostty."`
+- Change GitHub URL to `https://github.com/termsurf/termsurf`
+
+##### Step 7: Replace icons
+
+Copy icon assets from ts1:
+
+```bash
+# App icon set
+rm -rf ts5/macos/Assets.xcassets/AppIcon.appiconset
+cp -R ts1/termsurf-macos/Assets.xcassets/AppIcon.appiconset \
+  ts5/macos/Assets.xcassets/AppIcon.appiconset
+
+# App icon image
+rm -rf ts5/macos/Assets.xcassets/AppIconImage.imageset
+cp -R ts1/termsurf-macos/Assets.xcassets/AppIconImage.imageset \
+  ts5/macos/Assets.xcassets/AppIconImage.imageset
+
+# Debug icon
+cp -R ts1/termsurf-macos/Assets.xcassets/TermSurfDebugIcon.imageset \
+  ts5/macos/Assets.xcassets/TermSurfDebugIcon.imageset
+
+# Icon source files
+cp -R ts1/termsurf-macos/icon-source ts5/macos/icon-source
+```
+
+##### Step 8: Build and verify
+
+```bash
+cd ts5 && zig build
+```
+
+Verify the output app is named `TermSurf.app` (not `Ghostty.app`).
