@@ -3,9 +3,9 @@
 ## Goal
 
 Build a clean two-profile browser demo in ts5: a minimal Chromium embedder
-(`termsurf-browser`) that renders webpages to IOSurfaces and sends them via XPC,
-and a Swift compositor (`ts5/two-profiles/`) that receives and displays them
-side by side at 60fps.
+(`chromium-profile-server`) that renders webpages to IOSurfaces and sends them
+via XPC, and a Swift compositor (`ts5/two-profiles/`) that receives and displays
+them side by side at 60fps.
 
 This replaces the ts4 proof-of-concept code (Issues 412–416) with
 production-quality implementations that will serve as the foundation for
@@ -50,7 +50,7 @@ Since the architecture is proven, we can afford to get this right.
 ### Architecture
 
 ```
-termsurf-browser A (headless)         termsurf-browser B (headless)
+chromium-profile-server A (headless)         chromium-profile-server B (headless)
 --session-id=profile-a                --session-id=profile-b
 IOSurface 1600x1200 @ 60fps          IOSurface 1600x1200 @ 60fps
         |                                     |
@@ -68,8 +68,8 @@ IOSurface 1600x1200 @ 60fps          IOSurface 1600x1200 @ 60fps
 
 Two process types:
 
-1. **termsurf-browser** — Headless Chromium embedder. One instance per browser
-   profile. Renders a webpage via the Content API, captures frames with
+1. **chromium-profile-server** — Headless Chromium embedder. One instance per
+   browser profile. Renders a webpage via the Content API, captures frames with
    `FrameSinkVideoCapturer`, sends IOSurface Mach ports to the compositor via
    XPC. No Dock icon, no visible window.
 
@@ -79,7 +79,7 @@ Two process types:
 
 ### XPC protocol
 
-Messages from termsurf-browser to compositor:
+Messages from chromium-profile-server to compositor:
 
 - **`display_surface`** —
   `{ action: "display_surface", session_id: "<id>",
@@ -89,16 +89,21 @@ Messages from termsurf-browser to compositor:
 The compositor maps `session_id` to a pane: `"profile-b"` goes right, everything
 else goes left.
 
-## Part 1: termsurf-browser (Chromium)
+## Part 1: chromium-profile-server (Chromium)
 
 ### Naming
 
-The Chromium embedder is called `termsurf-browser`. This describes its role: it
-is the browser engine backend for TermSurf. Inside the Chromium source tree, the
-directory follows Chromium's underscore convention: `content/termsurf_browser/`.
+The Chromium embedder is called `chromium-profile-server`. This continues the
+"profile server" concept from ts3 (`termsurf-profile`), where each browser
+profile runs in its own process. The `chromium-` prefix distinguishes it from
+future profile server implementations backed by other engines (e.g.,
+`spidermonkey-profile-server`, `webkit-profile-server`).
 
-The build target is `termsurf_browser`. The output app bundle is
-`TermSurf Browser.app`.
+Inside the Chromium source tree, the directory follows Chromium's underscore
+convention: `content/chromium_profile_server/`.
+
+The build target is `chromium_profile_server`. The output app bundle is
+`Chromium Profile Server.app`.
 
 ### Approach: link against content_shell_lib, don't copy it
 
@@ -121,40 +126,41 @@ content_shell_lib.
 ### Files
 
 ```
-chromium/src/content/termsurf_browser/
+chromium/src/content/chromium_profile_server/
 ├── BUILD.gn
-├── termsurf_browser_main.cc          — Entry point
-├── termsurf_browser_main_mac.cc      — macOS entry (framework loading)
-├── termsurf_browser_main_delegate.h  — Subclass ShellMainDelegate
-├── termsurf_browser_main_delegate.cc
-├── termsurf_browser_main_parts.h     — Subclass ShellBrowserMainParts
-├── termsurf_browser_main_parts.cc
-├── termsurf_browser_context.h        — Subclass ShellBrowserContext
-├── termsurf_browser_context.cc
-├── termsurf_video_consumer.h         — FrameSinkVideoCapturer + XPC sender
-├── termsurf_video_consumer.cc
-└── Info.plist                        — LSUIElement = true
+├── profile_server_main.cc          — Entry point
+├── profile_server_main_mac.cc      — macOS entry (framework loading)
+├── profile_server_main_delegate.h  — Subclass ShellMainDelegate
+├── profile_server_main_delegate.cc
+├── profile_server_main_parts.h     — Subclass ShellBrowserMainParts
+├── profile_server_main_parts.cc
+├── profile_server_context.h        — Subclass ShellBrowserContext
+├── profile_server_context.cc
+├── profile_server_video_consumer.h — FrameSinkVideoCapturer + XPC sender
+├── profile_server_video_consumer.cc
+└── Info.plist                       — LSUIElement = true
 ```
 
 ~12 files instead of 218.
 
 ### Key classes
 
-**`TermSurfBrowserMainDelegate`** — Extends `ShellMainDelegate`. Overrides
+**`ProfileServerMainDelegate`** — Extends `ShellMainDelegate`. Overrides
 `CreateContentBrowserClient()` to return our custom browser client that uses
-`TermSurfBrowserMainParts`.
+`ProfileServerMainParts`.
 
-**`TermSurfBrowserMainParts`** — Extends `ShellBrowserMainParts`. Overrides
-browser context creation to use `TermSurfBrowserContext` with the
-`--user-data-dir` path. Wires up `TermSurfVideoConsumer` with proper lifecycle
-hooks (not a hardcoded 2-second delay).
+**`ProfileServerMainParts`** — Extends `ShellBrowserMainParts`. Overrides
+browser context creation to use `ProfileServerContext` with the
+`--user-data-dir` path. Wires up `ProfileServerVideoConsumer` with proper
+lifecycle hooks (not a hardcoded 2-second delay).
 
-**`TermSurfBrowserContext`** — Extends `ShellBrowserContext`. Overrides
+**`ProfileServerContext`** — Extends `ShellBrowserContext`. Overrides
 `GetPath()` to return the `--user-data-dir` path, giving each instance isolated
 cookies, localStorage, and cache.
 
-**`TermSurfVideoConsumer`** — Implements `viz::mojom::FrameSinkVideoConsumer`.
-This is the core of the frame delivery pipeline:
+**`ProfileServerVideoConsumer`** — Implements
+`viz::mojom::FrameSinkVideoConsumer`. This is the core of the frame delivery
+pipeline:
 
 1. Creates a `viz::ClientFrameSinkVideoCapturer` from `HostFrameSinkManager`
 2. Configures: `PIXEL_FORMAT_ARGB`, 16ms min capture period, auto-throttling
@@ -169,9 +175,9 @@ lifecycle management.
 
 ### Dock icon fix: LSUIElement
 
-The Info.plist sets `LSUIElement = true`, making termsurf-browser a background
-app with no Dock icon and no menu bar. This is the standard macOS mechanism for
-helper processes.
+The Info.plist sets `LSUIElement = true`, making chromium-profile-server a
+background app with no Dock icon and no menu bar. This is the standard macOS
+mechanism for helper processes.
 
 The risk is that `LSUIElement` might affect Chromium's compositor visibility
 chain — the same chain that causes 2fps when a `BrowserContext`'s views aren't
@@ -211,16 +217,16 @@ git checkout -b 146.0.7650.0-issue-501 146.0.7650.0
 ```gn
 import("//build/config/features.gni")
 
-source_set("termsurf_browser_lib") {
+source_set("chromium_profile_server_lib") {
   sources = [
-    "termsurf_browser_main_delegate.cc",
-    "termsurf_browser_main_delegate.h",
-    "termsurf_browser_main_parts.cc",
-    "termsurf_browser_main_parts.h",
-    "termsurf_browser_context.cc",
-    "termsurf_browser_context.h",
-    "termsurf_video_consumer.cc",
-    "termsurf_video_consumer.h",
+    "profile_server_main_delegate.cc",
+    "profile_server_main_delegate.h",
+    "profile_server_main_parts.cc",
+    "profile_server_main_parts.h",
+    "profile_server_context.cc",
+    "profile_server_context.h",
+    "profile_server_video_consumer.cc",
+    "profile_server_video_consumer.h",
   ]
 
   deps = [
@@ -232,14 +238,14 @@ source_set("termsurf_browser_lib") {
 }
 
 # macOS app bundle
-mac_app_bundle("termsurf_browser") {
-  output_name = "TermSurf Browser"
+mac_app_bundle("chromium_profile_server") {
+  output_name = "Chromium Profile Server"
   sources = [
-    "termsurf_browser_main.cc",
-    "termsurf_browser_main_mac.cc",
+    "profile_server_main.cc",
+    "profile_server_main_mac.cc",
   ]
   deps = [
-    ":termsurf_browser_lib",
+    ":chromium_profile_server_lib",
     "//content/shell:content_shell_framework",
   ]
   info_plist = "Info.plist"
@@ -252,7 +258,7 @@ Register in root BUILD.gn:
 group("gn_all") {
   deps = [
     ...
-    "//content/termsurf_browser:termsurf_browser",
+    "//content/chromium_profile_server:chromium_profile_server",
   ]
 }
 ```
@@ -262,7 +268,7 @@ group("gn_all") {
 ```bash
 cd chromium/src
 export PATH="$(cd ../depot_tools && pwd):$PATH"
-autoninja -C out/Default termsurf_browser
+autoninja -C out/Default chromium_profile_server
 ```
 
 ## Part 2: Swift compositor (ts5/two-profiles/)
@@ -306,10 +312,10 @@ No functional changes to XPC handling, Metal pipeline, or rendering logic.
 ## Build and run
 
 ```bash
-# 1. Build termsurf-browser (Chromium)
+# 1. Build chromium-profile-server
 cd chromium/src
 export PATH="$(cd ../depot_tools && pwd):$PATH"
-autoninja -C out/Default termsurf_browser
+autoninja -C out/Default chromium_profile_server
 
 # 2. Build compositor (Swift)
 cd ts5/two-profiles
@@ -325,14 +331,14 @@ cd ts4/box-demo && bun run server.ts &
 # 5. Start two profile servers
 cd chromium/src
 
-out/Default/TermSurf\ Browser.app/Contents/MacOS/TermSurf\ Browser \
+out/Default/Chromium\ Profile\ Server.app/Contents/MacOS/Chromium\ Profile\ Server \
   --hidden \
   --xpc-service=com.termsurf.two-profiles \
   --session-id=profile-a \
   --user-data-dir=$HOME/.config/termsurf/poc/profile-a \
   http://localhost:9407 2>&1 &
 
-out/Default/TermSurf\ Browser.app/Contents/MacOS/TermSurf\ Browser \
+out/Default/Chromium\ Profile\ Server.app/Contents/MacOS/Chromium\ Profile\ Server \
   --hidden \
   --xpc-service=com.termsurf.two-profiles \
   --session-id=profile-b \
@@ -346,20 +352,20 @@ out/Default/TermSurf\ Browser.app/Contents/MacOS/TermSurf\ Browser \
 - Different localStorage identity in each pane (profile isolation)
 - Both at 60fps sustained for 60+ seconds
 - Pixel-perfect Retina quality (1600x1200 IOSurface, sRGB)
-- No Dock icon for termsurf-browser processes
+- No Dock icon for chromium-profile-server processes
 - Pure Swift compositor, builds with `make`
 - Chromium embedder is ~12 files linking against content_shell_lib (not a copy)
 
 ## Experiments
 
-### Experiment 1: Build termsurf-browser
+### Experiment 1: Build chromium-profile-server
 
 #### Hypothesis
 
-A minimal Chromium target at `content/termsurf_browser/` that links against
-`content_shell_lib` and subclasses only what's needed (~12 files) will produce a
-working headless browser that captures frames and sends IOSurface Mach ports via
-XPC at 60fps — without a Dock icon.
+A minimal Chromium target at `content/chromium_profile_server/` that links
+against `content_shell_lib` and subclasses only what's needed (~12 files) will
+produce a working headless browser that captures frames and sends IOSurface Mach
+ports via XPC at 60fps — without a Dock icon.
 
 #### Steps
 
@@ -372,29 +378,29 @@ git checkout -b 146.0.7650.0-issue-501 146.0.7650.0
 
 ##### Step 2: Create directory and BUILD.gn
 
-Create `content/termsurf_browser/` with the BUILD.gn from the design above.
-Register the target in the root BUILD.gn.
+Create `content/chromium_profile_server/` with the BUILD.gn from the design
+above. Register the target in the root BUILD.gn.
 
 ##### Step 3: Write the entry points
 
-- `termsurf_browser_main.cc` — Calls `content::ContentMain()` with our delegate
-- `termsurf_browser_main_mac.cc` — macOS framework loading (same pattern as
+- `profile_server_main.cc` — Calls `content::ContentMain()` with our delegate
+- `profile_server_main_mac.cc` — macOS framework loading (same pattern as
   content_shell)
 
 ##### Step 4: Write the delegate classes
 
-- `TermSurfBrowserMainDelegate` — Extends `ShellMainDelegate`, overrides
+- `ProfileServerMainDelegate` — Extends `ShellMainDelegate`, overrides
   `CreateContentBrowserClient()` to return our browser client
-- `TermSurfBrowserMainParts` — Extends `ShellBrowserMainParts`, overrides
-  browser context creation, wires up `TermSurfVideoConsumer`
-- `TermSurfBrowserContext` — Extends `ShellBrowserContext`, overrides
-  `GetPath()` for `--user-data-dir`
+- `ProfileServerMainParts` — Extends `ShellBrowserMainParts`, overrides browser
+  context creation, wires up `ProfileServerVideoConsumer`
+- `ProfileServerContext` — Extends `ShellBrowserContext`, overrides `GetPath()`
+  for `--user-data-dir`
 
 ##### Step 5: Write the video consumer
 
-Port `ShellVideoConsumer` from the One Profile app as `TermSurfVideoConsumer`.
-Same `FrameSinkVideoCapturer` + XPC pipeline, but with proper lifecycle
-management instead of a hardcoded delay.
+Port `ShellVideoConsumer` from the One Profile app as
+`ProfileServerVideoConsumer`. Same `FrameSinkVideoCapturer` + XPC pipeline, but
+with proper lifecycle management instead of a hardcoded delay.
 
 ##### Step 6: Create Info.plist with LSUIElement
 
@@ -414,7 +420,7 @@ management instead of a hardcoded delay.
 ##### Step 7: Build and test
 
 ```bash
-autoninja -C out/Default termsurf_browser
+autoninja -C out/Default chromium_profile_server
 ```
 
 Test with the existing ts4/two-profiles-swift receiver to verify frames arrive
@@ -447,6 +453,6 @@ make
 
 ##### Step 3: End-to-end test
 
-Load the launchd plist, start the test page server, launch two termsurf-browser
-instances (from Experiment 1), and verify two panes at 60fps with different
-localStorage identities.
+Load the launchd plist, start the test page server, launch two
+chromium-profile-server instances (from Experiment 1), and verify two panes at
+60fps with different localStorage identities.
