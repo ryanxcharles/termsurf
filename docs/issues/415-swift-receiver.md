@@ -294,7 +294,8 @@ the same work. There are five independent unknowns:
    `xpc_dictionary_copy_mach_send()`, `xpc_get_type()` comparisons
 2. **IOSurface reconstruction** — `IOSurfaceLookupFromMachPort()` returning
    `IOSurfaceRef?` in Swift, `mach_task_self_` instead of `mach_task_self()`
-3. **Metal texture from IOSurface** — `device.makeTexture(descriptor:iosurface:plane:)`
+3. **Metal texture from IOSurface** —
+   `device.makeTexture(descriptor:iosurface:plane:)`
 4. **CADisplayLink** — replaces the deprecated `CVDisplayLink` from Issue 414
 5. **SPM Metal shader compilation** — `.metal` files in `Sources/` must be
    compiled automatically by `swift build`
@@ -363,15 +364,16 @@ layout described in the issue design (AppDelegate, XPCListener, Renderer).
    `.regular`, create an 800x600 window (one pane). Set up `CAMetalLayer` on the
    content view with `.bgra8Unorm_sRGB`, `contentsScale` = backing scale factor.
 
-4. **Metal pipeline** — Create device, command queue, render pipeline with
-   sRGB pixel format. Load the shader library from the SPM build output. SPM
-   places compiled Metal libraries in the bundle or alongside the binary — the
-   exact path may need discovery (try `Bundle.main`, then fall back to
+4. **Metal pipeline** — Create device, command queue, render pipeline with sRGB
+   pixel format. Load the shader library from the SPM build output. SPM places
+   compiled Metal libraries in the bundle or alongside the binary — the exact
+   path may need discovery (try `Bundle.main`, then fall back to
    executable-relative path).
 
-5. **CADisplayLink** — Create via `NSScreen.main!.displayLink(target:selector:)`.
-   Add to `RunLoop.main` with `.common` mode. On each tick, grab the latest
-   IOSurface, create a Metal texture, draw the fullscreen quad.
+5. **CADisplayLink** — Create via
+   `NSScreen.main!.displayLink(target:selector:)`. Add to `RunLoop.main` with
+   `.common` mode. On each tick, grab the latest IOSurface, create a Metal
+   texture, draw the fullscreen quad.
 
 6. **FPS logging** — Count frames per second, log to stderr with IOSurface
    dimensions. Same format as Issue 414.
@@ -403,6 +405,7 @@ xpc_connection_resume(listener)
 ```
 
 Key Swift-isms to watch:
+
 - `XPC_CONNECTION_MACH_SERVICE_LISTENER` may need casting to `UInt64`
 - `xpc_get_type()` comparison with `XPC_TYPE_CONNECTION` — these are global
   constants, should be available via bridging
@@ -509,8 +512,8 @@ out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
 #### Result: PASSED
 
 All five Swift-specific unknowns resolved. The Swift receiver renders a single
-pane at 60fps with pixel-perfect Retina quality, using `CADisplayLink` and the
-C XPC API.
+pane at 60fps with pixel-perfect Retina quality, using `CADisplayLink` and the C
+XPC API.
 
 **Logs (excerpt):**
 
@@ -536,7 +539,8 @@ C XPC API.
    `srgb`), not `.bgra8Unorm_sRGB` as in Objective-C.
 
 3. **Texture usage.** `MTLTextureUsage.shaderRead` requires the explicit type
-   prefix — Swift cannot infer the type from `.shaderRead` alone in this context.
+   prefix — Swift cannot infer the type from `.shaderRead` alone in this
+   context.
 
 4. **SPM does not compile `.metal` files.** SPM warns about unhandled `.metal`
    files and does not compile them. Fix: exclude from the target in
@@ -545,19 +549,160 @@ C XPC API.
 
 5. **XPC C API bridges cleanly.** `xpc_connection_create_mach_service()`,
    `xpc_get_type()`, `xpc_dictionary_copy_mach_send()`, and the
-   `XPC_TYPE_CONNECTION` / `XPC_TYPE_DICTIONARY` / `XPC_TYPE_ERROR` constants all
-   work without issues. `XPC_CONNECTION_MACH_SERVICE_LISTENER` accepts
+   `XPC_TYPE_CONNECTION` / `XPC_TYPE_DICTIONARY` / `XPC_TYPE_ERROR` constants
+   all work without issues. `XPC_CONNECTION_MACH_SERVICE_LISTENER` accepts
    `UInt64()` cast.
 
 6. **CADisplayLink works at 60fps.** Created via
    `window.screen!.displayLink(target:selector:)`, added to `.main` run loop
-   with `.common` mode. Fires on the main thread, simplifying Metal state access.
+   with `.common` mode. Fires on the main thread, simplifying Metal state
+   access.
 
 7. **`mach_task_self_` works.** The global variable replaces the C macro
    `mach_task_self()` as expected.
 
-8. **IOSurfaceLookupFromMachPort bridges automatically.** Returns `IOSurfaceRef?`
-   (ARC-managed), no C shim needed. Pure Swift throughout.
+8. **IOSurfaceLookupFromMachPort bridges automatically.** Returns
+   `IOSurfaceRef?` (ARC-managed), no C shim needed. Pure Swift throughout.
+
+### Experiment 2: Two-pane Swift receiver
+
+#### Hypothesis
+
+Adding a second pane to the Swift receiver is mechanical — no new unknowns.
+The same XPC, IOSurface, and Metal patterns from Experiment 1 extend to two
+panes with viewport-based compositing. If this works, Issue 415 is complete:
+the Swift receiver matches Issue 414 Experiment 7 in every way.
+
+#### Design
+
+Modify `main.swift` to support two simultaneous profile servers, identical to
+Issue 414 Experiment 7's Objective-C++ receiver. The changes are:
+
+##### 1. Pane enum and two IOSurface slots
+
+Replace the single `gPendingSurface` / `gCurrentTexture` with arrays indexed by
+pane:
+
+```swift
+enum Pane: Int {
+    case left = 0
+    case right = 1
+    static let count = 2
+}
+
+var gPendingSurface: [IOSurfaceRef?] = [nil, nil]
+var gCurrentTexture: [MTLTexture?] = [nil, nil]
+var gFrameCount: [Int] = [0, 0]
+```
+
+##### 2. Session ID → pane mapping
+
+Map `session_id` from the XPC message to a pane index. Same logic as Issue 414:
+
+```swift
+func paneForSession(_ sessionId: String?) -> Pane {
+    if sessionId == "profile-b" { return .right }
+    return .left
+}
+```
+
+In `handleMessage`, extract `session_id` and route the IOSurface to the
+correct slot.
+
+##### 3. Multiple peer connections
+
+Replace `gPeer: xpc_connection_t?` with an array:
+
+```swift
+var gPeers: [xpc_connection_t] = []
+```
+
+Each incoming connection is appended to the array (strong reference prevents ARC
+release). The event handler for each peer is identical — `handleMessage` routes
+by `session_id`, not by connection.
+
+##### 4. Window size: 1600x600
+
+Two 800x600 panes side by side:
+
+```swift
+let frame = NSRect(x: 100, y: 100, width: 1600, height: 600)
+```
+
+##### 5. Two-viewport rendering
+
+In `render()`, draw two viewports like Issue 414 Experiment 7:
+
+```swift
+let halfW = drawableW / 2.0
+
+// Left pane
+if let tex = gCurrentTexture[Pane.left.rawValue] {
+    let vp = MTLViewport(originX: 0, originY: 0,
+                         width: halfW, height: drawableH,
+                         znear: 0, zfar: 1)
+    encoder.setViewport(vp)
+    encoder.setFragmentTexture(tex, index: 0)
+    encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+}
+
+// Right pane
+if let tex = gCurrentTexture[Pane.right.rawValue] {
+    let vp = MTLViewport(originX: halfW, originY: 0,
+                         width: halfW, height: drawableH,
+                         znear: 0, zfar: 1)
+    encoder.setViewport(vp)
+    encoder.setFragmentTexture(tex, index: 0)
+    encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+}
+```
+
+##### 6. Per-pane FPS logging
+
+Log both pane frame counts on a single line, same format as Issue 414:
+
+```
+[Receiver] L: 60 (60.0 fps) R: 61 (60.0 fps) | IOSurface 1600x1200
+```
+
+#### Build and run
+
+```bash
+# Rebuild
+cd ts4/two-profiles-swift
+swift build
+# Shader metallib is already compiled from Experiment 1
+
+# Reload launchd plist (unload first to pick up new binary)
+launchctl unload ~/dev/termsurf/ts4/two-profiles-swift/com.termsurf.two-profiles-swift.plist
+launchctl load ~/dev/termsurf/ts4/two-profiles-swift/com.termsurf.two-profiles-swift.plist
+
+# Start TWO profile servers
+cd ~/dev/termsurf/ts4/termsurf-chromium/src
+
+out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+  --hidden \
+  --xpc-service=com.termsurf.two-profiles-swift \
+  --session-id=profile-a \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-a \
+  http://localhost:9407 2>&1 &
+
+out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+  --hidden \
+  --xpc-service=com.termsurf.two-profiles-swift \
+  --session-id=profile-b \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-b \
+  http://localhost:9407 2>&1 &
+```
+
+#### Success criteria
+
+- Two panes in one window, each showing the spinning blue square
+- Different localStorage identity in each pane (profile isolation)
+- Both at 60fps sustained for 60+ seconds
+- Pixel-perfect Retina quality (1600x1200 IOSurface, sRGB, 1:1 mapping)
+- Receiver is pure Swift, builds with `swift build`
+- Matches Issue 414 Experiment 7 output exactly
 
 ## What this unlocks
 
