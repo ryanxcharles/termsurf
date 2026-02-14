@@ -429,3 +429,17 @@ icon for now.
 
 Success. Removed all four icon additions from experiment 1. Build passes and
 `TermSurf.app` is produced. The app uses the upstream Ghostty icon for now.
+
+## Conclusion
+
+The high-impact rename is complete. The app builds as `TermSurf.app`, the menu
+bar reads "TermSurf", CLI output says `termsurf`, config loads from
+`~/.config/termsurf/`, and the About view links to the TermSurf GitHub repo.
+
+Internal identifiers (`GhosttyKit.xcframework`, `Ghostty.*` Swift namespaces,
+`ghostty_config_*` C API, `Ghostty.xcodeproj`) remain unchanged to minimize
+upstream merge conflicts.
+
+The icon still uses upstream Ghostty's Icon Composer format. A proper icon
+replacement will need to work with the `.icon` format and the debug-build
+runtime override — left for a future issue.
