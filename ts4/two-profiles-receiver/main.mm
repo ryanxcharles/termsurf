@@ -99,6 +99,14 @@ static void setup_metal(NSView *view) {
     g_metal_layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     g_metal_layer.framebufferOnly = NO;
     g_metal_layer.displaySyncEnabled = YES;
+
+    // Render at Retina resolution (2x on HiDPI screens).
+    CGFloat scale = [[NSScreen mainScreen] backingScaleFactor];
+    g_metal_layer.contentsScale = scale;
+    CGSize viewSize = view.bounds.size;
+    g_metal_layer.drawableSize = CGSizeMake(
+        viewSize.width * scale, viewSize.height * scale);
+
     [view setWantsLayer:YES];
     [view setLayer:g_metal_layer];
 

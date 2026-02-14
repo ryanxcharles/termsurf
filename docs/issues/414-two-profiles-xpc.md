@@ -1708,3 +1708,105 @@ Receiver:        IOSurface 1280x720  (was 640x360)
 - **< 60fps:** Capturing at 2x resolution (4x the pixel count) may increase
   GPU load. Check if the profile server maintains 60fps at 1280x720. If not,
   try `SetAutoThrottlingEnabled(true)` or reduce the window size.
+
+#### Result: FAILED
+
+The `SetResolutionConstraints()` fix worked — IOSurfaces are now 1600x1200
+physical pixels (800x600 logical × 2x Retina), up from 640x360. The receiver's
+`contentsScale` fix also took effect. Both processes sustain 60fps. However, the
+rendered output is still visibly blurry compared to Chrome rendering the same
+page directly.
+
+Receiver log:
+
+```
+[Receiver] Listening on com.termsurf.two-profiles...
+[Receiver] Profile server connected
+[Receiver] Window and Metal pipeline ready
+[Receiver] 74 frames in 1.01s (73.0 fps) | IOSurface 1600x1200
+[Receiver] 61 frames in 1.01s (60.2 fps) | IOSurface 1600x1200
+[Receiver] 60 frames in 1.00s (60.0 fps) | IOSurface 1600x1200
+```
+
+Profile server log:
+
+```
+[ShellVideoConsumer] Connected to XPC service: com.termsurf.two-profiles
+[ShellVideoConsumer] Attached to FrameSinkId FrameSinkId(5, 3), starting capture
+[ShellVideoConsumer] 61 frames in 1.01142s (60.3114 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 61 frames in 1.01692s (59.985 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 61 frames in 1.01666s (60.0002 fps) | IOSurface 1600x1200
+```
+
+#### Conclusion
+
+**What improved:**
+
+- **IOSurface resolution doubled.** From 640x360 to 1600x1200 (4x the pixel
+  count). `SetResolutionConstraints()` with physical pixel dimensions works as
+  expected.
+- **Receiver renders at Retina scale.** `contentsScale = 2.0` and `drawableSize`
+  set to physical pixels. Metal is producing a 2x drawable.
+- **60fps maintained.** No performance impact from 4x the pixel count.
+
+**What failed:**
+
+- **Still blurry compared to Chrome.** Side-by-side comparison with Chrome
+  rendering the same page shows visibly softer text and edges in the receiver
+  window.
+- **Texture scales with window resize.** Resizing the receiver window stretches
+  the texture instead of requesting new content at the correct size. No dynamic
+  resize handling exists.
+
+**Root cause analysis:**
+
+Two problems remain:
+
+1. **Size mismatch between source and receiver.** The sender's Content Shell
+   window is 800x600 logical (1600x1200 physical), but the receiver window is
+   640x360 logical (1280x720 physical). The 1600x1200 IOSurface is being
+   sampled and rendered into a 1280x720 drawable — a non-integer downscale that
+   introduces bilinear filtering blur. For pixel-perfect rendering, the source
+   and destination must be the same size (1:1 pixel mapping).
+
+2. **No resize coordination.** The receiver window size is hardcoded at creation.
+   There's no mechanism to tell the sender what resolution to capture at, or to
+   update the receiver's drawable when the window is resized. In the target
+   architecture, the GUI sends resize messages to the profile server, which
+   adjusts its `WebContents` size accordingly.
+
+3. **Possible additional issues:**
+   - The `CopyOutputRequest` in `FrameSinkVideoCapturer` may introduce subtle
+     quality loss compared to Chrome's direct `CALayer` presentation path.
+   - sRGB handling: the IOSurface may be sRGB-encoded but the Metal texture
+     descriptor specifies `MTLPixelFormatBGRA8Unorm` (linear), potentially
+     causing subtle color/contrast differences that make text appear softer.
+   - The sampler uses bilinear filtering (`MTLSamplerMinMagFilterLinear`), which
+     blurs when source and destination sizes don't match exactly.
+
+**What we learned:**
+
+1. `SetResolutionConstraints()` is the correct way to get Retina-resolution
+   IOSurfaces from `FrameSinkVideoCapturer`. Without it, the capturer defaults
+   to DIP (logical pixel) resolution.
+2. `CAMetalLayer.contentsScale` must be set to `backingScaleFactor` for Retina
+   rendering. The default of 1.0 causes upscaling blur.
+3. Pixel-perfect rendering requires 1:1 size matching between the source
+   IOSurface and the receiver drawable. Any scaling — even downscaling — causes
+   visible blur from bilinear filtering.
+
+**Fixes for the next attempt:**
+
+1. **Match sizes.** Set the receiver window to the same logical size as the
+   sender's Content Shell window (800x600), or set the sender's window size to
+   match the receiver (640x360). The IOSurface dimensions and drawable dimensions
+   must be identical.
+2. **Try nearest-neighbor sampling.** Use `MTLSamplerMinMagFilterNearest` instead
+   of linear to see if the blur is purely from the size mismatch (nearest won't
+   blur but will show aliasing if sizes differ).
+3. **Try sRGB texture format.** Use `MTLPixelFormatBGRA8Unorm_sRGB` for the
+   Metal texture created from the IOSurface. This was the exact fix for the
+   cef-test sRGB double-correction bug.
+4. **Add resize coordination.** When the receiver window resizes, send the new
+   dimensions to the sender, which adjusts its `WebContents` size and capturer
+   resolution constraints accordingly.
