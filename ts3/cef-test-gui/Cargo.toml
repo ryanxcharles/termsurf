@@ -16,7 +16,7 @@ pollster = "0.4"
 bytemuck.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-cef = { path = "../../cef-rs/cef", features = ["accelerated_osr"] }
+cef = { path = "../../vendor/cef-rs/cef", features = ["accelerated_osr"] }
 metal = "0.33"
 objc.workspace = true
 io-surface = "0.16"

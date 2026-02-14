@@ -37,7 +37,7 @@ The project has evolved through four generations:
 - `ts3/` — TermSurf 3.0 (WezTerm fork + out-of-process CEF). Superseded.
 - `ts2/` — TermSurf 2.0 (WezTerm fork + in-process CEF). Superseded.
 - `ts1/` — TermSurf 1.x (Ghostty fork + WKWebView). Legacy, still builds.
-- `cef-rs/` — CEF Rust bindings. Used by `ts3/termsurf-profile/`.
+- `vendor/cef-rs/` — CEF Rust bindings. Used by `ts3/termsurf-profile/`.
 - `docs/issues/` — All documentation across all generations.
 
 ## TermSurf 4.0 (ts4/) — Active Development
@@ -345,7 +345,7 @@ Uses WKWebView (Apple's WebKit) with console message capture, Safari Web
 Inspector support, session isolation via WKWebsiteDataStore, and an optional
 JavaScript API (`--js-api` flag).
 
-## cef-rs
+## cef-rs (`vendor/cef-rs/`)
 
 Third-party CEF (Chromium Embedded Framework) Rust bindings, imported and
 modified for TermSurf. Used by `ts3/termsurf-profile/` for off-screen browser
@@ -353,17 +353,17 @@ rendering.
 
 ### TermSurf Modifications to the Library
 
-These are changes to `cef-rs/cef/src/` (the library itself, not examples):
+These are changes to `vendor/cef-rs/cef/src/` (the library itself, not examples):
 
 1. **IOSurface Metal API crash fix** — The original code used
    `std::mem::transmute` to cast raw pointers to Metal API references, causing
    memory corruption. Replaced with properly typed references via the `objc`
-   crate. (`cef-rs/cef/src/osr_texture_import/iosurface.rs`)
+   crate. (`vendor/cef-rs/cef/src/osr_texture_import/iosurface.rs`)
 
 2. **sRGB double-correction fix** — CEF outputs sRGB pixel data, but the texture
    pipeline applied gamma correction a second time, washing out all colors.
    Fixed by declaring the correct sRGB format on texture views.
-   (`cef-rs/cef/src/osr_texture_import/common.rs`, `iosurface.rs`)
+   (`vendor/cef-rs/cef/src/osr_texture_import/common.rs`, `iosurface.rs`)
 
 3. **IOSurface IPC module (failed experiment)** — Added `iosurface_ipc.rs` to
    share IOSurface across processes via IOSurface IDs. This failed because
@@ -377,7 +377,7 @@ These are changes to `cef-rs/cef/src/` (the library itself, not examples):
 
 ### OSR Example Validation
 
-The OSR (off-screen rendering) example in `cef-rs/examples/osr/` was used as a
+The OSR (off-screen rendering) example in `vendor/cef-rs/examples/osr/` was used as a
 testbed before ts1 integration. Changes made to the example:
 
 | Feature                    | Status     | Notes                                       |
@@ -393,11 +393,11 @@ testbed before ts1 integration. Changes made to the example:
 
 ### Commands
 
-- **Build:** `cd cef-rs && cargo build`
-- **Build OSR example:** `cd cef-rs && cargo build -p cef-osr`
+- **Build:** `cd vendor/cef-rs && cargo build`
+- **Build OSR example:** `cd vendor/cef-rs && cargo build -p cef-osr`
 - **Bundle and run (macOS):**
   ```bash
-  cd cef-rs
+  cd vendor/cef-rs
   cargo build -p cef-osr
   cargo run -p bundle-cef-app -- cef-osr -o cef-osr.app
   ./cef-osr.app/Contents/MacOS/cef-osr
@@ -405,16 +405,16 @@ testbed before ts1 integration. Changes made to the example:
 
 ### Key Files
 
-- `cef-rs/cef/` — Main CEF wrapper crate
-- `cef-rs/cef/src/osr_texture_import/` — Texture import (IOSurface on macOS,
+- `vendor/cef-rs/cef/` — Main CEF wrapper crate
+- `vendor/cef-rs/cef/src/osr_texture_import/` — Texture import (IOSurface on macOS,
   DMA-BUF on Linux, D3D11 on Windows)
-- `cef-rs/cef/src/osr_texture_import/iosurface.rs` — IOSurface import + Mach
+- `vendor/cef-rs/cef/src/osr_texture_import/iosurface.rs` — IOSurface import + Mach
   port creation/lookup (modified for TermSurf)
-- `cef-rs/cef/src/osr_texture_import/common.rs` — Shared texture handling
+- `vendor/cef-rs/cef/src/osr_texture_import/common.rs` — Shared texture handling
   (modified for sRGB fix)
-- `cef-rs/examples/osr/` — Off-screen rendering example (validation testbed)
-- `cef-rs/sys/` — Low-level CEF C API bindings (unmodified)
-- `cef-rs/update-bindings/` — Tool to regenerate bindings from CEF headers
+- `vendor/cef-rs/examples/osr/` — Off-screen rendering example (validation testbed)
+- `vendor/cef-rs/sys/` — Low-level CEF C API bindings (unmodified)
+- `vendor/cef-rs/update-bindings/` — Tool to regenerate bindings from CEF headers
 
 ### Notes
 

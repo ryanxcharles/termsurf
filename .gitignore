@@ -39,12 +39,12 @@ ts1/Box_test_diff.ppm
 ts1/ghostty.qcow2
 ts1/vgcore.*
 
-# Analysis repos (not part of TermSurf)
-/wezterm/
-/electron/
-/alacritty/
-/cef/
-/chromium/
+# Vendored analysis repos (not committed)
+vendor/wezterm/
+vendor/electron/
+vendor/alacritty/
+vendor/cef/
+vendor/chromium/
 
 # Chromium build workspace (gitignored; src/ requires directory named "src")
 /termsurf-chromium/
@@ -59,4 +59,4 @@ ts4/two-profiles-receiver/receiver
 ts4/two-profiles-receiver/shaders.metallib
 
 # cef-rs build outputs
-cef-rs/target/
+vendor/cef-rs/target/

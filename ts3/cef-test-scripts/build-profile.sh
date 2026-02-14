@@ -11,7 +11,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TS3_DIR="$(dirname "$SCRIPT_DIR")"
-CEF_RS_DIR="$(dirname "$TS3_DIR")/cef-rs"
+CEF_RS_DIR="$(dirname "$TS3_DIR")/vendor/cef-rs"
 
 # 1. Ensure cef-osr.app exists (provides CEF framework and helper processes)
 if [ ! -d "$CEF_RS_DIR/cef-osr.app" ]; then

@@ -14,5 +14,5 @@ termsurf-xpc = { path = "../termsurf-xpc" }
 clap = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-cef = { path = "../../cef-rs/cef", features = ["accelerated_osr"] }
+cef = { path = "../../vendor/cef-rs/cef", features = ["accelerated_osr"] }
 ctrlc = "3.4"

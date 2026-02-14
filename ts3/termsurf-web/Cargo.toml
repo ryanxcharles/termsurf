@@ -15,6 +15,6 @@ uuid = { workspace = true, features = ["v4"] }
 ctrlc = "3.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-cef = { path = "../../cef-rs/cef", features = ["accelerated_osr"] }
+cef = { path = "../../vendor/cef-rs/cef", features = ["accelerated_osr"] }
 wgpu = { workspace = true }
 pollster = "0.4"

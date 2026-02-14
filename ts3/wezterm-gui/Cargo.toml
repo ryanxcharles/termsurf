@@ -39,7 +39,7 @@ bitflags.workspace = true
 bytemuck.workspace = true
 chrono.workspace = true
 clap.workspace = true
-cef = { path = "../../cef-rs/cef" }
+cef = { path = "../../vendor/cef-rs/cef" }
 codec.workspace = true
 colorgrad.workspace = true
 config.workspace = true
@@ -109,7 +109,7 @@ window-funcs.workspace = true
 window.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-cef = { path = "../../cef-rs/cef", features = ["accelerated_osr"] }
+cef = { path = "../../vendor/cef-rs/cef", features = ["accelerated_osr"] }
 termsurf-xpc = { path = "../termsurf-xpc" }
 
 [target.'cfg(windows)'.dependencies]

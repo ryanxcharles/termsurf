@@ -13,7 +13,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
-CEF_RS_DIR="$(dirname "$REPO_DIR")/cef-rs"
+CEF_RS_DIR="$(dirname "$REPO_DIR")/vendor/cef-rs"
 
 # Parse flags
 CLEAN=false
