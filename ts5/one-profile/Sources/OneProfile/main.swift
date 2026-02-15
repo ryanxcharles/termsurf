@@ -1,6 +1,6 @@
 // Copyright 2025 TermSurf
 // Swift Metal receiver: receives IOSurface Mach ports via XPC and renders them.
-// Part of Issue 503 Experiment 1: single-pane one-profile compositor.
+// Part of Issue 503 Experiment 4: single-pane one-profile with dynamic tab protocol.
 
 import Cocoa
 import Metal
@@ -11,6 +11,8 @@ import IOSurface
 
 var gListener: xpc_connection_t?
 var gPeers: [xpc_connection_t] = []
+var gControlConnection: xpc_connection_t?
+var gTabConnection: xpc_connection_t?
 
 // MARK: - Shared state between XPC queue and main thread
 
@@ -30,7 +32,7 @@ var gCurrentTexture: MTLTexture?
 
 // MARK: - XPC message handler
 
-func handleMessage(_ msg: xpc_object_t) {
+func handleMessage(_ msg: xpc_object_t, peer: xpc_connection_t) {
     guard let action = xpc_dictionary_get_string(msg, "action") else { return }
     let actionStr = String(cString: action)
 
@@ -72,9 +74,23 @@ func handleMessage(_ msg: xpc_object_t) {
             gLastLogTime = now
         }
     } else if actionStr == "register" {
-        let sessionId = xpc_dictionary_get_string(msg, "session_id")
-        let sid = sessionId != nil ? String(cString: sessionId!) : "(no session_id)"
-        fputs("[OneProfile] Profile server registered: \(sid)\n", stderr)
+        gControlConnection = peer
+        let profile = xpc_dictionary_get_string(msg, "profile")
+        let profileStr = profile != nil ? String(cString: profile!) : "(unknown)"
+        fputs("[OneProfile] Profile server registered: \(profileStr)\n", stderr)
+
+        // Send create_tab command back on the control connection.
+        let reply = xpc_dictionary_create(nil, nil, 0)
+        xpc_dictionary_set_string(reply, "action", "create_tab")
+        xpc_dictionary_set_string(reply, "url", "http://localhost:9407")
+        xpc_dictionary_set_string(reply, "tab_id", "main")
+        xpc_connection_send_message(peer, reply)
+        fputs("[OneProfile] Sent create_tab (tab_id=main)\n", stderr)
+    } else if actionStr == "tab_ready" {
+        gTabConnection = peer
+        let tabId = xpc_dictionary_get_string(msg, "tab_id")
+        let tid = tabId != nil ? String(cString: tabId!) : "(unknown)"
+        fputs("[OneProfile] Tab ready: \(tid)\n", stderr)
     }
 }
 
@@ -97,7 +113,7 @@ func startXPCListener() {
 
             xpc_connection_set_event_handler(peerConn) { event in
                 if xpc_get_type(event) == XPC_TYPE_DICTIONARY {
-                    handleMessage(event)
+                    handleMessage(event, peer: peerConn)
                 } else if xpc_get_type(event) == XPC_TYPE_ERROR {
                     if event === XPC_ERROR_CONNECTION_INVALID {
                         fputs("[OneProfile] Connection closed\n", stderr)

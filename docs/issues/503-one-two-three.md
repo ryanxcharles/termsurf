@@ -964,3 +964,24 @@ out/Default/Chromium\ Profile\ Server.app/Contents/MacOS/Chromium\ Profile\ Serv
    Profile server opens a tab connection, sends `tab_ready`, starts streaming.
 3. Compositor window shows the spinning blue square at ~60fps.
 4. No Dock icon for the Chromium Profile Server process.
+
+#### Result
+
+All pass criteria met:
+
+1. `make` builds clean (0.77s).
+2. Full protocol handshake works:
+   - Profile server connects, sends `register` as `profile-a`
+   - Compositor sends `create_tab` with `url=http://localhost:9407`,
+     `tab_id=main`
+   - Profile server creates tab, opens tab connection, sends `tab_ready`
+   - Frames stream on the tab connection
+3. Compositor window renders spinning blue square at ~60fps (59–61fps observed).
+4. Profile server runs headless with `--hidden`, no Dock icon.
+
+#### Conclusion
+
+One-profile compositor updated to the dynamic tab protocol with minimal changes
+(~15 lines modified). The protocol is backwards-compatible in the sense that the
+same Chromium Profile Server binary works with both one-profile and
+three-profiles compositors — the compositor decides how many tabs to create.
