@@ -620,3 +620,76 @@ Change the viewport `Paragraph` style from `Color::DarkGray` to `Color::Reset`.
 #### Result
 
 Builds with no warnings. Ready for interactive testing.
+
+### Experiment 11: Tokyo Night theme
+
+#### Goal
+
+Replace all `Color::Reset` and ANSI named colors with explicit RGB values from
+the [Tokyo Night](https://github.com/enkia/tokyo-night-vscode-theme) palette.
+This gives `web` a guaranteed visual identity regardless of the user's terminal
+theme. Every element — background, foreground, borders, text — is explicitly
+colored.
+
+Future experiments can add theme switching (Tokyo Night Light, Catppuccin,
+etc.), but for now we hardcode a single dark theme.
+
+#### Palette
+
+Tokyo Night (dark variant) colors used:
+
+| Role          | Color   | Hex       |
+| ------------- | ------- | --------- |
+| Background    | bg      | `#1a1b26` |
+| Foreground    | fg      | `#c0caf5` |
+| Comment/muted | comment | `#565f89` |
+| Active accent | cyan    | `#7dcfff` |
+| Border subtle | border  | `#3b4261` |
+
+#### Changes
+
+##### `web/src/main.rs`
+
+**Add color constants** at the top of the file:
+
+```rust
+const BG: Color = Color::Rgb(0x1a, 0x1b, 0x26);
+const FG: Color = Color::Rgb(0xc0, 0xca, 0xf5);
+const COMMENT: Color = Color::Rgb(0x56, 0x5f, 0x89);
+const CYAN: Color = Color::Rgb(0x7d, 0xcf, 0xff);
+const BORDER: Color = Color::Rgb(0x3b, 0x42, 0x61);
+```
+
+**Paint the full background:** Before rendering any widgets, render a `Block`
+with `BG` background over the entire `frame.area()`. This ensures no terminal
+default colors bleed through.
+
+**URL bar:**
+
+- Text: `FG`.
+- Active border/title (control mode): `CYAN`.
+- Inactive border/title (browse mode): `BORDER`.
+- Block background: `BG`.
+
+**Viewport:**
+
+- Coordinate text: `COMMENT` (debug info, visually subordinate).
+- Active border/title (browse mode): `CYAN`.
+- Inactive border/title (control mode): `BORDER`.
+- Block background: `BG`.
+
+**Status bar:**
+
+- Key hints: `COMMENT`.
+- Mode label: `FG`.
+
+#### Pass Criteria
+
+1. The entire TUI has a dark blue-gray background (`#1a1b26`), regardless of the
+   terminal's own theme.
+2. Active borders are cyan (`#7dcfff`).
+3. Inactive borders are a subtle gray-blue (`#3b4261`).
+4. URL text is bright (`#c0caf5`).
+5. Status bar hints are muted (`#565f89`), mode label is bright (`#c0caf5`).
+6. Viewport coordinates use the muted comment color.
+7. No terminal default colors bleed through anywhere.
