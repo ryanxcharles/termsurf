@@ -279,3 +279,7 @@ bar frame.
 2. Status bar text is clearly readable.
 3. Viewport placeholder text remains dim (it's temporary).
 4. URL text is the brightest element in the chrome (default foreground).
+
+#### Result
+
+Builds with no warnings. Ready for visual inspection.

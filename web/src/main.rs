@@ -52,8 +52,13 @@ fn ui(frame: &mut Frame, url: &str) {
     .split(frame.area());
 
     // URL bar.
-    let url_bar = Paragraph::new(url)
-        .block(Block::default().borders(Borders::ALL).title(" URL "));
+    let url_bar = Paragraph::new(url).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" URL ")
+            .border_style(Style::default().fg(Color::Gray))
+            .title_style(Style::default().fg(Color::Gray)),
+    );
     frame.render_widget(url_bar, layout[0]);
 
     // Viewport.
@@ -64,12 +69,14 @@ fn ui(frame: &mut Frame, url: &str) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Viewport "),
+                .title(" Viewport ")
+                .border_style(Style::default().fg(Color::Gray))
+                .title_style(Style::default().fg(Color::Gray)),
         );
     frame.render_widget(viewport, layout[1]);
 
     // Status bar.
     let status = Paragraph::new("[q] quit")
-        .style(Style::default().fg(Color::DarkGray));
+        .style(Style::default().fg(Color::Gray));
     frame.render_widget(status, layout[2]);
 }
