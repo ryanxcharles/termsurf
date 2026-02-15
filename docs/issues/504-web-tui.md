@@ -901,3 +901,10 @@ tool, then replace it with the real Unicode character via Python.
 2. The icon uses `COMMENT` color; the URL uses `FG`.
 3. All four Nerd Font icons pass the verification script.
 4. The icon is non-functional (no click/key handler) — purely visual.
+
+#### Result
+
+Builds and renders correctly. The icon appears in `COMMENT` to the left of the
+URL. However, decided not to keep it for now — the refresh icon adds visual
+clutter without functionality. Reverted the code change. May revisit when
+keybindings or mouse support are implemented.
