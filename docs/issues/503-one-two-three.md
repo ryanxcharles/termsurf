@@ -257,3 +257,79 @@ All three apps:
    localStorage identity, confirming they share the same `BrowserContext`.
 
 ## Experiments
+
+### Experiment 1: One profile — port box-demo and build one-pane compositor
+
+#### Goal
+
+Port the box-demo test page from ts4 to ts5. Build a one-pane Swift compositor
+(`ts5/one-profile/`) that receives IOSurface frames from a single Chromium
+Profile Server process and renders them in a Metal window. This establishes the
+ts5 test infrastructure and validates the simplest case.
+
+#### Branch
+
+No Chromium changes — this experiment only adds files to the main repo.
+
+#### Changes
+
+##### `ts5/box-demo/` — Copy from ts4
+
+Copy `ts4/box-demo/` to `ts5/box-demo/` as-is:
+
+- `server.ts` — Bun HTTP server on port 9407
+- `public/index.html` — Spinning blue square with localStorage identity and FPS
+
+No modifications needed.
+
+##### `ts5/one-profile/` — New Swift app
+
+Adapt `ts4/two-profiles-swift/` into a single-pane compositor:
+
+- `Package.swift` — SwiftPM manifest, target name `OneProfile`
+- `Sources/OneProfile/main.swift` — XPC listener, Metal pipeline, rendering
+- `Sources/OneProfile/Shaders.metal` — Vertex + fragment shaders (unchanged)
+- `com.termsurf.one-profile.plist` — Launchd agent definition
+- `Makefile` — Compile Metal shaders + `swift build`
+
+Changes from the ts4 two-profiles-swift source:
+
+1. **One pane, not two.** Remove the left/right pane split. The single pane
+   fills the entire window. Remove the `Pane` enum, the `paneForSession()`
+   mapping, and the dual-viewport rendering logic.
+2. **Window size.** 800x600 (single pane) instead of 1600x600 (two panes).
+3. **XPC service name.** `com.termsurf.one-profile`.
+4. **Target name.** `OneProfile` instead of `Receiver`.
+5. **Log path.** `~/dev/termsurf/logs/one-profile.log`.
+6. **Single texture.** One `gCurrentTexture` instead of an array of two.
+
+#### Build and Run
+
+```bash
+# 1. Start test page server
+cd ts5/box-demo && bun run server.ts &
+
+# 2. Build one-profile compositor
+cd ts5/one-profile && make
+
+# 3. Register as launchd service
+launchctl bootstrap gui/$(id -u) \
+  ~/dev/termsurf/ts5/one-profile/com.termsurf.one-profile.plist
+
+# 4. Start one Chromium Profile Server
+cd chromium/src
+out/Default/Chromium\ Profile\ Server.app/Contents/MacOS/Chromium\ Profile\ Server \
+  --hidden \
+  --xpc-service=com.termsurf.one-profile \
+  --session-id=profile-a \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-a \
+  http://localhost:9407
+```
+
+#### Pass Criteria
+
+1. Box-demo server runs on port 9407.
+2. One-profile compositor builds with `make` (shaders + `swift build`).
+3. Compositor window shows the spinning blue square at ~60fps.
+4. No Dock icon for the Chromium Profile Server process.
+5. localStorage identity string is visible in the rendered page.
