@@ -641,3 +641,130 @@ This validates the fork approach as the path forward. Subsequent experiments
 will rename `content/one_profile/` to `content/chromium_profile_server/`, add
 `LSUIElement` support, and replace the hardcoded 2-second capturer attachment
 delay with a `WebContentsObserver`.
+
+### Experiment 3: Hide Dock icon with runtime activation policy
+
+#### Hypothesis
+
+Calling `[NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory]`
+immediately after `RegisterShellCrApp()` in `PreBrowserMain()` will hide the One
+Profile app from the Dock — without setting `LSUIElement=true` in the main app's
+Info.plist and without triggering the `IsBackgroundOnlyProcess()` path
+resolution bug that crashed Experiment 1.
+
+#### Background
+
+The One Profile app currently shows a Dock icon for each profile server process.
+This is unacceptable — the profile server is a headless background process.
+
+Experiment 1 tried `LSUIElement=true` in Info.plist, which caused
+`IsBackgroundOnlyProcess()` to return true and crash `paths_apple.mm`. The
+runtime approach avoids this entirely: the app launches as a regular app (so
+path resolution works correctly), then immediately switches its activation
+policy to `.accessory`, which hides the Dock icon and menu bar.
+
+Note: the helper process plist (`helper-Info.plist`) already has `LSUIElement=1`
+— that's correct because helpers use the 9-level path walk. This experiment only
+changes the **main** app's behavior.
+
+#### Approach
+
+**One line of code.** In `shell_main_delegate_mac.mm`, add
+`NSApplicationActivationPolicyAccessory` right after `RegisterShellCrApp()`
+creates `[ShellCrApplication sharedApplication]`. This is the earliest point
+where `NSApp` exists and can have its policy changed.
+
+The change goes in `RegisterShellCrApp()` rather than `PreBrowserMain()` so the
+policy is set in the same function that creates `NSApp`, keeping the logic
+co-located.
+
+#### Steps
+
+##### Step 1: Modify RegisterShellCrApp
+
+In `content/one_profile/app/shell_main_delegate_mac.mm`, add one line after the
+`[ShellCrApplication sharedApplication]` call:
+
+```objc
+void RegisterShellCrApp() {
+  [ShellCrApplication sharedApplication];
+  [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+
+  CHECK([NSApp isKindOfClass:[ShellCrApplication class]]);
+}
+```
+
+`NSApplicationActivationPolicyAccessory` means: the app does not appear in the
+Dock, does not have a menu bar, but can still create windows (needed for the
+hidden window that Chromium's compositor renders to).
+
+##### Step 2: Build
+
+```bash
+cd chromium/src
+export PATH="$(cd ../depot_tools && pwd):$PATH"
+autoninja -C out/Default one_profile
+```
+
+Only `shell_main_delegate_mac.mm` changed, so the incremental build should be
+fast.
+
+##### Step 3: Test
+
+Run the same two-profile test from Experiment 2:
+
+```bash
+# Start test page server
+cd ts4/box-demo && bun run server.ts &
+
+# Ensure Swift receiver is loaded
+launchctl bootstrap gui/$(id -u) \
+  ~/dev/termsurf/ts4/two-profiles-swift/com.termsurf.two-profiles-swift.plist
+
+# Launch two profile servers
+cd chromium/src
+
+out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+  --hidden \
+  --xpc-service=com.termsurf.two-profiles-swift \
+  --session-id=profile-a \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-a \
+  http://localhost:9407 2>&1 &
+
+out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
+  --hidden \
+  --xpc-service=com.termsurf.two-profiles-swift \
+  --session-id=profile-b \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-b \
+  http://localhost:9407 2>&1 &
+```
+
+##### Step 4: Verify
+
+1. **No Dock icon:** Check the macOS Dock — there should be no "One Profile"
+   icon.
+2. **60fps maintained:** Check the Swift receiver log for sustained 60fps on
+   both panes.
+3. **No crashes:** The app should not hit the `paths_apple.mm` DCHECK.
+
+#### Success criteria
+
+- No Dock icon for either profile server process
+- Both panes at 60fps sustained for 30+ seconds
+- No crashes, no DCHECK failures
+- `IsBackgroundOnlyProcess()` returns false (path resolution uses the 2-level
+  walk, not the 9-level helper walk)
+
+#### What a failure would mean
+
+- **Dock icon still shows:** `NSApplicationActivationPolicyAccessory` might need
+  to be set earlier, or the Chromium startup sequence might override it.
+  Investigate when `NSApp` activation policy is set in the Content API
+  lifecycle.
+- **Crash in paths_apple.mm:** Would mean something else is setting
+  `LSUIElement` or `IsBackgroundOnlyProcess()` is checking something other than
+  the plist. Investigate what `IsBackgroundOnlyProcess()` actually checks.
+- **0fps or low fps:** The activation policy change might affect Chromium's
+  compositor visibility. If so, this would indicate that the compositor checks
+  `NSApp.activationPolicy` rather than window visibility — an important finding
+  that would rule out runtime policy changes entirely.
