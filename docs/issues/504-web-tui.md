@@ -410,3 +410,30 @@ No other changes. Control mode hints remain `[q] quit  [enter] browse`.
 #### Result
 
 Builds with no warnings. Ready for interactive testing.
+
+### Experiment 5: Mode icons
+
+#### Goal
+
+Add Nerd Font icons to the mode labels in the status bar to make them more
+visually distinctive. Browse mode gets `nf-md-web` (󰖟), control mode gets
+`nf-fa-keyboard_o` (). These render consistently in terminal emulators with Nerd
+Fonts and are easier to see than emoji.
+
+#### Changes
+
+##### `web/src/main.rs`
+
+Change the mode labels:
+
+- `"BROWSE"` → `"󰖟 BROWSE"` (U+F059F, nf-md-web)
+- `"CONTROL"` → `" CONTROL"` (U+F11C, nf-fa-keyboard_o)
+
+Increase the `Constraint::Length` for the mode label from `10` to `12` to
+accommodate the icon + space.
+
+#### Pass Criteria
+
+1. Browse mode shows `󰖟 BROWSE` on the right of the status bar.
+2. Control mode shows `CONTROL` on the right of the status bar.
+3. Labels are not clipped — icon and text are fully visible.
