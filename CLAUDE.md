@@ -55,6 +55,7 @@ The project has evolved through five generations:
 **Directory structure:**
 
 - `ts5/` — TermSurf 5.0 (Ghostty fork + in-process Chromium). Active work.
+- `web/` — `web` TUI (Rust/ratatui). Browser chrome in the terminal pane.
 - `ts4/` — TermSurf 4.0 (Chromium Content API experiments). Superseded.
 - `ts3/` — TermSurf 3.0 (WezTerm fork + out-of-process CEF). Superseded.
 - `ts2/` — TermSurf 2.0 (WezTerm fork + in-process CEF). Superseded.
@@ -78,30 +79,87 @@ Ghostty Fork (Zig + Swift macOS shell)
 │   ├── BrowserContext "work" (Profile 1)
 │   ├── BrowserContext "personal" (Profile 2)
 │   └── BrowserContext "guest" (Profile N)
+├── XPC compositor (com.termsurf.compositor Mach service)
+│   └── Receives overlay coordinates from `web` processes
+├── Metal renderer (inherited from Ghostty)
+│   └── pink_overlay pipeline (Issue 505) — GPU quad at grid coordinates
 ├── Pane/tab/split management (inherited from Ghostty)
-├── Keybindings, configuration (inherited from Ghostty)
-└── Metal renderer (inherited from Ghostty)
+└── Keybindings, configuration (inherited from Ghostty)
+
+web TUI (Rust/ratatui, runs inside a terminal pane)
+├── Draws browser chrome (URL bar, viewport border, status bar)
+├── Sends viewport grid coordinates to compositor via XPC
+└── TERMSURF_PANE_ID env var identifies which pane it's in
 ```
 
 ### Current State
 
-ts5 starts as unmodified upstream Ghostty (imported via `git subtree add`).
-Browser pane integration has not started yet — the Chromium Content API
-embedding (proven in ts4's PoC) will be added incrementally.
+ts5 is a Ghostty fork (imported via `git subtree add`) with the following
+TermSurf additions:
+
+- **XPC compositor** (`CompositorXPC.swift`) — Mach service listener that
+  receives overlay coordinates from `web` processes and passes them to the
+  renderer via the C API. Registered with launchd as `com.termsurf.compositor`.
+- **Pink overlay pipeline** (`pink_overlay` in `shaders.zig` / `shaders.metal`)
+  — Metal shader that renders a solid-color quad at grid coordinates. Proven
+  working with correct alignment (Issue 505, Experiments 1–3).
+- **C API bridge** (`ghostty_surface_set_overlay` / `clear_overlay`) — Lets
+  Swift XPC code set overlay coordinates on the Zig renderer thread-safely via
+  `draw_mutex`.
+- **Pane ID propagation** — Each surface sets `TERMSURF_PANE_ID` (UUID) in the
+  shell environment, inherited by child processes including `web`.
+
+**Not yet started:** Chromium Content API embedding (proven in ts4's PoC). The
+pink overlay will be replaced with a real IOSurface texture from Chromium.
 
 ### Directory Structure
 
 - `ts5/src/` — Shared Zig core (libghostty)
+- `ts5/src/renderer/generic.zig` — Main render logic, `drawFrame()`, pink
+  overlay render step
+- `ts5/src/renderer/metal/shaders.zig` — Pipeline definitions (`pink_overlay`)
+- `ts5/src/renderer/shaders/shaders.metal` — Metal shaders (pink overlay vertex
+  - fragment)
+- `ts5/src/Surface.zig` — Core surface, `setOverlay()` / `clearOverlay()`
+- `ts5/src/apprt/embedded.zig` — C API exports
+- `ts5/include/ghostty.h` — libghostty C API headers
 - `ts5/macos/` — Ghostty macOS app (Swift + Xcode)
+- `ts5/macos/Sources/Ghostty/CompositorXPC.swift` — XPC Mach service listener
+- `ts5/macos/Sources/App/macOS/AppDelegate.swift` — Starts compositor on launch
+- `ts5/macos/com.termsurf.compositor.plist` — launchd LaunchAgent plist
 - `ts5/build.zig` — Ghostty build system
 - `ts5/build.zig.zon` — Ghostty dependencies
-- `ts5/include/` — libghostty C API headers
 - `ts5/pkg/` — Platform packages (Linux, macOS, etc.)
+- `web/` — `web` TUI (Rust/ratatui)
+- `web/src/main.rs` — TUI event loop, layout, XPC overlay sending
+- `web/src/xpc.rs` — Minimal XPC FFI client for compositor connection
 
 ### Build Commands
 
 ```bash
+# Build TermSurf (Zig + Metal shaders)
 cd ts5 && zig build
+
+# Build web TUI
+cargo build -p web
+```
+
+### Launching
+
+The app must be launched via launchd (not `open`) because the XPC Mach service
+`com.termsurf.compositor` can only be claimed by the process launchd launched
+for that job.
+
+```bash
+# Register the LaunchAgent (once, after first build):
+launchctl bootstrap gui/$(id -u) ts5/macos/com.termsurf.compositor.plist
+
+# Launch:
+launchctl kickstart gui/$(id -u)/com.termsurf.compositor
+
+# Restart after rebuild:
+launchctl kill SIGTERM gui/$(id -u)/com.termsurf.compositor
+launchctl kickstart gui/$(id -u)/com.termsurf.compositor
 ```
 
 ### Upstream Merges
@@ -145,6 +203,15 @@ application.
 | 405   | Fork Ghostty with browser out-of-process (Option B selected)                         |
 | 406   | Profile isolation is CEF-only; Content API supports multiple profiles; CEF ruled out |
 | 407   | In-process Chromium PoC: two profiles, side by side, high framerate                  |
+| 408   | Two profiles side by side at 60fps (content_shell)                                   |
+| 409   | Apply Electron's full 147-patch set to termsurf-chromium                             |
+| 410   | Apply partial Electron patches to fix 2-3fps throttling                              |
+| 411   | Achieve 60fps two profiles without Electron patches                                  |
+| 412   | Isolate 2fps cause in minimal one-profile content_shell app                          |
+| 413   | Convert one-profile app (60fps) into two-profile app                                 |
+| 414   | Two profiles via XPC at full speed (design experiment 2)                             |
+| 415   | Reimplement Issue 414 receiver in Swift                                              |
+| 416   | Reimplement Issue 414 receiver in Rust                                               |
 
 ### Issue 407 PoC (Completed)
 
@@ -471,6 +538,13 @@ as a testbed before ts1 integration. Changes made to the example:
 - `docs/issues/417-ghostty-vs-wezterm.md` — Terminal emulator selection
   (Ghostty)
 - `docs/issues/418-repo-restructure.md` — Repo restructure and Ghostty import
+- `docs/issues/500-rename.md` — Rename Ghostty references to TermSurf in ts5
+- `docs/issues/501-two-profiles.md` — Two-profile browser demo in ts5
+- `docs/issues/502-attach-delay.md` — Eliminate hardcoded capturer attach delay
+- `docs/issues/503-one-two-three.md` — One, two, or three profiles (one process
+  per profile)
+- `docs/issues/504-web-tui.md` — `web` TUI chrome (ratatui terminal app)
+- `docs/issues/505-pink-texture.md` — Pink texture overlay (GPU quad via XPC)
 
 ### TermSurf 4.0
 
@@ -486,6 +560,17 @@ as a testbed before ts1 integration. Changes made to the example:
   terminal (Ghostty fork selected)
 - `docs/issues/406-chromium.md` — Profile isolation analysis; CEF ruled out
 - `docs/issues/407-chromium-poc.md` — In-process Chromium PoC plan
+- `docs/issues/408-two-profiles.md` — Two profiles side by side at 60fps
+- `docs/issues/409-electron-patch.md` — Electron's full 147-patch set
+- `docs/issues/410-two-profiles-2.md` — Two profiles attempt 2
+- `docs/issues/410-partial-electron.md` — Partial Electron patches for fps fix
+- `docs/issues/411-two-profiles-3.md` — 60fps two profiles without Electron
+- `docs/issues/412-one-profile.md` — Isolate 2fps cause in one-profile app
+- `docs/issues/413-one-profile-2.md` — One-profile to two-profile conversion
+- `docs/issues/414-two-profiles-xpc.md` — Two profiles via XPC at full speed
+- `docs/issues/415-swift-receiver.md` — Issue 414 receiver reimplemented in
+  Swift
+- `docs/issues/416-rust-receiver.md` — Issue 414 receiver reimplemented in Rust
 
 ### TermSurf 3.0
 
