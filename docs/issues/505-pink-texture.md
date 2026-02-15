@@ -34,18 +34,33 @@ ts3 used wgpu to composite CEF-rendered IOSurfaces into WezTerm's terminal
 panes. Key lessons:
 
 - **Viewport calculation was the hardest part.** Grid cells → physical pixels →
-  logical DIP → CEF dimensions. Getting this chain right took many experiments.
+  logical DIP → CEF dimensions. Getting this chain right took many experiments
+  (Issues 306, 308, 309, 311).
 - **sRGB double-correction was a major bug.** CEF outputs sRGB pixel data. If
   the texture view is declared as linear (`Bgra8Unorm`), the GPU applies gamma
   correction again, washing out colors. Fix: use `Bgra8UnormSrgb` so the GPU
   knows the data is already sRGB-encoded.
-- **Dimension mismatch during resize** caused visual glitches. When the pane
-  resizes, the old texture doesn't match the new viewport. ts3 logged mismatches
-  and had debounce logic, but never fully solved dynamic resize.
-- **`set_viewport()` was the compositing mechanism.** Rather than positioning
-  the texture with vertex coordinates, ts3 set the GPU viewport to clip the
-  render pass to the pane's rectangle. A normalized fullscreen quad then
-  stretched to fill the viewport.
+- **Textures bounced and stretched during resize.** The root cause (Issue 309):
+  during continuous window drag, the old texture was rendered into the resized
+  viewport. The debounce timer delayed resize commands by 30ms, but the viewport
+  changed every frame. During that gap, the old texture (e.g., 2820×2130) was
+  stretched into the new viewport (e.g., 1599×1590), breaking aspect ratio.
+- **Removing debounce fixed the bouncing.** Sending resize on every frame (no
+  debounce) eliminated the mismatch. CEF handled rapid resize commands fine.
+- **Invalidation was critical.** When a new texture arrived via XPC, nothing
+  triggered the render loop (Issue 309, Experiment 4). The texture sat in a
+  buffer for up to 887ms until an incidental event (mouse move, keystroke)
+  forced a render. Fix: call `window.invalidate()` immediately when a new XPC
+  message arrives, so the render loop picks up the new data.
+- **Scale factor source mismatch.** Initial spawn used pane DPI; resize used
+  window DPI. If these differed, the logical dimensions were wrong. Fix: use
+  the same DPI source for both (Issue 309).
+- **Stale cell size during resize.** Global static cell size values could lag
+  behind actual font rendering (Issue 311). Fix: always use current
+  `render_metrics.cell_size`, never cached globals.
+- **Send physical pixels, not logical.** Converting physical to logical on the
+  GUI side introduced truncation errors (Issue 311). Sending physical pixels
+  directly and letting the renderer convert eliminated double-truncation.
 
 #### ts4 (Chromium Content API experiments)
 
@@ -55,12 +70,24 @@ ts4 proved in-process Chromium rendering at 60fps. Key lessons:
   `device.makeTexture(descriptor:
   iosurface: plane:)` creates an MTLTexture
   that directly references IOSurface GPU memory. No pixel copying.
-- **Retina scaling: always use physical pixels.** Multiply logical dimensions by
-  `backingScaleFactor`. The drawable size is physical, not logical.
+- **Retina requires three coordinated fixes (Issue 414).** All three must work
+  together for crisp output:
+  1. Capture at physical pixel resolution (not logical).
+  2. Set `CAMetalLayer.contentsScale = backingScaleFactor`.
+  3. Match `drawableSize` to physical pixel dimensions.
+  Without all three, textures are blurry. Issue 414 Experiment 5 produced a
+  640×360 IOSurface on a Retina screen instead of 1280×720 — the logical size
+  leaked through.
 - **Metal bytesPerRow alignment.** IOSurface-backed textures require 16-byte row
   alignment: `(width * 4 + 15) & ~15`. Odd widths crash without this.
-- **Split-screen via MTLViewport.** Each pane gets its own viewport rectangle
-  within the same render pass. Simple, efficient, no extra framebuffers.
+- **Resize was immediate, no debounce.** `windowDidEndLiveResize` sent physical
+  dimensions via XPC. Child processes created a new IOSurface at the new size
+  and sent it back. Old IOSurface released atomically when the new one replaced
+  it — no flicker between frames.
+- **Texture creation validates dimensions.** `MTLTexture` descriptor width/height
+  must match the IOSurface. If they don't, Metal returns nil. This acts as
+  implicit mismatch detection — the old texture stays visible until a correctly
+  sized one arrives.
 
 ### Ghostty's Renderer (ts5)
 
@@ -149,6 +176,54 @@ renders its chrome (URL bar, status bar, borders) as terminal text. The browser
 viewport area contains terminal text too (the coordinates display). The pink
 overlay covers the viewport area, obscuring the terminal text beneath it — which
 is exactly what a real browser texture would do.
+
+### Resize Timing
+
+When the terminal window resizes, there is an unavoidable gap between the
+compositor knowing the new size and `web` sending updated coordinates:
+
+```
+t0    Compositor resizes pane (new grid dimensions, new padding)
+t1    Shell receives SIGWINCH
+t2    crossterm detects resize event
+t3    web's event loop wakes, calls terminal.draw()
+t4    ratatui recomputes layout with new dimensions
+t5    web sends set_overlay via XPC with new grid coordinates
+t6    Compositor stores new overlay rect
+t7    Next drawFrame() renders pink quad at new position/size
+```
+
+During `t0`–`t6`, the compositor has the old grid coordinates but the new cell
+size and padding. Because cell size is determined by font metrics (not terminal
+dimensions), it does **not** change on resize. What changes is the grid
+dimensions (columns/rows) and balanced padding.
+
+**Impact:** Between `t0` and `t6`, the overlay is drawn with the old grid
+width/height but the current padding. Since `col` and `row` are typically small
+values (e.g., col=1, row=3) and cell size hasn't changed, the overlay **position
+stays correct** — only the **width/height are stale** (the overlay is too narrow
+or too wide for a few frames).
+
+**Why this is acceptable for the pink overlay:**
+
+- The gap is a few milliseconds (SIGWINCH → ratatui draw → XPC send is fast).
+- The overlay position stays correct (top-left corner doesn't jump).
+- The width/height catch up within 1–2 frames.
+- There is no aspect-ratio distortion (unlike ts3 where an old texture was
+  stretched into a new viewport).
+
+**Lesson from ts3:** The bouncing problem in ts3 was far worse because the old
+*texture* (with wrong pixel dimensions) was stretched into the new viewport.
+Here, we're re-deriving pixel coordinates from grid coordinates every frame, so
+the position is always consistent with the current cell size and padding. The
+only stale data is the grid width/height from `web`, which updates within
+milliseconds.
+
+**Invalidation requirement:** When new coordinates arrive via XPC, the
+compositor must trigger a redraw. ts3's Issue 309 showed that without explicit
+invalidation, new data can sit in a buffer for hundreds of milliseconds. The
+compositor must call the equivalent of `window.invalidate()` when it receives a
+`set_overlay` message.
 
 ### Positioning Strategy: XPC Channel
 
@@ -332,12 +407,15 @@ connects and sends a `set_overlay` message:
 
 1. Look up the pane by `pane_id`.
 2. Store the overlay grid rect (col, row, width, height) on the pane's state.
-3. Mark the pane's surface as needing redraw.
+3. **Trigger a redraw** for the pane's surface. This is critical — ts3 Issue 309
+   showed that without explicit invalidation, new data can sit in a buffer for
+   hundreds of milliseconds until an incidental event forces a render. The XPC
+   handler must call the pane's invalidation function immediately.
 
 When the XPC connection closes (because `web` exited or crashed):
 
 1. Clear the overlay rect for that pane.
-2. Mark the pane's surface as needing redraw.
+2. Trigger a redraw.
 
 The overlay rect must be accessible from the renderer thread (where
 `drawFrame()` runs). Use the same thread-safe communication pattern Ghostty uses
@@ -397,31 +475,112 @@ needed.
    to normal with no pink residue.
 7. The pink rectangle does not flicker or tear during resize.
 
-## Sizing Lessons (Reference)
+## Sizing and Resize Lessons (Reference)
 
-From four generations of texture overlay experiments, these are the sizing
-rules:
+From four generations of texture overlay experiments, these are the rules. Each
+was learned the hard way.
 
-1. **Always work in physical pixels.** Multiply logical coordinates by
-   `backingScaleFactor` (typically 2.0 on Retina Macs). Ghostty's renderer
-   already operates in physical pixels — the projection matrix and all
+### Coordinate Systems
+
+1. **Always work in physical pixels in the renderer.** Multiply logical
+   coordinates by `backingScaleFactor` (typically 2.0 on Retina Macs). Ghostty's
+   renderer already operates in physical pixels — the projection matrix and all
    coordinates in `drawFrame()` use physical pixel units.
 
 2. **Use the existing projection matrix.** Ghostty creates an orthographic 2D
-   projection in `generic.zig` (`math.ortho2d`). Pass pixel coordinates through
-   this matrix and they map directly to screen positions.
+   projection in `generic.zig` (`math.ortho2d`). The matrix maps pixel
+   coordinates to normalized device coordinates. All existing shaders (cell_text,
+   image) follow the pattern: `position = projection × float4(pixel_x, pixel_y,
+   0, 1)`. The pink overlay must do the same.
 
-3. **IOSurface alignment.** When creating IOSurface-backed textures, bytesPerRow
-   must be 16-byte aligned. For the pink overlay this doesn't apply (we're
-   drawing a solid color, not importing a texture), but it will matter when we
-   replace the pink rectangle with a real browser IOSurface.
+3. **Grid → pixel conversion is simple.** Ghostty uses one formula everywhere:
+   `pixel = grid_pos × cell_size + padding`. Cell size comes from font metrics
+   and does not change on terminal resize. Padding changes when the terminal
+   resizes (balanced padding centers the grid). The conversion must use current
+   values from the renderer's `Size` struct, never cached or stale values.
 
-4. **sRGB handling.** Ghostty uses Display P3 color space for its render
-   targets. When importing external textures (from Chromium), the texture view
-   format must declare the correct color space to avoid double gamma correction.
-   For the pink overlay (a constant in the shader), this isn't an issue.
+4. **The image shader is the model.** Kitty images are the closest existing
+   analog to the pink overlay. They are positioned at grid coordinates with a
+   pixel offset, sized in pixels, and rendered as textured quads. The image
+   shader parameters are:
+   ```
+   grid_pos: [2]f32       // top-left cell
+   cell_offset: [2]f32    // pixel offset from cell corner
+   dest_size: [2]f32      // rendered size in pixels
+   ```
+   The pink overlay follows this same pattern.
 
-5. **Stale frames during resize.** Ghostty's `IOSurfaceLayer.setSurface()`
-   already validates that the IOSurface dimensions match the layer bounds and
-   discards mismatched frames. This same pattern should be applied to browser
-   texture overlays.
+### Resize
+
+5. **Invalidate on new data.** When new coordinates arrive via XPC, the
+   compositor must trigger a redraw immediately. ts3 Issue 309 showed that
+   without explicit invalidation, a new texture sat in a buffer for up to 887ms.
+   The render loop only ran when an incidental event (mouse move, keystroke)
+   happened to trigger it. Fix: call `invalidate()` in the XPC handler.
+
+6. **No debounce for coordinate updates.** ts3's 30ms debounce caused the
+   bouncing problem — the timer reset every frame during continuous drag, so
+   resize didn't fire until the user stopped dragging. Removing the debounce
+   fixed it. For the pink overlay, every `set_overlay` message from `web` should
+   be applied immediately. There is no expensive operation to debounce (unlike
+   CEF re-rendering).
+
+7. **Use current cell size, never stale values.** ts3 Issue 311 found that
+   global static cell size variables lagged behind actual font metrics. The fix:
+   always read `cell_size` from the renderer's current `Size` struct in
+   `drawFrame()`, which is guaranteed fresh. Ghostty's `drawFrame()` already
+   calls `api.surfaceSize()` and detects size changes per-frame — the overlay
+   conversion piggybacks on this.
+
+8. **Cell size does not change on terminal resize.** Cell size is determined by
+   font metrics, not terminal dimensions. When the terminal window resizes, the
+   grid dimensions (columns, rows) and padding change, but cell width and height
+   stay constant. This means the overlay position (derived from grid position ×
+   cell size) stays correct during the gap between resize and updated
+   coordinates. Only the overlay width/height are stale for a few frames.
+
+9. **Atomic replacement, not incremental update.** ts4 replaced IOSurface
+   textures atomically — the new texture replaced the old one in a single
+   assignment. No frame ever mixed old and new data. The pink overlay should
+   follow the same pattern: when new grid coordinates arrive via XPC, replace
+   the entire overlay rect in one write.
+
+### Future (Browser Texture)
+
+These lessons don't apply to the pink overlay but will matter when we replace
+it with a real browser IOSurface:
+
+10. **IOSurface bytesPerRow must be 16-byte aligned.** Formula:
+    `(width * 4 + 15) & ~15`. Discovered in ts4 when odd window widths caused
+    Metal texture creation failures.
+
+11. **sRGB double-correction.** Chromium outputs sRGB pixel data. If the texture
+    view is declared as linear (`Bgra8Unorm`), the GPU applies gamma correction
+    again, washing out colors. Fix: declare the texture view as `Bgra8UnormSrgb`
+    (or the equivalent in Ghostty's Display P3 color space).
+
+12. **Retina rendering requires three coordinated fixes (Issue 414).** All three
+    must be present:
+    - Capture at physical pixel resolution.
+    - Set `contentsScale = backingScaleFactor` on the Metal layer.
+    - Match `drawableSize` to physical pixel dimensions.
+    Without all three, output is blurry.
+
+13. **Stale frames during resize.** When the browser hasn't re-rendered at the
+    new size yet, the old IOSurface doesn't match the new viewport. Options:
+    - **Scale to fit:** Stretch the old texture into the new viewport (introduces
+      blur but avoids black flash). ts3 used this.
+    - **Discard mismatched frames:** Show terminal content until a correctly
+      sized frame arrives. Ghostty's `IOSurfaceLayer.setSurface()` already
+      validates dimensions and discards mismatches.
+    - **Hide overlay:** Clear the overlay until new coordinates and a matching
+      texture arrive.
+    The right choice depends on the visual tradeoff. For the pink overlay this
+    doesn't apply — the shader draws at whatever size it's told.
+
+14. **Send physical pixels across IPC, not logical.** ts3 Issue 311 found that
+    converting physical → logical on the sender side introduced truncation
+    errors. Send physical dimensions and let the receiver convert. For the pink
+    overlay this doesn't apply (we send grid coordinates, and the compositor
+    converts to physical internally), but it will matter for browser resize
+    messages.
