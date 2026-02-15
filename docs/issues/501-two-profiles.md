@@ -768,3 +768,45 @@ out/Default/One\ Profile.app/Contents/MacOS/One\ Profile \
   compositor visibility. If so, this would indicate that the compositor checks
   `NSApp.activationPolicy` rather than window visibility — an important finding
   that would rule out runtime policy changes entirely.
+
+#### Result: Passed
+
+One line of code hides both profile servers from the Dock while maintaining
+60fps on both panes with zero crashes.
+
+##### Change
+
+In `content/one_profile/app/shell_main_delegate_mac.mm`, added
+`[NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory]` inside
+`RegisterShellCrApp()`, immediately after
+`[ShellCrApplication sharedApplication]`.
+
+##### Build
+
+20 targets (incremental), zero errors.
+
+##### Test output
+
+```
+Profile A: 60 frames in 1.00023s (59.9861 fps) | IOSurface 1600x1200
+Profile B: 60 frames in 1.00005s (59.9967 fps) | IOSurface 1600x1200
+```
+
+Both panes sustained 60fps for 30+ seconds. No Dock icon appeared — verified via
+`System Events` (no "One Profile" in visible processes).
+
+##### Success criteria checklist
+
+- [x] No Dock icon for either profile server process
+- [x] Both panes at 60fps sustained for 30+ seconds
+- [x] No crashes, no DCHECK failures
+- [x] `IsBackgroundOnlyProcess()` returns false (2-level path walk, not 9-level)
+
+#### Conclusion
+
+The runtime activation policy approach works perfectly. Setting
+`NSApplicationActivationPolicyAccessory` after creating `NSApp` hides the Dock
+icon without affecting `IsBackgroundOnlyProcess()`, path resolution, or
+compositor frame rates. This sidesteps the `LSUIElement` / `paths_apple.mm`
+collision that killed Experiment 1 — no plist changes needed, no path logic to
+fix.
