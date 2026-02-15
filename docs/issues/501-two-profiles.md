@@ -942,3 +942,81 @@ carefully during launch to confirm no icon flash.
   call path resolution functions.
 - **Dock icon still flashes:** Would mean `LSUIElement` is not being read from
   the plist correctly. Verify the plist key spelling and value format.
+
+#### Result: Passed (with design adjustment)
+
+`LSUIElement=true` in the plist eliminates the Dock icon entirely — no flash,
+no momentary appearance. Both panes sustain 60fps with zero crashes.
+
+##### Design adjustment: path detection via `/Helpers/` instead of kProcessType
+
+The original design called for replacing `IsBackgroundOnlyProcess()` with
+`HasSwitch(switches::kProcessType)`. This crashed immediately:
+
+```
+DCHECK failed: current_process_commandline_.
+```
+
+`GetContentsPath()` is called from `OverrideFrameworkBundlePath()` during
+`ContentMain()`, **before** `CommandLine::Init()`. The command line simply
+doesn't exist yet.
+
+The fix: check for `/Helpers/` in the executable path. Helper processes live at
+paths like `.../Frameworks/.../Helpers/One Profile Helper.app/...`, while the
+main process lives at `.../One Profile.app/Contents/MacOS/...`. This is
+available immediately from `base::FILE_EXE` and requires no command line.
+
+```cpp
+if (path.value().find("/Helpers/") != std::string::npos) {
+    // 9-level walk for helper processes
+} else {
+    // 2-level walk for main process
+}
+```
+
+##### Changes
+
+1. **`paths_apple.mm`** — Replaced `IsBackgroundOnlyProcess()` with
+   `path.value().find("/Helpers/") != std::string::npos`. Removed
+   `base/command_line.h` and `content/public/common/content_switches.h`
+   includes (not needed). Updated comments explaining why
+   `IsBackgroundOnlyProcess()` and `CommandLine` cannot be used here.
+
+2. **`app-Info.plist`** — Added `LSUIElement=true`.
+
+3. **`shell_main_delegate_mac.mm`** — Removed the runtime
+   `setActivationPolicy:NSApplicationActivationPolicyAccessory` call from
+   `RegisterShellCrApp()` (no longer needed).
+
+##### Build
+
+27 targets (incremental), zero errors.
+
+##### Test output
+
+```
+Profile A: 60 frames in 1.00004s (59.9976 fps) | IOSurface 1600x1200
+Profile B: 60 frames in 1.00014s (59.9915 fps) | IOSurface 1600x1200
+```
+
+Both panes sustained 60fps for 30+ seconds. No Dock icon appeared at any point
+during launch or execution.
+
+##### Success criteria checklist
+
+- [x] No Dock icon at any point — no flash during launch
+- [x] Both panes at 60fps sustained for 30+ seconds
+- [x] No crashes, no DCHECK failures in `paths_apple.mm`
+- [x] Helper processes (renderer, GPU) still resolve paths correctly
+
+#### Conclusion
+
+`LSUIElement=true` in the plist is the correct approach for hiding the Dock
+icon — it prevents macOS from ever creating one, unlike the runtime
+`setActivationPolicy` approach from Experiment 3 which caused a brief flash.
+
+The `paths_apple.mm` fix required checking the executable path for `/Helpers/`
+rather than using `IsBackgroundOnlyProcess()` (which conflates `LSUIElement`
+with helper processes) or `CommandLine` (which isn't initialized yet).
+This is robust: the `/Helpers/` directory is a structural property of
+Chromium's bundle layout, not a runtime flag that could be absent or delayed.
