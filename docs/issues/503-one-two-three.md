@@ -1,5 +1,58 @@
 # Issue 503: One, Two, Three
 
+## Background: One Process Per Profile
+
+The constraint that two processes cannot share the same profile data directory
+has been discovered, re-discovered, and documented across eight issue documents
+spanning three generations of TermSurf. This section consolidates those
+findings.
+
+### ts2: Discovery (Issues 208, 209)
+
+Issue 208 found that CEF's Chrome runtime (post-M128) deliberately ignores
+custom `cache_path` settings. The `root_cache_path` IS the profile — one
+process, one profile, no exceptions. Issue 209 confirmed this by attempting to
+use Chrome's native profile naming (`Default`, `Profile 1`, etc.) with CEF.
+Custom profiles fail silently; only the Default profile works. This is
+documented CEF behavior, not a bug.
+
+### ts3: Architecture around the constraint (Issues 301, 305, 306, 307)
+
+Issue 301 ("Lessons from ts2") identified this as the core constraint that
+necessitated the entire ts3 architecture: out-of-process CEF, one process per
+profile. Issue 305 confirmed the mechanism — CEF uses a `SingletonLock` file in
+the profile directory; a second process will crash or fail to initialize. Issue
+306 discovered that the ts3 code was violating this constraint by spawning a new
+`termsurf-profile` process for every `web` command. Running `web google.com`
+then `web github.com` with the same profile would crash the second process on
+SingletonLock. The fix: detect an existing profile process and send a "create
+browser" command to it. Issue 307 formalized this as "the foundational
+architectural constraint of ts3" — exactly one `termsurf-profile` process per
+browser profile, with multiple webviews within that process sharing cookies and
+storage like tabs in a browser.
+
+### ts4: The CEF vs Chromium distinction (Issues 406, 407)
+
+Issue 406 made the critical discovery: **the one-profile-per-process constraint
+is CEF-specific, not a Chromium limitation.** Chromium's Content API
+(`content::BrowserContext`) fully supports multiple profiles with different
+storage paths in the same process. Chrome itself does this routinely. Electron
+proves it via `session.fromPartition()`. CEF adds its own constraints on top of
+Chromium. This finding killed CEF and led to ts4.
+
+Issue 407 proved it in practice — the in-process Chromium PoC ran two
+`BrowserContext` instances with different storage paths, each with its own
+cookies, localStorage, and cache, all in one process at 60fps.
+
+### What this means for Issue 503
+
+Multiple `BrowserContext` instances (different profiles) coexist in one process
+— proven in Issue 407. But Issue 503 asks a different question: can multiple
+`WebContents` from the **same** `BrowserContext` each have their own
+`FrameSinkVideoCapturer` delivering independent IOSurface streams? This is the
+multi-tab case. The profile server must host an unlimited number of WebContents
+per profile, each captured independently and sent over its own XPC connection.
+
 ## Problem
 
 The ts4 proof-of-concept demonstrated two **different** browser profiles
