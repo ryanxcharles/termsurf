@@ -37,65 +37,91 @@ logging into Google in one profile doesn't affect the others.
 ## Features
 
 - **Full Chromium** — Not a simplified renderer. Real DevTools, real JavaScript,
-  real web.
+  real web. Embedded via the Content API (not CEF).
 - **Profile isolation** — Separate cookies, sessions, and storage per profile.
-- **60fps rendering** — Hardware-accelerated via Metal/wgpu.
+- **60fps rendering** — Hardware-accelerated via Metal. GPU textures composited
+  directly into the terminal pane.
 - **Keyboard modes** — Browse mode for the web, Control mode for terminal
   keybindings.
-- **Mouse support** — Click, scroll, select, drag. It's a real browser.
 
 ## Getting Started
 
 ### Prerequisites (macOS)
 
+- [Zig](https://ziglang.org/) (for building the terminal)
+- [Rust](https://rustup.rs/) (for building the `web` TUI)
+
+### Build
+
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-brew install cmake ninja
+# Build the terminal
+cd ts5 && zig build
+
+# Build the web TUI
+cargo build -p web
 ```
 
-### Build & Run
+### Launch
+
+The app is launched via launchd because it registers an XPC Mach service for
+compositor communication.
 
 ```bash
-cd ts3 && ./scripts/build-debug.sh --open
+# Register the LaunchAgent (once, after first build):
+launchctl bootstrap gui/$(id -u) ts5/macos/com.termsurf.compositor.plist
+
+# Launch:
+launchctl kickstart gui/$(id -u)/com.termsurf.compositor
+
+# Restart after rebuild:
+launchctl kill SIGTERM gui/$(id -u)/com.termsurf.compositor
+launchctl kickstart gui/$(id -u)/com.termsurf.compositor
 ```
 
-First build downloads CEF (~300MB). Then in the terminal:
+Then in a TermSurf terminal pane:
 
 ```bash
-web google.com
+cargo run -p web -- https://google.com
 ```
 
 ## Keyboard Modes
 
-TermSurf webviews have two modes:
+The `web` TUI has two modes:
 
 | Mode        | Behavior                                     |
 | ----------- | -------------------------------------------- |
 | **Browse**  | Keyboard/mouse goes to the browser (default) |
-| **Control** | Browser dimmed, terminal keybindings active  |
+| **Control** | Terminal keybindings active                   |
 
 | Key              | Action                 |
 | ---------------- | ---------------------- |
-| Ctrl+C (Browse)  | Switch to Control mode |
+| Esc (Browse)     | Switch to Control mode |
 | Enter (Control)  | Switch to Browse mode  |
-| Ctrl+C (Control) | Close webview          |
-| Cmd+C (Control)  | Copy URL to clipboard  |
-
-### Navigation
-
-| Key         | Action      |
-| ----------- | ----------- |
-| Cmd+[       | Back        |
-| Cmd+]       | Forward     |
-| Cmd+R       | Reload      |
-| Cmd+Shift+R | Hard reload |
+| q (Control)      | Quit                   |
+| Ctrl+C (any)     | Force quit             |
 
 ## Status
 
-TermSurf is in active development. Core browsing works — rendering, input,
-profiles, navigation. DevTools and some polish features are still in progress.
+TermSurf is in active development. The project has evolved through five
+generations (ts1 through ts5). The current generation (ts5) forks
+[Ghostty](https://ghostty.org/) as the terminal and will embed Chromium directly
+via the Content API.
 
-macOS only for now. Linux and Windows support is planned.
+**What works today:**
+
+- Terminal emulator (full Ghostty, native Metal rendering)
+- `web` TUI chrome (URL bar, viewport border, status bar via ratatui)
+- GPU overlay pipeline (Metal shader renders at exact grid coordinates)
+- XPC compositor (Mach service receives overlay coordinates from `web` processes)
+- Pane identification (each pane sets `TERMSURF_PANE_ID` in the environment)
+
+**Not yet started:**
+
+- Chromium Content API embedding (proven feasible in ts4's PoC)
+- Browser input forwarding (keyboard, mouse)
+- Navigation (back, forward, reload)
+
+macOS only for now.
 
 ## Contributing
 
@@ -104,4 +130,5 @@ the full development guide.
 
 ## License
 
-See individual component licenses in `ts1/`, `ts2/`, `ts3/`, and `cef-rs/`.
+See individual component licenses in `ts5/`, `ts1/`, `ts3/`, and
+`vendor/cef-rs/`.
