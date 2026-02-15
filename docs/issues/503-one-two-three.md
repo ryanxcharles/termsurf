@@ -455,3 +455,44 @@ out/Default/Chromium\ Profile\ Server.app/Contents/MacOS/Chromium\ Profile\ Serv
    isolation).
 4. No Dock icon for either Chromium Profile Server process.
 5. Both profile servers log ~60fps on the sender side.
+
+#### Result: Pass
+
+Build: `make` compiled Metal shaders and Swift app with zero errors.
+
+Compositor log (receiver side):
+
+```
+[TwoProfiles] L: 60 (60.0 fps) R: 60 (60.0 fps) | IOSurface 1600x1200
+[TwoProfiles] L: 61 (60.0 fps) R: 60 (59.0 fps) | IOSurface 1600x1200
+[TwoProfiles] L: 60 (60.0 fps) R: 61 (61.0 fps) | IOSurface 1600x1200
+[TwoProfiles] L: 60 (60.0 fps) R: 61 (60.0 fps) | IOSurface 1600x1200
+[TwoProfiles] L: 60 (59.7 fps) R: 60 (59.7 fps) | IOSurface 1600x1200
+```
+
+Profile server A log (sender side):
+
+```
+[ShellVideoConsumer] 61 frames in 1.01659s (60.0046 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 61 frames in 1.01691s (59.9855 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 61 frames in 1.01829s (59.9042 fps) | IOSurface 1600x1200
+```
+
+Profile server B log (sender side):
+
+```
+[ShellVideoConsumer] 61 frames in 1.01659s (60.0044 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 60 frames in 1.00022s (59.9866 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 60 frames in 1.00021s (59.9873 fps) | IOSurface 1600x1200
+```
+
+60fps on all three streams (compositor left, compositor right, both senders). No
+Dock icons. Two side-by-side panes with different localStorage identities,
+confirming profile isolation.
+
+#### Conclusion
+
+`ts5/two-profiles/` is a working two-pane Swift compositor (~280 lines) ported
+from ts4. The Issue 414/501 two-profiles case is re-validated with the ts5 test
+infrastructure. Both profile servers deliver independent IOSurface streams at
+60fps, composited into a single Metal window with left/right viewports.
