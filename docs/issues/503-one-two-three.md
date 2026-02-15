@@ -370,3 +370,88 @@ The ts5 test infrastructure is established. Box-demo is ported, and
 adapted from the ts4 two-profiles-swift source. The one-profile baseline
 validates the full pipeline: Chromium Profile Server → FrameSinkVideoCapturer →
 IOSurface → XPC Mach port → Metal texture → CADisplayLink rendering at 60fps.
+
+### Experiment 2: Two profiles — port the two-pane compositor
+
+#### Goal
+
+Port the ts4 two-profiles-swift compositor to `ts5/two-profiles/`. Two Chromium
+Profile Server processes, each with a different `--user-data-dir`, each hosting
+one WebContents. Two panes side by side in one window. The two panes should show
+different localStorage identities, proving profile isolation.
+
+This is the Issue 414/501 case, re-validated with the ts5 test infrastructure.
+
+#### Branch
+
+No Chromium changes — this experiment only adds files to the main repo.
+
+#### Changes
+
+##### `ts5/two-profiles/` — New Swift app
+
+Port `ts4/two-profiles-swift/` with naming updates:
+
+- `Package.swift` — SwiftPM manifest, target name `TwoProfiles`
+- `Sources/TwoProfiles/main.swift` — XPC listener, Metal pipeline, two-pane
+  rendering
+- `Sources/TwoProfiles/Shaders.metal` — Vertex + fragment shaders (copy from
+  one-profile)
+- `com.termsurf.two-profiles.plist` — Launchd agent definition
+- `Makefile` — Compile Metal shaders + `swift build`
+
+Changes from the ts4 two-profiles-swift source:
+
+1. **XPC service name.** `com.termsurf.two-profiles` instead of
+   `com.termsurf.two-profiles-swift`.
+2. **Target name.** `TwoProfiles` instead of `Receiver`.
+3. **Log prefix.** `[TwoProfiles]` instead of `[Receiver]`.
+4. **Log path.** `~/dev/termsurf/logs/two-profiles.log`.
+5. **Window title.** `Two Profiles`.
+6. **Exclude metallib.** Add `shaders.metallib` to the Package.swift exclude
+   list (lesson from Experiment 1).
+7. **Binary path in plist.** Points to
+   `ts5/two-profiles/.build/debug/TwoProfiles`.
+
+The two-pane rendering logic (left/right viewports, `Pane` enum,
+`paneForSession()` mapping) carries over unchanged from ts4.
+
+#### Build and Run
+
+```bash
+# 1. Start test page server (if not already running)
+cd ts5/box-demo && bun run server.ts &
+
+# 2. Build two-profiles compositor
+cd ts5/two-profiles && make
+
+# 3. Register as launchd service
+launchctl bootstrap gui/$(id -u) \
+  ~/dev/termsurf/ts5/two-profiles/com.termsurf.two-profiles.plist
+
+# 4. Start two Chromium Profile Servers
+cd chromium/src
+out/Default/Chromium\ Profile\ Server.app/Contents/MacOS/Chromium\ Profile\ Server \
+  --hidden \
+  --xpc-service=com.termsurf.two-profiles \
+  --session-id=profile-a \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-a \
+  http://localhost:9407 &
+
+out/Default/Chromium\ Profile\ Server.app/Contents/MacOS/Chromium\ Profile\ Server \
+  --hidden \
+  --xpc-service=com.termsurf.two-profiles \
+  --session-id=profile-b \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-b \
+  http://localhost:9407
+```
+
+#### Pass Criteria
+
+1. Two-profiles compositor builds with `make` (shaders + `swift build`).
+2. Compositor window shows two side-by-side panes, each with a spinning blue
+   square at ~60fps.
+3. The two panes show **different** localStorage identity strings (profile
+   isolation).
+4. No Dock icon for either Chromium Profile Server process.
+5. Both profile servers log ~60fps on the sender side.
