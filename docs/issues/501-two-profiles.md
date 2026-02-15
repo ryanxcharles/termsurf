@@ -945,8 +945,8 @@ carefully during launch to confirm no icon flash.
 
 #### Result: Passed (with design adjustment)
 
-`LSUIElement=true` in the plist eliminates the Dock icon entirely — no flash,
-no momentary appearance. Both panes sustain 60fps with zero crashes.
+`LSUIElement=true` in the plist eliminates the Dock icon entirely — no flash, no
+momentary appearance. Both panes sustain 60fps with zero crashes.
 
 ##### Design adjustment: path detection via `/Helpers/` instead of kProcessType
 
@@ -978,9 +978,9 @@ if (path.value().find("/Helpers/") != std::string::npos) {
 
 1. **`paths_apple.mm`** — Replaced `IsBackgroundOnlyProcess()` with
    `path.value().find("/Helpers/") != std::string::npos`. Removed
-   `base/command_line.h` and `content/public/common/content_switches.h`
-   includes (not needed). Updated comments explaining why
-   `IsBackgroundOnlyProcess()` and `CommandLine` cannot be used here.
+   `base/command_line.h` and `content/public/common/content_switches.h` includes
+   (not needed). Updated comments explaining why `IsBackgroundOnlyProcess()` and
+   `CommandLine` cannot be used here.
 
 2. **`app-Info.plist`** — Added `LSUIElement=true`.
 
@@ -1011,12 +1011,155 @@ during launch or execution.
 
 #### Conclusion
 
-`LSUIElement=true` in the plist is the correct approach for hiding the Dock
-icon — it prevents macOS from ever creating one, unlike the runtime
+`LSUIElement=true` in the plist is the correct approach for hiding the Dock icon
+— it prevents macOS from ever creating one, unlike the runtime
 `setActivationPolicy` approach from Experiment 3 which caused a brief flash.
 
 The `paths_apple.mm` fix required checking the executable path for `/Helpers/`
 rather than using `IsBackgroundOnlyProcess()` (which conflates `LSUIElement`
-with helper processes) or `CommandLine` (which isn't initialized yet).
-This is robust: the `/Helpers/` directory is a structural property of
-Chromium's bundle layout, not a runtime flag that could be absent or delayed.
+with helper processes) or `CommandLine` (which isn't initialized yet). This is
+robust: the `/Helpers/` directory is a structural property of Chromium's bundle
+layout, not a runtime flag that could be absent or delayed.
+
+### Experiment 5: Rename One Profile to Chromium Profile Server
+
+#### Hypothesis
+
+Renaming `content/one_profile/` to `content/chromium_profile_server/` — with all
+internal references updated — will produce a working build with the correct app
+bundle name (`Chromium Profile Server.app`) and no functional regressions.
+
+#### Background
+
+"One Profile" was a descriptive name for the ts4 PoC constraint (one
+`BrowserContext` per process). Now that the architecture is proven and this is
+becoming a real component of TermSurf, it needs its proper name:
+`chromium-profile-server` (as defined in the Issue 501 design).
+
+The rename is purely mechanical — no logic changes, no new features. But the
+scope is large: 577 occurrences of "one_profile" / "One Profile" / "OneProfile"
+across 110 files, plus 1 reference in the root `BUILD.gn`.
+
+#### Scope
+
+**Directory rename:**
+
+- `content/one_profile/` → `content/chromium_profile_server/`
+
+**String replacements (all files under `content/chromium_profile_server/`):**
+
+| Old                   | New                               | Context                                                               |
+| --------------------- | --------------------------------- | --------------------------------------------------------------------- |
+| `one_profile`         | `chromium_profile_server`         | Target names, variable names, include paths, header guards, pak files |
+| `One Profile`         | `Chromium Profile Server`         | Product name, app bundle, framework name, helper name, comments       |
+| `OneProfile`          | `ChromiumProfileServer`           | Bundle IDs, class name prefixes                                       |
+| `one-profile`         | `chromium-profile-server`         | Any hyphenated references                                             |
+| `CONTENT_ONE_PROFILE` | `CONTENT_CHROMIUM_PROFILE_SERVER` | Macros, header guards                                                 |
+
+**Root BUILD.gn:**
+
+- `"//content/one_profile:one_profile"` →
+  `"//content/chromium_profile_server:chromium_profile_server"`
+
+**Bundle IDs:**
+
+- `org.chromium.OneProfile` → `com.termsurf.chromium-profile-server`
+- `org.chromium.OneProfile.helper` →
+  `com.termsurf.chromium-profile-server.helper`
+
+#### Approach
+
+**Phase 1: Directory rename.** Use
+`git mv content/one_profile content/chromium_profile_server` to preserve
+history.
+
+**Phase 2: Bulk string replacement.** Run `sed` across all files in
+`content/chromium_profile_server/` for each replacement pattern. Order matters —
+replace longer patterns first to avoid partial matches (e.g.,
+`CONTENT_ONE_PROFILE` before `one_profile`).
+
+**Phase 3: Root BUILD.gn.** Update the single reference.
+
+**Phase 4: Build and test.** Same two-profile 60fps test as previous
+experiments.
+
+#### Steps
+
+##### Step 1: Rename directory
+
+```bash
+cd chromium/src
+git mv content/one_profile content/chromium_profile_server
+```
+
+##### Step 2: Bulk string replacements
+
+Apply replacements in this order (longest first):
+
+1. `CONTENT_ONE_PROFILE` → `CONTENT_CHROMIUM_PROFILE_SERVER`
+2. `one_profile_product_name` → `chromium_profile_server_product_name`
+3. `org.chromium.OneProfile` → `com.termsurf.chromium-profile-server`
+4. `One Profile` → `Chromium Profile Server`
+5. `OneProfile` → `ChromiumProfileServer`
+6. `one_profile` → `chromium_profile_server`
+
+Run across all files in `content/chromium_profile_server/`.
+
+##### Step 3: Update root BUILD.gn
+
+Change:
+
+```gn
+"//content/one_profile:one_profile",
+```
+
+To:
+
+```gn
+"//content/chromium_profile_server:chromium_profile_server",
+```
+
+##### Step 4: Build
+
+```bash
+autoninja -C out/Default chromium_profile_server
+```
+
+##### Step 5: Test
+
+```bash
+out/Default/Chromium\ Profile\ Server.app/Contents/MacOS/Chromium\ Profile\ Server \
+  --hidden \
+  --xpc-service=com.termsurf.two-profiles-swift \
+  --session-id=profile-a \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-a \
+  http://localhost:9407 2>&1 &
+
+out/Default/Chromium\ Profile\ Server.app/Contents/MacOS/Chromium\ Profile\ Server \
+  --hidden \
+  --xpc-service=com.termsurf.two-profiles-swift \
+  --session-id=profile-b \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-b \
+  http://localhost:9407 2>&1 &
+```
+
+#### Success criteria
+
+- `autoninja -C out/Default chromium_profile_server` builds with zero errors
+- App bundle is `Chromium Profile Server.app`
+- No references to "one_profile" or "One Profile" remain in
+  `content/chromium_profile_server/`
+- Both panes at 60fps sustained for 30+ seconds
+- No Dock icon (LSUIElement still works after rename)
+
+#### What a failure would mean
+
+- **Build errors:** Missed a rename somewhere — a file still references the old
+  name. Fix the remaining references and rebuild.
+- **Linker errors:** A target name was renamed inconsistently between BUILD.gn
+  files. Check all `deps` lists.
+- **0fps:** The pak file name or resource path changed incorrectly, preventing
+  the web page from loading. Check `chromium_profile_server.pak` and resource
+  paths.
+- **Dock icon appears:** The plist rename broke LSUIElement. Check
+  `app-Info.plist`.
