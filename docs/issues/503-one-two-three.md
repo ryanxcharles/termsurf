@@ -333,3 +333,40 @@ out/Default/Chromium\ Profile\ Server.app/Contents/MacOS/Chromium\ Profile\ Serv
 3. Compositor window shows the spinning blue square at ~60fps.
 4. No Dock icon for the Chromium Profile Server process.
 5. localStorage identity string is visible in the rendered page.
+
+#### Result: Pass
+
+Build: `make` compiled Metal shaders and Swift app with zero errors (one warning
+about `.metallib` file, fixed by adding it to the exclude list in
+`Package.swift`).
+
+Compositor log (receiver side):
+
+```
+[OneProfile] 60 frames (59.0 fps) | IOSurface 1600x1200
+[OneProfile] 60 frames (60.0 fps) | IOSurface 1600x1200
+[OneProfile] 61 frames (60.0 fps) | IOSurface 1600x1200
+[OneProfile] 60 frames (59.7 fps) | IOSurface 1600x1200
+[OneProfile] 61 frames (60.3 fps) | IOSurface 1600x1200
+```
+
+Profile server log (sender side):
+
+```
+[ShellVideoConsumer] Attached to FrameSinkId FrameSinkId(5, 3), starting capture
+[ShellVideoConsumer] 62 frames in 1.00931s (61.4283 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 60 frames in 1.01486s (59.1215 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 61 frames in 1.01645s (60.0127 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 61 frames in 1.01622s (60.0261 fps) | IOSurface 1600x1200
+```
+
+60fps on both sides. No Dock icon. The spinning blue square and localStorage
+identity rendered correctly in the single-pane compositor window.
+
+#### Conclusion
+
+The ts5 test infrastructure is established. Box-demo is ported, and
+`ts5/one-profile/` is a working single-pane Swift compositor (~240 lines)
+adapted from the ts4 two-profiles-swift source. The one-profile baseline
+validates the full pipeline: Chromium Profile Server → FrameSinkVideoCapturer →
+IOSurface → XPC Mach port → Metal texture → CADisplayLink rendering at 60fps.
