@@ -135,7 +135,7 @@ Text (instanced)
   ↓
 Kitty images (above text)
   ↓
-★ Pink overlay (NEW) — fullscreen quad, viewport-clipped to browser region
+★ Pink overlay (NEW) — quad rendered at exact pixel coordinates of browser region
   ↓
 Custom shader passes (if any)
   ↓
@@ -252,8 +252,8 @@ Add two new shader functions:
 **Vertex shader (`pink_overlay_vertex`):**
 
 Takes a uniform buffer with the overlay rectangle (x, y, width, height in
-physical pixels) and the projection matrix. Outputs a fullscreen quad (4
-vertices as triangle strip) positioned at the overlay rectangle.
+physical pixels) and the projection matrix. Emits 4 vertices (triangle strip)
+positioned at the exact corners of the overlay rectangle.
 
 The vertex shader converts pixel coordinates to clip space using the existing
 orthographic projection matrix. This is the same approach the `image` shader
