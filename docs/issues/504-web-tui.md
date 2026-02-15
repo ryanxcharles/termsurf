@@ -557,3 +557,38 @@ or dim (inactive), never in between.
 #### Result
 
 Builds with no warnings. Ready for interactive testing.
+
+### Experiment 9: Color-based border highlighting
+
+#### Goal
+
+Replace brightness-based border highlighting with color-based highlighting.
+Instead of `DarkGray` (dim) vs `White` (bright), use `Color::Reset` (default
+terminal foreground) for inactive borders and `Color::Cyan` for active borders.
+This works in both light and dark terminal themes and gives a cleaner visual cue
+— the active region pops with color while inactive regions blend in naturally.
+
+#### Changes
+
+##### `web/src/main.rs`
+
+Change the mode-dependent border tuple:
+
+- **Active border:** `Color::Cyan` (was `Color::White`).
+- **Inactive border:** `Color::Reset` (was `Color::DarkGray`).
+
+So:
+
+- **Browse mode:** Viewport border → `Color::Cyan`. URL bar border →
+  `Color::Reset`.
+- **Control mode:** URL bar border → `Color::Cyan`. Viewport border →
+  `Color::Reset`.
+
+#### Pass Criteria
+
+1. Active border is cyan — clearly distinguishable by color, not just
+   brightness.
+2. Inactive border uses the terminal's default foreground — visible and
+   theme-appropriate.
+3. Works in both dark and light terminal themes.
+4. Switching modes immediately updates the border colors.
