@@ -72,13 +72,19 @@ fn ui(frame: &mut Frame, url: &str, mode: &Mode) {
     ])
     .split(frame.area());
 
+    // Border colors based on mode.
+    let (url_border, viewport_border) = match mode {
+        Mode::Browse => (Color::DarkGray, Color::White),
+        Mode::Control => (Color::White, Color::DarkGray),
+    };
+
     // URL bar.
     let url_bar = Paragraph::new(url).block(
         Block::default()
             .borders(Borders::ALL)
             .title(" URL ")
-            .border_style(Style::default().fg(Color::Gray))
-            .title_style(Style::default().fg(Color::Gray)),
+            .border_style(Style::default().fg(url_border))
+            .title_style(Style::default().fg(url_border)),
     );
     frame.render_widget(url_bar, layout[0]);
 
@@ -86,8 +92,8 @@ fn ui(frame: &mut Frame, url: &str, mode: &Mode) {
     let viewport_block = Block::default()
         .borders(Borders::ALL)
         .title(" Viewport ")
-        .border_style(Style::default().fg(Color::Gray))
-        .title_style(Style::default().fg(Color::Gray));
+        .border_style(Style::default().fg(viewport_border))
+        .title_style(Style::default().fg(viewport_border));
     let inner = viewport_block.inner(layout[1]);
     let viewport_text = format!(
         "origin: ({}, {})\nsize: {} x {}",

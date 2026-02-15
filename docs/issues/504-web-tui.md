@@ -553,3 +553,7 @@ or dim (inactive), never in between.
 2. In control mode, the URL bar border is bright and the viewport border is dim.
 3. Switching modes with `Esc`/`Enter` immediately updates the border brightness.
 4. The active border is clearly distinguishable from the inactive border.
+
+#### Result
+
+Builds with no warnings. Ready for interactive testing.
