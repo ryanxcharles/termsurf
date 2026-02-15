@@ -881,3 +881,57 @@ padding amount (configured + blank).
 
 The gap between the pink overlay and the viewport border is now symmetric on all
 four sides. Resizing preserves the symmetry at all window sizes.
+
+## Conclusion
+
+The pink texture overlay works. A solid-color GPU quad renders at exact grid
+coordinates inside a Ghostty terminal pane, positioned by XPC messages from the
+`web` TUI. Resizing is smooth and the overlay tracks the viewport correctly.
+
+### What Was Built
+
+| Component                              | Location                                                          |
+| -------------------------------------- | ----------------------------------------------------------------- |
+| Metal shader pipeline (`pink_overlay`) | `ts5/src/renderer/metal/shaders.zig`, `shaders.metal`             |
+| Overlay state on renderer              | `ts5/src/renderer/generic.zig`                                    |
+| C API bridge                           | `ts5/include/ghostty.h`, `ts5/src/apprt/embedded.zig`             |
+| Surface overlay methods                | `ts5/src/Surface.zig`                                             |
+| XPC Mach service listener              | `ts5/macos/Sources/Ghostty/CompositorXPC.swift`                   |
+| Pane ID env var injection              | `ts5/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift` |
+| launchd plist                          | `ts5/macos/com.termsurf.compositor.plist`                         |
+| XPC client (Rust FFI)                  | `web/src/xpc.rs`                                                  |
+| Overlay coordinate sending             | `web/src/main.rs`                                                 |
+
+### What Was Proven
+
+1. **Grid-to-pixel conversion works.** The vertex shader positions the quad at
+   `grid_pos * cell_size`, and the projection matrix handles padding. This is
+   the same pattern used by `cell_text_vertex` and `image_vertex`.
+
+2. **XPC overlay updates are fast enough.** The `web` TUI sends coordinates
+   every frame via XPC. The compositor receives them, updates the renderer state
+   under `draw_mutex`, and triggers a redraw. No visible latency.
+
+3. **Resize is correct.** When the terminal resizes, the `web` TUI recomputes
+   its layout and sends new coordinates. The overlay follows with no stale
+   positioning. Cell size doesn't change on resize (it's font-determined), so
+   the position stays correct during the brief gap before updated coordinates
+   arrive.
+
+4. **Cleanup on disconnect works.** When `web` exits, the XPC connection closes.
+   The compositor detects the disconnection and clears the overlay for that
+   pane.
+
+### What Remains
+
+The app currently requires `launchctl kickstart` to launch because the main app
+IS the XPC Mach service. In ts3, a separate launcher daemon owned the Mach
+service and the main app connected as a client, allowing normal launch via
+`open`. The next issue should separate the compositor into a standalone daemon
+so the app can be launched normally.
+
+The pink quad will eventually be replaced with a real IOSurface texture from
+Chromium. The shader pipeline, XPC protocol, and coordinate system are all ready
+for this — the only change will be swapping the solid-color fragment shader for
+a texture sampler and passing an IOSurface Mach port alongside the grid
+coordinates.
