@@ -23,8 +23,26 @@ enum Mode {
 }
 
 fn main() -> io::Result<()> {
-    let url = std::env::args().nth(1).unwrap_or_else(|| {
-        eprintln!("Usage: web <url>");
+    let args: Vec<String> = std::env::args().collect();
+
+    // Parse --profile flag.
+    let mut profile = String::from("default");
+    let mut url = None;
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--profile" {
+            if i + 1 < args.len() {
+                profile = args[i + 1].clone();
+                i += 2;
+                continue;
+            }
+        } else if url.is_none() {
+            url = Some(args[i].clone());
+        }
+        i += 1;
+    }
+    let url = url.unwrap_or_else(|| {
+        eprintln!("Usage: web <url> [--profile <name>]");
         std::process::exit(1);
     });
 
@@ -38,7 +56,7 @@ fn main() -> io::Result<()> {
 
     // Event loop.
     loop {
-        terminal.draw(|frame| ui(frame, &url, &mode))?;
+        terminal.draw(|frame| ui(frame, &url, &profile, &mode))?;
 
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(key) = event::read()? {
@@ -71,7 +89,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn ui(frame: &mut Frame, url: &str, mode: &Mode) {
+fn ui(frame: &mut Frame, url: &str, profile: &str, mode: &Mode) {
     // Paint full background.
     frame.render_widget(Block::default().style(Style::default().bg(BG)), frame.area());
 
@@ -89,12 +107,20 @@ fn ui(frame: &mut Frame, url: &str, mode: &Mode) {
     };
 
     // URL bar.
+    let profile_title = Line::from(vec![
+        Span::raw("  ")
+            .style(Style::default().fg(COMMENT)),
+        Span::raw(profile)
+            .style(Style::default().fg(FG)),
+        Span::raw(" "),
+    ]);
     let url_bar = Paragraph::new(url)
         .style(Style::default().fg(FG))
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" URL ")
+                .title_top(profile_title.alignment(Alignment::Right))
                 .border_style(Style::default().fg(url_border).bg(BG))
                 .title_style(Style::default().fg(url_border))
                 .style(Style::default().bg(BG)),

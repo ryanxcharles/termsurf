@@ -795,3 +795,7 @@ styling.
 2. `web https://google.com --profile work` shows ` work` instead.
 3. The profile name uses `FG` color and the icon uses `COMMENT`.
 4. The profile indicator doesn't overlap with the URL text or `URL` title.
+
+#### Result
+
+Builds with no warnings. Ready for interactive testing.
