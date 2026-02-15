@@ -474,6 +474,45 @@ needed.
    to normal with no pink residue.
 7. The pink rectangle does not flicker or tear during resize.
 
+#### Result: FAIL
+
+`TERMSURF_PANE_ID` is not set in the shell environment when running inside the
+built Ghostty app. The `web` process reports:
+
+```
+[web] Not connected to compositor (TERMSURF_PANE_ID not set or service unavailable)
+```
+
+**What went wrong:**
+
+The experiment modified `SurfaceView_AppKit.swift` to set
+`surface_cfg.environmentVariables["TERMSURF_PANE_ID"]` before creating the
+surface. However, Ghostty's `SurfaceConfiguration.environmentVariables` does not
+propagate to the shell process in the way we assumed. The environment dictionary
+on the Swift side may not reach the Zig core's process spawning code, or it may
+be overwritten/ignored during the `withCValue` serialization to the C API.
+
+**What needs investigation for Experiment 2:**
+
+1. **How does Ghostty propagate environment variables to child processes?** Trace
+   the path from `SurfaceConfiguration.environmentVariables` through `withCValue`
+   → `ghostty_surface_config_s` → Zig `Surface.init()` → shell spawn. Identify
+   where the env var is lost.
+
+2. **Is the XPC Mach service reachable?** Even if `TERMSURF_PANE_ID` were set,
+   the `com.termsurf.compositor` Mach service may not be registered with launchd.
+   The current plist launches a separate Ghostty binary as the service, but the
+   XPC listener (`CompositorXPC.swift`) runs inside the app process. The app
+   would need to register the Mach service itself (via
+   `xpc_connection_create_mach_service` with the listener flag) rather than
+   relying on launchd to launch a separate process.
+
+3. **Chicken-and-egg with launchd.** If the Mach service is only available when
+   the app is running, launchd cannot start it on-demand. The app must register
+   the service at startup and launchd must have a matching `MachServices` entry
+   in the plist. Alternatively, skip launchd entirely and use an XPC anonymous
+   connection or a different IPC mechanism (Unix socket, named pipe).
+
 ## Sizing and Resize Lessons (Reference)
 
 From four generations of texture overlay experiments, these are the rules. Each
