@@ -10,8 +10,7 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `146.0.7650.0-termsurf`
-- Commit: `b2907d660628a`
+- Branch: `146.0.7650.0-issue-503`
 - Base version: `146.0.7650.0` (tracking Electron's Chromium version)
 
 ## Branch Strategy
@@ -32,6 +31,9 @@ issue-specific branches.
 | `146.0.7650.0-issue-414` | [Issue 414](issues/414-two-profiles-xpc.md) | Two profiles via XPC         |
 | `146.0.7650.0-issue-415` | [Issue 415](issues/415-swift-receiver.md)   | Swift receiver               |
 | `146.0.7650.0-issue-416` | [Issue 416](issues/416-rust-receiver.md)    | Rust receiver                |
+| `146.0.7650.0-issue-501` | [Issue 501](issues/501-two-profiles-ts5.md) | Two profiles in ts5          |
+| `146.0.7650.0-issue-502` | [Issue 502](issues/502-attach-delay.md)     | Attach delay fix             |
+| `146.0.7650.0-issue-503` | [Issue 503](issues/503-one-two-three.md)    | Dynamic multi-tab protocol   |
 
 ## Local Setup
 

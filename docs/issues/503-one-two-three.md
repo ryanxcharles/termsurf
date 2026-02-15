@@ -786,3 +786,99 @@ frames.
 8. Both profile servers log ~60fps per WebContents on the sender side.
 9. Profile server A logs two attached capturers (two WebContents from one
    `BrowserContext`).
+
+#### Result: Pass
+
+Build: Chromium compiled with 13 steps (incremental). Two Chromium style errors
+fixed during the build: `TabState` needed explicit out-of-line
+constructor/destructor, and `strcmp` had to be replaced with `std::string_view`
+comparison to satisfy `-Wunsafe-buffer-usage-in-libc-call`. Swift compositor
+built with zero errors.
+
+Profile server A log (sender side — two WebContents from one BrowserContext):
+
+```
+[ProfileServer] Connected to compositor: com.termsurf.three-profiles
+[ProfileServer] Registered as profile: profile-a
+[ProfileServer] Created tab 'left' for URL: http://localhost:9407/
+[ProfileServer] Tab 'left' ready, 1 tab(s) active
+[ProfileServer] Created tab 'center' for URL: http://localhost:9407/
+[ProfileServer] Tab 'center' ready, 2 tab(s) active
+[ShellVideoConsumer] Attached to FrameSinkId FrameSinkId(6, 3), starting capture
+[ShellVideoConsumer] Attached to FrameSinkId FrameSinkId(5, 3), starting capture
+[ShellVideoConsumer] 61 frames in 1.01042s (60.3706 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 61 frames in 1.01231s (60.2585 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 60 frames in 1.00157s (59.9059 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 61 frames in 1.01724s (59.966 fps) | IOSurface 1600x1200
+```
+
+Profile server B log (sender side — one WebContents):
+
+```
+[ProfileServer] Connected to compositor: com.termsurf.three-profiles
+[ProfileServer] Registered as profile: profile-b
+[ProfileServer] Created tab 'right' for URL: http://localhost:9407/
+[ProfileServer] Tab 'right' ready, 1 tab(s) active
+[ShellVideoConsumer] Attached to FrameSinkId FrameSinkId(5, 3), starting capture
+[ShellVideoConsumer] 60 frames in 1.00012s (59.9925 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 61 frames in 1.01602s (60.0384 fps) | IOSurface 1600x1200
+[ShellVideoConsumer] 61 frames in 1.01649s (60.0105 fps) | IOSurface 1600x1200
+```
+
+Compositor log (receiver side — three panes):
+
+```
+[ThreeProfiles] Listening on com.termsurf.three-profiles...
+[ThreeProfiles] Profile server registered: profile-a
+[ThreeProfiles] Sent create_tab: tab_id=left url=http://localhost:9407
+[ThreeProfiles] Sent create_tab: tab_id=center url=http://localhost:9407
+[ThreeProfiles] Tab ready: tab_id=left -> pane left
+[ThreeProfiles] Tab ready: tab_id=center -> pane center
+[ThreeProfiles] Profile server registered: profile-b
+[ThreeProfiles] Sent create_tab: tab_id=right url=http://localhost:9407
+[ThreeProfiles] Tab ready: tab_id=right -> pane right
+[ThreeProfiles] L: 61 (60.0 fps) C: 61 (60.0 fps) R: 61 (60.0 fps) | IOSurface 1600x1200
+[ThreeProfiles] L: 60 (59.3 fps) C: 61 (60.3 fps) R: 61 (60.3 fps) | IOSurface 1600x1200
+[ThreeProfiles] L: 61 (60.3 fps) C: 61 (60.3 fps) R: 61 (60.3 fps) | IOSurface 1600x1200
+[ThreeProfiles] L: 61 (60.0 fps) C: 60 (59.0 fps) R: 61 (60.0 fps) | IOSurface 1600x1200
+[ThreeProfiles] L: 61 (60.0 fps) C: 61 (60.0 fps) R: 61 (60.0 fps) | IOSurface 1600x1200
+```
+
+60fps on all three streams. No Dock icons. The dynamic tab protocol worked
+exactly as designed: profile servers connect, register, receive `create_tab`
+commands, open per-tab connections, and start streaming.
+
+Profile server A created **two** WebContents from the **same** BrowserContext,
+each with its own FrameSinkVideoCapturer (FrameSinkId 6,3 and 5,3), each
+streaming at 60fps over its own XPC tab connection.
+
+#### Conclusion
+
+The core question of Issue 503 is answered: **yes, a single Chromium Profile
+Server process can host multiple WebContents from the same BrowserContext, each
+with an independent FrameSinkVideoCapturer delivering IOSurface frames at 60fps
+over its own XPC connection.**
+
+The dynamic tab protocol (control connection + per-tab connections) works as
+designed. Profile servers connect to the compositor, register, receive
+`create_tab` commands, and open dedicated tab connections for each tab. The
+compositor maps tab IDs to panes and renders all three at 60fps.
+
+Key validated capabilities:
+
+1. **Multiple WebContents per BrowserContext** — Profile server A created two
+   WebContents from one profile, each with independent capture. This is the
+   multi-tab case.
+2. **Independent FrameSinkVideoCapturers** — Each WebContents has its own
+   capturer delivering a separate IOSurface stream. No crosstalk.
+3. **Dynamic tab creation via XPC** — Tabs are created on demand by the
+   compositor, not hardcoded at startup. The profile server creates WebContents
+   and capturers in response to `create_tab` commands.
+4. **Per-tab XPC connections** — Each tab has its own connection. Connection
+   identity replaces session IDs. No multiplexing overhead.
+5. **Bidirectional connection model** — The compositor (Mach service listener)
+   sends commands to profile servers (clients) on control connections. Profile
+   servers open tab connections back. This is the foundation for keyboard/mouse
+   input forwarding.
+6. **Three independent 60fps streams** — Two from one profile, one from another,
+   all rendering in a single Metal window.
