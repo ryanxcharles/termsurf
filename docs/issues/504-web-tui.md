@@ -406,3 +406,7 @@ No other changes. Control mode hints remain `[q] quit  [enter] browse`.
    `[esc] control mode  [ctrl+esc] force exit browse mode` on the left.
 2. Control mode status bar is unchanged.
 3. Both `Esc` and `Ctrl+Esc` still switch to control mode (no behavior change).
+
+#### Result
+
+Builds with no warnings. Ready for interactive testing.

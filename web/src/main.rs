@@ -104,7 +104,7 @@ fn ui(frame: &mut Frame, url: &str, mode: &Mode) {
     .split(layout[2]);
 
     let (hints, label) = match mode {
-        Mode::Browse => ("[esc] control mode", "BROWSE"),
+        Mode::Browse => ("[esc] control mode  [ctrl+esc] force exit browse mode", "BROWSE"),
         Mode::Control => ("[q] quit  [enter] browse", "CONTROL"),
     };
 
