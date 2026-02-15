@@ -616,3 +616,7 @@ Change the viewport `Paragraph` style from `Color::DarkGray` to `Color::Reset`.
 
 1. Viewport origin and size text is clearly readable.
 2. Text uses the terminal's default foreground color.
+
+#### Result
+
+Builds with no warnings. Ready for interactive testing.

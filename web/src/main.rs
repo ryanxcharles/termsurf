@@ -101,7 +101,7 @@ fn ui(frame: &mut Frame, url: &str, mode: &Mode) {
     );
     let viewport = Paragraph::new(viewport_text)
         .alignment(Alignment::Center)
-        .style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().fg(Color::Reset))
         .block(viewport_block);
     frame.render_widget(viewport, layout[1]);
 
