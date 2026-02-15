@@ -58,6 +58,10 @@ ts5/Box_test_diff.ppm
 ts5/ghostty.qcow2
 ts5/vgcore.*
 
+# TermSurf 5.0 Swift app build outputs
+ts5/*/.build/
+ts5/*/Sources/*/*.metallib
+
 # Vendored analysis repos (not committed)
 vendor/wezterm/
 vendor/electron/

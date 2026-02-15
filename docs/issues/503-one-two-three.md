@@ -882,3 +882,85 @@ Key validated capabilities:
    input forwarding.
 6. **Three independent 60fps streams** — Two from one profile, one from another,
    all rendering in a single Metal window.
+
+### Experiment 4: Update One Profile for dynamic tab protocol
+
+#### Goal
+
+Update `ts5/one-profile/` to speak the dynamic tab protocol introduced in
+Experiment 3. Currently incompatible with the `146.0.7650.0-issue-503` Chromium
+branch because the old compositor expects profile servers to immediately stream
+`display_surface` messages with `session_id` fields, while the new Chromium code
+sends `register` and waits for `create_tab` commands.
+
+No Chromium changes — Swift compositor only.
+
+#### Changes
+
+##### `ts5/one-profile/Sources/OneProfile/main.swift`
+
+**New globals:**
+
+```swift
+var gControlConnection: xpc_connection_t?
+var gTabConnection: xpc_connection_t?
+```
+
+**`handleMessage` signature:** Add a `peer` parameter so the handler knows which
+connection sent each message (same pattern as three-profiles):
+
+```swift
+func handleMessage(_ msg: xpc_object_t, peer: xpc_connection_t)
+```
+
+Update the call site in `startXPCListener` to pass `peerConn`.
+
+**`register` handler:** Replace the old `session_id`-based handler. When a
+profile server sends `{"action": "register", "profile": "..."}`:
+
+1. Store `peer` as `gControlConnection`.
+2. Send
+   `{"action": "create_tab", "url": "http://localhost:9407", "tab_id":
+   "main"}`
+   back on the control connection.
+3. Log the profile name.
+
+**New `tab_ready` handler:** When a profile server sends
+`{"action":
+"tab_ready", "tab_id": "main"}` on a new connection:
+
+1. Store `peer` as `gTabConnection`.
+2. Log the tab ID.
+
+**`display_surface` handler:** No changes needed. Frames arrive on the tab
+connection instead of the control connection, but the rendering logic is
+identical — there's only one pane.
+
+#### Build and Run
+
+```bash
+# 1. Start test page server (if not already running)
+cd ts5/box-demo && bun run server.ts &
+
+# 2. Build one-profile compositor
+cd ts5/one-profile && make
+
+# 3. Register as launchd service
+launchctl bootstrap gui/$(id -u) \
+  ~/dev/termsurf/ts5/one-profile/com.termsurf.one-profile.plist
+
+# 4. Start one Chromium Profile Server (no URL arg, no --session-id)
+cd chromium/src
+out/Default/Chromium\ Profile\ Server.app/Contents/MacOS/Chromium\ Profile\ Server \
+  --hidden \
+  --xpc-service=com.termsurf.one-profile \
+  --user-data-dir=$HOME/.config/termsurf/poc/profile-a
+```
+
+#### Pass Criteria
+
+1. One-profile compositor builds with `make`.
+2. Profile server connects and sends `register`. Compositor sends `create_tab`.
+   Profile server opens a tab connection, sends `tab_ready`, starts streaming.
+3. Compositor window shows the spinning blue square at ~60fps.
+4. No Dock icon for the Chromium Profile Server process.
