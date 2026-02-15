@@ -697,3 +697,45 @@ default colors bleed through.
 #### Result
 
 Builds with no warnings. Ready for interactive testing.
+
+### Experiment 12: Brighten muted colors
+
+#### Goal
+
+The inactive borders (`#3b4261`) and muted text (`#565f89`) are too dim against
+the Tokyo Night background. Shift both one step brighter using colors from the
+Tokyo Night palette, keeping the visual hierarchy intact.
+
+#### Palette Update
+
+| Role            | Before    | After     |
+| --------------- | --------- | --------- |
+| Inactive border | `#3b4261` | `#565f89` |
+| Muted text      | `#565f89` | `#737aa2` |
+
+Foreground (`#c0caf5`) and active accent (`#7dcfff`) are unchanged.
+
+#### Changes
+
+##### `web/src/main.rs`
+
+- Rename `BORDER` to `COMMENT` value: `Color::Rgb(0x56, 0x5f, 0x89)` (was
+  `0x3b, 0x42, 0x61`).
+- Rename `COMMENT` to `MUTED` and change to `Color::Rgb(0x73, 0x7a, 0xa2)` (was
+  `0x56, 0x5f, 0x89`).
+
+Actually, simpler: just update the two hex values:
+
+- `BORDER`: `Color::Rgb(0x56, 0x5f, 0x89)` (was `0x3b, 0x42, 0x61`)
+- `COMMENT`: `Color::Rgb(0x73, 0x7a, 0xa2)` (was `0x56, 0x5f, 0x89`)
+
+No renaming, no logic changes — just two color values bumped up.
+
+#### Pass Criteria
+
+1. Inactive borders are visibly brighter than before but still subordinate to
+   cyan active borders.
+2. Status bar hints and viewport coordinates are brighter but still subordinate
+   to foreground text.
+3. The visual hierarchy is preserved: active accent > foreground > muted text >
+   inactive border > background.
