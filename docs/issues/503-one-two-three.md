@@ -1103,3 +1103,46 @@ connection maps to a pane via `gTabConnections`, replacing the old
 `session_id`-based `paneForSession` function. All three compositors
 (one-profile, two-profiles, three-profiles) now speak the same dynamic tab
 protocol.
+
+## Conclusion
+
+All four goals accomplished across five experiments:
+
+1. **Port to ts5** (Experiments 1–2): `ts5/one-profile/`, `ts5/two-profiles/`,
+   and `ts5/three-profiles/` are self-contained Swift compositors with Metal
+   rendering and XPC listeners. ts5 no longer depends on ts4 for testing.
+
+2. **One profile, one tab** (Experiment 1, updated in Experiment 4): Single
+   Chromium Profile Server, single WebContents, single pane at 60fps.
+
+3. **Two profiles, one tab each** (Experiment 2, updated in Experiment 5): Two
+   Profile Server processes with different `--user-data-dir` paths, each hosting
+   one WebContents. Two panes at 60fps.
+
+4. **Two profiles, three tabs** (Experiment 3): One Profile Server hosting
+   **two** WebContents from the same BrowserContext, a second hosting one. Three
+   independent FrameSinkVideoCapturers delivering three IOSurface streams over
+   three XPC connections. Three panes at 60fps. This was the key unknown — it
+   proves that multiple WebContents per BrowserContext each get independent
+   capture at full framerate.
+
+### Dynamic tab protocol
+
+Experiment 3 introduced a compositor-driven protocol that replaced the original
+session-ID-based approach. Experiments 4–5 backported it to the one-profile and
+two-profiles compositors, so all three now speak the same protocol:
+
+- Profile server connects and sends `register` with its profile name.
+- Compositor sends `create_tab` commands with a URL and tab ID.
+- Profile server opens a new XPC connection per tab, sends `tab_ready`.
+- Frames flow on per-tab connections. Connection identity replaces session IDs.
+
+The compositor decides how many tabs each profile gets. The Profile Server is
+generic — it creates whatever tabs the compositor asks for.
+
+### What's next
+
+The multi-tab, multi-profile rendering pipeline is validated. The next step is
+embedding this into ts5's Ghostty fork: replacing the Swift test compositors
+with Ghostty's Metal renderer, and spawning Chromium Profile Server processes
+from within the application.
