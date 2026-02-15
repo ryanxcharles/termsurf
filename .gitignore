@@ -80,5 +80,8 @@ ts4/termsurf-xpc/target/
 ts4/two-profiles-receiver/receiver
 ts4/two-profiles-receiver/shaders.metallib
 
+# web TUI build outputs
+web/target/
+
 # cef-rs build outputs
 vendor/cef-rs/target/
