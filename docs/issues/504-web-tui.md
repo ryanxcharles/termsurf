@@ -441,3 +441,35 @@ accommodate the icon + space.
 #### Result
 
 Builds with no warnings. Ready for interactive testing.
+
+### Experiment 6: Simplify browse mode hints
+
+#### Goal
+
+The browse mode status bar currently shows
+`[esc] control mode  [ctrl+esc] force exit browse mode`. The `[esc]` hint is
+unnecessary — users press Esc instinctively, and it will work most of the time.
+Only the escape hatch needs to be documented. Remove `[esc] control mode` and
+keep only `[ctrl+esc] force exit browse mode`.
+
+#### Changes
+
+##### `web/src/main.rs`
+
+Change the browse mode hint from:
+
+```
+[esc] control mode  [ctrl+esc] force exit browse mode
+```
+
+to:
+
+```
+[ctrl+esc] force exit browse mode
+```
+
+#### Pass Criteria
+
+1. Browse mode status bar shows only `[ctrl+esc] force exit browse mode`.
+2. `Esc` still switches to control mode (behavior unchanged).
+3. Control mode hints are unchanged.
