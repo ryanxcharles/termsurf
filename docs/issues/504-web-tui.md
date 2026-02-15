@@ -368,3 +368,7 @@ The mode label uses the same `Color::Gray` as the rest of the status bar.
 6. In control mode, `Enter` switches back to browse mode.
 7. `Ctrl+C` quits from either mode.
 8. Status bar left side shows mode-appropriate key hints.
+
+#### Result
+
+Builds with no warnings. Ready for interactive testing.
