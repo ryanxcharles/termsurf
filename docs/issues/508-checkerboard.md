@@ -848,3 +848,72 @@ lower the log level or write directly to a file descriptor.
 **Conclusion:** `open --stderr <path>` is the correct way to collect logs from
 TermSurf. No source code changes needed. This should be the standard approach
 for all future debugging.
+
+### Experiment 5: Align bytesPerRow to 16 bytes
+
+The root cause from Experiments 3–4: Metal requires `bytesPerRow` to be a
+multiple of 16 for IOSurface-backed textures. The IOSurface is created with
+`.bytesPerRow: pixelWidth * 4`, which is not always aligned.
+
+One-line fix in `CompositorXPC.swift`.
+
+#### Changes
+
+**1. Align bytesPerRow — `ts5/macos/Sources/Ghostty/CompositorXPC.swift`**
+
+Change the IOSurface creation from:
+
+```swift
+.bytesPerRow: pixelWidth * 4,
+```
+
+To:
+
+```swift
+.bytesPerRow: (pixelWidth * 4 + 15) & ~15,
+```
+
+The checkerboard fill loop already uses `testSurface.bytesPerRow` (line 196), so
+it will automatically respect the aligned stride. No other changes needed.
+
+**2. Also fix the checkerboard color while we're here.**
+
+The BGRA byte order is wrong — `UInt32(0xFF_FF_88_44)` on little-endian stores
+bytes B=0x44 G=0x88 R=0xFF, producing orange (#FF8844) instead of blue
+(#4488FF). Fix:
+
+```swift
+// Before: UInt32(0xFF_FF_88_44) → orange #FF8844
+// After:  UInt32(0xFF_44_88_FF) → blue #4488FF
+```
+
+#### Files
+
+| File                                            | Change                                    |
+| ----------------------------------------------- | ----------------------------------------- |
+| `ts5/macos/Sources/Ghostty/CompositorXPC.swift` | Align `bytesPerRow` to 16, fix BGRA color |
+
+#### Build & Reproduce
+
+```bash
+cd ts5 && zig build
+> ~/dev/termsurf/logs/overlay.log
+open ts5/zig-out/TermSurf.app --stderr ~/dev/termsurf/logs/overlay.log
+
+# In a TermSurf pane:
+cargo run -p web -- http://example.com
+
+# 1. Verify BLUE checkerboard appears (not orange)
+# 2. Resize the terminal window — should NOT crash
+# 3. Resize several times in different directions
+# 4. Quit web — overlay should clear
+# 5. Read logs: tail -50 ~/dev/termsurf/logs/overlay.log
+```
+
+#### Pass Criteria
+
+1. Blue/dark checkerboard appears at Retina resolution.
+2. **Resizing the terminal window does not crash.** Multiple resizes in
+   different directions all survive.
+3. Quitting `web` clears the overlay.
+4. No Metal validation assertions in the log file.
