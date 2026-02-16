@@ -1348,3 +1348,67 @@ on launch — text is crisp at Retina resolution with no blur or stretching. On
 terminal resize, the overlay updates to the new resolution smoothly. The texture
 is never stretched; during the ~16ms transition the old frame renders at its
 actual pixel dimensions, then the next frame arrives at the correct new size.
+
+## Conclusion
+
+### How we got here
+
+Issue 507 proved the full Chromium pipeline works end-to-end at 60fps but
+crashed after 3 seconds. Issue 508 fixed the crash (IOSurface `bytesPerRow`
+alignment + CFRetain/CFRelease lifetime management). This issue picked up where
+508 left off: reimplement end-to-end streaming on top of 508's stable
+infrastructure.
+
+Experiment 1 failed immediately — a server storm bug spawned a new Chromium
+process on every `set_overlay` call (every 250ms), flooding the system with
+dozens of competing servers. Experiment 2 fixed this with two guards: skip
+server spawn if one already exists, and only send `set_overlay` when the
+viewport actually changes. Live Chromium frames rendered stably.
+
+With streaming working, two visual issues became apparent. Experiment 3 fixed
+colors — the IOSurface texture was declared `bgra8unorm_srgb` but Ghostty's
+render target is non-sRGB, causing a decode/encode mismatch that made colors
+"too bold." One-line fix: `bgra8unorm`. Experiment 4 fixed resolution and added
+dynamic resize — the server had been capturing at a default hidden-window size,
+producing blurry stretched output. The app now computes physical pixel
+dimensions from grid coords × cell size, sends them to the server at startup and
+on every resize, and the overlay quad is always sized to the IOSurface's exact
+pixel dimensions (never stretched).
+
+### What we accomplished
+
+The original scope was just "retry end-to-end streaming" — get back to Issue
+507's state without the crash. We exceeded that significantly:
+
+| Experiment | Goal                       | Result |
+| ---------- | -------------------------- | ------ |
+| 1          | End-to-end streaming       | Fail   |
+| 2          | Fix server storm           | Pass   |
+| 3          | Fix sRGB color mismatch    | Pass   |
+| 4          | Retina resolution + resize | Pass   |
+
+The pipeline now delivers:
+
+- **Correct colors.** Chromium's sRGB output composites correctly into Ghostty's
+  non-sRGB render target.
+- **Pixel-perfect Retina resolution.** Text on webpages is crisp — no blur, no
+  scaling artifacts.
+- **Dynamic resize.** Terminal resize triggers a new capture resolution within
+  ~16ms. The texture is never stretched during the transition.
+- **Clean lifecycle.** Server spawns once, resizes on demand, terminates cleanly
+  on disconnect.
+
+### What's next
+
+The streaming pipeline is solid. The remaining work to make browser panes
+usable:
+
+- **Input forwarding.** Keyboard and mouse events need to flow from the terminal
+  pane to the Chromium WebContents. Without this, the webpage is view-only.
+- **Scroll support.** Scroll events from the terminal need to reach the page.
+- **Multiple tabs/profiles.** The current implementation is single-tab
+  (`tabs_[0]`). Supporting multiple browser panes requires routing by tab ID.
+- **In-process Chromium.** The current architecture runs Chromium out-of-process
+  via the Profile Server. The ts5 endgame is in-process Chromium via the Content
+  API (proven in ts4). The XPC streaming approach is a stepping stone — it
+  validates the rendering pipeline while the in-process embedding is developed.
