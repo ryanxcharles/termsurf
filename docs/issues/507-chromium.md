@@ -412,9 +412,9 @@ This is the Chromium user data directory. It stores cookies, localStorage,
 cache, and all other browser state. One directory per profile. Issue 507 uses
 only the `default` profile.
 
-## Experiments
+## Ideas for Experiments
 
-### Experiment 1: IOSurface Texture Pipeline
+### Experiment Idea 1: IOSurface Texture Pipeline
 
 Prove the Metal renderer can display an IOSurface texture at grid coordinates.
 Use a programmatically created test IOSurface (solid color or gradient) instead
@@ -439,7 +439,7 @@ of live Chromium frames.
 3. Quitting `web` clears the overlay.
 4. No flickering or tearing.
 
-### Experiment 2: Live Chromium Frames
+### Experiment Idea 2: Live Chromium Frames
 
 Connect the Chromium Profile Server and render live web content.
 
@@ -461,7 +461,7 @@ Connect the Chromium Profile Server and render live web content.
    the server's fps logging).
 3. Quitting `web` kills the server and clears the overlay.
 
-### Experiment 3: Retina Resolution and Resize
+### Experiment Idea 3: Retina Resolution and Resize
 
 Match the capture resolution to the viewport's physical pixel size.
 
@@ -544,4 +544,235 @@ cargo run -p web -- http://localhost:9407
 # - Server logs 60fps to stderr
 # - Resizing the terminal updates the rendered content
 # - Quitting web (q or Ctrl+C) clears the overlay and kills the server
+```
+
+## Experiments
+
+### Experiment 1: IOSurface Texture Overlay
+
+Prove the Metal renderer can display an IOSurface-backed texture at grid
+coordinates. Uses a test IOSurface created in Swift (no Chromium yet).
+
+#### Why This First
+
+The pink overlay (Issue 505) renders a solid-color quad. The final pipeline
+renders an IOSurface texture. This experiment bridges the gap — same grid
+coordinates, but sampling from a real IOSurface instead of returning a constant
+color. If this works, Experiment 2 just swaps the test surface for live Chromium
+frames.
+
+#### Changes
+
+**1. Metal shaders — `ts5/src/renderer/shaders/shaders.metal`**
+
+Add `overlay_vertex` and `overlay_fragment`. The vertex shader is the same
+grid-to-clip-space math as `pink_overlay_vertex`, but also outputs texture
+coordinates (0→1). The fragment shader samples the texture.
+
+```metal
+struct OverlayVertexOut {
+    float4 position [[position]];
+    float2 texcoord;
+};
+
+vertex OverlayVertexOut overlay_vertex(
+    uint vid [[vertex_id]],
+    constant PinkOverlayIn &params [[buffer(0)]],
+    constant Uniforms &uniforms [[buffer(1)]]
+) {
+    float2 origin = float2(params.grid_col, params.grid_row) * uniforms.cell_size;
+    float2 size = float2(params.grid_width, params.grid_height) * uniforms.cell_size;
+
+    float2 corner;
+    corner.x = float(vid == 1 || vid == 3);
+    corner.y = float(vid == 2 || vid == 3);
+
+    OverlayVertexOut out;
+    out.position = uniforms.projection_matrix * float4(origin + size * corner, 0.0, 1.0);
+    out.texcoord = corner;
+    return out;
+}
+
+fragment float4 overlay_fragment(
+    OverlayVertexOut in [[stage_in]],
+    texture2d<float> tex [[texture(0)]]
+) {
+    constexpr sampler s(mag_filter::linear, min_filter::linear);
+    return tex.sample(s, in.texcoord);
+}
+```
+
+Reuses `PinkOverlayIn` for the grid coordinate params (same struct, same
+layout). Keep the existing pink shaders for now.
+
+**2. Pipeline — `ts5/src/renderer/metal/shaders.zig`**
+
+Add `overlay` pipeline alongside `pink_overlay`:
+
+```zig
+.{ "overlay", .{
+    .vertex_fn = "overlay_vertex",
+    .fragment_fn = "overlay_fragment",
+    .blending_enabled = true,
+} },
+```
+
+Blending enabled so the texture can composite over terminal content.
+
+**3. Renderer state — `ts5/src/renderer/generic.zig`**
+
+Add field alongside `pink_overlay`:
+
+```zig
+/// IOSurfaceRef for the overlay texture. Set from Swift via C API.
+/// When non-null, drawFrame() creates an MTLTexture from it and
+/// renders with the overlay pipeline instead of pink_overlay.
+overlay_iosurface: ?*anyopaque = null,
+```
+
+In `drawFrame()`, replace the pink overlay render block with:
+
+```zig
+if (self.pink_overlay.grid_width > 0 and
+    self.pink_overlay.grid_height > 0)
+{
+    if (self.overlay_iosurface) |iosurface| {
+        // Create MTLTexture from IOSurface (zero-copy, cheap per-frame).
+        const desc = // MTLTextureDescriptor for BGRA8Unorm_sRGB
+        const tex = device.msgSend(
+            ?objc.Object,
+            objc.sel("newTextureWithDescriptor:iosurface:plane:"),
+            .{ desc, iosurface, @as(c_ulong, 0) },
+        );
+        if (tex) |t| {
+            // Render textured quad with overlay pipeline.
+            pass.step(.{
+                .pipeline = self.shaders.pipelines.overlay,
+                .uniforms = frame.uniforms.buffer,
+                .buffers = &.{buf.buffer},
+                .textures = &.{Texture.fromNative(t)},
+                .draw = .{ .type = .triangle_strip, .vertex_count = 4 },
+            });
+        }
+    } else {
+        // Fallback: pink overlay (no IOSurface yet).
+        // ... existing pink_overlay render code ...
+    }
+}
+```
+
+The MTLTexture creation from IOSurface is zero-copy — it's just a view into the
+same GPU memory. Creating it per-frame is fine. For streaming Chromium frames
+(Experiment 2), each new IOSurface produces a different texture, so per-frame
+creation is the correct pattern anyway.
+
+**4. C API — `ts5/include/ghostty.h`**
+
+```c
+void ghostty_surface_set_overlay_iosurface(ghostty_surface_t, void* iosurface_ref);
+```
+
+**5. Export — `ts5/src/apprt/embedded.zig`**
+
+```zig
+export fn ghostty_surface_set_overlay_iosurface(
+    surface: *Surface,
+    iosurface: ?*anyopaque,
+) void {
+    surface.core_surface.setOverlayIOSurface(iosurface);
+}
+```
+
+**6. Surface method — `ts5/src/Surface.zig`**
+
+```zig
+pub fn setOverlayIOSurface(self: *Surface, iosurface: ?*anyopaque) void {
+    self.renderer.draw_mutex.lock();
+    defer self.renderer.draw_mutex.unlock();
+    self.renderer.overlay_iosurface = iosurface;
+    self.queueRender() catch {};
+}
+```
+
+**7. Test IOSurface — `ts5/macos/Sources/Ghostty/CompositorXPC.swift`**
+
+In `handleMessage` for `set_overlay`, after calling
+`ghostty_surface_set_overlay()`, create a test IOSurface and pass it:
+
+```swift
+import IOSurface
+
+// Create a 256x256 BGRA checkerboard IOSurface.
+let testSurface = IOSurface(properties: [
+    .width: 256,
+    .height: 256,
+    .bytesPerElement: 4,
+    .bytesPerRow: 256 * 4,
+    .pixelFormat: 0x42475241  // 'BGRA'
+] as [IOSurfacePropertyKey: Any])!
+
+testSurface.lock(options: [], seed: nil)
+let base = testSurface.baseAddress
+let bpr = testSurface.bytesPerRow
+for y in 0..<256 {
+    for x in 0..<256 {
+        let cellX = x / 32
+        let cellY = y / 32
+        let isLight = (cellX + cellY) % 2 == 0
+        let offset = y * bpr + x * 4
+        // BGRA: blue, green, red, alpha
+        if isLight {
+            base.storeBytes(of: UInt32(0xFF_FF_88_44), toByteOffset: offset, as: UInt32.self)  // #4488FF
+        } else {
+            base.storeBytes(of: UInt32(0xFF_22_22_22), toByteOffset: offset, as: UInt32.self)  // #222222
+        }
+    }
+}
+testSurface.unlock(options: [], seed: nil)
+
+ghostty_surface_set_overlay_iosurface(cSurface, Unmanaged.passUnretained(testSurface).toOpaque())
+```
+
+The checkerboard uses 8x8 cells (32px each) in blue (#4488FF) and dark (#222222)
+— matching the box-demo's color scheme. This pattern makes texture coordinate
+correctness visually obvious: if the mapping is wrong, the squares will stretch
+or shift.
+
+The IOSurface must be retained for the lifetime of the overlay. Store it on the
+`CompositorXPC` instance alongside the peer tracking.
+
+#### Pass Criteria
+
+1. When `web` runs, a blue/dark checkerboard appears at the viewport coordinates
+   (instead of pink).
+2. The checkerboard follows the viewport on terminal resize.
+3. Quitting `web` clears the overlay.
+4. No flickering or tearing.
+
+#### Files
+
+| File                                            | Change                                                         |
+| ----------------------------------------------- | -------------------------------------------------------------- |
+| `ts5/src/renderer/shaders/shaders.metal`        | Add `overlay_vertex` + `overlay_fragment`                      |
+| `ts5/src/renderer/metal/shaders.zig`            | Add `overlay` pipeline                                         |
+| `ts5/src/renderer/generic.zig`                  | Add `overlay_iosurface` field, texture render in `drawFrame()` |
+| `ts5/include/ghostty.h`                         | Add `ghostty_surface_set_overlay_iosurface`                    |
+| `ts5/src/apprt/embedded.zig`                    | Export new C function                                          |
+| `ts5/src/Surface.zig`                           | Add `setOverlayIOSurface()` method                             |
+| `ts5/macos/Sources/Ghostty/CompositorXPC.swift` | Create test IOSurface, call new API                            |
+
+#### Build & Verify
+
+```bash
+cd ts5/xpc-gateway && swift build
+cd ts5 && zig build
+cargo build -p web
+open ts5/zig-out/TermSurf.app
+
+# In a TermSurf pane:
+cargo run -p web -- http://example.com
+
+# Expected: blue/dark checkerboard at viewport instead of pink
+# Resize terminal → checkerboard follows
+# Quit web → checkerboard clears
 ```
