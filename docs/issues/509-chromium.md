@@ -640,6 +640,27 @@ cargo run -p web -- http://localhost:9407
 
 ### Result
 
-_Not yet run._
+**Failed.** Pink overlay only — no Chromium frames rendered. Crash after
+closing.
 
----
+**Root cause:** `web` sends `set_overlay` on every draw cycle (every 250ms), and
+`handleSetOverlay` spawns a new Chromium Profile Server on every call with no
+guard. Dozens of server processes were spawned for a single pane.
+
+**Why no blue spinning square:** All servers competed for the same LevelDB
+profile directory (LOCK errors). Chromium sub-processes failed with
+`bootstrap_look_up ... Permission denied (1100)` — the Mach port rendezvous
+breaks when multiple servers collide. Multiple servers sent `server_register`,
+but only the first found a `pendingURL` (the rest got "no pending URL" because
+`removeValue` already consumed it). No server successfully streamed
+`display_surface` frames while `web` was connected.
+
+**Why crash:** `handleDisconnect` kills only `serverProcesses[uuid]` — the last
+server stored. All previously spawned servers became orphans (each with renderer
+and GPU sub-processes). Resource exhaustion from dozens of orphaned Chromium
+process trees caused the crash.
+
+**Fix needed (for Experiment 2):**
+
+1. Guard `spawnServer` — skip if `serverProcesses[uuid]` already exists.
+2. Optionally, only send `set_overlay` when the viewport rect changes.
