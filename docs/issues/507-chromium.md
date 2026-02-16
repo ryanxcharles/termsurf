@@ -776,3 +776,140 @@ cargo run -p web -- http://example.com
 # Resize terminal → checkerboard follows
 # Quit web → checkerboard clears
 ```
+
+### Experiment 2: Retina-Correct Resolution
+
+The Experiment 1 checkerboard is blurry because the IOSurface is a fixed 256x256
+pixels, stretched to fill the overlay area. On a Retina display, the overlay
+might be 1000x800 physical pixels — the 256x256 texture is magnified 4x, and
+linear filtering smooths the edges.
+
+This experiment creates the IOSurface at the exact physical pixel dimensions of
+the overlay viewport, so the texture maps 1:1 with screen pixels.
+
+#### Key Insight
+
+Ghostty's `cell_width` and `cell_height` (from font metrics) are already in
+physical pixels. When the display scale factor changes, `contentScaleCallback()`
+recalculates font metrics at the new DPI (e.g., 72 * 2 = 144 DPI for Retina). So
+the conversion is simply:
+
+```
+pixel_width  = grid_width  * cell_width
+pixel_height = grid_height * cell_height
+```
+
+No separate scale factor multiplication needed.
+
+#### Changes
+
+**1. C API: query cell size — `ts5/include/ghostty.h`**
+
+```c
+void ghostty_surface_get_cell_size(ghostty_surface_t,
+                                    uint32_t* width, uint32_t* height);
+```
+
+Returns `cell_width` and `cell_height` in physical pixels from the renderer's
+font metrics (`renderer.grid_metrics.cell_width/height`).
+
+**2. Export — `ts5/src/apprt/embedded.zig`**
+
+```zig
+export fn ghostty_surface_get_cell_size(
+    surface: *Surface,
+    width: *u32,
+    height: *u32,
+) void {
+    surface.core_surface.getCellSize(width, height);
+}
+```
+
+**3. Surface method — `ts5/src/Surface.zig`**
+
+```zig
+pub fn getCellSize(self: *Surface, width: *u32, height: *u32) void {
+    self.renderer.draw_mutex.lock();
+    defer self.renderer.draw_mutex.unlock();
+    width.* = self.renderer.grid_metrics.cell_width;
+    height.* = self.renderer.grid_metrics.cell_height;
+}
+```
+
+**4. Dynamic IOSurface — `ts5/macos/Sources/Ghostty/CompositorXPC.swift`**
+
+Replace the fixed 256x256 test surface with a dynamically sized one:
+
+```swift
+// Query cell size from the renderer.
+var cellWidth: UInt32 = 0
+var cellHeight: UInt32 = 0
+ghostty_surface_get_cell_size(cSurface, &cellWidth, &cellHeight)
+
+// Compute physical pixel dimensions.
+let pixelWidth = Int(width) * Int(cellWidth)
+let pixelHeight = Int(height) * Int(cellHeight)
+
+// Create IOSurface at exact pixel dimensions.
+let surface = IOSurface(properties: [
+    .width: pixelWidth,
+    .height: pixelHeight,
+    .bytesPerElement: 4,
+    .bytesPerRow: pixelWidth * 4,
+    .pixelFormat: 0x42475241  // 'BGRA'
+])
+```
+
+Draw the same checkerboard pattern but at the native resolution. Each checker
+cell is `cellWidth x cellHeight` — exactly one terminal cell — so the grid lines
+align perfectly with the terminal grid.
+
+Recreate the IOSurface whenever the overlay size changes (i.e., when `web` sends
+a new `set_overlay` with different width/height). Store the current width/height
+and compare on each message.
+
+**5. Nearest-neighbor sampling — `ts5/src/renderer/shaders/shaders.metal`**
+
+Change the overlay fragment sampler from linear to nearest:
+
+```metal
+constexpr sampler s(mag_filter::nearest, min_filter::nearest);
+```
+
+This is correct for 1:1 pixel mapping — there's no magnification, so every texel
+maps to exactly one screen pixel. Linear filtering would still blur at sub-pixel
+boundaries.
+
+#### Pass Criteria
+
+1. Checkerboard squares have sharp, crisp edges (not blurry).
+2. Each checker cell is exactly one terminal cell in size (aligned to the grid).
+3. Resizing the terminal recreates the IOSurface at the new dimensions — still
+   crisp after resize.
+4. No flickering or tearing.
+
+#### Files
+
+| File                                            | Change                                  |
+| ----------------------------------------------- | --------------------------------------- |
+| `ts5/include/ghostty.h`                         | Add `ghostty_surface_get_cell_size`     |
+| `ts5/src/apprt/embedded.zig`                    | Export new C function                   |
+| `ts5/src/Surface.zig`                           | Add `getCellSize()` method              |
+| `ts5/macos/Sources/Ghostty/CompositorXPC.swift` | Dynamic IOSurface at correct pixel size |
+| `ts5/src/renderer/shaders/shaders.metal`        | Change sampler to `nearest` filtering   |
+
+#### Build & Verify
+
+```bash
+cd ts5/xpc-gateway && swift build
+cd ts5 && zig build
+cargo build -p web
+open ts5/zig-out/TermSurf.app
+
+# In a TermSurf pane:
+cargo run -p web -- http://example.com
+
+# Expected: crisp checkerboard, each square = one terminal cell
+# Resize terminal → surface recreated, still crisp
+# Quit web → overlay clears
+```
