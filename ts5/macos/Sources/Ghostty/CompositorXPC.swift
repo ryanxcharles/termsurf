@@ -105,6 +105,7 @@ class CompositorXPC {
                         }
                     }
                 }
+                xpc_connection_set_target_queue(peerConn, queue)
                 xpc_connection_resume(peerConn)
             } else if xpc_get_type(peer) == XPC_TYPE_ERROR {
                 fputs("[Compositor] Anonymous listener error\n", stderr)
@@ -192,6 +193,8 @@ class CompositorXPC {
         let urlPtr = xpc_dictionary_get_string(msg, "url")
         if let urlPtr = urlPtr {
             let url = String(cString: urlPtr)
+            let profilePtr = xpc_dictionary_get_string(msg, "profile")
+            let profile = profilePtr.map { String(cString: $0) } ?? "default"
 
             // Skip if server already running for this pane.
             if serverProcesses[uuid] != nil {
@@ -248,7 +251,7 @@ class CompositorXPC {
             pendingPixelSizes[uuid] = (pixelWidth, pixelHeight)
 
             // Spawn Chromium Profile Server.
-            spawnServer(forPane: uuid)
+            spawnServer(forPane: uuid, profile: profile)
 
         } else {
             // No URL — fall back to checkerboard (Issue 508 test path).
@@ -401,10 +404,10 @@ class CompositorXPC {
 
     // MARK: - Server spawning
 
-    private func spawnServer(forPane uuid: UUID) {
+    private func spawnServer(forPane uuid: UUID, profile: String) {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let serverPath = "\(home)/dev/termsurf/chromium/src/out/Default/Chromium Profile Server.app/Contents/MacOS/Chromium Profile Server"
-        let profilePath = "\(home)/.config/termsurf/profiles/default"
+        let profilePath = "\(home)/.config/termsurf/chromium-profiles/\(profile)"
 
         // Ensure profile directory exists.
         try? FileManager.default.createDirectory(

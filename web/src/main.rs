@@ -43,6 +43,15 @@ fn main() -> io::Result<()> {
         }
         i += 1;
     }
+    // Validate profile name: lowercase alphanumeric, starts with a letter.
+    if profile.is_empty()
+        || !profile.bytes().next().unwrap().is_ascii_lowercase()
+        || !profile.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    {
+        eprintln!("Error: profile name must be lowercase alphanumeric, starting with a letter");
+        std::process::exit(1);
+    }
+
     let url = url.unwrap_or_else(|| {
         eprintln!("Usage: web <url> [--profile <name>]");
         std::process::exit(1);
@@ -88,6 +97,7 @@ fn main() -> io::Result<()> {
                     viewport_rect.width,
                     viewport_rect.height,
                     &url,
+                    &profile,
                 );
             }
             last_viewport = viewport_rect;
