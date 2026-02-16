@@ -302,6 +302,73 @@ cargo run -p web -- http://localhost:9407
 | `chromium/src/.../shell_video_consumer.h`       | Add `SetPaneId()` method                                           |
 | `docs/chromium.md`                              | Add new branch                                                     |
 
+## Ideas for Experiments
+
+### Idea 1: End-to-end streaming
+
+Reimplement the three Chromium-specific pieces that were reverted from Issue 507
+on top of the Issue 508 infrastructure: server lifecycle in CompositorXPC.swift,
+two-step gateway connect in the Chromium Profile Server, and URL in `web`'s
+`set_overlay`. This is essentially Issue 507 Experiments 3+4 redone with the
+bytesPerRow alignment fix and CFRetain/CFRelease already in place. The box-demo
+should render at 60fps without crashing.
+
+### Idea 2: Stability soak
+
+Run the box-demo for 5+ minutes. Verify no crash, no memory growth, no fps
+degradation. At 60fps, five minutes is ~18,000 IOSurface swaps — enough to
+expose any subtle lifetime or resource leak issues. Monitor with Activity
+Monitor and the server's fps logging.
+
+### Idea 3: Retina size matching
+
+The server currently captures at a fixed 800x600 (stretched to fill the
+viewport). Send the viewport's physical pixel dimensions to the server so it
+calls `SetResolutionConstraints` at the exact size. The app computes
+`grid_width * cell_width` and `grid_height * cell_height` (already in physical
+pixels thanks to DPI-scaled font metrics) and sends them alongside `create_tab`.
+The IOSurface should then match the overlay quad 1:1 — no stretching, no blur.
+
+### Idea 4: Dynamic resize
+
+When the terminal resizes, `web` sends updated grid coordinates to the app. The
+app recomputes the viewport's physical pixel dimensions and sends a `resize`
+message to the server. The server updates `SetResolutionConstraints` and starts
+capturing at the new size. New IOSurfaces arrive at the new dimensions. The
+overlay pipeline already handles dimension changes (Issue 508 proved this with
+the checkerboard).
+
+### Idea 5: Two panes — same profile
+
+Run two `web` commands in different panes, both using the default profile. Each
+points at a different URL (or the same URL). Both should render simultaneously
+at 60fps. This proves the per-pane tracking in CompositorXPC works with real
+Chromium frames — each pane has its own server process, its own IOSurface
+stream, and its own overlay quad. Both servers share the same `--user-data-dir`
+(default profile), so cookies and localStorage are shared between them.
+
+### Idea 6: Two panes — two profiles
+
+Run two `web` commands in different panes with different `--profile` flags
+(e.g., `--profile work` and `--profile personal`). Each profile gets its own
+Chromium Profile Server process with its own `--user-data-dir`
+(`~/.config/termsurf/profiles/work/` and
+`~/.config/termsurf/profiles/personal/`). Both render simultaneously at 60fps
+with fully isolated browser state — different cookies, different localStorage,
+different cache. This is the core TermSurf differentiator: side-by-side browsing
+with different identities in the same terminal window.
+
+### Idea 7: Three panes — two profiles
+
+Run three `web` commands: two panes share the same profile (e.g.,
+`--profile
+work`) and the third uses a different profile (e.g.,
+`--profile personal`). This tests the one-server-per-profile architecture — the
+two `work` panes should share a single Chromium Profile Server process (with two
+tabs/WebContents inside it), while the `personal` pane gets its own server. This
+is the ts3 foundational constraint (one CEF process per profile) applied to
+ts5's Content API approach, and validates the multi-tab protocol from Issue 503.
+
 ## Experiment 1: End-to-end streaming
 
 ### Goal
@@ -576,70 +643,3 @@ cargo run -p web -- http://localhost:9407
 _Not yet run._
 
 ---
-
-## Ideas for Experiments
-
-### Idea 1: End-to-end streaming
-
-Reimplement the three Chromium-specific pieces that were reverted from Issue 507
-on top of the Issue 508 infrastructure: server lifecycle in CompositorXPC.swift,
-two-step gateway connect in the Chromium Profile Server, and URL in `web`'s
-`set_overlay`. This is essentially Issue 507 Experiments 3+4 redone with the
-bytesPerRow alignment fix and CFRetain/CFRelease already in place. The box-demo
-should render at 60fps without crashing.
-
-### Idea 2: Stability soak
-
-Run the box-demo for 5+ minutes. Verify no crash, no memory growth, no fps
-degradation. At 60fps, five minutes is ~18,000 IOSurface swaps — enough to
-expose any subtle lifetime or resource leak issues. Monitor with Activity
-Monitor and the server's fps logging.
-
-### Idea 3: Retina size matching
-
-The server currently captures at a fixed 800x600 (stretched to fill the
-viewport). Send the viewport's physical pixel dimensions to the server so it
-calls `SetResolutionConstraints` at the exact size. The app computes
-`grid_width * cell_width` and `grid_height * cell_height` (already in physical
-pixels thanks to DPI-scaled font metrics) and sends them alongside `create_tab`.
-The IOSurface should then match the overlay quad 1:1 — no stretching, no blur.
-
-### Idea 4: Dynamic resize
-
-When the terminal resizes, `web` sends updated grid coordinates to the app. The
-app recomputes the viewport's physical pixel dimensions and sends a `resize`
-message to the server. The server updates `SetResolutionConstraints` and starts
-capturing at the new size. New IOSurfaces arrive at the new dimensions. The
-overlay pipeline already handles dimension changes (Issue 508 proved this with
-the checkerboard).
-
-### Idea 5: Two panes — same profile
-
-Run two `web` commands in different panes, both using the default profile. Each
-points at a different URL (or the same URL). Both should render simultaneously
-at 60fps. This proves the per-pane tracking in CompositorXPC works with real
-Chromium frames — each pane has its own server process, its own IOSurface
-stream, and its own overlay quad. Both servers share the same `--user-data-dir`
-(default profile), so cookies and localStorage are shared between them.
-
-### Idea 6: Two panes — two profiles
-
-Run two `web` commands in different panes with different `--profile` flags
-(e.g., `--profile work` and `--profile personal`). Each profile gets its own
-Chromium Profile Server process with its own `--user-data-dir`
-(`~/.config/termsurf/profiles/work/` and
-`~/.config/termsurf/profiles/personal/`). Both render simultaneously at 60fps
-with fully isolated browser state — different cookies, different localStorage,
-different cache. This is the core TermSurf differentiator: side-by-side browsing
-with different identities in the same terminal window.
-
-### Idea 7: Three panes — two profiles
-
-Run three `web` commands: two panes share the same profile (e.g.,
-`--profile
-work`) and the third uses a different profile (e.g.,
-`--profile personal`). This tests the one-server-per-profile architecture — the
-two `work` panes should share a single Chromium Profile Server process (with two
-tabs/WebContents inside it), while the `personal` pane gets its own server. This
-is the ts3 foundational constraint (one CEF process per profile) applied to
-ts5's Content API approach, and validates the multi-tab protocol from Issue 503.
