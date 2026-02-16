@@ -845,3 +845,341 @@ sRGB curve renders them correctly.
 Chromium pass through the shader unchanged to the non-sRGB render target, and
 the display's inherent sRGB curve renders them correctly. Same approach as ts3's
 cef-rs fix.
+
+---
+
+## Experiment 4: Retina resolution + dynamic resize
+
+### Goal
+
+The Chromium overlay renders at the exact physical pixel dimensions of the
+viewport — no stretching, no blur. When the terminal resizes, the server updates
+its capture resolution and new frames arrive at the new size.
+
+### Problem
+
+The Chromium Profile Server calls `SetResolutionConstraints` using
+`view->GetVisibleViewportSize()` from the Shell's RenderWidgetHostView. Since
+the Shell window is hidden (`--hidden`), this returns a default size unrelated
+to the actual viewport. The overlay stretches the small capture to fill the
+viewport, producing visible blur.
+
+### Solution
+
+The app knows the correct pixel dimensions: `grid_width * cellWidth` and
+`grid_height * cellHeight` (from `ghostty_surface_get_cell_size`, already
+Retina-aware). Pass these to the server so it captures at the right size.
+
+On resize, `web` already sends `set_overlay` with updated grid coords
+(Experiment 2's dedup). The app computes new pixel dimensions and tells the
+server to update `SetResolutionConstraints`.
+
+### XPC protocol (complete)
+
+This is the full protocol after this experiment. New or modified fields are
+marked with **(new)**.
+
+#### `web` → app (direct connection)
+
+**`set_overlay`** — sent once on start, then on every viewport change (resize):
+
+```
+{ action: "set_overlay",
+  pane_id: "<uuid>",
+  col: N,           // grid column (top-left)
+  row: N,           // grid row (top-left)
+  width: N,         // grid cells wide
+  height: N,        // grid cells tall
+  url: "http://..." }
+```
+
+No changes. The app computes pixel dimensions server-side using cell size.
+
+#### app → server (control connection)
+
+**`create_tab`** — sent after `server_register`, includes initial pixel size:
+
+```
+{ action: "create_tab",
+  url: "http://...",
+  tab_id: "<uuid>",
+  pixel_width: N,   // (new) physical pixels wide
+  pixel_height: N }  // (new) physical pixels tall
+```
+
+**`resize`** **(new)** — sent when viewport grid coords change after initial
+setup:
+
+```
+{ action: "resize",
+  pixel_width: N,   // new physical pixels wide
+  pixel_height: N }  // new physical pixels tall
+```
+
+#### server → app (control connection)
+
+**`server_register`** — unchanged:
+
+```
+{ action: "server_register",
+  pane_id: "<uuid>" }
+```
+
+#### server → app (per-tab connection)
+
+**`tab_ready`** — unchanged:
+
+```
+{ action: "tab_ready",
+  tab_id: "<uuid>" }
+```
+
+**`display_surface`** — unchanged (already includes dimensions):
+
+```
+{ action: "display_surface",
+  pane_id: "<uuid>",
+  iosurface_port: <mach_send_right>,
+  width: N,         // physical pixels (from IOSurface)
+  height: N }
+```
+
+### Changes
+
+Four files in the TermSurf repo, three files in the Chromium fork.
+
+#### 1. `ts5/macos/Sources/Ghostty/CompositorXPC.swift`
+
+**In `handleSetOverlay` (first-time path, before `spawnServer`):**
+
+Compute pixel dimensions using `ghostty_surface_get_cell_size` and store them
+for inclusion in `create_tab`:
+
+```swift
+var cellWidth: UInt32 = 0
+var cellHeight: UInt32 = 0
+ghostty_surface_get_cell_size(cSurface, &cellWidth, &cellHeight)
+let pixelWidth = UInt64(width) * UInt64(cellWidth)
+let pixelHeight = UInt64(height) * UInt64(cellHeight)
+pendingPixelSizes[uuid] = (pixelWidth, pixelHeight)
+```
+
+New state: `private var pendingPixelSizes: [UUID: (UInt64, UInt64)] = [:]`
+
+**In `handleServerRegister` (when sending `create_tab`):**
+
+Include `pixel_width` and `pixel_height` from `pendingPixelSizes[uuid]`.
+
+**In `handleSetOverlay` (server-already-running path):**
+
+Compute new pixel dimensions and send `resize` to the server's control
+connection:
+
+```swift
+if serverProcesses[uuid] != nil {
+    if let cSurface = cachedCSurfaces[uuid] {
+        ghostty_surface_set_overlay(cSurface, col, row, width, height)
+
+        // Send resize to server.
+        var cellWidth: UInt32 = 0
+        var cellHeight: UInt32 = 0
+        ghostty_surface_get_cell_size(cSurface, &cellWidth, &cellHeight)
+        let pixelWidth = UInt64(width) * UInt64(cellWidth)
+        let pixelHeight = UInt64(height) * UInt64(cellHeight)
+
+        if let controlConn = serverControlConnections[uuid] {
+            let msg = xpc_dictionary_create(nil, nil, 0)
+            xpc_dictionary_set_string(msg, "action", "resize")
+            xpc_dictionary_set_uint64(msg, "pixel_width", pixelWidth)
+            xpc_dictionary_set_uint64(msg, "pixel_height", pixelHeight)
+            xpc_connection_send_message(controlConn, msg)
+        }
+    }
+    return
+}
+```
+
+#### 2. `shell_browser_main_parts.cc` (Chromium)
+
+**Update `CreateTab` to accept pixel dimensions:**
+
+```cpp
+void ShellBrowserMainParts::CreateTab(const GURL& url,
+                                      const std::string& tab_id,
+                                      int pixel_width,
+                                      int pixel_height) {
+  // ... existing Shell creation ...
+  video_consumer->SetInitialSize(pixel_width, pixel_height);
+  // ... rest unchanged ...
+}
+```
+
+**Update control connection handler to extract pixel dimensions from
+`create_tab`:**
+
+```cpp
+if (action && std::string_view(action) == "create_tab") {
+    // ... existing url/tab_id extraction ...
+    int pw = (int)xpc_dictionary_get_int64(event, "pixel_width");
+    int ph = (int)xpc_dictionary_get_int64(event, "pixel_height");
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ShellBrowserMainParts::CreateTab,
+                       base::Unretained(self), GURL(url), tab_id, pw, ph));
+}
+```
+
+**Add `resize` handler in control connection event handler:**
+
+```cpp
+} else if (action && std::string_view(action) == "resize") {
+    int pw = (int)xpc_dictionary_get_int64(event, "pixel_width");
+    int ph = (int)xpc_dictionary_get_int64(event, "pixel_height");
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ShellBrowserMainParts::ResizeCapture,
+                       base::Unretained(self), pw, ph));
+}
+```
+
+**Add `ResizeCapture` method:**
+
+```cpp
+void ShellBrowserMainParts::ResizeCapture(int pixel_width, int pixel_height) {
+  if (!tabs_.empty()) {
+    tabs_[0]->video_consumer->SetResolution(pixel_width, pixel_height);
+  }
+}
+```
+
+(Single-tab for now — `tabs_[0]` is sufficient for the default-profile case.)
+
+#### 3. `shell_browser_main_parts.h` (Chromium)
+
+Update `CreateTab` signature:
+
+```cpp
+void CreateTab(const GURL& url, const std::string& tab_id,
+               int pixel_width, int pixel_height);
+void ResizeCapture(int pixel_width, int pixel_height);
+```
+
+#### 4. `shell_video_consumer.cc` (Chromium)
+
+**Add `SetInitialSize` — stores dimensions for use in `Attach`:**
+
+```cpp
+void ShellVideoConsumer::SetInitialSize(int width, int height) {
+  initial_width_ = width;
+  initial_height_ = height;
+}
+```
+
+**Modify `Attach` — use stored dimensions instead of `GetVisibleViewportSize`:**
+
+```cpp
+gfx::Size physical_size;
+if (initial_width_ > 0 && initial_height_ > 0) {
+  physical_size = gfx::Size(initial_width_, initial_height_);
+} else {
+  gfx::Size view_size = view->GetVisibleViewportSize();
+  float scale = view->GetDeviceScaleFactor();
+  physical_size = gfx::Size(
+      static_cast<int>(std::ceil(view_size.width() * scale)),
+      static_cast<int>(std::ceil(view_size.height() * scale)));
+}
+capturer_->SetResolutionConstraints(physical_size, physical_size, false);
+```
+
+**Add `SetResolution` — updates capture resolution on a running capturer:**
+
+```cpp
+void ShellVideoConsumer::SetResolution(int width, int height) {
+  if (capturer_ && width > 0 && height > 0) {
+    gfx::Size size(width, height);
+    capturer_->SetResolutionConstraints(size, size, false);
+    LOG(INFO) << "[ShellVideoConsumer] Resized to " << width << "x" << height;
+  }
+}
+```
+
+#### 5. `shell_video_consumer.h` (Chromium)
+
+Add declarations:
+
+```cpp
+void SetInitialSize(int width, int height);
+void SetResolution(int width, int height);
+```
+
+Add members:
+
+```cpp
+int initial_width_ = 0;
+int initial_height_ = 0;
+```
+
+### Message flow
+
+```
+Terminal resize
+    │
+    ▼
+web detects viewport change (last_viewport != viewport_rect)
+    │
+    ▼
+web ──set_overlay(new grid coords + url)──▶ App
+                                             │
+                                             ├─ serverProcesses[uuid] exists
+                                             ├─ ghostty_surface_set_overlay(new coords)
+                                             ├─ ghostty_surface_get_cell_size → cellW, cellH
+                                             ├─ pixelW = gridW * cellW
+                                             ├─ pixelH = gridH * cellH
+                                             │
+                                      App ──resize(pixelW, pixelH)──▶ Server
+                                                                       │
+                                                                       ├─ SetResolutionConstraints(new size)
+                                                                       │
+                                                            Next frames arrive at new size
+                                                                       │
+                                              Server ──display_surface──▶ App
+                                                                          │
+                                                                          └─ overlay renders at correct resolution
+```
+
+### Build
+
+```bash
+# 1. Build Chromium Profile Server (source changes)
+cd chromium/src
+export PATH="$(cd ../depot_tools && pwd):$PATH"
+autoninja -C out/Default chromium_profile_server
+
+# 2. Build TermSurf (CompositorXPC.swift changes)
+cd ts5 && zig build
+
+# No web changes needed — existing set_overlay dedup handles resize.
+```
+
+### Pass criteria
+
+1. On launch, the overlay renders at the viewport's exact physical pixel
+   dimensions — no blur, no stretching.
+2. On terminal resize, the overlay updates to the new resolution within ~1
+   second (time for server to adjust capturer + deliver new frames).
+3. No crash during or after resize.
+4. Text on the webpage is crisp at Retina resolution.
+
+### File summary
+
+| File                                            | Action                                                |
+| ----------------------------------------------- | ----------------------------------------------------- |
+| `ts5/macos/Sources/Ghostty/CompositorXPC.swift` | Compute pixel dims, send in `create_tab` and `resize` |
+| `chromium/.../shell_browser_main_parts.cc`      | Extract pixel dims, handle `resize`, pass to consumer |
+| `chromium/.../shell_browser_main_parts.h`       | Update `CreateTab` signature, add `ResizeCapture`     |
+| `chromium/.../shell_video_consumer.cc`          | `SetInitialSize`, `SetResolution` methods             |
+| `chromium/.../shell_video_consumer.h`           | Add declarations and members                          |
+
+### Result
+
+_Not yet run._
