@@ -6,6 +6,7 @@
 import Foundation
 import GhosttyKit
 import os.log
+import ServiceManagement
 
 private let logger = Logger(subsystem: "com.termsurf.xpc-gateway", category: "xpc")
 
@@ -34,6 +35,26 @@ class CompositorXPC {
     /// Call this once during app startup (e.g., in applicationDidFinishLaunching).
     func start(appDelegate: GhosttyAppDelegate) {
         self.appDelegate = appDelegate
+
+        // Register the xpc-gateway LaunchAgent if not already registered.
+        let gatewayService = SMAppService.agent(
+            plistName: "com.termsurf.xpc-gateway.plist")
+        switch gatewayService.status {
+        case .notRegistered, .notFound:
+            do {
+                try gatewayService.register()
+                fputs("[Compositor] Registered xpc-gateway LaunchAgent\n", stderr)
+            } catch {
+                fputs("[Compositor] Failed to register xpc-gateway: \(error)\n", stderr)
+            }
+        case .enabled:
+            fputs("[Compositor] xpc-gateway LaunchAgent already registered\n", stderr)
+        case .requiresApproval:
+            fputs("[Compositor] xpc-gateway requires user approval in System Settings\n", stderr)
+        @unknown default:
+            break
+        }
+
         logger.info("Connecting to xpc-gateway")
 
         let queue = DispatchQueue(label: "com.termsurf.compositor.xpc")

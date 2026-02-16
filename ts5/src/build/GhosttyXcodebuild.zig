@@ -175,6 +175,45 @@ pub fn init(
         break :copy step;
     };
 
+    // Bundle xpc-gateway binary and LaunchAgent plist (Issue 506).
+    // The gateway binary must be pre-built via `swift build` in
+    // ts5/xpc-gateway/ before running `zig build`.
+    const copy_gateway = copy_gw: {
+        const step = RunStep.create(b, "copy xpc-gateway into bundle");
+        step.addArgs(&.{"cp"});
+        step.addFileArg(b.path("xpc-gateway/.build/debug/xpc-gateway"));
+        step.addArg(b.fmt("{s}/Contents/MacOS/xpc-gateway", .{app_path}));
+        step.step.dependOn(&build.step);
+        break :copy_gw step;
+    };
+
+    const mkdir_la = mkdir_la: {
+        const step = RunStep.create(b, "mkdir LaunchAgents in bundle");
+        step.addArgs(&.{
+            "mkdir",
+            "-p",
+            b.fmt("{s}/Contents/Library/LaunchAgents", .{app_path}),
+        });
+        step.step.dependOn(&build.step);
+        break :mkdir_la step;
+    };
+
+    const copy_plist = copy_pl: {
+        const step = RunStep.create(b, "copy xpc-gateway plist into bundle");
+        step.addArgs(&.{"cp"});
+        step.addFileArg(b.path("macos/com.termsurf.xpc-gateway.bundle.plist"));
+        step.addArg(b.fmt(
+            "{s}/Contents/Library/LaunchAgents/com.termsurf.xpc-gateway.plist",
+            .{app_path},
+        ));
+        step.step.dependOn(&mkdir_la.step);
+        break :copy_pl step;
+    };
+
+    // Copy must wait for gateway files to be in the bundle.
+    copy.step.dependOn(&copy_gateway.step);
+    copy.step.dependOn(&copy_plist.step);
+
     return .{
         .build = build,
         .open = open,

@@ -13,6 +13,94 @@ In ts3, a separate launcher daemon (`termsurf-launcher`) owned the Mach service.
 The main app (WezTerm) launched normally via `open` and connected to the
 launcher as a client. This issue restores that pattern for ts5.
 
+### Prior Art: Launcher Patterns Across Generations
+
+#### ts1: No XPC
+
+ts1 used in-process WKWebView — no inter-process rendering. CLI-to-app
+communication used Unix domain sockets with JSON messages. No launcher, no Mach
+services, no IOSurface transfer.
+
+#### ts3: `termsurf-launcher` (Rust, ~300 lines)
+
+The most complex launcher. Written in Rust using the `termsurf-xpc` crate (~900
+lines of safe wrappers over the XPC C API). Owned `com.termsurf.launcher` Mach
+service. Handled four actions:
+
+| Action               | Purpose                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `spawn_profile`      | GUI requests a browser profile. Launcher stores GUI's endpoint, spawns `termsurf-profile` process (or forwards to existing one) |
+| `register_profile`   | Profile server registers after starting. Launcher stores connection for reuse + crash detection                                 |
+| `claim_session`      | Profile server claims GUI's endpoint. Launcher returns it in reply. Profile connects directly to GUI                            |
+| `unregister_profile` | Profile server gracefully unregisters before exit                                                                               |
+
+Beyond rendezvous, the ts3 launcher also:
+
+- **Spawned child processes** (`Command::new(&profile_bin_path).spawn()`)
+- **Tracked running profiles** in a `HashMap<String, Arc<XpcConnection>>`
+- **Detected crashed profiles** via XPC error handlers, cleaned up registry
+- **Implemented graceful shutdown** (exited when all GUI connections
+  disconnected, tracked via `AtomicUsize` counter)
+- **Routed multi-webview commands** (`create_browser`) to existing profile
+  processes sharing the same CEF context
+
+Endpoint relay pattern: GUI creates anonymous listener → sends endpoint to
+launcher → launcher stores → profile claims → profile connects directly to GUI
+for IOSurface Mach port transfer at 60fps.
+
+Deployment: bundled as an XPC service inside the app at
+`Contents/XPCServices/com.termsurf.launcher.xpc/`. The launchd plist was
+dynamically generated at build time with absolute paths.
+
+Key files: `ts3/termsurf-launcher/src/main.rs`,
+`ts3/termsurf-xpc/src/{lib,ffi,connection,listener,dictionary,block,iosurface}.rs`.
+
+#### ts4: No Launcher
+
+ts4's `two-profiles-receiver` experiments had no separate launcher. The receiver
+(GUI) itself claimed the Mach service directly — the same architecture ts5 had
+before this issue. It works, but forces `launchctl kickstart` instead of `open`.
+
+Implemented three times (C++, Swift, Rust) to compare ergonomics. All three
+shared the same critical patterns: store peers in global arrays to prevent
+ARC/Drop release, lock IOSurface access between XPC and render threads, use
+`IOSurfaceCreateMachPort` / `IOSurfaceLookupFromMachPort` for cross-process
+texture sharing.
+
+Key files: `ts4/two-profiles-receiver/main.mm`,
+`ts4/two-profiles-swift/Sources/Receiver/main.swift`,
+`ts4/two-profiles-rust/src/main.rs`.
+
+#### Comparison
+
+| Aspect           | ts3 launcher                    | ts4 (none)               | ts5 xpc-gateway                      |
+| ---------------- | ------------------------------- | ------------------------ | ------------------------------------ |
+| Language         | Rust + termsurf-xpc             | N/A                      | Swift (raw C API)                    |
+| Size             | ~300 lines + ~900 line library  | N/A                      | ~80 lines                            |
+| Actions          | 4                               | N/A                      | 2                                    |
+| Spawns processes | Yes                             | No                       | No                                   |
+| Profile tracking | Yes (HashMap + crash detection) | No                       | No                                   |
+| `open` works     | Yes                             | No (launchctl)           | Yes                                  |
+| Ongoing traffic  | Relays commands to profiles     | Receives IOSurface ports | None                                 |
+| Deployment       | XPC service in app bundle       | launchd plist            | launchd plist (SMAppService planned) |
+
+#### Design Lessons
+
+The ts5 xpc-gateway is dramatically simpler than ts3's launcher because it
+separates concerns. ts3's launcher was both a rendezvous point and a process
+manager. ts5 splits these: the gateway is pure rendezvous, and process
+management is external.
+
+What ts5 could learn from ts3:
+
+- **Crash recovery.** ts3 detected profile crashes via XPC error handlers and
+  cleaned up the registry. ts5's gateway stores one endpoint — if the app
+  crashes and restarts, it re-registers (which works). But stale endpoints could
+  matter if the app dies without re-registering.
+- **The `termsurf-xpc` crate.** ts3 built a full safe Rust XPC library. ts5's
+  `web/src/xpc.rs` uses raw FFI. If XPC usage grows, the safe wrapper pattern
+  may be worth reviving.
+
 ## Goal
 
 Launch TermSurf with `open ts5/zig-out/TermSurf.app` and have the XPC overlay
@@ -443,9 +531,9 @@ normally, the gateway auto-starts via launchd, the pink overlay appears and
 resizes correctly, and quitting `web` clears it. No `launchctl kickstart`
 needed.
 
-## Conclusion
+##### Conclusion
 
-### What Was Built
+###### What Was Built
 
 | File                                            | Role                                                           |
 | ----------------------------------------------- | -------------------------------------------------------------- |
@@ -455,7 +543,7 @@ needed.
 | `ts5/macos/Sources/Ghostty/CompositorXPC.swift` | App: connects as client, registers anonymous listener endpoint |
 | `web/src/xpc.rs`                                | `web`: two-step connect (gateway → endpoint → direct to app)   |
 
-### What Was Proven
+###### What Was Proven
 
 1. **The three-process endpoint relay works.** The gateway owns the Mach
    service, the app registers an anonymous listener endpoint, and `web`
@@ -477,7 +565,7 @@ needed.
    (`register_app`, `connect`) and carries no ongoing traffic. It could crash
    and restart without interrupting active `web` sessions.
 
-### What Remains
+###### What Remains
 
 - **Automatic plist registration.** The gateway plist must be registered with
   launchd via `launchctl bootstrap` (one-time setup). Apple's `SMAppService` API
@@ -674,3 +762,62 @@ cargo run -p web -- https://example.com
    (no absolute paths).
 6. `xpc-gateway` appears in System Settings > General > Login Items under
    TermSurf.
+
+#### Result: PASS
+
+All six pass criteria met. The app launches via `open`, the SMAppService
+registration happens automatically, the pink overlay works, and no
+`launchctl
+bootstrap` is needed.
+
+#### Gotcha: Stale App Process
+
+The initial test appeared to fail with `[web] Gateway error: "no_app"`. The
+cause was a stale TermSurf process from before the experiment. macOS keeps the
+app in the Dock after closing the window — the process is still running. The
+stale process had connected to the gateway and registered its endpoint under the
+old launchd registration, but after booting out and re-registering via
+SMAppService, the gateway restarted with no stored endpoint.
+
+The fix: right-click the Dock icon and quit, then relaunch with `open`. The
+fresh app registers its endpoint with the new gateway, and `web` connects
+successfully. This is not a bug in the SMAppService approach — it's a one-time
+migration issue when switching from manual `launchctl bootstrap` to
+SMAppService.
+
+#### Conclusion
+
+##### What Was Built
+
+| File                                              | Role                                                        |
+| ------------------------------------------------- | ----------------------------------------------------------- |
+| `ts5/macos/com.termsurf.xpc-gateway.bundle.plist` | SMAppService plist with `BundleProgram` (no absolute paths) |
+| `ts5/src/build/GhosttyXcodebuild.zig`             | Post-build steps to copy gateway binary + plist into bundle |
+| `ts5/macos/Sources/Ghostty/CompositorXPC.swift`   | SMAppService registration on app startup                    |
+
+##### What Was Proven
+
+1. **SMAppService works for XPC gateway registration.** The app calls
+   `SMAppService.agent(plistName:).register()` on startup, launchd picks up the
+   bundled plist, and the gateway auto-starts when `web` connects to
+   `com.termsurf.xpc-gateway`. Zero manual `launchctl` commands.
+
+2. **BundleProgram resolves correctly.** The plist uses
+   `Contents/MacOS/xpc-gateway` (bundle-relative path) and launchd finds the
+   binary inside the app bundle. No absolute paths anywhere.
+
+3. **The build system bundles everything.** `zig build` copies the pre-built
+   gateway binary into `Contents/MacOS/` and the plist into
+   `Contents/Library/LaunchAgents/`. The app bundle is self-contained.
+
+4. **Status checking prevents duplicate registration.** Checking
+   `gatewayService.status` before calling `register()` avoids the not-idempotent
+   trap — subsequent launches skip registration when the agent is already
+   enabled.
+
+##### What Remains
+
+- **Chromium texture swap.** The pink overlay will be replaced with a real
+  IOSurface texture from Chromium. The direct XPC connection established in
+  Experiment 1 is the same channel that will carry IOSurface Mach ports at
+  60fps.

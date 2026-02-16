@@ -13,7 +13,7 @@ logs/
 
 # Build outputs (root level for future WezTerm)
 /target/
-build/
+/build/
 zig-out/
 
 # Profiling
