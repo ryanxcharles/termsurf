@@ -23,8 +23,8 @@ a piece of the puzzle:
   connection and `FrameSinkVideoCapturer`.
 - **Issue 504** built the `web` TUI chrome (URL bar, viewport border, status
   bar) and sends viewport grid coordinates to the app via XPC.
-- **Issue 505** proved GPU overlay compositing: a pink quad renders at exact grid
-  coordinates inside a Ghostty pane, driven by XPC messages from `web`.
+- **Issue 505** proved GPU overlay compositing: a pink quad renders at exact
+  grid coordinates inside a Ghostty pane, driven by XPC messages from `web`.
 - **Issue 506 (xpc-gateway)** freed the app from launchd constraints. The
   xpc-gateway daemon owns the Mach service; the app launches normally via
   `open`.
@@ -47,20 +47,20 @@ Single default profile only. No multiple profiles for this issue.
 ### Process Topology
 
 ```
-                        xpc-gateway
-                    (com.termsurf.xpc-gateway)
-                     /                    \
-                    /                      \
-  TermSurf app ───┘                        └─── Chromium Profile Server
-  (registers endpoint)                      (claims endpoint,
-                                             connects directly)
-         ▲                                          │
-         │ direct XPC                               │ direct XPC
-         │ (set_overlay)                            │ (display_surface)
-         │                                          │
-       web TUI ─────────spawns──────────────────────┘
-  (browser chrome,
-   viewport coords)
+                      xpc-gateway
+                  (com.termsurf.xpc-gateway)
+                   /                    \
+                  /                      \
+TermSurf app ───┘                        └─── Chromium Profile Server
+(registers endpoint)                      (claims endpoint,
+                                           connects directly)
+       ▲                                          │
+       │ direct XPC                               │ direct XPC
+       │ (set_overlay)                            │ (display_surface)
+       │                                          │
+     web TUI ─────────spawns──────────────────────┘
+(browser chrome,
+ viewport coords)
 ```
 
 Four processes:
@@ -108,7 +108,8 @@ The Chromium Profile Server already captures frames via
 1. `OnFrameCaptured()` receives a `gpu_memory_buffer_handle` containing an
    `IOSurfaceRef`.
 2. `IOSurfaceCreateMachPort(io_surface)` creates a Mach port handle.
-3. The port is sent via XPC: `xpc_dictionary_set_mach_send(msg, "iosurface_port",
+3. The port is sent via XPC:
+   `xpc_dictionary_set_mach_send(msg, "iosurface_port",
    port)`.
 4. The app imports it: `IOSurfaceLookupFromMachPort(port)`.
 5. The renderer creates a `MTLTexture` from the IOSurface for the current frame.
@@ -137,8 +138,8 @@ pixel_width  = grid_width  * cell_width  * scale_factor
 pixel_height = grid_height * cell_height * scale_factor
 ```
 
-The app knows `cell_width`, `cell_height`, and `scale_factor` from the
-renderer. The Chromium Profile Server needs this information to set its capture
+The app knows `cell_width`, `cell_height`, and `scale_factor` from the renderer.
+The Chromium Profile Server needs this information to set its capture
 resolution. This can flow through `web` (which already bridges both) or via a
 reply on the direct XPC connection.
 
@@ -285,7 +286,8 @@ The Mach port is received as `mach_port_t` (`u32` in Zig). The import uses
 When a `display_surface` message arrives:
 
 1. Extract `pane_id` (UUID string) and look up the surface.
-2. Extract `iosurface_port` via `xpc_dictionary_copy_mach_send(msg,
+2. Extract `iosurface_port` via
+   `xpc_dictionary_copy_mach_send(msg,
    "iosurface_port")`.
 3. Extract `width` and `height`.
 4. Call `ghostty_surface_set_overlay_surface(surface, port, width, height)`.
@@ -311,7 +313,8 @@ xpc_connection_create_mach_service(service_name, queue, 0);
 Change to two-step connect (same pattern as `web/src/xpc.rs`):
 
 1. Connect to `com.termsurf.xpc-gateway`.
-2. Send `{ action: "connect" }` with `xpc_connection_send_message_with_reply_sync`.
+2. Send `{ action: "connect" }` with
+   `xpc_connection_send_message_with_reply_sync`.
 3. Extract endpoint from reply.
 4. Create connection from endpoint via `xpc_connection_create_from_endpoint`.
 5. Send `display_surface` frames on the direct connection, including `pane_id`.
@@ -425,18 +428,18 @@ Match the capture resolution to the viewport's physical pixel size.
 
 ## File Summary
 
-| File | Action |
-|------|--------|
-| `ts5/src/renderer/shaders/shaders.metal` | Add `overlay_vertex` + `overlay_fragment` |
-| `ts5/src/renderer/metal/shaders.zig` | Replace `pink_overlay` with `overlay` pipeline |
-| `ts5/src/renderer/generic.zig` | Add `overlay_surface` field, texture render step |
-| `ts5/include/ghostty.h` | Add `ghostty_surface_set_overlay_surface` |
-| `ts5/src/apprt/embedded.zig` | Export the new C API function |
-| `ts5/src/Surface.zig` | Add `setOverlaySurface()` method |
-| `ts5/macos/Sources/Ghostty/CompositorXPC.swift` | Handle `display_surface` action |
-| `chromium/src/.../shell_browser_main_parts.cc` | Two-step gateway connect |
-| `chromium/src/.../shell_switches.h` | Add `--pane-id` flag |
-| `web/src/main.rs` | Spawn Chromium Profile Server |
+| File                                            | Action                                           |
+| ----------------------------------------------- | ------------------------------------------------ |
+| `ts5/src/renderer/shaders/shaders.metal`        | Add `overlay_vertex` + `overlay_fragment`        |
+| `ts5/src/renderer/metal/shaders.zig`            | Replace `pink_overlay` with `overlay` pipeline   |
+| `ts5/src/renderer/generic.zig`                  | Add `overlay_surface` field, texture render step |
+| `ts5/include/ghostty.h`                         | Add `ghostty_surface_set_overlay_surface`        |
+| `ts5/src/apprt/embedded.zig`                    | Export the new C API function                    |
+| `ts5/src/Surface.zig`                           | Add `setOverlaySurface()` method                 |
+| `ts5/macos/Sources/Ghostty/CompositorXPC.swift` | Handle `display_surface` action                  |
+| `chromium/src/.../shell_browser_main_parts.cc`  | Two-step gateway connect                         |
+| `chromium/src/.../shell_switches.h`             | Add `--pane-id` flag                             |
+| `web/src/main.rs`                               | Spawn Chromium Profile Server                    |
 
 ## Chromium Branch
 
