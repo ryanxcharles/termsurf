@@ -1,4 +1,4 @@
-# Issue 506: Compositor Launcher Daemon
+# Issue 506: XPC Gateway Daemon
 
 ## Background
 
@@ -23,7 +23,7 @@ pipeline work exactly as it does today.
 ### Current (Issue 505)
 
 ```
-web ──XPC──▶ TermSurf app (com.termsurf.compositor)
+web ──XPC──▶ TermSurf app (com.termsurf.xpc-gateway)
               ├── XPC listener (Mach service)
               └── Renderer (set_overlay)
 ```
@@ -35,9 +35,9 @@ The app is both the Mach service and the renderer. Must be launched via
 
 ```
                      ┌──────────────────────┐
-                     │  Compositor Daemon   │
+                     │    XPC Gateway       │
                      │  (com.termsurf.      │
-                     │   compositor)        │
+                     │   xpc-gateway)       │
                      │                      │
   TermSurf app ─────▶│  Stores app endpoint │◀───── web
   (launched via open)│                      │  (connects, claims
@@ -51,22 +51,22 @@ The app is both the Mach service and the renderer. Must be launched via
 
 Three processes:
 
-1. **Compositor daemon** — Tiny binary. Owns the `com.termsurf.compositor` Mach
+1. **XPC gateway** — Tiny binary. Owns the `com.termsurf.xpc-gateway` Mach
    service. Managed by launchd. Its only job is rendezvous: the app registers
    its anonymous endpoint, and `web` processes claim it.
 
 2. **TermSurf app** — Launched normally via `open`. On startup, connects to
-   `com.termsurf.compositor` as a client and sends an anonymous XPC listener
+   `com.termsurf.xpc-gateway` as a client and sends an anonymous XPC listener
    endpoint. Handles `set_overlay` messages from `web` processes on the direct
    connection.
 
-3. **`web` TUI** — Connects to `com.termsurf.compositor`, requests the app's
+3. **`web` TUI** — Connects to `com.termsurf.xpc-gateway`, requests the app's
    endpoint, then connects directly to the app. All overlay messages flow on the
-   direct connection — no relay hop through the daemon.
+   direct connection — no relay hop through the gateway.
 
 ### Why Direct Connection (Not Relay)
 
-The daemon could relay every message from `web` to the app, but direct
+The gateway could relay every message from `web` to the app, but direct
 connection is better:
 
 - **No per-message relay hop.** Overlay coordinates are sent every 250ms today.
@@ -75,16 +75,16 @@ connection is better:
 - **Proven pattern.** ts3 used exactly this approach — the launcher relayed
   endpoints, then profile servers connected directly to the GUI for IOSurface
   Mach port transfer.
-- **Simpler daemon.** The daemon handles two message types (`register_app`,
+- **Simpler gateway.** The gateway handles two message types (`register_app`,
   `connect`) and no ongoing traffic. It could crash and restart without
   interrupting active `web` sessions (they already have direct connections).
 
-### Why Not Eliminate the Daemon Entirely
+### Why Not Eliminate the Gateway Entirely
 
-The daemon exists solely because of a macOS constraint: a Mach service can only
-be claimed by the process launchd launched for that job. Without a daemon, the
-app must be launched by launchd. With a daemon, the app launches normally and
-the daemon provides the well-known rendezvous point.
+The gateway exists solely because of a macOS constraint: a Mach service can only
+be claimed by the process launchd launched for that job. Without a gateway, the
+app must be launched by launchd. With a gateway, the app launches normally and
+the gateway provides the well-known rendezvous point.
 
 There is no alternative IPC mechanism that avoids this. XPC is the only way to
 transfer IOSurface Mach ports between processes on macOS. See CLAUDE.md "Settled
@@ -92,9 +92,9 @@ Architectural Decisions".
 
 ## XPC Protocol
 
-### Daemon Messages
+### Gateway Messages
 
-The daemon handles two actions:
+The gateway handles two actions:
 
 **`register_app`** — Sent by the TermSurf app on startup.
 
@@ -102,7 +102,7 @@ The daemon handles two actions:
 → { action: "register_app", endpoint: <anonymous_listener_endpoint> }
 ```
 
-The daemon stores the endpoint. If a previous endpoint exists (app restarted),
+The gateway stores the endpoint. If a previous endpoint exists (app restarted),
 it replaces it.
 
 **`connect`** — Sent by `web` processes.
@@ -112,10 +112,10 @@ it replaces it.
 ← { endpoint: <app_anonymous_listener_endpoint> }
 ```
 
-The daemon returns the app's endpoint. The `web` process uses it to establish a
+The gateway returns the app's endpoint. The `web` process uses it to establish a
 direct connection to the app.
 
-If the app hasn't registered yet (daemon started before app), the daemon can
+If the app hasn't registered yet (gateway started before app), the gateway can
 either return an error or hold the request until the app registers. Returning an
 error is simpler — `web` can retry.
 
@@ -137,8 +137,8 @@ On disconnect, the app clears the overlay for that pane (same as today).
 1. User runs:     open ts5/zig-out/TermSurf.app
 
 2. App starts:    applicationDidFinishLaunching()
-                  ├── connect_mach_service("com.termsurf.compositor")
-                  │   └── launchd auto-starts daemon if not running
+                  ├── connect_mach_service("com.termsurf.xpc-gateway")
+                  │   └── launchd auto-starts gateway if not running
                   ├── create anonymous XPC listener
                   ├── send { action: "register_app", endpoint: <listener> }
                   └── set event handler on anonymous listener
@@ -147,7 +147,7 @@ On disconnect, the app clears the overlay for that pane (same as today).
 3. User types:    cargo run -p web -- https://example.com
 
 4. web starts:    read TERMSURF_PANE_ID from env
-                  ├── connect_mach_service("com.termsurf.compositor")
+                  ├── connect_mach_service("com.termsurf.xpc-gateway")
                   ├── send { action: "connect", pane_id: "<uuid>" }
                   ├── receive reply with app endpoint
                   ├── connect to app via endpoint
@@ -159,7 +159,7 @@ On disconnect, the app clears the overlay for that pane (same as today).
 
 ## Components
 
-### Compositor Daemon
+### XPC Gateway
 
 A standalone binary, ~50–100 lines. Written in Swift or Rust — either works
 since the XPC C API is the same. Swift may be simpler because
@@ -168,7 +168,7 @@ more ergonomic with closures.
 
 **Responsibilities:**
 
-- Listen on `com.termsurf.compositor` (LISTENER flag)
+- Listen on `com.termsurf.xpc-gateway` (LISTENER flag)
 - Accept connections from the app (stores endpoint)
 - Accept connections from `web` processes (returns endpoint)
 - No ongoing traffic once connections are established
@@ -182,12 +182,12 @@ more ergonomic with closures.
 
 ### launchd Plist
 
-Same as today but points to the daemon binary instead of the app:
+Same as today but points to the gateway binary instead of the app:
 
 ```xml
 <key>ProgramArguments</key>
 <array>
-    <string>/path/to/termsurf-compositor</string>
+    <string>/path/to/xpc-gateway</string>
 </array>
 ```
 
@@ -200,7 +200,7 @@ Replace `CompositorXPC.swift`'s listener with a client connection:
 ```swift
 // App IS the listener
 let conn = xpc_connection_create_mach_service(
-    "com.termsurf.compositor", queue,
+    "com.termsurf.xpc-gateway", queue,
     UInt64(XPC_CONNECTION_MACH_SERVICE_LISTENER))
 ```
 
@@ -208,8 +208,8 @@ let conn = xpc_connection_create_mach_service(
 
 ```swift
 // App connects as client, sends anonymous listener
-let daemon = xpc_connection_create_mach_service(
-    "com.termsurf.compositor", queue, 0)  // no LISTENER flag
+let gateway = xpc_connection_create_mach_service(
+    "com.termsurf.xpc-gateway", queue, 0)  // no LISTENER flag
 
 let listener = xpc_connection_create(nil, queue)  // anonymous
 // ... set up handler for web connections on listener ...
@@ -218,7 +218,7 @@ let msg = xpc_dictionary_create(nil, nil, 0)
 xpc_dictionary_set_string(msg, "action", "register_app")
 xpc_dictionary_set_value(msg, "endpoint",
     xpc_endpoint_create(listener))
-xpc_connection_send_message(daemon, msg)
+xpc_connection_send_message(gateway, msg)
 ```
 
 The handler on the anonymous listener processes `set_overlay` messages exactly
@@ -228,14 +228,14 @@ as `CompositorXPC.swift` does today.
 
 Replace the direct Mach service connection with a two-step connect:
 
-1. Connect to `com.termsurf.compositor` (the daemon)
+1. Connect to `com.termsurf.xpc-gateway` (the gateway)
 2. Send `{ action: "connect", pane_id: "<uuid>" }`
 3. Receive reply with endpoint
 4. Connect to app via endpoint
 5. Send `set_overlay` on the direct connection
 
 This requires `xpc_connection_send_message_with_reply` (or the sync variant) to
-get the endpoint back from the daemon.
+get the endpoint back from the gateway.
 
 ## Verification
 
@@ -243,24 +243,24 @@ get the endpoint back from the daemon.
 2. In a TermSurf pane: `cargo run -p web -- https://example.com` shows the pink
    overlay.
 3. Resizing works. Quitting `web` clears the overlay.
-4. Killing and relaunching the app works (daemon stays running, `web` reconnects
-   on next launch).
-5. The daemon is invisible to the user — no manual `launchctl` commands needed
+4. Killing and relaunching the app works (gateway stays running, `web`
+   reconnects on next launch).
+5. The gateway is invisible to the user — no manual `launchctl` commands needed
    after initial plist registration.
 
 ## Experiments
 
-### Experiment 1: Compositor Daemon with Endpoint Relay
+### Experiment 1: XPC Gateway with Endpoint Relay
 
-Implement the three-process architecture: a standalone Swift daemon owns the
+Implement the three-process architecture: a standalone Swift gateway owns the
 Mach service, the app registers an anonymous endpoint, and `web` processes claim
 the endpoint to connect directly to the app.
 
 #### Changes
 
-##### Part 1: Compositor Daemon Binary
+##### Part 1: XPC Gateway Binary
 
-###### `ts5/compositor-daemon/Package.swift`
+###### `ts5/xpc-gateway/Package.swift`
 
 Minimal Swift Package Manager executable:
 
@@ -269,20 +269,20 @@ Minimal Swift Package Manager executable:
 import PackageDescription
 
 let package = Package(
-    name: "CompositorDaemon",
+    name: "XPCGateway",
     platforms: [.macOS(.v14)],
     targets: [
-        .executableTarget(name: "compositor-daemon",
+        .executableTarget(name: "xpc-gateway",
                           path: "Sources")
     ]
 )
 ```
 
-###### `ts5/compositor-daemon/Sources/main.swift`
+###### `ts5/xpc-gateway/Sources/main.swift`
 
-~60 lines. The daemon:
+~60 lines. The gateway:
 
-1. Creates a Mach service listener on `com.termsurf.compositor`.
+1. Creates a Mach service listener on `com.termsurf.xpc-gateway`.
 2. For each incoming peer connection, sets a message handler.
 3. On `register_app`: stores the endpoint from the app (replacing any previous
    one).
@@ -304,15 +304,33 @@ Key details:
 
 ##### Part 2: Update launchd Plist
 
-###### `ts5/macos/com.termsurf.compositor.plist`
+###### `ts5/macos/com.termsurf.xpc-gateway.plist`
 
-Change `ProgramArguments` to point to the daemon binary:
+New plist replacing `com.termsurf.compositor.plist`:
 
 ```xml
-<key>ProgramArguments</key>
-<array>
-    <string>/Users/ryan/dev/termsurf/ts5/compositor-daemon/.build/debug/compositor-daemon</string>
-</array>
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.termsurf.xpc-gateway</string>
+    <key>MachServices</key>
+    <dict>
+        <key>com.termsurf.xpc-gateway</key>
+        <true/>
+    </dict>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/ryan/dev/termsurf/ts5/xpc-gateway/.build/debug/xpc-gateway</string>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/Users/ryan/dev/termsurf/logs/xpc-gateway.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/ryan/dev/termsurf/logs/xpc-gateway.log</string>
+</dict>
+</plist>
 ```
 
 ##### Part 3: App Connects as Client
@@ -321,8 +339,8 @@ Change `ProgramArguments` to point to the daemon binary:
 
 Replace the Mach service listener with:
 
-1. **Client connection to daemon.** Connect to `com.termsurf.compositor` without
-   the LISTENER flag. Resume the connection.
+1. **Client connection to gateway.** Connect to `com.termsurf.xpc-gateway`
+   without the LISTENER flag. Resume the connection.
 
 2. **Anonymous XPC listener.** Create with `xpc_connection_create(nil, queue)`.
    Set its event handler to accept peer connections from `web` processes. Each
@@ -331,7 +349,7 @@ Replace the Mach service listener with:
 
 3. **Register endpoint.** Create an endpoint from the anonymous listener with
    `xpc_endpoint_create(listener)`. Send `{ action: "register_app", endpoint }`
-   to the daemon.
+   to the gateway.
 
 The `handleMessage` and `handleDisconnect` methods stay unchanged — they already
 handle `set_overlay`, surface lookup, and cleanup.
@@ -342,7 +360,7 @@ Key details:
   variable) to prevent ARC release.
 - `xpc_endpoint_create` takes a listener connection and returns a serializable
   endpoint object that can be sent over XPC to other processes.
-- The daemon connection only carries the `register_app` message at startup. All
+- The gateway connection only carries the `register_app` message at startup. All
   subsequent traffic flows on the anonymous listener's direct connections.
 
 ##### Part 4: `web` Two-Step Connect
@@ -351,7 +369,7 @@ Key details:
 
 Replace `CompositorConnection::connect()` with a two-step flow:
 
-1. Connect to `com.termsurf.compositor` (the daemon).
+1. Connect to `com.termsurf.xpc-gateway` (the gateway).
 2. Send `{ action: "connect", pane_id: "<uuid>" }` using
    `xpc_connection_send_message_with_reply_sync` to get a reply.
 3. Extract the endpoint from the reply with
@@ -381,14 +399,14 @@ extern "C" {
 }
 ```
 
-The daemon connection can be dropped after the endpoint is received — it's not
+The gateway connection can be dropped after the endpoint is received — it's not
 needed for ongoing communication.
 
 #### Build & Test
 
 ```bash
-# Build the daemon
-cd ts5/compositor-daemon && swift build
+# Build the gateway
+cd ts5/xpc-gateway && swift build
 
 # Build ts5
 cd ts5 && zig build
@@ -396,9 +414,9 @@ cd ts5 && zig build
 # Build web TUI
 cargo build -p web
 
-# Clear old launchd registration and re-register with daemon binary
+# Clear old launchd registration and re-register with gateway
 launchctl bootout gui/$(id -u)/com.termsurf.compositor
-launchctl bootstrap gui/$(id -u) ts5/macos/com.termsurf.compositor.plist
+launchctl bootstrap gui/$(id -u) ts5/macos/com.termsurf.xpc-gateway.plist
 
 # Launch the app normally
 open ts5/zig-out/TermSurf.app
@@ -410,10 +428,10 @@ cargo run -p web -- https://example.com
 #### Pass Criteria
 
 1. `open ts5/zig-out/TermSurf.app` launches the app and the pink overlay works.
-2. No `launchctl kickstart` needed — the daemon auto-starts when the app
+2. No `launchctl kickstart` needed — the gateway auto-starts when the app
    connects.
 3. The pink overlay appears, resizes correctly, and clears on `web` exit.
-4. Relaunching the app (quit and `open` again) works — the daemon stays running
+4. Relaunching the app (quit and `open` again) works — the gateway stays running
    and the app re-registers its endpoint.
-5. The daemon process is visible in Activity Monitor as `compositor-daemon` but
+5. The gateway process is visible in Activity Monitor as `xpc-gateway` but
    requires no user interaction.
