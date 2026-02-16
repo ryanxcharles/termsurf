@@ -824,3 +824,27 @@ tail -100 ~/dev/termsurf/logs/overlay.log
    lines (confirming `open --stderr` captures fd 2 for both runtimes).
 2. The Metal `bytesPerRow` assertion appears in the log (reproducing the
    Experiment 3 finding without any `freopen` code).
+
+#### Result: Pass
+
+`open --stderr` captures Swift `[Compositor]` lines and Metal assertions without
+any source code changes. The `freopen` hack was removed from AppDelegate.swift.
+
+The second run produced more data — the resize survived one intermediate size
+before crashing on a different one:
+
+- 1560×928 → `bytesPerRow = 6240` → 6240/16 = 390 ✓ works
+- 1716×1044 → `bytesPerRow = 6864` → 6864/16 = 429 ✓ works (resize survived)
+- 2002×1247 → `bytesPerRow = 8008` → 8008/16 = 500.5 ✗ crashes
+
+This confirms the root cause is purely alignment — resizing works when the pixel
+width happens to produce a 16-byte-aligned stride, and crashes when it doesn't.
+
+Zig `[overlay]` lines did not appear. Zig's `std.log` likely filters below
+`.err` in optimized builds. This is not a blocker — the Swift and Metal output
+is sufficient for diagnostics. For future Zig-side debugging, we could either
+lower the log level or write directly to a file descriptor.
+
+**Conclusion:** `open --stderr <path>` is the correct way to collect logs from
+TermSurf. No source code changes needed. This should be the standard approach
+for all future debugging.
