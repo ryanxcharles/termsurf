@@ -748,3 +748,39 @@ tail -50 ~/dev/termsurf/logs/overlay.log
 
 Same as Experiment 2: this passes if we can **read the `[overlay]` log lines**
 after the crash and identify what was happening when it died.
+
+#### Result: Pass
+
+The `freopen` redirect worked — Swift `fputs` output and Metal validation
+messages were captured in `~/dev/termsurf/logs/overlay.log`. The crash cause is
+now identified.
+
+**Root cause: Metal bytesPerRow alignment.**
+
+```
+_mtlValidateStrideTextureParameters:1927: failed assertion `Texture Descriptor Validation
+IOSurface texture: bytesPerRow (6500) must be aligned to 16 bytes
+```
+
+Metal requires `bytesPerRow` to be a multiple of 16 for IOSurface-backed
+textures. The IOSurface is created in `CompositorXPC.swift` with
+`.bytesPerRow: pixelWidth * 4`, which is not always 16-byte aligned:
+
+- Before resize: 1560×928 → `bytesPerRow = 6240` → 6240 / 16 = 390 ✓
+- After resize: 1625×986 → `bytesPerRow = 6500` → 6500 / 16 = 406.25 ✗
+
+The fix: align `bytesPerRow` to 16 bytes when creating the IOSurface:
+
+```swift
+let bytesPerRow = (pixelWidth * 4 + 15) & ~15
+```
+
+**Not a race condition. Not a use-after-free. Not a CFRetain issue.** The
+Experiment 1 diagnosis was wrong on all counts. The crash was a Metal validation
+assertion on a misaligned byte stride.
+
+**Note:** Zig `log.warn` output did not appear in the log file. `freopen`
+redirects the C `FILE* stderr`, but Zig's `std.debug.print` writes to fd 2 (the
+POSIX file descriptor) directly, bypassing the C FILE layer. Only Swift `fputs`
+and Metal's internal logging were captured. This is sufficient — the Metal
+assertion told us everything we needed.
