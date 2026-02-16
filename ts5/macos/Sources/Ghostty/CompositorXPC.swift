@@ -5,7 +5,6 @@
 
 import Foundation
 import GhosttyKit
-import IOSurface
 import os.log
 import ServiceManagement
 
@@ -28,13 +27,6 @@ class CompositorXPC {
 
     /// Weak reference to the app delegate for surface lookup.
     private weak var appDelegate: GhosttyAppDelegate?
-
-    /// Test IOSurface for Issue 507 (must be retained).
-    private var testSurface: IOSurface?
-
-    /// Current overlay dimensions in grid cells (to detect resize).
-    private var overlayGridWidth: UInt32 = 0
-    private var overlayGridHeight: UInt32 = 0
 
     private init() {}
 
@@ -163,80 +155,12 @@ class CompositorXPC {
                     return
                 }
                 ghostty_surface_set_overlay(cSurface, col, row, width, height)
-
-                // Recreate test IOSurface when overlay size changes (Experiment 2).
-                if self.testSurface == nil || width != self.overlayGridWidth || height != self.overlayGridHeight {
-                    var cellWidth: UInt32 = 0
-                    var cellHeight: UInt32 = 0
-                    ghostty_surface_get_cell_size(cSurface, &cellWidth, &cellHeight)
-
-                    let pixelWidth = Int(width) * Int(cellWidth)
-                    let pixelHeight = Int(height) * Int(cellHeight)
-                    self.testSurface = Self.createCheckerboardSurface(
-                        width: pixelWidth, height: pixelHeight,
-                        cellWidth: Int(cellWidth), cellHeight: Int(cellHeight))
-                    self.overlayGridWidth = width
-                    self.overlayGridHeight = height
-                    fputs("[Compositor] Created \(pixelWidth)x\(pixelHeight) checkerboard (cell \(cellWidth)x\(cellHeight))\n", stderr)
-                }
-
-                // Pass the IOSurface to the renderer (Issue 507).
-                if let ioSurface = self.testSurface {
-                    let ptr = Unmanaged.passUnretained(ioSurface).toOpaque()
-                    ghostty_surface_set_overlay_iosurface(cSurface, ptr)
-                }
             }
 
         default:
             fputs("[Compositor] unknown action: \(action)\n", stderr)
         }
     }
-
-    // MARK: - Test IOSurface (Issue 507)
-
-    /// Create a checkerboard IOSurface at the given pixel dimensions.
-    /// Each checker cell is one terminal cell (cellWidth x cellHeight pixels).
-    private static func createCheckerboardSurface(
-        width: Int, height: Int,
-        cellWidth: Int, cellHeight: Int
-    ) -> IOSurface? {
-        guard width > 0 && height > 0 else { return nil }
-        guard let surface = IOSurface(properties: [
-            .width: width,
-            .height: height,
-            .bytesPerElement: 4,
-            .bytesPerRow: width * 4,
-            .pixelFormat: 0x42475241  // 'BGRA'
-        ] as [IOSurfacePropertyKey: Any]) else {
-            fputs("[Compositor] Failed to create test IOSurface\n", stderr)
-            return nil
-        }
-
-        surface.lock(options: [], seed: nil)
-        let base = surface.baseAddress
-        let bpr = surface.bytesPerRow
-        for y in 0..<height {
-            for x in 0..<width {
-                let cellX = x / max(cellWidth, 1)
-                let cellY = y / max(cellHeight, 1)
-                let isLight = (cellX + cellY) % 2 == 0
-                let offset = y * bpr + x * 4
-                // BGRA byte order: B, G, R, A
-                if isLight {
-                    // Blue #4488FF → B=0xFF, G=0x88, R=0x44, A=0xFF
-                    base.storeBytes(of: UInt32(0xFF_44_88_FF), toByteOffset: offset, as: UInt32.self)
-                } else {
-                    // Dark #222222 → B=0x22, G=0x22, R=0x22, A=0xFF
-                    base.storeBytes(of: UInt32(0xFF_22_22_22), toByteOffset: offset, as: UInt32.self)
-                }
-            }
-        }
-        surface.unlock(options: [], seed: nil)
-
-        return surface
-    }
-
-    // MARK: - Disconnect handling
 
     private func handleDisconnect(_ peer: xpc_connection_t) {
         fputs("[Compositor] Web process disconnected\n", stderr)
