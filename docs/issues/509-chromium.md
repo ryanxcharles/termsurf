@@ -774,4 +774,6 @@ Same as Experiment 1:
 
 ### Result
 
-_Not yet run._
+**Passed.** Box-demo rendered live Chromium frames inside the TermSurf pane.
+Exactly one server spawned per pane. No crash. Clean exit killed the server and
+cleared the overlay. Resize not tested (out of scope for this experiment).
