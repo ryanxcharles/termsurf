@@ -36,14 +36,17 @@ class CompositorXPC {
     /// Maps pane UUID → current IOSurface (must retain to prevent ARC release).
     private var currentSurfaces: [UUID: IOSurface] = [:]
 
-    /// Maps pane UUID → Chromium Profile Server process (Issue 509).
-    private var serverProcesses: [UUID: Process] = [:]
+    /// Maps profile name → Chromium Profile Server process.
+    private var serverProcesses: [String: Process] = [:]
 
-    /// Maps pane UUID → server control connection (for sending create_tab).
-    private var serverControlConnections: [UUID: xpc_connection_t] = [:]
+    /// Maps profile name → server control connection (for sending create_tab).
+    private var serverControlConnections: [String: xpc_connection_t] = [:]
 
-    /// Maps pane UUID → URL to load (stored until server registers).
-    private var pendingURLs: [UUID: String] = [:]
+    /// Maps pane UUID → (profile, url) pending server registration.
+    private var pendingTabs: [UUID: (profile: String, url: String)] = [:]
+
+    /// Maps pane UUID → profile name (for disconnect cleanup).
+    private var paneProfiles: [UUID: String] = [:]
 
     /// Maps pane UUID → cached C surface pointer (for display_surface handler).
     private var cachedCSurfaces: [UUID: ghostty_surface_t] = [:]
@@ -189,29 +192,31 @@ class CompositorXPC {
         let peerId = ObjectIdentifier(peer as AnyObject)
         peerPaneIds[peerId] = uuid
 
-        // Check for URL field — if present, spawn Chromium server.
+        // Check for URL field — if present, spawn or reuse Chromium server.
         let urlPtr = xpc_dictionary_get_string(msg, "url")
         if let urlPtr = urlPtr {
             let url = String(cString: urlPtr)
             let profilePtr = xpc_dictionary_get_string(msg, "profile")
             let profile = profilePtr.map { String(cString: $0) } ?? "default"
 
-            // Skip if server already running for this pane.
-            if serverProcesses[uuid] != nil {
+            // Track which profile this pane belongs to.
+            paneProfiles[uuid] = profile
+
+            // If this pane already has a cached surface (resize case), just update.
+            if cachedCSurfaces[uuid] != nil {
                 if let cSurface = cachedCSurfaces[uuid] {
-                    // Update grid coordinates.
                     ghostty_surface_set_overlay(cSurface, col, row, width, height)
 
-                    // Send resize to server with new pixel dimensions.
                     var cellWidth: UInt32 = 0
                     var cellHeight: UInt32 = 0
                     ghostty_surface_get_cell_size(cSurface, &cellWidth, &cellHeight)
                     let pixelWidth = UInt64(width) * UInt64(cellWidth)
                     let pixelHeight = UInt64(height) * UInt64(cellHeight)
 
-                    if let controlConn = serverControlConnections[uuid] {
+                    if let controlConn = serverControlConnections[profile] {
                         let msg = xpc_dictionary_create(nil, nil, 0)
                         xpc_dictionary_set_string(msg, "action", "resize")
+                        xpc_dictionary_set_string(msg, "pane_id", paneIdStr)
                         xpc_dictionary_set_uint64(msg, "pixel_width", pixelWidth)
                         xpc_dictionary_set_uint64(msg, "pixel_height", pixelHeight)
                         xpc_connection_send_message(controlConn, msg)
@@ -221,9 +226,7 @@ class CompositorXPC {
                 return
             }
 
-            fputs("[Compositor] set_overlay with URL \(url) for pane \(paneIdStr)\n", stderr)
-
-            pendingURLs[uuid] = url
+            fputs("[Compositor] set_overlay with URL \(url) for pane \(paneIdStr) profile \(profile)\n", stderr)
 
             // Get the C surface pointer from main (synchronous — safe from XPC queue).
             var cSurfaceOpt: ghostty_surface_t? = nil
@@ -250,8 +253,20 @@ class CompositorXPC {
             let pixelHeight = UInt64(height) * UInt64(cellHeight)
             pendingPixelSizes[uuid] = (pixelWidth, pixelHeight)
 
-            // Spawn Chromium Profile Server.
-            spawnServer(forPane: uuid, profile: profile)
+            if let controlConn = serverControlConnections[profile] {
+                // Server already registered — send create_tab immediately.
+                sendCreateTab(controlConn, paneId: paneIdStr, url: url, uuid: uuid)
+            } else {
+                // Store as pending (sent when server_register arrives).
+                pendingTabs[uuid] = (profile: profile, url: url)
+
+                if serverProcesses[profile] == nil {
+                    // No server for this profile — spawn one.
+                    spawnServer(forProfile: profile)
+                }
+                // Else: server spawned but not yet registered. pendingTabs will be
+                // consumed when server_register arrives.
+            }
 
         } else {
             // No URL — fall back to checkerboard (Issue 508 test path).
@@ -321,41 +336,38 @@ class CompositorXPC {
     // MARK: - server_register (from Chromium Profile Server)
 
     private func handleServerRegister(_ msg: xpc_object_t, from peer: xpc_connection_t) {
-        guard let paneIdPtr = xpc_dictionary_get_string(msg, "pane_id") else {
-            fputs("[Compositor] server_register missing pane_id\n", stderr)
+        guard let profilePtr = xpc_dictionary_get_string(msg, "profile") else {
+            fputs("[Compositor] server_register missing profile\n", stderr)
             return
         }
-        let paneIdStr = String(cString: paneIdPtr)
-        guard let uuid = UUID(uuidString: paneIdStr) else {
-            fputs("[Compositor] server_register invalid pane_id: \(paneIdStr)\n", stderr)
-            return
+        let profile = String(cString: profilePtr)
+
+        fputs("[Compositor] server_register from profile \(profile)\n", stderr)
+
+        // Store the control connection keyed by profile.
+        serverControlConnections[profile] = peer
+
+        // Flush all pending tabs for this profile.
+        for (uuid, pending) in pendingTabs {
+            if pending.profile == profile {
+                sendCreateTab(peer, paneId: uuid.uuidString, url: pending.url, uuid: uuid)
+            }
         }
+        pendingTabs = pendingTabs.filter { $0.value.profile != profile }
+    }
 
-        fputs("[Compositor] server_register from pane \(paneIdStr)\n", stderr)
-
-        // Store the control connection.
-        serverControlConnections[uuid] = peer
-
-        // Look up the pending URL and send create_tab.
-        guard let url = pendingURLs.removeValue(forKey: uuid) else {
-            fputs("[Compositor] server_register but no pending URL for pane \(paneIdStr)\n", stderr)
-            return
-        }
-
-        let tabId = UUID().uuidString
+    private func sendCreateTab(_ controlConn: xpc_connection_t, paneId: String, url: String, uuid: UUID) {
         let pixelSize = pendingPixelSizes.removeValue(forKey: uuid)
-
-        let reply = xpc_dictionary_create(nil, nil, 0)
-        xpc_dictionary_set_string(reply, "action", "create_tab")
-        xpc_dictionary_set_string(reply, "url", url)
-        xpc_dictionary_set_string(reply, "tab_id", tabId)
+        let msg = xpc_dictionary_create(nil, nil, 0)
+        xpc_dictionary_set_string(msg, "action", "create_tab")
+        xpc_dictionary_set_string(msg, "url", url)
+        xpc_dictionary_set_string(msg, "pane_id", paneId)
         if let (pw, ph) = pixelSize {
-            xpc_dictionary_set_uint64(reply, "pixel_width", pw)
-            xpc_dictionary_set_uint64(reply, "pixel_height", ph)
+            xpc_dictionary_set_uint64(msg, "pixel_width", pw)
+            xpc_dictionary_set_uint64(msg, "pixel_height", ph)
         }
-        xpc_connection_send_message(peer, reply)
-
-        fputs("[Compositor] Sending create_tab url=\(url) tab_id=\(tabId) pixel=\(pixelSize?.0 ?? 0)x\(pixelSize?.1 ?? 0)\n", stderr)
+        xpc_connection_send_message(controlConn, msg)
+        fputs("[Compositor] Sending create_tab url=\(url) pane_id=\(paneId) pixel=\(pixelSize?.0 ?? 0)x\(pixelSize?.1 ?? 0)\n", stderr)
     }
 
     // MARK: - tab_ready (from Chromium Profile Server per-tab connection)
@@ -404,7 +416,7 @@ class CompositorXPC {
 
     // MARK: - Server spawning
 
-    private func spawnServer(forPane uuid: UUID, profile: String) {
+    private func spawnServer(forProfile profile: String) {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let serverPath = "\(home)/dev/termsurf/chromium/src/out/Default/Chromium Profile Server.app/Contents/MacOS/Chromium Profile Server"
         let profilePath = "\(home)/.config/termsurf/chromium-profiles/\(profile)"
@@ -419,15 +431,14 @@ class CompositorXPC {
         process.executableURL = URL(fileURLWithPath: serverPath)
         process.arguments = [
             "--xpc-service=com.termsurf.xpc-gateway",
-            "--pane-id=\(uuid.uuidString)",
             "--user-data-dir=\(profilePath)",
             "--hidden"
         ]
 
         do {
             try process.run()
-            serverProcesses[uuid] = process
-            fputs("[Compositor] Spawned server PID \(process.processIdentifier) for pane \(uuid.uuidString)\n", stderr)
+            serverProcesses[profile] = process
+            fputs("[Compositor] Spawned server PID \(process.processIdentifier) for profile \(profile)\n", stderr)
         } catch {
             fputs("[Compositor] Failed to spawn server: \(error)\n", stderr)
         }
@@ -445,21 +456,26 @@ class CompositorXPC {
         if let uuid = peerPaneIds.removeValue(forKey: peerId) {
             fputs("[Compositor] Web process disconnected for pane \(uuid.uuidString)\n", stderr)
 
-            // Kill the server process.
-            if let process = serverProcesses.removeValue(forKey: uuid) {
-                process.terminate()
-                fputs("[Compositor] Terminated server PID \(process.processIdentifier)\n", stderr)
-            }
+            let profile = paneProfiles.removeValue(forKey: uuid)
 
-            // Clean up all state for this pane.
-            serverControlConnections.removeValue(forKey: uuid)
-            pendingURLs.removeValue(forKey: uuid)
-            pendingPixelSizes.removeValue(forKey: uuid)
+            // Clean up pane-level state.
             currentSurfaces.removeValue(forKey: uuid)
-
-            // Clear the overlay using cached C surface pointer.
+            pendingPixelSizes.removeValue(forKey: uuid)
+            pendingTabs.removeValue(forKey: uuid)
             if let cSurface = cachedCSurfaces.removeValue(forKey: uuid) {
                 ghostty_surface_clear_overlay(cSurface)
+            }
+
+            // If no other panes use this profile, kill the server.
+            if let profile = profile {
+                let otherPanesForProfile = paneProfiles.values.contains(where: { $0 == profile })
+                if !otherPanesForProfile {
+                    if let process = serverProcesses.removeValue(forKey: profile) {
+                        process.terminate()
+                        fputs("[Compositor] Terminated server PID \(process.processIdentifier) for profile \(profile)\n", stderr)
+                    }
+                    serverControlConnections.removeValue(forKey: profile)
+                }
             }
         } else {
             // Server peer disconnected (control or tab connection) — log only.

@@ -35,6 +35,7 @@ issue-specific branches.
 | `146.0.7650.0-issue-502` | [Issue 502](issues/502-attach-delay.md)     | Attach delay fix             |
 | `146.0.7650.0-issue-503` | [Issue 503](issues/503-one-two-three.md)    | Dynamic multi-tab protocol   |
 | `146.0.7650.0-issue-509` | [Issue 509](issues/509-chromium.md)         | Chromium streaming (retry)   |
+| `146.0.7650.0-issue-511` | [Issue 511](issues/511-three-profiles.md)   | Per-tab pane routing         |
 
 ## Local Setup
 
