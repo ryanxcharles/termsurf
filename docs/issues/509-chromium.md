@@ -357,3 +357,14 @@ Chromium Profile Server process with its own `--user-data-dir`
 with fully isolated browser state — different cookies, different localStorage,
 different cache. This is the core TermSurf differentiator: side-by-side browsing
 with different identities in the same terminal window.
+
+### Idea 7: Three panes — two profiles
+
+Run three `web` commands: two panes share the same profile (e.g.,
+`--profile
+work`) and the third uses a different profile (e.g.,
+`--profile personal`). This tests the one-server-per-profile architecture — the
+two `work` panes should share a single Chromium Profile Server process (with two
+tabs/WebContents inside it), while the `personal` pane gets its own server. This
+is the ts3 foundational constraint (one CEF process per profile) applied to
+ts5's Content API approach, and validates the multi-tab protocol from Issue 503.
