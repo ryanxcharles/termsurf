@@ -664,3 +664,114 @@ process trees caused the crash.
 
 1. Guard `spawnServer` — skip if `serverProcesses[uuid]` already exists.
 2. Optionally, only send `set_overlay` when the viewport rect changes.
+
+---
+
+## Experiment 2: Guard server spawn
+
+### Goal
+
+Same as Experiment 1 — box-demo renders at 60fps in a TermSurf pane. This
+experiment fixes the server storm bug that caused Experiment 1 to fail.
+
+### Root cause recap
+
+`web` sends `set_overlay` every 250ms (on every draw cycle). `handleSetOverlay`
+calls `spawnServer` unconditionally. Both sides need guards.
+
+### Changes
+
+Two files change. No Chromium changes. No build changes (same binaries).
+
+#### 1. `ts5/macos/Sources/Ghostty/CompositorXPC.swift` — Guard server spawn
+
+In the URL branch of `handleSetOverlay`, skip everything after the first call.
+The grid coordinates and server are already set — repeated `set_overlay`
+messages for the same pane should be no-ops.
+
+Replace the unconditional spawn with a guard:
+
+```swift
+// Check for URL field — if present, spawn Chromium server.
+let urlPtr = xpc_dictionary_get_string(msg, "url")
+if let urlPtr = urlPtr {
+    let url = String(cString: urlPtr)
+
+    // Skip if server already running for this pane.
+    if serverProcesses[uuid] != nil {
+        // Update grid coordinates only (server already running).
+        if let cSurface = cachedCSurfaces[uuid] {
+            ghostty_surface_set_overlay(cSurface, col, row, width, height)
+        }
+        return
+    }
+
+    fputs("[Compositor] set_overlay with URL \(url) for pane \(paneIdStr)\n", stderr)
+    // ... rest of spawn logic unchanged ...
+```
+
+When `serverProcesses[uuid]` already exists, the handler updates the grid
+coordinates (in case the viewport moved) and returns. No second server spawned.
+
+#### 2. `web/src/main.rs` — Only send when viewport changes
+
+Track the previous viewport rect. Skip `send_set_overlay` if the rect hasn't
+changed since the last send.
+
+Before the event loop, add:
+
+```rust
+let mut last_viewport = Rect::default();
+```
+
+Replace the unconditional send with:
+
+```rust
+// Send overlay coordinates to compositor (only when changed).
+if viewport_rect != last_viewport {
+    if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+        conn.send_set_overlay(
+            pid,
+            viewport_rect.x,
+            viewport_rect.y,
+            viewport_rect.width,
+            viewport_rect.height,
+            &url,
+        );
+    }
+    last_viewport = viewport_rect;
+}
+```
+
+This reduces XPC traffic from 4 messages/second to only on resize. The server
+guard in Swift is the essential fix (prevents the storm even if `web` sends
+duplicates), but the client-side dedup is good hygiene.
+
+### Why both fixes
+
+The Swift guard is sufficient on its own — even if `web` floods `set_overlay`,
+only one server spawns. But sending identical messages every 250ms wastes XPC
+bandwidth and CPU. The client-side dedup is cheap (one `Rect` comparison) and
+eliminates the noise. Either fix alone prevents the server storm; both together
+are cleaner.
+
+### Pass criteria
+
+Same as Experiment 1:
+
+1. Box-demo renders inside the viewport at any frame rate above 30fps.
+2. No crash for at least 30 seconds.
+3. Quitting `web` clears the overlay and kills the server process.
+4. No orphaned `chromium_profile_server` processes after exit.
+5. Logs show exactly ONE `Spawned server` message per pane (not dozens).
+
+### File summary
+
+| File                                            | Action                                |
+| ----------------------------------------------- | ------------------------------------- |
+| `ts5/macos/Sources/Ghostty/CompositorXPC.swift` | Guard `spawnServer` with exists check |
+| `web/src/main.rs`                               | Only send `set_overlay` when changed  |
+
+### Result
+
+_Not yet run._
