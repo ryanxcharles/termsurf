@@ -167,6 +167,22 @@ profile-per-server are equivalent — each profile has exactly one pane. Server
 reuse (pane C scenario) is a future optimization. The demo should still be
 designed with this in mind, but it's not required to pass.
 
+## Ideas for future experiments
+
+1. **Profile name validation + XPC propagation.** Add validation to `web`,
+   include `profile` in `set_overlay`, and update `CompositorXPC.swift` to
+   extract it and use it for the `--user-data-dir` path. Test with a single pane
+   using `--profile work` and verify the data goes to
+   `~/.config/termsurf/chromium-profiles/work/`.
+
+2. **Two profiles side by side.** Open two split panes, run `web` with different
+   `--profile` flags in each, verify two separate server processes spawn with
+   separate data directories, and both render independently at 60fps.
+
+3. **Session isolation verification.** Load a page that writes to localStorage
+   in both profiles. Verify each profile sees only its own data. Close and
+   reopen — verify persistence within each profile and isolation between them.
+
 ## Experiment 1: Profile propagation + two profiles side by side
 
 ### Goal
@@ -339,19 +355,3 @@ cargo run -p web -- http://localhost:9407 --profile personal
 ### Result
 
 _Not yet run._
-
-## Ideas for future experiments
-
-1. **Profile name validation + XPC propagation.** Add validation to `web`,
-   include `profile` in `set_overlay`, and update `CompositorXPC.swift` to
-   extract it and use it for the `--user-data-dir` path. Test with a single pane
-   using `--profile work` and verify the data goes to
-   `~/.config/termsurf/chromium-profiles/work/`.
-
-2. **Two profiles side by side.** Open two split panes, run `web` with different
-   `--profile` flags in each, verify two separate server processes spawn with
-   separate data directories, and both render independently at 60fps.
-
-3. **Session isolation verification.** Load a page that writes to localStorage
-   in both profiles. Verify each profile sees only its own data. Close and
-   reopen — verify persistence within each profile and isolation between them.
