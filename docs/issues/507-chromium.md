@@ -52,20 +52,11 @@ Single default profile only. No multiple profiles for this issue.
 ### Process Topology
 
 ```
-                      xpc-gateway
-                  (com.termsurf.xpc-gateway)
-                   /                    \
-                  /                      \
-TermSurf app ───┘                        └─── Chromium Profile Server
-(registers endpoint)                      (claims endpoint,
-                                           connects directly)
-       ▲                                          │
-       │ direct XPC                               │ direct XPC
-       │ (set_overlay)                            │ (display_surface)
-       │                                          │
-     web TUI ─────────spawns──────────────────────┘
-(browser chrome,
- viewport coords)
+web TUI ──── TermSurf app ──── Chromium Profile Server
+              (central hub)       (managed by app)
+                   │
+               xpc-gateway
+           (rendezvous only)
 ```
 
 Four processes:
@@ -73,16 +64,20 @@ Four processes:
 1. **xpc-gateway** — Owns the Mach service. Pure rendezvous. Already built
    (Issue 506).
 
-2. **TermSurf app** — Registers anonymous listener with gateway. Receives
-   `set_overlay` from `web` (grid coordinates) and `display_surface` from
-   Chromium Profile Server (IOSurface Mach ports). Composites the IOSurface
-   texture at the grid coordinates using Metal.
+2. **TermSurf app** — The central hub. Registers anonymous listener with
+   gateway. Receives `set_overlay` and `navigate` from `web`. Manages Chromium
+   Profile Server lifecycle (spawns on first `navigate`, kills on `web`
+   disconnect). Forwards URLs to the server. Receives `display_surface`
+   (IOSurface Mach ports) from the server. Composites the IOSurface texture at
+   the grid coordinates using Metal.
 
-3. **`web` TUI** — Draws browser chrome. Sends viewport coordinates to app.
-   Spawns the Chromium Profile Server as a child process. Kills it on exit.
+3. **`web` TUI** — Pure browser chrome. Sends viewport coordinates and URL to
+   the app. Does not know about the Chromium Profile Server. Communicates only
+   with the app via XPC.
 
 4. **Chromium Profile Server** — Renders the webpage. Connects to app via
-   gateway. Sends IOSurface Mach ports at 60fps on the direct connection.
+   gateway. Receives `navigate` commands from the app. Sends IOSurface Mach
+   ports at 60fps on the direct connection.
 
 ### Connection Flow
 
@@ -90,19 +85,25 @@ Four processes:
 1. App starts:     registers endpoint with gateway
 
 2. web starts:     connects to gateway, gets endpoint, connects to app
-                   sends set_overlay (grid coords) on direct connection
-                   spawns Chromium Profile Server
+                   sends set_overlay (grid coords + URL) on direct connection
 
-3. Server starts:  connects to gateway, gets endpoint, connects to app
-                   navigates to URL
+3. App receives:   stores overlay grid coords
+                   spawns Chromium Profile Server for the pane
+
+4. Server starts:  connects to gateway, gets endpoint, connects to app
+                   app sends navigate (URL) to server
+                   server navigates to URL
                    sends display_surface (IOSurface Mach ports) at 60fps
 
-4. App renders:    imports IOSurface from Mach port
+5. App renders:    imports IOSurface from Mach port
                    creates MTLTexture
                    renders textured quad at grid coordinates
 
-5. web exits:      kills server, drops connection
-                   app clears overlay
+6. URL changes:    web sends navigate (new URL) to app
+                   app forwards navigate to server
+
+7. web exits:      drops connection
+                   app kills server, clears overlay
 ```
 
 ### IOSurface Frame Delivery
@@ -144,24 +145,48 @@ pixel_height = grid_height * cell_height * scale_factor
 ```
 
 The app knows `cell_width`, `cell_height`, and `scale_factor` from the renderer.
-The Chromium Profile Server needs this information to set its capture
-resolution. This can flow through `web` (which already bridges both) or via a
-reply on the direct XPC connection.
+Since the app manages the profile server directly, it can send this information
+to the server on the direct XPC connection (e.g., alongside the `navigate`
+command or as a separate `resize` message).
 
 ## XPC Protocol
 
-### Existing Messages (Unchanged)
+### `web` to app (direct connection)
 
-**`web` to app (direct connection):**
+**Set overlay (existing, extended with URL):**
 
 ```
 { action: "set_overlay", pane_id: "<uuid>",
-  col: N, row: N, width: N, height: N }
+  col: N, row: N, width: N, height: N,
+  url: "http://localhost:9407" }
 ```
 
-### New Messages
+The `url` field is new. On first receipt, the app spawns a Chromium Profile
+Server for this pane and sends it the URL. On subsequent receipts (resize, URL
+change), the app updates the overlay coordinates and/or forwards the new URL.
 
-**Chromium Profile Server to app (direct connection):**
+**Navigate (URL change only):**
+
+```
+{ action: "navigate", pane_id: "<uuid>",
+  url: "http://localhost:9407/other-page" }
+```
+
+Sent when the user changes the URL in the `web` TUI. The app forwards it to the
+profile server managing this pane.
+
+### App to Chromium Profile Server (direct connection)
+
+**Navigate:**
+
+```
+{ action: "navigate", url: "http://localhost:9407" }
+```
+
+Sent when the app receives a URL from `web` (either on initial `set_overlay` or
+a subsequent `navigate`). The server navigates its WebContents to the URL.
+
+### Chromium Profile Server to app (direct connection)
 
 ```
 { action: "display_surface", pane_id: "<uuid>",
@@ -172,11 +197,10 @@ reply on the direct XPC connection.
 The app maps `pane_id` to the correct surface and updates the overlay texture.
 `width` and `height` are the IOSurface physical pixel dimensions.
 
-**`web` to Chromium Profile Server (command-line args, not XPC):**
+### App spawns Chromium Profile Server (command-line args)
 
 ```
 Chromium\ Profile\ Server \
-  --url http://localhost:9407 \
   --pane-id <uuid> \
   --xpc-service com.termsurf.xpc-gateway \
   --hidden \
@@ -184,8 +208,10 @@ Chromium\ Profile\ Server \
   --content-shell-host-window-size 800x600
 ```
 
-The `--content-shell-host-window-size` sets the initial WebContents size.
-Approximate is fine for the first experiment; proper size matching comes later.
+Note: `--url` is no longer a command-line arg. The URL is sent via XPC after the
+server connects. The `--content-shell-host-window-size` sets the initial
+WebContents size. Approximate is fine for the first experiment; proper size
+matching comes later.
 
 ## Components
 
@@ -281,33 +307,50 @@ The Mach port is received as `mach_port_t` (`u32` in Zig). The import uses
 `IOSurfaceLookupFromMachPort()`. The renderer stores the resulting
 `IOSurfaceRef`.
 
-### 4. CompositorXPC.swift: Handle `display_surface`
+### 4. CompositorXPC.swift: Profile Server Management
 
 **Files:**
 
-- `ts5/macos/Sources/Ghostty/CompositorXPC.swift` — Add `display_surface` case
-  to `handleMessage()`.
+- `ts5/macos/Sources/Ghostty/CompositorXPC.swift` — Add profile server lifecycle
+  management and new message handlers.
 
-When a `display_surface` message arrives:
+**New responsibilities:**
 
-1. Extract `pane_id` (UUID string) and look up the surface.
-2. Extract `iosurface_port` via
-   `xpc_dictionary_copy_mach_send(msg,
-   "iosurface_port")`.
-3. Extract `width` and `height`.
-4. Call `ghostty_surface_set_overlay_surface(surface, port, width, height)`.
+1. **Spawn profile server.** When `set_overlay` arrives with a `url` and no
+   server is running for this pane, spawn a Chromium Profile Server process
+   (`Process` / `NSTask`). Track it by pane ID. The server binary path is
+   hardcoded or configured (e.g., `TERMSURF_CHROMIUM_PATH` env var, defaulting
+   to
+   `chromium/src/out/Default/Chromium Profile Server.app/Contents/MacOS/
+   Chromium Profile Server`).
+
+2. **Handle `display_surface`.** When an IOSurface frame arrives from the
+   server:
+   - Extract `pane_id` and look up the surface.
+   - Extract `iosurface_port` via
+     `xpc_dictionary_copy_mach_send(msg,
+     "iosurface_port")`.
+   - Extract `width` and `height`.
+   - Call `ghostty_surface_set_overlay_surface(surface, port, width, height)`.
+
+3. **Forward `navigate`.** When `navigate` arrives from `web`, forward the URL
+   to the profile server's XPC connection for this pane.
+
+4. **Kill server on disconnect.** When a `web` peer disconnects, kill the
+   profile server process for that pane and clear the overlay.
 
 The Mach port is passed through to the C API. The Zig side imports the
 IOSurface. This keeps Swift minimal — no IOSurface framework import needed.
 
-### 5. Chromium Profile Server: Gateway Connect
+### 5. Chromium Profile Server: Gateway Connect + Navigate Handler
 
 **Files:**
 
 - `chromium/src/content/chromium_profile_server/browser/shell_browser_main_parts.cc`
-  — Modify XPC connection code for two-step gateway connect.
+  — Modify XPC connection code for two-step gateway connect. Add incoming
+  `navigate` message handler.
 - `chromium/src/content/chromium_profile_server/common/shell_switches.h` — Add
-  `--pane-id` flag.
+  `--pane-id` flag. Remove `--url` flag (URL now comes via XPC).
 
 Currently the server connects directly to a named Mach service:
 
@@ -322,37 +365,44 @@ Change to two-step connect (same pattern as `web/src/xpc.rs`):
    `xpc_connection_send_message_with_reply_sync`.
 3. Extract endpoint from reply.
 4. Create connection from endpoint via `xpc_connection_create_from_endpoint`.
-5. Send `display_surface` frames on the direct connection, including `pane_id`.
+5. Set up incoming message handler for `navigate` commands from the app.
+6. Send `display_surface` frames on the direct connection, including `pane_id`.
 
-### 6. `web`: Spawn Chromium Profile Server
+When a `navigate` message arrives from the app, the server calls
+`LoadURLForDocument()` on its WebContents to navigate to the new URL.
+
+### 6. `web`: Send URL to App
 
 **Files:**
 
-- `web/src/main.rs` — After connecting to the app and sending `set_overlay`,
-  spawn the Chromium Profile Server as a child process.
+- `web/src/main.rs` — Include the URL in `set_overlay` messages. Send `navigate`
+  when the user changes the URL.
+
+`web` no longer spawns or manages the Chromium Profile Server. It sends the URL
+to the app and the app handles the rest.
 
 ```rust
-let server_path = std::env::var("TERMSURF_CHROMIUM_PATH")
-    .unwrap_or_else(|_| "chromium/src/out/Default/Chromium Profile Server.app/\
-        Contents/MacOS/Chromium Profile Server".to_string());
+// On startup / each draw: include url in set_overlay
+let msg = XpcDictionary::new();
+msg.set_string("action", "set_overlay");
+msg.set_string("pane_id", &pane_id);
+msg.set_u64("col", inner_rect.x as u64);
+msg.set_u64("row", inner_rect.y as u64);
+msg.set_u64("width", inner_rect.width as u64);
+msg.set_u64("height", inner_rect.height as u64);
+msg.set_string("url", &url);
+conn.send(&msg);
 
-let child = Command::new(&server_path)
-    .args([
-        "--url", &url,
-        "--pane-id", &pane_id,
-        "--xpc-service", "com.termsurf.xpc-gateway",
-        "--hidden",
-        "--user-data-dir",
-        &format!("{}/.config/termsurf/profiles/default",
-                 std::env::var("HOME").unwrap()),
-        "--content-shell-host-window-size", "800x600",
-    ])
-    .spawn()
-    .expect("Failed to spawn Chromium Profile Server");
+// On URL change:
+let msg = XpcDictionary::new();
+msg.set_string("action", "navigate");
+msg.set_string("pane_id", &pane_id);
+msg.set_string("url", &new_url);
+conn.send(&msg);
 ```
 
-On `web` exit (Ctrl+C, `q`, or signal), kill the child process. The XPC
-connection drops, and the app clears the overlay.
+On `web` exit (Ctrl+C, `q`, or signal), the XPC connection drops. The app
+detects the disconnect, kills the profile server, and clears the overlay.
 
 ### 7. Profile Data
 
@@ -395,10 +445,12 @@ Connect the Chromium Profile Server and render live web content.
 
 **Changes:**
 
-1. Modify Chromium Profile Server for two-step gateway connect (Component 5).
-2. Add `--pane-id` and `--url` flags to the server.
-3. Add `display_surface` handler to `CompositorXPC.swift` (Component 4).
-4. Modify `web` to spawn the server (Component 6).
+1. Modify Chromium Profile Server for two-step gateway connect + `navigate`
+   handler (Component 5).
+2. Add `--pane-id` flag to the server. Remove `--url` (URL comes via XPC).
+3. Add profile server management + `display_surface` handler to
+   `CompositorXPC.swift` (Component 4).
+4. Add `url` field to `web`'s `set_overlay` message (Component 6).
 5. The renderer uses the IOSurface from the server instead of the test surface.
 
 **Pass criteria:**
@@ -415,13 +467,13 @@ Match the capture resolution to the viewport's physical pixel size.
 
 **Changes:**
 
-1. `web` queries the app for viewport pixel dimensions (via XPC reply to
-   `set_overlay`, or a separate query). Or the app computes and tells the server
-   directly.
+1. The app computes the viewport's physical pixel size from the grid coordinates
+   (`cell_size * scale_factor`) and sends it to the profile server (e.g., as a
+   `resize` message or alongside `navigate`).
 2. The server sets `SetResolutionConstraints()` to the viewport's physical pixel
    size.
-3. On terminal resize, `web` sends updated coordinates, the app recomputes pixel
-   size, and the server updates its capturer.
+3. On terminal resize, `web` sends updated grid coordinates to the app. The app
+   recomputes the pixel size and sends a `resize` to the server.
 
 **Pass criteria:**
 
@@ -441,10 +493,10 @@ Match the capture resolution to the viewport's physical pixel size.
 | `ts5/include/ghostty.h`                         | Add `ghostty_surface_set_overlay_surface`        |
 | `ts5/src/apprt/embedded.zig`                    | Export the new C API function                    |
 | `ts5/src/Surface.zig`                           | Add `setOverlaySurface()` method                 |
-| `ts5/macos/Sources/Ghostty/CompositorXPC.swift` | Handle `display_surface` action                  |
-| `chromium/src/.../shell_browser_main_parts.cc`  | Two-step gateway connect                         |
-| `chromium/src/.../shell_switches.h`             | Add `--pane-id` flag                             |
-| `web/src/main.rs`                               | Spawn Chromium Profile Server                    |
+| `ts5/macos/Sources/Ghostty/CompositorXPC.swift` | Manage profile server, handle `display_surface`  |
+| `chromium/src/.../shell_browser_main_parts.cc`  | Two-step gateway connect, `navigate` handler     |
+| `chromium/src/.../shell_switches.h`             | Add `--pane-id`, remove `--url`                  |
+| `web/src/main.rs`                               | Send URL to app (no longer spawns server)        |
 
 ## Chromium Branch
 
@@ -482,7 +534,7 @@ cd ts4/box-demo && bun run server.ts &
 # Launch the app
 open ts5/zig-out/TermSurf.app
 
-# In a TermSurf pane (set TERMSURF_CHROMIUM_PATH if not using default):
+# In a TermSurf pane:
 cargo run -p web -- http://localhost:9407
 
 # Expected:
