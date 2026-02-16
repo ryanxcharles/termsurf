@@ -1028,3 +1028,53 @@ on `personal`. Exactly two server processes spawned (one per profile). The two
 `work` panes shared a single server process confirmed by matching PIDs in logs.
 Closing one `work` pane left the other rendering. Closing the last pane for each
 profile terminated its server cleanly. No crashes.
+
+## Conclusion
+
+### How we got here
+
+Issue 510 proved two different profiles render side by side at 60fps, but it
+papered over a fundamental limitation: each pane spawned its own server process
+regardless of profile name. That works when every profile has exactly one pane,
+but Chromium locks `--user-data-dir` at startup — a second process with the same
+data directory will fail. Server reuse was not an optimization to defer. It was
+a correctness requirement.
+
+The Chromium Profile Server already had the multi-tab infrastructure from Issue
+503 Experiment 3: `CreateTab` adds independent WebContents with their own frame
+capturers, `CloseTab` removes them without killing the server, and each tab gets
+its own per-tab XPC connection. What was missing was the wiring: the app tracked
+servers by pane UUID instead of profile name, the server stamped a single
+process-level `pane_id` on every frame, and resize was hardcoded to `tabs_[0]`.
+
+Experiment 1 rewired both sides in one pass. On the Chromium side: removed
+`--pane-id`, made `pane_id` per-tab (from `create_tab`), routed resize by
+`pane_id`, derived profile from `--user-data-dir` basename for
+`server_register`, and added auto-exit when the last tab closes. On the app
+side: replaced pane-keyed dictionaries with profile-keyed ones, added server
+reuse logic (second pane with same profile sends `create_tab` to existing
+server), and changed disconnect to only kill the server when the last pane for
+that profile disconnects.
+
+### What we accomplished
+
+Three panes in the same terminal window — two sharing `--profile work`, one on
+`--profile personal` — each rendering an independent Chromium session at 60fps.
+Two server processes, three frame streams, full profile isolation, correct
+lifecycle management. This validates the complete multi-profile, multi-pane
+architecture.
+
+| Experiment | Goal                       | Result |
+| ---------- | -------------------------- | ------ |
+| 1          | Server reuse + three panes | Pass   |
+
+### What's next
+
+- **Input forwarding.** Keyboard and mouse events to Chromium WebContents —
+  without this, webpages are view-only.
+- **Session isolation verification.** Load pages that write to localStorage in
+  both profiles and confirm data isolation persists across restarts.
+- **In-process Chromium.** The endgame: embed Chromium directly via the Content
+  API instead of streaming over XPC. The streaming architecture validated every
+  other piece of the pipeline — profiles, lifecycle, frame routing, resize — so
+  the transition can focus purely on embedding.
