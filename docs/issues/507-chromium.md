@@ -1517,3 +1517,28 @@ open ts5/zig-out/TermSurf.app
 # In a TermSurf pane:
 cargo run -p web -- http://localhost:9407
 ```
+
+#### Result: Fail
+
+The switch syntax fix worked — Chromium's `base::CommandLine` parsed all flags
+correctly. The full pipeline ran successfully:
+
+1. Server connected to app via gateway, created tab for `http://localhost:9407/`
+2. Video capture attached at 1600x1200 (Retina)
+3. IOSurface frames streamed at **58–60fps** for ~3 seconds
+4. The blue spinning box from box-demo was **visible in the terminal pane**
+
+The app then crashed. The crash is in the Metal render path, not the XPC
+pipeline. At 60fps, `display_surface` fires every 16ms. Each call passes the
+IOSurface to the Zig renderer as a raw pointer via
+`Unmanaged.passUnretained(ioSurface).toOpaque()`. When the next frame arrives
+and replaces `currentSurfaces[uuid]`, ARC releases the old IOSurface while the
+renderer may still hold a dangling pointer — a use-after-free on a GPU resource.
+
+The `nu` (nushell) crash in the diagnostic reports is a consequence: the shell
+panics in `nu_system::foreground::child_pgroup::reset` when its parent terminal
+vanishes.
+
+**Diagnosis:** The XPC and Chromium integration work. The crash is on the
+rendering consumption side — how the app holds and swaps IOSurface references
+across the Swift/Zig boundary at 60fps.
