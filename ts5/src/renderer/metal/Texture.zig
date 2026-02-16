@@ -97,7 +97,7 @@ pub fn fromIOSurface(device: objc.Object, iosurface: *anyopaque) ?Self {
     };
     defer desc.release();
 
-    desc.setProperty("pixelFormat", @intFromEnum(mtl.MTLPixelFormat.bgra8unorm_srgb));
+    desc.setProperty("pixelFormat", @intFromEnum(mtl.MTLPixelFormat.bgra8unorm));
     desc.setProperty("width", @as(c_ulong, width));
     desc.setProperty("height", @as(c_ulong, height));
     desc.setProperty("usage", @as(c_ulong, 0x0004)); // MTLTextureUsageShaderRead

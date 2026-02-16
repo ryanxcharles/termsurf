@@ -841,4 +841,7 @@ sRGB curve renders them correctly.
 
 ### Result
 
-_Not yet run._
+**Passed.** Colors now match the original webpage. The sRGB-encoded bytes from
+Chromium pass through the shader unchanged to the non-sRGB render target, and
+the display's inherent sRGB curve renders them correctly. Same approach as ts3's
+cef-rs fix.
