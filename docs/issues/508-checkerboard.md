@@ -477,3 +477,33 @@ cargo run -p web -- http://example.com
 # - Resize terminal → checkerboard recreates, still crisp, NO CRASH
 # - Quit web → overlay clears
 ```
+
+#### Result: Fail
+
+The checkerboard rendered correctly (orange/dark — the BGRA byte order in the
+test pattern produces #FF8844 instead of the intended #4488FF, but the texture
+pipeline works). Resizing the terminal window crashed the app.
+
+**CFRetain/CFRelease is necessary but not sufficient.** The fix correctly
+prevents ARC from releasing the IOSurface while Zig holds a retain, but the
+crash is a different race condition: `overlay_iosurface` is read during
+`drawFrame()` on the renderer thread _after_ the `draw_mutex` has been released.
+The mutex is only held at the beginning of `drawFrame()` to copy critical state
+(uniforms, cells), but `overlay_iosurface` is read directly from `self` later in
+the render pass. The main thread can swap the pointer between the mutex release
+and the render pass read.
+
+The `draw_mutex` protects the pointer swap in `setOverlayIOSurface()`, but the
+renderer's `drawFrame()` does not hold the mutex when it reads
+`self.overlay_iosurface` and creates the MTLTexture from it. This means:
+
+1. Renderer reads `self.overlay_iosurface` → gets pointer to old IOSurface
+2. Main thread acquires `draw_mutex`, CFReleases old, CFRetains new, swaps ptr
+3. Main thread releases `draw_mutex`
+4. Old IOSurface's last retain is gone (Swift ARC + Zig CFRelease)
+5. Renderer calls `Texture.fromIOSurface(old)` → dangling pointer
+
+**Diagnosis:** The IOSurface pointer must be snapshotted under the `draw_mutex`
+at the beginning of `drawFrame()`, alongside the other critical state. The
+snapshot should include a CFRetain so the surface stays alive for the entire
+frame. CFRelease the snapshot at the end of the frame.
