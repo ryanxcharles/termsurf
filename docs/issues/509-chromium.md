@@ -777,3 +777,68 @@ Same as Experiment 1:
 **Passed.** Box-demo rendered live Chromium frames inside the TermSurf pane.
 Exactly one server spawned per pane. No crash. Clean exit killed the server and
 cleared the overlay. Resize not tested (out of scope for this experiment).
+
+Two visual issues remain: incorrect resolution (expected — server captures at a
+fixed size, stretched to fit) and incorrect colors (darks too dark, blues too
+blue — sRGB mismatch, see Experiment 3).
+
+---
+
+## Experiment 3: Correct overlay colors
+
+### Goal
+
+Fix the "too bold" colors in the Chromium overlay. Darks should match the
+original webpage, not appear crushed. Blues should match the original, not
+appear oversaturated.
+
+### Root cause
+
+`Texture.fromIOSurface()` in `ts5/src/renderer/metal/Texture.zig` line 100
+creates the MTLTexture with `bgra8unorm_srgb`. This tells Metal to apply
+sRGB→linear decoding on texture read. But Ghostty's render target (the
+CAMetalLayer drawable) uses `bgra8unorm` (non-sRGB). The decoded linear values
+are written directly to the non-sRGB target without a linear→sRGB re-encode,
+making darks darker and colors more saturated.
+
+The same approach was used in ts3's cef-rs (`iosurface.rs:186`) — non-sRGB
+`BGRA8Unorm` for IOSurface-backed textures, letting the sRGB-encoded bytes pass
+through to the display unchanged.
+
+### Change
+
+One file, one line.
+
+#### `ts5/src/renderer/metal/Texture.zig` line 100
+
+Change:
+
+```zig
+desc.setProperty("pixelFormat", @intFromEnum(mtl.MTLPixelFormat.bgra8unorm_srgb));
+```
+
+To:
+
+```zig
+desc.setProperty("pixelFormat", @intFromEnum(mtl.MTLPixelFormat.bgra8unorm));
+```
+
+The sRGB-encoded bytes from Chromium's IOSurface pass through the shader
+unchanged and are written to the non-sRGB render target. The display's inherent
+sRGB curve renders them correctly.
+
+### Pass criteria
+
+1. Box-demo colors match the original webpage when viewed in a regular browser.
+2. No visual regression on the checkerboard test path (Issue 508).
+3. No crash.
+
+### File summary
+
+| File                                 | Action                           |
+| ------------------------------------ | -------------------------------- |
+| `ts5/src/renderer/metal/Texture.zig` | `bgra8unorm_srgb` → `bgra8unorm` |
+
+### Result
+
+_Not yet run._
