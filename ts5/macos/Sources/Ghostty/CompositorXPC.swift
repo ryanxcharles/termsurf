@@ -137,56 +137,10 @@ class CompositorXPC {
             .rightMouseDown, .rightMouseUp
         ]) { [weak self] event in
             guard let self = self else { return event }
+            guard event.window != nil else { return event }
 
-            // Must have an active window.
-            guard let window = event.window else { return event }
-
-            // Hit-test against all panes with SurfaceViews.
-            let windowLocation = event.locationInWindow
-
-            // Check all browsing panes (must dispatch to XPC queue for state reads).
-            let result: (uuid: UUID, relX: Double, relY: Double, scale: CGFloat)? = self.xpcQueue.sync {
-                for (uuid, surfaceView) in self.paneSurfaceViews {
-                    // Only intercept if the pane is in browse mode.
-                    guard self.paneBrowsing[uuid] == true else { continue }
-
-                    // Convert click to SurfaceView local coordinates.
-                    let mouseInView = surfaceView.convert(windowLocation, from: nil)
-                    guard surfaceView.bounds.contains(mouseInView) else { continue }
-
-                    // Get overlay geometry for this pane.
-                    guard let geo = self.overlayGeometry[uuid] else { continue }
-
-                    // SurfaceView is NOT flipped (Y=0 at bottom). Flip to top-left origin.
-                    let flippedY = surfaceView.bounds.height - mouseInView.y
-                    let scale = surfaceView.window?.backingScaleFactor ?? 2.0
-
-                    // Scale to physical pixels.
-                    let physX = mouseInView.x * scale
-                    let physY = flippedY * scale
-
-                    // Compute overlay-relative physical coordinates.
-                    let overlayOriginX = Double(geo.col) * Double(geo.cellW)
-                    let overlayOriginY = Double(geo.row) * Double(geo.cellH)
-                    let relPhysX = physX - overlayOriginX
-                    let relPhysY = physY - overlayOriginY
-
-                    // Hit test: is the click inside the overlay?
-                    let overlayW = Double(geo.width) * Double(geo.cellW)
-                    let overlayH = Double(geo.height) * Double(geo.cellH)
-                    guard relPhysX >= 0, relPhysY >= 0,
-                          relPhysX < overlayW, relPhysY < overlayH else { continue }
-
-                    // Convert to logical pixels for Chromium.
-                    let chromiumX = relPhysX / Double(scale)
-                    let chromiumY = relPhysY / Double(scale)
-
-                    return (uuid: uuid, relX: chromiumX, relY: chromiumY, scale: scale)
-                }
-                return nil
-            }
-
-            guard let hit = result else { return event }
+            let hit = self.xpcQueue.sync { self.hitTestOverlay(event: event) }
+            guard let hit = hit else { return event }
 
             // Determine event type and button.
             let typeStr: String
@@ -220,10 +174,49 @@ class CompositorXPC {
                 xpc_dictionary_set_string(msg, "action", "mouse_event")
                 xpc_dictionary_set_string(msg, "pane_id", hit.uuid.uuidString)
                 xpc_dictionary_set_string(msg, "type", typeStr)
-                xpc_dictionary_set_double(msg, "x", hit.relX)
-                xpc_dictionary_set_double(msg, "y", hit.relY)
+                xpc_dictionary_set_double(msg, "x", hit.x)
+                xpc_dictionary_set_double(msg, "y", hit.y)
                 xpc_dictionary_set_string(msg, "button", buttonStr)
                 xpc_dictionary_set_int64(msg, "click_count", Int64(event.clickCount))
+                xpc_dictionary_set_uint64(msg, "modifiers", mods)
+                xpc_connection_send_message(controlConn, msg)
+            }
+
+            // Consume the event (prevent terminal from receiving it).
+            return nil
+        }
+
+        // Register local event monitor for scroll wheel (Issue 514 Experiment 3).
+        // Only forwards when mouse is over the viewport AND pane is in browse mode.
+        NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel]) { [weak self] event in
+            guard let self = self else { return event }
+
+            let hit = self.xpcQueue.sync { self.hitTestOverlay(event: event) }
+            guard let hit = hit else { return event }
+
+            // Map modifier flags (shift=1, ctrl=2, alt=4, cmd=8).
+            var mods: UInt64 = 0
+            if event.modifierFlags.contains(.shift)   { mods |= 1 }
+            if event.modifierFlags.contains(.control)  { mods |= 2 }
+            if event.modifierFlags.contains(.option)   { mods |= 4 }
+            if event.modifierFlags.contains(.command)  { mods |= 8 }
+
+            // Send scroll_event via XPC to the Chromium server.
+            self.xpcQueue.async {
+                guard let profile = self.paneProfiles[hit.uuid],
+                      let controlConn = self.serverControlConnections[profile] else { return }
+
+                let msg = xpc_dictionary_create(nil, nil, 0)
+                xpc_dictionary_set_string(msg, "action", "scroll_event")
+                xpc_dictionary_set_string(msg, "pane_id", hit.uuid.uuidString)
+                xpc_dictionary_set_double(msg, "x", hit.x)
+                xpc_dictionary_set_double(msg, "y", hit.y)
+                xpc_dictionary_set_double(msg, "delta_x", event.scrollingDeltaX)
+                xpc_dictionary_set_double(msg, "delta_y", event.scrollingDeltaY)
+                xpc_dictionary_set_uint64(msg, "phase", UInt64(event.phase.rawValue))
+                xpc_dictionary_set_uint64(msg, "momentum_phase",
+                    UInt64(event.momentumPhase.rawValue))
+                xpc_dictionary_set_bool(msg, "precise", event.hasPreciseScrollingDeltas)
                 xpc_dictionary_set_uint64(msg, "modifiers", mods)
                 xpc_connection_send_message(controlConn, msg)
             }
@@ -623,6 +616,60 @@ class CompositorXPC {
         xpc_dictionary_set_string(fwd, "action", "url_changed")
         xpc_dictionary_set_string(fwd, "url", url)
         xpc_connection_send_message(webPeer, fwd)
+    }
+
+    // MARK: - Hit-testing (Issue 514)
+
+    /// Result of a successful overlay hit-test.
+    private struct OverlayHit {
+        let uuid: UUID
+        let x: Double  // logical pixels, overlay-relative
+        let y: Double
+    }
+
+    /// Hit-test an NSEvent against all browsing panes' overlay bounds.
+    /// Must be called on xpcQueue.
+    private func hitTestOverlay(event: NSEvent) -> OverlayHit? {
+        let windowLocation = event.locationInWindow
+
+        for (uuid, surfaceView) in paneSurfaceViews {
+            // Only intercept if the pane is in browse mode.
+            guard paneBrowsing[uuid] == true else { continue }
+
+            // Convert to SurfaceView local coordinates.
+            let mouseInView = surfaceView.convert(windowLocation, from: nil)
+            guard surfaceView.bounds.contains(mouseInView) else { continue }
+
+            // Get overlay geometry for this pane.
+            guard let geo = overlayGeometry[uuid] else { continue }
+
+            // SurfaceView is NOT flipped (Y=0 at bottom). Flip to top-left origin.
+            let flippedY = surfaceView.bounds.height - mouseInView.y
+            let scale = surfaceView.window?.backingScaleFactor ?? 2.0
+
+            // Scale to physical pixels.
+            let physX = mouseInView.x * scale
+            let physY = flippedY * scale
+
+            // Compute overlay-relative physical coordinates.
+            let overlayOriginX = Double(geo.col) * Double(geo.cellW)
+            let overlayOriginY = Double(geo.row) * Double(geo.cellH)
+            let relPhysX = physX - overlayOriginX
+            let relPhysY = physY - overlayOriginY
+
+            // Hit test: is the point inside the overlay?
+            let overlayW = Double(geo.width) * Double(geo.cellW)
+            let overlayH = Double(geo.height) * Double(geo.cellH)
+            guard relPhysX >= 0, relPhysY >= 0,
+                  relPhysX < overlayW, relPhysY < overlayH else { continue }
+
+            // Convert to logical pixels for Chromium.
+            let chromiumX = relPhysX / Double(scale)
+            let chromiumY = relPhysY / Double(scale)
+
+            return OverlayHit(uuid: uuid, x: chromiumX, y: chromiumY)
+        }
+        return nil
     }
 
     // MARK: - Server spawning
