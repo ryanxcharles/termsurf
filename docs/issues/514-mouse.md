@@ -550,3 +550,73 @@ pipeline are all functional. URL synchronization via `DidFinishNavigation` keeps
 the TUI URL bar in sync with Chromium's actual navigation state. This is the
 first interactive input flowing from TermSurf into the browser — prior to this,
 the browser pane was view-only.
+
+### Experiment 2: Re-apply view size after navigation
+
+After clicking a link, the new page renders at the wrong size — narrower than
+the viewport, with black bars on the left and right. Resizing the window fixes
+it because the `resize` XPC handler calls `view->SetSize()` on the current
+`RenderWidgetHostView`.
+
+The root cause is that `view->SetSize()` is only called once in `CreateTab`.
+When Chromium navigates, content_shell can reassert the Shell window's default
+size on the `RenderWidgetHostView`, overriding our custom dimensions. The
+capturer's IOSurface stays the correct size, but the content renders smaller
+within it.
+
+#### Fix
+
+`ShellVideoConsumer` already has `initial_width_` and `initial_height_` (the
+physical pixel dimensions from `SetInitialSize`), and `DidFinishNavigation`
+already fires on every committed main-frame navigation. Add a `SetSize` call
+inside `DidFinishNavigation` to re-apply the correct view dimensions after each
+navigation.
+
+#### Changes
+
+##### shell_video_consumer.cc
+
+In `DidFinishNavigation`, after the `HasCommitted` / `IsInPrimaryMainFrame`
+guards and before the `url_changed` XPC message, add:
+
+```cpp
+// Re-apply view size — content_shell may reset it after navigation.
+if (initial_width_ > 0 && initial_height_ > 0) {
+    RenderWidgetHostView* view = web_contents()->GetRenderWidgetHostView();
+    if (view) {
+        float scale = view->GetDeviceScaleFactor();
+        gfx::Size logical(
+            static_cast<int>(std::ceil(initial_width_ / scale)),
+            static_cast<int>(std::ceil(initial_height_ / scale)));
+        view->SetSize(logical);
+    }
+}
+```
+
+Also update `SetResolution` to store the new dimensions in `initial_width_` /
+`initial_height_` so that navigations after a resize use the latest size:
+
+```cpp
+void ShellVideoConsumer::SetResolution(int width, int height) {
+  if (capturer_ && width > 0 && height > 0) {
+    initial_width_ = width;
+    initial_height_ = height;
+    // ... existing capturer resize code ...
+  }
+}
+```
+
+No other files need changes. No new XPC messages.
+
+#### Verification
+
+```bash
+open ts5/zig-out/TermSurf.app --stderr ~/dev/termsurf/logs/overlay.log
+# In a TermSurf pane:
+cargo run -p web -- https://news.ycombinator.com
+```
+
+Click a link. The new page should fill the full viewport with no black bars.
+Resize the window, then click another link — should still fill correctly.
+
+Pass: no black bars after navigation, at any window size.
