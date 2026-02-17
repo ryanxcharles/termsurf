@@ -382,8 +382,8 @@ void HandleMouseEvent(const std::string& pane_id,
 
 ##### Chromium branch
 
-Create `146.0.7650.0-issue-514` from the current `146.0.7650.0-termsurf` branch.
-Add the `mouse_event` handler. Build with
+Create `146.0.7650.0-issue-514` from `146.0.7650.0-issue-512` (the last Chromium
+branch, from Issue 512 vsync). Add the `mouse_event` handler. Build with
 `autoninja -C out/Default chromium_profile_server`.
 
 **Verification:**
