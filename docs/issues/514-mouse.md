@@ -224,12 +224,39 @@ Once the target pane is identified, compute overlay-relative coordinates:
 - Convert back to logical pixels for Chromium: `chromiumX = relX / scale`,
   `chromiumY = relY / scale`.
 
-#### XPC message
+#### URL synchronization
 
-Map NSEvent fields and send on the server's control connection
-(`serverControlConnections[profile]` via `paneProfiles[uuid]`). The `pane_id`
-field tells the server which tab to target (one server may host multiple tabs
-for the same profile).
+When a click navigates the page, the URL changes. The `web` TUI needs to know
+the new URL so it can update the URL bar. `ShellVideoConsumer` already inherits
+from `WebContentsObserver` and already has the per-tab XPC connection and
+pane_id. Override `DidFinishNavigation` to detect committed main-frame
+navigations and send the new URL back through the GUI to the TUI.
+
+Flow:
+
+```
+Chromium renderer commits navigation
+    ↓
+ShellVideoConsumer::DidFinishNavigation()
+    ↓
+url_changed XPC message → CompositorXPC (on tab connection)
+    ↓
+CompositorXPC looks up webPeersForPane[uuid]
+    ↓
+url_changed XPC message → web TUI (on web peer connection)
+    ↓
+web TUI updates url variable, URL bar redraws
+```
+
+#### XPC messages
+
+Three messages are needed for this experiment:
+
+**1. `mouse_event`** — CompositorXPC → Chromium server (on control connection)
+
+Sent when the user clicks inside the overlay. The `pane_id` field tells the
+server which tab to target (one server may host multiple tabs for the same
+profile).
 
 - NSEvent type: `.leftMouseDown` → `"down"`, `.leftMouseUp` → `"up"`,
   `.rightMouseDown` → `"down"`, `.rightMouseUp` → `"up"`.
@@ -250,7 +277,32 @@ for the same profile).
 }
 ```
 
-Return `nil` to consume the event (prevent terminal from receiving it).
+Return `nil` to consume the NSEvent (prevent terminal from receiving it).
+
+**2. `url_changed`** — Chromium server → CompositorXPC (on tab connection)
+
+Sent by `ShellVideoConsumer` when a main-frame navigation commits. Only fires
+for committed, primary main-frame navigations (not subframes, not aborted).
+
+```
+{
+    action: "url_changed",
+    pane_id: "<uuid>",
+    url: "<new url>"
+}
+```
+
+**3. `url_changed`** — CompositorXPC → web TUI (on web peer connection)
+
+CompositorXPC receives `url_changed` from the server, looks up the web peer for
+the pane, and forwards it.
+
+```
+{
+    action: "url_changed",
+    url: "<new url>"
+}
+```
 
 #### Changes
 
@@ -280,6 +332,47 @@ NSEvent.addLocalMonitorForEvents(matching: [
 
 The monitor performs click routing, mode gating, coordinate transformation, and
 XPC message sending as described above.
+
+Handle incoming `url_changed` messages from the server (add case to
+`handleMessage`). Look up the pane UUID from the message's `pane_id`, find the
+web peer via `webPeersForPane[uuid]`, and forward the `url_changed` message.
+
+##### shell_video_consumer.cc
+
+Override `DidFinishNavigation` (already a `WebContentsObserver`, already has
+`xpc_connection_` and `pane_id_`):
+
+```cpp
+void ShellVideoConsumer::DidFinishNavigation(
+    NavigationHandle* navigation_handle) {
+    if (!navigation_handle->HasCommitted())
+        return;
+    if (!navigation_handle->IsInPrimaryMainFrame())
+        return;
+
+    const std::string& url = navigation_handle->GetURL().spec();
+    xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
+    xpc_dictionary_set_string(msg, "action", "url_changed");
+    xpc_dictionary_set_string(msg, "pane_id", pane_id_.c_str());
+    xpc_dictionary_set_string(msg, "url", url.c_str());
+    xpc_connection_send_message(xpc_connection_, msg);
+    xpc_release(msg);
+}
+```
+
+##### shell_video_consumer.h
+
+Add override declaration:
+
+```cpp
+void DidFinishNavigation(NavigationHandle* navigation_handle) override;
+```
+
+Add include for `NavigationHandle`:
+
+```cpp
+#include "content/public/browser/navigation_handle.h"
+```
 
 ##### shell_browser_main_parts.cc
 
@@ -380,11 +473,52 @@ void HandleMouseEvent(const std::string& pane_id,
                       int click_count, uint64_t modifiers);
 ```
 
+##### web/src/xpc.rs
+
+Add `UrlChanged` variant to `CompositorMessage`:
+
+```rust
+pub enum CompositorMessage {
+    ModeChanged { browsing: bool },
+    UrlChanged { url: String },
+}
+```
+
+Add `"url_changed"` parsing to the XPC event handler (after the existing
+`"mode_changed"` branch):
+
+```rust
+} else if action == "url_changed" {
+    let url_key = CString::new("url").unwrap();
+    let url_ptr = unsafe { xpc_dictionary_get_string(event, url_key.as_ptr()) };
+    if !url_ptr.is_null() {
+        let url = unsafe { std::ffi::CStr::from_ptr(url_ptr) }
+            .to_str()
+            .unwrap_or("")
+            .to_string();
+        let _ = tx.send(CompositorMessage::UrlChanged { url });
+    }
+}
+```
+
+##### web/src/main.rs
+
+Make the `url` variable mutable. Add a match arm to the message drain loop:
+
+```rust
+xpc::CompositorMessage::UrlChanged { url: new_url } => {
+    url = new_url;
+}
+```
+
+The UI already renders `&url` in the URL bar every frame — no rendering changes
+needed.
+
 ##### Chromium branch
 
 Create `146.0.7650.0-issue-514` from `146.0.7650.0-issue-512` (the last Chromium
-branch, from Issue 512 vsync). Add the `mouse_event` handler. Build with
-`autoninja -C out/Default chromium_profile_server`.
+branch, from Issue 512 vsync). Add the `mouse_event` and `url_changed` handlers.
+Build with `autoninja -C out/Default chromium_profile_server`.
 
 **Verification:**
 
@@ -395,7 +529,7 @@ open ts5/zig-out/TermSurf.app --stderr ~/dev/termsurf/logs/overlay.log
 cargo run -p web -- http://localhost:9407
 ```
 
-Click on a link or button in the box-demo page. The page should navigate or the
-button should activate. Check `overlay.log` for `mouse_event` forwarding logs.
+Click on a link in the box-demo page. The page should navigate, and the URL bar
+in the `web` TUI should update to show the new URL.
 
-Pass: clicking a link in the rendered page navigates to the target URL.
+Pass: clicking a link navigates the page and the URL bar updates.
