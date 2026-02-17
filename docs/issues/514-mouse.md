@@ -866,3 +866,179 @@ phase mapping required zero translation — NSEvent and Chromium use identical
 bitmask values. The `hitTestOverlay` helper extracted from the click monitor
 made adding the scroll monitor trivial (same hit-test, different XPC payload).
 Pages are now navigable and scrollable in browse mode.
+
+### Experiment 4: Mouse move / hover events
+
+Forward mouse movement to Chromium so hover states work: links highlight on
+hover, cursor changes to a pointer over clickable elements, tooltips appear, and
+CSS `:hover` states fire.
+
+#### Gating
+
+Same as clicks and scroll — only forward when both conditions are met:
+
+1. **Browse mode** — `paneBrowsing[uuid] == true`.
+2. **Mouse over viewport** — cursor is inside the overlay bounds.
+
+Both checked by the existing `hitTestOverlay` helper.
+
+#### Event types
+
+Three NSEvent types map to Chromium mouse move:
+
+| NSEvent type         | When it fires                  | Chromium type |
+| -------------------- | ------------------------------ | ------------- |
+| `.mouseMoved`        | Mouse moves, no button held    | `kMouseMove`  |
+| `.leftMouseDragged`  | Mouse moves, left button held  | `kMouseMove`  |
+| `.rightMouseDragged` | Mouse moves, right button held | `kMouseMove`  |
+
+All three map to `kMouseMove` — Chromium distinguishes drags by the button-down
+modifiers (`kLeftButtonDown`, `kRightButtonDown`), not by event type.
+
+`.mouseMoved` requires a tracking area on the view. SurfaceView already has one
+(with `.mouseMoved`, `.activeAlways`, `.inVisibleRect`), so the local event
+monitor will receive these events.
+
+#### Performance
+
+Mouse move events fire at 120+ Hz. Each one crosses XPC to the Chromium server.
+For a first pass this should be fine — the existing scroll pipeline already
+handles similar frequency. If it becomes an issue, we can throttle later (e.g.
+coalesce to one event per frame).
+
+#### XPC message
+
+```
+{
+    action: "mouse_move",
+    pane_id: "<uuid>",
+    x: <double>,          // logical pixels, overlay-relative
+    y: <double>,
+    modifiers: <uint64>   // shift=1, ctrl=2, alt=4, cmd=8 + button-down flags
+}
+```
+
+Button-down flags in modifiers (same bitmask as Chromium):
+
+- Left button held: `modifiers |= 32` (`kLeftButtonDown`)
+- Right button held: `modifiers |= 512` (`kRightButtonDown`)
+
+No `click_count`, `button`, or `type` fields — this is always a move, never a
+click.
+
+#### Changes
+
+##### CompositorXPC.swift
+
+Add a third local event monitor for mouse move and drag events:
+
+```swift
+NSEvent.addLocalMonitorForEvents(matching: [
+    .mouseMoved, .leftMouseDragged, .rightMouseDragged
+]) { [weak self] event in
+    guard let self = self else { return event }
+
+    let hit = self.xpcQueue.sync { self.hitTestOverlay(event: event) }
+    guard let hit = hit else { return event }
+
+    // Map modifier flags (shift=1, ctrl=2, alt=4, cmd=8).
+    var mods: UInt64 = 0
+    if event.modifierFlags.contains(.shift)   { mods |= 1 }
+    if event.modifierFlags.contains(.control)  { mods |= 2 }
+    if event.modifierFlags.contains(.option)   { mods |= 4 }
+    if event.modifierFlags.contains(.command)  { mods |= 8 }
+    // Add button-down flags for drag events.
+    if event.type == .leftMouseDragged  { mods |= 32 }   // kLeftButtonDown
+    if event.type == .rightMouseDragged { mods |= 512 }   // kRightButtonDown
+
+    // Send mouse_move via XPC to the Chromium server.
+    self.xpcQueue.async {
+        guard let profile = self.paneProfiles[hit.uuid],
+              let controlConn = self.serverControlConnections[profile] else { return }
+
+        let msg = xpc_dictionary_create(nil, nil, 0)
+        xpc_dictionary_set_string(msg, "action", "mouse_move")
+        xpc_dictionary_set_string(msg, "pane_id", hit.uuid.uuidString)
+        xpc_dictionary_set_double(msg, "x", hit.x)
+        xpc_dictionary_set_double(msg, "y", hit.y)
+        xpc_dictionary_set_uint64(msg, "modifiers", mods)
+        xpc_connection_send_message(controlConn, msg)
+    }
+
+    return nil  // consume
+}
+```
+
+##### shell_browser_main_parts.cc
+
+Add `"mouse_move"` case to the XPC handler in `StartDynamicMode` (after the
+`scroll_event` case):
+
+```cpp
+} else if (action && std::string_view(action) == "mouse_move") {
+    const char* pane = xpc_dictionary_get_string(event, "pane_id");
+    double x = xpc_dictionary_get_double(event, "x");
+    double y = xpc_dictionary_get_double(event, "y");
+    uint64_t modifiers = xpc_dictionary_get_uint64(event, "modifiers");
+    std::string s_pane(pane ? pane : "");
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ShellBrowserMainParts::HandleMouseMove,
+                       base::Unretained(self), s_pane, x, y, modifiers));
+}
+```
+
+New method `HandleMouseMove`:
+
+```cpp
+void ShellBrowserMainParts::HandleMouseMove(
+    const std::string& pane_id, double x, double y,
+    uint64_t modifiers) {
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+    TabState* tab = nullptr;
+    for (auto& t : tabs_) {
+        if (t->pane_id == pane_id) { tab = t.get(); break; }
+    }
+    if (!tab) return;
+
+    int web_modifiers = static_cast<int>(modifiers);
+
+    blink::WebMouseEvent mouse_event(
+        blink::WebInputEvent::Type::kMouseMove,
+        gfx::PointF(x, y),
+        gfx::PointF(x, y),
+        blink::WebPointerProperties::Button::kNoButton,
+        0,  // click_count
+        web_modifiers,
+        base::TimeTicks::Now());
+
+    auto* view = tab->shell->web_contents()->GetRenderWidgetHostView();
+    if (view)
+        view->GetRenderWidgetHost()->ForwardMouseEvent(mouse_event);
+}
+```
+
+##### shell_browser_main_parts.h
+
+Add inside the `#if BUILDFLAG(IS_MAC)` block after `HandleScrollEvent`:
+
+```cpp
+void HandleMouseMove(const std::string& pane_id,
+                     double x, double y,
+                     uint64_t modifiers);
+```
+
+#### Verification
+
+```bash
+open ts5/zig-out/TermSurf.app --stderr ~/dev/termsurf/logs/overlay.log
+# In a TermSurf pane:
+cargo run -p web -- https://news.ycombinator.com
+```
+
+Move the mouse over links in browse mode. Links should highlight on hover and
+the cursor should change to a pointer. Drag to select text (left-click hold +
+move).
+
+Pass: links highlight on hover, cursor changes over clickable elements.
