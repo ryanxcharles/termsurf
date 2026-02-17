@@ -172,3 +172,230 @@ The capabilities needed to satisfy the goal — roughly in order of impact:
   (trackpad) scrolling with momentum phases.
 - **Cursor feedback** — Propagate cursor type changes (pointer, I-beam, arrow)
   from the Chromium renderer back to the window via XPC so `NSCursor` updates.
+
+## Experiments
+
+### Experiment 1: Mouse clicks
+
+Make left-click work end-to-end. A click on a link in the rendered page should
+navigate. This is the simplest mouse event — a single point, no continuous
+tracking, no coordinate-sensitive feedback.
+
+#### Mode gating
+
+Mouse events are only intercepted when the target pane is in browse mode. If the
+pane under the cursor is not browsing (or has no overlay), the event passes
+through to the terminal unchanged. Mouse behavior is identical to stock Ghostty
+in control mode — clicks select text, interact with the terminal, etc.
+
+#### Click routing
+
+Unlike Ctrl+Esc (which uses `firstResponder` to identify the focused pane),
+mouse clicks can land in any pane — not just the focused one. The monitor cannot
+use the first-responder check. Instead, it hit-tests the click coordinates
+against all browsing panes:
+
+1. The monitor fires on the main thread. It iterates `paneSurfaceViews`
+   (typically 1–3 entries).
+2. For each pane, convert `event.locationInWindow` to the SurfaceView's local
+   coordinate space via
+   `surfaceView.convert(event.locationInWindow, from: nil)`.
+3. Check if the point falls within `surfaceView.bounds`. If not, skip.
+4. Check `paneBrowsing[uuid] == true` (read on XPC queue via sync dispatch). If
+   not browsing, skip.
+5. First match wins (no overlapping SurfaceViews in Ghostty's split layout).
+
+If no browsing pane matched, return `event` unchanged.
+
+#### Coordinate transformation
+
+Once the target pane is identified, compute overlay-relative coordinates:
+
+- SurfaceView is not flipped (`isFlipped` defaults to `false`), so Y=0 is at the
+  bottom. Flip Y to top-left origin:
+  `flippedY = surfaceView.bounds.height - mouseInView.y`.
+- Scale to physical pixels: multiply by
+  `surfaceView.window?.backingScaleFactor ?? 2.0`.
+- Compute overlay-relative physical coordinates: `relX = physX - col * cellW`,
+  `relY = physY - row * cellH`.
+- Hit test against overlay: if `relX < 0` or `relY < 0` or
+  `relX >= width * cellW` or `relY >= height * cellH`, the click is inside the
+  pane but outside the overlay — pass through (return `event`).
+- Convert back to logical pixels for Chromium: `chromiumX = relX / scale`,
+  `chromiumY = relY / scale`.
+
+#### XPC message
+
+Map NSEvent fields and send on the server's control connection
+(`serverControlConnections[profile]` via `paneProfiles[uuid]`). The `pane_id`
+field tells the server which tab to target (one server may host multiple tabs
+for the same profile).
+
+- NSEvent type: `.leftMouseDown` → `"down"`, `.leftMouseUp` → `"up"`,
+  `.rightMouseDown` → `"down"`, `.rightMouseUp` → `"up"`.
+- NSEvent button: left events → `"left"`, right events → `"right"`.
+- Modifier flags: `.shift` → 1, `.control` → 2, `.option` → 4, `.command` → 8.
+  These match `blink::WebInputEvent::Modifiers` exactly.
+
+```
+{
+    action: "mouse_event",
+    pane_id: "<uuid>",
+    type: "down" | "up",
+    x: <double>,        // logical pixels, overlay-relative
+    y: <double>,
+    button: "left" | "right",
+    click_count: <int>,  // event.clickCount
+    modifiers: <uint64>
+}
+```
+
+Return `nil` to consume the event (prevent terminal from receiving it).
+
+#### Changes
+
+##### CompositorXPC.swift
+
+New state properties:
+
+```swift
+private var overlayGeometry: [UUID: (col: UInt32, row: UInt32,
+    width: UInt32, height: UInt32, cellW: UInt32, cellH: UInt32)] = [:]
+private var paneSurfaceViews: [UUID: Ghostty.SurfaceView] = [:]
+```
+
+Populate `overlayGeometry` in `handleSetOverlay` after calling
+`ghostty_surface_get_cell_size`, alongside the existing `cachedCSurfaces`
+assignment. Populate `paneSurfaceViews` in the same `DispatchQueue.main.sync`
+block where `findSurface` already runs. Clean both up in `handleDisconnect`.
+
+Add a second local event monitor:
+
+```swift
+NSEvent.addLocalMonitorForEvents(matching: [
+    .leftMouseDown, .leftMouseUp,
+    .rightMouseDown, .rightMouseUp
+]) { [weak self] event in ... }
+```
+
+The monitor performs click routing, mode gating, coordinate transformation, and
+XPC message sending as described above.
+
+##### shell_browser_main_parts.cc
+
+Add includes:
+
+```cpp
+#include "content/public/browser/render_widget_host.h"
+#include "third_party/blink/public/common/input/web_mouse_event.h"
+```
+
+Add `"mouse_event"` case to the XPC event handler in `StartDynamicMode` (after
+the existing `"resize"` case):
+
+```cpp
+} else if (action && std::string_view(action) == "mouse_event") {
+    const char* pane = xpc_dictionary_get_string(event, "pane_id");
+    const char* type_str = xpc_dictionary_get_string(event, "type");
+    const char* button_str = xpc_dictionary_get_string(event, "button");
+    double x = xpc_dictionary_get_double(event, "x");
+    double y = xpc_dictionary_get_double(event, "y");
+    int click_count = (int)xpc_dictionary_get_int64(event, "click_count");
+    uint64_t modifiers = xpc_dictionary_get_uint64(event, "modifiers");
+    std::string s_pane(pane ? pane : "");
+    std::string s_type(type_str ? type_str : "");
+    std::string s_button(button_str ? button_str : "");
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ShellBrowserMainParts::HandleMouseEvent,
+                       base::Unretained(self), s_pane, s_type, x, y,
+                       s_button, click_count, modifiers));
+}
+```
+
+New method `HandleMouseEvent`. The server may host multiple tabs (one per pane
+sharing this profile). The `pane_id` field from the XPC message selects the
+correct tab — same linear scan used by `ResizeCapture`:
+
+```cpp
+void ShellBrowserMainParts::HandleMouseEvent(
+    const std::string& pane_id, const std::string& type,
+    double x, double y, const std::string& button,
+    int click_count, uint64_t modifiers) {
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+    // Find tab by pane_id (same lookup as ResizeCapture).
+    TabState* tab = nullptr;
+    for (auto& t : tabs_) {
+        if (t->pane_id == pane_id) { tab = t.get(); break; }
+    }
+    if (!tab) return;
+
+    // Map type string to WebInputEvent::Type.
+    blink::WebInputEvent::Type event_type;
+    if (type == "down")
+        event_type = blink::WebInputEvent::Type::kMouseDown;
+    else if (type == "up")
+        event_type = blink::WebInputEvent::Type::kMouseUp;
+    else
+        return;  // Only clicks in this experiment.
+
+    // Map button string.
+    auto btn = blink::WebPointerProperties::Button::kLeft;
+    if (button == "right")
+        btn = blink::WebPointerProperties::Button::kRight;
+
+    // Map modifiers (Swift bitmask matches WebInputEvent::Modifiers).
+    int web_modifiers = static_cast<int>(modifiers & 0xF);
+    // Add button-down modifier for mouseDown.
+    if (type == "down") {
+        if (button == "left")
+            web_modifiers |= blink::WebInputEvent::kLeftButtonDown;
+        else if (button == "right")
+            web_modifiers |= blink::WebInputEvent::kRightButtonDown;
+    }
+
+    blink::WebMouseEvent mouse_event(
+        event_type,
+        gfx::PointF(x, y),
+        gfx::PointF(x, y),  // screen position (approximate)
+        btn, click_count, web_modifiers,
+        base::TimeTicks::Now());
+
+    auto* view = tab->shell->web_contents()->GetRenderWidgetHostView();
+    if (view)
+        view->GetRenderWidgetHost()->ForwardMouseEvent(mouse_event);
+}
+```
+
+##### shell_browser_main_parts.h
+
+Add inside the `#if BUILDFLAG(IS_MAC)` block after `CloseTab`:
+
+```cpp
+void HandleMouseEvent(const std::string& pane_id,
+                      const std::string& type,
+                      double x, double y,
+                      const std::string& button,
+                      int click_count, uint64_t modifiers);
+```
+
+##### Chromium branch
+
+Create `146.0.7650.0-issue-514` from the current `146.0.7650.0-termsurf` branch.
+Add the `mouse_event` handler. Build with
+`autoninja -C out/Default chromium_profile_server`.
+
+**Verification:**
+
+```bash
+cd ts4/box-demo && bun run server.ts &
+open ts5/zig-out/TermSurf.app --stderr ~/dev/termsurf/logs/overlay.log
+# In a TermSurf pane:
+cargo run -p web -- http://localhost:9407
+```
+
+Click on a link or button in the box-demo page. The page should navigate or the
+button should activate. Check `overlay.log` for `mouse_event` forwarding logs.
+
+Pass: clicking a link in the rendered page navigates to the target URL.
