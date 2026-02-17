@@ -631,3 +631,221 @@ navigation with no black bars.
 Storing the pixel dimensions in `SetResolution` and re-applying `view->SetSize`
 in `DidFinishNavigation` fixes the post-navigation size reset. Two lines in
 `SetResolution`, ten lines in `DidFinishNavigation`.
+
+### Experiment 3: Scroll wheel forwarding
+
+Forward trackpad and mouse wheel scroll events from CompositorXPC to the
+Chromium Profile Server. After this, pages can be scrolled in browse mode.
+
+#### Gating
+
+Scroll events are only forwarded to Chromium when both conditions are met:
+
+1. **Browse mode** — the pane must have `paneBrowsing[uuid] == true`. In control
+   mode, scroll events pass through to the terminal (e.g. for scrollback).
+2. **Mouse over viewport** — the cursor must be inside the overlay bounds (the
+   Chromium content area), not in the URL bar, status bar, or outside the pane.
+
+Both checks are performed by the shared `hitTestOverlay` helper (extracted from
+the mouse click monitor). If either condition fails, `hitTestOverlay` returns
+`nil` and the monitor returns the event unchanged — the terminal handles it.
+
+#### Phase mapping
+
+NSEvent scroll phases and Chromium's `WebMouseWheelEvent::Phase` use identical
+bitmask values — no translation needed:
+
+| Name       | NSEvent raw | Chromium enum      | Value |
+| ---------- | ----------- | ------------------ | ----- |
+| None       | 0           | `kPhaseNone`       | 0     |
+| Began      | 1           | `kPhaseBegan`      | 1     |
+| Stationary | 2           | `kPhaseStationary` | 2     |
+| Changed    | 4           | `kPhaseChanged`    | 4     |
+| Ended      | 8           | `kPhaseEnded`      | 8     |
+| Cancelled  | 16          | `kPhaseCancelled`  | 16    |
+| May begin  | 32          | `kPhaseMayBegin`   | 32    |
+
+Trackpad scrolls produce a full lifecycle: `began → changed → ended`, optionally
+followed by momentum events (`momentumPhase: began → changed → ended`). Mouse
+wheel events have `phase = none` and `momentumPhase = none`.
+
+#### Delta units
+
+`NSEvent.hasPreciseScrollingDeltas` distinguishes trackpad (points) from mouse
+wheel (lines). Pass this as a boolean; the Chromium side sets `delta_units`:
+
+- `true` → `ui::ScrollGranularity::kScrollByPrecisePixel`
+- `false` → `ui::ScrollGranularity::kScrollByLine`
+
+#### XPC message
+
+```
+{
+    action: "scroll_event",
+    pane_id: "<uuid>",
+    x: <double>,              // cursor position, overlay-relative logical pixels
+    y: <double>,
+    delta_x: <double>,        // scrollingDeltaX (points or lines)
+    delta_y: <double>,        // scrollingDeltaY
+    phase: <uint64>,          // NSEvent.phase.rawValue
+    momentum_phase: <uint64>, // NSEvent.momentumPhase.rawValue
+    precise: <bool>,          // hasPreciseScrollingDeltas
+    modifiers: <uint64>
+}
+```
+
+#### Changes
+
+##### CompositorXPC.swift
+
+Extract the hit-test + coordinate transform logic from the mouse click monitor
+into a private helper method. Both monitors use the same hit-test:
+
+```swift
+private struct OverlayHit {
+    let uuid: UUID
+    let x: Double  // logical pixels, overlay-relative
+    let y: Double
+}
+
+private func hitTestOverlay(windowLocation: CGPoint) -> OverlayHit? {
+    // Same logic currently in the mouse monitor:
+    // iterate paneSurfaceViews, check paneBrowsing, convert coordinates,
+    // flip Y, scale to physical, subtract overlay origin, hit test, convert
+    // back to logical.
+}
+```
+
+Call this from both the existing mouse click monitor and a new scroll monitor.
+Must be called on the XPC queue (the monitors dispatch to `xpcQueue.sync`
+already).
+
+Add a second local event monitor for scroll events:
+
+```swift
+NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel]) { [weak self] event in
+    guard let self = self else { return event }
+    let hit = self.xpcQueue.sync { self.hitTestOverlay(...) }
+    guard let hit = hit else { return event }
+
+    // Send scroll_event via XPC.
+    self.xpcQueue.async {
+        guard let profile = self.paneProfiles[hit.uuid],
+              let controlConn = self.serverControlConnections[profile] else { return }
+
+        let msg = xpc_dictionary_create(nil, nil, 0)
+        xpc_dictionary_set_string(msg, "action", "scroll_event")
+        xpc_dictionary_set_string(msg, "pane_id", hit.uuid.uuidString)
+        xpc_dictionary_set_double(msg, "x", hit.x)
+        xpc_dictionary_set_double(msg, "y", hit.y)
+        xpc_dictionary_set_double(msg, "delta_x", event.scrollingDeltaX)
+        xpc_dictionary_set_double(msg, "delta_y", event.scrollingDeltaY)
+        xpc_dictionary_set_uint64(msg, "phase", UInt64(event.phase.rawValue))
+        xpc_dictionary_set_uint64(msg, "momentum_phase",
+            UInt64(event.momentumPhase.rawValue))
+        xpc_dictionary_set_bool(msg, "precise", event.hasPreciseScrollingDeltas)
+        // modifiers same as mouse clicks
+        xpc_dictionary_set_uint64(msg, "modifiers", mods)
+        xpc_connection_send_message(controlConn, msg)
+    }
+    return nil  // consume
+}
+```
+
+##### shell_browser_main_parts.cc
+
+Add include:
+
+```cpp
+#include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
+#include "ui/events/types/scroll_types.h"
+```
+
+Add `"scroll_event"` case to the XPC handler in `StartDynamicMode` (after the
+`mouse_event` case):
+
+```cpp
+} else if (action && std::string_view(action) == "scroll_event") {
+    const char* pane = xpc_dictionary_get_string(event, "pane_id");
+    double x = xpc_dictionary_get_double(event, "x");
+    double y = xpc_dictionary_get_double(event, "y");
+    double dx = xpc_dictionary_get_double(event, "delta_x");
+    double dy = xpc_dictionary_get_double(event, "delta_y");
+    uint64_t phase = xpc_dictionary_get_uint64(event, "phase");
+    uint64_t momentum = xpc_dictionary_get_uint64(event, "momentum_phase");
+    bool precise = xpc_dictionary_get_bool(event, "precise");
+    uint64_t modifiers = xpc_dictionary_get_uint64(event, "modifiers");
+    std::string s_pane(pane ? pane : "");
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ShellBrowserMainParts::HandleScrollEvent,
+                       base::Unretained(self), s_pane, x, y, dx, dy,
+                       phase, momentum, precise, modifiers));
+}
+```
+
+New method `HandleScrollEvent`:
+
+```cpp
+void ShellBrowserMainParts::HandleScrollEvent(
+    const std::string& pane_id, double x, double y,
+    double delta_x, double delta_y,
+    uint64_t phase, uint64_t momentum_phase,
+    bool precise, uint64_t modifiers) {
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+    TabState* tab = nullptr;
+    for (auto& t : tabs_) {
+        if (t->pane_id == pane_id) { tab = t.get(); break; }
+    }
+    if (!tab) return;
+
+    int web_modifiers = static_cast<int>(modifiers & 0xF);
+
+    blink::WebMouseWheelEvent wheel_event(
+        blink::WebInputEvent::Type::kMouseWheel,
+        web_modifiers,
+        base::TimeTicks::Now());
+
+    wheel_event.SetPositionInWidget(gfx::PointF(x, y));
+    wheel_event.SetPositionInScreen(gfx::PointF(x, y));
+    wheel_event.delta_x = static_cast<float>(delta_x);
+    wheel_event.delta_y = static_cast<float>(delta_y);
+    wheel_event.phase =
+        static_cast<blink::WebMouseWheelEvent::Phase>(phase);
+    wheel_event.momentum_phase =
+        static_cast<blink::WebMouseWheelEvent::Phase>(momentum_phase);
+    wheel_event.delta_units = precise
+        ? ui::ScrollGranularity::kScrollByPrecisePixel
+        : ui::ScrollGranularity::kScrollByLine;
+
+    auto* view = tab->shell->web_contents()->GetRenderWidgetHostView();
+    if (view)
+        view->GetRenderWidgetHost()->ForwardWheelEvent(wheel_event);
+}
+```
+
+##### shell_browser_main_parts.h
+
+Add inside the `#if BUILDFLAG(IS_MAC)` block after `HandleMouseEvent`:
+
+```cpp
+void HandleScrollEvent(const std::string& pane_id,
+                       double x, double y,
+                       double delta_x, double delta_y,
+                       uint64_t phase, uint64_t momentum_phase,
+                       bool precise, uint64_t modifiers);
+```
+
+#### Verification
+
+```bash
+open ts5/zig-out/TermSurf.app --stderr ~/dev/termsurf/logs/overlay.log
+# In a TermSurf pane:
+cargo run -p web -- https://news.ycombinator.com
+```
+
+Scroll down with trackpad or mouse wheel in browse mode. The page should scroll.
+Trackpad momentum (flick and release) should also work.
+
+Pass: page scrolls smoothly with both trackpad and mouse wheel.
