@@ -100,6 +100,119 @@ dropped (CFRelease old, CFRetain new in `setOverlayIOSurface`). There is no
 double or triple buffering for the overlay — only the terminal's swap chain has
 triple buffering.
 
+## How Chromium solves this internally
+
+Chromium's fundamental solution is to **never have two independent clocks**.
+There is exactly one authoritative timing source — the display's vsync — and
+every frame producer in the entire pipeline is a slave to that single clock.
+
+### The BeginFrame architecture
+
+The architecture has three layers:
+
+**BeginFrameSource** — wraps `CADisplayLink`/`CVDisplayLink` on macOS
+(`ExternalBeginFrameSourceMac`). On each vsync callback it generates a
+`BeginFrameArgs` containing `frame_time`, `deadline`, and `interval`. This is
+the _only_ entity that talks to the OS vsync mechanism. Everything else receives
+timing information from it.
+
+**Display Compositor (Viz)** — the `DisplayScheduler` observes the
+`BeginFrameSource` and orchestrates the pipeline. On each vsync it enters a
+"begin frame deadline interval", waits for all client frame sinks to submit
+their `CompositorFrame`s (or ack that they have no damage), then at a computed
+deadline triggers `DrawAndSwap()`. The 16.67ms frame budget at 60Hz is split
+into thirds:
+
+- 0–5.5ms: main thread (Blink layout, paint, JavaScript)
+- 5.5–11ms: compositor thread (raster, commit, activate, draw)
+- 11–16.67ms: display compositor (aggregate, GPU draw, swap)
+
+**cc::Scheduler (per renderer)** — each renderer process has a scheduler that is
+a `BeginFrameObserver`. It does not have its own timer. It receives
+`BeginFrameArgs` from Viz via Mojo IPC. When a BeginFrame arrives, it does
+layout/paint/commit, then submits a `CompositorFrame` back to Viz before the
+deadline. If the main thread is too slow, the compositor draws from the previous
+active tree (animations and scrolls still update smoothly).
+
+The `FrameSinkManagerImpl` propagates the single `BeginFrameSource` to all child
+frame sinks via `RecursivelyAttachBeginFrameSource()`. Every renderer's
+compositor gets the same clock. No independent timing anywhere.
+
+### Design patterns
+
+- **Pull, don't push.** Frame producers never push on their own schedule. The
+  display clock pulls work by sending BeginFrame signals. Producers respond to
+  those signals and submit frames within the allotted deadline.
+- **Single authoritative clock.** One `BeginFrameSource` per display, derived
+  from the OS vsync. All producers are observers of this single source. No
+  independent 60fps timers anywhere.
+- **Deadline-based scheduling.** Each BeginFrame carries a deadline. Miss it and
+  you skip the frame. The display compositor waits until the deadline (or until
+  all surfaces are ready), then draws.
+- **Damage-driven drawing.** No damage = no draw = no wasted work.
+
+### Why this doesn't help us (yet)
+
+The `FrameSinkVideoCapturer` (what we use) works differently from normal frame
+sinks. It is an async observer that issues `CopyOutputRequest`s on its own
+schedule. It does not participate in the BeginFrame protocol the same way. This
+is exactly why our two-clock problem exists — the capturer's output timing is
+decoupled from the display's vsync.
+
+To benefit from Chromium's one-clock architecture, we would need to either:
+
+1. Participate in Chromium's BeginFrame protocol — have the CVDisplayLink feed a
+   `BeginFrameSource` that Chromium's renderers observe.
+2. Use Chromium's own display path — render output surfaces directly as Metal
+   textures in the same pipeline CVDisplayLink drives.
+
+Both require in-process embedding via the Content API (idea #4 below).
+
+## How Electron handles this
+
+Electron has two rendering modes with very different answers.
+
+### Normal BrowserWindow (windowed rendering)
+
+No synchronization problem exists. Chromium renders into IOSurface-backed
+CALayers, sends `CAContextID`s cross-process, and the browser uses `CALayerHost`
+to composite them. CoreAnimation handles vsync synchronization atomically at the
+window server level. One clock. No drift.
+
+This is the architecture you get with in-process Chromium embedding.
+
+### Off-Screen Rendering (OSR)
+
+Structurally identical to what TermSurf does. `FrameSinkVideoCapturer` produces
+frames on Chromium's internal clock. The consumer receives them asynchronously.
+Two independent clocks, same drift, same micro-stutter. **Electron does not
+solve this.**
+
+What Electron does to make the drift tolerable:
+
+- **Frame pool backpressure.** A 10-frame `GpuMemoryBufferVideoFramePool`. If
+  the consumer doesn't call `release()`, the pool fills and capture stops.
+  Prevents unbounded accumulation but does not synchronize timing.
+- **Damage-driven capture.** Captures on `OnFrameDamaged` events rather than a
+  fixed timer. Reduces wasted work but does not align timing.
+- **Unlimited frame rate for shared textures.** Electron PR #45669 removed the
+  fps cap when using GPU-backed shared textures, since the handle copy is
+  near-zero overhead. Always have a fresh frame available. This is idea #2
+  below.
+
+The three throttling patches we already applied (from Issues 408–410) solve a
+different problem — they ensure Chromium produces frames at all for off-screen
+content. That is about frame _production_, not frame _synchronization_.
+
+### Summary
+
+| Approach            | How it solves vsync                                                   |
+| ------------------- | --------------------------------------------------------------------- |
+| Chromium (internal) | Single `BeginFrameSource` from vsync; all producers observe one clock |
+| Electron (windowed) | CALayer + CAContextID + CoreAnimation; OS handles sync atomically     |
+| Electron (OSR)      | Doesn't solve it. Same two-clock drift we have. Tolerates it.         |
+| TermSurf (current)  | Same as Electron OSR — two independent clocks                         |
+
 ## Ideas for fixing
 
 ### 1. Fix `needs_redraw` for overlay changes
