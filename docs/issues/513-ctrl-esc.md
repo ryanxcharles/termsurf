@@ -1,10 +1,13 @@
-# Issue 513: Ctrl+Esc
+# Issue 513: Ctrl+Esc and Window-Side Mode Tracking
 
 ## Background
 
-The `web` TUI has two modes: Browse and Control. Pressing Esc (or Ctrl+Esc)
-switches from Browse to Control mode. The status bar displays
-`[ctrl+esc] force exit browse mode` as a hint.
+The `web` TUI has two modes: Browse and Control. Pressing Esc switches from
+Browse to Control mode. The status bar displays
+`[ctrl+esc] force exit browse
+mode` as a hint — the intent was always for
+Ctrl+Esc to be the primary mode switch, with bare Esc as a temporary
+convenience.
 
 ## Problem
 
@@ -40,76 +43,100 @@ WezTerm likely sends a different encoding for Ctrl+Esc — either the same bare
 `\x1b` as unmodified Escape, or a sequence that crossterm's legacy parser
 recognizes. The exact encoding WezTerm uses has not been verified.
 
-### The `web` code
+## Architectural decision: window handles input in browse mode
 
-In `web/src/main.rs` (line 117):
+The original Options section proposed fixing this inside the `web` TUI (enabling
+the kitty keyboard protocol, parsing raw sequences, etc.). But a broader
+analysis of the input forwarding architecture changes the picture.
 
-```rust
-if key.code == KeyCode::Esc {
-    mode = Mode::Control;
-}
-```
+### Why the window must handle keyboard in browse mode
 
-This checks only `key.code` without inspecting modifiers. It would match
-Ctrl+Esc if crossterm delivered it as `KeyCode::Esc` with
-`KeyModifiers::CONTROL` — but crossterm never produces that event because it
-can't parse the sequence Ghostty sends.
+When browser input forwarding is implemented, the window (TermSurf) will need to
+forward keypresses to the Chromium Profile Server. The window has access to
+`NSEvent`, which provides:
 
-## Options
+- KeyDown and KeyUp events (terminals only signal "key pressed")
+- Left Shift vs Right Shift distinction
+- Key repeat vs separate presses
+- IME composition sequences
+- Dead keys for accented characters
 
-### 1. Enable keyboard enhancement in `web`
+The terminal PTY is a lossy channel — it cannot faithfully transmit the full
+range of keyboard events that browsers need. Issue 513 itself is proof: Ctrl+Esc
+doesn't survive the Ghostty → PTY → crossterm encoding.
 
-Crossterm supports the kitty keyboard protocol via
-`PushKeyboardEnhancementFlags`. When enabled, the terminal sends key events in a
-format crossterm can fully parse, including modifier information for all keys.
+Mouse input must also go through the window, because the terminal lacks sub-cell
+pixel coordinates needed for fine-grained mouse control. Since both keyboard and
+mouse must go through the window in browse mode, the window is the single input
+authority for browser interaction.
 
-```rust
-use crossterm::event::{
-    PushKeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    KeyboardEnhancementFlags,
-};
+### Mode must be shared
 
-// On startup:
-execute!(stdout, PushKeyboardEnhancementFlags(
-    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-))?;
+Both the window and the `web` TUI need to know the current mode:
 
-// On exit:
-execute!(stdout, PopKeyboardEnhancementFlags)?;
-```
+- **The window** needs the mode to decide whether to forward keypresses to the
+  Chromium Profile Server (browse mode) or let them pass through to the terminal
+  (control mode).
+- **The `web` TUI** needs the mode to render the correct UI state (border
+  colors, status bar hints, URL bar focus).
 
-With `DISAMBIGUATE_ESCAPE_CODES`, Ghostty would send Ctrl+Esc using the kitty
-protocol (`CSI 27 ; 5 u` or similar) instead of the xterm modify-other-keys
-format, and crossterm would parse it correctly.
+Mode state is shared between the two processes. When the mode changes, the
+window must notify `web` (via the existing XPC connection through
+CompositorXPC), and vice versa.
 
-Pros: Proper solution. Works for all modified keys, not just Ctrl+Esc. Cons:
-Changes the keyboard protocol for the entire TUI. Need to verify this doesn't
-break other keybindings. Only works in terminals that support the kitty keyboard
-protocol (Ghostty does, WezTerm does, many others do not).
+### How Ctrl+Esc works under this architecture
 
-### 2. Fall back to bare Esc
+1. User presses Ctrl+Esc while in browse mode.
+2. The window intercepts the keypress via `NSEvent` (before it reaches the PTY).
+3. The window recognizes Ctrl+Esc as the "exit browse mode" keybinding.
+4. The window transitions its mode state from Browse to Control.
+5. The window notifies `web` of the mode change via XPC.
+6. The window stops forwarding keypresses to Chromium and lets them pass through
+   to the terminal.
+7. `web` updates its UI to reflect control mode (border colors, status bar).
 
-Remove the Ctrl+ requirement entirely. The code already matches bare Esc. Just
-update the status bar hint from `[ctrl+esc]` to `[esc]`.
+Bare Esc continues to work as it does today — `web` receives it via crossterm
+and transitions to control mode locally, then notifies the window.
 
-Pros: Trivial one-line change. Works everywhere. Cons: Loses the ability to
-distinguish Esc from Ctrl+Esc. In the future, when browser input forwarding is
-implemented, bare Esc may conflict with webpage key handling (e.g., closing a
-dropdown). Ctrl+Esc would provide an unambiguous "force exit" that the browser
-would never intercept.
+## Implementation scope
 
-### 3. Parse the raw sequence manually
+This issue requires two things:
 
-Add a custom parser that recognizes `\x1b[27;5;27~` and emits the appropriate
-key event. Crossterm supports raw event reading and custom parsing.
+### 1. Window-side mode tracking and Ctrl+Esc handling
 
-Pros: Targeted fix without changing the keyboard protocol. Cons: Fragile — only
-handles this one sequence. Doesn't scale to other modified keys we may need
-later.
+Add mode state (Browse/Control) to CompositorXPC, per pane. When the window
+receives a Ctrl+Esc keypress in browse mode:
 
-## Recommendation
+- Transition mode to Control
+- Notify `web` via XPC
+- Stop intercepting keypresses (let them flow to the terminal)
 
-Option 1 (keyboard enhancement) is the correct long-term solution. The `web` TUI
-will eventually need full keyboard support for browser input forwarding —
-enabling the kitty protocol now sets the right foundation. Option 2 is a
-reasonable fallback if keyboard enhancement causes unexpected issues.
+When the window receives a mode change notification from `web` (e.g., `web`
+detected bare Esc or Enter):
+
+- Update mode state
+- Start or stop intercepting keypresses accordingly
+
+### 2. Mode synchronization protocol
+
+Add XPC messages for mode changes on the existing `web` ↔ CompositorXPC
+connection:
+
+- `mode_changed` (from window to `web`): window changed mode (e.g., Ctrl+Esc)
+- `mode_changed` (from `web` to window): `web` changed mode (e.g., bare Esc,
+  Enter)
+
+Both sides update their local mode state on receipt.
+
+## Future: full input forwarding
+
+This issue lays the groundwork for full browser input forwarding (keyboard and
+mouse). Once the window can intercept keypresses in browse mode, forwarding them
+to the Chromium Profile Server is a natural next step. The XPC channel from the
+window to the profile server already exists (CompositorXPC manages it). Adding
+`key_event` and `mouse_event` messages completes the input pipeline.
+
+The `web` TUI remains responsible for browser chrome (URL bar, status bar,
+viewport border) and control mode keybindings (`q` to quit, Enter to browse).
+The window is responsible for browser input (all keypresses and mouse events in
+browse mode).
