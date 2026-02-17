@@ -157,94 +157,18 @@ the renderer process, not a synchronous block on the browser message loop.
 Mouse moves at display refresh rate (60–120Hz) generate 60–120 XPC messages per
 second — far less traffic than the 120fps IOSurface stream already running.
 
-## Experiments
+## Ideas for Experiments
 
-### Experiment 1: Mouse clicks
+The capabilities needed to satisfy the goal — roughly in order of impact:
 
-Make clicking work. This is the simplest mouse event — a single point, no
-continuous tracking, no coordinate-sensitive feedback.
-
-**Changes:**
-
-1. **CompositorXPC.swift** — Add `.leftMouseDown`, `.leftMouseUp`,
-   `.rightMouseDown`, `.rightMouseUp` to the local event monitor. On click in a
-   browsing pane, transform coordinates to overlay-relative pixels and send
-   `mouse_event` via XPC on the server's control connection.
-
-2. **shell_browser_main_parts.cc** — Handle `mouse_event` action in the XPC
-   handler. Construct `blink::WebMouseEvent` and call `ForwardMouseEvent()` on
-   the tab's `RenderWidgetHost`.
-
-3. **Chromium branch** — Create `146.0.7650.0-issue-514` from the current
-   branch. Add the `mouse_event` handler.
-
-**Verification:**
-
-Open `http://localhost:9407` (box-demo) in a TermSurf pane. Click on a link or
-button in the page. The page should navigate or the button should activate.
-
-Pass: clicking a link navigates the page.
-
-### Experiment 2: Mouse movement and hover
-
-Add mouse tracking so the browser knows where the cursor is. This enables hover
-states (CSS `:hover`), tooltips, and cursor changes.
-
-**Changes:**
-
-1. **CompositorXPC.swift** — Add `.mouseMoved`, `.leftMouseDragged`,
-   `.rightMouseDragged` to the event monitor. Send `mouse_event` with
-   `type: "move"`. Track mouse enter/exit for the overlay region.
-
-2. **shell_browser_main_parts.cc** — Handle `move`, `entered`, `exited` event
-   types. Forward as `kMouseMove`, `kMouseEnter`, `kMouseLeave`.
-
-**Verification:**
-
-Hover over a link. The link should show its hover state (underline, color
-change). The cursor should change to a pointer (pending cursor feedback — may
-require Experiment 4).
-
-Pass: CSS `:hover` activates on links when the mouse is over them.
-
-### Experiment 3: Scrolling
-
-Add scroll wheel forwarding so pages can be scrolled.
-
-**Changes:**
-
-1. **CompositorXPC.swift** — Add `.scrollWheel` to the event monitor. Send
-   `scroll_event` with `delta_x`, `delta_y` from the NSEvent's
-   `scrollingDeltaX`/`scrollingDeltaY`. Handle both discrete (mouse wheel) and
-   continuous (trackpad) scrolling via `hasPreciseScrollingDeltas`.
-
-2. **shell_browser_main_parts.cc** — Handle `scroll_event` action. Construct
-   `blink::WebMouseWheelEvent` and call `ForwardWheelEvent()`. Set the
-   appropriate `phase` for momentum scrolling support.
-
-**Verification:**
-
-Open a page with scrollable content. Scroll with the trackpad or mouse wheel.
-The page should scroll smoothly.
-
-Pass: page scrolls in response to scroll input, with smooth trackpad momentum.
-
-### Experiment 4: Cursor feedback
-
-Make the cursor change based on what's under it (pointer for links, text cursor
-for inputs, etc.).
-
-**Changes:**
-
-1. **Chromium Profile Server** — Observe cursor changes from
-   `RenderWidgetHostView` and send cursor type back to the app via XPC.
-
-2. **CompositorXPC.swift** — Receive cursor type messages and set the
-   appropriate `NSCursor` on the window.
-
-**Verification:**
-
-Hover over a link — cursor becomes a pointer. Hover over text — cursor becomes
-an I-beam. Hover over the overlay border — cursor returns to arrow.
-
-Pass: cursor visually changes based on web content under the mouse.
+- **Clicks** — The simplest mouse event. A single point, no continuous tracking.
+  Forward left/right mouse down/up from CompositorXPC to the Chromium Profile
+  Server via XPC, inject as `blink::WebMouseEvent`, call `ForwardMouseEvent()`.
+- **Movement and hover** — Mouse tracking enables CSS `:hover`, tooltips, and
+  cursor feedback. Forward `mouseMoved` and track enter/exit for the overlay
+  region.
+- **Scrolling** — Forward scroll wheel events (`scrollingDeltaX`/`deltaY`) as
+  `blink::WebMouseWheelEvent`. Handle both discrete (mouse wheel) and continuous
+  (trackpad) scrolling with momentum phases.
+- **Cursor feedback** — Propagate cursor type changes (pointer, I-beam, arrow)
+  from the Chromium renderer back to the window via XPC so `NSCursor` updates.
