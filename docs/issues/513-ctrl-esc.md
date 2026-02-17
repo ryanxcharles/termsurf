@@ -519,3 +519,27 @@ Test matrix:
 
 Pass: Ctrl+Esc switches from browse to control in TermSurf, and mode stays
 synchronized between window and TUI across all transitions.
+
+#### Result: Pass
+
+Ctrl+Esc exits browse mode. The NSEvent local monitor intercepts Ctrl+Esc before
+it reaches the PTY, completely bypassing the terminal encoding problem. The
+two-level focus check ensures only the focused pane responds.
+
+Bidirectional mode sync works: bare Esc in browse mode sends `browsing: false`
+to the window, Enter in control mode sends `browsing: true`, and Ctrl+Esc sends
+`browsing: false` from the window back to `web`. Both sides stay in agreement.
+
+#### Conclusion
+
+Experiment 1 resolves the issue. Ctrl+Esc works reliably in TermSurf by
+intercepting it at the NSEvent level — before the lossy PTY encoding that caused
+the original problem. The bidirectional mode synchronization protocol
+(`mode_changed` messages over the existing XPC connection) keeps the window and
+`web` TUI in agreement across all mode transitions.
+
+This also lays the groundwork for full browser input forwarding. The window now
+knows whether a pane is in browse mode, which is the prerequisite for deciding
+whether to forward keypresses and mouse events to the Chromium Profile Server.
+Adding `key_event` and `mouse_event` messages on the existing XPC channel is the
+natural next step.
