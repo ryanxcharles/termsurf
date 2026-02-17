@@ -2459,6 +2459,7 @@ pub fn setOverlayIOSurface(self: *Surface, iosurface: ?*anyopaque) void {
     }
 
     self.renderer.overlay_iosurface = iosurface;
+    self.renderer.overlay_surface_changed = true;
     self.queueRender() catch {};
 }
 

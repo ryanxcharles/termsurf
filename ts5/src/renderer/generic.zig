@@ -196,6 +196,9 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         /// renders with the overlay pipeline instead of pink_overlay.
         overlay_iosurface: ?*anyopaque = null,
 
+        /// Set when a new overlay IOSurface arrives. Cleared after each drawFrame.
+        overlay_surface_changed: bool = false,
+
         /// Graphics API state.
         api: GraphicsAPI,
 
@@ -1449,12 +1452,18 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 self.size.screen.width != surface_size.width or
                 self.size.screen.height != surface_size.height;
 
+            // Consume the overlay-changed flag so it is cleared even if
+            // other conditions already require a redraw.
+            const overlay_changed = self.overlay_surface_changed;
+            self.overlay_surface_changed = false;
+
             // Conditions under which we need to draw the frame, otherwise we
             // don't need to since the previous frame should be identical.
             const needs_redraw =
                 size_changed or
                 self.cells_rebuilt or
                 self.hasAnimations() or
+                overlay_changed or
                 sync;
 
             if (!needs_redraw) {

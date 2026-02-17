@@ -354,3 +354,25 @@ spinning square. Compare visual smoothness for 30+ seconds.
 
 Pass: TermSurf looks visually indistinguishable from native Chromium. No
 perceptible micro-stutter or uneven cadence.
+
+#### Result: Pass
+
+Side-by-side with native Chromium, TermSurf is visually identical. The
+micro-stutter is gone. Two changes, both necessary:
+
+1. **`overlay_surface_changed`** fixed the frame-skipping bug. Without this, new
+   IOSurface frames were silently missed whenever the terminal had no cell
+   changes — the `needs_redraw` check returned false and `presentLastTarget()`
+   re-presented the old frame. This was likely the larger contributor to the
+   choppiness.
+
+2. **120fps capture** fixed the two-clock drift. With the capturer producing
+   frames at 2x the display rate, the newest IOSurface at any vsync is at most
+   ~8ms old. The temporal aliasing from phase drift between the capturer timer
+   and the CVDisplayLink is halved, dropping below the perceptible threshold.
+
+The cost is doubled capture GPU blits and XPC traffic (120 Mach port transfers
+per second per pane instead of 60). For a handful of panes this is negligible.
+If it becomes a concern at scale, the demand-driven pull model (idea #3) or
+in-process Chromium (idea #4) would eliminate the overhead. For now, 120fps
+oversampling is good enough.
