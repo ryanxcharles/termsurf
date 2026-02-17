@@ -46,7 +46,9 @@ fn main() -> io::Result<()> {
     // Validate profile name: lowercase alphanumeric, starts with a letter.
     if profile.is_empty()
         || !profile.bytes().next().unwrap().is_ascii_lowercase()
-        || !profile.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        || !profile
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
     {
         eprintln!("Error: profile name must be lowercase alphanumeric, starting with a letter");
         std::process::exit(1);
@@ -64,10 +66,14 @@ fn main() -> io::Result<()> {
         None => eprintln!("[web] TERMSURF_PANE_ID not set (not running inside TermSurf)"),
     }
 
-    let compositor = pane_id.as_ref().and_then(|_| xpc::CompositorConnection::connect());
+    let compositor = pane_id
+        .as_ref()
+        .and_then(|_| xpc::CompositorConnection::connect());
     match &compositor {
         Some(_) => eprintln!("[web] Connected to compositor"),
-        None if pane_id.is_some() => eprintln!("[web] XPC service unavailable (is launchd plist loaded?)"),
+        None if pane_id.is_some() => {
+            eprintln!("[web] XPC service unavailable (is launchd plist loaded?)")
+        }
         _ => {}
     }
 
@@ -107,9 +113,7 @@ fn main() -> io::Result<()> {
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(key) = event::read()? {
                 // Ctrl+C quits from any mode.
-                if key.code == KeyCode::Char('c')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
+                if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     break;
                 }
 
@@ -141,7 +145,11 @@ fn main() -> io::Result<()> {
             while let Some(msg) = conn.try_recv() {
                 match msg {
                     xpc::CompositorMessage::ModeChanged { browsing } => {
-                        mode = if browsing { Mode::Browse } else { Mode::Control };
+                        mode = if browsing {
+                            Mode::Browse
+                        } else {
+                            Mode::Control
+                        };
                     }
                     xpc::CompositorMessage::UrlChanged { url: new_url } => {
                         url = new_url;
@@ -161,11 +169,14 @@ fn main() -> io::Result<()> {
 /// Render the UI and return the viewport inner rect (grid coordinates).
 fn ui(frame: &mut Frame, url: &str, profile: &str, mode: &Mode) -> Rect {
     // Paint full background.
-    frame.render_widget(Block::default().style(Style::default().bg(BG)), frame.area());
+    frame.render_widget(
+        Block::default().style(Style::default().bg(BG)),
+        frame.area(),
+    );
 
     let layout = Layout::vertical([
         Constraint::Length(3), // URL bar (1 line + top/bottom border)
-        Constraint::Min(1),   // Viewport (fill remaining)
+        Constraint::Min(1),    // Viewport (fill remaining)
         Constraint::Length(1), // Status bar
     ])
     .split(frame.area());
@@ -178,23 +189,19 @@ fn ui(frame: &mut Frame, url: &str, profile: &str, mode: &Mode) -> Rect {
 
     // URL bar.
     let profile_title = Line::from(vec![
-        Span::raw("   ")
-            .style(Style::default().fg(COMMENT)),
-        Span::raw(profile)
-            .style(Style::default().fg(FG)),
+        Span::raw("  ").style(Style::default().fg(COMMENT)),
+        Span::raw(profile).style(Style::default().fg(FG)),
         Span::raw(" "),
     ]);
-    let url_bar = Paragraph::new(url)
-        .style(Style::default().fg(FG))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" URL ")
-                .title_top(profile_title.alignment(Alignment::Right))
-                .border_style(Style::default().fg(url_border).bg(BG))
-                .title_style(Style::default().fg(url_border))
-                .style(Style::default().bg(BG)),
-        );
+    let url_bar = Paragraph::new(url).style(Style::default().fg(FG)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" URL ")
+            .title_top(profile_title.alignment(Alignment::Right))
+            .border_style(Style::default().fg(url_border).bg(BG))
+            .title_style(Style::default().fg(url_border))
+            .style(Style::default().bg(BG)),
+    );
     frame.render_widget(url_bar, layout[0]);
 
     // Viewport.
@@ -217,7 +224,7 @@ fn ui(frame: &mut Frame, url: &str, profile: &str, mode: &Mode) -> Rect {
 
     // Status bar.
     let status_layout = Layout::horizontal([
-        Constraint::Fill(1),   // Key hints (left)
+        Constraint::Fill(1),    // Key hints (left)
         Constraint::Length(12), // Mode label (right)
     ])
     .split(layout[2]);
@@ -227,8 +234,7 @@ fn ui(frame: &mut Frame, url: &str, profile: &str, mode: &Mode) -> Rect {
         Mode::Control => ("[q] quit  [enter] browse", " CONTROL"),
     };
 
-    let hints_widget = Paragraph::new(hints)
-        .style(Style::default().fg(FG).bg(BG));
+    let hints_widget = Paragraph::new(hints).style(Style::default().fg(FG).bg(BG));
     frame.render_widget(hints_widget, status_layout[0]);
 
     let label_widget = Paragraph::new(label)
