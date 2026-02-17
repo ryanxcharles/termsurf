@@ -620,3 +620,14 @@ Click a link. The new page should fill the full viewport with no black bars.
 Resize the window, then click another link — should still fill correctly.
 
 Pass: no black bars after navigation, at any window size.
+
+**Result:** Pass
+
+Clicked links on news.ycombinator.com. Pages fill the full viewport after
+navigation with no black bars.
+
+#### Conclusion
+
+Storing the pixel dimensions in `SetResolution` and re-applying `view->SetSize`
+in `DidFinishNavigation` fixes the post-navigation size reset. Two lines in
+`SetResolution`, ten lines in `DidFinishNavigation`.
