@@ -188,14 +188,8 @@ class CompositorXPC {
                 xpc_connection_send_message(controlConn, msg)
             }
 
-            // Let mouseDown propagate so macOS generates .leftMouseDragged events.
-            // Consume mouseUp to prevent the terminal from processing the release.
-            switch event.type {
-            case .leftMouseDown, .rightMouseDown:
-                return event
-            default:
-                return nil
-            }
+            // Consume the event (prevent terminal from receiving it).
+            return nil
         }
 
         // Register local event monitor for scroll wheel (Issue 514 Experiment 3).
@@ -293,14 +287,8 @@ class CompositorXPC {
                 xpc_connection_send_message(controlConn, msg)
             }
 
-            // Let drag events propagate so macOS maintains drag tracking.
-            // Consume mouseMoved to prevent terminal hover interference.
-            switch event.type {
-            case .leftMouseDragged, .rightMouseDragged:
-                return event
-            default:
-                return nil
-            }
+            // Consume the event (prevent terminal from receiving it).
+            return nil
         }
 
         // Step 1: Create anonymous listener for direct web connections.
