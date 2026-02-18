@@ -241,8 +241,16 @@ class CompositorXPC {
             let hit = self.xpcQueue.sync { self.hitTestOverlay(event: event) }
 
             guard let hit = hit else {
-                // Mouse left the overlay — clear tracking state.
+                // Mouse left the overlay — give cursor control back to the pane.
                 self.xpcQueue.async { self.lastHitPaneUUID = nil }
+                DispatchQueue.main.async {
+                    if let window = NSApp.keyWindow {
+                        let windowPoint = event.locationInWindow
+                        if let hitView = window.contentView?.hitTest(windowPoint) {
+                            window.invalidateCursorRects(for: hitView)
+                        }
+                    }
+                }
                 return event
             }
 
