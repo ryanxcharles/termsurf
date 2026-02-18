@@ -1688,3 +1688,28 @@ cargo run -p web -- http://localhost:9408/test-mouse.html
 
 Pass: all five interactions work. The full mouseDown → mouseUp → click cycle is
 confirmed end-to-end.
+
+#### Result: Pass
+
+The full click cycle works. Button clicks increment the counter, checkboxes
+toggle, and the event log shows mousedown → mouseup → click triplets for each
+interaction. The mouseDown + mouseUp forwarding from Experiment 1 is confirmed
+working end-to-end.
+
+Two issues noted for future experiments:
+
+1. **Text selection doesn't work.** Click-and-drag over text does not select it.
+   Drag events are forwarded (Experiment 4 sends `.leftMouseDragged`), but text
+   selection may require additional state — Chromium needs to see the mouseDown
+   as the start of a selection, then continuous mouseDrag updates, then mouseUp
+   to finalize. The issue may be that mouseDown and mouseDrag arrive on
+   different event monitors (click monitor vs move monitor) with no shared
+   state, or that the drag coordinates aren't being interpreted as a selection
+   gesture by Chromium.
+
+2. **Input focus has no visual indicator.** Clicking a text input doesn't show a
+   focus ring or blinking text cursor. The input may be receiving focus (click
+   event fires), but the visual feedback requires keyboard input forwarding to
+   work — the blinking cursor and focus ring are rendered by Chromium, which
+   needs to know the input is active. This is likely a keyboard input issue
+   (Issue 515+), not a mouse issue.
