@@ -1512,3 +1512,18 @@ cargo run -p web -- https://news.ycombinator.com
 Pass: cursor reverts to the terminal's cursor on all exit paths, and the
 terminal's cursor matches what the shell/TUI requested (I-beam for shell, arrow
 for neovim, etc.).
+
+#### Result: Pass
+
+Cursor reverts correctly when leaving the overlay. `invalidateCursorRects(for:)`
+tells macOS to re-evaluate cursor rects for the view under the mouse, which
+picks up `NSScrollView.documentCursor` — whatever the terminal currently wants.
+
+The key insight across Experiments 5–7: macOS cursor management requires
+**continuous** overriding. `NSCursor.set()` works when called on every mouse
+move (Experiment 5), but a one-time call on exit gets swallowed (Experiment 6).
+The correct exit strategy is not to hardcode a cursor but to ask macOS to
+re-evaluate via `invalidateCursorRects` — this works on every call and
+automatically picks the right cursor for whatever view the mouse is over.
+
+Commit: `a11b597`.
