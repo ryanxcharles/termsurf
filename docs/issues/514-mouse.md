@@ -1428,3 +1428,87 @@ doesn't get that retry — if it doesn't take effect, nothing corrects it.
 Always call `NSCursor.arrow.set()` when outside the overlay, mirroring how
 `applyCursor` is called continuously when inside. This is slightly wasteful but
 matches the pattern that works.
+
+### Experiment 7: Cursor reset via invalidateCursorRects
+
+Experiment 6 failed because it called `NSCursor.arrow.set()` once on exit. But
+the deeper problem is that hardcoding arrow (or I-beam) is wrong — the terminal
+controls its own cursor shape via escape sequences (I-beam in a shell, arrow in
+neovim, etc.). We need to give control back to the pane, not pick a cursor
+ourselves.
+
+#### How Ghostty manages cursors
+
+Ghostty's cursor pipeline:
+
+```
+Terminal escape sequence (e.g. \e[6 q)
+    ↓
+ghostty_action_mouse_shape_e callback
+    ↓
+SurfaceView.setCursorShape() → sets @Published pointerStyle
+    ↓
+Combine sink in SurfaceScrollView → scrollView.documentCursor = style.cursor
+    ↓
+macOS cursor rect system shows documentCursor over the scroll view
+```
+
+`NSScrollView.documentCursor` is macOS's built-in mechanism — it sets up cursor
+rects internally so the correct cursor appears over the document area. Our
+`NSCursor.set()` calls override these cursor rects, and they don't reassert on
+their own because macOS only re-evaluates cursor rects on specific triggers.
+
+The trigger we need: `NSWindow.invalidateCursorRects(for:)`. This tells macOS to
+re-evaluate cursor rects for a view, which picks up `documentCursor` and
+restores whatever cursor the terminal currently wants.
+
+#### Changes
+
+##### CompositorXPC.swift
+
+Replace the Experiment 6 code in the mouse move monitor's nil-hit branch with:
+
+```swift
+guard let hit = hit else {
+    // Mouse left the overlay — give cursor control back to the pane.
+    self.xpcQueue.async { self.lastHitPaneUUID = nil }
+    DispatchQueue.main.async {
+        // Find the SurfaceView under the mouse and invalidate its cursor
+        // rects so documentCursor reasserts.
+        if let window = NSApp.keyWindow {
+            let windowPoint = event.locationInWindow
+            if let hitView = window.contentView?.hitTest(windowPoint) {
+                window.invalidateCursorRects(for: hitView)
+            }
+        }
+    }
+    return event
+}
+```
+
+This calls `invalidateCursorRects` on every mouse move outside the overlay —
+continuous, matching the pattern from Experiment 5 that works. The hit test
+finds whichever view the mouse is actually over (could be the SurfaceView's
+scroll view, a split divider, etc.) and invalidates its cursor rects
+specifically.
+
+No Chromium changes needed. Single file, single code path.
+
+#### Verification
+
+```bash
+open ts5/zig-out/TermSurf.app --stderr ~/dev/termsurf/logs/overlay.log
+# In a TermSurf pane:
+cargo run -p web -- https://news.ycombinator.com
+```
+
+1. Enter browse mode, hover over a link — cursor becomes pointing hand.
+2. Move mouse off the overlay into the terminal — cursor should revert to
+   whatever the terminal currently shows (I-beam for a shell).
+3. Move mouse back over a link — pointing hand again.
+4. Move off again — reverts again.
+5. While hovering over a link, press Ctrl+Esc — cursor should revert.
+
+Pass: cursor reverts to the terminal's cursor on all exit paths, and the
+terminal's cursor matches what the shell/TUI requested (I-beam for shell, arrow
+for neovim, etc.).
