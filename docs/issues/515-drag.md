@@ -936,3 +936,134 @@ The fix was moving focus delivery from the broken pre-`paneProfiles` location in
   `sendCreateTab`
 - **Mode transitions** (enter/exit browse): `handleModeChanged` + Ctrl+Esc
 - **Pane switches** (any mechanism): NSNotification from `focusDidChange`
+
+### Experiment 6: Drag events via flag suppression
+
+#### Problem
+
+The mouse click monitor consumes `leftMouseDown` (returns `nil`), which prevents
+macOS from generating `.leftMouseDragged` events. Without drag events, Chromium
+cannot track text selection. The logs confirm: only `Mouse down` and `Mouse up`
+arrive at Chromium — no move events between them.
+
+The root cause is architectural: returning `nil` from a local event monitor
+removes the event from the responder chain entirely. macOS only generates drag
+events when a view's `mouseDown:` handler has started a drag tracking session.
+With mouseDown consumed, no view receives it, no tracking session exists.
+
+#### Approach
+
+Stop consuming left mouse events. Instead, return them so the responder chain
+processes normally and drag tracking starts. But suppress the terminal from
+acting on them by setting a flag on the SurfaceView.
+
+The sequence:
+
+1. Monitor fires on `leftMouseDown` (main thread)
+2. Hit-test finds overlay match → get SurfaceView, set
+   `suppressMouseForOverlay = true`
+3. Forward to Chromium via XPC
+4. **Return the event** (don't consume) → event enters responder chain
+5. `SurfaceView.mouseDown` fires → checks flag → returns early (terminal
+   ignores)
+6. macOS starts drag tracking (view received mouseDown)
+7. `.leftMouseDragged` events generated → existing drag monitor forwards to
+   Chromium, consumes them (terminal never sees drags)
+8. `leftMouseUp` arrives → monitor forwards to Chromium, returns event
+9. `SurfaceView.mouseUp` fires → checks flag → clears flag, returns early
+
+Right mouse events keep the existing consume behavior (no drag tracking needed).
+Scroll events unchanged. The `.leftMouseDragged` in the move/drag monitor stays
+consumed — drag events are generated regardless of what the monitor does with
+them; only the initial `mouseDown` delivery matters.
+
+#### Changes
+
+##### SurfaceView_AppKit.swift (Ghostty modification)
+
+Add a property to SurfaceView (alongside `focused`, `prevPressureStage`, etc.):
+
+```swift
+/// Set by CompositorXPC when a mouse event targets the browser overlay.
+/// Suppresses terminal mouse handling so the event can drive drag tracking.
+var suppressMouseForOverlay: Bool = false
+```
+
+Guard in `mouseDown`:
+
+```swift
+override func mouseDown(with event: NSEvent) {
+    guard !suppressMouseForOverlay else { return }
+    guard let surface = self.surface else { return }
+    // ... existing code ...
+}
+```
+
+Guard in `mouseUp` (clear the flag):
+
+```swift
+override func mouseUp(with event: NSEvent) {
+    if suppressMouseForOverlay {
+        suppressMouseForOverlay = false
+        return
+    }
+    // ... existing code ...
+}
+```
+
+Guard in `mouseDragged` (in case macOS delivers any before the monitor):
+
+```swift
+override func mouseDragged(with event: NSEvent) {
+    guard !suppressMouseForOverlay else { return }
+    self.mouseMoved(with: event)
+}
+```
+
+Three one-line guards added to Ghostty. The flag is set/cleared on the main
+thread (monitors and view handlers both run on main), so no synchronization
+needed.
+
+##### CompositorXPC.swift
+
+In the mouse click monitor, split left and right mouse handling. For left mouse
+events over the overlay, set the flag and return the event instead of nil:
+
+```swift
+// For left mouse events: set flag and return event (preserve drag tracking).
+if event.type == .leftMouseDown || event.type == .leftMouseUp {
+    let surfaceView: Ghostty.SurfaceView? = self.xpcQueue.sync {
+        self.paneSurfaceViews[hit.uuid]
+    }
+    if event.type == .leftMouseDown {
+        surfaceView?.suppressMouseForOverlay = true
+    }
+
+    // Forward to Chromium (async).
+    self.xpcQueue.async { /* ... existing XPC send ... */ }
+
+    return event  // DON'T consume — allows drag tracking
+}
+
+// For right mouse events: consume as before.
+// ... existing code returning nil ...
+```
+
+No changes to the move/drag monitor — `.leftMouseDragged` stays consumed. No
+Chromium changes.
+
+#### Verification
+
+```bash
+open ts5/zig-out/TermSurf.app --stderr ~/dev/termsurf/logs/overlay.log
+# In a pane:
+cargo run -p web -- https://google.com
+```
+
+1. Enter browse mode, click and drag across "About" link text at the bottom of
+   Google's page.
+2. Check logs for `mouse_move` events between `Mouse down` and `Mouse up`.
+3. Check screen for blue selection highlight.
+
+Pass: drag events reach Chromium (visible in logs), and selection highlight
+appears on the rendered page.
