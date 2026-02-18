@@ -1822,3 +1822,72 @@ generating `.leftMouseDragged` events. Since the pane has mouse capture enabled,
 the terminal receives the click as a captured mouse event rather than starting
 terminal text selection. The button field fix from this experiment is still
 correct and should be kept.
+
+### Experiment 11: Let mouseDown propagate for drag tracking
+
+Experiment 10 failed because consuming mouseDown (returning `nil`) prevents
+macOS from generating `.leftMouseDragged` events. The fix: return the event
+instead of `nil` for mouseDown, so it reaches the SurfaceView and macOS starts
+drag tracking.
+
+#### Why this is safe
+
+Research into Ghostty's mouse handling confirms that when mouse capture is
+enabled (the `web` TUI sends `\e[?1000h`), the SurfaceView's mouseDown handler
+follows this path:
+
+```
+SurfaceView.mouseDown → ghostty_surface_mouse_button → Surface.zig mouseButtonCallback
+    → isMouseReporting() == true (mouse capture active)
+    → setSelection(null)   — clears any terminal text selection
+    → mouseReport(...)     — forwards click as escape sequence to TUI
+    → return true           — consumed, no terminal text selection starts
+```
+
+The `web` TUI receives the escaped mouse event and ignores it. No visible side
+effects — no terminal text selection, no visual glitches. The mouseDown reaches
+the SurfaceView, macOS starts drag tracking, and `.leftMouseDragged` events flow
+to the move monitor.
+
+mouseUp should still be consumed (`nil`) to prevent the terminal from processing
+the release.
+
+#### Changes
+
+##### CompositorXPC.swift
+
+In the click monitor (line ~191), change the return value from unconditional
+`nil` to conditional based on event type:
+
+```swift
+// Let mouseDown propagate so macOS generates .leftMouseDragged events.
+// Consume mouseUp to prevent the terminal from processing the release.
+switch event.type {
+case .leftMouseDown, .rightMouseDown:
+    return event
+default:
+    return nil
+}
+```
+
+No Chromium changes needed. Single file, single line change.
+
+#### Verification
+
+```bash
+cd html && python3 -m http.server 9408 &
+open ts5/zig-out/TermSurf.app --stderr ~/dev/termsurf/logs/overlay.log
+# In a TermSurf pane:
+cargo run -p web -- http://localhost:9408/test-mouse.html
+```
+
+1. Enter browse mode, click and drag over the "Mouse Event Test" heading — text
+   should highlight as you drag.
+2. Release — selection should persist.
+3. Double-click a word — should select the whole word.
+4. Verify buttons still work (click counter increments).
+5. Verify no terminal text selection appears (no blue highlight in the
+   terminal).
+
+Pass: text selection works via click-and-drag, buttons still fire, no terminal
+side effects.
