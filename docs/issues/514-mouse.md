@@ -1319,3 +1319,28 @@ overlay into the URL bar or terminal — cursor should revert to terminal I-beam
 
 Pass: cursor changes to pointing hand over links, arrow over non-interactive
 elements, and reverts when leaving the overlay.
+
+#### Result: Pass
+
+Cursor appearance syncs correctly. Hovering over links shows pointing hand, text
+shows I-beam, non-interactive areas show arrow. The reverse XPC channel works:
+Chromium detects cursor changes in the renderer, fires the callback through
+`RenderWidgetHostImpl::SetCursor`, `ShellVideoConsumer` sends the type over XPC,
+and CompositorXPC maps it to the correct `NSCursor`.
+
+Two trigger points both work as designed:
+
+1. **On cursor_changed receipt** — when the mouse is already over the pane and
+   the cursor type changes (e.g., moving from text to a link), the new cursor
+   applies immediately.
+2. **On mouse move** — when the mouse enters the overlay, the stored cursor type
+   is applied, so the cursor is correct from the first pixel.
+
+The cursor does NOT revert when leaving the overlay. The terminal's tracking
+area does not reassert the I-beam — the Chromium cursor sticks. The fallback fix
+noted in the design (calling `NSCursor.arrow.set()` when `hitTestOverlay`
+returns nil and `lastHitPaneUUID` was previously set) is needed. This is the
+next experiment.
+
+Commits: Chromium `d583c5f` (callback + XPC send), main `0fa925d` (CompositorXPC
+cursor handling).
