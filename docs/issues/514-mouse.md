@@ -1527,3 +1527,55 @@ re-evaluate via `invalidateCursorRects` — this works on every call and
 automatically picks the right cursor for whatever view the mouse is over.
 
 Commit: `a11b597`.
+
+### Experiment 8: Arrow cursor in TUI via mouse capture
+
+The `web` TUI currently shows an I-beam cursor because it doesn't enable mouse
+capture. When a terminal application enables mouse capture (`\e[?1000h` etc.),
+Ghostty detects the mode change and calls `setCursorShape(.default)`, which sets
+`documentCursor` to `.arrow`. This is the standard mechanism — neovim uses it
+too.
+
+#### Changes
+
+##### web/src/main.rs
+
+Import `EnableMouseCapture` and `DisableMouseCapture` from crossterm. Add
+`EnableMouseCapture` to the terminal setup and `DisableMouseCapture` to
+teardown.
+
+Line 6, add to imports:
+
+```rust
+use crossterm::event::{self, Event, KeyCode, KeyModifiers, EnableMouseCapture, DisableMouseCapture};
+```
+
+Line 83, add `EnableMouseCapture` to the setup execute:
+
+```rust
+execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+```
+
+Line 165, add `DisableMouseCapture` to the teardown execute:
+
+```rust
+execute!(terminal.backend_mut(), DisableMouseCapture, LeaveAlternateScreen)?;
+```
+
+No Chromium or CompositorXPC changes needed.
+
+#### Verification
+
+```bash
+cargo build -p web
+open ts5/zig-out/TermSurf.app --stderr ~/dev/termsurf/logs/overlay.log
+# In a TermSurf pane:
+cargo run -p web -- https://news.ycombinator.com
+```
+
+Without entering browse mode, the cursor over the TUI should be an arrow (not
+I-beam). Enter browse mode, hover a link — pointing hand. Move off the overlay —
+arrow (not I-beam, because the TUI has mouse capture enabled).
+
+Pass: cursor is arrow over the TUI in control mode, Chromium cursors work in
+browse mode, and cursor reverts to arrow (not I-beam) when leaving the overlay.
