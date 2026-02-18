@@ -1977,8 +1977,48 @@ point in the chain:
 2. Events reaching the monitor but `hitTestOverlay` failing during drag
 3. Events forwarded via XPC but Chromium's selection logic still not triggering
 
-**Next step:** Add diagnostic logging before making any more code changes. Log
-in the move monitor when a `.leftMouseDragged` event is received, whether
-`hitTestOverlay` succeeds, and the coordinates/modifiers being sent. Add logging
-to `HandleMouseMove` on the Chromium side. Then reproduce and read the logs to
-identify which link in the chain is broken.
+**Next step:** Text selection (drag-to-select) is deferred to Issue 515.
+
+## Conclusion
+
+Issue 514 established the complete mouse input forwarding pipeline between
+TermSurf and Chromium. Nine experiments across four capabilities:
+
+**Working:**
+
+- **Clicks** (Experiment 1) — Left and right mouse clicks forward from
+  CompositorXPC through XPC to `ForwardMouseEvent`. Hit testing, coordinate
+  transformation (Y-flip, Retina scaling, overlay-relative), and mode gating all
+  work. URL synchronization via `DidFinishNavigation` keeps the TUI URL bar
+  current.
+- **Post-navigation sizing** (Experiment 2) — `SetSize` re-applied in
+  `DidFinishNavigation` prevents viewport shrinkage after link clicks.
+- **Scrolling** (Experiment 3) — Trackpad and mouse wheel events forward with
+  full phase lifecycle (began → changed → ended → momentum). NSEvent and
+  Chromium phase bitmasks are identical — zero translation needed.
+- **Hover** (Experiment 4) — Mouse move events enable CSS `:hover`, tooltips,
+  and link highlights. The `hitTestOverlay` helper extracted here is shared by
+  all monitors.
+- **Cursor appearance** (Experiments 5–8) — Reverse XPC channel from Chromium's
+  `RenderWidgetHostImpl::SetCursor` through `ShellVideoConsumer` back to
+  `CompositorXPC.applyCursor`. Cursor updates continuously on every mouse move
+  (the only pattern that sticks on macOS). `invalidateCursorRects` gives control
+  back to the pane on exit. Mouse capture in the TUI (`EnableMouseCapture`)
+  gives an arrow cursor instead of I-beam.
+- **Full click cycle** (Experiment 9) — Buttons fire, checkboxes toggle, event
+  log shows complete mousedown → mouseup → click triplets.
+
+**Not working (deferred to Issue 515):**
+
+- **Text selection (drag-to-select)** — Three experiments (10–12) failed.
+  Experiment 10 fixed the Chromium-side button field (correct, kept in the
+  Chromium fork). Experiments 11–12 attempted to let mouseDown and mouseDragged
+  propagate through the local event monitor so macOS generates drag tracking
+  events. All three failed and the Swift changes were reverted. The fundamental
+  problem: local event monitors intercept events before the responder chain, and
+  the interaction between consuming/propagating events and macOS drag tracking
+  is not well understood. Diagnostic logging is needed to identify where the
+  chain breaks.
+- **Input focus visual feedback** — Clicking a text input doesn't show a
+  blinking cursor or focus ring. Likely requires keyboard input forwarding, not
+  a mouse issue.
