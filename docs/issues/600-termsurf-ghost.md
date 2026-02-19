@@ -150,7 +150,7 @@ open ghost/zig-out/Ghostty.app
 
 Verify Ghostty opens normally as a terminal emulator.
 
-### Verification
+### Result
 
-Pass: `ghost/zig-out/Ghostty.app` builds and runs as a standard Ghostty
+Pass. `ghost/zig-out/Ghostty.app` builds and runs as a standard Ghostty
 terminal. No crashes, no missing resources, terminal input/output works.
