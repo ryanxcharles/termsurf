@@ -400,11 +400,28 @@ cargo run -p web -- http://example.com
 
 Pass: Blue checkerboard renders at correct grid coordinates. Pink quad replaced.
 
-## Ideas for future experiments
+### Result
 
-2. **Chromium server lifecycle** — Spawn the server, handle `server_register`,
-   send `create_tab`, handle `display_surface`. Box demo renders in the terminal
-   at 60fps. Full end-to-end proof.
+**Pass.** Blue checkerboard renders at the correct grid origin, replacing the
+pink quad. The 200×200 test IOSurface is intentionally smaller than the viewport
+— real Chromium frames will arrive at viewport pixel dimensions.
 
-3. **Resize** — Resize the terminal, Ghost sends `resize` to the server, the
-   server adjusts capture resolution, frames continue at the new size.
+Initial build had a bug: the `kIOSurface*` extern constants are `CFStringRef`
+values (pointers), but were declared as `anyopaque` and passed with `&`, giving
+the address OF the pointer instead of the pointer itself. Fixed by declaring as
+`*const anyopaque` and passing directly. `IOSurfaceCreate` silently returned
+null with the wrong keys.
+
+Files changed:
+
+- `ghost/src/renderer/shaders/shaders.metal` — `pixel_width`/`pixel_height` in
+  `PinkOverlayIn`, textured `overlay_vertex`/`overlay_fragment`
+- `ghost/src/renderer/metal/shaders.zig` — `overlay` pipeline, extended
+  `PinkOverlay` struct
+- `ghost/src/renderer/metal/Texture.zig` — `fromIOSurface()` zero-copy texture
+- `ghost/src/renderer/generic.zig` —
+  `overlay_iosurface`/`overlay_surface_changed` fields, branched render path
+- `ghost/src/Surface.zig` — `setOverlayIOSurface()` with `CFRetain`/`CFRelease`,
+  updated `clearOverlay()`
+- `ghost/src/apprt/xpc.zig` — `createTestIOSurface()` (200×200 blue
+  checkerboard), wired into `handleSetOverlay`

@@ -2443,10 +2443,32 @@ pub fn setOverlay(self: *Surface, col: u32, row: u32, width: u32, height: u32) v
     self.queueRender() catch {};
 }
 
-/// Clear the overlay (Issue 602). Called on peer disconnect.
+extern "c" fn CFRetain(*anyopaque) void;
+extern "c" fn CFRelease(*anyopaque) void;
+
+/// Set the overlay IOSurface (Issue 603).
+/// CFRetains the new surface and CFReleases the old one.
+/// Thread-safe via draw_mutex.
+pub fn setOverlayIOSurface(self: *Surface, iosurface: ?*anyopaque) void {
+    self.renderer.draw_mutex.lock();
+    defer self.renderer.draw_mutex.unlock();
+
+    if (self.renderer.overlay_iosurface) |old| CFRelease(old);
+    if (iosurface) |new| CFRetain(new);
+
+    self.renderer.overlay_iosurface = iosurface;
+    self.renderer.overlay_surface_changed = true;
+    self.queueRender() catch {};
+}
+
+/// Clear the overlay (Issue 602 / Issue 603). Called on peer disconnect.
+/// Releases the IOSurface if one is held.
 pub fn clearOverlay(self: *Surface) void {
     self.renderer.draw_mutex.lock();
     defer self.renderer.draw_mutex.unlock();
+
+    if (self.renderer.overlay_iosurface) |old| CFRelease(old);
+    self.renderer.overlay_iosurface = null;
     self.renderer.pink_overlay = .{};
     self.queueRender() catch {};
 }

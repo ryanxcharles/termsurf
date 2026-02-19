@@ -14,6 +14,27 @@ const CoreSurface = @import("../Surface.zig");
 
 const log = std.log.scoped(.xpc);
 
+// -- IOSurface / CoreFoundation C API (test IOSurface, Issue 603) --
+
+extern "c" fn IOSurfaceCreate(properties: *anyopaque) ?*anyopaque;
+extern "c" fn IOSurfaceLock(surface: *anyopaque, options: u32, seed: ?*u32) i32;
+extern "c" fn IOSurfaceUnlock(surface: *anyopaque, options: u32, seed: ?*u32) i32;
+extern "c" fn IOSurfaceGetBaseAddress(surface: *anyopaque) ?[*]u8;
+extern "c" fn IOSurfaceGetBytesPerRow(surface: *anyopaque) usize;
+
+extern "c" fn CFDictionaryCreateMutable(allocator: ?*anyopaque, capacity: isize, key_cbs: ?*const anyopaque, val_cbs: ?*const anyopaque) ?*anyopaque;
+extern "c" fn CFDictionarySetValue(dict: *anyopaque, key: *const anyopaque, value: *const anyopaque) void;
+extern "c" fn CFNumberCreate(allocator: ?*anyopaque, the_type: i32, value_ptr: *const anyopaque) ?*anyopaque;
+extern "c" fn CFRelease(cf: *anyopaque) void;
+
+extern const kCFTypeDictionaryKeyCallBacks: anyopaque;
+extern const kCFTypeDictionaryValueCallBacks: anyopaque;
+// These are CFStringRef values (pointers), not structs.
+extern const kIOSurfaceWidth: *const anyopaque;
+extern const kIOSurfaceHeight: *const anyopaque;
+extern const kIOSurfaceBytesPerElement: *const anyopaque;
+extern const kIOSurfacePixelFormat: *const anyopaque;
+
 // -- XPC C API --
 
 const xpc_object_t = ?*anyopaque;
@@ -181,6 +202,13 @@ fn handleSetOverlay(msg: xpc_object_t) void {
             @intCast(width),
             @intCast(height),
         );
+
+        // Test IOSurface: blue checkerboard (Issue 603 Experiment 1).
+        if (createTestIOSurface()) |iosurface| {
+            surface.core().setOverlayIOSurface(iosurface);
+            log.info("test IOSurface set for pane={s}", .{pane_id});
+        }
+
         log.info("overlay set for pane={s}", .{pane_id});
     } else {
         log.warn("no surface found for pane={s}", .{pane_id});
@@ -192,6 +220,70 @@ fn handleModeChanged(msg: xpc_object_t) void {
     const browsing = xpc_dictionary_get_bool(msg, "browsing");
 
     log.info("mode_changed pane={s} browsing={}", .{ pane_id, browsing });
+}
+
+/// Create a 200×200 blue checkerboard IOSurface for testing (Issue 603).
+/// Returns an IOSurfaceRef (caller does NOT own — retained by module).
+fn createTestIOSurface() ?*anyopaque {
+    const size: i32 = 200;
+    const bpe: i32 = 4;
+    // 'BGRA' as a 32-bit integer (little-endian: 0x41524742).
+    const pixel_format: i32 = 0x42475241;
+    const cf_number_sint32: i32 = 3; // kCFNumberSInt32Type
+
+    // Build properties dictionary.
+    const dict = CFDictionaryCreateMutable(null, 4, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks) orelse return null;
+    defer CFRelease(dict);
+
+    const w_num = CFNumberCreate(null, cf_number_sint32, &size) orelse return null;
+    defer CFRelease(w_num);
+    const h_num = CFNumberCreate(null, cf_number_sint32, &size) orelse return null;
+    defer CFRelease(h_num);
+    const bpe_num = CFNumberCreate(null, cf_number_sint32, &bpe) orelse return null;
+    defer CFRelease(bpe_num);
+    const pf_num = CFNumberCreate(null, cf_number_sint32, &pixel_format) orelse return null;
+    defer CFRelease(pf_num);
+
+    CFDictionarySetValue(dict, kIOSurfaceWidth, w_num);
+    CFDictionarySetValue(dict, kIOSurfaceHeight, h_num);
+    CFDictionarySetValue(dict, kIOSurfaceBytesPerElement, bpe_num);
+    CFDictionarySetValue(dict, kIOSurfacePixelFormat, pf_num);
+
+    const surface = IOSurfaceCreate(dict) orelse return null;
+
+    // Lock, fill with blue checkerboard, unlock.
+    _ = IOSurfaceLock(surface, 0, null);
+    const base = IOSurfaceGetBaseAddress(surface) orelse {
+        _ = IOSurfaceUnlock(surface, 0, null);
+        return surface;
+    };
+    const bpr = IOSurfaceGetBytesPerRow(surface);
+    const sz: usize = @intCast(size);
+
+    for (0..sz) |y| {
+        const row = base + y * bpr;
+        for (0..sz) |x| {
+            const px = row + x * 4;
+            const checker = ((x / 20) + (y / 20)) % 2 == 0;
+            if (checker) {
+                // Blue (BGRA: B=255, G=100, R=50, A=255)
+                px[0] = 255;
+                px[1] = 100;
+                px[2] = 50;
+                px[3] = 255;
+            } else {
+                // Dark blue (BGRA: B=180, G=40, R=20, A=255)
+                px[0] = 180;
+                px[1] = 40;
+                px[2] = 20;
+                px[3] = 255;
+            }
+        }
+    }
+    _ = IOSurfaceUnlock(surface, 0, null);
+
+    log.info("created test IOSurface {d}x{d}", .{ sz, sz });
+    return surface;
 }
 
 /// Convert a nullable C string to a Zig slice, defaulting to "(null)".

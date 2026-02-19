@@ -150,6 +150,15 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         /// Zero width means no overlay.
         pink_overlay: shaderpkg.PinkOverlay = .{},
 
+        /// IOSurfaceRef for the overlay texture (Issue 603).
+        /// Retained via CFRetain — caller must pair with CFRelease.
+        /// When non-null, drawFrame() creates an MTLTexture from it and
+        /// renders with the overlay pipeline instead of pink_overlay.
+        overlay_iosurface: ?*anyopaque = null,
+
+        /// Set when a new overlay IOSurface arrives. Cleared after each drawFrame.
+        overlay_surface_changed: bool = false,
+
         /// The current GPU uniform values.
         uniforms: shaderpkg.Uniforms,
 
@@ -1646,25 +1655,52 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     .kitty_above_text,
                 );
 
-                // Pink overlay (Issue 602).
+                // Overlay (Issue 602 pink, Issue 603 IOSurface texture).
                 if (self.pink_overlay.grid_width > 0 and
                     self.pink_overlay.grid_height > 0)
                 {
-                    if (Buffer(shaderpkg.PinkOverlay).initFill(
-                        self.api.imageBufferOptions(),
-                        &.{self.pink_overlay},
-                    )) |*buf| {
-                        defer buf.deinit();
-                        pass.step(.{
-                            .pipeline = self.shaders.pipelines.pink_overlay,
-                            .uniforms = frame.uniforms.buffer,
-                            .buffers = &.{buf.buffer},
-                            .draw = .{
-                                .type = .triangle_strip,
-                                .vertex_count = 4,
-                            },
-                        });
-                    } else |_| {}
+                    if (self.overlay_iosurface) |iosurface| {
+                        // IOSurface texture path (Issue 603).
+                        if (Texture.fromIOSurface(self.api.device, iosurface)) |tex| {
+                            defer tex.deinit();
+                            var overlay_params = self.pink_overlay;
+                            overlay_params.pixel_width = @floatFromInt(tex.width);
+                            overlay_params.pixel_height = @floatFromInt(tex.height);
+                            if (Buffer(shaderpkg.PinkOverlay).initFill(
+                                self.api.imageBufferOptions(),
+                                &.{overlay_params},
+                            )) |*buf| {
+                                defer buf.deinit();
+                                pass.step(.{
+                                    .pipeline = self.shaders.pipelines.overlay,
+                                    .uniforms = frame.uniforms.buffer,
+                                    .buffers = &.{buf.buffer},
+                                    .textures = &.{tex},
+                                    .draw = .{
+                                        .type = .triangle_strip,
+                                        .vertex_count = 4,
+                                    },
+                                });
+                            } else |_| {}
+                        }
+                    } else {
+                        // Pink fallback (no IOSurface).
+                        if (Buffer(shaderpkg.PinkOverlay).initFill(
+                            self.api.imageBufferOptions(),
+                            &.{self.pink_overlay},
+                        )) |*buf| {
+                            defer buf.deinit();
+                            pass.step(.{
+                                .pipeline = self.shaders.pipelines.pink_overlay,
+                                .uniforms = frame.uniforms.buffer,
+                                .buffers = &.{buf.buffer},
+                                .draw = .{
+                                    .type = .triangle_strip,
+                                    .vertex_count = 4,
+                                },
+                            });
+                        } else |_| {}
+                    }
                 }
 
                 // Debug overlay. We do this before any custom shader state

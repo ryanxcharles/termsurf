@@ -47,6 +47,11 @@ const pipeline_descs: []const struct { [:0]const u8, PipelineDescription } =
             .fragment_fn = "pink_overlay_fragment",
             .blending_enabled = false,
         } },
+        .{ "overlay", .{
+            .vertex_fn = "overlay_vertex",
+            .fragment_fn = "overlay_fragment",
+            .blending_enabled = true,
+        } },
     };
 
 /// All the comptime-known info about a pipeline, so that
@@ -343,6 +348,8 @@ pub const PinkOverlay = extern struct {
     grid_row: f32 = 0,
     grid_width: f32 = 0,
     grid_height: f32 = 0,
+    pixel_width: f32 = 0,
+    pixel_height: f32 = 0,
 };
 
 /// Initialize the MTLLibrary. A MTLLibrary is a collection of shaders.
