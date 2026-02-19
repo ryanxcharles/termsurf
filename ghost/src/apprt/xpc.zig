@@ -162,17 +162,6 @@ fn handleSetOverlay(msg: xpc_object_t) void {
     log.info("set_overlay pane={s} col={} row={} width={} height={} url={s} profile={s} browsing={}", .{
         pane_id, col, row, width, height, url, profile, browsing,
     });
-
-    // Send url_changed back to web to confirm the round trip.
-    if (web_peer) |peer| {
-        var buf: [512]u8 = undefined;
-        const modified_url = std.fmt.bufPrintZ(&buf, "{s} [ghost]", .{url}) catch return;
-        const reply = xpc_dictionary_create(null, null, 0);
-        xpc_dictionary_set_string(reply, "action", "url_changed");
-        xpc_dictionary_set_string(reply, "url", modified_url);
-        xpc_connection_send_message(peer, reply);
-        log.info("sent url_changed: {s}", .{modified_url});
-    }
 }
 
 fn handleModeChanged(msg: xpc_object_t) void {
