@@ -219,9 +219,73 @@ All three key unknowns resolved:
 3. **XPC type constant comparison works** — `extern const` symbols with
    `@constCast` for identity comparison against `xpc_get_type()` return values.
 
-### Files changed
+#### Files changed
 
 | File                           | Change                                    |
 | ------------------------------ | ----------------------------------------- |
 | `ghost/src/apprt/xpc.zig`      | New file — XPC gateway, listener, handler |
 | `ghost/src/apprt/embedded.zig` | Call `xpc.init()` / `xpc.deinit()`        |
+
+### Experiment 2: Parse `set_overlay` and `mode_changed`
+
+#### Goal
+
+Ghost parses incoming XPC dictionary messages from `web` and logs the field
+values. Proves `xpc_dictionary_get_string`, `xpc_dictionary_get_uint64`, and
+`xpc_dictionary_get_bool` work from Zig.
+
+#### Changes
+
+##### `ghost/src/apprt/xpc.zig`
+
+Add three extern declarations:
+
+```zig
+extern "c" fn xpc_dictionary_get_string(xdict: xpc_object_t, key: [*:0]const u8) ?[*:0]const u8;
+extern "c" fn xpc_dictionary_get_uint64(xdict: xpc_object_t, key: [*:0]const u8) u64;
+extern "c" fn xpc_dictionary_get_bool(xdict: xpc_object_t, key: [*:0]const u8) bool;
+```
+
+Add the dictionary type constant:
+
+```zig
+extern const _xpc_type_dictionary: anyopaque;
+```
+
+Update `peerHandler` to detect dictionaries and dispatch:
+
+```zig
+fn peerHandler(_: *const EventBlock.Context, event: xpc_object_t) callconv(.c) void {
+    if (xpc_get_type(event) == xpcPtr(&_xpc_type_dictionary)) {
+        handleMessage(event);
+    } else if (xpc_get_type(event) == xpcPtr(&_xpc_type_error)) {
+        if (event == xpcPtr(&_xpc_error_connection_invalid)) {
+            log.info("peer disconnected", .{});
+        }
+    }
+}
+```
+
+Add `handleMessage` that reads the `action` field and dispatches:
+
+- `"set_overlay"` → log pane_id, col, row, width, height, url, profile, browsing
+- `"mode_changed"` → log pane_id, browsing
+- anything else → log unknown action
+
+The `xpc_dictionary_get_string` return type is `?[*:0]const u8` — null if the
+key is missing. Convert to a Zig slice with `std.mem.span` for logging.
+
+#### Verification
+
+```bash
+cd ghost && zig build
+GHOSTTY_LOG=stderr open ghost/zig-out/Ghostty.app --stderr ~/dev/termsurf/logs/ghost.log
+
+# In a Ghost pane:
+export TERMSURF_PANE_ID=$(uuidgen)
+cargo run -p web -- https://example.com
+```
+
+Pass: Ghost logs show the parsed field values from `set_overlay` (pane_id, col,
+row, width, height, url, profile, browsing) and `mode_changed` (pane_id,
+browsing). Values match what `web` sends.
