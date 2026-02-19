@@ -425,3 +425,168 @@ Files changed:
   updated `clearOverlay()`
 - `ghost/src/apprt/xpc.zig` — `createTestIOSurface()` (200×200 blue
   checkerboard), wired into `handleSetOverlay`
+
+## Experiment 2: Chromium server lifecycle
+
+### Goal
+
+Box demo renders live in the terminal at 60fps. Ghost spawns the Chromium
+Profile Server when `set_overlay` arrives with a URL, handles the full XPC
+protocol (`server_register` → `create_tab` → `display_surface`), and streams
+IOSurface frames to the renderer. The texture pipeline from Experiment 1 is used
+as-is.
+
+### Prerequisites
+
+1. **Copy box demo** — `cp -r ts4/box-demo box-demo`
+2. **Fork Chromium branch** — `146.0.7650.0-issue-603` from
+   `146.0.7650.0-issue-515`. No source changes expected.
+3. **Build server** — `autoninja -C out/Default chromium_profile_server`
+
+### Changes
+
+Only `ghost/src/apprt/xpc.zig` and `ghost/src/Surface.zig`. Everything else from
+Experiment 1 is used unchanged.
+
+**1. `ghost/src/Surface.zig` — Add `getCellSize()`**
+
+Thread-safe accessor for pixel dimension computation:
+
+```zig
+pub fn getCellSize(self: *Surface) struct { width: u32, height: u32 } {
+    self.renderer.draw_mutex.lock();
+    defer self.renderer.draw_mutex.unlock();
+    return .{
+        .width = self.renderer.grid_metrics.cell_width,
+        .height = self.renderer.grid_metrics.cell_height,
+    };
+}
+```
+
+**2. `ghost/src/apprt/xpc.zig` — Full rewrite of server lifecycle**
+
+**Remove:** `createTestIOSurface()` and all CF/IOSurface-creation externs (test
+code from Experiment 1).
+
+**New extern declarations:**
+
+```zig
+// Mach port transfer (display_surface handler).
+extern "c" fn xpc_dictionary_copy_mach_send(
+    xdict: xpc_object_t, key: [*:0]const u8) u32;
+extern "c" fn IOSurfaceLookupFromMachPort(port: u32) ?*anyopaque;
+extern "c" fn mach_port_deallocate(task: u32, name: u32) i32;
+extern const mach_task_self_: u32;
+
+// Sending messages to server.
+extern "c" fn xpc_dictionary_set_uint64(
+    xdict: xpc_object_t, key: [*:0]const u8, value: u64) void;
+
+// Peer identification.
+extern "c" fn xpc_dictionary_get_remote_connection(
+    msg: xpc_object_t) xpc_object_t;
+```
+
+**New module state:**
+
+```zig
+var server_peer: xpc_object_t = null;
+var server_process: ?std.process.Child = null;
+
+// Pending state between set_overlay and server_register.
+var pending_url_buf: [2048]u8 = undefined;
+var pending_url_len: usize = 0;
+var pending_pane_id: [36]u8 = undefined;
+var pending_pixel_w: u64 = 0;
+var pending_pixel_h: u64 = 0;
+```
+
+**Modified `listenerHandler`:** Don't assign to `web_peer` — peers are
+identified by their first message via `xpc_dictionary_get_remote_connection`.
+
+**Modified `handleMessage`:** Add `server_register`, `display_surface`,
+`tab_ready` actions. On `set_overlay`, retain connection as `web_peer`. On
+`server_register`, retain connection as `server_peer`.
+
+**Modified `handleSetOverlay`:** Store URL and pane ID in pending buffers.
+Compute pixel dimensions via `surface.getCellSize()`. Spawn the Chromium Profile
+Server. Remove test IOSurface code.
+
+**New `spawnServer`:** Launch via `std.process.Child.init` (following the
+pattern in `ghost/src/os/open.zig`):
+
+```zig
+fn spawnServer(profile: []const u8) void {
+    const home = std.posix.getenv("HOME") orelse return;
+    // Build argv with server path, --xpc-service, --user-data-dir, --hidden
+    // Spawn and store in server_process
+}
+```
+
+Server binary path:
+
+```
+{HOME}/dev/termsurf/chromium/src/out/Default/
+  Chromium Profile Server.app/Contents/MacOS/Chromium Profile Server
+```
+
+Arguments: `--xpc-service=com.termsurf.xpc-gateway`,
+`--user-data-dir={HOME}/.config/termsurf/chromium-profiles/{profile}`,
+`--hidden`
+
+**New `handleServerRegister`:** Send `create_tab` to the server peer:
+
+```zig
+fn handleServerRegister(msg: xpc_object_t) void {
+    const reply = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(reply, "action", "create_tab");
+    xpc_dictionary_set_string(reply, "url", pending_url_buf[0..pending_url_len]);
+    xpc_dictionary_set_string(reply, "pane_id", &pending_pane_id);
+    xpc_dictionary_set_uint64(reply, "pixel_width", pending_pixel_w);
+    xpc_dictionary_set_uint64(reply, "pixel_height", pending_pixel_h);
+    xpc_connection_send_message(server_peer, reply);
+}
+```
+
+**New `handleDisplaySurface`:** Called at 60fps. Extract Mach port, import
+IOSurface, pass to renderer:
+
+```zig
+fn handleDisplaySurface(msg: xpc_object_t) void {
+    const port = xpc_dictionary_copy_mach_send(msg, "iosurface_port");
+    if (port == 0) return;
+    const iosurface = IOSurfaceLookupFromMachPort(port) orelse {
+        _ = mach_port_deallocate(mach_task_self_, port);
+        return;
+    };
+    _ = mach_port_deallocate(mach_task_self_, port);
+
+    if (overlay_surface) |surface| {
+        surface.setOverlayIOSurface(iosurface);
+    }
+    // IOSurfaceLookupFromMachPort returns +1; setOverlayIOSurface
+    // CFRetains, so we CFRelease our lookup reference.
+    CFRelease(iosurface);
+}
+```
+
+**Modified disconnect handler:** On any peer disconnect, kill server process,
+release both peers, clear overlay.
+
+### Verification
+
+```bash
+cd box-demo && bun run server.ts &
+cd ghost && zig build
+open ghost/zig-out/Ghostty.app --stderr ~/dev/termsurf/logs/overlay.log
+# In a Ghost pane:
+cargo run -p web -- http://localhost:9407
+```
+
+Pass: Box demo (spinning blue square) renders in the terminal at 60fps for >30s.
+Clean exit (`ctrl+c` in `web`) kills the server process.
+
+## Ideas for future experiments
+
+3. **Resize** — Resize the terminal, Ghost sends `resize` to the server, the
+   server adjusts capture resolution, frames continue at the new size.
