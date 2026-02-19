@@ -228,8 +228,12 @@ fn handleSetOverlay(msg: xpc_object_t) void {
 
         // Compute pixel dimensions from grid cells × cell size.
         const cell = surface.core().getCellSize();
-        pane.pending_pixel_w = width * @as(u64, cell.width);
-        pane.pending_pixel_h = height * @as(u64, cell.height);
+        const new_pixel_w = width * @as(u64, cell.width);
+        const new_pixel_h = height * @as(u64, cell.height);
+        const resized = pane.server_peer != null and
+            (new_pixel_w != pane.pending_pixel_w or new_pixel_h != pane.pending_pixel_h);
+        pane.pending_pixel_w = new_pixel_w;
+        pane.pending_pixel_h = new_pixel_h;
 
         log.info("overlay set pane={s} pixel={d}x{d}", .{
             pane_id, pane.pending_pixel_w, pane.pending_pixel_h,
@@ -238,6 +242,8 @@ fn handleSetOverlay(msg: xpc_object_t) void {
         // Spawn the Chromium Profile Server (if not already running).
         if (pane.server_process == null) {
             spawnServer(&pane, profile);
+        } else if (resized) {
+            sendResize(&pane);
         }
     } else {
         log.warn("no surface found for pane={s}", .{pane_id});
@@ -322,6 +328,23 @@ fn handleModeChanged(msg: xpc_object_t) void {
     const browsing = xpc_dictionary_get_bool(msg, "browsing");
 
     log.info("mode_changed pane={s} browsing={}", .{ pane_id, browsing });
+}
+
+/// Send a resize message to the Chromium server. Caller must hold `p.mutex`.
+fn sendResize(p: *Pane) void {
+    const msg = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(msg, "action", "resize");
+
+    var pane_z: [37]u8 = undefined;
+    @memcpy(pane_z[0..36], &p.pending_pane_id);
+    pane_z[36] = 0;
+    xpc_dictionary_set_string(msg, "pane_id", @ptrCast(&pane_z));
+
+    xpc_dictionary_set_uint64(msg, "pixel_width", p.pending_pixel_w);
+    xpc_dictionary_set_uint64(msg, "pixel_height", p.pending_pixel_h);
+
+    xpc_connection_send_message(p.server_peer, msg);
+    log.info("sent resize pixel={d}x{d}", .{ p.pending_pixel_w, p.pending_pixel_h });
 }
 
 // -- Server lifecycle --

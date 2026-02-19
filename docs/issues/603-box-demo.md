@@ -689,6 +689,19 @@ cargo run -p web -- http://localhost:9407
 Pass: Box demo continues rendering during and after resize. The overlay fills
 the new viewport dimensions. Logs show `sent resize` messages.
 
+### Result
+
+**Pass.** Resize works end-to-end. Dragging the window edge sends updated
+`set_overlay` messages from `web`, Ghost detects the pixel dimension change,
+sends `resize` to the Chromium server, and the server adjusts capture resolution.
+New IOSurface frames arrive at the new size and the overlay quad scales
+automatically.
+
+Files changed:
+
+- `ghost/src/apprt/xpc.zig` — `sendResize()` helper, dimension change detection
+  in `handleSetOverlay`
+
 ## Ideas for future experiments
 
 4. **Mouse forwarding** — Click and scroll events forwarded to Chromium via XPC.
