@@ -1,7 +1,7 @@
-// XPC communication for TermSurf Ghost (Issue 601).
+// XPC communication for TermSurf Ghost (Issues 601–603).
 //
 // Connects to the xpc-gateway, creates an anonymous listener, registers its
-// endpoint, and handles connections from `web` processes.
+// endpoint, and handles connections from `web` processes and Chromium servers.
 //
 // Manual extern declarations instead of @cImport("xpc/xpc.h") because the XPC
 // header uses C block types in function signatures, which Zig's translate-c may
@@ -13,27 +13,6 @@ const CoreApp = @import("../App.zig");
 const CoreSurface = @import("../Surface.zig");
 
 const log = std.log.scoped(.xpc);
-
-// -- IOSurface / CoreFoundation C API (test IOSurface, Issue 603) --
-
-extern "c" fn IOSurfaceCreate(properties: *anyopaque) ?*anyopaque;
-extern "c" fn IOSurfaceLock(surface: *anyopaque, options: u32, seed: ?*u32) i32;
-extern "c" fn IOSurfaceUnlock(surface: *anyopaque, options: u32, seed: ?*u32) i32;
-extern "c" fn IOSurfaceGetBaseAddress(surface: *anyopaque) ?[*]u8;
-extern "c" fn IOSurfaceGetBytesPerRow(surface: *anyopaque) usize;
-
-extern "c" fn CFDictionaryCreateMutable(allocator: ?*anyopaque, capacity: isize, key_cbs: ?*const anyopaque, val_cbs: ?*const anyopaque) ?*anyopaque;
-extern "c" fn CFDictionarySetValue(dict: *anyopaque, key: *const anyopaque, value: *const anyopaque) void;
-extern "c" fn CFNumberCreate(allocator: ?*anyopaque, the_type: i32, value_ptr: *const anyopaque) ?*anyopaque;
-extern "c" fn CFRelease(cf: *anyopaque) void;
-
-extern const kCFTypeDictionaryKeyCallBacks: anyopaque;
-extern const kCFTypeDictionaryValueCallBacks: anyopaque;
-// These are CFStringRef values (pointers), not structs.
-extern const kIOSurfaceWidth: *const anyopaque;
-extern const kIOSurfaceHeight: *const anyopaque;
-extern const kIOSurfaceBytesPerElement: *const anyopaque;
-extern const kIOSurfacePixelFormat: *const anyopaque;
 
 // -- XPC C API --
 
@@ -52,6 +31,8 @@ extern "c" fn xpc_dictionary_set_value(xdict: xpc_object_t, key: [*:0]const u8, 
 extern "c" fn xpc_dictionary_get_string(xdict: xpc_object_t, key: [*:0]const u8) ?[*:0]const u8;
 extern "c" fn xpc_dictionary_get_uint64(xdict: xpc_object_t, key: [*:0]const u8) u64;
 extern "c" fn xpc_dictionary_get_bool(xdict: xpc_object_t, key: [*:0]const u8) bool;
+extern "c" fn xpc_dictionary_set_uint64(xdict: xpc_object_t, key: [*:0]const u8, value: u64) void;
+extern "c" fn xpc_dictionary_get_remote_connection(msg: xpc_object_t) xpc_object_t;
 extern "c" fn xpc_get_type(object: xpc_object_t) xpc_object_t;
 extern "c" fn xpc_retain(object: xpc_object_t) xpc_object_t;
 extern "c" fn xpc_release(object: xpc_object_t) void;
@@ -62,18 +43,44 @@ extern const _xpc_type_error: anyopaque;
 extern const _xpc_type_dictionary: anyopaque;
 extern const _xpc_error_connection_invalid: anyopaque;
 
+// -- Mach port / IOSurface C API (Issue 603) --
+
+extern "c" fn xpc_dictionary_copy_mach_send(xdict: xpc_object_t, key: [*:0]const u8) u32;
+extern "c" fn IOSurfaceLookupFromMachPort(port: u32) ?*anyopaque;
+extern "c" fn mach_port_deallocate(task: u32, name: u32) i32;
+extern const mach_task_self_: u32;
+extern "c" fn CFRelease(cf: *anyopaque) void;
+
 /// Cast a const extern symbol address to xpc_object_t for identity comparison.
 inline fn xpcPtr(ptr: *const anyopaque) xpc_object_t {
     return @constCast(ptr);
 }
+
+// -- Pane state (one mutex per pane) --
+
+/// Per-pane state for a single webview. All fields are protected by `mutex`.
+/// Handlers must lock `mutex` before reading or writing any field.
+const Pane = struct {
+    mutex: std.Thread.Mutex = .{},
+    web_peer: xpc_object_t = null,
+    server_peer: xpc_object_t = null,
+    overlay_surface: ?*CoreSurface = null,
+    server_process: ?std.process.Child = null,
+    pending_url_buf: [2048]u8 = undefined,
+    pending_url_len: usize = 0,
+    pending_pane_id: [36]u8 = undefined,
+    pending_pixel_w: u64 = 0,
+    pending_pixel_h: u64 = 0,
+};
 
 // -- Module state --
 
 var app: *CoreApp = undefined;
 var gateway: xpc_object_t = null;
 var listener: xpc_object_t = null;
-var web_peer: xpc_object_t = null;
-var overlay_surface: ?*CoreSurface = null;
+
+/// Single active pane. Multi-pane will replace this with a HashMap.
+var pane: Pane = .{};
 
 // -- Block type --
 //
@@ -110,10 +117,10 @@ pub fn init(core_app: *CoreApp) void {
 }
 
 pub fn deinit() void {
-    if (web_peer) |peer| {
-        xpc_release(peer);
-        web_peer = null;
-    }
+    pane.mutex.lock();
+    cleanupPaneLocked(&pane);
+    pane.mutex.unlock();
+
     if (listener != null) {
         xpc_connection_cancel(listener);
         listener = null;
@@ -137,8 +144,8 @@ fn listenerHandler(_: *const EventBlock.Context, event: xpc_object_t) callconv(.
     if (xpc_get_type(event) == xpcPtr(&_xpc_type_connection)) {
         log.info("peer connected", .{});
 
-        web_peer = xpc_retain(event);
-
+        // Don't assign to web_peer or server_peer yet —
+        // we identify the peer type by its first message.
         var peer_block = EventBlock.init(.{}, &peerHandler);
         xpc_connection_set_event_handler(event, @ptrCast(&peer_block));
         xpc_connection_resume(event);
@@ -150,15 +157,7 @@ fn peerHandler(_: *const EventBlock.Context, event: xpc_object_t) callconv(.c) v
         handleMessage(event);
     } else if (xpc_get_type(event) == xpcPtr(&_xpc_type_error)) {
         if (event == xpcPtr(&_xpc_error_connection_invalid)) {
-            if (overlay_surface) |surface| {
-                surface.clearOverlay();
-                overlay_surface = null;
-            }
-            if (web_peer) |peer| {
-                xpc_release(peer);
-                web_peer = null;
-            }
-            log.info("peer disconnected", .{});
+            handleDisconnect();
         }
     }
 }
@@ -172,6 +171,12 @@ fn handleMessage(msg: xpc_object_t) void {
 
     if (std.mem.eql(u8, action_str, "set_overlay")) {
         handleSetOverlay(msg);
+    } else if (std.mem.eql(u8, action_str, "server_register")) {
+        handleServerRegister(msg);
+    } else if (std.mem.eql(u8, action_str, "display_surface")) {
+        handleDisplaySurface(msg);
+    } else if (std.mem.eql(u8, action_str, "tab_ready")) {
+        handleTabReady(msg);
     } else if (std.mem.eql(u8, action_str, "mode_changed")) {
         handleModeChanged(msg);
     } else {
@@ -189,13 +194,22 @@ fn handleSetOverlay(msg: xpc_object_t) void {
     const height = xpc_dictionary_get_uint64(msg, "height");
     const browsing = xpc_dictionary_get_bool(msg, "browsing");
 
-    log.info("set_overlay pane={s} col={} row={} width={} height={} url={s} profile={s} browsing={}", .{
+    log.info("set_overlay pane={s} col={} row={} w={} h={} url={s} profile={s} browsing={}", .{
         pane_id, col, row, width, height, url, profile, browsing,
     });
 
     // Look up the surface by pane ID and set the overlay.
     if (app.findSurfaceByPaneId(pane_id)) |surface| {
-        overlay_surface = surface.core();
+        pane.mutex.lock();
+        defer pane.mutex.unlock();
+
+        // Retain web peer on first message.
+        if (pane.web_peer == null) {
+            const conn = xpc_dictionary_get_remote_connection(msg);
+            if (conn != null) pane.web_peer = xpc_retain(conn);
+        }
+
+        pane.overlay_surface = surface.core();
         surface.core().setOverlay(
             @intCast(col),
             @intCast(row),
@@ -203,16 +217,104 @@ fn handleSetOverlay(msg: xpc_object_t) void {
             @intCast(height),
         );
 
-        // Test IOSurface: blue checkerboard (Issue 603 Experiment 1).
-        if (createTestIOSurface()) |iosurface| {
-            surface.core().setOverlayIOSurface(iosurface);
-            log.info("test IOSurface set for pane={s}", .{pane_id});
+        // Store pending state for create_tab (sent after server_register).
+        if (pane_id.len <= 36) {
+            @memcpy(pane.pending_pane_id[0..pane_id.len], pane_id);
+        }
+        if (url.len <= pane.pending_url_buf.len) {
+            @memcpy(pane.pending_url_buf[0..url.len], url);
+            pane.pending_url_len = url.len;
         }
 
-        log.info("overlay set for pane={s}", .{pane_id});
+        // Compute pixel dimensions from grid cells × cell size.
+        const cell = surface.core().getCellSize();
+        pane.pending_pixel_w = width * @as(u64, cell.width);
+        pane.pending_pixel_h = height * @as(u64, cell.height);
+
+        log.info("overlay set pane={s} pixel={d}x{d}", .{
+            pane_id, pane.pending_pixel_w, pane.pending_pixel_h,
+        });
+
+        // Spawn the Chromium Profile Server (if not already running).
+        if (pane.server_process == null) {
+            spawnServer(&pane, profile);
+        }
     } else {
         log.warn("no surface found for pane={s}", .{pane_id});
     }
+}
+
+fn handleServerRegister(msg: xpc_object_t) void {
+    const profile = str(xpc_dictionary_get_string(msg, "profile"));
+    log.info("server_register profile={s}", .{profile});
+
+    pane.mutex.lock();
+    defer pane.mutex.unlock();
+
+    // Retain server peer on first message.
+    if (pane.server_peer == null) {
+        const conn = xpc_dictionary_get_remote_connection(msg);
+        if (conn != null) pane.server_peer = xpc_retain(conn);
+    }
+
+    if (pane.server_peer == null) {
+        log.warn("server_register but no server_peer", .{});
+        return;
+    }
+
+    // Send create_tab with the pending URL and pixel dimensions.
+    const reply = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(reply, "action", "create_tab");
+
+    // URL must be null-terminated for xpc_dictionary_set_string.
+    var url_z: [2049]u8 = undefined;
+    if (pane.pending_url_len > 0 and pane.pending_url_len < url_z.len) {
+        @memcpy(url_z[0..pane.pending_url_len], pane.pending_url_buf[0..pane.pending_url_len]);
+        url_z[pane.pending_url_len] = 0;
+        xpc_dictionary_set_string(reply, "url", @ptrCast(&url_z));
+    }
+
+    // Pane ID is already a [36]u8 — add null terminator.
+    var pane_z: [37]u8 = undefined;
+    @memcpy(pane_z[0..36], &pane.pending_pane_id);
+    pane_z[36] = 0;
+    xpc_dictionary_set_string(reply, "pane_id", @ptrCast(&pane_z));
+
+    xpc_dictionary_set_uint64(reply, "pixel_width", pane.pending_pixel_w);
+    xpc_dictionary_set_uint64(reply, "pixel_height", pane.pending_pixel_h);
+
+    xpc_connection_send_message(pane.server_peer, reply);
+    log.info("sent create_tab url_len={d} pixel={d}x{d}", .{
+        pane.pending_url_len, pane.pending_pixel_w, pane.pending_pixel_h,
+    });
+}
+
+fn handleDisplaySurface(msg: xpc_object_t) void {
+    const port = xpc_dictionary_copy_mach_send(msg, "iosurface_port");
+    if (port == 0) return;
+
+    const iosurface = IOSurfaceLookupFromMachPort(port) orelse {
+        _ = mach_port_deallocate(mach_task_self_, port);
+        return;
+    };
+    _ = mach_port_deallocate(mach_task_self_, port);
+
+    pane.mutex.lock();
+    const surface = pane.overlay_surface;
+    pane.mutex.unlock();
+
+    if (surface) |s| {
+        s.setOverlayIOSurface(iosurface);
+    }
+
+    // IOSurfaceLookupFromMachPort returns +1 ref; setOverlayIOSurface
+    // CFRetains, so we CFRelease our lookup reference.
+    CFRelease(iosurface);
+}
+
+fn handleTabReady(msg: xpc_object_t) void {
+    const tab_id = str(xpc_dictionary_get_string(msg, "tab_id"));
+    log.info("tab_ready tab_id={s}", .{tab_id});
 }
 
 fn handleModeChanged(msg: xpc_object_t) void {
@@ -222,68 +324,106 @@ fn handleModeChanged(msg: xpc_object_t) void {
     log.info("mode_changed pane={s} browsing={}", .{ pane_id, browsing });
 }
 
-/// Create a 200×200 blue checkerboard IOSurface for testing (Issue 603).
-/// Returns an IOSurfaceRef (caller does NOT own — retained by module).
-fn createTestIOSurface() ?*anyopaque {
-    const size: i32 = 200;
-    const bpe: i32 = 4;
-    // 'BGRA' as a 32-bit integer (little-endian: 0x41524742).
-    const pixel_format: i32 = 0x42475241;
-    const cf_number_sint32: i32 = 3; // kCFNumberSInt32Type
+// -- Server lifecycle --
 
-    // Build properties dictionary.
-    const dict = CFDictionaryCreateMutable(null, 4, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks) orelse return null;
-    defer CFRelease(dict);
-
-    const w_num = CFNumberCreate(null, cf_number_sint32, &size) orelse return null;
-    defer CFRelease(w_num);
-    const h_num = CFNumberCreate(null, cf_number_sint32, &size) orelse return null;
-    defer CFRelease(h_num);
-    const bpe_num = CFNumberCreate(null, cf_number_sint32, &bpe) orelse return null;
-    defer CFRelease(bpe_num);
-    const pf_num = CFNumberCreate(null, cf_number_sint32, &pixel_format) orelse return null;
-    defer CFRelease(pf_num);
-
-    CFDictionarySetValue(dict, kIOSurfaceWidth, w_num);
-    CFDictionarySetValue(dict, kIOSurfaceHeight, h_num);
-    CFDictionarySetValue(dict, kIOSurfaceBytesPerElement, bpe_num);
-    CFDictionarySetValue(dict, kIOSurfacePixelFormat, pf_num);
-
-    const surface = IOSurfaceCreate(dict) orelse return null;
-
-    // Lock, fill with blue checkerboard, unlock.
-    _ = IOSurfaceLock(surface, 0, null);
-    const base = IOSurfaceGetBaseAddress(surface) orelse {
-        _ = IOSurfaceUnlock(surface, 0, null);
-        return surface;
+/// Spawn the Chromium Profile Server. Caller must hold `p.mutex`.
+fn spawnServer(p: *Pane, profile: []const u8) void {
+    const home = std.posix.getenv("HOME") orelse {
+        log.err("HOME not set, cannot spawn server", .{});
+        return;
     };
-    const bpr = IOSurfaceGetBytesPerRow(surface);
-    const sz: usize = @intCast(size);
 
-    for (0..sz) |y| {
-        const row = base + y * bpr;
-        for (0..sz) |x| {
-            const px = row + x * 4;
-            const checker = ((x / 20) + (y / 20)) % 2 == 0;
-            if (checker) {
-                // Blue (BGRA: B=255, G=100, R=50, A=255)
-                px[0] = 255;
-                px[1] = 100;
-                px[2] = 50;
-                px[3] = 255;
-            } else {
-                // Dark blue (BGRA: B=180, G=40, R=20, A=255)
-                px[0] = 180;
-                px[1] = 40;
-                px[2] = 20;
-                px[3] = 255;
-            }
-        }
+    // Build null-terminated path strings.
+    var path_buf: [512]u8 = undefined;
+    const server_path = std.fmt.bufPrintZ(
+        &path_buf,
+        "{s}/dev/termsurf/chromium/src/out/Default/Chromium Profile Server.app/Contents/MacOS/Chromium Profile Server",
+        .{home},
+    ) catch {
+        log.err("server path too long", .{});
+        return;
+    };
+
+    var xpc_arg_buf: [128]u8 = undefined;
+    const xpc_arg = std.fmt.bufPrintZ(
+        &xpc_arg_buf,
+        "--xpc-service=com.termsurf.xpc-gateway",
+        .{},
+    ) catch return;
+
+    var data_arg_buf: [512]u8 = undefined;
+    const data_arg = std.fmt.bufPrintZ(
+        &data_arg_buf,
+        "--user-data-dir={s}/.config/termsurf/chromium-profiles/{s}",
+        .{ home, profile },
+    ) catch {
+        log.err("data dir path too long", .{});
+        return;
+    };
+
+    var hidden_buf: [16]u8 = undefined;
+    const hidden_arg = std.fmt.bufPrintZ(&hidden_buf, "--hidden", .{}) catch return;
+
+    log.info("spawning server: {s}", .{server_path});
+
+    var child = std.process.Child.init(
+        &.{ server_path, xpc_arg, data_arg, hidden_arg },
+        std.heap.page_allocator,
+    );
+    child.spawn() catch |err| {
+        log.err("failed to spawn server: {}", .{err});
+        return;
+    };
+
+    p.server_process = child;
+    log.info("server spawned pid={d}", .{child.id});
+}
+
+/// Kill the server process and wait for it to exit. Caller must hold `p.mutex`.
+fn killServer(p: *Pane) void {
+    if (p.server_process) |*proc| {
+        _ = proc.kill() catch {};
+        _ = proc.wait() catch {};
+        log.info("server killed", .{});
     }
-    _ = IOSurfaceUnlock(surface, 0, null);
+    p.server_process = null;
+}
 
-    log.info("created test IOSurface {d}x{d}", .{ sz, sz });
-    return surface;
+/// Full cleanup of a pane's state. Caller must hold `p.mutex`.
+fn cleanupPaneLocked(p: *Pane) void {
+    if (p.overlay_surface) |surface| {
+        surface.clearOverlay();
+        p.overlay_surface = null;
+    }
+
+    killServer(p);
+
+    if (p.web_peer) |peer| {
+        xpc_release(peer);
+        p.web_peer = null;
+    }
+    if (p.server_peer) |peer| {
+        xpc_release(peer);
+        p.server_peer = null;
+    }
+
+    p.pending_url_len = 0;
+    p.pending_pixel_w = 0;
+    p.pending_pixel_h = 0;
+}
+
+fn handleDisconnect() void {
+    pane.mutex.lock();
+    defer pane.mutex.unlock();
+
+    // Idempotent: if already cleaned up, the second disconnect is a no-op.
+    if (pane.web_peer == null and pane.server_peer == null) {
+        log.info("peer disconnected (already cleaned up)", .{});
+        return;
+    }
+
+    cleanupPaneLocked(&pane);
+    log.info("peer disconnected, cleaned up", .{});
 }
 
 /// Convert a nullable C string to a Zig slice, defaulting to "(null)".

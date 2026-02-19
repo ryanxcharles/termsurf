@@ -586,6 +586,34 @@ cargo run -p web -- http://localhost:9407
 Pass: Box demo (spinning blue square) renders in the terminal at 60fps for >30s.
 Clean exit (`ctrl+c` in `web`) kills the server process.
 
+### Result
+
+**Pass.** Box demo renders live in the terminal at ~60fps. The Chromium Profile
+Server streams IOSurface Mach ports over XPC, Ghost imports them as zero-copy
+Metal textures, and the overlay shader composites them at the correct grid
+coordinates. Google.com also renders correctly.
+
+A disconnect crash was discovered and fixed: when `web` exits, both the web peer
+and server peer disconnect simultaneously on different XPC dispatch queue
+threads. Both called `handleDisconnect()` concurrently, racing on shared
+module-level state (`server_process`, `web_peer`, `server_peer`). Thread A's
+`proc.wait()` invalidated the process handle, then Thread B's `proc.kill()` read
+the undefined `id` field → `panic: reached unreachable code` on two threads.
+
+Fixed by introducing a `Pane` struct with a per-pane `std.Thread.Mutex`. All
+handlers lock the pane's mutex before touching state. `handleDisconnect` is
+idempotent — the second thread sees null peers and no-ops. This design scales to
+multi-webview: replace `var pane: Pane` with a `HashMap(UUID, *Pane)`.
+
+Files changed:
+
+- `ghost/src/apprt/xpc.zig` — Full Chromium server lifecycle
+  (`server_register`, `create_tab`, `display_surface`), Mach port transfer,
+  server spawning via `std.process.Child`, per-pane mutex for thread safety
+- `ghost/src/Surface.zig` — `getCellSize()` for pixel dimension computation
+- `docs/chromium.md` — Added `146.0.7650.0-issue-603` branch
+- `box-demo/` — Copied from `ts4/box-demo/` (spinning blue square test page)
+
 ## Ideas for future experiments
 
 3. **Resize** — Resize the terminal, Ghost sends `resize` to the server, the

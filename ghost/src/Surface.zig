@@ -2443,6 +2443,17 @@ pub fn setOverlay(self: *Surface, col: u32, row: u32, width: u32, height: u32) v
     self.queueRender() catch {};
 }
 
+/// Query cell size in physical pixels (Issue 603).
+/// Thread-safe via draw_mutex.
+pub fn getCellSize(self: *Surface) struct { width: u32, height: u32 } {
+    self.renderer.draw_mutex.lock();
+    defer self.renderer.draw_mutex.unlock();
+    return .{
+        .width = self.renderer.grid_metrics.cell_width,
+        .height = self.renderer.grid_metrics.cell_height,
+    };
+}
+
 extern "c" fn CFRetain(*anyopaque) void;
 extern "c" fn CFRelease(*anyopaque) void;
 
