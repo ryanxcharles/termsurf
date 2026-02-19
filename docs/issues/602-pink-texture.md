@@ -322,9 +322,214 @@ Both key unknowns resolved:
 
 #### Files changed
 
-| File                           | Change                                       |
-| ------------------------------ | -------------------------------------------- |
+| File                           | Change                                        |
+| ------------------------------ | --------------------------------------------- |
 | `ghost/src/Surface.zig`        | UUID field, generation, env propagation       |
 | `ghost/src/App.zig`            | `findSurfaceByPaneId()` lookup method         |
 | `ghost/src/apprt/xpc.zig`      | Accept `*CoreApp`, look up surface on overlay |
 | `ghost/src/apprt/embedded.zig` | Pass `core_app` to `xpc.init()`               |
+
+### Experiment 2: Pink overlay rendering
+
+#### Goal
+
+When `web` sends `set_overlay`, a hot pink rectangle appears at the correct grid
+coordinates in the Ghost pane. Proves the full GPU pipeline from XPC message to
+rendered quad.
+
+#### Changes
+
+##### `ghost/src/renderer/shaders/shaders.metal`
+
+Add a params struct and two shader functions at the end of the file:
+
+```metal
+#pragma mark - Pink Overlay
+
+struct PinkOverlayIn {
+  float grid_col;
+  float grid_row;
+  float grid_width;
+  float grid_height;
+};
+
+vertex float4 pink_overlay_vertex(
+  uint vid [[vertex_id]],
+  constant PinkOverlayIn& params [[buffer(0)]],
+  constant Uniforms& uniforms [[buffer(1)]]
+) {
+  float2 origin = float2(params.grid_col, params.grid_row) * uniforms.cell_size;
+  float2 size = float2(params.grid_width, params.grid_height) * uniforms.cell_size;
+
+  float2 corner;
+  corner.x = float(vid == 1 || vid == 3);
+  corner.y = float(vid == 2 || vid == 3);
+
+  float2 pos = origin + size * corner;
+  return uniforms.projection_matrix * float4(pos, 0.0f, 1.0f);
+}
+
+fragment float4 pink_overlay_fragment() {
+  return float4(1.0, 0.41, 0.71, 1.0);
+}
+```
+
+The vertex shader converts grid coordinates to physical pixels by multiplying by
+`uniforms.cell_size`. The projection matrix (which includes padding) transforms
+to NDC. Four vertices form a triangle strip quad. The fragment shader returns
+hot pink.
+
+##### `ghost/src/renderer/metal/shaders.zig`
+
+Add the pipeline to `pipeline_descs` (after bg_image):
+
+```zig
+.{ "pink_overlay", .{
+    .vertex_fn = "pink_overlay_vertex",
+    .fragment_fn = "pink_overlay_fragment",
+    .blending_enabled = false,
+} },
+```
+
+No `vertex_attributes` — the params are passed as a raw buffer at index 0, not
+as per-instance vertex attributes.
+
+Add the params struct (after the existing `BgImage` struct):
+
+```zig
+pub const PinkOverlay = extern struct {
+    grid_col: f32 = 0,
+    grid_row: f32 = 0,
+    grid_width: f32 = 0,
+    grid_height: f32 = 0,
+};
+```
+
+##### `ghost/src/renderer/generic.zig`
+
+Add a field on the renderer struct (after the existing config/state fields):
+
+```zig
+pink_overlay: shaderpkg.PinkOverlay = .{},
+```
+
+Add a render step in `drawFrame()` after kitty images above text and before the
+debug overlay. The step creates a temporary buffer each frame, fills it with the
+params, and draws a triangle strip quad:
+
+```zig
+// Pink overlay (Issue 602).
+if (self.pink_overlay.grid_width > 0 and
+    self.pink_overlay.grid_height > 0)
+{
+    if (Buffer(shaderpkg.PinkOverlay).initFill(
+        self.api.imageBufferOptions(),
+        &.{self.pink_overlay},
+    )) |*buf| {
+        defer buf.deinit();
+        pass.step(.{
+            .pipeline = self.shaders.pipelines.pink_overlay,
+            .uniforms = frame.uniforms.buffer,
+            .buffers = &.{buf.buffer},
+            .draw = .{
+                .type = .triangle_strip,
+                .vertex_count = 4,
+            },
+        });
+    } else |_| {}
+}
+```
+
+`Buffer(PinkOverlay).initFill` creates a Metal buffer from the struct on the CPU
+side. `imageBufferOptions()` returns the device and storage mode. The buffer is
+released after the draw call via `defer`.
+
+##### `ghost/src/Surface.zig`
+
+Add two public methods:
+
+```zig
+pub fn setOverlay(self: *Surface, col: u32, row: u32, width: u32, height: u32) void {
+    self.renderer.draw_mutex.lock();
+    defer self.renderer.draw_mutex.unlock();
+    self.renderer.pink_overlay = .{
+        .grid_col = @floatFromInt(col),
+        .grid_row = @floatFromInt(row),
+        .grid_width = @floatFromInt(width),
+        .grid_height = @floatFromInt(height),
+    };
+    self.queueRender() catch {};
+}
+
+pub fn clearOverlay(self: *Surface) void {
+    self.renderer.draw_mutex.lock();
+    defer self.renderer.draw_mutex.unlock();
+    self.renderer.pink_overlay = .{};
+    self.queueRender() catch {};
+}
+```
+
+Both lock `draw_mutex` to serialize with `drawFrame()`. XPC callbacks arrive on
+a background queue, so thread safety is critical.
+
+##### `ghost/src/apprt/xpc.zig`
+
+Store the matched surface alongside the peer connection:
+
+```zig
+var overlay_surface: ?*CoreSurface = null;
+```
+
+In `handleSetOverlay`, after finding the surface, call `setOverlay()`:
+
+```zig
+if (app.findSurfaceByPaneId(pane_id)) |surface| {
+    overlay_surface = surface.core();
+    surface.core().setOverlay(
+        @intCast(col), @intCast(row),
+        @intCast(width), @intCast(height),
+    );
+    log.info("surface found for pane={s}", .{pane_id});
+} else {
+    log.warn("no surface found for pane={s}", .{pane_id});
+}
+```
+
+In `peerHandler` on disconnect, clear the overlay:
+
+```zig
+if (overlay_surface) |surface| {
+    surface.clearOverlay();
+    overlay_surface = null;
+}
+```
+
+`CoreSurface` is `@import("../Surface.zig")` — the core Surface type that has
+`setOverlay` / `clearOverlay`.
+
+#### Key unknowns
+
+1. Does `Buffer(PinkOverlay).initFill` work with a non-vertex-attribute struct?
+   The buffer is just raw bytes — the shader reads it as
+   `constant PinkOverlayIn&` at buffer index 0. Should work since it's the same
+   as how bg_image passes its params.
+2. Does the pipeline auto-initialize without `vertex_attributes`? The bg_color
+   pipeline also has no vertex attributes and works fine.
+
+#### Verification
+
+```bash
+cd ghost && zig build
+GHOSTTY_LOG=stderr open ghost/zig-out/Ghostty.app --stderr ~/dev/termsurf/logs/ghost.log
+```
+
+In a Ghost pane:
+
+```bash
+cargo run -p web -- https://example.com
+```
+
+Pass: A hot pink rectangle appears at the viewport coordinates (col=1, row=4,
+filling the viewport area). The rectangle position matches the `web` TUI's
+viewport border. Exiting `web` clears the rectangle. Resizing the terminal
+causes `web` to send updated coordinates and the rectangle adjusts.
