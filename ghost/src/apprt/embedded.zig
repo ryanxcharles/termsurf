@@ -21,6 +21,8 @@ const CoreSurface = @import("../Surface.zig");
 const configpkg = @import("../config.zig");
 const Config = configpkg.Config;
 
+const xpc = @import("xpc.zig");
+
 const log = std.log.scoped(.embedded_window);
 
 pub const resourcesDir = internal_os.resourcesDir;
@@ -142,9 +144,12 @@ pub const App = struct {
             .opts = opts,
             .keymap = keymap,
         };
+
+        xpc.init();
     }
 
     pub fn terminate(self: *App) void {
+        xpc.deinit();
         self.keymap.deinit();
         self.config.deinit();
     }

@@ -194,3 +194,34 @@ cargo run -p web -- https://example.com
 Pass: Ghost logs show "Peer connected" when `web` starts and "Peer disconnected"
 when `web` exits. No crashes, no block-related errors. The `web` TUI renders
 normally.
+
+Note: Launch with `GHOSTTY_LOG=stderr` — the embedded macOS build disables
+stderr logging by default.
+
+#### Result
+
+Pass. All four lifecycle messages appear in the log:
+
+```
+info(xpc): connecting to xpc-gateway
+info(xpc): registered endpoint with xpc-gateway
+info(xpc): peer connected
+info(xpc): peer disconnected
+```
+
+All three key unknowns resolved:
+
+1. **`extern "c"` declarations work** for XPC functions — no `@cImport` needed.
+   Manual declarations with `?*anyopaque` avoid C block type translation issues.
+2. **`objc.Block` works with XPC event handlers** — the block ABI is identical
+   for Objective-C and XPC. `xpc_connection_set_event_handler` copies the block
+   correctly.
+3. **XPC type constant comparison works** — `extern const` symbols with
+   `@constCast` for identity comparison against `xpc_get_type()` return values.
+
+### Files changed
+
+| File                           | Change                                    |
+| ------------------------------ | ----------------------------------------- |
+| `ghost/src/apprt/xpc.zig`      | New file — XPC gateway, listener, handler |
+| `ghost/src/apprt/embedded.zig` | Call `xpc.init()` / `xpc.deinit()`        |
