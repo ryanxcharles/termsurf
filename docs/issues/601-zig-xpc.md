@@ -301,11 +301,81 @@ info(xpc): mode_changed pane=9F96D529-... browsing=false
 
 All dictionary accessor functions work from Zig: `xpc_dictionary_get_string`
 (returns `?[*:0]const u8`), `xpc_dictionary_get_uint64`, and
-`xpc_dictionary_get_bool`. String comparison via `std.mem.span` +
-`std.mem.eql` for action dispatch.
+`xpc_dictionary_get_bool`. String comparison via `std.mem.span` + `std.mem.eql`
+for action dispatch.
 
 #### Files changed
 
-| File                      | Change                                          |
-| ------------------------- | ----------------------------------------------- |
-| `ghost/src/apprt/xpc.zig` | Parse set_overlay and mode_changed, log values  |
+| File                      | Change                                         |
+| ------------------------- | ---------------------------------------------- |
+| `ghost/src/apprt/xpc.zig` | Parse set_overlay and mode_changed, log values |
+
+### Experiment 3: Send messages to `web`
+
+#### Goal
+
+Ghost sends `url_changed` back to `web` when it receives `set_overlay`. This
+proves bidirectional XPC communication from Zig. The `web` TUI already handles
+`url_changed` by updating its URL bar — so the round trip is visually
+confirmable.
+
+#### Changes
+
+##### `ghost/src/apprt/xpc.zig`
+
+Add `xpc_retain` (needed to retain the peer connection beyond the event handler
+callback):
+
+```zig
+extern "c" fn xpc_retain(object: xpc_object_t) xpc_object_t;
+```
+
+Add module-level state for the peer connection:
+
+```zig
+var web_peer: xpc_object_t = null;
+```
+
+In `listenerHandler`, store the peer:
+
+```zig
+web_peer = xpc_retain(event);
+```
+
+In `peerHandler`, on disconnect clear it:
+
+```zig
+web_peer = null;
+```
+
+In `handleSetOverlay`, after logging, send `url_changed` back to confirm the
+round trip. Append " [ghost]" to the URL so the change is visible:
+
+```zig
+if (web_peer) |peer| {
+    const reply = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(reply, "action", "url_changed");
+    xpc_dictionary_set_string(reply, "url", "<the url> [ghost]");
+    xpc_connection_send_message(peer, reply);
+}
+```
+
+Building the modified URL string requires a small buffer — use a stack-allocated
+array and `std.fmt.bufPrint` to append " [ghost]".
+
+In `deinit`, release the stored peer if non-null.
+
+#### Verification
+
+```bash
+cd ghost && zig build
+GHOSTTY_LOG=stderr open ghost/zig-out/Ghostty.app --stderr ~/dev/termsurf/logs/ghost.log
+
+# In a Ghost pane:
+export TERMSURF_PANE_ID=$(uuidgen)
+cargo run -p web -- https://example.com
+```
+
+Pass: The `web` TUI's URL bar changes from `https://example.com` to
+`https://example.com [ghost]` after connecting. Ghost logs show the outgoing
+message.
