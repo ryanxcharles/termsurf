@@ -1,11 +1,11 @@
-// XPC communication for TermSurf Ghost (Issues 601–603).
+// XPC communication for TermSurf Ghost (Issues 601–604).
 //
-// Connects to the xpc-gateway, creates an anonymous listener, registers its
-// endpoint, and handles connections from `web` processes and Chromium servers.
+// All XPC event handlers run on a serial dispatch queue (`xpc_queue`).
+// No mutexes needed for XPC state — serialization is guaranteed by GCD.
+// The renderer's `draw_mutex` is separate and protects renderer state.
 //
-// Manual extern declarations instead of @cImport("xpc/xpc.h") because the XPC
-// header uses C block types in function signatures, which Zig's translate-c may
-// not handle. All XPC types are opaque pointers represented as ?*anyopaque.
+// Manual extern declarations instead of @cImport because the XPC header uses
+// C block types that Zig's translate-c may not handle.
 
 const std = @import("std");
 const objc = @import("objc");
@@ -13,6 +13,7 @@ const CoreApp = @import("../App.zig");
 const CoreSurface = @import("../Surface.zig");
 
 const log = std.log.scoped(.xpc);
+const alloc = std.heap.page_allocator;
 
 // -- XPC C API --
 
@@ -43,7 +44,12 @@ extern const _xpc_type_error: anyopaque;
 extern const _xpc_type_dictionary: anyopaque;
 extern const _xpc_error_connection_invalid: anyopaque;
 
-// -- Mach port / IOSurface C API (Issue 603) --
+// -- Dispatch queue C API --
+
+extern "c" fn dispatch_queue_create(label: [*:0]const u8, attr: ?*anyopaque) ?*anyopaque;
+extern "c" fn xpc_connection_set_target_queue(connection: xpc_object_t, queue: ?*anyopaque) void;
+
+// -- Mach port / IOSurface C API --
 
 extern "c" fn xpc_dictionary_copy_mach_send(xdict: xpc_object_t, key: [*:0]const u8) u32;
 extern "c" fn IOSurfaceLookupFromMachPort(port: u32) ?*anyopaque;
@@ -56,21 +62,27 @@ inline fn xpcPtr(ptr: *const anyopaque) xpc_object_t {
     return @constCast(ptr);
 }
 
-// -- Pane state (one mutex per pane) --
+// -- Data structures --
 
-/// Per-pane state for a single webview. All fields are protected by `mutex`.
-/// Handlers must lock `mutex` before reading or writing any field.
+/// Per-pane state. No mutex — all access is on the serial `xpc_queue`.
 const Pane = struct {
-    mutex: std.Thread.Mutex = .{},
     web_peer: xpc_object_t = null,
-    server_peer: xpc_object_t = null,
     overlay_surface: ?*CoreSurface = null,
-    server_process: ?std.process.Child = null,
+    server: ?*Server = null,
+    pane_id_key: []const u8 = "", // heap-allocated, also the key in `panes`
     pending_url_buf: [2048]u8 = undefined,
     pending_url_len: usize = 0,
-    pending_pane_id: [36]u8 = undefined,
     pending_pixel_w: u64 = 0,
     pending_pixel_h: u64 = 0,
+    tab_sent: bool = false,
+};
+
+/// Per-profile server state. Shared by all panes on the same profile.
+const Server = struct {
+    process: ?std.process.Child = null,
+    peer: xpc_object_t = null,
+    profile_key: []const u8 = "", // heap-allocated, also the key in `servers`
+    pane_count: usize = 0,
 };
 
 // -- Module state --
@@ -78,15 +90,28 @@ const Pane = struct {
 var app: *CoreApp = undefined;
 var gateway: xpc_object_t = null;
 var listener: xpc_object_t = null;
+var xpc_queue: ?*anyopaque = null;
 
-/// Single active pane. Multi-pane will replace this with a HashMap.
-var pane: Pane = .{};
+/// Active panes, keyed by pane UUID string.
+var panes: std.StringHashMap(*Pane) = undefined;
 
-// -- Block type --
-//
-// XPC event handler: fn(xpc_object_t) void.
-// No captures — module-level state is used instead.
+/// Active servers, keyed by profile name.
+var servers: std.StringHashMap(*Server) = undefined;
+
+/// Reverse lookup: connection address (usize) → pane UUID string.
+var peer_to_pane: std.AutoHashMap(usize, []const u8) = undefined;
+
+/// Reverse lookup: connection address (usize) → profile name.
+var peer_to_profile: std.AutoHashMap(usize, []const u8) = undefined;
+
+// -- Block types --
+
+/// Block with no captures (gateway, listener handlers).
 const EventBlock = objc.Block(struct {}, .{xpc_object_t}, void);
+
+/// Block with captured peer address (per-peer handler for disconnect ID).
+const PeerContext = struct { peer_addr: usize };
+const PeerBlock = objc.Block(PeerContext, .{xpc_object_t}, void);
 
 // -- Public API --
 
@@ -94,14 +119,25 @@ pub fn init(core_app: *CoreApp) void {
     app = core_app;
     log.info("connecting to xpc-gateway", .{});
 
+    // Serial dispatch queue — all XPC handlers run here, no mutexes needed.
+    xpc_queue = dispatch_queue_create("com.termsurf.ghost.xpc", null);
+
+    // Initialize maps.
+    panes = std.StringHashMap(*Pane).init(alloc);
+    servers = std.StringHashMap(*Server).init(alloc);
+    peer_to_pane = std.AutoHashMap(usize, []const u8).init(alloc);
+    peer_to_profile = std.AutoHashMap(usize, []const u8).init(alloc);
+
     // Connect to the xpc-gateway Mach service.
     gateway = xpc_connection_create_mach_service("com.termsurf.xpc-gateway", null, 0);
+    xpc_connection_set_target_queue(gateway, xpc_queue);
     var gw_block = EventBlock.init(.{}, &gatewayHandler);
     xpc_connection_set_event_handler(gateway, @ptrCast(&gw_block));
     xpc_connection_resume(gateway);
 
     // Create anonymous listener for direct peer connections.
     listener = xpc_connection_create(null, null);
+    xpc_connection_set_target_queue(listener, xpc_queue);
     var listener_block = EventBlock.init(.{}, &listenerHandler);
     xpc_connection_set_event_handler(listener, @ptrCast(&listener_block));
     xpc_connection_resume(listener);
@@ -113,13 +149,34 @@ pub fn init(core_app: *CoreApp) void {
     xpc_dictionary_set_value(msg, "endpoint", endpoint);
     xpc_connection_send_message(gateway, msg);
 
-    log.info("registered endpoint with xpc-gateway", .{});
+    log.info("registered endpoint with xpc-gateway (serial queue)", .{});
 }
 
 pub fn deinit() void {
-    pane.mutex.lock();
-    cleanupPaneLocked(&pane);
-    pane.mutex.unlock();
+    // Clean up all panes.
+    var pane_it = panes.iterator();
+    while (pane_it.next()) |entry| {
+        const p = entry.value_ptr.*;
+        if (p.overlay_surface) |surface| surface.clearOverlay();
+        if (p.web_peer) |peer| xpc_release(peer);
+        freeKey(p.pane_id_key);
+        alloc.destroy(p);
+    }
+    panes.deinit();
+
+    // Clean up all servers.
+    var server_it = servers.iterator();
+    while (server_it.next()) |entry| {
+        const s = entry.value_ptr.*;
+        killServer(s);
+        if (s.peer) |peer| xpc_release(peer);
+        freeKey(s.profile_key);
+        alloc.destroy(s);
+    }
+    servers.deinit();
+
+    peer_to_pane.deinit();
+    peer_to_profile.deinit();
 
     if (listener != null) {
         xpc_connection_cancel(listener);
@@ -144,20 +201,22 @@ fn listenerHandler(_: *const EventBlock.Context, event: xpc_object_t) callconv(.
     if (xpc_get_type(event) == xpcPtr(&_xpc_type_connection)) {
         log.info("peer connected", .{});
 
-        // Don't assign to web_peer or server_peer yet —
-        // we identify the peer type by its first message.
-        var peer_block = EventBlock.init(.{}, &peerHandler);
+        // Each peer gets a block that captures its connection address,
+        // so handleDisconnect can identify which peer disconnected.
+        const peer_addr = @intFromPtr(event.?);
+        var peer_block = PeerBlock.init(.{ .peer_addr = peer_addr }, &peerHandler);
         xpc_connection_set_event_handler(event, @ptrCast(&peer_block));
+        xpc_connection_set_target_queue(event, xpc_queue);
         xpc_connection_resume(event);
     }
 }
 
-fn peerHandler(_: *const EventBlock.Context, event: xpc_object_t) callconv(.c) void {
+fn peerHandler(ctx: *const PeerBlock.Context, event: xpc_object_t) callconv(.c) void {
     if (xpc_get_type(event) == xpcPtr(&_xpc_type_dictionary)) {
         handleMessage(event);
     } else if (xpc_get_type(event) == xpcPtr(&_xpc_type_error)) {
         if (event == xpcPtr(&_xpc_error_connection_invalid)) {
-            handleDisconnect();
+            handleDisconnect(ctx.peer_addr);
         }
     }
 }
@@ -198,55 +257,100 @@ fn handleSetOverlay(msg: xpc_object_t) void {
         pane_id, col, row, width, height, url, profile, browsing,
     });
 
-    // Look up the surface by pane ID and set the overlay.
-    if (app.findSurfaceByPaneId(pane_id)) |surface| {
-        pane.mutex.lock();
-        defer pane.mutex.unlock();
+    // Look up the surface by pane ID.
+    const surface = app.findSurfaceByPaneId(pane_id) orelse {
+        log.warn("no surface found for pane={s}", .{pane_id});
+        return;
+    };
 
-        // Retain web peer on first message.
-        if (pane.web_peer == null) {
-            const conn = xpc_dictionary_get_remote_connection(msg);
-            if (conn != null) pane.web_peer = xpc_retain(conn);
+    // Set overlay grid coordinates (thread-safe via draw_mutex internally).
+    surface.core().setOverlay(
+        @intCast(col),
+        @intCast(row),
+        @intCast(width),
+        @intCast(height),
+    );
+
+    // Compute pixel dimensions from grid cells × cell size.
+    const cell = surface.core().getCellSize();
+    const new_pixel_w = width * @as(u64, cell.width);
+    const new_pixel_h = height * @as(u64, cell.height);
+
+    if (panes.get(pane_id)) |p| {
+        // Existing pane — resize path.
+        const old_w = p.pending_pixel_w;
+        const old_h = p.pending_pixel_h;
+        p.pending_pixel_w = new_pixel_w;
+        p.pending_pixel_h = new_pixel_h;
+
+        if (url.len > 0 and url.len <= p.pending_url_buf.len) {
+            @memcpy(p.pending_url_buf[0..url.len], url);
+            p.pending_url_len = url.len;
         }
 
-        pane.overlay_surface = surface.core();
-        surface.core().setOverlay(
-            @intCast(col),
-            @intCast(row),
-            @intCast(width),
-            @intCast(height),
-        );
-
-        // Store pending state for create_tab (sent after server_register).
-        if (pane_id.len <= 36) {
-            @memcpy(pane.pending_pane_id[0..pane_id.len], pane_id);
-        }
-        if (url.len <= pane.pending_url_buf.len) {
-            @memcpy(pane.pending_url_buf[0..url.len], url);
-            pane.pending_url_len = url.len;
-        }
-
-        // Compute pixel dimensions from grid cells × cell size.
-        const cell = surface.core().getCellSize();
-        const new_pixel_w = width * @as(u64, cell.width);
-        const new_pixel_h = height * @as(u64, cell.height);
-        const resized = pane.server_peer != null and
-            (new_pixel_w != pane.pending_pixel_w or new_pixel_h != pane.pending_pixel_h);
-        pane.pending_pixel_w = new_pixel_w;
-        pane.pending_pixel_h = new_pixel_h;
-
-        log.info("overlay set pane={s} pixel={d}x{d}", .{
-            pane_id, pane.pending_pixel_w, pane.pending_pixel_h,
+        log.info("overlay updated pane={s} pixel={d}x{d}", .{
+            pane_id, new_pixel_w, new_pixel_h,
         });
 
-        // Spawn the Chromium Profile Server (if not already running).
-        if (pane.server_process == null) {
-            spawnServer(&pane, profile);
-        } else if (resized) {
-            sendResize(&pane);
+        // Send resize if tab is active and dimensions changed.
+        if (p.tab_sent) {
+            if (p.server) |server| {
+                if (server.peer != null and (new_pixel_w != old_w or new_pixel_h != old_h)) {
+                    sendResize(p, server);
+                }
+            }
         }
     } else {
-        log.warn("no surface found for pane={s}", .{pane_id});
+        // New pane.
+        const p = alloc.create(Pane) catch {
+            log.err("failed to allocate Pane", .{});
+            return;
+        };
+        p.* = .{};
+
+        // Owned copy of pane_id as HashMap key.
+        const pane_id_key = alloc.dupe(u8, pane_id) catch {
+            alloc.destroy(p);
+            return;
+        };
+        p.pane_id_key = pane_id_key;
+        panes.put(pane_id_key, p) catch {
+            alloc.free(pane_id_key);
+            alloc.destroy(p);
+            return;
+        };
+
+        p.overlay_surface = surface.core();
+        p.pending_pixel_w = new_pixel_w;
+        p.pending_pixel_h = new_pixel_h;
+
+        // Store pending URL.
+        if (url.len > 0 and url.len <= p.pending_url_buf.len) {
+            @memcpy(p.pending_url_buf[0..url.len], url);
+            p.pending_url_len = url.len;
+        }
+
+        // Retain and register web peer for disconnect identification.
+        const conn = xpc_dictionary_get_remote_connection(msg);
+        if (conn != null) {
+            p.web_peer = xpc_retain(conn);
+            peer_to_pane.put(@intFromPtr(conn.?), pane_id_key) catch {};
+        }
+
+        log.info("new pane={s} pixel={d}x{d}", .{
+            pane_id, new_pixel_w, new_pixel_h,
+        });
+
+        // Get or create server for this profile.
+        if (getOrCreateServer(profile)) |server| {
+            p.server = server;
+            server.pane_count += 1;
+
+            if (server.peer != null) {
+                // Server already registered — send create_tab now.
+                sendCreateTab(p, server);
+            }
+        }
     }
 }
 
@@ -254,45 +358,26 @@ fn handleServerRegister(msg: xpc_object_t) void {
     const profile = str(xpc_dictionary_get_string(msg, "profile"));
     log.info("server_register profile={s}", .{profile});
 
-    pane.mutex.lock();
-    defer pane.mutex.unlock();
-
-    // Retain server peer on first message.
-    if (pane.server_peer == null) {
-        const conn = xpc_dictionary_get_remote_connection(msg);
-        if (conn != null) pane.server_peer = xpc_retain(conn);
-    }
-
-    if (pane.server_peer == null) {
-        log.warn("server_register but no server_peer", .{});
+    const server = servers.get(profile) orelse {
+        log.warn("server_register for unknown profile={s}", .{profile});
         return;
+    };
+
+    // Retain and store server peer.
+    const conn = xpc_dictionary_get_remote_connection(msg);
+    if (conn != null) {
+        server.peer = xpc_retain(conn);
+        peer_to_profile.put(@intFromPtr(conn.?), server.profile_key) catch {};
     }
 
-    // Send create_tab with the pending URL and pixel dimensions.
-    const reply = xpc_dictionary_create(null, null, 0);
-    xpc_dictionary_set_string(reply, "action", "create_tab");
-
-    // URL must be null-terminated for xpc_dictionary_set_string.
-    var url_z: [2049]u8 = undefined;
-    if (pane.pending_url_len > 0 and pane.pending_url_len < url_z.len) {
-        @memcpy(url_z[0..pane.pending_url_len], pane.pending_url_buf[0..pane.pending_url_len]);
-        url_z[pane.pending_url_len] = 0;
-        xpc_dictionary_set_string(reply, "url", @ptrCast(&url_z));
+    // Flush all pending tabs for this server.
+    var it = panes.iterator();
+    while (it.next()) |entry| {
+        const p = entry.value_ptr.*;
+        if (p.server == server and !p.tab_sent and p.pending_url_len > 0) {
+            sendCreateTab(p, server);
+        }
     }
-
-    // Pane ID is already a [36]u8 — add null terminator.
-    var pane_z: [37]u8 = undefined;
-    @memcpy(pane_z[0..36], &pane.pending_pane_id);
-    pane_z[36] = 0;
-    xpc_dictionary_set_string(reply, "pane_id", @ptrCast(&pane_z));
-
-    xpc_dictionary_set_uint64(reply, "pixel_width", pane.pending_pixel_w);
-    xpc_dictionary_set_uint64(reply, "pixel_height", pane.pending_pixel_h);
-
-    xpc_connection_send_message(pane.server_peer, reply);
-    log.info("sent create_tab url_len={d} pixel={d}x{d}", .{
-        pane.pending_url_len, pane.pending_pixel_w, pane.pending_pixel_h,
-    });
 }
 
 fn handleDisplaySurface(msg: xpc_object_t) void {
@@ -305,12 +390,12 @@ fn handleDisplaySurface(msg: xpc_object_t) void {
     };
     _ = mach_port_deallocate(mach_task_self_, port);
 
-    pane.mutex.lock();
-    const surface = pane.overlay_surface;
-    pane.mutex.unlock();
-
-    if (surface) |s| {
-        s.setOverlayIOSurface(iosurface);
+    // Route by pane_id.
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    if (panes.get(pane_id)) |p| {
+        if (p.overlay_surface) |surface| {
+            surface.setOverlayIOSurface(iosurface);
+        }
     }
 
     // IOSurfaceLookupFromMachPort returns +1 ref; setOverlayIOSurface
@@ -330,33 +415,36 @@ fn handleModeChanged(msg: xpc_object_t) void {
     log.info("mode_changed pane={s} browsing={}", .{ pane_id, browsing });
 }
 
-/// Send a resize message to the Chromium server. Caller must hold `p.mutex`.
-fn sendResize(p: *Pane) void {
-    const msg = xpc_dictionary_create(null, null, 0);
-    xpc_dictionary_set_string(msg, "action", "resize");
-
-    var pane_z: [37]u8 = undefined;
-    @memcpy(pane_z[0..36], &p.pending_pane_id);
-    pane_z[36] = 0;
-    xpc_dictionary_set_string(msg, "pane_id", @ptrCast(&pane_z));
-
-    xpc_dictionary_set_uint64(msg, "pixel_width", p.pending_pixel_w);
-    xpc_dictionary_set_uint64(msg, "pixel_height", p.pending_pixel_h);
-
-    xpc_connection_send_message(p.server_peer, msg);
-    log.info("sent resize pixel={d}x{d}", .{ p.pending_pixel_w, p.pending_pixel_h });
-}
-
 // -- Server lifecycle --
 
-/// Spawn the Chromium Profile Server. Caller must hold `p.mutex`.
-fn spawnServer(p: *Pane, profile: []const u8) void {
+fn getOrCreateServer(profile: []const u8) ?*Server {
+    if (servers.get(profile)) |server| {
+        return server;
+    }
+
+    // Create new server for this profile.
+    const profile_key = alloc.dupe(u8, profile) catch return null;
+    const server = alloc.create(Server) catch {
+        alloc.free(profile_key);
+        return null;
+    };
+    server.* = .{ .profile_key = profile_key };
+    servers.put(profile_key, server) catch {
+        alloc.free(profile_key);
+        alloc.destroy(server);
+        return null;
+    };
+
+    spawnServerProcess(server);
+    return server;
+}
+
+fn spawnServerProcess(server: *Server) void {
     const home = std.posix.getenv("HOME") orelse {
         log.err("HOME not set, cannot spawn server", .{});
         return;
     };
 
-    // Build null-terminated path strings.
     var path_buf: [512]u8 = undefined;
     const server_path = std.fmt.bufPrintZ(
         &path_buf,
@@ -378,7 +466,7 @@ fn spawnServer(p: *Pane, profile: []const u8) void {
     const data_arg = std.fmt.bufPrintZ(
         &data_arg_buf,
         "--user-data-dir={s}/.config/termsurf/chromium-profiles/{s}",
-        .{ home, profile },
+        .{ home, server.profile_key },
     ) catch {
         log.err("data dir path too long", .{});
         return;
@@ -387,66 +475,168 @@ fn spawnServer(p: *Pane, profile: []const u8) void {
     var hidden_buf: [16]u8 = undefined;
     const hidden_arg = std.fmt.bufPrintZ(&hidden_buf, "--hidden", .{}) catch return;
 
-    log.info("spawning server: {s}", .{server_path});
+    log.info("spawning server profile={s}", .{server.profile_key});
 
     var child = std.process.Child.init(
         &.{ server_path, xpc_arg, data_arg, hidden_arg },
-        std.heap.page_allocator,
+        alloc,
     );
     child.spawn() catch |err| {
         log.err("failed to spawn server: {}", .{err});
         return;
     };
 
-    p.server_process = child;
-    log.info("server spawned pid={d}", .{child.id});
+    server.process = child;
+    log.info("server spawned pid={d} profile={s}", .{ child.id, server.profile_key });
 }
 
-/// Kill the server process and wait for it to exit. Caller must hold `p.mutex`.
-fn killServer(p: *Pane) void {
-    if (p.server_process) |*proc| {
+fn killServer(server: *Server) void {
+    if (server.process) |*proc| {
         _ = proc.kill() catch {};
         _ = proc.wait() catch {};
-        log.info("server killed", .{});
+        log.info("server killed profile={s}", .{server.profile_key});
     }
-    p.server_process = null;
+    server.process = null;
 }
 
-/// Full cleanup of a pane's state. Caller must hold `p.mutex`.
-fn cleanupPaneLocked(p: *Pane) void {
-    if (p.overlay_surface) |surface| {
-        surface.clearOverlay();
-        p.overlay_surface = null;
+fn sendCreateTab(p: *Pane, server: *Server) void {
+    const msg = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(msg, "action", "create_tab");
+
+    // URL (null-terminated).
+    var url_z: [2049]u8 = undefined;
+    if (p.pending_url_len > 0 and p.pending_url_len < url_z.len) {
+        @memcpy(url_z[0..p.pending_url_len], p.pending_url_buf[0..p.pending_url_len]);
+        url_z[p.pending_url_len] = 0;
+        xpc_dictionary_set_string(msg, "url", @ptrCast(&url_z));
     }
 
-    killServer(p);
-
-    if (p.web_peer) |peer| {
-        xpc_release(peer);
-        p.web_peer = null;
-    }
-    if (p.server_peer) |peer| {
-        xpc_release(peer);
-        p.server_peer = null;
+    // Pane ID (null-terminated).
+    if (p.pane_id_key.len > 0 and p.pane_id_key.len <= 36) {
+        var pane_z: [37]u8 = undefined;
+        @memcpy(pane_z[0..p.pane_id_key.len], p.pane_id_key);
+        pane_z[p.pane_id_key.len] = 0;
+        xpc_dictionary_set_string(msg, "pane_id", @ptrCast(&pane_z));
     }
 
-    p.pending_url_len = 0;
-    p.pending_pixel_w = 0;
-    p.pending_pixel_h = 0;
+    xpc_dictionary_set_uint64(msg, "pixel_width", p.pending_pixel_w);
+    xpc_dictionary_set_uint64(msg, "pixel_height", p.pending_pixel_h);
+
+    xpc_connection_send_message(server.peer, msg);
+    p.tab_sent = true;
+
+    log.info("sent create_tab pane={s} pixel={d}x{d}", .{
+        p.pane_id_key, p.pending_pixel_w, p.pending_pixel_h,
+    });
 }
 
-fn handleDisconnect() void {
-    pane.mutex.lock();
-    defer pane.mutex.unlock();
+fn sendResize(p: *Pane, server: *Server) void {
+    const msg = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(msg, "action", "resize");
 
-    // Idempotent: if already cleaned up, the second disconnect is a no-op.
-    if (pane.web_peer == null and pane.server_peer == null) {
-        log.info("peer disconnected (already cleaned up)", .{});
+    if (p.pane_id_key.len > 0 and p.pane_id_key.len <= 36) {
+        var pane_z: [37]u8 = undefined;
+        @memcpy(pane_z[0..p.pane_id_key.len], p.pane_id_key);
+        pane_z[p.pane_id_key.len] = 0;
+        xpc_dictionary_set_string(msg, "pane_id", @ptrCast(&pane_z));
+    }
+
+    xpc_dictionary_set_uint64(msg, "pixel_width", p.pending_pixel_w);
+    xpc_dictionary_set_uint64(msg, "pixel_height", p.pending_pixel_h);
+
+    xpc_connection_send_message(server.peer, msg);
+    log.info("sent resize pane={s} pixel={d}x{d}", .{
+        p.pane_id_key, p.pending_pixel_w, p.pending_pixel_h,
+    });
+}
+
+// -- Disconnect handling --
+
+fn handleDisconnect(peer_addr: usize) void {
+    // Check if this is a web peer.
+    if (peer_to_pane.get(peer_addr)) |pane_id_key| {
+        log.info("web peer disconnected pane={s}", .{pane_id_key});
+
+        if (panes.get(pane_id_key)) |p| {
+            if (p.overlay_surface) |surface| surface.clearOverlay();
+
+            // Decrement server pane count; kill if last.
+            if (p.server) |server| {
+                if (server.pane_count > 0) server.pane_count -= 1;
+
+                if (server.pane_count == 0) {
+                    killServer(server);
+                    if (server.peer) |sp| {
+                        _ = peer_to_profile.remove(@intFromPtr(sp));
+                        xpc_release(sp);
+                    }
+                    _ = servers.remove(server.profile_key);
+                    freeKey(server.profile_key);
+                    alloc.destroy(server);
+                }
+            }
+
+            if (p.web_peer) |peer| xpc_release(peer);
+            _ = panes.remove(pane_id_key);
+            _ = peer_to_pane.remove(peer_addr);
+            freeKey(p.pane_id_key);
+            alloc.destroy(p);
+        } else {
+            _ = peer_to_pane.remove(peer_addr);
+        }
         return;
     }
 
-    cleanupPaneLocked(&pane);
-    log.info("peer disconnected, cleaned up", .{});
+    // Check if this is a server peer.
+    if (peer_to_profile.get(peer_addr)) |profile_key| {
+        log.info("server peer disconnected profile={s}", .{profile_key});
+
+        if (servers.get(profile_key)) |server| {
+            // Collect pane keys to remove (can't mutate map during iteration).
+            var keys_buf: [64][]const u8 = undefined;
+            var addrs_buf: [64]usize = undefined;
+            var count: usize = 0;
+
+            var it = panes.iterator();
+            while (it.next()) |entry| {
+                const p = entry.value_ptr.*;
+                if (p.server == server and count < keys_buf.len) {
+                    if (p.overlay_surface) |surface| surface.clearOverlay();
+                    addrs_buf[count] = if (p.web_peer) |wp| @intFromPtr(wp) else 0;
+                    if (p.web_peer) |wp| xpc_release(wp);
+                    keys_buf[count] = entry.key_ptr.*;
+                    count += 1;
+                    alloc.destroy(p);
+                }
+            }
+
+            for (0..count) |i| {
+                _ = panes.remove(keys_buf[i]);
+                if (addrs_buf[i] != 0) _ = peer_to_pane.remove(addrs_buf[i]);
+                freeKey(keys_buf[i]);
+            }
+
+            if (server.peer) |sp| xpc_release(sp);
+            _ = servers.remove(profile_key);
+            _ = peer_to_profile.remove(peer_addr);
+            freeKey(server.profile_key);
+            alloc.destroy(server);
+        } else {
+            _ = peer_to_profile.remove(peer_addr);
+        }
+        return;
+    }
+
+    log.info("unknown peer disconnected", .{});
+}
+
+// -- Helpers --
+
+/// Free a heap-allocated key ([]const u8 from alloc.dupe). No-op for empty.
+fn freeKey(key: []const u8) void {
+    if (key.len > 0) {
+        alloc.free(@constCast(key));
+    }
 }
 
 /// Convert a nullable C string to a Zig slice, defaulting to "(null)".

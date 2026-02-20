@@ -277,3 +277,45 @@ Pass criteria:
 - Closing one pane doesn't affect the other
 - Closing the last pane kills the server
 - Resize works independently per pane
+
+### Result: Pass
+
+Tested with three panes on the same profile, all rendering the box demo
+simultaneously. One Chromium server process (PID 29095) hosted all three tabs.
+
+**Timeline (from logs):**
+
+1. First `web` connects → Ghost spawns server → `create_tab` → 60fps streaming
+2. Split pane → second `web` connects → Ghost reuses server → `create_tab` →
+   `2 tab(s) active` → 60fps on both
+3. Third pane → Ghost reuses server again → `create_tab` → `3 tab(s) active` →
+   60fps on all three
+4. Resize one pane → only that tab's capturer resizes, others unaffected
+5. Close panes → server continues until last tab closes
+
+**Observations:**
+
+- **Three tabs at 60fps each** — 180 `display_surface` messages/second on the
+  serial queue with no frame drops or bottleneck.
+- **Server reuse worked first try** — the `servers` HashMap keyed by profile
+  correctly shared one Chromium process across all three panes.
+- **Independent resize** — resizing pane 1 (780→377→780) while panes 2 and 3
+  continued streaming unaffected.
+- **First-tab latency ~1s, subsequent tabs ~0.2s** — the server is already warm
+  for the second and third tabs, so `create_tab` → first frame is much faster.
+- **`[ProfileServer] Gateway error`** appears in every session — the server's
+  gateway connection errors after registration because the gateway drops the
+  connection once the endpoint is claimed. Harmless but noisy; could suppress in
+  a future issue.
+
+## Conclusion
+
+Issue 604 is complete. The multi-pane architecture works: serial dispatch queue,
+per-pane state maps, server reuse by profile, `display_surface` routing by
+`pane_id`, and per-pane disconnect cleanup. Three panes at 60fps each on one
+server process — matching the throughput ts5 achieved in Issue 511, now in Zig.
+
+No changes were needed to `web`, xpc-gateway, the Chromium server, or the Metal
+renderer. The entire issue was a rewrite of `xpc.zig` — replacing the single
+`var pane: Pane` with `StringHashMap`-based multi-pane state and a GCD serial
+queue for thread safety.
