@@ -65,3 +65,15 @@ Pass criteria:
 - Closing one pane kills only its server
 - Closing the other pane kills the remaining server
 - No errors in Ghost logs
+
+### Result: Pass
+
+Two profiles side by side, zero code changes. The multi-profile path implemented
+in Issue 604 worked on the first try.
+
+## Conclusion
+
+Issue 605 is complete. Two different profiles run as two independent Chromium
+Profile Server processes, each with isolated `--user-data-dir`, streaming to
+separate panes at 60fps. No code changes were needed — Issue 604's architecture
+handled multi-profile out of the box.
