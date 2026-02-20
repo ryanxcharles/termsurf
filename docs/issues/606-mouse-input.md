@@ -233,3 +233,85 @@ bounds in physical pixels, converts to logical pixels via content scale, and
 `sendMouseEvent` in xpc.zig forwards the XPC `mouse_event` to the Chromium
 server's control connection. Clicks outside the overlay go to the terminal as
 normal.
+
+## Experiment 2: Scroll forwarding
+
+### Goal
+
+Scroll a web page in the Chromium overlay. Trackpad two-finger scroll and mouse
+wheel both work. Momentum scrolling (inertial flick) works. Scrolling outside
+the overlay scrolls the terminal as normal.
+
+### Design
+
+Same pattern as Experiment 1: intercept `scrollCallback` in Surface.zig,
+hit-test the overlay, forward via XPC. The Chromium server's `HandleScrollEvent`
+already exists from ts5 Issue 514.
+
+**Phase 1: Intercept scrolls in `scrollCallback`.**
+
+At the top of `scrollCallback`, before any terminal processing:
+
+```zig
+// Check if scroll is in a browser overlay (Issue 606).
+{
+    const cursor = try self.rt_surface.getCursorPos();
+    if (self.hitTestOverlay(@floatCast(cursor.x), @floatCast(cursor.y))) |overlay_pos| {
+        const xpc = @import("apprt/xpc.zig");
+        xpc.sendScrollEvent(self, xoff, yoff, scroll_mods, overlay_pos.x, overlay_pos.y);
+        return;
+    }
+}
+```
+
+`scrollCallback` returns `!void`, so `return` is enough to suppress terminal
+processing.
+
+**Phase 2: `sendScrollEvent` in `xpc.zig`.**
+
+Add `sendScrollEvent` that constructs an XPC `scroll_event` dictionary:
+
+```
+action:         "scroll_event"
+pane_id:        UUID string
+x, y:           overlay-relative logical pixels (from hitTestOverlay)
+delta_x:        horizontal scroll offset (xoff from scrollCallback)
+delta_y:        vertical scroll offset (yoff from scrollCallback)
+phase:          scroll phase (0 = none for non-trackpad)
+momentum_phase: momentum phase from ScrollMods.momentum
+precise:        true if ScrollMods.precision is set
+modifiers:      0 (scroll events rarely carry modifiers)
+```
+
+Ghost's `scrollCallback` receives `xoff`/`yoff` as pixel deltas when
+`scroll_mods.precision` is true (trackpad), or as wheel tick counts when false
+(mouse wheel). Chromium's `ForwardWheelEvent` expects pixel deltas. For
+non-precision scrolls, multiply by a cell height to convert ticks to pixels
+(matching Ghost's own `yoff_adjusted` logic). For precision scrolls, pass
+through directly.
+
+The `momentum` field from `ScrollMods` maps to macOS `NSEvent.momentumPhase`:
+`none=0`, `began=1`, `stationary=2`, `changed=3`, `ended=4`, `cancelled=5`,
+`may_begin=6`. Pass as `momentum_phase` in the XPC message. Chromium uses this
+for inertial scrolling.
+
+Ghost doesn't expose `NSEvent.phase` (the gesture phase) in `ScrollMods` — only
+`momentum`. Set `phase` to 0 in the XPC message. The Chromium server handles
+this correctly — it only uses phase for gesture-begin/end detection, which
+momentum already covers.
+
+### Verification
+
+```bash
+cd ghost && zig build
+open ghost/zig-out/Ghostty.app --stderr ~/dev/termsurf/logs/ghost.log
+cargo run -p web -- https://news.ycombinator.com
+```
+
+Pass criteria:
+
+- Two-finger trackpad scroll moves the page up and down smoothly
+- Momentum scrolling works (flick and release, page keeps scrolling)
+- Mouse wheel scrolling works
+- Scrolling outside the overlay scrolls the terminal as normal
+- No jitter or reverse-direction scroll
