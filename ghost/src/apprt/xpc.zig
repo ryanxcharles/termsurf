@@ -681,6 +681,47 @@ pub fn sendScrollEvent(
     xpc_connection_send_message(server.peer, msg);
 }
 
+/// Called from Surface.cursorPosCallback when the mouse is over the overlay.
+/// Sends mouse_move with button-down flags derived from click_state.
+pub fn sendMouseMove(
+    surface: *CoreSurface,
+    overlay_x: f64,
+    overlay_y: f64,
+) void {
+    const pane_id_key = surface_to_pane.get(@intFromPtr(surface)) orelse {
+        log.warn("sendMouseMove: no pane for surface", .{});
+        return;
+    };
+    const p = panes.get(pane_id_key) orelse return;
+    const server = p.server orelse return;
+    if (server.peer == null) return;
+
+    const msg = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(msg, "action", "mouse_move");
+
+    // Pane ID (null-terminated).
+    if (pane_id_key.len > 0 and pane_id_key.len <= 36) {
+        var pane_z: [37]u8 = undefined;
+        @memcpy(pane_z[0..pane_id_key.len], pane_id_key);
+        pane_z[pane_id_key.len] = 0;
+        xpc_dictionary_set_string(msg, "pane_id", @ptrCast(&pane_z));
+    }
+
+    // Overlay-relative logical coordinates.
+    xpc_dictionary_set_double(msg, "x", overlay_x);
+    xpc_dictionary_set_double(msg, "y", overlay_y);
+
+    // Button-down flags from click_state (for drag vs hover distinction).
+    var modifiers: i64 = 0;
+    const left_idx = @intFromEnum(input.MouseButton.left);
+    const right_idx = @intFromEnum(input.MouseButton.right);
+    if (surface.mouse.click_state[left_idx] == .press) modifiers |= 64; // kLeftButtonDown (1 << 6)
+    if (surface.mouse.click_state[right_idx] == .press) modifiers |= 256; // kRightButtonDown (1 << 8)
+    xpc_dictionary_set_int64(msg, "modifiers", modifiers);
+
+    xpc_connection_send_message(server.peer, msg);
+}
+
 // -- Disconnect handling --
 
 fn handleDisconnect(peer_addr: usize) void {

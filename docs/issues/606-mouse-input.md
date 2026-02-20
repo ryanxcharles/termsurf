@@ -523,3 +523,13 @@ Pass criteria:
 - Mouse moves outside the overlay still work for terminal (selection, etc.)
 - Left-click drag in the overlay sends button-down flag (visible in logs)
 - No crash or lag from high-frequency mouse move events
+
+### Result: Pass
+
+Hovering over links on Hacker News triggers CSS hover states. The interception
+in `cursorPosCallback` hit-tests the overlay, converts to logical coordinates,
+and `sendMouseMove` in xpc.zig forwards the `mouse_move` XPC message with
+button-down flags from `click_state`. Moving `click_state` update before the
+overlay check in `mouseButtonCallback` ensures button state is tracked for both
+overlay and terminal clicks, so drag events carry the correct `kLeftButtonDown`
+(64) modifier. No crashes from high-frequency mouse move events.

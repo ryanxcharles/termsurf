@@ -3982,6 +3982,10 @@ pub fn mouseButtonCallback(
 
     // log.debug("mouse action={} button={} mods={}", .{ action, button, mods });
 
+    // Always record our latest mouse state (moved up for overlay tracking,
+    // so cursorPosCallback can read button-down state during drag — Issue 606).
+    self.mouse.click_state[@intCast(@intFromEnum(button))] = action;
+
     // Check if click is in a browser overlay (Issue 606).
     {
         const cursor = try self.rt_surface.getCursorPos();
@@ -3996,9 +4000,6 @@ pub fn mouseButtonCallback(
     if (self.inspector != null) {
         defer self.queueRender() catch {};
     }
-
-    // Always record our latest mouse state
-    self.mouse.click_state[@intCast(@intFromEnum(button))] = action;
 
     // Always show the mouse again if it is hidden
     if (self.mouse.hidden) self.showMouse();
@@ -4737,6 +4738,13 @@ pub fn cursorPosCallback(
     defer crash.sentry.thread_state = null;
 
     // log.debug("cursor pos x={} y={} mods={?}", .{ pos.x, pos.y, mods });
+
+    // Check if mouse is in a browser overlay (Issue 606).
+    if (self.hitTestOverlay(@floatCast(pos.x), @floatCast(pos.y))) |overlay_pos| {
+        const xpc = @import("apprt/xpc.zig");
+        xpc.sendMouseMove(self, overlay_pos.x, overlay_pos.y);
+        return;
+    }
 
     // If the position is negative, it is outside our viewport and
     // we need to clear any hover states.
