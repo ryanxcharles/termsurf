@@ -35,6 +35,7 @@ extern "c" fn xpc_dictionary_get_uint64(xdict: xpc_object_t, key: [*:0]const u8)
 extern "c" fn xpc_dictionary_get_bool(xdict: xpc_object_t, key: [*:0]const u8) bool;
 extern "c" fn xpc_dictionary_set_uint64(xdict: xpc_object_t, key: [*:0]const u8, value: u64) void;
 extern "c" fn xpc_dictionary_set_int64(xdict: xpc_object_t, key: [*:0]const u8, value: i64) void;
+extern "c" fn xpc_dictionary_get_int64(xdict: xpc_object_t, key: [*:0]const u8) i64;
 extern "c" fn xpc_dictionary_set_double(xdict: xpc_object_t, key: [*:0]const u8, value: f64) void;
 extern "c" fn xpc_dictionary_set_bool(xdict: xpc_object_t, key: [*:0]const u8, value: bool) void;
 extern "c" fn xpc_dictionary_get_remote_connection(msg: xpc_object_t) xpc_object_t;
@@ -247,6 +248,8 @@ fn handleMessage(msg: xpc_object_t) void {
         handleTabReady(msg);
     } else if (std.mem.eql(u8, action_str, "mode_changed")) {
         handleModeChanged(msg);
+    } else if (std.mem.eql(u8, action_str, "cursor_changed")) {
+        handleCursorChanged(msg);
     } else {
         log.warn("unknown action: {s}", .{action_str});
     }
@@ -425,6 +428,17 @@ fn handleModeChanged(msg: xpc_object_t) void {
     const browsing = xpc_dictionary_get_bool(msg, "browsing");
 
     log.info("mode_changed pane={s} browsing={}", .{ pane_id, browsing });
+}
+
+fn handleCursorChanged(msg: xpc_object_t) void {
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    const cursor_type = xpc_dictionary_get_int64(msg, "cursor_type");
+
+    if (panes.get(pane_id)) |p| {
+        if (p.overlay_surface) |surface| {
+            surface.overlay_cursor_type = cursor_type;
+        }
+    }
 }
 
 // -- Server lifecycle --

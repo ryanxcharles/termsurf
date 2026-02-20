@@ -708,3 +708,11 @@ Pass criteria:
   mouse capture)
 - Cursor transitions are instant (no flicker or stuck cursor)
 - Rapid movement between overlay and terminal doesn't leave the wrong cursor
+
+### Result: Pass
+
+Hovering over links on news.ycombinator.com shows the pointing hand cursor.
+Moving off the overlay restores the terminal's cursor. Cursor changes are
+instant with no flicker. The `performAction(.mouse_shape)` pipeline works
+through Ghostty's existing `documentCursor` system — no `NSCursor.set()` hack,
+no `invalidateCursorRects` needed. Three ts5 experiments collapsed into one.

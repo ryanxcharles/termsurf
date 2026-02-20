@@ -77,6 +77,11 @@ raw_scroll: struct {
     precise: bool = false,
 } = .{},
 
+/// Chromium cursor type for overlay (Issue 606).
+/// Set by XPC cursor_changed handler, read by cursorPosCallback.
+/// Values are ui::mojom::CursorType integers from Chromium.
+overlay_cursor_type: i64 = 0,
+
 /// The windowing system surface and app.
 rt_app: *apprt.runtime.App,
 rt_surface: *apprt.runtime.Surface,
@@ -267,6 +272,9 @@ const Mouse = struct {
 
     /// True if the mouse position is currently over a link.
     over_link: bool = false,
+
+    /// True if the mouse is currently over a browser overlay (Issue 606).
+    over_overlay: bool = false,
 
     /// The last x/y in the cursor position for links. We use this to
     /// only process link hover events when the mouse actually moves cells.
@@ -2462,6 +2470,22 @@ pub fn hitTestOverlay(self: *Surface, phys_x: f64, phys_y: f64) ?struct { x: f64
 
     const scale = self.rt_surface.getContentScale() catch return null;
     return .{ .x = rel_x / @as(f64, scale.x), .y = rel_y / @as(f64, scale.y) };
+}
+
+/// Map Chromium ui::mojom::CursorType integer to Ghostty MouseShape (Issue 606).
+fn mapChromiumCursor(cursor_type: i64) terminal.MouseShape {
+    return switch (cursor_type) {
+        0 => .default, // kPointer (arrow)
+        1 => .crosshair, // kCross
+        2 => .pointer, // kHand
+        3 => .text, // kIBeam
+        31 => .move, // kMove
+        39 => .default, // kNone (hide cursor — use default for now)
+        40 => .not_allowed, // kNotAllowed
+        43 => .grab, // kGrab
+        44 => .grabbing, // kGrabbing
+        else => .default,
+    };
 }
 
 /// Set the pink overlay rectangle in grid coordinates (Issue 602).
@@ -4743,7 +4767,26 @@ pub fn cursorPosCallback(
     if (self.hitTestOverlay(@floatCast(pos.x), @floatCast(pos.y))) |overlay_pos| {
         const xpc = @import("apprt/xpc.zig");
         xpc.sendMouseMove(self, overlay_pos.x, overlay_pos.y);
+
+        // Set cursor from Chromium's cursor type (Issue 606 Experiment 4).
+        const shape = mapChromiumCursor(self.overlay_cursor_type);
+        _ = try self.rt_app.performAction(
+            .{ .surface = self },
+            .mouse_shape,
+            shape,
+        );
+        self.mouse.over_overlay = true;
         return;
+    }
+
+    // Restore terminal cursor when leaving the overlay (Issue 606 Experiment 4).
+    if (self.mouse.over_overlay) {
+        self.mouse.over_overlay = false;
+        _ = try self.rt_app.performAction(
+            .{ .surface = self },
+            .mouse_shape,
+            self.io.terminal.mouse_shape,
+        );
     }
 
     // If the position is negative, it is outside our viewport and
