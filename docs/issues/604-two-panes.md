@@ -22,7 +22,9 @@ panes cannot coexist.
 **Ghost (from Issues 601–603):**
 
 - XPC gateway connection, anonymous listener, endpoint registration
-- `Pane` struct with per-pane mutex, web/server peer tracking
+- `Pane` struct with per-pane mutex, web/server peer tracking (mutex replaced by
+  serial queue in this issue)
+- XPC connections use default concurrent dispatch queue (no target queue set)
 - Server lifecycle: spawn, `server_register` → `create_tab` → `display_surface`
 - IOSurface → Metal texture pipeline (zero-copy)
 - Dynamic resize via `sendResize`
@@ -51,13 +53,32 @@ panes cannot coexist.
 
 ### What needs to change
 
-**1. Multi-pane state in `xpc.zig`.**
+**1. Serial dispatch queue for XPC state.**
+
+Currently XPC connections use the default concurrent dispatch queue, so handlers
+can fire on different threads simultaneously. Issue 603 worked around this with
+a per-pane mutex, but multi-pane requires coordinating state across panes (e.g.
+server reuse, disconnect cleanup). Per-pane mutexes don't cover cross-pane
+operations; a global mutex would bottleneck everything.
+
+The proven solution (ts5 Issue 511): create a serial dispatch queue and set it
+as the target queue for all XPC connections. All handlers run serially — no
+mutexes needed, no deadlocks possible, no lock ordering concerns. ts5 ran three
+panes at 60fps each (180 `display_surface` messages/second) plus mouse, scroll,
+and keyboard events on one serial queue with no bottleneck — each handler is
+microseconds of work.
+
+Zig calls `dispatch_queue_create` and `xpc_connection_set_target_queue` directly
+(C APIs via `@cImport` or manual extern declarations).
+
+**2. Multi-pane state in `xpc.zig`.**
 
 Replace `var pane: Pane = .{}` with a data structure that maps pane UUIDs to
 `Pane` structs. When `set_overlay` arrives with a new `pane_id`, create a new
-`Pane`. When a web peer disconnects, clean up only that pane.
+`Pane`. When a web peer disconnects, clean up only that pane. No mutex on `Pane`
+— the serial queue serializes all access.
 
-**2. Server reuse by profile.**
+**3. Server reuse by profile.**
 
 Currently Ghost spawns a new server for every `set_overlay` with a URL. With two
 panes on the same profile, the second pane must reuse the first pane's server.
@@ -65,20 +86,20 @@ Need a profile → server mapping so that `handleSetOverlay` can detect an
 existing server and send `create_tab` on its control connection instead of
 spawning.
 
-**3. `display_surface` routing.**
+**4. `display_surface` routing.**
 
 Currently `handleDisplaySurface` writes to `pane.overlay_surface` — a single
 surface. With multiple panes, the handler must read `pane_id` from each
 `display_surface` message and route the IOSurface to the correct pane's surface.
 
-**4. Per-pane disconnect.**
+**5. Per-pane disconnect.**
 
 Currently `handleDisconnect` kills the server and cleans up everything. With
 multiple panes sharing a server, disconnecting one pane should only remove that
 pane's tab. The server should be killed only when all panes for that profile
 have disconnected (or the server auto-exits when its last tab closes).
 
-**5. Per-pane resize.**
+**6. Per-pane resize.**
 
 Currently `sendResize` sends on `pane.server_peer`. With multiple panes sharing
 one server, resize messages go on the shared control connection but must include
@@ -103,6 +124,35 @@ box demo simultaneously at 60fps. Same profile, one Chromium server process.
 
 ### Design
 
+**Serial dispatch queue** in `xpc.zig`:
+
+Create a serial dispatch queue and set it as the target queue for the gateway
+connection, the anonymous listener, and every peer connection. All XPC event
+handlers then run serially on this queue. No mutexes needed — state access is
+inherently serialized.
+
+```zig
+extern "c" fn dispatch_queue_create(label: [*:0]const u8, attr: ?*anyopaque) ?*anyopaque;
+extern const _dispatch_queue_attr_concurrent: anyopaque; // not used — null = serial
+extern "c" fn xpc_connection_set_target_queue(conn: xpc_object_t, queue: ?*anyopaque) void;
+
+var xpc_queue: ?*anyopaque = null;
+```
+
+In `init()`, before creating connections:
+
+```zig
+xpc_queue = dispatch_queue_create("com.termsurf.ghost.xpc", null); // null = serial
+```
+
+Then set on every connection:
+
+```zig
+gateway = xpc_connection_create_mach_service("com.termsurf.xpc-gateway", null, 0);
+xpc_connection_set_target_queue(gateway, xpc_queue);
+// ... same for listener and each peer in listenerHandler
+```
+
 **Data structures** in `xpc.zig`:
 
 Replace the single `var pane: Pane = .{}` with:
@@ -110,10 +160,15 @@ Replace the single `var pane: Pane = .{}` with:
 ```zig
 /// Active panes, keyed by pane UUID string.
 var panes: std.StringHashMap(*Pane) = undefined;
-var panes_mutex: std.Thread.Mutex = .{};
 
 /// Active servers, keyed by profile name.
 var servers: std.StringHashMap(*Server) = undefined;
+
+/// Reverse lookup: connection pointer → pane UUID string.
+var peer_to_pane: std.AutoHashMap(usize, []const u8) = undefined;
+
+/// Reverse lookup: connection pointer → profile name (for server peers).
+var peer_to_profile: std.AutoHashMap(usize, []const u8) = undefined;
 ```
 
 Where `Server` holds the shared server state:
@@ -127,15 +182,15 @@ const Server = struct {
 };
 ```
 
-And `Pane` changes to reference its server:
+And `Pane` drops the mutex (serial queue handles serialization):
 
 ```zig
 const Pane = struct {
-    mutex: std.Thread.Mutex = .{},
     web_peer: xpc_object_t = null,
     overlay_surface: ?*CoreSurface = null,
     server: ?*Server = null,
     pane_id: [36]u8 = undefined,
+    profile: []const u8 = "",
     pending_url_buf: [2048]u8 = undefined,
     pending_url_len: usize = 0,
     pending_pixel_w: u64 = 0,
@@ -143,24 +198,32 @@ const Pane = struct {
 };
 ```
 
+No mutexes on any of these. All access happens on the serial `xpc_queue`.
+
+Note: `setOverlayIOSurface` and `setOverlay` still use `draw_mutex` internally —
+that's the renderer thread lock, separate from XPC state. The serial queue
+protects XPC state; `draw_mutex` protects renderer state. They don't interact.
+
 **`handleSetOverlay` flow:**
 
 1. Extract `pane_id` from message
-2. Lock `panes_mutex`, look up or create `Pane` for this pane ID
-3. Lock `pane.mutex`, store overlay surface, URL, pixel dimensions
-4. Look up `servers` by profile:
+2. Look up or create `Pane` in `panes` for this pane ID
+3. Store overlay surface, URL, pixel dimensions on the pane
+4. Register `connection_ptr → pane_id` in `peer_to_pane`
+5. Look up `servers` by profile:
    - **No server:** spawn one, store URL as pending, increment `pane_count`
    - **Server exists, peer not yet connected:** store URL as pending (server is
      still starting up), increment `pane_count`
    - **Server exists, peer connected:** send `create_tab` immediately, increment
      `pane_count`
-5. If server already running and dimensions changed: send `resize`
+6. If server already running and dimensions changed: send `resize`
 
 **`handleServerRegister` flow:**
 
 1. Extract `profile` from message, look up `Server`
 2. Store the peer connection on the `Server`
-3. Iterate all panes whose server matches and have pending URLs → send
+3. Register `connection_ptr → profile` in `peer_to_profile`
+4. Iterate all panes whose server matches and have pending URLs → send
    `create_tab` for each
 
 **`handleDisplaySurface` flow:**
@@ -171,31 +234,29 @@ const Pane = struct {
 
 **Disconnect flow:**
 
+The `listenerHandler` now passes `peer` to the peer event handler via a closure
+or by capturing the connection pointer. On disconnect, the handler receives the
+connection object directly (same object that was passed to
+`xpc_connection_set_event_handler`).
+
 When a web peer disconnects:
 
-1. Find which pane this peer belongs to (by connection identity)
-2. Send `close_tab` or let the server detect the tab connection drop
-3. Decrement server's `pane_count`
-4. If `pane_count == 0`: kill server, remove from `servers`
-5. Clean up pane, remove from `panes`
+1. Look up `peer_to_pane[connection_ptr]` → pane ID
+2. Look up pane, get its profile and server
+3. Clear overlay on the pane's surface
+4. Decrement server's `pane_count`
+5. If `pane_count == 0`: kill server, remove from `servers` and
+   `peer_to_profile`
+6. Remove pane from `panes` and `peer_to_pane`
 
 When a server peer disconnects (server crashed or exited):
 
-1. Find which server this peer belongs to
-2. Clean up all panes that reference this server
-3. Remove server from `servers`
+1. Look up `peer_to_profile[connection_ptr]` → profile
+2. Find all panes that reference this server, clear their overlays
+3. Remove server from `servers`, panes from `panes`
+4. Clean up reverse lookup maps
 
-**Peer identification:**
-
-Currently `handleDisconnect` doesn't know which pane disconnected — it just
-cleans up the single pane. With multiple panes, the disconnect handler must
-identify the disconnecting peer. XPC provides
-`xpc_dictionary_get_remote_connection` on messages, but disconnect events are
-errors, not dictionaries.
-
-Option: store the connection pointer (address) as a key in a reverse lookup map
-(`connection_ptr → pane_id`). When a peer connects (first message), register the
-mapping. On disconnect, look up by connection pointer.
+All of this runs on the serial queue — no concurrent access, no races.
 
 ### Verification
 
