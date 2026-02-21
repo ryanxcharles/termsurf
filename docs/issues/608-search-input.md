@@ -149,6 +149,11 @@ Make the Chromium Profile Server's logs visible and add diagnostic logging to
 understand what happens during the freeze. Compare a working case (clicking a
 link on Wikipedia) vs a frozen case (submitting a search on Google).
 
+### Chromium branch
+
+Create `146.0.7650.0-issue-608` from `146.0.7650.0-issue-607`. The 608 branch
+builds on 607's keyboard forwarding code — we need it to type into search boxes.
+
 ### Design
 
 **Phase 1: Route server logs to `~/dev/termsurf/logs/chromium-server.log`.**
