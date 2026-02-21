@@ -167,7 +167,7 @@ fn main() -> io::Result<()> {
                     xpc::CompositorMessage::UrlChanged { url: new_url } => {
                         url = new_url;
                     }
-                    xpc::CompositorMessage::LoadingState { state, progress } => {
+                    xpc::CompositorMessage::LoadingState { state, progress: _ } => {
                         let mut stdout = io::stdout();
                         let _ = match state.as_str() {
                             "loading" => {
@@ -175,10 +175,7 @@ fn main() -> io::Result<()> {
                                 loading_bar_start = Some(Instant::now());
                                 write!(stdout, "\x1b]9;4;3\x1b\\")
                             }
-                            "progress" => {
-                                loading_bar_active = true;
-                                write!(stdout, "\x1b]9;4;1;{}\x1b\\", progress)
-                            }
+                            "progress" => Ok(()),
                             "done" => {
                                 loading_bar_active = false;
                                 loading_bar_start = None;

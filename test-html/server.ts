@@ -7,24 +7,53 @@ Bun.serve({
   async fetch(req) {
     const url = new URL(req.url);
 
-    // Slow-load route: streams chunked HTML over N seconds.
+    // Delayed resource route: sleeps for `delay` ms then returns a 1x1 PNG.
+    if (url.pathname === "/slow-resource") {
+      const delay = Math.min(
+        Math.max(parseInt(url.searchParams.get("delay") || "500"), 0),
+        30000,
+      );
+      await Bun.sleep(delay);
+      // 1x1 transparent PNG (67 bytes).
+      const png = new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00,
+        0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+        0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
+        0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x62,
+        0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xe5, 0x27, 0xde, 0xfc, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+      ]);
+      return new Response(png, {
+        headers: {
+          "Content-Type": "image/png",
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    // Slow-load route: page with many delayed subresources.
     if (url.pathname === "/slow") {
       const seconds = Math.min(
         Math.max(parseInt(url.searchParams.get("seconds") || "10"), 1),
         120,
       );
+      const count = Math.min(
+        Math.max(parseInt(url.searchParams.get("count") || "20"), 1),
+        200,
+      );
+      const delayMs = Math.round((seconds * 1000) / count);
 
-      const stream = new ReadableStream({
-        async start(controller) {
-          const encoder = new TextEncoder();
+      // Build <img> tags — each loads a delayed resource.
+      let imgs = "";
+      for (let i = 0; i < count; i++) {
+        imgs += `<img src="/slow-resource?id=${i}&delay=${delayMs}" width="1" height="1" onload="loaded()" style="position:absolute;opacity:0">\n`;
+      }
 
-          // Send the initial HTML shell.
-          controller.enqueue(
-            encoder.encode(`<!DOCTYPE html>
+      const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Slow Load Test (${seconds}s)</title>
+<title>Slow Load Test (${seconds}s, ${count} resources)</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -63,51 +92,32 @@ h1 { color: #7aa2f7; font-size: 28px; }
 <h1>Slow Load Test</h1>
 <div class="bar-container"><div class="bar-fill" id="bar"></div></div>
 <div class="pct" id="pct">0%</div>
-<div class="status" id="status">Loading... 0 / ${seconds}s</div>
+<div class="status" id="status">Loading... 0 / ${count} resources</div>
 <div class="done" id="done"></div>
+${imgs}
 <script>
-function update(p, elapsed, total) {
-  document.getElementById('bar').style.width = p + '%';
-  document.getElementById('pct').textContent = p + '%';
-  document.getElementById('status').textContent = 'Loading... ' + elapsed + ' / ' + total + 's';
-}
-function finish(total) {
-  document.getElementById('bar').style.width = '100%';
-  document.getElementById('pct').textContent = '100%';
-  document.getElementById('status').style.display = 'none';
-  document.getElementById('done').style.display = 'block';
-  document.getElementById('done').textContent = 'Done! Loaded in ' + total + 's';
+var total = ${count};
+var n = 0;
+var t0 = Date.now();
+function loaded() {
+  n++;
+  var pct = Math.round((n / total) * 100);
+  document.getElementById('bar').style.width = pct + '%';
+  document.getElementById('pct').textContent = pct + '%';
+  document.getElementById('status').textContent = 'Loading... ' + n + ' / ' + total + ' resources';
+  if (n >= total) {
+    var elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    document.getElementById('status').style.display = 'none';
+    document.getElementById('done').style.display = 'block';
+    document.getElementById('done').textContent = 'Done! ' + total + ' resources in ' + elapsed + 's';
+  }
 }
 </script>
-`),
-          );
+</body>
+</html>`;
 
-          // Send a progress chunk every second.
-          for (let i = 1; i <= seconds; i++) {
-            await Bun.sleep(1000);
-            const pct = Math.round((i / seconds) * 100);
-            controller.enqueue(
-              encoder.encode(
-                `<script>update(${pct}, ${i}, ${seconds});</script>\n`,
-              ),
-            );
-          }
-
-          // Send the final "done" chunk and close.
-          controller.enqueue(
-            encoder.encode(
-              `<script>finish(${seconds});</script>\n</body></html>`,
-            ),
-          );
-          controller.close();
-        },
-      });
-
-      return new Response(stream, {
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          "Transfer-Encoding": "chunked",
-        },
+      return new Response(html, {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
       });
     }
 

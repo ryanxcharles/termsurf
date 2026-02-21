@@ -992,3 +992,15 @@ The `"progress"` arm becomes a no-op (or is removed entirely).
    seconds, never stalling at a fixed percentage
 4. Back navigation — the bar should pulse briefly and clear (Experiment 6 fix)
 5. Cold start — the bar should pulse from the moment the TUI starts
+
+**Result:** Pass
+
+The indeterminate pulse works perfectly. The blue bar bounces continuously
+during loading and clears when the page finishes. No stalling at any percentage.
+
+#### Conclusion
+
+Chromium's `LoadProgressChanged` percentages are unreliable for user-facing
+progress indication. The indeterminate pulse is the correct approach — it
+communicates "loading" without making false promises about how far along we are.
+The `"progress"` arm is now a no-op in the TUI.

@@ -58,8 +58,9 @@ a:hover { background: #24283b; }
 
 <h2>Loading</h2>
 <ul>
-  <li><a href="/slow?seconds=10">Slow Load (10s)</a><span class="status">— chunked streaming, progress bar test</span></li>
+  <li><a href="/slow?seconds=10">Slow Load (10s)</a><span class="status">— 20 delayed resources, progress bar test</span></li>
   <li><a href="/slow?seconds=3">Slow Load (3s)</a><span class="status">— shorter variant</span></li>
+  <li><a href="/slow?seconds=10&count=40">Slow Load (10s, 40 resources)</a><span class="status">— finer-grained progress</span></li>
 </ul>
 
 <h2>File I/O</h2>
