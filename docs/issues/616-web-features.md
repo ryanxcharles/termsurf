@@ -929,3 +929,20 @@ Update the Loading section links to use the new parameters:
 4. The bar should clear when all resources finish
 5. Repeat with "Slow Load (3s)" — same smooth behavior, faster
 6. Repeat with "Slow Load (10s, 40 resources)" — even smoother granularity
+
+**Result:** Fail
+
+The progress bar stalls at ~10% instead of ~33%. Multiple subresources didn't
+help — Chromium's `LoadProgressChanged` heuristic still doesn't advance
+smoothly. The heuristic is not a resource-completion counter; it uses an
+internal weighting model that front-loads progress for initial connection and
+document parsing, leaving little range for subresource completion.
+
+#### Conclusion
+
+Chromium's `LoadProgressChanged` is fundamentally not suited for smooth progress
+on slow-loading pages, regardless of whether the delay is in one resource or
+many. The heuristic is designed for typical web pages that load in under a
+second, not for 10-second artificial delays. This is not a bug we can fix — it's
+how Chromium works. The progress bar works well for real-world browsing (where
+pages load quickly and progress jumps to 100%), and that's sufficient.
