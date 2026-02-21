@@ -446,7 +446,7 @@ fn handleModeChanged(msg: xpc_object_t) void {
 
     if (panes.get(pane_id)) |p| {
         p.browsing = browsing;
-        sendFocusChanged(pane_id, browsing);
+        sendFocusChanged(p.pane_id_key, browsing);
     }
 }
 

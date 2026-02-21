@@ -1419,3 +1419,15 @@ has the bug.
 5. Press Ctrl+Esc again — should exit browse mode (previously broken)
 6. Repeat steps 4-5 several times to confirm stable behavior
 7. Verify no `xpc-debug.log` is created
+
+**Result:** Pass
+
+Ctrl+Esc → Enter → Ctrl+Esc now works reliably. The fix was a one-line change:
+`handleModeChanged` now passes `p.pane_id_key` (the stable heap-allocated copy)
+to `sendFocusChanged` instead of the transient XPC message string.
+
+#### Conclusion
+
+Use-after-free fixed. `focused_pane` now always points to stable owned memory.
+Experiment 11 dead code (synthetic Ctrl key-up, control_left/right VK mappings)
+removed since the real cause was the dangling pointer, not stuck modifiers.
