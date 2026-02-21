@@ -795,3 +795,64 @@ The fix is entirely in the TUI: ignore `progress` messages that arrive after
 be implemented with a simple state machine — track whether we're in a loading
 cycle and only process `progress` messages while active. No Chromium or GUI
 changes are needed.
+
+### Experiment 6: Fix straggler progress message
+
+#### Goal
+
+Prevent the loading bar from getting stuck at 100% after back navigation (and
+any other scenario where a `progress` message arrives after `done`).
+
+#### Background
+
+Experiment 5 identified the root cause: Chromium fires
+`LoadProgressChanged(1.0)` and `DidStopLoading()` close together, but XPC
+message delivery doesn't guarantee ordering. A straggler `progress 100`
+sometimes arrives after `done`, re-activating the loading bar with no subsequent
+`done` to clear it.
+
+The current code unconditionally sets `loading_bar_active = true` on every
+`progress` message (line 179 of `tui/src/main.rs`). This means any `progress`
+arriving after `done` re-lights the bar.
+
+#### Changes
+
+##### Chromium Profile Server (`shell_video_consumer.cc`)
+
+**Branch: `146.0.7650.0-issue-616`**
+
+In `LoadProgressChanged`, skip sending when progress reaches 100%.
+`DidStopLoading` already sends `"done"` with progress 100 — the `progress 100`
+message is redundant and causes the race condition.
+
+```cpp
+void ShellVideoConsumer::LoadProgressChanged(double progress) {
+#if BUILDFLAG(IS_MAC)
+  int pct = static_cast<int>(progress * 100);
+  if (pct >= 100) return;  // DidStopLoading sends "done"
+  SendLoadingState("progress", pct);
+#endif
+}
+```
+
+This fixes at the source — no straggler message is ever sent, so no XPC ordering
+race is possible.
+
+##### No GUI or TUI changes
+
+The TUI logic is correct as-is. The problem was that Chromium sent a redundant
+message that could arrive out of order.
+
+#### Verification
+
+1. Launch TermSurf, run `web http://localhost:9616`
+2. Wait for the page to load — bar should clear normally
+3. Click a link to navigate to a subpage
+4. Right-click and select "Back"
+5. **Pass criterion**: The bar fills to 100% and clears — it does NOT stay stuck
+
+Also verify the normal cases still work:
+
+6. Cold start shows indeterminate pulse → determinate progress → clear
+7. Navigating to `/slow?seconds=5` shows progress → clear
+8. Ctrl+C during loading clears the bar
