@@ -1262,3 +1262,160 @@ send them:
 6. Click on the text input field again
 7. **Pass criterion**: Typing still works normally — Ctrl is not stuck
 8. Repeat steps 4–7 several times to confirm consistency
+
+**Result:** Fail
+
+Sending a synthetic Ctrl key-up did not fix the issue. The problem is not stuck
+modifiers in Chromium — it's a state synchronization bug in the GUI. After
+Ctrl+Esc, plain Esc works to exit browse mode, which should be impossible if
+`isOverlayForwarding` were true (it would be consumed and forwarded to
+Chromium). This means `isOverlayForwarding` is returning false even though the
+TUI thinks it's in browse mode.
+
+#### Conclusion
+
+The bug is not stuck Ctrl in Chromium. It's a broken `isOverlayForwarding` state
+after the Ctrl+Esc → Enter round-trip. `isOverlayForwarding` checks two things:
+`p.browsing` and `focused_pane`. One or both aren't being restored when the TUI
+sends `mode_changed(browsing: true)`. Needs diagnostic logging to determine
+which.
+
+### Experiment 12: Debug broken overlay forwarding after Ctrl+Esc
+
+#### Goal
+
+Add diagnostic logging to the GUI to determine why `isOverlayForwarding` returns
+false after a Ctrl+Esc → Enter (re-enter browse) cycle.
+
+#### Background
+
+Experiment 11 showed the problem is not stuck Ctrl in Chromium. After pressing
+Ctrl+Esc to exit browse mode and Enter to re-enter, `isOverlayForwarding`
+returns false. This means key events go to the terminal instead of Chromium.
+Plain Esc reaches the TUI (which shouldn't happen in browse mode) confirming the
+forwarding state is broken.
+
+`isOverlayForwarding` (xpc.zig line 555) checks three conditions:
+
+1. `surface_to_pane` lookup succeeds (maps surface pointer to pane ID)
+2. `p.browsing` is true (pane is in browse mode)
+3. `focused_pane` matches the pane ID (pane has focus)
+
+If any of these fail, forwarding is off. The logging must cover all three to
+find which one breaks.
+
+The state-changing functions in the round-trip are:
+
+- `notifyNonOverlayClicked` (Ctrl+Esc) → sets `p.browsing = false`,
+  `focused_pane = null`
+- `handleModeChanged` (TUI sends browsing=true) → sets `p.browsing = true`,
+  calls `sendFocusChanged(pane_id, true)` → should set `focused_pane = pane_id`
+
+`sendFocusChanged` has early returns (lines 483-485) for missing pane, missing
+server, or null `server.peer`. If any early return fires, `focused_pane` is
+never restored.
+
+#### Changes
+
+##### GUI (`gui/src/apprt/xpc.zig`)
+
+Add `log.info` calls to:
+
+1. **`isOverlayForwarding`** — log when it returns false and which condition
+   failed (no pane, not browsing, not focused, or focused on different pane)
+
+2. **`sendFocusChanged`** — log on each early return (pane not found, server not
+   found, server.peer null) and on success (focused_pane updated)
+
+3. **`handleModeChanged`** — already has a log line; add logging for the case
+   where `panes.get(pane_id)` returns null
+
+Run TermSurf with logs:
+`open gui/zig-out/TermSurf.app --stdout ~/dev/termsurf/logs/gui.log --stderr ~/dev/termsurf/logs/gui.log`
+
+##### No TUI or Chromium changes
+
+#### Verification
+
+1. Launch TermSurf with log output redirected
+2. Run `web http://localhost:9616`
+3. Press Ctrl+Esc to exit browse mode
+4. Press Enter to re-enter browse mode
+5. Observe that keyboard forwarding is broken
+6. Check `~/dev/termsurf/logs/gui.log` for `isOverlayForwarding` and
+   `sendFocusChanged` log lines to identify which condition fails
+
+The experiment succeeds when we can identify exactly which condition in
+`isOverlayForwarding` breaks after the Ctrl+Esc → Enter round-trip.
+
+**Result:** Pass
+
+The diagnostic logging revealed a **use-after-free bug** in `focused_pane`.
+
+The initial `sendFocusChanged` (from `handleSetOverlay`) stores the owned
+`pane_id_key` pointer at `0x137834000` — stable heap memory. After Ctrl+Esc →
+Enter, `handleModeChanged` calls `sendFocusChanged` with a pane_id from
+`xpc_dictionary_get_string` — a pointer into the XPC message's internal buffer
+at `0xb47f8d4c8`. After the handler returns, XPC releases the message, and the
+buffer is reused. Subsequent reads find 36 spaces (`' '`) instead of the UUID.
+
+The `std.mem.eql` comparison fails because `focused_pane` points to freed,
+overwritten memory. It doesn't crash because macOS malloc doesn't unmap pages —
+the memory is still readable, just contains wrong data.
+
+#### Conclusion
+
+Root cause identified: `handleModeChanged` passes an XPC message string to
+`sendFocusChanged`, which stores it in `focused_pane`. The string is freed when
+the XPC handler returns. Fix: use `p.pane_id_key` (the stable owned copy)
+instead of the transient XPC string.
+
+### Experiment 13: Fix dangling focused_pane pointer
+
+#### Goal
+
+Fix the use-after-free bug found in Experiment 12 and remove the diagnostic
+logging.
+
+#### Background
+
+`handleModeChanged` extracts `pane_id` from the XPC message via
+`xpc_dictionary_get_string`. This returns a pointer into the XPC message's
+internal buffer. It passes this transient pointer to `sendFocusChanged`, which
+stores it in the module-level `focused_pane`. After the XPC handler returns, the
+message is released and the pointer dangles.
+
+Every other caller of `sendFocusChanged` passes stable owned pointers:
+`p.pane_id_key` (from `handleSetOverlay`, `handleServerRegister`) or
+`surface_to_pane.get()` values (from `notifyOverlayClicked`,
+`notifyNonOverlayClicked`, `handlePaneFocusChanged`). Only `handleModeChanged`
+has the bug.
+
+#### Changes
+
+##### GUI (`gui/src/apprt/xpc.zig`)
+
+1. **Fix `handleModeChanged`**: After looking up the pane, use `p.pane_id_key`
+   (the stable owned copy) instead of the XPC message string when calling
+   `sendFocusChanged`.
+
+2. **Remove diagnostic logging**: Delete the `debug_file`, `debugLog` function,
+   and all `debugLog` calls in `isOverlayForwarding` and `sendFocusChanged`.
+   Restore `isOverlayForwarding` to its original compact form.
+
+3. **Remove Experiment 11 dead code**: The synthetic Ctrl key-up in
+   `Surface.zig` and the `control_left`/`control_right` VK mappings in `xpc.zig`
+   were added to fix a misdiagnosed problem. Remove them since Experiment 11
+   failed and the real cause was the dangling pointer.
+
+##### No TUI or Chromium changes
+
+#### Verification
+
+1. Build and launch TermSurf
+2. Run `web https://news.ycombinator.com`
+3. Press Ctrl+Esc — should exit browse mode
+4. Press Enter — should re-enter browse mode
+5. Press Ctrl+Esc again — should exit browse mode (previously broken)
+6. Repeat steps 4-5 several times to confirm stable behavior
+7. Verify no `xpc-debug.log` is created
