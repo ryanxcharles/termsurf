@@ -1144,3 +1144,5 @@ Pass criteria:
 - Right-clicks don't trigger mode switching (only left-click press)
 - Keyboard mode switching (Enter/Esc) still works alongside mouse switching
 - No feedback loop — `web` TUI doesn't echo `mode_changed` back
+
+### Result: Pass
