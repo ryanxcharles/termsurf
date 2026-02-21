@@ -51,11 +51,11 @@ The project has evolved through six generations:
 - **ts5** (Ghostty fork + out-of-process Chromium) — Proved end-to-end Chromium
   streaming works: IOSurface overlay pipeline, XPC communication, mouse/keyboard
   forwarding, focus lifecycle, text selection. All logic lived in Swift
-  (CompositorXPC). Superseded by Ghost.
-- **ghost** (Ghostty fork, Zig-first) — **Active development.** Fresh Ghostty
-  fork with all browser integration logic in Zig instead of Swift. XPC
-  communication, IOSurface textures, keyboard/mouse forwarding — all in Zig,
-  matching Ghostty's architecture where Swift is a thin macOS wrapper.
+  (CompositorXPC). Superseded by TermSurf GUI.
+- **gui** (Ghostty fork, Zig-first) — **Active development.** Ghostty fork with
+  all browser integration logic in Zig instead of Swift. XPC communication,
+  IOSurface textures, keyboard/mouse forwarding — all in Zig, matching Ghostty's
+  architecture where Swift is a thin macOS wrapper.
 
 **Directory structure:**
 
@@ -73,7 +73,7 @@ The project has evolved through six generations:
 
 ### Architecture
 
-Ghost forks Ghostty with all browser integration logic in Zig. Swift remains a
+TermSurf GUI forks Ghostty with all browser integration logic in Zig. Swift remains a
 thin macOS wrapper — window creation, menu bar, application lifecycle — matching
 Ghostty's own architecture. This is a clean break from ts5, where browser
 integration lived in Swift (CompositorXPC.swift).
@@ -92,8 +92,13 @@ Key architectural decisions:
 
 ### Current State
 
-Ghost is a clean Ghostty fork with no TermSurf modifications yet. Browser
-integration will be built incrementally across Issues 601+.
+TermSurf GUI is a Ghostty fork with browser integration built in Zig. Current
+TermSurf additions: XPC gateway connection and anonymous listener (Issue 601),
+IOSurface overlay pipeline with pink texture proof-of-concept (Issue 602), live
+Chromium streaming at 60fps with dynamic resize (Issue 603), multi-pane
+multi-profile server reuse (Issues 604–605), mouse input forwarding with cursor
+changes and text selection (Issue 606), keyboard input forwarding with Cmd+key
+bypass (Issues 607–609), TermSurf branding and app icon (Issues 611–612).
 
 ### Directory Structure
 
@@ -128,7 +133,7 @@ git fetch upstream
 git subtree pull --prefix=gui upstream main -m "Merge upstream Ghostty into gui"
 ```
 
-## TermSurf 5.0 (ts5/) — Superseded by Ghost
+## TermSurf 5.0 (ts5/) — Superseded by TermSurf GUI
 
 ### Architecture
 
@@ -637,10 +642,24 @@ as a testbed before ts1 integration. Changes made to the example:
 
 ## Documentation
 
-### TermSurf Ghost (active)
+### TermSurf GUI (active)
 
-- `docs/issues/600-termsurf-ghost.md` — Ghost vision, Zig-first architecture,
+- `docs/issues/600-termsurf-ghost.md` — GUI vision, Zig-first architecture,
   Ghostty fork
+- `docs/issues/601-zig-xpc.md` — XPC in Zig (gateway, listener, message parsing)
+- `docs/issues/602-pink-texture.md` — Pink texture overlay (GPU quad via XPC)
+- `docs/issues/603-box-demo.md` — Live Chromium streaming at 60fps
+- `docs/issues/604-two-panes.md` — Multi-pane Chromium streaming
+- `docs/issues/605-two-profiles.md` — Multi-profile server reuse
+- `docs/issues/606-mouse-input.md` — Mouse clicks, drag, scroll, cursor changes
+- `docs/issues/607-keyboard-input.md` — Basic key forwarding to Chromium
+- `docs/issues/608-search-input.md` — Search input (Google, address bar)
+- `docs/issues/609-keyboard-input-2.md` — Cmd+key bypass, clipboard, Tab
+- `docs/issues/610-app-icon.md` — App icon (blocked by bundle ID, resolved)
+- `docs/issues/611-rename.md` — Rename Ghostty → TermSurf
+- `docs/issues/612-icon.md` — App icon pipeline (release + debug icons)
+- `docs/issues/613-rename-directories.md` — Rename ghost/ → gui/, web/ → tui/
+- `docs/issues/614-docs-review.md` — Documentation review
 
 ### TermSurf 5.0
 
@@ -663,6 +682,9 @@ as a testbed before ts1 integration. Changes made to the example:
 - `docs/issues/510-two-profiles.md` — Two-profile streaming, dynamic resize
 - `docs/issues/511-three-profiles.md` — Three profiles, server reuse per profile
 - `docs/issues/512-vsync.md` — Vsync desynchronization, 120fps oversampling fix
+- `docs/issues/513-ctrl-esc.md` — Ctrl+Esc escape hatch (mode switching)
+- `docs/issues/514-mouse.md` — Mouse clicks and URL sync
+- `docs/issues/515-drag.md` — Focus state and text selection
 - `docs/vsync.md` — Top-level vsync overview and future improvement plan
 
 ### TermSurf 4.0

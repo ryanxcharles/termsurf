@@ -39,7 +39,7 @@ issue-specific branches.
 | `146.0.7650.0-issue-512` | [Issue 512](issues/512-vsync.md)            | 120fps oversampling          |
 | `146.0.7650.0-issue-514` | [Issue 514](issues/514-mouse.md)            | Mouse clicks + URL sync      |
 | `146.0.7650.0-issue-515` | [Issue 515](issues/515-drag.md)             | Focus state + text selection |
-| `146.0.7650.0-issue-603` | [Issue 603](issues/603-box-demo.md)         | Box demo in Ghost            |
+| `146.0.7650.0-issue-603` | [Issue 603](issues/603-box-demo.md)         | Box demo                     |
 | `146.0.7650.0-issue-607` | [Issue 607](issues/607-keyboard-input.md)   | Keyboard input               |
 | `146.0.7650.0-issue-608` | [Issue 608](issues/608-search-input.md)     | Search input                 |
 | `146.0.7650.0-issue-609` | [Issue 609](issues/609-keyboard-input-2.md) | Keyboard input (continued)   |

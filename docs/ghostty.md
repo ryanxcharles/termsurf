@@ -7,20 +7,23 @@ original Ghostty commit history is part of our git history — we forked, then
 began modifying files in place. Later, all Ghostty files were moved into `ts1/`
 to make room for other components (WezTerm forks, CEF experiments, docs, etc.).
 
-There are now two copies of Ghostty in this repo:
+There are now three copies of Ghostty in this repo:
 
-| Directory | Generation   | Status | Description                                                              |
-| --------- | ------------ | ------ | ------------------------------------------------------------------------ |
-| `ts1/`    | TermSurf 1.x | Frozen | Ghostty + WKWebView browser panes. No longer receives upstream merges.   |
-| `ts5/`    | TermSurf 5.0 | Active | Clean upstream Ghostty. Will receive Chromium Content API browser panes. |
+| Directory | Generation     | Status     | Description                                                            |
+| --------- | -------------- | ---------- | ---------------------------------------------------------------------- |
+| `gui/`    | TermSurf GUI   | Active     | Ghostty fork with browser integration in Zig. Receives upstream merges.|
+| `ts5/`    | TermSurf 5.0   | Superseded | Ghostty fork with browser integration in Swift. Superseded by gui/.    |
+| `ts1/`    | TermSurf 1.x   | Frozen     | Ghostty + WKWebView browser panes. No longer receives upstream merges. |
+
+**gui/ is active development.** All browser integration logic is in Zig, matching
+Ghostty's architecture. gui/ receives upstream Ghostty merges.
+
+**ts5 is superseded.** Its browser integration lived in Swift (CompositorXPC).
+gui/ rewrites this in Zig. ts5 is kept for reference.
 
 **ts1 is permanently frozen.** It contains TermSurf-specific modifications
 (WKWebView integration, `web` CLI command, branding) that are specific to the
 ts1 approach. It will not receive upstream Ghostty updates.
-
-**ts5 is active development.** It starts as unmodified upstream Ghostty. Browser
-pane integration (in-process Chromium via the Content API) will be added
-incrementally. ts5 receives upstream Ghostty merges.
 
 ## Remote
 
@@ -28,8 +31,8 @@ incrementally. ts5 receives upstream Ghostty merges.
 | ---------- | ------------------------------------------ | ------ |
 | `upstream` | https://github.com/ghostty-org/ghostty.git | main   |
 
-The `upstream` remote is shared between ts1 and ts5 — both came from the same
-Ghostty repo.
+The `upstream` remote is shared across all Ghostty copies — they all came from
+the same repo.
 
 ## How ts1 was created
 
@@ -53,34 +56,45 @@ found the original `/ → ts1/` move and tried to merge upstream changes into
 `ts1/` instead of `ts5/`. Three experiments were attempted before finding the
 working approach (see Issue 418 Experiments 1–3 for details).
 
-## Merging upstream into ts5
+## How gui/ was created
 
-To pull the latest upstream Ghostty changes into ts5:
+gui/ was created the same way as ts5:
+
+```bash
+git subtree add --prefix=gui upstream main
+```
+
+It was originally named `ghost/` (after the working name "Ghost") and later
+renamed to `gui/` in Issue 613.
+
+## Merging upstream into gui/
+
+To pull the latest upstream Ghostty changes into gui/:
 
 ```bash
 git fetch upstream
-git subtree pull --prefix=ts5 upstream main -m "Merge upstream Ghostty into ts5"
+git subtree pull --prefix=gui upstream main -m "Merge upstream Ghostty into gui"
 ```
-
-This uses `git subtree pull`, which finds changes since the last subtree
-operation and applies them under `ts5/`. It does not use the three-way merge
-against the original fork point, so the `/ → ts1/` rename history is irrelevant.
 
 ### Resolving conflicts
 
-ts5 currently has no TermSurf modifications, so upstream merges should be
-conflict-free. As we add browser pane support, conflicts will arise in modified
-files. Document those files and resolution strategies here as they develop.
+gui/ has TermSurf modifications in several files (XPC integration, IOSurface
+overlay, input forwarding). Upstream merges may conflict with these. Key files
+likely to conflict:
+
+- `gui/src/Surface.zig` — Browser state, input routing
+- `gui/src/renderer/Metal.zig` — Overlay rendering
+- `gui/macos/Sources/App/macOS/AppDelegate.swift` — Debug icon override
 
 ### After merging
 
 Verify the build:
 
 ```bash
-cd ts5 && zig build
+cd gui && zig build
 ```
 
 If the build fails, common causes are:
 
-- Zig version mismatch (check `ts5/build.zig.zon` for the required version)
+- Zig version mismatch (check `gui/build.zig.zon` for the required version)
 - New upstream dependencies or build system changes

@@ -17,7 +17,7 @@ events received through the terminal PTY.
 
 ## GUI keybindings
 
-These are handled in Ghost's Zig core (`gui/src/Surface.zig`), intercepted in
+These are handled in TermSurf's Zig core (`gui/src/Surface.zig`), intercepted in
 `keyCallback` before keybinding processing.
 
 | Key      | Mode   | Action            | Notes                                                                                                                                                                    |

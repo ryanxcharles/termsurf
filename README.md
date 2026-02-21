@@ -54,11 +54,8 @@ logging into Google in one profile doesn't affect the others.
 ### Build
 
 ```bash
-# Build the xpc-gateway (must be done before zig build)
-cd ts5/xpc-gateway && swift build
-
-# Build the terminal (bundles gateway into app)
-cd ts5 && zig build
+# Build the terminal
+cd gui && zig build
 
 # Build the web TUI
 cargo build -p web
@@ -67,11 +64,8 @@ cargo build -p web
 ### Launch
 
 ```bash
-open ts5/zig-out/TermSurf.app
+open gui/zig-out/TermSurf.app
 ```
-
-The XPC gateway LaunchAgent is auto-registered on first launch via SMAppService.
-No manual `launchctl` commands needed.
 
 Then in a TermSurf terminal pane:
 
@@ -97,27 +91,26 @@ The `web` TUI has two modes:
 
 ## Status
 
-TermSurf is in active development. The project has evolved through five
-generations (ts1 through ts5). The current generation (ts5) forks
-[Ghostty](https://ghostty.org/) as the terminal and will embed Chromium directly
-via the Content API.
+TermSurf is in active development. The project has evolved through six
+generations (ts1 through ts5, then gui). The current generation (`gui/`) forks
+[Ghostty](https://ghostty.org/) as the terminal with all browser integration
+logic in Zig.
 
 **What works today:**
 
 - Terminal emulator (full Ghostty, native Metal rendering)
 - `web` TUI chrome (URL bar, viewport border, status bar via ratatui)
-- Chromium streaming (real webpages render in terminal panes at 120fps)
+- Chromium streaming (real webpages render in terminal panes at 60fps)
 - IOSurface overlay pipeline (zero-copy GPU texture compositing via Metal)
 - Retina resolution and dynamic resize
-- Multi-profile server reuse (one Chromium server per browser profile)
-- Vsync-matched smoothness (120fps oversampling, visually identical to Chrome)
-- XPC gateway daemon (auto-registered LaunchAgent for compositor rendezvous)
-- Pane identification (each pane sets `TERMSURF_PANE_ID` in the environment)
+- Multi-pane, multi-profile server reuse
+- Mouse input forwarding (clicks, drag, scroll, cursor changes, text selection)
+- Keyboard input forwarding (key events, Cmd+key bypass, clipboard)
+- XPC communication (Zig ↔ `web` TUI ↔ Chromium server)
 
 **Not yet started:**
 
 - In-process Chromium embedding (currently out-of-process streaming over XPC)
-- Browser input forwarding (keyboard, mouse)
 - Navigation (back, forward, reload)
 
 macOS only for now.
@@ -129,5 +122,5 @@ the full development guide.
 
 ## License
 
-See individual component licenses in `ts5/`, `ts1/`, `ts3/`, and
+See individual component licenses in `gui/`, `ts5/`, `ts1/`, `ts3/`, and
 `vendor/cef-rs/`.
