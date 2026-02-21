@@ -762,3 +762,36 @@ Chromium already logs `DidStartLoading` and `DidStopLoading` via `LOG(INFO)`.
 
 The TUI must not be visually affected by the logging. The experiment succeeds
 when we can identify which hop drops the "done" message on back navigation.
+
+**Result:** Pass
+
+File logging works correctly — the TUI is unaffected and all loading state
+messages are captured in `/Users/ryan/dev/termsurf/logs/web.log`. The GUI logs
+confirm that every `loading_state` message from Chromium is forwarded to the web
+TUI, including `state=done` on back navigation (bfcache restore).
+
+The root cause is a **straggler `progress 100` message** that arrives after
+`done`. The web.log shows this pattern on back navigation:
+
+```
+[web] loading_state: state=done progress=100       ← bar clears
+[web] loading_state: state=progress progress=100   ← STRAGGLER re-activates bar
+```
+
+Chromium fires `LoadProgressChanged(1.0)` and `DidStopLoading()` close together,
+but XPC message delivery does not guarantee ordering. The `progress 100` message
+sometimes arrives after the `done` message. When it does, the TUI sets
+`loading_bar_active = true` and emits OSC 9;4;1;100 — but no subsequent `done`
+arrives to clear the bar, so it stays stuck at 100% until the 30-second safety
+timeout.
+
+#### Conclusion
+
+The three-hop pipeline (Chromium → GUI → TUI) is working correctly. No messages
+are dropped. Chromium fires `DidStopLoading` on bfcache restores as expected.
+
+The fix is entirely in the TUI: ignore `progress` messages that arrive after
+`done` until the next `loading` message starts a new navigation cycle. This can
+be implemented with a simple state machine — track whether we're in a loading
+cycle and only process `progress` messages while active. No Chromium or GUI
+changes are needed.
