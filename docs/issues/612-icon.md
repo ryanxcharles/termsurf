@@ -370,3 +370,16 @@ cd ghost && zig build
 3. **Dock icon (debug):** The green wave debug icon still appears (unchanged)
 4. **No old icon:** Neither the Ghostty icon nor the previous cyan wave surfer
    appears as the release icon
+
+**Result:** Pass
+
+The `generate-icons.sh` script produced all 7 sizes from `termsurf-2-black.png`.
+The release icon shows the new image in Finder and the dock. The debug icon
+remains the green wave (unchanged). No old icons appear.
+
+#### Conclusion
+
+The icon generation pipeline works end-to-end: source image in `assets/`, script
+in `ghost/scripts/`, generated PNGs in the asset catalog, correct icon in the
+built app. Changing the release icon is now a one-command operation:
+`ghost/scripts/generate-icons.sh`.
