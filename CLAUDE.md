@@ -661,6 +661,7 @@ as a testbed before ts1 integration. Changes made to the example:
 - `docs/issues/613-rename-directories.md` — Rename ghost/ → gui/, web/ → tui/
 - `docs/issues/614-docs-review.md` — Documentation review
 - `docs/issues/615-xdg.md` — XDG directory compliance
+- `docs/issues/616-web-features.md` — Missing web features inventory
 - `docs/xdg.md` — XDG directory pattern and conventions
 
 ### TermSurf 5.0
