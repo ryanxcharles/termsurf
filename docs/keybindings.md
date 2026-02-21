@@ -24,6 +24,17 @@ These are handled in TermSurf's Zig core (`gui/src/Surface.zig`), intercepted in
 | -------- | ------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Ctrl+Esc | Browse | Switch to Control | Calls `notifyNonOverlayClicked` which sends `mode_changed(browsing: false)` to `web` and `focus_changed(false)` to Chromium. Gated on `isOverlayForwarding` (Issue 607). |
 
+## Browser navigation keybindings
+
+These are forwarded from the GUI to Chromium via XPC `key_event` messages and
+intercepted in `HandleKeyEvent` before reaching the renderer.
+
+| Key   | Mode   | Action  | Notes                                                |
+| ----- | ------ | ------- | ---------------------------------------------------- |
+| Cmd+[ | Browse | Back    | Calls `NavigationController::GoBack()` in Chromium   |
+| Cmd+] | Browse | Forward | Calls `NavigationController::GoForward()` in Chromium |
+| Cmd+R | Browse | Reload  | Calls `NavigationController::Reload()` in Chromium   |
+
 ## Modes
 
 The `web` TUI has two modes. The GUI only tracks a boolean (`browsing` or not).

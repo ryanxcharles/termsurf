@@ -289,7 +289,7 @@ fn ui(frame: &mut Frame, url: &str, profile: &str, mode: &Mode) -> Rect {
     .split(layout[2]);
 
     let (hints, label) = match mode {
-        Mode::Browse => ("[ctrl+esc] force exit browse mode", "󰖟 BROWSE"),
+        Mode::Browse => ("[cmd+[] back  [cmd+]] fwd  [cmd+r] reload  [ctrl+esc] exit", "󰖟 BROWSE"),
         Mode::Control => ("[q] quit  [enter] browse", " CONTROL"),
     };
 

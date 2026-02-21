@@ -1167,3 +1167,20 @@ changes needed.
 6. Cmd+[ on the first page (no history) — should do nothing (no crash)
 7. Cmd+] with no forward history — should do nothing
 8. Status bar in Browse mode shows the new keybindings
+
+**Result:** Pass
+
+Cmd+[ (back), Cmd+] (forward), and Cmd+R (reload) all work correctly. The status
+bar shows the new keybindings in Browse mode.
+
+#### Conclusion
+
+Navigation keybindings implemented in Chromium's `HandleKeyEvent` by
+intercepting Cmd+key combinations before they reach the renderer. No GUI changes
+needed — the existing browse mode Cmd+key forwarding pipeline handles delivery.
+
+A separate issue was observed: keyboard input sometimes stops working or
+modifier state becomes inconsistent after closing and reopening the `web` TUI.
+This appears to be a pre-existing focus/modifier state synchronization problem,
+not caused by the navigation changes. Needs investigation in a separate
+experiment.
