@@ -3518,8 +3518,10 @@ pub fn scrollCallback(
         const cursor = try self.rt_surface.getCursorPos();
         if (self.hitTestOverlay(@floatCast(cursor.x), @floatCast(cursor.y))) |overlay_pos| {
             const xpc = @import("apprt/xpc.zig");
-            xpc.sendScrollEvent(self, overlay_pos.x, overlay_pos.y);
-            return;
+            if (xpc.isOverlayForwarding(self)) {
+                xpc.sendScrollEvent(self, overlay_pos.x, overlay_pos.y);
+                return;
+            }
         }
     }
 
@@ -4022,11 +4024,13 @@ pub fn mouseButtonCallback(
         const cursor = try self.rt_surface.getCursorPos();
         if (self.hitTestOverlay(@floatCast(cursor.x), @floatCast(cursor.y))) |overlay_pos| {
             const xpc = @import("apprt/xpc.zig");
-            // Switch to browse mode on overlay click if in control mode (Exp 6).
-            if (button == .left and action == .press) {
+            if (xpc.isOverlayForwarding(self)) {
+                // Active + browsing: forward click to Chromium.
+                xpc.sendMouseEvent(self, action, button, mods, overlay_pos.x, overlay_pos.y);
+            } else if (button == .left and action == .press) {
+                // Not forwarding: activate on left-click, consume the click.
                 xpc.notifyOverlayClicked(self);
             }
-            xpc.sendMouseEvent(self, action, button, mods, overlay_pos.x, overlay_pos.y);
             return true;
         }
         // Click missed overlay — switch to control if browsing (Exp 6).
@@ -4782,15 +4786,17 @@ pub fn cursorPosCallback(
     // Check if mouse is in a browser overlay (Issue 606).
     if (self.hitTestOverlay(@floatCast(pos.x), @floatCast(pos.y))) |overlay_pos| {
         const xpc = @import("apprt/xpc.zig");
-        xpc.sendMouseMove(self, overlay_pos.x, overlay_pos.y);
+        if (xpc.isOverlayForwarding(self)) {
+            xpc.sendMouseMove(self, overlay_pos.x, overlay_pos.y);
 
-        // Set cursor from Chromium's cursor type (Issue 606 Experiment 4).
-        const shape = mapChromiumCursor(self.overlay_cursor_type);
-        _ = try self.rt_app.performAction(
-            .{ .surface = self },
-            .mouse_shape,
-            shape,
-        );
+            // Set cursor from Chromium's cursor type (Issue 606 Experiment 4).
+            const shape = mapChromiumCursor(self.overlay_cursor_type);
+            _ = try self.rt_app.performAction(
+                .{ .surface = self },
+                .mouse_shape,
+                shape,
+            );
+        }
         self.mouse.over_overlay = true;
         return;
     }

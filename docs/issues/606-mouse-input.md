@@ -1290,3 +1290,35 @@ Pass criteria:
   page
 - With two panes, switching away from a browsing pane stops forwarding to it
 - Keyboard mode switching (Enter/Esc) still works
+
+### Result: Partial pass
+
+Mouse moves, cursor changes, and scroll are correctly gated — none forward to
+Chromium when the pane is inactive or in control mode. However, mouse clicks
+still trigger link navigation on activation.
+
+**Root cause:** The activation click suppresses the press but not the release.
+`notifyOverlayClicked` fires on the press event and sets `p.browsing = true` +
+`focused_pane = pane_id`. By the time the release event arrives (milliseconds
+later), `isOverlayForwarding` returns true and `sendMouseEvent` forwards the
+release to Chromium. Chromium triggers link navigation on mouseup, so the
+release alone is enough to navigate.
+
+**Fix ideas:**
+
+1. **Activation guard flag.** Add a per-pane `consuming_activation: bool` flag.
+   Set it true in `notifyOverlayClicked`. In the forwarding path, check the flag
+   and skip `sendMouseEvent` if set. Clear it on the next release event (after
+   skipping it). This suppresses both press and release for the activation
+   click.
+
+2. **Suppress at the source.** Instead of gating in xpc.zig, track an
+   `activation_button` on the Surface. Set it in `mouseButtonCallback` when
+   `notifyOverlayClicked` fires. Skip all forwarding for that button until the
+   release completes. Simpler because it stays in Surface.zig without adding
+   state to xpc.zig.
+
+3. **Delay forwarding.** Don't update `p.browsing`/`focused_pane` in
+   `notifyOverlayClicked` synchronously. Instead, send the focus XPC message and
+   let a callback update state. The release would still see
+   `isOverlayForwarding` as false. Fragile — depends on XPC timing.

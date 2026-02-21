@@ -532,6 +532,17 @@ pub fn handlePaneFocusChanged(surface: *CoreSurface, focused: bool) void {
     dispatch_async_f(xpc_queue, @ptrFromInt(encoded), dispatch_fn);
 }
 
+/// Returns true if the surface's pane is in browse mode AND is the
+/// focused pane — the only state where mouse events should forward
+/// to Chromium. (Issue 606 Experiment 7.)
+pub fn isOverlayForwarding(surface: *CoreSurface) bool {
+    const pane_id = surface_to_pane.get(@intFromPtr(surface)) orelse return false;
+    const p = panes.get(pane_id) orelse return false;
+    if (!p.browsing) return false;
+    const fp = focused_pane orelse return false;
+    return std.mem.eql(u8, fp, pane_id);
+}
+
 // -- Mouse-driven mode switching (Issue 606 Experiment 6) --
 
 fn sendModeToWeb(p: *Pane, browsing: bool) void {
