@@ -1655,12 +1655,13 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     .kitty_above_text,
                 );
 
-                // Overlay (Issue 602 pink, Issue 603 IOSurface texture).
+                // Overlay (Issue 603 IOSurface texture).
+                // No fallback — if no IOSurface has arrived yet, render nothing
+                // (the loading progress bar from OSC 9;4 indicates activity).
                 if (self.pink_overlay.grid_width > 0 and
                     self.pink_overlay.grid_height > 0)
                 {
                     if (self.overlay_iosurface) |iosurface| {
-                        // IOSurface texture path (Issue 603).
                         if (Texture.fromIOSurface(self.api.device, iosurface)) |tex| {
                             defer tex.deinit();
                             var overlay_params = self.pink_overlay;
@@ -1683,23 +1684,6 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                                 });
                             } else |_| {}
                         }
-                    } else {
-                        // Pink fallback (no IOSurface).
-                        if (Buffer(shaderpkg.PinkOverlay).initFill(
-                            self.api.imageBufferOptions(),
-                            &.{self.pink_overlay},
-                        )) |*buf| {
-                            defer buf.deinit();
-                            pass.step(.{
-                                .pipeline = self.shaders.pipelines.pink_overlay,
-                                .uniforms = frame.uniforms.buffer,
-                                .buffers = &.{buf.buffer},
-                                .draw = .{
-                                    .type = .triangle_strip,
-                                    .vertex_count = 4,
-                                },
-                            });
-                        } else |_| {}
                     }
                 }
 

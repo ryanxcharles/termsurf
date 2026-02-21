@@ -395,3 +395,27 @@ instead of pink.
 6. **Error state**: Navigating to an invalid URL shows a red error bar briefly
 7. **Subsequent navigations**: Clicking a link on the loaded page triggers the
    progress bar again
+
+**Result:** Pass
+
+The loading indicator works end-to-end: Chromium sends `loading_state` via XPC,
+the GUI relays it to the web TUI, and the TUI emits OSC 9;4 which Ghostty
+renders as a blue progress bar. The pink fallback texture is removed — the pane
+shows nothing until Chromium sends its first frame.
+
+However, there is a critical issue: **the longest wait is Chromium process
+startup, not page loading.** When the user runs `web google.com` for the first
+time, the Chromium Profile Server process must launch before any page can load.
+This cold start takes significantly longer than loading google.com itself. The
+loading indicator only appears briefly after Chromium is already running and the
+page load begins. During the much longer Chromium startup phase, the user sees
+no progress indication at all.
+
+#### Conclusion
+
+The Chromium-to-TUI loading pipeline works. The next experiment must address the
+cold-start gap: the web TUI should show the progress bar immediately when
+waiting for Chromium to start, not only after Chromium is running and reports
+`DidStartLoading`. This can be done entirely in the GUI or TUI — the TUI can
+emit OSC 9;4;3 (indeterminate pulse) as soon as it sends `set_overlay`, and
+clear it when the first `loading_state` or `display_surface` arrives.

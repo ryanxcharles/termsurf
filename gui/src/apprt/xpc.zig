@@ -255,6 +255,8 @@ fn handleMessage(msg: xpc_object_t) void {
         handleModeChanged(msg);
     } else if (std.mem.eql(u8, action_str, "cursor_changed")) {
         handleCursorChanged(msg);
+    } else if (std.mem.eql(u8, action_str, "loading_state")) {
+        handleLoadingState(msg);
     } else {
         log.warn("unknown action: {s}", .{action_str});
     }
@@ -457,6 +459,21 @@ fn handleCursorChanged(msg: xpc_object_t) void {
             surface.overlay_cursor_type = cursor_type;
         }
     }
+}
+
+fn handleLoadingState(msg: xpc_object_t) void {
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    const p = panes.get(pane_id) orelse return;
+    if (p.web_peer == null) return;
+
+    const state = xpc_dictionary_get_string(msg, "state") orelse return;
+    const progress = xpc_dictionary_get_uint64(msg, "progress");
+
+    const fwd = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(fwd, "action", "loading_state");
+    xpc_dictionary_set_string(fwd, "state", state);
+    xpc_dictionary_set_uint64(fwd, "progress", progress);
+    xpc_connection_send_message(p.web_peer, fwd);
 }
 
 // -- Focus lifecycle (Issue 606 Experiment 5) --

@@ -1,6 +1,6 @@
 mod xpc;
 
-use std::io;
+use std::io::{self, Write};
 use std::time::Duration;
 
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers};
@@ -153,6 +153,17 @@ fn main() -> io::Result<()> {
                     }
                     xpc::CompositorMessage::UrlChanged { url: new_url } => {
                         url = new_url;
+                    }
+                    xpc::CompositorMessage::LoadingState { state, progress } => {
+                        let mut stdout = io::stdout();
+                        let _ = match state.as_str() {
+                            "loading" => write!(stdout, "\x1b]9;4;3\x1b\\"),
+                            "progress" => write!(stdout, "\x1b]9;4;1;{}\x1b\\", progress),
+                            "done" => write!(stdout, "\x1b]9;4;0\x1b\\"),
+                            "error" => write!(stdout, "\x1b]9;4;2\x1b\\"),
+                            _ => Ok(()),
+                        };
+                        let _ = stdout.flush();
                     }
                 }
             }

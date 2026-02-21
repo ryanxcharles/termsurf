@@ -40,6 +40,7 @@ extern "C" {
     fn xpc_dictionary_get_string(dict: XpcObjectT, key: *const c_char) -> *const c_char;
     fn xpc_dictionary_get_bool(dict: XpcObjectT, key: *const c_char) -> bool;
     fn xpc_dictionary_set_bool(dict: XpcObjectT, key: *const c_char, value: bool);
+    fn xpc_dictionary_get_uint64(dict: XpcObjectT, key: *const c_char) -> u64;
     fn xpc_get_type(object: XpcObjectT) -> *const c_void;
 }
 
@@ -55,6 +56,7 @@ extern "C" {
 pub enum CompositorMessage {
     ModeChanged { browsing: bool },
     UrlChanged { url: String },
+    LoadingState { state: String, progress: u8 },
 }
 
 /// A direct connection to the TermSurf app via its anonymous XPC listener.
@@ -186,6 +188,18 @@ impl CompositorConnection {
                         .unwrap_or("")
                         .to_string();
                     let _ = tx.send(CompositorMessage::UrlChanged { url });
+                }
+            } else if action == "loading_state" {
+                let state_key = CString::new("state").unwrap();
+                let state_ptr = unsafe { xpc_dictionary_get_string(event, state_key.as_ptr()) };
+                if !state_ptr.is_null() {
+                    let state = unsafe { std::ffi::CStr::from_ptr(state_ptr) }
+                        .to_str()
+                        .unwrap_or("done")
+                        .to_string();
+                    let progress_key = CString::new("progress").unwrap();
+                    let progress = unsafe { xpc_dictionary_get_uint64(event, progress_key.as_ptr()) } as u8;
+                    let _ = tx.send(CompositorMessage::LoadingState { state, progress });
                 }
             }
         });
