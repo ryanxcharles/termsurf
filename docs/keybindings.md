@@ -17,13 +17,12 @@ events received through the terminal PTY.
 
 ## GUI keybindings
 
-These are handled by the TermSurf window
-(`ts5/macos/Sources/Ghostty/CompositorXPC.swift`) via NSEvent local monitor,
-before events reach the terminal PTY.
+These are handled in Ghost's Zig core (`ghost/src/Surface.zig`), intercepted in
+`keyCallback` before keybinding processing.
 
-| Key      | Mode   | Action            | Notes                                                                                                                                                                             |
-| -------- | ------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Ctrl+Esc | Browse | Switch to Control | Sends `mode_changed(browsing: false)` to `web`. Intercepted at NSEvent level (keyCode 0x35 + .control). Two-level focus check ensures only the focused pane responds (Issue 513). |
+| Key      | Mode   | Action            | Notes                                                                                                                                                                    |
+| -------- | ------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Ctrl+Esc | Browse | Switch to Control | Calls `notifyNonOverlayClicked` which sends `mode_changed(browsing: false)` to `web` and `focus_changed(false)` to Chromium. Gated on `isOverlayForwarding` (Issue 607). |
 
 ## Modes
 
