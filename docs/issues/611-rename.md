@@ -45,12 +45,12 @@ within the TermSurf family.
 | App name                  | TermSurf Ghost                                      |
 | Bundle identifier         | com.termsurf.ghost                                  |
 | Bundle identifier (debug) | com.termsurf.ghost.debug                            |
-| Config directory          | `~/.config/termsurf-ghost/`                         |
+| Config directory          | `~/.config/termsurf/`                               |
 | Config fallback (macOS)   | `~/Library/Application Support/com.termsurf.ghost/` |
 | CLI binary name           | `ghostty` (unchanged)                               |
 | CLI usage text            | `termsurf-ghost`                                    |
 | CLI version output        | `TermSurf Ghost {version}`                          |
-| Custom icon path          | `~/.config/termsurf-ghost/Ghost.icns`               |
+| Custom icon path          | `~/.config/termsurf/Ghost.icns`                     |
 
 The CLI binary stays `ghostty` because renaming it requires changes to the Zig
 build system, shell completions, and the `ghostty` symlink in the app bundle. A
@@ -113,25 +113,27 @@ In `ghost/src/`:
 
 ### 4. Config paths
 
+Change the hardcoded directory names in Zig source code. No new code needed —
+`ghostty_config_load_default_files` will automatically load from the correct
+paths after these changes.
+
+In `ghost/src/`:
+
+- `build_config.zig:58` — `"com.mitchellh.ghostty"` → `"com.termsurf.ghost"`
+  (controls macOS App Support and cache paths)
+- `config/file_load.zig:14` — `"ghostty/config.ghostty"` →
+  `"termsurf/config.ghostty"` (XDG config path)
+- `config/file_load.zig:23` — `"ghostty/config"` → `"termsurf/config"` (legacy
+  XDG config path)
+- `config/theme.zig:30` — `"ghostty"` → `"termsurf"` (theme directory)
+
 In `ghost/macos/Sources/`:
 
-- `Ghostty/Ghostty.Config.swift` — Use
-  `ghostty_config_load_files(cfg, "termsurf-ghost", "com.termsurf.ghost")`
-  instead of `ghostty_config_load_default_files(cfg)`
-- `Ghostty/Ghostty.Config.swift` — Custom icon path →
-  `~/.config/termsurf-ghost/Ghost.icns`
-- `Features/Settings/SettingsView.swift` — Config path and app name in
-  instructions: `$HOME/.config/termsurf-ghost/config` and
+- `Ghostty/Ghostty.Config.swift:335` — Custom icon path →
+  `~/.config/termsurf/Ghost.icns`
+- `Features/Settings/SettingsView.swift:17` — Config path and app name in
+  instructions: `$HOME/.config/termsurf/config.ghostty` and
   `restart TermSurf Ghost`
-
-This requires porting the `ghostty_config_load_files` C API function from ts1,
-as upstream Ghostty only has `ghostty_config_load_default_files`. ts5 already
-ported this — the implementation can be copied from there:
-
-- `ghost/src/os/macos.zig` — `appSupportDirWithBundleId` function
-- `ghost/src/config/Config.zig` — `loadFiles` method
-- `ghost/src/config/CApi.zig` — `ghostty_config_load_files` export
-- `ghost/include/ghostty.h` — C header declaration
 
 ### 5. About view
 
@@ -186,13 +188,57 @@ changes manually if upstream restructures build settings.
 
 `cd ghost && zig build` produces `TermSurf Ghost.app`. The menu bar reads
 "TermSurf Ghost", the About view shows "TermSurf Ghost", the CLI prints
-"TermSurf Ghost {version}", config loads from `~/.config/termsurf-ghost/`, and
-the bundle identifier is `com.termsurf.ghost`. The surfing ghost icon (from
-Issue 610) displays correctly.
+"TermSurf Ghost {version}", config loads from `~/.config/termsurf/`, and the
+bundle identifier is `com.termsurf.ghost`. The surfing ghost icon (from Issue
+610) displays correctly.
+
+#### Approach
+
+Change hardcoded values in the existing source code. No new functions, no new
+files. `ghostty_config_load_default_files` continues to work — it just loads
+from `~/.config/termsurf/` instead of `~/.config/ghostty/` after the underlying
+constants change.
 
 #### Steps
 
-##### Step 1: Rename plist and entitlements files
+##### Step 1: Change config paths in Zig source
+
+These four changes redirect all config, cache, and App Support paths:
+
+**`ghost/src/build_config.zig:58`:**
+
+```
+"com.mitchellh.ghostty" → "com.termsurf.ghost"
+```
+
+This controls macOS App Support
+(`~/Library/Application Support/com.termsurf.ghost/`) and cache paths.
+
+**`ghost/src/config/file_load.zig:14`:**
+
+```
+"ghostty/config.ghostty" → "termsurf/config.ghostty"
+```
+
+XDG config path becomes `~/.config/termsurf/config.ghostty`.
+
+**`ghost/src/config/file_load.zig:23`:**
+
+```
+"ghostty/config" → "termsurf/config"
+```
+
+Legacy config path becomes `~/.config/termsurf/config`.
+
+**`ghost/src/config/theme.zig:30`:**
+
+```
+"ghostty" → "termsurf"
+```
+
+Theme directory becomes `~/.config/termsurf/themes/`.
+
+##### Step 2: Rename plist and entitlements files
 
 ```bash
 cd ghost/macos
@@ -203,7 +249,7 @@ git mv Ghostty.entitlements Ghost.entitlements
 `GhosttyDebug.entitlements` and `GhosttyReleaseLocal.entitlements` stay as-is
 (internal).
 
-##### Step 2: Update `project.pbxproj`
+##### Step 3: Update `project.pbxproj`
 
 In `ghost/macos/Ghostty.xcodeproj/project.pbxproj`:
 
@@ -245,16 +291,16 @@ with `within TermSurf Ghost` in all of them.
 - `-target "Ghostty"` in xcodebuild — that's the Xcode target name, internal
 - iOS bundle identifiers (`com.mitchellh.ghostty-ios`) — not our platform
 
-##### Step 3: Update `Ghost-Info.plist`
+##### Step 4: Update `Ghost-Info.plist`
 
-In `ghost/macos/Ghost-Info.plist` (after rename in step 1):
+In `ghost/macos/Ghost-Info.plist` (after rename in step 2):
 
 - `"Ghostty Surface Identifier"` → `"TermSurf Ghost Surface Identifier"`
 
 Keep `GHOSTTY_MAC_LAUNCH_SOURCE` and `com.mitchellh.ghosttySurfaceId` as-is
 (internal).
 
-##### Step 4: Update CLI text
+##### Step 5: Update CLI text
 
 **`ghost/src/cli/help.zig`:**
 
@@ -278,71 +324,19 @@ Leave doc comments and path references in `list_themes.zig` that refer to
 `ghostty` config directories and resource paths — those are upstream paths that
 still exist in the binary. Only change user-visible output strings.
 
-##### Step 5: Port `ghostty_config_load_files` from ts5
+##### Step 6: Update Swift strings
 
-Upstream Ghostty only has `ghostty_config_load_default_files`, which loads from
-`~/.config/ghostty/`. We need `ghostty_config_load_files` to load from custom
-directories.
+**`ghost/macos/Sources/Ghostty/Ghostty.Config.swift:335`:**
 
-Port three pieces from ts5:
+- `"~/.config/ghostty/Ghostty.icns"` → `"~/.config/termsurf/Ghost.icns"`
 
-**`ghost/src/os/macos.zig`** — Add `appSupportDirWithBundleId`:
+No change needed on line 70 — `ghostty_config_load_default_files(cfg)` already
+loads from the correct paths after step 1.
 
-```zig
-pub fn appSupportDirWithBundleId(
-    alloc: Allocator,
-    bundle_id: []const u8,
-    sub_path: []const u8,
-) AppSupportDirError![]const u8 {
-    return try commonDir(
-        alloc,
-        .NSApplicationSupportDirectory,
-        &.{ bundle_id, sub_path },
-    );
-}
-```
+**`ghost/macos/Sources/Features/Settings/SettingsView.swift:17`:**
 
-**`ghost/src/config/Config.zig`** — Add `loadFiles` method (copy from
-`ts5/src/config/Config.zig:3952`). This is ~50 lines that parallels
-`loadDefaultFiles` but takes `app_name` and `bundle_id` parameters.
-
-**`ghost/src/config/CApi.zig`** — Add export:
-
-```zig
-export fn ghostty_config_load_files(
-    self: *Config,
-    app_name: [*:0]const u8,
-    bundle_id: [*:0]const u8,
-) void {
-    self.loadFiles(
-        state.alloc,
-        std.mem.sliceTo(app_name, 0),
-        std.mem.sliceTo(bundle_id, 0),
-    ) catch |err| {
-        log.err("error loading config err={}", .{err});
-    };
-}
-```
-
-**`ghost/include/ghostty.h`** — Add declaration:
-
-```c
-void ghostty_config_load_files(ghostty_config_t, const char *, const char *);
-```
-
-##### Step 6: Update config paths in Swift
-
-**`ghost/macos/Sources/Ghostty/Ghostty.Config.swift`:**
-
-- Line 70: `ghostty_config_load_default_files(cfg)` →
-  `ghostty_config_load_files(cfg, "termsurf-ghost", "com.termsurf.ghost")`
-- Line 335: `"~/.config/ghostty/Ghostty.icns"` →
-  `"~/.config/termsurf-ghost/Ghost.icns"`
-
-**`ghost/macos/Sources/Features/Settings/SettingsView.swift`:**
-
-- Line 17: `"$HOME/.config/ghostty/config.ghostty and restart Ghostty"` →
-  `"$HOME/.config/termsurf-ghost/config and restart TermSurf Ghost"`
+- `"$HOME/.config/ghostty/config.ghostty and restart Ghostty"` →
+  `"$HOME/.config/termsurf/config.ghostty and restart TermSurf Ghost"`
 
 ##### Step 7: Update About view
 
