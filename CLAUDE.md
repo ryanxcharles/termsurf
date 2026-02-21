@@ -59,8 +59,8 @@ The project has evolved through six generations:
 
 **Directory structure:**
 
-- `ghost/` — TermSurf Ghost (Ghostty fork, Zig-first). **Active development.**
-- `web/` — `web` TUI (Rust/ratatui). Browser chrome in the terminal pane.
+- `gui/` — TermSurf GUI (Ghostty fork, Zig-first). **Active development.**
+- `tui/` — `web` TUI (Rust/ratatui). Browser chrome in the terminal pane.
 - `ts5/` — TermSurf 5.0 (Ghostty fork + out-of-process Chromium). Superseded.
 - `ts4/` — TermSurf 4.0 (Chromium Content API experiments). Superseded.
 - `ts3/` — TermSurf 3.0 (WezTerm fork + out-of-process CEF). Superseded.
@@ -69,7 +69,7 @@ The project has evolved through six generations:
 - `vendor/cef-rs/` — CEF Rust bindings. Used by `ts3/termsurf-profile/`.
 - `docs/issues/` — All documentation across all generations.
 
-## TermSurf Ghost (ghost/) — Active Development
+## TermSurf GUI (gui/) — Active Development
 
 ### Architecture
 
@@ -97,26 +97,26 @@ integration will be built incrementally across Issues 601+.
 
 ### Directory Structure
 
-- `ghost/src/` — Shared Zig core (libghostty)
-- `ghost/src/Surface.zig` — Core surface (will hold browser state)
-- `ghost/src/renderer/Metal.zig` — Metal renderer
-- `ghost/src/renderer/metal/` — Metal pipeline, shaders, IOSurface layer
-- `ghost/src/apprt/embedded.zig` — C API exports
-- `ghost/include/ghostty.h` — libghostty C API headers
-- `ghost/macos/` — macOS app (Swift, thin wrapper)
-- `ghost/build.zig` — Build system
-- `ghost/build.zig.zon` — Dependencies
+- `gui/src/` — Shared Zig core (libghostty)
+- `gui/src/Surface.zig` — Core surface (will hold browser state)
+- `gui/src/renderer/Metal.zig` — Metal renderer
+- `gui/src/renderer/metal/` — Metal pipeline, shaders, IOSurface layer
+- `gui/src/apprt/embedded.zig` — C API exports
+- `gui/include/ghostty.h` — libghostty C API headers
+- `gui/macos/` — macOS app (Swift, thin wrapper)
+- `gui/build.zig` — Build system
+- `gui/build.zig.zon` — Dependencies
 
 ### Build Commands
 
 ```bash
-cd ghost && zig build
+cd gui && zig build
 ```
 
 ### Launching
 
 ```bash
-open ghost/zig-out/Ghostty.app
+open gui/zig-out/TermSurf.app
 ```
 
 ### Upstream Merges
@@ -125,7 +125,7 @@ Same approach as ts5 (Issue 418 Experiment 3):
 
 ```bash
 git fetch upstream
-git subtree pull --prefix=ghost upstream main -m "Merge upstream Ghostty into ghost"
+git subtree pull --prefix=gui upstream main -m "Merge upstream Ghostty into gui"
 ```
 
 ## TermSurf 5.0 (ts5/) — Superseded by Ghost
@@ -240,9 +240,9 @@ input forwarding, navigation, and other browser interaction features.
 - `ts5/build.zig` — Ghostty build system
 - `ts5/build.zig.zon` — Ghostty dependencies
 - `ts5/pkg/` — Platform packages (Linux, macOS, etc.)
-- `web/` — `web` TUI (Rust/ratatui)
-- `web/src/main.rs` — TUI event loop, layout, XPC overlay sending
-- `web/src/xpc.rs` — Minimal XPC FFI client (two-step connect via gateway)
+- `tui/` — `web` TUI (Rust/ratatui)
+- `tui/src/main.rs` — TUI event loop, layout, XPC overlay sending
+- `tui/src/xpc.rs` — Minimal XPC FFI client (two-step connect via gateway)
 
 ### Build Commands
 

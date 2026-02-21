@@ -16,7 +16,7 @@ the known files are:
 
 | File | Icons |
 |------|-------|
-| `web/src/main.rs` | nf-md-web (U+F059F), nf-fa-keyboard_o (U+F11C), nf-fa-user (U+F007) |
+| `tui/src/main.rs` | nf-md-web (U+F059F), nf-fa-keyboard_o (U+F11C), nf-fa-user (U+F007) |
 | `docs/issues/504-web-tui.md` | nf-md-web (U+F059F), nf-fa-keyboard_o (U+F11C), nf-fa-user (U+F007), nf-md-refresh (U+F0450) |
 
 Update this table when new files or icons are added.

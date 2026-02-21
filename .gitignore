@@ -62,26 +62,26 @@ ts5/vgcore.*
 ts5/*/.build/
 ts5/*/Sources/*/*.metallib
 
-# TermSurf Ghost (ghost/)
-ghost/zig-cache/
-ghost/.zig-cache/
-ghost/zig-out/
-ghost/build/
-ghost/.flatpak-builder/
-ghost/flatpak/builddir/
-ghost/flatpak/repo/
-ghost/result*
-ghost/.nixos-test-history
-ghost/example/*.wasm
-ghost/test/ghostty
-ghost/test/cases/**/*.actual.png
-ghost/glad.zip
-ghost/Box_test.ppm
-ghost/Box_test_diff.ppm
-ghost/ghostty.qcow2
-ghost/vgcore.*
-ghost/*/.build/
-ghost/*/Sources/*/*.metallib
+# TermSurf GUI (gui/)
+gui/zig-cache/
+gui/.zig-cache/
+gui/zig-out/
+gui/build/
+gui/.flatpak-builder/
+gui/flatpak/builddir/
+gui/flatpak/repo/
+gui/result*
+gui/.nixos-test-history
+gui/example/*.wasm
+gui/test/ghostty
+gui/test/cases/**/*.actual.png
+gui/glad.zip
+gui/Box_test.ppm
+gui/Box_test_diff.ppm
+gui/ghostty.qcow2
+gui/vgcore.*
+gui/*/.build/
+gui/*/Sources/*/*.metallib
 
 # Vendored analysis repos (not committed)
 vendor/wezterm/
@@ -101,8 +101,8 @@ ts4/termsurf-xpc/target/
 ts4/two-profiles-receiver/receiver
 ts4/two-profiles-receiver/shaders.metallib
 
-# web TUI build outputs
-web/target/
+# TUI build outputs
+tui/target/
 
 # cef-rs build outputs
 vendor/cef-rs/target/

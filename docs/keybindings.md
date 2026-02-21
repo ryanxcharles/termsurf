@@ -5,7 +5,7 @@ Ghostty defaults or user-configured Ghostty keybindings.
 
 ## `web` TUI keybindings
 
-These are handled by the `web` TUI process (`web/src/main.rs`) via crossterm key
+These are handled by the `web` TUI process (`tui/src/main.rs`) via crossterm key
 events received through the terminal PTY.
 
 | Key    | Mode    | Action            | Notes                                        |
@@ -17,7 +17,7 @@ events received through the terminal PTY.
 
 ## GUI keybindings
 
-These are handled in Ghost's Zig core (`ghost/src/Surface.zig`), intercepted in
+These are handled in Ghost's Zig core (`gui/src/Surface.zig`), intercepted in
 `keyCallback` before keybinding processing.
 
 | Key      | Mode   | Action            | Notes                                                                                                                                                                    |

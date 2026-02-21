@@ -142,3 +142,21 @@ cd gui && zig build
 3. **Historical docs unchanged:**
    `git diff docs/issues/6{00,01,02,03,04,05,06,07,08,09,10,11,12}*` shows no
    changes
+
+**Result:** Pass
+
+Build succeeds from `gui/`. No stale `ghost/` or `web/` references in living
+documents. Historical issue docs unchanged.
+
+#### Conclusion
+
+The rename was straightforward — two `git mv` operations plus find/replace
+across 5 living documents (CLAUDE.md, .gitignore, keybindings.md, 2 Claude
+skills). No code changes needed inside either directory.
+
+## Conclusion
+
+`ghost/` is now `gui/` and `web/` is now `tui/`. Build commands are
+`cd gui && zig build` and `cargo build -p web` (from `tui/`). Historical issue
+docs (600–612) retain their original `ghost/` and `web/` paths as a record of
+when those names were in use.

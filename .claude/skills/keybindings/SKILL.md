@@ -1,6 +1,6 @@
 ---
 name: keybindings
-description: "Track and document all TermSurf keybindings. Use when adding, changing, or removing keybindings in either the GUI (CompositorXPC.swift, AppDelegate.swift) or the TUI (web/src/main.rs). Ensures docs/keybindings.md stays accurate."
+description: "Track and document all TermSurf keybindings. Use when adding, changing, or removing keybindings in either the GUI (CompositorXPC.swift, AppDelegate.swift) or the TUI (tui/src/main.rs). Ensures docs/keybindings.md stays accurate."
 ---
 
 # Keybindings
@@ -35,7 +35,7 @@ Keybindings are handled in two places:
 | Layer   | File                                            | Mechanism             | When                                                       |
 | ------- | ----------------------------------------------- | --------------------- | ---------------------------------------------------------- |
 | **GUI** | `ts5/macos/Sources/Ghostty/CompositorXPC.swift` | NSEvent local monitor | Before the PTY — intercepts keys the terminal can't encode |
-| **TUI** | `web/src/main.rs`                               | crossterm key events  | Inside the terminal — standard key handling via PTY        |
+| **TUI** | `tui/src/main.rs`                               | crossterm key events  | Inside the terminal — standard key handling via PTY        |
 
 GUI keybindings fire first (NSEvent monitor runs before the responder chain). If
 the GUI consumes an event (returns `nil`), the TUI never sees it.
