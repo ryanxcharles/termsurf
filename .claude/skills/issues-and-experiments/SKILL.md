@@ -89,6 +89,22 @@ Each experiment has:
 4. **Verification** — How to test that the experiment worked. Include concrete
    steps and a pass/fail criterion.
 
+### Chromium branches
+
+If an experiment modifies Chromium code, it MUST create a new branch in the
+Chromium repo (`chromium/src/`). Always fork the most relevant recent branch —
+usually the branch from the previous issue or experiment that has the code you
+need. Never work directly on an existing branch from a different issue.
+
+Each experiment that touches Chromium includes a `### Chromium branch` section
+documenting:
+
+1. The new branch name: `{version}-issue-{N}` (e.g., `146.0.7650.0-issue-608`)
+2. Which branch it forks from and why (e.g., "from `146.0.7650.0-issue-607`
+   because we need the keyboard forwarding code")
+
+Also add the new branch to the table in `docs/chromium.md`.
+
 ### One at a time
 
 Design and implement one experiment at a time. After Experiment 1 is concluded,
