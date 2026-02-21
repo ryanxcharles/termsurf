@@ -419,3 +419,108 @@ waiting for Chromium to start, not only after Chromium is running and reports
 `DidStartLoading`. This can be done entirely in the GUI or TUI — the TUI can
 emit OSC 9;4;3 (indeterminate pulse) as soon as it sends `set_overlay`, and
 clear it when the first `loading_state` or `display_surface` arrives.
+
+### Experiment 3: Cold-start loading indicator, safety timeout, and slow-load test page
+
+#### Goal
+
+Show the loading progress bar from the moment the user runs `web <url>` — not
+just after Chromium is already running. Handle edge cases so the bar never gets
+stuck. Add a test page that simulates a slow download for visual verification.
+
+#### Background
+
+Experiment 2 proved the loading pipeline works, but revealed a critical gap: the
+longest wait during first use is Chromium process startup, not page loading.
+During cold start, the user sees nothing for several seconds. The progress bar
+only appears briefly once Chromium is running and fires `DidStartLoading`.
+
+There are also edge cases where the bar could get stuck forever:
+
+- Chromium crashes before sending any `loading_state`
+- XPC connection drops
+- A page load enters an infinite redirect loop
+- The web TUI loses its compositor connection
+
+#### Changes
+
+##### web TUI (`tui/src/main.rs`)
+
+**Immediate indeterminate pulse on overlay send:**
+
+After the first `send_set_overlay()` call, immediately emit OSC 9;4;3
+(indeterminate blue pulse). This covers the Chromium cold-start period. The
+pulse runs until the first `loading_state` message (from Chromium) or
+`display_surface` (first frame) arrives, whichever comes first.
+
+Add a boolean `loading_bar_active` to track whether the progress bar is
+currently showing. Set it to `true` after emitting the initial pulse. When a
+`LoadingState` with state `"done"` or `"error"` arrives, set it to `false`.
+
+**Safety timeout:**
+
+Add a 30-second timeout. If `loading_bar_active` is `true` for more than 30
+seconds without receiving a `"done"` or `"error"` state, emit OSC 9;4;2 (red
+error bar) briefly, then OSC 9;4;0 (clear) to prevent the bar from being stuck
+forever. Track the start time with `std::time::Instant`.
+
+The timeout check runs on each iteration of the event loop (every 250ms poll
+cycle), so it adds no extra threads or complexity.
+
+**Clear on exit:**
+
+Before restoring the terminal, emit OSC 9;4;0 to ensure the progress bar is
+cleared if the user quits (Ctrl+C or `q`) while loading.
+
+##### Test page (`test-html/server.ts` and `test-html/public/test-slow-load.html`)
+
+Add a `/slow` route to `server.ts` that accepts a `?seconds=N` query parameter
+(default 10). The server sleeps for that duration using `Bun.sleep()`, then
+streams a chunked HTML response. Every second, it sends a chunk that updates a
+visual progress indicator on the page itself, so the user can see both:
+
+1. Ghostty's blue progress bar at the top of the pane (OSC 9;4)
+2. The page's own progress indicator in the viewport
+
+The page design:
+
+- Dark background matching the Tokyo Night theme
+- A large circular or bar progress indicator that fills as chunks arrive
+- Percentage text that updates with each chunk
+- After loading completes: a "Done!" message with the total load time
+
+The `/slow` route uses chunked transfer encoding (streaming `Response` in Bun)
+to send partial HTML. Each chunk is a `<script>` tag that updates the progress
+element's width/text.
+
+Also add the new test page to `test-html/public/index.html` in a new "Loading"
+section.
+
+#### Verification
+
+1. **Cold start**: Kill any running Chromium Profile Server. Launch TermSurf,
+   run `web http://localhost:9616`. The blue progress bar should pulse
+   immediately (indeterminate), then transition to determinate progress when
+   Chromium reports loading, then disappear when the page finishes loading.
+
+2. **Warm start**: With Chromium already running, run
+   `web http://localhost:9616/slow?seconds=10`. The bar should pulse briefly
+   (indeterminate), then show determinate progress 0%→100% over ~10 seconds. The
+   page itself should show matching progress.
+
+3. **Quick load**: Run `web http://localhost:9616`. The bar should pulse briefly
+   and disappear quickly — no lingering after the page is loaded.
+
+4. **Error case**: Run `web http://localhost:99999` (unreachable port). The bar
+   should eventually show red (error) and then clear.
+
+5. **Safety timeout**: If the user kills the Chromium server mid-load (e.g.,
+   `kill -9`), the bar should not stay forever — after 30 seconds it clears with
+   an error flash.
+
+6. **Clean exit**: Press `q` or Ctrl+C while the bar is active. The bar should
+   disappear — no orphaned progress indicator left in Ghostty's title bar.
+
+7. **Slow page visual**: Navigate to `http://localhost:9616/slow?seconds=10`.
+   Both Ghostty's progress bar and the page's own progress indicator should
+   advance together over 10 seconds.
