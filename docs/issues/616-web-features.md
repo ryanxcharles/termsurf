@@ -179,3 +179,219 @@ demo page. Record pass/fail for each:
 3. `html/` and `box-demo/` are deleted from the repo
 4. `ts4/box-demo/` and `ts5/box-demo/` are unchanged
 5. Each demo has a pass/fail result recorded in the table above
+
+### Experiment 2: Loading state indicator and pink texture removal
+
+#### Goal
+
+Show a blue progress bar at the top of the terminal pane while a web page is
+loading. Remove the pink texture that currently shows during page load. The
+progress bar is Ghostty's built-in OSC 9;4 indicator — no custom rendering
+needed.
+
+#### Background
+
+When a user navigates to a page, the current experience is:
+
+1. Pink texture fills the pane (the default IOSurface before Chromium sends a
+   frame)
+2. No indication that anything is happening
+3. Page suddenly appears when Chromium sends the first frame
+
+The desired experience is:
+
+1. Blue progress bar pulses at the top of the terminal pane
+2. Progress bar shows determinate progress as the page loads
+3. Progress bar disappears when the page is fully loaded
+4. No pink texture — the pane shows nothing (or the previous page) until the
+   first Chromium frame arrives
+
+#### Architecture
+
+Three processes participate, connected by XPC:
+
+```
+Chromium Profile Server ──XPC──▶ TermSurf GUI ──XPC──▶ web TUI ──stdout──▶ Ghostty
+```
+
+**Chromium Profile Server** detects loading state via `WebContentsObserver`
+callbacks and sends XPC messages to the GUI.
+
+**TermSurf GUI** receives loading state from Chromium and relays it to the web
+TUI via the existing reverse XPC channel.
+
+**web TUI** receives loading state and emits OSC 9;4 escape sequences to stdout.
+Ghostty renders the blue progress bar.
+
+#### XPC message protocol
+
+##### Chromium Profile Server → GUI
+
+New message type: `loading_state`
+
+```
+{
+  "action":   "loading_state",
+  "pane_id":  "<uuid>",
+  "state":    "loading" | "progress" | "done" | "error",
+  "progress": <uint64 0–100>    // only meaningful when state == "progress"
+}
+```
+
+Sent at these Chromium events:
+
+| Chromium callback        | `state`      | `progress` | When                        |
+| ------------------------ | ------------ | ---------- | --------------------------- |
+| `DidStartLoading()`      | `"loading"`  | 0          | Navigation begins           |
+| `LoadProgressChanged(p)` | `"progress"` | p × 100    | Periodic during load        |
+| `DidStopLoading()`       | `"done"`     | 100        | All frames finished loading |
+| `DidFailLoad(...)`       | `"error"`    | 0          | Load failed                 |
+
+##### GUI → web TUI
+
+New message type: `loading_state` (relayed from Chromium)
+
+```
+{
+  "action":   "loading_state",
+  "state":    "loading" | "progress" | "done" | "error",
+  "progress": <uint64 0–100>
+}
+```
+
+The GUI strips `pane_id` (the web TUI already knows which pane it is) and
+forwards on the existing `web_peer` connection.
+
+##### web TUI → stdout (terminal escape sequences)
+
+| Received state | OSC 9;4 sequence              | Ghostty renders            |
+| -------------- | ----------------------------- | -------------------------- |
+| `"loading"`    | `\x1b]9;4;3\x1b\\`            | Indeterminate blue pulse   |
+| `"progress"`   | `\x1b]9;4;1;{progress}\x1b\\` | Determinate blue bar at N% |
+| `"done"`       | `\x1b]9;4;0\x1b\\`            | Bar removed                |
+| `"error"`      | `\x1b]9;4;2\x1b\\`            | Red error bar              |
+
+#### Changes
+
+##### Chromium Profile Server (branch: `146.0.7650.0-issue-616`)
+
+**File: `content/chromium_profile_server/browser/shell_video_consumer.h`**
+
+Add `WebContentsObserver` method declarations:
+
+- `void DidStartLoading() override;`
+- `void DidStopLoading() override;`
+- `void LoadProgressChanged(double progress) override;`
+- `void DidFailLoad(content::RenderFrameHost*, const GURL&, int) override;`
+
+Add helper:
+
+- `void SendLoadingState(const char* state, int progress);`
+
+**File: `content/chromium_profile_server/browser/shell_video_consumer.cc`**
+
+Implement the four observer methods. Each calls `SendLoadingState()` which
+constructs and sends the XPC dictionary:
+
+```cpp
+void ShellVideoConsumer::SendLoadingState(const char* state, int progress) {
+  if (!xpc_connection_) return;
+  xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
+  xpc_dictionary_set_string(msg, "action", "loading_state");
+  xpc_dictionary_set_string(msg, "pane_id", pane_id_.c_str());
+  xpc_dictionary_set_string(msg, "state", state);
+  xpc_dictionary_set_uint64(msg, "progress", progress);
+  xpc_connection_send_message(xpc_connection_, msg);
+  xpc_release(msg);
+}
+```
+
+##### TermSurf GUI
+
+**File: `gui/src/apprt/xpc.zig`**
+
+Add `"loading_state"` to the `handleMessage` dispatcher. The handler:
+
+1. Reads `pane_id` from the message
+2. Looks up the pane
+3. Sends a new `loading_state` message to `pane.web_peer` with `state` and
+   `progress` fields (no `pane_id` — the TUI knows its own pane)
+
+New function: `handleLoadingState(msg)` — approximately 15 lines following the
+same pattern as `sendModeToWeb`.
+
+##### web TUI
+
+**File: `tui/src/xpc.rs`**
+
+Add `LoadingState` variant to `CompositorMessage`:
+
+```rust
+pub enum CompositorMessage {
+    ModeChanged { browsing: bool },
+    UrlChanged { url: String },
+    LoadingState { state: String, progress: u8 },
+}
+```
+
+Add parsing in the event handler block (alongside `mode_changed` and
+`url_changed`):
+
+```rust
+} else if action == "loading_state" {
+    let state_key = CString::new("state").unwrap();
+    let state_ptr = unsafe { xpc_dictionary_get_string(event, state_key.as_ptr()) };
+    if !state_ptr.is_null() {
+        let state = unsafe { CStr::from_ptr(state_ptr) }
+            .to_str().unwrap_or("done").to_string();
+        let progress_key = CString::new("progress").unwrap();
+        let progress = unsafe { xpc_dictionary_get_uint64(event, progress_key.as_ptr()) } as u8;
+        let _ = tx.send(CompositorMessage::LoadingState { state, progress });
+    }
+}
+```
+
+**File: `tui/src/main.rs`**
+
+Add OSC 9;4 emission when `LoadingState` is received:
+
+```rust
+CompositorMessage::LoadingState { state, progress } => {
+    match state.as_str() {
+        "loading" => write!(stdout, "\x1b]9;4;3\x1b\\")?,
+        "progress" => write!(stdout, "\x1b]9;4;1;{}\x1b\\", progress)?,
+        "done" => write!(stdout, "\x1b]9;4;0\x1b\\")?,
+        "error" => write!(stdout, "\x1b]9;4;2\x1b\\")?,
+        _ => {}
+    }
+    stdout.flush()?;
+}
+```
+
+##### Pink texture removal
+
+**File: `gui/src/renderer/Metal.zig`** (or wherever the pink fallback texture is
+created)
+
+Remove or replace the pink fallback color. Options:
+
+- Set the fallback to transparent (clear color)
+- Skip rendering the overlay entirely when no IOSurface has been received yet
+- Show nothing until the first `display_surface` message arrives
+
+The exact approach depends on how the overlay pipeline handles the "no surface
+yet" state. The simplest change is making the initial clear color transparent
+instead of pink.
+
+#### Verification
+
+1. Launch TermSurf, run `web http://localhost:9616`
+2. **Loading indicator**: While the page loads, a blue progress bar pulses at
+   the top of the terminal pane
+3. **Progress updates**: For slow-loading pages, the bar shows determinate
+   progress (0%–100%)
+4. **Completion**: The bar disappears when the page finishes loading
+5. **No pink**: No pink texture visible at any point during page load
+6. **Error state**: Navigating to an invalid URL shows a red error bar briefly
+7. **Subsequent navigations**: Clicking a link on the loaded page triggers the
+   progress bar again
