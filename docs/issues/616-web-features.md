@@ -573,3 +573,102 @@ The two remaining issues are both on the Chromium side of the pipeline:
   `NavigationEntryCommitted`) and send "done" when a bfcache restore completes.
   Alternatively, the TUI could treat reaching 100% progress as equivalent to
   "done" after a short delay.
+
+### Experiment 4: Debug back-navigation stuck bar
+
+#### Goal
+
+Add diagnostic logging across all three processes in the loading state pipeline
+to determine exactly where the "done" message gets lost during back navigation.
+
+#### Background
+
+Experiment 3 found that right-clicking and selecting "Back" causes the progress
+bar to fill to 100% and stay there permanently. Chromium's source code confirms
+that `DidStopLoading()` fires on bfcache restores, so the callback should be
+invoked. The problem is somewhere in the three-hop pipeline:
+
+```
+Chromium Profile Server → GUI (xpc.zig) → web TUI (main.rs)
+```
+
+Each hop has potential silent failure modes:
+
+- **Chromium**: `SendLoadingState` returns early if `xpc_connection_` is null
+- **GUI**: `handleLoadingState` returns early if pane lookup fails or `web_peer`
+  is null — both with no logging
+- **TUI**: No logging of received messages — we can't tell if messages arrive
+
+Chromium already has `LOG(INFO)` in `DidStartLoading` and `DidStopLoading`. The
+GUI and TUI have no loading state logging at all.
+
+#### Changes
+
+##### GUI (`gui/src/apprt/xpc.zig`)
+
+Add a `log.info` call at the top of `handleLoadingState` so every incoming
+loading state message is logged, including the early-return cases:
+
+```zig
+fn handleLoadingState(msg: xpc_object_t) void {
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    const state_str = str(xpc_dictionary_get_string(msg, "state") orelse "?");
+    const progress = xpc_dictionary_get_uint64(msg, "progress");
+
+    const p = panes.get(pane_id) orelse {
+        log.warn("loading_state: unknown pane={s} state={s}", .{ pane_id, state_str });
+        return;
+    };
+    if (p.web_peer == null) {
+        log.warn("loading_state: no web_peer pane={s} state={s}", .{ pane_id, state_str });
+        return;
+    }
+
+    log.info("loading_state pane={s} state={s} progress={} → forwarding to web TUI", .{
+        pane_id, state_str, progress,
+    });
+
+    // ... relay as before
+}
+```
+
+This logs three cases: unknown pane (early return), no web_peer (early return),
+and successful forward.
+
+##### TUI (`tui/src/main.rs`)
+
+Add `eprintln!` in the `LoadingState` message handler so every received message
+is visible on stderr:
+
+```rust
+xpc::CompositorMessage::LoadingState { state, progress } => {
+    eprintln!("[web] loading_state: state={} progress={}", state, progress);
+    // ... existing OSC emission
+}
+```
+
+##### No Chromium changes
+
+Chromium already logs `DidStartLoading` and `DidStopLoading` via `LOG(INFO)`.
+These appear in the Chromium Profile Server's stderr.
+
+#### Verification
+
+1. Launch TermSurf and run `web http://localhost:9616`
+2. Wait for the page to load (bar should clear)
+3. Click a link on the page to navigate to a subpage
+4. Right-click and select "Back"
+5. Observe the bar behavior — does it get stuck at 100%?
+
+Check logs from all three processes:
+
+- **Chromium stderr**: Look for `DidStartLoading` and `DidStopLoading` during
+  the back navigation. If `DidStopLoading` fires, Chromium is not the problem.
+- **GUI (TermSurf) logs**: Look for `loading_state` lines. If the GUI logs
+  `state=done` being forwarded, the GUI is not the problem. If the GUI logs
+  `unknown pane` or `no web_peer`, that's the drop point.
+- **TUI stderr**: Look for `[web] loading_state` lines. If the TUI never
+  receives `state=done`, the message was lost between GUI and TUI.
+
+The experiment succeeds when we can identify which hop drops the "done" message
+on back navigation.
