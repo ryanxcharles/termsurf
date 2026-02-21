@@ -1322,3 +1322,97 @@ release alone is enough to navigate.
    `notifyOverlayClicked` synchronously. Instead, send the focus XPC message and
    let a callback update state. The release would still see
    `isOverlayForwarding` as false. Fragile — depends on XPC timing.
+
+## Experiment 8: Suppress activation mouseup
+
+### Goal
+
+Prevent the activation click's mouseup from reaching Chromium. When an overlay
+click switches mode from control to browse, both the press and release must be
+consumed — Chromium should see nothing until the next fresh click.
+
+### Background
+
+Experiment 7 gates mouse forwarding on `isOverlayForwarding` (browsing + focused
+pane). The press is correctly suppressed: `isOverlayForwarding` is false, so
+`sendMouseEvent` is skipped and `notifyOverlayClicked` activates. But
+`notifyOverlayClicked` synchronously sets `p.browsing = true` and
+`focused_pane`, so by the time the release event arrives, `isOverlayForwarding`
+returns true and the release forwards to Chromium. Chromium navigates links on
+mouseup.
+
+Fix idea 2 from Experiment 7 is the cleanest: track the suppression in
+Surface.zig where the press/release lifecycle already lives, without adding
+state to xpc.zig.
+
+### Design
+
+**Phase 1: Add `overlay_activation` flag to Mouse struct in Surface.zig.**
+
+Add after `over_overlay`:
+
+```zig
+/// True while consuming an activation click on the overlay. Set on
+/// the press that triggers notifyOverlayClicked, cleared on the
+/// corresponding release. Prevents the mouseup from forwarding to
+/// Chromium. (Issue 606 Experiment 8.)
+overlay_activation: bool = false,
+```
+
+**Phase 2: Set and check the flag in `mouseButtonCallback`.**
+
+Replace the overlay hit block. When activation fires, set the flag. When
+forwarding is active, check the flag first — if set and this is the release,
+clear it and skip forwarding:
+
+```zig
+// Check if click is in a browser overlay (Issue 606).
+{
+    const cursor = try self.rt_surface.getCursorPos();
+    if (self.hitTestOverlay(@floatCast(cursor.x), @floatCast(cursor.y))) |overlay_pos| {
+        const xpc = @import("apprt/xpc.zig");
+        if (xpc.isOverlayForwarding(self)) {
+            // Suppress the release that follows an activation press (Exp 8).
+            if (self.mouse.overlay_activation) {
+                if (action == .release) {
+                    self.mouse.overlay_activation = false;
+                }
+            } else {
+                // Active + browsing: forward click to Chromium.
+                xpc.sendMouseEvent(self, action, button, mods, overlay_pos.x, overlay_pos.y);
+            }
+        } else if (button == .left and action == .press) {
+            // Not forwarding: activate on left-click, consume the click.
+            xpc.notifyOverlayClicked(self);
+            self.mouse.overlay_activation = true;
+        }
+        return true;
+    }
+    // Click missed overlay — switch to control if browsing (Exp 6).
+    if (button == .left and action == .press) {
+        const xpc = @import("apprt/xpc.zig");
+        xpc.notifyNonOverlayClicked(self);
+    }
+}
+```
+
+The flag is set on the activating press and cleared on the next release. Any
+events between (drags, other buttons) are also suppressed while the flag is set,
+which is correct — the entire activation gesture should be invisible to
+Chromium.
+
+### Verification
+
+```bash
+cd ghost && zig build
+open ghost/zig-out/Ghostty.app --stderr ~/dev/termsurf/logs/ghost.log
+cargo run -p web -- https://en.wikipedia.org/wiki/Terminal_emulator
+```
+
+Pass criteria:
+
+- In control mode, clicking a link activates the webview but does NOT navigate
+- The link only navigates on the next click (after activation)
+- Mouse moves and scroll still correctly gated (no regression from Exp 7)
+- Keyboard mode switching still works
+- Right-clicks on an inactive overlay don't activate or forward
