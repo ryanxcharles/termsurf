@@ -1057,3 +1057,15 @@ we never need it.
 3. Click a link — it should work on the first click
 4. Right-click, then click a link — still works on the first click (no focus
    stealing)
+
+**Result:** Pass
+
+Right-click no longer shows a context menu. Clicks always work on the first
+attempt — no more focus stealing.
+
+#### Conclusion
+
+The Content Shell context menu was a debugging artifact that didn't belong in
+TermSurf's architecture. Commenting out `ShowContextMenu` eliminates the focus
+issue. Back, forward, reload, and inspect will be implemented as TUI keybindings
+via XPC in future experiments.
