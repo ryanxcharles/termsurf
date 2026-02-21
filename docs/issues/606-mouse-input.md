@@ -1029,9 +1029,9 @@ switches transfer focus. But mouse-driven mode switching failed because:
    via `sendMouseEvent`. The `web` TUI never sees these clicks, so it can't
    trigger `mode_changed`.
 
-2. **Non-overlay clicks don't trigger mode changes.** Clicks outside the
-   overlay fall through to normal terminal handling, but Ghost doesn't detect
-   them as a signal to exit browse mode and unfocus Chromium.
+2. **Non-overlay clicks don't trigger mode changes.** Clicks outside the overlay
+   fall through to normal terminal handling, but Ghost doesn't detect them as a
+   signal to exit browse mode and unfocus Chromium.
 
 The solution: Ghost drives mode switching on mouse clicks and notifies the `web`
 TUI by sending `mode_changed` messages back on `p.web_peer`. The `web` TUI
@@ -1146,3 +1146,147 @@ Pass criteria:
 - No feedback loop — `web` TUI doesn't echo `mode_changed` back
 
 ### Result: Pass
+
+## Experiment 7: Gate mouse events on focus + browse
+
+### Goal
+
+Only forward mouse clicks, moves, scroll, and cursor changes to Chromium when
+the pane is both the active Ghostty pane AND in browse mode. Activation clicks
+should switch mode and focus but not pass through to Chromium.
+
+### Background
+
+Experiments 1-6 unconditionally forward mouse events to Chromium whenever a hit
+test succeeds. This is wrong in two cases:
+
+1. **Control mode.** The pane has an overlay but the web TUI is in control mode.
+   Mouse moves still send `mouse_moved` to Chromium (causing hover effects) and
+   clicks both activate and pass through (e.g., clicking a link navigates
+   instead of just switching to browse mode).
+
+2. **Inactive pane.** The pane is in browse mode but the user switched to a
+   different Ghostty pane. Mouse events still forward to Chromium because the
+   hit test doesn't check pane focus.
+
+The correct behavior: mouse events only forward when the pane is the focused
+pane AND in browse mode. An activation click (overlay click while in control
+mode or while the pane is inactive) should switch to browse mode and focus the
+pane, but the click itself must not reach Chromium. Similarly, mouse moves and
+scroll over an unfocused or control-mode overlay should not forward.
+
+### Design
+
+Add a single query function `isOverlayForwarding` in xpc.zig that returns true
+only when both conditions hold: the pane is browsing AND is the focused pane.
+Use it to gate all three mouse forwarding sites in Surface.zig.
+
+**Phase 1: Add `isOverlayForwarding` query in xpc.zig.**
+
+```zig
+/// Returns true if the surface's pane is in browse mode AND is the
+/// focused pane — the only state where mouse events should forward
+/// to Chromium.
+pub fn isOverlayForwarding(surface: *CoreSurface) bool {
+    const pane_id = surface_to_pane.get(@intFromPtr(surface)) orelse return false;
+    const p = panes.get(pane_id) orelse return false;
+    if (!p.browsing) return false;
+    const fp = focused_pane orelse return false;
+    return std.mem.eql(u8, fp, pane_id);
+}
+```
+
+**Phase 2: Gate `mouseButtonCallback` in Surface.zig.**
+
+Replace the overlay hit block. When the hit test succeeds but
+`isOverlayForwarding` is false, call `notifyOverlayClicked` (which handles
+activation) but do NOT call `sendMouseEvent` — consume the click by returning
+true. When forwarding is true, send the event normally:
+
+```zig
+// Check if click is in a browser overlay (Issue 606).
+{
+    const cursor = try self.rt_surface.getCursorPos();
+    if (self.hitTestOverlay(@floatCast(cursor.x), @floatCast(cursor.y))) |overlay_pos| {
+        const xpc = @import("apprt/xpc.zig");
+        if (xpc.isOverlayForwarding(self)) {
+            // Active + browsing: forward click to Chromium.
+            xpc.sendMouseEvent(self, action, button, mods, overlay_pos.x, overlay_pos.y);
+        } else if (button == .left and action == .press) {
+            // Not forwarding: activate on left-click, consume the click.
+            xpc.notifyOverlayClicked(self);
+        }
+        return true;
+    }
+    // Click missed overlay — switch to control if browsing (Exp 6).
+    if (button == .left and action == .press) {
+        const xpc = @import("apprt/xpc.zig");
+        xpc.notifyNonOverlayClicked(self);
+    }
+}
+```
+
+**Phase 3: Gate `cursorPosCallback` in Surface.zig.**
+
+Only forward mouse moves and set the Chromium cursor when forwarding is active.
+When not forwarding, still track `over_overlay` for cursor restore but skip
+`sendMouseMove` and cursor shape override:
+
+```zig
+// Check if mouse is in a browser overlay (Issue 606).
+if (self.hitTestOverlay(@floatCast(pos.x), @floatCast(pos.y))) |_overlay_pos| {
+    const xpc = @import("apprt/xpc.zig");
+    if (xpc.isOverlayForwarding(self)) {
+        xpc.sendMouseMove(self, _overlay_pos.x, _overlay_pos.y);
+        const shape = mapChromiumCursor(self.overlay_cursor_type);
+        _ = try self.rt_app.performAction(
+            .{ .surface = self },
+            .mouse_shape,
+            shape,
+        );
+    }
+    self.mouse.over_overlay = true;
+    return;
+}
+```
+
+**Phase 4: Gate `scrollCallback` in Surface.zig.**
+
+Only forward scroll events when forwarding is active. When not forwarding, let
+the scroll fall through to normal terminal handling:
+
+```zig
+// Check if scroll is in a browser overlay (Issue 606).
+{
+    const cursor = try self.rt_surface.getCursorPos();
+    if (self.hitTestOverlay(@floatCast(cursor.x), @floatCast(cursor.y))) |overlay_pos| {
+        const xpc = @import("apprt/xpc.zig");
+        if (xpc.isOverlayForwarding(self)) {
+            xpc.sendScrollEvent(self, overlay_pos.x, overlay_pos.y);
+            return;
+        }
+    }
+}
+```
+
+### Verification
+
+```bash
+cd ghost && zig build
+open ghost/zig-out/Ghostty.app --stderr ~/dev/termsurf/logs/ghost.log
+cargo run -p web -- https://en.wikipedia.org/wiki/Terminal_emulator
+```
+
+Pass criteria:
+
+- In control mode, hovering over the overlay does NOT change cursor or trigger
+  Chromium hover effects (no `mouse_moved` in log)
+- In control mode, clicking the overlay switches to browse mode and focuses, but
+  does NOT navigate links or trigger Chromium click handlers
+- After activation, subsequent clicks and moves forward to Chromium normally
+- In browse mode, clicking outside the overlay switches to control mode and
+  unfocuses — subsequent overlay hovers do not forward
+- Scrolling over the overlay in control mode scrolls the terminal, not the web
+  page
+- With two panes, switching away from a browsing pane stops forwarding to it
+- Keyboard mode switching (Enter/Esc) still works
