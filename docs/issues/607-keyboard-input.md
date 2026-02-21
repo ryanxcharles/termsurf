@@ -149,3 +149,15 @@ Pass criteria:
 - The `web` TUI updates its chrome to show control mode
 - Terminal input resumes normally after exiting browse mode
 - Ctrl+Esc does nothing when not in browse mode (no crash, no side effects)
+
+### Result: Pass
+
+Ctrl+Esc exits browse mode immediately every time.
+
+### Conclusion
+
+Seven lines in `keyCallback`, before any keybinding or terminal processing:
+check for Escape + Ctrl + press while `isOverlayForwarding`, call
+`notifyNonOverlayClicked`, return `.consumed`. Reuses the same browse→control
+transition as clicking outside the overlay. The escape hatch is now in place
+before keyboard forwarding is implemented.

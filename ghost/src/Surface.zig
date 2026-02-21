@@ -2744,6 +2744,15 @@ pub fn keyCallback(
         event.mods = self.config.key_remaps.apply(event_orig.mods);
     }
 
+    // Ctrl+Esc exits browse mode (Issue 607 Experiment 1).
+    if (event.key == .escape and event.mods.ctrl and event.action == .press) {
+        const xpc = @import("apprt/xpc.zig");
+        if (xpc.isOverlayForwarding(self)) {
+            xpc.notifyNonOverlayClicked(self);
+            return .consumed;
+        }
+    }
+
     // Crash metadata in case we crash in here
     crash.sentry.thread_state = self.crashThreadState();
     defer crash.sentry.thread_state = null;
