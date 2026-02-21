@@ -129,3 +129,50 @@ Wikipedia's search).
 
 Record each result as Pass, Fail, or N/A (if the site doesn't support that
 test). For any Fail, note the observed behavior.
+
+**Result:** Partial
+
+8 of 13 tests pass. 5 fail. The failures fall into two groups:
+
+**Group 1: Tab (test 4).** Tab doesn't move focus between form fields. The VK
+code for Tab (0x09) is mapped and sent, but it may not be reaching Chromium, or
+Chromium may need additional event fields (e.g., `dom_code`) to process Tab as a
+focus-move event. Alternatively, Ghost or macOS may be intercepting Tab before
+it reaches `keyCallback` (Ghostty uses Tab for terminal focus cycling in some
+configurations).
+
+**Group 2: All Cmd shortcuts (tests 9-12).** Cmd+A selects terminal contents
+instead of webpage contents. Cmd+C, Cmd+V, Cmd+X, and Cmd+Z all fail similarly.
+These events never reach the Zig `keyCallback` forwarding block because macOS
+intercepts them at the AppKit level before `keyDown` is called.
+
+The Cmd+key interception path is:
+
+1. macOS calls `performKeyEquivalent` on the view for any Cmd+key press.
+2. `performKeyEquivalent` checks if the key is a Ghostty binding (e.g., Cmd+A →
+   `select_all`).
+3. If it is a binding, it calls `keyDown` which routes to Ghostty's binding
+   system — never reaching our forwarding block.
+4. If it's not a binding, the macOS menu system checks `MainMenu.xib` for
+   matching menu items (e.g., Cmd+A → `selectAll:` IBAction on the responder
+   chain).
+
+Either way, Cmd+key events are consumed before our Zig code sees them. The
+forwarding block in `keyCallback` only runs for keys that survive both the
+`performKeyEquivalent` check and the AppKit responder chain.
+
+#### Conclusion
+
+The basic keyboard pipeline works well — characters, Enter, Backspace, arrows,
+Home/End, and Shift+arrow selection all function correctly. The two remaining
+problems are:
+
+1. **Cmd shortcuts are intercepted by macOS/Ghostty before reaching Zig.** This
+   requires changes in the Swift layer (`performKeyEquivalent` or the responder
+   chain) to detect browse mode and forward Cmd+key events to `keyCallback`
+   instead of handling them as Ghostty bindings or menu actions.
+
+2. **Tab doesn't work.** This may be a simpler issue — possibly a missing VK
+   code mapping, a Ghostty binding consuming Tab, or Chromium needing additional
+   fields on the keyboard event. Investigate separately from the Cmd shortcut
+   problem.
