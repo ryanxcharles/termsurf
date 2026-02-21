@@ -140,3 +140,132 @@ open ghost/zig-out/Ghostty.app
    require `touch ghost/zig-out/Ghostty.app` to bust the icon cache.)
 4. **No Ghostty icon visible:** The old blue rounded-square Ghostty icon does
    not appear anywhere.
+
+**Result:** Partial
+
+The debug icon works — the green wave surfer appears in the dock. The release
+icon still shows the old Ghostty icon, which flashes briefly before the debug
+override replaces it.
+
+#### Conclusion
+
+The debug icon succeeded because it's loaded at runtime via
+`NSImage(named: "BlueprintImage")` from the asset catalog imageset we replaced.
+
+The release icon failed because `AppIconImage.imageset` is NOT what Xcode uses
+for the app icon. The actual app icon comes from `ghost/images/Ghostty.icon/` —
+an **Icon Composer** document (macOS/Xcode 16+ format). This is a layered bundle
+containing multiple PNGs (`Ghostty.png`, `Screen.png`, `gloss.png`,
+`Inner Bevel 6px.png`, `Screen Effects.png`) composited together with blend
+modes, gradients, and glass effects. Xcode compiles this `.icon` bundle into
+`Ghostty.icns` at build time.
+
+The Xcode project includes `Ghostty.icon` as a resource (`project.pbxproj` line
+57: `path = ../images/Ghostty.icon`), and
+`ASSETCATALOG_COMPILER_APPICON_NAME = Ghostty` references it. The
+`AppIconImage.imageset` is just a regular imageset used by the runtime icon-
+switching system (`macos-icon` config) — not the Finder/Launchpad icon.
+
+The Background section's description of how Ghostty handles icons was wrong. It
+assumed `AppIconImage.imageset` was the source of the app icon. The correct
+source is `Ghostty.icon`.
+
+### Experiment 2: Replace the Icon Composer document
+
+#### Goal
+
+The release icon in Finder, Launchpad, and the initial dock display shows the
+TermSurf Ghost surfing icon (cyan wave) instead of the Ghostty icon.
+
+#### Description
+
+The app icon is compiled from `ghost/images/Ghostty.icon/`, an Icon Composer
+bundle. This layered format composites multiple PNGs with blend modes,
+gradients, and glass effects. Our new icon is a single flat PNG — it doesn't use
+Icon Composer's layering system.
+
+The simplest approach: replace the `Ghostty.icon` bundle with a minimal Icon
+Composer document that has a single layer containing our 1024px PNG. This
+preserves the `.icon` format that Xcode expects while using our flat image.
+
+An Icon Composer document is a folder with:
+
+- `icon.json` — Layer definitions, blend modes, effects
+- `Assets/` — PNG files referenced by `icon.json`
+
+The minimal `icon.json` needs one group with one layer pointing to our PNG. No
+gradients, no glass, no blend modes.
+
+#### Changes
+
+**`ghost/images/Ghostty.icon/Assets/`** — Remove all existing PNGs and copy in
+the new icon:
+
+```bash
+rm ghost/images/Ghostty.icon/Assets/*.png
+cp assets/termsurf-ghost-black.png ghost/images/Ghostty.icon/Assets/termsurf-ghost.png
+```
+
+**`ghost/images/Ghostty.icon/icon.json`** — Replace with a minimal single-layer
+document:
+
+```json
+{
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "hidden" : false,
+          "image-name" : "termsurf-ghost.png",
+          "name" : "TermSurf Ghost"
+        }
+      ],
+      "name" : "Icon"
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : "shared"
+  }
+}
+```
+
+No changes to the Xcode project — it already references `Ghostty.icon` by path.
+
+No changes to `AppIconImage.imageset` — Experiment 1 already replaced it (used
+by the runtime icon-switching system).
+
+No changes to `BlueprintImage.imageset` — Experiment 1 already replaced it
+(debug override).
+
+#### Verification
+
+```bash
+cd ghost && zig build
+open ghost/zig-out/Ghostty.app
+```
+
+1. **Dock icon (before runtime override):** The TermSurf Ghost surfing icon
+   (cyan wave) appears immediately when the app launches, before any runtime
+   icon switching occurs.
+2. **Finder:** `ghost/zig-out/Ghostty.app` shows the new icon. (May require
+   `touch ghost/zig-out/Ghostty.app` to bust the icon cache.)
+3. **Debug build dock icon:** The green wave debug icon still appears (runtime
+   override from Experiment 1).
+4. **App switcher (Cmd+Tab):** Shows the correct icon.
+
+**Result:** Fail
+
+The release icon does not load. The built `Ghostty.icns` is only 85KB / 256x256
+— the Icon Composer compilation produced a degraded result. The minimal
+`icon.json` with a single layer and no additional properties is likely missing
+required fields that Icon Composer needs to properly render the icon at all
+sizes.
+
+#### Conclusion
+
+The minimal `icon.json` format doesn't work. Icon Composer's `.icon` format
+likely requires additional properties (lighting, shadow, fill, or platform
+definitions) even for a single flat layer. Without documentation on the exact
+required schema, guessing at the format is unreliable. A different approach is
+needed — either reverse-engineering a working minimal `.icon` document or
+bypassing Icon Composer entirely by generating the `.icns` file directly.
