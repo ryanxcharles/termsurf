@@ -2753,6 +2753,15 @@ pub fn keyCallback(
         }
     }
 
+    // Forward keyboard to Chromium overlay if in browse mode (Issue 607 Experiment 2).
+    {
+        const xpc = @import("apprt/xpc.zig");
+        if (xpc.isOverlayForwarding(self)) {
+            xpc.sendKeyEvent(self, event.action, event.key, event.mods, event.utf8);
+            return .consumed;
+        }
+    }
+
     // Crash metadata in case we crash in here
     crash.sentry.thread_state = self.crashThreadState();
     defer crash.sentry.thread_state = null;

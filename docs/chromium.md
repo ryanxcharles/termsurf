@@ -40,6 +40,7 @@ issue-specific branches.
 | `146.0.7650.0-issue-514` | [Issue 514](issues/514-mouse.md)            | Mouse clicks + URL sync      |
 | `146.0.7650.0-issue-515` | [Issue 515](issues/515-drag.md)             | Focus state + text selection |
 | `146.0.7650.0-issue-603` | [Issue 603](issues/603-box-demo.md)         | Box demo in Ghost            |
+| `146.0.7650.0-issue-607` | [Issue 607](issues/607-keyboard-input.md)   | Keyboard input               |
 
 ## Local Setup
 

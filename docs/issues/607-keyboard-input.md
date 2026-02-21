@@ -391,3 +391,64 @@ Pass criteria:
 - Cmd+C copies selected text
 - Cmd+V pastes from clipboard
 - Ctrl+Esc still exits browse mode (escape hatch preserved)
+
+### Result: Partial pass
+
+Character typing works — clicking the Google search box and typing "hello" makes
+characters appear. But pressing Enter freezes the browser overlay. It stops
+responding to subsequent key presses and mouse input, then eventually gets
+unstuck at a random time later. The freeze is not permanent but makes Enter
+unusable.
+
+Backspace, Tab, arrow keys, and Cmd+key shortcuts were not tested because the
+Enter freeze blocked further testing on Google.
+
+### Conclusion
+
+The basic key forwarding pipeline is proven: `keyToWindowsVK` maps keys
+correctly, `sendKeyEvent` constructs and sends XPC messages, `HandleKeyEvent`
+receives them and calls `ForwardKeyboardEvent`, and character input reaches the
+page. The three-layer pipeline (Zig → XPC → Chromium) works end to end for
+printable characters.
+
+The Enter freeze is the blocking issue. When Enter is pressed, Chromium receives
+`kRawKeyDown` (which triggers form submission / navigation on Google) followed
+immediately by `kChar` (because Enter generates `\r` as UTF-8 text). Sending
+both events back-to-back without waiting for the renderer to ack the first may
+jam Chromium's input pipeline — the renderer is busy navigating when the `kChar`
+arrives, fails to ack, and the browser process stalls waiting for the ack until
+a timeout fires.
+
+Filtering out `kChar` for non-printable characters (UTF-8 byte < 0x20) did not
+fix the freeze, so the root cause may be deeper:
+
+- **Missing event fields.** Our `NativeWebKeyboardEvent` only sets
+  `windows_key_code`. Chromium's native macOS path populates `native_key_code`,
+  `dom_code`, `dom_key`, `is_system_key`, and other fields. The renderer may
+  mishandle events with these fields zeroed.
+- **No ack-based flow control.** Chromium normally waits for the renderer to ack
+  `kRawKeyDown` before sending `kChar`. We send both synchronously. The fix may
+  require using `ForwardKeyboardEventWithCommands` or implementing ack tracking.
+- **Navigation-induced view invalidation.** When Enter triggers navigation, the
+  `RenderWidgetHostView` may be destroyed and recreated. The `kChar` event hits
+  a stale view.
+- **Chromium expects `NSEvent`-backed events on macOS.** The
+  `NativeWebKeyboardEvent` has a constructor that takes an `NSEvent*`. Our
+  synthetic constructor may skip macOS-specific initialization that the renderer
+  relies on.
+
+### Next steps
+
+1. **Investigate with Chromium logging.** Add `LOG(INFO)` traces around
+   `ForwardKeyboardEvent` to confirm which event causes the freeze. Check if the
+   renderer acks `kRawKeyDown` before `kChar` arrives.
+2. **Try sending only `kRawKeyDown` for Enter.** If the freeze is caused by
+   `kChar` specifically, skip it for VK 0x0D.
+3. **Populate missing event fields.** Set `native_key_code`, `dom_code`,
+   `dom_key` on the `NativeWebKeyboardEvent` to match what Chromium's macOS path
+   produces.
+4. **Study Chromium's `RenderWidgetHostImpl::ForwardKeyboardEvent`.** Understand
+   the ack flow and whether synthetic events need special handling.
+5. **Test on a static page.** Try Enter in a text field on a page that doesn't
+   navigate (e.g., the box demo with a form) to isolate whether the freeze is
+   navigation-related.
