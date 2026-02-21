@@ -179,3 +179,205 @@ predictable — keep our version of the renamed strings, resolve Xcode project
 changes manually if upstream restructures build settings.
 
 ## Experiments
+
+### Experiment 1: Implement all name changes
+
+#### Goal
+
+`cd ghost && zig build` produces `TermSurf Ghost.app`. The menu bar reads
+"TermSurf Ghost", the About view shows "TermSurf Ghost", the CLI prints
+"TermSurf Ghost {version}", config loads from `~/.config/termsurf-ghost/`, and
+the bundle identifier is `com.termsurf.ghost`. The surfing ghost icon (from
+Issue 610) displays correctly.
+
+#### Steps
+
+##### Step 1: Rename plist and entitlements files
+
+```bash
+cd ghost/macos
+git mv Ghostty-Info.plist Ghost-Info.plist
+git mv Ghostty.entitlements Ghost.entitlements
+```
+
+`GhosttyDebug.entitlements` and `GhosttyReleaseLocal.entitlements` stay as-is
+(internal).
+
+##### Step 2: Update `project.pbxproj`
+
+In `ghost/macos/Ghostty.xcodeproj/project.pbxproj`:
+
+**File references** (update paths for renamed files):
+
+- `Ghostty-Info.plist` → `Ghost-Info.plist`
+- `Ghostty.entitlements` → `Ghost.entitlements`
+
+**Bundle identifiers:**
+
+- `com.mitchellh.ghostty` → `com.termsurf.ghost` (release, all 3 configs)
+- `com.mitchellh.ghostty.debug` → `com.termsurf.ghost.debug`
+
+**Display names:**
+
+- `INFOPLIST_KEY_CFBundleDisplayName = Ghostty` → `"TermSurf Ghost"` (3 release
+  configs)
+- `INFOPLIST_KEY_CFBundleDisplayName = "Ghostty[DEBUG]"` →
+  `"TermSurf Ghost[DEBUG]"`
+
+**Product name:**
+
+- `PRODUCT_NAME = "$(TARGET_NAME)"` → `PRODUCT_NAME = "TermSurf Ghost"` (all 3
+  main app configs: Debug, Release, ReleaseLocal)
+
+**Permission dialog strings** (all `within Ghostty` → `within TermSurf Ghost`):
+
+There are ~14 permission strings per config (3 configs: Debug, Release,
+ReleaseLocal), all following the pattern
+`"A program running within Ghostty
+would like to..."`. Replace `within Ghostty`
+with `within TermSurf Ghost` in all of them.
+
+**Do NOT change:**
+
+- `PRODUCT_BUNDLE_IDENTIFIER` for test targets (`com.mitchellh.GhosttyTests`,
+  `com.mitchellh.GhosttyUITests`) — internal
+- `PRODUCT_NAME = "$(TARGET_NAME)"` for test targets — internal
+- `-target "Ghostty"` in xcodebuild — that's the Xcode target name, internal
+- iOS bundle identifiers (`com.mitchellh.ghostty-ios`) — not our platform
+
+##### Step 3: Update `Ghost-Info.plist`
+
+In `ghost/macos/Ghost-Info.plist` (after rename in step 1):
+
+- `"Ghostty Surface Identifier"` → `"TermSurf Ghost Surface Identifier"`
+
+Keep `GHOSTTY_MAC_LAUNCH_SOURCE` and `com.mitchellh.ghosttySurfaceId` as-is
+(internal).
+
+##### Step 4: Update CLI text
+
+**`ghost/src/cli/help.zig`:**
+
+- Line 37: `"ghostty"` → `"termsurf-ghost"` in usage line
+- Line 39: `"Ghostty"` → `"TermSurf Ghost"` in description
+- Line 41: `"Ghostty"` → `"TermSurf Ghost"`
+- Line 53: `"ghostty"` → `"termsurf-ghost"` in example command
+- Line 56: `"Ghostty.app"` → `"TermSurf Ghost.app"`
+- Line 57: `"ghostty.app"` → `"termsurf ghost.app"` (lowercase for `open`)
+
+**`ghost/src/cli/version.zig`:**
+
+- Line 31: `"Ghostty {s}"` → `"TermSurf Ghost {s}"`
+
+**`ghost/src/cli/list_themes.zig`:**
+
+- Line 303: `"👻 Ghostty Theme Preview 👻"` →
+  `"🏄 TermSurf Ghost Theme Preview 🏄"`
+
+Leave doc comments and path references in `list_themes.zig` that refer to
+`ghostty` config directories and resource paths — those are upstream paths that
+still exist in the binary. Only change user-visible output strings.
+
+##### Step 5: Port `ghostty_config_load_files` from ts5
+
+Upstream Ghostty only has `ghostty_config_load_default_files`, which loads from
+`~/.config/ghostty/`. We need `ghostty_config_load_files` to load from custom
+directories.
+
+Port three pieces from ts5:
+
+**`ghost/src/os/macos.zig`** — Add `appSupportDirWithBundleId`:
+
+```zig
+pub fn appSupportDirWithBundleId(
+    alloc: Allocator,
+    bundle_id: []const u8,
+    sub_path: []const u8,
+) AppSupportDirError![]const u8 {
+    return try commonDir(
+        alloc,
+        .NSApplicationSupportDirectory,
+        &.{ bundle_id, sub_path },
+    );
+}
+```
+
+**`ghost/src/config/Config.zig`** — Add `loadFiles` method (copy from
+`ts5/src/config/Config.zig:3952`). This is ~50 lines that parallels
+`loadDefaultFiles` but takes `app_name` and `bundle_id` parameters.
+
+**`ghost/src/config/CApi.zig`** — Add export:
+
+```zig
+export fn ghostty_config_load_files(
+    self: *Config,
+    app_name: [*:0]const u8,
+    bundle_id: [*:0]const u8,
+) void {
+    self.loadFiles(
+        state.alloc,
+        std.mem.sliceTo(app_name, 0),
+        std.mem.sliceTo(bundle_id, 0),
+    ) catch |err| {
+        log.err("error loading config err={}", .{err});
+    };
+}
+```
+
+**`ghost/include/ghostty.h`** — Add declaration:
+
+```c
+void ghostty_config_load_files(ghostty_config_t, const char *, const char *);
+```
+
+##### Step 6: Update config paths in Swift
+
+**`ghost/macos/Sources/Ghostty/Ghostty.Config.swift`:**
+
+- Line 70: `ghostty_config_load_default_files(cfg)` →
+  `ghostty_config_load_files(cfg, "termsurf-ghost", "com.termsurf.ghost")`
+- Line 335: `"~/.config/ghostty/Ghostty.icns"` →
+  `"~/.config/termsurf-ghost/Ghost.icns"`
+
+**`ghost/macos/Sources/Features/Settings/SettingsView.swift`:**
+
+- Line 17: `"$HOME/.config/ghostty/config.ghostty and restart Ghostty"` →
+  `"$HOME/.config/termsurf-ghost/config and restart TermSurf Ghost"`
+
+##### Step 7: Update About view
+
+**`ghost/macos/Sources/Features/About/AboutView.swift`:**
+
+- Line 6: GitHub URL → `"https://github.com/termsurf/termsurf"`
+- Line 51: `"Ghostty"` → `"TermSurf Ghost"`
+
+##### Step 8: Update build system
+
+**`ghost/src/build/GhosttyXcodebuild.zig`:**
+
+- Line 52: `"Ghostty.app"` → `"TermSurf Ghost.app"`
+
+##### Step 9: Build and verify
+
+```bash
+rm -rf ~/Library/Developer/Xcode/DerivedData/Ghostty-*
+rm -rf ghost/macos/build/
+cd ghost && zig build
+```
+
+#### Verification
+
+1. **App name:** `ls ghost/zig-out/` shows `TermSurf Ghost.app`
+2. **Menu bar:** Launch the app — menu bar reads "TermSurf Ghost"
+3. **About view:** Help → About shows "TermSurf Ghost" and links to the TermSurf
+   GitHub repo
+4. **Bundle identifier:**
+   `defaults read ghost/zig-out/TermSurf\ Ghost.app/Contents/Info.plist CFBundleIdentifier`
+   returns `com.termsurf.ghost`
+5. **Icon:** The surfing ghost icon appears in the dock (no cached old icon,
+   since the bundle identifier is new)
+6. **CLI version:**
+   `ghost/zig-out/TermSurf\ Ghost.app/Contents/MacOS/ghostty +version` prints
+   `TermSurf Ghost {version}`
+
+**Result:** (pending)
