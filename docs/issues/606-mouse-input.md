@@ -1712,3 +1712,84 @@ Pass criteria:
 - Releasing the mouse finalizes the selection (highlight stays)
 - Cursor changes to text cursor (I-beam) over selectable text
 - Dragging past the edge of the overlay doesn't crash
+
+### Result: Fail
+
+Text selection does not work. Chromium logs confirm mouse down and up arrive
+with different coordinates (drag occurred), but selection highlights don't
+paint. Chromium's `HandleMouseMove` doesn't log individual moves, so we can't
+tell from these logs whether drag moves reached Chromium or what modifiers they
+carried.
+
+## Experiment 12: Trace drag events
+
+### Goal
+
+Add temporary logging to trace why mouse drag events don't produce text
+selection. Determine whether `cursorPosCallback` is called during a drag,
+whether `isOverlayForwarding` returns true, and whether `sendMouseMove` sends
+the `kLeftButtonDown` modifier.
+
+### Design
+
+**Phase 1: Log in `cursorPosCallback` overlay hit (Surface.zig).**
+
+Log whether the hit test succeeds during a drag and what the forwarding state
+is. Only log when left button is down (drag), to avoid flooding with hover
+moves:
+
+```zig
+if (self.hitTestOverlay(@floatCast(pos.x), @floatCast(pos.y))) |overlay_pos| {
+    const xpc = @import("apprt/xpc.zig");
+    const left_down = self.mouse.click_state[@intFromEnum(input.MouseButton.left)] == .press;
+    if (left_down) {
+        const fwd = xpc.isOverlayForwarding(self);
+        log.info("drag move: overlay_hit left_down={} forwarding={} pos=({d:.1},{d:.1})",
+            .{ left_down, fwd, overlay_pos.x, overlay_pos.y });
+    }
+    // ... rest of existing code
+```
+
+**Phase 2: Log in `sendMouseMove` (xpc.zig).**
+
+Log the modifiers being sent, but only when button-down flags are set (drag):
+
+```zig
+if (modifiers != 0) {
+    log.info("sendMouseMove drag modifiers={} x={d:.1} y={d:.1}", .{ modifiers, overlay_x, overlay_y });
+}
+```
+
+**Phase 3: Log in `mouseButtonCallback` overlay hit (Surface.zig).**
+
+Log activation flag state and forwarding result at press and release:
+
+```zig
+if (self.hitTestOverlay(...)) |overlay_pos| {
+    const xpc = @import("apprt/xpc.zig");
+    const fwd = xpc.isOverlayForwarding(self);
+    log.info("overlay click action={s} button={s} forwarding={} activation={}",
+        .{ @tagName(action), @tagName(button), fwd, self.mouse.overlay_activation });
+    if (fwd) {
+        // ... existing suppression + forwarding logic
+```
+
+### Verification
+
+```bash
+cd ghost && zig build
+open ghost/zig-out/Ghostty.app --stderr ~/dev/termsurf/logs/ghost.log
+cargo run -p web -- https://en.wikipedia.org/wiki/Terminal_emulator
+```
+
+In browse mode, click and drag across text. Check
+`~/dev/termsurf/logs/ghost.log`.
+
+The logs should reveal one of:
+
+- `cursorPosCallback` is not called during drags → macOS event routing issue
+- Hit test fails during drags → coordinate problem
+- `isOverlayForwarding` returns false → state problem
+- `sendMouseMove` called with modifiers=0 → `click_state` not set
+- `sendMouseMove` called with modifiers=64 → Chromium receives drags but doesn't
+  select (Blink issue, focus issue, or XPC type mismatch)
