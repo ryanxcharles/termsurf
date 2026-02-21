@@ -1871,3 +1871,107 @@ Pass criteria:
 - Selection extends in real time as the mouse moves
 - Releasing the mouse finalizes the selection
 - No debug log noise
+
+### Result: Partial pass
+
+The XPC type mismatch fix is correct — Chromium now receives modifier bits
+during drags, and text selection works. But it works intermittently: sometimes a
+click-drag selects text, sometimes it doesn't. The `overlay_activation` flag
+(set by `paneFocusChanged(true)`) eats the first mouse press after any focus
+change. If the pane was recently focused (e.g., by clicking into it, or by
+switching panes), the next press is suppressed. This breaks the "activate on
+first click, then immediately drag/select" flow.
+
+## Experiment 14: Trace activation flag lifecycle
+
+### Goal
+
+Add debug logs to trace the `overlay_activation` flag through the full click
+lifecycle. Determine exactly when and why the flag is still `true` at press time
+when it shouldn't be.
+
+### Background
+
+The `overlay_activation` flag is set to `true` in `paneFocusChanged(true)` and
+cleared on mouse release (or when a click lands outside the overlay). The intent
+is to suppress the single activation click that caused the focus change. But the
+flag appears to persist beyond the activation click, eating subsequent presses.
+
+Possible causes:
+
+1. **No release after activation click.** If the activation click's release
+   lands outside the overlay (e.g., mouse moved slightly), it clears via the
+   bottom path (`self.mouse.overlay_activation = false` at line 4058) — this
+   works. But if the release is consumed by the `if (action == .release)` branch
+   at line 4039, the flag clears — this also works. So what case is missed?
+
+2. **Focus fires without a corresponding click.** If `paneFocusChanged(true)`
+   fires from a keyboard shortcut (Cmd+]) or tab switch rather than a mouse
+   click, the flag is set but there is no mouse release to clear it. The flag
+   stays `true` and eats the next press.
+
+3. **Multiple `paneFocusChanged(true)` calls.** If focus oscillates quickly
+   (e.g., split pane reshuffle), the flag may be re-set after being cleared.
+
+Logs will reveal which case is happening.
+
+### Design
+
+**Phase 1: Log in `paneFocusChanged` (Surface.zig:3475).**
+
+After `self.mouse.overlay_activation = true`:
+
+```zig
+log.info("paneFocusChanged focused={} overlay_activation={}", .{
+    focused, self.mouse.overlay_activation,
+});
+```
+
+**Phase 2: Log in `mouseButtonCallback` overlay hit (Surface.zig:4036).**
+
+After entering the `isOverlayForwarding` branch, before the activation check:
+
+```zig
+log.info("overlay click action={} button={} forwarding=true activation={}", .{
+    action, button, self.mouse.overlay_activation,
+});
+```
+
+Also log the suppression and clear paths:
+
+```zig
+// Inside the overlay_activation == true branch, after clearing on release:
+log.info("activation suppressed action={} cleared={}", .{
+    action, action == .release,
+});
+```
+
+```zig
+// Inside the else branch (forwarding to Chromium):
+log.info("forwarding click action={} button={}", .{ action, button });
+```
+
+**Phase 3: Log in `mouseButtonCallback` non-overlay clear (Surface.zig:4058).**
+
+```zig
+log.info("non-overlay click, clearing activation flag", .{});
+```
+
+### Verification
+
+```bash
+cd ghost && zig build
+GHOSTTY_LOG=stderr open ghost/zig-out/Ghostty.app --stdout ~/dev/termsurf/logs/ghost.log --stderr ~/dev/termsurf/logs/ghost.log
+cargo run -p web -- https://en.wikipedia.org/wiki/Terminal_emulator
+```
+
+Test sequence:
+
+1. Click the overlay to activate (should see activation suppressed log)
+2. Immediately click and drag text (should see forwarding log, NOT activation
+   suppressed)
+3. Switch to another pane via keyboard (Cmd+]), then switch back, then
+   click-drag — check if activation flag eats the press
+
+Pass criteria: logs reveal the exact scenario where the activation flag is
+`true` when it shouldn't be.
