@@ -220,3 +220,27 @@ Minimal README: what it is, how to build, how it fits into the project.
 
 4. **AGENTS.md and CLAUDE.md are identical:** `diff AGENTS.md CLAUDE.md` returns
    no output.
+
+**Result:** Pass
+
+All four verification checks passed. The one "Ghost" match in docs/ghostty.md is
+an intentional historical reference ("It was originally named `ghost/` (after the
+working name 'Ghost')"), not stale naming. AGENTS.md is a symlink to CLAUDE.md,
+so they stay in sync automatically.
+
+#### Conclusion
+
+Seven files updated, one created, one deleted (CHANGELOG.md, removed before the
+experiment). The "Ghost" generation name is gone from all living docs, replaced
+by "TermSurf GUI" or "gui". README build/launch commands now point to gui/.
+TODO.md is rewritten for current priorities. docs/ghostty.md tracks all three
+Ghostty copies with gui/ as active. The tui/ directory has a README.
+
+## Conclusion
+
+All living documentation is accurate and reflects the current state of the
+project. The renames from Issues 611–613 are fully propagated. No stale "Ghost"
+naming, no ts5 references where gui/ is meant, no broken links. CHANGELOG.md
+(ts1-era, obsolete) was removed. TODO.md was rewritten for current gui/
+priorities. The documentation index in CLAUDE.md now lists all 18 missing issue
+docs (513–515, 601–614).
