@@ -222,3 +222,159 @@ Each step should have a file path, line number, and the decision logic. The
 mapping should answer whether the magnitude problem (2fps vs expected ~30fps) is
 explained by compounding delays in the ack chain, or whether we need to look
 elsewhere.
+
+**Result:** The Viz Display serialization hypothesis is **debunked**. The Viz
+pipeline is clean. The 2fps cause is not in the Display, not in
+HasPendingSurfaces, not in the ack flow.
+
+#### Answer 1: The Display draws at the deadline regardless of pending surfaces
+
+Under default settings (`wait_for_all_surfaces_before_draw_ = false`),
+**`ShouldDraw()` does not check `HasPendingSurfaces`**
+(`display_scheduler.cc:448-453`). The draw proceeds whenever `needs_draw_` is
+true, `output_surface_lost_` is false, `visible_` is true, and
+`root_frame_missing()` is false. Pending surfaces are irrelevant to the draw
+decision.
+
+The only effect of `has_pending_surfaces_` is on deadline mode selection
+(`display_scheduler.cc:488-546`). When surfaces are pending, the Display uses
+`kRegular` (draw at vsync minus 1/3 interval, ~5.56ms before vsync at 60Hz)
+instead of `kImmediate` (draw now). This delays the draw by up to ~11ms but does
+not skip it.
+
+The deadline is a fixed ratio — `kDefaultEstimatedDisplayDrawTimeRatio = 1/3` of
+the vsync interval (`begin_frame_args.h:177-189`). It is not adaptive. It does
+not grow when surfaces are slow.
+
+The `wait_for_all_surfaces_before_draw_` flag (which WOULD block draws on
+pending surfaces) is only enabled by the
+`--run-all-compositor-stages-before-draw` command-line switch
+(`viz_compositor_thread_runner_impl.cc:242-243`). This is off by default and not
+used by Content Shell.
+
+**The fast renderer's frame IS drawn even when the slow renderer hasn't
+responded.** The Display draws with stale data for the missing surface. The fast
+renderer gets its ack during the draw.
+
+#### Answer 2: Ack for Frame N is sent when Frame N+1 activates
+
+The CompositorFrame ack flows through `Surface::ActivateFrame()`
+(`surface.cc:669`). When Frame N+1 activates, it replaces Frame N as the active
+frame (line 687-689). `UnrefFrameResourcesAndRunCallbacks` is called on Frame N
+(line 702), which calls `SendAckIfNeeded` (line 966), which calls
+`SendCompositorFrameAck` (line 494), which calls
+`CompositorFrameSinkSupport::DidReceiveCompositorFrameAck` (line 1027-1041).
+This decrements `pending_frames_` and sends the ack to the renderer via Mojo.
+
+The ack is sent **synchronously on the Viz thread** during Frame N+1's
+activation. It is not deferred to the draw. It arrives at the renderer
+asynchronously via Mojo IPC.
+
+On the renderer side, the ack decrements `pending_submit_frames_`
+(`scheduler_state_machine.cc:1694`), then `ProcessScheduledActions()` runs
+(`scheduler.cc:209`). However, if the renderer is in IDLE state (not inside a
+BeginFrame interval), `ShouldSendBeginMainFrame()` returns false
+(`scheduler_state_machine.cc:656-658`). **The renderer must wait for the next
+BeginFrame from Viz before starting new work.**
+
+The `kNoCompositorFrameAcks` feature (`features.cc:371-373`) is **disabled by
+default**. When disabled, standard ack-based throttling via
+`kMaxPendingSubmitFrames = 1` applies. When enabled, acks are eliminated and
+throttling moves to Viz-side BeginFrame withholding. Not relevant to our case.
+
+In steady state for a single renderer: submit Frame N → Frame N activates → acks
+Frame N-1 → renderer receives ack → `pending_submit_frames_` goes 1→0 → but
+Frame N was just submitted so it goes back to 1 → wait for next BeginFrame →
+produce Frame N+1 → Frame N+1 activates → acks Frame N → cycle continues at
+60fps.
+
+#### Answer 3: DidNotProduceFrame DOES clear pending state
+
+When a throttled renderer finishes its BeginFrame interval without submitting,
+`Scheduler::FinishImplFrame()` (`scheduler.cc:637-686`) detects the
+draw-throttled state and sends `DidNotProduceFrame` with
+`FrameSkippedReason::kDrawThrottled` (line 661).
+
+The `DidNotProduceFrame` carries a `BeginFrameAck` with the current `frame_id`
+and `has_damage = false`. This flows through:
+
+1. `CompositorFrameSinkSupport::DidNotProduceFrame` (line 661-692) calls
+   `SurfaceModified()` with `has_damage = false`
+2. `SurfaceManager::SurfaceModified` (line 500-510) notifies
+   `DisplayDamageTracker::OnSurfaceDamaged`
+3. `ProcessSurfaceDamage` (line 88-124) stores `last_ack = ack` for the surface
+4. `HasPendingSurfaces` (line 135-170) checks
+   `last_ack.frame_id ==
+   begin_frame_args.frame_id` — match — surface is **not
+   counted as pending**
+
+Additionally, there is a second escape hatch at line 154-157:
+`SurfaceHasUnackedFrame` skips surfaces whose producer is already
+CompositorFrameAck-throttled. Even if `DidNotProduceFrame` somehow failed, a
+renderer waiting for an ack would still not block the Display.
+
+**The proposed feedback loop does not exist.** `DidNotProduceFrame` properly
+clears pending state. The Display does not wait indefinitely for throttled
+renderers.
+
+#### The full frame lifecycle
+
+```
+BeginFrame (vsync)
+  → Viz sends OnBeginFrame to each CompositorFrameSinkSupport
+  → Mojo IPC to each renderer process
+
+Renderer (throttled, pending_submit_frames_ >= 1):
+  → cc::Scheduler::BeginImplFrame() — enters INSIDE_BEGIN_FRAME
+  → NextAction() → ShouldSendBeginMainFrame() → false (IsDrawThrottled)
+  → NextAction() → ShouldDraw() → false (IsDrawThrottled)
+  → Deadline fires → FinishImplFrame()
+  → SendDidNotProduceFrame(frame_id, kDrawThrottled)
+  → Viz: DidNotProduceFrame → clears pending state
+
+Renderer (not throttled):
+  → cc::Scheduler::BeginImplFrame() — enters INSIDE_BEGIN_FRAME
+  → NextAction() → ShouldSendBeginMainFrame() → true
+  → BeginMainFrame → rAF callbacks → commit → activate → draw
+  → SubmitCompositorFrame to Viz → pending_submit_frames_++
+
+Viz (receives CompositorFrame):
+  → Surface::QueueFrame → CommitFrame → ActivateFrame
+  → Frame N replaces Frame N-1
+  → UnrefFrameResourcesAndRunCallbacks(Frame N-1)
+  → SendCompositorFrameAck → Mojo to renderer
+  → Renderer: pending_submit_frames_-- → wait for next BeginFrame
+
+Display:
+  → has_pending_surfaces_ true → kRegular deadline (not kImmediate)
+  → Deadline fires (~11ms into frame)
+  → ShouldDraw() → true (does NOT check has_pending_surfaces_)
+  → DrawAndSwap() with whatever frames are available
+  → Stale data for missing surfaces
+```
+
+Every step has a clear code path. No step blocks on other renderers' state. The
+Display draws at the deadline regardless. Acks flow synchronously during
+activation. `DidNotProduceFrame` clears pending state.
+
+#### Conclusion
+
+**The Viz Display serialization hypothesis is wrong.** The proposed mechanism —
+`HasPendingSurfaces` creating a cross-renderer stall that cascades into 2fps —
+does not match the code. The Display draws at the deadline regardless of pending
+surfaces, `DidNotProduceFrame` properly clears pending state, and acks are sent
+synchronously during frame activation without waiting for the draw.
+
+The Viz pipeline is now thoroughly mapped and cleared as a suspect. The 2fps
+cause is **not** in:
+
+- `HasPendingSurfaces` (does not block draws)
+- `kMaxPendingSubmitFrames = 1` ack chain (works correctly in isolation)
+- `DidNotProduceFrame` feedback loop (pending state is properly cleared)
+- `DisplayScheduler` draw decisions (draws whenever there's damage)
+
+The bottleneck must be upstream of Viz — somewhere in how the renderer process
+produces (or fails to produce) CompositorFrames when a second BrowserContext
+exists. The key observation from 620 Exp 14 stands: BeginFrames arrive at 60fps
+but the renderer only produces CompositorFrames at ~3fps. The renderer is
+receiving the signal to produce frames and choosing not to. The question is why.
