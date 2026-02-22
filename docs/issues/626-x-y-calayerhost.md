@@ -598,3 +598,49 @@ Run the app and read the log. If `geometryFlipped = false`, the Y offset is
 explained and the fix is to Y-flip the flipped layer's position:
 `y = parent_height - y_from_top - h`. If `geometryFlipped = true`, the offset
 has a different cause.
+
+#### Results
+
+**Pass.** The log confirms:
+
+```
+IOSurfaceLayer geometryFlipped=false bounds=(0.0,0.0,800.0,568.0)
+```
+
+The IOSurfaceLayer does NOT have `geometryFlipped`. Y=0 is at the bottom. Our
+`y = 60pt` positions the flipped layer 60pt from the bottom of the 568pt parent,
+placing its top edge at `568 - 60 - 464 = 44pt` from the top — instead of the
+intended 60pt. The 16pt difference (≈ one cell height of 14.5pt) matches the
+observed ~10px offset.
+
+#### Conclusion
+
+Root cause confirmed. The IOSurfaceLayer uses standard CALayer coordinates with
+Y=0 at the bottom. Our frame calculation assumes Y=0 at the top. The fix is to
+apply a Y-flip when setting the flipped layer's frame:
+`y_flipped = parent_height - y_from_top - h`.
+
+### Experiment 6: Apply Y-flip for IOSurfaceLayer coordinates
+
+The IOSurfaceLayer has `geometryFlipped = false` (Y=0 at bottom). Our
+`flipped_layer`'s frame is positioned in the IOSurfaceLayer's sublayer
+coordinate system, which uses bottom-origin Y. We currently compute
+`y = grid_row * cell_height / scale + padding_top / scale` as if Y=0 is at the
+top. The fix is to flip: `y_flipped = parent_height - y_from_top - h`.
+
+Also remove the Experiment 5 diagnostic log.
+
+#### Changes
+
+**`gui/src/renderer/Metal.zig`:**
+
+- In `updateCALayerHostFrame`: After computing `y` (top-origin) and `h`, read
+  the parent IOSurfaceLayer's bounds height (`self.layer.layer` bounds). Compute
+  `y_flipped = parent_height - y - h`. Use `y_flipped` as the frame origin Y.
+- In `setCALayerHostContextId`: Remove the Experiment 5 diagnostic log.
+
+#### Verification
+
+Run the app. The web content should align pixel-perfectly with the TUI viewport
+in both X and Y. The ~10px Y offset should be gone. If it works, also verify
+that the content stays aligned after a browser navigation (page load).
