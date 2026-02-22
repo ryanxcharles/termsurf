@@ -1072,3 +1072,18 @@ Shell. The fix must address visibility/delegate management in the shim.
 If 60fps: the throttling is caused by multiple WebContents or profiles competing
 for foreground state. The fix is different — focus/activation management between
 multiple contents.
+
+#### Result
+
+**Pass.** Single WebContents also renders at ~2fps. This confirms the throttling
+is inherent to the direct `WebContents::Create` path — not caused by multiple
+WebContents or profiles competing for visibility.
+
+#### Conclusion
+
+The 2fps throttling is fundamental to bypassing Shell. Even a single WebContents
+in a single profile throttles. The problem is not contention between multiple
+views — it is something Shell does during creation or lifecycle management that
+our direct path omits. The next experiment should focus on what Shell provides
+that we don't: likely `WebContentsDelegate`, `RenderWidgetHostView` visibility,
+or the `ShellPlatformDelegate` setup.
