@@ -795,3 +795,181 @@ Research is complete when we can answer:
 3. Whether `CALayerHost` or IOSurface-from-CALayerParams is the right approach
    for our Metal renderer
 4. A concrete list of files to modify and approximate line count
+
+#### Results
+
+##### A1: CALayerParams are already being produced
+
+**Yes.** The normal display path is fully active alongside the capturer. Content
+Shell's `SetContents()` (`shell_platform_delegate_mac.mm:222-238`) installs the
+standard chain:
+
+```
+WebContents → NSView → RenderWidgetHostViewMac → BrowserCompositorMac →
+AcceleratedWidgetMac → DisplayCALayerTree
+```
+
+The capturer is purely observational. When frames arrive at the frame sink,
+`compositor_frame_sink_support.cc:408-412` notifies capture clients AND the
+normal display path simultaneously:
+
+```cpp
+for (CapturableFrameSink::Client* client : capture_clients_) {
+  client->OnFrameDamaged(...);
+}
+// Normal display path continues unaffected
+```
+
+The capturer's `video_capture_enabled` flag
+(`surface_aggregator.cc:911-914,996-999`) only prevents render pass merging as
+an optimization — it does not suppress CALayerParams generation.
+
+**CALayerParams are being produced every frame and we're ignoring them.**
+
+##### A2: The interception point
+
+The complete callback chain from GPU to NSView:
+
+```
+GPU Process: SkiaOutputSurface::DidSwapBuffersComplete()
+  → Display::DidReceiveCALayerParams()
+  → RootCompositorFrameSinkImpl::DisplayDidReceiveCALayerParams()
+  ═══ Mojo IPC ═══
+  → HostDisplayClient::OnDisplayReceivedCALayerParams()
+      host_display_client.cc:41-49
+  → CALayerFrameSink::UpdateCALayerTree()
+  → AcceleratedWidgetMac::UpdateCALayerTree()
+      accelerated_widget_mac.mm:82-93
+  → view_->AcceleratedWidgetCALayerParamsUpdated()
+  → RenderWidgetHostViewMac::AcceleratedWidgetCALayerParamsUpdated()
+      render_widget_host_view_mac.mm:156-168
+  → ns_view_->SetCALayerParams(*ca_layer_params)
+```
+
+The interception point is
+`RenderWidgetHostViewMac::AcceleratedWidgetCALayerParamsUpdated()` at
+`render_widget_host_view_mac.mm:156`. At this point,
+`browser_compositor_->GetLastCALayerParams()` returns the complete
+`CALayerParams` struct.
+
+##### A3: CALayerHost vs IOSurface — a critical constraint
+
+The two paths in `CALayerParams` are **mutually exclusive**
+(`ca_layer_params.h:40-52`):
+
+```cpp
+uint32_t ca_context_id = 0;                    // Remote CoreAnimation
+gfx::ScopedRefCountedIOSurfaceMachPort io_surface_mach_port;  // IOSurface
+// io_surface_mach_port is "non-null iff ca_context_id is zero"
+```
+
+**On modern macOS, only `ca_context_id` is populated.** The path is chosen in
+`ca_layer_tree_coordinator.mm:203-229`:
+
+```cpp
+if (allow_remote_layers_) {
+  params.ca_context_id = [ca_context_ contextId];  // ← DEFAULT PATH
+} else {
+  IOSurfaceRef io_surface = frame.layer_tree->GetContentIOSurface();
+  if (io_surface)
+    params.io_surface_mach_port.reset(IOSurfaceCreateMachPort(io_surface));
+}
+```
+
+`allow_remote_layers_` is true when `RemoteLayerAPISupported()` returns true
+(`remote_layer_api.mm:19-56`), which checks for the `kRemoteCoreAnimationAPI`
+feature flag and `CAContext`/`CALayerHost` class availability. On any modern
+macOS, this is true.
+
+**This means the IOSurface path (Path B) is not available by default.** To get
+IOSurface Mach ports from CALayerParams, we'd need to disable remote
+CoreAnimation — which would deviate from Chrome's preferred path.
+
+**CALayerHost (Path A) is the default and preferred path.** How it works:
+
+1. GPU process creates `CAContext` with a root `CALayer`
+   (`ca_layer_tree_coordinator.mm:29-68`)
+2. GPU process renders its layer tree into the `CAContext`
+3. `ca_context_id` (uint32) sent to browser process via Mojo
+4. Browser creates `CALayerHost` with that `contextId`
+   (`display_ca_layer_tree.mm:123-153`)
+5. Window Server composites GPU process's CALayer tree directly from VRAM
+
+**Can CALayerHost coexist with our Metal renderer?**
+
+CALayerHost is a `CALayer` subclass — a proxy layer composited by the Window
+Server. It cannot be mixed with `CAMetalLayer` at the same hierarchical level
+(different compositing models). However, they CAN coexist as **siblings** in the
+same NSView's layer tree:
+
+- Our Metal renderer has a `CAMetalLayer` as the view's backing layer
+- A `CALayerHost` can be added as a sublayer on top of it, positioned at the
+  browser pane coordinates
+- The Window Server composites both: Metal content (terminal) underneath,
+  CALayerHost content (browser) on top
+
+This means we would NOT composite the browser content in our Metal shader
+pipeline. The Window Server handles it. We lose fine-grained z-ordering control
+and can't apply Metal effects to browser content, but we gain zero-copy,
+lowest-latency display.
+
+**Alternative: force the IOSurface path.** Disable `kRemoteCoreAnimationAPI` in
+the Chromium Profile Server so `allow_remote_layers_ = false`. CALayerParams
+would then contain `io_surface_mach_port` instead of `ca_context_id`. We'd get
+IOSurface from the normal display path (no capturer, no GPU readback) and
+composite it in our Metal renderer exactly as we do now. Simpler integration,
+but we'd be overriding Chrome's preferred path.
+
+##### A4: Minimal change — two approaches
+
+**Approach A: CALayerHost (~50 lines new + ~460 lines deleted)**
+
+1. In `shell_browser_main_parts.cc` (~20 lines): After tab creation, hook
+   `AcceleratedWidgetCALayerParamsUpdated()`. Extract `ca_context_id` from
+   CALayerParams. Send once via XPC (only changes when context changes).
+2. In GUI (`Metal.zig` or Swift layer) (~30 lines): Receive `ca_context_id`.
+   Create `CALayerHost`. Add as sublayer of the window's content view at browser
+   pane coordinates.
+3. Delete `shell_video_consumer.h` (114 lines) and `shell_video_consumer.cc`
+   (348 lines). Remove capturer setup from `shell_browser_main_parts.cc`.
+
+**Approach B: IOSurface from display path (~50 lines new + ~460 lines deleted)**
+
+1. Disable `kRemoteCoreAnimationAPI` in the Chromium Profile Server (1 line:
+   command-line flag or feature override).
+2. In `shell_browser_main_parts.cc` (~35 lines): Hook
+   `AcceleratedWidgetCALayerParamsUpdated()`. Extract `io_surface_mach_port`
+   from CALayerParams. Send via XPC per frame (same as current capturer path but
+   without GPU readback).
+3. In GUI: No changes — IOSurface Mach port handling already works.
+4. Delete `shell_video_consumer.h` and `shell_video_consumer.cc`.
+
+**Approach B is a drop-in replacement** for the capturer with minimal GUI
+changes. The XPC message format stays the same (Mach port per frame). The only
+difference: the IOSurface comes from the display compositor's output instead of
+the capturer's GPU readback. No timer wait, no readback cost.
+
+**Approach A is architecturally superior** — `ca_context_id` is sent once (not
+per frame), and the Window Server handles compositing with zero-copy. But it
+requires GUI-side changes to manage the CALayerHost layer hierarchy.
+
+#### Conclusion
+
+The capturer can be eliminated. CALayerParams are already being produced every
+frame — we've been ignoring them. The interception point is
+`RenderWidgetHostViewMac::AcceleratedWidgetCALayerParamsUpdated()` at
+`render_widget_host_view_mac.mm:156`.
+
+Two viable approaches:
+
+- **Approach A (CALayerHost)**: Send `ca_context_id` once, GUI creates
+  `CALayerHost`, Window Server composites. Zero-copy, lowest latency, but
+  requires GUI layer hierarchy changes and loses Metal compositing control.
+- **Approach B (IOSurface from display path)**: Disable remote CoreAnimation,
+  send IOSurface Mach port per frame from the display path instead of the
+  capturer. Drop-in replacement, no GUI changes, still eliminates ~5-7ms
+  capturer overhead.
+
+Either approach deletes ~460 lines of capturer code and adds ~50 lines of
+interception code. The hard question is not feasibility — it's which approach
+gives better results for TermSurf's compositor architecture.
