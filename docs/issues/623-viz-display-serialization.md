@@ -123,3 +123,102 @@ Two tracks: empirical experiments to test the hypothesis directly, and source
 code research to trace the exact frame lifecycle and find the amplification
 mechanism (or the real cause). Start with research to understand the
 `HasPendingSurfaces` → ack → unblock chain in detail before modifying code.
+
+## Experiments
+
+### Experiment 1: Trace the full frame lifecycle across two renderers
+
+A source code research experiment — no code changes, no builds. Before
+instrumenting or modifying Chromium, we need to understand the exact sequence of
+events in a single frame cycle when two renderer processes both have active rAF
+loops. The goal is to map the complete chain from BeginFrame to ack and identify
+where the ~500ms delay accumulates.
+
+#### Question 1: What happens when the Display has pending surfaces?
+
+The `DisplayScheduler` checks `HasPendingSurfaces` before drawing. Trace the
+exact behavior when one renderer has submitted a CompositorFrame but the other
+has not yet responded to its BeginFrame.
+
+**Where to look:**
+
+- `components/viz/service/display/display_scheduler.cc` —
+  `OnBeginFrameDeadline()`, `ShouldDraw()`, and how the deadline timer is set.
+  What happens when the deadline fires and a surface is still pending? Does the
+  Display draw anyway (without the slow surface), or does it skip the entire
+  draw?
+- `components/viz/service/display/display_damage_tracker.cc:135-170` —
+  `HasPendingSurfaces()` implementation. What counts as "pending"? Is it any
+  surface that received a BeginFrame but hasn't submitted a CompositorFrame?
+- `components/viz/service/display/display_scheduler.cc` — how the deadline
+  duration is calculated. Is it a fixed offset from vsync, or adaptive? Does it
+  grow when surfaces are slow?
+
+**Key question:** Does the Display **skip the draw entirely** when surfaces are
+pending at the deadline, or does it **draw with stale data** for the missing
+surface? If it skips, that's a complete pipeline stall. If it draws with stale
+data, the fast renderer should still get acked.
+
+#### Question 2: How does the ack flow back to the renderer?
+
+When the Display draws and the frame is presented, trace the exact path of the
+ack back to the renderer's `pending_submit_frames_` counter.
+
+**Where to look:**
+
+- `components/viz/service/display/display.cc` — after `DrawAndSwap()`, how does
+  it signal completion?
+- `components/viz/service/frame_sinks/compositor_frame_sink_support.cc` —
+  `DidReceiveCompositorFrameAck()`. When is this called relative to the draw? Is
+  it immediate, or deferred to the next frame?
+- `components/viz/service/surfaces/surface.cc:702` — the comment says "ack sent
+  when next frame activates." Does this mean a renderer must wait for its OWN
+  next frame to activate before receiving the ack for the current one? If so,
+  that's a built-in one-frame delay that compounds with cross-surface waiting.
+- `cc/scheduler/scheduler.cc` — how does receiving the ack unblock the renderer?
+  Does it immediately allow a new BeginMainFrame, or does it wait for the next
+  BeginFrame?
+
+**Key question:** Is the ack latency one frame (sent at next draw), two frames
+(sent at next surface activation), or variable? If it's two frames and the draw
+itself is delayed by `HasPendingSurfaces`, the compounding could explain 2fps.
+
+#### Question 3: What is the renderer doing between BeginFrame and CompositorFrame submission?
+
+When the renderer receives a BeginFrame and `IsDrawThrottled()` is true (because
+`pending_submit_frames_ >= 1`), what exactly happens? Does it silently drop the
+BeginFrame? Does it send `DidNotProduceFrame`? Does it queue the work?
+
+**Where to look:**
+
+- `cc/scheduler/scheduler.cc` — `OnBeginFrameSourcePausedChanged()`,
+  `BeginFrame()` — what does the scheduler do with a BeginFrame when it can't
+  send BeginMainFrame?
+- `cc/scheduler/scheduler_state_machine.cc` — trace through the full
+  `NextAction()` decision tree when `IsDrawThrottled()` is true. What state does
+  the scheduler settle into?
+- `components/viz/service/frame_sinks/compositor_frame_sink_support.cc` — when
+  the renderer responds with `DidNotProduceFrame`, does Viz still count it as
+  "pending" for `HasPendingSurfaces`?
+
+**Key question:** If a throttled renderer sends `DidNotProduceFrame`, does the
+Display treat that surface as no longer pending (allowing it to draw the other
+surface's frame)? Or does it still wait? If `DidNotProduceFrame` clears the
+pending state, then the fast renderer should get its ack promptly and shouldn't
+degrade. If it doesn't clear it, that's the amplification mechanism.
+
+#### Verification
+
+Research is complete when the full frame lifecycle is mapped:
+
+```
+BeginFrame → [renderer receives] → [throttle check] → [BeginMainFrame or drop]
+  → [rAF + commit + activate + draw] → [submit CompositorFrame to Viz]
+  → [Display checks HasPendingSurfaces] → [draw or skip]
+  → [ack sent back] → [renderer unblocks]
+```
+
+Each step should have a file path, line number, and the decision logic. The
+mapping should answer whether the magnitude problem (2fps vs expected ~30fps) is
+explained by compounding delays in the ack chain, or whether we need to look
+elsewhere.
