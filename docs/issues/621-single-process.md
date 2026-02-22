@@ -475,3 +475,17 @@ autoninja -C out/Default zig_content_shell
    - Are both sluggish (2fps)?
    - Is one smooth and the other sluggish?
 5. Close both windows — process exits cleanly
+
+**Result:** Both 2fps
+
+Both google.com windows rendered at 2fps. The contention is symmetric — neither
+profile "wins." This eliminates page complexity as a variable: the Issue 620
+finding that DDG was fast while google was slow was because DDG is lightweight
+enough to avoid the bottleneck, not because google specifically triggers it.
+
+#### Conclusion
+
+Two BrowserContexts with the same complex page both degrade equally to 2fps. The
+problem is purely multi-BrowserContext contention in Chromium's rendering
+pipeline — not page-specific behavior, not asymmetric resource ordering. Any
+sufficiently complex page will trigger it.
