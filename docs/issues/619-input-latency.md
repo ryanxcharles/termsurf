@@ -511,3 +511,64 @@ The value:
    files. Just the shim + Zig logic.
 3. **Incremental.** Each TODO item (downloads, dialogs, permissions) adds one C
    function to the shim + Zig logic.
+
+### Research 4: Multi-profile in one process
+
+The multi-process architecture (one Chromium server per browser profile) was
+inherited from the CEF era. CEF's `SingletonLock` file prevents two processes
+from opening the same `root_cache_path`, and CEF Chrome runtime (post-M128)
+ignores custom `cache_path` — the `root_cache_path` IS the profile. One process
+= one profile. This was the defining constraint of ts3 (Issue 303, 325–350).
+
+But CEF is gone. TermSurf uses the Content API directly. And the Content API
+does not have this limitation.
+
+#### Already proven in ts4
+
+Multiple profiles in one process was proven across four experiments:
+
+- **Issue 406** — `content::BrowserContext` supports multiple instances with
+  different storage paths. Each gets isolated cookies, localStorage, and cache.
+  The one-profile-per-process constraint was a CEF limitation, not a Chromium
+  limitation.
+- **Issue 407** — In-process Chromium PoC: two profiles, side by side, high
+  framerate.
+- **Issue 408** — Two profiles side by side at 60fps in content_shell.
+- **Issue 413** — Converted a one-profile app into a two-profile app.
+
+The Content API supports any number of `BrowserContext` instances in one
+process. Each has its own storage path, cookies, localStorage, and cache. Ten
+profiles in one process is fine — just ten `BrowserContext` instances with
+different paths.
+
+#### What this means for the architecture
+
+The entire current multi-process architecture exists to work around a CEF
+limitation that no longer applies:
+
+- xpc-gateway daemon (rendezvous service)
+- Profile server spawning (one process per profile)
+- Per-server XPC connections
+- IOSurface Mach port transfer (frame streaming)
+- FrameSinkVideoCapturer (recording API for cross-process capture)
+- 120fps oversampling (compensating for capture timer jitter)
+
+With in-process multi-profile, this collapses to: Zig calls C shim, C shim calls
+Content API, Content API renders into CALayerHost. No IPC. No process
+management. No frame capture. No Mach port transfer.
+
+Chromium still spawns its own renderer and GPU sub-processes internally — that's
+Chromium's business, not ours. From the GUI's perspective, it's a library call.
+
+#### Out-of-process is still an option
+
+Even with multi-profile working in-process, there are reasons to keep
+out-of-process as an option:
+
+- **Crash isolation.** A Chromium crash in-process kills the terminal. Out-of-
+  process, it kills a browser tab.
+- **Engine flexibility.** Supporting Gecko or WebKit alongside Chromium is
+  easier when each engine is a separate process.
+
+But these would be choices, not constraints. The multi-process architecture
+would exist because we want it, not because CEF forces it.
