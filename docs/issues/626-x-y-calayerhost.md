@@ -470,3 +470,32 @@ Run the app. The web content should align pixel-perfectly with the TUI viewport
 border — no visible gap at the top or left edge. Compare the top-left corner of
 the web content with the TUI viewport border drawn by ratatui. If the offset is
 gone, proceed to test scrolling, text selection, and pane resize.
+
+#### Results
+
+**Partial success.** The X offset is fixed — web content aligns horizontally
+with the TUI viewport. The Y offset remains at approximately ~10px too high.
+Resize is broken (the flipped layer does not update on resize), but that is
+expected and deferred.
+
+#### Conclusion
+
+The intermediate flipped layer architecture fixed the X offset. Adding grid
+padding to the frame calculation (`+ padding_left / scale`) and restructuring
+the layer tree (`IOSurfaceLayer → flipped_layer → CALayerHost`) were both
+necessary for the X fix.
+
+The Y offset persists because of a conflict between the `flipped_layer`'s
+`autoresizingMask` and its explicit frame. The `flipped_layer` has
+`autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable` — the same
+mask Chromium uses on `maybe_flipped_layer_` to fill the parent. But Chromium's
+`maybe_flipped_layer_` has no explicit frame — it fills the entire parent. We
+set an explicit frame on the `flipped_layer` to position it at the overlay
+rectangle, which conflicts with the auto-fill mask. The mask may be adjusting
+the layer's position during layout, causing the ~10px Y shift.
+
+The fix for Experiment 4 should follow Chromium's pattern more closely: let the
+`flipped_layer` fill the entire IOSurfaceLayer (no explicit frame, keep the
+auto-fill mask), and set the frame on the CALayerHost instead. The CALayerHost's
+position would then be in the flipped layer's coordinate system (Y=0 at top),
+which is the correct coordinate system for grid-based positioning.

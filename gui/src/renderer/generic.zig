@@ -157,6 +157,10 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         /// Created via ObjC runtime when ca_context_id arrives from Chromium.
         ca_layer_host: ?*anyopaque = null,
 
+        /// Intermediate flipped layer between IOSurfaceLayer and CALayerHost
+        /// (Issue 626). Matches Chromium's maybe_flipped_layer_ pattern.
+        ca_layer_flipped: ?*anyopaque = null,
+
         /// The current GPU uniform values.
         uniforms: shaderpkg.Uniforms,
 
@@ -831,35 +835,36 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         /// Must be called with draw_mutex held.
         pub fn setCALayerHostContextId(self: *Self, context_id: u32) void {
             if (comptime @hasDecl(GraphicsAPI, "setCALayerHostContextId")) {
-                self.api.setCALayerHostContextId(context_id, &self.ca_layer_host);
+                self.api.setCALayerHostContextId(context_id, &self.ca_layer_host, &self.ca_layer_flipped);
             }
         }
 
-        /// Update the CALayerHost frame to match current grid coordinates.
+        /// Update the flipped layer frame to match current grid coordinates.
         /// Must be called with draw_mutex held.
         pub fn updateCALayerHostFrame(self: *Self) void {
             if (comptime @hasDecl(GraphicsAPI, "updateCALayerHostFrame")) {
-                const host = self.ca_layer_host orelse return;
+                const flipped = self.ca_layer_flipped orelse return;
                 self.api.updateCALayerHostFrame(
-                    host,
+                    flipped,
                     self.overlay_grid_col,
                     self.overlay_grid_row,
                     self.overlay_grid_width,
                     self.overlay_grid_height,
                     self.grid_metrics.cell_width,
                     self.grid_metrics.cell_height,
+                    self.size.padding.top,
+                    self.size.padding.left,
                 );
             }
         }
 
-        /// Remove and release the CALayerHost sublayer.
+        /// Remove and release the CALayerHost and flipped layer.
         /// Must be called with draw_mutex held.
         pub fn removeCALayerHost(self: *Self) void {
             if (comptime @hasDecl(GraphicsAPI, "removeCALayerHost")) {
-                if (self.ca_layer_host) |host| {
-                    self.api.removeCALayerHost(host);
-                    self.ca_layer_host = null;
-                }
+                self.api.removeCALayerHost(self.ca_layer_host, self.ca_layer_flipped);
+                self.ca_layer_host = null;
+                self.ca_layer_flipped = null;
             }
         }
 

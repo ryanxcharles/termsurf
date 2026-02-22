@@ -161,12 +161,24 @@ pub fn deinit(self: *Metal) void {
     self.layer.release();
 }
 
-/// Create or update a CALayerHost for browser overlay (Issue 625).
+/// Create or update a CALayerHost for browser overlay (Issue 625/626).
 /// The CALayerHost displays the remote CAContext from Chromium's GPU process.
 /// Window Server composites directly from GPU VRAM — zero per-frame IPC.
-pub fn setCALayerHostContextId(self: *Metal, context_id: u32, ca_layer_host_ptr: *?*anyopaque) void {
+///
+/// Layer tree matches Chromium's DisplayCALayerTree pattern (Issue 626):
+///   IOSurfaceLayer → flipped_layer (geometryFlipped) → CALayerHost
+pub fn setCALayerHostContextId(
+    self: *Metal,
+    context_id: u32,
+    ca_layer_host_ptr: *?*anyopaque,
+    ca_layer_flipped_ptr: *?*anyopaque,
+) void {
     const CALayerHost = objc.getClass("CALayerHost") orelse {
         log.warn("CALayerHost class not found", .{});
+        return;
+    };
+    const CALayer = objc.getClass("CALayer") orelse {
+        log.warn("CALayer class not found", .{});
         return;
     };
 
@@ -176,49 +188,63 @@ pub fn setCALayerHostContextId(self: *Metal, context_id: u32, ca_layer_host_ptr:
         host.setProperty("contextId", @as(u32, context_id));
         log.info("updated CALayerHost contextId={}", .{context_id});
     } else {
-        // Create new CALayerHost, set contextId, add as sublayer.
+        // CAAutoresizingMask constants from QuartzCore.
+        const kCALayerWidthSizable: c_uint = 1 << 1; // 2
+        const kCALayerMaxXMargin: c_uint = 1 << 2; // 4
+        const kCALayerHeightSizable: c_uint = 1 << 4; // 16
+        const kCALayerMaxYMargin: c_uint = 1 << 5; // 32
+
+        // Create intermediate flipped layer (matches Chromium's maybe_flipped_layer_).
+        // This layer provides a top-left-origin coordinate system for the CALayerHost.
+        const flipped_id = CALayer.msgSend(objc.c.id, objc.sel("layer"), .{});
+        const flipped = objc.Object.fromId(flipped_id).retain();
+        flipped.setProperty("geometryFlipped", true);
+        flipped.setProperty("anchorPoint", macos.graphics.Point{ .x = 0, .y = 0 });
+        flipped.setProperty("autoresizingMask", kCALayerWidthSizable | kCALayerHeightSizable);
+        self.layer.layer.msgSend(void, objc.sel("addSublayer:"), .{flipped.value});
+        ca_layer_flipped_ptr.* = flipped.value;
+
+        // Create CALayerHost as sublayer of the flipped layer.
         const host_id = CALayerHost.msgSend(objc.c.id, objc.sel("layer"), .{});
         const host = objc.Object.fromId(host_id).retain();
         host.setProperty("contextId", @as(u32, context_id));
-
-        // Match Chromium's DisplayCALayerTree::GotCALayerFrame() pattern.
         host.setProperty("anchorPoint", macos.graphics.Point{ .x = 0, .y = 0 });
-
-        // Chromium's CAContext root layer uses geometryFlipped = YES (Y=0 at top).
-        // Chromium's browser process hosts it in a geometryFlipped layer too.
-        // We must match this so the remote content renders right-side-up.
-        host.setProperty("geometryFlipped", true);
-
-        // Add as sublayer of our IOSurfaceLayer.
-        self.layer.layer.msgSend(void, objc.sel("addSublayer:"), .{host.value});
-
+        host.setProperty("autoresizingMask", kCALayerMaxXMargin | kCALayerMaxYMargin);
+        flipped.msgSend(void, objc.sel("addSublayer:"), .{host.value});
         ca_layer_host_ptr.* = host.value;
-        log.info("created CALayerHost contextId={}", .{context_id});
+
+        log.info("created CALayerHost contextId={} with flipped intermediate layer", .{context_id});
     }
 }
 
-/// Update the CALayerHost frame to match overlay grid coordinates (Issue 625).
-/// Cell dimensions are in physical pixels; CALayer frames use logical points.
-/// The CALayerHost has geometryFlipped = YES, so Y=0 is at the top — matching
-/// the terminal grid. No Y flip needed.
+/// Update the flipped layer frame to match overlay grid coordinates (Issue 626).
+/// Cell dimensions and padding are in physical pixels; CALayer frames use
+/// logical points. The flipped layer has geometryFlipped = YES, so Y=0 is at
+/// the top — matching the terminal grid. No Y flip needed.
+/// Padding is added so the overlay aligns with the grid, not the surface edge.
 pub fn updateCALayerHostFrame(
     self: *Metal,
-    host_ptr: *anyopaque,
+    flipped_ptr: *anyopaque,
     grid_col: f32,
     grid_row: f32,
     grid_width: f32,
     grid_height: f32,
     cell_width: u32,
     cell_height: u32,
+    padding_top: u32,
+    padding_left: u32,
 ) void {
-    const host = objc.Object.fromId(host_ptr);
+    const flipped = objc.Object.fromId(flipped_ptr);
     const scale = self.layer.layer.getProperty(f64, "contentsScale");
     const cw: f64 = @floatFromInt(cell_width);
     const ch: f64 = @floatFromInt(cell_height);
+    const pt: f64 = @floatFromInt(padding_top);
+    const pl: f64 = @floatFromInt(padding_left);
 
-    // Convert physical pixels to logical points.
-    const x: f64 = @as(f64, grid_col) * cw / scale;
-    const y: f64 = @as(f64, grid_row) * ch / scale;
+    // Convert physical pixels to logical points. Add padding so the overlay
+    // aligns with the terminal grid (which starts at padding offset).
+    const x: f64 = @as(f64, grid_col) * cw / scale + pl / scale;
+    const y: f64 = @as(f64, grid_row) * ch / scale + pt / scale;
     const w: f64 = @as(f64, grid_width) * cw / scale;
     const h: f64 = @as(f64, grid_height) * ch / scale;
 
@@ -226,15 +252,22 @@ pub fn updateCALayerHostFrame(
         .origin = .{ .x = x, .y = y },
         .size = .{ .width = w, .height = h },
     };
-    host.setProperty("frame", frame);
+    flipped.setProperty("frame", frame);
 }
 
-/// Remove and release a CALayerHost sublayer (Issue 625).
-pub fn removeCALayerHost(self: *Metal, host_ptr: *anyopaque) void {
+/// Remove and release the CALayerHost and flipped layer (Issue 625/626).
+pub fn removeCALayerHost(self: *Metal, host_ptr: ?*anyopaque, flipped_ptr: ?*anyopaque) void {
     _ = self;
-    const host = objc.Object.fromId(host_ptr);
-    host.msgSend(void, objc.sel("removeFromSuperlayer"), .{});
-    host.release();
+    if (host_ptr) |ptr| {
+        const host = objc.Object.fromId(ptr);
+        host.msgSend(void, objc.sel("removeFromSuperlayer"), .{});
+        host.release();
+    }
+    if (flipped_ptr) |ptr| {
+        const flipped = objc.Object.fromId(ptr);
+        flipped.msgSend(void, objc.sel("removeFromSuperlayer"), .{});
+        flipped.release();
+    }
 }
 
 pub fn loopEnter(self: *Metal) void {
