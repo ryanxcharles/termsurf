@@ -312,3 +312,51 @@ intermediate layer matching Chromium's pattern, or (b) move `geometryFlipped` to
 the IOSurfaceLayer (risky — could break terminal rendering) and position the
 CALayerHost without explicit frame math. The `geometryFlipped` on the wrong
 layer explains the residual offset.
+
+### Experiment 2: Diagnostic logging to find the residual offset
+
+The Experiment 1 research identified architectural differences (missing
+intermediate layer, `geometryFlipped` on the wrong layer). But before changing
+the layer architecture, we need to understand the exact source of the ~10px Y /
+~3px X offset. There's a simpler hypothesis: grid padding.
+
+The terminal grid doesn't start at pixel (0, 0) in the surface — it starts at
+`(padding.left, padding.top)`. The current `updateCALayerHostFrame` computes
+position as `grid_col * cell_width / scale`, relative to the surface origin, not
+the grid origin. If `padding.top / scale ≈ 10` and `padding.left / scale ≈ 3`,
+this entirely explains the residual offset.
+
+#### What to log
+
+**GUI side (in `updateCALayerHostFrame`):**
+
+1. Grid padding: `self.size.padding.top`, `self.size.padding.left` (physical
+   pixels)
+2. Grid padding in points: padding / contentsScale
+3. Computed frame values (x, y, w, h) in logical points
+4. Overlay grid coordinates (col, row, width, height)
+5. Cell dimensions (cell_width, cell_height)
+6. contentsScale
+
+**Chromium side (in `SetContents`):**
+
+7. `web_view.frame` — content view frame within the window
+8. `window.contentView.bounds` — window content area bounds
+
+#### Changes
+
+- `gui/src/renderer/generic.zig`: Pass `self.size.padding.top` and
+  `self.size.padding.left` to `Metal.updateCALayerHostFrame`.
+- `gui/src/renderer/Metal.zig`: Accept padding parameters. Log all values
+  including padding, padding-in-points, computed frame, grid coordinates, cell
+  dimensions, and contentsScale.
+- `chromium/src/content/chromium_profile_server/browser/shell_platform_delegate_mac.mm`:
+  Add `NSLog` in `SetContents` to log `web_view.frame` and
+  `window.contentView.bounds`.
+
+#### Verification
+
+Run the app, trigger a browser overlay, and read the logs. If
+`padding.top / scale ≈ 10` and `padding.left / scale ≈ 3`, the padding is the
+cause and the fix is to add padding to the frame calculation. If not, the
+Chromium-side logs will show whether the content view has a non-zero origin.
