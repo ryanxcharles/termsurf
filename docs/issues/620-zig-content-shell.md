@@ -1541,3 +1541,346 @@ No changes to `content_api_shim.h` or `BUILD.gn`.
 
 The logs will reveal whether the CVDisplayLink theory is correct or the
 contention is elsewhere.
+
+**Result:** Pass
+
+Launched with `--enable-logging=stderr --v=1`, captured 819 `[TS-DIAG]` log
+lines in 12 seconds. The CVDisplayLink-level logs did not appear (macOS may be
+using `CADisplayLinkMac` instead of `CVDisplayLinkMac` on this OS version), but
+the `ExternalBeginFrameSourceMac` logs revealed the exact mechanism.
+
+**The compositor is thrashing.** Three `ExternalBeginFrameSourceMac` instances
+were observed:
+
+- `0x75cde7700` — initial compositor for profile A
+- `0x75ce48780` — initial compositor for profile B
+- `0x75cef1400` — replacement compositor (appears at +500ms)
+
+**Startup phase (452.662–452.788, ~125ms):** Both initial instances start
+healthy, receiving `OnDisplayLinkCallback` every ~16.6ms (60fps). Within 75ms,
+both begin thrashing — `OnNeedsBeginFrames` toggles true→false→true rapidly.
+
+**Steady-state thrashing pattern (457s onward):** Instance `0x75cef1400` shows a
+clear cycle:
+
+| Time    | Event                                 |
+| ------- | ------------------------------------- |
+| 457.121 | `OnNeedsBeginFrames(true)` → register |
+| 457.154 | `OnNeedsBeginFrames(false)` → unreg   |
+|         | _(~250ms gap)_                        |
+| 457.438 | `OnNeedsBeginFrames(true)` → register |
+| 457.471 | `OnNeedsBeginFrames(false)` → unreg   |
+|         | _(~300ms gap)_                        |
+| 457.771 | `OnNeedsBeginFrames(true)` → register |
+| 457.804 | `OnNeedsBeginFrames(false)` → unreg   |
+|         | _(~300ms gap)_                        |
+| 458.105 | `OnNeedsBeginFrames(true)` → register |
+| 458.138 | `OnNeedsBeginFrames(false)` → unreg   |
+
+Each cycle: register for vsync, get 1–2 callbacks (~33ms), immediately
+unregister, wait ~300ms, repeat. That's ~3 updates per second — matching the
+observed 2fps.
+
+The Chromium source has a TODO at exactly this location:
+
+```cpp
+// TODO: Try to prevent constant switching between callback register and
+// unregister.
+```
+
+**Key finding:** The bottleneck is NOT in the display link layer. The display
+link continues running fine. The problem is upstream — something calls
+`OnNeedsBeginFrames(false)` after just 1–2 frames, then waits ~300ms before
+calling `OnNeedsBeginFrames(true)` again. The caller is likely in
+`DisplayScheduler`, `FrameSinkManager`, or the surface aggregation layer.
+
+#### Conclusion
+
+The 2fps throttle is caused by rapid `OnNeedsBeginFrames` thrashing in the
+`ExternalBeginFrameSourceMac`. The compositor registers for vsync, draws 1–2
+frames, gets told to stop, waits ~300ms, then starts again. The CVDisplayLink
+hypothesis was partially correct — the display link itself is fine, but the
+begin frame source that sits on top of it is being toggled on/off by something
+upstream.
+
+#### Call chain analysis
+
+Tracing the call chain from the logs to the decision-maker:
+
+```
+DisplayScheduler::AttemptDrawAndSwap()           [display_scheduler.cc:589]
+  → ShouldDraw() returns false
+  → StopObservingBeginFrames()
+    → BeginFrameSource::RemoveObserver()          [begin_frame_source.cc:538]
+      → client_->OnNeedsBeginFrames(false)
+        → ExternalBeginFrameSourceMac::OnNeedsBeginFrames(false)
+          → StopBeginFrame()
+            → vsync_callback_mac_.reset()          ← unregisters from DisplayLink
+```
+
+`ShouldDraw()` checks:
+
+```cpp
+return needs_draw_ && !output_surface_lost_ && visible_ &&
+       !damage_tracker_->root_frame_missing();
+```
+
+After a successful `DrawAndSwap()`, `needs_draw_` is cleared. If no new damage
+arrives before the next deadline, the compositor stops observing. The ~300ms gap
+between cycles is the time waiting for the renderer to produce new damage.
+
+Each profile gets its own `Display` + `DisplayScheduler` +
+`ExternalBeginFrameSourceMac`, all sharing the same `DisplayLinkMac` (keyed by
+`display_id=2`). The independent thrashing of each compositor degrades the whole
+pipeline.
+
+#### Deep dive: the observer–renderer deadlock
+
+Source code analysis revealed a **deadlock between frame observation and frame
+production**. The full cycle:
+
+1. **DisplayScheduler draws** → `DrawAndSwap()` succeeds → `needs_draw_ = false`
+2. **Next deadline** → `ShouldDraw()` returns false (no new damage yet) →
+   `StopObservingBeginFrames()` → removes itself from `BeginFrameSource`
+3. **Renderer starves** — `CompositorFrameSinkSupport::OnBeginFrame()` only
+   forwards BeginFrames to the renderer when the support is actively observing.
+   When the DisplayScheduler stops observing, the renderer also stops receiving
+   BeginFrames.
+4. **No new frames** — renderer can't produce CompositorFrames without
+   BeginFrames → no `SubmitCompositorFrame()` → no
+   `SurfaceManager::SurfaceModified()` → no `OnDisplayDamaged()`
+5. **Stays stopped** — `needs_draw_` stays false, `root_frame_missing()` may be
+   true → `ShouldDraw()` stays false → DisplayScheduler remains idle
+6. **~300ms later** — an external event (watchdog timer, input, or forced
+   refresh) triggers new damage → `OnDisplayDamaged()` sets `needs_draw_ = true`
+   → `MaybeStartObservingBeginFrames()` restarts the cycle
+7. **1–2 frames drawn**, then back to step 1
+
+**Why multi-profile triggers this but single-profile doesn't:**
+
+With a single DisplayScheduler, the renderer produces frames fast enough that
+new damage always arrives before the next deadline. The scheduler never stops
+observing.
+
+With two DisplaySchedulers on two profiles, they **both** stop observing
+simultaneously after drawing a frame. This starves **both** renderers at once.
+Neither can produce damage to restart the other. The entire pipeline stalls
+until an external event (the ~300ms watchdog) forces a restart.
+
+**`root_frame_missing()` path:**
+
+`DisplayDamageTracker::UpdateRootFrameMissing()` checks
+`surface->HasActiveFrame()`. If no CompositorFrame has been activated on the
+root surface (because the renderer was starved of BeginFrames), this returns
+true, which makes `ShouldDraw()` return false, reinforcing the deadlock.
+
+**The fix space:**
+
+The Chromium TODO at the `OnNeedsBeginFrames` call site acknowledges this:
+
+```cpp
+// TODO: Try to prevent constant switching between callback register and
+// unregister.
+```
+
+Potential approaches:
+
+1. **Never stop observing** if renderers have pending surfaces — keep sending
+   BeginFrames even when the compositor doesn't need to draw
+2. **Decouple renderer BeginFrames from compositor observation** — always
+   deliver BeginFrames to the renderer, only gate the draw/composite step
+3. **Coordinate multi-display schedulers** — prevent all schedulers from
+   stopping simultaneously when they share the same DisplayLinkMac
+4. **Add a keepalive** — when StopObservingBeginFrames fires, send one more
+   BeginFrame to give the renderer a chance to submit
+
+Key files:
+
+| Component            | File                             | Lines        |
+| -------------------- | -------------------------------- | ------------ |
+| root_frame_missing   | display_damage_tracker.cc        | 250–253      |
+| ShouldDraw gate      | display_scheduler.cc             | 448–453      |
+| Observer stop        | display_scheduler.cc             | 437–446, 603 |
+| Renderer BeginFrame  | compositor_frame_sink_support.cc | 1138–1233    |
+| Renderer observation | compositor_frame_sink_support.cc | 1246–1270    |
+
+### Experiment 13: Prevent DisplayScheduler from stopping observation
+
+#### Background: the full picture
+
+Experiments 10–12 established the multi-profile 2fps boundary and captured
+diagnostic logs. The analysis below traces the complete root cause.
+
+**The observer architecture.** Each profile's display creates a
+`RootCompositorFrameSinkImpl` (root_compositor_frame_sink_impl.cc) which owns:
+
+- One `ExternalBeginFrameSourceMac` — the vsync source (macOS-specific)
+- One `Display` with a `DisplayScheduler` — manages draw timing
+- Child `CompositorFrameSinkSupport` instances — one per renderer
+
+Both `DisplayScheduler` and `CompositorFrameSinkSupport` are **observers** of
+the same `ExternalBeginFrameSourceMac`. The `ExternalBeginFrameSource` base
+class (begin_frame_source.cc:510–540) tracks all observers. When the first
+observer is added, it calls `client_->OnNeedsBeginFrames(true)` which registers
+the vsync callback. When the last observer is removed, it calls
+`client_->OnNeedsBeginFrames(false)` which unregisters it.
+
+**The deadlock mechanism.** After drawing a frame:
+
+1. `DisplayScheduler::AttemptDrawAndSwap()` (display_scheduler.cc:589) calls
+   `ShouldDraw()`. This checks four conditions:
+   ```cpp
+   return needs_draw_ && !output_surface_lost_ && visible_ &&
+          !damage_tracker_->root_frame_missing();
+   ```
+2. After a successful draw, `needs_draw_` is cleared (line 278). If no new
+   damage has arrived, `ShouldDraw()` returns false.
+3. `AttemptDrawAndSwap()` calls `StopObservingBeginFrames()` (line 603), which
+   calls `RemoveObserver()` on the `ExternalBeginFrameSource`.
+4. The renderer's `CompositorFrameSinkSupport` manages its own observation
+   independently via `UpdateNeedsBeginFramesInternal()` (line 1246). If the
+   renderer has no pending work, it also removes itself as an observer.
+5. When **both** the DisplayScheduler and all CompositorFrameSinkSupports have
+   removed themselves, `observers_.empty()` becomes true →
+   `OnNeedsBeginFrames(false)` → the vsync callback is unregistered from the
+   DisplayLink.
+6. Without vsync callbacks, no BeginFrames are generated. Without BeginFrames,
+   the renderer cannot produce new CompositorFrames. Without new frames, no
+   damage arrives. Without damage, `needs_draw_` stays false. **The pipeline is
+   stalled.**
+7. ~300ms later, an external event (watchdog, input, or timer) triggers new
+   damage → `OnDisplayDamaged()` → `needs_draw_ = true` →
+   `MaybeStartObservingBeginFrames()` → the cycle restarts for 1–2 frames.
+
+**Why single-profile works.** With one profile, the renderer produces frames
+fast enough that new damage always arrives before the deadline. The
+DisplayScheduler never calls `StopObservingBeginFrames()` because `needs_draw_`
+is always true when checked.
+
+**Why multi-profile deadlocks.** With two profiles, each has an independent
+DisplayScheduler. After drawing, both stop observing simultaneously. Both
+renderers lose BeginFrames. Neither can produce new frames to restart the other.
+The entire pipeline stalls until an external event forces a restart.
+
+**The `root_frame_missing()` path.**
+`DisplayDamageTracker::UpdateRootFrameMissing()` (display_damage_tracker.cc:250)
+checks whether the root surface has an active CompositorFrame:
+
+```cpp
+Surface* surface = surface_manager_->GetSurfaceForId(root_surface_id_);
+SetRootFrameMissing(!surface || !surface->HasActiveFrame());
+```
+
+If the renderer was starved of BeginFrames and hasn't submitted a frame, the
+root surface may lack an active frame, making `root_frame_missing()` return
+true. This makes `ShouldDraw()` return false even if `needs_draw_` is true,
+reinforcing the deadlock. However, this is a secondary effect — the primary
+cause is the `needs_draw_` / `StopObservingBeginFrames` cycle described above.
+
+**Chromium's awareness.** The source code has a TODO at the exact location where
+`OnNeedsBeginFrames` is toggled (external_begin_frame_source_mac.cc:231):
+
+```cpp
+// TODO: Try to prevent constant switching between callback register and
+// unregister.
+```
+
+#### Candidate fixes
+
+Five approaches were identified, ranked by simplicity and directness:
+
+**Fix A: Remove `StopObservingBeginFrames()` from `AttemptDrawAndSwap()`**
+(display_scheduler.cc:603). One-line change. The DisplayScheduler never stops
+observing, so the BeginFrameSource always has at least one observer, the vsync
+callback stays registered, and the renderer keeps receiving BeginFrames. The
+`ShouldDraw()` gate still prevents unnecessary draws — the scheduler just keeps
+receiving BeginFrames without acting on them until new damage arrives. Cost:
+minor CPU from processing idle BeginFrames (negligible for our use case).
+
+**Fix B: Debounce in `ExternalBeginFrameSourceMac::OnNeedsBeginFrames(false)`.**
+Don't immediately unregister — keep the vsync callback for N more vsyncs. If
+`OnNeedsBeginFrames(true)` comes back before timeout, cancel the unregister.
+Matches the existing pattern in `CVDisplayLinkMac::StopDisplayLinkIfNeeded()`
+which waits 12 empty vsyncs. More power-friendly than Fix A but more code and
+doesn't address the root cause (DisplayScheduler still thrashes).
+
+**Fix C: Remove `root_frame_missing()` from `ShouldDraw()`.** If the root frame
+is missing, draw an empty frame instead of stopping. Prevents the secondary
+deadlock path but doesn't address the primary `needs_draw_` path.
+
+**Fix D: Decouple renderer BeginFrames from compositor observation.** Always
+forward BeginFrames to child frame sinks regardless of whether the
+DisplayScheduler is observing. Architecturally clean but a significant refactor
+touching `FrameSinkManagerImpl`, `CompositorFrameSinkSupport`, and the
+BeginFrame forwarding logic.
+
+**Fix E: Coordinate multi-display schedulers.** Don't stop observing if other
+DisplaySchedulers sharing the same DisplayLinkMac still need frames. Requires
+cross-scheduler communication that doesn't currently exist.
+
+#### This experiment: Fix A
+
+Fix A is the simplest and most direct. It targets the exact line identified as
+the trigger (`StopObservingBeginFrames()` at display_scheduler.cc:603) and
+breaks the deadlock by ensuring the BeginFrameSource always has at least one
+observer.
+
+#### Changes
+
+**`components/viz/service/display/display_scheduler.cc`** — in
+`AttemptDrawAndSwap()`, remove the call to `StopObservingBeginFrames()` when
+`ShouldDraw()` returns false. Keep the reset of resize expectations.
+
+Before:
+
+```cpp
+} else {
+    damage_tracker_->reset_expecting_root_surface_damage_because_of_resize();
+    StopObservingBeginFrames();
+}
+```
+
+After:
+
+```cpp
+} else {
+    damage_tracker_->reset_expecting_root_surface_damage_because_of_resize();
+    // TermSurf: Don't stop observing. With multiple BrowserContexts,
+    // stopping causes a deadlock: the renderer loses BeginFrames, can't
+    // produce new frames, no damage arrives, and the compositor stays
+    // stopped. Keeping observation alive costs minor CPU but prevents
+    // the 2fps thrashing seen in Experiments 5–9 and 12.
+}
+```
+
+**`content_api_shim.mm`** — keep the Experiment 12 two-profile code (same as
+Experiment 9). No changes.
+
+**Diagnostic logging** — keep the `[TS-DIAG]` instrumentation from Experiment 12
+in `external_begin_frame_source_mac.cc` and `cv_display_link_mac.mm`. The logs
+will confirm whether `OnNeedsBeginFrames(false)` stops firing.
+
+#### Verification
+
+1. Build and launch — two Shell windows appear (one per profile)
+2. Check visual FPS: expect 60fps (previously 2fps)
+3. Capture stderr with `--enable-logging=stderr --v=1`
+4. Confirm that `OnNeedsBeginFrames(false)` no longer fires repeatedly in the
+   steady state (the thrashing pattern from Experiment 12 should disappear)
+5. Confirm that `OnNeedsBeginFrames(true)` fires once at startup and stays
+   active
+
+#### Subsequent experiments if this fails
+
+If Fix A produces 60fps: **done** — the deadlock was the sole cause. Future
+refinement (Fix B debounce) can be a separate issue for power optimization.
+
+If Fix A still shows 2fps: the deadlock is deeper than `DisplayScheduler`. The
+renderer's `CompositorFrameSinkSupport` is independently starving. Try **Fix D**
+(decouple renderer BeginFrames) or add logging to
+`CompositorFrameSinkSupport::UpdateNeedsBeginFramesInternal()` to trace why the
+renderer stops requesting frames.
+
+If Fix A shows improvement but not 60fps (e.g., 30fps): both paths contribute.
+Combine Fix A with Fix C (remove `root_frame_missing` from `ShouldDraw`) to
+eliminate both deadlock triggers.
