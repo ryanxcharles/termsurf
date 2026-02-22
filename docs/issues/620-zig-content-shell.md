@@ -1884,3 +1884,39 @@ renderer stops requesting frames.
 If Fix A shows improvement but not 60fps (e.g., 30fps): both paths contribute.
 Combine Fix A with Fix C (remove `root_frame_missing` from `ShouldDraw`) to
 eliminate both deadlock triggers.
+
+**Result:** Fail
+
+The fix successfully eliminated the `OnNeedsBeginFrames` thrashing in the logs —
+the vsync callback stayed registered and delivered steady 16ms callbacks. But
+**visual performance was still 2fps**. Typing into Google's search input was
+obviously sluggish, matching Experiment 12's behavior exactly.
+
+What the logs showed:
+
+| Instance    | Profile     | Vsync callbacks | Duration | Behavior                           |
+| ----------- | ----------- | --------------- | -------- | ---------------------------------- |
+| 0x7a91ad680 | google.com  | 26              | 430ms    | Ran briefly, then stopped          |
+| 0x7a91afc00 | example.com | 1053            | 17.5s    | Continuous 16ms callbacks (60.2/s) |
+
+The logs prove that the `ExternalBeginFrameSourceMac` was no longer thrashing —
+it received steady vsync callbacks. But the renderer was still not producing
+frames at 60fps. The `ShouldDraw()` gate continued returning false, meaning the
+scheduler received BeginFrames but skipped drawing on most of them.
+
+This means **the deadlock is deeper than `DisplayScheduler` stopping
+observation**. Even with the vsync pipeline kept alive, the renderer does not
+produce frames. The `CompositorFrameSinkSupport` or some other component is
+independently starving the renderer of BeginFrames, or the renderer itself is
+throttled by a different mechanism.
+
+#### Conclusion
+
+Fix A is necessary but not sufficient. It keeps the vsync source alive, but
+something further downstream still prevents frames from being drawn. The next
+investigation should trace why `ShouldDraw()` returns false — specifically
+whether `needs_draw_` is never set (no damage arriving) or
+`root_frame_missing()` is true (renderer not submitting frames). Adding
+instrumentation to `ShouldDraw()` and
+`CompositorFrameSinkSupport::OnBeginFrame()` would reveal which path is
+blocking.
