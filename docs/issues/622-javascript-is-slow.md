@@ -673,3 +673,167 @@ line numbers. The answers should identify either:
 3. No BrowserContext-specific logic found — meaning the contention is in the Viz
    process itself (not the browser process), and Experiment 5 should instrument
    Viz frame scheduling
+
+**Result:** All three questions answered. No BrowserContext-specific frame logic
+exists — but two strong candidate mechanisms identified.
+
+#### Answer 1: BrowserContext is invisible to the BeginFrame pipeline
+
+"BrowserContext" appears in **zero files** across all of `components/viz/` and
+`cc/`. The entire BeginFrame delivery system — from display link to
+`ExternalBeginFrameSource` to `FrameSinkManagerImpl` to
+`CompositorFrameSinkSupport` to renderer `cc::Scheduler` — has no concept of
+BrowserContext, StoragePartition, or browser-level profile identity.
+
+The BeginFrame flow on macOS:
+
+1. A single `DisplayLinkMacMojo` (`ui/compositor/display_link_mac_mojo.mm:209`)
+   runs on a dedicated "VSyncThread" in the browser process, issuing VSync to
+   Viz via Mojo
+2. `ExternalBeginFrameSourceMojoMac`
+   (`components/viz/service/frame_sinks/external_begin_frame_source_mojo_mac.cc:48-53`)
+   receives it in the Viz process
+3. `VSyncProviderMac` (`ui/display/mac/vsync_provider_mac.cc:109-128`)
+   distributes to all registered callbacks for that display
+4. Each window's `ExternalBeginFrameSourceMac`
+   (`components/viz/service/frame_sinks/external_begin_frame_source_mac.cc:240-318`)
+   fires
+5. `ExternalBeginFrameSource::OnBeginFrame`
+   (`components/viz/common/frame_sinks/begin_frame_source.cc:558-597`) iterates
+   a flat set of all observers — no batching, no grouping, no identity checks
+6. Each `CompositorFrameSinkSupport::OnBeginFrame`
+   (`components/viz/service/frame_sinks/compositor_frame_sink_support.cc:1138-1233`)
+   decides whether to forward to its renderer client
+
+All data structures are keyed by `FrameSinkId` (an integer pair). Nothing
+carries BrowserContext information.
+
+#### Answer 2: Three throttling mechanisms, none per-BrowserContext
+
+RenderWidgetHostImpl has **no** frame throttling or backpressure. Its only
+throttle is `visual_properties_ack_pending_` for resize events
+(`render_widget_host_impl.cc:1293-1296`), irrelevant to frame pacing.
+
+The real throttling lives in three places:
+
+**A. Renderer-side: `kMaxPendingSubmitFrames = 1`**
+(`cc/scheduler/scheduler_state_machine.cc:32`)
+
+After submitting one CompositorFrame to Viz, the renderer blocks draws, commits,
+**and BeginMainFrame** (which triggers rAF) until Viz acknowledges:
+
+```cpp
+// scheduler_state_machine.cc:670-679
+bool just_submitted_in_deadline =
+    begin_impl_frame_state_ == BeginImplFrameState::INSIDE_DEADLINE &&
+    did_submit_in_last_frame_;
+if (IsDrawThrottled() && !just_submitted_in_deadline)
+  return false;  // blocks ShouldSendBeginMainFrame
+```
+
+`IsDrawThrottled()` returns true when
+`pending_submit_frames_ >=
+kMaxPendingSubmitFrames` (line 1602-1607). This is
+per-renderer-process.
+
+**B. Viz-side: undrawn frame throttling (`kUndrawnFrameLimit = 3`)**
+(`components/viz/service/frame_sinks/compositor_frame_sink_support.h:81`,
+`compositor_frame_sink_support.cc:1489-1495`)
+
+If a client submits more than 3 frames that haven't been drawn, BeginFrames are
+throttled. Per-FrameSink, not per-BrowserContext.
+
+**C. Viz-side: unresponsive client throttling (`kLimitThrottle = 10`)**
+(`components/viz/service/frame_sinks/begin_frame_tracker.h:23-24`,
+`compositor_frame_sink_support.cc:1531-1534`)
+
+After 10+ outstanding unanswered BeginFrames, Viz throttles sending more. After
+100, it stops entirely. Per-FrameSink.
+
+#### Answer 3: Zero frame-related resources are per-BrowserContext
+
+BrowserContext owns storage infrastructure (StoragePartitionImplMap,
+NetworkContext, cookies, IndexedDB, ServiceWorker) — **none** of which are
+frame-related. All compositor infrastructure is either global or
+per-renderer-process:
+
+| Resource                        | Scope                              | Frame-related? |
+| ------------------------------- | ---------------------------------- | -------------- |
+| `HostFrameSinkManager`          | Global (one per `BrowserMainLoop`) | Yes            |
+| `FrameSinkManagerImpl`          | Global (in Viz process)            | Yes            |
+| `GpuProcessHost`                | Global singleton                   | Yes            |
+| `ImageTransportFactory`         | Global singleton                   | Yes            |
+| `SharedImageManager`            | Global (in GPU process)            | Yes            |
+| `GpuClient` / GPU channel       | Per-renderer-process               | Yes            |
+| `EmbeddedFrameSinkProviderImpl` | Per-renderer-process               | Yes            |
+| `StoragePartitionImplMap`       | Per-BrowserContext                 | No             |
+| `NetworkContext`                | Per-StoragePartition               | No             |
+
+The only BrowserContext-specific code in the frame path is renderer process
+allocation (`IsSuitableHost()` at `render_process_host_impl.cc:4696`), which
+**forces** separate renderer processes for different BrowserContexts.
+
+#### Two candidate mechanisms
+
+**Theory A: Viz Display serialization**
+
+The `DisplayScheduler` waits for pending surfaces before drawing
+(`display_damage_tracker.cc:135-170`). When two renderer processes both receive
+BeginFrames, the Display waits for **both** to respond before drawing either.
+Each renderer has `kMaxPendingSubmitFrames = 1` — it blocks rAF until Viz
+acknowledges the previous frame. The ack arrives only after the Display draws.
+This creates a cross-process waiting chain:
+
+1. Both renderers receive BeginFrame simultaneously
+2. Renderer A finishes rAF, submits frame, blocks waiting for ack
+3. Display waits for Renderer B (still running rAF)
+4. Renderer B finishes, submits, Display draws both, sends acks
+5. Both renderers can now start their next frame — but the entire vsync interval
+   was spent waiting
+
+CSS animations bypass this because the compositor responds to BeginFrame
+immediately without waiting for the main thread. Same-BrowserContext bypasses
+this because both WebContents share one renderer process, so frames are batched
+into a single submission.
+
+**Theory B: macOS process backgrounding**
+
+`kMacAllowBackgroundingRenderProcesses` (`render_process_host_impl.cc:5717`)
+controls whether renderer processes get backgrounded by macOS. When one
+renderer's window doesn't have focus, macOS may background that process,
+drastically throttling its main thread:
+
+- CSS animations: immune (compositor thread is not throttled by backgrounding)
+- JS rAF: affected (main thread IS throttled)
+- Same-BrowserContext: immune (one process, both WebContents in the foreground
+  process)
+- Multi-BrowserContext: affected (two processes, the unfocused one gets
+  backgrounded)
+
+This explains the ~2fps magnitude — macOS App Nap and timer coalescing can
+throttle background processes to ~1-2 wakeups per second.
+
+Additionally, renderer process priority is managed per-process
+(`UpdateProcessPriority` at `render_process_host_impl.cc:5659`). Each renderer
+has its own V8 isolate priority (`SetIsolatePriority` at
+`render_thread_impl.cc:1210`) and `MainThreadSchedulerImpl` backgrounding state
+(`main_thread_scheduler_impl.cc:1088`). When a renderer process is backgrounded,
+its entire Blink scheduler shifts to low-priority mode.
+
+#### Conclusion
+
+No BrowserContext-specific frame logic exists in the browser process. The
+BrowserContext boundary manifests solely through renderer process isolation. Two
+candidate mechanisms explain the 2fps degradation:
+
+- **Theory A (Viz serialization)** predicts that `HasPendingSurfaces` creates
+  cross-renderer waiting. This would show up as delayed acks. Testable by
+  disabling surface waiting or increasing `kMaxPendingSubmitFrames`.
+- **Theory B (macOS backgrounding)** predicts that the unfocused renderer's main
+  thread is throttled by the OS. This would show up in Activity Monitor as
+  reduced CPU for the unfocused renderer. Testable by disabling App Nap or
+  process backgrounding.
+
+Theory B is the stronger candidate — it specifically explains the 2fps
+magnitude, the CSS vs JS asymmetry, and the single vs multi-BrowserContext
+behavior. The next experiment should test it first.
