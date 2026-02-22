@@ -6,6 +6,10 @@ Replace the `FrameSinkVideoCapturer` with `CALayerHost` so that browser panes
 display with the same latency as native Chrome — zero per-frame IPC, zero
 application-side compositing, Window Server composites directly from GPU VRAM.
 
+## Chromium Branch
+
+`146.0.7650.0-issue-625` (forked from `146.0.7650.0-issue-616`)
+
 ## Background
 
 ### The current pipeline
