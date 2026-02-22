@@ -2053,6 +2053,17 @@ bool BeginFrameTracker::ShouldStopBeginFrame() const {
 }
 ```
 
+**4. `content_api_shim.mm` — update URLs**
+
+Change Profile B from `https://example.com` to `https://lite.duckduckgo.com`.
+Both profiles now load interactive pages with search inputs, making it easier to
+generate sustained damage for testing.
+
+```cpp
+const char* kProfileAUrl = "https://google.com";
+const char* kProfileBUrl = "https://lite.duckduckgo.com";
+```
+
 **Keep Experiment 13's fix** (`StopObservingBeginFrames` commented out) and
 Experiment 12's `ExternalBeginFrameSourceMac` instrumentation. This builds on
 both.
