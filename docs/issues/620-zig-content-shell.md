@@ -628,13 +628,14 @@ calls these same functions from Zig.
 #### Implementation notes
 
 The initial attempt overrode `PreMainMessageLoopRun()` entirely (skipping the
-parent's implementation). This crashed at `StoragePartitionImpl::GetStorageService()`
-because the parent's `PreMainMessageLoopRun()` sets up infrastructure that
-`WebContents` creation depends on (DevTools, resource provider, etc.).
+parent's implementation). This crashed at
+`StoragePartitionImpl::GetStorageService()` because the parent's
+`PreMainMessageLoopRun()` sets up infrastructure that `WebContents` creation
+depends on (DevTools, resource provider, etc.).
 
 The fix: don't override `PreMainMessageLoopRun()`. Override
-`InitializeBrowserContexts()` and `InitializeMessageLoopContext()` instead —
-the parent handles all infrastructure setup.
+`InitializeBrowserContexts()` and `InitializeMessageLoopContext()` instead — the
+parent handles all infrastructure setup.
 
 Ownership model: `ts_create_browser_context` returns a caller-owned handle (raw
 `new`). Profile A is transferred to the parent via `set_browser_context()` (the
@@ -642,8 +643,8 @@ parent's `unique_ptr` owns it and destroys it in `PostMainMessageLoopRun`).
 Profile B stays caller-owned and is destroyed via `ts_destroy_browser_context`
 before the parent cleans up.
 
-The header uses `#ifdef __cplusplus` / `extern "C"` guards so it's valid as
-both a C and C++ header — Zig can include it directly.
+The header uses `#ifdef __cplusplus` / `extern "C"` guards so it's valid as both
+a C and C++ header — Zig can include it directly.
 
 #### Result
 
@@ -662,6 +663,122 @@ isolated profile storage. 8 processes running (main + GPU + network + storage +
 
 The C API works: `ts_create_browser_context(path)` creates profiles,
 `ts_create_tab(ctx, url)` opens windows, `ts_destroy_browser_context(ctx)`
-cleans up. The functions are exported with `extern "C"` and default visibility
-— callable from Zig via `@cImport`. The header is a valid C header (no C++
-types in the public API, only opaque `void*` handles).
+cleans up. The functions are exported with `extern "C"` and default visibility —
+callable from Zig via `@cImport`. The header is a valid C header (no C++ types
+in the public API, only opaque `void*` handles).
+
+### Experiment 4: Callback-driven initialization from a custom launcher
+
+Add lifecycle callbacks to the C API (`ts_set_on_initialized`,
+`ts_set_on_shutdown`). Write a custom launcher (`ts_main.mm`) that replaces
+`shell_main_mac.cc` — it dlopen's the framework, dlsym's all C API symbols,
+registers callbacks, and calls ContentMain. The callbacks create and destroy
+profiles and tabs using only dlsym'd C function pointers.
+
+This proves the full external-control pattern: the launcher has zero Chromium
+headers, zero C++ knowledge — only C function pointers obtained via dlsym. Zig
+does exactly the same thing.
+
+#### Changes
+
+**`content_api_shim.h`** — Add callback API:
+
+```c
+typedef void (*ts_callback_t)(void);
+
+// Register a callback that fires once when the browser is ready.
+// Must be called before ContentMain. The callback should create
+// profiles and tabs via the C API.
+void ts_set_on_initialized(ts_callback_t callback);
+
+// Register a callback that fires during shutdown, before contexts
+// are destroyed. The callback should call ts_destroy_browser_context
+// on any contexts it created.
+void ts_set_on_shutdown(ts_callback_t callback);
+```
+
+**`content_api_shim.mm`** — Wire callbacks into the initialization chain:
+
+1. Global callback pointers (`g_on_initialized`, `g_on_shutdown`).
+2. `ts_set_on_initialized` / `ts_set_on_shutdown` — store the pointers.
+3. `TsBrowserMainParts::InitializeBrowserContexts()` — create a default context
+   for parent infrastructure (DevTools needs a non-null `browser_context_`). The
+   real profiles are created by the callback.
+4. `TsBrowserMainParts::InitializeMessageLoopContext()` — fire
+   `g_on_initialized`.
+5. `TsBrowserMainParts::PostMainMessageLoopRun()` — fire `g_on_shutdown`, then
+   call parent (which destroys the default context).
+6. Remove hardcoded profile paths and URLs from the shim — all application logic
+   moves to the launcher.
+
+**`ts_main.mm`** — Custom launcher (new file, ~60 lines):
+
+Pure C with dlopen/dlsym. No Chromium headers, no C++ includes.
+
+```c
+// Function pointer types
+typedef int (*ContentMainFn)(int, const char**);
+typedef void (*SetCallbackFn)(void (*)(void));
+typedef void* (*CreateContextFn)(const char*);
+typedef void (*DestroyContextFn)(void*);
+typedef void (*CreateTabFn)(void*, const char*);
+
+// dlsym'd function pointers
+static CreateContextFn  g_create_ctx;
+static DestroyContextFn g_destroy_ctx;
+static CreateTabFn      g_create_tab;
+
+// Context handles
+static void* ctx_a;
+static void* ctx_b;
+
+static void on_initialized(void) {
+  ctx_a = g_create_ctx("/Users/.../profile-a");
+  ctx_b = g_create_ctx("/Users/.../profile-b");
+  g_create_tab(ctx_a, "https://google.com");
+  g_create_tab(ctx_b, "https://example.com");
+}
+
+static void on_shutdown(void) {
+  g_destroy_ctx(ctx_b);
+  g_destroy_ctx(ctx_a);
+}
+
+int main(int argc, const char** argv) {
+  // ... find framework path, dlopen ...
+  // ... dlsym all symbols ...
+  set_on_initialized(on_initialized);
+  set_on_shutdown(on_shutdown);
+  int rv = content_main(argc, argv);
+  exit(rv);
+}
+```
+
+The framework path logic mirrors `shell_main_mac.cc` but is self-contained (no
+`SHELL_PRODUCT_NAME` define — the framework name is hardcoded).
+
+**`BUILD.gn`** — Change the main app bundle source:
+
+```gn
+mac_app_bundle("zig_content_shell") {
+  sources = [ "ts_main.mm" ]   # was shell_main_mac.cc
+  # Remove SHELL_PRODUCT_NAME define (not needed)
+  # Remove content_shell_app dep (not needed)
+  ...
+}
+```
+
+Helper apps keep using `shell_main_mac.cc` unchanged.
+
+#### Verification
+
+1. Two windows appear (google.com + example.com)
+2. Both interactive
+3. Profile directories created
+4. Closing both windows exits cleanly (no crash, no leak)
+5. The launcher (`ts_main.mm`) has zero `#include` of Chromium headers — only
+   `<dlfcn.h>`, `<stdio.h>`, and platform headers for path resolution
+
+The key proof: application logic (which profiles, which URLs) lives entirely in
+the launcher. The framework is a generic Content API service layer. A Zig
+launcher would use the identical dlsym pattern.
