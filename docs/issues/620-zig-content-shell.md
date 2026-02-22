@@ -1302,3 +1302,30 @@ or the build environment. The next experiment tests vanilla `content_shell`.
 
 If smooth: the C API wrappers somehow cause the throttle (investigate
 `PathService::Override` interaction with `ts_create_browser_context`).
+
+#### Result: Pass
+
+Rendering was ~2fps — identical to all previous experiments. The C API wrappers
+are confirmed irrelevant. Experiment 2's code is the simplest possible form of
+our custom framework: just the subclass chain + two profiles + direct C++ calls.
+Still 2fps.
+
+The bisection within our code is exhausted. Every experiment from 2 through 8
+shows the same 2fps behavior. The only thing we haven't tested is the vanilla
+`content_shell` target itself.
+
+#### Conclusion
+
+The 2fps throttle has been present since Experiment 1 (the very first Zig
+Content Shell build). It is not caused by:
+
+- The C API wrappers (Experiment 8 vs 9)
+- The callback/lifecycle machinery (Experiment 7 vs 8)
+- Direct WebContents::Create vs Shell::CreateNewWindow (Experiments 5–7)
+- Multiple profiles vs single profile (Experiment 6)
+- The custom launcher `ts_main.mm` vs stock `shell_main_mac.cc` (Experiment 8)
+
+The only remaining hypothesis is that the vanilla `content_shell` target itself
+renders at 2fps with these build flags (`is_debug=false`, `symbol_level=0`,
+`is_component_build=true`). The next experiment must build and run the unmodified
+`content_shell` to establish a true baseline.
