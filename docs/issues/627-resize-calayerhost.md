@@ -160,3 +160,29 @@ Run the app, open a browser overlay, then resize the window. The web content
 should resize and reposition to match the TUI viewport border. Chromium should
 log `Resized pane ... to ...` on each resize. Test horizontal resize, vertical
 resize, and window maximize/restore.
+
+#### Results
+
+**Pass.** Resize works. The browser overlay tracks the TUI viewport on window
+resize.
+
+#### Conclusion
+
+Two things were broken:
+
+1. The `sendResize()` function and Chromium's `"resize"` handler had been
+   accidentally removed in the CALayerHost commit. Restoring them lets Chromium
+   re-render at the new dimensions.
+
+2. The `flipped_layer` frame was never updated when the surface size changed.
+   Adding `updateCALayerHostFrame()` to the `size_changed` path in `drawFrame()`
+   ensures the layer repositions on every resize.
+
+## Conclusion
+
+Resize was working before the CALayerHost migration. The Issue 625 commit
+accidentally removed `sendResize()` (GUI) and the `"resize"` XPC handler +
+`ResizeCapture()` (Chromium). Restoring both — with `ResizeTab()` replacing
+`ResizeCapture()` since there's no capturer to resize — plus adding a
+`flipped_layer` frame update in `drawFrame()` on size change, fully restores
+resize behavior.

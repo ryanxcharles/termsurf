@@ -1544,6 +1544,9 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     .height = surface_size.height,
                 };
                 self.updateScreenSizeUniforms();
+                // Reposition the CALayerHost overlay for the new surface size.
+                // The Y-flip formula depends on parent_bounds.height (Issue 627).
+                self.updateCALayerHostFrame();
             }
 
             // If this frame's target isn't the correct size, or the target

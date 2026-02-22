@@ -291,7 +291,9 @@ fn handleSetOverlay(msg: xpc_object_t) void {
     const new_pixel_h = height * @as(u64, cell.height);
 
     if (panes.get(pane_id)) |p| {
-        // Existing pane — update path.
+        // Existing pane — resize path.
+        const old_w = p.pending_pixel_w;
+        const old_h = p.pending_pixel_h;
         p.pending_pixel_w = new_pixel_w;
         p.pending_pixel_h = new_pixel_h;
         p.browsing = browsing;
@@ -304,6 +306,15 @@ fn handleSetOverlay(msg: xpc_object_t) void {
         log.info("overlay updated pane={s} pixel={d}x{d}", .{
             pane_id, new_pixel_w, new_pixel_h,
         });
+
+        // Send resize if tab is active and dimensions changed.
+        if (p.tab_sent) {
+            if (p.server) |server| {
+                if (server.peer != null and (new_pixel_w != old_w or new_pixel_h != old_h)) {
+                    sendResize(p, server);
+                }
+            }
+        }
 
     } else {
         // New pane.
@@ -726,6 +737,26 @@ fn sendCreateTab(p: *Pane, server: *Server) void {
     p.tab_sent = true;
 
     log.info("sent create_tab pane={s} pixel={d}x{d}", .{
+        p.pane_id_key, p.pending_pixel_w, p.pending_pixel_h,
+    });
+}
+
+fn sendResize(p: *Pane, server: *Server) void {
+    const msg = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(msg, "action", "resize");
+
+    if (p.pane_id_key.len > 0 and p.pane_id_key.len <= 36) {
+        var pane_z: [37]u8 = undefined;
+        @memcpy(pane_z[0..p.pane_id_key.len], p.pane_id_key);
+        pane_z[p.pane_id_key.len] = 0;
+        xpc_dictionary_set_string(msg, "pane_id", @ptrCast(&pane_z));
+    }
+
+    xpc_dictionary_set_uint64(msg, "pixel_width", p.pending_pixel_w);
+    xpc_dictionary_set_uint64(msg, "pixel_height", p.pending_pixel_h);
+
+    xpc_connection_send_message(server.peer, msg);
+    log.info("sent resize pane={s} pixel={d}x{d}", .{
         p.pane_id_key, p.pending_pixel_w, p.pending_pixel_h,
     });
 }
