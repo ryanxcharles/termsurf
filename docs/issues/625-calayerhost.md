@@ -694,3 +694,68 @@ from another process, the XPC one-shot `ca_context_id` delivery works, and
 Window Server composites the content. The implementation has a coordinate system
 bug that prevents testing any other functionality. Experiment 3 should fix the Y
 coordinate flip and re-verify.
+
+### Experiment 3: Fix CALayerHost Y coordinate
+
+Fix the Y-axis inversion bug from Experiment 2 and re-verify the full
+CALayerHost pipeline.
+
+#### Problem
+
+CALayer on macOS uses a bottom-left origin (Y=0 at the bottom, Y increases
+upward). The terminal grid uses a top-left origin (row 0 at the top, row
+increases downward). `updateCALayerHostFrame()` in `Metal.zig` sets
+`frame.origin.y = grid_row * cell_height` without flipping, placing the
+CALayerHost near the bottom of the parent layer instead of near the top.
+
+#### Fix
+
+Two options:
+
+- **Option A — flip Y manually.** Read the parent layer's bounds height and
+  compute `flipped_y = parent_height - y - h`. Requires passing the surface
+  height into `updateCALayerHostFrame()`.
+
+- **Option B — set `geometryFlipped = true` on the IOSurfaceLayer.** This tells
+  Core Animation that sublayers use a top-left coordinate system (Y=0 at top, Y
+  increases downward). Only affects sublayer geometry, not the layer's own
+  `contents` rendering. No Y math needed —
+  `frame.origin.y = grid_row *
+  cell_height` works as-is.
+
+Option B is cleaner (one property, no math), but it could have side effects on
+terminal rendering if any other code assumes the default bottom-left geometry.
+Since no existing code adds sublayers to the IOSurfaceLayer (CALayerHost is the
+first), Option B should be safe. However, Option A is more conservative and
+explicit.
+
+#### Changes
+
+**In `Metal.zig` — `updateCALayerHostFrame()`:**
+
+1. Add the surface screen height as a parameter (from `self.size.screen.height`
+   on the GenericRenderer).
+2. Flip Y: `flipped_y = parent_height - y - h`.
+3. Remove the incorrect comment claiming the coordinate system is already
+   top-left.
+
+**In `generic.zig` — `updateCALayerHostFrame()`:**
+
+4. Pass `self.size.screen.height` to the Metal call.
+
+#### Verification
+
+Same as Experiment 2:
+
+1. Build TermSurf GUI (`cd gui && zig build`).
+2. Launch the app, open a terminal, type `web news.ycombinator.com`.
+3. **Pass criteria:**
+   - Web page renders at the correct position (aligned with the TUI viewport)
+   - Scrolling feels responsive
+   - Text selection tracks the cursor
+   - Pane resize works — browser content resizes with the pane
+   - Multiple panes with different profiles work
+   - Closing a browser pane cleans up the CALayerHost
+4. **Bonus verification:**
+   - Compare text selection latency side-by-side with native Chrome
+   - Verify no per-frame XPC messages in Console.app / log stream
