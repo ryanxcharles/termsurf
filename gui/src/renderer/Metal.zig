@@ -181,6 +181,14 @@ pub fn setCALayerHostContextId(self: *Metal, context_id: u32, ca_layer_host_ptr:
         const host = objc.Object.fromId(host_id).retain();
         host.setProperty("contextId", @as(u32, context_id));
 
+        // Match Chromium's DisplayCALayerTree::GotCALayerFrame() pattern.
+        host.setProperty("anchorPoint", macos.graphics.Point{ .x = 0, .y = 0 });
+
+        // Chromium's CAContext root layer uses geometryFlipped = YES (Y=0 at top).
+        // Chromium's browser process hosts it in a geometryFlipped layer too.
+        // We must match this so the remote content renders right-side-up.
+        host.setProperty("geometryFlipped", true);
+
         // Add as sublayer of our IOSurfaceLayer.
         self.layer.layer.msgSend(void, objc.sel("addSublayer:"), .{host.value});
 
@@ -190,6 +198,9 @@ pub fn setCALayerHostContextId(self: *Metal, context_id: u32, ca_layer_host_ptr:
 }
 
 /// Update the CALayerHost frame to match overlay grid coordinates (Issue 625).
+/// Cell dimensions are in physical pixels; CALayer frames use logical points.
+/// The CALayerHost has geometryFlipped = YES, so Y=0 is at the top — matching
+/// the terminal grid. No Y flip needed.
 pub fn updateCALayerHostFrame(
     self: *Metal,
     host_ptr: *anyopaque,
@@ -200,24 +211,17 @@ pub fn updateCALayerHostFrame(
     cell_width: u32,
     cell_height: u32,
 ) void {
-    _ = self;
     const host = objc.Object.fromId(host_ptr);
+    const scale = self.layer.layer.getProperty(f64, "contentsScale");
     const cw: f64 = @floatFromInt(cell_width);
     const ch: f64 = @floatFromInt(cell_height);
 
-    // The layer bounds are in the parent layer's coordinate space.
-    // IOSurfaceLayer uses default CALayer geometry (origin = bottom-left, Y up).
-    // Compute pixel origin and size from grid coordinates.
-    const x: f64 = @as(f64, grid_col) * cw;
-    const y: f64 = @as(f64, grid_row) * ch;
-    const w: f64 = @as(f64, grid_width) * cw;
-    const h: f64 = @as(f64, grid_height) * ch;
+    // Convert physical pixels to logical points.
+    const x: f64 = @as(f64, grid_col) * cw / scale;
+    const y: f64 = @as(f64, grid_row) * ch / scale;
+    const w: f64 = @as(f64, grid_width) * cw / scale;
+    const h: f64 = @as(f64, grid_height) * ch / scale;
 
-    // CALayer frame: {{x, y}, {width, height}}.
-    // On macOS, CALayer Y=0 is at the bottom. The IOSurfaceLayer is
-    // set up with contentsGravity = kCAGravityTopLeft and the view
-    // is flipped (wantsLayer), so the coordinate system matches:
-    // origin is top-left, Y increases downward.
     const frame = macos.graphics.Rect{
         .origin = .{ .x = x, .y = y },
         .size = .{ .width = w, .height = h },
