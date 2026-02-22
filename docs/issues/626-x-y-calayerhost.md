@@ -99,3 +99,71 @@ terminal grid's coordinate system. No Y flip is applied.
 - **Cell size rounding.** The cell dimensions are integers (physical pixels).
   Dividing by `contentsScale` may introduce fractional point values that don't
   align with the actual grid rendering.
+
+## Experiments
+
+### Experiment 1: Research Electron's CALayerHost handling
+
+Electron embeds Chromium in a normal `BrowserWindow` using stock CALayerHost —
+no custom display code. Their CALayerHost positioning works perfectly. This
+experiment studies how Electron sets up its NSView/CALayer hierarchy and
+positions the CALayerHost to understand what we're doing differently.
+
+#### Research questions
+
+**R1: Electron's NSView hierarchy.**
+
+How does Electron's `BrowserWindow` set up its NSView tree? What view hosts the
+web content? Is it a layer-hosting view or a layer-backed view? What is the view
+hierarchy from NSWindow down to the CALayerHost?
+
+Look in `vendor/electron/shell/browser/native_window_mac.mm` and related files.
+
+**R2: Electron's CALayerHost setup.**
+
+Does Electron create the CALayerHost itself, or does it inherit Chromium's
+default `DisplayCALayerTree` behavior? Does it set `geometryFlipped`,
+`anchorPoint`, or any other properties on the host layer? How does the host
+layer relate to the content view?
+
+Look in `vendor/electron/` for any CALayerHost references, and in Chromium's
+`ui/accelerated_widget_mac/display_ca_layer_tree.mm` for the default behavior.
+
+**R3: How does Chromium's default `DisplayCALayerTree` position the
+CALayerHost?**
+
+In stock Chromium (which Electron uses), `DisplayCALayerTree::GotCALayerFrame()`
+creates the CALayerHost and adds it to a `maybe_flipped_layer_`. What is
+`maybe_flipped_layer_`? How is it configured? What is its relationship to the
+NSView's layer? This is the reference implementation that works — we need to
+match it.
+
+Look in `chromium/src/ui/accelerated_widget_mac/display_ca_layer_tree.mm` and
+`display_ca_layer_tree.h`.
+
+**R4: How does the content view's frame relate to the CAContext geometry?**
+
+In Chromium's normal display path, the content view fills the window (minus any
+chrome). The CALayerHost fills the content view. The CAContext from the GPU
+process is sized to match. How does this size agreement happen? Is the
+CALayerHost frame explicitly set, or does it auto-fill via autoresizing masks?
+
+**R5: What would "no offset" look like for us?**
+
+Given what we learn from R1–R4, what would we need to change so that the
+CALayerHost content starts at exactly (0, 0) in the CAContext — with no title
+bar, toolbar, or view inset shifting the content? Is it a Chromium-side fix
+(make the content view fill the window at origin), a GUI-side fix (account for
+the offset), or both?
+
+#### Verification
+
+Research is complete when we can draw a side-by-side comparison:
+
+1. **Electron/Chrome:** Full layer tree from NSWindow → NSView → CALayer →
+   CALayerHost, with every `geometryFlipped`, `anchorPoint`, `frame`, and
+   autoresizing mask documented.
+2. **TermSurf:** Our current layer tree from SurfaceView → IOSurfaceLayer →
+   CALayerHost, with the same properties documented.
+3. A concrete list of differences that could explain the ~10px Y / ~3px X
+   offset.
