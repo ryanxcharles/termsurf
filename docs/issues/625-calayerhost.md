@@ -1175,3 +1175,80 @@ content view padding. The fix is: set `geometryFlipped = YES` on the parent
 layer (or the CALayerHost), hide or eliminate the shell toolbar, set
 `anchorPoint = CGPointZero` on the CALayerHost, and convert pixel values to
 points by dividing by the scale factor.
+
+### Experiment 6: Fix CALayerHost positioning
+
+Apply the three fixes identified in Experiment 5: `geometryFlipped`, shell
+window chrome elimination, and pixel-to-point conversion.
+
+#### Changes
+
+**Fix 1: `geometryFlipped` on CALayerHost (GUI side)**
+
+In `Metal.zig` — `setCALayerHostContextId()`:
+
+1. After creating the CALayerHost, set `geometryFlipped = YES` on it. This makes
+   the CALayerHost's coordinate system match Chromium's CAContext (Y=0 at top).
+   Do NOT set it on the IOSurfaceLayer itself — that could break terminal
+   rendering. Setting it on the CALayerHost only affects the remote content's
+   sublayer geometry.
+
+2. Set `anchorPoint = CGPointZero` on the CALayerHost, matching Chromium's own
+   `DisplayCALayerTree::GotCALayerFrame()` pattern.
+
+**Fix 2: Remove shell window chrome (Chromium side)**
+
+In `shell_platform_delegate_mac.mm` — `CreatePlatformWindow()`:
+
+3. Change the window style mask to `NSWindowStyleMaskBorderless`. This removes
+   the title bar entirely — no ~28px offset.
+
+4. Force-hide the toolbar by making `ShouldHideToolbar()` return `true` for the
+   Chromium Profile Server, or pass `--chromium-profile-server-hide-toolbar`.
+   This removes the 24px toolbar offset and the nav buttons/URL bar views.
+
+   If the toolbar is already hidden via the `--hidden` flag or command-line
+   switch, confirm this and note it. If not, add the switch to the server launch
+   arguments.
+
+**Fix 3: Pixel-to-point conversion (GUI side)**
+
+In `Metal.zig` — `updateCALayerHostFrame()`:
+
+5. Read the parent IOSurfaceLayer's `contentsScale` and divide all pixel values
+   by it. The grid coordinates multiplied by cell size produce physical pixels,
+   but CALayer frames use logical points.
+
+   ```
+   scale = parent.contentsScale  // 2.0 on Retina
+   x = (grid_col * cell_width) / scale
+   y = (grid_row * cell_height) / scale
+   w = (grid_width * cell_width) / scale
+   h = (grid_height * cell_height) / scale
+   ```
+
+6. Remove the Y flip (`flipped_y = sh - y - h`). With `geometryFlipped = YES` on
+   the CALayerHost, Y=0 is at the top — matching the terminal grid's coordinate
+   system. The naive `y = grid_row * cell_height / scale` is correct as-is.
+
+**Fix 4: Remove diagnostic logging (GUI side)**
+
+7. Remove all `diag:` log lines from `Metal.zig` and `generic.zig`. Keep the
+   existing non-diagnostic log lines (`created CALayerHost`, etc.).
+
+#### Verification
+
+1. Build Chromium Profile Server
+   (`autoninja -C out/Default chromium_profile_server`).
+2. Build TermSurf GUI (`cd gui && zig build`).
+3. Launch the app, open a terminal, type `web news.ycombinator.com`.
+4. **Pass criteria:**
+   - Web page renders at the correct position (aligned with the TUI viewport, ~1
+     row down and ~1 column in from the top-left of the surface)
+   - No visible Y offset — content top edge aligns with the TUI viewport top
+   - No visible X offset — content left edge aligns with the TUI viewport left
+   - Scrolling feels responsive
+   - Text selection tracks the cursor
+   - Pane resize works — browser content resizes with the pane
+   - Multiple panes with different profiles work
+   - Closing a browser pane cleans up the CALayerHost
