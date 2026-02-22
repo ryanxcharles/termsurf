@@ -538,3 +538,67 @@ contention window is too short to cause visible degradation).
 
 If both 2fps: the contention affects all pages regardless of complexity. The
 Issue 620 DDG result was a fluke or edge case.
+
+**Result:** Both 60fps
+
+Both lite.duckduckgo.com windows rendered at 60fps — smooth, interactive, no
+degradation. Combined with Experiment 2 (both google.com = both 2fps), this
+completes the picture:
+
+| Profile A           | Profile B           | A fps | B fps | Experiment |
+| ------------------- | ------------------- | ----- | ----- | ---------- |
+| google.com          | —                   | 60    | —     | 621.1      |
+| google.com          | google.com          | 2     | 2     | 621.2      |
+| lite.duckduckgo.com | lite.duckduckgo.com | 60    | 60    | 621.3      |
+| google.com          | lite.duckduckgo.com | 2     | 60    | 620.14     |
+| lite.duckduckgo.com | google.com          | 60    | 2     | 620.15     |
+
+The multi-BrowserContext contention exists regardless of page complexity, but
+lightweight pages are fast enough to avoid visible degradation. The bottleneck
+is a shared resource that both profiles contend for — when pages finish their
+work quickly (DDG), the contention window is too short to matter. When pages
+have sustained work (google.com), the contention becomes a persistent stall.
+
+#### Hypotheses: why DDG escapes
+
+**1. Blink main thread utilization.** google.com runs continuous JavaScript
+(autocomplete, analytics, ad scripts, service workers). This keeps the Blink
+main thread busy across multiple task queue cycles. DDG's lite page has
+virtually no JavaScript — a static HTML form. When two profiles contend for
+shared resources, the profile whose Blink main thread finishes quickly releases
+the contention before the next vsync. google.com's main thread is still working
+when the next BeginFrame arrives, causing frame drops.
+
+**2. Compositor damage frequency.** google.com generates continuous compositor
+damage — CSS animations (the blinking cursor, suggestion dropdown transitions),
+layout shifts from async content loading, and JavaScript-driven DOM mutations.
+Each damage event triggers a new CompositorFrame submission attempt. With two
+profiles both generating continuous damage, the shared GPU channel or compositor
+thread is saturated. DDG generates damage only on user input (typing), so the
+contention window is brief and intermittent.
+
+**3. Renderer process weight.** Each BrowserContext gets its own renderer
+process. google.com's renderer process is heavyweight: large DOM, many layout
+objects, complex paint layers, multiple JavaScript contexts (iframes, ads). The
+renderer takes longer to produce each CompositorFrame. DDG's renderer is
+lightweight: small DOM, simple layout, one paint layer. It produces frames
+faster, clearing the shared resource before the next frame deadline.
+
+**4. GPU command buffer volume.** google.com submits more GPU commands per frame
+(more draw calls, more texture uploads, more shader switches) due to its complex
+visual composition. With two profiles sharing a single GPU process, the command
+buffer serialization takes longer. DDG submits far fewer GPU commands per frame,
+so the serialization overhead is negligible.
+
+**The common thread:** all four hypotheses point to the same root cause — a
+shared resource (likely GPU channel, compositor thread, or Blink main thread
+scheduling) that becomes a bottleneck proportional to per-frame work. The fix
+must either eliminate the shared resource or reduce the per-frame contention.
+
+#### Conclusion
+
+The 2fps degradation is complexity-dependent, not inherent to multi-
+BrowserContext. Lightweight pages coexist at 60fps. The contention is
+proportional to per-frame work — when both profiles have heavy pages, neither
+can finish within the frame budget. The next experiments should instrument the
+renderer side to identify which specific shared resource is the bottleneck.
