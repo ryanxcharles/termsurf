@@ -823,17 +823,68 @@ its entire Blink scheduler shifts to low-priority mode.
 #### Conclusion
 
 No BrowserContext-specific frame logic exists in the browser process. The
-BrowserContext boundary manifests solely through renderer process isolation. Two
-candidate mechanisms explain the 2fps degradation:
+BrowserContext boundary manifests solely through renderer process isolation. The
+lead candidate is **Viz Display serialization**: the `DisplayScheduler` waits
+for all pending surfaces before drawing (`HasPendingSurfaces`), and each
+renderer blocks on `kMaxPendingSubmitFrames = 1` until Viz acknowledges the
+previous frame. Two separate renderer processes with slow JS round-trips create
+a cross-process waiting chain through the shared Display. This would show up as
+delayed acks. Testable by disabling surface waiting or increasing
+`kMaxPendingSubmitFrames`.
 
-- **Theory A (Viz serialization)** predicts that `HasPendingSurfaces` creates
-  cross-renderer waiting. This would show up as delayed acks. Testable by
-  disabling surface waiting or increasing `kMaxPendingSubmitFrames`.
-- **Theory B (macOS backgrounding)** predicts that the unfocused renderer's main
-  thread is throttled by the OS. This would show up in Activity Monitor as
-  reduced CPU for the unfocused renderer. Testable by disabling App Nap or
-  process backgrounding.
+## Conclusion
 
-Theory B is the stronger candidate — it specifically explains the 2fps
-magnitude, the CSS vs JS asymmetry, and the single vs multi-BrowserContext
-behavior. The next experiment should test it first.
+Issue 622 ran four experiments — one empirical test and three Chromium source
+code research sessions — to pinpoint why JavaScript-driven rendering degrades to
+2fps when two BrowserContexts coexist in a single Chromium process.
+
+### What we learned
+
+**The 2fps requires BOTH conditions: multiple BrowserContexts AND JavaScript.**
+
+| Configuration                | rAF | FPS     | Experiment |
+| ---------------------------- | --- | ------- | ---------- |
+| 2 BrowserContexts, 2 windows | yes | 2 + 2   | 621.5      |
+| 1 BrowserContext, 2 windows  | yes | 60 + 60 | 622.3      |
+| 2 BrowserContexts, CSS only  | no  | 60 + 60 | 621.4      |
+
+This is the definitive fork. Neither condition alone triggers the degradation.
+
+**BrowserContext is invisible to the frame pipeline.** The word "BrowserContext"
+appears in zero files across all of `components/viz/` and `cc/`. The entire
+BeginFrame delivery system, frame sink management, and compositor scheduling
+have no concept of browser profiles. The BrowserContext boundary manifests
+solely through one mechanism: renderer process isolation (`IsSuitableHost()`
+forces separate processes for different BrowserContexts).
+
+**The architecture is fully isolated.** Each BrowserContext gets its own
+renderer process with its own Blink main thread, compositor thread, scheduler,
+and BeginMainFrame dispatch. There is no cross-process serialization in the
+renderer layer. The only shared resources are the GPU/Viz process and the
+browser process — both of which are BrowserContext-unaware.
+
+**Three throttling mechanisms were identified, none per-BrowserContext:**
+
+1. `kMaxPendingSubmitFrames = 1` — per-renderer backpressure that blocks rAF
+   until Viz acknowledges the previous frame
+2. `kUndrawnFrameLimit = 3` — per-FrameSink throttle if undrawn frames pile up
+3. `BeginFrameTracker kLimitThrottle = 10` — per-FrameSink unresponsive client
+   detection
+
+### Lead theory for Issue 623
+
+**Viz Display serialization.** The `DisplayScheduler` waits for all pending
+surfaces before drawing (`HasPendingSurfaces`). Two separate renderer processes
+with slow JS round-trips create a cross-process waiting chain through the shared
+Display. Each renderer blocks on `kMaxPendingSubmitFrames = 1` while the Display
+waits for the other. CSS animations bypass this because the compositor responds
+immediately without a main-thread round-trip. Same-BrowserContext bypasses this
+because both WebContents share one renderer and batch their submissions.
+
+This theory qualitatively explains all three experimental cases but has a
+magnitude gap: simple cross-process waiting should produce ~30fps, not 2fps.
+Either there is a cascading feedback loop that amplifies the initial delay, or
+the real mechanism is something else that correlates with separate renderer
+processes + main-thread involvement.
+
+Issue 623 will investigate.
