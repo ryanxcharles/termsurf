@@ -236,3 +236,285 @@ Research is complete when we can draw the full before/after picture:
 3. A definitive layer tree diagram showing where `CALayerHost` sits relative to
    `CAMetalLayer`.
 4. The coordinate system for positioning `CALayerHost` at browser pane bounds.
+
+#### Results
+
+##### A1: XPC frame reception — the current pipeline
+
+The entire pipeline is Zig — no Swift intermediary. XPC messages arrive on a
+serial GCD queue, IOSurface references are stored on the renderer struct behind
+a mutex, and `drawFrame` creates a transient Metal texture from the IOSurface
+each frame.
+
+```
+Chromium Profile Server
+  │ XPC: { action: "display_surface", iosurface_port: <mach_port>, pane_id }
+  ▼
+GCD serial queue "com.termsurf.ghost.xpc"
+  │
+  ▼
+xpc.zig:handleDisplaySurface()                           line 415-436
+  ├─ xpc_dictionary_copy_mach_send(msg, "iosurface_port")  → Mach port
+  ├─ IOSurfaceLookupFromMachPort(port)                      → IOSurfaceRef
+  ├─ mach_port_deallocate(port)
+  └─ surface.setOverlayIOSurface(iosurface)
+       │
+       ▼
+Surface.zig:setOverlayIOSurface()                        line 2528-2538
+  ├─ draw_mutex.lock()
+  ├─ CFRelease(old), CFRetain(new)
+  ├─ renderer.overlay_iosurface = iosurface
+  ├─ renderer.overlay_surface_changed = true
+  └─ queueRender()
+       │
+       ▼ [renderer thread]
+generic.zig:drawFrame()                                  line 1406
+  ├─ draw_mutex.lock()                                   line 1422
+  ├─ (terminal cells, backgrounds, text, images)
+  └─ IOSurface overlay step                              line 1661-1688
+       ├─ Texture.fromIOSurface(device, iosurface)       Texture.zig:88-117
+       │    (zero-copy MTLTexture from IOSurface GPU memory)
+       ├─ Buffer(PinkOverlay).initFill(overlay_params)
+       └─ pass.step(pipeline=overlay, textures={tex}, vertex_count=4)
+            │
+            ▼ [GPU]
+shaders.metal:overlay_vertex()                           line 894-909
+  origin = (grid_col, grid_row) * cell_size
+  size = (pixel_width, pixel_height) from IOSurface
+shaders.metal:overlay_fragment()                         line 912-918
+  sample IOSurface texture → BGRA color
+```
+
+The overlay position is set separately via `set_overlay` XPC message →
+`xpc.zig:handleSetOverlay()` (line 267) → `Surface.zig:setOverlay()` (line
+2499), which stores grid coordinates in the `PinkOverlay` struct.
+
+##### A2: Metal overlay pipeline — what gets deleted
+
+Every Metal resource for the browser overlay is cleanly isolated from terminal
+rendering. Nothing shared needs modification.
+
+**DELETE — browser overlay only:**
+
+| Resource                                        | File                | Lines            |
+| ----------------------------------------------- | ------------------- | ---------------- |
+| Pipeline `pink_overlay`                         | `metal/shaders.zig` | 45-49            |
+| Pipeline `overlay`                              | `metal/shaders.zig` | 50-54            |
+| Struct `PinkOverlay`                            | `metal/shaders.zig` | 346-353          |
+| Shader `pink_overlay_vertex`                    | `shaders.metal`     | 866-880          |
+| Shader `pink_overlay_fragment`                  | `shaders.metal`     | 882-884          |
+| Shader `overlay_vertex`                         | `shaders.metal`     | 894-909          |
+| Shader `overlay_fragment`                       | `shaders.metal`     | 912-918          |
+| MSL structs `PinkOverlayIn`, `OverlayVertexOut` | `shaders.metal`     | 857-864, 889-892 |
+| `Texture.fromIOSurface()`                       | `metal/Texture.zig` | 85-117           |
+| IOSurface draw call block                       | `generic.zig`       | 1661-1688        |
+| Field `pink_overlay`                            | `generic.zig`       | 151              |
+| Field `overlay_iosurface`                       | `generic.zig`       | 157              |
+| Field `overlay_surface_changed`                 | `generic.zig`       | 160              |
+| `setOverlay()`                                  | `Surface.zig`       | 2499-2507        |
+| `setOverlayIOSurface()`                         | `Surface.zig`       | 2528-2538        |
+| `clearOverlay()`                                | `Surface.zig`       | 2542-2549        |
+| `hitTestOverlay()`                              | `Surface.zig`       | 2459-2476        |
+| `mapChromiumCursor()`                           | `Surface.zig`       | 2479-2495        |
+| `overlay_cursor_type` field                     | `Surface.zig`       | 83               |
+| `handleDisplaySurface()`                        | `xpc.zig`           | 415-436          |
+| IOSurface externs                               | `xpc.zig`           | 58-64            |
+| `ghostty_surface_is_overlay_forwarding`         | `embedded.zig`      | 1749-1752        |
+
+**KEEP — terminal rendering (unaffected):**
+
+- Pipelines: `bg_color`, `cell_bg`, `cell_text`, `image`, `bg_image`
+- `Uniforms` struct (read-only by overlay shaders, unchanged by removal)
+- `IOSurfaceLayer` — the terminal's presentation layer, NOT the browser overlay
+- `Overlay.zig` — Ghostty's inspector debug overlay (unrelated to browser)
+
+##### A3: NSView/CALayer hierarchy and CALayerHost insertion point
+
+The current layer tree:
+
+```
+NSWindow (TerminalWindow)
+  └─ contentView → TerminalViewContainer (NSView)
+       └─ NSHostingView (hosts SwiftUI)
+            └─ TerminalSplitTreeView → SplitView(s)
+                 └─ [per split pane]
+                      └─ SurfaceRepresentable (NSViewRepresentable)
+                           └─ SurfaceScrollView (NSView)
+                                └─ NSScrollView → NSClipView → documentView
+                                     └─ SurfaceView (NSView, layer-hosting)
+                                          └─ layer: IOSurfaceLayer (CALayer subclass)
+                                               contents = terminal IOSurface
+                                               (no sublayers)
+```
+
+**Critical detail:** SurfaceView is a **layer-hosting view** — Zig sets `layer`
+BEFORE `wantsLayer = true` (`Metal.zig:124-125`), giving the application full
+control over the layer tree. AppKit does not create a default backing layer.
+
+**Proposed insertion — CALayerHost as sublayer of IOSurfaceLayer:**
+
+```
+SurfaceView (layer-hosting)
+  └─ layer: IOSurfaceLayer (terminal content)
+       ├─ sublayer: CALayerHost (browser content)    ← NEW
+       │    contextId = Chromium's ca_context_id
+       │    frame = overlay pixel rect
+       └─ sublayer: CALayer (dimming overlay)         ← NEW (inactive panes)
+            backgroundColor = (0, 0, 0, 0.4)
+            frame = same as CALayerHost
+```
+
+This works because:
+
+- Layer-hosting means we control the layer tree from Zig
+- `CALayerHost` as a sublayer composites ON TOP of terminal content
+- Window Server handles compositing — no Metal draw calls for browser content
+- The dimming layer sits above the CALayerHost for inactive pane dimming
+
+Key files for the insertion point:
+
+| What                    | File                       | Line    |
+| ----------------------- | -------------------------- | ------- |
+| IOSurfaceLayer creation | `Metal.zig`                | 111     |
+| Layer-hosting setup     | `Metal.zig`                | 124-125 |
+| IOSurfaceLayer subclass | `metal/IOSurfaceLayer.zig` | 138-183 |
+| SurfaceView class       | `SurfaceView_AppKit.swift` | 10      |
+| NSView pointer to Zig   | `SurfaceView.swift`        | 694-695 |
+
+##### A4: Pane coordinate system
+
+The overlay uses **grid coordinates** (column/row in terminal cells) as source
+of truth, converted to pixels at render time via `cell_size`.
+
+**Current conversion (shader-side):**
+
+```
+origin_px = (grid_col, grid_row) * cell_size
+size_px = (pixel_width, pixel_height)  // from IOSurface dimensions
+```
+
+**For CALayerHost, the same conversion applies but in Zig:**
+
+```zig
+const x = pink_overlay.grid_col * cell_width;
+const y = pink_overlay.grid_row * cell_height;
+const w = pixel_width;  // from Chromium's reported size
+const h = pixel_height;
+ca_layer_host.setFrame(.{ .origin = .{ x, y }, .size = .{ w, h } });
+```
+
+**Critical finding: each surface has its own coordinate space starting at (0,
+0).** The `SurfaceView` has no knowledge of its position within the window.
+Overlay grid coordinates are relative to the surface's own grid. Since
+`CALayerHost` will be a sublayer of IOSurfaceLayer (which IS the surface's root
+layer), its frame is also relative to the surface — no window-relative
+coordinates needed.
+
+**Resize propagation:**
+
+1. SwiftUI detects size change → `sizeDidChange()` →
+   `ghostty_surface_set_size()` → renderer updates uniforms
+2. `web` TUI detects terminal resize → sends new `set_overlay` with updated grid
+   coordinates → XPC handler recomputes pixel dimensions → sends `resize` to
+   Chromium
+3. CALayerHost frame updates when new grid coordinates arrive (same path as
+   current overlay)
+
+**Key fields:**
+
+| What                   | How                                      | Location           |
+| ---------------------- | ---------------------------------------- | ------------------ |
+| Grid coordinates       | `pink_overlay.grid_col/row/width/height` | `generic.zig:151`  |
+| Cell size (pixels)     | `grid_metrics.cell_width/height`         | `generic.zig:110`  |
+| Surface size (pixels)  | `self.size.screen.width/height`          | `Surface.zig:150`  |
+| Content scale (Retina) | `rt_surface.getContentScale()`           | `Surface.zig:2474` |
+
+##### A5: Chromium server side — before and after
+
+**BEFORE — capturer path:**
+
+`ShellVideoConsumer` (`shell_video_consumer.cc/h`) creates a
+`ClientFrameSinkVideoCapturer` at 120fps. On every captured frame:
+
+```
+OnFrameCaptured()                                        line 258-332
+  ├─ Extract IOSurfaceRef from gpu_memory_buffer_handle  line 270
+  ├─ IOSurfaceCreateMachPort(io_surface)                 line 277
+  ├─ Build XPC dict: { action: "display_surface",
+  │    iosurface_port: <mach_port>, pane_id }
+  ├─ xpc_connection_send_message(tab_connection, msg)    line 285
+  └─ mach_port_deallocate(port)                          line 287
+```
+
+Created in `shell_browser_main_parts.cc:CreateTab()` (line 354-405): creates
+consumer, sets pane ID and size, opens per-tab XPC connection, sends
+`tab_ready`, hands connection to consumer.
+
+**AFTER — CALayerParams interception:**
+
+Replace the capturer with a callback on
+`AcceleratedWidgetCALayerParamsUpdated()`. Two options:
+
+- **Option A:** Add a callback on `RenderWidgetHostViewMac` (similar to existing
+  `SetCursorChangedCallback` pattern at line 394) that fires with
+  `ca_context_id` when `AcceleratedWidgetCALayerParamsUpdated()` is called.
+- **Option B:** After `RenderViewReady()`, query
+  `browser_compositor_->GetLastCALayerParams()->ca_context_id` and send it once.
+
+New XPC message format:
+
+```
+Sent once per tab (and on ca_context_id change):
+{
+  "action": "ca_context",
+  "ca_context_id": <uint32>,
+  "pane_id": "<uuid>",
+  "pixel_width": <uint64>,
+  "pixel_height": <uint64>,
+  "scale_factor": "<string>"    // XPC has no float type
+}
+```
+
+**DELETE:**
+
+| What                               | File                               | Lines              |
+| ---------------------------------- | ---------------------------------- | ------------------ |
+| `shell_video_consumer.cc`          | `chromium_profile_server/browser/` | entire (347 lines) |
+| `shell_video_consumer.h`           | `chromium_profile_server/browser/` | entire (113 lines) |
+| BUILD.gn entries                   | `chromium_profile_server/BUILD.gn` | 201-202            |
+| Consumer creation in `CreateTab()` | `shell_browser_main_parts.cc`      | 354-358, 387-388   |
+| `ResizeCapture()`                  | `shell_browser_main_parts.cc`      | 411-446            |
+| `resize` XPC handler               | `shell_browser_main_parts.cc`      | 219-227            |
+
+**PRESERVE (move out of ShellVideoConsumer):**
+
+The video consumer currently doubles as a `WebContentsObserver` for navigation
+and loading state. These notifications must move to a simpler observer:
+
+- `DidFinishNavigation` → URL change notifications (lines 90-144)
+- `DidStartLoading`/`DidStopLoading`/`LoadProgressChanged` (lines 161-193)
+- Cursor change callback (via `SetCursorChangedCallback`, line 394)
+
+#### Conclusion
+
+The full before/after picture is clear:
+
+**Before:** Chromium capturer (120fps timer) → IOSurface → Mach port → XPC (per
+frame) → Zig imports IOSurface → Metal texture → shader composites → screen.
+~460 lines of capturer code, per-frame GPU readback, per-frame Mach port
+transfer.
+
+**After:** Chromium `AcceleratedWidgetCALayerParamsUpdated()` → extract
+`ca_context_id` (uint32) → XPC (once) → Zig creates `CALayerHost` as sublayer of
+IOSurfaceLayer → Window Server composites from GPU VRAM → screen. ~50 lines of
+interception code, zero per-frame IPC.
+
+The layer hierarchy is clean: `IOSurfaceLayer` (terminal) with `CALayerHost`
+(browser) as sublayer. Each surface has its own coordinate space starting at (0,
+0), so CALayerHost frame coordinates match the current grid-to-pixel conversion.
+No window-relative math needed.
+
+The Chromium side needs: delete `ShellVideoConsumer`, add a `CALayerParams`
+callback, move `WebContentsObserver` notifications to a simpler class. The GUI
+side needs: delete the entire Metal overlay pipeline, add `CALayerHost` creation
+and positioning in Zig via Objective-C runtime calls.
