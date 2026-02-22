@@ -489,3 +489,52 @@ Two BrowserContexts with the same complex page both degrade equally to 2fps. The
 problem is purely multi-BrowserContext contention in Chromium's rendering
 pipeline — not page-specific behavior, not asymmetric resource ordering. Any
 sufficiently complex page will trigger it.
+
+### Experiment 3: Two profiles, both lite.duckduckgo.com
+
+The inverse of Experiment 2. Both profiles load lite.duckduckgo.com — a
+lightweight page that rendered at 60fps alongside google.com in Issue 620
+Experiments 14–15. If both DDG instances also render at 60fps here, the
+degradation is strictly complexity-dependent: lightweight pages escape the
+contention, heavyweight pages don't. If both degrade to 2fps, then even
+lightweight pages suffer when both profiles are under equal load.
+
+#### Changes
+
+**`content_api_shim.mm`** — change both URLs to lite.duckduckgo.com:
+
+```cpp
+const char* kProfileAUrl = "https://lite.duckduckgo.com";
+const char* kProfileBUrl = "https://lite.duckduckgo.com";
+```
+
+No other changes. Same two-profile structure as Experiment 2.
+
+#### Build
+
+```bash
+cd ~/dev/termsurf/chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default zig_content_shell
+```
+
+#### Verification
+
+1. Launch the app:
+   ```bash
+   open out/Default/Zig\ Content\ Shell.app
+   ```
+2. Two Content Shell windows appear, both showing lite.duckduckgo.com
+3. Focus each window individually and type into the search box
+4. Observe rendering performance in each window:
+   - Are both smooth (60fps)?
+   - Are both sluggish (2fps)?
+   - Is one smooth and the other sluggish?
+5. Close both windows — process exits cleanly
+
+If both 60fps: the contention only affects complex pages. Lightweight pages
+avoid whatever bottleneck exists (likely less GPU/main-thread work means the
+contention window is too short to cause visible degradation).
+
+If both 2fps: the contention affects all pages regardless of complexity. The
+Issue 620 DDG result was a fluke or edge case.
