@@ -753,5 +753,67 @@ the compositor/GPU pipeline as the bottleneck:
 CSS animations at 60fps across two profiles proves the compositor and GPU
 pipelines are not the bottleneck. The 2fps degradation is caused by JavaScript
 contention on the Blink main thread. The next experiment should confirm this by
-loading a page with continuous JavaScript animation (e.g., `requestAnimationFrame`
-loop) and zero CSS animations.
+loading a page with continuous JavaScript animation (e.g.,
+`requestAnimationFrame` loop) and zero CSS animations.
+
+### Experiment 5: Two profiles, JavaScript animation (requestAnimationFrame)
+
+The inverse of Experiment 4. Both profiles load the ts4 box demo — a page with a
+continuous `requestAnimationFrame` loop drawing a spinning blue square on a
+canvas. Zero CSS animations, all rendering driven by JavaScript. The page also
+has a built-in FPS counter and a localStorage identity string (different per
+profile, confirming profile isolation).
+
+If both degrade to 2fps: JavaScript-driven animation confirms the Blink main
+thread as the bottleneck. Combined with Experiment 4 (CSS = 60fps), this
+pinpoints JavaScript execution as the trigger.
+
+If both stay at 60fps: the box demo's JavaScript is too lightweight to trigger
+the contention, and google.com's degradation comes from something heavier
+(multiple scripts, iframes, service workers, etc.).
+
+#### Changes
+
+**`content_api_shim.mm`** — point both URLs to the box demo:
+
+```cpp
+const char* kProfileAUrl = "http://localhost:9616/test-box-demo.html";
+const char* kProfileBUrl = "http://localhost:9616/test-box-demo.html";
+```
+
+Same two-profile structure as Experiments 2–4. The test page already exists at
+`test-html/public/test-box-demo.html`.
+
+#### Build
+
+```bash
+cd ~/dev/termsurf/chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default zig_content_shell
+```
+
+#### Verification
+
+1. Start the Bun server (if not already running):
+   ```bash
+   cd ~/dev/termsurf/test-html && bun run server.ts
+   ```
+2. Launch the app:
+   ```bash
+   open out/Default/Zig\ Content\ Shell.app
+   ```
+3. Two Content Shell windows appear, each showing a spinning blue square with an
+   FPS counter and a localStorage identity string
+4. Observe:
+   - Are both spinning smoothly (FPS counter shows ~60)?
+   - Are both stuttering (FPS counter shows ~2)?
+   - Do the identity strings differ (confirming profile isolation)?
+5. Close both windows — process exits cleanly
+
+If both ~60fps: lightweight JavaScript animation escapes the contention, just
+like CSS animations and DDG. The bottleneck requires heavyweight JS (google.com
+scale).
+
+If both ~2fps: any continuous JavaScript execution triggers the contention when
+two BrowserContexts are active. This would definitively confirm the Blink main
+thread as the shared resource.
