@@ -511,3 +511,116 @@ answers the critical architecture question: **in-process embedding is viable.**
 The GUI binary can become the browser process, eliminating the entire
 out-of-process stack (xpc-gateway, profile server, XPC connections, IOSurface
 Mach port transfer, FrameSinkVideoCapturer, 120fps oversampling).
+
+### Experiment 3: C API for profile and tab lifecycle
+
+Expose C functions for creating and destroying browser profiles and tabs. Prove
+the API works by having `InitializeMessageLoopContext()` call the exported C
+functions instead of directly using Content Shell C++ classes. Same observable
+result as Experiment 2 (two windows, two profiles), but the creation path goes
+through the public C API.
+
+This is the foundation for the Zig embedder. Once these functions exist, Zig
+calls them to manage browser profiles and tabs without any C++ knowledge.
+
+#### Changes
+
+**`content_api_shim.h`** — Add exported C function declarations:
+
+```c
+// Opaque handle type for a browser profile.
+typedef void* ts_browser_context_t;
+
+// Create a browser profile with the given absolute storage path.
+// Must be called on the browser thread (i.e., from the initialized callback
+// or after ContentMain has started the message loop).
+ts_browser_context_t ts_create_browser_context(const char* path);
+
+// Destroy a browser profile.
+void ts_destroy_browser_context(ts_browser_context_t ctx);
+
+// Create a tab in the given profile, loading the URL.
+// Opens a Content Shell window (temporary — later experiments replace Shell
+// with a headless WebContents and CAContextID extraction).
+void ts_create_tab(ts_browser_context_t ctx, const char* url);
+```
+
+**`content_api_shim.mm`** — Implement the C functions and simplify
+TsBrowserMainParts:
+
+1. Global storage: `std::vector<std::unique_ptr<ShellBrowserContext>>` owns all
+   contexts created through the C API. Handles are raw pointers into this
+   vector.
+
+2. `ts_create_browser_context(path)` — Override `SHELL_DIR_USER_DATA` with the
+   given path, create a `ShellBrowserContext(false)`, store in global vector,
+   return raw pointer as opaque handle.
+
+3. `ts_destroy_browser_context(handle)` — Find and erase from global vector.
+
+4. `ts_create_tab(ctx, url)` — Cast handle to `ShellBrowserContext*`, call
+   `Shell::CreateNewWindow(ctx, GURL(url), nullptr, gfx::Size())`.
+
+5. Override `PreMainMessageLoopRun()` instead of just the sub-methods. The
+   parent's implementation calls
+   `ShellDevToolsManagerDelegate::StartHttpHandler` with
+   `browser_context_.get()` which would be null (we don't use
+   `set_browser_context`). Also, `PlatformResourceProvider` is a static function
+   in the parent's `.cc` file — inaccessible from subclasses. Our override:
+
+   ```cpp
+   int PreMainMessageLoopRun() override {
+     Shell::Initialize(CreateShellPlatformDelegate());
+     InitializeMessageLoopContext();
+     return 0;
+   }
+   ```
+
+   Skips `InitializeBrowserContexts()` (empty), resource provider (net error
+   pages — not needed), and DevTools handler (not needed for experiment).
+
+6. `InitializeMessageLoopContext()` uses the C API:
+
+   ```cpp
+   void InitializeMessageLoopContext() override {
+     base::FilePath home;
+     base::PathService::Get(base::DIR_HOME, &home);
+     std::string base_path =
+         home.Append(".config/termsurf/zig-content-shell").value();
+
+     ctx_a_ = ts_create_browser_context(
+         (base_path + "/profile-a").c_str());
+     ctx_b_ = ts_create_browser_context(
+         (base_path + "/profile-b").c_str());
+     ts_create_tab(ctx_a_, "https://google.com");
+     ts_create_tab(ctx_b_, "https://example.com");
+   }
+   ```
+
+7. Override `PostMainMessageLoopRun()` — destroy contexts via the C API (parent
+   would try to stop DevTools and destroy its own null context):
+
+   ```cpp
+   void PostMainMessageLoopRun() override {
+     ts_destroy_browser_context(ctx_b_);
+     ts_destroy_browser_context(ctx_a_);
+     ctx_a_ = nullptr;
+     ctx_b_ = nullptr;
+   }
+   ```
+
+No changes to `BUILD.gn` or the plist files.
+
+#### Verification
+
+Same as Experiment 2:
+
+1. Two windows appear (google.com + example.com)
+2. Both interactive (scrolling, clicking, typing)
+3. Profile directories created
+   (`~/.config/termsurf/zig-content-shell/profile-{a,b}/`)
+4. Closing both windows exits the process
+
+The key difference is architectural: all profile and tab creation goes through
+the exported C functions declared in `content_api_shim.h`. A future experiment
+calls these same functions from Zig.
