@@ -499,3 +499,53 @@ The fix for Experiment 4 should follow Chromium's pattern more closely: let the
 auto-fill mask), and set the frame on the CALayerHost instead. The CALayerHost's
 position would then be in the flipped layer's coordinate system (Y=0 at top),
 which is the correct coordinate system for grid-based positioning.
+
+### Experiment 4: Position CALayerHost inside full-size flipped layer
+
+Follow Chromium's `DisplayCALayerTree` pattern exactly: the `flipped_layer`
+fills the entire IOSurfaceLayer (no explicit frame, auto-resizes via mask). The
+CALayerHost is positioned inside the `flipped_layer` at the overlay grid
+rectangle. This ensures the CALayerHost's frame coordinates are always in the
+flipped coordinate system (Y=0 at top), regardless of the IOSurfaceLayer's
+coordinate system.
+
+**Current architecture (Experiment 3):**
+
+```
+IOSurfaceLayer
+└─ flipped_layer (geometryFlipped=YES, auto-fill mask, explicit frame at overlay rect)
+   └─ CALayerHost (at origin, pinned top-left via mask)
+```
+
+Problem: the auto-fill mask conflicts with the explicit frame on
+`flipped_layer`, causing the ~10px Y shift.
+
+**Target architecture (Experiment 4):**
+
+```
+IOSurfaceLayer
+└─ flipped_layer (geometryFlipped=YES, auto-fill mask, fills parent)
+   └─ CALayerHost (explicit frame at overlay rect, no auto-resize mask)
+```
+
+This matches Chromium: `maybe_flipped_layer_` fills the parent,
+`remote_layer_` sits inside it.
+
+#### Changes
+
+**`gui/src/renderer/Metal.zig`:**
+
+- In `setCALayerHostContextId`: Remove `autoresizingMask` from the CALayerHost
+  (we will set an explicit frame on it instead of relying on pinning).
+- In `updateCALayerHostFrame`: Set the frame on the CALayerHost (not the
+  flipped layer). The flipped layer fills the parent and is never repositioned.
+
+**`gui/src/renderer/generic.zig`:**
+
+- In `updateCALayerHostFrame`: Pass the `ca_layer_host` pointer instead of
+  `ca_layer_flipped`.
+
+#### Verification
+
+Run the app. The web content should align pixel-perfectly with the TUI viewport
+in both X and Y. The ~10px Y offset should be gone.
