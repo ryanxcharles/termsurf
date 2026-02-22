@@ -378,3 +378,90 @@ produces (or fails to produce) CompositorFrames when a second BrowserContext
 exists. The key observation from 620 Exp 14 stands: BeginFrames arrive at 60fps
 but the renderer only produces CompositorFrames at ~3fps. The renderer is
 receiving the signal to produce frames and choosing not to. The question is why.
+
+## Conclusion
+
+Four issues and 25 experiments over more than half a day failed to find the root
+cause of the 2fps degradation when two BrowserContexts run JavaScript animations
+in a single Chromium process.
+
+### The investigation arc
+
+[Issue 620](620-zig-content-shell.md) (15 experiments) built the Zig Content
+Shell — a minimal Chromium embedder in 3 files and ~190 lines — and discovered
+the 2fps problem. Instrumentation of the entire viz/compositor pipeline proved
+that BeginFrames arrive at 60fps but the renderer only produces CompositorFrames
+at ~3fps. The viz pipeline is clean. The bottleneck is in the renderer.
+
+[Issue 621](621-single-process.md) (5 experiments) isolated the trigger: the
+degradation requires JavaScript on the Blink main thread. CSS `@keyframes`
+animations run at 60fps across two BrowserContexts because they execute on the
+compositor thread. A trivial 30-line `requestAnimationFrame` loop degrades both
+profiles to 2fps. The compositor thread is healthy; the main thread is the
+bottleneck.
+
+[Issue 622](622-javascript-is-slow.md) (4 experiments) proved the degradation
+requires BOTH conditions — multiple BrowserContexts AND JavaScript. One
+BrowserContext with two JS windows runs at 60fps. Two BrowserContexts with CSS
+runs at 60fps. Only the combination triggers 2fps. Source code research
+confirmed that "BrowserContext" appears in zero files across `components/viz/`
+and `cc/` — the frame pipeline has no concept of profiles. The BrowserContext
+boundary manifests solely through renderer process isolation
+(`IsSuitableHost()`).
+
+Issue 623 (this issue, 1 experiment) investigated the leading theory — Viz
+Display serialization, where the `DisplayScheduler` waiting for pending surfaces
+creates a cross-process stall chain. **The hypothesis was debunked.** The
+Display draws at the deadline regardless of pending surfaces,
+`DidNotProduceFrame` properly clears pending state, and acks flow synchronously
+during frame activation. The entire Viz pipeline is now thoroughly mapped and
+cleared as a suspect.
+
+### What we know
+
+| Configuration                | rAF | FPS     | Experiment |
+| ---------------------------- | --- | ------- | ---------- |
+| 1 BrowserContext, 1 window   | yes | 60      | 621.1      |
+| 1 BrowserContext, 2 windows  | yes | 60 + 60 | 622.3      |
+| 2 BrowserContexts, CSS only  | no  | 60 + 60 | 621.4      |
+| 2 BrowserContexts, 2 windows | yes | 2 + 2   | 621.5      |
+
+The renderer receives BeginFrames at 60fps and chooses not to produce
+CompositorFrames. The decision happens upstream of Viz, inside the renderer
+process, and is related to the Blink main thread. Every downstream mechanism —
+Display scheduling, ack chains, pending surface tracking, draw throttling — has
+been investigated and cleared.
+
+### What was eliminated
+
+Across all four issues:
+
+- Viz Display serialization (HasPendingSurfaces, ack delays, draw skipping)
+- Renderer process contention (each BrowserContext gets its own process)
+- BrowserContext-specific frame logic (zero references in viz/cc)
+- Compositor/GPU pipeline (CSS animations work at 60fps)
+- All viz-side throttles (kUndrawnFrameLimit, BeginFrameTracker — never fired)
+- ExternalBeginFrameSourceMac thrashing (symptom, not cause)
+- kMaxPendingSubmitFrames ack chain (works correctly in isolation)
+- DidNotProduceFrame feedback loop (properly clears pending state)
+- DisplayScheduler draw decisions (draws whenever there's damage)
+- Scheduler state machine (pipelining flag enabled)
+
+### Direction change
+
+The root cause of the single-process multi-BrowserContext 2fps degradation
+remains unknown. Somewhere in Chromium's renderer internals — likely in Blink's
+main thread scheduler, BeginMainFrame dispatch, or an interaction between
+multiple renderer processes and the shared GPU process — JavaScript execution
+triggers a pathological slowdown that we have not been able to locate.
+
+Rather than continue searching for a needle in Chromium's ~35 million lines of
+code, we will pursue a **multi-process architecture**: one Chromium process per
+browser profile, each with a single BrowserContext. This is the architecture
+TermSurf already uses in production (ts5, gui) — separate Chromium Profile
+Server processes streaming IOSurface frames over XPC. The single-process
+multi-profile approach was an optimization experiment to reduce IPC overhead.
+
+The next investigation will focus on **speeding up inter-process communication**
+— making the existing multi-process architecture faster rather than trying to
+make multiple profiles coexist in one process.
