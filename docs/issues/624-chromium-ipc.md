@@ -1066,3 +1066,198 @@ Research is complete when we can answer:
 3. How Electron's OSR captures and delivers frames
 4. Whether Electron's approach reveals a better pattern than CALayerHost for
    TermSurf's use case
+
+#### Results
+
+##### A1: Electron's normal display path is stock Chromium
+
+Electron's standard (non-OSR) `BrowserWindow` uses the **completely unmodified
+Chromium compositing pipeline**. Electron does not intercept, override, or
+customize any part of the display chain.
+
+The view hierarchy:
+
+```
+ElectronNSWindow
+  contentView (CALayer-backed)
+    NativeWidgetMacNSWindowBridge compositor view
+      RootViewMac
+        InspectableWebContentsView
+          views::WebView → WebContentsViewCocoa
+            RenderWidgetHostViewMac
+              BrowserCompositorMac
+                AcceleratedWidgetMac
+                  DisplayCALayerTree → CALayerHost
+```
+
+How it works:
+
+1. `BrowserWindow` constructor creates a `views::WebView` and calls
+   `SetWebContents()` with the `content::WebContents`
+   (`electron_api_browser_window.cc:68-94`).
+2. `views::WebView` is **standard Chromium code** — Electron does not override
+   it. It embeds the `WebContentsViewCocoa` NSView via `views::NativeViewHost`.
+3. Inside the `WebContentsViewCocoa`, the standard chain runs:
+   `RenderWidgetHostViewMac` → `BrowserCompositorMac` → `AcceleratedWidgetMac` →
+   `DisplayCALayerTree`.
+4. The GPU process creates a `CAContext`, sends `ca_context_id` (uint32) via
+   `CALayerParams`. `DisplayCALayerTree::GotCALayerFrame()` creates a
+   `CALayerHost` with that `contextId`. Window Server composites directly.
+
+Searching for `CALayerHost`, `ca_context_id`, `CALayerParams`, and
+`AcceleratedWidgetCALayerParamsUpdated` across Electron's shell code returns
+**zero hits** for the standard path. Electron simply inherits Chromium's display
+pipeline.
+
+**One notable detail:** Electron's MAS (Mac App Store) build patches out
+`CAContext`/`CALayerHost` because they are **private Apple APIs**
+(`mas_avoid_private_macos_api_usage.patch.patch:1862-1900`). The MAS build falls
+back to `io_surface_mach_port` in `CALayerParams`. This confirms that
+`CAContext`/`CALayerHost` are undocumented — Chrome and Electron use them, but
+Apple could theoretically break them.
+
+##### A2: OSR is a completely separate pipeline
+
+Electron's offscreen rendering is toggled by `webPreferences.offscreen` at the
+JavaScript API level. It replaces the **entire** display chain — not just the
+frame capture.
+
+**Normal (non-OSR) path** (`electron_api_web_contents.cc:921-924`):
+
+```cpp
+content::WebContents::CreateParams params(session->browser_context());
+web_contents = content::WebContents::Create(params);
+// No custom view or delegate — Chromium creates default WebContentsViewMac
+```
+
+**OSR path** (`electron_api_web_contents.cc:902-920`):
+
+```cpp
+auto* osr_wcv = new OffScreenWebContentsView(/* ... */);
+params.view = osr_wcv;
+params.delegate_view = osr_wcv;
+web_contents = content::WebContents::Create(params);
+// Custom view → custom RWHV → custom compositor → custom frame delivery
+```
+
+The OSR path creates:
+
+- `OffScreenWebContentsView` — replaces `WebContentsViewMac`
+- `OffScreenRenderWidgetHostView` — replaces `RenderWidgetHostViewMac`
+- A custom `ui::Compositor` with `gfx::kNullAcceleratedWidget` (no real window)
+- `OffScreenHostDisplayClient` — replaces standard `HostDisplayClient`
+- `OffScreenVideoConsumer` — wraps `FrameSinkVideoCapturer`
+
+`FrameSinkVideoCapturer` is used **only for OSR**, never for normal rendering.
+The only other capturer use is `FrameSubscriber`
+(`shell/browser/api/frame_subscriber.h`) — an opt-in API for screenshots/screen
+recording, not part of the display pipeline.
+
+**The normal display path is the standard Chromium `CALayerParams` pipeline,
+unmodified.**
+
+##### A3: Electron does not customize the compositor chain for non-OSR
+
+**Non-OSR:** Electron does not subclass or wrap `RenderWidgetHostViewMac`. There
+are zero references to `AcceleratedWidgetMac` in Electron's shell code. The only
+reference to `BrowserCompositorMac` is a comment about avoiding a `DCHECK`
+failure during view detachment (`electron_ns_window_delegate.mm:385-386`).
+
+**OSR:** `OffScreenRenderWidgetHostView` subclasses `RenderWidgetHostViewBase`
+directly — not `RenderWidgetHostViewMac`. It has no NSView, no CALayer, no
+macOS-specific rendering. It's cross-platform, with only trivial macOS stubs
+(`GetNSViewId()` returns 0, `UpdateNSViewAndDisplay()` returns false).
+
+The OSR infrastructure is enabled by a Chromium patch
+(`feat_enable_offscreen_rendering_with_viz_compositor.patch`) that adds a
+`CompositorDelegate` interface to `ui::Compositor`. This delegate is only set on
+the OSR compositor — normal windows have `compositor->delegate() == nullptr` and
+follow the unmodified code path.
+
+##### A4: Electron's OSR uses the same capturer we use
+
+Electron's OSR frame delivery has two paths:
+
+**Primary path — `FrameSinkVideoCapturer`** (GPU-accelerated, normal case):
+
+`OffScreenVideoConsumer` (`osr_video_consumer.cc`) wraps
+`ClientFrameSinkVideoCapturer`, exactly as TermSurf's `ShellVideoConsumer` does.
+Two sub-modes:
+
+| Mode                                      | Delivery             | How                                                                                                         |
+| ----------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Default                                   | Shared memory bitmap | Capturer copies to shared memory region, consumer creates `SkBitmap`                                        |
+| Shared texture (`useSharedTexture: true`) | GPU handle           | Capturer delivers `GpuMemoryBufferHandle` containing raw `IOSurfaceRef` (macOS) or D3D11 `HANDLE` (Windows) |
+
+The shared texture mode is closest to what TermSurf does — zero-copy GPU texture
+sharing via IOSurface.
+
+Notable capturer optimizations (`osr_video_consumer.cc:43-70`):
+
+- `SetAutoThrottlingEnabled(false)` — disable auto-throttling
+- `SetMinSizeChangePeriod(base::TimeDelta())` — no minimum delay between resizes
+- `SetAnimationFpsLockIn(false, 1)` — prevent capturer from locking animation
+  FPS, which causes output stutter
+- Resolution constraints: 1×1 minimum, `kMaxDimension` maximum — avoids faulty
+  textures during frequent resize
+
+**Fallback path — `CALayerParams` interception** (macOS software rendering):
+
+`OffScreenHostDisplayClient` overrides `OnDisplayReceivedCALayerParams()`
+(`osr_host_display_client_mac.mm:13-37`). When GPU acceleration is disabled:
+
+1. Receives `CALayerParams` with `io_surface_mach_port`
+2. `IOSurfaceLookupFromMachPort()` to get the IOSurface
+3. `IOSurfaceGetBaseAddress()` — CPU readback of pixel data
+4. Wraps in `SkBitmap`, delivers via callback
+
+This fallback does NOT use `ca_context_id` — the OSR compositor has no real
+window or CALayer tree, so it forces `allow_remote_layers_ = false`, producing
+IOSurface Mach ports instead.
+
+#### Conclusion
+
+Electron confirms everything we learned in Experiment 2 and validates Approach A
+(CALayerHost):
+
+1. **Electron's normal display path IS the CALayerHost path.** Standard
+   `BrowserWindow` rendering uses the unmodified Chromium pipeline: `CAContext`
+   → `ca_context_id` → `CALayerHost` → Window Server. Electron inherits this
+   without writing a single line of custom display code. This is the
+   architecturally correct way to display Chromium content.
+
+2. **Electron's OSR uses the same capturer we use.** `FrameSinkVideoCapturer`
+   with GPU texture handles (IOSurface). TermSurf's current approach is
+   architecturally identical to Electron's OSR — including the same latency
+   penalty from the capturer's timer and GPU readback.
+
+3. **CAContext/CALayerHost are private Apple APIs.** Electron's MAS patch
+   reveals this — Mac App Store builds must fall back to IOSurface Mach ports.
+   For TermSurf, this is not a concern unless we target the Mac App Store.
+
+4. **The OSR fallback path intercepts `CALayerParams` for IOSurface.** This is
+   exactly Approach B from Experiment 2 — Electron already does it, but only as
+   a software-rendering fallback with CPU readback. If we wanted Approach B with
+   GPU zero-copy, we'd use the IOSurface from `CALayerParams` as a Metal texture
+   (no CPU readback) rather than reading pixels like Electron does.
+
+**What this means for TermSurf:**
+
+TermSurf's architecture is fundamentally different from Electron's normal path.
+Electron runs Chromium in-process — its `BrowserWindow` IS the browser process.
+The `CALayerHost` is created inside the same process, in the same NSView
+hierarchy. TermSurf runs Chromium **out-of-process** — the Chromium Profile
+Server is a separate process, and TermSurf's GUI is a separate application with
+its own Metal renderer.
+
+For CALayerHost (Approach A), we need to:
+
+1. Extract `ca_context_id` from `CALayerParams` in the Chromium Profile Server
+2. Send it over XPC to the GUI (one uint32, sent once per tab)
+3. Create `CALayerHost` in the GUI and add it as a sublayer positioned at the
+   browser pane coordinates
+
+The `ca_context_id` works across processes — that's the entire point of
+`CAContext`. The GPU process and the browser process are different processes in
+Chrome too, and `CALayerHost` bridges them via Window Server. Adding one more
+process boundary (Chromium server → TermSurf GUI) should work identically.
