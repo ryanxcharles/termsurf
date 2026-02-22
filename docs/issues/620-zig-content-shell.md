@@ -2087,3 +2087,75 @@ both.
      building up
 
 The answer will point directly at which throttle mechanism to disable next.
+
+**Result:** Pass (diagnostic)
+
+The instrumentation identified the bottleneck as `needs_draw=0` and eliminated
+several candidate throttle mechanisms.
+
+**Visual observation:** Both windows were individually focused and interacted
+with. google.com (Profile A, opened first) rendered at 2fps when typing into the
+search bar. lite.duckduckgo.com (Profile B, opened second) rendered at 60fps
+when typing. The slowdown is order-dependent: **the first-opened profile is the
+one that gets throttled**.
+
+**Summary counts (~90-second capture):**
+
+| Metric                       | Count | Meaning                                |
+| ---------------------------- | ----- | -------------------------------------- |
+| `ShouldDraw=false`           | 1585  | Dominant — draw gate blocks most vsync |
+| `DrawAndSwap`                | 292   | Draws happen, but infrequently         |
+| `ShouldSendBeginFrame=false` | 9     | Almost never blocked                   |
+| `BeginFrameTracker THROTTLE` | 0     | Not the problem                        |
+| `BeginFrameTracker STOP`     | 0     | Not the problem                        |
+
+**The `ShouldDraw=false` breakdown — every single instance shows:**
+
+```
+needs_draw=0 output_surface_lost=0 visible=1 root_frame_missing=0
+```
+
+All 1585 failures are `needs_draw=0`. The other three conditions are healthy.
+The ONLY problem is that `needs_draw_` is not being set — no damage is arriving
+from the first profile's renderer.
+
+**`ShouldSendBeginFrame` is NOT the bottleneck.** Only 9 rejections total, all
+with reason `StopNotRequested` (early initialization). The `BeginFrameTracker`
+throttle/stop mechanisms never fired. BeginFrames ARE being delivered to the
+renderer.
+
+**Draw timing for the slow display (~3fps steady state).** The google.com
+display showed an initial 60fps burst during page load, then degraded to ~333ms
+intervals (3fps) in steady state:
+
+```
+102208.850 → 102209.183 → 102209.516 → 102209.833 → 102210.166
+          333ms        333ms        317ms        333ms
+```
+
+**The key insight: this is order-dependent, likely lock contention.** The first
+profile (Profile A, google.com) is the one that gets throttled to 2fps. The
+second profile (Profile B, duckduckgo) runs at 60fps. This is consistent with a
+lock contention or resource ordering issue where the second BrowserContext's
+creation disrupts the first's rendering pipeline — possibly a shared lock,
+shared GPU channel, or shared compositor resource that the second profile
+acquires and doesn't release fairly.
+
+#### Conclusion
+
+Experiment 14 eliminated the viz compositor pipeline as the bottleneck:
+
+- BeginFrameTracker throttle/stop: **not the cause** (never fires)
+- ShouldSendBeginFrame: **not the cause** (9 rejections in ~90s, all init-time)
+- ShouldDraw conditions other than `needs_draw_`: **not the cause** (all
+  healthy)
+
+The bottleneck is `needs_draw_=0` — the first profile's renderer is not
+submitting CompositorFrames at 60fps. This is order-dependent: the first-opened
+profile is throttled while the second runs fine. This points to lock contention
+or resource ordering in the shared infrastructure (GPU channel, compositor
+thread, or renderer process scheduling).
+
+The next experiment should reverse the URL order (duckduckgo first, google
+second) to confirm the order-dependence hypothesis. If duckduckgo becomes the
+slow one, the problem is definitively about creation order, not page complexity.
