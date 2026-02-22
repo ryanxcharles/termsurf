@@ -1039,3 +1039,36 @@ signal visibility.
    bridge should detect when the NSView moves into a visible window and
    propagate visibility. Investigate whether this propagation is failing or
    happening too late.
+
+### Experiment 6: Single WebContents isolation test
+
+Isolate the 2fps throttling from Experiment 5. Open a single WebContents
+(google.com) with a single profile instead of two. If the single WebContents
+also renders at 2fps, the problem is fundamental to the direct
+`WebContents::Create` path. If it renders at full speed, the problem is related
+to multiple WebContents or multiple profiles competing for visibility.
+
+#### Changes
+
+**`ts_main.mm`** only — reduce to one profile, one WebContents, one window:
+
+1. Remove `ctx_b`, `wc_b`, `path_b` — only create profile A.
+2. `on_initialized`: create one context, one WebContents (google.com), one
+   window titled "Profile A".
+3. `on_shutdown`: destroy one WebContents, one context.
+
+No changes to the framework (`content_api_shim.h`, `content_api_shim.mm`,
+`BUILD.gn`).
+
+#### Verification
+
+1. One window appears showing google.com
+2. Check rendering speed — smooth (60fps) or throttled (~2fps)?
+3. Page is interactive (scrolling, clicking, typing)
+
+If 2fps: the throttling is inherent to direct `WebContents::Create` without
+Shell. The fix must address visibility/delegate management in the shim.
+
+If 60fps: the throttling is caused by multiple WebContents or profiles competing
+for foreground state. The fix is different — focus/activation management between
+multiple contents.
