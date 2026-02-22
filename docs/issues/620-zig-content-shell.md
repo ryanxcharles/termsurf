@@ -2223,3 +2223,135 @@ bottleneck.
 The next experiment should test with two heavyweight pages (e.g., google.com on
 both profiles, or google.com + another complex site) to determine whether the
 problem is google.com-specific or whether any heavy page triggers it.
+
+## Conclusion
+
+Issue 620 achieved its primary goal: a minimal Chromium embedder (3 files, ~190
+lines) that loads web pages through the Content API via a C function boundary.
+The Zig Content Shell replaces Content Shell's 14,000-line fork with a thin C++
+shim that can be driven from Zig.
+
+The secondary goal — multiple browser profiles at 60fps in a single process —
+remains unsolved. 15 experiments systematically narrowed the problem:
+
+### What works
+
+| Configuration        | FPS   | Experiments |
+| -------------------- | ----- | ----------- |
+| 1 profile, 1 window  | 60fps | 1, 10       |
+| 1 profile, 2 windows | 60fps | 11          |
+
+### What doesn't work
+
+| Configuration                 | FPS   | Experiments |
+| ----------------------------- | ----- | ----------- |
+| 2 profiles, any window count  | 2fps  | 2–9, 12     |
+| 2 profiles + DDG + google.com | mixed | 14–15       |
+
+Experiments 14–15 revealed that the 2fps is page-dependent: lite.duckduckgo.com
+renders at 60fps while google.com renders at 2fps, regardless of which profile
+is created first. This was consistent across 6 runs in both URL orderings.
+
+### What was eliminated
+
+The bisection across Experiments 5–11 and the instrumentation in 12–14
+eliminated these as causes:
+
+- **C API wrappers** — Experiment 8 vs 9: identical 2fps with and without them
+- **Callback/lifecycle machinery** — Experiment 7 vs 8: identical 2fps
+- **Direct WebContents vs Shell::CreateNewWindow** — Experiments 5–7: identical
+- **Custom launcher vs stock shell_main_mac.cc** — Experiment 8: identical
+- **Creation order** — Experiment 15: 5 runs, always google slow, DDG fast
+- **ExternalBeginFrameSourceMac thrashing** — Experiment 12 found it, Experiment
+  13 fixed it, but 2fps persisted
+- **BeginFrameTracker throttle/stop** — Experiment 14: never fired (0 events)
+- **ShouldSendBeginFrame gate** — Experiment 14: only 9 rejections in 90s, all
+  during init
+- **DisplayScheduler ShouldDraw conditions** (output_surface_lost, visible,
+  root_frame_missing) — Experiment 14: all healthy, only `needs_draw=0` fails
+
+### What was found
+
+**The viz compositor pipeline works correctly.** BeginFrames arrive at 60fps,
+pass through all gates, and the DisplayScheduler is ready to draw. The problem
+is that the renderer for complex pages (google.com) only submits
+CompositorFrames at ~3fps when a second BrowserContext exists. The renderer
+receives BeginFrames but doesn't produce output.
+
+**The ExternalBeginFrameSourceMac thrashing** (Experiment 12) was a real bug —
+the DisplayScheduler's `StopObservingBeginFrames()` call at
+display_scheduler.cc:603 caused a deadlock where the renderer lost BeginFrames
+and couldn't produce frames. Commenting it out (Experiment 13) fixed the
+thrashing but didn't fix the 2fps, proving the thrashing was a symptom, not the
+root cause.
+
+**The bottleneck is in the renderer process.** The renderer receives BeginFrames
+via `CompositorFrameSinkSupport::OnBeginFrame()` but only produces
+CompositorFrames at ~3fps for complex pages. Lightweight pages
+(lite.duckduckgo.com) are unaffected. This points to renderer-side contention
+when multiple BrowserContexts exist — possibly in the GPU channel, shared
+compositor thread, Blink's main thread scheduling, or JavaScript execution
+competing for the same process resources.
+
+### Chromium internals research
+
+The following architecture was mapped during the investigation:
+
+**Vsync and frame delivery chain:**
+
+```
+CADisplayLinkMac / CVDisplayLinkMac (macOS vsync driver)
+  → ExternalBeginFrameSourceMac (per-compositor begin frame source)
+    → ExternalBeginFrameSource::AddObserver/RemoveObserver
+      → DisplayScheduler::OnBeginFrame (schedules deadline)
+        → DisplayScheduler::AttemptDrawAndSwap
+          → ShouldDraw() gate (needs_draw_, visible, output_surface_lost,
+                               root_frame_missing)
+          → DrawAndSwap() → actual pixel output
+      → CompositorFrameSinkSupport::OnBeginFrame (forwards to renderer)
+        → ShouldSendBeginFrame() gate (multiple throttle checks)
+        → client_->OnBeginFrame() (Mojo IPC to renderer process)
+```
+
+**Throttle mechanisms investigated:**
+
+| Mechanism                                   | Location                         | Threshold                 | Status                         |
+| ------------------------------------------- | -------------------------------- | ------------------------- | ------------------------------ |
+| StopObservingBeginFrames                    | display_scheduler.cc:603         | ShouldDraw()=false        | Fixed (Exp 13), not root cause |
+| BeginFrameTracker::ShouldThrottleBeginFrame | begin_frame_tracker.cc           | outstanding >= 10         | Never triggered                |
+| BeginFrameTracker::ShouldStopBeginFrame     | begin_frame_tracker.cc           | outstanding >= 100        | Never triggered                |
+| kUndrawnFrameLimit                          | compositor_frame_sink_support.cc | undrawn > 3               | Never triggered                |
+| SetIsGpuBusy                                | begin_frame_source.cc:152        | pending_swaps >= max      | Not investigated               |
+| client_needs_begin_frame_                   | compositor_frame_sink_support.cc | client stopped requesting | 9 events (init only)           |
+
+**Key source files:**
+
+| File                               | Role                                                         |
+| ---------------------------------- | ------------------------------------------------------------ |
+| cv_display_link_mac.mm             | macOS CVDisplayLink vsync driver                             |
+| ca_display_link_mac.mm             | macOS CADisplayLink vsync driver (used on newer macOS)       |
+| external_begin_frame_source_mac.cc | Per-compositor vsync source, registers/unregisters callbacks |
+| begin_frame_source.cc              | Observer management, OnNeedsBeginFrames dispatch             |
+| display_scheduler.cc               | Draw timing, ShouldDraw gate, AttemptDrawAndSwap             |
+| display_damage_tracker.cc          | Tracks root_frame_missing, surface damage                    |
+| compositor_frame_sink_support.cc   | Forwards BeginFrames to renderer, throttle gates             |
+| begin_frame_tracker.cc             | Tracks outstanding BeginFrames for throttle/stop             |
+| root_compositor_frame_sink_impl.cc | Creates ExternalBeginFrameSourceMac per profile              |
+
+### Next steps
+
+The investigation continues in Issue 621. The remaining unknowns:
+
+1. **Why does the renderer produce frames at 3fps for complex pages?** The viz
+   pipeline delivers BeginFrames at 60fps. The renderer receives them but only
+   submits CompositorFrames at ~3fps for google.com while lite.duckduckgo.com is
+   fine. Is this Blink main thread contention, GPU channel contention, or
+   something else?
+
+2. **Is the problem google.com-specific or complexity-dependent?** Testing with
+   two heavyweight pages (both google.com, or google.com + another complex site)
+   would answer this.
+
+3. **Can the renderer-side contention be fixed?** The fix may be in Blink's
+   frame scheduling, the GPU channel sharing between BrowserContexts, or process
+   priority management.
