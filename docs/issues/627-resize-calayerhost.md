@@ -88,3 +88,42 @@ y = parent_bounds.height - y_from_top - h
 On resize, `parent_bounds.height` changes (the IOSurfaceLayer resizes with the
 window). The grid coordinates, cell dimensions, and padding may also change. All
 of these must be current when `updateCALayerHostFrame()` runs.
+
+## Experiments
+
+### Experiment 1: Update flipped_layer frame on size change in drawFrame
+
+The `drawFrame()` loop in `generic.zig` already detects size changes
+(`size_changed` at line 1486). When the surface size changes, it updates
+`self.size.screen` and GPU uniforms — but never calls
+`updateCALayerHostFrame()`. This means the `flipped_layer` frame stays at the
+old position even though the IOSurfaceLayer has resized underneath it.
+
+The `setOverlay()` path does call `updateCALayerHostFrame()`, and the TUI does
+send updated `set_overlay` messages on resize. But there's a timing problem: the
+`set_overlay` XPC arrives on a background queue and calls
+`updateCALayerHostFrame()` with the new grid coordinates. However, the Y-flip
+formula reads `parent_bounds.height` from the IOSurfaceLayer. If the
+IOSurfaceLayer hasn't finished resizing when the XPC arrives, the parent bounds
+are stale and the Y calculation is wrong.
+
+The fix: call `updateCALayerHostFrame()` in `drawFrame()` whenever
+`size_changed` is true and an overlay is active. At that point,
+`self.size.screen` has just been updated and the IOSurfaceLayer bounds are
+current. This mirrors the old pipeline's behavior — the overlay position is
+recalculated every frame that the size changes.
+
+#### Changes
+
+**`gui/src/renderer/generic.zig`:**
+
+- In `drawFrame()`, after the `size_changed` block (after line 1546
+  `self.updateScreenSizeUniforms()`), add a call to
+  `self.updateCALayerHostFrame()`. The method already guards on
+  `ca_layer_flipped` being non-null, so it's a no-op when there's no overlay.
+
+#### Verification
+
+Run the app, open a browser overlay, then resize the window. The web content
+should resize and reposition to match the TUI viewport border at all times. Test
+both horizontal and vertical resize, and window maximize/restore.
