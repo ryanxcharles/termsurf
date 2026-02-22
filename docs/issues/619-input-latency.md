@@ -191,3 +191,97 @@ out-of-process architecture is not the problem — the message-passing pattern i
    high-priority dispatch queues to minimize scheduling latency.
 4. **Evaluate** — Compare TermSurf vs Chrome after optimizations. Determine how
    much of the remaining gap is inherent to out-of-process streaming.
+
+## Research
+
+### Research 1: Content Shell's native rendering path
+
+Content Shell uses the exact same rendering pipeline as Chrome when running as a
+normal windowed app. It does NOT use `FrameSinkVideoCapturer` for display — that
+API is only used when explicitly created for tab capture or screen recording.
+
+#### The normal display path (verified from `chromium/src/`)
+
+1. **Renderer process** — Blink renders into a `cc::LayerTreeHost`, which
+   commits CompositorFrames to the Viz display compositor (GPU process).
+2. **GPU/Viz process** — Aggregates frames and produces output as
+   `gfx::CALayerParams` (`ui/gfx/ca_layer_params.h`). On macOS this contains
+   either a `ca_context_id` (remote CoreAnimation, the normal GPU path) or an
+   `io_surface_mach_port` (software fallback).
+3. **Browser process** — `BrowserCompositorMac` receives the params.
+   `DisplayCALayerTree::UpdateCALayerTree()` creates a `CALayerHost` with the
+   `ca_context_id`, or sets the IOSurface as a CALayer's contents.
+4. **macOS Window Server** — Composites the CALayer tree onto the screen.
+
+Zero pixel readback. Zero GPU-to-CPU copy. Display-vsync locked.
+Compositor-thread scroll handling. The full Chrome experience.
+
+#### How Content Shell sets this up
+
+- `shell_platform_delegate_mac.mm:222-238` — `SetContents()` gets the
+  WebContents' native NSView and adds it as a subview of the window.
+- `web_contents_view_mac.mm:389-435` — Creates `RenderWidgetHostViewMac`. For
+  Content Shell, `SetParentUiLayer()` is never called (no `ui::Views`).
+- `render_widget_host_view_mac.mm:228` — Creates `BrowserCompositorMac`.
+- `browser_compositor_view_mac.mm:191-206` — Enters `HasOwnCompositor` state
+  (confirmed by the comment at line 159: "This is used by content shell").
+- `browser_compositor_view_mac.mm:251-263` — Creates a `RecyclableCompositorMac`
+  with its own `AcceleratedWidgetMac`.
+- `accelerated_widget_mac.mm:82-93` — Receives `CALayerParams` from the GPU
+  process.
+- `display_ca_layer_tree.mm:66-121` — Creates a `CALayerHost` with the
+  `ca_context_id` for zero-copy GPU compositing.
+
+Content Shell gets all of this for free: compositor-thread input handling,
+BeginFrame synchronization, and the full Viz display compositor pipeline. It is
+part of the Content API, not the Chrome browser UI.
+
+#### What our Chromium Profile Server does differently
+
+Our `ShellVideoConsumer` bypasses the normal display path entirely. Instead of
+using the `CALayerParams` output, it attaches a `FrameSinkVideoCapturer` to the
+compositor's frame sink. The capturer:
+
+1. Issues `CopyOutputRequest`s to read pixels back from GPU memory
+2. Produces frames on its own 120fps timer (not display-vsync locked)
+3. Delivers IOSurface Mach ports to our XPC consumer
+
+Every frame pays a GPU readback cost that the normal path avoids. The capturer
+is a recording API bolted onto the side of the normal compositor — not the
+display path.
+
+#### Options to eliminate the capturer
+
+**Option A: Use `ca_context_id` directly.**
+
+Let the display compositor produce its normal `ca_context_id` output. Send the
+ID (a `uint32_t`) over XPC to the GUI. The GUI creates a `CALayerHost` with that
+context ID. This is how Chrome's own multi-process architecture works — the GPU
+process owns the CAContext, the browser process hosts it.
+
+Caveat: `CALayerHost` normally needs to be in an NSView hierarchy for the Window
+Server to composite it. Whether it can be used with our Metal renderer (which
+composites into its own drawable) needs investigation. We may need to overlay
+the `CALayerHost` as a sublayer of our Metal view's backing layer.
+
+**Option B: Force the IOSurface path.**
+
+Disable remote CoreAnimation in the Chromium Profile Server so the display
+compositor produces `io_surface_mach_port` instead of `ca_context_id`. This
+gives us IOSurface Mach ports from the normal compositor output — no capturer,
+no GPU readback. The IOSurface is the same format we already handle in our Metal
+overlay pipeline.
+
+Caveat: need to verify that disabling remote CALayers doesn't degrade Chromium's
+internal rendering performance.
+
+**Option C: Intercept at `AcceleratedWidgetCALayerParamsUpdated`.**
+
+Override the callback in `RenderWidgetHostViewMac` (line 156) to forward
+`CALayerParams` over XPC instead of setting them on an NSView. This would let us
+choose between the `ca_context_id` and `io_surface_mach_port` paths dynamically.
+
+All three options eliminate the `FrameSinkVideoCapturer` entirely, removing the
+GPU readback cost, the capture timer latency, and the decoupled timing. The
+Chromium Profile Server would produce frames on the display compositor's vsync
+clock, not on a recording timer.
