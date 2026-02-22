@@ -1,355 +1,355 @@
 {
-  "generatedAt": "2026-02-14T22:42:30.197Z",
+  "generatedAt": "2026-02-22T10:32:06.627Z",
   "commits": [
     {
-      "hash": "edfa2bcbc744aef217c03e348811a3fe98b5a768",
-      "message": "Issue 500: add conclusion",
-      "body": "The renaming saga finds its close,\nWhat changed, what stayed — the summary shows.\nThe ghost icon lingers, biding time,\nBut TermSurf now runs, and that's sublime.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "df100909b00a5f989638777a7572962517e05c84",
+      "message": "Design 617 Experiment 1: purge all tags",
+      "body": "The experiment is drawn, the plan crystal clear:\nThree hundred forty-four tags disappear.\nThe version badge too shall be swept from the site—\nNo more \"v1.0\" in the header tonight.",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T16:32:45-06:00"
+      "date": "2026-02-22T04:29:50-06:00"
     },
     {
-      "hash": "d3363c30622e176749db54d3b98c1a6fdb2101f2",
-      "message": "Issue 500: revert icon changes",
-      "body": "The icons came, the icons went,\nTheir purpose never quite was meant.\nIcon Composer held the throne—\nWe'll leave that ghost face well alone.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "ed5af05f0bfb18fbd1e2600e635d9341bb8e9e06",
+      "message": "Create Issue 617: Alpha",
+      "body": "Three hundred forty-four tags in a row,\nFrom a 1.0 that nobody came to know.\nThe versions were fiction, the badges a lie—\nTime to wipe the slate clean and let alphas fly.",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T16:11:32-06:00"
+      "date": "2026-02-22T04:28:36-06:00"
     },
     {
-      "hash": "9e8a44632d7cef1e5741036c3a04ba6d7cf11c4a",
-      "message": "Redesign experiment 2: revert icons",
-      "body": "The icon fought back and won the round,\nIcon Composer's format too tightly bound.\nSo we'll undo the swap,\nLet the ghost icon stop,\nTill a proper replacement is found.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "68804782dea4333483bacb34d58d8d14292b0eb6",
+      "message": "Add build-debug and build-release scripts",
+      "body": "Two scripts now sit at the root of the tree,\nOne fast, one with checks, as builds ought to be.\nThey build GUI, Chromium, and TUI in turn,\nWith --clean to purge and --open to learn.",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T16:09:04-06:00"
+      "date": "2026-02-21T20:06:46-06:00"
     },
     {
-      "hash": "851549aed3039c77461fd62b66846960d278c91f",
-      "message": "Issue 500: design experiment 2",
-      "body": "The ghost still haunts the Dock, it seems—\nTwo culprits lurk behind the scenes:\nIcon Composer holds the throne,\nAnd debug builds have minds their own.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "86c9d39649193187e5b29eaf2f581e95cb5d7040",
+      "message": "Style TUI status bar keybinding hints",
+      "body": "The brackets were loud, the keys hard to parse,\nSo we dimmed the delimiters down to a farce.\nAngle brackets now whisper in muted gray light,\nWhile the keybindings shine at full FG-bright.\nAlso hushed a warning about progress unread.",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T16:05:54-06:00"
+      "date": "2026-02-21T20:06:41-06:00"
     },
     {
-      "hash": "2b1f4e688d8a26d97d1041af8a455c8cacb78cc0",
-      "message": "Issue 500: rename Ghostty to TermSurf",
-      "body": "The ghost has shed its spectral guise,\nNow TermSurf greets the user's eyes.\nFrom menu bar to CLI help,\nThe surfer rides where phantoms yelped—\nThough icons cling to ghostly ties.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "83a35eb7beb2aba0455c7d2edb7d938ea81bfe29",
+      "message": "Update docs for Issue 616 progress",
+      "body": "The README grew stale, the CLAUDE.md too,\nChromium's branch description was slightly askew.\nNavigation and loading now listed with pride,\nNo more \"not yet started\" for features inside.",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T16:02:49-06:00"
+      "date": "2026-02-21T20:06:35-06:00"
     },
     {
-      "hash": "8b61ef867a4745298a16164c662c73b1ff2da755",
-      "message": "Issue 500: design experiment 1",
-      "body": "Eight steps to shed the ghostly name,\nFrom plist files to icon frame.\nThe CLI, the config, the About view too—\nOne experiment to make it through.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "8a223a1c6bcdda0fc6a5d66117587a52fdaa739c",
+      "message": "Add TODO.md for web features",
+      "body": "A checklist born of Issue Six-One-Six,\nFour boxes checked, seventeen need their fix.\nFrom downloads to zoom, the road is long—\nBut every journey starts with a song.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:47:39-06:00"
+      "date": "2026-02-21T17:09:01-06:00"
     },
     {
-      "hash": "de6fb67c3ea439cb9205be6ed1995fe2f1a60569",
-      "message": "Update rename plan to modify macos/ directly",
-      "body": "No need for a parallel directory—\nWe're forking, not preserving parity.\nThe ghost can change its name in place,\nNo second folder, no duplicate space.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "909612040b26a9371b75c15f1242059890d04fd5",
+      "message": "Close Issue 616: missing web features",
+      "body": "Thirteen experiments walked through the door,\nLoading bars, nav keys, and bugs galore.\nA dangling pointer hid in the night—\nThirty-six spaces where UUIDs write.\nSeven more features still wait in the wings,\nBut today we celebrate what closure brings.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:42:48-06:00"
+      "date": "2026-02-21T17:06:12-06:00"
     },
     {
-      "hash": "b079b6c3d4217fc75e4e0a8aec975cfaea20dc5a",
-      "message": "Issue 500: plan the great renaming",
-      "body": "A ghost once haunted every string,\nEach menu, path, and CLI thing.\nWe mapped each trace from ts1's deed—\nNow ts5 has its renaming screed.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "7e42534e9c1fce846830e633c142e73d1078a89d",
+      "message": "Fix dangling pointer in focused_pane",
+      "body": "A pane_id borrowed from XPC's hand,\nWas freed before the check was planned.\nOne letter changed, the pointer stayed—\np.pane_id_key will never fade.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:40:04-06:00"
+      "date": "2026-02-21T17:03:37-06:00"
     },
     {
-      "hash": "7725ec88e055561ddf1a880d2136e6c29663662b",
-      "message": "Rename termsurf-chromium to chromium",
-      "body": "A name too long, a prefix too proud,\nNow shorter and leaner, unbowed.\nvendor/chromium's gone,\nJust one carries on—\nPlain \"chromium/\" stands in the crowd.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "960670b2d237a25344a53174a95c7cf5853d70dd",
+      "message": "Close 616 Exp 12, design Exp 13: the dangling pane",
+      "body": "A pointer wandered far from home,\nThrough freed XPC it chose to roam.\nSpaces filled its UUID face—\nThirty-six blanks in its place.\nNow we know the ghost we chase.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:31:58-06:00"
+      "date": "2026-02-21T16:58:48-06:00"
     },
     {
-      "hash": "3d3e25bfe5f39a1e5163797d0a9d819d386e7c57",
-      "message": "Issue 418: write conclusion",
-      "body": "Three changes planned, three changes done,\nThree experiments till subtree won.\nThe repo's reshaped,\nThe docs have escaped—\nIssue 418, you've had your run.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "3bec33db7b0287197477e4a9cc77c7bb28eb1fc0",
+      "message": "Design 616 Experiment 11: unstick Ctrl",
+      "body": "Ctrl went down but never came back up,\nA phantom modifier filling Chromium's cup.\nEach keystroke screamed \"I'm Ctrl+something!\"—\nOne synthetic release should fix everything.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:27:47-06:00"
+      "date": "2026-02-21T16:27:06-06:00"
     },
     {
-      "hash": "06335bdd928f2eba14266cc61512bf372a028b10",
-      "message": "Flesh out merge-upstream skill",
-      "body": "Six steps now guide the upstream dance,\nNo more leaving merges up to chance.\nSubtree pull, not merge—\nLest renames emerge—\nAnd ts1? It stays in its trance.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "98b7379ee443cf3df7319f15fe94fb5283d94e77",
+      "message": "Close 616 Experiment 10: navigate by keys",
+      "body": "No menu needed, no right-click required,\nJust Cmd and brackets — navigation rewired.\nThe status bar whispers what keys to press,\nAnd the docs record this keybinding success.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:26:13-06:00"
+      "date": "2026-02-21T16:21:41-06:00"
     },
     {
-      "hash": "36ac11f6040211cd6d65c277a09dc8876ece6253",
-      "message": "Simplify merge-upstream skill",
-      "body": "The skill shed its weight, grew lean and thin,\nWezTerm and cef-rs no longer within.\nJust Ghostty remains,\nOne doc that explains—\nLet the upstream merging begin.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "782a3a1ac856db099e0e918f0132c90bd7b7f9d2",
+      "message": "Design 616 Experiment 10: navigation keys",
+      "body": "The menu is gone, the right-click dead,\nBut back and forward still need to be fed.\nCmd+bracket left, Cmd+bracket right,\nCmd+R reload — navigation done right.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:25:01-06:00"
+      "date": "2026-02-21T16:09:47-06:00"
     },
     {
-      "hash": "5bde6a13748dec9b2d734567ce468b187f8cf93f",
-      "message": "Point merge-upstream skill to ghostty.md",
-      "body": "The skill once read from an old address,\nNow ghostty.md handles the Ghostty mess.\nEach upstream its own doc,\nLike keys to a lock—\nThe right guide for each merge, no less.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "dab20a42f3b9f1be65a631ecafc5ea757f0a3ad5",
+      "message": "Close 616 Experiment 9: no more ghost menu",
+      "body": "Right-click once stole focus from the view,\nA phantom menu the user never knew.\nOne return and a comment block later—\nClicks work first try, no more focus traitor.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:23:13-06:00"
+      "date": "2026-02-21T16:05:44-06:00"
     },
     {
-      "hash": "2c453520062d29b75fbbcfe71b66373d7e18dcb2",
-      "message": "Add docs/ghostty.md",
-      "body": "Two forks diverged in a repo wide,\nOne frozen still, one active with pride.\nts1 rests in peace,\nts5 gets the lease—\nAnd subtree pull shall be our guide.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "5addbaa2313afa97381a22a77b7f9da33d52e10d",
+      "message": "Design 616 Experiment 9: kill context menu",
+      "body": "A phantom menu on a headless pane,\nStealing focus, driving users insane.\nOne early return, and the ghost is laid—\nNo more right-click tricks from Content Shell's shade.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:22:16-06:00"
+      "date": "2026-02-21T16:00:52-06:00"
     },
     {
-      "hash": "5b201dd29888e8ad46aff9ccdee14eebcf4d6e96",
-      "message": "Issue 418: configure ts5 post-import",
-      "body": "Five generations now stand in line,\nEach folder a chapter, each version a sign.\nThe gitignore grew, the skills learned new tricks,\nCLAUDE.md got the memo: ts5's in the mix.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "a2151149a87c207a7823bef87527053067269f10",
+      "message": "Implement 616 Experiments 7-8: pulse over percent",
+      "body": "The percentages lied — ten, thirty-three —\nSo we set the bar bouncing, wild and free.\nMulti-resource tricks? The heuristic said no.\nIndeterminate pulse? Now that's the way to go.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:20:12-06:00"
+      "date": "2026-02-21T15:52:56-06:00"
     },
     {
-      "hash": "06047dab3a7245d0cc2135eafc61f119a85a88a8",
-      "message": "Issue 418: design Experiment 4",
-      "body": "The tree is planted, roots run deep,\nNow docs and configs need their sweep.\nSeven steps to tend the ground—\nGitignore, skills, and CLAUDE.md bound.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "3fa274f3a8d75c08fd394fe8820a1838f43484e3",
+      "message": "Design 616 Experiment 8: indeterminate pulse",
+      "body": "Percentages lied, frozen in place,\nSo we'll bounce instead — a pulse full of grace.\nNo stalling at ten, no stuck thirty-three,\nJust a dancing blue bar, loading and free.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:10:29-06:00"
+      "date": "2026-02-21T15:50:10-06:00"
     },
     {
-      "hash": "233254c7645d97f270614ebbbe6a34433b47d4a1",
-      "message": "Issue 418: Experiment 3 passes",
-      "body": "Third time's the charm, they say—\nSubtree add saved the day.\nts5/ stands tall and neat,\nGhostty's code, fully complete.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "78a6b631d3c9f3e06ee4381255c4cc371d174035",
+      "message": "Close 616 Experiment 7: heuristic won't budge",
+      "body": "We split one stream to twenty small,\nBut Chromium's progress didn't care at all.\nTen percent, then frozen still—\nSome heuristics bend to no one's will.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:07:38-06:00"
+      "date": "2026-02-21T15:48:48-06:00"
     },
     {
-      "hash": "16779ac0b017d2158ea0f3d3affad7dd9d5fc8d1",
-      "message": "Add 'ts5/' from commit '61e347a2c278263dd1392c324feaee5fb9712ee5'",
-      "body": "git-subtree-dir: ts5\ngit-subtree-mainline: cf2a83931d66db142509e52339d1d8426bafdb93\ngit-subtree-split: 61e347a2c278263dd1392c324feaee5fb9712ee5",
+      "hash": "b01913967ddb81f0121c316d04dc5519699da08f",
+      "message": "Design 616 Experiment 7: multi-resource slow page",
+      "body": "One stream alone confused the heuristic's brain,\nStuck at thirty-three percent, like a stalled train.\nTwenty images, each delayed with care,\nShould coax the bar to climb — smooth as fresh air.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:07:07-06:00"
+      "date": "2026-02-21T15:45:21-06:00"
     },
     {
-      "hash": "cf2a83931d66db142509e52339d1d8426bafdb93",
-      "message": "Issue 418: design Experiment 3",
-      "body": "The merge strategy kept getting burned,\nSo a subtree lesson was learned.\nNo fork point, no fuss,\nJust add prefix for us—\nA simpler approach, well-earned.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "18d52c335287fb2c389ecb15e1ae8a9d6bf7b127",
+      "message": "Close 616 Experiment 6: one line, one fix",
+      "body": "The straggler sent its \"hundred\" too late,\nBut one guard clause settled the debate.\nNo state machine, no workaround to weave—\nJust tell the source: at ninety-nine, you leave.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:06:46-06:00"
+      "date": "2026-02-21T15:40:01-06:00"
     },
     {
-      "hash": "42318de55c139b1b17fa564781b5bb07fb9d2175",
-      "message": "Issue 418: Experiment 2 fails too",
-      "body": "We silenced renames, hoping for peace,\nBut deletions arose in their place.\nNo ts5 in sight,\nJust root-level blight—\nThe subtree strategy falls from grace.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "8a4e488a01ef9e0cd0a8a0729d8ff7ba98d8913e",
+      "message": "Design 616 Experiment 6: suppress progress 100",
+      "body": "Why send a hundred when done's on its way?\nA redundant message led progress astray.\nNow Chromium holds its tongue at the peak,\nAnd the bar clears cleanly — no straggler to seek.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:03:32-06:00"
+      "date": "2026-02-21T15:35:30-06:00"
     },
     {
-      "hash": "868259a28addfddc64a2555a6c1aa78e7266ef45",
-      "message": "Issue 418: design Experiment 2",
-      "body": "Rename detection stole the show,\nSo we'll tell it not to go.\nWith no-renames in the mix,\nSubtree mapping finally clicks?\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "92f970d4e676705b6a3cdf8d445e4ef024b0dae8",
+      "message": "Close 616 Experiment 5: straggler found",
+      "body": "A progress message, late to the ball,\nArrived after \"done\" — the nerve, the gall!\nIt re-lit the bar with confident grace,\nThen left it stuck, frozen in place.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:02:09-06:00"
+      "date": "2026-02-21T15:32:43-06:00"
     },
     {
-      "hash": "8c2eb152dd33d57f5c19867379eb3076950a98d3",
-      "message": "Issue 418: document failed subtree experiment",
-      "body": "The subtree merge had a plan,\nEight steps from beginning to end.\nBut rename detection\nIgnored our direction—\nNow it's Experiment 1, my friend.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "f6092c062d6150d9a03e01e4d0b4234d2949f43a",
+      "message": "Design 616 Experiment 5: file logging",
+      "body": "Fool me once with eprintln's shame,\nFool me twice and the PTY's to blame.\nNow logs go to a file,\nIn proper repo style—\nNo more wrecking the TUI's frame.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T15:00:38-06:00"
+      "date": "2026-02-21T15:25:08-06:00"
     },
     {
-      "hash": "8db7a835e4bd005f4821cd3b1451c5a1c36db371",
-      "message": "Issue 418: simplify Change 3 merge strategy",
-      "body": "No read-tree tricks, no ours deceit—\nJust subtree merge, clean and neat.\nSince Ghostty's history's already ours,\nOne flag maps files to ts5's bowers.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "151c44305d54728cc5418a849be387e09e145715",
+      "message": "Close 616 Experiment 4: eprintln fail",
+      "body": "eprintln, you traitor, you fiend!\nYou wrote to the PTY, unscreened.\nThe TUI went dark,\nLost its colors, its spark—\nA lesson in stderr, convened.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T14:48:10-06:00"
+      "date": "2026-02-21T15:22:35-06:00"
     },
     {
-      "hash": "b54b288b7e0e8b7bdaa89ec2fd8c2588774c8954",
-      "message": "Issue 418: design Change 3 in nine steps",
-      "body": "A ghost shall rise in ts5's domain,\nImported fresh, no WKWebView chain.\nRead-tree plants roots, merge-ours connects,\nSubtree strategy for future effects.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "ecf44ec95791ade22be7aa24ec37a34cd487b5ea",
+      "message": "Design 616 Experiment 4: debug stuck bar",
+      "body": "The \"done\" message vanished like a ghost,\nSomewhere between each XPC post.\nWe'll add logs at each hop,\nFind out where it stops,\nAnd catch the bug haunting us most.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T14:39:16-06:00"
+      "date": "2026-02-21T15:12:46-06:00"
     },
     {
-      "hash": "f52e957d2ba67ae2d20a6dc62b85683b902c4ba7",
-      "message": "Move vendored repos into vendor/",
-      "body": "The cef-rs crate wandered free,\nAt root level for all to see.\nNow vendor/ keeps things neat and tidy,\nWith analysis repos tucked beside-y.\nThirteen paths in ts3 rewritten—\nBy this new structure, we are smitten.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "bfb48c5a561027ab13b6b9676ca17865d1dbc164",
+      "message": "Implement 616 Experiment 3: cold-start bar",
+      "body": "The bar once waited for Chromium's hello,\nNow it pulses the instant you go.\nA timeout stands guard,\nLest progress get scarred—\nAnd a slow page test puts on a show.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T14:31:49-06:00"
+      "date": "2026-02-21T15:09:20-06:00"
     },
     {
-      "hash": "3a8b3ab54a0be0577835a873bfe831f5f5a6c3d6",
-      "message": "Issue 418: design Change 2 in seven steps",
-      "body": "The vendors were scattered across the root floor,\nNow they'll gather in vendor/ behind one front door.\ncef-rs gets git-mv'd (it's tracked, you see),\nWhile the rest simply walk there — gitignored and free.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "124e73417af41500ea04665c16601fa806a4ee89",
+      "message": "Design 616 Experiment 3: cold-start bar",
+      "body": "The bar showed up late to its own party—\nChromium was booting, progress was tardy.\nNow we pulse right away,\ntimeout guards the display,\nAnd a slow page proves nothing gets snarky.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T14:26:57-06:00"
+      "date": "2026-02-21T14:54:01-06:00"
     },
     {
-      "hash": "a8a836c924364a97b4c17d0a4bbba58814f912c0",
-      "message": "Move termsurf-chromium to top level",
-      "body": "The submodule broke free, declared \"I'm standalone!\"\nSixty-two gigs of git data, no longer in chain.\nFrom ts4 it rose to the root of the tree,\nGitignored and independent — finally free.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "469d52f49ffb74f7a191735e4a24796afaf92bff",
+      "message": "Implement 616 Experiment 2: loading bar",
+      "body": "The pink has fallen, the blue bar ascends,\nThree processes linked from beginning to ends.\nChromium whispers, \"I'm loading, I think!\"\nThe GUI relays it in less than a blink,\nAnd OSC nine-four the progress bar sends.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T14:20:44-06:00"
+      "date": "2026-02-21T14:47:09-06:00"
     },
     {
-      "hash": "380cdffdbf75b9f605e8116f54e0ce2d74a58ddb",
-      "message": "Issue 418: no origin, no problem",
-      "body": "We dropped origin — there's no remote host,\nJust upstream from Google, the canonical post.\nThe steps got reordered (two before three),\nSo git data moves out before we set it free.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "a4d6feb37cc48471ca33b14e508f5e14a9b91ec5",
+      "message": "Design 616 Experiment 2: loading indicator",
+      "body": "Three processes, one bar, zero pink—\nChromium tells the GUI, \"I think\nI'm loading a page!\"\nThe TUI takes the stage,\nAnd OSC nine-four draws blue ink.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T14:06:07-06:00"
+      "date": "2026-02-21T14:36:15-06:00"
     },
     {
-      "hash": "0bf9c24c4784c33e6fd03649ff3f48a004617207",
-      "message": "Issue 418: origin comes home to roost",
-      "body": "GitHub said \"too large, no thanks,\"\nSo origin stays on local ranks.\nUpstream now points to Google's source,\nThe canonical Chromium, straight from the horse.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "2c7c5d700971fa9330cd068d96b7cc3c92d2c7bc",
+      "message": "Vendor cleanup and research skill",
+      "body": "The CEF has left the building at last,\nIts off-screen rendering days have passed.\nWe cloned Ghostty near,\nWrote a skill crystal clear:\n\"Read local repos — web searches? Outclassed.\"\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T13:40:44-06:00"
+      "date": "2026-02-21T14:21:25-06:00"
     },
     {
-      "hash": "bfcc1ee28ba1b811c7c8efee10b40191bac5a2e9",
-      "message": "Issue 418: fix .git pointer and file list",
-      "body": "A .git file with a relative trail\nWould snap in two when we move the mail.\nSo first we swap it for the real thing,\nAnd list the poet among files to bring.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "d5dcf3a9609a5481bf73d3e39c77f0f6c881ca6c",
+      "message": "Unify test pages into test-html/",
+      "body": "The HTML was scattered far and wide,\nbox-demo here, html/ beside.\nNow one Bun server, port 9616,\nServes eight test pages, all pristine,\nWith an index page to be your guide.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T12:43:45-06:00"
+      "date": "2026-02-21T14:01:38-06:00"
     },
     {
-      "hash": "426c329ec17d6bd0fb68a97aca3fc388a0d704e0",
-      "message": "Issue 418: track all chromium branches",
-      "body": "Each branch gets a row, each row a link,\nSo none are lost in chromium's drink.\nThe doc remembers every fork we've made,\nA ledger kept so history won't fade.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "f010fe860d31df4c6296895e55eab70765a02b27",
+      "message": "Design 616 Experiment 1: unify test pages",
+      "body": "Scattered HTML across the land,\nbox-demo here, html there — unplanned.\nOne server to serve them all,\nOne index page to list the hall,\nAnd in the testing, bind them.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T12:41:08-06:00"
+      "date": "2026-02-21T13:56:48-06:00"
     },
     {
-      "hash": "dfe2f0b3bf18ab246de050c41d139e3d66b9c48c",
-      "message": "Issue 418: update git-poet skill too",
-      "body": "The poet's quill once tracked a submodule's fate,\nNow chromium's free—the verse must update.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "2580d93d0566c0dc192c72d711f835a25b559537",
+      "message": "Create Issue 616: web features inventory",
+      "body": "Twenty features cataloged with care,\nFrom ts1's WKWebView affair.\nSome translate to Chrome,\nSome can stay home,\nBut now we know exactly what's there.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T12:38:29-06:00"
+      "date": "2026-02-21T13:51:03-06:00"
     },
     {
-      "hash": "5539f1063ce3d35e5736b906bad6642e849d4721",
-      "message": "Issue 418: detail Change 1 in ten steps",
-      "body": "Ten steps to free the chromium tree:\nPush branches, kill the submodule's key,\nMove the dir, fix every path,\nThen document the aftermath.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "ecd9f9ce8dd563c3159fab21443d4000da04bf11",
+      "message": "Remove obsolete TODO.md",
+      "body": "A list of tasks from long ago,\nCEF items with nowhere to go.\nSix generations past,\nIt breathed its last—\nThere's nothing left that's TODO.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T12:36:49-06:00"
+      "date": "2026-02-21T13:43:21-06:00"
     },
     {
-      "hash": "30cf1e522e09cb16b81b49b2e05554f0a1ae7b89",
-      "message": "Issue 418: add implementations section",
-      "body": "A scaffold stands, awaiting brick,\nChange one is first—let's make it quick.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "22c3447c58c8f64ee002b9e48b8bda50885fd3d8",
+      "message": "Move Chromium profiles to XDG_DATA_HOME",
+      "body": "The cookies cried from ~/.config,\n\"We're data, not settings — we're livid!\"\nSo we read DATA_HOME,\nGave them space of their own,\nNow their placement is XDG-compliant.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T12:34:02-06:00"
+      "date": "2026-02-21T13:41:47-06:00"
     },
     {
-      "hash": "ae975c7a998db324bbdd5f018716345583de9029",
-      "message": "Issue 418: explain why no submodule",
-      "body": "A submodule of chromium's girth\nMade git status slow as birth.\nSo we cut the cord, set it free—\nNow status runs instantly.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "d05c5dbe5326c9d5a6ad58e6a16a29ed32768514",
+      "message": "Design 615 Experiment 1: XDG data home",
+      "body": "Read XDG_DATA_HOME, fall back with grace,\nGive browser profiles their proper place.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T12:33:03-06:00"
+      "date": "2026-02-21T13:37:02-06:00"
     },
     {
-      "hash": "24a0b9ffb640f3eccfc69810646aaa7e34271b40",
-      "message": "Issue 418: rename to ts5",
-      "body": "Five generations, short and sweet,\nts1 through ts5, the naming's neat.\nWho needs long names when three will do?\nThe ghost moves in to room ts2… wait, five.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "a337da4d6ca6f0e4201a1dba2b9cbdbd76bebb11",
+      "message": "Create Issue 615: XDG directories",
+      "body": "Config's no place for browsing state—\nYour cookies and your cache should wait\nIn DATA_HOME, where data goes,\nNot CONFIG, where your settings doze.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T12:30:02-06:00"
+      "date": "2026-02-21T13:29:05-06:00"
     },
     {
-      "hash": "685ead3ad4573c3b2c7928dd6597217e792db6e1",
-      "message": "Issue 418: Ghostty gets its own room",
-      "body": "Not at the root, but one floor down,\nThe ghost resides in its own town.\nNo README clash, no docs collide—\nEach fork stays neatly on its side.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "7317d37d771cb8ff08d6d81401e8c7a36a192a3e",
+      "message": "Close 614: documentation review complete",
+      "body": "The docs were dusty, out of date,\nWith Ghost's old name on every slate.\nWe read them all from top to end,\nFixed every line, and pressed \"amend\" —\nWell, \"new commit\" — let's keep things straight.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T12:28:05-06:00"
+      "date": "2026-02-21T13:22:43-06:00"
     },
     {
-      "hash": "3618e027d2059ba68865be49044849c99cdad24b",
-      "message": "Issue 418: push branches, check paths",
-      "body": "Before we move, we push our art,\nSeven branches to the chart.\nAnd every path that points the way\nGets checked, lest content_shell go astray.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "cea948d164d3fbd8c125ff33b0ff29be6bb6804a",
+      "message": "Update living docs for accuracy",
+      "body": "The Ghost had haunted every page,\nA phantom from a bygone age.\nWe swept through nine docs, pen in hand,\nAnd brought them current as we'd planned.\ngui/ now reigns where Ghost once stood,\nThe docs at last say what they should.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T12:17:59-06:00"
+      "date": "2026-02-21T13:22:05-06:00"
     },
     {
-      "hash": "d2e5c333eb476c55e5eadc7e04d90209ce5f98e6",
-      "message": "Issue 418: chromium docs find their home",
-      "body": "The branch and commit, once spread thin,\nNow live in docs/chromium.md within.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "3b9cf9d9ec08e9c00b9373f539c7602128c23296",
+      "message": "Remove obsolete CHANGELOG.md",
+      "body": "A changelog from the WKWebView days,\nStill lingering in its ts1 haze.\nSix generations on,\nIts relevance: gone.\nWe bid it farewell with no praise.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T12:15:21-06:00"
+      "date": "2026-02-21T13:17:37-06:00"
     },
     {
-      "hash": "a9b0ba1f4ca0a1424d4f371f5959b824762fb43c",
-      "message": "Issue 418: plan the great migration",
-      "body": "The folders shift, the paths align,\nChromium freed from ts4's confine.\nGhostty shall reign at root's front door,\nWhile vendors nest on a lower floor.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "be994f077c4f94bc26b2986a3f75f38c2904c785",
+      "message": "Design 614 Experiment 1: docs review",
+      "body": "Nine docs reviewed with careful eye,\nGhost's old name still lingered — my, oh my!\nREADME points to ts5,\nTODO's barely alive,\nTime to set these living docs right.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T12:13:11-06:00"
+      "date": "2026-02-21T13:17:14-06:00"
     },
     {
-      "hash": "115784f8c4728d7d8631361001d8fbc6e9996e52",
-      "message": "Issue 417: Ghostty wins",
-      "body": "The ghost prevailed, the wez withdrew,\nOne pane to change, not twenty-two.\nWith Metal bones and Zig for brains,\nIt renders browsers inside panes.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "fbb35d560e626a69740c0a6dec3449a33dfa61c9",
+      "message": "Create Issue 614: review documentation",
+      "body": "Nine markdown files sit in a row,\nSome stale, some verbose, some so-so.\nWe'll read every word,\nTrim what's absurd,\nAnd make sure they match what we know.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T11:55:30-06:00"
+      "date": "2026-02-21T13:09:39-06:00"
     },
     {
-      "hash": "fbd0d40214165b3cd5878c80164c7ba7324e0a87",
-      "message": "Issue 417: research complete",
-      "body": "Two terminals weighed upon the scale,\nOne Zig, one Rust, each with a tale.\nStars and forks and panes compared,\nNo stone unturned, no detail spared.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "c8e62ce524cbd0d197e6b17ab166d34b13260a6f",
+      "message": "Rename ghost/ to gui/, web/ to tui/, close 613",
+      "body": "The ghost shed its name, became gui,\nThe web found its truth as tui.\nTwo folders reborn,\nTheir old labels shorn—\nNow named for the things that they be.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T11:46:49-06:00"
+      "date": "2026-02-21T13:05:43-06:00"
     },
     {
-      "hash": "e05109c87369600c26340a41912c4c4ac72e8f39",
-      "message": "Issue 417: Ghostty vs WezTerm showdown",
-      "body": "Two terminals enter, one terminal leaves—\nA fork is forever, so nobody grieves\nWithout research first, from panes to the core,\nTo find which one's worth maintaining evermore.",
+      "hash": "074756f49fbff68a82ad74eac9f37d17f0a489d0",
+      "message": "Design 613 Experiment 1: rename and update",
+      "body": "Two folders with names from the past,\nAs ghost and as web they were cast.\nSix steps, living docs,\nHistorical ones—locked,\nGUI and TUI named right at last.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T11:22:52-06:00"
+      "date": "2026-02-21T12:57:51-06:00"
     },
     {
-      "hash": "15f622807e5366350d4bee3023f61fc7999189d8",
-      "message": "Issue 416: conclusion",
-      "body": "Three languages walked into a bar—\nC++, Swift, and Rust from afar.\nEach rendered two panes,\nAt sixty-frame gains,\nAnd none was the bottleneck star.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "61e8d4af75647d02c6c0235025e2cd145d9d4a42",
+      "message": "Create Issue 613: rename ghost/ and web/",
+      "body": "A ghost and a web walked into a bar,\nThe bartender said, \"You've come too far.\nYou're GUI and TUI,\nNot spooky or screwy—\nNow go be the names that you are.\"\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T11:03:37-06:00"
+      "date": "2026-02-21T12:55:09-06:00"
     },
     {
-      "hash": "f8b33cffcabc18ef70b20d320deaf887b02677b6",
-      "message": "Issue 416 experiment 3: two panes pass",
-      "body": "Two viewports walk into a render pass,\nEach drawing a quad through its own looking glass.\nLeft pane, right pane, 120 combined—\nThe Rust receiver leaves no frame behind.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "0ab453d41605cc7274fb7007f7f4ed69d621acce",
+      "message": "Close Issue 612: app icon",
+      "body": "Three experiments, each built on the last—\nThe Composer removed, the old icon surpassed.\nA script and a PNG,\nAre all that you need,\nTo give TermSurf an icon that lasts.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T11:01:42-06:00"
+      "date": "2026-02-21T12:50:38-06:00"
     },
     {
-      "hash": "e7f22fc02d96938cc8725d9a2a43dc1bcc26cf94",
-      "message": "Issue 416: design experiment 3",
-      "body": "One pane was fine, but the goal demands two—\nSame shader, same pass, just a viewport askew.\nLeft half for A, right half for B,\nSix small changes, and two panes we'll see.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "581e04a6546151d37ba82e1998f2f129a99e75a1",
+      "message": "Generate icons from new source image",
+      "body": "One script to resize them all,\nFrom 1024 down to small.\nThe surfer's new face\nTakes the old icon's place—\nNow TermSurf stands proud, standing tall.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T10:52:38-06:00"
+      "date": "2026-02-21T12:49:50-06:00"
     },
     {
-      "hash": "684a01c632397a1c86f0f4848bdc704bad64e407",
-      "message": "Issue 416 experiment 2: 60fps in Rust",
-      "body": "A function pretended to be a variable,\nThe CPU jumped to data — quite terrible.\nWe fixed that, then found\nThe wrong flag passed around,\nNow Rust renders IOSurfaces, all seven unknowns severable.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "6782fc82a190a072e01f3a32a03fcdb4a6555aff",
+      "message": "Design 612 Experiment 3: new icon source",
+      "body": "The old ghost icons have sailed away,\nTheir PNGs deleted today.\nA new image waits\nAt the asset gates—\nLet the script resize and display.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T10:47:43-06:00"
+      "date": "2026-02-21T12:45:46-06:00"
     },
     {
-      "hash": "840e33938bda839aae509d007e33e842d63f87c0",
-      "message": "Issue 416: design experiment 2",
-      "body": "A dash and a flag, so alike yet so wrong,\n--service sang softly, but not the right song.\n--xpc-service was waiting, the true name all along—\nNo code need be changed, just the words we pass on.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "0f8cae3b5c816ee8a2689bf17e38ebf7f419aa88",
+      "message": "Remove Ghostty.icon, close Issue 612",
+      "body": "The Composer's ghost held on tight,\nSix references kept it in sight.\nWe snipped every thread,\nNow AppIcon instead—\nThe surfer rides free in the light.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T10:44:32-06:00"
+      "date": "2026-02-21T12:42:33-06:00"
     },
     {
-      "hash": "b3d31132a06a0e434d3e283ef856071ab67195b2",
-      "message": "Issue 416 experiment 1: failed",
-      "body": "The Rust receiver built and listened,\nIts XPC ears perked, pipeline glistened.\nBut mach_task_self_ was a variable, not a call—\nThe CPU jumped to data and took a great fall.\nWe fixed the crash, yet the sender stayed mute,\nAnd silence, alas, is hard to refute.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "hash": "3bc53005b74200d4e24d58f0f9c3c8cf3244d4ca",
+      "message": "Design 612 Experiment 2: remove Ghostty.icon",
+      "body": "Six lines in the project still hold the key,\nTo an Icon Composer we no longer need.\nDelete every trace,\nLet AppIcon take its place,\nAnd the surfing ghost finally is freed.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-02-14T10:37:08-06:00"
+      "date": "2026-02-21T12:37:21-06:00"
     },
     {
-      "hash": "61e347a2c278263dd1392c324feaee5fb9712ee5",
-      "message": "core/gtk: add language config entry to override GUI localization (#10428)",
-      "body": "Fixes #10276\n\n<img width=\"853\" height=\"637\" alt=\"Screenshot From 2026-01-23 16-45-11\"\nsrc=\"https://github.com/user-attachments/assets/aff9d2f8-eb3e-411e-bd3d-ebd32e5c7973\"\n/>",
-      "author": "Leah Amelia Chen",
-      "date": "2026-02-15T00:24:30+08:00"
+      "hash": "98bb5888655451433caf8b756336ad3b320d73af",
+      "message": "Add TermSurf icon assets, partial success",
+      "body": "The debug dock icon surfs a green wave bright,\nThe runtime override works—what a sight!\nBut the bundle icon stays\nIn its old Ghostty ways—\nIcon Composer still lurks, out of sight.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-02-21T12:35:02-06:00"
     }
   ]
 }

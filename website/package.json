@@ -7,8 +7,7 @@
     "preview": "vite preview",
     "start": "bun run server.tsx",
     "build:commits": "bun run scripts/build-commits.ts",
-    "build:version": "bun run scripts/build-version.ts",
-    "build:data": "bun run build:commits && bun run build:version",
+    "build:data": "bun run build:commits",
     "deploy": "fly deploy"
   },
   "dependencies": {

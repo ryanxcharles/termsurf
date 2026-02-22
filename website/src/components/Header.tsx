@@ -1,5 +1,3 @@
-import versionData from "../../data/version.json";
-
 export function Header() {
   return (
     <header className="text-center mb-12 pb-8 border-b border-border">
@@ -8,11 +6,8 @@ export function Header() {
         alt="TermSurf logo"
         className="w-16 h-16 mx-auto mb-4"
       />
-      <h1 className="text-4xl font-bold text-primary mb-2 relative inline-block">
+      <h1 className="text-4xl font-bold text-primary mb-2">
         TermSurf
-        <span className="absolute -right-16 top-1/2 -translate-y-1/2 text-sm font-normal text-foreground-dark bg-background-highlight px-2 py-0.5 rounded">
-          v{versionData.version}
-        </span>
       </h1>
       <p className="text-foreground-dark mb-4">Terminal + Browser</p>
       <nav>
