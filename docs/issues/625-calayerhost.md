@@ -124,3 +124,115 @@ Before implementing, we need to research the TermSurf codebase to understand:
 5. **Can `CALayerHost` be created from Zig?** Zig already calls Objective-C
    runtime APIs for Metal. `CALayerHost` is another `CALayer` subclass — same
    pattern. But we need to verify the specific API calls.
+
+## Experiments
+
+### Experiment 1: Map the current pipeline
+
+A source code research experiment — no code changes, no builds. Read the
+TermSurf GUI and Chromium Profile Server source to trace the complete frame
+delivery pipeline from end to end. The goal is to know exactly what code to
+change before writing a single line.
+
+#### Q1: XPC frame reception in the GUI
+
+Trace the path from XPC message arrival to Metal rendering. Where does the GUI
+receive IOSurface Mach ports, and how do they reach the renderer?
+
+**Where to look:**
+
+- `gui/src/apprt/embedded.zig` — C API exports. Search for XPC-related functions
+  and `overlay` / `iosurface` / `mach_port` references.
+- `gui/src/Surface.zig` — the core surface. Search for overlay state, IOSurface
+  fields, and any XPC callback handling.
+- `gui/src/renderer/Metal.zig` — the Metal renderer. Search for IOSurface
+  import, overlay texture, and how the browser frame gets composited.
+- `gui/macos/` — Swift code. Search for XPC message handling, Mach port
+  extraction, and calls into the Zig C API.
+
+**Deliverable:** A sequence diagram from XPC message arrival to Metal draw call,
+with every function, file, and line number labeled. Identify exactly what gets
+deleted.
+
+#### Q2: Metal overlay pipeline
+
+Map the Metal shader pipeline that composites browser content. What render pass,
+pipeline state, vertex buffer, and fragment shader are involved?
+
+**Where to look:**
+
+- `gui/src/renderer/Metal.zig` — search for `overlay`, `iosurface`, `browser`,
+  or any render pass that handles non-terminal content.
+- `gui/src/renderer/metal/` — shader files, pipeline definitions. What shaders
+  draw the browser overlay?
+- Search for `IOSurface` across all of `gui/src/` — every reference needs to be
+  cataloged for removal.
+
+**Deliverable:** A list of every Metal resource (pipeline state, shader
+function, vertex buffer, texture, render pass) used for the browser overlay.
+Each item should be annotated with: keep, delete, or modify.
+
+#### Q3: NSView and CALayer hierarchy
+
+Map the current layer tree. Where does `CAMetalLayer` live? What is the NSView
+structure? Where should `CALayerHost` be inserted?
+
+**Where to look:**
+
+- `gui/macos/Sources/` — Swift app code. Search for `NSView`, `CALayer`,
+  `CAMetalLayer`, `contentView`, `wantsLayer`, `makeBackingLayer`.
+- `gui/src/apprt/embedded.zig` — how the Zig side references the view/layer.
+- Look at how Ghostty's Metal renderer gets its `CAMetalLayer` — this is the
+  layer that `CALayerHost` needs to sit on top of.
+
+**Deliverable:** A layer tree diagram showing the current NSView/CALayer
+hierarchy, with the proposed insertion point for `CALayerHost` marked.
+
+#### Q4: Pane coordinate propagation
+
+Understand how the GUI tracks browser pane pixel coordinates. The `CALayerHost`
+frame (position + size) must update when panes resize.
+
+**Where to look:**
+
+- `gui/src/Surface.zig` — how does the surface know its pixel bounds within the
+  window? Search for `screen`, `padding`, `grid`, `size`, `viewport`.
+- `gui/src/apprt/embedded.zig` — how do resize events propagate?
+- The current overlay pipeline — how does it know where to position the browser
+  content? Whatever coordinate system it uses is what `CALayerHost` needs.
+
+**Deliverable:** The exact fields and functions that provide browser pane pixel
+coordinates (origin x, origin y, width, height) relative to the window.
+
+#### Q5: Chromium server side — CALayerParams interception
+
+Map the Chromium Profile Server's current frame sending code and identify where
+to intercept `CALayerParams` instead.
+
+**Where to look:**
+
+- `chromium/src/content/shell/browser/shell_video_consumer.cc` and `.h` — the
+  current capturer. Trace how it sends IOSurface Mach ports over XPC.
+- `chromium/src/content/shell/browser/shell_browser_main_parts.cc` — where the
+  capturer is created and connected to XPC. This is where `CALayerParams`
+  interception would go instead.
+- `chromium/src/content/browser/renderer_host/render_widget_host_view_mac.mm` —
+  `AcceleratedWidgetCALayerParamsUpdated()` at line 156. How to hook into this
+  callback for our Content Shell.
+
+**Deliverable:** A before/after outline showing: (1) what currently sends frames
+over XPC, (2) what replaces it (CALayerParams interception), and (3) what gets
+deleted.
+
+#### Verification
+
+Research is complete when we can draw the full before/after picture:
+
+1. **Before:** Complete trace from Chromium capturer → XPC → GUI → Metal draw
+   call, with every file and function labeled.
+2. **After:** Complete trace from Chromium `CALayerParams` callback → XPC
+   (ca_context_id once) → GUI → `CALayerHost` sublayer, with proposed code
+   changes for each step.
+3. A definitive layer tree diagram showing where `CALayerHost` sits relative to
+   `CAMetalLayer`.
+4. The coordinate system for positioning `CALayerHost` at browser pane bounds.
