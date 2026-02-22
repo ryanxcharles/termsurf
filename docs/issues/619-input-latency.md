@@ -70,7 +70,66 @@ back, and then wait for the _next_ vsync. You effectively always lose at least
 one frame compared to Chrome. This is inherent to any out-of-process streaming
 architecture.
 
-### What is fixable
+## How Chrome stays fast across process boundaries
+
+Chrome uses separate processes for rendering and GPU compositing — the same kind
+of cross-process architecture that TermSurf has. But Chrome feels responsive
+because its performance-critical path does not use message-passing IPC. It uses
+shared memory.
+
+### Chrome's process model
+
+| Process           | Role                                                               |
+| ----------------- | ------------------------------------------------------------------ |
+| **Browser**       | UI chrome, input dispatch, coordination                            |
+| **Renderer** (1+) | Blink (DOM, layout, paint) + compositor thread (scroll, animation) |
+| **GPU/Viz** (1)   | All GPU calls, display compositing, rasterization                  |
+
+Renderers never touch the GPU directly. Every graphics call crosses a process
+boundary to the GPU/Viz process. Yet Chrome still achieves ~1–2 frame latency.
+
+### Shared memory, not message passing
+
+The critical difference from TermSurf's architecture:
+
+**GPU Command Buffer** — Renderers write GL-equivalent commands into a shared
+memory ring buffer. Hundreds of commands batch up before a single lightweight
+IPC notification tells the GPU process to consume them. No per-call kernel
+transition. No serialization overhead.
+
+**CompositorFrames are metadata, not pixels** — When a renderer submits a frame
+to Viz, it sends a small struct describing quads that reference textures already
+in GPU memory (IOSurface on macOS). The heavy pixel data never crosses the
+process boundary — it was rasterized directly into GPU memory via the command
+buffer.
+
+**Sync tokens** — Instead of blocking to wait for raster to complete, the
+compositor submits frames with non-blocking sync tokens. The GPU resolves them
+before drawing. The pipeline never stalls.
+
+**Compositor-thread input handling** — Scroll and selection don't need the main
+thread. The compositor thread receives input, applies scroll offsets to the
+existing layer tree, and submits a new frame — all without touching JavaScript
+or layout. This is why scrolling stays smooth even when JS is blocked.
+
+### TermSurf vs Chrome: the architectural gap
+
+| Aspect                | Chrome                                       | TermSurf                                     |
+| --------------------- | -------------------------------------------- | -------------------------------------------- |
+| Graphics commands     | Shared memory ring buffer (zero copy)        | N/A (capturer does the rendering)            |
+| Frame submission      | Small metadata struct (quads + texture refs) | Full IOSurface Mach port transfer via XPC    |
+| Input → compositor    | Mojo to compositor thread (same process)     | XPC to Chromium process (kernel hop)         |
+| Frame synchronization | BeginFrame from single vsync clock           | Two independent clocks (120fps oversampling) |
+| Scroll/selection      | Compositor thread handles directly           | Full Chromium render + capture round-trip    |
+
+The fundamental gap: TermSurf uses a recording API (`FrameSinkVideoCapturer`) on
+top of message-passing IPC (XPC), whereas Chrome uses shared memory command
+buffers with zero-copy GPU textures and compositor-driven input. Every input
+event in TermSurf requires a full round-trip: XPC out, Chromium render, capture,
+XPC back. In Chrome, the compositor thread handles scroll and selection within
+the same process, often within the same frame.
+
+### What is fixable (short-term)
 
 The capturer timer is the most actionable target. Chromium's
 `FrameSinkVideoCapturer` supports `RequestRefreshFrame()` — it forces an
@@ -79,14 +138,16 @@ we would eliminate the 0–8ms capture wait. Combined with XPC delivery jitter
 reduction (high-priority dispatch queues), we could shave ~5–10ms off the
 average round-trip.
 
+### What is not fixable (without in-process embedding)
+
 The XPC async latency and double-vsync penalty are inherent to the
 out-of-process streaming architecture. They cannot be eliminated without
-in-process Chromium embedding (the long-term endgame described in
-`docs/vsync.md`).
+in-process Chromium embedding — the long-term endgame described in
+`docs/vsync.md`. In-process embedding would give TermSurf access to Chrome's own
+compositor thread for input handling, shared memory for frame submission, and a
+single BeginFrame clock for synchronization.
 
-## Architecture
-
-The investigation should proceed in stages:
+## Investigation plan
 
 1. **Measure** — Instrument the pipeline to measure actual input-to-display
    latency. Timestamp mouse events when sent, timestamp when the corresponding
