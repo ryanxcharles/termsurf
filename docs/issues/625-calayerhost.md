@@ -777,3 +777,104 @@ The naive Y flip doesn't work. The coordinate system issue is not a simple
 top-vs-bottom inversion, or the values being passed are incorrect. Experiment 4
 should add diagnostic logging and/or use a different approach to understand what
 coordinates the CALayerHost actually needs.
+
+### Experiment 4: Diagnose CALayerHost positioning
+
+The Y flip in Experiment 3 had **zero visible effect**. That's the key clue —
+not "slightly wrong" or "flipped the other way," but zero change. This narrows
+the possible causes significantly. This experiment adds diagnostic logging to
+identify which hypothesis is correct, then fixes the root cause.
+
+#### Hypotheses
+
+Ranked by how well they explain "zero effect from Y flip":
+
+1. **`setProperty("frame", frame)` silently fails for CGRect.** CGRect is a
+   32-byte struct. The zig-objc `setProperty` method uses `objc_msgSend` under
+   the hood. On ARM64, `objc_msgSend` can pass structs up to a certain size in
+   registers, but CGRect (4 doubles = 32 bytes) may exceed that limit and need a
+   different calling convention. If the struct data arrives as garbage, the
+   frame is never actually set. This would explain zero effect from any value
+   change.
+
+2. **The function isn't being called or values are all zero.** If
+   `overlay_grid_*` fields are still zero when `updateCALayerHostFrame` runs
+   (race condition: `ca_context_id` arrives before overlay coordinates), the
+   computed frame is a zero-size rect. Flipping a zero rect produces a zero
+   rect.
+
+3. **CALayerHost ignores the host-side `frame`.** CALayerHost displays a remote
+   `CAContext`'s layer tree. The remote layer may impose its own size. Setting
+   `frame` on the host might only set a clip rect (or be ignored entirely), with
+   the actual positioning controlled by the remote layer's geometry.
+
+4. **Physical pixels vs logical points.** CALayer frames use points (logical
+   coordinates). If `cell_width`, `cell_height`, and `screen_height` are in
+   physical pixels (2x on Retina), everything is doubled — the frame is 2x too
+   large and 2x offset. The Y flip math would produce a different number, but if
+   the frame is already larger than the parent, both positions overflow the
+   visible area in the same way.
+
+5. **Superlayer coordinate weirdness.** The parent IOSurfaceLayer may have
+   transforms, bounds offsets, or `geometryFlipped = YES` already set. If it's
+   already flipped, our flip double-flips back to the original wrong value. But
+   "zero change" is harder to explain this way unless both values happen to
+   overflow identically.
+
+#### Diagnostic changes
+
+Add `log.info` calls to print every value at every stage. This tells us exactly
+which hypothesis is correct.
+
+**In `Metal.zig` — `setCALayerHostContextId()`:**
+
+1. After creating or updating the CALayerHost, log the host's actual `frame` as
+   read back from the object (to confirm `setProperty("frame", ...)` works).
+
+**In `Metal.zig` — `updateCALayerHostFrame()`:**
+
+2. Log all input values: `grid_col`, `grid_row`, `grid_width`, `grid_height`,
+   `cell_width`, `cell_height`, `screen_height`.
+3. Log the computed frame: `x`, `y` (before flip), `flipped_y`, `w`, `h`.
+4. After calling `setProperty("frame", frame)`, read the frame back from the
+   host object and log it. If the read-back frame differs from what we set,
+   hypothesis #1 (setProperty fails for CGRect) is confirmed.
+5. Also log the parent IOSurfaceLayer's `bounds` and `frame` to check for
+   unexpected transforms or sizes.
+
+**In `generic.zig` — `updateCALayerHostFrame()`:**
+
+6. Log whether `ca_layer_host` is non-null (to confirm the function is actually
+   reached).
+
+**In `generic.zig` — `setCALayerHostContextId()`:**
+
+7. Log the order of operations — whether `ca_context_id` arrives before or after
+   `set_overlay` grid coordinates.
+
+#### Hardcoded sanity check
+
+As a parallel diagnostic, temporarily hardcode a known-good frame value:
+
+8. In `updateCALayerHostFrame()`, before the normal logic, add a hardcoded
+   override:
+   ```
+   frame = { origin: { x: 50, y: 50 }, size: { width: 400, height: 300 } }
+   ```
+   If the hardcoded frame also has no effect, the problem is #1 (setProperty
+   fails) or #3 (CALayerHost ignores frame). If the hardcoded frame works
+   correctly, the problem is in the computed values (#2 or #4).
+
+#### Verification
+
+1. Build TermSurf GUI (`cd gui && zig build`).
+2. Launch the app, open a terminal, type `web news.ycombinator.com`.
+3. Check TermSurf's log output for all the diagnostic values.
+4. **Diagnosis complete when we can answer:**
+   - Are the input values (grid coords, cell size, screen height) reasonable?
+   - Does the frame read-back match what we set? (Tests hypothesis #1)
+   - Does the hardcoded frame produce correct positioning? (Tests #1 vs #2/#4)
+   - What is the parent layer's bounds? (Tests #5)
+   - Is `updateCALayerHostFrame` called at all? (Tests #2)
+5. Once the root cause is identified, fix it and verify the CALayerHost appears
+   at the correct position.
