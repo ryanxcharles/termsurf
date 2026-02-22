@@ -666,3 +666,31 @@ texture.
 5. **Bonus verification:**
    - Compare text selection latency side-by-side with native Chrome
    - Verify no per-frame XPC messages in Console.app / log stream
+
+**Result:** Fail
+
+Both builds succeed — Chromium Profile Server and TermSurf GUI compile without
+errors. The app launches, a terminal opens, and `web news.ycombinator.com` loads
+the page. The CALayerHost receives the `ca_context_id` and the web content is
+visible. So the core pipeline works: Chromium → XPC (ca_context_id once) →
+CALayerHost → Window Server compositing.
+
+However, the CALayerHost is positioned catastrophically wrong. Instead of
+appearing at the overlay viewport position (near the top of the surface), the
+web content is pushed to the bottom of the screen with only the top ~10%
+visible. The error is so severe that no other functionality could be tested.
+
+**Root cause:** CALayer on macOS uses Y=0 at the **bottom** (Y increases
+upward), but the terminal grid has row 0 at the **top** (Y increases downward).
+`updateCALayerHostFrame()` in `Metal.zig` naively sets
+`frame.origin.y = grid_row * cell_height`, which places a small grid row (like
+row 1–2) at a small Y value — near the bottom in CALayer coordinates. The fix is
+to flip Y: `flipped_y = parent_layer_height - y - h`.
+
+#### Conclusion
+
+The architecture is sound — CALayerHost works for displaying Chromium content
+from another process, the XPC one-shot `ca_context_id` delivery works, and
+Window Server composites the content. The implementation has a coordinate system
+bug that prevents testing any other functionality. Experiment 3 should fix the Y
+coordinate flip and re-verify.
