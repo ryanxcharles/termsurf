@@ -602,3 +602,72 @@ BrowserContext. Lightweight pages coexist at 60fps. The contention is
 proportional to per-frame work — when both profiles have heavy pages, neither
 can finish within the frame budget. The next experiments should instrument the
 renderer side to identify which specific shared resource is the bottleneck.
+
+### Experiment 4: Two profiles, CSS animation only (no JavaScript)
+
+google.com has two things DDG doesn't: JavaScript and CSS animations. Either
+could be the source of contention. This experiment isolates CSS animations by
+loading a page with continuous `@keyframes` animations and zero JavaScript.
+
+CSS animations run in the compositor thread — they generate continuous
+compositor damage (new CompositorFrames every vsync) without touching the Blink
+main thread or executing any JavaScript. If two profiles both loading this page
+degrade to 2fps, the bottleneck is in the compositor/GPU pipeline (damage
+frequency, paint layers, GPU command serialization). If they stay at 60fps, the
+bottleneck is JavaScript-driven.
+
+#### Changes
+
+**`content_api_shim.mm`** — replace both URLs with a `data:` URL containing a
+CSS-animation-only page. The page has:
+
+- A spinning box (`transform: rotate`, continuous)
+- A color-cycling background (`background-color` transition, continuous)
+- No `<script>` tags, no JavaScript, no event handlers
+
+```cpp
+const char* kAnimationPage =
+    "data:text/html,"
+    "<!DOCTYPE html>"
+    "<style>"
+    "body{margin:0;overflow:hidden;background:#111}"
+    "@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}"
+    "@keyframes pulse{0%{background:#e44}33%{background:#4e4}66%{background:#44e}100%{background:#e44}}"
+    ".box{width:200px;height:200px;margin:100px auto;animation:spin 2s linear infinite,pulse 3s linear infinite;border-radius:20px}"
+    "</style>"
+    "<div class='box'></div>";
+
+const char* kProfileAUrl = kAnimationPage;
+const char* kProfileBUrl = kAnimationPage;
+```
+
+No other changes. Same two-profile structure as Experiments 2–3.
+
+#### Build
+
+```bash
+cd ~/dev/termsurf/chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default zig_content_shell
+```
+
+#### Verification
+
+1. Launch the app:
+   ```bash
+   open out/Default/Zig\ Content\ Shell.app
+   ```
+2. Two Content Shell windows appear, each showing a spinning color-cycling box
+   on a dark background
+3. Observe the animation in each window:
+   - Are both spinning smoothly (60fps)?
+   - Are both stuttering (~2fps)?
+   - Is one smooth and the other stuttering?
+4. Close both windows — process exits cleanly
+
+If both 60fps: CSS animations alone don't trigger the contention. The bottleneck
+is JavaScript-driven (Blink main thread work, not compositor work).
+
+If both 2fps: the compositor/GPU pipeline itself is the bottleneck. Continuous
+compositor damage from any source (CSS or JS) triggers the contention when two
+BrowserContexts are active.
