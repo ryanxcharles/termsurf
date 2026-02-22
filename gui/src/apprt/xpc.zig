@@ -257,6 +257,8 @@ fn handleMessage(msg: xpc_object_t) void {
         handleCursorChanged(msg);
     } else if (std.mem.eql(u8, action_str, "loading_state")) {
         handleLoadingState(msg);
+    } else if (std.mem.eql(u8, action_str, "url_changed")) {
+        handleUrlChanged(msg);
     } else {
         log.warn("unknown action: {s}", .{action_str});
     }
@@ -473,6 +475,19 @@ fn handleLoadingState(msg: xpc_object_t) void {
     xpc_dictionary_set_string(fwd, "action", "loading_state");
     xpc_dictionary_set_string(fwd, "state", state);
     xpc_dictionary_set_uint64(fwd, "progress", progress);
+    xpc_connection_send_message(p.web_peer, fwd);
+}
+
+fn handleUrlChanged(msg: xpc_object_t) void {
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    const p = panes.get(pane_id) orelse return;
+    if (p.web_peer == null) return;
+
+    const url = xpc_dictionary_get_string(msg, "url") orelse return;
+
+    const fwd = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(fwd, "action", "url_changed");
+    xpc_dictionary_set_string(fwd, "url", url);
     xpc_connection_send_message(p.web_peer, fwd);
 }
 

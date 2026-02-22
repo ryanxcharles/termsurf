@@ -108,3 +108,16 @@ No Chromium or TUI changes needed — both ends already exist.
 3. The URL bar in the TUI should update to the new page's URL
 4. Press Cmd+[ (back) — URL bar should revert to the previous URL
 5. Press Cmd+] (forward) — URL bar should show the navigated URL again
+
+**Result:** Pass
+
+The URL bar updates on every navigation — link clicks, back/forward, and
+redirects.
+
+## Conclusion
+
+The URL sync pipeline was already 2/3 complete. The Chromium server sent
+`url_changed` (Issue 616) and the TUI handled it. The only missing piece was an
+8-line relay function in `gui/src/apprt/xpc.zig` to forward the message from the
+server to the TUI. One dispatch line + one function, following the existing
+`handleLoadingState` pattern.
