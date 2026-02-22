@@ -1920,3 +1920,159 @@ whether `needs_draw_` is never set (no damage arriving) or
 instrumentation to `ShouldDraw()` and
 `CompositorFrameSinkSupport::OnBeginFrame()` would reveal which path is
 blocking.
+
+### Experiment 14: Instrument the draw and frame delivery pipeline
+
+#### Background: what Experiment 13 revealed
+
+Experiment 13 proved that keeping the `ExternalBeginFrameSourceMac` alive (Fix
+A) is necessary but not sufficient. The vsync source delivered steady 16ms
+callbacks, yet visual rendering remained at 2fps. This means the bottleneck is
+downstream — somewhere between the vsync callback arriving and pixels actually
+being drawn.
+
+There are three independent throttle/starvation mechanisms in the pipeline:
+
+**1. DisplayScheduler::ShouldDraw() gate** (display_scheduler.cc:448–452)
+
+```cpp
+return needs_draw_ && !output_surface_lost_ && visible_ &&
+       !damage_tracker_->root_frame_missing();
+```
+
+Four conditions, any of which being wrong prevents drawing. The most likely
+culprits:
+
+- `needs_draw_` — only set by `OnDisplayDamaged()`. If the renderer never
+  submits new CompositorFrames, no damage is generated, and `needs_draw_` stays
+  false.
+- `root_frame_missing()` — if the renderer was starved of BeginFrames and hasn't
+  activated a surface, this returns true, blocking the draw.
+
+**2. CompositorFrameSinkSupport::ShouldSendBeginFrame() throttle**
+(compositor_frame_sink_support.cc:1452–1557)
+
+Even when the `ExternalBeginFrameSourceMac` delivers a callback, each
+`CompositorFrameSinkSupport` independently decides whether to forward the
+BeginFrame to its renderer. Multiple throttle gates exist:
+
+| Gate                         | Threshold                 | Effect                               |
+| ---------------------------- | ------------------------- | ------------------------------------ |
+| `ShouldStopBeginFrame()`     | outstanding >= 100        | Completely stops sending BeginFrames |
+| `ShouldThrottleBeginFrame()` | outstanding >= 10         | Throttles BeginFrame delivery        |
+| `kUndrawnFrameLimit`         | undrawn frames > 3        | Throttles if too many undrawn frames |
+| `!client_needs_begin_frame_` | client stopped requesting | Stops sending                        |
+| `PendingAck`                 | pending >= limit          | Stops until ack received             |
+
+The `outstanding_begin_frames_` counter in `BeginFrameTracker`
+(begin_frame_tracker.cc) tracks how many BeginFrames were sent without
+acknowledgment. With two profiles competing for GPU time, renderers may be slow
+to acknowledge, causing the counter to build up past the throttle threshold (10)
+or stop threshold (100).
+
+**3. GPU busy backpressure** (begin_frame_source.cc:152–167)
+
+When `pending_swaps_ >= MaxPendingSwaps()`, the `DisplayScheduler` calls
+`SetIsGpuBusy(true)` on the `BeginFrameSource`. This can throttle future
+BeginFrame delivery at the source level. With two profiles sharing the GPU, swap
+buffers may back up.
+
+**Which mechanism is blocking?** We don't know — that's what this experiment
+will determine.
+
+#### Changes
+
+Add `[TS-DIAG]` instrumentation to three decision points. Use LOG(ERROR) for
+state transitions and infrequent events; VLOG(1) for per-frame data.
+
+**1. `display_scheduler.cc` — `ShouldDraw()` condition breakdown**
+
+Add VLOG(1) inside `AttemptDrawAndSwap()` when `ShouldDraw()` returns false,
+logging all four conditions:
+
+```cpp
+} else {
+    VLOG(1) << "[TS-DIAG] ShouldDraw=false"
+            << " needs_draw=" << needs_draw_
+            << " output_surface_lost=" << output_surface_lost_
+            << " visible=" << visible_
+            << " root_frame_missing=" << damage_tracker_->root_frame_missing()
+            << " pending_swaps=" << pending_swaps_;
+    damage_tracker_->reset_expecting_root_surface_damage_because_of_resize();
+    // StopObservingBeginFrames();  // (Experiment 13)
+}
+```
+
+Also add LOG(ERROR) to `DrawAndSwap()` to count successful draws:
+
+```cpp
+bool DisplayScheduler::DrawAndSwap() {
+  LOG(ERROR) << "[TS-DIAG] DrawAndSwap display=" << this;
+  // ... existing code ...
+```
+
+**2. `compositor_frame_sink_support.cc` — `RecordShouldSendBeginFrame()` with
+logging**
+
+Replace the file-level `RecordShouldSendBeginFrame()` function to also LOG when
+returning false:
+
+```cpp
+bool RecordShouldSendBeginFrame(const std::string& reason, bool should_send) {
+  TRACE_EVENT2("viz", "SendBeginFrameDecision", "reason", reason, "should_send",
+               should_send);
+  if (!should_send) {
+    LOG(ERROR) << "[TS-DIAG] ShouldSendBeginFrame=false reason=" << reason;
+  }
+  return should_send;
+}
+```
+
+**3. `begin_frame_tracker.cc` — outstanding frame count**
+
+Add LOG(ERROR) when throttle or stop thresholds are hit:
+
+```cpp
+bool BeginFrameTracker::ShouldThrottleBeginFrame() const {
+  bool result = outstanding_begin_frames_ >= kLimitThrottle &&
+                outstanding_begin_frames_ < kLimitStop;
+  if (result) {
+    LOG(ERROR) << "[TS-DIAG] BeginFrameTracker THROTTLE outstanding="
+               << outstanding_begin_frames_;
+  }
+  return result;
+}
+
+bool BeginFrameTracker::ShouldStopBeginFrame() const {
+  bool result = outstanding_begin_frames_ >= kLimitStop;
+  if (result) {
+    LOG(ERROR) << "[TS-DIAG] BeginFrameTracker STOP outstanding="
+               << outstanding_begin_frames_;
+  }
+  return result;
+}
+```
+
+**Keep Experiment 13's fix** (`StopObservingBeginFrames` commented out) and
+Experiment 12's `ExternalBeginFrameSourceMac` instrumentation. This builds on
+both.
+
+#### Verification
+
+1. Build and launch — two Shell windows appear (one per profile)
+2. Capture stderr with `--enable-logging=stderr --v=1`
+3. Interact with the google.com window (type in search) to generate damage
+4. Analyze logs:
+   - If `ShouldDraw=false` lines dominate with `needs_draw=0`: damage isn't
+     arriving (renderer starved)
+   - If `ShouldDraw=false` with `root_frame_missing=1`: renderer hasn't
+     activated a surface
+   - If `ShouldSendBeginFrame=false` with `ThrottleUnresponsiveClient` or
+     `StopUnresponsiveClient`: the `BeginFrameTracker` is killing frame delivery
+   - If `ShouldSendBeginFrame=false` with `ThrottleUndrawnFrames`: frames are
+     produced but never drawn
+   - If `DrawAndSwap` fires infrequently: draws happen but are rare
+   - If `BeginFrameTracker THROTTLE/STOP` appears: outstanding frames are
+     building up
+
+The answer will point directly at which throttle mechanism to disable next.
