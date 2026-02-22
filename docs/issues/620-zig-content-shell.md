@@ -1402,3 +1402,39 @@ The next experiment should bisect within this diff: try Experiment 1's code but
 with the `InitializeBrowserContexts` override (single profile created
 explicitly) to determine whether it's the override itself or the second profile
 that causes the throttle.
+
+### Experiment 11: Two windows, same profile
+
+Issue 413 Experiments 5–6 showed that two navigating WebContents from the same
+BrowserContext run at 60fps in the `content_shell` clone. This experiment
+reproduces that finding in the Zig Content Shell framework: take Experiment 10
+(single profile, 60fps) and add a second `Shell::CreateNewWindow` call on the
+same profile.
+
+If smooth: confirms the multi-profile contention from Issue 413.4 is the only
+2fps cause — same-profile multi-window is fine.
+
+If 2fps: something about our framework (the subclass chain, path overrides)
+breaks even same-profile multi-window, which would be a different bug.
+
+#### Changes
+
+**`content_api_shim.mm`** — one-line change to `InitializeMessageLoopContext`:
+
+1. Add a second `Shell::CreateNewWindow` call using `browser_context()` (the
+   same parent-owned profile) with a different URL (example.com).
+
+No other changes. Same header, same BUILD.gn, same single BrowserContext.
+
+#### Verification
+
+1. Two Content Shell windows appear (google.com + example.com)
+2. Check rendering speed — smooth or ~2fps?
+3. Both pages interactive
+
+If smooth: same-profile multi-window works. The next experiment adds a second
+BrowserContext (without navigating) to reproduce 413.3, then adds navigation to
+reproduce 413.4.
+
+If 2fps: the subclass chain or path overrides break multi-window even within one
+profile — investigate.
