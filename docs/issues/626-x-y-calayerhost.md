@@ -575,3 +575,26 @@ was wrong. The actual cause of the Y offset must be something else.
 Experiment 5 should revert to Experiment 3's architecture (frame on the
 `flipped_layer`, CALayerHost at origin) and investigate the Y offset through
 other means.
+
+### Experiment 5: Check IOSurfaceLayer's geometryFlipped
+
+The ~10px Y offset may be caused by a coordinate system mismatch. We set the
+`flipped_layer`'s frame origin in the IOSurfaceLayer's sublayer coordinate
+system. If the IOSurfaceLayer does NOT have `geometryFlipped` (Y=0 at bottom),
+then our `y=60pt` places the flipped layer 60pt from the bottom — not from the
+top as intended. For a 600pt parent with a 464pt layer, that puts the top edge
+at `600 - 60 - 464 = 76pt` from the top instead of 60pt. The 16pt difference is
+approximately one cell (14.5pt).
+
+#### Changes
+
+- `gui/src/renderer/Metal.zig`: In `setCALayerHostContextId`, after creating the
+  flipped layer, log `self.layer.layer.getProperty(bool, "geometryFlipped")` and
+  the IOSurfaceLayer's bounds.
+
+#### Verification
+
+Run the app and read the log. If `geometryFlipped = false`, the Y offset is
+explained and the fix is to Y-flip the flipped layer's position:
+`y = parent_height - y_from_top - h`. If `geometryFlipped = true`, the offset
+has a different cause.
