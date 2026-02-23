@@ -1082,3 +1082,21 @@ Run the app, open a browser overlay at `news.ycombinator.com`, click a link. The
 new page should appear within ~200ms — no visible blank gap. Test multiple
 navigations in sequence. Test cross-site navigation (e.g., a link from HN to an
 external site).
+
+#### Results
+
+**Fail.** The overlay still vanishes for ~10 seconds on navigation. Reducing the
+dedup gate from 10 seconds to 100ms had no effect.
+
+#### Conclusion
+
+The 10-second dedup gate in `RootCompositorFrameSinkImpl` is not the cause. The
+correlation between the 10-second gate duration and the 10-second blank was
+coincidental. The `SetCALayerParams` call frequency does not control when the
+CALayerHost's content becomes visible.
+
+The blank persists for ~10 seconds regardless of how frequently
+`AcceleratedWidgetCALayerParamsUpdated` fires. The root cause is elsewhere —
+possibly in the Window Server's handling of cross-process CAContext/CALayerHost
+connections, or in how the hidden NSWindow's layer tree interacts with the
+compositor output.
