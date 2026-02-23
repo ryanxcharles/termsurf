@@ -299,3 +299,21 @@ This is a Chromium-only change. No GUI changes needed.
 
 Run the app, open a browser overlay, resize the window, then click a link. The
 new page should render at the current pane size, not the original creation size.
+
+#### Results
+
+**Fail.** The new page still renders at the original creation size, not the
+resized size. The fix had no effect.
+
+#### Conclusion
+
+`RenderViewHostChanged` does not fire for the navigations being tested.
+Same-site navigations (e.g., clicking a link on Google) don't swap the
+`RenderViewHost` — the same view persists. Cross-site navigations may also not
+trigger it if site isolation isn't fully enabled in the Profile Server
+configuration. The re-apply code never runs because the hook never fires.
+
+The fix needs a different hook point — one that fires on every navigation, not
+just view swaps. The CALayerParams callback itself is a candidate: when a new
+`ca_context_id` arrives (meaning a new compositor surface was created), re-apply
+the stored size to the current view.
