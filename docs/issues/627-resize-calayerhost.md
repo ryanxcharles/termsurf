@@ -178,11 +178,83 @@ Two things were broken:
    Adding `updateCALayerHostFrame()` to the `size_changed` path in `drawFrame()`
    ensures the layer repositions on every resize.
 
-## Conclusion
+### Experiment 2: Anchor overlay to top edge during resize
 
-Resize was working before the CALayerHost migration. The Issue 625 commit
-accidentally removed `sendResize()` (GUI) and the `"resize"` XPC handler +
-`ResizeCapture()` (Chromium). Restoring both — with `ResizeTab()` replacing
-`ResizeCapture()` since there's no capturer to resize — plus adding a
-`flipped_layer` frame update in `drawFrame()` on size change, fully restores
-resize behavior.
+#### Problem
+
+Resize works, but the overlay is anchored to the bottom of the window. When
+dragging the bottom edge down, the web content slides down with it, then the top
+edge catches up. This looks wrong — the overlay should stay pinned to the
+top-left corner and grow downward.
+
+The cause is the Y-flip formula from Issue 626 Experiment 6:
+
+```zig
+y = parent_bounds.height - y_from_top - h
+```
+
+This positions the `flipped_layer` relative to the **bottom** of the
+IOSurfaceLayer. During a drag-resize, `parent_bounds.height` changes every
+frame, so the layer's distance from the bottom stays constant while its distance
+from the top changes — making it slide with the bottom edge.
+
+#### Solution
+
+Stop setting the frame on `flipped_layer`. Let it auto-fill the parent via its
+existing `autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable`.
+Since `flipped_layer` has `geometryFlipped = YES`, its sublayer coordinate
+system has Y=0 at the **top**. Add a third CALayer (`positioning_layer`) between
+`flipped_layer` and the CALayerHost. Set the explicit frame on
+`positioning_layer` using top-origin Y directly — no flip formula needed. The
+CALayerHost sits inside `positioning_layer` at origin.
+
+**Current layer tree:**
+
+```
+IOSurfaceLayer (Y=0 at bottom)
+└─ flipped_layer (geometryFlipped=YES, auto-fill mask, explicit frame + Y-flip)
+   └─ CALayerHost (at origin)
+```
+
+**Target layer tree:**
+
+```
+IOSurfaceLayer (Y=0 at bottom)
+└─ flipped_layer (geometryFlipped=YES, auto-fills parent, NO explicit frame)
+   └─ positioning_layer (explicit frame at overlay rect, top-origin Y)
+      └─ CALayerHost (at origin)
+```
+
+On resize, `flipped_layer` auto-resizes with the IOSurfaceLayer.
+`positioning_layer` stays at its position relative to the top. No Y-flip, no
+bottom-anchored sliding.
+
+#### Changes
+
+**`gui/src/renderer/Metal.zig`:**
+
+- In `setCALayerHostContextId`: Create `positioning_layer` (plain CALayer) as a
+  sublayer of `flipped_layer`. Move the CALayerHost to be a sublayer of
+  `positioning_layer` instead of `flipped_layer`. Set `anchorPoint = zero` on
+  `positioning_layer`. No autoresizingMask on `positioning_layer` — it gets an
+  explicit frame.
+- In `updateCALayerHostFrame`: Set the frame on `positioning_layer` instead of
+  `flipped_layer`. Use top-origin Y directly
+  (`y = grid_row * cell_height /
+  scale + padding_top / scale`). Remove the
+  Y-flip formula and the `parent_bounds` read.
+- In `removeCALayerHost`: Also remove and release `positioning_layer`.
+- Store the `positioning_layer` pointer.
+
+**`gui/src/renderer/generic.zig`:**
+
+- Add `ca_layer_positioning: ?*anyopaque = null` field.
+- Pass it to `setCALayerHostContextId` and `removeCALayerHost`.
+- In `updateCALayerHostFrame`: Pass `ca_layer_positioning` instead of
+  `ca_layer_flipped`.
+
+#### Verification
+
+Run the app, open a browser overlay, drag the bottom edge of the window down.
+The web content should stay pinned to the top-left and grow downward — no
+sliding. Test dragging all four edges and corners.
