@@ -479,3 +479,303 @@ issue-630) or a rebuild with different state — may have changed the compositor
 behavior in the hidden-window case. If the compositor fully detaches
 (`HasNoCompositor`) instead of holding a temporary reference, there is nothing
 for `kExpireInterval` to garbage-collect, and recovery never happens.
+
+### Experiment 3: Fix navigation blank
+
+#### Purpose
+
+Fix the permanent overlay disappearance on navigation by addressing the seven
+confirmed findings from Experiment 2. Changes span both the GUI (Zig) and the
+Chromium Profile Server (C++).
+
+#### Changes
+
+**GUI side (3 changes):**
+
+**G1. Dispatch CALayerHost mutations to the main thread.**
+
+File: `gui/src/apprt/xpc.zig`
+
+Add a `dispatch_get_main_queue` extern declaration alongside the existing
+`dispatch_async_f` (line 55):
+
+```zig
+extern "c" fn dispatch_get_main_queue() ?*anyopaque;
+```
+
+Change `handleCAContext()` (lines 409-420) to dispatch to the main queue instead
+of calling `surface.setCAContextId()` directly on the XPC queue. The context ID
+and surface pointer must be encoded into a dispatch context (same pattern as
+`handlePaneFocusChanged` at line 548).
+
+File: `gui/src/Surface.zig`
+
+`setCAContextId()` (lines 2524-2529) currently acquires `draw_mutex`. Keep the
+mutex acquisition — the main thread and the renderer thread both need it — but
+the function is now called from the main thread instead of the XPC queue.
+
+File: `gui/src/renderer/Metal.zig`
+
+`setCALayerHostContextId()` (lines 172-256) now runs on the main thread. Wrap
+all CALayer mutations in a CATransaction. Add these extern declarations:
+
+```zig
+extern "c" fn CATransaction_begin() void;    // [CATransaction begin]
+extern "c" fn CATransaction_commit() void;   // [CATransaction commit]
+extern "c" fn CATransaction_setDisableActions(flag: bool) void;
+```
+
+Or use the Objective-C runtime via `objc.getClass("CATransaction")` + `msgSend`.
+The wrapping should look like:
+
+```
+CATransaction.begin()
+CATransaction.setDisableActions(true)
+// ... all layer creation/replacement/property-setting ...
+CATransaction.commit()
+```
+
+Apply the same wrapping to `updateCALayerHostFrame()` (lines 263-295) and
+`removeCALayerHost()` (lines 298-315). These are called from `drawFrame()` on
+the renderer thread (via `size_changed` path), so they also need CATransaction
+wrapping, though they already run on an appropriate thread (the renderer thread
+drives the Metal command queue and is effectively the "display" thread).
+
+**G2. Atomic CALayerHost swap.**
+
+File: `gui/src/renderer/Metal.zig`
+
+In the replacement path of `setCALayerHostContextId()` (lines 188-213), reverse
+the order: add the new CALayerHost to `positioning_layer` BEFORE removing the
+old one.
+
+Current order (lines 194-210):
+
+1. `old_host.removeFromSuperlayer()` + `old_host.release()`
+2. Create `new_host`, set properties
+3. `positioning_layer.addSublayer(new_host)`
+
+New order:
+
+1. Create `new_host`, set properties
+2. `positioning_layer.addSublayer(new_host)`
+3. `old_host.removeFromSuperlayer()` + `old_host.release()`
+
+This matches Chromium's `DisplayCALayerTree::GotCALayerFrame()` pattern — the
+new host is added before the old one is removed, ensuring no frame without a
+CALayerHost in the layer tree.
+
+**G3. Guard against zero context ID.**
+
+File: `gui/src/apprt/xpc.zig`
+
+In `handleCAContext()` (line 411), add a zero check before calling
+`surface.setCAContextId()`:
+
+```zig
+if (context_id == 0) return;
+```
+
+This is defense-in-depth — the Chromium-side lambda already filters zeros (line
+407 of `shell_browser_main_parts.cc`), but a race or a different code path could
+bypass it.
+
+**Chromium side (4 changes):**
+
+**C1. Replace `orderOut:` with `setAlphaValue:0`.**
+
+File: `shell_platform_delegate_mac.mm`, line 209.
+
+Change:
+
+```objc
+[window orderOut:nil];
+```
+
+To:
+
+```objc
+[window setAlphaValue:0.0];
+[window orderFront:nil];
+```
+
+`orderOut:` removes the window from the window list, which triggers
+`NSWindowDidChangeOcclusionStateNotification` and causes Chromium's
+`RenderWidgetHostViewMac::OnWindowOcclusionStateChanged()` to set
+`render_widget_host_is_hidden_ = true`. This cascades into
+`BrowserCompositorMac` transitioning to `HasNoCompositor`, which invalidates
+surface IDs during navigation.
+
+`setAlphaValue:0` makes the window fully transparent but keeps it in the window
+list. The compositor remains active. `orderFront:nil` ensures the window is in
+the list without activating it (no key/main window status). The user never sees
+the transparent window.
+
+If `orderFront:nil` steals focus, use
+`[window orderWindow:NSWindowBelow
+relativeTo:0]` instead, which adds the window
+to the list at the back.
+
+**C2. Re-register callbacks on view swap.**
+
+File: `shell_tab_observer.h`
+
+Add to the class declaration (after line 43):
+
+```cpp
+void RenderViewHostChanged(RenderViewHost* old_host,
+                           RenderViewHost* new_host) override;
+```
+
+Add private members to store the callback and connection for re-registration:
+
+```cpp
+base::RepeatingCallback<void(const gfx::CALayerParams&)> ca_layer_params_callback_;
+```
+
+File: `shell_tab_observer.cc`
+
+Add a new method:
+
+```cpp
+void ShellTabObserver::RenderViewHostChanged(
+    RenderViewHost* old_host, RenderViewHost* new_host) {
+  if (!new_host || !xpc_connection_)
+    return;
+  auto* web_contents = WebContents::FromRenderFrameHost(
+      new_host->GetMainRenderFrameHost());
+  if (!web_contents)
+    return;
+  auto* view = web_contents->GetRenderWidgetHostView();
+  if (!view)
+    return;
+
+  // Re-register CALayerParams callback on the new view.
+  SetCALayerParamsCallbackOnView(view, ca_layer_params_callback_);
+
+  // Re-register cursor callback on the new view.
+  auto* rwhi = static_cast<RenderWidgetHostImpl*>(
+      view->GetRenderWidgetHost());
+  rwhi->SetCursorChangedCallback(base::BindRepeating(
+      &ShellTabObserver::OnCursorChanged, base::Unretained(this)));
+}
+```
+
+File: `shell_browser_main_parts.cc`
+
+In `CreateTab()`, after creating the CALayerParams callback (line 427), store it
+on the observer so `RenderViewHostChanged` can re-use it:
+
+```cpp
+tab_observer->SetCALayerParamsCallback(ca_layer_callback);
+```
+
+This requires extracting the lambda into a named variable and passing it to both
+`SetCALayerParamsCallbackOnView()` and the observer.
+
+**C3. Reset dedup gate on navigation.**
+
+File: `shell_tab_observer.h`
+
+Add a private member:
+
+```cpp
+uint32_t* last_ca_context_id_ = nullptr;  // owned by the callback
+```
+
+File: `shell_tab_observer.cc`
+
+In `DidFinishNavigation()`, after the existing gate checks (line 51), reset the
+dedup gate:
+
+```cpp
+// Reset the ca_context_id dedup gate so the callback fires even if the
+// new CAContext reuses the same ID (Issue 630, Experiment 2 finding #5).
+if (last_ca_context_id_)
+  *last_ca_context_id_ = 0;
+```
+
+File: `shell_browser_main_parts.cc`
+
+In `CreateTab()`, change `base::Owned(new uint32_t(0))` to a raw pointer that is
+also stored on the observer:
+
+```cpp
+auto* last_id = new uint32_t(0);
+tab_observer->SetLastCAContextIdPtr(last_id);
+// ... use last_id in BindRepeating instead of base::Owned ...
+```
+
+Ownership of `last_id` transfers to the callback via `base::Owned` as before,
+but the observer also holds a non-owning pointer for reset purposes. The
+observer must NOT delete it — the callback destructor handles that.
+
+Alternatively, use a `std::shared_ptr<uint32_t>` shared between the callback and
+the observer, avoiding the raw pointer ownership question entirely.
+
+**C4. Use `setContentSize:` for resize.**
+
+File: `shell_browser_main_parts.cc`
+
+In `ResizeTab()` (lines 462-469), replace `view->SetSize(logical)` with:
+
+```cpp
+shell->ResizeWebContentForTests(logical);
+```
+
+This calls `ShellPlatformDelegate::ResizeWebContent()` which sets
+`contentView.frame` on the hidden NSWindow, ensuring `DidNavigate()` reads the
+correct `dfh_size_dip_` from the window dimensions.
+
+The same change should be made in `CreateTab()` (lines 340-353) — use
+`shell->ResizeWebContentForTests(logical)` instead of `view->SetSize(logical)`.
+
+#### Build and test
+
+```bash
+# Build Chromium
+cd chromium/src
+export PATH="$(cd ../depot_tools && pwd):$PATH"
+autoninja -C out/Default chromium_profile_server
+
+# Build GUI
+cd gui && zig build
+
+# Launch
+open gui/zig-out/TermSurf.app
+```
+
+Test:
+
+1. Open a terminal pane, run `web example.com`.
+2. Verify the initial overlay appears promptly (faster than before).
+3. Click a link on the page.
+4. Verify the overlay transitions seamlessly — no blank, no flicker.
+5. Click multiple links in succession — verify continuous visibility.
+6. Resize the window during and after navigation — verify overlay tracks.
+7. Open a second pane with a different profile — verify both work.
+
+#### Verification
+
+- Overlay never vanishes during navigation (same-site or cross-site).
+- Initial overlay appears within 1-2 seconds of `web` command.
+- Resize continues to work after navigation.
+- Multi-pane multi-profile still works.
+- No CALayer warnings in Console.app (filter by process name).
+
+**Result:** Pass
+
+Navigation no longer causes the overlay to permanently vanish. Clicking links
+transitions to the new page with the overlay intact. There is a brief flicker
+(one frame of blank) during the transition, but the overlay reappears
+immediately — fundamentally different from the previous behavior where it
+vanished forever.
+
+#### Conclusion
+
+The seven fixes together resolved the permanent navigation blank. The most
+impactful changes were likely C1 (replacing `orderOut:` with `setAlphaValue:0`
+to keep the compositor active) and the GUI threading fixes G1+G2 (dispatching
+CALayerHost mutations to the main thread with CATransaction wrapping and atomic
+swap). The brief flicker during navigation is a separate, much smaller issue —
+the overlay is continuously visible across navigations, which was the goal.

@@ -53,6 +53,7 @@ extern const _xpc_error_connection_invalid: anyopaque;
 
 extern "c" fn dispatch_queue_create(label: [*:0]const u8, attr: ?*anyopaque) ?*anyopaque;
 extern "c" fn dispatch_async_f(queue: ?*anyopaque, context: ?*anyopaque, work: *const fn (?*anyopaque) callconv(.c) void) void;
+extern const _dispatch_main_q: anyopaque;
 extern "c" fn xpc_connection_set_target_queue(connection: xpc_object_t, queue: ?*anyopaque) void;
 
 
@@ -412,9 +413,27 @@ fn handleCAContext(msg: xpc_object_t) void {
 
     log.info("ca_context pane={s} context_id={}", .{ pane_id, context_id });
 
+    // Guard against zero context ID (Issue 630, fix G3).
+    if (context_id == 0) return;
+
     if (panes.get(pane_id)) |p| {
         if (p.overlay_surface) |surface| {
-            surface.setCAContextId(context_id);
+            // Dispatch CALayerHost creation to the main thread (Issue 630,
+            // fix G1). Core Animation requires all layer-tree mutations on
+            // the main thread.
+            const Ctx = struct {
+                surf: *CoreSurface,
+                ctx_id: u32,
+
+                fn dispatch(raw: ?*anyopaque) callconv(.c) void {
+                    const self: *@This() = @ptrCast(@alignCast(raw));
+                    self.surf.setCAContextId(self.ctx_id);
+                    std.heap.c_allocator.destroy(self);
+                }
+            };
+            const ctx = std.heap.c_allocator.create(Ctx) catch return;
+            ctx.* = .{ .surf = surface, .ctx_id = context_id };
+            dispatch_async_f(@constCast(&_dispatch_main_q), @ptrCast(ctx), &Ctx.dispatch);
         }
     }
 }
