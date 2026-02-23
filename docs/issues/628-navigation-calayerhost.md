@@ -865,3 +865,83 @@ rendering. Something is fundamentally blocking or delaying the compositor output
 pipeline during navigation. The next experiment needs empirical data — add
 logging to trace exactly what happens: when does the compositor stop producing
 frames, when does it resume, and what triggers the resume.
+
+### Experiment 7: Add logging to trace the navigation blank
+
+#### Problem
+
+Six experiments of analysis have not identified the root cause. Hypotheses about
+callback timing, fallback surfaces, and visibility checks have all failed to
+explain the blank. We need empirical data from the running system to understand
+what actually happens during navigation.
+
+#### Approach
+
+Add logging at every point in the pipeline to build a timeline of what happens
+when the user clicks a link. The logs will answer:
+
+1. When does the CALayerParams callback stop firing?
+2. When does it resume?
+3. Does the `ca_context_id` change?
+4. What is the compositor state during navigation?
+5. Is `render_widget_host_is_hidden_` true or false?
+6. How long is the gap between the last old-page callback and the first new-page
+   callback?
+
+#### Changes
+
+**`chromium/.../shell_tab_observer.cc` — CALayerParams callback:**
+
+Log ALL invocations, not just new `ca_context_id` values. Currently the callback
+silently returns when `ca_context_id == 0` or `ca_context_id == last_id`. Add
+logging before the early return so we can see every callback, including filtered
+ones. Include the `ca_context_id`, `pixel_size`, `is_empty`, and whether the
+callback was filtered.
+
+```cpp
+[](ShellTabObserver* observer, const gfx::CALayerParams& params) {
+    bool filtered = (params.ca_context_id == 0 ||
+                     params.ca_context_id == observer->last_ca_context_id_);
+    LOG(INFO) << "[CALayerParams] pane=" << observer->pane_id_
+              << " ca_context_id=" << params.ca_context_id
+              << " size=" << params.pixel_size.width()
+              << "x" << params.pixel_size.height()
+              << " empty=" << params.is_empty
+              << (filtered ? " FILTERED" : " NEW");
+    if (filtered)
+        return;
+    // ... existing send logic ...
+}
+```
+
+**`chromium/.../browser_compositor_view_mac.mm` — DidNavigate():**
+
+Log the compositor state when navigation fires:
+
+```cpp
+LOG(INFO) << "[BrowserCompositorMac] DidNavigate"
+          << " hidden=" << render_widget_host_is_hidden_
+          << " state=" << state_
+          << " first_nav=" << is_first_navigation_;
+```
+
+**`chromium/.../render_widget_host_view_mac.mm` —
+AcceleratedWidgetCALayerParamsUpdated():**
+
+Log when params are delivered to our callback, and whether params exist:
+
+```cpp
+LOG(INFO) << "[RWHVM] AcceleratedWidgetCALayerParamsUpdated"
+          << " has_params=" << (ca_layer_params != nullptr)
+          << " has_callback=" << (!!ca_layer_params_callback_);
+```
+
+This will fire at vsync rate, so it will be verbose. But during the blank period
+we need to see whether it stops firing entirely or continues with empty params.
+
+#### Verification
+
+Run the app, open a browser overlay, click a link. Examine the logs for the
+timeline between navigation start and the overlay reappearing. The logs should
+reveal the exact gap — when the compositor stops delivering params, whether the
+callback is still registered, and what triggers the resumption.
