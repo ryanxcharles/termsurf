@@ -389,3 +389,107 @@ Look at `RenderWidgetHostViewMac` lifecycle during navigation.
 Research is complete when we can answer all four questions and propose a
 concrete fix based on how Electron/Chromium maintains view size across
 navigation.
+
+#### Results
+
+**Pass.** All four questions answered.
+
+**R1: Does Electron call `view->SetSize()` at all?**
+
+Yes. Electron explicitly calls `SetSize()` on its off-screen
+`RenderWidgetHostView` whenever the window resizes. It does NOT rely on NSView
+auto-layout. The call chain: `NativeWindow::NotifyWindowResize()` →
+`OffScreenWebContentsView::OnWindowResize()` → `view->SetSize(GetSize())`. The
+macOS NSView is a dummy placeholder — all sizing is explicit and programmatic.
+
+Key files:
+
+- `vendor/electron/shell/browser/osr/osr_web_contents_view.cc:62-66`
+- `vendor/electron/shell/browser/osr/osr_render_widget_host_view.cc:289-296`
+
+**R2: How does Chromium's normal display path handle view sizing?**
+
+The RWHV gets its initial size from `SetParentWebContentsNSView()`, which copies
+the parent's bounds and sets
+`autoresizingMask = NSViewWidthSizable |
+NSViewHeightSizable` on the Cocoa view.
+After that, autoresizing keeps the view sized to its parent automatically. When
+the NSView frame changes (from autoresizing or explicit `SetBounds`),
+`setFrameSize:` fires → `sendViewBoundsInWindowToHost` →
+`OnBoundsInWindowChanged()` → `UpdateScreenInfo()` →
+`UpdateSurfaceFromNSView()`. This updates `dfh_size_dip_` in
+`BrowserCompositorMac`, which is the size used when creating new compositor
+surfaces.
+
+Key files:
+
+- `chromium/src/content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.mm:94-108`
+- `chromium/src/content/app_shim_remote_cocoa/render_widget_host_view_cocoa.mm:1763-1766`
+- `chromium/src/content/browser/renderer_host/render_widget_host_view_mac.mm:894-942`
+
+**R3: Why does content_shell need explicit `SetSize()` calls?**
+
+Our `SetContents` in `shell_platform_delegate_mac.mm` adds the web view to the
+hidden NSWindow's contentView with
+`autoresizingMask = NSViewWidthSizable |
+NSViewHeightSizable`. But `ResizeTab()`
+only calls `view->SetSize()` — it never resizes the hidden NSWindow itself. This
+creates a mismatch: the NSView frame is set to the new size via `SetBounds()`,
+but the NSWindow remains at its creation size. The autoresizing mask ties the
+web view to the window's contentView bounds, so the NSView frame and the window
+are inconsistent.
+
+Resizing the NSWindow instead of (or in addition to) calling `view->SetSize()`
+would let the normal autoresizing chain propagate size correctly: NSWindow
+resize → contentView resize → web_view autoresize → `setFrameSize:` →
+`sendViewBoundsInWindowToHost` → `OnBoundsInWindowChanged` → `UpdateScreenInfo`
+→ `UpdateSurfaceFromNSView`.
+
+Key files:
+
+- `chromium/src/content/chromium_profile_server/browser/shell_platform_delegate_mac.mm:229-245`
+- `chromium/src/content/chromium_profile_server/browser/shell_browser_main_parts.cc:417-452`
+
+**R4: Does the `RenderWidgetHostView` survive same-site navigation?**
+
+Yes. Same-site navigations reuse the current `RenderFrameHost` and its
+`RenderWidgetHostView`. The view is the same object — it is not destroyed and
+recreated. The `ca_context_id` changes because
+`BrowserCompositorMac::DidNavigate()` generates a new `LocalSurfaceId`, which
+creates a new compositor surface. The new surface is created with
+`dfh_size_dip_` — whatever size `BrowserCompositorMac` thinks the view is.
+
+This is the root cause: `DidNavigate()` calls `EmbedSurface()` with
+`dfh_size_dip_`. If `dfh_size_dip_` reflects the NSWindow's contentView bounds
+(from autoresizing) rather than the explicitly-set view size, the new surface
+will be created at the wrong size.
+
+Key files:
+
+- `chromium/src/content/browser/renderer_host/browser_compositor_view_mac.mm:341-361`
+- `chromium/src/content/browser/renderer_host/render_frame_host_manager.cc:1865-2021`
+
+#### Conclusion
+
+The stale-size-after-navigation bug has a clear root cause.
+
+`ResizeTab()` calls `view->SetSize()` which sets the NSView frame and updates
+`dfh_size_dip_` via the bounds-change callback chain. This works initially — the
+page renders at the correct size. But the hidden NSWindow remains at its
+creation size. The web view has `autoresizingMask` tying it to the window's
+contentView, creating tension between the explicitly-set frame and the
+autoresizing constraint.
+
+During navigation, `BrowserCompositorMac::DidNavigate()` creates a new
+compositor surface using `dfh_size_dip_`. If the autoresizing constraint has
+pulled the NSView back to the window size, or if `dfh_size_dip_` was reset
+during the navigation lifecycle, the new surface renders at the wrong (original)
+size.
+
+The fix is to resize the hidden NSWindow in `ResizeTab()` instead of calling
+`view->SetSize()` directly. When the NSWindow resizes, the autoresizing chain
+propagates naturally: contentView → web_view → RWHV Cocoa view → `setFrameSize:`
+→ `sendViewBoundsInWindowToHost` → `OnBoundsInWindowChanged` →
+`UpdateScreenInfo` → `UpdateSurfaceFromNSView`. This updates `dfh_size_dip_`
+through the standard Chromium path, and the size survives navigation because the
+NSWindow stays at the correct size.
