@@ -511,3 +511,132 @@ There are two testable hypotheses for the next experiment:
 
 Research is complete when all five questions are answered and we have testable
 hypotheses for the next experiment.
+
+### Experiment 3: Disable the hidden window's DisplayCALayerTree
+
+#### Problem
+
+Experiment 2 found that the hidden window's `DisplayCALayerTree` is never
+disabled in the Chromium Profile Server. In stock Chrome, `DisableDisplay()` is
+called via `SetParentUiLayer()` to destroy the `DisplayCALayerTree` when the
+Views compositor takes over. In our content_shell-based server, this never
+happens, so the hidden window creates a competing `CALayerHost` for every
+`ca_context_id`.
+
+#### Hypothesis
+
+The hidden window's `CALayerHost` interferes with the GUI's `CALayerHost`.
+Calling `DisableDisplay()` on the `RenderWidgetHostNSViewBridge` will destroy
+the hidden window's `DisplayCALayerTree`, ensuring only the GUI's `CALayerHost`
+connects to each `CAContext`. This should eliminate the ~10-second blank during
+navigation.
+
+#### Chromium branch
+
+Create `146.0.7650.0-issue-629` from `146.0.7650.0-issue-627` (discarding Issue
+628's branch, which has 5 commits that all failed).
+
+#### Changes
+
+**File 1: `content/browser/renderer_host/render_widget_host_view_mac.h`**
+
+Add a public method to expose `DisableDisplay()`:
+
+```cpp
+// Disable the NSView's DisplayCALayerTree so it doesn't create a competing
+// CALayerHost. Used by Chromium Profile Server (Issue 629).
+void DisableNSViewDisplay();
+```
+
+Add near line 110, next to the existing `SetCALayerParamsCallback()` TermSurf
+addition.
+
+**File 2: `content/browser/renderer_host/render_widget_host_view_mac.mm`**
+
+Implement the wrapper:
+
+```cpp
+void RenderWidgetHostViewMac::DisableNSViewDisplay() {
+  ns_view_->DisableDisplay();
+}
+```
+
+Add near the existing `SetCALayerParamsCallback()` implementation (around line
+156).
+
+**File 3:
+`content/chromium_profile_server/browser/shell_ca_layer_bridge_mac.h`**
+
+Add a bridge function declaration:
+
+```cpp
+// Disable the NSView's DisplayCALayerTree to prevent a competing
+// CALayerHost in the hidden window (Issue 629).
+void DisableDisplayOnView(RenderWidgetHostView* view);
+```
+
+**File 4:
+`content/chromium_profile_server/browser/shell_ca_layer_bridge_mac.mm`**
+
+Implement the bridge:
+
+```cpp
+void DisableDisplayOnView(RenderWidgetHostView* view) {
+  auto* mac_view = static_cast<RenderWidgetHostViewMac*>(view);
+  mac_view->DisableNSViewDisplay();
+}
+```
+
+**File 5: `content/chromium_profile_server/browser/shell_tab_observer.cc`**
+
+Call `DisableDisplayOnView()` at the start of `RegisterCALayerParamsCallback()`,
+before setting the callback:
+
+```cpp
+void ShellTabObserver::RegisterCALayerParamsCallback() {
+  if (!web_contents())
+    return;
+  auto* view = web_contents()->GetRenderWidgetHostView();
+  if (!view)
+    return;
+
+  // Disable the hidden window's DisplayCALayerTree so it doesn't create
+  // a competing CALayerHost for the same CAContext (Issue 629).
+  DisableDisplayOnView(view);
+
+  // Reset deduplication so the new view's first ca_context_id always gets sent.
+  last_ca_context_id_ = 0;
+
+  SetCALayerParamsCallbackOnView(view, base::BindRepeating(...));
+  // ... rest unchanged
+}
+```
+
+This is called both at initial tab setup and on `RenderViewHostChanged()`, so
+every new `RenderWidgetHostView` gets its `DisplayCALayerTree` disabled before
+any `SetCALayerParams()` calls arrive.
+
+#### Expected effect
+
+After the change, `AcceleratedWidgetCALayerParamsUpdated()` becomes:
+
+```
+AcceleratedWidgetCALayerParamsUpdated()
+  ├── ns_view_->SetCALayerParams()       // Returns early (display_disabled_)
+  └── ca_layer_params_callback_()        // Our hook: sends over XPC
+      └── (async) GUI creates CALayerHost // ONLY host for this CAContext
+```
+
+The hidden window's `DisplayCALayerTree` is destroyed. No `CALayerHost` is
+created in the hidden window. Only the GUI's `CALayerHost` connects to the
+`CAContext`. This matches how stock Chrome operates when the Views compositor
+takes over.
+
+#### Verification
+
+1. Build the Chromium Profile Server
+   (`autoninja -C out/Default chromium_profile_server`).
+2. Launch TermSurf and open a page (e.g., `web google.com`).
+3. Click a link on the page.
+4. **Pass:** The new page appears within ~1 second (no 10-second blank).
+5. **Fail:** The ~10-second blank persists — the dual-host hypothesis is wrong.
