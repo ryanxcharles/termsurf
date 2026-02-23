@@ -1032,3 +1032,327 @@ blank.
 
 **Fail:** All 20 items come back clean — the code is correct and the problem is
 entirely in Chromium internals or Window Server behavior.
+
+#### Chromium revert
+
+All Experiment 3 code changes reverted on `146.0.7650.0-issue-629`:
+
+- `render_widget_host_view_mac.h` — removed `DisableNSViewDisplay()` declaration
+- `render_widget_host_view_mac.mm` — removed `DisableNSViewDisplay()`
+  implementation
+- `shell_ca_layer_bridge_mac.h` — removed `DisableDisplayOnView()` declaration
+- `shell_ca_layer_bridge_mac.mm` — removed `DisableDisplayOnView()`
+  implementation
+- `shell_browser_main_parts.cc` — removed the `DisableDisplayOnView(view)` call
+
+#### Results
+
+**Item 1: Callback survival across navigation — CONFIRMED BUG (latent)**
+
+The CALayerParams callback is registered once in `CreateTab()`
+(`shell_browser_main_parts.cc:404-427`) on the initial `RenderWidgetHostView`.
+`ShellTabObserver` does NOT implement `RenderViewHostChanged` or
+`RenderFrameHostChanged`. On cross-site navigation with site isolation, Chromium
+creates a new `RenderWidgetHostView` and destroys the old one. The callback is
+on the old view and is lost. Nobody re-registers it on the new view.
+
+However, the Chromium Profile Server is content_shell-based and does not enable
+strict site isolation. Same-site navigations reuse the `RenderWidgetHostView`.
+Most test navigations (clicking a link on google.com results page) are
+cross-origin, but without site isolation the view is not swapped. This is a
+confirmed latent bug that will surface when site isolation is enabled, but is
+**probably not the cause of the current ~10-second blank**.
+
+**Fix:** Add `RenderViewHostChanged()` to `ShellTabObserver` that re-registers
+both the CALayerParams callback and the cursor callback on the new view.
+
+**Item 2: ca_context_id transition handling in the GUI — NOT AN ISSUE**
+
+`Metal.zig:188-213` properly handles the replacement path:
+
+1. Removes old host from positioning layer (`removeFromSuperlayer` + `release`)
+2. Creates new `CALayerHost` with new `contextId`
+3. Adds new host to existing positioning layer
+4. Updates the stored pointer
+
+The positioning layer and flipped layer are preserved (not recreated). The
+removal-then-addition is synchronous within the same function call. This matches
+Chromium's `DisplayCALayerTree::GotCALayerFrame()` pattern.
+
+**Item 3: Hidden window visibility state — INCONCLUSIVE**
+
+The Chromium Profile Server hides its NSWindow via `[window orderOut:nil]`
+(`shell_platform_delegate_mac.mm:209`). This could trigger `WasOccluded()` →
+`SetRenderWidgetHostIsHidden(true)` on the `RenderWidgetHostViewMac`. If
+`render_widget_host_is_hidden_` is true:
+
+1. `BrowserCompositorMac::UpdateState()` transitions to `HasNoCompositor`
+2. `DidNavigate()` invalidates the surface ID instead of generating a new one
+3. No new surface is embedded, no frames are submitted
+
+This would explain the blank: the compositor pipeline is torn down on
+navigation. Recovery might happen when the 10-second `kExpireInterval` fires in
+the Surface Manager (item 10).
+
+However, this contradicts Issue 628 Experiment 7's finding that the new
+`ca_context_id` arrives within 100ms. If the compositor were truly detached, no
+`ca_context_id` would be produced. Either: (a) `[window orderOut:nil]` does NOT
+trigger `render_widget_host_is_hidden_` for a borderless window that was never
+shown, or (b) the initial tab creation path avoids the hidden flag because the
+window already exists when the first tab is created.
+
+**Needs diagnostic logging** in `BrowserCompositorMac::UpdateState()` and
+`DidNavigate()` to confirm whether `render_widget_host_is_hidden_` is true.
+
+**Item 4: Competing CALayerHost during transition — NOT AN ISSUE**
+
+Experiment 3 disproved this hypothesis. Removing the hidden window's
+`DisplayCALayerTree` (which eliminates the competing `CALayerHost`) made things
+worse — the navigated page never appeared at all. The hidden window's host is
+necessary for the compositor pipeline to function.
+
+**Item 5: IOSurface overlay lifecycle on blank — NOT AN ISSUE**
+
+When the old `CAContext` dies and the new one hasn't produced content yet, the
+GUI's `CALayerHost` shows nothing (transparent). This is expected behavior
+during the transition. The renderer doesn't need to detect or respond to this —
+the new `CALayerHost` will display content when the new `CAContext` starts
+producing frames.
+
+**Item 6: Shell tab observer navigation hooks — CONFIRMED BUG (latent)**
+
+`ShellTabObserver` implements only:
+
+- `DidFinishNavigation`
+- `DidStartLoading`
+- `DidStopLoading`
+- `LoadProgressChanged`
+- `DidFailLoad`
+
+It does NOT implement `RenderViewHostChanged` or `RenderFrameHostChanged`.
+`Shell` implements `PrimaryPageChanged` but only calls
+`DidNavigatePrimaryMainFramePostCommit()` on the platform delegate, which is a
+no-op (`shell_platform_delegate_mac.mm:333-335`).
+
+This means there is no code anywhere that re-registers callbacks after a view
+swap. Same analysis as item 1 — latent bug, not the immediate cause.
+
+**Fix:** Same as item 1.
+
+**Item 7: Same-origin vs cross-origin behavior — NOT RELEVANT**
+
+Without site isolation in content_shell, the `RenderWidgetHostView` is reused
+for both same-site and cross-site navigations. The CALayerParams callback
+survives. Whether the test navigation is same-origin or cross-origin doesn't
+matter for the current bug.
+
+**Item 8: Frame production gap — NOT AN ISSUE**
+
+Issue 628 Experiment 7 confirmed the new `ca_context_id` arrives within 100ms of
+clicking a link. The compositor is not paused during the navigation transition.
+The frame production gap is negligible.
+
+**Item 9: XPC message ordering — NOT AN ISSUE**
+
+`url_changed` is sent from `DidFinishNavigation()` on the UI thread.
+`ca_context` is sent from `AcceleratedWidgetCALayerParamsUpdated()`. Both go to
+the same XPC connection. The GUI's `handleCAContext()` and `handleUrlChanged()`
+are independent handlers — neither assumes the other has already fired. No
+ordering dependency exists.
+
+**Item 10: 10-second surface reference expiration — INCONCLUSIVE**
+
+`SurfaceManager::kExpireInterval = base::Seconds(10)` matches the ~10-second
+blank exactly. If the hidden window's compositor doesn't properly claim new
+surfaces after navigation (because `render_widget_host_is_hidden_` causes
+`DidNavigate()` to invalidate the surface ID instead of embedding), temporary
+references would expire after 10 seconds, triggering surface garbage collection.
+This could cause the compositor to re-embed, generating a new `ca_context_id`.
+
+This theory depends on item 3 (hidden window compositor detachment) being true.
+If the compositor is NOT detached, this is irrelevant.
+
+**Item 11: Hardcoded delays or sleeps — NOT AN ISSUE**
+
+No sleeps, `dispatch_after`, `PostDelayedTask`, or timer-based delays found in
+any TermSurf browser integration code. The only sleeps in the GUI codebase are
+in upstream Ghostty code (terminal I/O, fork handling) — unrelated to the
+overlay pipeline.
+
+**Item 12: Polling loops — NOT AN ISSUE**
+
+No polling loops found in the browser integration code.
+
+**Item 13: Recreating objects that should be reused — NOT AN ISSUE**
+
+`Metal.zig` creates a new `CALayerHost` on every `ca_context_id` change (line
+200). This matches Chromium's `DisplayCALayerTree::GotCALayerFrame()` behavior —
+it also creates a new host rather than updating `contextId` on the existing one.
+The positioning layer and flipped layer are correctly reused.
+
+**Item 14: Ignored return values — MINOR (not the cause)**
+
+`xpc_connection_send_message` returns void (fire-and-forget). ObjC `msgSend`
+calls for `removeFromSuperlayer` and `addSublayer:` return void. The
+`getClass`/`sel` calls are checked with `orelse` guards that log warnings and
+return early. No dangerous ignored return values.
+
+**Item 15: CALayer mutations from background thread — CONFIRMED ISSUE**
+
+All CALayerHost creation, replacement, and removal happens on the XPC serial
+dispatch queue (`com.termsurf.ghost.xpc`), **not the main thread**. The call
+chain:
+
+```
+XPC serial queue (background)
+  → handleCAContext() [xpc.zig:409]
+    → surface.setCAContextId() [Surface.zig:2524] (acquires draw_mutex)
+      → renderer.setCALayerHostContextId() [generic.zig:841]
+        → Metal.setCALayerHostContextId() [Metal.zig:172]
+          → removeFromSuperlayer, release, [CALayerHost layer], addSublayer:
+```
+
+Apple's documentation states CALayer modifications should happen on the main
+thread. On the main thread, implicit `CATransaction`s are committed at the end
+of each run loop iteration by Core Animation. On a background GCD queue without
+a run loop, implicit transactions may not commit automatically.
+
+The initial `setCAContextId` call also happens from this background queue and
+works correctly. The difference during navigation is that the replacement path
+removes the old host (causing the overlay to go blank) and adds the new host in
+the same call. If the `CATransaction` commit is delayed or deferred until the
+main thread's next run loop iteration, the removal takes visual effect
+immediately (because the layer is gone from the tree) but the addition might not
+take visual effect until the transaction commits.
+
+This is unlikely to cause a 10-SECOND delay on its own. But combined with the
+hidden window's `CAContext` lifecycle (item 3), background-thread layer
+mutations could exacerbate timing issues.
+
+Chromium's `DisplayCALayerTree` wraps its `CALayerHost` operations in
+`ScopedCAActionDisabler` (which disables implicit animations) and runs on the
+main thread. Our code does neither.
+
+**Fix:** Dispatch CALayerHost creation/replacement to the main thread, and wrap
+in `[CATransaction begin]` / `[CATransaction commit]` with
+`[CATransaction setDisableActions:YES]`.
+
+**Item 16: One-shot setup that should be per-navigation — CONFIRMED BUG
+(latent)**
+
+Same as items 1 and 6. Both the CALayerParams callback
+(`shell_browser_main_parts.cc:404-427`) and the cursor callback
+(`shell_browser_main_parts.cc:394-396`) are registered once in `CreateTab()`.
+Neither is re-registered after a view swap.
+
+**Item 17: Stale Mach port / pointer references — NOT AN ISSUE**
+
+`tab->shell->web_contents()` returns the same `WebContents` throughout the tab's
+lifetime (WebContents survives navigation). In `ResizeTab()`,
+`HandleMouseEvent()`, `HandleKeyEvent()`, etc., the code calls
+`GetRenderWidgetHostView()` fresh each time — this returns the current (possibly
+new) view. No stale pointers.
+
+**Item 18: Missing cleanup on old resources — NOT AN ISSUE**
+
+`Metal.zig:193-195` properly removes the old `CALayerHost`:
+`removeFromSuperlayer` detaches it from the layer tree, `release` drops the
+retain count. The positioning layer is reused, not leaked. Old `CAContext`
+cleanup is handled by Chromium's GPU process when the `CALayerTreeCoordinator`
+destructor runs.
+
+**Item 19: Swallowed errors — MINOR (not the cause)**
+
+- `queueRender() catch {}` in `Surface.zig:2507,2543` silently swallows render
+  queue failures. These are unlikely to fail in practice.
+- `generic.zig:851` returns early if `ca_layer_positioning` is null — correct
+  behavior, not an error.
+- `xpc.zig:415-419` returns silently if pane not found — correct for
+  out-of-order messages.
+
+None of these could cause the 10-second blank.
+
+**Item 20: Assumptions about ordering or timing — NOT AN ISSUE**
+
+`setCAContextId()` calls `setCALayerHostContextId()` then
+`updateCALayerHostFrame()` synchronously under `draw_mutex`. The frame update
+requires `ca_layer_positioning` to exist (early return if null). In practice,
+`setOverlay()` (from `web` TUI) always arrives before `ca_context` (from
+Chromium), so the positioning layer exists when `setCAContextId()` is called.
+Both handlers run on the same serial XPC queue, so there's no race.
+
+#### Findings ranked by likelihood
+
+1. **Item 3 + Item 10: Hidden window compositor detachment + 10-second surface
+   expiration.** If `[window orderOut:nil]` causes
+   `render_widget_host_is_hidden_ = true`, the compositor is detached during
+   navigation. `DidNavigate()` invalidates the surface ID. No new surface is
+   embedded. The surface manager's 10-second `kExpireInterval` triggers cleanup
+   and eventual recovery. This perfectly explains both the blank and its
+   consistent ~10-second duration. **INCONCLUSIVE — needs diagnostic logging.**
+
+2. **Item 15: CALayer mutations from background thread.** All CALayerHost
+   operations happen on a GCD queue that is not the main thread. `CATransaction`
+   commits may be delayed. Chromium uses `ScopedCAActionDisabler` and runs on
+   the main thread — we do neither. This could contribute to the blank but
+   unlikely to cause a 10-second delay on its own. **CONFIRMED ISSUE — should be
+   fixed regardless.**
+
+3. **Items 1/6/16: Missing RenderViewHostChanged.** The CALayerParams callback
+   and cursor callback are registered once and never re-registered after a view
+   swap. This will cause permanent blank (not 10-second blank) on cross-site
+   navigation with site isolation. Currently latent because content_shell
+   doesn't enable strict site isolation. **CONFIRMED BUG (latent) — should be
+   fixed.**
+
+#### Conclusion
+
+**Pass.** Three confirmed issues found. Two are latent bugs (items 1/6/16:
+missing callback re-registration). One is an active code quality issue (item 15:
+background-thread CALayer mutations). One strong hypothesis remains inconclusive
+(items 3+10: hidden window compositor detachment + surface expiration).
+
+The next experiment should add diagnostic logging to confirm whether
+`render_widget_host_is_hidden_` is true in the Chromium Profile Server. If
+confirmed, the fix is straightforward: call `ShowWithVisibility(VISIBLE)` on the
+`RenderWidgetHostViewMac` after `[window orderOut:nil]`, or intercept the
+`WasOccluded()` call to prevent it from setting the hidden flag.
+
+## Conclusion
+
+Five experiments investigated the ~10-second navigation blank in CALayerHost.
+The first four focused on Chromium internals — CAContext lifecycle, dual
+CALayerHost interference, `DisableDisplay()`, and timer audits. None explained
+the blank. Experiment 5 turned the audit inward on TermSurf's own code and
+produced the strongest leads.
+
+### Primary hypothesis: hidden window compositor detachment
+
+The Chromium Profile Server hides its NSWindow via `[window orderOut:nil]`. This
+likely sets `render_widget_host_is_hidden_ = true` on the
+`RenderWidgetHostViewMac`, which causes `BrowserCompositorMac` to transition to
+`HasNoCompositor`. During navigation, `DidNavigate()` then invalidates the
+surface ID instead of generating a new one — no new surface is embedded, no
+frames are submitted. The surface manager's
+`kExpireInterval = base::Seconds(10)` eventually garbage-collects the orphaned
+temporary reference, triggering recovery. This explains both the blank and its
+consistent ~10-second duration.
+
+This remains unverified. The next step is diagnostic logging in
+`BrowserCompositorMac::UpdateState()` and `DidNavigate()` to confirm whether
+`render_widget_host_is_hidden_` is true.
+
+### Confirmed bugs
+
+1. **CALayer mutations from background thread.** All CALayerHost
+   creation/replacement happens on the XPC serial GCD queue, not the main
+   thread. No `CATransaction` wrapping, no `ScopedCAActionDisabler`. Chromium
+   does both. This violates Apple's threading model for Core Animation and could
+   cause delayed or missed visual updates.
+
+2. **Missing `RenderViewHostChanged` in `ShellTabObserver`.** The CALayerParams
+   callback and cursor callback are registered once in `CreateTab()` on the
+   initial `RenderWidgetHostView`. Nobody re-registers them after a view swap.
+   Currently latent (content_shell doesn't enable strict site isolation), but
+   will cause permanent blank on cross-site navigation when site isolation is
+   enabled.
