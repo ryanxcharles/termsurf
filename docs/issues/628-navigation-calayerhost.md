@@ -493,3 +493,54 @@ propagates naturally: contentView → web_view → RWHV Cocoa view → `setFrame
 `UpdateScreenInfo` → `UpdateSurfaceFromNSView`. This updates `dfh_size_dip_`
 through the standard Chromium path, and the size survives navigation because the
 NSWindow stays at the correct size.
+
+### Experiment 4: Resize the NSWindow instead of calling view->SetSize()
+
+#### Problem
+
+`ResizeTab()` calls `view->SetSize(logical)` to resize the
+`RenderWidgetHostView` directly. This sets the NSView frame but never resizes
+the hidden NSWindow. The web view has
+`autoresizingMask = NSViewWidthSizable |
+NSViewHeightSizable`, tying it to the
+window's contentView. When navigation triggers
+`BrowserCompositorMac::DidNavigate()`, the new compositor surface is created
+with `dfh_size_dip_`, which may reflect the window's original size rather than
+the explicitly-set view size.
+
+#### Solution
+
+Resize the NSWindow instead of calling `view->SetSize()`. The
+`Shell::ResizeWebContentForTests()` method already calls
+`ShellPlatformDelegate::ResizeWebContent()`, which has access to the NSWindow in
+the `.mm` file. Fix `ResizeWebContent` to set the window's content size (not
+just `contentView.frame`), then use `ResizeWebContentForTests` from both
+`CreateTab()` and `ResizeTab()`.
+
+The autoresizing chain handles the rest: window resize → contentView resize →
+web_view autoresize → RWHV Cocoa view `setFrameSize:` →
+`sendViewBoundsInWindowToHost` → `OnBoundsInWindowChanged` → `UpdateScreenInfo`
+→ `UpdateSurfaceFromNSView` → `dfh_size_dip_` updated.
+
+#### Changes
+
+**`chromium/.../shell_platform_delegate_mac.mm`:**
+
+- In `ResizeWebContent()`, replace
+  `shell_data.delegate.window.contentView.frame = frame` with
+  `[shell_data.delegate.window setContentSize:NSMakeSize(width, height)]`. This
+  resizes the window itself, letting autoresizing propagate to all subviews.
+
+**`chromium/.../shell_browser_main_parts.cc`:**
+
+- In `CreateTab()`, replace `view->SetSize(logical)` with
+  `shell->ResizeWebContentForTests(logical)`.
+- In `ResizeTab()`, replace `view->SetSize(logical)` with
+  `tab->shell->ResizeWebContentForTests(logical)`.
+
+#### Verification
+
+Run the app, open a browser overlay, resize the window, then click a link. The
+new page should render at the current pane size, not the original creation size.
+Test same-site navigation (link within google.com) and cross-site navigation
+(link from Google to Wikipedia). Both should preserve the resized dimensions.
