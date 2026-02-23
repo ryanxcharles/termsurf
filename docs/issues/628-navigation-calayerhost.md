@@ -544,3 +544,20 @@ Run the app, open a browser overlay, resize the window, then click a link. The
 new page should render at the current pane size, not the original creation size.
 Test same-site navigation (link within google.com) and cross-site navigation
 (link from Google to Wikipedia). Both should preserve the resized dimensions.
+
+#### Results
+
+**Pass.** Navigation preserves the resized dimensions. The new page renders at
+the current pane size after both same-site and cross-site navigation.
+
+#### Conclusion
+
+The root cause was confirmed: `view->SetSize()` set the RWHV's NSView frame but
+left the hidden NSWindow at its creation size. The autoresizing mask created
+tension between the two, and `BrowserCompositorMac::DidNavigate()` used the
+wrong size when creating the new compositor surface.
+
+Resizing the NSWindow via `[window setContentSize:]` lets the standard
+autoresizing chain propagate the size through the entire view hierarchy. The
+`dfh_size_dip_` in `BrowserCompositorMac` stays correct across navigations
+because it derives from the actual NSView bounds, which follow the window.
