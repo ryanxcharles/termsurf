@@ -147,8 +147,12 @@ State" line to point to the new branch.
 
 #### Purpose
 
-Find what causes the browser overlay to vanish for ~10 seconds when clicking a
-link, and what causes the initial page to take longer than expected to appear.
+Find what causes the browser overlay to permanently vanish when clicking a link.
+
+Current behavior: clicking a link causes the overlay to disappear and it never
+comes back. Previously the overlay would vanish for ~10 seconds and then
+reappear, but that behavior is no longer reproducible — the disappearance is now
+permanent.
 
 The audit checks every CALayerHost-related code path in both the GUI (Zig) and
 Chromium Profile Server (C++) against 20 known code smells. Each smell is
@@ -158,9 +162,15 @@ other non-visibility concerns are marked clean and skipped.
 
 The core questions are:
 
-1. **Why does the overlay vanish on navigation and reappear ~10 seconds later?**
-2. **Why does the initial overlay take longer than expected to appear?**
-3. **What is the correct CALayerHost lifecycle for continuous visibility?** How
+1. **Why does the overlay permanently vanish on navigation?** This is the
+   primary bug. The overlay disappears when clicking a link and never returns.
+2. **Why did the overlay previously vanish for ~10 seconds and then recover?**
+   This was the behavior documented in Issues 628–629 but is no longer
+   reproducible. The audit should still search for what caused the 10-second
+   recovery, as understanding that mechanism may explain why recovery no longer
+   happens.
+3. **Why does the initial overlay take longer than expected to appear?**
+4. **What is the correct CALayerHost lifecycle for continuous visibility?** How
    should we create, swap, and manage CALayerHost instances to guarantee the
    overlay is always visible — across initial load, same-site navigation, and
    cross-site navigation?
