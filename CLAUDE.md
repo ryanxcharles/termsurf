@@ -4,8 +4,9 @@ A file for [guiding coding agents](https://agents.md/).
 
 ## AI Guidance
 
-Never under any circumstances change the code unless explicitly asked by the
-user. When in doubt, ask the user before making any changes.
+Do exactly what I say. No more, no less. NEVER assume I want something I didn't
+ask for. NEVER under any circumstances change the code unless I explicitly ask
+to change the code.
 
 ## Settled Architectural Decisions
 
@@ -86,10 +87,10 @@ The project has evolved through six generations:
 
 ### Architecture
 
-TermSurf GUI forks Ghostty with all browser integration logic in Zig. Swift remains a
-thin macOS wrapper — window creation, menu bar, application lifecycle — matching
-Ghostty's own architecture. This is a clean break from ts5, where browser
-integration lived in Swift (CompositorXPC.swift).
+TermSurf GUI forks Ghostty with all browser integration logic in Zig. Swift
+remains a thin macOS wrapper — window creation, menu bar, application lifecycle
+— matching Ghostty's own architecture. This is a clean break from ts5, where
+browser integration lived in Swift (CompositorXPC.swift).
 
 Key architectural decisions:
 
@@ -772,9 +773,5 @@ as a testbed before ts1 integration. Changes made to the example:
 
 ## AI Reminder
 
-Never change any code unless the user explicitly asks. If you are unsure if
-changing the code is what the user wants, ask the user first. If the user asks a
-question, then answer the question WITHOUT modifying any code. If you need to
-modify code to answer a question, then confirm with the user first that this is
-what they want. Only make changes to the code after the user has granted
-approval.
+NEVER change the code unless I explicitly ask. NEVER make unrequested changes.
+Always do EXACTLY what I ask - no more, no less.

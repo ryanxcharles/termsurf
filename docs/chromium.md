@@ -10,7 +10,7 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `146.0.7650.0-issue-629`
+- Branch: `146.0.7650.0-issue-630`
 - Base version: `146.0.7650.0` (tracking Electron's Chromium version)
 
 ## Branch Strategy
