@@ -265,3 +265,249 @@ that window visibility affects `CAContext` compositing.
 
 Research is complete when all four questions are answered and we have a concrete
 hypothesis for the next experiment.
+
+### Experiment 2: Deep dive into the CAContext lifecycle during navigation
+
+#### Problem
+
+Experiment 1 identified three critical differences between TermSurf and stock
+Chrome, but it didn't explain _why_ the blank lasts ~10 seconds. We need to
+trace the exact lifecycle of CAContext creation and destruction during
+navigation, understand whether the hidden window's `DisplayCALayerTree`
+interferes with our GUI's `CALayerHost`, and determine whether
+`DisableDisplay()` is the key mechanism Chrome uses to avoid the problem.
+
+#### Research questions
+
+**R1: What is the exact CAContext lifecycle during navigation?**
+
+When a user clicks a link, the renderer process may swap (cross-site navigation)
+or the compositor may recreate its output surface (same-site). In either case, a
+new `CALayerTreeCoordinator` is created in the GPU process, which allocates a
+new `CAContext` via `+[CAContext contextWithCGSConnection:options:]`. This gives
+a new `ca_context_id`.
+
+Trace the full sequence:
+
+1. Navigation commits.
+2. `RenderViewHostChanged` fires (if cross-site) — or the compositor swaps the
+   output surface (same-site).
+3. Old `CALayerTreeCoordinator` is destroyed → old `CAContext` is released.
+4. New `CALayerTreeCoordinator` is created → new `CAContext` → new
+   `ca_context_id`.
+5. `AcceleratedWidgetCALayerParamsUpdated()` fires with new params.
+6. `ns_view_->SetCALayerParams()` → hidden window's
+   `DisplayCALayerTree::GotCALayerFrame()` creates a `CALayerHost` with the new
+   `ca_context_id`.
+7. `ca_layer_params_callback_` sends the `ca_context_id` over XPC.
+8. GUI receives it and creates its own `CALayerHost`.
+
+Questions: Does step 6 happen before step 8? (Yes — they're in the same
+function, and `SetCALayerParams` is called first.) Does the hidden window's host
+"claim" the CAContext before the GUI can connect? What is the timing gap between
+step 6 and step 8?
+
+**R2: Is `DisableDisplay()` ever called in the Chromium Profile Server?**
+
+`DisableDisplay()` on `RenderWidgetHostNSViewBridge` destroys the
+`DisplayCALayerTree` and sets `display_disabled_ = true`. After that,
+`SetCALayerParams()` returns early — no `CALayerHost` is created in the hidden
+window.
+
+The only call site is `RenderWidgetHostViewMac::SetParentUiLayer()`, which fires
+only when a `parent_ui_layer` (Views/Aura compositor layer) is provided. The
+comment at line 362 explicitly notes: "not all code has been updated to use
+`ui::Views` (e.g, `content_shell`)".
+
+Since the Chromium Profile Server is based on `content_shell`, and
+`content_shell` does not use `ui::Views` / `ui::Layer` compositing,
+`SetParentUiLayer()` is never called with a non-null layer. Therefore
+`DisableDisplay()` is **never called** in our pipeline.
+
+This means the hidden window's `DisplayCALayerTree` is **always active**. Every
+frame, it receives `SetCALayerParams()` and maintains its own `CALayerHost`
+inside the hidden window's NSView.
+
+**R3: How does Chrome's Views UI eliminate the dual-host problem?**
+
+In stock Chrome (not `content_shell`), the browser uses `ui::Views` for
+rendering. When `SetParentUiLayer()` is called with a valid layer:
+
+1. `DisableDisplay()` is called on the `RenderWidgetHostNSViewBridge`.
+2. The `DisplayCALayerTree` is destroyed (`display_ca_layer_tree_.reset()`).
+3. `display_disabled_ = true` prevents future `SetCALayerParams()` calls from
+   creating any `CALayerHost` in the NSView.
+4. Instead, the `ui::Compositor` (parent layer compositor) handles display. The
+   `CALayerHost` lives in the Views compositor's layer tree, not in the NSView's
+   `DisplayCALayerTree`.
+
+This means in stock Chrome with Views, there is exactly **one CALayerHost per
+CAContext** — the one in the Views compositor. The NSView's `DisplayCALayerTree`
+is disabled. This is the normal path for Chrome on macOS.
+
+In our Chromium Profile Server (content_shell-based), `DisableDisplay()` is
+never called, so the NSView's `DisplayCALayerTree` stays alive and creates a
+**second CALayerHost** for the same CAContext. This is the dual-host problem
+identified in Experiment 1.
+
+**R4: What is the exact code flow in
+`AcceleratedWidgetCALayerParamsUpdated()`?**
+
+```cpp
+void RenderWidgetHostViewMac::AcceleratedWidgetCALayerParamsUpdated() {
+  SetBackgroundLayerColor(last_frame_root_background_color_);
+  const gfx::CALayerParams* ca_layer_params =
+      browser_compositor_->GetLastCALayerParams();
+  if (ca_layer_params) {
+    ns_view_->SetCALayerParams(*ca_layer_params);    // (A) Hidden window host
+    if (ca_layer_params_callback_)
+      ca_layer_params_callback_.Run(*ca_layer_params); // (B) Our XPC callback
+  }
+}
+```
+
+Step (A) calls `RenderWidgetHostNSViewBridge::SetCALayerParams()` →
+`DisplayCALayerTree::UpdateCALayerTree()` → `GotCALayerFrame()`. This creates a
+`CALayerHost` in the hidden window with the new `ca_context_id`. Because
+`display_disabled_` is false (see R2), this always runs.
+
+Step (B) sends the `ca_context_id` over XPC to the GUI. The GUI then creates its
+own `CALayerHost`.
+
+The hidden window's `CALayerHost` is always created **before** the GUI's, in the
+same function call. Both point at the same `CAContext`.
+
+**R5: Where is the CAContext created and what happens to the old one?**
+
+`CAContext` is created in `CALayerTreeCoordinator::CALayerTreeCoordinator()`
+(`ui/accelerated_widget_mac/ca_layer_tree_coordinator.mm:29-68`):
+
+```cpp
+ca_context_ = [CAContext contextWithCGSConnection:connection_id options:@{}];
+ca_context_.layer = root_ca_layer_;
+```
+
+Each `ImageTransportSurfaceOverlayMacEGL` (GPU output surface) creates one
+`CALayerTreeCoordinator`. During navigation, the old output surface is destroyed
+(old `CAContext` released) and a new one is created (new `CAContext` with a new
+`ca_context_id`).
+
+The `ca_context_id` is read from `[ca_context_ contextId]` in
+`CommitPresentedFrameToCA()` and sent to the browser process via the swap
+completion callback.
+
+#### Results
+
+**R1: The CAContext lifecycle during navigation is well-defined.**
+
+The GPU process creates one `CAContext` per output surface
+(`CALayerTreeCoordinator`). Navigation destroys the old surface and creates a
+new one, producing a new `ca_context_id`. The old `CAContext` is released when
+its `CALayerTreeCoordinator` destructor runs.
+
+The exact sequence is:
+
+1. Navigation commits → `RenderViewHostChanged` fires.
+2. New `RenderWidgetHostView` is created with a new `BrowserCompositorMac`.
+3. GPU process creates a new `ImageTransportSurfaceOverlayMacEGL` → new
+   `CALayerTreeCoordinator` → new `CAContext` → new `ca_context_id`.
+4. First compositor frame arrives → `AcceleratedWidgetCALayerParamsUpdated()`
+   fires.
+5. `ns_view_->SetCALayerParams()` → hidden window's `DisplayCALayerTree` creates
+   a `CALayerHost` with the new ID (step A).
+6. `ca_layer_params_callback_` sends the ID over XPC (step B).
+7. GUI receives it and creates its own `CALayerHost` (step C).
+
+Steps A and B happen synchronously in the same function. Step C happens
+asynchronously after XPC delivery (microseconds to low milliseconds). The hidden
+window's host always beats the GUI's host.
+
+**R2: `DisableDisplay()` is never called in the Chromium Profile Server.**
+
+Confirmed. The Chromium Profile Server is content_shell-based. `content_shell`
+does not use `ui::Views` or `ui::Layer` compositing. `SetParentUiLayer()` is
+never called with a non-null layer. Therefore `DisableDisplay()` never fires,
+and the hidden window's `DisplayCALayerTree` is always active.
+
+This is the root of the dual-host problem: `DisplayCALayerTree` was designed to
+be disabled when the Views compositor takes over. In our pipeline, nothing takes
+over, so it stays active and creates a competing `CALayerHost` for every
+`ca_context_id`.
+
+**R3: Chrome's Views UI eliminates the dual-host problem via
+`DisableDisplay()`.**
+
+In stock Chrome, `SetParentUiLayer()` is called early in the view lifecycle.
+This calls `DisableDisplay()`, which:
+
+1. Destroys the `DisplayCALayerTree` (`display_ca_layer_tree_.reset()`).
+2. Sets `display_disabled_ = true`.
+3. Future `SetCALayerParams()` calls return early — no `CALayerHost` created.
+
+The Views compositor handles display through its own layer tree. There is
+exactly one `CALayerHost` per `CAContext` in the Views compositor, and zero in
+the NSView's `DisplayCALayerTree` (because it's been destroyed).
+
+Our Chromium Profile Server never takes this path. The hidden window's
+`DisplayCALayerTree` runs for the entire lifetime of the tab, creating a
+`CALayerHost` for every `ca_context_id` it receives. Our GUI creates a second
+one. Two `CALayerHost` instances compete for the same `CAContext`.
+
+**R4: The call ordering in `AcceleratedWidgetCALayerParamsUpdated()` is
+confirmed.**
+
+```
+AcceleratedWidgetCALayerParamsUpdated()
+  ├── ns_view_->SetCALayerParams()       // Hidden window: DisplayCALayerTree
+  │   └── GotCALayerFrame()              // Creates CALayerHost in hidden window
+  └── ca_layer_params_callback_()        // Our hook: sends over XPC
+      └── (async) GUI creates CALayerHost // Second host, same CAContext
+```
+
+The hidden window's `CALayerHost` is created **synchronously before** our XPC
+callback fires. The GUI's `CALayerHost` is created asynchronously after XPC
+delivery. Both point at the same `CAContext`.
+
+**R5: Each navigation produces a new CAContext.**
+
+The GPU process creates `CAContext` via `+[CAContext contextWithCGSConnection:]`
+in `CALayerTreeCoordinator`'s constructor. Each output surface gets one. During
+navigation, old surface → destroyed (old `CAContext` released), new surface →
+created (new `CAContext`, new `ca_context_id`).
+
+The `ca_context_id` is sent to the browser in `gfx::CALayerParams` via the swap
+completion callback, then forwarded to both the hidden window's
+`DisplayCALayerTree` (via `SetCALayerParams`) and our XPC callback.
+
+#### Conclusion
+
+The dual-`CALayerHost` problem is now fully understood. In stock Chrome,
+`DisableDisplay()` destroys the NSView's `DisplayCALayerTree` when the Views
+compositor takes over, ensuring exactly one `CALayerHost` per `CAContext`. In
+our Chromium Profile Server (content_shell-based), `DisableDisplay()` is never
+called, so the hidden window's `DisplayCALayerTree` stays active and creates a
+competing `CALayerHost` for every `ca_context_id`.
+
+The strongest hypothesis is: **the hidden window's `CALayerHost` interferes with
+the GUI's `CALayerHost`** because both point at the same `CAContext`. macOS
+Window Server may only composite a `CAContext` to one `CALayerHost` at a time,
+or may deprioritize compositing for the GUI's host because the hidden window's
+host was created first.
+
+There are two testable hypotheses for the next experiment:
+
+1. **Call `DisableDisplay()` on the NSView bridge** — This would destroy the
+   hidden window's `DisplayCALayerTree`, eliminating the competing
+   `CALayerHost`. The `SetCALayerParams()` call in
+   `AcceleratedWidgetCALayerParamsUpdated()` would become a no-op, and only our
+   XPC callback would run. This is the most targeted fix.
+
+2. **Make the hidden window visible** — If the Window Server deprioritizes
+   compositing for off-screen windows, making the window visible might fix the
+   blank without eliminating the dual host. This would distinguish between the
+   "dual host" and "hidden window" hypotheses.
+
+#### Verification
+
+Research is complete when all five questions are answered and we have testable
+hypotheses for the next experiment.
