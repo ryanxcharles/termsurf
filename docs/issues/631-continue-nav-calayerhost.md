@@ -1200,9 +1200,9 @@ for same-site navigations. Each new `RenderViewHost` has its own compositor and
 `CALayerTreeCoordinator`, producing a new `ca_context_id`. This is a
 renderer-level architectural behavior that window visibility cannot influence.
 
-This means the flicker cannot be prevented by keeping the compositor alive —
-the compositor is replaced as part of normal navigation, not as an artifact of
-our hidden window. The fix must either:
+This means the flicker cannot be prevented by keeping the compositor alive — the
+compositor is replaced as part of normal navigation, not as an artifact of our
+hidden window. The fix must either:
 
 1. Work within the constraint that `ca_context_id` changes on every navigation
    (e.g., snapshot the old content before navigation).
@@ -1213,3 +1213,85 @@ our hidden window. The fix must either:
 
 Code changes reverted. Chromium branch `146.0.7650.0-issue-631` contains the
 revert commit.
+
+## Conclusion
+
+Five experiments. Zero fixes. The ~100ms navigation flicker remains unsolved.
+
+### What we tried
+
+1. **Skip CALayerHost swap when context ID unchanged** (Experiment 2, GUI-side).
+   The ID changes on every navigation, so the skip never triggered.
+
+2. **Delay old CALayerHost removal by 200ms** (Experiment 3, GUI-side). The old
+   CAContext's content is already destroyed by the time we try to show it.
+   Keeping the old host around longer just keeps a pointer to a dead context.
+
+3. **Disable compositor recycling** (Experiment 5, Chromium-side, Electron's
+   patch). Caused white screen on back navigation. The `ca_context_id` changes
+   because of renderer swaps during navigation, not because of
+   occlusion-triggered compositor recycling.
+
+### What we learned
+
+- **The `ca_context_id` changes on every navigation.** Three Wikipedia
+  navigations produced three different IDs (Experiment 2 logs). This is not a
+  bug — it's how Chromium works with RenderDocument and BackForwardCache.
+
+- **The old CAContext is destroyed before the new one has content.** The old
+  `CALayerTreeCoordinator` and its `CAContext` are torn down when the new
+  renderer takes over. The new CAContext exists but has no submitted frame yet.
+  No GUI-side trick can bridge this gap because there is no content to display
+  on either side during the transition.
+
+- **Chromium has fallback mechanisms we don't use.** `DelegatedFrameHost` caches
+  pre-navigation surfaces, maintains stale content layers via
+  `CopyFromCompositingSurface`, and manages fallback surface ranges through viz.
+  Our `CALayerParams` callback bypasses this entire stack — we read the raw
+  `ca_context_id` and create our own `CALayerHost`, so none of the built-in
+  transition machinery applies.
+
+- **Electron's compositor recycling patch doesn't apply.** Our hidden window
+  (`setAlphaValue:0`) was suspected of triggering recycling, but the real cause
+  of new IDs is renderer-level: new `RenderViewHost` → new compositor → new
+  `CALayerTreeCoordinator` → new `ca_context_id`.
+
+### Ideas for next steps
+
+**Chromium-side approaches:**
+
+- **Disable RenderDocument or BackForwardCache.** If same-site navigations keep
+  the same `RenderViewHost`, the compositor and `ca_context_id` would persist.
+  Trade-off: loses Chromium's navigation performance optimizations.
+
+- **Hook into `DelegatedFrameHost`'s fallback mechanism.** Instead of reading
+  `CALayerParams` directly, use the `DelegatedFrameHost`'s stale content layer
+  or pre-navigation surface caching. The infrastructure exists — we just need to
+  tap into it from our Profile Server.
+
+- **Snapshot before navigation.** Call `CopyFromCompositingSurface()` before
+  navigation commits and send the snapshot to the GUI as a static fallback
+  texture. The GUI displays the snapshot while the new CAContext initializes.
+
+**GUI-side approaches:**
+
+- **Freeze the last good frame.** Before the `ca_context_id` changes, capture
+  the current CALayerHost's rendered content (via `CALayer.render(in:)` or
+  similar) and place it on a static `CALayer` behind the host. When the host
+  swaps and the new CAContext is empty, the frozen frame shows through.
+
+- **Hide the overlay during transition.** Accept the flicker but make it less
+  jarring — fade to a loading state or show a placeholder instead of flashing
+  the terminal background.
+
+**Research approaches:**
+
+- **Trace the exact Chromium navigation lifecycle.** Add microsecond-precision
+  logging at every stage: `DidStartNavigation`, `RenderViewHostChanged`,
+  `DidFinishNavigation`, CALayerParams callback, first frame on new surface.
+  Determine the exact duration of the content gap.
+
+- **Study how Chrome handles tab restore.** When restoring a tab from
+  BackForwardCache, Chrome must face the same "new compositor, no content yet"
+  gap. How does it avoid flicker? The answer may be in the `DelegatedFrameHost`
+  stale content layer path.
