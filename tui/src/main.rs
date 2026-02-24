@@ -255,7 +255,7 @@ fn ui(frame: &mut Frame, url: &str, profile: &str, mode: &Mode) -> Rect {
 
     // URL bar.
     let profile_title = Line::from(vec![
-        Span::raw("  ").style(Style::default().fg(COMMENT)),
+        Span::raw(" \u{F007} ").style(Style::default().fg(COMMENT)),
         Span::raw(profile).style(Style::default().fg(FG)),
         Span::raw(" "),
     ]);
@@ -330,8 +330,8 @@ fn ui(frame: &mut Frame, url: &str, profile: &str, mode: &Mode) -> Rect {
     };
 
     let label = match mode {
-        Mode::Browse => "󰖟 BROWSE",
-        Mode::Control => " CONTROL",
+        Mode::Browse => "\u{F059F} BROWSE",
+        Mode::Control => "\u{F11C} CONTROL",
     };
 
     let hints_widget = Paragraph::new(hints);

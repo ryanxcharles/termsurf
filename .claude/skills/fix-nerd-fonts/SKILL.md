@@ -97,6 +97,26 @@ Codepoints above U+FFFF use `\U00XXXXXX` (8 hex digits, zero-padded):
 Using `\uF059F` for a codepoint above U+FFFF is **wrong** — Python interprets it
 as `\uF059` + literal `F`, producing a garbage character.
 
+## Rule: Always Use Unicode Escape Syntax in Source Code
+
+**NEVER embed raw Nerd Font bytes in source code.** Always use the language's
+Unicode escape syntax. Raw UTF-8 bytes are silently corrupted by text editors,
+LLM tools, clipboard operations, and diff/patch workflows. Unicode escapes are
+pure ASCII and survive any tool chain.
+
+| Language | Syntax | Example (U+F007) | Example (U+F059F) |
+|----------|--------|-------------------|--------------------|
+| Rust | `\u{XXXX}` | `"\u{F007}"` | `"\u{F059F}"` |
+| Zig | `\u{XXXX}` | `"\u{F007}"` | `"\u{F059F}"` |
+| Python | `\uXXXX` / `\U00XXXXXX` | `'\uF007'` | `'\U000F059F'` |
+| C/C++ | `\uXXXX` / `\UXXXXXXXX` | `u8"\uF007"` | `u8"\U000F059F"` |
+| Swift | `\u{XXXX}` | `"\u{F007}"` | `"\u{F059F}"` |
+| JavaScript | `\u{XXXX}` | `"\u{F007}"` | `"\u{F059F}"` |
+
+**When editing a file that contains raw Nerd Font bytes**, convert them to
+Unicode escapes as part of the edit. Use `xxd` or `python3` to identify the
+codepoint, then replace the raw bytes with the appropriate escape.
+
 ## Adding New Icons
 
 When introducing a new Nerd Font icon to the project:
@@ -105,3 +125,4 @@ When introducing a new Nerd Font icon to the project:
 2. Add it to the verification script's `icons` dict.
 3. Add a placeholder constant for it.
 4. Use the placeholder-and-replace pattern for the first embed.
+5. **Use Unicode escape syntax** (`\u{...}` in Rust/Zig, etc.) — never raw bytes.
