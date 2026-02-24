@@ -166,3 +166,303 @@ The `BrowserCompositorMac` will propagate the size change to the
 Navigation between pages has no visible blank flash. The `ca_context_id` remains
 constant across navigations (verified via logging). The GUI's `CALayerHost` is
 created once at startup and never swapped.
+
+## Experiment 1: Create persistent compositor and set parent_ui_layer_
+
+### Hypothesis
+
+If the profile server creates a persistent `RecyclableCompositorMac` with a root
+`ui::Layer` and passes that layer as `parent_ui_layer_` to each
+`RenderWidgetHostViewMac`, the `BrowserCompositorMac` will enter
+`UseParentLayerCompositor` mode. The `CAContext` will persist across navigations
+and the `ca_context_id` will remain stable, eliminating the navigation flicker.
+
+### Chromium branch
+
+`146.0.7650.0-issue-633` (forked from `146.0.7650.0-issue-631`)
+
+### Code changes
+
+#### 1. Add dependencies to BUILD.gn
+
+**File:** `content/chromium_profile_server/BUILD.gn`
+
+Add to the deps list:
+
+```gn
+"//ui/compositor",
+"//ui/accelerated_widget_mac",
+```
+
+#### 2. Add a bridge function to set parent_ui_layer_
+
+`SetParentUiLayer` is on `RenderWidgetHostViewMac` (not the public
+`RenderWidgetHostView` interface), so it needs an Obj-C++ bridge — same pattern
+as the existing `shell_ca_layer_bridge_mac`.
+
+**New file:**
+`content/chromium_profile_server/browser/shell_compositor_bridge_mac.h`
+
+```cpp
+#ifndef CONTENT_CHROMIUM_PROFILE_SERVER_BROWSER_SHELL_COMPOSITOR_BRIDGE_MAC_H_
+#define CONTENT_CHROMIUM_PROFILE_SERVER_BROWSER_SHELL_COMPOSITOR_BRIDGE_MAC_H_
+
+namespace ui { class Layer; }
+
+namespace content {
+
+class RenderWidgetHostView;
+
+void SetParentUiLayerOnView(RenderWidgetHostView* view, ui::Layer* layer);
+
+}  // namespace content
+
+#endif
+```
+
+**New file:**
+`content/chromium_profile_server/browser/shell_compositor_bridge_mac.mm`
+
+```objcpp
+#include "content/chromium_profile_server/browser/shell_compositor_bridge_mac.h"
+#include "content/browser/renderer_host/render_widget_host_view_mac.h"
+
+namespace content {
+
+void SetParentUiLayerOnView(RenderWidgetHostView* view, ui::Layer* layer) {
+  auto* mac_view = static_cast<RenderWidgetHostViewMac*>(view);
+  mac_view->SetParentUiLayer(layer);
+}
+
+}  // namespace content
+```
+
+Add both files to the sources list in BUILD.gn.
+
+#### 3. Create the persistent compositor in ShellBrowserMainParts
+
+**File:** `content/chromium_profile_server/browser/shell_browser_main_parts.h`
+
+Add includes and members:
+
+```cpp
+#include "ui/accelerated_widget_mac/accelerated_widget_mac.h"
+#include "ui/compositor/compositor.h"
+#include "ui/compositor/layer.h"
+
+// Inside the class, private section:
+#if BUILDFLAG(IS_MAC)
+  // Persistent compositor for UseParentLayerCompositor mode (Issue 633).
+  std::unique_ptr<ui::AcceleratedWidgetMac> persistent_widget_mac_;
+  std::unique_ptr<ui::Compositor> persistent_compositor_;
+  std::unique_ptr<ui::Layer> persistent_root_layer_;
+#endif
+```
+
+**File:** `content/chromium_profile_server/browser/shell_browser_main_parts.cc`
+
+Add includes:
+
+```cpp
+#include "content/chromium_profile_server/browser/shell_compositor_bridge_mac.h"
+#include "content/public/browser/context_factory.h"
+#include "ui/accelerated_widget_mac/accelerated_widget_mac.h"
+#include "ui/compositor/compositor.h"
+#include "ui/compositor/layer.h"
+```
+
+In `CreateTab()`, after the Shell is created and resized (around line 354),
+before the tab observer and callback setup, add:
+
+```cpp
+  // Create persistent compositor on first tab (Issue 633).
+  if (!persistent_compositor_) {
+    persistent_widget_mac_ = std::make_unique<ui::AcceleratedWidgetMac>();
+    ui::ContextFactory* context_factory = content::GetContextFactory();
+    persistent_compositor_ = std::make_unique<ui::Compositor>(
+        context_factory->AllocateFrameSinkId(),
+        context_factory,
+        base::SingleThreadTaskRunner::GetCurrentDefault(),
+        false /* enable_pixel_canvas */);
+    persistent_compositor_->SetAcceleratedWidget(
+        persistent_widget_mac_->accelerated_widget());
+
+    persistent_root_layer_ =
+        std::make_unique<ui::Layer>(ui::LAYER_SOLID_COLOR);
+    persistent_root_layer_->SetColor(SK_ColorTRANSPARENT);
+
+    // Set initial size from the first tab's dimensions.
+    RenderWidgetHostView* view =
+        shell->web_contents()->GetRenderWidgetHostView();
+    if (view) {
+      float scale = view->GetDeviceScaleFactor();
+      gfx::Size size_pixels(pixel_width, pixel_height);
+      gfx::Size size_dip(
+          static_cast<int>(std::ceil(pixel_width / scale)),
+          static_cast<int>(std::ceil(pixel_height / scale)));
+      persistent_root_layer_->SetBounds(gfx::Rect(size_dip));
+      viz::LocalSurfaceId local_surface_id =
+          viz::LocalSurfaceId(1, 1, base::UnguessableToken::Create());
+      persistent_compositor_->SetScaleAndSize(
+          scale, size_pixels, local_surface_id);
+    }
+
+    persistent_compositor_->SetRootLayer(persistent_root_layer_.get());
+    persistent_compositor_->SetVisible(true);
+
+    LOG(INFO) << "[ProfileServer] Created persistent compositor (Issue 633)";
+  }
+
+  // Set parent_ui_layer_ on the view (Issue 633).
+  {
+    RenderWidgetHostView* view =
+        shell->web_contents()->GetRenderWidgetHostView();
+    if (view) {
+      SetParentUiLayerOnView(view, persistent_root_layer_.get());
+      LOG(INFO) << "[ProfileServer] Set parent_ui_layer_ on initial view";
+    }
+  }
+```
+
+#### 4. Set parent_ui_layer_ on view swap in ShellTabObserver
+
+**File:** `content/chromium_profile_server/browser/shell_tab_observer.h`
+
+Add:
+
+```cpp
+  // Store the parent ui layer for re-registration on view swap (Issue 633).
+  void SetParentUiLayer(ui::Layer* layer);
+
+  // In private section:
+  raw_ptr<ui::Layer> parent_ui_layer_ = nullptr;
+```
+
+Add include:
+
+```cpp
+namespace ui { class Layer; }
+```
+
+**File:** `content/chromium_profile_server/browser/shell_tab_observer.cc`
+
+Add:
+
+```cpp
+#include "content/chromium_profile_server/browser/shell_compositor_bridge_mac.h"
+```
+
+Add method:
+
+```cpp
+void ShellTabObserver::SetParentUiLayer(ui::Layer* layer) {
+  parent_ui_layer_ = layer;
+}
+```
+
+In `RenderViewHostChanged()`, after the existing callback re-registration (after
+line 77), add:
+
+```cpp
+// Re-set parent_ui_layer_ on the new view (Issue 633).
+if (parent_ui_layer_) {
+  SetParentUiLayerOnView(view, parent_ui_layer_);
+  LOG(INFO) << "[ShellTabObserver] Set parent_ui_layer_ on new view"
+            << " pane=" << pane_id_;
+}
+```
+
+**File:** `content/chromium_profile_server/browser/shell_browser_main_parts.cc`
+
+In `CreateTab()`, after `tab_observer->SetLastCAContextIdPtr(last_id)` (line
+437), add:
+
+```cpp
+// Store parent ui layer on observer for re-registration (Issue 633).
+tab_observer->SetParentUiLayer(persistent_root_layer_.get());
+```
+
+#### 5. Handle resize
+
+In `ShellBrowserMainParts::ResizeTab()`, after the existing resize logic, update
+the persistent compositor:
+
+```cpp
+if (persistent_compositor_ && persistent_root_layer_) {
+  RenderWidgetHostView* view =
+      tab_state->shell->web_contents()->GetRenderWidgetHostView();
+  if (view) {
+    float scale = view->GetDeviceScaleFactor();
+    gfx::Size size_dip(
+        static_cast<int>(std::ceil(pixel_width / scale)),
+        static_cast<int>(std::ceil(pixel_height / scale)));
+    persistent_root_layer_->SetBounds(gfx::Rect(size_dip));
+    gfx::Size size_pixels(pixel_width, pixel_height);
+    // TODO: proper LocalSurfaceId allocation.
+    persistent_compositor_->SetScaleAndSize(
+        scale, size_pixels, viz::LocalSurfaceId());
+  }
+}
+```
+
+#### 6. Keep existing CALayerParams callback (for now)
+
+The existing per-view `SetCALayerParamsCallback` mechanism may or may not fire
+in `UseParentLayerCompositor` mode. For this experiment, **keep it in place** —
+it's harmless if it doesn't fire. The persistent compositor's
+`AcceleratedWidgetMac` will receive the `ca_context_id` via
+`UpdateCALayerTree()`, but we don't have a callback registered on it yet.
+
+**If the per-view callback stops firing** (expected — `GetLastCALayerParams()`
+returns null in `UseParentLayerCompositor` mode), the GUI won't receive the
+`ca_context_id` at all. In that case, as a quick fix for this experiment, add a
+callback on the persistent widget:
+
+```cpp
+// After persistent_widget_mac_ creation:
+// TODO: Implement AcceleratedWidgetMacNSView to receive callback.
+// For now, we'll observe whether the existing per-view callback still fires.
+```
+
+This is the main unknown: how to get the `ca_context_id` out of the persistent
+compositor. If the per-view callback doesn't fire, we'll need to implement
+`AcceleratedWidgetMacNSView` in Experiment 2.
+
+### Test
+
+1. Create Chromium branch: `git checkout -b 146.0.7650.0-issue-633` from
+   `146.0.7650.0-issue-631`
+2. Apply all code changes above
+3. Build: `autoninja -C out/Default chromium_profile_server`
+4. Build GUI: `cd gui && zig build`
+5. Launch: `open gui/zig-out/TermSurf.app`
+6. Open `web` TUI, navigate to any page
+7. Click a link — observe whether the flicker is gone
+8. Check logs for:
+   - "Created persistent compositor" — confirms setup
+   - "Set parent_ui_layer_ on initial view" — confirms mode switch
+   - "Set parent_ui_layer_ on new view" — confirms re-registration on nav
+   - "Sent ca_context_id=..." — check if it fires once or per-navigation
+9. Navigate multiple times — verify `ca_context_id` stays the same in logs
+
+### Success criteria
+
+- The `ca_context_id` in the logs is the same value across all navigations
+- No visible flicker on navigation
+- Page content renders correctly after navigation
+
+### Failure modes
+
+- **ca_context_id not sent:** The per-view callback doesn't fire in
+  `UseParentLayerCompositor` mode and we have no other callback registered. The
+  GUI never receives the ID. Fix: implement `AcceleratedWidgetMacNSView` on a
+  custom bridge class in Experiment 2.
+- **Crash in SetParentUiLayer:** The layer may need to have a compositor
+  attached and visible before `SetParentUiLayer` is called. The DCHECK in
+  `BrowserCompositorMac::SetParentUiLayer` requires
+  `new_parent_ui_layer->GetCompositor()` to be non-null.
+- **Black/blank content:** The persistent compositor exists but content doesn't
+  render into it correctly. May need additional `ui::Compositor` configuration
+  (background color, visible state, etc.).
+- **Resize breaks:** The persistent compositor's size doesn't match the tab's
+  expected size. May cause layout issues or crashes.
