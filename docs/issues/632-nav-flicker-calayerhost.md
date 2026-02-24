@@ -544,3 +544,74 @@ The most promising path forward is to investigate **why** the profile server
 recreates the `CALayerTreeCoordinator` on navigation and whether it can be made
 to persist, matching normal Chromium's behavior. If the `ca_context_id` stops
 changing, the flicker disappears entirely — no GUI-side workaround needed.
+
+## Experiment 3: Research why the CALayerTreeCoordinator is recreated
+
+### Questions
+
+1. **Why is the `CALayerTreeCoordinator` destroyed on navigation?** Trace the
+   destruction path from a navigation event to the coordinator's destructor.
+   Identify every object in the chain that gets recreated: RenderViewHost,
+   RenderWidgetHost, compositor, output surface, coordinator. Which of these
+   recreations is necessary and which is incidental?
+
+2. **Can we adopt the normal Chromium approach?** In normal Chromium, the
+   CAContext persists and content updates happen via sublayer swaps within the
+   same `root_ca_layer_`. Can the profile server do the same? What would need to
+   change so that navigation updates the content within the existing CAContext
+   rather than creating a new one?
+
+3. **Provide concrete instructions.** If it is possible to make navigation work
+   without destroying the `CALayerTreeCoordinator`, describe the specific code
+   changes needed in the Chromium profile server. If it is not possible (e.g.,
+   the destruction is inherent to the Content API's design), explain why and
+   identify the exact constraint that prevents it.
+
+### Method
+
+Research the Chromium source at `chromium/src/`. Trace the following paths:
+
+**Destruction path (why it's destroyed):**
+
+- Start from `WebContents::NavigateToURL` or `NavigationController::LoadURL`
+- Follow the navigation through commit, renderer swap, and compositor lifecycle
+- Identify where the old `RenderWidgetHostViewMac` is destroyed
+- Trace from `RenderWidgetHostViewMac` destruction → `BrowserCompositorMac` →
+  `DelegatedFrameHost` → output surface → `CALayerTreeCoordinator` destructor
+- Note whether the destruction happens for same-site navigations, cross-site
+  navigations, or both (Issue 631 Experiment 2 showed the ID changes for both)
+
+**Persistence path (how normal Chromium avoids it):**
+
+- In normal Chromium's `BrowserCompositorMac`, how is the compositor kept alive
+  across navigations?
+- What role does `RenderWidgetHostViewMac::TakeFallbackContentFrom` play in
+  preserving the output surface?
+- Does the `BrowserCompositorMac` outlive the `RenderWidgetHostViewMac` that
+  created it?
+
+**Profile server specifics:**
+
+- Examine our profile server's `ShellBrowserMainParts`, `ShellTabObserver`, and
+  any `RenderWidgetHostView` setup to understand how the compositor lifecycle
+  differs from normal Chromium
+- Check whether `content_shell` (which our server is based on) has the same
+  compositor recycling behavior or if our modifications introduced it
+- Look for any `BrowserCompositorMac` equivalent in the profile server, or
+  identify what takes its place
+
+### Deliverables
+
+The research should produce:
+
+1. A clear trace of the destruction chain, naming every class and method
+   involved
+2. An explanation of why normal Chromium's CAContext persists but ours doesn't
+3. Either: concrete code changes to make the CAContext persist, OR: a clear
+   explanation of why this is not feasible and what alternative to pursue
+
+### Success criteria
+
+The research answers all three questions with enough specificity to either (a)
+design an implementation experiment, or (b) conclusively rule out the approach
+and redirect to a GUI-side workaround.
