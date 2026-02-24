@@ -46,9 +46,9 @@ Browse ──Esc──> Control ──Enter──> Browse
 ### New mode: UrlEdit
 
 ```
-Browse ──Esc──> Control ──e──> UrlEdit ──Enter──> Browse
-                    ^                       │
-                    └───────Esc (normal)─────┘
+Browse ──Ctrl+Esc──> Control ──e──> UrlEdit ──Enter──> Browse
+                         ^                       │
+                         └───────Ctrl+Esc────────┘
 ```
 
 - **UrlEdit**: Keys handled by edtui. URL bar is editable with Vim keybindings.
@@ -58,17 +58,13 @@ TUI does not need to track these — edtui handles them internally. The TUI only
 needs to intercept two keys at the boundary:
 
 - **Enter** (from any edtui mode): Navigate to the edited URL. Switch to Browse.
-- **Escape when edtui is in Normal mode**: Cancel edit. Switch to Control.
+- **Ctrl+Esc** (from any edtui mode): Cancel edit. Switch to Control.
 
-The Escape key is context-dependent:
-
-- If edtui is in Insert or Visual mode, Escape returns to edtui Normal mode
-  (standard Vim behavior — edtui handles this internally).
-- If edtui is already in Normal mode, Escape exits UrlEdit and returns to
-  Control mode (the TUI intercepts this).
-
-This is natural Vim behavior. In Vim, pressing Escape in Normal mode does
-nothing harmful. Here, it means "I'm done editing, go back."
+`Ctrl+Esc` is already the universal "escape to Control" key — it exits Browse
+mode the same way. Using it in UrlEdit too keeps one consistent key for "get me
+back to Control from anywhere." Escape (without Ctrl) always goes to edtui,
+which uses it for its own Vim mode transitions (Insert → Normal, Visual →
+Normal). No conditional interception needed.
 
 ### Entering UrlEdit
 
@@ -90,16 +86,15 @@ Or to edit a URL already in the bar:
 
 Or to cancel:
 
-1. Esc → `e` → edit some text → Esc (back to edtui Normal) → Esc (back to
-   Control)
+1. Esc → `e` → edit some text → Ctrl+Esc (back to Control)
 
 ### Mode summary
 
-| Mode    | URL bar          | Keys go to | Enter           | Escape                    |
-| ------- | ---------------- | ---------- | --------------- | ------------------------- |
-| Browse  | read-only        | Chromium   | —               | → Control                 |
-| Control | read-only        | TUI        | → Browse        | —                         |
-| UrlEdit | editable (edtui) | edtui      | navigate+Browse | → edtui Normal or Control |
+| Mode    | URL bar          | Keys go to | Enter           | Ctrl+Esc  | Escape        |
+| ------- | ---------------- | ---------- | --------------- | --------- | ------------- |
+| Browse  | read-only        | Chromium   | —               | → Control | —             |
+| Control | read-only        | TUI        | → Browse        | —         | —             |
+| UrlEdit | editable (edtui) | edtui      | navigate+Browse | → Control | → edtui (Vim) |
 
 ## edtui configuration
 
@@ -150,5 +145,227 @@ When Enter is pressed in UrlEdit mode:
 
 ## Dependencies
 
-Add edtui as a dependency in `tui/Cargo.toml`. Use the crates.io version or a
-path dependency to `vendor/edtui/` if we need to patch `insert_char`.
+Add edtui as a path dependency to `vendor/edtui/` (so we can patch `insert_char`
+later for paste-with-newline). This requires upgrading the TUI from
+`ratatui = "0.29"` + `crossterm = "0.28"` to `ratatui = "0.30"` +
+`crossterm = "0.29"` to match edtui's dependency versions.
+
+## Experiment 1: edtui URL bar with mode transitions
+
+### Hypothesis
+
+Adding edtui as the URL bar editor with a `UrlEdit` mode, Ctrl+Esc/Enter
+interception, and single-line enforcement will produce a working editable URL
+bar with Vim keybindings. The user can press `e` from Control mode, edit the
+URL, and press Enter to navigate.
+
+### Changes
+
+#### 1. Upgrade dependencies (`tui/Cargo.toml`)
+
+edtui 0.11.1 depends on `crossterm = "0.29"` and `ratatui-core = "0.1"`. The TUI
+currently uses `ratatui = "0.29"` + `crossterm = "0.28"`. Upgrade to match:
+
+```toml
+[dependencies]
+crossterm = "0.29"
+ratatui = "0.30"
+edtui = { path = "../vendor/edtui", default-features = false, features = ["arboard"] }
+libc = "0.2"
+block2 = "0.6"
+```
+
+Disable `default-features` to skip `syntax-highlighting` (not needed for a URL
+bar). Keep `arboard` for system clipboard support.
+
+#### 2. Add `UrlEdit` mode (`tui/src/main.rs`)
+
+Add a third variant to the `Mode` enum:
+
+```rust
+#[derive(PartialEq)]
+enum Mode {
+    Browse,
+    Control,
+    UrlEdit,
+}
+```
+
+Add edtui state alongside existing state in `main()`:
+
+```rust
+use edtui::{EditorEventHandler, EditorMode, EditorState, EditorTheme,
+            EditorView, Lines};
+use edtui::events::{KeyEventHandler, KeyEventRegister, KeyInput};
+
+let mut editor_state = EditorState::new(Lines::from(url.as_str()));
+let mut editor_handler = {
+    let mut kh = KeyEventHandler::vim_mode();
+    // Remove newline keybindings for single-line mode.
+    kh.remove(&KeyEventRegister::i(vec![KeyInput::new(KeyCode::Enter)]));
+    kh.remove(&KeyEventRegister::n(vec![KeyInput::new('o')]));
+    kh.remove(&KeyEventRegister::n(vec![KeyInput::shift('O')]));
+    EditorEventHandler::new(kh)
+};
+```
+
+#### 3. Key dispatch for UrlEdit mode
+
+In the event loop, add a `Mode::UrlEdit` arm. The TUI intercepts Enter and
+Ctrl+Esc. Everything else (including plain Escape) goes to edtui:
+
+```rust
+Mode::UrlEdit => {
+    match key.code {
+        KeyCode::Enter => {
+            // Extract URL from editor, navigate, switch to Browse.
+            let new_url: String = editor_state.lines
+                .get(jagged::index::RowIndex::new(0))
+                .map(|line| line.iter().collect())
+                .unwrap_or_default();
+            url = new_url;
+            mode = Mode::Browse;
+            if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+                conn.send_mode_changed(pid, true);
+            }
+            // Force viewport update to send new URL.
+            last_viewport = Rect::default();
+        }
+        _ => {
+            // Pass everything else to edtui (including Escape).
+            editor_handler.on_key_event(key, &mut editor_state);
+        }
+    }
+}
+```
+
+Note: `Ctrl+Esc` is already handled before the mode dispatch (it always switches
+to Control from any mode). See the existing `Ctrl+C` pattern — `Ctrl+Esc` is
+added at the same level.
+
+#### 4. Enter UrlEdit from Control mode
+
+Add `e` keybinding in Control mode:
+
+```rust
+Mode::Control => match key.code {
+    KeyCode::Char('q') => break,
+    KeyCode::Char('e') => {
+        // Initialize editor with current URL, cursor at end.
+        editor_state = EditorState::new(Lines::from(url.as_str()));
+        let len = url.len();
+        editor_state.cursor = edtui::Index2::new(0, len.saturating_sub(1));
+        mode = Mode::UrlEdit;
+        if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+            conn.send_mode_changed(pid, false);
+        }
+    }
+    KeyCode::Enter => {
+        mode = Mode::Browse;
+        if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+            conn.send_mode_changed(pid, true);
+        }
+    }
+    _ => {}
+},
+```
+
+#### 5. Render edtui in UrlEdit mode (`ui()` function)
+
+Pass `editor_state` to `ui()` and render `EditorView` when in UrlEdit mode:
+
+```rust
+fn ui(
+    frame: &mut Frame,
+    url: &str,
+    profile: &str,
+    mode: &Mode,
+    editor_state: &mut EditorState,
+) -> Rect {
+    // ... layout unchanged ...
+
+    let (url_border, viewport_border) = match mode {
+        Mode::Browse => (BORDER, CYAN),
+        Mode::Control => (CYAN, BORDER),
+        Mode::UrlEdit => (CYAN, BORDER),
+    };
+
+    if *mode == Mode::UrlEdit {
+        let theme = EditorTheme::default()
+            .base(Style::default().fg(FG).bg(BG))
+            .cursor_style(Style::default().fg(BG).bg(FG))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Chromium ")
+                    .title_top(profile_title.alignment(Alignment::Right))
+                    .border_style(Style::default().fg(url_border).bg(BG))
+                    .title_style(Style::default().fg(url_border))
+                    .style(Style::default().bg(BG)),
+            )
+            .hide_status_line();
+        EditorView::new(editor_state)
+            .theme(theme)
+            .wrap(false)
+            .render(layout[0], frame.buffer_mut());
+    } else {
+        // Existing Paragraph rendering.
+        let url_bar = Paragraph::new(url)
+            .style(Style::default().fg(FG))
+            .block(/* ... existing block ... */);
+        frame.render_widget(url_bar, layout[0]);
+    }
+
+    // ... rest unchanged ...
+}
+```
+
+#### 6. Update status bar hints
+
+Add UrlEdit hints:
+
+```rust
+Mode::UrlEdit => Line::from(vec![
+    Span::styled("<", d),
+    Span::styled("enter", f),
+    Span::styled("> ", d),
+    Span::styled("navigate  ", f),
+    Span::styled("<", d),
+    Span::styled("ctrl+esc", f),
+    Span::styled("> ", d),
+    Span::styled("control", f),
+]),
+```
+
+And a mode label:
+
+```rust
+let label = match mode {
+    Mode::Browse => "\u{F059F} BROWSE",
+    Mode::Control => "\u{F11C} CONTROL",
+    Mode::UrlEdit => "\u{F040} EDIT",
+};
+```
+
+### Verification
+
+1. `cd tui && cargo build` — must compile with upgraded deps
+2. Launch TermSurf, open a `web` pane
+3. Press Esc to enter Control mode
+4. Press `e` — URL bar becomes editable, cursor visible at end of URL
+5. Press `A` then type a new URL — characters appear
+6. Press Enter — browser navigates to the new URL, mode switches to Browse
+7. Press Ctrl+Esc from UrlEdit — cancels edit, returns to Control
+8. Ctrl+Esc → `e` → `0` → `w` → `ciw` → type → Enter — Vim motions work
+9. Long URL: horizontal scrolling keeps cursor visible
+
+### Success criteria
+
+- `e` from Control enters UrlEdit with edtui rendering
+- Vim keybindings work (h/l/w/b/i/a/A/x/dd/ciw etc.)
+- Enter extracts the URL and navigates
+- Ctrl+Esc exits UrlEdit to Control from any edtui sub-mode
+- Escape handled by edtui for Vim mode transitions (Insert → Normal)
+- No newlines can be inserted (Enter and o/O removed)
+- Horizontal scrolling works for long URLs
+- Status bar shows correct hints and mode label
