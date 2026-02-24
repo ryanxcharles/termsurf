@@ -1171,3 +1171,45 @@ This is the only code change. No GUI modifications.
 6. Navigate to a different origin (cross-site).
    - The ID may change (renderer swap creates a new compositor). Brief flicker
      is acceptable for cross-site navigation — that's a separate problem.
+
+**Result:** Fail
+
+Two variants were tested:
+
+1. **Electron's original patch** (only skip `SetRenderWidgetHostIsHidden`, still
+   call `host()->WasHidden()`): back navigation produced a white screen. The
+   renderer was told it was hidden but the compositor wasn't — the show path
+   never called `WasShown()` because the compositor appeared visible. Renderer
+   never restarted producing frames.
+
+2. **Skip `WasOccluded()` entirely** when the view has a window: same white
+   screen on back navigation. The occlusion path is not the only thing
+   controlling renderer frame production during navigation.
+
+#### Conclusion
+
+The compositor recycling hypothesis from Experiment 4 was wrong — or at least
+incomplete. Preventing occlusion-triggered recycling does not keep the
+`ca_context_id` stable across navigations, and both variants introduced a
+regression (white screen on back navigation).
+
+The `ca_context_id` likely changes on every navigation because of
+**renderer/RenderViewHost swaps**, not window occlusion. Modern Chromium with
+RenderDocument and BackForwardCache creates new `RenderFrameHost` instances even
+for same-site navigations. Each new `RenderViewHost` has its own compositor and
+`CALayerTreeCoordinator`, producing a new `ca_context_id`. This is a
+renderer-level architectural behavior that window visibility cannot influence.
+
+This means the flicker cannot be prevented by keeping the compositor alive —
+the compositor is replaced as part of normal navigation, not as an artifact of
+our hidden window. The fix must either:
+
+1. Work within the constraint that `ca_context_id` changes on every navigation
+   (e.g., snapshot the old content before navigation).
+2. Prevent the renderer swap that causes the new compositor (e.g., disable
+   RenderDocument or BackForwardCache for our use case).
+3. Use Chromium's existing fallback surface mechanism (`DelegatedFrameHost`'s
+   stale content layer or pre-navigation surface caching) to bridge the gap.
+
+Code changes reverted. Chromium branch `146.0.7650.0-issue-631` contains the
+revert commit.
