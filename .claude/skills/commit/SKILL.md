@@ -66,13 +66,21 @@ We bumped the versions, one by one,
 Now npm audit says: "Well done!"
 ```
 
+## Arguments
+
+`/commit <what>` — commit exactly `<what>`. Stage only the files related to
+`<what>` and nothing else. Do not include unrelated changes. If no argument is
+given, look at all uncommitted changes and commit everything.
+
 ## Process
 
-1. **Run git diff --staged** to see what's being committed
-2. **Understand the change**: What problem does it solve? What was added/removed/fixed?
-3. **Write the title**: Accurate, imperative mood, 50 chars max
-4. **Compose the poem**: Pick a style that fits the change, make it fun
-5. **Stage and commit** using the poetic message
+1. **Check the argument.** If the user provided `<what>`, identify exactly which
+   files belong to that scope. Stage only those files.
+2. **Run git diff --staged** to see what's being committed
+3. **Understand the change**: What problem does it solve? What was added/removed/fixed?
+4. **Write the title**: Accurate, imperative mood, 50 chars max
+5. **Compose the poem**: Pick a style that fits the change, make it fun
+6. **Stage and commit** using the poetic message
 
 ## Chromium Fork Workflow
 
