@@ -2,9 +2,8 @@
 
 ## Goal
 
-Eliminate the single-frame (~16ms) flicker that occurs on every page navigation.
-The browser overlay should transition from old page to new page with no visible
-blank frame.
+Eliminate the brief flicker that occurs on every page navigation. The browser
+overlay should transition from old page to new page with no visible blank frame.
 
 ## Background
 
@@ -67,13 +66,14 @@ Issue 631 ran five experiments:
 ### The critical realization
 
 The flicker was initially estimated at ~100ms. It is actually much shorter —
-approximately one frame (~16ms). This changes the entire analysis.
+visually it appears to be roughly one frame (~16ms), though this has not been
+precisely measured. This changes the entire analysis.
 
 If the gap were 100ms, it would mean the new CAContext genuinely has no content
-for a significant period. But a single-frame gap is likely **the inherent cost
-of the CALayerHost swap itself**, not a content gap. The new CAContext probably
-already has content when we swap — Window Server just needs one vsync cycle to
-composite the new host's layer tree after the CATransaction commits.
+for a significant period. But a very brief gap is likely **the inherent cost of
+the CALayerHost swap itself**, not a content gap. The new CAContext probably
+already has content when we swap — Window Server just needs at least one vsync
+cycle to composite the new host's layer tree after the CATransaction commits.
 
 ### Current swap mechanics
 
@@ -87,8 +87,9 @@ inside a single `CATransaction`:
 5. `CATransaction.commit()`
 
 Window Server processes the entire transaction atomically at the next vsync: old
-host removed + new host added = one frame where the new host hasn't been
-composited yet. The result is a single blank frame.
+host removed + new host added = at least one frame where the new host hasn't
+been composited yet. The result is a brief blank flash (visually estimated at ~1
+frame, not precisely measured).
 
 ### Why previous experiments missed this
 
@@ -115,9 +116,10 @@ Split the atomic swap into two CATransactions across two frames:
 2. **Frame N+1**: Remove the old CALayerHost. Commit. By now, the new host has
    been composited for one full frame and is visible.
 
-This requires a one-frame delay between add and remove. Implementable via
-`dispatch_after_f` with a delay of one frame (~16ms), or by deferring the
-removal to the next `drawFrame()` call.
+This requires a short delay between add and remove — at least one frame.
+Implementable via `dispatch_after_f` with a delay of ~16ms, or by deferring the
+removal to the next `drawFrame()` call. The exact delay needed is unknown until
+tested.
 
 ### Pre-warm the CALayerHost
 
@@ -141,11 +143,11 @@ Instead of an instant swap, briefly overlap both hosts:
 3. Remove old host
 
 Even with `setDisableActions:YES`, we could manually set opacity values across
-two frames. This turns the blank frame into a crossfade.
+multiple frames. This turns the blank flash into a crossfade.
 
 ### Accept and mask
 
-If the single-frame blank is truly unavoidable with CALayerHost, mask it:
+If the brief blank is truly unavoidable with CALayerHost, mask it:
 
 - Set the positioning layer's `backgroundColor` to white (or the page's
   background color). During the one-frame gap, the user sees white instead of
