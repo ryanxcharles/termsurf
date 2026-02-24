@@ -27,4 +27,7 @@ After your edits to a markdown file are complete, run:
 prettier --write --prose-wrap always --print-width 80 <file_path>
 ```
 
+**IMPORTANT:** Use the `prettier` CLI directly. NEVER use `npx prettier`. The
+tool is installed globally — `npx` is unnecessary and slow.
+
 That's it. No other steps needed.
