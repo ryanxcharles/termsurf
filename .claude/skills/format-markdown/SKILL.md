@@ -1,6 +1,8 @@
 ---
 name: format-markdown
-description: "Format markdown files with prettier. Use after creating or editing any markdown file (.md)."
+description:
+  "Format markdown files with prettier. Use after creating or editing any
+  markdown file (.md)."
 ---
 
 # Format Markdown
@@ -22,7 +24,7 @@ After every Write or Edit to any `.md` file in the project. This includes:
 After your edits to a markdown file are complete, run:
 
 ```bash
-prettier --write <file_path>
+prettier --write --prose-wrap always --print-width 80 <file_path>
 ```
 
 That's it. No other steps needed.
