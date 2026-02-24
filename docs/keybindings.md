@@ -26,14 +26,14 @@ These are handled in TermSurf's Zig core (`gui/src/Surface.zig`), intercepted in
 
 ## Browser navigation keybindings
 
-These are forwarded from the GUI to Chromium via XPC `key_event` messages and
-intercepted in `HandleKeyEvent` before reaching the renderer.
+These are forwarded from the GUI to Chromium via XPC `key_event` messages.
+Chromium handles them internally via its default keybinding logic.
 
-| Key   | Mode   | Action  | Notes                                                |
-| ----- | ------ | ------- | ---------------------------------------------------- |
-| Cmd+[ | Browse | Back    | Calls `NavigationController::GoBack()` in Chromium   |
-| Cmd+] | Browse | Forward | Calls `NavigationController::GoForward()` in Chromium |
-| Cmd+R | Browse | Reload  | Calls `NavigationController::Reload()` in Chromium   |
+| Key   | Mode   | Action  | Notes                                       |
+| ----- | ------ | ------- | ------------------------------------------- |
+| Cmd+[ | Browse | Back    | Forwarded as key event, handled by Chromium |
+| Cmd+] | Browse | Forward | Forwarded as key event, handled by Chromium |
+| Cmd+R | Browse | Reload  | Forwarded as key event, handled by Chromium |
 
 ## Modes
 

@@ -68,8 +68,8 @@ The project has evolved through six generations:
   (CompositorXPC). Superseded by TermSurf GUI.
 - **gui** (Ghostty fork, Zig-first) — **Active development.** Ghostty fork with
   all browser integration logic in Zig instead of Swift. XPC communication,
-  IOSurface textures, keyboard/mouse forwarding — all in Zig, matching Ghostty's
-  architecture where Swift is a thin macOS wrapper.
+  CALayerHost compositing, keyboard/mouse forwarding — all in Zig, matching
+  Ghostty's architecture where Swift is a thin macOS wrapper.
 
 **Directory structure:**
 
@@ -96,8 +96,10 @@ Key architectural decisions:
 
 - **XPC in Zig.** XPC is a C API (`<xpc/xpc.h>`). Zig calls it directly via
   `@cImport`. No Swift intermediary needed.
-- **IOSurface in Zig.** The Metal renderer already lives in Zig. IOSurface Mach
-  ports arrive via XPC and go straight to the renderer. No Swift middleman.
+- **CALayerHost in Zig.** Browser panes render via `CALayerHost` — a CALayer
+  subclass that displays a remote `CAContext` from Chromium's GPU process.
+  Window Server composites directly from GPU VRAM. Zero per-frame IPC, zero
+  texture copies. The Metal renderer sets up the CALayerHost layer tree in Zig.
 - **Input routing in Zig.** Zig already receives all keyboard/mouse events
   through `Surface.keyCallback()` and `mouseButtonCallback()`. In browse mode,
   these route to Chromium via XPC instead of to the terminal.
@@ -108,19 +110,20 @@ Key architectural decisions:
 
 TermSurf GUI is a Ghostty fork with browser integration built in Zig. Current
 TermSurf additions: XPC gateway connection and anonymous listener (Issue 601),
-IOSurface overlay pipeline with pink texture proof-of-concept (Issue 602), live
-Chromium streaming at 60fps with dynamic resize (Issue 603), multi-pane
-multi-profile server reuse (Issues 604–605), mouse input forwarding with cursor
-changes and text selection (Issue 606), keyboard input forwarding with Cmd+key
-bypass (Issues 607–609), TermSurf branding and app icon (Issues 611–612),
-directory rename from ghost/web to gui/tui (Issue 613), XDG directory compliance
-(Issue 615), loading progress indicator and browser navigation keybindings
-(Issue 616).
+pink texture proof-of-concept (Issue 602), live Chromium streaming at 60fps with
+dynamic resize (Issue 603), multi-pane multi-profile server reuse (Issues
+604–605), mouse input forwarding with cursor changes and text selection (Issue
+606), keyboard input forwarding with Cmd+key bypass (Issues 607–609), TermSurf
+branding and app icon (Issues 611–612), directory rename from ghost/web to
+gui/tui (Issue 613), XDG directory compliance (Issue 615), loading progress
+indicator and browser navigation keybindings (Issue 616), CALayerHost migration
+replacing FrameSinkVideoCapturer with zero-copy Window Server compositing
+(Issues 624–632).
 
 ### Directory Structure
 
 - `gui/src/` — Shared Zig core (libghostty)
-- `gui/src/Surface.zig` — Core surface (will hold browser state)
+- `gui/src/Surface.zig` — Core surface (holds browser state)
 - `gui/src/renderer/Metal.zig` — Metal renderer
 - `gui/src/renderer/metal/` — Metal pipeline, shaders, IOSurface layer
 - `gui/src/apprt/embedded.zig` — C API exports
@@ -215,7 +218,7 @@ TermSurf additions:
 - **120fps vsync oversampling** — The Chromium capturer runs at 120fps (2x the
   display rate) so there is always a fresh frame at every 60Hz vsync. Combined
   with the `overlay_surface_changed` flag that ensures every new IOSurface
-  triggers a redraw (Issue 512). See `docs/vsync.md`.
+  triggers a redraw (Issue 512).
 - **Multi-profile server reuse** — Multiple panes sharing the same browser
   profile share one Chromium Profile Server process. Panes with different
   profiles get separate servers. Server auto-exits when its last tab closes
@@ -276,7 +279,7 @@ cd ts5/xpc-gateway && swift build
 cd ts5 && zig build
 
 # Build web TUI
-cargo build -p web
+cd tui && cargo build
 ```
 
 ### Launching
@@ -543,7 +546,7 @@ ts2 embedded CEF directly inside WezTerm's process. CEF allows only one
 TermSurf requires multiple profiles (like Chrome profiles), so CEF had to move
 to separate processes — one per profile. That's ts3.
 
-Historical docs: `docs/issues/ts2-*.md`
+Historical docs: `docs/issues/200-*.md` through `docs/issues/210-*.md`
 
 ## TermSurf 1.x (ts1/) — Legacy
 
@@ -679,6 +682,29 @@ as a testbed before ts1 integration. Changes made to the example:
 - `docs/issues/614-docs-review.md` — Documentation review
 - `docs/issues/615-xdg.md` — XDG directory compliance
 - `docs/issues/616-web-features.md` — Missing web features inventory
+- `docs/issues/617-alpha.md` — Alpha release planning
+- `docs/issues/618-url-sync.md` — URL sync
+- `docs/issues/619-input-latency.md` — Input latency measurement and analysis
+- `docs/issues/620-zig-content-shell.md` — Zig Content Shell (in-process
+  attempt)
+- `docs/issues/621-single-process.md` — Single-process multi-profile performance
+- `docs/issues/622-javascript-is-slow.md` — JavaScript causes 2fps in
+  multi-profile
+- `docs/issues/623-viz-display-serialization.md` — Viz Display serialization
+  theory (debunked)
+- `docs/issues/624-chromium-ipc.md` — Chromium IPC architecture research
+- `docs/issues/625-calayerhost.md` — CALayerHost migration (replaced
+  FrameSinkVideoCapturer)
+- `docs/issues/626-x-y-calayerhost.md` — CALayerHost X/Y positioning fix
+- `docs/issues/627-resize-calayerhost.md` — CALayerHost resize fix
+- `docs/issues/628-navigation-calayerhost.md` — CALayerHost navigation (first
+  attempt, 8 experiments failed)
+- `docs/issues/629-understand-nav-calayerhost.md` — Navigation blank diagnosis
+- `docs/issues/630-nav-calayerhost-6.md` — Navigation blank fix (7 coordinated
+  fixes)
+- `docs/issues/631-continue-nav-calayerhost.md` — Navigation flicker
+  investigation
+- `docs/issues/632-nav-flicker-calayerhost.md` — Navigation flicker fix (design)
 - `docs/xdg.md` — XDG directory pattern and conventions
 
 ### TermSurf 5.0
@@ -696,8 +722,8 @@ as a testbed before ts1 integration. Changes made to the example:
 - `docs/issues/506-smappservice.md` — SMAppService for xpc-gateway registration
 - `docs/issues/507-chromium.md` — First Chromium streaming attempt (IOSurface
   crashes)
-- `docs/issues/508-iosurface-overlay.md` — IOSurface overlay pipeline (Metal
-  texture from IOSurface)
+- `docs/issues/508-checkerboard.md` — IOSurface overlay pipeline (Metal texture
+  from IOSurface)
 - `docs/issues/509-chromium.md` — Chromium streaming (retry), Retina resolution
 - `docs/issues/510-two-profiles.md` — Two-profile streaming, dynamic resize
 - `docs/issues/511-three-profiles.md` — Three profiles, server reuse per profile
@@ -705,7 +731,6 @@ as a testbed before ts1 integration. Changes made to the example:
 - `docs/issues/513-ctrl-esc.md` — Ctrl+Esc escape hatch (mode switching)
 - `docs/issues/514-mouse.md` — Mouse clicks and URL sync
 - `docs/issues/515-drag.md` — Focus state and text selection
-- `docs/vsync.md` — Top-level vsync overview and future improvement plan
 
 ### TermSurf 4.0
 

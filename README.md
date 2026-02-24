@@ -58,7 +58,7 @@ logging into Google in one profile doesn't affect the others.
 cd gui && zig build
 
 # Build the web TUI
-cargo build -p web
+cd tui && cargo build
 ```
 
 ### Launch
@@ -70,7 +70,7 @@ open gui/zig-out/TermSurf.app
 Then in a TermSurf terminal pane:
 
 ```bash
-cargo run -p web -- https://google.com
+cd tui && cargo run -- https://google.com
 ```
 
 ## Keyboard Modes
@@ -101,7 +101,7 @@ logic in Zig.
 - Terminal emulator (full Ghostty, native Metal rendering)
 - `web` TUI chrome (URL bar, viewport border, status bar via ratatui)
 - Chromium streaming (real webpages render in terminal panes at 60fps)
-- IOSurface overlay pipeline (zero-copy GPU texture compositing via Metal)
+- CALayerHost compositing (Window Server composites directly from GPU VRAM)
 - Retina resolution and dynamic resize
 - Multi-pane, multi-profile server reuse
 - Mouse input forwarding (clicks, drag, scroll, cursor changes, text selection)
