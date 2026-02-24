@@ -153,3 +153,157 @@ If the brief blank is truly unavoidable with CALayerHost, mask it:
   background color). During the one-frame gap, the user sees white instead of
   the terminal background, which is far less jarring.
 - Or set it to the previous page's dominant color, extracted before navigation.
+
+## Experiment 1: Two-phase swap via deferred removal
+
+### Hypothesis
+
+The flicker occurs because the old CALayerHost is removed in the same
+`CATransaction` as the new one is added. Window Server processes the transaction
+atomically at the next vsync, but the new host hasn't been composited yet — so
+there's a brief blank. If we leave the old host in the layer tree (underneath
+the new one) and defer its removal, the old host covers the gap while Window
+Server composites the new one.
+
+### Design
+
+**Change:** Split the atomic swap in `Metal.zig`'s `setCALayerHostContextId()`
+into two phases:
+
+1. **Phase 1 (immediate):** Create the new `CALayerHost`, add it to the
+   positioning layer. Do NOT remove the old host. Store the old host pointer in
+   a new field `ca_layer_host_pending_removal: ?*anyopaque` on the renderer
+   struct. Commit the `CATransaction`.
+
+2. **Phase 2 (deferred to next `drawFrame`):** At the start of `drawFrame()`,
+   check if `ca_layer_host_pending_removal` is non-null. If so, remove it from
+   the superlayer, release it, and set the field to null. This runs inside the
+   `draw_mutex` lock that `drawFrame` already holds.
+
+**Why `drawFrame` and not `dispatch_after_f`:** Both `setCALayerHostContextId`
+and `drawFrame` run under `draw_mutex`, so the pending removal field is
+thread-safe without additional synchronization. Using `drawFrame` also
+guarantees the removal happens after at least one render pass, not after an
+arbitrary timer that might fire too early or too late.
+
+### Code changes
+
+**`generic.zig` — add field:**
+
+```zig
+/// Old CALayerHost pending removal (Issue 632 Experiment 1).
+/// Set during two-phase swap; cleared at next drawFrame.
+ca_layer_host_pending_removal: ?*anyopaque = null,
+```
+
+**`Metal.zig` — modify the existing-host branch of
+`setCALayerHostContextId()`:**
+
+Replace lines 220–223 (the immediate removal):
+
+```zig
+// Now remove old host.
+const old_host = objc.Object.fromId(existing);
+old_host.msgSend(void, objc.sel("removeFromSuperlayer"), .{});
+old_host.release();
+```
+
+With deferred removal:
+
+```zig
+// Defer old host removal to next drawFrame (Issue 632 Experiment 1).
+// The old host stays in the layer tree underneath the new one,
+// covering the gap while Window Server composites the new host.
+ca_layer_host_pending_removal.* = existing;
+```
+
+And update the function signature to accept the new pointer:
+
+```zig
+pub fn setCALayerHostContextId(
+    self: *Metal,
+    context_id: u32,
+    ca_layer_host_ptr: *?*anyopaque,
+    ca_layer_flipped_ptr: *?*anyopaque,
+    ca_layer_positioning_ptr: *?*anyopaque,
+    ca_layer_host_pending_removal: *?*anyopaque,
+) void {
+```
+
+**`generic.zig` — update the wrapper to pass the new field:**
+
+```zig
+pub fn setCALayerHostContextId(self: *Self, context_id: u32) void {
+    if (comptime @hasDecl(GraphicsAPI, "setCALayerHostContextId")) {
+        self.api.setCALayerHostContextId(
+            context_id,
+            &self.ca_layer_host,
+            &self.ca_layer_flipped,
+            &self.ca_layer_positioning,
+            &self.ca_layer_host_pending_removal,
+        );
+    }
+}
+```
+
+**`generic.zig` — add deferred removal in `drawFrame()`:**
+
+Insert near the top of `drawFrame()`, after `draw_mutex` is acquired (after line
+1468):
+
+```zig
+// Phase 2 of two-phase CALayerHost swap (Issue 632 Experiment 1).
+// Remove the old host that was left in the layer tree during the swap.
+if (self.ca_layer_host_pending_removal) |old_ptr| {
+    const CATx = objc.getClass("CATransaction");
+    if (CATx) |tx| {
+        tx.msgSend(void, objc.sel("begin"), .{});
+        tx.msgSend(void, objc.sel("setDisableActions:"), .{true});
+        const old_host = objc.Object.fromId(old_ptr);
+        old_host.msgSend(void, objc.sel("removeFromSuperlayer"), .{});
+        old_host.release();
+        tx.msgSend(void, objc.sel("commit"), .{});
+    }
+    self.ca_layer_host_pending_removal = null;
+}
+```
+
+**`generic.zig` — update `removeCALayerHost` to clean up pending removal:**
+
+Add to the existing `removeCALayerHost()` function:
+
+```zig
+// Also clean up any pending removal (Issue 632).
+if (self.ca_layer_host_pending_removal) |old_ptr| {
+    const old_host_obj = objc.Object.fromId(old_ptr);
+    old_host_obj.msgSend(void, objc.sel("removeFromSuperlayer"), .{});
+    old_host_obj.release();
+    self.ca_layer_host_pending_removal = null;
+}
+```
+
+### Test
+
+1. Build: `cd gui && zig build`
+2. Launch: `open gui/zig-out/TermSurf.app`
+3. Open `web` TUI, navigate to any page
+4. Click a link — observe whether the flicker is gone, reduced, or unchanged
+5. Click browser back/forward — same observation
+6. Try multiple rapid navigations in sequence
+
+### Success criteria
+
+Navigation between pages has no visible blank flash. The old page remains
+visible until the new page appears.
+
+### Failure modes
+
+- **Flicker unchanged:** The gap is not caused by the `removeFromSuperlayer`
+  timing. The new host genuinely takes longer than one `drawFrame` cycle to be
+  composited. Would need to increase the delay or try a different approach.
+- **Stale frame visible:** The old host's dead CAContext shows corruption or a
+  stale frame briefly. Visually worse than a blank. Would need the opacity
+  crossfade approach instead.
+- **Memory leak:** If `drawFrame` never runs after the swap (e.g., window is
+  occluded), the old host is never removed. Mitigated by the cleanup in
+  `removeCALayerHost()`, but worth verifying.
