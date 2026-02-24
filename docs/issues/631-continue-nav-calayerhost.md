@@ -817,3 +817,76 @@ The fix must be Chromium-side. Either:
    `CopyFromCompositingSurface`) before navigation commits.
 
 Code changes reverted.
+
+### Experiment 4: Research Chromium/Electron CALayerHost navigation transitions
+
+#### Purpose
+
+Experiments 2 and 3 proved the flicker is Chromium-side: the old CAContext is
+destroyed before the new one has content, and no GUI-side fix can mask this. We
+need to understand how Chromium and Electron handle this same problem.
+
+This is a research-only experiment — no code modifications.
+
+#### Questions to answer
+
+1. **What destroys the old CAContext during navigation?** Trace the lifecycle:
+   which class owns the `CALayerTreeCoordinator`, when is it torn down during
+   navigation, and what triggers the teardown? Key classes to investigate:
+   `BrowserCompositorMac`, `DelegatedFrameHost`, `CALayerTreeCoordinator`,
+   `DisplayCALayerTree`.
+
+2. **Does Chromium have a content transition mechanism?** When switching tabs,
+   Chrome shows the old tab's content until the new tab renders. Does a similar
+   mechanism exist for navigation within a tab? Look for snapshot/capture logic
+   tied to navigation in `RenderWidgetHostViewMac` or `BrowserCompositorMac`.
+
+3. **How does Electron handle this?** Electron uses the same out-of-process
+   renderer with CALayerHost. Search the Electron source and patches for
+   navigation transition handling, especially around `BrowserCompositorMac`,
+   `DelegatedFrameHost`, or `RenderWidgetHostViewMac`.
+
+4. **What is `ui::Compositor`'s role?** The `ui::Compositor` may hold a
+   reference to the old surface's content. Does it have a "keep old content
+   until new content arrives" pattern?
+
+5. **Is there a "first frame after navigation" signal?** Something like
+   `DidFirstVisuallyNonEmptyPaint` or `RenderFrameHost::DidCommitNavigation`
+   that we could use to delay the old CAContext teardown.
+
+#### Files to search
+
+**Chromium (`chromium/src/`):**
+
+- `ui/compositor/compositor.h` / `.cc` — compositor lifecycle
+- `content/browser/renderer_host/render_widget_host_view_mac.mm` — macOS view,
+  CALayerHost usage
+- `content/browser/renderer_host/browser_compositor_view_mac.mm` / `.h` —
+  `BrowserCompositorMac`, `DidNavigate()`, surface management
+- `content/browser/renderer_host/delegated_frame_host.cc` / `.h` —
+  `DelegatedFrameHost`, surface ID management, `DidNavigate()`
+- `ui/accelerated_widget_mac/ca_layer_tree_coordinator.h` / `.cc` —
+  `CALayerTreeCoordinator`, `CAContext` creation/destruction
+- `ui/accelerated_widget_mac/display_ca_layer_tree.mm` —
+  `DisplayCALayerTree::GotCALayerFrame()`, CALayerHost creation
+
+**Electron (`vendor/electron/`):**
+
+- Search for patches touching `browser_compositor_view_mac`,
+  `render_widget_host_view_mac`, `delegated_frame_host`, or
+  `ca_layer_tree_coordinator`
+- Search for navigation transition or content snapshot logic
+
+#### Steps
+
+1. Read the Chromium files listed above, focusing on the navigation path and
+   CAContext lifecycle.
+2. Search Electron's patches for modifications to the same files.
+3. Answer each of the 5 questions above with file paths and line numbers.
+4. Propose concrete Chromium-side fixes based on findings.
+
+#### Verification
+
+All 5 questions have answers with specific file paths and line numbers from the
+local source. At least one concrete fix is proposed with enough detail to design
+as the next experiment.
