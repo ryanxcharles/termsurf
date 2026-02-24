@@ -360,3 +360,180 @@ don't render anything useful. Future experiments should explore:
 - **Accept and mask.** Set the positioning layer's `backgroundColor` to white so
   the flash shows white instead of the terminal background. Doesn't eliminate
   the flash but makes it far less jarring.
+
+## Experiment 2: Delay ca_context_id until content is composited
+
+### Hypothesis
+
+The flash occurs because the GUI swaps to a new CALayerHost whose CAContext
+hasn't produced visible content yet. The XPC `ca_context` message is sent on the
+**first** CALayerParams callback with the new ID — but that first callback may
+arrive before the renderer has painted real web content into the new compositor.
+If we delay sending the new `ca_context_id` by several frames, the new CAContext
+will have real content when the GUI finally swaps to it.
+
+### Background
+
+The `ca_context_id` is sent over XPC from a `CALayerParams` callback registered
+on the `RenderWidgetHostViewMac`. The callback is in
+`shell_browser_main_parts.cc` lines 399–431 (inside `CreateTab()`):
+
+```cpp
+auto ca_layer_callback = base::BindRepeating(
+    [](const std::string& pane_id, xpc_connection_t conn,
+       uint32_t* last_id, const gfx::CALayerParams& params) {
+      if (params.ca_context_id == 0 || params.ca_context_id == *last_id)
+        return;
+      *last_id = params.ca_context_id;
+      // ... send XPC message immediately ...
+    },
+    cb_pane_id, cb_conn,
+    base::Owned(last_id));
+```
+
+When a new `ca_context_id` appears (different from `*last_id`), the XPC message
+is sent immediately on that same callback invocation. The GPU process has
+committed a frame to the CAContext (the callback only fires when
+`CALayerParams.is_empty == false`), but the committed content may be a blank
+compositor fallback — not the rendered web page. The renderer needs several more
+frames to paint real content.
+
+### Design
+
+**Change:** In the `ca_layer_callback` lambda, when a new `ca_context_id` is
+detected, don't send the XPC message immediately. Instead, start a frame counter.
+Continue counting callbacks with the same `ca_context_id`. After N callbacks
+(N = 3 to start, tunable), send the XPC message.
+
+During the delay:
+- The GUI still has the **old** CALayerHost pointing at the old (dead) CAContext.
+- The old host shows nothing (confirmed by Experiment 1).
+- The delay means the flash of blank content is still visible for the same
+  duration. But the swap itself — when it happens — should be clean: the new
+  CAContext will have N frames of real content by then.
+
+**Wait — this doesn't help.** If the old CAContext is dead and shows nothing
+during the delay, then delaying the send just makes the blank period *longer*,
+not shorter. The flash still happens. The only way this approach works is if the
+blank flash is caused by the GUI swapping to a CAContext with no content — not
+by the old CAContext dying.
+
+**Revised hypothesis:** The flash might be caused by BOTH:
+1. The old CAContext dying (unavoidable), AND
+2. The new CAContext not having content when swapped to
+
+If #2 is a factor, delaying the send would eliminate the second blank — reducing
+the total flash duration. If #1 is the sole cause and #2 contributes nothing,
+then delaying the send won't help.
+
+**This is worth testing because we don't know the relative contribution of each
+factor.** The test will tell us.
+
+### Chromium branch
+
+`146.0.7650.0-issue-632` (forked from `146.0.7650.0-issue-631`)
+
+### Code changes
+
+**`shell_browser_main_parts.cc` — modify the `ca_layer_callback` lambda:**
+
+Add two new shared variables alongside `last_id`:
+
+```cpp
+auto* last_id = new uint32_t(0);
+auto* pending_id = new uint32_t(0);    // New: ID waiting to be sent
+auto* pending_count = new int(0);       // New: frames seen with pending ID
+const int kFrameDelay = 3;              // New: frames to wait before sending
+```
+
+Replace the lambda body:
+
+```cpp
+[](const std::string& pane_id, xpc_connection_t conn,
+   uint32_t* last_id, uint32_t* pending_id, int* pending_count,
+   int frame_delay, const gfx::CALayerParams& params) {
+  if (params.ca_context_id == 0)
+    return;
+
+  // New ID detected — start counting frames.
+  if (params.ca_context_id != *last_id &&
+      params.ca_context_id != *pending_id) {
+    *pending_id = params.ca_context_id;
+    *pending_count = 0;
+  }
+
+  // Increment count if we're waiting on a pending ID.
+  if (*pending_id != 0 && params.ca_context_id == *pending_id) {
+    (*pending_count)++;
+    if (*pending_count >= frame_delay) {
+      // Enough frames have been composited — send the ID.
+      *last_id = *pending_id;
+      *pending_id = 0;
+      *pending_count = 0;
+
+      xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
+      xpc_dictionary_set_string(msg, "action", "ca_context");
+      xpc_dictionary_set_uint64(msg, "ca_context_id",
+                                params.ca_context_id);
+      xpc_dictionary_set_string(msg, "pane_id", pane_id.c_str());
+      xpc_dictionary_set_uint64(msg, "pixel_width",
+                                params.pixel_size.width());
+      xpc_dictionary_set_uint64(msg, "pixel_height",
+                                params.pixel_size.height());
+      xpc_connection_send_message(conn, msg);
+      xpc_release(msg);
+    }
+  }
+}
+```
+
+Update the `base::BindRepeating` to pass the new variables:
+
+```cpp
+auto ca_layer_callback = base::BindRepeating(
+    [](/* ... */),
+    cb_pane_id, cb_conn,
+    base::Owned(last_id), base::Owned(pending_id),
+    base::Owned(pending_count), kFrameDelay);
+```
+
+The `ShellTabObserver::DidFinishNavigation` dedup gate reset (`*last_ca_context_id_ = 0`)
+remains unchanged — it still resets `last_id`. The `pending_id` and
+`pending_count` handle the delay logic independently.
+
+### Test
+
+1. Create Chromium branch: `146.0.7650.0-issue-632` from `146.0.7650.0-issue-631`
+2. Apply the code change to `shell_browser_main_parts.cc`
+3. Build: `autoninja -C out/Default chromium_profile_server`
+4. Build GUI: `cd gui && zig build`
+5. Launch: `open gui/zig-out/TermSurf.app`
+6. Navigate between pages — observe flash behavior
+7. If flash is reduced, try tuning `kFrameDelay` (1, 2, 3, 5)
+8. If flash is unchanged, the delay doesn't help
+
+### Success criteria
+
+Navigation between pages has no visible flash, or the flash is significantly
+reduced compared to the current behavior.
+
+### Failure modes
+
+- **Flash unchanged:** The flash is entirely caused by the old CAContext dying
+  (factor #1), and the new CAContext already has content when it arrives. The
+  delay just makes the blank period longer. In this case, the flash cannot be
+  fixed from either the GUI or the Chromium callback — it's inherent to the
+  CAContext lifecycle.
+- **Flash longer:** The delay adds latency to the swap without reducing the
+  blank. Worse UX than before. Revert immediately.
+- **Navigation feels sluggish:** The N-frame delay adds perceived latency to
+  page transitions. May need to tune N down or abandon this approach.
+
+### If this fails
+
+Fall back to **Experiment 3: snapshot fallback** (GUI-side). Before swapping the
+CALayerHost, capture the current positioning layer's visible content as a bitmap
+via `CALayer.renderInContext:` or the `contents` property. Place the bitmap on a
+static `CALayer` that covers the gap while the new CAContext produces its first
+frame. This approach doesn't prevent the blank — it masks it with a static image
+of the previous page, which is visually seamless.
