@@ -1088,3 +1088,86 @@ with an empty content gap.
 Electron solved this years ago by disabling compositor recycling when the view
 is attached to a window. The next experiment should apply the same approach to
 our Chromium Profile Server.
+
+### Experiment 5: Disable compositor recycling (Electron patch)
+
+#### Purpose
+
+Apply Electron's proven fix for compositor recycling. When a
+`RenderWidgetHostViewMac` receives `WasOccluded()`, it currently calls
+`SetRenderWidgetHostIsHidden(true)` unconditionally, which triggers
+`TransitionToState(HasNoCompositor)` and destroys the compositor. The Electron
+patch makes this conditional: only mark hidden if the view's NSView is truly
+unattached from any window.
+
+Our Profile Server's window uses `setAlphaValue:0` + `orderWindow:NSWindowBelow`
+(Issue 630, fix C1), which keeps the window in the window list but places it
+behind everything. macOS may still report this as occluded, triggering
+`WasOccluded()` and compositor recycling. The Electron patch would prevent
+recycling because the view IS attached to a window — it's just transparent and
+behind other windows.
+
+#### Hypothesis
+
+The `ca_context_id` changes on every navigation because the compositor is being
+recycled. If we prevent recycling, the same `CALayerTreeCoordinator` and
+`ca_context_id` persist across navigations. The GUI receives the same ID, the
+dedup gate in the Chromium callback filters it out, and no `CALayerHost` swap
+occurs. Zero flicker.
+
+#### Changes
+
+**New Chromium branch:** `146.0.7650.0-issue-631` forked from
+`146.0.7650.0-issue-630`.
+
+**`content/browser/renderer_host/render_widget_host_view_mac.mm` —
+`WasOccluded()`**
+
+Apply the Electron patch. Change `WasOccluded()` (around line 567) from:
+
+```cpp
+void RenderWidgetHostViewMac::WasOccluded() {
+  if (host()->IsHidden()) {
+    return;
+  }
+
+  host()->WasHidden();
+  browser_compositor_->SetRenderWidgetHostIsHidden(true);
+  // ...
+}
+```
+
+To:
+
+```cpp
+void RenderWidgetHostViewMac::WasOccluded() {
+  if (host()->IsHidden()) {
+    return;
+  }
+
+  host()->WasHidden();
+  // Only mark the compositor hidden if the view is truly unattached from a
+  // window (Issue 631, Experiment 5). When the view has a window (even a
+  // transparent one), keep the compositor alive to prevent recycling.
+  // This matches Electron's disable_compositor_recycling.patch.
+  const bool unattached = ![GetInProcessNSView() window];
+  browser_compositor_->SetRenderWidgetHostIsHidden(unattached);
+  // ...
+}
+```
+
+This is the only code change. No GUI modifications.
+
+#### Verification
+
+1. Create Chromium branch and apply the change.
+2. Build: `autoninja -C out/Default chromium_profile_server`
+3. Launch TermSurf and open a web page.
+4. Navigate to another page on the same site (e.g., click a Wikipedia link).
+5. Check `logs/chromium-server.log` for `ca_context_id` values.
+   - **Pass criterion 1**: Same-site navigations produce the **same**
+     `ca_context_id` (compositor not recycled).
+   - **Pass criterion 2**: No visible flicker during same-site navigation.
+6. Navigate to a different origin (cross-site).
+   - The ID may change (renderer swap creates a new compositor). Brief flicker
+     is acceptable for cross-site navigation — that's a separate problem.
