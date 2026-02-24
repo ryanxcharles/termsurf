@@ -685,3 +685,99 @@ surface transition), #6 (old host removed before new host has content), #9 (no
 fallback content during transition).
 
 Code changes reverted.
+
+### Experiment 3: Delay old CALayerHost removal
+
+#### Purpose
+
+The `ca_context_id` changes on every navigation (proven by Experiment 2 logs),
+so a CALayerHost swap is unavoidable. Currently the old host is removed in the
+same CATransaction as the new host addition (smell #6/#7). If the new CAContext
+has no content yet, the user sees a blank frame.
+
+The fix: keep the old CALayerHost behind the new one for 200ms. If the old
+CAContext still has content during the transition, the old page shows through
+the transparent new host until the new page's first frame arrives.
+
+#### Hypothesis
+
+The old `CALayerTreeCoordinator` (and its CAContext) is not destroyed instantly
+when navigation creates a new one. There is a brief overlap where the old
+CAContext still has the previous page's content. By keeping the old CALayerHost
+in the layer tree behind the new one, the old content remains visible during the
+gap, masking the flicker.
+
+If the old CAContext is destroyed before the new one has content, the old host
+also goes blank, and this experiment fails — the blank is just delayed, not
+eliminated.
+
+#### Changes
+
+**`gui/src/renderer/Metal.zig` — `setCALayerHostContextId()`**
+
+In the existing-host replacement branch, change the swap to keep the old host
+for 200ms:
+
+1. Add the new host to the positioning layer (same as now).
+2. Do NOT remove the old host in the same transaction — leave it behind the new
+   host.
+3. Schedule a delayed removal of the old host via `dispatch_after` (200ms).
+
+```zig
+if (ca_layer_host_ptr.*) |existing| {
+    // ... create new_host, set contextId, anchorPoint, autoresizingMask ...
+
+    // Add new host to positioning_layer (on top of old host).
+    if (ca_layer_positioning_ptr.*) |pos_ptr| {
+        const pos = objc.Object.fromId(pos_ptr);
+        pos.msgSend(void, objc.sel("addSublayer:"), .{new_host.value});
+    }
+
+    // Update pointer to new host immediately.
+    ca_layer_host_ptr.* = new_host.value;
+
+    // Schedule delayed removal of old host (200ms).
+    // The old host's CAContext may still have content from the previous page,
+    // visible behind the transparent new host until the new page renders.
+    const Old = struct {
+        host: objc.Object,
+        fn remove(raw: ?*anyopaque) callconv(.c) void {
+            const self: *@This() = @ptrCast(@alignCast(raw));
+            const CATx2 = objc.getClass("CATransaction").?;
+            CATx2.msgSend(void, objc.sel("begin"), .{});
+            CATx2.msgSend(void, objc.sel("setDisableActions:"), .{true});
+            self.host.msgSend(void, objc.sel("removeFromSuperlayer"), .{});
+            self.host.release();
+            CATx2.msgSend(void, objc.sel("commit"), .{});
+            std.heap.c_allocator.destroy(self);
+        }
+    };
+    const old_ctx = std.heap.c_allocator.create(Old) catch return;
+    old_ctx.* = .{ .host = objc.Object.fromId(existing) };
+    const delay = dispatch_time(DISPATCH_TIME_NOW, 200 * std.time.ns_per_ms);
+    dispatch_after(delay, &_dispatch_main_q, old_ctx, &Old.remove);
+
+    log.info("replaced CALayerHost contextId={}, old host removal delayed 200ms", .{context_id});
+}
+```
+
+This requires adding `dispatch_after` and `dispatch_time` to the extern
+declarations (they are standard GCD functions from `<dispatch/dispatch.h>`,
+already available via Zig's C import).
+
+#### Verification
+
+1. Build TermSurf: `cd gui && zig build`
+2. Launch: `open gui/zig-out/TermSurf.app`
+3. Open a web page:
+   `cargo run -p web -- https://en.wikipedia.org/wiki/Main_Page`
+4. Click any Wikipedia link and observe the transition.
+   - **Pass**: No visible blank frame. The old page content remains visible
+     until the new page appears.
+   - **Partial**: The old page lingers for ~200ms then there is a brief blank
+     before the new page. This means the old CAContext is destroyed quickly but
+     the new one takes longer than 200ms to have content.
+   - **Fail**: Same flicker as before. The old CAContext is destroyed instantly
+     when navigation begins, so the old host also goes blank immediately.
+5. Test multiple navigations in sequence to confirm no layer tree corruption
+   (leaked hosts, double-free, etc.).
