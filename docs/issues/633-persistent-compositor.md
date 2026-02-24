@@ -451,18 +451,22 @@ compositor. If the per-view callback doesn't fire, we'll need to implement
 - No visible flicker on navigation
 - Page content renders correctly after navigation
 
-### Failure modes
+### Result: FAIL
 
-- **ca_context_id not sent:** The per-view callback doesn't fire in
-  `UseParentLayerCompositor` mode and we have no other callback registered. The
-  GUI never receives the ID. Fix: implement `AcceleratedWidgetMacNSView` on a
-  custom bridge class in Experiment 2.
-- **Crash in SetParentUiLayer:** The layer may need to have a compositor
-  attached and visible before `SetParentUiLayer` is called. The DCHECK in
-  `BrowserCompositorMac::SetParentUiLayer` requires
-  `new_parent_ui_layer->GetCompositor()` to be non-null.
-- **Black/blank content:** The persistent compositor exists but content doesn't
-  render into it correctly. May need additional `ui::Compositor` configuration
-  (background color, visible state, etc.).
-- **Resize breaks:** The persistent compositor's size doesn't match the tab's
-  expected size. May cause layout issues or crashes.
+The persistent compositor is created and `SetParentUiLayer` succeeds — the
+`BrowserCompositorMac` enters `UseParentLayerCompositor` mode as intended. But
+the webview never appears. No `ca_context_id` is sent to the GUI.
+
+**Root cause:** In `UseParentLayerCompositor` mode, no `RecyclableCompositorMac`
+is created per view. The per-view `SetCALayerParamsCallback` calls
+`GetLastCALayerParams()`, which returns null without a `recyclable_compositor_`.
+The callback never fires, the GUI never receives the `ca_context_id`, and no
+`CALayerHost` is created.
+
+The `ca_context_id` now lives on the persistent compositor's
+`AcceleratedWidgetMac`. But we never registered an `AcceleratedWidgetMacNSView`
+on it to receive the `AcceleratedWidgetCALayerParamsUpdated()` callback.
+
+**Fix:** Implement `AcceleratedWidgetMacNSView` on a bridge class, register it
+with `persistent_widget_mac_->SetNSView(bridge)`, and extract the
+`ca_context_id` from `GetCALayerParams()` in the callback. This is Experiment 2.
