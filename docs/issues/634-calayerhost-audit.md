@@ -76,8 +76,9 @@ correctly.
 **Result: PASS**
 
 Bug: refocusing the window eats the first click even though the browser pane is
-already focused. The focus-eating logic incorrectly treats a window-refocus click
-as a pane-focus click. Link navigation itself works correctly with no flicker.
+already focused. The focus-eating logic incorrectly treats a window-refocus
+click as a pane-focus click. Link navigation itself works correctly with no
+flicker.
 
 ### T3: Back/forward navigation
 
@@ -150,8 +151,8 @@ Click a text input or search field. Type characters. Text appears in the field.
 
 ### T14: Keyboard input (Cmd+key bypass)
 
-Cmd+C, Cmd+V, Cmd+A, Cmd+X bypass the browser and work as expected (copy,
-paste, select all, cut).
+Cmd+C, Cmd+V, Cmd+A, Cmd+X bypass the browser and work as expected (copy, paste,
+select all, cut).
 
 ### T15: Keyboard input (Tab)
 
@@ -190,3 +191,29 @@ Text is sharp. Compare with native Chrome side-by-side if needed.
 
 Compare the browser overlay position with the TUI viewport border. Content
 should align to the pixel — no gap, no overlap, no offset.
+
+## Conclusion
+
+The audit passed 11 of the first 12 tests (T1–T7, T9–T12) before uncovering a
+severe regression: opening a second pane with the same browser profile causes
+both webviews to navigate to the new URL. The profile server is supposed to
+manage independent tabs — each pane gets its own `WebContents`, its own URL, its
+own navigation history. Instead, the persistent compositor changes from Issue
+633 appear to have conflated the two tabs, routing all navigation through a
+single shared path.
+
+This is a fundamental correctness issue. Multi-tab isolation within a single
+profile is the core architecture of the profile server (established in Issues
+503–511). A broken multi-tab mode means the CALayerHost migration has regressed
+a feature that worked correctly under the old `FrameSinkVideoCapturer` pipeline.
+
+The remaining tests (T4, T8, T13–T22) are deferred. There is no point testing
+keyboard input, multi-profile, or tab lifecycle when multi-tab within a single
+profile is broken. The next issue will diagnose and fix this regression, then
+the audit will resume.
+
+### Minor bug noted
+
+T2 found that refocusing the TermSurf window eats the first click even though
+the browser pane is already focused. The focus-eating logic incorrectly treats a
+window-refocus click as a pane-focus click. This is cosmetic — not blocking.
