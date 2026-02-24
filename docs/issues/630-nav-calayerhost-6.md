@@ -779,3 +779,55 @@ to keep the compositor active) and the GUI threading fixes G1+G2 (dispatching
 CALayerHost mutations to the main thread with CATransaction wrapping and atomic
 swap). The brief flicker during navigation is a separate, much smaller issue —
 the overlay is continuously visible across navigations, which was the goal.
+
+## Conclusion
+
+Issue 630 resolved the primary navigation blank — clicking a link no longer
+causes the browser overlay to permanently vanish. The fix required seven
+coordinated changes across both the GUI (Zig) and the Chromium Profile Server
+(C++):
+
+- **C1**: Replaced `[window orderOut:nil]` with `setAlphaValue:0` to keep the
+  hidden window's compositor active during navigation.
+- **C2**: Added `RenderViewHostChanged` to `ShellTabObserver` to re-register
+  CALayerParams and cursor callbacks after cross-process navigation view swaps.
+- **C3**: Reset the `ca_context_id` dedup gate on navigation so the callback
+  fires even if the new CAContext reuses the same ID.
+- **C4**: Changed `view->SetSize()` to `ResizeWebContentForTests()` so the
+  hidden NSWindow's `contentView.frame` stays in sync with the RWHV, ensuring
+  `BrowserCompositorMac::DidNavigate()` reads the correct `dfh_size_dip_`.
+- **G1**: Dispatched CALayerHost creation to the main thread via
+  `dispatch_async_f` and wrapped all CALayer mutations in explicit
+  `CATransaction begin/setDisableActions/commit`.
+- **G2**: Reversed the swap order to add the new CALayerHost before removing the
+  old one (atomic swap), matching Chromium's `DisplayCALayerTree` pattern.
+- **G3**: Added a zero guard on `ca_context_id` in the XPC handler.
+
+### Remaining issue
+
+There is still a brief (~100ms) flicker during every navigation — the overlay
+blanks for one frame then reappears. This is visible and annoying but does not
+make the browser unusable. The most likely cause is the compositor tearing down
+and rebuilding its content tree during the navigation, leaving the CAContext
+momentarily empty. A snapshot-behind approach (capturing the current frame as a
+static image before the swap) or avoiding the CALayerHost swap entirely when the
+`ca_context_id` doesn't change could eliminate this. Tracked as a follow-up
+issue.
+
+### Untested areas
+
+The CALayerHost migration (Issues 625–630) changed fundamental rendering
+infrastructure. The following features have not been retested since the
+migration and may have regressions:
+
+- **Mouse input**: clicks, drag, scroll, cursor changes (Issue 606)
+- **Keyboard input**: key forwarding, Cmd+key bypass, clipboard, Tab (Issues
+  607–609)
+- **Loading progress**: progress bar, pulse animation (Issue 616)
+- **Browser navigation keybindings**: Cmd+L, Cmd+R, back/forward (Issue 616)
+- **Multi-pane multi-profile**: server reuse, independent tabs (Issues 604–605)
+- **Dynamic resize**: pane resize propagation through XPC (Issue 627)
+- **Text selection**: drag-to-select, cursor changes (Issue 606)
+
+A comprehensive retest of all browser features should be performed before moving
+on to new feature work.
