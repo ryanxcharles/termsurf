@@ -307,3 +307,56 @@ visible until the new page appears.
 - **Memory leak:** If `drawFrame` never runs after the swap (e.g., window is
   occluded), the old host is never removed. Mitigated by the cleanup in
   `removeCALayerHost()`, but worth verifying.
+
+### Result: FAIL
+
+The flicker is still visible. Deferring old host removal to the next `drawFrame`
+did not help — the flash of content persists on every navigation.
+
+### Analysis
+
+The hypothesis was wrong. The flicker is not caused by removing the old host in
+the same transaction as adding the new one. Even with the old host kept in the
+layer tree underneath the new one, the flash still occurs. This means:
+
+1. **The old host is not covering the gap.** Either its dead CAContext renders as
+   transparent (not as the last frame), or Window Server doesn't composite a
+   host whose CAContext has been destroyed — it just shows nothing regardless of
+   whether the host is in the layer tree.
+
+2. **The new host genuinely has no content for at least one frame.** The flash
+   is the new CAContext before Chromium's GPU process has composited its first
+   frame into it. No amount of layer tree manipulation on the GUI side can fix
+   this — the content simply doesn't exist yet.
+
+3. **One `drawFrame` cycle may not be enough.** The delay between add and removal
+   was tied to `drawFrame` (~16ms at 60Hz), but if the new CAContext needs
+   multiple frames to produce content, a longer delay would be needed. However,
+   since the old host isn't providing cover anyway (point 1), a longer delay
+   wouldn't help.
+
+### Next steps
+
+The two-phase swap approach is fundamentally limited because dead CAContexts
+don't render anything useful. Future experiments should explore:
+
+- **Snapshot the old content.** Before the swap, capture the current positioning
+  layer's contents as a bitmap (via `renderInContext:` or `contents` property)
+  and set it as the positioning layer's `contents`. This static snapshot covers
+  the gap regardless of the old CAContext's state. Remove it once the new host
+  is composited.
+
+- **Chromium-side: reuse the CAContext.** Instead of creating a new CAContext on
+  navigation, have Chromium update the existing one. If the `ca_context_id`
+  doesn't change, no swap is needed on the GUI side. This requires Chromium
+  changes — the ID changes because navigation triggers renderer/compositor
+  recreation.
+
+- **Chromium-side: pre-composite before sending ID.** Delay sending the new
+  `ca_context_id` until the new CAContext has at least one composited frame.
+  The old page stays visible (via the old host) until the new one is ready. This
+  requires a way to detect "first frame composited" on the Chromium side.
+
+- **Accept and mask.** Set the positioning layer's `backgroundColor` to white so
+  the flash shows white instead of the terminal background. Doesn't eliminate
+  the flash but makes it far less jarring.
