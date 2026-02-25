@@ -98,10 +98,10 @@ is spread across:
 `146.0.7650.0-issue-642` — forked from the vanilla `146.0.7650.0` tag, NOT from
 `issue-639` or any other TermSurf branch.
 
-The whole point of the Zig Profile Server is to eliminate the Content Shell fork.
-The current profile server (`chromium_profile_server`) carries 42 patches from
-`termsurf` through `issue-639` — most of which modify Content Shell internals.
-The new branch starts clean: just 3 new files in
+The whole point of the Zig Profile Server is to eliminate the Content Shell
+fork. The current profile server (`chromium_profile_server`) carries 42 patches
+from `termsurf` through `issue-639` — most of which modify Content Shell
+internals. The new branch starts clean: just 3 new files in
 `content/zig_profile_server/` (BUILD.gn, header, implementation). No
 modifications to existing Chromium source.
 
@@ -308,3 +308,116 @@ interception, dock icon hiding, focus management, and auto-exit.
 Once the Zig Profile Server has feature parity, switch the GUI to connect to it
 instead of the C++ profile server. Remove the old `chromium_profile_server`
 target.
+
+## Experiments
+
+### Experiment 1: Zig drives ContentMain
+
+Prove that a Zig binary can dlopen the Chromium framework, register a callback,
+and drive `ContentMain` to display a web page. This is the thinnest possible
+end-to-end proof of the Zig-to-Chromium bridge.
+
+Issue 620 Experiment 4 proved this from a C/ObjC launcher (`ts_main.mm`). This
+experiment proves it from Zig. Everything else in this issue is incremental once
+this works.
+
+#### Chromium side
+
+Create the branch `146.0.7650.0-issue-642` from the vanilla `146.0.7650.0` tag.
+Add 3 files in `chromium/src/content/zig_profile_server/`:
+
+**`BUILD.gn`** — Build target. The key difference from the old
+`chromium_profile_server`: this target depends on
+`//content/shell:content_shell_lib` (linking against Content Shell as a
+library), not forking it. No Content Shell files are copied or modified.
+
+**`content_api_shim.h`** — C header with 4 exports:
+
+```c
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef void (*ts_callback_t)(void);
+
+// Register a callback that fires when the browser is ready.
+void ts_set_on_initialized(ts_callback_t callback);
+
+// Create a browser profile with the given storage path.
+typedef void* ts_browser_context_t;
+ts_browser_context_t ts_create_browser_context(const char* path);
+
+// Create a tab (Shell window) in the given profile, loading the URL.
+void ts_create_tab(ts_browser_context_t ctx, const char* url);
+
+#ifdef __cplusplus
+}
+#endif
+```
+
+`ContentMain` is not declared here — it is dlsym'd from the framework directly
+(same pattern as `shell_main_mac.cc`).
+
+**`content_api_shim.cc`** — C++ implementation. Subclasses `ShellMainDelegate`,
+`ShellContentBrowserClient`, and `ShellBrowserMainParts` (same 3-class chain as
+Issue 620). `InitializeMessageLoopContext()` fires the `on_initialized`
+callback. `ts_create_browser_context` creates a `ShellBrowserContext` with the
+given path. `ts_create_tab` calls `Shell::CreateNewWindow`.
+
+The macOS app bundle uses `shell_main_mac.cc` as its entry point (same as Issue
+620 Experiments 1–3 and 8–11). The helper bundles also reuse Content Shell's
+launcher unchanged.
+
+#### Zig side
+
+Create `browser/` in the main repo:
+
+**`browser/build.zig`** — Build system. Produces a shared library (`.dylib`)
+that the app bundle's `shell_main_mac.cc` loads via dlopen.
+
+**`browser/src/main.zig`** — Zig entry point. Exports `ContentMain` as
+`extern "C"` — this is the symbol that `shell_main_mac.cc` dlsym's. Inside, it:
+
+1. Uses `std.DynLib` (or direct `@cImport` of `<dlfcn.h>`) to dlopen the
+   Chromium framework (the C++ shim's shared library).
+2. dlsym's `ts_set_on_initialized`, `ts_create_browser_context`,
+   `ts_create_tab`.
+3. Registers an `on_initialized` callback.
+4. Calls the real `ContentMain` (dlsym'd from the framework).
+
+The `on_initialized` callback:
+
+1. Builds the profile path (`~/.config/termsurf/zig-profile-server/profile-a/`).
+2. Calls `ts_create_browser_context(path)`.
+3. Calls `ts_create_tab(ctx, "https://google.com")`.
+
+#### Build
+
+```bash
+# Step 1: Build the C++ shim (framework + app bundle)
+cd ~/dev/termsurf/chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default zig_profile_server
+
+# Step 2: Build the Zig shared library
+cd ~/dev/termsurf/browser
+zig build
+
+# Step 3: Copy or symlink the Zig dylib into the framework bundle
+# (exact mechanism TBD during implementation)
+```
+
+#### Verification
+
+1. Run the app:
+   ```bash
+   open chromium/src/out/Default/Zig\ Profile\ Server.app
+   ```
+2. A Content Shell window appears showing google.com
+3. The page is interactive (scrolling, clicking, typing work)
+4. Profile directory created at
+   `~/.config/termsurf/zig-profile-server/profile-a/`
+5. Closing the window exits the process
+
+If google.com loads in a Shell window, the Zig → C → C++ bridge works. The
+Content API is successfully driven from Zig through the shim.
