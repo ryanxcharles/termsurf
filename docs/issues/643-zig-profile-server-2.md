@@ -267,4 +267,25 @@ Same result as 642 Experiment 2: no Shell window, nonzero CAContext ID, no
 crash. The only difference is the binary was built by `autoninja` instead of
 `zig build`.
 
-#### Result:
+#### Result: Pass
+
+`autoninja -C out/Default zig_profile_server` builds the full app bundle in a
+single command. The GN `action()` invokes `zig build-exe`, a second `action()`
+swaps the Zig binary over the C++ launcher in the app bundle.
+
+Output from launching via the terminal:
+
+```
+[ZigProfileServer] Created persistent compositor
+[ZigProfileServer] Set parent_ui_layer_ on view
+[ZigProfileServer] Created WebContents, navigating to https://google.com
+ca_context_id=4090419826
+```
+
+The binary has `flags=0x20002(adhoc,linker-signed)` — the correct code signing
+produced natively by the Zig compiler. No `codesign` step needed. The app also
+launches correctly via `open`, with the full Chromium process tree (GPU,
+Network, Storage, and Renderer helpers).
+
+This solves the root cause of all Issue 642 deployment failures: the binary is
+built and bundled by `autoninja`, so the app bundle is correct by construction.
