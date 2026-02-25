@@ -1,9 +1,0 @@
-[package]
-name = "termsurf-terminal"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-termsurf-xpc = { path = "../termsurf-xpc" }
-wgpu = "24"
-pollster = "0.4"
