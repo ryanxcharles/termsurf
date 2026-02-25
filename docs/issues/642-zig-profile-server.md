@@ -997,3 +997,109 @@ understanding of Chromium's bundle path expectations. The next experiment should
 investigate whether the issue is in the main process or the Helper subprocess
 launch, and whether the Chromium-built outer `.app` shell (from `autoninja`)
 needs to be preserved while only replacing the main executable.
+
+### Experiments 3–5 Conclusion
+
+Three experiments attempted to connect the Zig Profile Server to the GUI via
+XPC. All failed. The Zig XPC code itself was never the problem — the code
+compiled, the XPC message dispatch logic was sound, and when the server was
+launched manually from the terminal it connected to the gateway, created a
+BrowserContext, and sent `server_register` successfully. The failures were all
+in the deployment pipeline: getting the Zig binary to run inside a Chromium app
+bundle when spawned by the GUI.
+
+#### What worked
+
+- **Zig XPC code.** The `objc.Block`-based event handler, arg parsing,
+  `xpc_connection_create_mach_service` client connection, `server_register` /
+  `ca_context` message format — all correct. Verified by launching the server
+  directly from the terminal in Experiment 5.
+- **`zig_objc` integration.** Adding the dependency to `browser/build.zig.zon`
+  and importing the `objc` module worked without issues.
+- **App bundle assembly from `zig build`.** The build system correctly produces
+  a `.app` bundle with Info.plist, PkgInfo, executable, and framework.
+
+#### What failed
+
+1. **Experiment 3: Code signing.** Copying the Zig binary into the
+   Chromium-built `.app` bundle and re-signing with
+   `codesign --force --deep -s -` produced a full adhoc signature that sealed
+   mismatched resources. The original Chromium binary had `linker-signed`
+   (lightweight, no sealed resources). macOS killed the process with
+   `SIGKILL (Code Signature Invalid)` before any code ran.
+
+2. **Experiment 5, attempt 1: Symlink.** Symlinking the framework from the
+   Zig-assembled bundle to the Chromium build output broke Chromium's
+   `GetContentsPath()`, which calls `realpath()` to resolve the executable path.
+   `realpath()` follows symlinks, so the resolved path pointed into the Chromium
+   build tree instead of the app bundle's `Contents/` directory. `DCHECK` crash.
+
+3. **Experiment 5, attempt 2: Copy.** Copying the framework instead of
+   symlinking avoided the `realpath()` symlink issue, but the server still
+   crashed or hung. The `GetContentsPath()` DCHECK continued to fail — the
+   Chromium framework has deep assumptions about the bundle layout that extend
+   beyond just the main executable location.
+
+#### Root cause
+
+Chromium's macOS bundle path resolution is tightly coupled to the exact
+directory structure that `autoninja` produces. The code in
+`content/shell/app/paths_apple.mm` navigates the directory hierarchy by counting
+levels (`path.DirName().DirName()`) and asserts the result. Any deviation from
+the expected layout — different signing, symlinks, reconstructed bundles —
+triggers fatal assertions.
+
+The fundamental mistake was trying to replace or reconstruct the app bundle.
+Chromium builds are not composable — you can't swap parts in and out.
+
+#### Lessons for next time
+
+1. **Don't fight the Chromium build system.** The app bundle must come from
+   `autoninja`. The Zig binary must be placed inside that bundle, not the other
+   way around. The Experiment 2 workflow (copy Zig binary in, re-sign) was the
+   right direction — the signing just needed to be done correctly.
+
+2. **Iterate on one variable at a time.** Experiment 3 changed two things at
+   once: added XPC code AND changed the deployment pipeline. When it failed, it
+   was unclear which change caused the failure. The XPC code should have been
+   tested with the known-working Experiment 2 deployment first.
+
+3. **Test deployment before logic.** The correct sequence: (a) copy the
+   Experiment 2 Zig binary into the autoninja bundle with correct signing,
+   verify it launches when spawned by the GUI, (b) then add XPC code.
+
+4. **Sign only the binary, not the bundle.** Experiment 4 showed the fix:
+   `codesign --force -s - <binary>` (not `--deep`, not the `.app`). This signs
+   just the executable with correct page hashes without touching the framework
+   or sealing bundle resources. This was never tested because Experiment 5 went
+   in a different direction (zig build assembly).
+
+5. **Keep the code.** The XPC implementation in `browser/src/main.zig` is
+   correct and reusable. The `build.zig.zon` and `objc` module setup is correct.
+   Only the deployment pipeline needs to change.
+
+## Conclusion
+
+Issue 642 set out to rewrite the Chromium Profile Server in Zig across 7 planned
+stages. Experiments 1–2 succeeded: Zig can dlopen the Chromium framework, drive
+ContentMain, create WebContents directly without Shell windows, and receive
+stable CAContext IDs from the persistent compositor. The Zig-to-Chromium bridge
+works.
+
+Experiments 3–5 attempted Stage 3 (XPC gateway) and failed — not because of the
+Zig code, but because of macOS app bundle deployment. Three different approaches
+to getting the Zig binary into a launchable Chromium app bundle all hit
+different walls: code signing invalidation, symlink resolution via `realpath()`,
+and Chromium's hardcoded bundle path assertions.
+
+The issue is paused, not abandoned. The architecture is proven (Experiments
+1–2), the XPC code is written and tested (runs correctly from the terminal), and
+the failure mode is understood. The path forward is clear: use the
+autoninja-built app bundle as-is, replace only the main executable, and sign
+only that binary with `codesign --force -s -` (not `--deep`). This was
+identified in Experiment 4 but never tested because Experiment 5 diverged into
+building the bundle from scratch.
+
+When this issue resumes, start with a single focused experiment: copy the
+Experiment 2 Zig binary into the autoninja bundle, sign only the binary, and
+verify it launches when spawned by the GUI. One variable at a time.
