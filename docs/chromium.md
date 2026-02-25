@@ -10,7 +10,7 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `146.0.7650.0-issue-637`
+- Branch: `146.0.7650.0-issue-638`
 - Base version: `146.0.7650.0` (tracking Electron's Chromium version)
 
 ## Branch Strategy
@@ -58,6 +58,7 @@ find the most relevant recent branch, create a new branch from it
 | `146.0.7650.0-issue-631` | [Issue 631](issues/631-continue-nav-calayerhost.md)   | Disable compositor recycling               |
 | `146.0.7650.0-issue-633` | [Issue 633](issues/633-persistent-compositor.md)      | Persistent compositor for stable CAContext |
 | `146.0.7650.0-issue-637` | [Issue 637](issues/637-editable-url-bar.md)           | Navigate XPC action                        |
+| `146.0.7650.0-issue-638` | [Issue 638](issues/638-page-title.md)                 | Page title sync                            |
 
 ## Local Setup
 

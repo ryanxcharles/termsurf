@@ -253,6 +253,8 @@ fn handleMessage(msg: xpc_object_t) void {
         handleLoadingState(msg);
     } else if (std.mem.eql(u8, action_str, "url_changed")) {
         handleUrlChanged(msg);
+    } else if (std.mem.eql(u8, action_str, "title_changed")) {
+        handleTitleChanged(msg);
     } else if (std.mem.eql(u8, action_str, "navigate")) {
         handleNavigate(msg);
     } else {
@@ -493,6 +495,19 @@ fn handleUrlChanged(msg: xpc_object_t) void {
     const fwd = xpc_dictionary_create(null, null, 0);
     xpc_dictionary_set_string(fwd, "action", "url_changed");
     xpc_dictionary_set_string(fwd, "url", url);
+    xpc_connection_send_message(p.web_peer, fwd);
+}
+
+fn handleTitleChanged(msg: xpc_object_t) void {
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    const p = panes.get(pane_id) orelse return;
+    if (p.web_peer == null) return;
+
+    const title = xpc_dictionary_get_string(msg, "title") orelse return;
+
+    const fwd = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(fwd, "action", "title_changed");
+    xpc_dictionary_set_string(fwd, "title", title);
     xpc_connection_send_message(p.web_peer, fwd);
 }
 

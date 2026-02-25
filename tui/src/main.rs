@@ -95,6 +95,7 @@ fn main() -> io::Result<()> {
     let mut loading_bar_active = false;
     let mut loading_bar_start: Option<Instant> = None;
     const LOADING_TIMEOUT: Duration = Duration::from_secs(30);
+    let mut page_title = String::new();
 
     // edtui state (Issue 637).
     let mut editor_state = EditorState::new(Lines::from(url.as_str()));
@@ -111,7 +112,7 @@ fn main() -> io::Result<()> {
     loop {
         let mut viewport_rect = Rect::default();
         terminal.draw(|frame| {
-            viewport_rect = ui(frame, &url, &profile, &mode, &mut editor_state);
+            viewport_rect = ui(frame, &url, &profile, &mode, &mut editor_state, &page_title);
         })?;
 
         // Send overlay coordinates to compositor (only when changed).
@@ -241,6 +242,9 @@ fn main() -> io::Result<()> {
                         };
                         let _ = stdout.flush();
                     }
+                    xpc::CompositorMessage::TitleChanged { title } => {
+                        page_title = title;
+                    }
                 }
             }
         }
@@ -287,6 +291,7 @@ fn ui(
     profile: &str,
     mode: &Mode,
     editor_state: &mut EditorState,
+    page_title: &str,
 ) -> Rect {
     // Paint full background.
     frame.render_widget(
@@ -345,9 +350,14 @@ fn ui(
     }
 
     // Viewport.
+    let viewport_title = if page_title.is_empty() {
+        " Viewport ".to_string()
+    } else {
+        format!(" {} ", page_title)
+    };
     let viewport_block = Block::default()
         .borders(Borders::ALL)
-        .title(" Viewport ")
+        .title(viewport_title)
         .border_style(Style::default().fg(viewport_border).bg(BG))
         .title_style(Style::default().fg(viewport_border))
         .style(Style::default().bg(BG));

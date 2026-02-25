@@ -57,6 +57,7 @@ pub enum CompositorMessage {
     ModeChanged { browsing: bool },
     UrlChanged { url: String },
     LoadingState { state: String, _progress: u8 },
+    TitleChanged { title: String },
 }
 
 /// A direct connection to the TermSurf app via its anonymous XPC listener.
@@ -218,6 +219,16 @@ impl CompositorConnection {
                         state,
                         _progress: progress,
                     });
+                }
+            } else if action == "title_changed" {
+                let title_key = CString::new("title").unwrap();
+                let title_ptr = unsafe { xpc_dictionary_get_string(event, title_key.as_ptr()) };
+                if !title_ptr.is_null() {
+                    let title = unsafe { std::ffi::CStr::from_ptr(title_ptr) }
+                        .to_str()
+                        .unwrap_or("")
+                        .to_string();
+                    let _ = tx.send(CompositorMessage::TitleChanged { title });
                 }
             }
         });
