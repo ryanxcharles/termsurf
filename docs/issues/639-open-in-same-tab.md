@@ -292,3 +292,146 @@ tab directly (as in Experiment 1) — this path doesn't go through
 All three research areas answered with code references. Root cause of Experiment
 1 failure identified (re-entrant navigation from within `AddNewContents`). Clear
 recommendation: use `IsWebContentsCreationOverridden` + deferred navigation.
+
+## Experiment 3: Suppress creation + deferred navigation
+
+### Hypothesis
+
+Using Electron's pattern — `IsWebContentsCreationOverridden` returns `true` to
+intercept, `CreateCustomWebContents` returns `nullptr` to suppress — prevents
+the new `WebContents` from being created. A deferred `PostTask` navigates the
+source tab to the target URL after the `CreateNewWindow` call chain unwinds,
+avoiding re-entrant navigation.
+
+### Changes
+
+All changes in `shell.h` and `shell.cc` (Chromium-only, no GUI/TUI changes).
+
+#### 1. `shell.h`: Add two new overrides
+
+Add after the `AddNewContents` declaration:
+
+```cpp
+bool IsWebContentsCreationOverridden(
+    RenderFrameHost* opener,
+    SiteInstance* source_site_instance,
+    mojom::WindowContainerType window_container_type,
+    const GURL& opener_url,
+    const std::string& frame_name,
+    const GURL& target_url) override;
+WebContents* CreateCustomWebContents(
+    RenderFrameHost* opener,
+    SiteInstance* source_site_instance,
+    bool is_new_browsing_instance,
+    const GURL& opener_url,
+    const std::string& frame_name,
+    const GURL& target_url,
+    const StoragePartitionConfig& partition_config,
+    SessionStorageNamespace* session_storage_namespace) override;
+```
+
+#### 2. `shell.cc`: Implement `IsWebContentsCreationOverridden`
+
+Suppress creation and post a deferred navigation on the opener's tab:
+
+```cpp
+bool Shell::IsWebContentsCreationOverridden(
+    RenderFrameHost* opener,
+    SiteInstance* source_site_instance,
+    mojom::WindowContainerType window_container_type,
+    const GURL& opener_url,
+    const std::string& frame_name,
+    const GURL& target_url) {
+  // Issue 639: Intercept new-window requests and navigate the opener tab
+  // to the target URL instead. Post a task so the navigation runs after
+  // the CreateNewWindow call chain fully unwinds.
+  if (opener && target_url.is_valid()) {
+    WebContents* source = WebContents::FromRenderFrameHost(opener);
+    if (source) {
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE,
+          base::BindOnce(
+              [](base::WeakPtr<WebContents> wc, GURL url) {
+                if (!wc)
+                  return;
+                NavigationController::LoadURLParams params(url);
+                params.transition_type = ui::PAGE_TRANSITION_LINK;
+                wc->GetController().LoadURLWithParams(params);
+              },
+              source->GetWeakPtr(), target_url));
+    }
+  }
+  return true;  // Always suppress — we handle it ourselves.
+}
+```
+
+#### 3. `shell.cc`: Implement `CreateCustomWebContents`
+
+Return `nullptr` to tell Chromium not to create a `WebContents`:
+
+```cpp
+WebContents* Shell::CreateCustomWebContents(
+    RenderFrameHost* opener,
+    SiteInstance* source_site_instance,
+    bool is_new_browsing_instance,
+    const GURL& opener_url,
+    const std::string& frame_name,
+    const GURL& target_url,
+    const StoragePartitionConfig& partition_config,
+    SessionStorageNamespace* session_storage_namespace) {
+  // Issue 639: No custom WebContents — creation is fully suppressed.
+  return nullptr;
+}
+```
+
+#### 4. `shell.cc`: Modify `OpenURLFromTab`
+
+Same as Experiment 1 — navigate the source tab for new-tab dispositions:
+
+```cpp
+case WindowOpenDisposition::NEW_POPUP:
+case WindowOpenDisposition::NEW_WINDOW:
+case WindowOpenDisposition::NEW_BACKGROUND_TAB:
+case WindowOpenDisposition::NEW_FOREGROUND_TAB:
+  // Issue 639: Open in current tab instead of creating a new window.
+  target = source;
+  break;
+```
+
+This path doesn't go through `CreateNewWindow` so re-entrancy is not a concern.
+
+#### 5. `shell.cc`: Leave `AddNewContents` unchanged
+
+`AddNewContents` should never be called for new-window requests now, since
+`IsWebContentsCreationOverridden` suppresses creation before it happens. Keep
+the original implementation as a safety net for any edge cases (e.g.
+picture-in-picture).
+
+#### 6. Includes
+
+Add if not already present:
+
+```cpp
+#include "base/task/sequenced_task_runner.h"
+#include "ui/base/page_transition_types.h"
+```
+
+### Verification
+
+1. Build Chromium (`autoninja -C out/Default chromium_profile_server`)
+2. Launch TermSurf, `web localhost:9616/test-target-blank.html`
+3. Click "Open example.com in new tab" (`target="_blank"`) — opens in same tab
+4. Click back — returns to test page
+5. Click `window.open()` button — opens in same tab
+6. Click "Open with rel=noopener" — opens in same tab
+7. No stray Chromium windows should appear
+8. URL bar and page title update correctly after each navigation
+
+### Success criteria
+
+- `target="_blank"` links navigate the current tab
+- `window.open()` navigates the current tab
+- No new Chromium windows are created
+- No TUI freezes or unresponsiveness
+- Back/forward navigation works after redirected navigations
+- Page title and URL bar update correctly
