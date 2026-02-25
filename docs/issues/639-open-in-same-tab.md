@@ -435,3 +435,19 @@ Add if not already present:
 - No TUI freezes or unresponsiveness
 - Back/forward navigation works after redirected navigations
 - Page title and URL bar update correctly
+
+### Result: Success
+
+All success criteria pass. `target="_blank"` links, `window.open()`, and
+`rel="noopener"` links all navigate in the current tab. No stray windows, no
+freezes. Back navigation returns to the previous page. URL bar and page title
+update correctly.
+
+## Conclusion
+
+Issue 639 is closed. New-tab and new-window requests (`target="_blank"`,
+`window.open()`, `rel="noopener"`) are intercepted and opened in the current tab
+instead. The implementation uses Electron's pattern:
+`IsWebContentsCreationOverridden` suppresses `WebContents` creation, and a
+deferred `PostTask` navigates the source tab after the call chain unwinds. True
+multi-tab support is deferred to a future issue.
