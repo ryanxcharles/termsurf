@@ -159,3 +159,112 @@ target.
 C++ shim from Issue 642's Experiments 1–2.
 
 ## Experiments
+
+### Experiment 1: GN Builds the Zig Binary
+
+Prove that `autoninja` can compile a Zig source file and produce a working app
+bundle. This is the 642 Experiment 2 result (standalone WebContents + CAContext
+ID) reproduced through the Chromium build system. No XPC code — that's Stage 2.
+No `zig_objc` dependency — that's only needed for XPC blocks.
+
+One variable changes from the working 642 Experiment 2: the binary is built by
+GN instead of `zig build`. Everything else stays the same.
+
+#### Chromium branch
+
+Create `146.0.7650.0-issue-643` from `146.0.7650.0-issue-642`.
+
+#### Files to add
+
+All in `chromium/src/content/zig_profile_server/`:
+
+**`main.zig`** — Copy from the 642 Experiment 2 version of
+`browser/src/main.zig` (the standalone version, before XPC was added). This is
+the version that dlopen's the framework, creates a BrowserContext, calls
+`ts_create_web_contents("https://google.com", 1280, 720)`, and prints
+`ca_context_id` to stderr. ~160 lines, no external dependencies.
+
+**`build_zig.py`** — Python wrapper script that GN's `action()` invokes. Calls
+`zig build-exe` with the right flags:
+
+```python
+#!/usr/bin/env python3
+import argparse, subprocess, sys
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--zig', default='zig')
+    parser.add_argument('--source', required=True)
+    parser.add_argument('--output', required=True)
+    args = parser.parse_args()
+
+    cmd = [
+        args.zig, 'build-exe',
+        args.source,
+        '-lc',
+        '-rpath', '@executable_path/../Frameworks',
+        '-femit-bin=' + args.output,
+    ]
+    sys.exit(subprocess.call(cmd))
+
+if __name__ == '__main__':
+    main()
+```
+
+**`BUILD.gn`** — Modify the existing BUILD.gn to add:
+
+```gn
+action("zig_profile_server_exe") {
+  script = "build_zig.py"
+  sources = [ "main.zig" ]
+  outputs = [ "$root_out_dir/zig_profile_server" ]
+  args = [
+    "--zig", "zig",
+    "--source", rebase_path("main.zig"),
+    "--output", rebase_path("$root_out_dir/zig_profile_server"),
+  ]
+}
+```
+
+Then modify the existing bundle target to use this binary as the main executable
+instead of the C++ one. The exact mechanism depends on how the current
+`zig_profile_server` target is structured — check the existing BUILD.gn to see
+how the app bundle is assembled and where the executable comes from.
+
+#### What NOT to change
+
+- The C++ shim (`content_api_shim.h`, `content_api_shim.cc`) — unchanged
+- The framework target — unchanged
+- The app bundle structure (Info.plist, Helpers, Frameworks/) — unchanged
+
+#### Build
+
+```bash
+cd chromium/src
+autoninja -C out/Default zig_profile_server
+```
+
+Single command. If this works, the output at
+`out/Default/Zig Profile Server.app` is a complete, correctly-signed app bundle
+with the Zig binary as the main executable.
+
+#### Verification
+
+```bash
+open "chromium/src/out/Default/Zig Profile Server.app"
+```
+
+Expected output on stderr:
+
+```
+[ZigProfileServer] Standalone mode
+[ZigProfileServer] Created persistent compositor
+[ZigProfileServer] Created WebContents, navigating to https://google.com
+ca_context_id=<nonzero>
+```
+
+Same result as 642 Experiment 2: no Shell window, nonzero CAContext ID, no
+crash. The only difference is the binary was built by `autoninja` instead of
+`zig build`.
+
+#### Result:
