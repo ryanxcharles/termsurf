@@ -421,3 +421,25 @@ zig build
 
 If google.com loads in a Shell window, the Zig → C → C++ bridge works. The
 Content API is successfully driven from Zig through the shim.
+
+**Result:** Pass
+
+Google.com loaded in a Shell window, fully interactive. The Zig binary dlopen'd
+the framework, resolved all 6 symbols, registered callbacks, and drove
+ContentMain successfully. The implementation differs from the design in two
+minor ways:
+
+1. The Zig binary replaces the app bundle's main executable directly (like Issue
+   620 Experiment 4's `ts_main.mm`) rather than being a shared library loaded by
+   `shell_main_mac.cc`. This is simpler — no intermediate dlopen layer.
+2. The header exports 6 functions (ContentMain, set_on_initialized,
+   set_on_shutdown, create_browser_context, destroy_browser_context, create_tab)
+   rather than the 4 listed in the design. The shutdown callback and destroy
+   function were added for clean lifecycle management.
+
+#### Conclusion
+
+The Zig-to-Chromium bridge works. A Zig `main()` can drive the entire Chromium
+Content API through dlopen/dlsym with zero Chromium headers. The C++ shim is 3
+new files on a vanilla Chromium tag — no Content Shell modifications. This
+validates the architecture for the full Zig Profile Server rewrite.
