@@ -1,0 +1,50 @@
+From 088993f3358c4297825f71cdde6786e6698e19b9 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 11:16:08 -0600
+Subject: [PATCH 5/6] CSS spins sans JS, both profiles soar
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The compositor danced alone,
+No scripts, no main thread groan—
+Two boxes spun in perfect time,
+At sixty frames, a pantomime.
+JavaScript: you stand accused.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/content_api_shim.mm | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+index 95a82f547e394..4ad4f9a64005b 100644
+--- a/content/zig_content_shell/content_api_shim.mm
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -5,8 +5,8 @@
+ // hardcoded URL. The framework exports ContentMain() which shell_main_mac.cc
+ // calls via dlsym.
+ //
+-// Issue 621, Experiment 3: Two profiles, both loading lite.duckduckgo.com.
+-// Tests whether lightweight pages escape multi-BrowserContext contention.
++// Issue 621, Experiment 4: Two profiles, CSS animation only (no JavaScript).
++// Tests whether compositor-driven damage alone triggers the 2fps contention.
+ 
+ #include "content/zig_content_shell/content_api_shim.h"
+ 
+@@ -102,9 +102,9 @@ void TsOverrideBundleID() {
+ // Content API subclasses
+ // ---------------------------------------------------------------------------
+ 
+-// Two profiles, both lite.duckduckgo.com.
+-const char* kProfileAUrl = "https://lite.duckduckgo.com";
+-const char* kProfileBUrl = "https://lite.duckduckgo.com";
++// Two profiles, CSS-only animation page (no JavaScript).
++const char* kProfileAUrl = "http://localhost:9616/css-animation.html";
++const char* kProfileBUrl = "http://localhost:9616/css-animation.html";
+ 
+ class TsBrowserMainParts : public content::ShellBrowserMainParts {
+  protected:
+-- 
+2.50.1 (Apple Git-155)
+

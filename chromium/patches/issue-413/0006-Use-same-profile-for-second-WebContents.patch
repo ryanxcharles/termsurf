@@ -1,0 +1,37 @@
+From 42e754881599917f74ddf3e14fdc407d5953b11f Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Thu, 12 Feb 2026 07:51:48 -0600
+Subject: [PATCH 6/7] Use same profile for second WebContents
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+One letter changed, from b to a—
+Two contents share one profile today.
+If Chrome can do it, so can we;
+The answer shapes our destiny.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/one_profile/browser/shell_browser_main_parts.cc | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/content/one_profile/browser/shell_browser_main_parts.cc b/content/one_profile/browser/shell_browser_main_parts.cc
+index ebcd2f2567c8c..8d62bde42b4ca 100644
+--- a/content/one_profile/browser/shell_browser_main_parts.cc
++++ b/content/one_profile/browser/shell_browser_main_parts.cc
+@@ -181,8 +181,9 @@ void ShellBrowserMainParts::InitializeMessageLoopContext() {
+   ReparentToCustomWindow(shell);
+ #endif
+ 
+-  // Create second WebContents with profile B, navigate but don't attach view.
+-  WebContents::CreateParams params(browser_context_b_.get());
++  // Create second WebContents with profile A (same profile), navigate but
++  // don't attach view.
++  WebContents::CreateParams params(browser_context_.get());
+   web_contents_b_ = WebContents::Create(params);
+   NavigationController::LoadURLParams load_params(GetStartupURL());
+   load_params.transition_type = ui::PageTransitionFromInt(
+-- 
+2.50.1 (Apple Git-155)
+

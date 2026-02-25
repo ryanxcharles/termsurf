@@ -1,0 +1,33 @@
+From 0444311a60fcf73f69e6d9a6681622d6c65d7882 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 10:56:22 -0600
+Subject: [PATCH 2/6] Register zig_content_shell in root BUILD.gn
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Without a line in the root GN file,
+The target hid from autoninja's knife.
+One line added, the build finds its mark—
+No more searching alone in the dark.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ BUILD.gn | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index 1fa72e6ace6ec..e35c9ad4d6720 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -195,6 +195,7 @@ group("gn_all") {
+         "//components/viz:viz_unittests",
+         "//content/browser/interest_group/tools:adjustable_auction",
+         "//content/shell:content_shell",
++        "//content/zig_content_shell:zig_content_shell",
+         "//content/test:content_browsertests",
+         "//content/test:content_unittests",
+         "//device:device_unittests",
+-- 
+2.50.1 (Apple Git-155)
+

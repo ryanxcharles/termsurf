@@ -1,0 +1,50 @@
+From 59ec42d82df64238fb4b193c3c002e7517ebb6de Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 11:04:11 -0600
+Subject: [PATCH 4/6] Two ducks, both flying at sixty frames
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The lightweight birds don't feel the chain
+That drags the Googles down the drain.
+Same architecture, same shared resource—
+But simpler pages chart a faster course.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/content_api_shim.mm | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+index fbc5125a168ca..95a82f547e394 100644
+--- a/content/zig_content_shell/content_api_shim.mm
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -5,9 +5,8 @@
+ // hardcoded URL. The framework exports ContentMain() which shell_main_mac.cc
+ // calls via dlsym.
+ //
+-// Issue 621, Experiment 2: Two profiles, both loading google.com.
+-// Tests whether multi-BrowserContext contention is symmetric when both
+-// profiles load the same complex page.
++// Issue 621, Experiment 3: Two profiles, both loading lite.duckduckgo.com.
++// Tests whether lightweight pages escape multi-BrowserContext contention.
+ 
+ #include "content/zig_content_shell/content_api_shim.h"
+ 
+@@ -103,9 +102,9 @@ void TsOverrideBundleID() {
+ // Content API subclasses
+ // ---------------------------------------------------------------------------
+ 
+-// Two profiles, both google.com.
+-const char* kProfileAUrl = "https://google.com";
+-const char* kProfileBUrl = "https://google.com";
++// Two profiles, both lite.duckduckgo.com.
++const char* kProfileAUrl = "https://lite.duckduckgo.com";
++const char* kProfileBUrl = "https://lite.duckduckgo.com";
+ 
+ class TsBrowserMainParts : public content::ShellBrowserMainParts {
+  protected:
+-- 
+2.50.1 (Apple Git-155)
+

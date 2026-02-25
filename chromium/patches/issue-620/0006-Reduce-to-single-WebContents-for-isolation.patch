@@ -1,0 +1,65 @@
+From 11a52ceceb92ba94b4a3194699018c163a32b8ee Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 08:45:26 -0600
+Subject: [PATCH 06/13] Reduce to single WebContents for isolation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+One window stood alone, still stuck at two,
+Frames per second — not views — were the clue.
+The throttle's not contention, that much is clear;
+Shell knows something we haven't found here.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/ts_main.mm | 14 --------------
+ 1 file changed, 14 deletions(-)
+
+diff --git a/content/zig_content_shell/ts_main.mm b/content/zig_content_shell/ts_main.mm
+index 82edae08289a1..bae0f59693fd8 100644
+--- a/content/zig_content_shell/ts_main.mm
++++ b/content/zig_content_shell/ts_main.mm
+@@ -46,9 +46,7 @@
+ 
+ // Context and WebContents handles.
+ static void* ctx_a;
+-static void* ctx_b;
+ static void* wc_a;
+-static void* wc_b;
+ 
+ // Track open windows — quit when the last one closes.
+ static int g_open_windows = 0;
+@@ -110,29 +108,17 @@ static void on_initialized(void) {
+   }
+ 
+   char path_a[1024];
+-  char path_b[1024];
+   snprintf(path_a, sizeof(path_a),
+            "%s/.config/termsurf/zig-content-shell/profile-a", home);
+-  snprintf(path_b, sizeof(path_b),
+-           "%s/.config/termsurf/zig-content-shell/profile-b", home);
+ 
+   ctx_a = g_create_ctx(path_a);
+-  ctx_b = g_create_ctx(path_b);
+-
+   wc_a = g_create_web_contents(ctx_a, "https://google.com");
+-  wc_b = g_create_web_contents(ctx_b, "https://example.com");
+-
+   create_window(g_get_native_view(wc_a), "Profile A");
+-  create_window(g_get_native_view(wc_b), "Profile B");
+ }
+ 
+ static void on_shutdown(void) {
+-  g_destroy_web_contents(wc_b);
+-  wc_b = NULL;
+   g_destroy_web_contents(wc_a);
+   wc_a = NULL;
+-  g_destroy_ctx(ctx_b);
+-  ctx_b = NULL;
+   g_destroy_ctx(ctx_a);
+   ctx_a = NULL;
+ }
+-- 
+2.50.1 (Apple Git-155)
+

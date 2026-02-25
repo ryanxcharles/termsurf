@@ -1,0 +1,199 @@
+From 54279dbd0ab2d3a199793e904ee87d401374701c Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 07:57:31 -0600
+Subject: [PATCH 03/13] Export C API for profile and tab lifecycle
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Three functions walked out the door:
+create, destroy, and create some more.
+"extern C," they proudly said,
+"Zig can call us—full speed ahead."
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/content_api_shim.h  | 28 +++++++
+ content/zig_content_shell/content_api_shim.mm | 78 ++++++++++++-------
+ 2 files changed, 78 insertions(+), 28 deletions(-)
+
+diff --git a/content/zig_content_shell/content_api_shim.h b/content/zig_content_shell/content_api_shim.h
+index a45ba936aedfc..f7927bc636768 100644
+--- a/content/zig_content_shell/content_api_shim.h
++++ b/content/zig_content_shell/content_api_shim.h
+@@ -6,10 +6,38 @@
+ #include "build/build_config.h"
+ 
+ #if BUILDFLAG(IS_MAC)
++
++#ifdef __cplusplus
+ extern "C" {
++#endif
++
++// Framework entry point — called by shell_main_mac.cc via dlsym.
+ __attribute__((visibility("default")))
+ int ContentMain(int argc, const char** argv);
++
++// Opaque handle type for a browser profile.
++typedef void* ts_browser_context_t;
++
++// Create a browser profile with the given absolute storage path.
++// Must be called on the browser thread (i.e., from InitializeMessageLoopContext
++// or a posted task after the message loop is running).
++__attribute__((visibility("default")))
++ts_browser_context_t ts_create_browser_context(const char* path);
++
++// Destroy a browser profile.
++__attribute__((visibility("default")))
++void ts_destroy_browser_context(ts_browser_context_t ctx);
++
++// Create a tab in the given profile, loading the URL.
++// Opens a Content Shell window (temporary — later experiments replace Shell
++// with a headless WebContents and CAContextID extraction).
++__attribute__((visibility("default")))
++void ts_create_tab(ts_browser_context_t ctx, const char* url);
++
++#ifdef __cplusplus
+ }  // extern "C"
++#endif
++
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+ #endif  // CONTENT_ZIG_CONTENT_SHELL_CONTENT_API_SHIM_H_
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+index c7001f6654d00..dc7c7a971da0f 100644
+--- a/content/zig_content_shell/content_api_shim.mm
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -1,9 +1,10 @@
+ // Copyright 2025 TermSurf. All rights reserved.
+ //
+ // Thin C++ shim that drives the Content API through a C function boundary.
+-// Subclasses Content Shell's classes to create two browser profiles with
+-// different storage paths, each loading a different URL. The framework exports
+-// ContentMain() which shell_main_mac.cc calls via dlsym.
++// Exports C functions for profile and tab lifecycle. The framework exports
++// ContentMain() which shell_main_mac.cc calls via dlsym, plus
++// ts_create_browser_context / ts_destroy_browser_context / ts_create_tab
++// which Zig (or any C caller) can use to control the browser.
+ 
+ #include "content/zig_content_shell/content_api_shim.h"
+ 
+@@ -19,8 +20,8 @@
+ #include "content/public/common/content_paths.h"
+ #include "content/shell/app/shell_main_delegate.h"
+ #include "content/shell/browser/shell.h"
+-#include "content/shell/browser/shell_browser_main_parts.h"
+ #include "content/shell/browser/shell_browser_context.h"
++#include "content/shell/browser/shell_browser_main_parts.h"
+ #include "content/shell/browser/shell_content_browser_client.h"
+ #include "content/shell/common/shell_paths.h"
+ #include "url/gurl.h"
+@@ -99,44 +100,45 @@ void TsOverrideBundleID() {
+ // Content API subclasses
+ // ---------------------------------------------------------------------------
+ 
+-// Two profiles, two URLs. Experiment 2.
+-const char* kProfileAUrl = "https://google.com";
+-const char* kProfileBUrl = "https://example.com";
+-
+ class TsBrowserMainParts : public content::ShellBrowserMainParts {
+  protected:
+   void InitializeBrowserContexts() override {
+     base::FilePath home;
+     base::PathService::Get(base::DIR_HOME, &home);
+-    base::FilePath base_path = home.Append(".config")
+-                                   .Append("termsurf")
+-                                   .Append("zig-content-shell");
+-
+-    // Profile A — set path before construction (cached during init).
+-    base::PathService::Override(content::SHELL_DIR_USER_DATA,
+-                                base_path.Append("profile-a"));
+-    set_browser_context(new content::ShellBrowserContext(false));
+-
+-    // Profile B — override path again, then create second context.
+-    base::PathService::Override(content::SHELL_DIR_USER_DATA,
+-                                base_path.Append("profile-b"));
+-    browser_context_b_.reset(new content::ShellBrowserContext(false));
++    std::string base_path =
++        home.Append(".config/termsurf/zig-content-shell").value();
++
++    // Profile A — created via C API, ownership transferred to parent via
++    // set_browser_context so the parent's PreMainMessageLoopRun can pass
++    // it to DevTools and other infrastructure.
++    ctx_a_ = ts_create_browser_context(
++        (base_path + "/profile-a").c_str());
++    set_browser_context(
++        static_cast<content::ShellBrowserContext*>(ctx_a_));
++
++    // Profile B — created via C API, we own it.
++    ctx_b_ = ts_create_browser_context(
++        (base_path + "/profile-b").c_str());
+   }
+ 
+   void InitializeMessageLoopContext() override {
+-    content::Shell::CreateNewWindow(browser_context(), GURL(kProfileAUrl),
+-                                    nullptr, gfx::Size());
+-    content::Shell::CreateNewWindow(browser_context_b_.get(), GURL(kProfileBUrl),
+-                                    nullptr, gfx::Size());
++    ts_create_tab(ctx_a_, "https://google.com");
++    ts_create_tab(ctx_b_, "https://example.com");
+   }
+ 
+   void PostMainMessageLoopRun() override {
+-    browser_context_b_.reset();
++    // Destroy profile B (we own it).
++    ts_destroy_browser_context(ctx_b_);
++    ctx_b_ = nullptr;
++    // Profile A is owned by the parent via set_browser_context — the parent's
++    // PostMainMessageLoopRun will destroy it.
++    ctx_a_ = nullptr;
+     ShellBrowserMainParts::PostMainMessageLoopRun();
+   }
+ 
+  private:
+-  std::unique_ptr<content::ShellBrowserContext> browser_context_b_;
++  ts_browser_context_t ctx_a_ = nullptr;
++  ts_browser_context_t ctx_b_ = nullptr;
+ };
+ 
+ class TsContentBrowserClient : public content::ShellContentBrowserClient {
+@@ -163,10 +165,11 @@ void PostMainMessageLoopRun() override {
+ }  // namespace
+ 
+ // ---------------------------------------------------------------------------
+-// Framework entry point — called by shell_main_mac.cc via dlsym.
++// Exported C API
+ // ---------------------------------------------------------------------------
+ 
+ #if BUILDFLAG(IS_MAC)
++
+ int ContentMain(int argc, const char** argv) {
+   TsMainDelegate delegate;
+   content::ContentMainParams params(&delegate);
+@@ -182,4 +185,23 @@ int ContentMain(int argc, const char** argv) {
+ 
+   return content::ContentMain(std::move(params));
+ }
++
++ts_browser_context_t ts_create_browser_context(const char* path) {
++  base::PathService::Override(content::SHELL_DIR_USER_DATA,
++                              base::FilePath(path));
++  auto* ctx = new content::ShellBrowserContext(false);
++  return static_cast<ts_browser_context_t>(ctx);
++}
++
++void ts_destroy_browser_context(ts_browser_context_t handle) {
++  delete static_cast<content::ShellBrowserContext*>(handle);
++}
++
++void ts_create_tab(ts_browser_context_t ctx, const char* url) {
++  auto* browser_context =
++      static_cast<content::ShellBrowserContext*>(ctx);
++  content::Shell::CreateNewWindow(browser_context, GURL(url), nullptr,
++                                  gfx::Size());
++}
++
+ #endif  // BUILDFLAG(IS_MAC)
+-- 
+2.50.1 (Apple Git-155)
+

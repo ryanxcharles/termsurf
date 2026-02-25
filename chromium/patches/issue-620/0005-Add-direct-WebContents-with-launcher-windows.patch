@@ -1,0 +1,320 @@
+From 3473201baf9c6db616d36b428a85ebd44ebf4b29 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 08:42:05 -0600
+Subject: [PATCH 05/13] Add direct WebContents with launcher windows
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The WebContents broke free from Shell's embrace,
+Got its own NSWindow, its own little space.
+Pages loaded fine, input worked too—
+But two frames per second? That just wouldn't do.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/BUILD.gn            |   1 +
+ content/zig_content_shell/content_api_shim.h  |  24 ++++
+ content/zig_content_shell/content_api_shim.mm |  45 ++++++++
+ content/zig_content_shell/ts_main.mm          | 109 ++++++++++++++++--
+ 4 files changed, 168 insertions(+), 11 deletions(-)
+
+diff --git a/content/zig_content_shell/BUILD.gn b/content/zig_content_shell/BUILD.gn
+index e41c0ad65645e..915e43db79c1a 100644
+--- a/content/zig_content_shell/BUILD.gn
++++ b/content/zig_content_shell/BUILD.gn
+@@ -37,6 +37,7 @@ mac_app_bundle("zig_content_shell") {
+   output_name = zig_content_shell_product_name
+   sources = [ "ts_main.mm" ]
+ 
++  frameworks = [ "Cocoa.framework" ]
+   deps = [
+     ":zig_content_shell_framework_bundle_data",
+     ":zig_content_shell_resources_bundle_data",
+diff --git a/content/zig_content_shell/content_api_shim.h b/content/zig_content_shell/content_api_shim.h
+index b2e5c72f91873..bd47c683b5afb 100644
+--- a/content/zig_content_shell/content_api_shim.h
++++ b/content/zig_content_shell/content_api_shim.h
+@@ -49,6 +49,30 @@ void ts_set_on_initialized(ts_callback_t callback);
+ __attribute__((visibility("default")))
+ void ts_set_on_shutdown(ts_callback_t callback);
+ 
++// Opaque handle for a WebContents (page).
++typedef void* ts_web_contents_t;
++
++// Create a WebContents in the given profile, loading the URL.
++// Does NOT create a window — caller must attach the native view
++// to their own window via ts_get_native_view.
++__attribute__((visibility("default")))
++ts_web_contents_t ts_create_web_contents(ts_browser_context_t ctx,
++                                         const char* url);
++
++// Get the native view (NSView* on macOS) for a WebContents.
++// The returned pointer is a valid NSView* that can be added as a
++// subview to any NSWindow's contentView.
++__attribute__((visibility("default")))
++void* ts_get_native_view(ts_web_contents_t contents);
++
++// Destroy a WebContents.
++__attribute__((visibility("default")))
++void ts_destroy_web_contents(ts_web_contents_t contents);
++
++// Quit the message loop. Call this when all windows are closed.
++__attribute__((visibility("default")))
++void ts_quit(void);
++
+ #ifdef __cplusplus
+ }  // extern "C"
+ #endif
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+index 44cdef3aa24bc..42d99e8609a5e 100644
+--- a/content/zig_content_shell/content_api_shim.mm
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -11,6 +11,8 @@
+ #include <string>
+ 
+ #include "base/apple/bundle_locations.h"
++#include "base/no_destructor.h"
++#include "base/run_loop.h"
+ #include "base/apple/foundation_util.h"
+ #include "base/base_paths.h"
+ #include "base/path_service.h"
+@@ -24,6 +26,9 @@
+ #include "content/shell/browser/shell_browser_main_parts.h"
+ #include "content/shell/browser/shell_content_browser_client.h"
+ #include "content/shell/common/shell_paths.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/page_transition_types.h"
+ #include "url/gurl.h"
+ 
+ namespace {
+@@ -103,6 +108,11 @@ void TsOverrideBundleID() {
+ static ts_callback_t g_on_initialized = nullptr;
+ static ts_callback_t g_on_shutdown = nullptr;
+ 
++base::OnceClosure& GetQuitClosure() {
++  static base::NoDestructor<base::OnceClosure> closure;
++  return *closure;
++}
++
+ // ---------------------------------------------------------------------------
+ // Content API subclasses
+ // ---------------------------------------------------------------------------
+@@ -127,6 +137,12 @@ void InitializeMessageLoopContext() override {
+     }
+   }
+ 
++  void WillRunMainMessageLoop(
++      std::unique_ptr<base::RunLoop>& run_loop) override {
++    GetQuitClosure() = run_loop->QuitClosure();
++    ShellBrowserMainParts::WillRunMainMessageLoop(run_loop);
++  }
++
+   void PostMainMessageLoopRun() override {
+     if (g_on_shutdown) {
+       g_on_shutdown();
+@@ -206,4 +222,33 @@ void ts_set_on_shutdown(ts_callback_t callback) {
+   g_on_shutdown = callback;
+ }
+ 
++ts_web_contents_t ts_create_web_contents(ts_browser_context_t ctx,
++                                         const char* url) {
++  auto* browser_context =
++      static_cast<content::ShellBrowserContext*>(ctx);
++  content::WebContents::CreateParams params(browser_context);
++  auto* wc = content::WebContents::Create(params).release();
++
++  content::NavigationController::LoadURLParams load_params{GURL(url)};
++  load_params.transition_type = ui::PAGE_TRANSITION_TYPED;
++  wc->GetController().LoadURLWithParams(load_params);
++
++  return static_cast<ts_web_contents_t>(wc);
++}
++
++void* ts_get_native_view(ts_web_contents_t contents) {
++  auto* wc = static_cast<content::WebContents*>(contents);
++  return (__bridge void*)wc->GetNativeView().GetNativeNSView();
++}
++
++void ts_destroy_web_contents(ts_web_contents_t contents) {
++  delete static_cast<content::WebContents*>(contents);
++}
++
++void ts_quit(void) {
++  auto& quit = GetQuitClosure();
++  if (quit)
++    std::move(quit).Run();
++}
++
+ #endif  // BUILDFLAG(IS_MAC)
+diff --git a/content/zig_content_shell/ts_main.mm b/content/zig_content_shell/ts_main.mm
+index c1d1ff4480b7c..82edae08289a1 100644
+--- a/content/zig_content_shell/ts_main.mm
++++ b/content/zig_content_shell/ts_main.mm
+@@ -1,9 +1,9 @@
+ // Copyright 2025 TermSurf. All rights reserved.
+ //
+ // Custom launcher for Zig Content Shell. Replaces shell_main_mac.cc.
+-// Pure C with dlopen/dlsym — no Chromium headers, no C++ includes.
+-// Proves the full external-control pattern: a Zig launcher would use
+-// the identical dlsym approach.
++// No Chromium headers — only system headers (C stdlib, Cocoa, dlopen).
++// Creates WebContents via the C API and attaches them to NSWindows
++// created here, proving the launcher owns all window management.
+ 
+ #ifdef UNSAFE_BUFFERS_BUILD
+ #pragma allow_unsafe_libc_calls
+@@ -17,24 +17,92 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#import <Cocoa/Cocoa.h>
++
++// ---------------------------------------------------------------------------
+ // Function pointer types matching content_api_shim.h.
++// ---------------------------------------------------------------------------
++
+ typedef int (*ContentMainFn)(int, const char**);
+ typedef void (*CallbackFn)(void);
+ typedef void (*SetCallbackFn)(CallbackFn);
+ typedef void* (*CreateContextFn)(const char*);
+ typedef void (*DestroyContextFn)(void*);
+-typedef void (*CreateTabFn)(void*, const char*);
++typedef void* (*CreateWebContentsFn)(void*, const char*);
++typedef void* (*GetNativeViewFn)(void*);
++typedef void (*DestroyWebContentsFn)(void*);
++typedef void (*QuitFn)(void);
+ 
++// ---------------------------------------------------------------------------
+ // dlsym'd function pointers (set in main, used by callbacks).
++// ---------------------------------------------------------------------------
++
+ static CreateContextFn g_create_ctx;
+ static DestroyContextFn g_destroy_ctx;
+-static CreateTabFn g_create_tab;
++static CreateWebContentsFn g_create_web_contents;
++static GetNativeViewFn g_get_native_view;
++static DestroyWebContentsFn g_destroy_web_contents;
++static QuitFn g_quit;
+ 
+-// Context handles (created in on_initialized, destroyed in on_shutdown).
++// Context and WebContents handles.
+ static void* ctx_a;
+ static void* ctx_b;
++static void* wc_a;
++static void* wc_b;
++
++// Track open windows — quit when the last one closes.
++static int g_open_windows = 0;
++
++// ---------------------------------------------------------------------------
++// NSWindowDelegate — calls ts_quit when the last window closes.
++// ---------------------------------------------------------------------------
++
++@interface TsWindowDelegate : NSObject <NSWindowDelegate>
++@end
++
++@implementation TsWindowDelegate
++- (void)windowWillClose:(NSNotification*)notification {
++  if (--g_open_windows == 0 && g_quit)
++    g_quit();
++}
++@end
++
++static TsWindowDelegate* g_window_delegate;
++
++// ---------------------------------------------------------------------------
++// Window creation helper.
++// ---------------------------------------------------------------------------
++
++static void create_window(void* native_view, const char* title) {
++  NSView* web_view = (__bridge NSView*)native_view;
++  NSRect frame = NSMakeRect(0, 0, 800, 600);
++  NSUInteger style = NSWindowStyleMaskTitled |
++                     NSWindowStyleMaskClosable |
++                     NSWindowStyleMaskMiniaturizable |
++                     NSWindowStyleMaskResizable;
++  NSWindow* window = [[NSWindow alloc] initWithContentRect:frame
++                                                 styleMask:style
++                                                   backing:NSBackingStoreBuffered
++                                                     defer:NO];
++  window.title = [NSString stringWithUTF8String:title];
++  window.delegate = g_window_delegate;
++
++  web_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  web_view.frame = window.contentView.bounds;
++  [window.contentView addSubview:web_view];
++
++  [window cascadeTopLeftFromPoint:NSMakePoint(20, 20)];
++  [window makeKeyAndOrderFront:nil];
++  g_open_windows++;
++}
++
++// ---------------------------------------------------------------------------
++// Lifecycle callbacks.
++// ---------------------------------------------------------------------------
+ 
+ static void on_initialized(void) {
++  g_window_delegate = [[TsWindowDelegate alloc] init];
++
+   const char* home = getenv("HOME");
+   if (!home) {
+     fprintf(stderr, "HOME not set\n");
+@@ -50,17 +118,29 @@ static void on_initialized(void) {
+ 
+   ctx_a = g_create_ctx(path_a);
+   ctx_b = g_create_ctx(path_b);
+-  g_create_tab(ctx_a, "https://google.com");
+-  g_create_tab(ctx_b, "https://example.com");
++
++  wc_a = g_create_web_contents(ctx_a, "https://google.com");
++  wc_b = g_create_web_contents(ctx_b, "https://example.com");
++
++  create_window(g_get_native_view(wc_a), "Profile A");
++  create_window(g_get_native_view(wc_b), "Profile B");
+ }
+ 
+ static void on_shutdown(void) {
++  g_destroy_web_contents(wc_b);
++  wc_b = NULL;
++  g_destroy_web_contents(wc_a);
++  wc_a = NULL;
+   g_destroy_ctx(ctx_b);
+   ctx_b = NULL;
+   g_destroy_ctx(ctx_a);
+   ctx_a = NULL;
+ }
+ 
++// ---------------------------------------------------------------------------
++// Entry point.
++// ---------------------------------------------------------------------------
++
+ int main(int argc, const char** argv) {
+   // Find the executable path.
+   uint32_t exec_path_size = 0;
+@@ -111,11 +191,18 @@ int main(int argc, const char** argv) {
+       (CreateContextFn)dlsym(library, "ts_create_browser_context");
+   g_destroy_ctx =
+       (DestroyContextFn)dlsym(library, "ts_destroy_browser_context");
+-  g_create_tab =
+-      (CreateTabFn)dlsym(library, "ts_create_tab");
++  g_create_web_contents =
++      (CreateWebContentsFn)dlsym(library, "ts_create_web_contents");
++  g_get_native_view =
++      (GetNativeViewFn)dlsym(library, "ts_get_native_view");
++  g_destroy_web_contents =
++      (DestroyWebContentsFn)dlsym(library, "ts_destroy_web_contents");
++  g_quit =
++      (QuitFn)dlsym(library, "ts_quit");
+ 
+   if (!content_main || !set_on_initialized || !set_on_shutdown ||
+-      !g_create_ctx || !g_destroy_ctx || !g_create_tab) {
++      !g_create_ctx || !g_destroy_ctx || !g_create_web_contents ||
++      !g_get_native_view || !g_destroy_web_contents || !g_quit) {
+     fprintf(stderr, "dlsym failed: %s\n", dlerror());
+     abort();
+   }
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,144 @@
+From 39310a1cc711e3ade866b0e75461cfbc868b30db Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 10:50:59 -0600
+Subject: [PATCH 13/13] =?UTF-8?q?Add=20Exp=2013=E2=80=9315=20instrumentati?=
+ =?UTF-8?q?on=20and=20fixes?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The scheduler stopped watching, so we made it stay,
+Logged every throttle gate along the way.
+Google was slow and DDG was fast—
+The page, not the order, was to blame at last.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../viz/service/display/display_scheduler.cc  | 19 ++++++++++++++++++-
+ .../frame_sinks/begin_frame_tracker.cc        | 18 +++++++++++++++---
+ .../compositor_frame_sink_support.cc          |  3 +++
+ content/zig_content_shell/content_api_shim.mm |  6 +++---
+ 4 files changed, 39 insertions(+), 7 deletions(-)
+
+diff --git a/components/viz/service/display/display_scheduler.cc b/components/viz/service/display/display_scheduler.cc
+index fc90c16787b26..2cdc73bee8e50 100644
+--- a/components/viz/service/display/display_scheduler.cc
++++ b/components/viz/service/display/display_scheduler.cc
+@@ -9,6 +9,7 @@
+ #include <vector>
+ 
+ #include "base/auto_reset.h"
++#include "base/logging.h"
+ #include "base/feature_list.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/notimplemented.h"
+@@ -259,6 +260,7 @@ void DisplayScheduler::ReportFrameTime(
+ 
+ bool DisplayScheduler::DrawAndSwap() {
+   TRACE_EVENT0("viz", "DisplayScheduler::DrawAndSwap");
++  LOG(ERROR) << "[TS-DIAG] DrawAndSwap display=" << this;
+   DCHECK_LT(pending_swaps_,
+             std::max(pending_swap_params_.max_pending_swaps,
+                      pending_swap_params_.max_pending_swaps_120hz.value_or(0)));
+@@ -595,12 +597,27 @@ bool DisplayScheduler::AttemptDrawAndSwap() {
+     if (pending_swaps_ < MaxPendingSwaps())
+       return DrawAndSwap();
+   } else {
++    VLOG(1) << "[TS-DIAG] ShouldDraw=false"
++            << " needs_draw=" << needs_draw_
++            << " output_surface_lost=" << output_surface_lost_
++            << " visible=" << visible_
++            << " root_frame_missing=" << damage_tracker_->root_frame_missing()
++            << " pending_swaps=" << pending_swaps_
++            << " display=" << this;
+     // We are going idle, so reset expectations.
+     // TODO(eseckler): Should we avoid going idle if
+     // |expecting_root_surface_damage_because_of_resize_| is true?
+     damage_tracker_->reset_expecting_root_surface_damage_because_of_resize();
+ 
+-    StopObservingBeginFrames();
++    // TermSurf: Don't stop observing. With multiple BrowserContexts,
++    // stopping causes a deadlock: the renderer loses BeginFrames, can't
++    // produce new frames, so no damage arrives, and the scheduler never
++    // restarts. Keeping the source running adds negligible cost (one
++    //
++
++    // callback per vsync) and lets the renderer recover promptly.
++    // See Issue 620, Experiment 13.
++    // StopObservingBeginFrames();
+   }
+   return false;
+ }
+diff --git a/components/viz/service/frame_sinks/begin_frame_tracker.cc b/components/viz/service/frame_sinks/begin_frame_tracker.cc
+index c831c8efa02af..61d55e0718823 100644
+--- a/components/viz/service/frame_sinks/begin_frame_tracker.cc
++++ b/components/viz/service/frame_sinks/begin_frame_tracker.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "components/viz/service/frame_sinks/begin_frame_tracker.h"
+ 
++#include "base/logging.h"
++
+ namespace viz {
+ 
+ void BeginFrameTracker::SentBeginFrame(const BeginFrameArgs& args) {
+@@ -29,12 +31,22 @@ void BeginFrameTracker::ReceivedAck(const BeginFrameAck& ack) {
+ }
+ 
+ bool BeginFrameTracker::ShouldThrottleBeginFrame() const {
+-  return outstanding_begin_frames_ >= kLimitThrottle &&
+-         outstanding_begin_frames_ < kLimitStop;
++  bool result = outstanding_begin_frames_ >= kLimitThrottle &&
++                outstanding_begin_frames_ < kLimitStop;
++  if (result) {
++    LOG(ERROR) << "[TS-DIAG] BeginFrameTracker THROTTLE outstanding="
++               << outstanding_begin_frames_;
++  }
++  return result;
+ }
+ 
+ bool BeginFrameTracker::ShouldStopBeginFrame() const {
+-  return outstanding_begin_frames_ >= kLimitStop;
++  bool result = outstanding_begin_frames_ >= kLimitStop;
++  if (result) {
++    LOG(ERROR) << "[TS-DIAG] BeginFrameTracker STOP outstanding="
++               << outstanding_begin_frames_;
++  }
++  return result;
+ }
+ 
+ bool BeginFrameTracker::MatchesLastSent(const BeginFrameAck& ack) {
+diff --git a/components/viz/service/frame_sinks/compositor_frame_sink_support.cc b/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
+index 426975d76e78d..0a156c0183ede 100644
+--- a/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
++++ b/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
+@@ -69,6 +69,9 @@ namespace {
+ bool RecordShouldSendBeginFrame(const std::string& reason, bool should_send) {
+   TRACE_EVENT2("viz", "SendBeginFrameDecision", "reason", reason, "should_send",
+                should_send);
++  if (!should_send) {
++    LOG(ERROR) << "[TS-DIAG] ShouldSendBeginFrame=false reason=" << reason;
++  }
+   return should_send;
+ }
+ 
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+index 16e988033b288..40b708778c4da 100644
+--- a/content/zig_content_shell/content_api_shim.mm
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -103,9 +103,9 @@ void TsOverrideBundleID() {
+ // Content API subclasses
+ // ---------------------------------------------------------------------------
+ 
+-// Two profiles, two URLs. Experiment 2 (replayed for Experiment 12).
+-const char* kProfileAUrl = "https://google.com";
+-const char* kProfileBUrl = "https://example.com";
++// Two profiles, two URLs. Experiment 15: reversed order from Exp 14.
++const char* kProfileAUrl = "https://lite.duckduckgo.com";
++const char* kProfileBUrl = "https://google.com";
+ 
+ class TsBrowserMainParts : public content::ShellBrowserMainParts {
+  protected:
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,236 @@
+From c656d74ecdf65532af8eba3c46dc69840f088193 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 10:04:39 -0600
+Subject: [PATCH 12/13] Instrument vsync to catch the 2fps thief
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We planted logs where vsyncs flow,
+And caught the thrashing, high and low:
+Register, draw, unregister—repeat,
+A 300ms waltz of self-defeat.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../external_begin_frame_source_mac.cc        | 19 +++++++
+ content/zig_content_shell/content_api_shim.mm | 50 +++++++++++++++----
+ ui/display/mac/cv_display_link_mac.mm         | 16 ++++++
+ 3 files changed, 74 insertions(+), 11 deletions(-)
+
+diff --git a/components/viz/service/frame_sinks/external_begin_frame_source_mac.cc b/components/viz/service/frame_sinks/external_begin_frame_source_mac.cc
+index c16269261f814..0a26aeebb6485 100644
+--- a/components/viz/service/frame_sinks/external_begin_frame_source_mac.cc
++++ b/components/viz/service/frame_sinks/external_begin_frame_source_mac.cc
+@@ -185,6 +185,9 @@ void ExternalBeginFrameSourceMac::SetVSyncDisplayID(int64_t display_id,
+ void ExternalBeginFrameSourceMac::StartBeginFrame() {
+   if (display_link_mac_) {
+     DCHECK(!vsync_callback_mac_);
++    LOG(ERROR) << "[TS-DIAG] ExternalBeginFrameSourceMac(" << this
++               << ")::StartBeginFrame via DisplayLink display_id="
++               << display_id_;
+     // Request the callback to be called on the register thread.
+     vsync_callback_mac_ = display_link_mac_->RegisterCallback(
+         base::BindRepeating(&ExternalBeginFrameSourceMac::OnDisplayLinkCallback,
+@@ -202,6 +205,9 @@ void ExternalBeginFrameSourceMac::StartBeginFrame() {
+   }
+ 
+   // Start the timer.
++  LOG(ERROR) << "[TS-DIAG] ExternalBeginFrameSourceMac(" << this
++             << ")::StartBeginFrame via TIMER display_id=" << display_id_
++             << " preferred_interval=" << preferred_interval_;
+   CreateDelayBasedTimeSourceIfNeeded();
+   time_source_->SetActive(/*active=*/true);
+ }
+@@ -209,6 +215,9 @@ void ExternalBeginFrameSourceMac::StartBeginFrame() {
+ void ExternalBeginFrameSourceMac::StopBeginFrame() {
+   if (display_link_mac_) {
+     DCHECK(vsync_callback_mac_);
++    LOG(ERROR) << "[TS-DIAG] ExternalBeginFrameSourceMac(" << this
++               << ")::StopBeginFrame unregister DisplayLink display_id="
++               << display_id_;
+     // Remove and unregister VSyncCallbackMac.
+     vsync_callback_mac_.reset();
+     vsyncs_to_skip_ = 0;
+@@ -216,6 +225,8 @@ void ExternalBeginFrameSourceMac::StopBeginFrame() {
+   }
+ 
+   // Stop the timer.
++  LOG(ERROR) << "[TS-DIAG] ExternalBeginFrameSourceMac(" << this
++             << ")::StopBeginFrame stop TIMER display_id=" << display_id_;
+   DCHECK(time_source_);
+   time_source_->SetActive(/*active=*/false);
+ }
+@@ -224,6 +235,10 @@ void ExternalBeginFrameSourceMac::OnNeedsBeginFrames(bool needs_begin_frames) {
+   if (needs_begin_frames_ == needs_begin_frames) {
+     return;
+   }
++  LOG(ERROR) << "[TS-DIAG] ExternalBeginFrameSourceMac(" << this
++             << ")::OnNeedsBeginFrames " << needs_begin_frames
++             << " display_id=" << display_id_
++             << " has_display_link=" << !!display_link_mac_;
+   needs_begin_frames_ = needs_begin_frames;
+   just_started_begin_frame_ = true;
+ 
+@@ -240,8 +255,12 @@ void ExternalBeginFrameSourceMac::OnNeedsBeginFrames(bool needs_begin_frames) {
+ void ExternalBeginFrameSourceMac::OnDisplayLinkCallback(
+     ui::VSyncParamsMac params) {
+   if (!needs_begin_frames_) {
++    VLOG(1) << "[TS-DIAG] ExternalBeginFrameSourceMac(" << this
++            << ")::OnDisplayLinkCallback IGNORED (needs_begin_frames=false)";
+     return;
+   }
++  VLOG(1) << "[TS-DIAG] ExternalBeginFrameSourceMac(" << this
++          << ")::OnDisplayLinkCallback display_id=" << display_id_;
+ 
+   if (vsyncs_to_skip_ > 0) {
+     TRACE_EVENT_INSTANT0(
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+index f768c84a312d8..16e988033b288 100644
+--- a/content/zig_content_shell/content_api_shim.mm
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -1,13 +1,13 @@
+ // Copyright 2025 TermSurf. All rights reserved.
+ //
+ // Thin C++ shim that drives the Content API through a C function boundary.
+-// Subclasses Content Shell's classes and overrides just enough to load a
+-// hardcoded URL. The framework exports ContentMain() which shell_main_mac.cc
+-// calls via dlsym.
++// Subclasses Content Shell's classes to create two browser profiles with
++// different storage paths, each loading a different URL. The framework exports
++// ContentMain() which shell_main_mac.cc calls via dlsym.
+ //
+-// Experiment 10: Replay Experiment 1's exact state — single profile, single
+-// window, only InitializeMessageLoopContext overridden. Parent handles
+-// everything else.
++// Experiment 12: Revert to Experiment 9's two-profile code to trigger 2fps.
++// Instrumentation is in cv_display_link_mac.mm and
++// external_begin_frame_source_mac.cc.
+ 
+ #include "content/zig_content_shell/content_api_shim.h"
+ 
+@@ -24,7 +24,9 @@
+ #include "content/shell/app/shell_main_delegate.h"
+ #include "content/shell/browser/shell.h"
+ #include "content/shell/browser/shell_browser_main_parts.h"
++#include "content/shell/browser/shell_browser_context.h"
+ #include "content/shell/browser/shell_content_browser_client.h"
++#include "content/shell/common/shell_paths.h"
+ #include "url/gurl.h"
+ 
+ namespace {
+@@ -101,18 +103,44 @@ void TsOverrideBundleID() {
+ // Content API subclasses
+ // ---------------------------------------------------------------------------
+ 
+-// The URL to load. Hardcoded for Experiment 1.
+-const char* kInitialUrl = "https://google.com";
++// Two profiles, two URLs. Experiment 2 (replayed for Experiment 12).
++const char* kProfileAUrl = "https://google.com";
++const char* kProfileBUrl = "https://example.com";
+ 
+ class TsBrowserMainParts : public content::ShellBrowserMainParts {
+  protected:
++  void InitializeBrowserContexts() override {
++    base::FilePath home;
++    base::PathService::Get(base::DIR_HOME, &home);
++    base::FilePath base_path = home.Append(".config")
++                                   .Append("termsurf")
++                                   .Append("zig-content-shell");
++
++    // Profile A — set path before construction (cached during init).
++    base::PathService::Override(content::SHELL_DIR_USER_DATA,
++                                base_path.Append("profile-a"));
++    set_browser_context(new content::ShellBrowserContext(false));
++
++    // Profile B — override path again, then create second context.
++    base::PathService::Override(content::SHELL_DIR_USER_DATA,
++                                base_path.Append("profile-b"));
++    browser_context_b_.reset(new content::ShellBrowserContext(false));
++  }
++
+   void InitializeMessageLoopContext() override {
+-    content::Shell::CreateNewWindow(browser_context(), GURL(kInitialUrl),
++    content::Shell::CreateNewWindow(browser_context(), GURL(kProfileAUrl),
+                                     nullptr, gfx::Size());
+-    content::Shell::CreateNewWindow(browser_context(),
+-                                    GURL("https://example.com"),
++    content::Shell::CreateNewWindow(browser_context_b_.get(), GURL(kProfileBUrl),
+                                     nullptr, gfx::Size());
+   }
++
++  void PostMainMessageLoopRun() override {
++    browser_context_b_.reset();
++    ShellBrowserMainParts::PostMainMessageLoopRun();
++  }
++
++ private:
++  std::unique_ptr<content::ShellBrowserContext> browser_context_b_;
+ };
+ 
+ class TsContentBrowserClient : public content::ShellContentBrowserClient {
+diff --git a/ui/display/mac/cv_display_link_mac.mm b/ui/display/mac/cv_display_link_mac.mm
+index b5186621d91d5..875219ef4e052 100644
+--- a/ui/display/mac/cv_display_link_mac.mm
++++ b/ui/display/mac/cv_display_link_mac.mm
+@@ -214,6 +214,9 @@ bool ComputeVSyncParameters(const CVTimeStamp& cv_time,
+       return false;
+     }
+ 
++    LOG(ERROR) << "[TS-DIAG] CVDisplayLink START display_id=" << display_id_
++               << " thread_id=" << thread_id_
++               << " callbacks=" << callbacks_.size();
+     display_link_is_running_ = true;
+   }
+ 
+@@ -229,6 +232,9 @@ bool ComputeVSyncParameters(const CVTimeStamp& cv_time,
+     return;
+   }
+   consecutive_vsyncs_with_no_callbacks_ += 1;
++  VLOG(1) << "[TS-DIAG] CVDisplayLink empty_callbacks vsync #"
++          << consecutive_vsyncs_with_no_callbacks_
++          << " display_id=" << display_id_;
+   if (consecutive_vsyncs_with_no_callbacks_ <
+       VSyncCallbackMac::kMaxExtraVSyncs) {
+     return;
+@@ -239,6 +245,10 @@ bool ComputeVSyncParameters(const CVTimeStamp& cv_time,
+     return;
+   }
+ 
++  LOG(ERROR) << "[TS-DIAG] CVDisplayLink STOP display_id=" << display_id_
++             << " thread_id=" << thread_id_
++             << " (after " << consecutive_vsyncs_with_no_callbacks_
++             << " empty vsyncs)";
+   CVReturn ret = CVDisplayLinkStop(display_link_.get());
+   if (ret != kCVReturnSuccess) {
+     LOG(ERROR) << "CVDisplayLinkStop failed. CVReturn: " << ret;
+@@ -288,6 +298,8 @@ bool ComputeVSyncParameters(const CVTimeStamp& cv_time,
+ void CVDisplayLinkMac::RunCallbacks(const VSyncParamsMac& params) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
++  VLOG(1) << "[TS-DIAG] CVDisplayLink RunCallbacks display_id=" << display_id_
++          << " callbacks=" << callbacks_.size();
+   for (auto* callback : callbacks_) {
+     callback->callback_for_displaylink_thread_.Run(params);
+   }
+@@ -361,6 +373,8 @@ bool ComputeVSyncParameters(const CVTimeStamp& cv_time,
+     new_callback.reset();
+   } else {
+     callbacks_.insert(new_callback.get());
++    LOG(ERROR) << "[TS-DIAG] CVDisplayLink RegisterCallback display_id="
++               << display_id_ << " callbacks=" << callbacks_.size();
+   }
+ 
+   return new_callback;
+@@ -369,6 +383,8 @@ bool ComputeVSyncParameters(const CVTimeStamp& cv_time,
+ void CVDisplayLinkMac::UnregisterCallback(VSyncCallbackMac* callback) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   callbacks_.erase(callback);
++  LOG(ERROR) << "[TS-DIAG] CVDisplayLink UnregisterCallback display_id="
++             << display_id_ << " callbacks=" << callbacks_.size();
+ }
+ 
+ }  // namespace ui
+-- 
+2.50.1 (Apple Git-155)
+

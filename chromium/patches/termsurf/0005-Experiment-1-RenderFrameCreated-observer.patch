@@ -1,0 +1,185 @@
+From 97d3d57865e6dfb13a27fac17e6b2e87fa341882 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Wed, 11 Feb 2026 06:48:15 -0600
+Subject: [PATCH 5/5] Experiment 1: RenderFrameCreated observer
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We waited for the frame, we set the flags,
+We called WasShown on hidden widgets too—
+But BrowserCompositorMac still drags,
+Two fps remains. The compositor withdrew.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../two_profiles/two_profiles_main_parts.h    | 21 +++++
+ .../two_profiles/two_profiles_main_parts.mm   | 78 +++++++++++++++----
+ 2 files changed, 86 insertions(+), 13 deletions(-)
+
+diff --git a/content/two_profiles/two_profiles_main_parts.h b/content/two_profiles/two_profiles_main_parts.h
+index b8a3f5c8eba58..591a445d5b2ca 100644
+--- a/content/two_profiles/two_profiles_main_parts.h
++++ b/content/two_profiles/two_profiles_main_parts.h
+@@ -4,14 +4,33 @@
+ #define CONTENT_TWO_PROFILES_TWO_PROFILES_MAIN_PARTS_H_
+ 
+ #include <memory>
++#include <string>
+ 
+ #include "build/build_config.h"
+ #include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_contents_observer.h"
+ #include "content/shell/browser/shell_browser_context.h"
+ #include "content/shell/browser/shell_browser_main_parts.h"
+ 
+ namespace content {
+ 
++// Issue 410.2, Experiment 1: Observes a WebContents and sets throttle bypass
++// flags when the renderer is ready, not at initialization time.
++class ThrottleBypassObserver : public WebContentsObserver {
++ public:
++  ThrottleBypassObserver(WebContents* web_contents, const std::string& label);
++  ~ThrottleBypassObserver() override;
++
++  // WebContentsObserver:
++  void RenderFrameCreated(RenderFrameHost* render_frame_host) override;
++  void RenderFrameHostChanged(RenderFrameHost* old_host,
++                              RenderFrameHost* new_host) override;
++
++ private:
++  void ApplyBypass(RenderFrameHost* render_frame_host);
++  std::string label_;
++};
++
+ class TwoProfilesMainParts : public ShellBrowserMainParts {
+  public:
+   TwoProfilesMainParts();
+@@ -26,6 +45,8 @@ class TwoProfilesMainParts : public ShellBrowserMainParts {
+ 
+   std::unique_ptr<ShellBrowserContext> browser_context_b_;
+   std::unique_ptr<WebContents> web_contents_b_;
++  std::unique_ptr<ThrottleBypassObserver> observer_a_;
++  std::unique_ptr<ThrottleBypassObserver> observer_b_;
+ };
+ 
+ }  // namespace content
+diff --git a/content/two_profiles/two_profiles_main_parts.mm b/content/two_profiles/two_profiles_main_parts.mm
+index 695b5ee4becf3..2f48e61e8d5d5 100644
+--- a/content/two_profiles/two_profiles_main_parts.mm
++++ b/content/two_profiles/two_profiles_main_parts.mm
+@@ -3,8 +3,10 @@
+ #include "content/two_profiles/two_profiles_main_parts.h"
+ 
+ #include "base/files/file_path.h"
++#include "base/logging.h"
+ #include "base/path_service.h"
+ #include "content/browser/renderer_host/render_widget_host_impl.h"
++#include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/render_view_host.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/shell/browser/shell.h"
+@@ -34,6 +36,61 @@
+ 
+ }  // namespace
+ 
++// --- ThrottleBypassObserver ---
++
++ThrottleBypassObserver::ThrottleBypassObserver(WebContents* web_contents,
++                                               const std::string& label)
++    : WebContentsObserver(web_contents), label_(label) {}
++
++ThrottleBypassObserver::~ThrottleBypassObserver() = default;
++
++void ThrottleBypassObserver::RenderFrameCreated(
++    RenderFrameHost* render_frame_host) {
++  LOG(INFO) << "[TermSurf " << label_ << "] RenderFrameCreated";
++  ApplyBypass(render_frame_host);
++}
++
++void ThrottleBypassObserver::RenderFrameHostChanged(
++    RenderFrameHost* old_host,
++    RenderFrameHost* new_host) {
++  LOG(INFO) << "[TermSurf " << label_ << "] RenderFrameHostChanged";
++  if (new_host) {
++    ApplyBypass(new_host);
++  }
++}
++
++void ThrottleBypassObserver::ApplyBypass(RenderFrameHost* render_frame_host) {
++  auto* rwhv = render_frame_host->GetView();
++  if (!rwhv) {
++    LOG(WARNING) << "[TermSurf " << label_ << "] No RenderWidgetHostView yet";
++    return;
++  }
++
++  auto* rwh_impl =
++      static_cast<RenderWidgetHostImpl*>(rwhv->GetRenderWidgetHost());
++  if (!rwh_impl) {
++    LOG(WARNING) << "[TermSurf " << label_ << "] No RenderWidgetHostImpl";
++    return;
++  }
++
++  // Layer 1: Prevent RenderWidgetHost from treating views as hidden.
++  rwh_impl->disable_hidden_ = true;
++  LOG(INFO) << "[TermSurf " << label_ << "] Set disable_hidden_ on " << rwh_impl
++            << " (is_hidden=" << rwh_impl->IsHidden() << ")";
++
++  // Layer 2: Disable Blink's scheduler throttling.
++  render_frame_host->GetRenderViewHost()->SetSchedulerThrottling(false);
++  LOG(INFO) << "[TermSurf " << label_ << "] SetSchedulerThrottling(false)";
++
++  // Force-show if currently hidden (reverses whatever Hide() did).
++  if (rwh_impl->IsHidden()) {
++    LOG(INFO) << "[TermSurf " << label_ << "] Widget is hidden, calling WasShown()";
++    rwh_impl->WasShown({});
++  }
++}
++
++// --- TwoProfilesMainParts ---
++
+ TwoProfilesMainParts::TwoProfilesMainParts() = default;
+ TwoProfilesMainParts::~TwoProfilesMainParts() = default;
+ 
+@@ -64,6 +121,12 @@
+   load_params.transition_type = ui::PAGE_TRANSITION_TYPED;
+   web_contents_b_->GetController().LoadURLWithParams(load_params);
+ 
++  // Attach throttle bypass observers — they set flags when renderers are ready.
++  observer_a_ = std::make_unique<ThrottleBypassObserver>(
++      shell_a->web_contents(), "Profile-A");
++  observer_b_ = std::make_unique<ThrottleBypassObserver>(
++      web_contents_b_.get(), "Profile-B");
++
+ #if BUILDFLAG(IS_MAC)
+   // Arrange both WebContents side by side in Shell A's window.
+   NSView* view_a =
+@@ -86,23 +149,12 @@
+     view_a.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+     view_b.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+   }
+-
+-  // Disable all three throttling layers for both WebContents.
+-  // Layer 1: Prevent RenderWidgetHost from treating views as hidden.
+-  auto* rwh_a = static_cast<RenderWidgetHostImpl*>(
+-      shell_a->web_contents()->GetRenderWidgetHostView()->GetRenderWidgetHost());
+-  rwh_a->disable_hidden_ = true;
+-  auto* rwh_b = static_cast<RenderWidgetHostImpl*>(
+-      web_contents_b_->GetRenderWidgetHostView()->GetRenderWidgetHost());
+-  rwh_b->disable_hidden_ = true;
+-
+-  // Layer 2: Disable Blink's scheduler throttling per RenderView.
+-  shell_a->web_contents()->GetRenderViewHost()->SetSchedulerThrottling(false);
+-  web_contents_b_->GetRenderViewHost()->SetSchedulerThrottling(false);
+ #endif
+ }
+ 
+ void TwoProfilesMainParts::PostMainMessageLoopRun() {
++  observer_b_.reset();
++  observer_a_.reset();
+   web_contents_b_.reset();
+   browser_context_b_.reset();
+   ShellBrowserMainParts::PostMainMessageLoopRun();
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,96 @@
+From 0a13b0f382456b10468e33b320b73ca55704d261 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 10:59:44 -0600
+Subject: [PATCH 3/6] Two Googles, both at 2fps apiece
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two profiles entered, both bearing the same face,
+Google on Google in a symmetric race.
+Neither one won, neither one flew—
+Both crawled at two frames, confirming what's true.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/content_api_shim.mm | 43 ++++++++++++++++---
+ 1 file changed, 37 insertions(+), 6 deletions(-)
+
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+index 6d98e7142dc0b..fbc5125a168ca 100644
+--- a/content/zig_content_shell/content_api_shim.mm
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -5,9 +5,9 @@
+ // hardcoded URL. The framework exports ContentMain() which shell_main_mac.cc
+ // calls via dlsym.
+ //
+-// Issue 621, Experiment 1: Single profile baseline. One window loading
+-// google.com. Parent handles InitializeBrowserContexts and
+-// PostMainMessageLoopRun — no profile path override, no second BrowserContext.
++// Issue 621, Experiment 2: Two profiles, both loading google.com.
++// Tests whether multi-BrowserContext contention is symmetric when both
++// profiles load the same complex page.
+ 
+ #include "content/zig_content_shell/content_api_shim.h"
+ 
+@@ -24,7 +24,9 @@
+ #include "content/shell/app/shell_main_delegate.h"
+ #include "content/shell/browser/shell.h"
+ #include "content/shell/browser/shell_browser_main_parts.h"
++#include "content/shell/browser/shell_browser_context.h"
+ #include "content/shell/browser/shell_content_browser_client.h"
++#include "content/shell/common/shell_paths.h"
+ #include "url/gurl.h"
+ 
+ namespace {
+@@ -101,15 +103,44 @@ void TsOverrideBundleID() {
+ // Content API subclasses
+ // ---------------------------------------------------------------------------
+ 
+-// The URL to load. Hardcoded for Experiment 1.
+-const char* kInitialUrl = "https://google.com";
++// Two profiles, both google.com.
++const char* kProfileAUrl = "https://google.com";
++const char* kProfileBUrl = "https://google.com";
+ 
+ class TsBrowserMainParts : public content::ShellBrowserMainParts {
+  protected:
++  void InitializeBrowserContexts() override {
++    base::FilePath home;
++    base::PathService::Get(base::DIR_HOME, &home);
++    base::FilePath base_path = home.Append(".config")
++                                   .Append("termsurf")
++                                   .Append("zig-content-shell");
++
++    // Profile A — set path before construction (cached during init).
++    base::PathService::Override(content::SHELL_DIR_USER_DATA,
++                                base_path.Append("profile-a"));
++    set_browser_context(new content::ShellBrowserContext(false));
++
++    // Profile B — override path again, then create second context.
++    base::PathService::Override(content::SHELL_DIR_USER_DATA,
++                                base_path.Append("profile-b"));
++    browser_context_b_.reset(new content::ShellBrowserContext(false));
++  }
++
+   void InitializeMessageLoopContext() override {
+-    content::Shell::CreateNewWindow(browser_context(), GURL(kInitialUrl),
++    content::Shell::CreateNewWindow(browser_context(), GURL(kProfileAUrl),
++                                    nullptr, gfx::Size());
++    content::Shell::CreateNewWindow(browser_context_b_.get(), GURL(kProfileBUrl),
+                                     nullptr, gfx::Size());
+   }
++
++  void PostMainMessageLoopRun() override {
++    browser_context_b_.reset();
++    ShellBrowserMainParts::PostMainMessageLoopRun();
++  }
++
++ private:
++  std::unique_ptr<content::ShellBrowserContext> browser_context_b_;
+ };
+ 
+ class TsContentBrowserClient : public content::ShellContentBrowserClient {
+-- 
+2.50.1 (Apple Git-155)
+

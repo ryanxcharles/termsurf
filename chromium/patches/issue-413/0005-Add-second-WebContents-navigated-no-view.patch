@@ -1,0 +1,87 @@
+From 8aa32a3a77cc505c43e000f4894ccfd2af36ac39 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Thu, 12 Feb 2026 07:33:04 -0600
+Subject: [PATCH 5/7] Add second WebContents (navigated, no view)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A page that renders into the void,
+No window, no view, no frame enjoyed.
+Its renderer hums with nowhere to paint—
+Does Shell A stutter, or show no complaint?
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../one_profile/browser/shell_browser_main_parts.cc  | 12 ++++++++++++
+ .../one_profile/browser/shell_browser_main_parts.h   |  2 ++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/content/one_profile/browser/shell_browser_main_parts.cc b/content/one_profile/browser/shell_browser_main_parts.cc
+index 98e52169f91db..ebcd2f2567c8c 100644
+--- a/content/one_profile/browser/shell_browser_main_parts.cc
++++ b/content/one_profile/browser/shell_browser_main_parts.cc
+@@ -26,7 +26,9 @@
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/devtools_agent_host.h"
+ #include "content/public/browser/first_party_sets_handler.h"
++#include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/storage_partition.h"
++#include "content/public/browser/web_contents.h"
+ #include "content/public/common/content_switches.h"
+ #include "content/public/common/result_codes.h"
+ #include "content/public/common/url_constants.h"
+@@ -38,6 +40,7 @@
+ #include "content/one_profile/common/shell_paths.h"
+ #include "content/one_profile/common/shell_switches.h"
+ #include "device/bluetooth/bluetooth_adapter_factory.h"
++#include "ui/base/page_transition_types.h"
+ #include "net/base/filename_util.h"
+ #include "net/base/net_module.h"
+ #include "net/grit/net_resources.h"
+@@ -177,6 +180,14 @@ void ShellBrowserMainParts::InitializeMessageLoopContext() {
+ #if BUILDFLAG(IS_MAC)
+   ReparentToCustomWindow(shell);
+ #endif
++
++  // Create second WebContents with profile B, navigate but don't attach view.
++  WebContents::CreateParams params(browser_context_b_.get());
++  web_contents_b_ = WebContents::Create(params);
++  NavigationController::LoadURLParams load_params(GetStartupURL());
++  load_params.transition_type = ui::PageTransitionFromInt(
++      ui::PAGE_TRANSITION_TYPED | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
++  web_contents_b_->GetController().LoadURLWithParams(load_params);
+ }
+ 
+ void ShellBrowserMainParts::ToolkitInitialized() {
+@@ -228,6 +239,7 @@ void ShellBrowserMainParts::WillRunMainMessageLoop(
+ void ShellBrowserMainParts::PostMainMessageLoopRun() {
+   DCHECK_EQ(Shell::windows().size(), 0u);
+   ShellDevToolsManagerDelegate::StopHttpHandler();
++  web_contents_b_.reset();
+   browser_context_b_.reset();
+   browser_context_.reset();
+   off_the_record_browser_context_.reset();
+diff --git a/content/one_profile/browser/shell_browser_main_parts.h b/content/one_profile/browser/shell_browser_main_parts.h
+index c85f505ec29f7..caee586395987 100644
+--- a/content/one_profile/browser/shell_browser_main_parts.h
++++ b/content/one_profile/browser/shell_browser_main_parts.h
+@@ -28,6 +28,7 @@ class ChildExitObserver;
+ 
+ namespace content {
+ class ShellPlatformDelegate;
++class WebContents;
+ 
+ #if BUILDFLAG(IS_FUCHSIA)
+ class FuchsiaViewPresenter;
+@@ -84,6 +85,7 @@ class ShellBrowserMainParts : public BrowserMainParts {
+   std::unique_ptr<ShellBrowserContext> browser_context_;
+   std::unique_ptr<ShellBrowserContext> off_the_record_browser_context_;
+   std::unique_ptr<ShellBrowserContext> browser_context_b_;
++  std::unique_ptr<WebContents> web_contents_b_;
+ 
+   std::unique_ptr<performance_manager::PerformanceManagerLifetime>
+       performance_manager_lifetime_;
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,103 @@
+From e69a93137518598bd3dbd526d8b9f4f51ebad30a Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 09:02:50 -0600
+Subject: [PATCH 10/13] Replay Experiment 1: single profile, smooth
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+One window, one profile, one override—
+And sixty frames per second came alive!
+The ghost that haunted every test we'd run
+Was never here in Experiment 1.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/content_api_shim.mm | 49 ++++---------------
+ 1 file changed, 9 insertions(+), 40 deletions(-)
+
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+index 84f8eec36082e..48a5a9ee4e7d8 100644
+--- a/content/zig_content_shell/content_api_shim.mm
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -1,13 +1,13 @@
+ // Copyright 2025 TermSurf. All rights reserved.
+ //
+ // Thin C++ shim that drives the Content API through a C function boundary.
+-// Subclasses Content Shell's classes to create two browser profiles with
+-// different storage paths, each loading a different URL. The framework exports
+-// ContentMain() which shell_main_mac.cc calls via dlsym.
++// Subclasses Content Shell's classes and overrides just enough to load a
++// hardcoded URL. The framework exports ContentMain() which shell_main_mac.cc
++// calls via dlsym.
+ //
+-// Experiment 9: Replay Experiment 2's exact framework state to continue
+-// bisecting the 2fps regression. No C API functions — profiles created
+-// directly with C++ in TsBrowserMainParts.
++// Experiment 10: Replay Experiment 1's exact state — single profile, single
++// window, only InitializeMessageLoopContext overridden. Parent handles
++// everything else.
+ 
+ #include "content/zig_content_shell/content_api_shim.h"
+ 
+@@ -24,9 +24,7 @@
+ #include "content/shell/app/shell_main_delegate.h"
+ #include "content/shell/browser/shell.h"
+ #include "content/shell/browser/shell_browser_main_parts.h"
+-#include "content/shell/browser/shell_browser_context.h"
+ #include "content/shell/browser/shell_content_browser_client.h"
+-#include "content/shell/common/shell_paths.h"
+ #include "url/gurl.h"
+ 
+ namespace {
+@@ -103,44 +101,15 @@ void TsOverrideBundleID() {
+ // Content API subclasses
+ // ---------------------------------------------------------------------------
+ 
+-// Two profiles, two URLs. Experiment 2.
+-const char* kProfileAUrl = "https://google.com";
+-const char* kProfileBUrl = "https://example.com";
++// The URL to load. Hardcoded for Experiment 1.
++const char* kInitialUrl = "https://google.com";
+ 
+ class TsBrowserMainParts : public content::ShellBrowserMainParts {
+  protected:
+-  void InitializeBrowserContexts() override {
+-    base::FilePath home;
+-    base::PathService::Get(base::DIR_HOME, &home);
+-    base::FilePath base_path = home.Append(".config")
+-                                   .Append("termsurf")
+-                                   .Append("zig-content-shell");
+-
+-    // Profile A — set path before construction (cached during init).
+-    base::PathService::Override(content::SHELL_DIR_USER_DATA,
+-                                base_path.Append("profile-a"));
+-    set_browser_context(new content::ShellBrowserContext(false));
+-
+-    // Profile B — override path again, then create second context.
+-    base::PathService::Override(content::SHELL_DIR_USER_DATA,
+-                                base_path.Append("profile-b"));
+-    browser_context_b_.reset(new content::ShellBrowserContext(false));
+-  }
+-
+   void InitializeMessageLoopContext() override {
+-    content::Shell::CreateNewWindow(browser_context(), GURL(kProfileAUrl),
+-                                    nullptr, gfx::Size());
+-    content::Shell::CreateNewWindow(browser_context_b_.get(), GURL(kProfileBUrl),
++    content::Shell::CreateNewWindow(browser_context(), GURL(kInitialUrl),
+                                     nullptr, gfx::Size());
+   }
+-
+-  void PostMainMessageLoopRun() override {
+-    browser_context_b_.reset();
+-    ShellBrowserMainParts::PostMainMessageLoopRun();
+-  }
+-
+- private:
+-  std::unique_ptr<content::ShellBrowserContext> browser_context_b_;
+ };
+ 
+ class TsContentBrowserClient : public content::ShellContentBrowserClient {
+-- 
+2.50.1 (Apple Git-155)
+

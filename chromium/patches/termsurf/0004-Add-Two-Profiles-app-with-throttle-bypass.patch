@@ -1,0 +1,830 @@
+From 4ace6f2ff097fa48231a8c33e88c196ada583e25 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Wed, 11 Feb 2026 06:18:43 -0600
+Subject: [PATCH 4/5] Add Two Profiles app with throttle bypass
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two contexts, one window, side by side—
+Last time they ran at two fps (we cried).
+But now with three layers unthrottled and free,
+disable_hidden, no scheduler, compositor spree,
+Both profiles spin at full stride.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ BUILD.gn                                      |   1 +
+ content/two_profiles/BUILD.gn                 | 235 ++++++++++++++++++
+ content/two_profiles/app-Info.plist           |  30 +++
+ content/two_profiles/framework-Info.plist     |  18 ++
+ content/two_profiles/helper-Info.plist        |  28 +++
+ .../two_profiles_content_browser_client.cc    |  22 ++
+ .../two_profiles_content_browser_client.h     |  23 ++
+ .../two_profiles/two_profiles_content_main.cc |  26 ++
+ .../two_profiles/two_profiles_content_main.h  |  15 ++
+ .../two_profiles_main_delegate.cc             |  19 ++
+ .../two_profiles/two_profiles_main_delegate.h |  20 ++
+ .../two_profiles/two_profiles_main_parts.h    |  33 +++
+ .../two_profiles/two_profiles_main_parts.mm   | 111 +++++++++
+ .../two_profiles/two_profiles_paths_apple.h   |  18 ++
+ .../two_profiles/two_profiles_paths_apple.mm  |  86 +++++++
+ 15 files changed, 685 insertions(+)
+ create mode 100644 content/two_profiles/BUILD.gn
+ create mode 100644 content/two_profiles/app-Info.plist
+ create mode 100644 content/two_profiles/framework-Info.plist
+ create mode 100644 content/two_profiles/helper-Info.plist
+ create mode 100644 content/two_profiles/two_profiles_content_browser_client.cc
+ create mode 100644 content/two_profiles/two_profiles_content_browser_client.h
+ create mode 100644 content/two_profiles/two_profiles_content_main.cc
+ create mode 100644 content/two_profiles/two_profiles_content_main.h
+ create mode 100644 content/two_profiles/two_profiles_main_delegate.cc
+ create mode 100644 content/two_profiles/two_profiles_main_delegate.h
+ create mode 100644 content/two_profiles/two_profiles_main_parts.h
+ create mode 100644 content/two_profiles/two_profiles_main_parts.mm
+ create mode 100644 content/two_profiles/two_profiles_paths_apple.h
+ create mode 100644 content/two_profiles/two_profiles_paths_apple.mm
+
+diff --git a/BUILD.gn b/BUILD.gn
+index 1fa72e6ace6ec..386e680b4a774 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -195,6 +195,7 @@ group("gn_all") {
+         "//components/viz:viz_unittests",
+         "//content/browser/interest_group/tools:adjustable_auction",
+         "//content/shell:content_shell",
++        "//content/two_profiles",
+         "//content/test:content_browsertests",
+         "//content/test:content_unittests",
+         "//device:device_unittests",
+diff --git a/content/two_profiles/BUILD.gn b/content/two_profiles/BUILD.gn
+new file mode 100644
+index 0000000000000..12290abe18714
+--- /dev/null
++++ b/content/two_profiles/BUILD.gn
+@@ -0,0 +1,235 @@
++# Copyright 2025 TermSurf. Based on content/shell/BUILD.gn.
++# "Two Profiles" — a minimal Content API app that renders two browser profiles
++# side by side in one window. Reuses content_shell_lib for all browser
++# infrastructure.
++
++import("//build/apple/tweak_info_plist.gni")
++import("//build/config/mac/rules.gni")
++import("//content/public/app/mac_helpers.gni")
++import("//ui/gl/features.gni")
++
++assert(is_mac, "Two Profiles is currently macOS-only")
++
++two_profiles_product_name = "Two Profiles"
++two_profiles_version = "1.0.0.0"
++two_profiles_framework_name = "$two_profiles_product_name Framework"
++two_profiles_helper_name = "$two_profiles_product_name Helper"
++
++# Static library with our custom classes.
++source_set("two_profiles_lib") {
++  testonly = true
++  sources = [
++    "two_profiles_content_browser_client.cc",
++    "two_profiles_content_browser_client.h",
++    "two_profiles_main_delegate.cc",
++    "two_profiles_main_delegate.h",
++    "two_profiles_main_parts.mm",
++    "two_profiles_main_parts.h",
++    "two_profiles_paths_apple.h",
++    "two_profiles_paths_apple.mm",
++  ]
++
++  deps = [
++    "//base",
++    "//content/public/app",
++    "//content/public/browser",
++    "//content/public/common",
++    "//content/shell:content_shell_lib",
++    "//url",
++  ]
++
++  frameworks = [
++    "AppKit.framework",
++    "Foundation.framework",
++  ]
++}
++
++# --- macOS bundle structure ---
++
++# Info.plist for the main app bundle.
++tweak_info_plist("two_profiles_plist") {
++  testonly = true
++  info_plist = "app-Info.plist"
++  args = [
++    "--scm=1",
++    "--version",
++    two_profiles_version,
++  ]
++}
++
++# Info.plist for the framework.
++tweak_info_plist("two_profiles_framework_plist") {
++  testonly = true
++  info_plist = "framework-Info.plist"
++  args = [
++    "--breakpad=0",
++    "--keystone=0",
++    "--scm=1",
++    "--version",
++    two_profiles_version,
++    "--branding",
++    two_profiles_product_name,
++  ]
++}
++
++# Info.plist for helper apps.
++tweak_info_plist("two_profiles_helper_plist") {
++  testonly = true
++  info_plist = "helper-Info.plist"
++  args = [
++    "--breakpad=0",
++    "--keystone=0",
++    "--scm=0",
++    "--version",
++    two_profiles_version,
++  ]
++}
++
++# Helper app template — compiles shell_main_mac.cc with our product name.
++template("two_profiles_helper_app") {
++  mac_app_bundle(target_name) {
++    assert(defined(invoker.helper_name_suffix))
++    assert(defined(invoker.helper_bundle_id_suffix))
++
++    testonly = true
++
++    output_name = two_profiles_helper_name + invoker.helper_name_suffix
++
++    sources = [ "//content/shell/app/shell_main_mac.cc" ]
++    defines = [
++      "HELPER_EXECUTABLE",
++      "SHELL_PRODUCT_NAME=\"$two_profiles_product_name\"",
++    ]
++    extra_substitutions = [
++      "CONTENT_SHELL_HELPER_SUFFIX=${invoker.helper_name_suffix}",
++      "CONTENT_SHELL_HELPER_BUNDLE_ID_SUFFIX=${invoker.helper_bundle_id_suffix}",
++    ]
++    deps = [
++      "//base/allocator:early_zone_registration_apple",
++      "//sandbox/mac:seatbelt",
++    ]
++
++    info_plist_target = ":two_profiles_helper_plist"
++
++    if (is_component_build) {
++      ldflags = [
++        "-Wl,-rpath,@executable_path/../../../../../../..",
++        "-Wl,-rpath,@executable_path/../../../../../../../../../..",
++      ]
++      deps += [ ":two_profiles_framework+link_nested" ]
++    }
++  }
++}
++
++# Create all helper variants (default, renderer, gpu, plugin).
++foreach(helper_params, content_mac_helpers) {
++  _helper_target = helper_params[0]
++  _helper_bundle_id = helper_params[1]
++  _helper_suffix = helper_params[2]
++  two_profiles_helper_app("two_profiles_helper_app_${_helper_target}") {
++    helper_name_suffix = _helper_suffix
++    helper_bundle_id_suffix = _helper_bundle_id
++  }
++}
++
++# Bundle the helpers + crashpad handler into the framework.
++bundle_data("two_profiles_framework_helpers") {
++  testonly = true
++  sources = [ "$root_out_dir/chrome_crashpad_handler" ]
++  outputs = [ "{{bundle_contents_dir}}/Helpers/{{source_file_part}}" ]
++  public_deps = [ "//components/crash/core/app:chrome_crashpad_handler" ]
++  foreach(helper_params, content_mac_helpers) {
++    sources += [
++      "$root_out_dir/${two_profiles_helper_name}${helper_params[2]}.app",
++    ]
++    public_deps += [ ":two_profiles_helper_app_${helper_params[0]}" ]
++  }
++}
++
++# The framework bundle — contains all browser logic.
++mac_framework_bundle("two_profiles_framework") {
++  testonly = true
++
++  output_name = two_profiles_framework_name
++
++  framework_version = "C"
++
++  framework_contents = [
++    "Helpers",
++    "Libraries",
++    "Resources",
++  ]
++
++  sources = [
++    "two_profiles_content_main.cc",
++    "two_profiles_content_main.h",
++  ]
++
++  deps = [
++    ":two_profiles_lib",
++    "//content/shell:content_shell_app",
++    "//content/public/app",
++    "//content/public/common",
++    "//third_party/icu:icudata",
++  ]
++
++  if (!use_static_angle) {
++    deps += [ "//content/shell:content_shell_angle_binaries" ]
++  }
++
++  bundle_deps = [
++    ":two_profiles_framework_helpers",
++    "//content/shell:content_shell_framework_resources",
++    "//content/shell:content_shell_swiftshader_binaries",
++  ]
++
++  if (!is_component_build) {
++    ldflags = [ "-Wl,-install_name,@executable_path/../Frameworks/$output_name.framework/$output_name" ]
++    deps += [ "//base/test:test_trace_processor_bundle_data" ]
++  } else {
++    ldflags = [ "-Wl,-install_name,@rpath/$output_name.framework/$output_name" ]
++    ldflags += [ "-Wl,-rpath,@loader_path/../../../../../.." ]
++  }
++
++  info_plist_target = ":two_profiles_framework_plist"
++}
++
++# Bundle data to embed the framework in the app.
++bundle_data("two_profiles_framework_bundle_data") {
++  testonly = true
++  sources = [ "$root_out_dir/$two_profiles_framework_name.framework" ]
++  outputs = [ "{{bundle_contents_dir}}/Frameworks/{{source_file_part}}" ]
++  if (is_component_build) {
++    public_deps = [ ":two_profiles_framework+link" ]
++  } else {
++    public_deps = [ ":two_profiles_framework" ]
++  }
++}
++
++# Reuse content_shell's icon.
++bundle_data("two_profiles_resources_bundle_data") {
++  testonly = true
++  sources = [ "//content/shell/app/app.icns" ]
++  outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
++}
++
++# The main app bundle — thin loader that dlopen()s the framework.
++mac_app_bundle("two_profiles") {
++  testonly = true
++  output_name = two_profiles_product_name
++  sources = [ "//content/shell/app/shell_main_mac.cc" ]
++  defines = [ "SHELL_PRODUCT_NAME=\"$two_profiles_product_name\"" ]
++
++  deps = [
++    ":two_profiles_framework_bundle_data",
++    ":two_profiles_resources_bundle_data",
++    "//base/allocator:early_zone_registration_apple",
++    "//sandbox/mac:seatbelt",
++  ]
++  info_plist_target = ":two_profiles_plist"
++  data_deps = [ ":two_profiles_lib" ]
++
++  if (is_component_build) {
++    ldflags = [ "-Wl,-rpath,@executable_path/../Frameworks" ]
++  }
++}
+diff --git a/content/two_profiles/app-Info.plist b/content/two_profiles/app-Info.plist
+new file mode 100644
+index 0000000000000..370b61b404ab6
+--- /dev/null
++++ b/content/two_profiles/app-Info.plist
+@@ -0,0 +1,30 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>CFBundleDevelopmentRegion</key>
++	<string>en</string>
++	<key>CFBundleDisplayName</key>
++	<string>${EXECUTABLE_NAME}</string>
++	<key>CFBundleExecutable</key>
++	<string>${EXECUTABLE_NAME}</string>
++	<key>CFBundleIconFile</key>
++	<string>app.icns</string>
++	<key>CFBundleIdentifier</key>
++	<string>org.termsurf.TwoProfiles</string>
++	<key>CFBundleInfoDictionaryVersion</key>
++	<string>6.0</string>
++	<key>CFBundleName</key>
++	<string>${PRODUCT_NAME}</string>
++	<key>CFBundlePackageType</key>
++	<string>APPL</string>
++	<key>CFBundleVersion</key>
++	<string>1.0</string>
++	<key>NSPrincipalClass</key>
++	<string>NSApplication</string>
++	<key>LSFileQuarantineEnabled</key>
++	<true/>
++	<key>NSSupportsAutomaticGraphicsSwitching</key>
++	<true/>
++</dict>
++</plist>
+diff --git a/content/two_profiles/framework-Info.plist b/content/two_profiles/framework-Info.plist
+new file mode 100644
+index 0000000000000..07301fd0537e0
+--- /dev/null
++++ b/content/two_profiles/framework-Info.plist
+@@ -0,0 +1,18 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>CFBundleDevelopmentRegion</key>
++	<string>en</string>
++	<key>CFBundleExecutable</key>
++	<string>${EXECUTABLE_NAME}</string>
++	<key>CFBundleIdentifier</key>
++	<string>org.termsurf.TwoProfiles.framework</string>
++	<key>CFBundleInfoDictionaryVersion</key>
++	<string>6.0</string>
++	<key>CFBundlePackageType</key>
++	<string>FMWK</string>
++	<key>CFBundleSignature</key>
++	<string>????</string>
++</dict>
++</plist>
+diff --git a/content/two_profiles/helper-Info.plist b/content/two_profiles/helper-Info.plist
+new file mode 100644
+index 0000000000000..1a61968248f43
+--- /dev/null
++++ b/content/two_profiles/helper-Info.plist
+@@ -0,0 +1,28 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>CFBundleDevelopmentRegion</key>
++	<string>en</string>
++	<key>CFBundleDisplayName</key>
++	<string>${EXECUTABLE_NAME}</string>
++	<key>CFBundleExecutable</key>
++	<string>${EXECUTABLE_NAME}</string>
++	<key>CFBundleIdentifier</key>
++	<string>org.termsurf.TwoProfiles.helper${CONTENT_SHELL_HELPER_BUNDLE_ID_SUFFIX}</string>
++	<key>CFBundleInfoDictionaryVersion</key>
++	<string>6.0</string>
++	<key>CFBundleName</key>
++	<string>${PRODUCT_NAME}</string>
++	<key>CFBundlePackageType</key>
++	<string>APPL</string>
++	<key>CFBundleSignature</key>
++	<string>????</string>
++	<key>LSFileQuarantineEnabled</key>
++	<true/>
++	<key>LSUIElement</key>
++	<string>1</string>
++	<key>NSSupportsAutomaticGraphicsSwitching</key>
++	<true/>
++</dict>
++</plist>
+diff --git a/content/two_profiles/two_profiles_content_browser_client.cc b/content/two_profiles/two_profiles_content_browser_client.cc
+new file mode 100644
+index 0000000000000..97a9a597507e9
+--- /dev/null
++++ b/content/two_profiles/two_profiles_content_browser_client.cc
+@@ -0,0 +1,22 @@
++// Copyright 2025 TermSurf. Based on Chromium's shell_content_browser_client.cc.
++
++#include "content/two_profiles/two_profiles_content_browser_client.h"
++
++#include <memory>
++
++#include "content/two_profiles/two_profiles_main_parts.h"
++
++namespace content {
++
++TwoProfilesContentBrowserClient::TwoProfilesContentBrowserClient() = default;
++TwoProfilesContentBrowserClient::~TwoProfilesContentBrowserClient() = default;
++
++std::unique_ptr<BrowserMainParts>
++TwoProfilesContentBrowserClient::CreateBrowserMainParts(
++    bool /* is_integration_test */) {
++  auto main_parts = std::make_unique<TwoProfilesMainParts>();
++  set_browser_main_parts(main_parts.get());
++  return main_parts;
++}
++
++}  // namespace content
+diff --git a/content/two_profiles/two_profiles_content_browser_client.h b/content/two_profiles/two_profiles_content_browser_client.h
+new file mode 100644
+index 0000000000000..4ae89623de170
+--- /dev/null
++++ b/content/two_profiles/two_profiles_content_browser_client.h
+@@ -0,0 +1,23 @@
++// Copyright 2025 TermSurf. Based on Chromium's shell_content_browser_client.h.
++
++#ifndef CONTENT_TWO_PROFILES_TWO_PROFILES_CONTENT_BROWSER_CLIENT_H_
++#define CONTENT_TWO_PROFILES_TWO_PROFILES_CONTENT_BROWSER_CLIENT_H_
++
++#include <memory>
++
++#include "content/shell/browser/shell_content_browser_client.h"
++
++namespace content {
++
++class TwoProfilesContentBrowserClient : public ShellContentBrowserClient {
++ public:
++  TwoProfilesContentBrowserClient();
++  ~TwoProfilesContentBrowserClient() override;
++
++  std::unique_ptr<BrowserMainParts> CreateBrowserMainParts(
++      bool is_integration_test) override;
++};
++
++}  // namespace content
++
++#endif  // CONTENT_TWO_PROFILES_TWO_PROFILES_CONTENT_BROWSER_CLIENT_H_
+diff --git a/content/two_profiles/two_profiles_content_main.cc b/content/two_profiles/two_profiles_content_main.cc
+new file mode 100644
+index 0000000000000..b19f531135ccf
+--- /dev/null
++++ b/content/two_profiles/two_profiles_content_main.cc
+@@ -0,0 +1,26 @@
++// Copyright 2025 TermSurf. Based on Chromium's content/shell/app/shell_content_main.cc.
++
++#include "content/two_profiles/two_profiles_content_main.h"
++
++#include "base/compiler_specific.h"
++#include "build/build_config.h"
++#include "content/public/app/content_main.h"
++#include "content/two_profiles/two_profiles_main_delegate.h"
++#include "content/two_profiles/two_profiles_paths_apple.h"
++
++#if BUILDFLAG(IS_MAC)
++int ContentMain(int argc, const char** argv) {
++  content::TwoProfilesMainDelegate delegate;
++  content::ContentMainParams params(&delegate);
++  params.argc = argc;
++  params.argv = argv;
++
++  TwoProfilesOverrideFrameworkBundlePath();
++  TwoProfilesOverrideOuterBundlePath();
++  TwoProfilesOverrideChildProcessPath();
++  TwoProfilesOverrideSourceRootPath();
++  TwoProfilesOverrideBundleID();
++
++  return content::ContentMain(std::move(params));
++}
++#endif  // BUILDFLAG(IS_MAC)
+diff --git a/content/two_profiles/two_profiles_content_main.h b/content/two_profiles/two_profiles_content_main.h
+new file mode 100644
+index 0000000000000..a08559983962b
+--- /dev/null
++++ b/content/two_profiles/two_profiles_content_main.h
+@@ -0,0 +1,15 @@
++// Copyright 2025 TermSurf. Based on Chromium's content/shell/app/shell_content_main.h.
++
++#ifndef CONTENT_TWO_PROFILES_TWO_PROFILES_CONTENT_MAIN_H_
++#define CONTENT_TWO_PROFILES_TWO_PROFILES_CONTENT_MAIN_H_
++
++#include "build/build_config.h"
++
++#if BUILDFLAG(IS_MAC)
++extern "C" {
++__attribute__((visibility("default")))
++int ContentMain(int argc, const char** argv);
++}  // extern "C"
++#endif  // BUILDFLAG(IS_MAC)
++
++#endif  // CONTENT_TWO_PROFILES_TWO_PROFILES_CONTENT_MAIN_H_
+diff --git a/content/two_profiles/two_profiles_main_delegate.cc b/content/two_profiles/two_profiles_main_delegate.cc
+new file mode 100644
+index 0000000000000..2b1d586fdaa60
+--- /dev/null
++++ b/content/two_profiles/two_profiles_main_delegate.cc
+@@ -0,0 +1,19 @@
++// Copyright 2025 TermSurf. Based on Chromium's content/shell/app/shell_main_delegate.cc.
++
++#include "content/two_profiles/two_profiles_main_delegate.h"
++
++#include "content/two_profiles/two_profiles_content_browser_client.h"
++
++namespace content {
++
++TwoProfilesMainDelegate::TwoProfilesMainDelegate()
++    : ShellMainDelegate(/*is_content_browsertests=*/false) {}
++
++TwoProfilesMainDelegate::~TwoProfilesMainDelegate() = default;
++
++ContentBrowserClient* TwoProfilesMainDelegate::CreateContentBrowserClient() {
++  browser_client_ = std::make_unique<TwoProfilesContentBrowserClient>();
++  return browser_client_.get();
++}
++
++}  // namespace content
+diff --git a/content/two_profiles/two_profiles_main_delegate.h b/content/two_profiles/two_profiles_main_delegate.h
+new file mode 100644
+index 0000000000000..5c0ab88007d5b
+--- /dev/null
++++ b/content/two_profiles/two_profiles_main_delegate.h
+@@ -0,0 +1,20 @@
++// Copyright 2025 TermSurf. Based on Chromium's content/shell/app/shell_main_delegate.h.
++
++#ifndef CONTENT_TWO_PROFILES_TWO_PROFILES_MAIN_DELEGATE_H_
++#define CONTENT_TWO_PROFILES_TWO_PROFILES_MAIN_DELEGATE_H_
++
++#include "content/shell/app/shell_main_delegate.h"
++
++namespace content {
++
++class TwoProfilesMainDelegate : public ShellMainDelegate {
++ public:
++  TwoProfilesMainDelegate();
++  ~TwoProfilesMainDelegate() override;
++
++  ContentBrowserClient* CreateContentBrowserClient() override;
++};
++
++}  // namespace content
++
++#endif  // CONTENT_TWO_PROFILES_TWO_PROFILES_MAIN_DELEGATE_H_
+diff --git a/content/two_profiles/two_profiles_main_parts.h b/content/two_profiles/two_profiles_main_parts.h
+new file mode 100644
+index 0000000000000..b8a3f5c8eba58
+--- /dev/null
++++ b/content/two_profiles/two_profiles_main_parts.h
+@@ -0,0 +1,33 @@
++// Copyright 2025 TermSurf. Based on Chromium's shell_browser_main_parts.h.
++
++#ifndef CONTENT_TWO_PROFILES_TWO_PROFILES_MAIN_PARTS_H_
++#define CONTENT_TWO_PROFILES_TWO_PROFILES_MAIN_PARTS_H_
++
++#include <memory>
++
++#include "build/build_config.h"
++#include "content/public/browser/web_contents.h"
++#include "content/shell/browser/shell_browser_context.h"
++#include "content/shell/browser/shell_browser_main_parts.h"
++
++namespace content {
++
++class TwoProfilesMainParts : public ShellBrowserMainParts {
++ public:
++  TwoProfilesMainParts();
++  ~TwoProfilesMainParts() override;
++
++ protected:
++  void InitializeBrowserContexts() override;
++  void InitializeMessageLoopContext() override;
++
++ private:
++  void PostMainMessageLoopRun() override;
++
++  std::unique_ptr<ShellBrowserContext> browser_context_b_;
++  std::unique_ptr<WebContents> web_contents_b_;
++};
++
++}  // namespace content
++
++#endif  // CONTENT_TWO_PROFILES_TWO_PROFILES_MAIN_PARTS_H_
+diff --git a/content/two_profiles/two_profiles_main_parts.mm b/content/two_profiles/two_profiles_main_parts.mm
+new file mode 100644
+index 0000000000000..695b5ee4becf3
+--- /dev/null
++++ b/content/two_profiles/two_profiles_main_parts.mm
+@@ -0,0 +1,111 @@
++// Copyright 2025 TermSurf. Based on Chromium's shell_browser_main_parts.cc.
++
++#include "content/two_profiles/two_profiles_main_parts.h"
++
++#include "base/files/file_path.h"
++#include "base/path_service.h"
++#include "content/browser/renderer_host/render_widget_host_impl.h"
++#include "content/public/browser/render_view_host.h"
++#include "content/public/browser/web_contents.h"
++#include "content/shell/browser/shell.h"
++#include "content/shell/browser/shell_browser_context.h"
++#include "content/shell/common/shell_paths.h"
++#include "url/gurl.h"
++
++#if BUILDFLAG(IS_MAC)
++#import <Cocoa/Cocoa.h>
++#include "content/public/browser/render_widget_host_view.h"
++#endif
++
++namespace content {
++
++namespace {
++
++const char kTestPageURL[] = "http://localhost:9407";
++
++base::FilePath GetProfilePath(const std::string& name) {
++  base::FilePath home_dir;
++  base::PathService::Get(base::DIR_HOME, &home_dir);
++  return home_dir.Append(".config")
++                 .Append("termsurf")
++                 .Append("poc")
++                 .Append(name);
++}
++
++}  // namespace
++
++TwoProfilesMainParts::TwoProfilesMainParts() = default;
++TwoProfilesMainParts::~TwoProfilesMainParts() = default;
++
++void TwoProfilesMainParts::InitializeBrowserContexts() {
++  // Override the user data path before creating each context.
++  // ShellBrowserContext reads SHELL_DIR_USER_DATA in its constructor.
++
++  base::PathService::Override(SHELL_DIR_USER_DATA, GetProfilePath("profile-a"));
++  set_browser_context(new ShellBrowserContext(false));
++
++  base::PathService::Override(SHELL_DIR_USER_DATA, GetProfilePath("profile-b"));
++  browser_context_b_ = std::make_unique<ShellBrowserContext>(false);
++}
++
++void TwoProfilesMainParts::InitializeMessageLoopContext() {
++  GURL url(kTestPageURL);
++
++  // Create Shell A (profile A) — this creates a window with toolbar.
++  Shell* shell_a = Shell::CreateNewWindow(
++      browser_context(), url, nullptr, gfx::Size(1200, 600));
++
++  // Create WebContents B (profile B) — no Shell, just a WebContents.
++  WebContents::CreateParams params_b(browser_context_b_.get());
++  web_contents_b_ = WebContents::Create(params_b);
++
++  // Navigate WebContents B to the test page.
++  NavigationController::LoadURLParams load_params(url);
++  load_params.transition_type = ui::PAGE_TRANSITION_TYPED;
++  web_contents_b_->GetController().LoadURLWithParams(load_params);
++
++#if BUILDFLAG(IS_MAC)
++  // Arrange both WebContents side by side in Shell A's window.
++  NSView* view_a =
++      shell_a->web_contents()->GetNativeView().GetNativeNSView();
++  NSView* view_b =
++      web_contents_b_->GetNativeView().GetNativeNSView();
++  NSView* container = [view_a superview];
++
++  if (container) {
++    // Add view_b to the same container.
++    [container addSubview:view_b];
++
++    // Layout: left half / right half.
++    CGFloat width = container.bounds.size.width;
++    CGFloat height = container.bounds.size.height;
++
++    view_a.frame = NSMakeRect(0, 0, width / 2, height);
++    view_b.frame = NSMakeRect(width / 2, 0, width / 2, height);
++
++    view_a.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++    view_b.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  }
++
++  // Disable all three throttling layers for both WebContents.
++  // Layer 1: Prevent RenderWidgetHost from treating views as hidden.
++  auto* rwh_a = static_cast<RenderWidgetHostImpl*>(
++      shell_a->web_contents()->GetRenderWidgetHostView()->GetRenderWidgetHost());
++  rwh_a->disable_hidden_ = true;
++  auto* rwh_b = static_cast<RenderWidgetHostImpl*>(
++      web_contents_b_->GetRenderWidgetHostView()->GetRenderWidgetHost());
++  rwh_b->disable_hidden_ = true;
++
++  // Layer 2: Disable Blink's scheduler throttling per RenderView.
++  shell_a->web_contents()->GetRenderViewHost()->SetSchedulerThrottling(false);
++  web_contents_b_->GetRenderViewHost()->SetSchedulerThrottling(false);
++#endif
++}
++
++void TwoProfilesMainParts::PostMainMessageLoopRun() {
++  web_contents_b_.reset();
++  browser_context_b_.reset();
++  ShellBrowserMainParts::PostMainMessageLoopRun();
++}
++
++}  // namespace content
+diff --git a/content/two_profiles/two_profiles_paths_apple.h b/content/two_profiles/two_profiles_paths_apple.h
+new file mode 100644
+index 0000000000000..3f0f31c19da80
+--- /dev/null
++++ b/content/two_profiles/two_profiles_paths_apple.h
+@@ -0,0 +1,18 @@
++// Copyright 2025 TermSurf. Based on Chromium's content/shell/app/paths_apple.h.
++
++#ifndef CONTENT_TWO_PROFILES_TWO_PROFILES_PATHS_APPLE_H_
++#define CONTENT_TWO_PROFILES_TWO_PROFILES_PATHS_APPLE_H_
++
++namespace base {
++class FilePath;
++}
++
++void TwoProfilesOverrideFrameworkBundlePath();
++void TwoProfilesOverrideOuterBundlePath();
++void TwoProfilesOverrideChildProcessPath();
++void TwoProfilesOverrideSourceRootPath();
++base::FilePath TwoProfilesGetResourcesPakFilePath();
++base::FilePath TwoProfilesGetInfoPlistPath();
++void TwoProfilesOverrideBundleID();
++
++#endif  // CONTENT_TWO_PROFILES_TWO_PROFILES_PATHS_APPLE_H_
+diff --git a/content/two_profiles/two_profiles_paths_apple.mm b/content/two_profiles/two_profiles_paths_apple.mm
+new file mode 100644
+index 0000000000000..eaf3422fbe099
+--- /dev/null
++++ b/content/two_profiles/two_profiles_paths_apple.mm
+@@ -0,0 +1,86 @@
++// Copyright 2025 TermSurf. Based on Chromium's content/shell/app/paths_apple.mm.
++
++#include "content/two_profiles/two_profiles_paths_apple.h"
++
++#include "base/apple/bundle_locations.h"
++#include "base/apple/foundation_util.h"
++#include "base/base_paths.h"
++#include "base/path_service.h"
++#include "base/strings/sys_string_conversions.h"
++#include "content/public/common/content_paths.h"
++
++namespace {
++
++base::FilePath GetContentsPath() {
++  base::FilePath path;
++  base::PathService::Get(base::FILE_EXE, &path);
++
++  if (base::apple::IsBackgroundOnlyProcess()) {
++    // Helper: go up nine levels to main bundle Contents.
++    path = path.DirName()
++               .DirName()
++               .DirName()
++               .DirName()
++               .DirName()
++               .DirName()
++               .DirName()
++               .DirName()
++               .DirName();
++  } else {
++    path = path.DirName().DirName();
++  }
++  DCHECK_EQ("Contents", path.BaseName().value());
++  return path;
++}
++
++base::FilePath GetFrameworksPath() {
++  return GetContentsPath().Append("Frameworks");
++}
++
++}  // namespace
++
++void TwoProfilesOverrideFrameworkBundlePath() {
++  base::FilePath helper_path =
++      GetFrameworksPath().Append("Two Profiles Framework.framework");
++  base::apple::SetOverrideFrameworkBundlePath(helper_path);
++}
++
++void TwoProfilesOverrideOuterBundlePath() {
++  base::FilePath path = GetContentsPath().DirName();
++  base::apple::SetOverrideOuterBundlePath(path);
++}
++
++void TwoProfilesOverrideChildProcessPath() {
++  base::FilePath helper_path = base::apple::FrameworkBundlePath()
++                                   .Append("Helpers")
++                                   .Append("Two Profiles Helper.app")
++                                   .Append("Contents")
++                                   .Append("MacOS")
++                                   .Append("Two Profiles Helper");
++  base::PathService::OverrideAndCreateIfNeeded(
++      content::CHILD_PROCESS_EXE, helper_path, /*is_absolute=*/true,
++      /*create=*/false);
++}
++
++void TwoProfilesOverrideSourceRootPath() {
++  base::PathService::Override(
++      base::DIR_SRC_TEST_DATA_ROOT,
++      GetFrameworksPath().DirName().DirName().DirName().DirName().DirName());
++}
++
++base::FilePath TwoProfilesGetResourcesPakFilePath() {
++  NSString* pak_path =
++      [base::apple::FrameworkBundle() pathForResource:@"content_shell"
++                                               ofType:@"pak"];
++  return base::FilePath([pak_path fileSystemRepresentation]);
++}
++
++base::FilePath TwoProfilesGetInfoPlistPath() {
++  return GetContentsPath().Append("Info.plist");
++}
++
++void TwoProfilesOverrideBundleID() {
++  NSBundle* bundle = base::apple::OuterBundle();
++  base::apple::SetBaseBundleIDOverride(
++      base::SysNSStringToUTF8(bundle.bundleIdentifier));
++}
+-- 
+2.50.1 (Apple Git-155)
+

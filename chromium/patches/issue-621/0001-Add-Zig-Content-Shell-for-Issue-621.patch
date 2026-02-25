@@ -1,0 +1,709 @@
+From 1219d6bd2b30481501a6ff8f9736b63886411cf6 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 10:54:32 -0600
+Subject: [PATCH 1/6] Add Zig Content Shell for Issue 621
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A fresh branch, a clean beginning,
+One profile, one page, no multi-profile sinning.
+Google alone in its Content Shell throne—
+The baseline must stand before seeds are sown.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/BUILD.gn            | 253 ++++++++++++++++++
+ content/zig_content_shell/app-Info.plist      |  28 ++
+ content/zig_content_shell/content_api_shim.h  |  15 ++
+ content/zig_content_shell/content_api_shim.mm | 158 +++++++++++
+ .../zig_content_shell/framework-Info.plist    |  18 ++
+ content/zig_content_shell/helper-Info.plist   |  28 ++
+ content/zig_content_shell/ts_main.mm          | 133 +++++++++
+ 7 files changed, 633 insertions(+)
+ create mode 100644 content/zig_content_shell/BUILD.gn
+ create mode 100644 content/zig_content_shell/app-Info.plist
+ create mode 100644 content/zig_content_shell/content_api_shim.h
+ create mode 100644 content/zig_content_shell/content_api_shim.mm
+ create mode 100644 content/zig_content_shell/framework-Info.plist
+ create mode 100644 content/zig_content_shell/helper-Info.plist
+ create mode 100644 content/zig_content_shell/ts_main.mm
+
+diff --git a/content/zig_content_shell/BUILD.gn b/content/zig_content_shell/BUILD.gn
+new file mode 100644
+index 0000000000000..dc914d7d366fa
+--- /dev/null
++++ b/content/zig_content_shell/BUILD.gn
+@@ -0,0 +1,253 @@
++# Copyright 2025 TermSurf. All rights reserved.
++#
++# Minimal Content Shell derivative that proves the Content API can be driven
++# through a C function boundary. Reuses content_shell_lib and content_shell_app
++# from //content/shell — only adds a thin shim (content_api_shim.cc) with
++# custom subclasses and path overrides.
++
++import("//build/config/mac/rules.gni")
++import("//build/apple/tweak_info_plist.gni")
++import("//content/public/app/mac_helpers.gni")
++import("//third_party/icu/config.gni")
++import("//tools/v8_context_snapshot/v8_context_snapshot.gni")
++import("//ui/gl/features.gni")
++
++declare_args() {
++  zig_content_shell_product_name = "Zig Content Shell"
++  zig_content_shell_version = "1.0.0.0"
++}
++
++zig_content_shell_framework_name = "$zig_content_shell_product_name Framework"
++zig_content_shell_helper_name = "$zig_content_shell_product_name Helper"
++
++# --- App bundle (thin launcher that dlopen's the framework) ---
++
++tweak_info_plist("zig_content_shell_plist") {
++  testonly = true
++  info_plist = "app-Info.plist"
++  args = [
++    "--scm=1",
++    "--version",
++    zig_content_shell_version,
++  ]
++}
++
++mac_app_bundle("zig_content_shell") {
++  testonly = true
++  output_name = zig_content_shell_product_name
++  sources = [ "//content/shell/app/shell_main_mac.cc" ]
++  defines = [ "SHELL_PRODUCT_NAME=\"$zig_content_shell_product_name\"" ]
++
++  deps = [
++    ":zig_content_shell_framework_bundle_data",
++    ":zig_content_shell_resources_bundle_data",
++    "//base/allocator:early_zone_registration_apple",
++    "//sandbox/mac:seatbelt",
++  ]
++  info_plist_target = ":zig_content_shell_plist"
++  data_deps = [ "//content/shell:content_shell_app" ]
++
++  if (is_component_build) {
++    ldflags = [ "-Wl,-rpath,@executable_path/../Frameworks" ]
++  }
++}
++
++# --- Framework (contains the actual Content API shim code) ---
++
++tweak_info_plist("zig_content_shell_framework_plist") {
++  testonly = true
++  info_plist = "framework-Info.plist"
++  args = [
++    "--breakpad=0",
++    "--keystone=0",
++    "--scm=1",
++    "--version",
++    zig_content_shell_version,
++    "--branding",
++    zig_content_shell_product_name,
++  ]
++}
++
++mac_framework_bundle("zig_content_shell_framework") {
++  testonly = true
++  output_name = zig_content_shell_framework_name
++  framework_version = "C"
++
++  framework_contents = [
++    "Helpers",
++    "Libraries",
++    "Resources",
++  ]
++
++  sources = [
++    "content_api_shim.mm",
++    "content_api_shim.h",
++  ]
++
++  deps = [
++    "//content/shell:content_shell_app",
++    "//content/public/app",
++    "//content/public/common",
++    "//third_party/icu:icudata",
++  ]
++
++  if (!use_static_angle) {
++    deps += [ ":zig_content_shell_angle_binaries" ]
++  }
++
++  bundle_deps = [
++    ":zig_content_shell_framework_helpers",
++    ":zig_content_shell_framework_resources",
++    ":zig_content_shell_swiftshader_binaries",
++  ]
++
++  if (!is_component_build) {
++    ldflags = [ "-Wl,-install_name,@executable_path/../Frameworks/$output_name.framework/$output_name" ]
++  } else {
++    ldflags = [
++      "-Wl,-install_name,@rpath/$output_name.framework/$output_name",
++      "-Wl,-rpath,@loader_path/../../../../../..",
++    ]
++  }
++
++  info_plist_target = ":zig_content_shell_framework_plist"
++}
++
++# --- Helper apps (GPU, Renderer, Utility processes) ---
++
++tweak_info_plist("zig_content_shell_helper_plist") {
++  testonly = true
++  info_plist = "helper-Info.plist"
++  args = [
++    "--breakpad=0",
++    "--keystone=0",
++    "--scm=0",
++    "--version",
++    zig_content_shell_version,
++  ]
++}
++
++template("zig_content_shell_helper_app") {
++  mac_app_bundle(target_name) {
++    assert(defined(invoker.helper_name_suffix))
++    assert(defined(invoker.helper_bundle_id_suffix))
++
++    testonly = true
++    output_name = zig_content_shell_helper_name + invoker.helper_name_suffix
++    sources = [ "//content/shell/app/shell_main_mac.cc" ]
++    defines = [
++      "HELPER_EXECUTABLE",
++      "SHELL_PRODUCT_NAME=\"$zig_content_shell_product_name\"",
++    ]
++    extra_substitutions = [
++      "CONTENT_ZIG_CONTENT_SHELL_HELPER_SUFFIX=${invoker.helper_name_suffix}",
++      "CONTENT_ZIG_CONTENT_SHELL_HELPER_BUNDLE_ID_SUFFIX=${invoker.helper_bundle_id_suffix}",
++    ]
++    deps = [
++      "//base/allocator:early_zone_registration_apple",
++      "//sandbox/mac:seatbelt",
++    ]
++    info_plist_target = ":zig_content_shell_helper_plist"
++
++    if (is_component_build) {
++      ldflags = [
++        "-Wl,-rpath,@executable_path/../../../../../../..",
++        "-Wl,-rpath,@executable_path/../../../../../../../../../..",
++      ]
++      deps += [ ":zig_content_shell_framework+link_nested" ]
++    }
++  }
++}
++
++foreach(helper_params, content_mac_helpers) {
++  _helper_target = helper_params[0]
++  _helper_bundle_id = helper_params[1]
++  _helper_suffix = helper_params[2]
++  zig_content_shell_helper_app(
++      "zig_content_shell_helper_app_${_helper_target}") {
++    helper_name_suffix = _helper_suffix
++    helper_bundle_id_suffix = _helper_bundle_id
++  }
++}
++
++# --- Bundle data (framework, helpers, resources, libraries) ---
++
++bundle_data("zig_content_shell_framework_helpers") {
++  testonly = true
++  sources = [ "$root_out_dir/chrome_crashpad_handler" ]
++  outputs = [ "{{bundle_contents_dir}}/Helpers/{{source_file_part}}" ]
++  public_deps = [ "//components/crash/core/app:chrome_crashpad_handler" ]
++  foreach(helper_params, content_mac_helpers) {
++    sources += [
++      "$root_out_dir/${zig_content_shell_helper_name}${helper_params[2]}.app",
++    ]
++    public_deps +=
++        [ ":zig_content_shell_helper_app_${helper_params[0]}" ]
++  }
++}
++
++bundle_data("zig_content_shell_framework_bundle_data") {
++  testonly = true
++  sources =
++      [ "$root_out_dir/$zig_content_shell_framework_name.framework" ]
++  outputs = [ "{{bundle_contents_dir}}/Frameworks/{{source_file_part}}" ]
++  if (is_component_build) {
++    public_deps = [ ":zig_content_shell_framework+link" ]
++  } else {
++    public_deps = [ ":zig_content_shell_framework" ]
++  }
++}
++
++bundle_data("zig_content_shell_framework_resources") {
++  testonly = true
++
++  # Reuse Content Shell's pak file — it contains all the resources we need.
++  sources = [ "$root_out_dir/content_shell.pak" ]
++  public_deps = [ "//content/shell:pak" ]
++
++  if (icu_use_data_file) {
++    sources += [ "$root_out_dir/icudtl.dat" ]
++    deps = [ "//third_party/icu:icudata" ]
++  }
++
++  sources += [ "//ui/gl/resources/angle-metal/gpu_shader_cache.bin" ]
++
++  if (v8_use_external_startup_data) {
++    public_deps += [ "//v8" ]
++    if (use_v8_context_snapshot) {
++      sources += [ "$root_out_dir/$v8_context_snapshot_filename" ]
++      public_deps += [ "//tools/v8_context_snapshot" ]
++    }
++    if (!use_v8_context_snapshot || include_both_v8_snapshots) {
++      sources += [ "$root_out_dir/snapshot_blob.bin" ]
++    }
++  }
++
++  outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
++}
++
++bundle_data("zig_content_shell_resources_bundle_data") {
++  testonly = true
++  sources = [ "//content/shell/app/app.icns" ]
++  outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
++}
++
++if (!use_static_angle) {
++  bundle_data("zig_content_shell_angle_binaries") {
++    sources = [
++      "$root_out_dir/egl_intermediates/libEGL.dylib",
++      "$root_out_dir/egl_intermediates/libGLESv2.dylib",
++    ]
++    outputs = [ "{{bundle_contents_dir}}/Libraries/{{source_file_part}}" ]
++    public_deps = [ "//ui/gl:angle_library_copy" ]
++  }
++}
++
++bundle_data("zig_content_shell_swiftshader_binaries") {
++  sources = [
++    "$root_out_dir/vk_intermediates/libvk_swiftshader.dylib",
++    "$root_out_dir/vk_intermediates/vk_swiftshader_icd.json",
++  ]
++  outputs = [ "{{bundle_contents_dir}}/Libraries/{{source_file_part}}" ]
++  public_deps = [ "//ui/gl:swiftshader_vk_library_copy" ]
++}
+diff --git a/content/zig_content_shell/app-Info.plist b/content/zig_content_shell/app-Info.plist
+new file mode 100644
+index 0000000000000..8d8b7941f72da
+--- /dev/null
++++ b/content/zig_content_shell/app-Info.plist
+@@ -0,0 +1,28 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>CFBundleDevelopmentRegion</key>
++	<string>en</string>
++	<key>CFBundleDisplayName</key>
++	<string>${EXECUTABLE_NAME}</string>
++	<key>CFBundleExecutable</key>
++	<string>${EXECUTABLE_NAME}</string>
++	<key>CFBundleIdentifier</key>
++	<string>com.termsurf.zig-content-shell</string>
++	<key>CFBundleInfoDictionaryVersion</key>
++	<string>6.0</string>
++	<key>CFBundleName</key>
++	<string>${PRODUCT_NAME}</string>
++	<key>CFBundlePackageType</key>
++	<string>APPL</string>
++	<key>CFBundleVersion</key>
++	<string>1.0</string>
++	<key>NSPrincipalClass</key>
++	<string>NSApplication</string>
++	<key>LSFileQuarantineEnabled</key>
++	<true/>
++	<key>NSSupportsAutomaticGraphicsSwitching</key>
++	<true/>
++</dict>
++</plist>
+diff --git a/content/zig_content_shell/content_api_shim.h b/content/zig_content_shell/content_api_shim.h
+new file mode 100644
+index 0000000000000..a45ba936aedfc
+--- /dev/null
++++ b/content/zig_content_shell/content_api_shim.h
+@@ -0,0 +1,15 @@
++// Copyright 2025 TermSurf. All rights reserved.
++
++#ifndef CONTENT_ZIG_CONTENT_SHELL_CONTENT_API_SHIM_H_
++#define CONTENT_ZIG_CONTENT_SHELL_CONTENT_API_SHIM_H_
++
++#include "build/build_config.h"
++
++#if BUILDFLAG(IS_MAC)
++extern "C" {
++__attribute__((visibility("default")))
++int ContentMain(int argc, const char** argv);
++}  // extern "C"
++#endif  // BUILDFLAG(IS_MAC)
++
++#endif  // CONTENT_ZIG_CONTENT_SHELL_CONTENT_API_SHIM_H_
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+new file mode 100644
+index 0000000000000..6d98e7142dc0b
+--- /dev/null
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -0,0 +1,158 @@
++// Copyright 2025 TermSurf. All rights reserved.
++//
++// Thin C++ shim that drives the Content API through a C function boundary.
++// Subclasses Content Shell's classes and overrides just enough to load a
++// hardcoded URL. The framework exports ContentMain() which shell_main_mac.cc
++// calls via dlsym.
++//
++// Issue 621, Experiment 1: Single profile baseline. One window loading
++// google.com. Parent handles InitializeBrowserContexts and
++// PostMainMessageLoopRun — no profile path override, no second BrowserContext.
++
++#include "content/zig_content_shell/content_api_shim.h"
++
++#include <string>
++
++#include "base/apple/bundle_locations.h"
++#include "base/apple/foundation_util.h"
++#include "base/base_paths.h"
++#include "base/path_service.h"
++#include "base/strings/sys_string_conversions.h"
++#include "build/build_config.h"
++#include "content/public/app/content_main.h"
++#include "content/public/common/content_paths.h"
++#include "content/shell/app/shell_main_delegate.h"
++#include "content/shell/browser/shell.h"
++#include "content/shell/browser/shell_browser_main_parts.h"
++#include "content/shell/browser/shell_content_browser_client.h"
++#include "url/gurl.h"
++
++namespace {
++
++// ---------------------------------------------------------------------------
++// Path overrides for "Zig Content Shell" product name.
++// These mirror content/shell/app/paths_apple.mm but use our bundle names.
++// We give them unique names to avoid symbol collisions with the functions
++// compiled into content_shell_app (which use "Content Shell" names).
++// ---------------------------------------------------------------------------
++
++base::FilePath GetContentsPath() {
++  base::FilePath path;
++  base::PathService::Get(base::FILE_EXE, &path);
++
++  if (path.value().find("/Helpers/") != std::string::npos) {
++    // Helper process: go up 9 levels from the helper executable.
++    path = path.DirName()
++               .DirName()
++               .DirName()
++               .DirName()
++               .DirName()
++               .DirName()
++               .DirName()
++               .DirName()
++               .DirName();
++  } else {
++    // Main process: up to MacOS, then to Contents.
++    path = path.DirName().DirName();
++  }
++  return path;
++}
++
++base::FilePath GetFrameworksPath() {
++  return GetContentsPath().Append("Frameworks");
++}
++
++void TsOverrideFrameworkBundlePath() {
++  base::FilePath path =
++      GetFrameworksPath().Append("Zig Content Shell Framework.framework");
++  base::apple::SetOverrideFrameworkBundlePath(path);
++}
++
++void TsOverrideOuterBundlePath() {
++  base::FilePath path = GetContentsPath().DirName();
++  base::apple::SetOverrideOuterBundlePath(path);
++}
++
++void TsOverrideChildProcessPath() {
++  base::FilePath path = base::apple::FrameworkBundlePath()
++                             .Append("Helpers")
++                             .Append("Zig Content Shell Helper.app")
++                             .Append("Contents")
++                             .Append("MacOS")
++                             .Append("Zig Content Shell Helper");
++  base::PathService::OverrideAndCreateIfNeeded(
++      content::CHILD_PROCESS_EXE, path, /*is_absolute=*/true,
++      /*create=*/false);
++}
++
++void TsOverrideSourceRootPath() {
++  base::PathService::Override(
++      base::DIR_SRC_TEST_DATA_ROOT,
++      GetFrameworksPath().DirName().DirName().DirName().DirName().DirName());
++}
++
++void TsOverrideBundleID() {
++  NSBundle* bundle = base::apple::OuterBundle();
++  base::apple::SetBaseBundleIDOverride(
++      base::SysNSStringToUTF8(bundle.bundleIdentifier));
++}
++
++// ---------------------------------------------------------------------------
++// Content API subclasses
++// ---------------------------------------------------------------------------
++
++// The URL to load. Hardcoded for Experiment 1.
++const char* kInitialUrl = "https://google.com";
++
++class TsBrowserMainParts : public content::ShellBrowserMainParts {
++ protected:
++  void InitializeMessageLoopContext() override {
++    content::Shell::CreateNewWindow(browser_context(), GURL(kInitialUrl),
++                                    nullptr, gfx::Size());
++  }
++};
++
++class TsContentBrowserClient : public content::ShellContentBrowserClient {
++ public:
++  std::unique_ptr<content::BrowserMainParts> CreateBrowserMainParts(
++      bool /* is_integration_test */) override {
++    auto parts = std::make_unique<TsBrowserMainParts>();
++    set_browser_main_parts(parts.get());
++    return parts;
++  }
++};
++
++class TsMainDelegate : public content::ShellMainDelegate {
++ protected:
++  content::ContentBrowserClient* CreateContentBrowserClient() override {
++    browser_client_ = std::make_unique<TsContentBrowserClient>();
++    return browser_client_.get();
++  }
++
++ private:
++  std::unique_ptr<TsContentBrowserClient> browser_client_;
++};
++
++}  // namespace
++
++// ---------------------------------------------------------------------------
++// Framework entry point — called by shell_main_mac.cc via dlsym.
++// ---------------------------------------------------------------------------
++
++#if BUILDFLAG(IS_MAC)
++int ContentMain(int argc, const char** argv) {
++  TsMainDelegate delegate;
++  content::ContentMainParams params(&delegate);
++  params.argc = argc;
++  params.argv = argv;
++
++  // Set up bundle paths before ContentMain runs.
++  TsOverrideFrameworkBundlePath();
++  TsOverrideOuterBundlePath();
++  TsOverrideChildProcessPath();
++  TsOverrideSourceRootPath();
++  TsOverrideBundleID();
++
++  return content::ContentMain(std::move(params));
++}
++#endif  // BUILDFLAG(IS_MAC)
+diff --git a/content/zig_content_shell/framework-Info.plist b/content/zig_content_shell/framework-Info.plist
+new file mode 100644
+index 0000000000000..674b6f2cb6bfc
+--- /dev/null
++++ b/content/zig_content_shell/framework-Info.plist
+@@ -0,0 +1,18 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>CFBundleDevelopmentRegion</key>
++	<string>en</string>
++	<key>CFBundleExecutable</key>
++	<string>${EXECUTABLE_NAME}</string>
++	<key>CFBundleIdentifier</key>
++	<string>com.termsurf.zig-content-shell.framework</string>
++	<key>CFBundleInfoDictionaryVersion</key>
++	<string>6.0</string>
++	<key>CFBundlePackageType</key>
++	<string>FMWK</string>
++	<key>CFBundleSignature</key>
++	<string>????</string>
++</dict>
++</plist>
+diff --git a/content/zig_content_shell/helper-Info.plist b/content/zig_content_shell/helper-Info.plist
+new file mode 100644
+index 0000000000000..ba6484ff0dd26
+--- /dev/null
++++ b/content/zig_content_shell/helper-Info.plist
+@@ -0,0 +1,28 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>CFBundleDevelopmentRegion</key>
++	<string>en</string>
++	<key>CFBundleDisplayName</key>
++	<string>${EXECUTABLE_NAME}</string>
++	<key>CFBundleExecutable</key>
++	<string>${EXECUTABLE_NAME}</string>
++	<key>CFBundleIdentifier</key>
++	<string>com.termsurf.zig-content-shell.helper${CONTENT_ZIG_CONTENT_SHELL_HELPER_BUNDLE_ID_SUFFIX}</string>
++	<key>CFBundleInfoDictionaryVersion</key>
++	<string>6.0</string>
++	<key>CFBundleName</key>
++	<string>${PRODUCT_NAME}</string>
++	<key>CFBundlePackageType</key>
++	<string>APPL</string>
++	<key>CFBundleSignature</key>
++	<string>????</string>
++	<key>LSFileQuarantineEnabled</key>
++	<true/>
++	<key>LSUIElement</key>
++	<string>1</string>
++	<key>NSSupportsAutomaticGraphicsSwitching</key>
++	<true/>
++</dict>
++</plist>
+diff --git a/content/zig_content_shell/ts_main.mm b/content/zig_content_shell/ts_main.mm
+new file mode 100644
+index 0000000000000..f16fc79e6ffc1
+--- /dev/null
++++ b/content/zig_content_shell/ts_main.mm
+@@ -0,0 +1,133 @@
++// Copyright 2025 TermSurf. All rights reserved.
++//
++// Custom launcher for Zig Content Shell. Replaces shell_main_mac.cc.
++// Pure C with dlopen/dlsym — no Chromium headers, no C++ includes.
++//
++// Experiment 7: Replay Experiment 4's Shell::CreateNewWindow path to
++// verify baseline FPS. Uses ts_create_tab (Shell windows) instead of
++// ts_create_web_contents (direct WebContents).
++
++#ifdef UNSAFE_BUFFERS_BUILD
++#pragma allow_unsafe_libc_calls
++#endif
++
++#include <dlfcn.h>
++#include <errno.h>
++#include <libgen.h>
++#include <mach-o/dyld.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++// Function pointer types matching content_api_shim.h.
++typedef int (*ContentMainFn)(int, const char**);
++typedef void (*CallbackFn)(void);
++typedef void (*SetCallbackFn)(CallbackFn);
++typedef void* (*CreateContextFn)(const char*);
++typedef void (*DestroyContextFn)(void*);
++typedef void (*CreateTabFn)(void*, const char*);
++
++// dlsym'd function pointers (set in main, used by callbacks).
++static CreateContextFn g_create_ctx;
++static DestroyContextFn g_destroy_ctx;
++static CreateTabFn g_create_tab;
++
++// Context handles (created in on_initialized, destroyed in on_shutdown).
++static void* ctx_a;
++static void* ctx_b;
++
++static void on_initialized(void) {
++  const char* home = getenv("HOME");
++  if (!home) {
++    fprintf(stderr, "HOME not set\n");
++    abort();
++  }
++
++  char path_a[1024];
++  char path_b[1024];
++  snprintf(path_a, sizeof(path_a),
++           "%s/.config/termsurf/zig-content-shell/profile-a", home);
++  snprintf(path_b, sizeof(path_b),
++           "%s/.config/termsurf/zig-content-shell/profile-b", home);
++
++  ctx_a = g_create_ctx(path_a);
++  ctx_b = g_create_ctx(path_b);
++  g_create_tab(ctx_a, "https://google.com");
++  g_create_tab(ctx_b, "https://example.com");
++}
++
++static void on_shutdown(void) {
++  g_destroy_ctx(ctx_b);
++  ctx_b = NULL;
++  g_destroy_ctx(ctx_a);
++  ctx_a = NULL;
++}
++
++int main(int argc, const char** argv) {
++  // Find the executable path.
++  uint32_t exec_path_size = 0;
++  int rv = _NSGetExecutablePath(NULL, &exec_path_size);
++  if (rv != -1) {
++    fprintf(stderr, "_NSGetExecutablePath: get length failed\n");
++    abort();
++  }
++
++  char* exec_path = (char*)malloc(exec_path_size);
++  rv = _NSGetExecutablePath(exec_path, &exec_path_size);
++  if (rv != 0) {
++    fprintf(stderr, "_NSGetExecutablePath: get path failed\n");
++    abort();
++  }
++
++  // Framework path relative to the executable:
++  //   <MacOS>/../Frameworks/Zig Content Shell Framework.framework/
++  //   Zig Content Shell Framework
++  const char* parent_dir = dirname(exec_path);
++  if (!parent_dir) {
++    fprintf(stderr, "dirname %s: %s\n", exec_path, strerror(errno));
++    abort();
++  }
++
++  const char rel_path[] =
++      "../Frameworks/Zig Content Shell Framework.framework/"
++      "Zig Content Shell Framework";
++  size_t fw_path_size = strlen(parent_dir) + sizeof(rel_path) + 1;
++  char* fw_path = (char*)malloc(fw_path_size);
++  snprintf(fw_path, fw_path_size, "%s/%s", parent_dir, rel_path);
++
++  // Load the framework.
++  void* library = dlopen(fw_path, RTLD_LAZY | RTLD_LOCAL | RTLD_FIRST);
++  if (!library) {
++    fprintf(stderr, "dlopen %s: %s\n", fw_path, dlerror());
++    abort();
++  }
++
++  // Resolve all C API symbols.
++  ContentMainFn content_main =
++      (ContentMainFn)dlsym(library, "ContentMain");
++  SetCallbackFn set_on_initialized =
++      (SetCallbackFn)dlsym(library, "ts_set_on_initialized");
++  SetCallbackFn set_on_shutdown =
++      (SetCallbackFn)dlsym(library, "ts_set_on_shutdown");
++  g_create_ctx =
++      (CreateContextFn)dlsym(library, "ts_create_browser_context");
++  g_destroy_ctx =
++      (DestroyContextFn)dlsym(library, "ts_destroy_browser_context");
++  g_create_tab =
++      (CreateTabFn)dlsym(library, "ts_create_tab");
++
++  if (!content_main || !set_on_initialized || !set_on_shutdown ||
++      !g_create_ctx || !g_destroy_ctx || !g_create_tab) {
++    fprintf(stderr, "dlsym failed: %s\n", dlerror());
++    abort();
++  }
++
++  // Register callbacks and run.
++  set_on_initialized(on_initialized);
++  set_on_shutdown(on_shutdown);
++  rv = content_main(argc, argv);
++
++  // exit, don't return from main, to avoid the apparent removal of main
++  // from stack backtraces under tail call optimization.
++  exit(rv);
++}
+-- 
+2.50.1 (Apple Git-155)
+

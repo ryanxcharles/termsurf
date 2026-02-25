@@ -1,0 +1,86 @@
+From 54ff30a8f50d610bbbb43346101d2fa9230fb9af Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 12:04:52 -0600
+Subject: [PATCH 6/6] One profile, two windows, rAF unleashed
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two windows share a single home,
+No second context left to roam.
+The boxes spin, the frames flow free—
+Sixty fps for all to see.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/content_api_shim.mm | 40 ++++---------------
+ 1 file changed, 7 insertions(+), 33 deletions(-)
+
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+index 4ad4f9a64005b..618ccdaefd5b6 100644
+--- a/content/zig_content_shell/content_api_shim.mm
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -5,8 +5,8 @@
+ // hardcoded URL. The framework exports ContentMain() which shell_main_mac.cc
+ // calls via dlsym.
+ //
+-// Issue 621, Experiment 4: Two profiles, CSS animation only (no JavaScript).
+-// Tests whether compositor-driven damage alone triggers the 2fps contention.
++// Issue 622, Experiment 3: One profile, two windows, JS box demo (rAF).
++// Tests whether multi-BrowserContext is required to trigger 2fps.
+ 
+ #include "content/zig_content_shell/content_api_shim.h"
+ 
+@@ -102,44 +102,18 @@ void TsOverrideBundleID() {
+ // Content API subclasses
+ // ---------------------------------------------------------------------------
+ 
+-// Two profiles, CSS-only animation page (no JavaScript).
+-const char* kProfileAUrl = "http://localhost:9616/css-animation.html";
+-const char* kProfileBUrl = "http://localhost:9616/css-animation.html";
++// One profile, two windows, JS box demo (requestAnimationFrame).
++const char* kWindowAUrl = "http://localhost:9616/test-box-demo.html";
++const char* kWindowBUrl = "http://localhost:9616/test-box-demo.html";
+ 
+ class TsBrowserMainParts : public content::ShellBrowserMainParts {
+  protected:
+-  void InitializeBrowserContexts() override {
+-    base::FilePath home;
+-    base::PathService::Get(base::DIR_HOME, &home);
+-    base::FilePath base_path = home.Append(".config")
+-                                   .Append("termsurf")
+-                                   .Append("zig-content-shell");
+-
+-    // Profile A — set path before construction (cached during init).
+-    base::PathService::Override(content::SHELL_DIR_USER_DATA,
+-                                base_path.Append("profile-a"));
+-    set_browser_context(new content::ShellBrowserContext(false));
+-
+-    // Profile B — override path again, then create second context.
+-    base::PathService::Override(content::SHELL_DIR_USER_DATA,
+-                                base_path.Append("profile-b"));
+-    browser_context_b_.reset(new content::ShellBrowserContext(false));
+-  }
+-
+   void InitializeMessageLoopContext() override {
+-    content::Shell::CreateNewWindow(browser_context(), GURL(kProfileAUrl),
++    content::Shell::CreateNewWindow(browser_context(), GURL(kWindowAUrl),
+                                     nullptr, gfx::Size());
+-    content::Shell::CreateNewWindow(browser_context_b_.get(), GURL(kProfileBUrl),
++    content::Shell::CreateNewWindow(browser_context(), GURL(kWindowBUrl),
+                                     nullptr, gfx::Size());
+   }
+-
+-  void PostMainMessageLoopRun() override {
+-    browser_context_b_.reset();
+-    ShellBrowserMainParts::PostMainMessageLoopRun();
+-  }
+-
+- private:
+-  std::unique_ptr<content::ShellBrowserContext> browser_context_b_;
+ };
+ 
+ class TsContentBrowserClient : public content::ShellContentBrowserClient {
+-- 
+2.50.1 (Apple Git-155)
+

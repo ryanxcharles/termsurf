@@ -83,8 +83,10 @@ gui/vgcore.*
 gui/*/.build/
 gui/*/Sources/*/*.metallib
 
-# Chromium build workspace (gitignored; src/ requires directory named "src")
-/chromium/
+# Chromium build workspace (src/, depot_tools, gclient state all ignored)
+/chromium/*
+!/chromium/patches/
+!/chromium/README.md
 
 # TermSurf 4.0 (ts4/) build outputs
 ts4/termsurf-window/.build/

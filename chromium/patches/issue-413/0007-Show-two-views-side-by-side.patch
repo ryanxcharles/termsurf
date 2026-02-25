@@ -1,0 +1,109 @@
+From 24a377c67a6e949a103b14b7ebc93cd6914dcda8 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Thu, 12 Feb 2026 08:01:59 -0600
+Subject: [PATCH 7/7] Show two views side by side
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two squares walk into a bar—
+The window says, "You're wide enough by far."
+Left and right they spin in sync,
+Same profile, same process, what do you think?
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../browser/shell_browser_main_parts.cc       | 12 +++----
+ .../browser/shell_browser_main_parts_mac.mm   | 31 ++++++++++++-------
+ 2 files changed, 26 insertions(+), 17 deletions(-)
+
+diff --git a/content/one_profile/browser/shell_browser_main_parts.cc b/content/one_profile/browser/shell_browser_main_parts.cc
+index 8d62bde42b4ca..2af83ef28906b 100644
+--- a/content/one_profile/browser/shell_browser_main_parts.cc
++++ b/content/one_profile/browser/shell_browser_main_parts.cc
+@@ -171,24 +171,24 @@ void ShellBrowserMainParts::InitializeBrowserContexts() {
+ }
+ 
+ #if BUILDFLAG(IS_MAC)
+-void ReparentToCustomWindow(Shell* shell);
++void ReparentToCustomWindow(Shell* shell, WebContents* web_contents_b);
+ #endif
+ 
+ void ShellBrowserMainParts::InitializeMessageLoopContext() {
+   Shell* shell = Shell::CreateNewWindow(browser_context_.get(), GetStartupURL(),
+                                         nullptr, gfx::Size());
+-#if BUILDFLAG(IS_MAC)
+-  ReparentToCustomWindow(shell);
+-#endif
+ 
+-  // Create second WebContents with profile A (same profile), navigate but
+-  // don't attach view.
++  // Create second WebContents with same profile, navigate it.
+   WebContents::CreateParams params(browser_context_.get());
+   web_contents_b_ = WebContents::Create(params);
+   NavigationController::LoadURLParams load_params(GetStartupURL());
+   load_params.transition_type = ui::PageTransitionFromInt(
+       ui::PAGE_TRANSITION_TYPED | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
+   web_contents_b_->GetController().LoadURLWithParams(load_params);
++
++#if BUILDFLAG(IS_MAC)
++  ReparentToCustomWindow(shell, web_contents_b_.get());
++#endif
+ }
+ 
+ void ShellBrowserMainParts::ToolkitInitialized() {
+diff --git a/content/one_profile/browser/shell_browser_main_parts_mac.mm b/content/one_profile/browser/shell_browser_main_parts_mac.mm
+index 6f83b65ff2ff1..9617bb7d8ace1 100644
+--- a/content/one_profile/browser/shell_browser_main_parts_mac.mm
++++ b/content/one_profile/browser/shell_browser_main_parts_mac.mm
+@@ -128,9 +128,9 @@
+ 
+ static NSWindow* g_custom_window = nil;
+ 
+-void ReparentToCustomWindow(Shell* shell) {
+-  // Create our own NSWindow.
+-  NSRect frame = NSMakeRect(200, 200, 800, 600);
++void ReparentToCustomWindow(Shell* shell, WebContents* web_contents_b) {
++  // Create our own NSWindow, wide enough for two views side by side.
++  NSRect frame = NSMakeRect(200, 200, 1200, 600);
+   NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                      NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+   g_custom_window = [[NSWindow alloc] initWithContentRect:frame
+@@ -140,17 +140,26 @@ void ReparentToCustomWindow(Shell* shell) {
+   g_custom_window.title = @"One Profile (Custom Window)";
+   g_custom_window.releasedWhenClosed = NO;
+ 
+-  // Get the WebContents' native NSView.
+-  NSView* web_view =
++  // Get both WebContents' native NSViews.
++  NSView* view_a =
+       shell->web_contents()->GetNativeView().GetNativeNSView();
++  NSView* view_b =
++      web_contents_b->GetNativeView().GetNativeNSView();
+ 
+-  // Remove from Shell's window.
+-  [web_view removeFromSuperview];
++  // Remove view A from Shell's window.
++  [view_a removeFromSuperview];
+ 
+-  // Add to our window.
+-  [g_custom_window.contentView addSubview:web_view];
+-  web_view.frame = g_custom_window.contentView.bounds;
+-  web_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  // Layout side by side in our window.
++  NSRect bounds = g_custom_window.contentView.bounds;
++  CGFloat half = bounds.size.width / 2.0;
++
++  view_a.frame = NSMakeRect(0, 0, half, bounds.size.height);
++  view_a.autoresizingMask = NSViewHeightSizable;
++  [g_custom_window.contentView addSubview:view_a];
++
++  view_b.frame = NSMakeRect(half, 0, half, bounds.size.height);
++  view_b.autoresizingMask = NSViewHeightSizable;
++  [g_custom_window.contentView addSubview:view_b];
+ 
+   // Hide Shell's original window (orderOut doesn't trigger windowShouldClose).
+   NSWindow* shell_window = shell->window().GetNativeNSWindow();
+-- 
+2.50.1 (Apple Git-155)
+

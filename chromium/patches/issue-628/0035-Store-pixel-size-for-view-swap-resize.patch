@@ -1,0 +1,99 @@
+From f0560242e1268eb18ae54334cbf63a3642d367a3 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 18:45:59 -0600
+Subject: [PATCH 35/38] Store pixel size for view swap resize
+
+The dimensions stored, the setter set,
+But RenderViewHostChanged plays hard to get.
+Same-site links don't swap the host,
+So stored dimensions matter most... not.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../browser/shell_browser_main_parts.cc       |  4 ++++
+ .../browser/shell_tab_observer.cc             | 21 +++++++++++++++++++
+ .../browser/shell_tab_observer.h              |  3 +++
+ 3 files changed, 28 insertions(+)
+
+diff --git a/content/chromium_profile_server/browser/shell_browser_main_parts.cc b/content/chromium_profile_server/browser/shell_browser_main_parts.cc
+index e9b8e05833e88..65e8873f5882c 100644
+--- a/content/chromium_profile_server/browser/shell_browser_main_parts.cc
++++ b/content/chromium_profile_server/browser/shell_browser_main_parts.cc
+@@ -355,6 +355,7 @@ void ShellBrowserMainParts::CreateTab(const GURL& url,
+   // Create a ShellTabObserver for navigation/loading/cursor notifications.
+   auto tab_observer = std::make_unique<ShellTabObserver>();
+   tab_observer->SetPaneId(pane_id);
++  tab_observer->SetLastPixelSize(pixel_width, pixel_height);
+ 
+   // Open a new connection to the app for this tab.
+   xpc_connection_t tab_conn = xpc_connection_create_from_endpoint(app_endpoint_);
+@@ -445,6 +446,9 @@ void ShellBrowserMainParts::ResizeTab(const std::string& pane_id,
+               << logical.ToString()
+               << " (physical " << pixel_width << "x" << pixel_height << ")";
+   }
++
++  // Store dimensions so RenderViewHostChanged can re-apply them (Issue 628).
++  tab->tab_observer->SetLastPixelSize(pixel_width, pixel_height);
+ }
+ 
+ void ShellBrowserMainParts::HandleMouseEvent(
+diff --git a/content/chromium_profile_server/browser/shell_tab_observer.cc b/content/chromium_profile_server/browser/shell_tab_observer.cc
+index d006913ea5b3a..67063727b9adb 100644
+--- a/content/chromium_profile_server/browser/shell_tab_observer.cc
++++ b/content/chromium_profile_server/browser/shell_tab_observer.cc
+@@ -127,10 +127,31 @@ void ShellTabObserver::RenderViewHostChanged(RenderViewHost* old_host,
+ #if BUILDFLAG(IS_MAC)
+   LOG(INFO) << "[ShellTabObserver] RenderViewHostChanged pane=" << pane_id_;
+   RegisterCALayerParamsCallback();
++
++  // Re-apply the last known pixel size to the new view (Issue 628 Exp 2).
++  // The new RenderWidgetHostView starts at its default size, not the size
++  // that was set on the old view via ResizeTab().
++  if (last_pixel_width_ > 0 && last_pixel_height_ > 0) {
++    if (auto* view = web_contents()->GetRenderWidgetHostView()) {
++      float scale = view->GetDeviceScaleFactor();
++      gfx::Size logical(
++          static_cast<int>(std::ceil(last_pixel_width_ / scale)),
++          static_cast<int>(std::ceil(last_pixel_height_ / scale)));
++      view->SetSize(logical);
++      LOG(INFO) << "[ShellTabObserver] Re-applied size " << logical.ToString()
++                << " (physical " << last_pixel_width_ << "x"
++                << last_pixel_height_ << ") pane=" << pane_id_;
++    }
++  }
+ #endif
+ }
+ 
+ #if BUILDFLAG(IS_MAC)
++void ShellTabObserver::SetLastPixelSize(int width, int height) {
++  last_pixel_width_ = width;
++  last_pixel_height_ = height;
++}
++
+ void ShellTabObserver::RegisterCALayerParamsCallback() {
+   if (!web_contents())
+     return;
+diff --git a/content/chromium_profile_server/browser/shell_tab_observer.h b/content/chromium_profile_server/browser/shell_tab_observer.h
+index ecbcc2b9b83c7..2b70f0ffc3ffa 100644
+--- a/content/chromium_profile_server/browser/shell_tab_observer.h
++++ b/content/chromium_profile_server/browser/shell_tab_observer.h
+@@ -50,6 +50,7 @@ class ShellTabObserver : public WebContentsObserver {
+   void SetPaneId(const std::string& pane_id);
+   void OnCursorChanged(const ui::Cursor& cursor);
+   void RegisterCALayerParamsCallback();
++  void SetLastPixelSize(int width, int height);
+ #endif
+ 
+  private:
+@@ -59,6 +60,8 @@ class ShellTabObserver : public WebContentsObserver {
+   xpc_connection_t xpc_connection_ = nullptr;
+   std::string pane_id_;
+   uint32_t last_ca_context_id_ = 0;
++  int last_pixel_width_ = 0;
++  int last_pixel_height_ = 0;
+ #endif
+ };
+ 
+-- 
+2.50.1 (Apple Git-155)
+

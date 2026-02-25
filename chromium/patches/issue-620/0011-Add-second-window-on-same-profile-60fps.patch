@@ -1,0 +1,35 @@
+From be05b812aea009baff0384060fe2fea8b8b6c66a Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 09:20:36 -0600
+Subject: [PATCH 11/13] Add second window on same profile: 60fps
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two windows, one profile, sharing one soul,
+Both rendering smoothly, both perfectly whole.
+The contention requires a profile to fight—
+Same-context siblings get along just right.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/content_api_shim.mm | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+index 48a5a9ee4e7d8..f768c84a312d8 100644
+--- a/content/zig_content_shell/content_api_shim.mm
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -109,6 +109,9 @@ void TsOverrideBundleID() {
+   void InitializeMessageLoopContext() override {
+     content::Shell::CreateNewWindow(browser_context(), GURL(kInitialUrl),
+                                     nullptr, gfx::Size());
++    content::Shell::CreateNewWindow(browser_context(),
++                                    GURL("https://example.com"),
++                                    nullptr, gfx::Size());
+   }
+ };
+ 
+-- 
+2.50.1 (Apple Git-155)
+

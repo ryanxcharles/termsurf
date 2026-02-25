@@ -38,6 +38,7 @@ find the most relevant recent branch, create a new branch from it
 | `146.0.7650.0-issue-501` | [Issue 501](issues/501-two-profiles-ts5.md)           | Two profiles in ts5                        |
 | `146.0.7650.0-issue-502` | [Issue 502](issues/502-attach-delay.md)               | Attach delay fix                           |
 | `146.0.7650.0-issue-503` | [Issue 503](issues/503-one-two-three.md)              | Dynamic multi-tab protocol                 |
+| `146.0.7650.0-issue-507` | —                                                     | First Chromium streaming attempt           |
 | `146.0.7650.0-issue-509` | [Issue 509](issues/509-chromium.md)                   | Chromium streaming (retry)                 |
 | `146.0.7650.0-issue-511` | [Issue 511](issues/511-three-profiles.md)             | Per-tab pane routing                       |
 | `146.0.7650.0-issue-512` | [Issue 512](issues/512-vsync.md)                      | 120fps oversampling                        |
@@ -57,9 +58,37 @@ find the most relevant recent branch, create a new branch from it
 | `146.0.7650.0-issue-630` | [Issue 630](issues/630-nav-calayerhost-6.md)          | Fix navigation blank                       |
 | `146.0.7650.0-issue-631` | [Issue 631](issues/631-continue-nav-calayerhost.md)   | Disable compositor recycling               |
 | `146.0.7650.0-issue-633` | [Issue 633](issues/633-persistent-compositor.md)      | Persistent compositor for stable CAContext |
+| `146.0.7650.0-issue-635` | —                                                     | Persistent compositor (continued)          |
 | `146.0.7650.0-issue-637` | [Issue 637](issues/637-editable-url-bar.md)           | Navigate XPC action                        |
 | `146.0.7650.0-issue-638` | [Issue 638](issues/638-page-title.md)                 | Page title sync                            |
 | `146.0.7650.0-issue-639` | [Issue 639](issues/639-open-in-same-tab.md)           | Open new-tab links in same tab             |
+
+## Patches
+
+Every TermSurf branch is archived as `git format-patch` output in
+`chromium/patches/`. Each subdirectory contains the complete patch set from the
+`146.0.7650.0` tag to the branch tip.
+
+To reconstruct a branch:
+
+```bash
+cd chromium/src
+git checkout 146.0.7650.0
+git checkout -b 146.0.7650.0-issue-{N}
+git am ../../chromium/patches/issue-{N}/*.patch
+```
+
+After committing to a Chromium branch, regenerate its patches:
+
+```bash
+cd chromium/src
+rm -rf ../../chromium/patches/issue-{N}/
+git format-patch 146.0.7650.0..HEAD -o ../../chromium/patches/issue-{N}/
+```
+
+Then commit the updated patches in the main repo.
+
+See [chromium/README.md](../chromium/README.md) for the full directory layout.
 
 ## Local Setup
 

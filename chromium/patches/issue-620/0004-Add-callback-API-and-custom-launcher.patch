@@ -1,0 +1,298 @@
+From 7bb85fe6beaef83ce46c13e6707d08dec5c405c8 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 08:12:25 -0600
+Subject: [PATCH 04/13] Add callback API and custom launcher
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The shim grew ears — two callback hooks,
+So launchers can call without Chromium books.
+dlsym six symbols, register, then run,
+Zero headers needed. The decoupling's done.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/BUILD.gn            |   6 +-
+ content/zig_content_shell/content_api_shim.h  |  15 ++
+ content/zig_content_shell/content_api_shim.mm |  54 ++++----
+ content/zig_content_shell/ts_main.mm          | 131 ++++++++++++++++++
+ 4 files changed, 175 insertions(+), 31 deletions(-)
+ create mode 100644 content/zig_content_shell/ts_main.mm
+
+diff --git a/content/zig_content_shell/BUILD.gn b/content/zig_content_shell/BUILD.gn
+index dc914d7d366fa..e41c0ad65645e 100644
+--- a/content/zig_content_shell/BUILD.gn
++++ b/content/zig_content_shell/BUILD.gn
+@@ -35,17 +35,13 @@ tweak_info_plist("zig_content_shell_plist") {
+ mac_app_bundle("zig_content_shell") {
+   testonly = true
+   output_name = zig_content_shell_product_name
+-  sources = [ "//content/shell/app/shell_main_mac.cc" ]
+-  defines = [ "SHELL_PRODUCT_NAME=\"$zig_content_shell_product_name\"" ]
++  sources = [ "ts_main.mm" ]
+ 
+   deps = [
+     ":zig_content_shell_framework_bundle_data",
+     ":zig_content_shell_resources_bundle_data",
+-    "//base/allocator:early_zone_registration_apple",
+-    "//sandbox/mac:seatbelt",
+   ]
+   info_plist_target = ":zig_content_shell_plist"
+-  data_deps = [ "//content/shell:content_shell_app" ]
+ 
+   if (is_component_build) {
+     ldflags = [ "-Wl,-rpath,@executable_path/../Frameworks" ]
+diff --git a/content/zig_content_shell/content_api_shim.h b/content/zig_content_shell/content_api_shim.h
+index f7927bc636768..b2e5c72f91873 100644
+--- a/content/zig_content_shell/content_api_shim.h
++++ b/content/zig_content_shell/content_api_shim.h
+@@ -34,6 +34,21 @@ void ts_destroy_browser_context(ts_browser_context_t ctx);
+ __attribute__((visibility("default")))
+ void ts_create_tab(ts_browser_context_t ctx, const char* url);
+ 
++// Callback type for lifecycle events.
++typedef void (*ts_callback_t)(void);
++
++// Register a callback that fires once when the browser is ready.
++// Must be called before ContentMain. The callback should create
++// profiles and tabs via the C API.
++__attribute__((visibility("default")))
++void ts_set_on_initialized(ts_callback_t callback);
++
++// Register a callback that fires during shutdown, before contexts
++// are destroyed. The callback should call ts_destroy_browser_context
++// on any contexts it created.
++__attribute__((visibility("default")))
++void ts_set_on_shutdown(ts_callback_t callback);
++
+ #ifdef __cplusplus
+ }  // extern "C"
+ #endif
+diff --git a/content/zig_content_shell/content_api_shim.mm b/content/zig_content_shell/content_api_shim.mm
+index dc7c7a971da0f..44cdef3aa24bc 100644
+--- a/content/zig_content_shell/content_api_shim.mm
++++ b/content/zig_content_shell/content_api_shim.mm
+@@ -96,6 +96,13 @@ void TsOverrideBundleID() {
+       base::SysNSStringToUTF8(bundle.bundleIdentifier));
+ }
+ 
++// ---------------------------------------------------------------------------
++// Lifecycle callbacks (set by the launcher before ContentMain)
++// ---------------------------------------------------------------------------
++
++static ts_callback_t g_on_initialized = nullptr;
++static ts_callback_t g_on_shutdown = nullptr;
++
+ // ---------------------------------------------------------------------------
+ // Content API subclasses
+ // ---------------------------------------------------------------------------
+@@ -103,42 +110,29 @@ void TsOverrideBundleID() {
+ class TsBrowserMainParts : public content::ShellBrowserMainParts {
+  protected:
+   void InitializeBrowserContexts() override {
++    // Create a default context for parent infrastructure (DevTools, resource
++    // provider). Actual user profiles are created by the on_initialized
++    // callback.
+     base::FilePath home;
+     base::PathService::Get(base::DIR_HOME, &home);
+-    std::string base_path =
+-        home.Append(".config/termsurf/zig-content-shell").value();
+-
+-    // Profile A — created via C API, ownership transferred to parent via
+-    // set_browser_context so the parent's PreMainMessageLoopRun can pass
+-    // it to DevTools and other infrastructure.
+-    ctx_a_ = ts_create_browser_context(
+-        (base_path + "/profile-a").c_str());
+-    set_browser_context(
+-        static_cast<content::ShellBrowserContext*>(ctx_a_));
+-
+-    // Profile B — created via C API, we own it.
+-    ctx_b_ = ts_create_browser_context(
+-        (base_path + "/profile-b").c_str());
++    base::PathService::Override(
++        content::SHELL_DIR_USER_DATA,
++        home.Append(".config/termsurf/zig-content-shell/default"));
++    set_browser_context(new content::ShellBrowserContext(false));
+   }
+ 
+   void InitializeMessageLoopContext() override {
+-    ts_create_tab(ctx_a_, "https://google.com");
+-    ts_create_tab(ctx_b_, "https://example.com");
++    if (g_on_initialized) {
++      g_on_initialized();
++    }
+   }
+ 
+   void PostMainMessageLoopRun() override {
+-    // Destroy profile B (we own it).
+-    ts_destroy_browser_context(ctx_b_);
+-    ctx_b_ = nullptr;
+-    // Profile A is owned by the parent via set_browser_context — the parent's
+-    // PostMainMessageLoopRun will destroy it.
+-    ctx_a_ = nullptr;
++    if (g_on_shutdown) {
++      g_on_shutdown();
++    }
+     ShellBrowserMainParts::PostMainMessageLoopRun();
+   }
+-
+- private:
+-  ts_browser_context_t ctx_a_ = nullptr;
+-  ts_browser_context_t ctx_b_ = nullptr;
+ };
+ 
+ class TsContentBrowserClient : public content::ShellContentBrowserClient {
+@@ -204,4 +198,12 @@ void ts_create_tab(ts_browser_context_t ctx, const char* url) {
+                                   gfx::Size());
+ }
+ 
++void ts_set_on_initialized(ts_callback_t callback) {
++  g_on_initialized = callback;
++}
++
++void ts_set_on_shutdown(ts_callback_t callback) {
++  g_on_shutdown = callback;
++}
++
+ #endif  // BUILDFLAG(IS_MAC)
+diff --git a/content/zig_content_shell/ts_main.mm b/content/zig_content_shell/ts_main.mm
+new file mode 100644
+index 0000000000000..c1d1ff4480b7c
+--- /dev/null
++++ b/content/zig_content_shell/ts_main.mm
+@@ -0,0 +1,131 @@
++// Copyright 2025 TermSurf. All rights reserved.
++//
++// Custom launcher for Zig Content Shell. Replaces shell_main_mac.cc.
++// Pure C with dlopen/dlsym — no Chromium headers, no C++ includes.
++// Proves the full external-control pattern: a Zig launcher would use
++// the identical dlsym approach.
++
++#ifdef UNSAFE_BUFFERS_BUILD
++#pragma allow_unsafe_libc_calls
++#endif
++
++#include <dlfcn.h>
++#include <errno.h>
++#include <libgen.h>
++#include <mach-o/dyld.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++// Function pointer types matching content_api_shim.h.
++typedef int (*ContentMainFn)(int, const char**);
++typedef void (*CallbackFn)(void);
++typedef void (*SetCallbackFn)(CallbackFn);
++typedef void* (*CreateContextFn)(const char*);
++typedef void (*DestroyContextFn)(void*);
++typedef void (*CreateTabFn)(void*, const char*);
++
++// dlsym'd function pointers (set in main, used by callbacks).
++static CreateContextFn g_create_ctx;
++static DestroyContextFn g_destroy_ctx;
++static CreateTabFn g_create_tab;
++
++// Context handles (created in on_initialized, destroyed in on_shutdown).
++static void* ctx_a;
++static void* ctx_b;
++
++static void on_initialized(void) {
++  const char* home = getenv("HOME");
++  if (!home) {
++    fprintf(stderr, "HOME not set\n");
++    abort();
++  }
++
++  char path_a[1024];
++  char path_b[1024];
++  snprintf(path_a, sizeof(path_a),
++           "%s/.config/termsurf/zig-content-shell/profile-a", home);
++  snprintf(path_b, sizeof(path_b),
++           "%s/.config/termsurf/zig-content-shell/profile-b", home);
++
++  ctx_a = g_create_ctx(path_a);
++  ctx_b = g_create_ctx(path_b);
++  g_create_tab(ctx_a, "https://google.com");
++  g_create_tab(ctx_b, "https://example.com");
++}
++
++static void on_shutdown(void) {
++  g_destroy_ctx(ctx_b);
++  ctx_b = NULL;
++  g_destroy_ctx(ctx_a);
++  ctx_a = NULL;
++}
++
++int main(int argc, const char** argv) {
++  // Find the executable path.
++  uint32_t exec_path_size = 0;
++  int rv = _NSGetExecutablePath(NULL, &exec_path_size);
++  if (rv != -1) {
++    fprintf(stderr, "_NSGetExecutablePath: get length failed\n");
++    abort();
++  }
++
++  char* exec_path = (char*)malloc(exec_path_size);
++  rv = _NSGetExecutablePath(exec_path, &exec_path_size);
++  if (rv != 0) {
++    fprintf(stderr, "_NSGetExecutablePath: get path failed\n");
++    abort();
++  }
++
++  // Framework path relative to the executable:
++  //   <MacOS>/../Frameworks/Zig Content Shell Framework.framework/
++  //   Zig Content Shell Framework
++  const char* parent_dir = dirname(exec_path);
++  if (!parent_dir) {
++    fprintf(stderr, "dirname %s: %s\n", exec_path, strerror(errno));
++    abort();
++  }
++
++  const char rel_path[] =
++      "../Frameworks/Zig Content Shell Framework.framework/"
++      "Zig Content Shell Framework";
++  size_t fw_path_size = strlen(parent_dir) + sizeof(rel_path) + 1;
++  char* fw_path = (char*)malloc(fw_path_size);
++  snprintf(fw_path, fw_path_size, "%s/%s", parent_dir, rel_path);
++
++  // Load the framework.
++  void* library = dlopen(fw_path, RTLD_LAZY | RTLD_LOCAL | RTLD_FIRST);
++  if (!library) {
++    fprintf(stderr, "dlopen %s: %s\n", fw_path, dlerror());
++    abort();
++  }
++
++  // Resolve all C API symbols.
++  ContentMainFn content_main =
++      (ContentMainFn)dlsym(library, "ContentMain");
++  SetCallbackFn set_on_initialized =
++      (SetCallbackFn)dlsym(library, "ts_set_on_initialized");
++  SetCallbackFn set_on_shutdown =
++      (SetCallbackFn)dlsym(library, "ts_set_on_shutdown");
++  g_create_ctx =
++      (CreateContextFn)dlsym(library, "ts_create_browser_context");
++  g_destroy_ctx =
++      (DestroyContextFn)dlsym(library, "ts_destroy_browser_context");
++  g_create_tab =
++      (CreateTabFn)dlsym(library, "ts_create_tab");
++
++  if (!content_main || !set_on_initialized || !set_on_shutdown ||
++      !g_create_ctx || !g_destroy_ctx || !g_create_tab) {
++    fprintf(stderr, "dlsym failed: %s\n", dlerror());
++    abort();
++  }
++
++  // Register callbacks and run.
++  set_on_initialized(on_initialized);
++  set_on_shutdown(on_shutdown);
++  rv = content_main(argc, argv);
++
++  // exit, don't return from main, to avoid the apparent removal of main
++  // from stack backtraces under tail call optimization.
++  exit(rv);
++}
+-- 
+2.50.1 (Apple Git-155)
+

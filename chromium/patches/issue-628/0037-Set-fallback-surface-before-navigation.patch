@@ -1,0 +1,41 @@
+From 7b14b21c9518d13fb2ea877ae90eb00074b06f00 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Mon, 23 Feb 2026 04:16:15 -0600
+Subject: [PATCH 37/38] Set fallback surface before navigation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The SurfaceRange had no start, no floor—
+So viz showed nothing, just an empty door.
+Now the old page lingers as a fallback friend,
+Compositing content until the new frames descend.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../browser/renderer_host/browser_compositor_view_mac.mm | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/content/browser/renderer_host/browser_compositor_view_mac.mm b/content/browser/renderer_host/browser_compositor_view_mac.mm
+index 93c7c92e52a95..95486701529b4 100644
+--- a/content/browser/renderer_host/browser_compositor_view_mac.mm
++++ b/content/browser/renderer_host/browser_compositor_view_mac.mm
+@@ -345,6 +345,15 @@
+     // LocalSurfaceId.
+     dfh_local_surface_id_allocator_.Invalidate();
+   } else {
++    // Set the current surface as fallback so the compositor shows old content
++    // while waiting for the new page's first frame (Issue 628).
++    const viz::SurfaceId* current_primary =
++        DelegatedFrameHostGetLayer()->GetSurfaceId();
++    if (current_primary) {
++      DelegatedFrameHostGetLayer()->SetOldestAcceptableFallback(
++          *current_primary);
++    }
++
+     // The first navigation does not need a new LocalSurfaceID. The renderer can
+     // use the ID that was already provided.
+     if (!is_first_navigation_) {
+-- 
+2.50.1 (Apple Git-155)
+

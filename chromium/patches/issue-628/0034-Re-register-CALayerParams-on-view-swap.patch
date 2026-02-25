@@ -1,0 +1,178 @@
+From 25fab61056f103cab91fdd60ba532405133b3171 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 18:33:23 -0600
+Subject: [PATCH 34/38] Re-register CALayerParams on view swap
+
+The view got swapped, the callback stayed,
+On the old host's grave it softly prayed.
+Now RenderViewHostChanged takes the stage,
+Re-registers the hook on every new page.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../browser/shell_browser_main_parts.cc       | 36 ++----------
+ .../browser/shell_tab_observer.cc             | 58 +++++++++++++++++++
+ .../browser/shell_tab_observer.h              |  5 ++
+ 3 files changed, 68 insertions(+), 31 deletions(-)
+
+diff --git a/content/chromium_profile_server/browser/shell_browser_main_parts.cc b/content/chromium_profile_server/browser/shell_browser_main_parts.cc
+index 3eb4349e65d8c..e9b8e05833e88 100644
+--- a/content/chromium_profile_server/browser/shell_browser_main_parts.cc
++++ b/content/chromium_profile_server/browser/shell_browser_main_parts.cc
+@@ -394,39 +394,13 @@ void ShellBrowserMainParts::CreateTab(const GURL& url,
+     rwhi->SetCursorChangedCallback(base::BindRepeating(
+         &ShellTabObserver::OnCursorChanged,
+         base::Unretained(tab_observer.get())));
+-
+-    // Register CALayerParams callback to send ca_context_id to the app.
+-    // When the GPU process produces a new CAContext, we send its ID once
+-    // (and re-send if it changes). The app creates a CALayerHost with this
+-    // ID — Window Server composites directly from GPU VRAM.
+-    std::string cb_pane_id = pane_id;
+-    xpc_connection_t cb_conn = tab_conn;
+-    SetCALayerParamsCallbackOnView(view, base::BindRepeating(
+-        [](const std::string& pane_id, xpc_connection_t conn,
+-           uint32_t* last_id, const gfx::CALayerParams& params) {
+-          if (params.ca_context_id == 0 || params.ca_context_id == *last_id)
+-            return;
+-          *last_id = params.ca_context_id;
+-          xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
+-          xpc_dictionary_set_string(msg, "action", "ca_context");
+-          xpc_dictionary_set_uint64(msg, "ca_context_id",
+-                                    params.ca_context_id);
+-          xpc_dictionary_set_string(msg, "pane_id", pane_id.c_str());
+-          xpc_dictionary_set_uint64(msg, "pixel_width",
+-                                    params.pixel_size.width());
+-          xpc_dictionary_set_uint64(msg, "pixel_height",
+-                                    params.pixel_size.height());
+-          xpc_connection_send_message(conn, msg);
+-          xpc_release(msg);
+-          LOG(INFO) << "[ProfileServer] Sent ca_context_id="
+-                    << params.ca_context_id << " for pane " << pane_id
+-                    << " (" << params.pixel_size.width() << "x"
+-                    << params.pixel_size.height() << ")";
+-        },
+-        cb_pane_id, cb_conn,
+-        base::Owned(new uint32_t(0))));
+   }
+ 
++  // Register CALayerParams callback to send ca_context_id to the app.
++  // This is on the observer so it can re-register after RenderViewHost
++  // swaps (e.g., cross-site navigation). See Issue 628.
++  tab_observer->RegisterCALayerParamsCallback();
++
+   // Store tab state.
+   auto tab = std::make_unique<TabState>();
+   tab->shell = shell;
+diff --git a/content/chromium_profile_server/browser/shell_tab_observer.cc b/content/chromium_profile_server/browser/shell_tab_observer.cc
+index 7258a72d47c3b..d006913ea5b3a 100644
+--- a/content/chromium_profile_server/browser/shell_tab_observer.cc
++++ b/content/chromium_profile_server/browser/shell_tab_observer.cc
+@@ -12,6 +12,10 @@
+ #include "content/public/browser/render_widget_host_view.h"
+ #include "content/public/browser/web_contents.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "content/chromium_profile_server/browser/shell_ca_layer_bridge_mac.h"
++#endif
++
+ namespace content {
+ 
+ ShellTabObserver::ShellTabObserver() = default;
+@@ -118,4 +122,58 @@ void ShellTabObserver::DidFailLoad(RenderFrameHost* render_frame_host,
+ #endif
+ }
+ 
++void ShellTabObserver::RenderViewHostChanged(RenderViewHost* old_host,
++                                              RenderViewHost* new_host) {
++#if BUILDFLAG(IS_MAC)
++  LOG(INFO) << "[ShellTabObserver] RenderViewHostChanged pane=" << pane_id_;
++  RegisterCALayerParamsCallback();
++#endif
++}
++
++#if BUILDFLAG(IS_MAC)
++void ShellTabObserver::RegisterCALayerParamsCallback() {
++  if (!web_contents())
++    return;
++  auto* view = web_contents()->GetRenderWidgetHostView();
++  if (!view)
++    return;
++
++  // Reset deduplication so the new view's first ca_context_id always gets sent.
++  last_ca_context_id_ = 0;
++
++  SetCALayerParamsCallbackOnView(view, base::BindRepeating(
++      [](ShellTabObserver* observer, const gfx::CALayerParams& params) {
++        if (params.ca_context_id == 0 ||
++            params.ca_context_id == observer->last_ca_context_id_)
++          return;
++        observer->last_ca_context_id_ = params.ca_context_id;
++
++        if (!observer->xpc_connection_)
++          return;
++
++        xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
++        xpc_dictionary_set_string(msg, "action", "ca_context");
++        xpc_dictionary_set_uint64(msg, "ca_context_id",
++                                  params.ca_context_id);
++        xpc_dictionary_set_string(msg, "pane_id",
++                                  observer->pane_id_.c_str());
++        xpc_dictionary_set_uint64(msg, "pixel_width",
++                                  params.pixel_size.width());
++        xpc_dictionary_set_uint64(msg, "pixel_height",
++                                  params.pixel_size.height());
++        xpc_connection_send_message(observer->xpc_connection_, msg);
++        xpc_release(msg);
++        LOG(INFO) << "[ShellTabObserver] Sent ca_context_id="
++                  << params.ca_context_id << " for pane "
++                  << observer->pane_id_
++                  << " (" << params.pixel_size.width() << "x"
++                  << params.pixel_size.height() << ")";
++      },
++      base::Unretained(this)));
++
++  LOG(INFO) << "[ShellTabObserver] Registered CALayerParams callback"
++            << " pane=" << pane_id_;
++}
++#endif
++
+ }  // namespace content
+diff --git a/content/chromium_profile_server/browser/shell_tab_observer.h b/content/chromium_profile_server/browser/shell_tab_observer.h
+index 540423174d71a..ecbcc2b9b83c7 100644
+--- a/content/chromium_profile_server/browser/shell_tab_observer.h
++++ b/content/chromium_profile_server/browser/shell_tab_observer.h
+@@ -9,6 +9,7 @@
+ 
+ #include "build/build_config.h"
+ #include "content/public/browser/navigation_handle.h"
++#include "content/public/browser/render_view_host.h"
+ #include "content/public/browser/web_contents_observer.h"
+ #include "ui/base/cursor/cursor.h"
+ 
+@@ -41,11 +42,14 @@ class ShellTabObserver : public WebContentsObserver {
+   void DidFailLoad(RenderFrameHost* render_frame_host,
+                    const GURL& validated_url,
+                    int error_code) override;
++  void RenderViewHostChanged(RenderViewHost* old_host,
++                             RenderViewHost* new_host) override;
+ 
+ #if BUILDFLAG(IS_MAC)
+   void SetConnection(xpc_connection_t conn);
+   void SetPaneId(const std::string& pane_id);
+   void OnCursorChanged(const ui::Cursor& cursor);
++  void RegisterCALayerParamsCallback();
+ #endif
+ 
+  private:
+@@ -54,6 +58,7 @@ class ShellTabObserver : public WebContentsObserver {
+ 
+   xpc_connection_t xpc_connection_ = nullptr;
+   std::string pane_id_;
++  uint32_t last_ca_context_id_ = 0;
+ #endif
+ };
+ 
+-- 
+2.50.1 (Apple Git-155)
+

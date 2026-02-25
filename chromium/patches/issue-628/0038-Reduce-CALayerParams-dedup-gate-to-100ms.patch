@@ -1,0 +1,34 @@
+From a3947ae55673e8099ba0af892e892c5c9f0d2082 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Mon, 23 Feb 2026 04:36:55 -0600
+Subject: [PATCH 38/38] Reduce CALayerParams dedup gate to 100ms
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Ten seconds the gate held the frames at bay,
+While CALayerHost waited with nothing to display.
+A hundred milliseconds — that's all we need,
+For the Window Server's recomposite to succeed.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../viz/service/frame_sinks/root_compositor_frame_sink_impl.cc  | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/components/viz/service/frame_sinks/root_compositor_frame_sink_impl.cc b/components/viz/service/frame_sinks/root_compositor_frame_sink_impl.cc
+index caa78654fff69..d20d49816bbe4 100644
+--- a/components/viz/service/frame_sinks/root_compositor_frame_sink_impl.cc
++++ b/components/viz/service/frame_sinks/root_compositor_frame_sink_impl.cc
+@@ -909,7 +909,7 @@ void RootCompositorFrameSinkImpl::DisplayDidReceiveCALayerParams(
+   // even if the params haven't changed. The value here matches that of
+   // DisplayLinkMac, which is responsible for querying for vsync updates.
+   next_forced_ca_layer_params_update_time_ =
+-      base::TimeTicks::Now() + base::Seconds(10);
++      base::TimeTicks::Now() + base::Milliseconds(100);
+   if (display_client_)
+     display_client_->OnDisplayReceivedCALayerParams(ca_layer_params);
+ #else
+-- 
+2.50.1 (Apple Git-155)
+

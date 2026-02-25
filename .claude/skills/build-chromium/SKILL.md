@@ -109,6 +109,44 @@ Chromium version tag.
 issue's branch. Find the most relevant recent branch, fork it to the new issue
 number, and add the new branch to the Branches table in `docs/chromium.md`.
 
+## Patches
+
+Every TermSurf Chromium branch is archived as `git format-patch` output in
+`chromium/patches/`. After committing to a Chromium branch, always regenerate
+its patch set:
+
+```bash
+cd ~/dev/termsurf/chromium/src
+rm -rf ../../chromium/patches/issue-{N}/
+git format-patch 146.0.7650.0..HEAD -o ../../chromium/patches/issue-{N}/
+```
+
+Then commit the updated patches in the main repo alongside the `docs/chromium.md`
+update.
+
+## Full Workflow for a New Issue
+
+1. Create a new issue doc in `docs/issues/`.
+2. Determine Chromium needs modification.
+3. Fork the most relevant recent branch (not necessarily the immediate prior
+   branch — that might have been a failed experiment):
+   ```bash
+   cd ~/dev/termsurf/chromium/src
+   export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+   git checkout 146.0.7650.0-issue-{parent}
+   git checkout -b 146.0.7650.0-issue-{N}
+   ```
+4. Make changes, build with `autoninja`, test.
+5. Commit to the issue branch with git-poet.
+6. Generate patches:
+   ```bash
+   rm -rf ../../chromium/patches/issue-{N}/
+   git format-patch 146.0.7650.0..HEAD -o ../../chromium/patches/issue-{N}/
+   ```
+7. Return to the main repo.
+8. Update `docs/chromium.md` (current branch + Branches table).
+9. Commit patches and docs in the main repo with git-poet.
+
 ## Branch and Version Tracking
 
 `docs/chromium.md` tracks the current branch, commit, and a complete list of all

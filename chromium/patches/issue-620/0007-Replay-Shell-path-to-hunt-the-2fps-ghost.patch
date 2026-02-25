@@ -1,0 +1,191 @@
+From b3265bdd30f71203f7cb631a2555a346c9f28291 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Sun, 22 Feb 2026 08:51:18 -0600
+Subject: [PATCH 07/13] Replay Shell path to hunt the 2fps ghost
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The Shell windows opened, pages rendered fine,
+But frames crawled at two — same old sluggish sign.
+The direct path's not guilty, that much is clear,
+The throttle was born in Experiment 4's frontier.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ content/zig_content_shell/ts_main.mm | 111 +++++----------------------
+ 1 file changed, 20 insertions(+), 91 deletions(-)
+
+diff --git a/content/zig_content_shell/ts_main.mm b/content/zig_content_shell/ts_main.mm
+index bae0f59693fd8..f16fc79e6ffc1 100644
+--- a/content/zig_content_shell/ts_main.mm
++++ b/content/zig_content_shell/ts_main.mm
+@@ -1,9 +1,11 @@
+ // Copyright 2025 TermSurf. All rights reserved.
+ //
+ // Custom launcher for Zig Content Shell. Replaces shell_main_mac.cc.
+-// No Chromium headers — only system headers (C stdlib, Cocoa, dlopen).
+-// Creates WebContents via the C API and attaches them to NSWindows
+-// created here, proving the launcher owns all window management.
++// Pure C with dlopen/dlsym — no Chromium headers, no C++ includes.
++//
++// Experiment 7: Replay Experiment 4's Shell::CreateNewWindow path to
++// verify baseline FPS. Uses ts_create_tab (Shell windows) instead of
++// ts_create_web_contents (direct WebContents).
+ 
+ #ifdef UNSAFE_BUFFERS_BUILD
+ #pragma allow_unsafe_libc_calls
+@@ -17,90 +19,24 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-#import <Cocoa/Cocoa.h>
+-
+-// ---------------------------------------------------------------------------
+ // Function pointer types matching content_api_shim.h.
+-// ---------------------------------------------------------------------------
+-
+ typedef int (*ContentMainFn)(int, const char**);
+ typedef void (*CallbackFn)(void);
+ typedef void (*SetCallbackFn)(CallbackFn);
+ typedef void* (*CreateContextFn)(const char*);
+ typedef void (*DestroyContextFn)(void*);
+-typedef void* (*CreateWebContentsFn)(void*, const char*);
+-typedef void* (*GetNativeViewFn)(void*);
+-typedef void (*DestroyWebContentsFn)(void*);
+-typedef void (*QuitFn)(void);
++typedef void (*CreateTabFn)(void*, const char*);
+ 
+-// ---------------------------------------------------------------------------
+ // dlsym'd function pointers (set in main, used by callbacks).
+-// ---------------------------------------------------------------------------
+-
+ static CreateContextFn g_create_ctx;
+ static DestroyContextFn g_destroy_ctx;
+-static CreateWebContentsFn g_create_web_contents;
+-static GetNativeViewFn g_get_native_view;
+-static DestroyWebContentsFn g_destroy_web_contents;
+-static QuitFn g_quit;
++static CreateTabFn g_create_tab;
+ 
+-// Context and WebContents handles.
++// Context handles (created in on_initialized, destroyed in on_shutdown).
+ static void* ctx_a;
+-static void* wc_a;
+-
+-// Track open windows — quit when the last one closes.
+-static int g_open_windows = 0;
+-
+-// ---------------------------------------------------------------------------
+-// NSWindowDelegate — calls ts_quit when the last window closes.
+-// ---------------------------------------------------------------------------
+-
+-@interface TsWindowDelegate : NSObject <NSWindowDelegate>
+-@end
+-
+-@implementation TsWindowDelegate
+-- (void)windowWillClose:(NSNotification*)notification {
+-  if (--g_open_windows == 0 && g_quit)
+-    g_quit();
+-}
+-@end
+-
+-static TsWindowDelegate* g_window_delegate;
+-
+-// ---------------------------------------------------------------------------
+-// Window creation helper.
+-// ---------------------------------------------------------------------------
+-
+-static void create_window(void* native_view, const char* title) {
+-  NSView* web_view = (__bridge NSView*)native_view;
+-  NSRect frame = NSMakeRect(0, 0, 800, 600);
+-  NSUInteger style = NSWindowStyleMaskTitled |
+-                     NSWindowStyleMaskClosable |
+-                     NSWindowStyleMaskMiniaturizable |
+-                     NSWindowStyleMaskResizable;
+-  NSWindow* window = [[NSWindow alloc] initWithContentRect:frame
+-                                                 styleMask:style
+-                                                   backing:NSBackingStoreBuffered
+-                                                     defer:NO];
+-  window.title = [NSString stringWithUTF8String:title];
+-  window.delegate = g_window_delegate;
+-
+-  web_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+-  web_view.frame = window.contentView.bounds;
+-  [window.contentView addSubview:web_view];
+-
+-  [window cascadeTopLeftFromPoint:NSMakePoint(20, 20)];
+-  [window makeKeyAndOrderFront:nil];
+-  g_open_windows++;
+-}
+-
+-// ---------------------------------------------------------------------------
+-// Lifecycle callbacks.
+-// ---------------------------------------------------------------------------
++static void* ctx_b;
+ 
+ static void on_initialized(void) {
+-  g_window_delegate = [[TsWindowDelegate alloc] init];
+-
+   const char* home = getenv("HOME");
+   if (!home) {
+     fprintf(stderr, "HOME not set\n");
+@@ -108,25 +44,25 @@ static void on_initialized(void) {
+   }
+ 
+   char path_a[1024];
++  char path_b[1024];
+   snprintf(path_a, sizeof(path_a),
+            "%s/.config/termsurf/zig-content-shell/profile-a", home);
++  snprintf(path_b, sizeof(path_b),
++           "%s/.config/termsurf/zig-content-shell/profile-b", home);
+ 
+   ctx_a = g_create_ctx(path_a);
+-  wc_a = g_create_web_contents(ctx_a, "https://google.com");
+-  create_window(g_get_native_view(wc_a), "Profile A");
++  ctx_b = g_create_ctx(path_b);
++  g_create_tab(ctx_a, "https://google.com");
++  g_create_tab(ctx_b, "https://example.com");
+ }
+ 
+ static void on_shutdown(void) {
+-  g_destroy_web_contents(wc_a);
+-  wc_a = NULL;
++  g_destroy_ctx(ctx_b);
++  ctx_b = NULL;
+   g_destroy_ctx(ctx_a);
+   ctx_a = NULL;
+ }
+ 
+-// ---------------------------------------------------------------------------
+-// Entry point.
+-// ---------------------------------------------------------------------------
+-
+ int main(int argc, const char** argv) {
+   // Find the executable path.
+   uint32_t exec_path_size = 0;
+@@ -177,18 +113,11 @@ int main(int argc, const char** argv) {
+       (CreateContextFn)dlsym(library, "ts_create_browser_context");
+   g_destroy_ctx =
+       (DestroyContextFn)dlsym(library, "ts_destroy_browser_context");
+-  g_create_web_contents =
+-      (CreateWebContentsFn)dlsym(library, "ts_create_web_contents");
+-  g_get_native_view =
+-      (GetNativeViewFn)dlsym(library, "ts_get_native_view");
+-  g_destroy_web_contents =
+-      (DestroyWebContentsFn)dlsym(library, "ts_destroy_web_contents");
+-  g_quit =
+-      (QuitFn)dlsym(library, "ts_quit");
++  g_create_tab =
++      (CreateTabFn)dlsym(library, "ts_create_tab");
+ 
+   if (!content_main || !set_on_initialized || !set_on_shutdown ||
+-      !g_create_ctx || !g_destroy_ctx || !g_create_web_contents ||
+-      !g_get_native_view || !g_destroy_web_contents || !g_quit) {
++      !g_create_ctx || !g_destroy_ctx || !g_create_tab) {
+     fprintf(stderr, "dlsym failed: %s\n", dlerror());
+     abort();
+   }
+-- 
+2.50.1 (Apple Git-155)
+

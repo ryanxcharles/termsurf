@@ -1,0 +1,56 @@
+From 27094a3c0934459ab0941d015684e571dc8ed4a7 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Thu, 12 Feb 2026 05:47:32 -0600
+Subject: [PATCH 2/7] Override SHELL_DIR_USER_DATA path
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A profile wandered from its home,
+To .config it now chose to roam.
+The frames should hold at sixty still—
+If not, the path bends to our will.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../one_profile/browser/shell_browser_main_parts.cc    | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/content/one_profile/browser/shell_browser_main_parts.cc b/content/one_profile/browser/shell_browser_main_parts.cc
+index 235f188875a9e..3f1e17118ac05 100644
+--- a/content/one_profile/browser/shell_browser_main_parts.cc
++++ b/content/one_profile/browser/shell_browser_main_parts.cc
+@@ -10,6 +10,7 @@
+ #include "base/command_line.h"
+ #include "base/files/file_path.h"
+ #include "base/files/file_util.h"
++#include "base/path_service.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
+ #include "base/memory/ref_counted_memory.h"
+@@ -34,6 +35,7 @@
+ #include "content/one_profile/browser/shell_browser_context.h"
+ #include "content/one_profile/browser/shell_devtools_manager_delegate.h"
+ #include "content/one_profile/browser/shell_platform_delegate.h"
++#include "content/one_profile/common/shell_paths.h"
+ #include "content/one_profile/common/shell_switches.h"
+ #include "device/bluetooth/bluetooth_adapter_factory.h"
+ #include "net/base/filename_util.h"
+@@ -138,6 +140,14 @@ int ShellBrowserMainParts::PreEarlyInitialization() {
+ }
+ 
+ void ShellBrowserMainParts::InitializeBrowserContexts() {
++  base::FilePath profile_path =
++      base::GetHomeDir()
++          .Append(".config")
++          .Append("termsurf")
++          .Append("poc")
++          .Append("profile-a");
++  base::PathService::Override(SHELL_DIR_USER_DATA, profile_path);
++
+   set_browser_context(new ShellBrowserContext(false));
+   set_off_the_record_browser_context(new ShellBrowserContext(true));
+   // Persistent Origin Trials needs to be instantiated as soon as possible
+-- 
+2.50.1 (Apple Git-155)
+
