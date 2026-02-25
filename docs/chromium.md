@@ -10,7 +10,7 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `146.0.7650.0-issue-639`
+- Branch: `146.0.7650.0-issue-642`
 - Base version: `146.0.7650.0` (tracking Electron's Chromium version)
 
 ## Branch Strategy
@@ -62,6 +62,7 @@ find the most relevant recent branch, create a new branch from it
 | `146.0.7650.0-issue-637` | [Issue 637](issues/637-editable-url-bar.md)           | Navigate XPC action                         |
 | `146.0.7650.0-issue-638` | [Issue 638](issues/638-page-title.md)                 | Page title sync                             |
 | `146.0.7650.0-issue-639` | [Issue 639](issues/639-open-in-same-tab.md)           | Open new-tab links in same tab              |
+| `146.0.7650.0-issue-642` | [Issue 642](issues/642-zig-profile-server.md)         | Zig Profile Server                          |
 
 ## Patches
 
