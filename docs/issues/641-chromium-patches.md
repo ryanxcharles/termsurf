@@ -123,3 +123,24 @@ new patches, and the relationship between patches and branches.
 ### Step 5: Update `docs/chromium.md`
 
 Add a Patches section explaining the archive and how to use it.
+
+### Step 6: Update the `build-chromium` skill
+
+Update `.claude/skills/build-chromium/SKILL.md` to include patch generation in
+the branch workflow. The new flow when creating a Chromium branch for an issue:
+
+1. Make a new issue doc.
+2. Determine Chromium needs modification.
+3. Fork the most relevant recent branch (not necessarily the immediate prior
+   branch — that might have been a failed experiment) to
+   `{version}-issue-{N}`.
+4. Make changes, build, test.
+5. Commit to the issue branch with git-poet.
+6. Generate patches:
+   ```bash
+   cd chromium/src
+   git format-patch 146.0.7650.0..HEAD -o ../../chromium/patches/issue-{N}/
+   ```
+7. Return to the main repo.
+8. Update `docs/chromium.md` (current branch + Branches table).
+9. Commit patches and docs with git-poet.
