@@ -110,3 +110,19 @@ pointer to `docs/early-prototypes.md` for details.
 - `docs/ghostty.md` — Review for accuracy
 - `docs/keybindings.md` — Verify current
 - `docs/xdg.md` — Verify current
+
+## Result
+
+All four stages completed.
+
+- **Stage 1** (`0bdf837`): Deleted `ts1/`–`ts5/` — 7,053 files, 3.6M lines,
+  ~161 GB freed.
+- **Stage 2** (`9554829`): Created `docs/early-prototypes.md` with full
+  prototype documentation, archive log, and issue doc index.
+- **Stage 3** (`b9f41f7`): Slimmed `CLAUDE.md` from 805 to 236 lines. Replaced
+  full prototype sections with a brief History section linking to
+  `docs/early-prototypes.md`.
+- **Stage 4** (`0779208`): Reviewed all remaining docs. Updated
+  `docs/ghostty.md` to remove archived ts1/ts5 references. `docs/chromium.md`,
+  `docs/vendor.md`, `docs/keybindings.md`, and `docs/xdg.md` were already
+  current — no changes needed.
