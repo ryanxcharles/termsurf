@@ -359,3 +359,49 @@ if (xpc.hasOverlayPane(self)) {
 
 **Result: Pass.** Ctrl+Esc now returns to Control mode from both insert and
 normal mode.
+
+### Experiment 5: Mode label reflects edtui sub-mode
+
+**Goal:** Replace the static "EDIT" label in the bottom-right status bar with
+the actual edtui mode name and a distinct Nerd Font glyph for each.
+
+#### Glyphs
+
+edtui has four modes. Proposed glyphs:
+
+| Mode   | Glyph      | Unicode    | Name               | Rationale                               |
+| ------ | ---------- | ---------- | ------------------ | --------------------------------------- |
+| Normal | (terminal) | `\u{EA85}` | nf-cod-terminal    | Command/control mode                    |
+| Insert | (pencil)   | `\u{F040}` | nf-fa-pencil       | Writing/editing (reuses old EDIT glyph) |
+| Visual | (checkbox) | `\u{F14A}` | nf-fa-square-check | Selection                               |
+| Search | (search)   | `\u{F002}` | nf-fa-search       | Magnifying glass                        |
+
+#### Changes
+
+One change in `tui/src/main.rs:431-435`. Replace:
+
+```rust
+let label = match mode {
+    Mode::Browse => "\u{F059F} BROWSE",
+    Mode::Control => "\u{F11C} CONTROL",
+    Mode::UrlEdit => "\u{F040} EDIT",
+};
+```
+
+With a match that reads `editor_state.mode` when in UrlEdit:
+
+```rust
+let label = match mode {
+    Mode::Browse => "\u{F059F} BROWSE".to_string(),
+    Mode::Control => "\u{F11C} CONTROL".to_string(),
+    Mode::UrlEdit => match editor_state.mode {
+        EditorMode::Normal => "\u{EA85} NORMAL".to_string(),
+        EditorMode::Insert => "\u{F040} INSERT".to_string(),
+        EditorMode::Visual => "\u{F14A} VISUAL".to_string(),
+        EditorMode::Search => "\u{F002} SEARCH".to_string(),
+    },
+};
+```
+
+The `Paragraph::new()` call accepts `String`, so changing from `&str` to
+`String` via `.to_string()` is fine.
