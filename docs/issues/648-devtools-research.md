@@ -168,21 +168,48 @@ our Chromium fork.
 ```bash
 "/Users/ryan/dev/termsurf/chromium/src/out/Default/Content Shell.app/Contents/MacOS/Content Shell" \
   --remote-debugging-port=9222 \
+  '--remote-allow-origins=*' \
   https://example.com
 ```
 
 This opens a Content Shell window with a URL bar and the webpage.
 
-### Open DevTools
+### Open DevTools (in-process)
 
-In your regular browser, navigate to:
+Right-click inside the Content Shell window and select "Inspect". This opens
+DevTools in a new Content Shell window using `ShellDevToolsFrontend::Show()`,
+which sets up `ShellDevToolsBindings` for a direct in-process connection. All
+DevTools features work: element inspection, hover highlighting, DOM
+manipulation, network panel, etc.
 
-```
-http://127.0.0.1:9222
-```
+### Open DevTools (external browser)
 
-This lists inspectable targets. Click one to open the full DevTools frontend for
-that page.
+Navigate to `http://127.0.0.1:9222` in an external browser. This lists
+inspectable targets. Click one to open the DevTools frontend.
+
+**Requires `--remote-allow-origins=*`** — without this flag, the DevTools server
+rejects WebSocket connections from external origins and the frontend shows
+"WebSocket disconnected" immediately.
+
+### In-process vs out-of-process DevTools
+
+When DevTools runs out-of-process (in an external browser), the element
+inspection experience is degraded. The DevTools frontend renders a
+**screenshot** of the page and overlays a reconstructed DOM layout on top of it.
+Hovering over an element in the Elements panel highlights a region on this
+screenshot — it cannot draw the blue/green overlay directly on the real page
+because it's in a different process.
+
+When DevTools runs in-process (Content Shell's "Inspect" or via
+`ShellDevToolsBindings`), the DevTools agent communicates directly with the
+renderer. Hovering over an element draws the highlight overlay directly on the
+live page in real time. This is the native Chrome DevTools experience.
+
+**This confirms that TermSurf must use in-process DevTools.** The second overlay
+approach (Option B) is correct — DevTools needs to run inside the same Chromium
+profile server process, connected via `ShellDevToolsBindings`, rendered as a
+second CALayerHost overlay. Out-of-process DevTools (Option D) loses the element
+hover highlighting and other features that require direct renderer access.
 
 **Note:** The Chromium Profile Server (`Chromium Profile Server.app`) is
 headless — it starts a server with no UI and idles until it receives XPC
