@@ -447,3 +447,18 @@ edtui, which executes the search and switches back to Normal mode.
 
 **Result: Pass.** Enter in Search mode now executes the search instead of
 triggering navigation.
+
+## Conclusion
+
+All three goals are met across six experiments:
+
+- **Keybinding and insert mode** (Exp 1): `i` enters UrlEdit in insert mode so
+  the user can type immediately. No more double-pressing `i`.
+- **Ctrl+Esc exit** (Exp 2–4): Ctrl+Esc returns to Control from any edtui
+  sub-mode. Experiment 2 failed because crossterm can't parse the terminal
+  encoding (`\x1b[27;5;27~`). The fix lives in the GUI (`Surface.zig`), which
+  intercepts Ctrl+Esc and sends `mode_changed(false)` via XPC.
+- **Mode labels** (Exp 5): The status bar shows NORMAL, INSERT, VISUAL, or
+  SEARCH with distinct Nerd Font glyphs instead of a generic "EDIT".
+- **Search Enter** (Exp 6): Enter passes through to edtui in Search mode instead
+  of triggering navigation.
