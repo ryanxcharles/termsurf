@@ -90,7 +90,7 @@ fn main() -> io::Result<()> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
 
-    let mut mode = Mode::Browse;
+    let mut mode = Mode::Control;
     let mut last_viewport = Rect::default();
     let mut loading_bar_active = false;
     let mut loading_bar_start: Option<Instant> = None;

@@ -57,3 +57,9 @@ Run `web <url>`. Confirm:
   `<enter> browse`).
 - Keyboard input is NOT forwarded to Chromium.
 - Pressing Enter switches to browse mode normally.
+
+**Result: Pass.** TUI starts in control mode.
+
+## Conclusion
+
+The TUI now starts in control mode. One-line change.
