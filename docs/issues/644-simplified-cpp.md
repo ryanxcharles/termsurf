@@ -763,3 +763,38 @@ The TermSurf Browser works end-to-end with all features that
 scroll, resize, navigation (Cmd+[/]/R), URL sync, page title sync, cursor
 changes, tab close, auto-exit. The `content/termsurf_browser/` directory has no
 `#include` of any `content/shell/` or `content/chromium_profile_server/` header.
+
+#### Result: Abandoned
+
+Implementation began — the `146.0.7650.0-issue-644-exp3` branch has partial code
+for the app layer, common layer, and most of the browser layer (~20 files
+written). But the experiment was abandoned mid-implementation.
+
+#### Conclusion
+
+The simplified C++ profile server is a nice-to-have, not a need-to-have. The
+existing `chromium_profile_server` works correctly — web rendering, XPC, input
+forwarding, persistent compositor, navigation, resize, URL/title sync, cursor
+changes all function end-to-end. Rewriting it to drop Content Shell boilerplate
+is purely an aesthetic improvement.
+
+Meanwhile, TermSurf has real feature gaps: no tab management, no favicon
+support, no find-in-page, no download handling, no certificate error pages, no
+form autofill, no history. Every hour spent rewriting working infrastructure is
+an hour not spent on features users actually need.
+
+The Experiment 2 research is valuable — it maps exactly which Content Shell
+files we depend on, which ones are dead weight, and what a simplified
+implementation would look like. If Chromium upgrade friction ever becomes a real
+problem, this analysis provides a clear blueprint. But until then, the existing
+server is working and the priority is features.
+
+## Conclusion
+
+Issue 644 set out to replace the Content Shell fork with a minimal C++ profile
+server. Experiment 1 restored the working baseline. Experiment 2 produced a
+thorough analysis of the codebase: 16 TermSurf files, ~40 unmodified Content
+Shell files (16 unnecessary), and a feasibility assessment showing the
+simplified server would be ~22 files. Experiment 3 began implementation but was
+abandoned — the existing server works, and features matter more than
+infrastructure cleanup right now.
