@@ -180,7 +180,7 @@ fn main() -> io::Result<()> {
                         _ => {}
                     },
                     Mode::UrlEdit => match key.code {
-                        KeyCode::Enter => {
+                        KeyCode::Enter if editor_state.mode != EditorMode::Search => {
                             // Extract URL from editor, navigate, switch to Browse.
                             let new_url: String = editor_state
                                 .lines
@@ -429,9 +429,14 @@ fn ui(
     };
 
     let label = match mode {
-        Mode::Browse => "\u{F059F} BROWSE",
-        Mode::Control => "\u{F11C} CONTROL",
-        Mode::UrlEdit => "\u{F040} EDIT",
+        Mode::Browse => "\u{F059F} BROWSE".to_string(),
+        Mode::Control => "\u{F11C} CONTROL".to_string(),
+        Mode::UrlEdit => match editor_state.mode {
+            EditorMode::Normal => "\u{EA85} NORMAL".to_string(),
+            EditorMode::Insert => "\u{F040} INSERT".to_string(),
+            EditorMode::Visual => "\u{F14A} VISUAL".to_string(),
+            EditorMode::Search => "\u{F002} SEARCH".to_string(),
+        },
     };
 
     let hints_widget = Paragraph::new(hints);

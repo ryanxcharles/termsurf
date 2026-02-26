@@ -405,3 +405,45 @@ let label = match mode {
 
 The `Paragraph::new()` call accepts `String`, so changing from `&str` to
 `String` via `.to_string()` is fine.
+
+**Result: Pass.** Status bar now shows NORMAL, INSERT, VISUAL, or SEARCH with
+distinct glyphs when in UrlEdit mode.
+
+### Experiment 6: Don't intercept Enter in Search mode
+
+**Goal:** Fix Enter key dispatch so it passes through to edtui when in Search
+mode instead of triggering navigation.
+
+#### The bug
+
+`tui/src/main.rs:182-196` always intercepts Enter in UrlEdit mode:
+
+```rust
+Mode::UrlEdit => match key.code {
+    KeyCode::Enter => {
+        // Extract URL, navigate, switch to Browse.
+    }
+    _ => {
+        editor_handler.on_key_event(key, &mut editor_state);
+    }
+},
+```
+
+edtui's Search mode uses Enter to execute the search and return to Normal mode
+(`vendor/edtui/src/events/key.rs:153-154`). But Enter never reaches edtui
+because the TUI intercepts it first.
+
+#### The fix
+
+One change in `tui/src/main.rs:183`. Add a guard so Enter only triggers
+navigation when edtui is NOT in Search mode:
+
+```rust
+KeyCode::Enter if editor_state.mode != EditorMode::Search => {
+```
+
+When edtui is in Search mode, Enter falls through to the `_` arm and reaches
+edtui, which executes the search and switches back to Normal mode.
+
+**Result: Pass.** Enter in Search mode now executes the search instead of
+triggering navigation.
