@@ -58,6 +58,53 @@ shell->LoadURL(GetFrontendURL());
 The frontend connects to the inspected page via `ShellDevToolsBindings`, which
 implements the Chrome DevTools Protocol (CDP) over an internal message pipe.
 
+### How the bindings work
+
+The DevTools frontend URL (`?targetType=tab`) carries no targeting information.
+The connection between a DevTools window and its inspected page is set up
+entirely in C++, not via the URL.
+
+The flow when "Inspect" is triggered:
+
+1. `Shell::ShowDevTools()` calls `ShellDevToolsFrontend::Show(web_contents())` —
+   passing the inspected page's `WebContents*`.
+2. `Show()` creates a new Shell window, then constructs
+   `ShellDevToolsFrontend(shell, inspected_contents)`.
+3. The constructor (`shell_devtools_frontend.cc:69-76`) creates
+   `ShellDevToolsBindings` with two `WebContents` pointers:
+
+```cpp
+ShellDevToolsFrontend::ShellDevToolsFrontend(
+    Shell* frontend_shell, WebContents* inspected_contents)
+    : WebContentsObserver(frontend_shell->web_contents()),
+      frontend_shell_(frontend_shell),
+      devtools_bindings_(
+          new ShellDevToolsBindings(frontend_shell->web_contents(),
+                                    inspected_contents,
+                                    this)) {}
+```
+
+4. When the DevTools HTML finishes loading,
+   `PrimaryMainDocumentElementAvailable()` fires and calls
+   `devtools_bindings_->Attach()`, which connects the DevTools agent for the
+   inspected page to this specific frontend via Mojo IPC.
+
+Two DevTools windows load the identical URL but inspect different pages because
+each has its own `ShellDevToolsBindings` pointing to a different `WebContents`.
+
+`ShellDevToolsBindings` (`shell_devtools_bindings.h:35-93`) implements
+`DevToolsAgentHostClient`, receiving protocol messages from the inspected page's
+`DevToolsAgentHost` and forwarding them to the frontend JavaScript via
+`DevToolsFrontendHost`. This is the same in-process mechanism that release
+Chrome uses — no HTTP, no WebSocket, just Mojo pipes.
+
+**Implication for TermSurf:** When the user presses Cmd+I, the profile server
+already knows which tab's `WebContents` to inspect. We create a second
+`WebContents` (without a native window), load the DevTools frontend into it,
+wire up `ShellDevToolsBindings(devtools_wc, inspected_wc, ...)`, and send its
+CAContext ID to the GUI as a second overlay. The URL doesn't matter — the
+targeting is entirely in the bindings.
+
 ### Keyboard shortcut infrastructure
 
 `shell_browser_main_parts.cc:776-798` already intercepts Cmd+key shortcuts
