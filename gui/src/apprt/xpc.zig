@@ -8,6 +8,7 @@
 // C block types that Zig's translate-c may not handle.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const objc = @import("objc");
 const CoreApp = @import("../App.zig");
 const CoreSurface = @import("../Surface.zig");
@@ -779,7 +780,7 @@ fn spawnServerProcess(server: *Server) void {
     var data_arg_buf: [512]u8 = undefined;
     const data_arg = std.fmt.bufPrintZ(
         &data_arg_buf,
-        "--user-data-dir={s}/termsurf/chromium-profiles/{s}",
+        "--user-data-dir={s}/termsurf/" ++ (if (comptime builtin.mode == .Debug) "debug/" else "") ++ "chromium-profiles/{s}",
         .{ data_home, server.profile_key },
     ) catch {
         log.err("data dir path too long", .{});

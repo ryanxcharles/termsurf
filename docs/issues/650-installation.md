@@ -361,3 +361,39 @@ as an explicit override for custom setups.
    - Logs go to `~/.local/state/termsurf/chromium-server.log`.
 4. **Coexistence**: Dev build and installed build can run independently. Dev
    build uses the dev Chromium, installed build uses its bundled copy.
+
+**Result: Pass.** All six changes implemented and verified. Dev build compiles
+and runs, finding the Chromium server via the dev fallback path. The install
+script bundles everything into `/Applications/TermSurf.app` with Chromium
+helpers, symlinks CLI tools to `/usr/local/bin/`, and the installed app
+discovers its bundled Chromium server via `std.fs.selfExePath()`. Logs now go to
+`~/.local/state/termsurf/chromium-server.log`.
+
+## Conclusion
+
+TermSurf can now be built once and installed anywhere. The four hardcoded
+development paths are gone:
+
+1. **Chromium server path** — replaced with a three-step fallback chain: check
+   the app bundle (`Contents/Helpers/`), then `TERMSURF_CHROMIUM_SERVER` env
+   var, then the dev fallback. Bundle discovery uses `std.fs.selfExePath()`, the
+   same pattern Ghostty uses in `resourcesdir.zig`.
+2. **Log file path** — moved from `~/dev/termsurf/logs/` to
+   `XDG_STATE_HOME/termsurf/chromium-server.log` (default:
+   `~/.local/state/termsurf/`). The directory is created automatically.
+3. **XPC gateway plist** — was already stale (referenced `ghost/` which was
+   renamed to `gui/`). Not modified in this issue since the plist is not used in
+   the current architecture.
+4. **`web` TUI binary** — bundled into `Contents/MacOS/web` by the install
+   script and symlinked to `/usr/local/bin/web`.
+
+Additional changes:
+
+- **CLI binary renamed** from `ghostty` to `termsurf` in the build system.
+- **Install script** (`install.sh`) copies the release build to
+  `/Applications/TermSurf.app`, bundles Chromium helpers, and symlinks
+  `termsurf` and `web` to `/usr/local/bin/`.
+- **Debug/release profile isolation** — debug builds use
+  `~/.local/share/termsurf/debug/chromium-profiles/` while release builds use
+  `~/.local/share/termsurf/chromium-profiles/`. Both can run simultaneously
+  without Chromium data directory conflicts.
