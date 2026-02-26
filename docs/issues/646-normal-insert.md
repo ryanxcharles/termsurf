@@ -145,6 +145,22 @@ Ctrl+Esc check that:
 - Notifies the compositor via `send_mode_changed`
 - Is checked before keys are dispatched to edtui
 
+## Experiments
+
+### Experiment 1: Change keybinding from `e` to `i`
+
+**Goal:** Change the keybinding that enters edit mode from `e` to `i`, and enter
+insert mode directly so the user can type immediately.
+
+Two changes in `tui/src/main.rs`:
+
+1. **Line 163** — change `KeyCode::Char('e')` to `KeyCode::Char('i')`.
+2. **Line 168** — after `mode = Mode::UrlEdit;`, add
+   `editor_state.mode = EditorMode::Insert;` so edtui starts in insert mode
+   instead of normal mode. Requires `use edtui::EditorMode;` if not already
+   imported.
+3. **Line 410** — change the hint bar text from `"e"` to `"i"`.
+
 ## Key files
 
 - `tui/src/main.rs` — mode enum, key dispatch, status bar rendering
