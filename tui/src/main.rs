@@ -301,8 +301,8 @@ fn ui(
     );
 
     let layout = Layout::vertical([
-        Constraint::Length(3), // URL bar (1 line + top/bottom border)
         Constraint::Min(1),    // Viewport (fill remaining)
+        Constraint::Length(3), // URL bar (1 line + top/bottom border)
         Constraint::Length(1), // Status bar
     ])
     .split(frame.area());
@@ -314,12 +314,6 @@ fn ui(
     };
 
     // URL bar.
-    let profile_title = Line::from(vec![
-        Span::raw(" \u{F007} ").style(Style::default().fg(COMMENT)),
-        Span::raw(profile).style(Style::default().fg(FG)),
-        Span::raw(" "),
-    ]);
-
     if *mode == Mode::UrlEdit {
         let theme = EditorTheme::default()
             .base(Style::default().fg(FG).bg(BG))
@@ -328,7 +322,6 @@ fn ui(
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title_top(profile_title.alignment(Alignment::Right))
                     .border_style(Style::default().fg(url_border).bg(BG))
                     .title_style(Style::default().fg(url_border))
                     .style(Style::default().bg(BG)),
@@ -336,21 +329,25 @@ fn ui(
             .hide_status_line();
         frame.render_widget(
             EditorView::new(editor_state).theme(theme).wrap(false),
-            layout[0],
+            layout[1],
         );
     } else {
         let url_bar = Paragraph::new(url).style(Style::default().fg(FG)).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title_top(profile_title.alignment(Alignment::Right))
                 .border_style(Style::default().fg(url_border).bg(BG))
                 .title_style(Style::default().fg(url_border))
                 .style(Style::default().bg(BG)),
         );
-        frame.render_widget(url_bar, layout[0]);
+        frame.render_widget(url_bar, layout[1]);
     }
 
     // Viewport.
+    let profile_title = Line::from(vec![
+        Span::raw(" \u{F007} ").style(Style::default().fg(COMMENT)),
+        Span::raw(profile).style(Style::default().fg(FG)),
+        Span::raw(" "),
+    ]);
     let viewport_title = if page_title.is_empty() {
         " Viewport ".to_string()
     } else {
@@ -359,10 +356,11 @@ fn ui(
     let viewport_block = Block::default()
         .borders(Borders::ALL)
         .title(viewport_title)
+        .title_top(profile_title.alignment(Alignment::Right))
         .border_style(Style::default().fg(viewport_border).bg(BG))
         .title_style(Style::default().fg(viewport_border))
         .style(Style::default().bg(BG));
-    let inner = viewport_block.inner(layout[1]);
+    let inner = viewport_block.inner(layout[0]);
     let viewport_text = format!(
         "origin: ({}, {})\nsize: {} x {}",
         inner.x, inner.y, inner.width, inner.height
@@ -371,7 +369,7 @@ fn ui(
         .alignment(Alignment::Center)
         .style(Style::default().fg(FG).bg(BG))
         .block(viewport_block);
-    frame.render_widget(viewport, layout[1]);
+    frame.render_widget(viewport, layout[0]);
 
     // Status bar.
     let status_layout = Layout::horizontal([

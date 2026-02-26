@@ -163,3 +163,13 @@ Run the TUI. Confirm:
 - Entering UrlEdit mode shows the editor in the bottom URL bar slot.
 - Overlay coordinates are correct (viewport debug text shows expected origin and
   size).
+
+**Result: Pass.** Layout rearranged, profile name moved to viewport title.
+
+## Conclusion
+
+The TUI layout is restructured. The viewport now occupies the top of the screen
+with the page title on the left and the profile name on the right. The URL bar
+sits below the viewport, just above the status line. This puts the browser
+content front and center while keeping the URL bar accessible near the keyboard
+hints.
