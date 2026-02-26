@@ -493,3 +493,273 @@ The analysis answers all six questions. Key findings:
 - Two files use internal `content/browser/` headers — this is the only tight
   coupling to Chromium internals.
 - Estimated simplified server: ~22 files vs. ~56 current. All purpose-built.
+
+### Experiment 3: Build the TermSurf Browser
+
+Create `content/termsurf_browser/` — a standalone Content API embedder that
+replaces `chromium_profile_server`. Every file is purpose-built for TermSurf. No
+Content Shell dependency. All existing features (web rendering, XPC, input
+forwarding, persistent compositor, navigation, resize, URL/title sync, cursor
+changes) must work end-to-end.
+
+#### Chromium branch
+
+Create `146.0.7650.0-issue-644-exp3` from `146.0.7650.0-issue-644`. The existing
+branch has the `chromium_profile_server` directory intact — we keep it as a
+reference during development. The new `termsurf_browser` directory is
+independent. Add the branch to `docs/chromium.md`.
+
+#### Directory structure
+
+```
+content/termsurf_browser/
+├── BUILD.gn
+├── app/
+│   ├── main.cc                    — Entry point (mac_app_bundle source)
+│   ├── main_mac.cc                — Framework dlopen + ContentMain
+│   ├── content_main.cc/h          — Framework entry point
+│   ├── main_delegate.cc/h         — ContentMainDelegate
+│   ├── main_delegate_mac.h/mm     — Mac-specific delegate (EnsureCorrectResolutionSettings, RegisterShellCrApp)
+│   ├── crash_reporter_client.cc/h — Crash reporter (copy from Content Shell)
+│   ├── paths_apple.h/mm           — Resource pak path (copy from Content Shell)
+│   ├── app-Info.plist             — App bundle plist
+│   ├── framework-Info.plist       — Framework plist
+│   └── helper-Info.plist          — Helper app plist
+├── browser/
+│   ├── browser_context.cc/h       — Copy ShellBrowserContext (reuse as-is)
+│   ├── browser_main_parts.cc/h    — Our XPC + tab lifecycle + input forwarding
+│   ├── browser_main_parts_mac.mm  — PreCreateMainMessageLoop (minimal menu bar)
+│   ├── content_browser_client.cc/h — Minimal ContentBrowserClient
+│   ├── web_contents_delegate.cc/h — Minimal WebContentsDelegate (suppress popups)
+│   ├── tab_observer.cc/h          — XPC notifications (move from shell_tab_observer)
+│   ├── ca_layer_bridge_mac.h/mm   — CALayerParams callback bridge (move)
+│   ├── compositor_bridge_mac.h/mm — Persistent compositor bridge (move)
+│   ├── platform_delegate_mac.mm   — Create offscreen NSWindow
+│   ├── permission_manager.cc/h    — Grant-all permission manager
+│   └── download_manager_delegate.cc/h — Download path resolution
+├── common/
+│   ├── content_client.cc/h        — Minimal ContentClient (user agent, resources)
+│   ├── switches.cc/h              — Command-line switches (xpc-service, hidden, user-data-dir)
+│   └── paths.cc/h                 — Path provider (user-data-dir resolution)
+├── renderer/
+│   └── content_renderer_client.cc/h — Minimal ContentRendererClient
+├── gpu/
+│   └── content_gpu_client.cc/h    — Minimal ContentGpuClient
+├── utility/
+│   └── content_utility_client.cc/h — Minimal ContentUtilityClient
+└── resources/
+    └── shell_resources.grd        — Resource file (copy from Content Shell)
+```
+
+~25 source files total. Every file exists for a reason TermSurf needs.
+
+#### File-by-file plan
+
+**App layer — entry points and initialization:**
+
+`app/main.cc` — The `mac_app_bundle` source. Same pattern as Content Shell's
+`shell_main_mac.cc`: calls `sandbox::SeatbeltExecServer`, then `dlopen()`s the
+framework and calls `ContentMain`. Copy the existing file, change the product
+name macro.
+
+`app/main_mac.cc` — Identical purpose to `shell_main_mac.cc`. Handles the
+`HELPER_EXECUTABLE` code path for helper processes. Copy with name changes.
+
+`app/content_main.cc/h` — The framework entry point. Identical to
+`shell_content_main.cc/h`. Creates `MainDelegate`, calls `ContentMain()`. Copy
+with include path changes.
+
+`app/main_delegate.cc/h` — Implements `ContentMainDelegate`. Simplified from
+`ShellMainDelegate`:
+
+- `BasicStartupComplete()`: init logging, register path provider. Drop
+  `--run-layout-test` compat, web tests.
+- `PreSandboxStartup()`: crash reporter, resource bundle init. Same as Content
+  Shell.
+- `RunProcess()`: same as Content Shell (return MainFunctionParams for non-
+  browser processes).
+- `ShouldCreateFeatureList()` / `ShouldInitializeMojo()`: same.
+- `PostEarlyInitialization()`: feature list + field trials + Mojo init. Same.
+- `PreBrowserMain()`: call `RegisterShellCrApp()` on Mac. Same.
+- `Create*Client()` methods: create our own client classes instead of Shell's.
+- Drop: `is_content_browsertests_` flag, web test runner, all test support.
+
+`app/main_delegate_mac.h/mm` — `EnsureCorrectResolutionSettings()` and
+`RegisterShellCrApp()`. Copy from Content Shell.
+
+`app/crash_reporter_client.cc/h` — Copy from Content Shell unchanged.
+
+`app/paths_apple.h/mm` — `GetResourcesPakFilePath()`. Copy from Content Shell.
+
+**Browser layer — the core:**
+
+`browser/browser_context.cc/h` — Copy `ShellBrowserContext` with only namespace
+and include path changes. This implements 15+ `BrowserContext` pure virtual
+methods. Rewriting gains nothing.
+
+`browser/browser_main_parts.cc/h` — This is where our code lives. Move the ~845
+lines from `shell_browser_main_parts.cc` (XPC gateway, `CreateTab`, `ResizeTab`,
+`HandleMouseEvent`, `HandleScrollEvent`, `HandleMouseMove`,
+`HandleFocusChanged`, `HandleKeyEvent`, `NavigateTab`, `CloseTab`) plus the
+lifecycle methods. Simplifications:
+
+- `InitializeBrowserContexts()`: create one `BrowserContext`, no off-the-record.
+- `PreMainMessageLoopRun()`: no
+  `ShellDevToolsManagerDelegate::StartHttpHandler`. No `Shell::Initialize()` —
+  we don't use the Shell class.
+- `InitializeMessageLoopContext()`: XPC mode only. No fallback needed.
+- `CreateTab()`: create `WebContents` directly via `WebContents::Create()`, set
+  our `WebContentsDelegate`. No `Shell::CreateNewWindow()`.
+- Drop: DevTools initialization, Shell window management, web test checks.
+
+`browser/browser_main_parts_mac.mm` — `PreCreateMainMessageLoop()`: build a
+minimal menu bar (App menu with Hide/Quit only). Drop File/Edit/View/Debug/
+Window menus.
+
+`browser/content_browser_client.cc/h` — Implements `ContentBrowserClient`.
+Essential overrides only:
+
+- `CreateBrowserMainParts()` — create our `BrowserMainParts`.
+- `GetWebContentsViewDelegate()` — return nullptr (no context menu needed).
+- `ConfigureNetworkContextParams()` — set up cookie/cache paths from
+  BrowserContext. Reference `ShellContentBrowserClient` for the exact params.
+- `GetAcceptLangs()` — return "en-us".
+- `GetDefaultDownloadName()` — return "download".
+- `AppendExtraCommandLineSwitches()` — pass `--user-data-dir` and
+  `--xpc-service` to child processes.
+- `CreateDevToolsManagerDelegate()` — return nullptr.
+- `GetUserAgent()` / `GetUserAgentMetadata()` — same as Content Shell.
+- Drop: test callbacks, isolated context support, shared storage overrides,
+  protocol handler registration, all test-related methods.
+
+`browser/web_contents_delegate.cc/h` — Minimal `WebContentsDelegate`:
+
+- `OpenURLFromTab()` — navigate in same tab (suppress new-window links).
+- `AddNewContents()` — reject new windows.
+- `IsWebContentsCreationOverridden()` / `CreateCustomWebContents()` — redirect
+  to same tab (from Issue 639).
+- `CloseContents()` — no-op (tab lifecycle managed by XPC).
+- Drop: DevTools, file chooser, color chooser, fullscreen, JS dialog manager,
+  toolbar, URL bar, all Shell UI.
+
+`browser/tab_observer.cc/h` — Move from `shell_tab_observer`. Change include
+paths. Functionally identical.
+
+`browser/ca_layer_bridge_mac.h/mm` — Move from `shell_ca_layer_bridge_mac`.
+Change include paths. Functionally identical.
+
+`browser/compositor_bridge_mac.h/mm` — Move from `shell_compositor_bridge_mac`.
+Change include paths. Functionally identical.
+
+`browser/platform_delegate_mac.mm` — Free function `CreateOffscreenWindow()`
+that creates a borderless, transparent NSWindow. Content Shell's
+`ShellPlatformDelegate` is a class with Shell-specific state management we don't
+need. Our version: ~40 lines, returns an NSWindow. Called from `CreateTab()` in
+`BrowserMainParts`.
+
+`browser/permission_manager.cc/h` — Copy `ShellPermissionManager` with
+namespace/include changes. It grants all permissions by default.
+
+`browser/download_manager_delegate.cc/h` — Copy `ShellDownloadManagerDelegate`
+with namespace/include changes. Provides download path resolution.
+
+**Common layer:**
+
+`common/content_client.cc/h` — Simplified from `ShellContentClient`:
+
+- `GetLocalizedString()` — delegate to l10n_util. Drop web test overrides.
+- `GetDataResource()` / `GetDataResourceBytes()` / `GetDataResourceString()` /
+  `GetNativeImageNamed()` — delegate to ResourceBundle. Same.
+- `GetOriginTrialPolicy()` — same.
+- `AddAdditionalSchemes()` — empty. Drop test scheme registration.
+
+`common/switches.cc/h` — Only what TermSurf uses:
+
+- `kUserDataDir` ("user-data-dir")
+- `kXpcService` ("xpc-service")
+- `kHidden` ("hidden")
+- Drop: crash dumps dir, system font check, expose internals, host window size,
+  hide toolbar, isolated context origins, remote debugging address, run web
+  tests, test register standard scheme.
+
+`common/paths.cc/h` — Same `ShellPathProvider` logic. Resolves `--user-data-dir`
+or defaults to `~/Library/Application Support/TermSurf Browser/`.
+
+**Renderer, GPU, Utility layers:**
+
+`renderer/content_renderer_client.cc/h` — Nearly empty. Override nothing, or
+override `CreateContentRendererClient()` to return our class. Content Shell's
+version has ~50 lines of web test support we don't need.
+
+`gpu/content_gpu_client.cc/h` — Empty class. Content Shell's version has one
+method (`GetDisplayCompositedSurfaceVizDebugOutput`) we don't use.
+
+`utility/content_utility_client.cc/h` — Empty class. Content Shell's version
+registers test Mojo interfaces we don't need.
+
+**Build system (BUILD.gn):**
+
+Copy the `chromium_profile_server` BUILD.gn structure, renamed to
+`termsurf_browser`. Key changes:
+
+- `static_library("termsurf_browser_lib")` — our source files, not Content
+  Shell's. Keep the same `public_deps` on `content/public/*`. Keep
+  `check_includes = false` for component builds (needed for internal headers).
+- `static_library("termsurf_browser_app")` — app layer sources.
+- `mac_app_bundle("termsurf_browser")` — product name "TermSurf Browser".
+- `mac_framework_bundle("termsurf_browser_framework")` — same pattern.
+- Helper app template — same pattern.
+- `repack("pak")` — same resource deps. Change output name.
+- Remove: `inspector_protocol_generate` (DevTools), `content_browsertests_mojom`
+  (tests), `shell_controller_mojom` (tests), `testonly = true` flags.
+- Keep: `IOSurface.framework` dep, `ui/accelerated_widget_mac`, `ui/compositor`,
+  ANGLE/SwiftShader binary bundles.
+
+**Plists:**
+
+Copy `app-Info.plist`, `framework-Info.plist`, `helper-Info.plist` from
+`chromium_profile_server/app/`. Change bundle identifiers and product name
+references.
+
+**Resources:**
+
+Copy `shell_resources.grd`. This defines the resource IDs (e.g.,
+`IDR_DIR_HEADER_HTML`). We might need it for the net module callback.
+
+#### GUI change
+
+Update `gui/src/apprt/xpc.zig` server path from:
+
+```
+"Chromium Profile Server.app/Contents/MacOS/Chromium Profile Server"
+```
+
+to:
+
+```
+"TermSurf Browser.app/Contents/MacOS/TermSurf Browser"
+```
+
+#### Build and test
+
+```bash
+cd chromium/src
+git checkout 146.0.7650.0-issue-644-exp3
+export PATH="$(cd ../depot_tools && pwd):$PATH"
+autoninja -C out/Default termsurf_browser
+
+cd ../../gui && zig build
+open zig-out/TermSurf.app
+```
+
+Type `web google.com`. Expected: web page renders, mouse clicks work, keyboard
+input works, scroll works, resize works, URL bar updates, page title syncs,
+cursor changes.
+
+#### Pass criteria
+
+The TermSurf Browser works end-to-end with all features that
+`chromium_profile_server` supports: web rendering, mouse input, keyboard input,
+scroll, resize, navigation (Cmd+[/]/R), URL sync, page title sync, cursor
+changes, tab close, auto-exit. The `content/termsurf_browser/` directory has no
+`#include` of any `content/shell/` or `content/chromium_profile_server/` header.
