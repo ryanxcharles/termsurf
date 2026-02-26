@@ -253,17 +253,7 @@ inline logic that:
 
 In both cases, return `.consumed` so the key doesn't continue down the pipeline.
 
-### Experiment 4: Implement GUI-side Ctrl+Esc fix
-
-**Goal:** Implement the fix designed in Experiment 3.
-
-**Result: Fail.** Reverted. The approach was wrong — it consumed Ctrl+Esc at the
-GUI level even when not in browse mode, preventing it from reaching any TUI.
-Ctrl+Esc should flow through the terminal PTY to the TUI in non-browse modes,
-just like any other key. The GUI should only intercept it in browse mode (to
-prevent it from going to Chromium).
-
-### Experiment 5: Investigate Ctrl+Esc terminal encoding
+### Experiment 4: Investigate Ctrl+Esc terminal encoding
 
 **Goal:** Understand why the TUI doesn't receive Ctrl+Esc through crossterm when
 not in browse mode, and fix it.
