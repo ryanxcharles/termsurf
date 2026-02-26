@@ -275,34 +275,94 @@ messages. Use Content Shell for manual DevTools testing.
 | `gui/src/apprt/xpc.zig:1051-1108`                         | `sendKeyEvent()` — key forwarding    |
 | `gui/src/Surface.zig:2740-2747`                           | Ctrl+Esc interception                |
 
+## Option E: `devtools://` protocol in a separate pane
+
+Instead of cramming two overlays into one pane, use the terminal's native pane
+support. The user opens a Ghostty split and types:
+
+```
+web devtools://[pane-id]
+```
+
+The `web` TUI recognizes the `devtools://` scheme, connects to the same profile
+server via XPC, and the profile server creates a DevTools WebContents with
+`ShellDevToolsBindings` pointing at the inspected tab. The DevTools WebContents
+renders as a normal CALayerHost overlay in the new pane — identical to how a
+regular webpage renders today.
+
+**Pros:**
+
+- **Zero new layout code.** No split viewports, no dock positions, no resize
+  coordination. Ghostty handles pane splits natively.
+- **Zero new input routing.** Each pane has its own `web` TUI, its own overlay,
+  its own XPC connection. No ambiguity about which overlay receives input.
+- **Full in-process DevTools.** The DevTools WebContents runs inside the same
+  Chromium profile server as the inspected page. `ShellDevToolsBindings`
+  provides the direct Mojo connection. Hover highlighting works on the live
+  page.
+- **Reuses everything.** Same `web` TUI, same overlay pipeline, same XPC
+  protocol, same CALayerHost compositing. The only new code is URL scheme
+  recognition and a new XPC action.
+- **Flexible layout.** The user can put DevTools on the right, bottom, or any
+  Ghostty split configuration. They can resize it with Ghostty keybindings. They
+  can even move it to a different tab or window.
+
+**Cons:**
+
+- Each pane needs an ID that the user can reference. The TUI must display or
+  make discoverable the pane ID of the browser it's inspecting.
+- Two `web` TUIs share one profile server — the server must support a
+  `create_devtools_tab` action that creates a DevTools WebContents for an
+  existing tab instead of a new browsing tab.
+
+### How it would work
+
+1. **Pane ID assignment.** Each `web` TUI already has a `TERMSURF_PANE_ID` from
+   the environment. This ID is sent to the profile server via `set_overlay`. The
+   browser pane displays its ID somewhere accessible (status bar, or a
+   keybinding to copy it).
+
+2. **`web devtools://[pane-id]`** — the TUI parses the URL scheme:
+   - Recognizes `devtools://` as a special scheme.
+   - Sends a new XPC action (`create_devtools_tab`) to the profile server with
+     the target pane ID.
+   - The profile server looks up the target tab's `WebContents`, creates a new
+     `WebContents` for the DevTools frontend, wires up `ShellDevToolsBindings`,
+     and returns a CAContext ID.
+   - The DevTools overlay renders in the new pane like any other page.
+
+3. **Profile server changes.** New `create_devtools_tab` XPC action:
+   - Receives: `pane_id` (the DevTools pane) + `target_pane_id` (the page to
+     inspect).
+   - Creates a `WebContents` via `WebContents::Create()` (no native window).
+   - Loads the DevTools frontend URL from the built-in HTTP server.
+   - Creates `ShellDevToolsBindings(devtools_wc, target_wc, ...)`.
+   - Attaches a `TabObserver` and sends the CAContext ID back to the GUI.
+
+4. **Lifecycle.** Closing the DevTools pane closes the `web devtools://` TUI,
+   which drops the XPC connection, which cleans up the DevTools WebContents and
+   bindings. Closing the inspected page should also close or disconnect the
+   DevTools pane gracefully.
+
 ## Conclusion
 
-The most likely approach is a second webview overlay for DevTools, rendered
-alongside the browser content in the same terminal pane. This avoids leaving the
-terminal and reuses our existing Chromium rendering pipeline. But it raises
-several open questions that need more thought:
+Option E (`devtools://` protocol in a separate pane) is the best approach. It
+reuses the terminal's native pane management instead of reinventing split
+viewports inside the TUI. The profile server already supports multiple tabs per
+process — a DevTools tab is just another tab with `ShellDevToolsBindings`
+instead of a URL navigation.
 
-- **Layout and sizing.** How do we split the viewport between the page and
-  DevTools? Fixed ratio? Draggable divider? What's the default split — 50/50,
-  60/40?
-- **Dock position.** DevTools should support docking to the bottom, right, left,
-  or top of the viewport — matching Chrome's own DevTools positions. How does
-  the user switch between them? A keybinding? A TUI menu?
-- **Port discovery.** The DevTools HTTP server runs on an ephemeral port inside
-  the Chromium profile server. The GUI needs to learn this port to construct the
-  DevTools frontend URL. This requires a new XPC message from Chromium to the
-  GUI.
-- **WebSocket targeting.** The DevTools frontend URL includes a `?ws=` parameter
-  that targets a specific inspected page. We need to construct the correct
-  WebSocket debugger URL for the active tab.
-- **Two overlays per pane.** The GUI currently assumes one CALayerHost overlay
-  per pane. A second overlay for DevTools means managing two layers, two sets of
-  coordinates, and routing mouse/keyboard input to the correct one.
-- **Resize coordination.** When the terminal resizes or the user changes the
-  dock position, both overlays need to be resized and repositioned atomically.
-- **Toggle keybinding.** Cmd+I (or Cmd+Option+I) should toggle DevTools open and
-  closed. This needs to be intercepted in the GUI before reaching the terminal,
-  similar to how Ctrl+Esc is handled.
+Open questions before implementation:
 
-Shelving this issue to ruminate on the correct answers. The infrastructure is
-understood — now we need the right UX design before writing code.
+- **Pane ID discoverability.** How does the user find the pane ID of the page
+  they want to inspect? Options: display in the status bar, copy to clipboard
+  via keybinding, or auto-open DevTools for the most recent browser pane.
+- **Shortcut UX.** Should there be a keybinding (Cmd+I) that automatically opens
+  a Ghostty split and runs `web devtools://[current-pane-id]`? This would
+  require the GUI to spawn a new terminal pane programmatically.
+- **Lifecycle edge cases.** What happens when the inspected page navigates? When
+  it closes? When the profile server restarts?
+
+Shelving this issue to think through the UX details. The architecture is clear —
+`devtools://` protocol, same profile server, `ShellDevToolsBindings`, separate
+pane.
