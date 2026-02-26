@@ -71,3 +71,17 @@ No directory is being used for the wrong purpose.
 
 **Result: Pass.** Audit complete. One problem found: three state/cache paths
 still use the upstream `ghostty/` name instead of `termsurf/`.
+
+## Conclusion
+
+The audit is complete. TermSurf uses all four XDG base directories correctly —
+config, data, state, and cache are each used for their intended purpose with no
+conflation.
+
+One problem found: three paths in state and cache still use the upstream
+`ghostty/` app name instead of `termsurf/`. These are straightforward string
+replacements in `crash/dir.zig`, `crash/sentry.zig`, `DiskCache.zig`, and
+`ssh_cache.zig`. The rename can be done in a future issue when the branding
+sweep continues.
+
+**Status: Closed.**
