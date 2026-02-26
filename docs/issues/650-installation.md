@@ -155,27 +155,34 @@ needs to be renamed to `termsurf`. This affects:
 
 ### Install script
 
-`scripts/install.sh`:
+`install.sh` (top-level, alongside `build-release.sh` and `build-debug.sh`).
+Does NOT build anything — it installs the latest release build. Run
+`build-release.sh` first.
 
 ```bash
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP="/Applications/TermSurf.app"
-SRC="gui/macos/build/ReleaseLocal/TermSurf.app"
-CHROMIUM="chromium/src/out/Default"
+SRC="$REPO_DIR/gui/macos/build/ReleaseLocal/TermSurf.app"
+CHROMIUM="$REPO_DIR/chromium/src/out/Default"
+WEB="$REPO_DIR/tui/target/release/web"
 
-# Build release
-(cd gui && zig build -Doptimize=ReleaseFast)
+# Verify release build exists.
+if [ ! -d "$SRC" ]; then
+  echo "Error: Release build not found at $SRC"
+  echo "Run build-release.sh first."
+  exit 1
+fi
 
-# Build web TUI
-(cd tui && cargo build --release)
-
-# Copy app bundle
+# Copy app bundle.
+echo "==> Installing to $APP..."
 rm -rf "$APP"
 cp -R "$SRC" "$APP"
 
-# Bundle Chromium server + helpers
+# Bundle Chromium server + helpers.
+echo "==> Bundling Chromium Profile Server..."
 mkdir -p "$APP/Contents/Helpers"
 cp -R "$CHROMIUM/Chromium Profile Server.app" "$APP/Contents/Helpers/"
 cp -R "$CHROMIUM/Chromium Profile Server Helper.app" "$APP/Contents/Helpers/"
@@ -183,14 +190,24 @@ cp -R "$CHROMIUM/Chromium Profile Server Helper (GPU).app" "$APP/Contents/Helper
 cp -R "$CHROMIUM/Chromium Profile Server Helper (Renderer).app" "$APP/Contents/Helpers/"
 cp -R "$CHROMIUM/Chromium Profile Server Helper (Plugin).app" "$APP/Contents/Helpers/"
 
-# Bundle web TUI
-cp tui/target/release/web "$APP/Contents/MacOS/web"
+# Bundle web TUI.
+if [ -f "$WEB" ]; then
+  echo "==> Bundling web TUI..."
+  cp "$WEB" "$APP/Contents/MacOS/web"
+else
+  echo "Warning: web TUI not found at $WEB (skipping)"
+fi
 
-# Symlink CLI tools
+# Symlink CLI tools.
+echo "==> Symlinking CLI tools to /usr/local/bin/..."
 ln -sf "$APP/Contents/MacOS/termsurf" /usr/local/bin/termsurf
 ln -sf "$APP/Contents/MacOS/web" /usr/local/bin/web
 
-echo "Installed to $APP"
+echo ""
+echo "Done."
+echo "  App:  $APP"
+echo "  CLI:  /usr/local/bin/termsurf"
+echo "  Web:  /usr/local/bin/web"
 ```
 
 No signing needed for personal use. Gatekeeper may warn on first launch —
@@ -295,8 +312,9 @@ if (logdir) |d| {
 "{s}/Contents/MacOS/termsurf",
 ```
 
-**5. Create `scripts/install.sh`** — Install script that builds release, bundles
-Chromium, copies to `/Applications`, and symlinks CLI tools.
+**5. Create `install.sh`** — Top-level install script (alongside
+`build-release.sh`) that bundles the latest release build with Chromium, copies
+to `/Applications`, and symlinks CLI tools.
 
 **6. Update `docs/xdg.md`** — Add `XDG_STATE_HOME` for logs.
 
