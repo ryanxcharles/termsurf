@@ -115,3 +115,73 @@ In `tui/src/main.rs`:
 Pass. "URL" title appears in the top-left of the URL bar in all three modes,
 styled to match the border color (dim in Browse, cyan in Control, purple in
 Edit).
+
+## Experiment 2: Command bar UI
+
+### Hypothesis
+
+A fourth TUI mode (`Mode::Command`) with its own edtui instance, rendered in a
+yellow command bar that replaces the URL bar, will establish the command mode
+UI. No commands are executed — `Enter` simply exits back to Control. State is
+discarded on exit.
+
+### Changes
+
+Add a Tokyo Night yellow constant:
+
+```rust
+const YELLOW: Color = Color::Rgb(0xe0, 0xaf, 0x68);
+```
+
+In `tui/src/main.rs`:
+
+1. **Add `Mode::Command` to the enum.** Fourth variant.
+
+2. **Command editor state.** Add `cmd_state: EditorState` and
+   `cmd_handler: EditorEventHandler` as separate variables. `cmd_state` is
+   created fresh each time `:` is pressed — state is not preserved across
+   invocations. Same single-line config as the URL editor (no newline
+   keybindings). Uses `UrlClipboard` for clean yanks.
+
+3. **`:` keybinding in Control mode.** Creates a fresh `EditorState` in Insert
+   mode, switches to `Mode::Command`.
+
+4. **Command mode key handling.** Same pattern as Edit mode: `Ctrl+Esc` exits
+   Command → Control. `Enter` (when not in Search submode) exits Command →
+   Control. No command dispatch — all input is discarded on exit. `Esc` and all
+   other keys forward to `cmd_handler` (so `Esc` goes from Insert → Normal, not
+   back to Control).
+
+5. **Command bar rendering.** When in `Mode::Command`, render a command bar in
+   `layout[1]` (replacing the URL bar). The command bar is a yellow-bordered
+   block titled "COMMAND". Inside the block's inner area, use
+   `Layout::horizontal` to split into a 2-char prefix area (`:`) and the
+   remaining space for the command edtui. The `:` is rendered as a static
+   `Paragraph`, styled in yellow. The edtui editor renders in the remaining
+   space without its own block (the outer block provides the border).
+
+6. **Submode indicator.** Same as the URL bar: top-right of the command bar
+   block shows NORMAL/INSERT/VISUAL/SEARCH with Nerd Font icons, styled in
+   yellow.
+
+7. **Border color.** Add `Mode::Command => (YELLOW, BORDER)` to the border color
+   match.
+
+8. **Status bar.** Add `Mode::Command` arms:
+   - Label: `"\u{F120} COMMAND"` (terminal icon)
+   - Hints: `<enter> execute  <ctrl+esc> control`
+
+### Test
+
+1. Launch TUI, press `Esc` to Control
+2. Press `:` — URL bar replaced by yellow-bordered command bar titled "COMMAND",
+   with `:` prefix and cursor after it, status bar says `COMMAND`
+3. Top-right of command bar shows `INSERT` with icon in yellow
+4. Type some text, press `Esc` — editor goes to Normal (still in Command mode),
+   top-right shows `NORMAL`
+5. Press `Ctrl+Esc` — exits Command → Control, URL bar reappears
+6. Press `:` again — command bar appears with empty input (state not preserved)
+7. Type some text, press `Enter` — exits to Control, input discarded
+8. Verify URL editor state is unaffected by command mode input
+9. Press `q` — TUI quits (still works from Control mode)
+10. Relaunch, press `i` to Edit — URL editor still works, cursor preserved
