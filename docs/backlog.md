@@ -1,4 +1,4 @@
-# Future Issues
+# Backlog
 
 Issues that need their own issue doc when we're ready to work on them. Each
 entry is a problem we've identified but haven't started solving yet.
