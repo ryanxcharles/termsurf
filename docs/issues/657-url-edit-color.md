@@ -47,8 +47,7 @@ URL bar is being edited vs merely focused.
 ### Test
 
 1. Launch the TUI: `cargo run -- http://example.com`
-2. Press `:` to enter Control mode — URL bar border should be cyan
-3. Press `e` to enter UrlEdit mode — URL bar border should turn purple
-4. Press `Escape` to return to Control — border should return to cyan
-5. Press `Escape` again to Browse — URL bar border should be the dim border
-   color
+2. Press `Esc` to enter Control mode — URL bar border should be cyan
+3. Press `i` to enter UrlEdit mode — URL bar border should turn purple
+4. Press `Esc` to return to Control — border should return to cyan
+5. Press `Enter` to Browse — URL bar border should be the dim border color
