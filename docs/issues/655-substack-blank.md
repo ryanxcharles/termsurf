@@ -127,3 +127,53 @@ rendering issue.
 Steps 1–2 will narrow the cause to either JavaScript or rendering. Step 3 will
 rule out UA-based content differences. Step 4 will reveal if a redirect is
 involved. The findings will inform what to fix in the next experiment.
+
+**Result: Pass.** Root cause identified in step 1.
+
+#### Findings
+
+Step 1 (Chromium server log) immediately revealed the cause. Two lines at the
+moment the page goes white:
+
+```
+Terminating render process for bad Mojo message: Received bad user message:
+No binder found for interface blink.mojom.BadgeService for the frame/document scope
+
+Terminating renderer for bad IPC message, reason 123
+```
+
+The **renderer process is being killed by Chromium's IPC security layer**.
+Substack's JavaScript calls the Badging API (`navigator.setAppBadge()` /
+`navigator.clearAppBadge()`), which sends a Mojo message to
+`blink.mojom.BadgeService`. Our Content API build doesn't register a handler for
+this interface. Chromium treats an unbound Mojo interface as a security
+violation ("bad message") and terminates the renderer process. The page goes
+white because the renderer is dead.
+
+The timeline in the log confirms this:
+
+1. Navigation to the Substack page commits (line 23)
+2. Page title sets to "The Investigation - The Masonic" (line 24)
+3. Substack's JS runs, including a recruitment banner in `console.log` (line 25)
+4. A second navigation commit (line 55) — likely a client-side history push
+5. **Renderer killed** for `BadgeService` bad message (lines 56–57)
+6. Key view becomes null (line 58) — the renderer is gone
+
+The progress bar staying active is explained: the page never finishes loading
+because the renderer is killed mid-load.
+
+Steps 2–5 were not needed — step 1 found the root cause.
+
+#### Root cause
+
+Our Chromium Content API build is missing a Mojo interface binder for
+`blink.mojom.BadgeService`. When any page's JavaScript invokes the Badging API,
+the renderer process is terminated. This is not Substack-specific — any page
+using the Badging API would trigger the same crash. Substack happens to use it
+for notification badge counts on their PWA.
+
+#### Next step
+
+Register a stub/no-op handler for `blink.mojom.BadgeService` in the Chromium
+fork so the renderer is not killed. This likely requires adding a binder in the
+browser process's `ContentBrowserClient` or the frame host's interface registry.
