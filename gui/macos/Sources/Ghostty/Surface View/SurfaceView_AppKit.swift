@@ -1225,23 +1225,11 @@ extension Ghostty {
                 }
             }
             
-            // If this is a binding then we want to perform it.
+            // If this is a binding then we want to perform it. Go straight to
+            // keyDown — do NOT try the menu first. The menu-first approach
+            // (added post-v1.2.3) lets system menu items like "Hide" (Cmd+H)
+            // steal user keybindings. (Issue 654)
             if let bindingFlags {
-                // Attempt to trigger a menu item for this key binding. We only do this if:
-                //   - We're not in a key sequence or table (those are separate bindings)
-                //   - The binding is NOT `all` (menu uses FirstResponder chain)
-                //   - The binding is NOT `performable` (menu will always consume)
-                //   - The binding is `consumed` (unconsumed bindings should pass through
-                //     to the terminal, so we must not intercept them for the menu)
-                if keySequence.isEmpty,
-                   keyTables.isEmpty,
-                   bindingFlags.isDisjoint(with: [.all, .performable]),
-                   bindingFlags.contains(.consumed) {
-                    if let menu = NSApp.mainMenu, menu.performKeyEquivalent(with: event) {
-                        return true
-                    }
-                }
-                
                 self.keyDown(with: event)
                 return true
             }

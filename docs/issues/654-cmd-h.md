@@ -221,3 +221,10 @@ happens before the menu check.
 6. Remove the `cmd+h` keybinding from the config, relaunch — Cmd+H should hide
    the window again (default menu behavior restored)
 7. Confirm Cmd+C (copy) and Cmd+V (paste) still work
+
+**Result: Pass.**
+
+Removing the menu-first block from `performKeyEquivalent()` restores v1.2.3
+behavior. User keybindings now take priority over menu shortcuts. Cmd+H creates
+a split when configured, and the "Hide TermSurf" menu item retains its Cmd+H
+shortcut for users who don't override it.
