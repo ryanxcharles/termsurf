@@ -36,6 +36,13 @@ else
   echo "Warning: web TUI not found at $WEB (skipping)"
 fi
 
+# Unregister build tree copies so Spotlight only finds /Applications.
+echo "==> Unregistering build tree copies from Launch Services..."
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
+"$LSREGISTER" -u "$REPO_DIR/gui/macos/build/Debug/TermSurf Debug.app" 2>/dev/null || true
+"$LSREGISTER" -u "$REPO_DIR/gui/macos/build/Debug/TermSurf.app" 2>/dev/null || true
+"$LSREGISTER" -u "$REPO_DIR/gui/macos/build/ReleaseLocal/TermSurf.app" 2>/dev/null || true
+
 # Symlink CLI tools.
 echo "==> Symlinking CLI tools to /usr/local/bin/..."
 ln -sf "$APP/Contents/MacOS/termsurf" /usr/local/bin/termsurf
