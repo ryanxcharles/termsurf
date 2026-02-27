@@ -942,7 +942,71 @@ resource files (`.pak`, `icudtl.dat`, `v8_context_snapshot.bin`) that are in
 
 #### Next step
 
-The immediate fix for Issue 653 is to stop bundling Chromium helpers in
-`install.sh`, since they don't work and the dev fallback path handles it. The
-broader problem of making Chromium work from inside the app bundle is a separate
-issue for the alpha release (Issue 617).
+Copy all Chromium resources alongside the `.app` bundles so the bundled Chromium
+server can actually run.
+
+### Experiment 6: Bundle Chromium resources in install.sh
+
+**Goal:** Make the installed app at `/Applications/TermSurf.app` load pages by
+copying all files the Chromium server needs into `Contents/Helpers/`.
+
+#### Background
+
+Chromium resolves resources relative to the directory containing the `.app`
+bundle — not inside it. When `Chromium Profile Server.app` lives at
+`chromium/src/out/Default/`, it finds `.pak` files, `icudtl.dat`,
+`v8_context_snapshot.arm64.bin`, and `.dylib` shared libraries in that same
+`out/Default/` directory. When copied to `Contents/Helpers/`, those sibling
+files are absent.
+
+The build uses `is_component_build = true`, so Chromium is split into shared
+libraries (`.dylib` files) that must be present alongside the `.app` bundles.
+
+#### Changes
+
+**1. Identify required files.** Inspect `chromium/src/out/Default/` and
+determine the full set of files needed:
+
+- `*.pak` — Resource packs (at minimum: `chromium_profile_server.pak`,
+  `chromium_profile_server_resources.pak`, `content_shell.pak`,
+  `shell_resources.pak`)
+- `icudtl.dat` — ICU internationalization data
+- `v8_context_snapshot.arm64.bin` — V8 JavaScript engine snapshot
+- `*.dylib` — Shared libraries (component build). Copy all `.dylib` files from
+  `out/Default/`.
+- `locales/` — If the Chromium server needs locale pak files, copy the
+  `locales/` directory too.
+
+Run the bundled Chromium server manually from `Contents/Helpers/` after copying
+each category to find the minimum set needed. Start with just `.pak` +
+`icudtl.dat` + `v8_context_snapshot` and add `.dylib` files if it crashes on
+missing libraries.
+
+**2. Update `install.sh`.** After copying the `.app` bundles, also copy the
+resource files:
+
+```bash
+# Bundle Chromium resources (component build needs these alongside .app bundles).
+echo "==> Bundling Chromium resources..."
+cp "$CHROMIUM"/*.pak "$APP/Contents/Helpers/"
+cp "$CHROMIUM/icudtl.dat" "$APP/Contents/Helpers/"
+cp "$CHROMIUM"/v8_context_snapshot*.bin "$APP/Contents/Helpers/"
+cp "$CHROMIUM"/*.dylib "$APP/Contents/Helpers/"
+if [ -d "$CHROMIUM/locales" ]; then
+  cp -R "$CHROMIUM/locales" "$APP/Contents/Helpers/"
+fi
+```
+
+**3. Test incrementally.** After updating `install.sh`:
+
+- Run `install.sh` (with sudo if needed for `/Applications/`)
+- Open `/Applications/TermSurf.app`
+- Run `web https://google.com`
+- If it fails, check what's missing by running the Chromium server directly and
+  reading the error output
+
+#### Verification
+
+The installed app at `/Applications/TermSurf.app` loads pages via
+`web https://google.com`. Both the installed release and the debug repo build
+work simultaneously with separate gateways.
