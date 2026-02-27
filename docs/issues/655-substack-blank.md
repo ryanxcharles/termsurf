@@ -67,6 +67,63 @@ content remains visible behind the overlay.
 - If DevTools are available, inspect the DOM after the page goes white — is the
   content still in the DOM but hidden by CSS, or has the DOM changed entirely?
 - Try loading the page with JavaScript disabled to confirm JS is the trigger.
-- Try other Substack blogs to confirm the issue is Substack-wide.
+- Try other Substack blogs to confirm the issue is Substack-wide. **Done** —
+  confirmed on `kirschsubstack.com`.
 - Compare the user agent string — Substack might serve different content based
   on the UA.
+
+## Experiments
+
+### Experiment 1: Diagnose the blank screen
+
+**Goal:** Determine what causes Substack pages to go white after the initial
+render. Narrow down whether it's JavaScript, a navigation/redirect, or a
+rendering issue.
+
+#### Diagnostic steps
+
+1. **Check the Chromium server log.** The server logs to
+   `~/.local/state/termsurf/chromium-server.log` (set via `--enable-logging` and
+   `--log-file` in `xpc.zig:806-839`). Clear the log, load the Substack page,
+   wait for it to go blank, then search the log for errors, warnings, navigation
+   events, or JavaScript exceptions. Look for:
+   - `ERR` or `ERROR` lines
+   - `CONSOLE` messages (JavaScript `console.error`)
+   - Navigation-related entries (`DidFinishNavigation`, `DidStartNavigation`)
+   - Any mention of `dialog`, `backdrop`, `overlay`, or `service-worker`
+
+2. **Test with JavaScript disabled.** Temporarily add `--disable-javascript` to
+   the Chromium server's command-line args in `xpc.zig:844`:
+
+   ```zig
+   var child = std.process.Child.init(
+       &.{ server_path, xpc_arg, data_arg, hidden_arg, logging_arg, logfile_arg, "--disable-javascript" },
+       alloc,
+   );
+   ```
+
+   Rebuild (`cd gui && zig build`), launch the debug app, and load the Substack
+   page. If the page stays visible, JavaScript is confirmed as the trigger. If
+   it still goes blank, the issue is in CSS or the rendering pipeline.
+
+   **Revert this change after testing.**
+
+3. **Check the user agent.** Our Chromium fork may send a non-standard user
+   agent that causes Substack to serve different content. Check what UA the
+   server sends by loading a UA-echo page like `https://httpbin.org/user-agent`
+   in TermSurf and comparing it to regular Chrome.
+
+4. **Check for client-side navigation.** The Chromium server log (step 1) should
+   show navigation events. If there's a second navigation after the initial page
+   load (e.g., a redirect to a login page or error page), that would explain the
+   blank — especially if it hits a navigation bug from Issues 628–632.
+
+5. **Test a non-Substack page with overlays.** Load a page known to show modal
+   overlays (e.g., a Medium paywall article, a cookie consent banner) to see if
+   the issue is Substack-specific or affects all overlay-heavy pages.
+
+#### Expected outcome
+
+Steps 1–2 will narrow the cause to either JavaScript or rendering. Step 3 will
+rule out UA-based content differences. Step 4 will reveal if a redirect is
+involved. The findings will inform what to fix in the next experiment.
