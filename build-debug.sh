@@ -29,7 +29,7 @@ fi
 echo "==> Building GUI (Debug)..."
 zig build
 
-APP="$REPO_DIR/gui/macos/build/Debug/TermSurf.app"
+APP="$REPO_DIR/gui/macos/build/Debug/TermSurf Debug.app"
 
 # --- Chromium ---
 

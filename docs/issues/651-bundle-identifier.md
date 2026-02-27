@@ -165,3 +165,24 @@ directory copy. After this, Spotlight only finds `/Applications/TermSurf.app`.
 4. **Install**: Run `install.sh`. Press F4 and type "termsurf". Only the
    `/Applications/TermSurf.app` should appear (plus "TermSurf Debug" if the
    debug build is present — but never the release build tree copy).
+
+**Result: Pass.** Debug build produces `TermSurf Debug.app`, Spotlight shows it
+as a separate entry from the installed release. The `build-debug.sh` script was
+also updated to reference the new app name.
+
+## Conclusion
+
+Debug and release builds are now visually distinct in Spotlight. The debug app
+bundle is named "TermSurf Debug" (`com.termsurf.debug`) while the release and
+installed copies remain "TermSurf" (`com.termsurf`). Pressing F4 and typing
+"termsurf" no longer risks launching the wrong build.
+
+Three changes made it work:
+
+1. **Xcode project** — Debug config's `PRODUCT_NAME` changed from `TermSurf` to
+   `"TermSurf Debug"`, producing `TermSurf Debug.app` in the build directory.
+2. **Zig build system** — `GhosttyXcodebuild.zig` now selects the correct app
+   name per build mode so `zig build` and `zig build run` find the right bundle.
+3. **Install script** — `lsregister -u` unregisters build tree copies from
+   Launch Services after installation, ensuring Spotlight only finds the
+   `/Applications/` copy.
