@@ -185,3 +185,10 @@ In `tui/src/main.rs`:
 8. Verify URL editor state is unaffected by command mode input
 9. Press `q` — TUI quits (still works from Control mode)
 10. Relaunch, press `i` to Edit — URL editor still works, cursor preserved
+
+### Result
+
+Pass. Yellow command bar replaces the URL bar when `:` is pressed. Submode
+indicators display with Nerd Font icons in yellow. `Ctrl+Esc` and `Enter` both
+exit to Control. State is discarded between invocations. URL editor state is
+unaffected.

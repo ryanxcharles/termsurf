@@ -28,12 +28,14 @@ const BORDER: Color = Color::Rgb(0x56, 0x5f, 0x89);
 const DIM: Color = Color::Rgb(0x90, 0x9a, 0xb8);
 const SELECTION: Color = Color::Rgb(0x28, 0x34, 0x57);
 const PURPLE: Color = Color::Rgb(0xbb, 0x9a, 0xf7);
+const YELLOW: Color = Color::Rgb(0xe0, 0xaf, 0x68);
 
 #[derive(PartialEq)]
 enum Mode {
     Browse,
     Control,
     Edit,
+    Command,
 }
 
 /// Clipboard wrapper that strips leading newlines from edtui's line-mode yanks
@@ -127,7 +129,7 @@ fn main() -> io::Result<()> {
     let mut editor_state = EditorState::new(Lines::from(url.as_str()));
     editor_state.set_clipboard(UrlClipboard::new());
     let mut editor_url = url.clone(); // Track which URL the editor has.
-    let mut editor_handler = {
+    let make_single_line_handler = || {
         let mut kh = KeyEventHandler::vim_mode();
         // Remove newline keybindings for single-line mode.
         kh.remove(&KeyEventRegister::i(vec![KeyInput::new(KeyCode::Enter)]));
@@ -135,12 +137,26 @@ fn main() -> io::Result<()> {
         kh.remove(&KeyEventRegister::n(vec![KeyInput::shift('O')]));
         EditorEventHandler::new(kh)
     };
+    let mut editor_handler = make_single_line_handler();
+
+    // Command mode editor state (Issue 659).
+    let mut cmd_state = EditorState::new(Lines::from(""));
+    cmd_state.set_clipboard(UrlClipboard::new());
+    let mut cmd_handler = make_single_line_handler();
 
     // Event loop.
     loop {
         let mut viewport_rect = Rect::default();
         terminal.draw(|frame| {
-            viewport_rect = ui(frame, &url, &profile, &mode, &mut editor_state, &page_title);
+            viewport_rect = ui(
+                frame,
+                &url,
+                &profile,
+                &mode,
+                &mut editor_state,
+                &mut cmd_state,
+                &page_title,
+            );
         })?;
 
         // Send overlay coordinates to compositor (only when changed).
@@ -257,6 +273,13 @@ fn main() -> io::Result<()> {
                                     conn.send_mode_changed(pid, false);
                                 }
                             }
+                            KeyCode::Char(':') => {
+                                // Enter Command mode with fresh editor (Issue 659).
+                                cmd_state = EditorState::new(Lines::from(""));
+                                cmd_state.set_clipboard(UrlClipboard::new());
+                                cmd_state.mode = EditorMode::Insert;
+                                mode = Mode::Command;
+                            }
                             KeyCode::Enter => {
                                 mode = Mode::Browse;
                                 if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
@@ -290,6 +313,20 @@ fn main() -> io::Result<()> {
                         } else {
                             // Pass everything else to edtui (including Escape).
                             editor_handler.on_key_event(key, &mut editor_state);
+                        }
+                    }
+                    Mode::Command => {
+                        // Ctrl+Esc exits Command → Control (Issue 659).
+                        if key.code == KeyCode::Esc && key.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            mode = Mode::Control;
+                        } else if key.code == KeyCode::Enter && cmd_state.mode != EditorMode::Search
+                        {
+                            // Enter exits Command → Control (no dispatch yet).
+                            mode = Mode::Control;
+                        } else {
+                            // Pass everything else to command edtui.
+                            cmd_handler.on_key_event(key, &mut cmd_state);
                         }
                     }
                 }
@@ -387,6 +424,7 @@ fn ui(
     profile: &str,
     mode: &Mode,
     editor_state: &mut EditorState,
+    cmd_state: &mut EditorState,
     page_title: &str,
 ) -> Rect {
     // Paint full background.
@@ -407,10 +445,53 @@ fn ui(
         Mode::Browse => (BORDER, CYAN),
         Mode::Control => (CYAN, BORDER),
         Mode::Edit => (PURPLE, BORDER),
+        Mode::Command => (YELLOW, BORDER),
     };
 
-    // URL bar.
-    if *mode == Mode::Edit {
+    // URL bar / Command bar (Issue 659).
+    if *mode == Mode::Command {
+        // Submode indicator in top-right of command bar.
+        let submode_text = match cmd_state.mode {
+            EditorMode::Normal => "\u{EA85} NORMAL",
+            EditorMode::Insert => "\u{F040} INSERT",
+            EditorMode::Visual => "\u{F14A} VISUAL",
+            EditorMode::Search => "\u{F002} SEARCH",
+        };
+        let submode_label = Line::from(vec![
+            Span::raw(" ").style(Style::default().fg(YELLOW)),
+            Span::raw(submode_text).style(Style::default().fg(YELLOW)),
+            Span::raw(" "),
+        ]);
+        let cmd_title = Line::from(vec![
+            Span::raw(" COMMAND ").style(Style::default().fg(url_border))
+        ]);
+        let cmd_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(url_border).bg(BG))
+            .title_style(Style::default().fg(url_border))
+            .title_top(cmd_title)
+            .title_top(submode_label.alignment(Alignment::Right))
+            .style(Style::default().bg(BG));
+        let cmd_inner = cmd_block.inner(layout[1]);
+        frame.render_widget(cmd_block, layout[1]);
+
+        // Split inner area: ":" prefix + editor.
+        let cmd_layout =
+            Layout::horizontal([Constraint::Length(2), Constraint::Min(0)]).split(cmd_inner);
+        frame.render_widget(
+            Paragraph::new(": ").style(Style::default().fg(YELLOW).bg(BG)),
+            cmd_layout[0],
+        );
+        let theme = EditorTheme::default()
+            .base(Style::default().fg(FG).bg(BG))
+            .cursor_style(Style::default().fg(BG).bg(FG))
+            .selection_style(Style::default().fg(FG).bg(SELECTION))
+            .hide_status_line();
+        frame.render_widget(
+            EditorView::new(cmd_state).theme(theme).wrap(false),
+            cmd_layout[1],
+        );
+    } else if *mode == Mode::Edit {
         // Submode indicator in top-right of URL bar (Issue 658).
         let submode_text = match editor_state.mode {
             EditorMode::Normal => "\u{EA85} NORMAL",
@@ -491,7 +572,7 @@ fn ui(
     // Status bar.
     let status_layout = Layout::horizontal([
         Constraint::Fill(1),    // Key hints (left)
-        Constraint::Length(12), // Mode label (right)
+        Constraint::Length(14), // Mode label (right)
     ])
     .split(layout[2]);
 
@@ -541,12 +622,23 @@ fn ui(
             Span::styled("> ", d),
             Span::styled("control", f),
         ]),
+        Mode::Command => Line::from(vec![
+            Span::styled("<", d),
+            Span::styled("enter", f),
+            Span::styled("> ", d),
+            Span::styled("execute  ", f),
+            Span::styled("<", d),
+            Span::styled("ctrl+esc", f),
+            Span::styled("> ", d),
+            Span::styled("control", f),
+        ]),
     };
 
     let label = match mode {
         Mode::Browse => "\u{F059F} BROWSE".to_string(),
         Mode::Control => "\u{F11C} CONTROL".to_string(),
         Mode::Edit => "\u{F044} EDIT".to_string(),
+        Mode::Command => "\u{F120} COMMAND".to_string(),
     };
 
     let hints_widget = Paragraph::new(hints);
