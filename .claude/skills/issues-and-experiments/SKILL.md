@@ -9,6 +9,18 @@ Every significant piece of work gets an issue document in `docs/issues/`. Issues
 describe the problem, provide background, and propose solutions. Experiments are
 the incremental steps that solve the problem.
 
+## One Issue at a Time
+
+Only one issue is active at a time. The active issue is the highest-numbered
+issue doc in `docs/issues/` that does not have a `## Conclusion`. All work
+focuses on this issue until it is closed.
+
+When a new problem is discovered during work on the active issue, do NOT create
+a new issue doc for it. Instead, add it to `docs/backlog.md` — a numbered,
+checkboxed list of problems waiting to become issues. When the active issue is
+closed and we're ready to start the next piece of work, promote a backlog item
+to a full issue doc (next sequential number) and remove it from the backlog.
+
 ## Issue Documents
 
 ### Location and naming
@@ -151,12 +163,16 @@ This goes after the last experiment, still inside the issue document.
 
 ## Process Summary
 
-1. **Create the issue** — Problem statement, background, analysis. No
+1. **Check the backlog** — If starting fresh, pick an item from
+   `docs/backlog.md` and promote it to a new issue doc.
+2. **Create the issue** — Problem statement, background, analysis. No
    experiments yet.
-2. **Design Experiment 1** — Add `## Experiments` and `### Experiment 1` when
+3. **Design Experiment 1** — Add `## Experiments` and `### Experiment 1` when
    ready.
-3. **Implement Experiment 1** — Write the code.
-4. **Record the result** — Pass, partial, or fail with a conclusion.
-5. **Repeat** — Design the next experiment based on what was learned. Continue
+4. **Implement Experiment 1** — Write the code.
+5. **Record the result** — Pass, partial, or fail with a conclusion.
+6. **Repeat** — Design the next experiment based on what was learned. Continue
    until the issue's goal is met.
-6. **Close the issue** — Write the issue-level conclusion.
+7. **Close the issue** — Write the issue-level conclusion.
+8. **New problems discovered along the way** — Add to `docs/backlog.md`, not
+   to a new issue doc.

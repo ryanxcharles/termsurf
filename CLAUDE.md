@@ -213,6 +213,10 @@ Issue docs for all prototype generations are indexed in
 - `docs/issues/002-merge-upstream.md` — How to merge changes from upstream repos
 - `docs/issues/001-competitors.md` — Terminal-browser hybrid comparison
 - `docs/issues/003-website.md` — termsurf.com website
+- `docs/backlog.md` — Issues identified but not yet started. Only one issue is
+  active at a time (the highest-numbered issue doc without a `## Conclusion`).
+  When a new problem is identified during work on the active issue, add it to
+  the backlog instead of creating an issue doc.
 
 ## Remember
 
