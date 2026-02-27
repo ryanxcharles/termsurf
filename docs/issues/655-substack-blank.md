@@ -317,3 +317,28 @@ void ShellContentBrowserClient::BindBadgeService(
 8. Check `~/.local/state/termsurf/chromium-server.log` — no "Terminating render
    process" or "bad Mojo message" errors
 9. Test `https://kirschsubstack.com/` — should also render without crashing
+
+**Result: Pass.**
+
+Substack pages render and stay visible. The `StubBadgeService` accepts and
+silently ignores Badging API calls, so the renderer is no longer killed.
+
+## Conclusion
+
+Substack pages went blank because Chromium killed the renderer process. The
+cause was a missing Mojo interface binder for `blink.mojom.BadgeService` —
+Substack's JavaScript calls `navigator.setAppBadge()`, and our Content API build
+had no handler registered. Chromium treats an unbound Mojo interface as a
+security violation and terminates the renderer.
+
+The fix is a `StubBadgeService` class that implements the `BadgeService`
+interface with empty `SetBadge()` and `ClearBadge()` methods. It accepts
+connections and does nothing — we don't need badge functionality, we just need
+the renderer to survive the call.
+
+Changes are on Chromium branch `146.0.7650.0-issue-655`, in two files:
+
+- `shell_content_browser_client.h` — `StubBadgeService` declaration,
+  `BindBadgeService()` method, member variable
+- `shell_content_browser_client.cc` — `StubBadgeService` definition, binder
+  registration in `RegisterBrowserInterfaceBindersForFrame()`
