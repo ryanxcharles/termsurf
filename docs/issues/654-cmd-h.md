@@ -144,3 +144,80 @@ still works), it just loses the Cmd+H shortcut.
    terminal — a new pane should open to the left
 5. Confirm Cmd+J, Cmd+K, Cmd+L still work for the other split directions
 6. Confirm "Hide TermSurf" still works when clicked from the menu
+
+**Result: Pass.**
+
+Removing `keyEquivalent="h"` from the "Hide Ghostty" menu item in `MainMenu.xib`
+fixed the issue. Cmd+H now creates a split pane to the left as configured. The
+"Hide TermSurf" menu item remains functional via click, and Cmd+J/K/L continue
+to work for the other split directions.
+
+However, this is a workaround — it removes a standard macOS shortcut from the
+menu rather than fixing the root cause. The real problem is that
+`performKeyEquivalent()` tries the menu before the user binding. Any other macOS
+system menu item with a shortcut that conflicts with a user keybinding would
+have the same problem.
+
+### Experiment 2: Revert to v1.2.3 binding-first behavior
+
+**Goal:** Make user keybindings always take priority over menu shortcuts, like
+Ghostty v1.2.3 did. Revert the Experiment 1 workaround since it's no longer
+needed.
+
+#### Background
+
+Between v1.2.3 and `tip`, Ghostty added a menu-first check in
+`performKeyEquivalent()` so that bindings like Cmd+C and Cmd+V trigger the
+corresponding menu item (which makes the menu flash). This is cosmetic — the
+binding still works without it, because `keyDown()` routes to Zig's
+`maybeHandleBinding()` which executes the action regardless.
+
+The side effect is that system menu items (like "Hide", Cmd+H) can steal user
+keybindings. The v1.2.3 approach — go straight to `keyDown()` — avoids this
+entirely.
+
+#### Changes
+
+**1. `gui/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift`** —
+Remove the menu-first block (lines 1230–1243) from `performKeyEquivalent()`.
+When a binding matches, go straight to `keyDown()`:
+
+```swift
+// If this is a binding then we want to perform it.
+if let bindingFlags {
+    self.keyDown(with: event)
+    return true
+}
+```
+
+The `bindingFlags` variable and the `surfaceModel.flatMap` check above it stay —
+they still determine whether the event is a binding. Only the menu-first block
+inside the `if let bindingFlags` is removed.
+
+**2. `gui/macos/Sources/App/macOS/MainMenu.xib`** — Revert the Experiment 1
+change. Restore `keyEquivalent="h"` on the "Hide Ghostty" menu item and remove
+the empty `modifierMask`:
+
+```xml
+<menuItem title="Hide Ghostty" keyEquivalent="h" id="Olw-nP-bQN">
+    <connections>
+        <action selector="hide:" target="-1" id="PnN-Uc-m68"/>
+    </connections>
+</menuItem>
+```
+
+The menu item keeps its standard Cmd+H shortcut. It just won't fire when the
+user has a keybinding configured for Cmd+H, because the binding check now
+happens before the menu check.
+
+#### Verification
+
+1. Build the debug app: `cd gui && zig build`
+2. Launch `TermSurf-Debug.app`
+3. Confirm the "Hide TermSurf" menu item shows "Cmd+H" (restored)
+4. With `keybind = cmd+h=new_split:left` in the config, press Cmd+H — a new pane
+   should open to the left (binding wins over menu)
+5. Confirm Cmd+J, Cmd+K, Cmd+L still work
+6. Remove the `cmd+h` keybinding from the config, relaunch — Cmd+H should hide
+   the window again (default menu behavior restored)
+7. Confirm Cmd+C (copy) and Cmd+V (paste) still work
