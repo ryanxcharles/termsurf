@@ -236,3 +236,25 @@ In `tui/src/main.rs`:
 
 Pass. Prefix matching works: `:q`, `:qu`, `:qui`, `:quit` all quit. Unknown and
 empty commands return to Control silently. Static command table is extensible.
+
+## Experiment 4: Remove q shortcut, update hints
+
+### Hypothesis
+
+Removing the bare `q` shortcut from Control mode and updating the status bar
+hints to show `:q` will make the quit workflow consistent with command mode.
+
+### Changes
+
+In `tui/src/main.rs`:
+
+1. **Remove `KeyCode::Char('q') => break`** from the `Mode::Control` match arm.
+
+2. **Update Control mode hints.** Replace `<q> quit` with `<:q> quit`.
+
+### Test
+
+1. Launch TUI, press `Esc` to Control
+2. Press `q` — nothing happens
+3. Status bar hints show `<:q> quit` instead of `<q> quit`
+4. Press `:`, type `q`, press `Enter` — TUI quits
