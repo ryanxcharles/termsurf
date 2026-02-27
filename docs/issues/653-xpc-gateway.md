@@ -698,3 +698,63 @@ Experiment 4 should test both hypotheses: reset the BTM database to clear stale
 entries, and if the space is the problem, either rename the debug app to remove
 the space or switch from `BundleProgram` to absolute `ProgramArguments` for
 debug builds.
+
+### Experiment 4: Fix debug gateway spawn failure
+
+**Goal:** Get the debug gateway to start via SMAppService so `web` works in the
+debug build.
+
+Experiment 3 found two possible causes for `exit code 78 (EX_CONFIG)`:
+
+1. Stale BTM entry (UUID mismatch between launchd and sfltool)
+2. Space in `TermSurf Debug.app` breaking `BundleProgram` path resolution
+
+This experiment tests them in order — cheapest fix first.
+
+#### Step 1: Reset BTM and retest
+
+Clear the entire BTM database, relaunch the debug app, and check if the gateway
+starts:
+
+```bash
+sfltool resetbtm
+```
+
+Then close and reopen the debug app. Check:
+
+```bash
+launchctl print gui/$(id -u)/com.termsurf.debug.xpc-gateway
+```
+
+If `state = running`, the stale BTM entry was the problem. Run
+`web https://google.com` in the debug terminal to confirm end-to-end.
+
+If `state = spawn scheduled` or `job state = spawn failed` with exit code 78
+again, the BTM entry was not the issue — proceed to step 2.
+
+#### Step 2: Remove the space from the debug app name
+
+The debug app is built as `TermSurf Debug.app`. The release app is
+`TermSurf.app`. launchd resolves `BundleProgram` relative to the parent bundle
+URL, which is `file:///...TermSurf%20Debug.app/`. The URL-encoded space may
+break path resolution.
+
+Change the debug app name from `TermSurf Debug.app` to `TermSurf-Debug.app` in
+the Xcode project configuration. The relevant setting is `PRODUCT_NAME` (or the
+target/scheme name) in `gui/macos/`. Find where the debug build's app name is
+set and remove the space.
+
+After rebuilding (`zig build`), relaunch and check:
+
+```bash
+launchctl print gui/$(id -u)/com.termsurf.debug.xpc-gateway
+```
+
+If `state = running`, the space was the problem. Run `web https://google.com` to
+confirm.
+
+#### Verification
+
+The debug gateway starts automatically when the debug app launches. Running
+`web https://google.com` in the debug app's terminal connects and loads the
+page. No manual `launchctl` commands needed.
