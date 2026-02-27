@@ -29,9 +29,8 @@ Rename `Mode::UrlEdit` to `Mode::Edit`. The TUI now has three top-level modes:
 
 When the TUI is in **Edit mode**, all keypresses route to edtui, which manages
 its own submodes: Normal, Insert, Visual, Search. The TUI stays in Edit mode
-regardless of which editor submode is active. The only way back to Control is
-Esc while the editor is in Normal mode (Esc in Insert/Visual/Search first
-returns the editor to Normal, then a second Esc exits Edit → Control).
+regardless of which editor submode is active. `Esc` always goes to edtui (e.g.,
+Insert → Normal). `Ctrl+Esc` exits Edit → Control from any submode.
 
 ### Submode indicator
 
@@ -77,9 +76,8 @@ In `tui/src/main.rs`:
    `i` keypress handler. Instead, sync editor content from URL only when the URL
    changes (external navigation, initial load).
 
-3. **Esc routing in Edit mode.** Intercept Esc before passing to edtui: if the
-   editor is already in Normal mode, exit Edit → Control instead of forwarding
-   to the editor.
+3. **Ctrl+Esc in Edit mode.** Intercept `Ctrl+Esc` before passing to edtui: exit
+   Edit → Control. Plain `Esc` always forwards to edtui.
 
 4. **New keybindings.** Add `A`, `I`, `n`, `v`, `V` handlers in the
    `Mode::Control` match arm, each setting the appropriate editor mode/cursor
@@ -100,11 +98,51 @@ and proper Esc routing will make URL editing feel like a proper vim buffer.
 
 1. Launch TUI, press `Esc` to Control, press `i` — Edit/Insert, cursor at end
 2. Type some text, press `Esc` — editor goes to Normal (still in Edit mode)
-3. Press `Esc` again — exits Edit → Control
+3. Press `Ctrl+Esc` — exits Edit → Control
 4. Press `i` — Edit/Insert, cursor where you left it (not reset)
-5. Press `Esc` twice to Control, press `A` — Edit/Insert, cursor at end of line
-6. Press `Esc` twice to Control, press `I` — Edit/Insert, cursor at start
+5. Press `Ctrl+Esc` to Control, press `A` — Edit/Insert, cursor at end of line
+6. Press `Ctrl+Esc` to Control, press `I` — Edit/Insert, cursor at start
 7. Press `n` — Edit/Normal, cursor at last position
 8. Press `v` — Edit/Visual, empty selection at cursor
 9. Press `V` — Edit/Visual, entire line selected
 10. In all Edit submodes, top-right of URL bar shows NORMAL/INSERT/VISUAL/SEARCH
+
+### Result
+
+Pass. All six keybindings work. Persistent editor state preserves cursor
+position across Control ↔ Edit transitions. Purple submode indicator shows in
+the top-right of the URL bar. Ctrl+Esc exits Edit → Control from any submode.
+
+## Experiment 2: Fix mode indicators
+
+### Problem
+
+Two issues from Experiment 1:
+
+1. The URL bar submode indicator shows plain text (`NORMAL`, `INSERT`, etc.)
+   with no Nerd Font icon. Every other mode label in the TUI has an icon.
+2. The status bar (bottom-right) shows the editor submode instead of `EDIT`. The
+   status bar should always say `EDIT` when the TUI is in Edit mode. Only the
+   URL bar shows submodes.
+
+### Changes
+
+In `tui/src/main.rs`:
+
+1. **URL bar submode label** — Add Nerd Font icons to each submode, reusing the
+   same icons currently on the status bar labels:
+   - `\u{EA85}` NORMAL
+   - `\u{F040}` INSERT
+   - `\u{F14A}` VISUAL
+   - `\u{F002}` SEARCH
+
+2. **Status bar label** — Change the `Mode::Edit` arm from a submode match to a
+   single `"\u{F044} EDIT"` label (pencil-square icon).
+
+### Test
+
+1. Press `i` from Control — status bar says `EDIT`, URL bar top-right says
+   `INSERT`
+2. Press `Esc` — status bar still says `EDIT`, URL bar says `NORMAL`
+3. Press `v` — URL bar says `VISUAL`, status bar still `EDIT`
+4. All four submodes show their icon in the URL bar

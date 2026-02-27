@@ -10,6 +10,7 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use edtui::actions::{Execute, SelectLine, SwitchMode};
 use edtui::events::{KeyEventHandler, KeyEventRegister, KeyInput};
 use edtui::{
     EditorEventHandler, EditorMode, EditorState, EditorTheme, EditorView, Lines, RowIndex,
@@ -31,7 +32,7 @@ const PURPLE: Color = Color::Rgb(0xbb, 0x9a, 0xf7);
 enum Mode {
     Browse,
     Control,
-    UrlEdit,
+    Edit,
 }
 
 fn main() -> io::Result<()> {
@@ -100,8 +101,9 @@ fn main() -> io::Result<()> {
     const LOADING_TIMEOUT: Duration = Duration::from_secs(30);
     let mut page_title = String::new();
 
-    // edtui state (Issue 637).
+    // edtui state (Issue 637, 658).
     let mut editor_state = EditorState::new(Lines::from(url.as_str()));
+    let mut editor_url = url.clone(); // Track which URL the editor has.
     let mut editor_handler = {
         let mut kh = KeyEventHandler::vim_mode();
         // Remove newline keybindings for single-line mode.
@@ -161,47 +163,111 @@ fn main() -> io::Result<()> {
                             }
                         }
                     }
-                    Mode::Control => match key.code {
-                        KeyCode::Char('q') => break,
-                        KeyCode::Char('i') => {
-                            // Initialize editor with current URL, cursor at end (Issue 637).
-                            editor_state = EditorState::new(Lines::from(url.as_str()));
-                            let len = url.len();
-                            editor_state.cursor = edtui::Index2::new(0, len.saturating_sub(1));
-                            editor_state.mode = EditorMode::Insert;
-                            mode = Mode::UrlEdit;
-                            if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
-                                conn.send_mode_changed(pid, false);
+                    Mode::Control => {
+                        // Sync editor content if URL changed externally (Issue 658).
+                        let enter_edit =
+                            |editor_state: &mut EditorState,
+                             editor_url: &mut String,
+                             url: &str,
+                             mode: &mut Mode| {
+                                if *editor_url != url {
+                                    *editor_state = EditorState::new(Lines::from(url));
+                                    let len = url.len();
+                                    editor_state.cursor =
+                                        edtui::Index2::new(0, len.saturating_sub(1));
+                                    *editor_url = url.to_string();
+                                }
+                                *mode = Mode::Edit;
+                            };
+                        match key.code {
+                            KeyCode::Char('q') => break,
+                            KeyCode::Char('i') => {
+                                // Insert mode, cursor at last position (Issue 658).
+                                enter_edit(&mut editor_state, &mut editor_url, &url, &mut mode);
+                                editor_state.mode = EditorMode::Insert;
+                                if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+                                    conn.send_mode_changed(pid, false);
+                                }
                             }
-                        }
-                        KeyCode::Enter => {
-                            mode = Mode::Browse;
-                            if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
-                                conn.send_mode_changed(pid, true);
+                            KeyCode::Char('A') => {
+                                // Insert mode, cursor at end of line (Issue 658).
+                                enter_edit(&mut editor_state, &mut editor_url, &url, &mut mode);
+                                editor_state.cursor.col =
+                                    editor_state.lines.len_col(0).unwrap_or(0);
+                                editor_state.mode = EditorMode::Insert;
+                                if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+                                    conn.send_mode_changed(pid, false);
+                                }
                             }
+                            KeyCode::Char('I') => {
+                                // Insert mode, cursor at start of line (Issue 658).
+                                enter_edit(&mut editor_state, &mut editor_url, &url, &mut mode);
+                                editor_state.cursor = edtui::Index2::new(0, 0);
+                                editor_state.mode = EditorMode::Insert;
+                                if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+                                    conn.send_mode_changed(pid, false);
+                                }
+                            }
+                            KeyCode::Char('n') => {
+                                // Normal mode, cursor at last position (Issue 658).
+                                enter_edit(&mut editor_state, &mut editor_url, &url, &mut mode);
+                                editor_state.mode = EditorMode::Normal;
+                                editor_state.selection = None;
+                                if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+                                    conn.send_mode_changed(pid, false);
+                                }
+                            }
+                            KeyCode::Char('v') => {
+                                // Visual mode, cursor at last position (Issue 658).
+                                enter_edit(&mut editor_state, &mut editor_url, &url, &mut mode);
+                                SwitchMode(EditorMode::Visual).execute(&mut editor_state);
+                                if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+                                    conn.send_mode_changed(pid, false);
+                                }
+                            }
+                            KeyCode::Char('V') => {
+                                // Visual mode, entire line selected (Issue 658).
+                                enter_edit(&mut editor_state, &mut editor_url, &url, &mut mode);
+                                SelectLine.execute(&mut editor_state);
+                                if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+                                    conn.send_mode_changed(pid, false);
+                                }
+                            }
+                            KeyCode::Enter => {
+                                mode = Mode::Browse;
+                                if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+                                    conn.send_mode_changed(pid, true);
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    },
-                    Mode::UrlEdit => match key.code {
-                        KeyCode::Enter if editor_state.mode != EditorMode::Search => {
+                    }
+                    Mode::Edit => {
+                        // Ctrl+Esc exits Edit → Control (Issue 658).
+                        if key.code == KeyCode::Esc && key.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            mode = Mode::Control;
+                        } else if key.code == KeyCode::Enter
+                            && editor_state.mode != EditorMode::Search
+                        {
                             // Extract URL from editor, navigate, switch to Browse.
                             let new_url: String = editor_state
                                 .lines
                                 .get(RowIndex::new(0))
                                 .map(|line| line.iter().collect())
                                 .unwrap_or_default();
-                            url = new_url;
+                            url = new_url.clone();
+                            editor_url = new_url;
                             mode = Mode::Browse;
                             if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
                                 conn.send_navigate(pid, &url);
                                 conn.send_mode_changed(pid, true);
                             }
-                        }
-                        _ => {
+                        } else {
                             // Pass everything else to edtui (including Escape).
                             editor_handler.on_key_event(key, &mut editor_state);
                         }
-                    },
+                    }
                 }
             }
         }
@@ -219,6 +285,8 @@ fn main() -> io::Result<()> {
                     }
                     xpc::CompositorMessage::UrlChanged { url: new_url } => {
                         url = new_url;
+                        // Mark editor_url stale so enter_edit re-syncs (Issue 658).
+                        editor_url.clear();
                     }
                     xpc::CompositorMessage::LoadingState {
                         state,
@@ -314,11 +382,23 @@ fn ui(
     let (url_border, viewport_border) = match mode {
         Mode::Browse => (BORDER, CYAN),
         Mode::Control => (CYAN, BORDER),
-        Mode::UrlEdit => (PURPLE, BORDER),
+        Mode::Edit => (PURPLE, BORDER),
     };
 
     // URL bar.
-    if *mode == Mode::UrlEdit {
+    if *mode == Mode::Edit {
+        // Submode indicator in top-right of URL bar (Issue 658).
+        let submode_text = match editor_state.mode {
+            EditorMode::Normal => "NORMAL",
+            EditorMode::Insert => "INSERT",
+            EditorMode::Visual => "VISUAL",
+            EditorMode::Search => "SEARCH",
+        };
+        let submode_label = Line::from(vec![
+            Span::raw(" ").style(Style::default().fg(PURPLE)),
+            Span::raw(submode_text).style(Style::default().fg(PURPLE)),
+            Span::raw(" "),
+        ]);
         let theme = EditorTheme::default()
             .base(Style::default().fg(FG).bg(BG))
             .cursor_style(Style::default().fg(BG).bg(FG))
@@ -328,6 +408,7 @@ fn ui(
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(url_border).bg(BG))
                     .title_style(Style::default().fg(url_border))
+                    .title_top(submode_label.alignment(Alignment::Right))
                     .style(Style::default().bg(BG)),
             )
             .hide_status_line();
@@ -418,7 +499,7 @@ fn ui(
             Span::styled("> ", d),
             Span::styled("browse", f),
         ]),
-        Mode::UrlEdit => Line::from(vec![
+        Mode::Edit => Line::from(vec![
             Span::styled("<", d),
             Span::styled("enter", f),
             Span::styled("> ", d),
@@ -433,7 +514,7 @@ fn ui(
     let label = match mode {
         Mode::Browse => "\u{F059F} BROWSE".to_string(),
         Mode::Control => "\u{F11C} CONTROL".to_string(),
-        Mode::UrlEdit => match editor_state.mode {
+        Mode::Edit => match editor_state.mode {
             EditorMode::Normal => "\u{EA85} NORMAL".to_string(),
             EditorMode::Insert => "\u{F040} INSERT".to_string(),
             EditorMode::Visual => "\u{F14A} VISUAL".to_string(),
