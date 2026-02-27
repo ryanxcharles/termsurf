@@ -13,7 +13,7 @@ zig-out/
 /result*
 /.nixos-test-history
 example/*.wasm
-test/ghostty
+test/termsurf
 test/cases/**/*.actual.png
 flatpak/builddir/
 flatpak/repo/

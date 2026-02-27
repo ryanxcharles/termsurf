@@ -1,6 +1,6 @@
 """
 This script is used to update the appcast.xml file for tagged
-Ghostty releases.
+TermSurf releases.
 
 This expects the following files in the current directory:
     - sign_update.txt - contains the output from "sign_update" in the Sparkle
@@ -8,9 +8,9 @@ This expects the following files in the current directory:
     - appcast.xml - the existing appcast file.
 
 And the following environment variables to be set:
-    - GHOSTTY_VERSION - the version number (X.Y.Z format)
-    - GHOSTTY_BUILD - the build number
-    - GHOSTTY_COMMIT - the commit hash
+    - TERMSURF_VERSION - the version number (X.Y.Z format)
+    - TERMSURF_BUILD - the build number
+    - TERMSURF_COMMIT - the commit hash
 
 The script will output a new appcast file called appcast_new.xml.
 """
@@ -20,11 +20,11 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 now = datetime.now(timezone.utc)
-version = os.environ["GHOSTTY_VERSION"]
+version = os.environ["TERMSURF_VERSION"]
 version_dash = version.replace('.', '-')
-build = os.environ["GHOSTTY_BUILD"]
-commit = os.environ["GHOSTTY_COMMIT"]
-commit_long = os.environ["GHOSTTY_COMMIT_LONG"]
+build = os.environ["TERMSURF_BUILD"]
+commit = os.environ["TERMSURF_COMMIT"]
+commit_long = os.environ["TERMSURF_COMMIT_LONG"]
 repo = "https://github.com/ghostty-org/ghostty"
 
 # Read our sign_update output
@@ -84,10 +84,10 @@ elem.text = f"{version}"
 elem = ET.SubElement(item, "sparkle:minimumSystemVersion")
 elem.text = "13.0.0"
 elem = ET.SubElement(item, "sparkle:fullReleaseNotesLink")
-elem.text = f"https://ghostty.org/docs/install/release-notes/{version_dash}"
+elem.text = f"https://termsurf.com/docs/install/release-notes/{version_dash}"
 elem = ET.SubElement(item, "description")
 elem.text = f"""
-<h1>Ghostty v{version}</h1>
+<h1>TermSurf v{version}</h1>
 <p>
 This release was built from commit <code><a href="{repo}/commits/{commit_long}">{commit}</a></code>
 on {now.strftime('%Y-%m-%d')}.
@@ -95,11 +95,11 @@ on {now.strftime('%Y-%m-%d')}.
 <p>
 We don't currently generate release notes for auto-updates.
 You can view the complete changelog and release notes
-at <a href="https://ghostty.org/docs/install/release-notes/{version_dash}">ghostty.org/docs/install/release-notes/{version_dash}</a>.
+at <a href="https://termsurf.com/docs/install/release-notes/{version_dash}">termsurf.com/docs/install/release-notes/{version_dash}</a>.
 </p>
 """
 elem = ET.SubElement(item, "enclosure")
-elem.set("url", f"https://release.files.ghostty.org/{version}/Ghostty.dmg")
+elem.set("url", f"https://release.files.ghostty.org/{version}/TermSurf.dmg")
 elem.set("type", "application/octet-stream")
 for key, value in attrs.items():
     elem.set(key, value)

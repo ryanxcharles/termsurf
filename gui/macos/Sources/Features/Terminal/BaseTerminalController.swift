@@ -1,10 +1,10 @@
 import Cocoa
 import SwiftUI
 import Combine
-import GhosttyKit
+import TermSurfKit
 
-/// A base class for windows that can contain Ghostty windows. This base class implements
-/// the bare minimum functionality that every terminal window in Ghostty should implement.
+/// A base class for windows that can contain TermSurf windows. This base class implements
+/// the bare minimum functionality that every terminal window in TermSurf should implement.
 ///
 /// Usage: Specify this as the base class of your window controller for the window that contains
 /// a terminal. The window controller must also be the window delegate OR the window delegate
@@ -34,15 +34,15 @@ class BaseTerminalController: NSWindowController,
                               FullscreenDelegate
 {
     /// The app instance that this terminal view will represent.
-    let ghostty: Ghostty.App
+    let termsurf: TermSurf.App
 
     /// The currently focused surface.
-    var focusedSurface: Ghostty.SurfaceView? = nil {
+    var focusedSurface: TermSurf.SurfaceView? = nil {
         didSet { syncFocusToSurfaceTree() }
     }
 
     /// The tree of splits within this terminal window.
-    @Published var surfaceTree: SplitTree<Ghostty.SurfaceView> = .init() {
+    @Published var surfaceTree: SplitTree<TermSurf.SurfaceView> = .init() {
         didSet { surfaceTreeDidChange(from: oldValue, to: surfaceTree) }
     }
 
@@ -73,9 +73,9 @@ class BaseTerminalController: NSWindowController,
     private var savedFrame: SavedFrame? = nil
 
     /// Cache previously applied appearance to avoid unnecessary updates
-    private var appliedColorScheme: ghostty_color_scheme_e?
+    private var appliedColorScheme: termsurf_color_scheme_e?
 
-    /// The configuration derived from the Ghostty config so we don't need to rely on references.
+    /// The configuration derived from the TermSurf config so we don't need to rely on references.
     private var derivedConfig: DerivedConfig
 
     /// Track whether background is forced opaque (true) or using config transparency (false)
@@ -95,7 +95,7 @@ class BaseTerminalController: NSWindowController,
 
     /// The time that undo/redo operations that contain running ptys are valid for.
     var undoExpiration: Duration {
-        ghostty.config.undoTimeout
+        termsurf.config.undoTimeout
     }
 
     /// The undo manager for this controller is the undo manager of the window,
@@ -123,25 +123,25 @@ class BaseTerminalController: NSWindowController,
         fatalError("init(coder:) is not supported for this view")
     }
 
-    init(_ ghostty: Ghostty.App,
-         baseConfig base: Ghostty.SurfaceConfiguration? = nil,
-         surfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil
+    init(_ termsurf: TermSurf.App,
+         baseConfig base: TermSurf.SurfaceConfiguration? = nil,
+         surfaceTree tree: SplitTree<TermSurf.SurfaceView>? = nil
     ) {
-        self.ghostty = ghostty
-        self.derivedConfig = DerivedConfig(ghostty.config)
+        self.termsurf = termsurf
+        self.derivedConfig = DerivedConfig(termsurf.config)
 
         super.init(window: nil)
 
         // Initialize our initial surface.
-        guard let ghostty_app = ghostty.app else { preconditionFailure("app must be loaded") }
-        self.surfaceTree = tree ?? .init(view: Ghostty.SurfaceView(ghostty_app, baseConfig: base))
+        guard let termsurf_app = termsurf.app else { preconditionFailure("app must be loaded") }
+        self.surfaceTree = tree ?? .init(view: TermSurf.SurfaceView(termsurf_app, baseConfig: base))
 
         // Setup our notifications for behaviors
         let center = NotificationCenter.default
         center.addObserver(
             self,
             selector: #selector(onConfirmClipboardRequest),
-            name: Ghostty.Notification.confirmClipboard,
+            name: TermSurf.Notification.confirmClipboard,
             object: nil)
         center.addObserver(
             self,
@@ -150,60 +150,60 @@ class BaseTerminalController: NSWindowController,
             object: nil)
         center.addObserver(
             self,
-            selector: #selector(ghosttyConfigDidChangeBase(_:)),
-            name: .ghosttyConfigDidChange,
+            selector: #selector(termsurfConfigDidChangeBase(_:)),
+            name: .termsurfConfigDidChange,
             object: nil)
         center.addObserver(
             self,
-            selector: #selector(ghosttyCommandPaletteDidToggle(_:)),
-            name: .ghosttyCommandPaletteDidToggle,
+            selector: #selector(termsurfCommandPaletteDidToggle(_:)),
+            name: .termsurfCommandPaletteDidToggle,
             object: nil)
         center.addObserver(
             self,
-            selector: #selector(ghosttyMaximizeDidToggle(_:)),
-            name: .ghosttyMaximizeDidToggle,
+            selector: #selector(termsurfMaximizeDidToggle(_:)),
+            name: .termsurfMaximizeDidToggle,
             object: nil)
 
         // Splits
         center.addObserver(
             self,
-            selector: #selector(ghosttyDidCloseSurface(_:)),
-            name: Ghostty.Notification.ghosttyCloseSurface,
+            selector: #selector(termsurfDidCloseSurface(_:)),
+            name: TermSurf.Notification.termsurfCloseSurface,
             object: nil)
         center.addObserver(
             self,
-            selector: #selector(ghosttyDidNewSplit(_:)),
-            name: Ghostty.Notification.ghosttyNewSplit,
+            selector: #selector(termsurfDidNewSplit(_:)),
+            name: TermSurf.Notification.termsurfNewSplit,
             object: nil)
         center.addObserver(
             self,
-            selector: #selector(ghosttyDidEqualizeSplits(_:)),
-            name: Ghostty.Notification.didEqualizeSplits,
+            selector: #selector(termsurfDidEqualizeSplits(_:)),
+            name: TermSurf.Notification.didEqualizeSplits,
             object: nil)
         center.addObserver(
             self,
-            selector: #selector(ghosttyDidFocusSplit(_:)),
-            name: Ghostty.Notification.ghosttyFocusSplit,
+            selector: #selector(termsurfDidFocusSplit(_:)),
+            name: TermSurf.Notification.termsurfFocusSplit,
             object: nil)
         center.addObserver(
             self,
-            selector: #selector(ghosttyDidToggleSplitZoom(_:)),
-            name: Ghostty.Notification.didToggleSplitZoom,
+            selector: #selector(termsurfDidToggleSplitZoom(_:)),
+            name: TermSurf.Notification.didToggleSplitZoom,
             object: nil)
         center.addObserver(
             self,
-            selector: #selector(ghosttyDidResizeSplit(_:)),
-            name: Ghostty.Notification.didResizeSplit,
+            selector: #selector(termsurfDidResizeSplit(_:)),
+            name: TermSurf.Notification.didResizeSplit,
             object: nil)
         center.addObserver(
             self,
-            selector: #selector(ghosttyDidPresentTerminal(_:)),
-            name: Ghostty.Notification.ghosttyPresentTerminal,
+            selector: #selector(termsurfDidPresentTerminal(_:)),
+            name: TermSurf.Notification.termsurfPresentTerminal,
             object: nil)
         center.addObserver(
             self,
-            selector: #selector(ghosttySurfaceDragEndedNoTarget(_:)),
-            name: .ghosttySurfaceDragEndedNoTarget,
+            selector: #selector(termsurfSurfaceDragEndedNoTarget(_:)),
+            name: .termsurfSurfaceDragEndedNoTarget,
             object: nil)
 
         // Listen for local events that we need to know of outside of
@@ -226,19 +226,19 @@ class BaseTerminalController: NSWindowController,
     /// Create a new split.
     @discardableResult
     func newSplit(
-        at oldView: Ghostty.SurfaceView,
-        direction: SplitTree<Ghostty.SurfaceView>.NewDirection,
-        baseConfig config: Ghostty.SurfaceConfiguration? = nil
-    ) -> Ghostty.SurfaceView? {
+        at oldView: TermSurf.SurfaceView,
+        direction: SplitTree<TermSurf.SurfaceView>.NewDirection,
+        baseConfig config: TermSurf.SurfaceConfiguration? = nil
+    ) -> TermSurf.SurfaceView? {
         // We can only create new splits for surfaces in our tree.
         guard surfaceTree.root?.node(view: oldView) != nil else { return nil }
 
         // Create a new surface view
-        guard let ghostty_app = ghostty.app else { return nil }
-        let newView = Ghostty.SurfaceView(ghostty_app, baseConfig: config)
+        guard let termsurf_app = termsurf.app else { return nil }
+        let newView = TermSurf.SurfaceView(termsurf_app, baseConfig: config)
 
         // Do the split
-        let newTree: SplitTree<Ghostty.SurfaceView>
+        let newTree: SplitTree<TermSurf.SurfaceView>
         do {
             newTree = try surfaceTree.inserting(
                 view: newView,
@@ -248,7 +248,7 @@ class BaseTerminalController: NSWindowController,
             // If splitting fails for any reason (it should not), then we just log
             // and return. The new view we created will be deinitialized and its
             // no big deal.
-            Ghostty.logger.warning("failed to insert split: \(error)")
+            TermSurf.logger.warning("failed to insert split: \(error)")
             return nil
         }
 
@@ -262,13 +262,13 @@ class BaseTerminalController: NSWindowController,
     }
 
     /// Move focus to a surface view.
-    func focusSurface(_ view: Ghostty.SurfaceView) {
+    func focusSurface(_ view: TermSurf.SurfaceView) {
         // Check if target surface is in our tree
         guard surfaceTree.contains(view) else { return }
 
         // Move focus to the target surface and activate the window/app
         DispatchQueue.main.async {
-            Ghostty.moveFocus(to: view)
+            TermSurf.moveFocus(to: view)
             view.window?.makeKeyAndOrderFront(nil)
             if !NSApp.isActive {
                 NSApp.activate(ignoringOtherApps: true)
@@ -279,14 +279,14 @@ class BaseTerminalController: NSWindowController,
     /// Called when the surfaceTree variable changed.
     ///
     /// Subclasses should call super first.
-    func surfaceTreeDidChange(from: SplitTree<Ghostty.SurfaceView>, to: SplitTree<Ghostty.SurfaceView>) {
+    func surfaceTreeDidChange(from: SplitTree<TermSurf.SurfaceView>, to: SplitTree<TermSurf.SurfaceView>) {
         // If our surface tree becomes empty then we have no focused surface.
         if (to.isEmpty) {
             focusedSurface = nil
         }
     }
 
-    /// Update all surfaces with the focus state. This ensures that libghostty has an accurate view about
+    /// Update all surfaces with the focus state. This ensures that libtermsurf has an accurate view about
     /// what surface is focused. This must be called whenever a surface OR window changes focus.
     func syncFocusToSurfaceTree() {
         for surfaceView in surfaceTree {
@@ -380,7 +380,7 @@ class BaseTerminalController: NSWindowController,
 
     /// Close a surface from a view.
     func closeSurface(
-        _ view: Ghostty.SurfaceView,
+        _ view: TermSurf.SurfaceView,
         withConfirmation: Bool = true
     ) {
         guard let node = surfaceTree.root?.node(view: view) else { return }
@@ -391,7 +391,7 @@ class BaseTerminalController: NSWindowController,
     ///
     /// This will also insert the proper undo stack information in.
     func closeSurface(
-        _ node: SplitTree<Ghostty.SurfaceView>.Node,
+        _ node: SplitTree<TermSurf.SurfaceView>.Node,
         withConfirmation: Bool = true
     ) {
         // This node must be part of our tree
@@ -404,7 +404,7 @@ class BaseTerminalController: NSWindowController,
         }
 
         // Confirm close. We use an NSAlert instead of a SwiftUI confirmationDialog
-        // due to SwiftUI bugs (see Ghostty #560). To repeat from #560, the bug is that
+        // due to SwiftUI bugs (see TermSurf #560). To repeat from #560, the bug is that
         // confirmationDialog allows the user to Cmd-W close the alert, but when doing
         // so SwiftUI does not update any of the bindings to note that window is no longer
         // being shown, and provides no callback to detect this.
@@ -422,7 +422,7 @@ class BaseTerminalController: NSWindowController,
 
     /// Find the next surface to focus when a node is being closed.
     /// Goes to previous split unless we're the leftmost leaf, then goes to next.
-    private func findNextFocusTargetAfterClosing(node: SplitTree<Ghostty.SurfaceView>.Node) -> Ghostty.SurfaceView? {
+    private func findNextFocusTargetAfterClosing(node: SplitTree<TermSurf.SurfaceView>.Node) -> TermSurf.SurfaceView? {
         guard let root = surfaceTree.root else { return nil }
         
         // If we're the leftmost, then we move to the next surface after closing.
@@ -439,9 +439,9 @@ class BaseTerminalController: NSWindowController,
     /// This also updates the undo manager to support restoring this node.
     ///
     /// This does no confirmation and assumes confirmation is already done.
-    private func removeSurfaceNode(_ node: SplitTree<Ghostty.SurfaceView>.Node) {
+    private func removeSurfaceNode(_ node: SplitTree<TermSurf.SurfaceView>.Node) {
         // Move focus if the closed surface was focused and we have a next target
-        let nextFocus: Ghostty.SurfaceView? = if node.contains(
+        let nextFocus: TermSurf.SurfaceView? = if node.contains(
             where: { $0 == focusedSurface }
         ) {
             findNextFocusTargetAfterClosing(node: node)
@@ -458,9 +458,9 @@ class BaseTerminalController: NSWindowController,
     }
 
     func replaceSurfaceTree(
-        _ newTree: SplitTree<Ghostty.SurfaceView>,
-        moveFocusTo newView: Ghostty.SurfaceView? = nil,
-        moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
+        _ newTree: SplitTree<TermSurf.SurfaceView>,
+        moveFocusTo newView: TermSurf.SurfaceView? = nil,
+        moveFocusFrom oldView: TermSurf.SurfaceView? = nil,
         undoAction: String? = nil
     ) {
         // Setup our new split tree
@@ -468,7 +468,7 @@ class BaseTerminalController: NSWindowController,
         surfaceTree = newTree
         if let newView {
             DispatchQueue.main.async {
-                Ghostty.moveFocus(to: newView, from: oldView)
+                TermSurf.moveFocus(to: newView, from: oldView)
             }
         }
         
@@ -485,7 +485,7 @@ class BaseTerminalController: NSWindowController,
             target.surfaceTree = oldTree
             if let oldView {
                 DispatchQueue.main.async {
-                    Ghostty.moveFocus(to: oldView, from: target.focusedSurface)
+                    TermSurf.moveFocus(to: oldView, from: target.focusedSurface)
                 }
             }
             
@@ -548,67 +548,67 @@ class BaseTerminalController: NSWindowController,
         window.setFrame(newFrame, display: true)
     }
 
-    @objc private func ghosttyConfigDidChangeBase(_ notification: Notification) {
+    @objc private func termsurfConfigDidChangeBase(_ notification: Notification) {
         // We only care if the configuration is a global configuration, not a
         // surface-specific one.
         guard notification.object == nil else { return }
 
         // Get our managed configuration object out
         guard let config = notification.userInfo?[
-            Notification.Name.GhosttyConfigChangeKey
-        ] as? Ghostty.Config else { return }
+            Notification.Name.TermSurfConfigChangeKey
+        ] as? TermSurf.Config else { return }
 
         // Update our derived config
         self.derivedConfig = DerivedConfig(config)
     }
 
-    @objc private func ghosttyCommandPaletteDidToggle(_ notification: Notification) {
-        guard let surfaceView = notification.object as? Ghostty.SurfaceView else { return }
+    @objc private func termsurfCommandPaletteDidToggle(_ notification: Notification) {
+        guard let surfaceView = notification.object as? TermSurf.SurfaceView else { return }
         guard surfaceTree.contains(surfaceView) else { return }
         toggleCommandPalette(nil)
     }
 
-    @objc private func ghosttyMaximizeDidToggle(_ notification: Notification) {
+    @objc private func termsurfMaximizeDidToggle(_ notification: Notification) {
         guard let window else { return }
-        guard let surfaceView = notification.object as? Ghostty.SurfaceView else { return }
+        guard let surfaceView = notification.object as? TermSurf.SurfaceView else { return }
         guard surfaceTree.contains(surfaceView) else { return }
         window.zoom(nil)
     }
 
-    @objc private func ghosttyDidCloseSurface(_ notification: Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+    @objc private func termsurfDidCloseSurface(_ notification: Notification) {
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard let node = surfaceTree.root?.node(view: target) else { return }
         closeSurface(
             node,
             withConfirmation: (notification.userInfo?["process_alive"] as? Bool) ?? false)
     }
 
-    @objc private func ghosttyDidNewSplit(_ notification: Notification) {
+    @objc private func termsurfDidNewSplit(_ notification: Notification) {
         // The target must be within our tree
-        guard let oldView = notification.object as? Ghostty.SurfaceView else { return }
+        guard let oldView = notification.object as? TermSurf.SurfaceView else { return }
         guard surfaceTree.root?.node(view: oldView) != nil else { return }
 
         // Notification must contain our base config
-        let configAny = notification.userInfo?[Ghostty.Notification.NewSurfaceConfigKey]
-        let config = configAny as? Ghostty.SurfaceConfiguration
+        let configAny = notification.userInfo?[TermSurf.Notification.NewSurfaceConfigKey]
+        let config = configAny as? TermSurf.SurfaceConfiguration
 
         // Determine our desired direction
         guard let directionAny = notification.userInfo?["direction"] else { return }
-        guard let direction = directionAny as? ghostty_action_split_direction_e else { return }
-        let splitDirection: SplitTree<Ghostty.SurfaceView>.NewDirection
+        guard let direction = directionAny as? termsurf_action_split_direction_e else { return }
+        let splitDirection: SplitTree<TermSurf.SurfaceView>.NewDirection
         switch (direction) {
-        case GHOSTTY_SPLIT_DIRECTION_RIGHT: splitDirection = .right
-        case GHOSTTY_SPLIT_DIRECTION_LEFT: splitDirection = .left
-        case GHOSTTY_SPLIT_DIRECTION_DOWN: splitDirection = .down
-        case GHOSTTY_SPLIT_DIRECTION_UP: splitDirection = .up
+        case TERMSURF_SPLIT_DIRECTION_RIGHT: splitDirection = .right
+        case TERMSURF_SPLIT_DIRECTION_LEFT: splitDirection = .left
+        case TERMSURF_SPLIT_DIRECTION_DOWN: splitDirection = .down
+        case TERMSURF_SPLIT_DIRECTION_UP: splitDirection = .up
         default: return
         }
 
         newSplit(at: oldView, direction: splitDirection, baseConfig: config)
     }
 
-    @objc private func ghosttyDidEqualizeSplits(_ notification: Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+    @objc private func termsurfDidEqualizeSplits(_ notification: Notification) {
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         
         // Check if target surface is in current controller's tree
         guard surfaceTree.contains(target) else { return }
@@ -617,14 +617,14 @@ class BaseTerminalController: NSWindowController,
         surfaceTree = surfaceTree.equalized()
     }
     
-    @objc private func ghosttyDidFocusSplit(_ notification: Notification) {
+    @objc private func termsurfDidFocusSplit(_ notification: Notification) {
         // The target must be within our tree
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard surfaceTree.root?.node(view: target) != nil else { return }
 
         // Get the direction from the notification
-        guard let directionAny = notification.userInfo?[Ghostty.Notification.SplitDirectionKey] else { return }
-        guard let direction = directionAny as? Ghostty.SplitFocusDirection else { return }
+        guard let directionAny = notification.userInfo?[TermSurf.Notification.SplitDirectionKey] else { return }
+        guard let direction = directionAny as? TermSurf.SplitFocusDirection else { return }
 
         // Find the node for the target surface
         guard let targetNode = surfaceTree.root?.node(view: target) else { return }
@@ -646,13 +646,13 @@ class BaseTerminalController: NSWindowController,
 
         // Move focus to the next surface
         DispatchQueue.main.async {
-            Ghostty.moveFocus(to: nextSurface, from: target)
+            TermSurf.moveFocus(to: nextSurface, from: target)
         }
     }
     
-    @objc private func ghosttyDidToggleSplitZoom(_ notification: Notification) {
+    @objc private func termsurfDidToggleSplitZoom(_ notification: Notification) {
         // The target must be within our tree
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard let targetNode = surfaceTree.root?.node(view: target) else { return }
 
         // Toggle the zoomed state
@@ -674,24 +674,24 @@ class BaseTerminalController: NSWindowController,
         // Ensure focus stays on the target surface. We lose focus when we do
         // this so we need to grab it again.
         DispatchQueue.main.async {
-            Ghostty.moveFocus(to: target)
+            TermSurf.moveFocus(to: target)
         }
     }
     
-    @objc private func ghosttyDidResizeSplit(_ notification: Notification) {
+    @objc private func termsurfDidResizeSplit(_ notification: Notification) {
         // The target must be within our tree
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard let targetNode = surfaceTree.root?.node(view: target) else { return }
         
         // Extract direction and amount from notification
-        guard let directionAny = notification.userInfo?[Ghostty.Notification.ResizeSplitDirectionKey] else { return }
-        guard let direction = directionAny as? Ghostty.SplitResizeDirection else { return }
+        guard let directionAny = notification.userInfo?[TermSurf.Notification.ResizeSplitDirectionKey] else { return }
+        guard let direction = directionAny as? TermSurf.SplitResizeDirection else { return }
         
-        guard let amountAny = notification.userInfo?[Ghostty.Notification.ResizeSplitAmountKey] else { return }
+        guard let amountAny = notification.userInfo?[TermSurf.Notification.ResizeSplitAmountKey] else { return }
         guard let amount = amountAny as? UInt16 else { return }
         
-        // Convert Ghostty.SplitResizeDirection to SplitTree.Spatial.Direction
-        let spatialDirection: SplitTree<Ghostty.SurfaceView>.Spatial.Direction
+        // Convert TermSurf.SplitResizeDirection to SplitTree.Spatial.Direction
+        let spatialDirection: SplitTree<TermSurf.SurfaceView>.Spatial.Direction
         switch direction {
         case .up: spatialDirection = .up
         case .down: spatialDirection = .down
@@ -706,12 +706,12 @@ class BaseTerminalController: NSWindowController,
         do {
             surfaceTree = try surfaceTree.resizing(node: targetNode, by: amount, in: spatialDirection, with: bounds)
         } catch {
-            Ghostty.logger.warning("failed to resize split: \(error)")
+            TermSurf.logger.warning("failed to resize split: \(error)")
         }
     }
 
-    @objc private func ghosttyDidPresentTerminal(_ notification: Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+    @objc private func termsurfDidPresentTerminal(_ notification: Notification) {
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard surfaceTree.contains(target) else { return }
 
         // Bring the window to front and focus the surface.
@@ -719,15 +719,15 @@ class BaseTerminalController: NSWindowController,
         
         // We use a small delay to ensure this runs after any UI cleanup
         // (e.g., command palette restoring focus to its original surface).
-        Ghostty.moveFocus(to: target)
-        Ghostty.moveFocus(to: target, delay: 0.1)
+        TermSurf.moveFocus(to: target)
+        TermSurf.moveFocus(to: target, delay: 0.1)
 
         // Show a brief highlight to help the user locate the presented terminal.
         target.highlight()
     }
 
-    @objc private func ghosttySurfaceDragEndedNoTarget(_ notification: Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+    @objc private func termsurfSurfaceDragEndedNoTarget(_ notification: Notification) {
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard let targetNode = surfaceTree.root?.node(view: target) else { return }
         
         // If our tree isn't split, then we never create a new window, because
@@ -745,7 +745,7 @@ class BaseTerminalController: NSWindowController,
         let removedTree = surfaceTree.removing(targetNode)
 
         // Create a new tree with the dragged surface and open a new window
-        let newTree = SplitTree<Ghostty.SurfaceView>(view: target)
+        let newTree = SplitTree<TermSurf.SurfaceView>(view: target)
         
         // Treat our undo below as a full group.
         undoManager?.beginUndoGrouping()
@@ -756,9 +756,9 @@ class BaseTerminalController: NSWindowController,
         
         replaceSurfaceTree(removedTree, moveFocusFrom: oldFocusedSurface)
         _ = TerminalController.newWindow(
-            ghostty,
+            termsurf,
             tree: newTree,
-            position: notification.userInfo?[Notification.Name.ghosttySurfaceDragEndedNoTargetPointKey] as? NSPoint,
+            position: notification.userInfo?[Notification.Name.termsurfSurfaceDragEndedNoTargetPointKey] as? NSPoint,
             confirmUndo: false)
     }
 
@@ -775,7 +775,7 @@ class BaseTerminalController: NSWindowController,
     }
 
     private func localEventFlagsChanged(_ event: NSEvent) -> NSEvent? {
-        var surfaces: [Ghostty.SurfaceView] = surfaceTree.map { $0 }
+        var surfaces: [TermSurf.SurfaceView] = surfaceTree.map { $0 }
 
         // If we're the main window receiving key input, then we want to avoid
         // calling this on our focused surface because that'll trigger a double
@@ -793,7 +793,7 @@ class BaseTerminalController: NSWindowController,
 
     // MARK: TerminalViewDelegate
 
-    func focusedSurfaceDidChange(to: Ghostty.SurfaceView?) {
+    func focusedSurfaceDidChange(to: TermSurf.SurfaceView?) {
         let lastFocusedSurface = focusedSurface
         focusedSurface = to
 
@@ -820,7 +820,7 @@ class BaseTerminalController: NSWindowController,
     
     private func computeTitle(title: String, bell: Bool) -> String {
         var result = title
-        if (bell && ghostty.config.bellFeatures.contains(.title)) {
+        if (bell && termsurf.config.bellFeatures.contains(.title)) {
             result = "🔔 \(result)"
         }
 
@@ -875,22 +875,22 @@ class BaseTerminalController: NSWindowController,
         }
     }
 
-    private func splitDidResize(node: SplitTree<Ghostty.SurfaceView>.Node, to newRatio: Double) {
+    private func splitDidResize(node: SplitTree<TermSurf.SurfaceView>.Node, to newRatio: Double) {
         let resizedNode = node.resizing(to: newRatio)
         do {
             surfaceTree = try surfaceTree.replacing(node: node, with: resizedNode)
         } catch {
-            Ghostty.logger.warning("failed to replace node during split resize: \(error)")
+            TermSurf.logger.warning("failed to replace node during split resize: \(error)")
         }
     }
 
     private func splitDidDrop(
-        source: Ghostty.SurfaceView,
-        destination: Ghostty.SurfaceView,
+        source: TermSurf.SurfaceView,
+        destination: TermSurf.SurfaceView,
         zone: TerminalSplitDropZone
     ) {
         // Map drop zone to split direction
-        let direction: SplitTree<Ghostty.SurfaceView>.NewDirection = switch zone {
+        let direction: SplitTree<TermSurf.SurfaceView>.NewDirection = switch zone {
         case .top: .up
         case .bottom: .down
         case .left: .left
@@ -901,11 +901,11 @@ class BaseTerminalController: NSWindowController,
         if let sourceNode = surfaceTree.root?.node(view: source) {
             // Source is in our tree - same window move
             let treeWithoutSource = surfaceTree.removing(sourceNode)
-            let newTree: SplitTree<Ghostty.SurfaceView>
+            let newTree: SplitTree<TermSurf.SurfaceView>
             do {
                 newTree = try treeWithoutSource.inserting(view: source, at: destination, direction: direction)
             } catch {
-                Ghostty.logger.warning("failed to insert surface during drop: \(error)")
+                TermSurf.logger.warning("failed to insert surface during drop: \(error)")
                 return
             }
             
@@ -919,7 +919,7 @@ class BaseTerminalController: NSWindowController,
         
         // Source is not in our tree - search other windows
         var sourceController: BaseTerminalController?
-        var sourceNode: SplitTree<Ghostty.SurfaceView>.Node?
+        var sourceNode: SplitTree<TermSurf.SurfaceView>.Node?
         for window in NSApp.windows {
             guard let controller = window.windowController as? BaseTerminalController else { continue }
             guard controller !== self else { continue }
@@ -931,18 +931,18 @@ class BaseTerminalController: NSWindowController,
         }
         
         guard let sourceController, let sourceNode else {
-            Ghostty.logger.warning("source surface not found in any window during drop")
+            TermSurf.logger.warning("source surface not found in any window during drop")
             return
         }
         
         // Remove from source controller's tree and add it to our tree.
         // We do this first because if there is an error then we can
         // abort.
-        let newTree: SplitTree<Ghostty.SurfaceView>
+        let newTree: SplitTree<TermSurf.SurfaceView>
         do {
             newTree = try surfaceTree.inserting(view: source, at: destination, direction: direction)
         } catch {
-            Ghostty.logger.warning("failed to insert surface during cross-window drop: \(error)")
+            TermSurf.logger.warning("failed to insert surface during cross-window drop: \(error)")
             return
         }
         
@@ -963,12 +963,12 @@ class BaseTerminalController: NSWindowController,
             moveFocusFrom: focusedSurface)
     }
 
-    func performAction(_ action: String, on surfaceView: Ghostty.SurfaceView) {
+    func performAction(_ action: String, on surfaceView: TermSurf.SurfaceView) {
         guard let surface = surfaceView.surface else { return }
         let len = action.utf8CString.count
         if (len == 0) { return }
         _ = action.withCString { cString in
-            ghostty_surface_binding_action(surface, cString, UInt(len - 1))
+            termsurf_surface_binding_action(surface, cString, UInt(len - 1))
         }
     }
 
@@ -979,7 +979,7 @@ class BaseTerminalController: NSWindowController,
     /// Subclasses should override this to add platform-specific checks and sync appearance.
     func toggleBackgroundOpacity() {
         // Do nothing if config is already fully opaque
-        guard ghostty.config.backgroundOpacity < 1 else { return }
+        guard termsurf.config.backgroundOpacity < 1 else { return }
         
         // Do nothing if in fullscreen (transparency doesn't apply in fullscreen)
         guard let window, !window.styleMask.contains(.fullScreen) else { return }
@@ -1069,7 +1069,7 @@ class BaseTerminalController: NSWindowController,
     // MARK: Clipboard Confirmation
 
     @objc private func onConfirmClipboardRequest(notification: SwiftUI.Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard target == self.focusedSurface else { return }
         guard let surface = target.surface else { return }
 
@@ -1077,14 +1077,14 @@ class BaseTerminalController: NSWindowController,
         guard let window = self.window else { return }
 
         // Check whether we use non-native fullscreen
-        guard let str = notification.userInfo?[Ghostty.Notification.ConfirmClipboardStrKey] as? String else { return }
-        guard let state = notification.userInfo?[Ghostty.Notification.ConfirmClipboardStateKey] as? UnsafeMutableRawPointer? else { return }
-        guard let request = notification.userInfo?[Ghostty.Notification.ConfirmClipboardRequestKey] as? Ghostty.ClipboardRequest else { return }
+        guard let str = notification.userInfo?[TermSurf.Notification.ConfirmClipboardStrKey] as? String else { return }
+        guard let state = notification.userInfo?[TermSurf.Notification.ConfirmClipboardStateKey] as? UnsafeMutableRawPointer? else { return }
+        guard let request = notification.userInfo?[TermSurf.Notification.ConfirmClipboardRequestKey] as? TermSurf.ClipboardRequest else { return }
 
         // If we already have a clipboard confirmation view up, we ignore this request.
         // This shouldn't be possible...
         guard self.clipboardConfirmation == nil else {
-            Ghostty.App.completeClipboardRequest(surface, data: "", state: state, confirmed: true)
+            TermSurf.App.completeClipboardRequest(surface, data: "", state: state, confirmed: true)
             return
         }
 
@@ -1099,7 +1099,7 @@ class BaseTerminalController: NSWindowController,
         window.beginSheet(self.clipboardConfirmation!.window!)
     }
 
-    func clipboardConfirmationComplete(_ action: ClipboardConfirmationView.Action, _ request: Ghostty.ClipboardRequest) {
+    func clipboardConfirmationComplete(_ action: ClipboardConfirmationView.Action, _ request: TermSurf.ClipboardRequest) {
         // End our clipboard confirmation no matter what
         guard let cc = self.clipboardConfirmation else { return }
         self.clipboardConfirmation = nil
@@ -1125,7 +1125,7 @@ class BaseTerminalController: NSWindowController,
                 str = cc.contents
             }
 
-            Ghostty.App.completeClipboardRequest(cc.surface, data: str, state: cc.state, confirmed: true)
+            TermSurf.App.completeClipboardRequest(cc.surface, data: str, state: cc.state, confirmed: true)
         }
     }
 
@@ -1217,7 +1217,7 @@ class BaseTerminalController: NSWindowController,
         // various weirdness with moving surfaces around.
         if let window, window.firstResponder == window, let focusedSurface {
             DispatchQueue.main.async {
-                Ghostty.moveFocus(to: focusedSurface)
+                TermSurf.moveFocus(to: focusedSurface)
             }
         }
 
@@ -1236,7 +1236,7 @@ class BaseTerminalController: NSWindowController,
         let visible = self.window?.occlusionState.contains(.visible) ?? false
         for view in surfaceTree {
             if let surface = view.surface {
-                ghostty_surface_set_occlusion(surface, visible)
+                termsurf_surface_set_occlusion(surface, visible)
             }
         }
     }
@@ -1258,7 +1258,7 @@ class BaseTerminalController: NSWindowController,
 
     @IBAction func close(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.requestClose(surface: surface)
+        termsurf.requestClose(surface: surface)
     }
 
     @IBAction func closeWindow(_ sender: Any) {
@@ -1272,27 +1272,27 @@ class BaseTerminalController: NSWindowController,
 
     @IBAction func splitRight(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.split(surface: surface, direction: GHOSTTY_SPLIT_DIRECTION_RIGHT)
+        termsurf.split(surface: surface, direction: TERMSURF_SPLIT_DIRECTION_RIGHT)
     }
 
     @IBAction func splitLeft(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.split(surface: surface, direction: GHOSTTY_SPLIT_DIRECTION_LEFT)
+        termsurf.split(surface: surface, direction: TERMSURF_SPLIT_DIRECTION_LEFT)
     }
 
     @IBAction func splitDown(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.split(surface: surface, direction: GHOSTTY_SPLIT_DIRECTION_DOWN)
+        termsurf.split(surface: surface, direction: TERMSURF_SPLIT_DIRECTION_DOWN)
     }
 
     @IBAction func splitUp(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.split(surface: surface, direction: GHOSTTY_SPLIT_DIRECTION_UP)
+        termsurf.split(surface: surface, direction: TERMSURF_SPLIT_DIRECTION_UP)
     }
 
     @IBAction func splitZoom(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.splitToggleZoom(surface: surface)
+        termsurf.splitToggleZoom(surface: surface)
     }
 
 
@@ -1322,47 +1322,47 @@ class BaseTerminalController: NSWindowController,
 
     @IBAction func equalizeSplits(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.splitEqualize(surface: surface)
+        termsurf.splitEqualize(surface: surface)
     }
 
     @IBAction func moveSplitDividerUp(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.splitResize(surface: surface, direction: .up, amount: 10)
+        termsurf.splitResize(surface: surface, direction: .up, amount: 10)
     }
 
     @IBAction func moveSplitDividerDown(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.splitResize(surface: surface, direction: .down, amount: 10)
+        termsurf.splitResize(surface: surface, direction: .down, amount: 10)
     }
 
     @IBAction func moveSplitDividerLeft(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.splitResize(surface: surface, direction: .left, amount: 10)
+        termsurf.splitResize(surface: surface, direction: .left, amount: 10)
     }
 
     @IBAction func moveSplitDividerRight(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.splitResize(surface: surface, direction: .right, amount: 10)
+        termsurf.splitResize(surface: surface, direction: .right, amount: 10)
     }
 
-    private func splitMoveFocus(direction: Ghostty.SplitFocusDirection) {
+    private func splitMoveFocus(direction: TermSurf.SplitFocusDirection) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.splitMoveFocus(surface: surface, direction: direction)
+        termsurf.splitMoveFocus(surface: surface, direction: direction)
     }
 
     @IBAction func increaseFontSize(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.changeFontSize(surface: surface, .increase(1))
+        termsurf.changeFontSize(surface: surface, .increase(1))
     }
 
     @IBAction func decreaseFontSize(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.changeFontSize(surface: surface, .decrease(1))
+        termsurf.changeFontSize(surface: surface, .decrease(1))
     }
 
     @IBAction func resetFontSize(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.changeFontSize(surface: surface, .reset)
+        termsurf.changeFontSize(surface: surface, .reset)
     }
 
     @IBAction func toggleCommandPalette(_ sender: Any?) {
@@ -1395,14 +1395,14 @@ class BaseTerminalController: NSWindowController,
 
     @objc func resetTerminal(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.resetTerminal(surface: surface)
+        termsurf.resetTerminal(surface: surface)
     }
 
     private struct DerivedConfig {
-        let macosTitlebarProxyIcon: Ghostty.MacOSTitlebarProxyIcon
+        let macosTitlebarProxyIcon: TermSurf.MacOSTitlebarProxyIcon
         let windowStepResize: Bool
         let focusFollowsMouse: Bool
-        let splitPreserveZoom: Ghostty.Config.SplitPreserveZoom
+        let splitPreserveZoom: TermSurf.Config.SplitPreserveZoom
 
         init() {
             self.macosTitlebarProxyIcon = .visible
@@ -1411,7 +1411,7 @@ class BaseTerminalController: NSWindowController,
             self.splitPreserveZoom = .init()
         }
 
-        init(_ config: Ghostty.Config) {
+        init(_ config: TermSurf.Config) {
             self.macosTitlebarProxyIcon = config.macosTitlebarProxyIcon
             self.windowStepResize = config.windowStepResize
             self.focusFollowsMouse = config.focusFollowsMouse
@@ -1435,7 +1435,7 @@ extension BaseTerminalController: NSMenuItemValidation {
 
     /// Update the surface tree's color scheme only when it actually changes.
     ///
-    /// Calling ``ghostty_surface_set_color_scheme`` triggers
+    /// Calling ``termsurf_surface_set_color_scheme`` triggers
     /// ``syncAppearance(_:)`` via notification,
     /// so we avoid redundant calls.
     func updateColorSchemeForSurfaceTree() {
@@ -1445,18 +1445,18 @@ extension BaseTerminalController: NSMenuItemValidation {
         ///
         /// Using App's effectiveAppearance here to prevent incorrect updates.
         let themeAppearance = NSApplication.shared.effectiveAppearance
-        let scheme: ghostty_color_scheme_e
+        let scheme: termsurf_color_scheme_e
         if themeAppearance.isDark {
-            scheme = GHOSTTY_COLOR_SCHEME_DARK
+            scheme = TERMSURF_COLOR_SCHEME_DARK
         } else {
-            scheme = GHOSTTY_COLOR_SCHEME_LIGHT
+            scheme = TERMSURF_COLOR_SCHEME_LIGHT
         }
         guard scheme != appliedColorScheme else {
             return
         }
         for surfaceView in surfaceTree {
             if let surface = surfaceView.surface {
-                ghostty_surface_set_color_scheme(surface, scheme)
+                termsurf_surface_set_color_scheme(surface, scheme)
             }
         }
         appliedColorScheme = scheme

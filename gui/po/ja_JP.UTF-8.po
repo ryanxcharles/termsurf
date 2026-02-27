@@ -1,12 +1,12 @@
-# Japanese translations for com.mitchellh.ghostty package
-# com.mitchellh.ghostty パッケージに対する和訳.
+# Japanese translations for com.termsurf package
+# com.termsurf パッケージに対する和訳.
 # Copyright (C) 2025 Mitchell Hashimoto, Ghostty contributors
-# This file is distributed under the same license as the com.mitchellh.ghostty package.
+# This file is distributed under the same license as the com.termsurf package.
 # Lon Sagisawa <lon@sagisawa.me>, 2025.
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: com.mitchellh.ghostty\n"
+"Project-Id-Version: com.termsurf\n"
 "Report-Msgid-Bugs-To: m@mitchellh.com\n"
 "POT-Creation-Date: 2026-02-17 23:16+0100\n"
 "PO-Revision-Date: 2026-02-11 12:02+0900\n"
@@ -18,9 +18,9 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: dist/linux/ghostty_nautilus.py:53
-msgid "Open in Ghostty"
-msgstr "Ghosttyで開く"
+#: dist/linux/termsurf_nautilus.py:53
+msgid "Open in TermSurf"
+msgstr "TermSurfで開く"
 
 #: src/apprt/gtk/ui/1.0/clipboard-confirmation-dialog.blp:12
 #: src/apprt/gtk/ui/1.4/clipboard-confirmation-dialog.blp:12
@@ -82,13 +82,13 @@ msgstr "設定ファイルの再読み込み"
 #: src/apprt/gtk/ui/1.2/debug-warning.blp:7
 #: src/apprt/gtk/ui/1.3/debug-warning.blp:6
 msgid ""
-"⚠️ You're running a debug build of Ghostty! Performance will be degraded."
+"⚠️ You're running a debug build of TermSurf! Performance will be degraded."
 msgstr ""
-"⚠️ Ghostty のデバッグビルドを実行しています! パフォーマンスが低下しています。"
+"⚠️ TermSurf のデバッグビルドを実行しています! パフォーマンスが低下しています。"
 
 #: src/apprt/gtk/ui/1.5/inspector-window.blp:5
-msgid "Ghostty: Terminal Inspector"
-msgstr "Ghostty: 端末インスペクター"
+msgid "TermSurf: Terminal Inspector"
+msgstr "TermSurf: 端末インスペクター"
 
 #: src/apprt/gtk/ui/1.2/search-overlay.blp:29
 msgid "Find…"
@@ -238,8 +238,8 @@ msgid "Terminal Inspector"
 msgstr "端末インスペクター"
 
 #: src/apprt/gtk/ui/1.5/window.blp:307 src/apprt/gtk/class/window.zig:1727
-msgid "About Ghostty"
-msgstr "Ghostty について"
+msgid "About TermSurf"
+msgstr "TermSurf について"
 
 #: src/apprt/gtk/ui/1.5/window.blp:312
 msgid "Quit"
@@ -278,8 +278,8 @@ msgstr ""
 "危険な可能性があります。"
 
 #: src/apprt/gtk/class/close_confirmation_dialog.zig:184
-msgid "Quit Ghostty?"
-msgstr "Ghostty を終了しますか?"
+msgid "Quit TermSurf?"
+msgstr "TermSurf を終了しますか?"
 
 #: src/apprt/gtk/class/close_confirmation_dialog.zig:185
 msgid "Close Tab?"
@@ -350,5 +350,5 @@ msgid "Cleared clipboard"
 msgstr "クリップボードを空にしました"
 
 #: src/apprt/gtk/class/window.zig:1708
-msgid "Ghostty Developers"
-msgstr "Ghostty 開発者"
+msgid "TermSurf Developers"
+msgstr "TermSurf 開発者"

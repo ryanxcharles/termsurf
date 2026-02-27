@@ -1,6 +1,6 @@
 # Acceptance Testing
 
-This directory contains an acceptance test suite for ghostty. This works
+This directory contains an acceptance test suite for termsurf. This works
 by running the terminal emulator within a windowing environment, capturing a
 screenshot, and comparing results. We use this to visually verify that
 all rendering conforms to what we expect.
@@ -33,8 +33,8 @@ To run the full test suite against all terminal emulators, use the
 `run-all.sh` script. This optionally takes an `--exec` parameter to run
 the full test suite against only a single terminal emulator.
 
-## Modifying the `ghostty` Binary
+## Modifying the `termsurf` Binary
 
-This test suite expects the `ghostty` binary to be in _this directory_.
+This test suite expects the `termsurf` binary to be in _this directory_.
 You can manually copy it into place. Each time you modify the binary, you
 must rebuild the Docker image.

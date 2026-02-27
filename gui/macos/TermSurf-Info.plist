@@ -42,13 +42,13 @@
 			</array>
 		</dict>
 	</array>
-	<key>GhosttyBuild</key>
+	<key>TermSurfBuild</key>
 	<string></string>
-	<key>GhosttyCommit</key>
+	<key>TermSurfCommit</key>
 	<string></string>
 	<key>LSEnvironment</key>
 	<dict>
-		<key>GHOSTTY_MAC_LAUNCH_SOURCE</key>
+		<key>TERMSURF_MAC_LAUNCH_SOURCE</key>
 		<string>app</string>
 	</dict>
 	<key>MDItemKeywords</key>
@@ -104,7 +104,7 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>com.mitchellh.ghosttySurfaceId</string>
+			<string>com.termsurfSurfaceId</string>
 			<key>UTTypeDescription</key>
 			<string>TermSurf Surface Identifier</string>
 			<key>UTTypeConformsTo</key>

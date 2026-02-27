@@ -1,12 +1,12 @@
-# Russian translations for com.mitchellh.ghostty package
-# Русские переводы для пакета com.mitchellh.ghostty.
+# Russian translations for com.termsurf package
+# Русские переводы для пакета com.termsurf.
 # Copyright (C) 2025 Mitchell Hashimoto, Ghostty contributors
-# This file is distributed under the same license as the com.mitchellh.ghostty package.
+# This file is distributed under the same license as the com.termsurf package.
 # blackzeshi <sergey_zhuzhgov@mail.ru>, 2025.
 # Ivan Bastrakov <bastaynav@proton.me>, 2025.
 msgid ""
 msgstr ""
-"Project-Id-Version: com.mitchellh.ghostty\n"
+"Project-Id-Version: com.termsurf\n"
 "Report-Msgid-Bugs-To: m@mitchellh.com\n"
 "POT-Creation-Date: 2026-02-17 23:16+0100\n"
 "PO-Revision-Date: 2025-09-03 01:50+0300\n"
@@ -19,8 +19,8 @@ msgstr ""
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
 "n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
-#: dist/linux/ghostty_nautilus.py:53
-msgid "Open in Ghostty"
+#: dist/linux/termsurf_nautilus.py:53
+msgid "Open in TermSurf"
 msgstr ""
 
 #: src/apprt/gtk/ui/1.0/clipboard-confirmation-dialog.blp:12
@@ -83,14 +83,14 @@ msgstr "Обновить конфигурацию"
 #: src/apprt/gtk/ui/1.2/debug-warning.blp:7
 #: src/apprt/gtk/ui/1.3/debug-warning.blp:6
 msgid ""
-"⚠️ You're running a debug build of Ghostty! Performance will be degraded."
+"⚠️ You're running a debug build of TermSurf! Performance will be degraded."
 msgstr ""
-"⚠️ Вы запустили отладочную сборку Ghostty! Это может влиять на "
+"⚠️ Вы запустили отладочную сборку TermSurf! Это может влиять на "
 "производительность."
 
 #: src/apprt/gtk/ui/1.5/inspector-window.blp:5
-msgid "Ghostty: Terminal Inspector"
-msgstr "Ghostty: инспектор терминала"
+msgid "TermSurf: Terminal Inspector"
+msgstr "TermSurf: инспектор терминала"
 
 #: src/apprt/gtk/ui/1.2/search-overlay.blp:29
 msgid "Find…"
@@ -238,8 +238,8 @@ msgid "Terminal Inspector"
 msgstr "Инспектор терминала"
 
 #: src/apprt/gtk/ui/1.5/window.blp:307 src/apprt/gtk/class/window.zig:1727
-msgid "About Ghostty"
-msgstr "О Ghostty"
+msgid "About TermSurf"
+msgstr "О TermSurf"
 
 #: src/apprt/gtk/ui/1.5/window.blp:312
 msgid "Quit"
@@ -278,8 +278,8 @@ msgstr ""
 "команды, которые могут быть исполнены."
 
 #: src/apprt/gtk/class/close_confirmation_dialog.zig:184
-msgid "Quit Ghostty?"
-msgstr "Закрыть Ghostty?"
+msgid "Quit TermSurf?"
+msgstr "Закрыть TermSurf?"
 
 #: src/apprt/gtk/class/close_confirmation_dialog.zig:185
 msgid "Close Tab?"
@@ -350,5 +350,5 @@ msgid "Cleared clipboard"
 msgstr "Буфер обмена очищен"
 
 #: src/apprt/gtk/class/window.zig:1708
-msgid "Ghostty Developers"
-msgstr "Разработчики Ghostty"
+msgid "TermSurf Developers"
+msgstr "Разработчики TermSurf"

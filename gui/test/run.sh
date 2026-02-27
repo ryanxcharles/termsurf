@@ -71,11 +71,11 @@ if ! has_func "test_do"; then
 fi
 
 # NOTE: This is a huge hack right now.
-if [ "$ARG_EXEC" = "ghostty" ]; then
-  ARG_EXEC="/tmp/ghostty";
+if [ "$ARG_EXEC" = "termsurf" ]; then
+  ARG_EXEC="/tmp/termsurf";
 
   # Copy so we don't read/write race when running in parallel
-  cp /src/ghostty ${ARG_EXEC}
+  cp /src/termsurf ${ARG_EXEC}
 
   # We build in Nix (maybe). To be sure, we replace the interpreter so
   # it doesn't point to a Nix path. If we don't build in Nix, this should

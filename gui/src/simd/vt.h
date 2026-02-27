@@ -1,30 +1,30 @@
-#if defined(GHOSTTY_SIMD_VT_H_) == defined(HWY_TARGET_TOGGLE)
-#ifdef GHOSTTY_SIMD_VT_H_
-#undef GHOSTTY_SIMD_VT_H_
+#if defined(TERMSURF_SIMD_VT_H_) == defined(HWY_TARGET_TOGGLE)
+#ifdef TERMSURF_SIMD_VT_H_
+#undef TERMSURF_SIMD_VT_H_
 #else
-#define GHOSTTY_SIMD_VT_H_
+#define TERMSURF_SIMD_VT_H_
 #endif
 
 #include <hwy/highway.h>
 
 HWY_BEFORE_NAMESPACE();
-namespace ghostty {
+namespace termsurf {
 namespace HWY_NAMESPACE {
 
 namespace hn = hwy::HWY_NAMESPACE;
 
 }  // namespace HWY_NAMESPACE
-}  // namespace ghostty
+}  // namespace termsurf
 HWY_AFTER_NAMESPACE();
 
 #if HWY_ONCE
 
-namespace ghostty {
+namespace termsurf {
 
 typedef void (*PrintFunc)(const char32_t* chars, size_t count);
 
-}  // namespace ghostty
+}  // namespace termsurf
 
 #endif  // HWY_ONCE
 
-#endif  // GHOSTTY_SIMD_VT_H_
+#endif  // TERMSURF_SIMD_VT_H_

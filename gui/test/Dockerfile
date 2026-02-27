@@ -61,6 +61,6 @@ COPY --from=wraptest /tmp/wraptest/wraptest /usr/bin/wraptest
 
 COPY ./run.sh /entrypoint.sh
 
-COPY ./ghostty /usr/bin/ghostty
+COPY ./termsurf /usr/bin/termsurf
 
 ENTRYPOINT ["/bin/bash"]

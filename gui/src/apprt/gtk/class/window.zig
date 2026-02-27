@@ -30,14 +30,14 @@ const DebugWarning = @import("debug_warning.zig").DebugWarning;
 const CommandPalette = @import("command_palette.zig").CommandPalette;
 const WeakRef = @import("../weak_ref.zig").WeakRef;
 
-const log = std.log.scoped(.gtk_ghostty_window);
+const log = std.log.scoped(.gtk_termsurf_window);
 
 pub const Window = extern struct {
     const Self = @This();
     parent_instance: Parent,
     pub const Parent = adw.ApplicationWindow;
     pub const getGObjectType = gobject.ext.defineClass(Self, .{
-        .name = "GhosttyWindow",
+        .name = "TermSurfWindow",
         .instanceInit = &init,
         .classInit = &Class.init,
         .parent_class = &Class.parent,
@@ -624,13 +624,13 @@ pub const Window = extern struct {
             config.@"background-opacity" >= 1,
         );
 
-        // Apply class to color headerbar if window-theme is set to `ghostty` and
+        // Apply class to color headerbar if window-theme is set to `termsurf` and
         // GTK version is before 4.16. The conditional is because above 4.16
         // we use GTK CSS color variables.
         self.toggleCssClass(
-            "window-theme-ghostty",
+            "window-theme-termsurf",
             !gtk_version.atLeast(4, 16, 0) and
-                config.@"window-theme" == .ghostty,
+                config.@"window-theme" == .termsurf,
         );
 
         // Move the tab bar to the proper location.
@@ -1531,7 +1531,7 @@ pub const Window = extern struct {
             // If the tab overview is open, then we don't close the window
             // because its a rather abrupt experience. This also fixes an
             // issue where dragging out the last tab in the tab overview
-            // won't cause Ghostty to exit.
+            // won't cause TermSurf to exit.
             if (priv.tab_overview.getOpen() != 0) return;
 
             self.as(gtk.Window).close();
@@ -1695,9 +1695,9 @@ pub const Window = extern struct {
         _: ?*glib.Variant,
         self: *Self,
     ) callconv(.c) void {
-        const name = "Ghostty";
-        const icon = "com.mitchellh.ghostty";
-        const website = "https://ghostty.org";
+        const name = "TermSurf";
+        const icon = "com.termsurf";
+        const website = "https://termsurf.com";
 
         if (adw_version.supportsDialogs()) {
             adw.showAboutDialog(
@@ -1705,7 +1705,7 @@ pub const Window = extern struct {
                 "application-name",
                 name,
                 "developer-name",
-                i18n._("Ghostty Developers"),
+                i18n._("TermSurf Developers"),
                 "application-icon",
                 icon,
                 "version",
@@ -1724,7 +1724,7 @@ pub const Window = extern struct {
                 "logo-icon-name",
                 icon,
                 "title",
-                i18n._("About Ghostty"),
+                i18n._("About TermSurf"),
                 "version",
                 build_config.version_string.ptr,
                 "website",
@@ -1960,13 +1960,13 @@ pub const Window = extern struct {
         self.toggleCommandPalette();
     }
 
-    /// Toggle the Ghostty inspector for the active surface.
+    /// Toggle the TermSurf inspector for the active surface.
     fn toggleInspector(self: *Self) void {
         const surface = self.getActiveSurface() orelse return;
         _ = surface.controlInspector(.toggle);
     }
 
-    /// React to a GTK action requesting that the Ghostty inspector be toggled.
+    /// React to a GTK action requesting that the TermSurf inspector be toggled.
     fn actionToggleInspector(
         _: *gio.SimpleAction,
         _: ?*glib.Variant,

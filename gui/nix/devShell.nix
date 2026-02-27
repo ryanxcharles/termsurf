@@ -86,7 +86,7 @@
   };
 in
   mkShell {
-    name = "ghostty";
+    name = "termsurf";
     packages =
       [
         # For builds
@@ -200,7 +200,7 @@ in
         poop
       ];
 
-    # This should be set onto the rpath of the ghostty binary if you want
+    # This should be set onto the rpath of the termsurf binary if you want
     # it to be "portable" across the system.
     LD_LIBRARY_PATH = ld_library_path;
     GI_TYPELIB_PATH = gi_typelib_path;

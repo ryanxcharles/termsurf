@@ -5,7 +5,7 @@ const build_options = @import("terminal_options");
 /// The shapes are always based on the W3C supported cursor styles so we
 /// can have a cross platform list.
 //
-// Must be kept in sync with ghostty_cursor_shape_e
+// Must be kept in sync with termsurf_cursor_shape_e
 pub const MouseShape = enum(c_int) {
     default,
     context_menu,
@@ -50,14 +50,14 @@ pub const MouseShape = enum(c_int) {
     /// Make this a valid gobject if we're in a GTK environment.
     pub const getGObjectType = gtk: {
         switch (build_options.artifact) {
-            .ghostty => {},
+            .termsurf => {},
             .lib => break :gtk void,
         }
 
         break :gtk switch (@import("../build_config.zig").app_runtime) {
             .gtk => @import("gobject").ext.defineEnum(
                 MouseShape,
-                .{ .name = "GhosttyMouseShape" },
+                .{ .name = "TermSurfMouseShape" },
             ),
 
             .none => void,

@@ -1,13 +1,13 @@
 //
 //  NSPasteboardTests.swift
-//  GhosttyTests
+//  TermSurfTests
 //
 //  Tests for NSPasteboard.PasteboardType MIME type conversion.
 //
 
 import Testing
 import AppKit
-@testable import Ghostty
+@testable import TermSurf
 
 struct NSPasteboardTypeExtensionTests {
     /// Test text/plain MIME type converts to .string

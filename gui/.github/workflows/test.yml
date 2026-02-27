@@ -19,10 +19,10 @@ jobs:
       - build-dist
       - build-examples
       - build-flatpak
-      - build-libghostty-vt
-      - build-libghostty-vt-macos
+      - build-libtermsurf-vt
+      - build-libtermsurf-vt-macos
       - build-linux
-      - build-linux-libghostty
+      - build-linux-libtermsurf
       - build-nix
       - build-macos
       - build-macos-freetype
@@ -90,7 +90,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Build Benchmarks
@@ -133,7 +133,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Build Example
@@ -166,7 +166,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Build with Flatpak
@@ -200,7 +200,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Build with Snap
@@ -209,7 +209,7 @@ jobs:
             zig build \
             -Dsnap
 
-  build-libghostty-vt:
+  build-libtermsurf-vt:
     strategy:
       matrix:
         target:
@@ -244,7 +244,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Build
@@ -254,7 +254,7 @@ jobs:
             -Dsimd=false
 
   # lib-vt requires macOS runner for macOS/iOS builds becauase it requires the `apple_sdk` path
-  build-libghostty-vt-macos:
+  build-libtermsurf-vt-macos:
     strategy:
       matrix:
         target: [aarch64-macos, x86_64-macos, aarch64-ios]
@@ -270,7 +270,7 @@ jobs:
           determinate: true
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Xcode Select
@@ -308,13 +308,13 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Test Build
         run: nix develop -c zig build
 
-  build-linux-libghostty:
+  build-linux-libtermsurf:
     runs-on: namespace-profile-ghostty-md
     needs: test
     env:
@@ -337,10 +337,10 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
-      - name: Build Libghostty
+      - name: Build Libtermsurf
         run: nix develop -c zig build -Dapp-runtime=none
 
   build-nix:
@@ -370,26 +370,26 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Test release NixOS package build
-        run: nix build .#ghostty-releasefast
+        run: nix build .#termsurf-releasefast
 
       - name: Check version
-        run: result/bin/ghostty +version | grep -q '.ReleaseFast'
+        run: result/bin/termsurf +version | grep -q '.ReleaseFast'
 
       - name: Check to see if the binary has been stripped
-        run: nm result/bin/.ghostty-wrapped 2>&1 | grep -q 'no symbols'
+        run: nm result/bin/.termsurf-wrapped 2>&1 | grep -q 'no symbols'
 
       - name: Test debug NixOS package build
-        run: nix build .#ghostty-debug
+        run: nix build .#termsurf-debug
 
       - name: Check version
-        run: result/bin/ghostty +version | grep -q '.Debug'
+        run: result/bin/termsurf +version | grep -q '.Debug'
 
       - name: Check to see if the binary has not been stripped
-        run: nm result/bin/.ghostty-wrapped 2>&1 | grep -q 'main_ghostty.main'
+        run: nm result/bin/.termsurf-wrapped 2>&1 | grep -q 'main_termsurf.main'
 
   build-dist:
     runs-on: namespace-profile-ghostty-md
@@ -416,14 +416,14 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Build and Check Source Tarball
         run: |
           rm -rf zig-out/dist
           nix develop -c zig build distcheck
-          cp zig-out/dist/*.tar.gz ghostty-source.tar.gz
+          cp zig-out/dist/*.tar.gz termsurf-source.tar.gz
 
       - name: Upload artifact
         id: upload-artifact
@@ -431,7 +431,7 @@ jobs:
         with:
           name: source-tarball
           path: |-
-            ghostty-source.tar.gz
+            termsurf-source.tar.gz
 
   trigger-snap:
     if: github.event_name != 'pull_request'
@@ -482,7 +482,7 @@ jobs:
           determinate: true
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Xcode Select
@@ -495,22 +495,22 @@ jobs:
         id: deps
         run: nix build -L .#deps && echo "deps=$(readlink ./result)" >> $GITHUB_OUTPUT
 
-      # GhosttyKit is the framework that is built from Zig for our native
+      # TermSurfKit is the framework that is built from Zig for our native
       # Mac app to access.
-      - name: Build GhosttyKit
+      - name: Build TermSurfKit
         run: nix develop -c zig build --system ${{ steps.deps.outputs.deps }} -Demit-macos-app=false
 
       # The native app is built with native Xcode tooling. This also does
       # codesigning. IMPORTANT: this must NOT run in a Nix environment.
       # Nix breaks xcodebuild so this has to be run outside.
-      - name: Build Ghostty.app
-        run: cd macos && xcodebuild -target Ghostty
+      - name: Build TermSurf.app
+        run: cd macos && xcodebuild -target TermSurf
 
       # Build the iOS target without code signing just to verify it works.
-      - name: Build Ghostty iOS
+      - name: Build TermSurf iOS
         run: |
           cd macos
-          xcodebuild -target Ghostty-iOS "CODE_SIGNING_ALLOWED=NO"
+          xcodebuild -target TermSurf-iOS "CODE_SIGNING_ALLOWED=NO"
 
   build-macos-freetype:
     runs-on: namespace-profile-ghostty-macos-tahoe
@@ -525,7 +525,7 @@ jobs:
           determinate: true
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Xcode Select
@@ -645,7 +645,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: test
@@ -687,7 +687,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Test
@@ -735,7 +735,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Test
@@ -770,7 +770,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Test Sentry Build
@@ -790,7 +790,7 @@ jobs:
           determinate: true
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Xcode Select
@@ -834,7 +834,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Test
@@ -861,7 +861,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: true
           useDaemon: false # sometimes fails on short jobs
@@ -891,7 +891,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: true
           useDaemon: false # sometimes fails on short jobs
@@ -920,7 +920,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: true
           useDaemon: false # sometimes fails on short jobs
@@ -947,7 +947,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: true
           useDaemon: false # sometimes fails on short jobs
@@ -974,7 +974,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: true
           useDaemon: false # sometimes fails on short jobs
@@ -1001,7 +1001,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: true
           useDaemon: false # sometimes fails on short jobs
@@ -1033,7 +1033,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: true
           useDaemon: false # sometimes fails on short jobs
@@ -1060,7 +1060,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: true
           useDaemon: false # sometimes fails on short jobs
@@ -1097,7 +1097,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Test ${{ matrix.pkg }} Build
@@ -1124,7 +1124,7 @@ jobs:
       - name: Extract tarball
         run: |
           mkdir dist
-          tar --verbose --extract --strip-components 1 --directory dist --file ghostty-source.tar.gz
+          tar --verbose --extract --strip-components 1 --directory dist --file termsurf-source.tar.gz
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
@@ -1159,7 +1159,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: valgrind deps
@@ -1182,7 +1182,7 @@ jobs:
   #         - "15.0"
   #   timeout-minutes: 10
   #   steps:
-  #     - name: Checkout Ghostty
+  #     - name: Checkout TermSurf
   #       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
   #
   #     - name: Start SSH
@@ -1229,4 +1229,4 @@ jobs:
   #       run: |
   #         cd $GITHUB_WORKSPACE
   #         zig build
-  #         ./zig-out/bin/ghostty +version
+  #         ./zig-out/bin/termsurf +version

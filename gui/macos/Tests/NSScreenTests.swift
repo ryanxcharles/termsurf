@@ -1,13 +1,13 @@
 //
 //  WindowPositionTests.swift
-//  GhosttyTests
+//  TermSurfTests
 //
 //  Tests for window positioning coordinate conversion functionality.
 //
 
 import Testing
 import AppKit
-@testable import Ghostty
+@testable import TermSurf
 
 struct NSScreenExtensionTests {
     /// Test positive coordinate conversion from top-left to bottom-left

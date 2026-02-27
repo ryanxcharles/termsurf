@@ -12,7 +12,7 @@ zig-out/
 macos/
 
 # produced by Icon Composer on macOS
-images/Ghostty.icon/icon.json
+images/TermSurf.icon/icon.json
 
 # website dev run
 website/.next

@@ -1,14 +1,14 @@
-# Contributing to Ghostty
+# Contributing to TermSurf
 
-This document describes the process of contributing to Ghostty. It is intended
+This document describes the process of contributing to TermSurf. It is intended
 for anyone considering opening an **issue**, **discussion** or **pull request**.
-For people who are interested in developing Ghostty and technical details behind
-it, please check out our ["Developing Ghostty"](HACKING.md) document as well.
+For people who are interested in developing TermSurf and technical details behind
+it, please check out our ["Developing TermSurf"](HACKING.md) document as well.
 
 > [!NOTE]
 >
 > I'm sorry for the wall of text. I'm not trying to be difficult and I do
-> appreciate your contributions. Ghostty is a personal project for me that
+> appreciate your contributions. TermSurf is a personal project for me that
 > I maintain in my free time. If you're expecting me to dedicate my personal
 > time to fixing bugs, maintaining features, and reviewing code, I do kindly
 > ask you spend a few minutes reading this document. Thank you. ❤️
@@ -26,7 +26,7 @@ that understanding. Be sure to read the [AI Usage Policy](AI_POLICY.md).
 
 ## AI Usage
 
-The Ghostty project has strict rules for AI usage. Please see
+The TermSurf project has strict rules for AI usage. Please see
 the [AI Usage Policy](AI_POLICY.md). **This is very important.**
 
 ## First-Time Contributors
@@ -69,10 +69,10 @@ Issues that are extra friendly to new contributors are tagged with
 
 ["contributor friendly"]: https://github.com/ghostty-org/ghostty/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22contributor%20friendly%22
 
-### I'd like to translate Ghostty to my language
+### I'd like to translate TermSurf to my language
 
 We have written a [Translator's Guide](po/README_TRANSLATORS.md) for
-everyone interested in contributing translations to Ghostty.
+everyone interested in contributing translations to TermSurf.
 Translations usually do not need to go through the process of issue triage
 and you can submit pull requests directly, although please make sure that
 our [Style Guide](po/README_TRANSLATORS.md#style-guide) is followed before
@@ -135,13 +135,13 @@ Open an [Q&A discussion], or join our [Discord Server] and ask away in the
 `#help` forum channel.
 
 Do not use the `#terminals` or `#development` channels to ask for help —
-those are for general discussion about terminals and Ghostty development
+those are for general discussion about terminals and TermSurf development
 respectively. If you do ask a question there, you will be redirected to
 `#help` instead.
 
 > [!NOTE]
 > If your question is about a missing feature, please open a discussion under
-> the ["Feature Requests, Ideas"] category. If Ghostty is behaving
+> the ["Feature Requests, Ideas"] category. If TermSurf is behaving
 > unexpectedly, use the ["Issue Triage"] category.
 >
 > The "Q&A" category is strictly for other kinds of discussions and do not
@@ -159,10 +159,10 @@ respectively. If you do ask a question there, you will be redirected to
 
 ### Issues are Actionable
 
-The Ghostty [issue tracker](https://github.com/ghostty-org/ghostty/issues)
+The TermSurf [issue tracker](https://github.com/ghostty-org/ghostty/issues)
 is for _actionable items_.
 
-Unlike some other projects, Ghostty **does not use the issue tracker for
+Unlike some other projects, TermSurf **does not use the issue tracker for
 discussion or feature requests**. Instead, we use GitHub
 [discussions](https://github.com/ghostty-org/ghostty/discussions) for that.
 Once a discussion reaches a point where a well-understood, actionable

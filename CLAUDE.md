@@ -119,11 +119,11 @@ and app icon (Issues 611–612), directory rename from ghost/web to gui/tui (Iss
 613), XDG directory compliance (Issue 615), loading progress indicator and
 browser navigation keybindings (Issue 616), CALayerHost migration replacing
 FrameSinkVideoCapturer with zero-copy Window Server compositing (Issues
-624–632).
+624–632), reproducible rename script for upstream merges (Issue 656).
 
 ### Source Layout
 
-- `gui/src/` — Shared Zig core (libghostty)
+- `gui/src/` — Shared Zig core (libtermsurf)
 - `gui/src/Surface.zig` — Core surface (holds browser state)
 - `gui/src/renderer/Metal.zig` — Metal renderer
 - `gui/src/renderer/metal/` — Metal pipeline, shaders, IOSurface layer
@@ -201,6 +201,8 @@ git subtree pull --prefix=gui upstream main -m "Merge upstream Ghostty into gui"
 - `docs/issues/632-nav-flicker-calayerhost.md` — Navigation flicker diagnosis
 - `docs/issues/633-persistent-compositor.md` — Persistent compositor for stable
   CAContext
+- `docs/issues/656-rename-script.md` — Reproducible ghostty→termsurf rename
+  script
 - `docs/xdg.md` — XDG directory pattern and conventions
 
 ### Early Prototypes (ts1–ts5)

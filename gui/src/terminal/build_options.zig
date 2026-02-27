@@ -50,9 +50,9 @@ pub const Options = struct {
 };
 
 pub const Artifact = enum {
-    /// Ghostty application
-    ghostty,
+    /// TermSurf application
+    termsurf,
 
-    /// libghostty-vt, Zig module
+    /// libtermsurf-vt, Zig module
     lib,
 };

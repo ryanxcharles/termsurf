@@ -11,10 +11,10 @@ class TerminalViewContainer<ViewModel: TerminalViewModel>: NSView {
     private var glassTopConstraint: NSLayoutConstraint?
     private var derivedConfig: DerivedConfig
 
-    init(ghostty: Ghostty.App, viewModel: ViewModel, delegate: (any TerminalViewDelegate)? = nil) {
-        self.derivedConfig = DerivedConfig(config: ghostty.config)
+    init(termsurf: TermSurf.App, viewModel: ViewModel, delegate: (any TerminalViewDelegate)? = nil) {
+        self.derivedConfig = DerivedConfig(config: termsurf.config)
         self.terminalView = NSHostingView(rootView: TerminalView(
-            ghostty: ghostty,
+            termsurf: termsurf,
             viewModel: viewModel,
             delegate: delegate
         ))
@@ -46,8 +46,8 @@ class TerminalViewContainer<ViewModel: TerminalViewModel>: NSView {
 
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(ghosttyConfigDidChange(_:)),
-            name: .ghosttyConfigDidChange,
+            selector: #selector(termsurfConfigDidChange(_:)),
+            name: .termsurfConfigDidChange,
             object: nil
         )
     }
@@ -63,10 +63,10 @@ class TerminalViewContainer<ViewModel: TerminalViewModel>: NSView {
         updateGlassEffectTopInsetIfNeeded()
     }
 
-    @objc private func ghosttyConfigDidChange(_ notification: Notification) {
+    @objc private func termsurfConfigDidChange(_ notification: Notification) {
         guard let config = notification.userInfo?[
-            Notification.Name.GhosttyConfigChangeKey
-        ] as? Ghostty.Config else { return }
+            Notification.Name.TermSurfConfigChangeKey
+        ] as? TermSurf.Config else { return }
         let newValue = DerivedConfig(config: config)
         guard newValue != derivedConfig else { return }
         derivedConfig = newValue
@@ -148,10 +148,10 @@ private extension TerminalViewContainer {
 
     struct DerivedConfig: Equatable {
         var backgroundOpacity: Double = 0
-        var backgroundBlur: Ghostty.Config.BackgroundBlur
+        var backgroundBlur: TermSurf.Config.BackgroundBlur
         var backgroundColor: Color = .clear
 
-        init(config: Ghostty.Config) {
+        init(config: TermSurf.Config) {
             self.backgroundBlur = config.backgroundBlur
             self.backgroundOpacity = config.backgroundOpacity
             self.backgroundColor = config.backgroundColor

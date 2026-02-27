@@ -2,7 +2,7 @@ import Cocoa
 import CoreGraphics
 import Carbon
 import OSLog
-import GhosttyKit
+import TermSurfKit
 
 // Manages the event tap to monitor global events, currently only used for
 // global keybindings.
@@ -133,16 +133,16 @@ fileprivate func cgEventFlagsChangedHandler(
     // that processes all local events.
     guard !NSApp.isActive else { return result }
 
-    // We need an app delegate to get the Ghostty app instance
+    // We need an app delegate to get the TermSurf app instance
     guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return result }
-    guard let ghostty = appDelegate.ghostty.app else { return result }
+    guard let termsurf = appDelegate.termsurf.app else { return result }
 
     // We need an NSEvent for our logic below
     guard let event: NSEvent = .init(cgEvent: cgEvent) else { return result }
 
-    // Build our event input and call ghostty
-    let key_ev = event.ghosttyKeyEvent(GHOSTTY_ACTION_PRESS)
-    if (ghostty_app_key(ghostty, key_ev)) {
+    // Build our event input and call termsurf
+    let key_ev = event.termsurfKeyEvent(TERMSURF_ACTION_PRESS)
+    if (termsurf_app_key(termsurf, key_ev)) {
         GlobalEventTap.logger.info("global key event handled event=\(event)")
         return nil
     }

@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const args = @import("args.zig");
-const Action = @import("ghostty.zig").Action;
+const Action = @import("termsurf.zig").Action;
 
 // Note that this options struct doesn't implement the `help` decl like other
 // actions. That is because the help command is special and wants to handle its
@@ -15,7 +15,7 @@ pub const Options = struct {
     }
 };
 
-/// The `help` command shows general help about Ghostty. Recognized as either
+/// The `help` command shows general help about TermSurf. Recognized as either
 /// `-h, `--help`, or like other actions `+help`.
 ///
 /// You can also specify `--help` or `-h` along with any action such as

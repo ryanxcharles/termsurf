@@ -3,14 +3,14 @@ import SwiftUI
 import UserNotifications
 import OSLog
 import Sparkle
-import GhosttyKit
+import TermSurfKit
 import ServiceManagement
 
 class AppDelegate: NSObject,
                     ObservableObject,
                     NSApplicationDelegate,
                     UNUserNotificationCenterDelegate,
-                    GhosttyAppDelegate
+                    TermSurfAppDelegate
 {
     // The application logger. We should probably move this at some point to a dedicated
     // class/struct but for now it lives here! 🤷‍♂️
@@ -19,7 +19,7 @@ class AppDelegate: NSObject,
         category: String(describing: AppDelegate.self)
     )
 
-    /// Various menu items so that we can programmatically sync the keyboard shortcut with the Ghostty config
+    /// Various menu items so that we can programmatically sync the keyboard shortcut with the TermSurf config
     @IBOutlet private var menuAbout: NSMenuItem?
     @IBOutlet private var menuServices: NSMenu?
     @IBOutlet private var menuCheckForUpdates: NSMenuItem?
@@ -94,11 +94,11 @@ class AppDelegate: NSObject,
     /// seconds since the process was launched.
     private var applicationLaunchTime: TimeInterval = 0
 
-    /// This is the current configuration from the Ghostty configuration that we need.
+    /// This is the current configuration from the TermSurf configuration that we need.
     private var derivedConfig: DerivedConfig = DerivedConfig()
 
-    /// The ghostty global state. Only one per process.
-    let ghostty: Ghostty.App
+    /// The termsurf global state. Only one per process.
+    let termsurf: TermSurf.App
 
     /// The global undo manager for app-level state such as window restoration.
     lazy var undoManager = ExpiringUndoManager()
@@ -114,7 +114,7 @@ class AppDelegate: NSObject,
             
         case .pendingRestore(let state):
             let controller = QuickTerminalController(
-                ghostty,
+                termsurf,
                 position: derivedConfig.quickTerminalPosition,
                 baseConfig: state.baseConfig,
                 restorationState: state
@@ -124,7 +124,7 @@ class AppDelegate: NSObject,
             
         case .uninitialized:
             let controller = QuickTerminalController(
-                ghostty,
+                termsurf,
                 position: derivedConfig.quickTerminalPosition,
                 restorationState: nil
             )
@@ -157,7 +157,7 @@ class AppDelegate: NSObject,
     @Published private(set) var appIcon: NSImage? = nil
 
     override init() {
-        // Register the xpc-gateway LaunchAgent before Ghostty.App() connects
+        // Register the xpc-gateway LaunchAgent before TermSurf.App() connects
         // to it. SMAppService tells launchd about the bundled agent plist so
         // the gateway auto-starts on demand (Issue 653).
 #if DEBUG
@@ -177,13 +177,13 @@ class AppDelegate: NSObject,
         }
 
 #if DEBUG
-        ghostty = Ghostty.App(configPath: ProcessInfo.processInfo.environment["GHOSTTY_CONFIG_PATH"])
+        termsurf = TermSurf.App(configPath: ProcessInfo.processInfo.environment["TERMSURF_CONFIG_PATH"])
 #else
-        ghostty = Ghostty.App()
+        termsurf = TermSurf.App()
 #endif
         super.init()
 
-        ghostty.delegate = self
+        termsurf.delegate = self
     }
 
     //MARK: - NSApplicationDelegate
@@ -222,7 +222,7 @@ class AppDelegate: NSObject,
         }
 
         // Initial config loading
-        ghosttyConfigDidChange(config: ghostty.config)
+        termsurfConfigDidChange(config: termsurf.config)
 
         // Start our update checker.
         updateController.startUpdater()
@@ -230,7 +230,7 @@ class AppDelegate: NSObject,
         // Register our service provider. This must happen after everything is initialized.
         NSApp.servicesProvider = ServiceProvider()
 
-        // This registers the Ghostty => Services menu to exist.
+        // This registers the TermSurf => Services menu to exist.
         NSApp.servicesMenu = menuServices
 
         // Setup a local event monitor for app-level keyboard shortcuts. See
@@ -254,37 +254,37 @@ class AppDelegate: NSObject,
         )
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(ghosttyConfigDidChange(_:)),
-            name: .ghosttyConfigDidChange,
+            selector: #selector(termsurfConfigDidChange(_:)),
+            name: .termsurfConfigDidChange,
             object: nil
         )
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(ghosttyBellDidRing(_:)),
-            name: .ghosttyBellDidRing,
+            selector: #selector(termsurfBellDidRing(_:)),
+            name: .termsurfBellDidRing,
             object: nil
         )
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(ghosttyNewWindow(_:)),
-            name: Ghostty.Notification.ghosttyNewWindow,
+            selector: #selector(termsurfNewWindow(_:)),
+            name: TermSurf.Notification.termsurfNewWindow,
             object: nil)
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(ghosttyNewTab(_:)),
-            name: Ghostty.Notification.ghosttyNewTab,
+            selector: #selector(termsurfNewTab(_:)),
+            name: TermSurf.Notification.termsurfNewTab,
             object: nil)
 
         // Configure user notifications
         let actions = [
-            UNNotificationAction(identifier: Ghostty.userNotificationActionShow, title: "Show")
+            UNNotificationAction(identifier: TermSurf.userNotificationActionShow, title: "Show")
         ]
 
         let center = UNUserNotificationCenter.current()
 
         center.setNotificationCategories([
             UNNotificationCategory(
-                identifier: Ghostty.userNotificationCategory,
+                identifier: TermSurf.userNotificationCategory,
                 actions: actions,
                 intentIdentifiers: [],
                 options: [.customDismissAction]
@@ -292,21 +292,21 @@ class AppDelegate: NSObject,
         ])
         center.delegate = self
 
-        // Observe our appearance so we can report the correct value to libghostty.
+        // Observe our appearance so we can report the correct value to libtermsurf.
         self.appearanceObserver = NSApplication.shared.observe(
             \.effectiveAppearance,
              options: [.new, .initial]
         ) { _, change in
             guard let appearance = change.newValue else { return }
-            guard let app = self.ghostty.app else { return }
-            let scheme: ghostty_color_scheme_e
+            guard let app = self.termsurf.app else { return }
+            let scheme: termsurf_color_scheme_e
             if (appearance.isDark) {
-                scheme = GHOSTTY_COLOR_SCHEME_DARK
+                scheme = TERMSURF_COLOR_SCHEME_DARK
             } else {
-                scheme = GHOSTTY_COLOR_SCHEME_LIGHT
+                scheme = TERMSURF_COLOR_SCHEME_LIGHT
             }
 
-            ghostty_app_set_color_scheme(app, scheme)
+            termsurf_app_set_color_scheme(app, scheme)
         }
 
         // Setup our menu
@@ -315,7 +315,7 @@ class AppDelegate: NSObject,
         // Setup signal handlers
         setupSignals()
 
-        switch Ghostty.launchSource {
+        switch TermSurf.launchSource {
         case .app:
             // Don't have to do anything.
             break
@@ -361,7 +361,7 @@ class AppDelegate: NSObject,
             //   - if we're restoring from persisted state
             if TerminalController.all.isEmpty && derivedConfig.initialWindow {
                 undoManager.disableUndoRegistration()
-                _ = TerminalController.newWindow(ghostty)
+                _ = TerminalController.newWindow(termsurf)
                 undoManager.enableUndoRegistration()
             }
         }
@@ -394,7 +394,7 @@ class AppDelegate: NSObject,
 
         // If the user is shutting down, restarting, or logging out, we don't confirm quit.
         why: if let event = NSAppleEventManager.shared().currentAppleEvent {
-            // If all Ghostty windows are in the background (i.e. you Cmd-Q from the Cmd-Tab
+            // If all TermSurf windows are in the background (i.e. you Cmd-Q from the Cmd-Tab
             // view), then this is null. I don't know why (pun intended) but we have to
             // guard against it.
             guard let keyword = AEKeyword("why?") else { break why }
@@ -417,13 +417,13 @@ class AppDelegate: NSObject,
         }
 
         // If our app says we don't need to confirm, we can exit now.
-        if (!ghostty.needsConfirmQuit) { return .terminateNow }
+        if (!termsurf.needsConfirmQuit) { return .terminateNow }
 
         // We have some visible window. Show an app-wide modal to confirm quitting.
         let alert = NSAlert()
-        alert.messageText = "Quit Ghostty?"
+        alert.messageText = "Quit TermSurf?"
         alert.informativeText = "All terminal sessions will be terminated."
-        alert.addButton(withTitle: "Close Ghostty")
+        alert.addButton(withTitle: "Close TermSurf")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
         switch (alert.runModal()) {
@@ -461,12 +461,12 @@ class AppDelegate: NSObject,
         guard applicationHasBecomeActive else { return true }
 
         // No visible windows, open a new one.
-        _ = TerminalController.newWindow(ghostty)
+        _ = TerminalController.newWindow(termsurf)
         return false
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
-        // Ghostty will validate as well but we can avoid creating an entirely new
+        // TermSurf will validate as well but we can avoid creating an entirely new
         // surface by doing our own validation here. We can also show a useful error
         // this way.
         
@@ -478,7 +478,7 @@ class AppDelegate: NSObject,
         var requiresConfirm: Bool = false
         
         // Initialize the surface config which will be used to create the tab or window for the opened file.
-        var config = Ghostty.SurfaceConfiguration()
+        var config = TermSurf.SurfaceConfiguration()
         
         if (isDirectory.boolValue) {
             // When opening a directory, check the configuration to decide
@@ -497,7 +497,7 @@ class AppDelegate: NSObject,
             // profile/rc files for the shell, which is super important on macOS
             // due to things like Homebrew. Instead, we set the command to
             // `<filename>; exit` which is what Terminal and iTerm2 do.
-            config.initialInput = "\(Ghostty.Shell.quote(filename)); exit\n"
+            config.initialInput = "\(TermSurf.Shell.quote(filename)); exit\n"
             
             // For commands executed directly, we want to ensure we wait after exit
             // because in most cases scripts don't block on exit and we don't want
@@ -514,7 +514,7 @@ class AppDelegate: NSObject,
             // may want to show this as a sheet on the focused window (especially if we're
             // opening a tab). I'm not sure.
             let alert = NSAlert()
-            alert.messageText = "Allow Ghostty to execute \"\(filename)\"?"
+            alert.messageText = "Allow TermSurf to execute \"\(filename)\"?"
             alert.addButton(withTitle: "Allow")
             alert.addButton(withTitle: "Cancel")
             alert.alertStyle = .warning
@@ -527,14 +527,14 @@ class AppDelegate: NSObject,
             }
         }
         
-        switch ghostty.config.macosDockDropBehavior {
+        switch termsurf.config.macosDockDropBehavior {
         case .new_tab:
             _ = TerminalController.newTab(
-                ghostty,
+                termsurf,
                 from: TerminalController.preferredParent?.window,
                 withBaseConfig: config
             )
-        case .new_window: _ = TerminalController.newWindow(ghostty, withBaseConfig: config)
+        case .new_window: _ = TerminalController.newWindow(termsurf, withBaseConfig: config)
         }
         
         return true
@@ -561,8 +561,8 @@ class AppDelegate: NSObject,
         let sigusr2 = DispatchSource.makeSignalSource(signal: SIGUSR2, queue: .main)
         sigusr2.setEventHandler { [weak self] in
             guard let self else { return }
-            Ghostty.logger.info("reloading configuration in response to SIGUSR2")
-            self.ghostty.reloadConfig()
+            TermSurf.logger.info("reloading configuration in response to SIGUSR2")
+            self.termsurf.reloadConfig()
         }
 
         // The signal source starts unactivated, so we have to resume it once
@@ -617,9 +617,9 @@ class AppDelegate: NSObject,
         self.menuFindParent?.setImageIfDesired(systemSymbolName: "text.page.badge.magnifyingglass")
     }
 
-    /// Sync all of our menu item keyboard shortcuts with the Ghostty configuration.
-    private func syncMenuShortcuts(_ config: Ghostty.Config) {
-        guard ghostty.readiness == .ready else { return }
+    /// Sync all of our menu item keyboard shortcuts with the TermSurf configuration.
+    private func syncMenuShortcuts(_ config: TermSurf.Config) {
+        guard termsurf.readiness == .ready else { return }
 
         syncMenuShortcut(config, action: "check_for_updates", menuItem: self.menuCheckForUpdates)
         syncMenuShortcut(config, action: "open_config", menuItem: self.menuOpenConfig)
@@ -677,7 +677,7 @@ class AppDelegate: NSObject,
         syncMenuShortcut(config, action: "toggle_secure_input", menuItem: self.menuSecureInput)
 
         // This menu item is NOT synced with the configuration because it disables macOS
-        // global fullscreen keyboard shortcut. The shortcut in the Ghostty config will continue
+        // global fullscreen keyboard shortcut. The shortcut in the TermSurf config will continue
         // to work but it won't be reflected in the menu item.
         //
         // syncMenuShortcut(config, action: "toggle_fullscreen", menuItem: self.menuToggleFullScreen)
@@ -687,8 +687,8 @@ class AppDelegate: NSObject,
     }
 
     /// Syncs a single menu shortcut for the given action. The action string is the same
-    /// action string used for the Ghostty configuration.
-    private func syncMenuShortcut(_ config: Ghostty.Config, action: String, menuItem: NSMenuItem?) {
+    /// action string used for the TermSurf configuration.
+    private func syncMenuShortcut(_ config: TermSurf.Config, action: String, menuItem: NSMenuItem?) {
         guard let menu = menuItem else { return }
         guard let shortcut = config.keyboardShortcut(for: action) else {
             // No shortcut, clear the menu item
@@ -733,18 +733,18 @@ class AppDelegate: NSObject,
         guard NSApp.mainWindow == nil else { return event }
 
         // If this event as-is would result in a key binding then we send it.
-        if let app = ghostty.app {
-            var ghosttyEvent = event.ghosttyKeyEvent(GHOSTTY_ACTION_PRESS)
+        if let app = termsurf.app {
+            var termsurfEvent = event.termsurfKeyEvent(TERMSURF_ACTION_PRESS)
             let match = (event.characters ?? "").withCString { ptr in
-                ghosttyEvent.text = ptr
-                if !ghostty_app_key_is_binding(app, ghosttyEvent) {
+                termsurfEvent.text = ptr
+                if !termsurf_app_key_is_binding(app, termsurfEvent) {
                     return false
                 }
 
-                return ghostty_app_key(app, ghosttyEvent)
+                return termsurf_app_key(app, termsurfEvent)
             }
 
-            // If the key was handled by Ghostty we stop the event chain. If
+            // If the key was handled by TermSurf we stop the event chain. If
             // the key wasn't handled then we let it fall through and continue
             // processing. This is important because some bindings may have no
             // affect at this scope.
@@ -760,15 +760,15 @@ class AppDelegate: NSObject,
         }
 
         // If we reach this point then we try to process the key event
-        // through the Ghostty key mechanism.
+        // through the TermSurf key mechanism.
 
-        // Ghostty must be loaded
-        guard let ghostty = self.ghostty.app else { return event }
+        // TermSurf must be loaded
+        guard let termsurf = self.termsurf.app else { return event }
 
-        // Build our event input and call ghostty
-        if (ghostty_app_key(ghostty, event.ghosttyKeyEvent(GHOSTTY_ACTION_PRESS))) {
+        // Build our event input and call termsurf
+        if (termsurf_app_key(termsurf, event.termsurfKeyEvent(TERMSURF_ACTION_PRESS))) {
             // The key was used so we want to stop it from going to our Mac app
-            Ghostty.logger.debug("local key event handled event=\(event)")
+            TermSurf.logger.debug("local key event handled event=\(event)")
             return nil
         }
 
@@ -784,33 +784,33 @@ class AppDelegate: NSObject,
         self.menuQuickTerminal?.state = if (quickController.visible) { .on } else { .off }
     }
 
-    @objc private func ghosttyConfigDidChange(_ notification: Notification) {
+    @objc private func termsurfConfigDidChange(_ notification: Notification) {
         // We only care if the configuration is a global configuration, not a surface one.
         guard notification.object == nil else { return }
 
         // Get our managed configuration object out
         guard let config = notification.userInfo?[
-            Notification.Name.GhosttyConfigChangeKey
-        ] as? Ghostty.Config else { return }
+            Notification.Name.TermSurfConfigChangeKey
+        ] as? TermSurf.Config else { return }
 
-        ghosttyConfigDidChange(config: config)
+        termsurfConfigDidChange(config: config)
     }
 
-    @objc private func ghosttyBellDidRing(_ notification: Notification) {
-        if (ghostty.config.bellFeatures.contains(.system)) {
+    @objc private func termsurfBellDidRing(_ notification: Notification) {
+        if (termsurf.config.bellFeatures.contains(.system)) {
             NSSound.beep()
         }
 
-        if (ghostty.config.bellFeatures.contains(.attention)) {
+        if (termsurf.config.bellFeatures.contains(.attention)) {
             // Bounce the dock icon if we're not focused.
             NSApp.requestUserAttention(.informationalRequest)
 
             // Handle setting the dock badge based on permissions
-            ghosttyUpdateBadgeForBell()
+            termsurfUpdateBadgeForBell()
         }
     }
 
-    private func ghosttyUpdateBadgeForBell() {
+    private func termsurfUpdateBadgeForBell() {
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { settings in
             switch settings.authorizationStatus {
@@ -849,24 +849,24 @@ class AppDelegate: NSObject,
         }
     }
 
-    @objc private func ghosttyNewWindow(_ notification: Notification) {
-        let configAny = notification.userInfo?[Ghostty.Notification.NewSurfaceConfigKey]
-        let config = configAny as? Ghostty.SurfaceConfiguration
-        _ = TerminalController.newWindow(ghostty, withBaseConfig: config)
+    @objc private func termsurfNewWindow(_ notification: Notification) {
+        let configAny = notification.userInfo?[TermSurf.Notification.NewSurfaceConfigKey]
+        let config = configAny as? TermSurf.SurfaceConfiguration
+        _ = TerminalController.newWindow(termsurf, withBaseConfig: config)
     }
 
-    @objc private func ghosttyNewTab(_ notification: Notification) {
-        guard let surfaceView = notification.object as? Ghostty.SurfaceView else { return }
+    @objc private func termsurfNewTab(_ notification: Notification) {
+        guard let surfaceView = notification.object as? TermSurf.SurfaceView else { return }
         guard let window = surfaceView.window else { return }
 
         // We only want to listen to new tabs if the focused parent is
         // a regular terminal controller.
         guard window.windowController is TerminalController else { return }
 
-        let configAny = notification.userInfo?[Ghostty.Notification.NewSurfaceConfigKey]
-        let config = configAny as? Ghostty.SurfaceConfiguration
+        let configAny = notification.userInfo?[TermSurf.Notification.NewSurfaceConfigKey]
+        let config = configAny as? TermSurf.SurfaceConfiguration
 
-        _ = TerminalController.newTab(ghostty, from: window, withBaseConfig: config)
+        _ = TerminalController.newTab(termsurf, from: window, withBaseConfig: config)
     }
 
     private func setDockBadge(_ label: String? = "•") {
@@ -874,7 +874,7 @@ class AppDelegate: NSObject,
         NSApp.dockTile.display()
     }
 
-    private func ghosttyConfigDidChange(config: Ghostty.Config) {
+    private func termsurfConfigDidChange(config: TermSurf.Config) {
         // Update the config we need to store
         self.derivedConfig = DerivedConfig(config)
 
@@ -902,7 +902,7 @@ class AppDelegate: NSObject,
                 autoUpdate == .download
             /**
              To test `auto-update` easily, uncomment the line below and
-             delete `SUEnableAutomaticChecks` in Ghostty-Info.plist.
+             delete `SUEnableAutomaticChecks` in TermSurf-Info.plist.
 
              Note: When `auto-update = download`, you may need to
              `Clean Build Folder` if a background install has already begun.
@@ -938,8 +938,8 @@ class AppDelegate: NSObject,
         }
 
         // We need to handle our global event tap depending on if there are global
-        // events that we care about in Ghostty.
-        if (ghostty_app_has_global_keybinds(ghostty.app!)) {
+        // events that we care about in TermSurf.
+        if (termsurf_app_has_global_keybinds(termsurf.app!)) {
             if (timeSinceLaunch > 5) {
                 // If the process has been running for awhile we enable right away
                 // because no windows are likely to pop up.
@@ -961,14 +961,14 @@ class AppDelegate: NSObject,
     }
 
     /// Sync the appearance of our app with the theme specified in the config.
-    private func syncAppearance(config: Ghostty.Config) {
-        NSApplication.shared.appearance = .init(ghosttyConfig: config)
+    private func syncAppearance(config: TermSurf.Config) {
+        NSApplication.shared.appearance = .init(termsurfConfig: config)
     }
 
     // Using AppIconActor to ensure this work
     // happens synchronously in the background
     @AppIconActor
-    private func updateAppIcon(from config: Ghostty.Config) async  {
+    private func updateAppIcon(from config: TermSurf.Config) async  {
         var appIcon: NSImage?
         var appIconName: String? = config.macosIcon.rawValue
 
@@ -991,7 +991,7 @@ class AppDelegate: NSObject,
             appIconName = nil
             guard let ghostColor = config.macosIconGhostColor else { break }
             guard let screenColors = config.macosIconScreenColor else { break }
-            guard let icon = ColorizedGhosttyIcon(
+            guard let icon = ColorizedTermSurfIcon(
                 screenColors: screenColors,
                 ghostColor: ghostColor,
                 frame: config.macosIconFrame
@@ -1008,8 +1008,8 @@ class AppDelegate: NSObject,
 
         // Only change the icon if it has actually changed from the current one,
         // or if the app build has changed (e.g. after an update that reset the icon)
-        let cachedIconName = UserDefaults.standard.string(forKey: "CustomGhosttyIcon")
-        let cachedIconBuild = UserDefaults.standard.string(forKey: "CustomGhosttyIconBuild")
+        let cachedIconName = UserDefaults.standard.string(forKey: "CustomTermSurfIcon")
+        let cachedIconBuild = UserDefaults.standard.string(forKey: "CustomTermSurfIconBuild")
         let currentBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
         let buildChanged = cachedIconBuild != currentBuild
 
@@ -1038,8 +1038,8 @@ class AppDelegate: NSObject,
             NSApplication.shared.applicationIconImage = newIcon
         }
 
-        UserDefaults.standard.set(appIconName, forKey: "CustomGhosttyIcon")
-        UserDefaults.standard.set(currentBuild, forKey: "CustomGhosttyIconBuild")
+        UserDefaults.standard.set(appIconName, forKey: "CustomTermSurfIcon")
+        UserDefaults.standard.set(currentBuild, forKey: "CustomTermSurfIconBuild")
     }
 
     //MARK: - Restorable State
@@ -1052,7 +1052,7 @@ class AppDelegate: NSObject,
     func application(_ app: NSApplication, willEncodeRestorableState coder: NSCoder) {
         Self.logger.debug("application will save window state")
         
-        guard ghostty.config.windowSaveState != "never" else { return }
+        guard termsurf.config.windowSaveState != "never" else { return }
         
         // Encode our quick terminal state if we have it.
         switch quickTerminalControllerState {
@@ -1072,7 +1072,7 @@ class AppDelegate: NSObject,
         Self.logger.debug("application will restore window state")
         
         // Decode our quick terminal state.
-        if ghostty.config.windowSaveState != "never",
+        if termsurf.config.windowSaveState != "never",
             let state = QuickTerminalRestorableState(coder: coder) {
             quickTerminalControllerState = .pendingRestore(state)
         }
@@ -1085,7 +1085,7 @@ class AppDelegate: NSObject,
         didReceive: UNNotificationResponse,
         withCompletionHandler: () -> Void
     ) {
-        ghostty.handleUserNotification(response: didReceive)
+        termsurf.handleUserNotification(response: didReceive)
         withCompletionHandler()
     }
 
@@ -1094,14 +1094,14 @@ class AppDelegate: NSObject,
         willPresent: UNNotification,
         withCompletionHandler: (UNNotificationPresentationOptions) -> Void
     ) {
-        let shouldPresent = ghostty.shouldPresentNotification(notification: willPresent)
+        let shouldPresent = termsurf.shouldPresentNotification(notification: willPresent)
         let options: UNNotificationPresentationOptions = shouldPresent ? [.banner, .sound] : []
         withCompletionHandler(options)
     }
 
-    //MARK: - GhosttyAppDelegate
+    //MARK: - TermSurfAppDelegate
 
-    func findSurface(forUUID uuid: UUID) -> Ghostty.SurfaceView? {
+    func findSurface(forUUID uuid: UUID) -> TermSurf.SurfaceView? {
         for c in TerminalController.all {
             for view in c.surfaceTree {
                 if view.id == uuid {
@@ -1126,7 +1126,7 @@ class AppDelegate: NSObject,
 
     //MARK: - Global State
 
-    func setSecureInput(_ mode: Ghostty.SetSecureInput) {
+    func setSecureInput(_ mode: TermSurf.SetSecureInput) {
         let input = SecureInput.shared
         switch (mode) {
         case .on:
@@ -1145,11 +1145,11 @@ class AppDelegate: NSObject,
     //MARK: - IB Actions
 
     @IBAction func openConfig(_ sender: Any?) {
-        Ghostty.App.openConfig()
+        TermSurf.App.openConfig()
     }
 
     @IBAction func reloadConfig(_ sender: Any?) {
-        ghostty.reloadConfig()
+        termsurf.reloadConfig()
     }
 
     @IBAction func checkForUpdates(_ sender: Any?) {
@@ -1158,12 +1158,12 @@ class AppDelegate: NSObject,
     }
 
     @IBAction func newWindow(_ sender: Any?) {
-        _ = TerminalController.newWindow(ghostty)
+        _ = TerminalController.newWindow(termsurf)
     }
 
     @IBAction func newTab(_ sender: Any?) {
         _ = TerminalController.newTab(
-            ghostty,
+            termsurf,
             from: TerminalController.preferredParent?.window
         )
     }
@@ -1178,7 +1178,7 @@ class AppDelegate: NSObject,
     }
 
     @IBAction func showHelp(_ sender: Any) {
-        guard let url = URL(string: "https://ghostty.org/docs") else { return }
+        guard let url = URL(string: "https://termsurf.com/docs") else { return }
         NSWorkspace.shared.open(url)
     }
 
@@ -1190,12 +1190,12 @@ class AppDelegate: NSObject,
         quickController.toggle()
     }
 
-    /// Toggles visibility of all Ghosty Terminal windows. When hidden, activates Ghostty as the frontmost application
+    /// Toggles visibility of all Ghosty Terminal windows. When hidden, activates TermSurf as the frontmost application
     @IBAction func toggleVisibility(_ sender: Any) {
         // If we have focus, then we hide all windows.
         if NSApp.isActive {
             // Toggle visibility doesn't do anything if the focused window is native
-            // fullscreen. This is only relevant if Ghostty is active.
+            // fullscreen. This is only relevant if TermSurf is active.
             guard let keyWindow = NSApp.keyWindow,
                   !keyWindow.styleMask.contains(.fullScreen) else { return }
 
@@ -1240,7 +1240,7 @@ class AppDelegate: NSObject,
             self.quickTerminalPosition = .top
         }
 
-        init(_ config: Ghostty.Config) {
+        init(_ config: TermSurf.Config) {
             self.initialWindow = config.initialWindow
             self.shouldQuitAfterLastWindowClosed = config.shouldQuitAfterLastWindowClosed
             self.quickTerminalPosition = config.quickTerminalPosition
@@ -1322,7 +1322,7 @@ extension AppDelegate {
                 let alert = NSAlert()
                 alert.messageText = "Failed to Set Default Terminal"
                 alert.informativeText = """
-                Ghostty could not be set as the default terminal application.
+                TermSurf could not be set as the default terminal application.
 
                 Error: \(error.localizedDescription)
                 """

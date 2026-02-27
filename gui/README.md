@@ -2,16 +2,16 @@
 <h1>
 <p align="center">
   <img src="https://github.com/user-attachments/assets/fe853809-ba8b-400b-83ab-a9a0da25be8a" alt="Logo" width="128">
-  <br>Ghostty
+  <br>TermSurf
 </h1>
   <p align="center">
     Fast, native, feature-rich terminal emulator pushing modern features.
     <br />
     <a href="#about">About</a>
     ·
-    <a href="https://ghostty.org/download">Download</a>
+    <a href="https://termsurf.com/download">Download</a>
     ·
-    <a href="https://ghostty.org/docs">Documentation</a>
+    <a href="https://termsurf.com/docs">Documentation</a>
     ·
     <a href="CONTRIBUTING.md">Contributing</a>
     ·
@@ -21,43 +21,43 @@
 
 ## About
 
-Ghostty is a terminal emulator that differentiates itself by being
+TermSurf is a terminal emulator that differentiates itself by being
 fast, feature-rich, and native. While there are many excellent terminal
 emulators available, they all force you to choose between speed,
-features, or native UIs. Ghostty provides all three.
+features, or native UIs. TermSurf provides all three.
 
-In all categories, I am not trying to claim that Ghostty is the
+In all categories, I am not trying to claim that TermSurf is the
 best (i.e. the fastest, most feature-rich, or most native). But
-Ghostty is competitive in all three categories and Ghostty
+TermSurf is competitive in all three categories and TermSurf
 doesn't make you choose between them.
 
-Ghostty also intends to push the boundaries of what is possible with a
+TermSurf also intends to push the boundaries of what is possible with a
 terminal emulator by exposing modern, opt-in features that enable CLI tool
 developers to build more feature rich, interactive applications.
 
-While aiming for this ambitious goal, our first step is to make Ghostty
+While aiming for this ambitious goal, our first step is to make TermSurf
 one of the best fully standards compliant terminal emulator, remaining
 compatible with all existing shells and software while supporting all of
-the latest terminal innovations in the ecosystem. You can use Ghostty
+the latest terminal innovations in the ecosystem. You can use TermSurf
 as a drop-in replacement for your existing terminal emulator.
 
-For more details, see [About Ghostty](https://ghostty.org/docs/about).
+For more details, see [About TermSurf](https://termsurf.com/docs/about).
 
 ## Download
 
-See the [download page](https://ghostty.org/download) on the Ghostty website.
+See the [download page](https://termsurf.com/download) on the TermSurf website.
 
 ## Documentation
 
-See the [documentation](https://ghostty.org/docs) on the Ghostty website.
+See the [documentation](https://termsurf.com/docs) on the TermSurf website.
 
 ## Contributing and Developing
 
-If you have any ideas, issues, etc. regarding Ghostty, or would like to
-contribute to Ghostty through pull requests, please check out our
-["Contributing to Ghostty"](CONTRIBUTING.md) document. Those who would like
-to get involved with Ghostty's development as well should also read the
-["Developing Ghostty"](HACKING.md) document for more technical details.
+If you have any ideas, issues, etc. regarding TermSurf, or would like to
+contribute to TermSurf through pull requests, please check out our
+["Contributing to TermSurf"](CONTRIBUTING.md) document. Those who would like
+to get involved with TermSurf's development as well should also read the
+["Developing TermSurf"](HACKING.md) document for more technical details.
 
 ## Roadmap and Status
 
@@ -70,7 +70,7 @@ The high-level ambitious plan for the project, in order:
 |  3  | Basic customizability -- fonts, bg colors, etc.           |   ✅   |
 |  4  | Richer windowing features -- multi-window, tabbing, panes |   ✅   |
 |  5  | Native Platform Experiences (i.e. Mac Preference Panel)   |   ⚠️   |
-|  6  | Cross-platform `libghostty` for Embeddable Terminals      |   ⚠️   |
+|  6  | Cross-platform `libtermsurf` for Embeddable Terminals      |   ⚠️   |
 |  7  | Windows Terminals (including PowerShell, Cmd, WSL)        |   ❌   |
 |  N  | Fancy features (to be expanded upon later)                |   ❌   |
 
@@ -78,25 +78,25 @@ Additional details for each step in the big roadmap below:
 
 #### Standards-Compliant Terminal Emulation
 
-Ghostty implements enough control sequences to be used by hundreds of
+TermSurf implements enough control sequences to be used by hundreds of
 testers daily for over the past year. Further, we've done a
 [comprehensive xterm audit](https://github.com/ghostty-org/ghostty/issues/632)
-comparing Ghostty's behavior to xterm and building a set of conformance
+comparing TermSurf's behavior to xterm and building a set of conformance
 test cases.
 
-We believe Ghostty is one of the most compliant terminal emulators available.
+We believe TermSurf is one of the most compliant terminal emulators available.
 
 Terminal behavior is partially a de jure standard
 (i.e. [ECMA-48](https://ecma-international.org/publications-and-standards/standards/ecma-48/))
 but mostly a de facto standard as defined by popular terminal emulators
-worldwide. Ghostty takes the approach that our behavior is defined by
+worldwide. TermSurf takes the approach that our behavior is defined by
 (1) standards, if available, (2) xterm, if the feature exists, (3)
-other popular terminals, in that order. This defines what the Ghostty project
+other popular terminals, in that order. This defines what the TermSurf project
 views as a "standard."
 
 #### Competitive Performance
 
-We need better benchmarks to continuously verify this, but Ghostty is
+We need better benchmarks to continuously verify this, but TermSurf is
 generally in the same performance category as the other highest performing
 terminal emulators.
 
@@ -126,7 +126,7 @@ splits.
 
 #### Native Platform Experiences
 
-Ghostty is a cross-platform terminal emulator but we don't aim for a
+TermSurf is a cross-platform terminal emulator but we don't aim for a
 least-common-denominator experience. There is a large, shared core written
 in Zig but we do a lot of platform-native things:
 
@@ -138,60 +138,60 @@ in Zig but we do a lot of platform-native things:
 There are more improvements to be made. The macOS settings window is still
 a work-in-progress. Similar improvements will follow with Linux.
 
-#### Cross-platform `libghostty` for Embeddable Terminals
+#### Cross-platform `libtermsurf` for Embeddable Terminals
 
-In addition to being a standalone terminal emulator, Ghostty is a
+In addition to being a standalone terminal emulator, TermSurf is a
 C-compatible library for embedding a fast, feature-rich terminal emulator
-in any 3rd party project. This library is called `libghostty`.
+in any 3rd party project. This library is called `libtermsurf`.
 
-Due to the scope of this project, we're breaking libghostty down into
-separate actually libraries, starting with `libghostty-vt`. The goal of
+Due to the scope of this project, we're breaking libtermsurf down into
+separate actually libraries, starting with `libtermsurf-vt`. The goal of
 this project is to focus on parsing terminal sequences and maintaining
 terminal state. This is covered in more detail in this
-[blog post](https://mitchellh.com/writing/libghostty-is-coming).
+[blog post](https://mitchellh.com/writing/libtermsurf-is-coming).
 
-`libghostty-vt` is already available and usable today for Zig and C and
+`libtermsurf-vt` is already available and usable today for Zig and C and
 is compatible for macOS, Linux, Windows, and WebAssembly. At the time of
 writing this, the API isn't stable yet and we haven't tagged an official
-release, but the core logic is well proven (since Ghostty uses it) and
+release, but the core logic is well proven (since TermSurf uses it) and
 we're working hard on it now.
 
-The ultimate goal is not hypothetical! The macOS app is a `libghostty` consumer.
+The ultimate goal is not hypothetical! The macOS app is a `libtermsurf` consumer.
 The macOS app is a native Swift app developed in Xcode and `main()` is
-within Swift. The Swift app links to `libghostty` and uses the C API to
+within Swift. The Swift app links to `libtermsurf` and uses the C API to
 render terminals.
 
 ## Crash Reports
 
-Ghostty has a built-in crash reporter that will generate and save crash
-reports to disk. The crash reports are saved to the `$XDG_STATE_HOME/ghostty/crash`
+TermSurf has a built-in crash reporter that will generate and save crash
+reports to disk. The crash reports are saved to the `$XDG_STATE_HOME/termsurf/crash`
 directory. If `$XDG_STATE_HOME` is not set, the default is `~/.local/state`.
 **Crash reports are _not_ automatically sent anywhere off your machine.**
 
-Crash reports are only generated the next time Ghostty is started after a
-crash. If Ghostty crashes and you want to generate a crash report, you must
-restart Ghostty at least once. You should see a message in the log that a
+Crash reports are only generated the next time TermSurf is started after a
+crash. If TermSurf crashes and you want to generate a crash report, you must
+restart TermSurf at least once. You should see a message in the log that a
 crash report was generated.
 
 > [!NOTE]
 >
-> Use the `ghostty +crash-report` CLI command to get a list of available crash
-> reports. A future version of Ghostty will make the contents of the crash
+> Use the `termsurf +crash-report` CLI command to get a list of available crash
+> reports. A future version of TermSurf will make the contents of the crash
 > reports more easily viewable through the CLI and GUI.
 
 Crash reports end in the `.ghosttycrash` extension. The crash reports are in
 [Sentry envelope format](https://develop.sentry.dev/sdk/envelopes/). You can
 upload these to your own Sentry account to view their contents, but the format
 is also publicly documented so any other available tools can also be used.
-The `ghostty +crash-report` CLI command can be used to list any crash reports.
-A future version of Ghostty will show you the contents of the crash report
+The `termsurf +crash-report` CLI command can be used to list any crash reports.
+A future version of TermSurf will show you the contents of the crash report
 directly in the terminal.
 
-To send the crash report to the Ghostty project, you can use the following
+To send the crash report to the TermSurf project, you can use the following
 CLI command using the [Sentry CLI](https://docs.sentry.io/cli/installation/):
 
 ```shell-session
-SENTRY_DSN=https://e914ee84fd895c4fe324afa3e53dac76@o4507352570920960.ingest.us.sentry.io/4507850923638784 sentry-cli send-envelope --raw <path to ghostty crash>
+SENTRY_DSN=https://e914ee84fd895c4fe324afa3e53dac76@o4507352570920960.ingest.us.sentry.io/4507850923638784 sentry-cli send-envelope --raw <path to termsurf crash>
 ```
 
 > [!WARNING]

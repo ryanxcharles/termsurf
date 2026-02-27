@@ -7,7 +7,7 @@
 DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
 
 # We always copy the bin in case it was rebuilt
-cp ${DIR}/../zig-out/bin/ghostty ${DIR}/
+cp ${DIR}/../zig-out/bin/termsurf ${DIR}/
 
 # Unix shortcut to just execute ./run-host for each one. We can do
 # this less esoterically if we ever wanted.

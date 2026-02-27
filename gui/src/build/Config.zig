@@ -35,8 +35,8 @@ simd: bool = true,
 i18n: bool = true,
 wasm_shared: bool = true,
 
-/// Ghostty exe properties
-exe_entrypoint: ExeEntrypoint = .ghostty,
+/// TermSurf exe properties
+exe_entrypoint: ExeEntrypoint = .termsurf,
 version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
 
 /// Binary properties
@@ -204,7 +204,7 @@ pub fn init(b: *std.Build, appVersion: []const u8) !Config {
     };
 
     //---------------------------------------------------------------
-    // Ghostty Exe Properties
+    // TermSurf Exe Properties
 
     const version_string = b.option(
         []const u8,
@@ -219,8 +219,8 @@ pub fn init(b: *std.Build, appVersion: []const u8) !Config {
     else version: {
         const app_version = try std.SemanticVersion.parse(appVersion);
 
-        // Is ghostty a dependency? If so, skip git detection.
-        // @src().file won't resolve from b.build_root unless ghostty
+        // Is termsurf a dependency? If so, skip git detection.
+        // @src().file won't resolve from b.build_root unless termsurf
         // is the project being built.
         b.build_root.handle.access(@src().file, .{}) catch break :version .{
             .major = app_version.major,
@@ -367,7 +367,7 @@ pub fn init(b: *std.Build, appVersion: []const u8) !Config {
     config.emit_terminfo = b.option(
         bool,
         "emit-terminfo",
-        "Install Ghostty terminfo source file",
+        "Install TermSurf terminfo source file",
     ) orelse switch (target.result.os.tag) {
         .windows => true,
         else => switch (optimize) {
@@ -379,7 +379,7 @@ pub fn init(b: *std.Build, appVersion: []const u8) !Config {
     config.emit_termcap = b.option(
         bool,
         "emit-termcap",
-        "Install Ghostty termcap file",
+        "Install TermSurf termcap file",
     ) orelse switch (optimize) {
         .Debug => true,
         .ReleaseSafe, .ReleaseFast, .ReleaseSmall => false,
@@ -388,7 +388,7 @@ pub fn init(b: *std.Build, appVersion: []const u8) !Config {
     config.emit_themes = b.option(
         bool,
         "emit-themes",
-        "Install bundled iTerm2-Color-Schemes Ghostty themes",
+        "Install bundled iTerm2-Color-Schemes TermSurf themes",
     ) orelse true;
 
     config.emit_webdata = b.option(
@@ -509,10 +509,10 @@ pub fn addOptions(self: *const Config, step: *std.Build.Step.Options) !void {
 }
 
 /// Returns the build options for the terminal module. This assumes a
-/// Ghostty executable being built. Callers should modify this as needed.
+/// TermSurf executable being built. Callers should modify this as needed.
 pub fn terminalOptions(self: *const Config) TerminalBuildOptions {
     return .{
-        .artifact = .ghostty,
+        .artifact = .termsurf,
         .simd = self.simd,
         .oniguruma = true,
         .c_abi = false,
@@ -617,10 +617,10 @@ pub fn genericMacOSTarget(
 ///
 /// Therefore, main.zig uses this to switch between the different entrypoints.
 pub const ExeEntrypoint = enum {
-    ghostty,
+    termsurf,
     helpgen,
-    mdgen_ghostty_1,
-    mdgen_ghostty_5,
+    mdgen_termsurf_1,
+    mdgen_termsurf_5,
     webgen_config,
     webgen_actions,
     webgen_commands,

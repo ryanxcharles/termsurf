@@ -64,19 +64,19 @@ jobs:
       - name: Extract build info
         id: extract_build_info
         run: |
-          GHOSTTY_BUILD=$(git rev-list --count HEAD)
-          GHOSTTY_COMMIT=$(git rev-parse --short HEAD)
-          GHOSTTY_COMMIT_LONG=$(git rev-parse HEAD)
-          echo "build=$GHOSTTY_BUILD" >> $GITHUB_OUTPUT
-          echo "commit=$GHOSTTY_COMMIT" >> $GITHUB_OUTPUT
-          echo "commit_long=$GHOSTTY_COMMIT_LONG" >> $GITHUB_OUTPUT
+          TERMSURF_BUILD=$(git rev-list --count HEAD)
+          TERMSURF_COMMIT=$(git rev-parse --short HEAD)
+          TERMSURF_COMMIT_LONG=$(git rev-parse HEAD)
+          echo "build=$TERMSURF_BUILD" >> $GITHUB_OUTPUT
+          echo "commit=$TERMSURF_COMMIT" >> $GITHUB_OUTPUT
+          echo "commit_long=$TERMSURF_COMMIT_LONG" >> $GITHUB_OUTPUT
           cat $GITHUB_OUTPUT
 
   source-tarball:
     runs-on: namespace-profile-ghostty-md
     needs: [setup]
     env:
-      GHOSTTY_VERSION: ${{ needs.setup.outputs.version }}
+      TERMSURF_VERSION: ${{ needs.setup.outputs.version }}
       ZIG_LOCAL_CACHE_DIR: /zig/local-cache
       ZIG_GLOBAL_CACHE_DIR: /zig/global-cache
     steps:
@@ -95,41 +95,41 @@ jobs:
 
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Create Tarball
         run: |
           rm -rf zig-out/dist
           nix develop -c zig build distcheck
-          cp zig-out/dist/ghostty-${GHOSTTY_VERSION}.tar.gz .
-          cp zig-out/dist/ghostty-${GHOSTTY_VERSION}.tar.gz ghostty-source.tar.gz
+          cp zig-out/dist/termsurf-${TERMSURF_VERSION}.tar.gz .
+          cp zig-out/dist/termsurf-${TERMSURF_VERSION}.tar.gz termsurf-source.tar.gz
 
       - name: Sign Tarball
         run: |
           echo -n "${{ secrets.MINISIGN_KEY }}" > minisign.key
           echo -n "${{ secrets.MINISIGN_PASSWORD }}" > minisign.password
-          nix develop -c minisign -S -m "ghostty-${GHOSTTY_VERSION}.tar.gz" -s minisign.key < minisign.password
-          nix develop -c minisign -S -m "ghostty-source.tar.gz" -s minisign.key < minisign.password
+          nix develop -c minisign -S -m "termsurf-${TERMSURF_VERSION}.tar.gz" -s minisign.key < minisign.password
+          nix develop -c minisign -S -m "termsurf-source.tar.gz" -s minisign.key < minisign.password
 
       - name: Upload artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: source-tarball
           path: |-
-            ghostty-${{ env.GHOSTTY_VERSION }}.tar.gz
-            ghostty-${{ env.GHOSTTY_VERSION }}.tar.gz.minisig
-            ghostty-source.tar.gz
-            ghostty-source.tar.gz.minisig
+            termsurf-${{ env.TERMSURF_VERSION }}.tar.gz
+            termsurf-${{ env.TERMSURF_VERSION }}.tar.gz.minisig
+            termsurf-source.tar.gz
+            termsurf-source.tar.gz.minisig
 
   build-macos:
     needs: [setup]
     runs-on: namespace-profile-ghostty-macos-tahoe
     timeout-minutes: 90
     env:
-      GHOSTTY_VERSION: ${{ needs.setup.outputs.version }}
-      GHOSTTY_BUILD: ${{ needs.setup.outputs.build }}
-      GHOSTTY_COMMIT: ${{ needs.setup.outputs.commit }}
+      TERMSURF_VERSION: ${{ needs.setup.outputs.version }}
+      TERMSURF_BUILD: ${{ needs.setup.outputs.build }}
+      TERMSURF_COMMIT: ${{ needs.setup.outputs.commit }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -139,7 +139,7 @@ jobs:
           determinate: true
       - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
         with:
-          name: ghostty
+          name: termsurf
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: XCode Select
@@ -158,23 +158,23 @@ jobs:
           unzip sparkle.zip
           echo "$(pwd)/bin" >> $GITHUB_PATH
 
-      # GhosttyKit is the framework that is built from Zig for our native
+      # TermSurfKit is the framework that is built from Zig for our native
       # Mac app to access. Build this in release mode.
-      - name: Build GhosttyKit
+      - name: Build TermSurfKit
         run: |
           nix develop -c \
             zig build \
             -Doptimize=ReleaseFast \
             -Demit-macos-app=false \
-            -Dversion-string=${GHOSTTY_VERSION}
+            -Dversion-string=${TERMSURF_VERSION}
 
       # The native app is built with native XCode tooling. This also does
       # codesigning. IMPORTANT: this must NOT run in a Nix environment.
       # Nix breaks xcodebuild so this has to be run outside.
-      - name: Build Ghostty.app
+      - name: Build TermSurf.app
         run: |
           cd macos
-          xcodebuild -target Ghostty -configuration Release
+          xcodebuild -target TermSurf -configuration Release
 
       # Add all our metadata to Info.plist so we can reference it later.
       - name: Update Info.plist
@@ -182,13 +182,13 @@ jobs:
           SPARKLE_KEY_PUB: ${{ secrets.PROD_MACOS_SPARKLE_KEY_PUB }}
         run: |
           # Version Info
-          /usr/libexec/PlistBuddy -c "Set :GhosttyCommit $GHOSTTY_COMMIT" "macos/build/Release/Ghostty.app/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GHOSTTY_BUILD" "macos/build/Release/Ghostty.app/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $GHOSTTY_VERSION" "macos/build/Release/Ghostty.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :TermSurfCommit $TERMSURF_COMMIT" "macos/build/Release/TermSurf.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $TERMSURF_BUILD" "macos/build/Release/TermSurf.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $TERMSURF_VERSION" "macos/build/Release/TermSurf.app/Contents/Info.plist"
 
           # Updater
-          /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_KEY_PUB" "macos/build/Release/Ghostty.app/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Delete :SUEnableAutomaticChecks" "macos/build/Release/Ghostty.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_KEY_PUB" "macos/build/Release/TermSurf.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Delete :SUEnableAutomaticChecks" "macos/build/Release/TermSurf.app/Contents/Info.plist"
 
       - name: Codesign app bundle
         env:
@@ -210,18 +210,18 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" build.keychain
 
           # Codesign Sparkle. Some notes here:
-          #   - The XPC services aren't used since we don't sandbox Ghostty,
+          #   - The XPC services aren't used since we don't sandbox TermSurf,
           #     but since they're part of the build, they still need to be
           #     codesigned.
           #   - The binaries in the "Versions" folders need to NOT be symlinks.
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Ghostty.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc"
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Ghostty.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc"
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Ghostty.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Ghostty.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/Ghostty.app/Contents/Frameworks/Sparkle.framework"
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/TermSurf.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc"
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/TermSurf.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc"
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/TermSurf.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/TermSurf.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime "macos/build/Release/TermSurf.app/Contents/Frameworks/Sparkle.framework"
 
           # Codesign the app bundle
-          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime --entitlements "macos/Ghostty.entitlements" macos/build/Release/Ghostty.app
+          /usr/bin/codesign --verbose -f -s "$MACOS_CERTIFICATE_NAME" -o runtime --entitlements "macos/TermSurf.entitlements" macos/build/Release/TermSurf.app
 
       - name: Create DMG
         env:
@@ -230,9 +230,9 @@ jobs:
           npm install --global create-dmg
           create-dmg \
             --identity="$MACOS_CERTIFICATE_NAME" \
-            ./macos/build/Release/Ghostty.app \
+            ./macos/build/Release/TermSurf.app \
             ./
-          mv ./Ghostty*.dmg ./Ghostty.dmg
+          mv ./TermSurf*.dmg ./TermSurf.dmg
 
       - name: "Notarize DMG"
         env:
@@ -252,30 +252,30 @@ jobs:
           # characteristics. Visit the Notarization docs for more information and strategies on how to optimize it if
           # you're curious
           echo "Notarize dmg"
-          xcrun notarytool submit "Ghostty.dmg" --keychain-profile "notarytool-profile" --wait
+          xcrun notarytool submit "TermSurf.dmg" --keychain-profile "notarytool-profile" --wait
 
           # Finally, we need to "attach the staple" to our executable, which will allow our app to be
           # validated by macOS even when an internet connection is not available. We do this to
           # both the app and the dmg
           echo "Attach staple"
-          xcrun stapler staple "Ghostty.dmg"
-          xcrun stapler staple "macos/build/Release/Ghostty.app"
+          xcrun stapler staple "TermSurf.dmg"
+          xcrun stapler staple "macos/build/Release/TermSurf.app"
 
       # Zip up the app and symbols
       - name: Zip App
         run: |
           cd macos/build/Release
-          zip -9 -r --symlinks ../../../ghostty-macos-universal.zip Ghostty.app
-          zip -9 -r --symlinks ../../../ghostty-macos-universal-dsym.zip Ghostty.app.dSYM/
+          zip -9 -r --symlinks ../../../termsurf-macos-universal.zip TermSurf.app
+          zip -9 -r --symlinks ../../../termsurf-macos-universal-dsym.zip TermSurf.app.dSYM/
 
       - name: Upload artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: macos
           path: |-
-            Ghostty.dmg
-            ghostty-macos-universal.zip
-            ghostty-macos-universal-dsym.zip
+            TermSurf.dmg
+            termsurf-macos-universal.zip
+            termsurf-macos-universal-dsym.zip
 
   sentry-dsym:
     runs-on: namespace-profile-ghostty-sm
@@ -294,16 +294,16 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
-          sentry-cli dif upload --project ghostty --wait ghostty-macos-universal-dsym.zip
+          sentry-cli dif upload --project termsurf --wait termsurf-macos-universal-dsym.zip
 
   appcast:
     needs: [setup, build-macos]
     runs-on: namespace-profile-ghostty-macos-tahoe
     env:
-      GHOSTTY_VERSION: ${{ needs.setup.outputs.version }}
-      GHOSTTY_BUILD: ${{ needs.setup.outputs.build }}
-      GHOSTTY_COMMIT: ${{ needs.setup.outputs.commit }}
-      GHOSTTY_COMMIT_LONG: ${{ needs.setup.outputs.commit_long }}
+      TERMSURF_VERSION: ${{ needs.setup.outputs.version }}
+      TERMSURF_BUILD: ${{ needs.setup.outputs.build }}
+      TERMSURF_COMMIT: ${{ needs.setup.outputs.commit }}
+      TERMSURF_COMMIT_LONG: ${{ needs.setup.outputs.commit_long }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -327,13 +327,13 @@ jobs:
         env:
           SPARKLE_KEY: ${{ secrets.PROD_MACOS_SPARKLE_KEY }}
         run: |
-          echo "GHOSTTY_VERSION=$GHOSTTY_VERSION"
-          echo "GHOSTTY_BUILD=$GHOSTTY_BUILD"
-          echo "GHOSTTY_COMMIT=$GHOSTTY_COMMIT"
-          echo "GHOSTTY_COMMIT_LONG=$GHOSTTY_COMMIT_LONG"
+          echo "TERMSURF_VERSION=$TERMSURF_VERSION"
+          echo "TERMSURF_BUILD=$TERMSURF_BUILD"
+          echo "TERMSURF_COMMIT=$TERMSURF_COMMIT"
+          echo "TERMSURF_COMMIT_LONG=$TERMSURF_COMMIT_LONG"
 
           echo $SPARKLE_KEY > signing.key
-          sign_update -f signing.key Ghostty.dmg > sign_update.txt
+          sign_update -f signing.key TermSurf.dmg > sign_update.txt
           curl -L https://release.files.ghostty.org/appcast.xml > appcast.xml
           python3 ./dist/macos/update_appcast_tag.py
           test -f appcast_new.xml
@@ -354,7 +354,7 @@ jobs:
     needs: [setup, source-tarball, build-macos, appcast]
     runs-on: namespace-profile-ghostty-sm
     env:
-      GHOSTTY_VERSION: ${{ needs.setup.outputs.version }}
+      TERMSURF_VERSION: ${{ needs.setup.outputs.version }}
     steps:
       - name: Download macOS Artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -377,21 +377,21 @@ jobs:
       - name: Prep Files
         run: |
           mkdir blob
-          mkdir -p blob/${GHOSTTY_VERSION}
-          mv "ghostty-${GHOSTTY_VERSION}.tar.gz" blob/${GHOSTTY_VERSION}/ghostty-${GHOSTTY_VERSION}.tar.gz
-          mv "ghostty-${GHOSTTY_VERSION}.tar.gz.minisig" blob/${GHOSTTY_VERSION}/ghostty-${GHOSTTY_VERSION}.tar.gz.minisig
-          mv ghostty-source.tar.gz blob/${GHOSTTY_VERSION}/ghostty-source.tar.gz
-          mv ghostty-source.tar.gz.minisig blob/${GHOSTTY_VERSION}/ghostty-source.tar.gz.minisig
-          mv ghostty-macos-universal.zip blob/${GHOSTTY_VERSION}/ghostty-macos-universal.zip
-          mv ghostty-macos-universal-dsym.zip blob/${GHOSTTY_VERSION}/ghostty-macos-universal-dsym.zip
-          mv Ghostty.dmg blob/${GHOSTTY_VERSION}/Ghostty.dmg
-          mv appcast.xml blob/${GHOSTTY_VERSION}/appcast-staged.xml
+          mkdir -p blob/${TERMSURF_VERSION}
+          mv "termsurf-${TERMSURF_VERSION}.tar.gz" blob/${TERMSURF_VERSION}/termsurf-${TERMSURF_VERSION}.tar.gz
+          mv "termsurf-${TERMSURF_VERSION}.tar.gz.minisig" blob/${TERMSURF_VERSION}/termsurf-${TERMSURF_VERSION}.tar.gz.minisig
+          mv termsurf-source.tar.gz blob/${TERMSURF_VERSION}/termsurf-source.tar.gz
+          mv termsurf-source.tar.gz.minisig blob/${TERMSURF_VERSION}/termsurf-source.tar.gz.minisig
+          mv termsurf-macos-universal.zip blob/${TERMSURF_VERSION}/termsurf-macos-universal.zip
+          mv termsurf-macos-universal-dsym.zip blob/${TERMSURF_VERSION}/termsurf-macos-universal-dsym.zip
+          mv TermSurf.dmg blob/${TERMSURF_VERSION}/TermSurf.dmg
+          mv appcast.xml blob/${TERMSURF_VERSION}/appcast-staged.xml
       - name: Upload to R2
         uses: ryand56/r2-upload-action@b801a390acbdeb034c5e684ff5e1361c06639e7c # v1.4
         with:
           r2-account-id: ${{ secrets.CF_R2_RELEASE_ACCOUNT_ID }}
           r2-access-key-id: ${{ secrets.CF_R2_RELEASE_AWS_KEY }}
           r2-secret-access-key: ${{ secrets.CF_R2_RELEASE_SECRET_KEY }}
-          r2-bucket: ghostty-release
+          r2-bucket: termsurf-release
           source-dir: blob
           destination-dir: ./

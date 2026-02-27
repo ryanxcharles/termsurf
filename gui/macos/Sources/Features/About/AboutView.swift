@@ -4,11 +4,11 @@ struct AboutView: View {
     @Environment(\.openURL) var openURL
 
     private let githubURL = URL(string: "https://github.com/termsurf/termsurf")
-    private let docsURL = URL(string: "https://ghostty.org/docs")
+    private let docsURL = URL(string: "https://termsurf.com/docs")
 
     /// Read the commit from the bundle.
     private var build: String? { Bundle.main.infoDictionary?["CFBundleVersion"] as? String }
-    private var commit: String? { Bundle.main.infoDictionary?["GhosttyCommit"] as? String }
+    private var commit: String? { Bundle.main.infoDictionary?["TermSurfCommit"] as? String }
     private var version: String? { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String }
     private var copyright: String? { Bundle.main.infoDictionary?["NSHumanReadableCopyright"] as? String }
 
@@ -51,7 +51,7 @@ struct AboutView: View {
                     Text("TermSurf")
                         .bold()
                         .font(.title)
-                    Text("Terminal emulator with integrated browser,\nbuilt on Ghostty.")
+                    Text("Terminal emulator with integrated browser,\nbuilt on TermSurf.")
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .font(.caption)

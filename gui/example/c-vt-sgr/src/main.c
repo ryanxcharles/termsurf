@@ -1,12 +1,12 @@
 #include <assert.h>
 #include <stdio.h>
-#include <ghostty/vt.h>
+#include <termsurf/vt.h>
 
 int main() {
   // Create parser
-  GhosttySgrParser parser;
-  GhosttyResult result = ghostty_sgr_new(NULL, &parser);
-  assert(result == GHOSTTY_SUCCESS);
+  TermSurfSgrParser parser;
+  TermSurfResult result = termsurf_sgr_new(NULL, &parser);
+  assert(result == TERMSURF_SUCCESS);
 
   // Parse a complex SGR sequence from Kakoune
   // This corresponds to the escape sequence:
@@ -23,39 +23,39 @@ int main() {
   char separators[] = ";;;;;;;;;;;;;;;;";
   separators[0] = ':';
   
-  result = ghostty_sgr_set_params(parser, params, separators, sizeof(params) / sizeof(params[0]));
-  assert(result == GHOSTTY_SUCCESS);
+  result = termsurf_sgr_set_params(parser, params, separators, sizeof(params) / sizeof(params[0]));
+  assert(result == TERMSURF_SUCCESS);
 
   printf("Parsing Kakoune SGR sequence:\n");
   printf("ESC[4:3;38;2;51;51;51;48;2;170;170;170;58;2;255;97;136m\n\n");
 
   // Iterate through attributes
-  GhosttySgrAttribute attr;
+  TermSurfSgrAttribute attr;
   int count = 0;
-  while (ghostty_sgr_next(parser, &attr)) {
+  while (termsurf_sgr_next(parser, &attr)) {
     count++;
     printf("Attribute %d: ", count);
     
     switch (attr.tag) {
-      case GHOSTTY_SGR_ATTR_UNDERLINE:
+      case TERMSURF_SGR_ATTR_UNDERLINE:
         printf("Underline style = ");
         switch (attr.value.underline) {
-          case GHOSTTY_SGR_UNDERLINE_NONE:
+          case TERMSURF_SGR_UNDERLINE_NONE:
             printf("none\n");
             break;
-          case GHOSTTY_SGR_UNDERLINE_SINGLE:
+          case TERMSURF_SGR_UNDERLINE_SINGLE:
             printf("single\n");
             break;
-          case GHOSTTY_SGR_UNDERLINE_DOUBLE:
+          case TERMSURF_SGR_UNDERLINE_DOUBLE:
             printf("double\n");
             break;
-          case GHOSTTY_SGR_UNDERLINE_CURLY:
+          case TERMSURF_SGR_UNDERLINE_CURLY:
             printf("curly\n");
             break;
-          case GHOSTTY_SGR_UNDERLINE_DOTTED:
+          case TERMSURF_SGR_UNDERLINE_DOTTED:
             printf("dotted\n");
             break;
-          case GHOSTTY_SGR_UNDERLINE_DASHED:
+          case TERMSURF_SGR_UNDERLINE_DASHED:
             printf("dashed\n");
             break;
           default:
@@ -64,56 +64,56 @@ int main() {
         }
         break;
 
-      case GHOSTTY_SGR_ATTR_DIRECT_COLOR_FG:
+      case TERMSURF_SGR_ATTR_DIRECT_COLOR_FG:
         printf("Foreground RGB = (%d, %d, %d)\n",
                attr.value.direct_color_fg.r,
                attr.value.direct_color_fg.g,
                attr.value.direct_color_fg.b);
         break;
 
-      case GHOSTTY_SGR_ATTR_DIRECT_COLOR_BG:
+      case TERMSURF_SGR_ATTR_DIRECT_COLOR_BG:
         printf("Background RGB = (%d, %d, %d)\n",
                attr.value.direct_color_bg.r,
                attr.value.direct_color_bg.g,
                attr.value.direct_color_bg.b);
         break;
 
-      case GHOSTTY_SGR_ATTR_UNDERLINE_COLOR:
+      case TERMSURF_SGR_ATTR_UNDERLINE_COLOR:
         printf("Underline color RGB = (%d, %d, %d)\n",
                attr.value.underline_color.r,
                attr.value.underline_color.g,
                attr.value.underline_color.b);
         break;
 
-      case GHOSTTY_SGR_ATTR_FG_8:
+      case TERMSURF_SGR_ATTR_FG_8:
         printf("Foreground 8-color = %d\n", attr.value.fg_8);
         break;
 
-      case GHOSTTY_SGR_ATTR_BG_8:
+      case TERMSURF_SGR_ATTR_BG_8:
         printf("Background 8-color = %d\n", attr.value.bg_8);
         break;
 
-      case GHOSTTY_SGR_ATTR_FG_256:
+      case TERMSURF_SGR_ATTR_FG_256:
         printf("Foreground 256-color = %d\n", attr.value.fg_256);
         break;
 
-      case GHOSTTY_SGR_ATTR_BG_256:
+      case TERMSURF_SGR_ATTR_BG_256:
         printf("Background 256-color = %d\n", attr.value.bg_256);
         break;
 
-      case GHOSTTY_SGR_ATTR_BOLD:
+      case TERMSURF_SGR_ATTR_BOLD:
         printf("Bold\n");
         break;
 
-      case GHOSTTY_SGR_ATTR_ITALIC:
+      case TERMSURF_SGR_ATTR_ITALIC:
         printf("Italic\n");
         break;
 
-      case GHOSTTY_SGR_ATTR_UNSET:
+      case TERMSURF_SGR_ATTR_UNSET:
         printf("Reset all attributes\n");
         break;
 
-      case GHOSTTY_SGR_ATTR_UNKNOWN:
+      case TERMSURF_SGR_ATTR_UNKNOWN:
         printf("Unknown attribute\n");
         break;
 
@@ -126,6 +126,6 @@ int main() {
   printf("\nTotal attributes parsed: %d\n", count);
 
   // Cleanup
-  ghostty_sgr_free(parser);
+  termsurf_sgr_free(parser);
   return 0;
 }

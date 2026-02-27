@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
-const Action = @import("../cli.zig").ghostty.Action;
+const Action = @import("../cli.zig").termsurf.Action;
 const apprt = @import("../apprt.zig");
 const args = @import("args.zig");
 const diagnostics = @import("diagnostics.zig");
@@ -10,11 +10,11 @@ pub const Options = struct {
     /// This is set by the CLI parser for deinit.
     _arena: ?ArenaAllocator = null,
 
-    /// If set, open up a new window in a custom instance of Ghostty.
+    /// If set, open up a new window in a custom instance of TermSurf.
     class: ?[:0]const u8 = null,
 
     /// If `-e` is found in the arguments, this will contain all of the
-    /// arguments to pass to Ghostty as the command.
+    /// arguments to pass to TermSurf as the command.
     _arguments: ?[][:0]const u8 = null,
 
     /// Enable arg parsing diagnostics so that we don't get an error if
@@ -55,34 +55,34 @@ pub const Options = struct {
 };
 
 /// The `new-window` will use native platform IPC to open up a new window in a
-/// running instance of Ghostty.
+/// running instance of TermSurf.
 ///
 /// If the `--class` flag is not set, the `new-window` command will try and
-/// connect to a running instance of Ghostty based on what optimizations the
-/// Ghostty CLI was compiled with. Otherwise the `new-window` command will try
-/// and contact a running Ghostty instance that was configured with the same
+/// connect to a running instance of TermSurf based on what optimizations the
+/// TermSurf CLI was compiled with. Otherwise the `new-window` command will try
+/// and contact a running TermSurf instance that was configured with the same
 /// `class` as was given on the command line.
 ///
 /// If the `-e` flag is included on the command line, any arguments that follow
-/// will be sent to the running Ghostty instance and used as the command to run
-/// in the new window rather than the default. If `-e` is not specified, Ghostty
+/// will be sent to the running TermSurf instance and used as the command to run
+/// in the new window rather than the default. If `-e` is not specified, TermSurf
 /// will use the default command (either specified with `command` in your config
 /// or your default shell as configured on your system).
 ///
-/// GTK uses an application ID to identify instances of applications. If Ghostty
+/// GTK uses an application ID to identify instances of applications. If TermSurf
 /// is compiled with release optimizations, the default application ID will be
-/// `com.mitchellh.ghostty`. If Ghostty is compiled with debug optimizations,
-/// the default application ID will be `com.mitchellh.ghostty-debug`.  The
+/// `com.termsurf`. If TermSurf is compiled with debug optimizations,
+/// the default application ID will be `com.termsurf-debug`.  The
 /// `class` configuration entry can be used to set up a custom application
 /// ID. The class name must follow the requirements defined [in the GTK
 /// documentation](https://docs.gtk.org/gio/type_func.Application.id_is_valid.html)
-/// or it will be ignored and Ghostty will use the default as defined above.
+/// or it will be ignored and TermSurf will use the default as defined above.
 ///
-/// On GTK, D-Bus activation must be properly configured. Ghostty does not need
+/// On GTK, D-Bus activation must be properly configured. TermSurf does not need
 /// to be running for this to open a new window, making it suitable for binding
 /// to keys in your window manager (if other methods for configuring global
 /// shortcuts are unavailable). D-Bus will handle launching a new instance
-/// of Ghostty if it is not already running. See the Ghostty website for
+/// of TermSurf if it is not already running. See the TermSurf website for
 /// information on properly configuring D-Bus activation.
 ///
 /// Only supported on GTK.
@@ -90,7 +90,7 @@ pub const Options = struct {
 /// Flags:
 ///
 ///   * `--class=<class>`: If set, open up a new window in a custom instance of
-///     Ghostty. The class must be a valid GTK application ID.
+///     TermSurf. The class must be a valid GTK application ID.
 ///
 ///   * `-e`: Any arguments after this will be interpreted as a command to
 ///     execute inside the new window instead of the default command.

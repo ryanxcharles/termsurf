@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ghostty VT Key Encoder - WebAssembly Example</title>
+    <title>TermSurf VT Key Encoder - WebAssembly Example</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -119,13 +119,13 @@
     </style>
 </head>
 <body>
-    <h1>Ghostty VT Key Encoder - WebAssembly Example</h1>
-    <p>This example demonstrates encoding key events into terminal escape sequences using the Ghostty VT WebAssembly module.</p>
+    <h1>TermSurf VT Key Encoder - WebAssembly Example</h1>
+    <p>This example demonstrates encoding key events into terminal escape sequences using the TermSurf VT WebAssembly module.</p>
     
     <div class="warning">
         <strong>⚠️ Warning:</strong>
-        This is an example of the libghostty-vt WebAssembly API. The JavaScript 
-        keyboard event mapping to the libghostty-vt API may not be perfect
+        This is an example of the libtermsurf-vt WebAssembly API. The JavaScript 
+        keyboard event mapping to the libtermsurf-vt API may not be perfect
         and may result in encoding inaccuracies for certain keys or layouts.
         Do not use this as a key encoding reference.
     </div>
@@ -167,7 +167,7 @@
         async function loadWasm() {
             try {
                 // Load the wasm module - adjust path as needed
-                const response = await fetch('../../zig-out/bin/ghostty-vt.wasm');
+                const response = await fetch('../../zig-out/bin/termsurf-vt.wasm');
                 const wasmBytes = await response.arrayBuffer();
                 
                 // Instantiate the wasm module
@@ -217,199 +217,199 @@
             return result;
         }
 
-        // Map W3C KeyboardEvent.code values to Ghostty key codes
-        // Based on include/ghostty/vt/key/event.h
+        // Map W3C KeyboardEvent.code values to TermSurf key codes
+        // Based on include/termsurf/vt/key/event.h
         const keyCodeMap = {
             // Writing System Keys
-            'Backquote': 1,          // GHOSTTY_KEY_BACKQUOTE
-            'Backslash': 2,          // GHOSTTY_KEY_BACKSLASH
-            'BracketLeft': 3,        // GHOSTTY_KEY_BRACKET_LEFT
-            'BracketRight': 4,       // GHOSTTY_KEY_BRACKET_RIGHT
-            'Comma': 5,              // GHOSTTY_KEY_COMMA
-            'Digit0': 6,             // GHOSTTY_KEY_DIGIT_0
-            'Digit1': 7,             // GHOSTTY_KEY_DIGIT_1
-            'Digit2': 8,             // GHOSTTY_KEY_DIGIT_2
-            'Digit3': 9,             // GHOSTTY_KEY_DIGIT_3
-            'Digit4': 10,            // GHOSTTY_KEY_DIGIT_4
-            'Digit5': 11,            // GHOSTTY_KEY_DIGIT_5
-            'Digit6': 12,            // GHOSTTY_KEY_DIGIT_6
-            'Digit7': 13,            // GHOSTTY_KEY_DIGIT_7
-            'Digit8': 14,            // GHOSTTY_KEY_DIGIT_8
-            'Digit9': 15,            // GHOSTTY_KEY_DIGIT_9
-            'Equal': 16,             // GHOSTTY_KEY_EQUAL
-            'IntlBackslash': 17,     // GHOSTTY_KEY_INTL_BACKSLASH
-            'IntlRo': 18,            // GHOSTTY_KEY_INTL_RO
-            'IntlYen': 19,           // GHOSTTY_KEY_INTL_YEN
-            'KeyA': 20,              // GHOSTTY_KEY_A
-            'KeyB': 21,              // GHOSTTY_KEY_B
-            'KeyC': 22,              // GHOSTTY_KEY_C
-            'KeyD': 23,              // GHOSTTY_KEY_D
-            'KeyE': 24,              // GHOSTTY_KEY_E
-            'KeyF': 25,              // GHOSTTY_KEY_F
-            'KeyG': 26,              // GHOSTTY_KEY_G
-            'KeyH': 27,              // GHOSTTY_KEY_H
-            'KeyI': 28,              // GHOSTTY_KEY_I
-            'KeyJ': 29,              // GHOSTTY_KEY_J
-            'KeyK': 30,              // GHOSTTY_KEY_K
-            'KeyL': 31,              // GHOSTTY_KEY_L
-            'KeyM': 32,              // GHOSTTY_KEY_M
-            'KeyN': 33,              // GHOSTTY_KEY_N
-            'KeyO': 34,              // GHOSTTY_KEY_O
-            'KeyP': 35,              // GHOSTTY_KEY_P
-            'KeyQ': 36,              // GHOSTTY_KEY_Q
-            'KeyR': 37,              // GHOSTTY_KEY_R
-            'KeyS': 38,              // GHOSTTY_KEY_S
-            'KeyT': 39,              // GHOSTTY_KEY_T
-            'KeyU': 40,              // GHOSTTY_KEY_U
-            'KeyV': 41,              // GHOSTTY_KEY_V
-            'KeyW': 42,              // GHOSTTY_KEY_W
-            'KeyX': 43,              // GHOSTTY_KEY_X
-            'KeyY': 44,              // GHOSTTY_KEY_Y
-            'KeyZ': 45,              // GHOSTTY_KEY_Z
-            'Minus': 46,             // GHOSTTY_KEY_MINUS
-            'Period': 47,            // GHOSTTY_KEY_PERIOD
-            'Quote': 48,             // GHOSTTY_KEY_QUOTE
-            'Semicolon': 49,         // GHOSTTY_KEY_SEMICOLON
-            'Slash': 50,             // GHOSTTY_KEY_SLASH
+            'Backquote': 1,          // TERMSURF_KEY_BACKQUOTE
+            'Backslash': 2,          // TERMSURF_KEY_BACKSLASH
+            'BracketLeft': 3,        // TERMSURF_KEY_BRACKET_LEFT
+            'BracketRight': 4,       // TERMSURF_KEY_BRACKET_RIGHT
+            'Comma': 5,              // TERMSURF_KEY_COMMA
+            'Digit0': 6,             // TERMSURF_KEY_DIGIT_0
+            'Digit1': 7,             // TERMSURF_KEY_DIGIT_1
+            'Digit2': 8,             // TERMSURF_KEY_DIGIT_2
+            'Digit3': 9,             // TERMSURF_KEY_DIGIT_3
+            'Digit4': 10,            // TERMSURF_KEY_DIGIT_4
+            'Digit5': 11,            // TERMSURF_KEY_DIGIT_5
+            'Digit6': 12,            // TERMSURF_KEY_DIGIT_6
+            'Digit7': 13,            // TERMSURF_KEY_DIGIT_7
+            'Digit8': 14,            // TERMSURF_KEY_DIGIT_8
+            'Digit9': 15,            // TERMSURF_KEY_DIGIT_9
+            'Equal': 16,             // TERMSURF_KEY_EQUAL
+            'IntlBackslash': 17,     // TERMSURF_KEY_INTL_BACKSLASH
+            'IntlRo': 18,            // TERMSURF_KEY_INTL_RO
+            'IntlYen': 19,           // TERMSURF_KEY_INTL_YEN
+            'KeyA': 20,              // TERMSURF_KEY_A
+            'KeyB': 21,              // TERMSURF_KEY_B
+            'KeyC': 22,              // TERMSURF_KEY_C
+            'KeyD': 23,              // TERMSURF_KEY_D
+            'KeyE': 24,              // TERMSURF_KEY_E
+            'KeyF': 25,              // TERMSURF_KEY_F
+            'KeyG': 26,              // TERMSURF_KEY_G
+            'KeyH': 27,              // TERMSURF_KEY_H
+            'KeyI': 28,              // TERMSURF_KEY_I
+            'KeyJ': 29,              // TERMSURF_KEY_J
+            'KeyK': 30,              // TERMSURF_KEY_K
+            'KeyL': 31,              // TERMSURF_KEY_L
+            'KeyM': 32,              // TERMSURF_KEY_M
+            'KeyN': 33,              // TERMSURF_KEY_N
+            'KeyO': 34,              // TERMSURF_KEY_O
+            'KeyP': 35,              // TERMSURF_KEY_P
+            'KeyQ': 36,              // TERMSURF_KEY_Q
+            'KeyR': 37,              // TERMSURF_KEY_R
+            'KeyS': 38,              // TERMSURF_KEY_S
+            'KeyT': 39,              // TERMSURF_KEY_T
+            'KeyU': 40,              // TERMSURF_KEY_U
+            'KeyV': 41,              // TERMSURF_KEY_V
+            'KeyW': 42,              // TERMSURF_KEY_W
+            'KeyX': 43,              // TERMSURF_KEY_X
+            'KeyY': 44,              // TERMSURF_KEY_Y
+            'KeyZ': 45,              // TERMSURF_KEY_Z
+            'Minus': 46,             // TERMSURF_KEY_MINUS
+            'Period': 47,            // TERMSURF_KEY_PERIOD
+            'Quote': 48,             // TERMSURF_KEY_QUOTE
+            'Semicolon': 49,         // TERMSURF_KEY_SEMICOLON
+            'Slash': 50,             // TERMSURF_KEY_SLASH
             
             // Functional Keys
-            'AltLeft': 51,           // GHOSTTY_KEY_ALT_LEFT
-            'AltRight': 52,          // GHOSTTY_KEY_ALT_RIGHT
-            'Backspace': 53,         // GHOSTTY_KEY_BACKSPACE
-            'CapsLock': 54,          // GHOSTTY_KEY_CAPS_LOCK
-            'ContextMenu': 55,       // GHOSTTY_KEY_CONTEXT_MENU
-            'ControlLeft': 56,       // GHOSTTY_KEY_CONTROL_LEFT
-            'ControlRight': 57,      // GHOSTTY_KEY_CONTROL_RIGHT
-            'Enter': 58,             // GHOSTTY_KEY_ENTER
-            'MetaLeft': 59,          // GHOSTTY_KEY_META_LEFT
-            'MetaRight': 60,         // GHOSTTY_KEY_META_RIGHT
-            'ShiftLeft': 61,         // GHOSTTY_KEY_SHIFT_LEFT
-            'ShiftRight': 62,        // GHOSTTY_KEY_SHIFT_RIGHT
-            'Space': 63,             // GHOSTTY_KEY_SPACE
-            'Tab': 64,               // GHOSTTY_KEY_TAB
-            'Convert': 65,           // GHOSTTY_KEY_CONVERT
-            'KanaMode': 66,          // GHOSTTY_KEY_KANA_MODE
-            'NonConvert': 67,        // GHOSTTY_KEY_NON_CONVERT
+            'AltLeft': 51,           // TERMSURF_KEY_ALT_LEFT
+            'AltRight': 52,          // TERMSURF_KEY_ALT_RIGHT
+            'Backspace': 53,         // TERMSURF_KEY_BACKSPACE
+            'CapsLock': 54,          // TERMSURF_KEY_CAPS_LOCK
+            'ContextMenu': 55,       // TERMSURF_KEY_CONTEXT_MENU
+            'ControlLeft': 56,       // TERMSURF_KEY_CONTROL_LEFT
+            'ControlRight': 57,      // TERMSURF_KEY_CONTROL_RIGHT
+            'Enter': 58,             // TERMSURF_KEY_ENTER
+            'MetaLeft': 59,          // TERMSURF_KEY_META_LEFT
+            'MetaRight': 60,         // TERMSURF_KEY_META_RIGHT
+            'ShiftLeft': 61,         // TERMSURF_KEY_SHIFT_LEFT
+            'ShiftRight': 62,        // TERMSURF_KEY_SHIFT_RIGHT
+            'Space': 63,             // TERMSURF_KEY_SPACE
+            'Tab': 64,               // TERMSURF_KEY_TAB
+            'Convert': 65,           // TERMSURF_KEY_CONVERT
+            'KanaMode': 66,          // TERMSURF_KEY_KANA_MODE
+            'NonConvert': 67,        // TERMSURF_KEY_NON_CONVERT
             
             // Control Pad Section
-            'Delete': 68,            // GHOSTTY_KEY_DELETE
-            'End': 69,               // GHOSTTY_KEY_END
-            'Help': 70,              // GHOSTTY_KEY_HELP
-            'Home': 71,              // GHOSTTY_KEY_HOME
-            'Insert': 72,            // GHOSTTY_KEY_INSERT
-            'PageDown': 73,          // GHOSTTY_KEY_PAGE_DOWN
-            'PageUp': 74,            // GHOSTTY_KEY_PAGE_UP
+            'Delete': 68,            // TERMSURF_KEY_DELETE
+            'End': 69,               // TERMSURF_KEY_END
+            'Help': 70,              // TERMSURF_KEY_HELP
+            'Home': 71,              // TERMSURF_KEY_HOME
+            'Insert': 72,            // TERMSURF_KEY_INSERT
+            'PageDown': 73,          // TERMSURF_KEY_PAGE_DOWN
+            'PageUp': 74,            // TERMSURF_KEY_PAGE_UP
             
             // Arrow Pad Section
-            'ArrowDown': 75,         // GHOSTTY_KEY_ARROW_DOWN
-            'ArrowLeft': 76,         // GHOSTTY_KEY_ARROW_LEFT
-            'ArrowRight': 77,        // GHOSTTY_KEY_ARROW_RIGHT
-            'ArrowUp': 78,           // GHOSTTY_KEY_ARROW_UP
+            'ArrowDown': 75,         // TERMSURF_KEY_ARROW_DOWN
+            'ArrowLeft': 76,         // TERMSURF_KEY_ARROW_LEFT
+            'ArrowRight': 77,        // TERMSURF_KEY_ARROW_RIGHT
+            'ArrowUp': 78,           // TERMSURF_KEY_ARROW_UP
             
             // Numpad Section
-            'NumLock': 79,           // GHOSTTY_KEY_NUM_LOCK
-            'Numpad0': 80,           // GHOSTTY_KEY_NUMPAD_0
-            'Numpad1': 81,           // GHOSTTY_KEY_NUMPAD_1
-            'Numpad2': 82,           // GHOSTTY_KEY_NUMPAD_2
-            'Numpad3': 83,           // GHOSTTY_KEY_NUMPAD_3
-            'Numpad4': 84,           // GHOSTTY_KEY_NUMPAD_4
-            'Numpad5': 85,           // GHOSTTY_KEY_NUMPAD_5
-            'Numpad6': 86,           // GHOSTTY_KEY_NUMPAD_6
-            'Numpad7': 87,           // GHOSTTY_KEY_NUMPAD_7
-            'Numpad8': 88,           // GHOSTTY_KEY_NUMPAD_8
-            'Numpad9': 89,           // GHOSTTY_KEY_NUMPAD_9
-            'NumpadAdd': 90,         // GHOSTTY_KEY_NUMPAD_ADD
-            'NumpadBackspace': 91,   // GHOSTTY_KEY_NUMPAD_BACKSPACE
-            'NumpadClear': 92,       // GHOSTTY_KEY_NUMPAD_CLEAR
-            'NumpadClearEntry': 93,  // GHOSTTY_KEY_NUMPAD_CLEAR_ENTRY
-            'NumpadComma': 94,       // GHOSTTY_KEY_NUMPAD_COMMA
-            'NumpadDecimal': 95,     // GHOSTTY_KEY_NUMPAD_DECIMAL
-            'NumpadDivide': 96,      // GHOSTTY_KEY_NUMPAD_DIVIDE
-            'NumpadEnter': 97,       // GHOSTTY_KEY_NUMPAD_ENTER
-            'NumpadEqual': 98,       // GHOSTTY_KEY_NUMPAD_EQUAL
-            'NumpadMemoryAdd': 99,   // GHOSTTY_KEY_NUMPAD_MEMORY_ADD
-            'NumpadMemoryClear': 100,// GHOSTTY_KEY_NUMPAD_MEMORY_CLEAR
-            'NumpadMemoryRecall': 101,// GHOSTTY_KEY_NUMPAD_MEMORY_RECALL
-            'NumpadMemoryStore': 102,// GHOSTTY_KEY_NUMPAD_MEMORY_STORE
-            'NumpadMemorySubtract': 103,// GHOSTTY_KEY_NUMPAD_MEMORY_SUBTRACT
-            'NumpadMultiply': 104,   // GHOSTTY_KEY_NUMPAD_MULTIPLY
-            'NumpadParenLeft': 105,  // GHOSTTY_KEY_NUMPAD_PAREN_LEFT
-            'NumpadParenRight': 106, // GHOSTTY_KEY_NUMPAD_PAREN_RIGHT
-            'NumpadSubtract': 107,   // GHOSTTY_KEY_NUMPAD_SUBTRACT
-            'NumpadSeparator': 108,  // GHOSTTY_KEY_NUMPAD_SEPARATOR
-            'NumpadUp': 109,         // GHOSTTY_KEY_NUMPAD_UP
-            'NumpadDown': 110,       // GHOSTTY_KEY_NUMPAD_DOWN
-            'NumpadRight': 111,      // GHOSTTY_KEY_NUMPAD_RIGHT
-            'NumpadLeft': 112,       // GHOSTTY_KEY_NUMPAD_LEFT
-            'NumpadBegin': 113,      // GHOSTTY_KEY_NUMPAD_BEGIN
-            'NumpadHome': 114,       // GHOSTTY_KEY_NUMPAD_HOME
-            'NumpadEnd': 115,        // GHOSTTY_KEY_NUMPAD_END
-            'NumpadInsert': 116,     // GHOSTTY_KEY_NUMPAD_INSERT
-            'NumpadDelete': 117,     // GHOSTTY_KEY_NUMPAD_DELETE
-            'NumpadPageUp': 118,     // GHOSTTY_KEY_NUMPAD_PAGE_UP
-            'NumpadPageDown': 119,   // GHOSTTY_KEY_NUMPAD_PAGE_DOWN
+            'NumLock': 79,           // TERMSURF_KEY_NUM_LOCK
+            'Numpad0': 80,           // TERMSURF_KEY_NUMPAD_0
+            'Numpad1': 81,           // TERMSURF_KEY_NUMPAD_1
+            'Numpad2': 82,           // TERMSURF_KEY_NUMPAD_2
+            'Numpad3': 83,           // TERMSURF_KEY_NUMPAD_3
+            'Numpad4': 84,           // TERMSURF_KEY_NUMPAD_4
+            'Numpad5': 85,           // TERMSURF_KEY_NUMPAD_5
+            'Numpad6': 86,           // TERMSURF_KEY_NUMPAD_6
+            'Numpad7': 87,           // TERMSURF_KEY_NUMPAD_7
+            'Numpad8': 88,           // TERMSURF_KEY_NUMPAD_8
+            'Numpad9': 89,           // TERMSURF_KEY_NUMPAD_9
+            'NumpadAdd': 90,         // TERMSURF_KEY_NUMPAD_ADD
+            'NumpadBackspace': 91,   // TERMSURF_KEY_NUMPAD_BACKSPACE
+            'NumpadClear': 92,       // TERMSURF_KEY_NUMPAD_CLEAR
+            'NumpadClearEntry': 93,  // TERMSURF_KEY_NUMPAD_CLEAR_ENTRY
+            'NumpadComma': 94,       // TERMSURF_KEY_NUMPAD_COMMA
+            'NumpadDecimal': 95,     // TERMSURF_KEY_NUMPAD_DECIMAL
+            'NumpadDivide': 96,      // TERMSURF_KEY_NUMPAD_DIVIDE
+            'NumpadEnter': 97,       // TERMSURF_KEY_NUMPAD_ENTER
+            'NumpadEqual': 98,       // TERMSURF_KEY_NUMPAD_EQUAL
+            'NumpadMemoryAdd': 99,   // TERMSURF_KEY_NUMPAD_MEMORY_ADD
+            'NumpadMemoryClear': 100,// TERMSURF_KEY_NUMPAD_MEMORY_CLEAR
+            'NumpadMemoryRecall': 101,// TERMSURF_KEY_NUMPAD_MEMORY_RECALL
+            'NumpadMemoryStore': 102,// TERMSURF_KEY_NUMPAD_MEMORY_STORE
+            'NumpadMemorySubtract': 103,// TERMSURF_KEY_NUMPAD_MEMORY_SUBTRACT
+            'NumpadMultiply': 104,   // TERMSURF_KEY_NUMPAD_MULTIPLY
+            'NumpadParenLeft': 105,  // TERMSURF_KEY_NUMPAD_PAREN_LEFT
+            'NumpadParenRight': 106, // TERMSURF_KEY_NUMPAD_PAREN_RIGHT
+            'NumpadSubtract': 107,   // TERMSURF_KEY_NUMPAD_SUBTRACT
+            'NumpadSeparator': 108,  // TERMSURF_KEY_NUMPAD_SEPARATOR
+            'NumpadUp': 109,         // TERMSURF_KEY_NUMPAD_UP
+            'NumpadDown': 110,       // TERMSURF_KEY_NUMPAD_DOWN
+            'NumpadRight': 111,      // TERMSURF_KEY_NUMPAD_RIGHT
+            'NumpadLeft': 112,       // TERMSURF_KEY_NUMPAD_LEFT
+            'NumpadBegin': 113,      // TERMSURF_KEY_NUMPAD_BEGIN
+            'NumpadHome': 114,       // TERMSURF_KEY_NUMPAD_HOME
+            'NumpadEnd': 115,        // TERMSURF_KEY_NUMPAD_END
+            'NumpadInsert': 116,     // TERMSURF_KEY_NUMPAD_INSERT
+            'NumpadDelete': 117,     // TERMSURF_KEY_NUMPAD_DELETE
+            'NumpadPageUp': 118,     // TERMSURF_KEY_NUMPAD_PAGE_UP
+            'NumpadPageDown': 119,   // TERMSURF_KEY_NUMPAD_PAGE_DOWN
             
             // Function Section
-            'Escape': 120,           // GHOSTTY_KEY_ESCAPE
-            'F1': 121,               // GHOSTTY_KEY_F1
-            'F2': 122,               // GHOSTTY_KEY_F2
-            'F3': 123,               // GHOSTTY_KEY_F3
-            'F4': 124,               // GHOSTTY_KEY_F4
-            'F5': 125,               // GHOSTTY_KEY_F5
-            'F6': 126,               // GHOSTTY_KEY_F6
-            'F7': 127,               // GHOSTTY_KEY_F7
-            'F8': 128,               // GHOSTTY_KEY_F8
-            'F9': 129,               // GHOSTTY_KEY_F9
-            'F10': 130,              // GHOSTTY_KEY_F10
-            'F11': 131,              // GHOSTTY_KEY_F11
-            'F12': 132,              // GHOSTTY_KEY_F12
-            'F13': 133,              // GHOSTTY_KEY_F13
-            'F14': 134,              // GHOSTTY_KEY_F14
-            'F15': 135,              // GHOSTTY_KEY_F15
-            'F16': 136,              // GHOSTTY_KEY_F16
-            'F17': 137,              // GHOSTTY_KEY_F17
-            'F18': 138,              // GHOSTTY_KEY_F18
-            'F19': 139,              // GHOSTTY_KEY_F19
-            'F20': 140,              // GHOSTTY_KEY_F20
-            'F21': 141,              // GHOSTTY_KEY_F21
-            'F22': 142,              // GHOSTTY_KEY_F22
-            'F23': 143,              // GHOSTTY_KEY_F23
-            'F24': 144,              // GHOSTTY_KEY_F24
-            'F25': 145,              // GHOSTTY_KEY_F25
-            'Fn': 146,               // GHOSTTY_KEY_FN
-            'FnLock': 147,           // GHOSTTY_KEY_FN_LOCK
-            'PrintScreen': 148,      // GHOSTTY_KEY_PRINT_SCREEN
-            'ScrollLock': 149,       // GHOSTTY_KEY_SCROLL_LOCK
-            'Pause': 150,            // GHOSTTY_KEY_PAUSE
+            'Escape': 120,           // TERMSURF_KEY_ESCAPE
+            'F1': 121,               // TERMSURF_KEY_F1
+            'F2': 122,               // TERMSURF_KEY_F2
+            'F3': 123,               // TERMSURF_KEY_F3
+            'F4': 124,               // TERMSURF_KEY_F4
+            'F5': 125,               // TERMSURF_KEY_F5
+            'F6': 126,               // TERMSURF_KEY_F6
+            'F7': 127,               // TERMSURF_KEY_F7
+            'F8': 128,               // TERMSURF_KEY_F8
+            'F9': 129,               // TERMSURF_KEY_F9
+            'F10': 130,              // TERMSURF_KEY_F10
+            'F11': 131,              // TERMSURF_KEY_F11
+            'F12': 132,              // TERMSURF_KEY_F12
+            'F13': 133,              // TERMSURF_KEY_F13
+            'F14': 134,              // TERMSURF_KEY_F14
+            'F15': 135,              // TERMSURF_KEY_F15
+            'F16': 136,              // TERMSURF_KEY_F16
+            'F17': 137,              // TERMSURF_KEY_F17
+            'F18': 138,              // TERMSURF_KEY_F18
+            'F19': 139,              // TERMSURF_KEY_F19
+            'F20': 140,              // TERMSURF_KEY_F20
+            'F21': 141,              // TERMSURF_KEY_F21
+            'F22': 142,              // TERMSURF_KEY_F22
+            'F23': 143,              // TERMSURF_KEY_F23
+            'F24': 144,              // TERMSURF_KEY_F24
+            'F25': 145,              // TERMSURF_KEY_F25
+            'Fn': 146,               // TERMSURF_KEY_FN
+            'FnLock': 147,           // TERMSURF_KEY_FN_LOCK
+            'PrintScreen': 148,      // TERMSURF_KEY_PRINT_SCREEN
+            'ScrollLock': 149,       // TERMSURF_KEY_SCROLL_LOCK
+            'Pause': 150,            // TERMSURF_KEY_PAUSE
             
             // Media Keys
-            'BrowserBack': 151,      // GHOSTTY_KEY_BROWSER_BACK
-            'BrowserFavorites': 152, // GHOSTTY_KEY_BROWSER_FAVORITES
-            'BrowserForward': 153,   // GHOSTTY_KEY_BROWSER_FORWARD
-            'BrowserHome': 154,      // GHOSTTY_KEY_BROWSER_HOME
-            'BrowserRefresh': 155,   // GHOSTTY_KEY_BROWSER_REFRESH
-            'BrowserSearch': 156,    // GHOSTTY_KEY_BROWSER_SEARCH
-            'BrowserStop': 157,      // GHOSTTY_KEY_BROWSER_STOP
-            'Eject': 158,            // GHOSTTY_KEY_EJECT
-            'LaunchApp1': 159,       // GHOSTTY_KEY_LAUNCH_APP_1
-            'LaunchApp2': 160,       // GHOSTTY_KEY_LAUNCH_APP_2
-            'LaunchMail': 161,       // GHOSTTY_KEY_LAUNCH_MAIL
-            'MediaPlayPause': 162,   // GHOSTTY_KEY_MEDIA_PLAY_PAUSE
-            'MediaSelect': 163,      // GHOSTTY_KEY_MEDIA_SELECT
-            'MediaStop': 164,        // GHOSTTY_KEY_MEDIA_STOP
-            'MediaTrackNext': 165,   // GHOSTTY_KEY_MEDIA_TRACK_NEXT
-            'MediaTrackPrevious': 166,// GHOSTTY_KEY_MEDIA_TRACK_PREVIOUS
-            'Power': 167,            // GHOSTTY_KEY_POWER
-            'Sleep': 168,            // GHOSTTY_KEY_SLEEP
-            'AudioVolumeDown': 169,  // GHOSTTY_KEY_AUDIO_VOLUME_DOWN
-            'AudioVolumeMute': 170,  // GHOSTTY_KEY_AUDIO_VOLUME_MUTE
-            'AudioVolumeUp': 171,    // GHOSTTY_KEY_AUDIO_VOLUME_UP
-            'WakeUp': 172,           // GHOSTTY_KEY_WAKE_UP
+            'BrowserBack': 151,      // TERMSURF_KEY_BROWSER_BACK
+            'BrowserFavorites': 152, // TERMSURF_KEY_BROWSER_FAVORITES
+            'BrowserForward': 153,   // TERMSURF_KEY_BROWSER_FORWARD
+            'BrowserHome': 154,      // TERMSURF_KEY_BROWSER_HOME
+            'BrowserRefresh': 155,   // TERMSURF_KEY_BROWSER_REFRESH
+            'BrowserSearch': 156,    // TERMSURF_KEY_BROWSER_SEARCH
+            'BrowserStop': 157,      // TERMSURF_KEY_BROWSER_STOP
+            'Eject': 158,            // TERMSURF_KEY_EJECT
+            'LaunchApp1': 159,       // TERMSURF_KEY_LAUNCH_APP_1
+            'LaunchApp2': 160,       // TERMSURF_KEY_LAUNCH_APP_2
+            'LaunchMail': 161,       // TERMSURF_KEY_LAUNCH_MAIL
+            'MediaPlayPause': 162,   // TERMSURF_KEY_MEDIA_PLAY_PAUSE
+            'MediaSelect': 163,      // TERMSURF_KEY_MEDIA_SELECT
+            'MediaStop': 164,        // TERMSURF_KEY_MEDIA_STOP
+            'MediaTrackNext': 165,   // TERMSURF_KEY_MEDIA_TRACK_NEXT
+            'MediaTrackPrevious': 166,// TERMSURF_KEY_MEDIA_TRACK_PREVIOUS
+            'Power': 167,            // TERMSURF_KEY_POWER
+            'Sleep': 168,            // TERMSURF_KEY_SLEEP
+            'AudioVolumeDown': 169,  // TERMSURF_KEY_AUDIO_VOLUME_DOWN
+            'AudioVolumeMute': 170,  // TERMSURF_KEY_AUDIO_VOLUME_MUTE
+            'AudioVolumeUp': 171,    // TERMSURF_KEY_AUDIO_VOLUME_UP
+            'WakeUp': 172,           // TERMSURF_KEY_WAKE_UP
             
             // Legacy, Non-standard, and Special Keys
-            'Copy': 173,             // GHOSTTY_KEY_COPY
-            'Cut': 174,              // GHOSTTY_KEY_CUT
-            'Paste': 175,            // GHOSTTY_KEY_PASTE
+            'Copy': 173,             // TERMSURF_KEY_COPY
+            'Cut': 174,              // TERMSURF_KEY_CUT
+            'Paste': 175,            // TERMSURF_KEY_PASTE
         };
 
         function encodeKeyEvent(event) {
@@ -417,11 +417,11 @@
 
             try {
                 // Create key event
-                const eventPtrPtr = wasmInstance.exports.ghostty_wasm_alloc_opaque();
-                const result = wasmInstance.exports.ghostty_key_event_new(0, eventPtrPtr);
+                const eventPtrPtr = wasmInstance.exports.termsurf_wasm_alloc_opaque();
+                const result = wasmInstance.exports.termsurf_key_event_new(0, eventPtrPtr);
                 
                 if (result !== 0) {
-                    throw new Error(`ghostty_key_event_new failed with result ${result}`);
+                    throw new Error(`termsurf_key_event_new failed with result ${result}`);
                 }
                 
                 const eventPtr = new DataView(getBuffer()).getUint32(eventPtrPtr, true);
@@ -429,57 +429,57 @@
                 // Get action from radio buttons
                 const actionRadio = document.querySelector('input[name="action"]:checked');
                 const action = parseInt(actionRadio.value);
-                wasmInstance.exports.ghostty_key_event_set_action(eventPtr, action);
+                wasmInstance.exports.termsurf_key_event_set_action(eventPtr, action);
 
                 // Map key code from event.code (preferred, layout-independent)
-                let keyCode = keyCodeMap[event.code] || 0; // GHOSTTY_KEY_UNIDENTIFIED = 0
-                wasmInstance.exports.ghostty_key_event_set_key(eventPtr, keyCode);
+                let keyCode = keyCodeMap[event.code] || 0; // TERMSURF_KEY_UNIDENTIFIED = 0
+                wasmInstance.exports.termsurf_key_event_set_key(eventPtr, keyCode);
 
                 // Map modifiers with left/right side information
                 let mods = 0;
                 if (event.shiftKey) {
-                    mods |= 0x01; // GHOSTTY_MODS_SHIFT
-                    if (event.code === 'ShiftRight') mods |= 0x40; // GHOSTTY_MODS_SHIFT_SIDE
+                    mods |= 0x01; // TERMSURF_MODS_SHIFT
+                    if (event.code === 'ShiftRight') mods |= 0x40; // TERMSURF_MODS_SHIFT_SIDE
                 }
                 if (event.ctrlKey) {
-                    mods |= 0x02; // GHOSTTY_MODS_CTRL
-                    if (event.code === 'ControlRight') mods |= 0x80; // GHOSTTY_MODS_CTRL_SIDE
+                    mods |= 0x02; // TERMSURF_MODS_CTRL
+                    if (event.code === 'ControlRight') mods |= 0x80; // TERMSURF_MODS_CTRL_SIDE
                 }
                 if (event.altKey) {
-                    mods |= 0x04; // GHOSTTY_MODS_ALT
-                    if (event.code === 'AltRight') mods |= 0x100; // GHOSTTY_MODS_ALT_SIDE
+                    mods |= 0x04; // TERMSURF_MODS_ALT
+                    if (event.code === 'AltRight') mods |= 0x100; // TERMSURF_MODS_ALT_SIDE
                 }
                 if (event.metaKey) {
-                    mods |= 0x08; // GHOSTTY_MODS_SUPER
-                    if (event.code === 'MetaRight') mods |= 0x200; // GHOSTTY_MODS_SUPER_SIDE
+                    mods |= 0x08; // TERMSURF_MODS_SUPER
+                    if (event.code === 'MetaRight') mods |= 0x200; // TERMSURF_MODS_SUPER_SIDE
                 }
-                wasmInstance.exports.ghostty_key_event_set_mods(eventPtr, mods);
+                wasmInstance.exports.termsurf_key_event_set_mods(eventPtr, mods);
 
                 // Set UTF-8 text from the key event (the actual character produced)
                 if (event.key.length === 1) {
                     const utf8Bytes = new TextEncoder().encode(event.key);
-                    const utf8Ptr = wasmInstance.exports.ghostty_wasm_alloc_u8_array(utf8Bytes.length);
+                    const utf8Ptr = wasmInstance.exports.termsurf_wasm_alloc_u8_array(utf8Bytes.length);
                     new Uint8Array(getBuffer()).set(utf8Bytes, utf8Ptr);
-                    wasmInstance.exports.ghostty_key_event_set_utf8(eventPtr, utf8Ptr, utf8Bytes.length);
+                    wasmInstance.exports.termsurf_key_event_set_utf8(eventPtr, utf8Ptr, utf8Bytes.length);
                 }
 
                 // Set unshifted codepoint
                 const unshiftedCodepoint = getUnshiftedCodepoint(event);
                 if (unshiftedCodepoint !== 0) {
-                    wasmInstance.exports.ghostty_key_event_set_unshifted_codepoint(eventPtr, unshiftedCodepoint);
+                    wasmInstance.exports.termsurf_key_event_set_unshifted_codepoint(eventPtr, unshiftedCodepoint);
                 }
 
                 // Encode the key event
-                const requiredPtr = wasmInstance.exports.ghostty_wasm_alloc_usize();
-                wasmInstance.exports.ghostty_key_encoder_encode(
+                const requiredPtr = wasmInstance.exports.termsurf_wasm_alloc_usize();
+                wasmInstance.exports.termsurf_key_encoder_encode(
                     encoderPtr, eventPtr, 0, 0, requiredPtr
                 );
                 
                 const required = new DataView(getBuffer()).getUint32(requiredPtr, true);
                 
-                const bufPtr = wasmInstance.exports.ghostty_wasm_alloc_u8_array(required);
-                const writtenPtr = wasmInstance.exports.ghostty_wasm_alloc_usize();
-                const encodeResult = wasmInstance.exports.ghostty_key_encoder_encode(
+                const bufPtr = wasmInstance.exports.termsurf_wasm_alloc_u8_array(required);
+                const writtenPtr = wasmInstance.exports.termsurf_wasm_alloc_usize();
+                const encodeResult = wasmInstance.exports.termsurf_key_encoder_encode(
                     encoderPtr, eventPtr, bufPtr, required, writtenPtr
                 );
                 
@@ -555,11 +555,11 @@
             if (!encoderPtr) return;
             
             const flags = getKittyFlags();
-            const flagsPtr = wasmInstance.exports.ghostty_wasm_alloc_u8();
+            const flagsPtr = wasmInstance.exports.termsurf_wasm_alloc_u8();
             new DataView(getBuffer()).setUint8(flagsPtr, flags);
-            wasmInstance.exports.ghostty_key_encoder_setopt(
+            wasmInstance.exports.termsurf_key_encoder_setopt(
                 encoderPtr, 
-                5, // GHOSTTY_KEY_ENCODER_OPT_KITTY_FLAGS
+                5, // TERMSURF_KEY_ENCODER_OPT_KITTY_FLAGS
                 flagsPtr
             );
             
@@ -642,11 +642,11 @@
                 }
 
                 // Create key encoder
-                const encoderPtrPtr = wasmInstance.exports.ghostty_wasm_alloc_opaque();
-                const result = wasmInstance.exports.ghostty_key_encoder_new(0, encoderPtrPtr);
+                const encoderPtrPtr = wasmInstance.exports.termsurf_wasm_alloc_opaque();
+                const result = wasmInstance.exports.termsurf_key_encoder_new(0, encoderPtrPtr);
                 
                 if (result !== 0) {
-                    throw new Error(`ghostty_key_encoder_new failed with result ${result}`);
+                    throw new Error(`termsurf_key_encoder_new failed with result ${result}`);
                 }
                 
                 encoderPtr = new DataView(getBuffer()).getUint32(encoderPtrPtr, true);

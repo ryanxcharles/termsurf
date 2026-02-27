@@ -10,7 +10,7 @@
 # The `<issue>` parameter can be either an issue number or a full GitHub
 # issue URL.
 def main [
-  issue: any, # Ghostty issue number or URL
+  issue: any, # TermSurf issue number or URL
   --repo: string = "ghostty-org/ghostty" # GitHub repository in the format "owner/repo"
 ] {
   # TODO: This whole script doesn't handle errors very well. I actually

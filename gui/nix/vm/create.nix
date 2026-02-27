@@ -26,11 +26,11 @@ in
           overlay
         ];
 
-        users.groups.ghostty = {
+        users.groups.termsurf = {
           gid = gid;
         };
 
-        users.users.ghostty = {
+        users.users.termsurf = {
           uid = uid;
         };
 

@@ -2919,7 +2919,7 @@ pub const Scrollbar = struct {
         .len = 0,
     };
 
-    // Sync with: ghostty_action_scrollbar_s
+    // Sync with: termsurf_action_scrollbar_s
     pub const C = extern struct {
         total: u64,
         offset: u64,

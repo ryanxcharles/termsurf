@@ -50,7 +50,7 @@ pub const Option = enum {
 
     // https://sw.kovidgoyal.net/kitty/shell-integration/#notes-for-shell-developers
     // Kitty supports a "redraw" option for prompt_start. This is extended
-    // by Ghostty with the "last" option. See Redraw the type for more details.
+    // by TermSurf with the "last" option. See Redraw the type for more details.
     redraw,
 
     // Use a special key instead of arrow keys to move the cursor on
@@ -61,10 +61,10 @@ pub const Option = enum {
     special_key,
 
     // If true, the shell is capable of handling mouse click events.
-    // Ghostty will then send a click event to the shell when the user
+    // TermSurf will then send a click event to the shell when the user
     // clicks somewhere in the prompt. The shell can then move the cursor
     // to that position or perform some other appropriate action. If false,
-    // Ghostty may generate a number of fake key events to move the cursor
+    // TermSurf may generate a number of fake key events to move the cursor
     // which is not very robust.
     // See: https://sw.kovidgoyal.net/kitty/shell-integration/#notes-for-shell-developers
     click_events,
@@ -248,7 +248,7 @@ pub const PromptKind = enum {
 };
 
 /// The values for the `redraw` extension to OSC133. This was
-/// started by Kitty[1] and extended by Ghostty (the "last" option).
+/// started by Kitty[1] and extended by TermSurf (the "last" option).
 ///
 /// [1]: https://sw.kovidgoyal.net/kitty/shell-integration/#notes-for-shell-developers
 pub const Redraw = enum(u2) {
@@ -257,12 +257,12 @@ pub const Redraw = enum(u2) {
     /// unless it is to reset a prior other value.
     true,
 
-    /// The shell does NOT support redrawing. In this case, Ghostty will NOT
+    /// The shell does NOT support redrawing. In this case, TermSurf will NOT
     /// clear any prompt lines on resize.
     false,
 
     /// The shell supports redrawing only the LAST line of the prompt.
-    /// Ghostty will only clear the last line of the prompt on resize.
+    /// TermSurf will only clear the last line of the prompt on resize.
     ///
     /// This is specifically introduced because Bash only redraws the last
     /// line. It is literally the only shell that does this and it does this

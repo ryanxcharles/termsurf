@@ -2,7 +2,7 @@ import Foundation
 import Cocoa
 import SwiftUI
 import Combine
-import GhosttyKit
+import TermSurfKit
 
 /// A classic, tabbed terminal experience.
 class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Controller {
@@ -10,7 +10,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         let defaultValue = "Terminal"
         
         guard let appDelegate = NSApp.delegate as? AppDelegate else { return defaultValue }
-        let config = appDelegate.ghostty.config
+        let config = appDelegate.termsurf.config
         
         // If we have no window decorations, there's no reason to do anything but
         // the default titlebar (because there will be no titlebar).
@@ -51,7 +51,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     /// For example, terminals executing custom scripts are not restorable.
     private var restorable: Bool = true
     
-    /// The configuration derived from the Ghostty config so we don't need to rely on references.
+    /// The configuration derived from the TermSurf config so we don't need to rely on references.
     private(set) var derivedConfig: DerivedConfig
     
     
@@ -61,9 +61,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     /// This will be set to the initial frame of the window from the xib on load.
     private var initialFrame: NSRect? = nil
     
-    init(_ ghostty: Ghostty.App,
-         withBaseConfig base: Ghostty.SurfaceConfiguration? = nil,
-         withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
+    init(_ termsurf: TermSurf.App,
+         withBaseConfig base: TermSurf.SurfaceConfiguration? = nil,
+         withSurfaceTree tree: SplitTree<TermSurf.SurfaceView>? = nil,
          parent: NSWindow? = nil
     ) {
         // The window we manage is not restorable if we've specified a command
@@ -74,52 +74,52 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         self.restorable = (base?.command ?? "") == ""
         
         // Setup our initial derived config based on the current app config
-        self.derivedConfig = DerivedConfig(ghostty.config)
+        self.derivedConfig = DerivedConfig(termsurf.config)
         
-        super.init(ghostty, baseConfig: base, surfaceTree: tree)
+        super.init(termsurf, baseConfig: base, surfaceTree: tree)
         
         // Setup our notifications for behaviors
         let center = NotificationCenter.default
         center.addObserver(
             self,
             selector: #selector(onToggleFullscreen),
-            name: Ghostty.Notification.ghosttyToggleFullscreen,
+            name: TermSurf.Notification.termsurfToggleFullscreen,
             object: nil)
         center.addObserver(
             self,
             selector: #selector(onMoveTab),
-            name: .ghosttyMoveTab,
+            name: .termsurfMoveTab,
             object: nil)
         center.addObserver(
             self,
             selector: #selector(onGotoTab),
-            name: Ghostty.Notification.ghosttyGotoTab,
+            name: TermSurf.Notification.termsurfGotoTab,
             object: nil)
         center.addObserver(
             self,
             selector: #selector(onCloseTab),
-            name: .ghosttyCloseTab,
+            name: .termsurfCloseTab,
             object: nil)
         center.addObserver(
             self,
             selector: #selector(onCloseOtherTabs),
-            name: .ghosttyCloseOtherTabs,
+            name: .termsurfCloseOtherTabs,
             object: nil)
         center.addObserver(
             self,
             selector: #selector(onCloseTabsOnTheRight),
-            name: .ghosttyCloseTabsOnTheRight,
+            name: .termsurfCloseTabsOnTheRight,
             object: nil)
         center.addObserver(
             self,
             selector: #selector(onResetWindowSize),
-            name: .ghosttyResetWindowSize,
+            name: .termsurfResetWindowSize,
             object: nil
         )
         center.addObserver(
             self,
-            selector: #selector(ghosttyConfigDidChange(_:)),
-            name: .ghosttyConfigDidChange,
+            selector: #selector(termsurfConfigDidChange(_:)),
+            name: .termsurfConfigDidChange,
             object: nil
         )
         center.addObserver(
@@ -130,7 +130,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         center.addObserver(
             self,
             selector: #selector(onCloseWindow),
-            name: .ghosttyCloseWindow,
+            name: .termsurfCloseWindow,
             object: nil
         )
     }
@@ -147,7 +147,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     
     // MARK: Base Controller Overrides
     
-    override func surfaceTreeDidChange(from: SplitTree<Ghostty.SurfaceView>, to: SplitTree<Ghostty.SurfaceView>) {
+    override func surfaceTreeDidChange(from: SplitTree<TermSurf.SurfaceView>, to: SplitTree<TermSurf.SurfaceView>) {
         super.surfaceTreeDidChange(from: from, to: to)
         
         // Whenever our surface tree changes in any way (new split, close split, etc.)
@@ -166,9 +166,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
     
     override func replaceSurfaceTree(
-        _ newTree: SplitTree<Ghostty.SurfaceView>,
-        moveFocusTo newView: Ghostty.SurfaceView? = nil,
-        moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
+        _ newTree: SplitTree<TermSurf.SurfaceView>,
+        moveFocusTo newView: TermSurf.SurfaceView? = nil,
+        moveFocusFrom oldView: TermSurf.SurfaceView? = nil,
         undoAction: String? = nil
     ) {
         // We have a special case if our tree is empty to close our tab immediately.
@@ -214,11 +214,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     /// The "new window" action.
     static func newWindow(
-        _ ghostty: Ghostty.App,
-        withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil,
+        _ termsurf: TermSurf.App,
+        withBaseConfig baseConfig: TermSurf.SurfaceConfiguration? = nil,
         withParent explicitParent: NSWindow? = nil
     ) -> TerminalController {
-        let c = TerminalController.init(ghostty, withBaseConfig: baseConfig)
+        let c = TerminalController.init(termsurf, withBaseConfig: baseConfig)
 
         // Get our parent. Our parent is the one explicitly given to us,
         // otherwise the focused terminal, otherwise an arbitrary one.
@@ -232,8 +232,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                 // fullscreen but this is how we've always done it. This matches iTerm2
                 // behavior.
                 c.toggleFullscreen(mode: .native)
-            } else if ghostty.config.windowFullscreen {
-                switch (ghostty.config.windowFullscreenMode) {
+            } else if termsurf.config.windowFullscreen {
+                switch (termsurf.config.windowFullscreenMode) {
                 case .native:
                     // Native has to be done immediately so that our stylemask contains
                     // fullscreen for the logic later in this method.
@@ -243,7 +243,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                     // If we're non-native then we have to do it on a later loop
                     // so that the content view is setup.
                     DispatchQueue.main.async {
-                        c.toggleFullscreen(mode: ghostty.config.windowFullscreenMode)
+                        c.toggleFullscreen(mode: termsurf.config.windowFullscreenMode)
                     }
                 }
             }
@@ -281,11 +281,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
                 // Register redo action
                 undoManager.registerUndo(
-                    withTarget: ghostty,
+                    withTarget: termsurf,
                     expiresAfter: target.undoExpiration
-                ) { ghostty in
+                ) { termsurf in
                     _ = TerminalController.newWindow(
-                        ghostty,
+                        termsurf,
                         withBaseConfig: baseConfig,
                         withParent: explicitParent)
                 }
@@ -298,17 +298,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     /// Create a new window with an existing split tree.
     /// The window will be sized to match the tree's current view bounds if available.
     /// - Parameters:
-    ///   - ghostty: The Ghostty app instance.
+    ///   - termsurf: The TermSurf app instance.
     ///   - tree: The split tree to use for the new window.
     ///   - position: Optional screen position (top-left corner) for the new window.
     ///               If nil, the window will cascade from the last cascade point.
     static func newWindow(
-        _ ghostty: Ghostty.App,
-        tree: SplitTree<Ghostty.SurfaceView>,
+        _ termsurf: TermSurf.App,
+        tree: SplitTree<TermSurf.SurfaceView>,
         position: NSPoint? = nil,
         confirmUndo: Bool = true,
     ) -> TerminalController {
-        let c = TerminalController.init(ghostty, withSurfaceTree: tree)
+        let c = TerminalController.init(termsurf, withSurfaceTree: tree)
 
         // Calculate the target frame based on the tree's view bounds
         let treeSize: CGSize? = tree.root?.viewBounds()
@@ -350,10 +350,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                 }
 
                 undoManager.registerUndo(
-                    withTarget: ghostty,
+                    withTarget: termsurf,
                     expiresAfter: target.undoExpiration
-                ) { ghostty in
-                    _ = TerminalController.newWindow(ghostty, tree: tree)
+                ) { termsurf in
+                    _ = TerminalController.newWindow(termsurf, tree: tree)
                 }
             }
         }
@@ -362,15 +362,15 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     static func newTab(
-        _ ghostty: Ghostty.App,
+        _ termsurf: TermSurf.App,
         from parent: NSWindow? = nil,
-        withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil
+        withBaseConfig baseConfig: TermSurf.SurfaceConfiguration? = nil
     ) -> TerminalController? {
         // Making sure that we're dealing with a TerminalController. If not,
         // then we just create a new window.
         guard let parent,
               let parentController = parent.windowController as? TerminalController else {
-            return newWindow(ghostty, withBaseConfig: baseConfig, withParent: parent)
+            return newWindow(termsurf, withBaseConfig: baseConfig, withParent: parent)
         }
 
         // If our parent is in non-native fullscreen, then new tabs do not work.
@@ -387,7 +387,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
 
         // Create a new window and add it to the parent
-        let controller = TerminalController.init(ghostty, withBaseConfig: baseConfig)
+        let controller = TerminalController.init(termsurf, withBaseConfig: baseConfig)
         guard let window = controller.window else { return controller }
 
         // If the parent is miniaturized, then macOS exhibits really strange behaviors
@@ -409,7 +409,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // If we don't allow tabs then we create a new window instead.
         if (window.tabbingMode != .disallowed) {
             // Add the window to the tab group and show it.
-            switch ghostty.config.windowNewTabPosition {
+            switch termsurf.config.windowNewTabPosition {
             case "end":
                 // If we already have a tab group and we want the new tab to open at the end,
                 // then we use the last window in the tab group as the parent.
@@ -470,11 +470,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
                 // Register redo action
                 undoManager.registerUndo(
-                    withTarget: ghostty,
+                    withTarget: termsurf,
                     expiresAfter: target.undoExpiration
-                ) { ghostty in
+                ) { termsurf in
                     _ = TerminalController.newTab(
-                        ghostty,
+                        termsurf,
                         from: parent,
                         withBaseConfig: baseConfig)
                 }
@@ -486,11 +486,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     
     //MARK: - Methods
 
-    @objc private func ghosttyConfigDidChange(_ notification: Notification) {
+    @objc private func termsurfConfigDidChange(_ notification: Notification) {
         // Get our managed configuration object out
         guard let config = notification.userInfo?[
-            Notification.Name.GhosttyConfigChangeKey
-        ] as? Ghostty.Config else { return }
+            Notification.Name.TermSurfConfigChangeKey
+        ] as? TermSurf.Config else { return }
 
         // If this is an app-level config update then we update some things.
         if (notification.object == nil) {
@@ -507,7 +507,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             return
         }
         /// Surface-level config will be updated in
-        /// ``Ghostty/Ghostty/SurfaceView/derivedConfig`` then
+        /// ``TermSurf/TermSurf/SurfaceView/derivedConfig`` then
         /// ``TerminalController/focusedSurfaceDidChange(to:)``
     }
 
@@ -529,7 +529,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                     continue
                 }
 
-                if let equiv = ghostty.config.keyboardShortcut(for: "goto_tab:\(tab)") {
+                if let equiv = termsurf.config.keyboardShortcut(for: "goto_tab:\(tab)") {
                     window.keyEquivalent = "\(equiv)"
                 } else {
                     window.keyEquivalent = ""
@@ -572,7 +572,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         syncAppearance(focusedSurface.derivedConfig)
     }
 
-    private func syncAppearance(_ surfaceConfig: Ghostty.SurfaceView.DerivedConfig) {
+    private func syncAppearance(_ surfaceConfig: TermSurf.SurfaceView.DerivedConfig) {
         // Let our window handle its own appearance
         guard let window = window as? TerminalWindow else { return }
 
@@ -615,7 +615,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     /// This is called anytime a node in the surface tree is being removed.
     override func closeSurface(
-        _ node: SplitTree<Ghostty.SurfaceView>.Node,
+        _ node: SplitTree<TermSurf.SurfaceView>.Node,
         withConfirmation: Bool = true
     ) {
         // If this isn't the root then we're dealing with a split closure.
@@ -647,10 +647,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             // Register undo action to restore the tab
             undoManager.setActionName("Close Tab")
             undoManager.registerUndo(
-                withTarget: ghostty,
+                withTarget: termsurf,
                 expiresAfter: undoExpiration
-            ) { ghostty in
-                let newController = TerminalController(ghostty, with: undoState)
+            ) { termsurf in
+                let newController = TerminalController(termsurf, with: undoState)
 
                 if registerRedo {
                     undoManager.registerUndo(
@@ -792,10 +792,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                 // Register undo action to restore the window
                 undoManager.setActionName("Close Window")
                 undoManager.registerUndo(
-                    withTarget: ghostty,
-                    expiresAfter: undoExpiration) { ghostty in
+                    withTarget: termsurf,
+                    expiresAfter: undoExpiration) { termsurf in
                         // Restore the undo state
-                        let newController = TerminalController(ghostty, with: undoState)
+                        let newController = TerminalController(termsurf, with: undoState)
 
                         // Register redo action
                         undoManager.registerUndo(
@@ -848,12 +848,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         undoManager.setActionName("Close Window")
         undoManager.registerUndo(
-            withTarget: ghostty,
+            withTarget: termsurf,
             expiresAfter: undoExpiration
-        ) { ghostty in
+        ) { termsurf in
             // Restore all windows in the tab group
             let controllers = undoStates.map { undoState in
-                TerminalController(ghostty, with: undoState)
+                TerminalController(termsurf, with: undoState)
             }
 
             // The first controller becomes the parent window for all tabs.
@@ -931,17 +931,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     /// The state that we require to recreate a TerminalController from an undo.
     struct UndoState {
         let frame: NSRect
-        let surfaceTree: SplitTree<Ghostty.SurfaceView>
+        let surfaceTree: SplitTree<TermSurf.SurfaceView>
         let focusedSurface: UUID?
         let tabIndex: Int?
         weak var tabGroup: NSWindowTabGroup?
         let tabColor: TerminalTabColor
     }
 
-    convenience init(_ ghostty: Ghostty.App,
+    convenience init(_ termsurf: TermSurf.App,
          with undoState: UndoState
     ) {
-        self.init(ghostty, withSurfaceTree: undoState.surfaceTree)
+        self.init(termsurf, withSurfaceTree: undoState.surfaceTree)
 
         // Show the window and restore its frame
         showWindow(nil)
@@ -970,14 +970,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             if let focusedUUID = undoState.focusedSurface,
                let focusTarget = surfaceTree.first(where: { $0.id == focusedUUID }) {
                 DispatchQueue.main.async {
-                    Ghostty.moveFocus(to: focusTarget, from: nil)
+                    TermSurf.moveFocus(to: focusTarget, from: nil)
                 }
             } else if let focusedSurface = surfaceTree.first {
                 // No prior focused surface or we can't find it, let's focus
                 // the first.
                 self.focusedSurface = focusedSurface
                 DispatchQueue.main.async {
-                    Ghostty.moveFocus(to: focusedSurface, from: nil)
+                    TermSurf.moveFocus(to: focusedSurface, from: nil)
                 }
             }
         }
@@ -1008,10 +1008,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         guard let window else { return }
 
         // I copy this because we may change the source in the future but also because
-        // I regularly audit our codebase for "ghostty.config" access because generally
+        // I regularly audit our codebase for "termsurf.config" access because generally
         // you shouldn't use it. Its safe in this case because for a new window we should
         // use whatever the latest app-level config is.
-        let config = ghostty.config
+        let config = termsurf.config
 
         // Setting all three of these is required for restoration to work.
         window.isRestorable = restorable
@@ -1030,7 +1030,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         // Initialize our content view to the SwiftUI root
         window.contentView = TerminalViewContainer(
-            ghostty: self.ghostty,
+            termsurf: self.termsurf,
             viewModel: self,
             delegate: self,
         )
@@ -1062,7 +1062,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // so it respects cascade.
         initialFrame = window.frame
 
-        // In various situations, macOS automatically tabs new windows. Ghostty handles
+        // In various situations, macOS automatically tabs new windows. TermSurf handles
         // its own tabbing so we DONT want this behavior. This detects this scenario and undoes
         // it.
         //
@@ -1075,7 +1075,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // the expected or desired behavior of anyone I've found.
         if (!window.styleMask.contains(.fullScreen)) {
             // If we have more than 1 window in our tab group we know we're a new window.
-            // Since Ghostty manages tabbing manually this will never be more than one
+            // Since TermSurf manages tabbing manually this will never be more than one
             // at this point in the AppKit lifecycle (we add to the group after this).
             if let tabGroup = window.tabGroup, tabGroup.windows.count > 1 {
                 window.tabGroup?.removeWindow(window)
@@ -1090,9 +1090,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     // Shows the "+" button in the tab bar, responds to that click.
     override func newWindowForTab(_ sender: Any?) {
-        // Trigger the ghostty core event logic for a new tab.
+        // Trigger the termsurf core event logic for a new tab.
         guard let surface = self.focusedSurface?.surface else { return }
-        ghostty.newTab(surface: surface)
+        termsurf.newTab(surface: surface)
     }
 
     // MARK: NSWindowDelegate
@@ -1188,12 +1188,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     @IBAction func newWindow(_ sender: Any?) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.newWindow(surface: surface)
+        termsurf.newWindow(surface: surface)
     }
 
     @IBAction func newTab(_ sender: Any?) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.newTab(surface: surface)
+        termsurf.newTab(surface: surface)
     }
 
     @IBAction func closeTab(_ sender: Any?) {
@@ -1307,19 +1307,19 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
     }
 
-    @IBAction func toggleGhosttyFullScreen(_ sender: Any?) {
+    @IBAction func toggleTermSurfFullScreen(_ sender: Any?) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.toggleFullscreen(surface: surface)
+        termsurf.toggleFullscreen(surface: surface)
     }
 
     @IBAction func toggleTerminalInspector(_ sender: Any?) {
         guard let surface = focusedSurface?.surface else { return }
-        ghostty.toggleTerminalInspector(surface: surface)
+        termsurf.toggleTerminalInspector(surface: surface)
     }
 
     //MARK: - TerminalViewDelegate
 
-    override func focusedSurfaceDidChange(to: Ghostty.SurfaceView?) {
+    override func focusedSurfaceDidChange(to: TermSurf.SurfaceView?) {
         super.focusedSurfaceDidChange(to: to)
 
         // We always cancel our event listener
@@ -1339,7 +1339,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             .store(in: &surfaceAppearanceCancellables)
     }
 
-    private func syncAppearanceOnPropertyChange(_ surface: Ghostty.SurfaceView?) {
+    private func syncAppearanceOnPropertyChange(_ surface: TermSurf.SurfaceView?) {
         guard let surface else { return }
         DispatchQueue.main.async { [weak self, weak surface] in
             guard let surface else { return }
@@ -1352,12 +1352,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     //MARK: - Notifications
 
     @objc private func onMoveTab(notification: SwiftUI.Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard target == self.focusedSurface else { return }
         guard let window = self.window else { return }
 
         // Get the move action
-        guard let action = notification.userInfo?[Notification.Name.GhosttyMoveTabKey] as? Ghostty.Action.MoveTab else { return }
+        guard let action = notification.userInfo?[Notification.Name.TermSurfMoveTabKey] as? TermSurf.Action.MoveTab else { return }
         guard action.amount != 0 else { return }
 
         // Determine our current selected index
@@ -1415,13 +1415,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     @objc private func onGotoTab(notification: SwiftUI.Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard target == self.focusedSurface else { return }
         guard let window = self.window else { return }
 
         // Get the tab index from the notification
-        guard let tabEnumAny = notification.userInfo?[Ghostty.Notification.GotoTabKey] else { return }
-        guard let tabEnum = tabEnumAny as? ghostty_action_goto_tab_e else { return }
+        guard let tabEnumAny = notification.userInfo?[TermSurf.Notification.GotoTabKey] else { return }
+        guard let tabEnum = tabEnumAny as? termsurf_action_goto_tab_e else { return }
         let tabIndex: Int32 = tabEnum.rawValue
 
         guard let windowController = window.windowController else { return }
@@ -1436,19 +1436,19 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             guard let selectedWindow = tabGroup.selectedWindow else { return }
             guard let selectedIndex = tabbedWindows.firstIndex(where: { $0 == selectedWindow }) else { return }
 
-            if (tabIndex == GHOSTTY_GOTO_TAB_PREVIOUS.rawValue) {
+            if (tabIndex == TERMSURF_GOTO_TAB_PREVIOUS.rawValue) {
                 if (selectedIndex == 0) {
                     finalIndex = tabbedWindows.count - 1
                 } else {
                     finalIndex = selectedIndex - 1
                 }
-            } else if (tabIndex == GHOSTTY_GOTO_TAB_NEXT.rawValue) {
+            } else if (tabIndex == TERMSURF_GOTO_TAB_NEXT.rawValue) {
                 if (selectedIndex == tabbedWindows.count - 1) {
                     finalIndex = 0
                 } else {
                     finalIndex = selectedIndex + 1
                 }
-            } else if (tabIndex == GHOSTTY_GOTO_TAB_LAST.rawValue) {
+            } else if (tabIndex == TERMSURF_GOTO_TAB_LAST.rawValue) {
                 finalIndex = tabbedWindows.count - 1
             } else {
                 return
@@ -1467,46 +1467,46 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     @objc private func onCloseTab(notification: SwiftUI.Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard surfaceTree.contains(target) else { return }
         closeTab(self)
     }
 
     @objc private func onCloseOtherTabs(notification: SwiftUI.Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard surfaceTree.contains(target) else { return }
         closeOtherTabs(self)
     }
 
     @objc private func onCloseTabsOnTheRight(notification: SwiftUI.Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard surfaceTree.contains(target) else { return }
         closeTabsOnTheRight(self)
     }
 
     @objc private func onCloseWindow(notification: SwiftUI.Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard surfaceTree.contains(target) else { return }
         closeWindow(self)
     }
 
     @objc private func onResetWindowSize(notification: SwiftUI.Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard surfaceTree.contains(target) else { return }
         returnToDefaultSize(nil)
     }
 
     @objc private func onToggleFullscreen(notification: SwiftUI.Notification) {
-        guard let target = notification.object as? Ghostty.SurfaceView else { return }
+        guard let target = notification.object as? TermSurf.SurfaceView else { return }
         guard target == self.focusedSurface else { return }
 
         // Get the fullscreen mode we want to toggle
         let fullscreenMode: FullscreenMode
-        if let any = notification.userInfo?[Ghostty.Notification.FullscreenModeKey],
+        if let any = notification.userInfo?[TermSurf.Notification.FullscreenModeKey],
            let mode = any as? FullscreenMode {
             fullscreenMode = mode
         } else {
-            Ghostty.logger.warning("no fullscreen mode specified or invalid mode, doing nothing")
+            TermSurf.logger.warning("no fullscreen mode specified or invalid mode, doing nothing")
             return
         }
 
@@ -1515,7 +1515,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     struct DerivedConfig {
         let backgroundColor: Color
-        let macosWindowButtons: Ghostty.MacOSWindowButtons
+        let macosWindowButtons: TermSurf.MacOSWindowButtons
         let macosTitlebarStyle: String
         let maximize: Bool
         let windowPositionX: Int16?
@@ -1530,7 +1530,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             self.windowPositionY = nil
         }
 
-        init(_ config: Ghostty.Config) {
+        init(_ config: TermSurf.Config) {
             self.backgroundColor = config.backgroundColor
             self.macosWindowButtons = config.macosWindowButtons
             self.macosTitlebarStyle = config.macosTitlebarStyle

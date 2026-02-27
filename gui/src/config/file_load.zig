@@ -15,7 +15,7 @@ pub fn defaultXdgPath(alloc: Allocator) ![]const u8 {
     );
 }
 
-/// Ghostty <1.3.0 default path for the XDG home configuration file.
+/// TermSurf <1.3.0 default path for the XDG home configuration file.
 /// Returned value must be freed by the caller.
 pub fn legacyDefaultXdgPath(alloc: Allocator) ![]const u8 {
     return try internal_os.xdg.config(
@@ -55,7 +55,7 @@ pub fn defaultAppSupportPath(alloc: Allocator) ![]const u8 {
     return try internal_os.macos.appSupportDir(alloc, "config.ghostty");
 }
 
-/// Ghostty <1.3.0 default path for the macOS Application Support
+/// TermSurf <1.3.0 default path for the macOS Application Support
 /// configuration file. Returned value must be freed by the caller.
 pub fn legacyDefaultAppSupportPath(alloc: Allocator) ![]const u8 {
     return try internal_os.macos.appSupportDir(alloc, "config");

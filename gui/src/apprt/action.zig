@@ -15,25 +15,25 @@ pub const Target = union(Key) {
     app,
     surface: *CoreSurface,
 
-    // Sync with: ghostty_target_tag_e
+    // Sync with: termsurf_target_tag_e
     pub const Key = enum(c_int) {
         app,
         surface,
     };
 
-    // Sync with: ghostty_target_u
+    // Sync with: termsurf_target_u
     pub const CValue = extern union {
         app: void,
         surface: *apprt.Surface,
     };
 
-    // Sync with: ghostty_target_s
+    // Sync with: termsurf_target_s
     pub const C = extern struct {
         key: Key,
         value: CValue,
     };
 
-    /// Convert to ghostty_target_s.
+    /// Convert to termsurf_target_s.
     pub fn cval(self: Target) C {
         return .{
             .key = @as(Key, self),
@@ -58,7 +58,7 @@ pub const Action = union(Key) {
     // A GUIDE TO ADDING NEW ACTIONS:
     //
     // 1. Add the action to the `Key` enum. The order of the enum matters
-    //    because it maps directly to the libghostty C enum. For ABI
+    //    because it maps directly to the libtermsurf C enum. For ABI
     //    compatibility, new actions should be added to the end of the enum.
     //
     // 2. Add the action and optional value to the Action union.
@@ -67,7 +67,7 @@ pub const Action = union(Key) {
     //    compatible (extern). If it is not, add a `C` decl to the value
     //    and a `cval` function to convert to the C ABI compatible value.
     //
-    // 4. Update `include/ghostty.h`: add the new key, value, and union
+    // 4. Update `include/termsurf.h`: add the new key, value, and union
     //    entry. If the value type is void then only the key needs to be
     //    added. Ensure the order matches exactly with the Zig code.
 
@@ -112,7 +112,7 @@ pub const Action = union(Key) {
     /// Toggle the command palette. This currently only works on macOS.
     toggle_command_palette,
 
-    /// Toggle the visibility of all Ghostty terminal windows.
+    /// Toggle the visibility of all TermSurf terminal windows.
     toggle_visibility,
 
     /// Toggle the window background opacity. This only has an effect
@@ -216,7 +216,7 @@ pub const Action = union(Key) {
     /// The health of the renderer has changed.
     renderer_health: renderer.Health,
 
-    /// Open the Ghostty configuration. This is platform-specific about
+    /// Open the TermSurf configuration. This is platform-specific about
     /// what it means; it can mean opening a dedicated UI or just opening
     /// a file in a text editor.
     open_config,
@@ -224,7 +224,7 @@ pub const Action = union(Key) {
     /// Called when there are no more surfaces and the app should quit
     /// after the configured delay.
     ///
-    /// Despite the name, this is the notification that libghostty sends
+    /// Despite the name, this is the notification that libtermsurf sends
     /// when there are no more surfaces regardless of if the configuration
     /// wants to quit after close, has any delay set, etc. It's up to the
     /// apprt to implement the proper logic based on the config.
@@ -335,7 +335,7 @@ pub const Action = union(Key) {
     /// otherwise the terminal-set title.
     copy_title_to_clipboard,
 
-    /// Sync with: ghostty_action_tag_e
+    /// Sync with: termsurf_action_tag_e
     pub const Key = enum(c_int) {
         quit,
         new_window,
@@ -403,7 +403,7 @@ pub const Action = union(Key) {
         copy_title_to_clipboard,
     };
 
-    /// Sync with: ghostty_action_u
+    /// Sync with: termsurf_action_u
     pub const CValue = cvalue: {
         const key_fields = @typeInfo(Key).@"enum".fields;
         var union_fields: [key_fields.len]std.builtin.Type.UnionField = undefined;
@@ -431,7 +431,7 @@ pub const Action = union(Key) {
         } });
     };
 
-    /// Sync with: ghostty_action_s
+    /// Sync with: termsurf_action_s
     pub const C = extern struct {
         key: Key,
         value: CValue,
@@ -458,7 +458,7 @@ pub const Action = union(Key) {
         unreachable;
     }
 
-    /// Convert to ghostty_action_s.
+    /// Convert to termsurf_action_s.
     pub fn cval(self: Action) C {
         const value: CValue = switch (self) {
             inline else => |v, tag| @unionInit(
@@ -584,7 +584,7 @@ pub const PromptTitle = enum(c_int) {
 pub const MouseOverLink = struct {
     url: [:0]const u8,
 
-    // Sync with: ghostty_action_mouse_over_link_s
+    // Sync with: termsurf_action_mouse_over_link_s
     pub const C = extern struct {
         url: [*]const u8,
         len: usize,
@@ -613,7 +613,7 @@ pub const InitialSize = extern struct {
     pub const getGObjectType = switch (build_config.app_runtime) {
         .gtk => @import("gobject").ext.defineBoxed(
             InitialSize,
-            .{ .name = "GhosttyApprtInitialSize" },
+            .{ .name = "TermSurfApprtInitialSize" },
         ),
 
         .none => void,
@@ -628,7 +628,7 @@ pub const CellSize = extern struct {
 pub const SetTitle = struct {
     title: [:0]const u8,
 
-    // Sync with: ghostty_action_set_title_s
+    // Sync with: termsurf_action_set_title_s
     pub const C = extern struct {
         title: [*:0]const u8,
     };
@@ -652,7 +652,7 @@ pub const SetTitle = struct {
 pub const Pwd = struct {
     pwd: [:0]const u8,
 
-    // Sync with: ghostty_action_set_pwd_s
+    // Sync with: termsurf_action_set_pwd_s
     pub const C = extern struct {
         pwd: [*:0]const u8,
     };
@@ -678,7 +678,7 @@ pub const DesktopNotification = struct {
     title: [:0]const u8,
     body: [:0]const u8,
 
-    // Sync with: ghostty_action_desktop_notification_s
+    // Sync with: termsurf_action_desktop_notification_s
     pub const C = extern struct {
         title: [*:0]const u8,
         body: [*:0]const u8,
@@ -709,7 +709,7 @@ pub const KeySequence = union(enum) {
     trigger: input.Trigger,
     end,
 
-    // Sync with: ghostty_action_key_sequence_s
+    // Sync with: termsurf_action_key_sequence_s
     pub const C = extern struct {
         active: bool,
         trigger: input.Trigger.C,
@@ -728,14 +728,14 @@ pub const KeyTable = union(enum) {
     deactivate,
     deactivate_all,
 
-    // Sync with: ghostty_action_key_table_tag_e
+    // Sync with: termsurf_action_key_table_tag_e
     pub const Tag = enum(c_int) {
         activate,
         deactivate,
         deactivate_all,
     };
 
-    // Sync with: ghostty_action_key_table_u
+    // Sync with: termsurf_action_key_table_u
     pub const CValue = extern union {
         activate: extern struct {
             name: [*]const u8,
@@ -743,7 +743,7 @@ pub const KeyTable = union(enum) {
         },
     };
 
-    // Sync with: ghostty_action_key_table_s
+    // Sync with: termsurf_action_key_table_s
     pub const C = extern struct {
         tag: Tag,
         value: CValue,
@@ -786,7 +786,7 @@ pub const ColorKind = enum(c_int) {
 
 pub const ReloadConfig = extern struct {
     /// A soft reload means that the configuration doesn't need to be
-    /// read off disk, but libghostty needs the full config again so call
+    /// read off disk, but libtermsurf needs the full config again so call
     /// updateConfig with it.
     soft: bool = false,
 };
@@ -794,7 +794,7 @@ pub const ReloadConfig = extern struct {
 pub const ConfigChange = struct {
     config: *const configpkg.Config,
 
-    // Sync with: ghostty_action_config_change_s
+    // Sync with: termsurf_action_config_change_s
     pub const C = extern struct {
         config: *const configpkg.Config,
     };
@@ -817,7 +817,7 @@ pub const OpenUrl = struct {
     /// The type of the data at the URL to open. This is used as a hint to
     /// potentially open the URL in a different way.
     ///
-    /// Sync with: ghostty_action_open_url_kind_e
+    /// Sync with: termsurf_action_open_url_kind_e
     pub const Kind = enum(c_int) {
         /// The type is unknown. This is the default and apprts should
         /// open the URL in the most generic way possible. For example,
@@ -834,7 +834,7 @@ pub const OpenUrl = struct {
         html,
     };
 
-    // Sync with: ghostty_action_open_url_s
+    // Sync with: termsurf_action_open_url_s
     pub const C = extern struct {
         kind: Kind,
         url: [*]const u8,
@@ -850,7 +850,7 @@ pub const OpenUrl = struct {
     }
 };
 
-/// sync with ghostty_action_close_tab_mode_e in ghostty.h
+/// sync with termsurf_action_close_tab_mode_e in termsurf.h
 pub const CloseTabMode = enum(c_int) {
     /// Close the current tab.
     this,
@@ -864,7 +864,7 @@ pub const CommandFinished = struct {
     exit_code: ?u8,
     duration: configpkg.Config.Duration,
 
-    /// sync with ghostty_action_command_finished_s in ghostty.h
+    /// sync with termsurf_action_command_finished_s in termsurf.h
     pub const C = extern struct {
         exit_code: i16,
         duration: u64,
@@ -881,7 +881,7 @@ pub const CommandFinished = struct {
 pub const StartSearch = struct {
     needle: [:0]const u8,
 
-    // Sync with: ghostty_action_start_search_s
+    // Sync with: termsurf_action_start_search_s
     pub const C = extern struct {
         needle: [*:0]const u8,
     };
@@ -896,7 +896,7 @@ pub const StartSearch = struct {
 pub const SearchTotal = struct {
     total: ?usize,
 
-    // Sync with: ghostty_action_search_total_s
+    // Sync with: termsurf_action_search_total_s
     pub const C = extern struct {
         total: isize,
     };
@@ -911,7 +911,7 @@ pub const SearchTotal = struct {
 pub const SearchSelected = struct {
     selected: ?usize,
 
-    // Sync with: ghostty_action_search_selected_s
+    // Sync with: termsurf_action_search_selected_s
     pub const C = extern struct {
         selected: isize,
     };

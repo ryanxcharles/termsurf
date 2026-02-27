@@ -1076,7 +1076,7 @@ pub fn sendMouseMove(
 
 // -- Keyboard input (Issue 607) --
 
-/// Map Ghostty input.Key to Windows virtual key code for Chromium.
+/// Map TermSurf input.Key to Windows virtual key code for Chromium.
 fn keyToWindowsVK(key: input.Key) u32 {
     return switch (key) {
         .key_a => 0x41,
