@@ -256,7 +256,6 @@ fn main() -> io::Result<()> {
                                 *mode = Mode::Edit;
                             };
                         match key.code {
-                            KeyCode::Char('q') => break,
                             KeyCode::Char('i') => {
                                 // Insert mode, cursor at last position (Issue 658).
                                 enter_edit(&mut editor_state, &mut editor_url, &url, &mut mode);
@@ -645,7 +644,7 @@ fn ui(
         ]),
         Mode::Control => Line::from(vec![
             Span::styled("<", d),
-            Span::styled("q", f),
+            Span::styled(":q", f),
             Span::styled("> ", d),
             Span::styled("quit  ", f),
             Span::styled("<", d),

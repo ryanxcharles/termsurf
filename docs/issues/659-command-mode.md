@@ -258,3 +258,36 @@ In `tui/src/main.rs`:
 2. Press `q` — nothing happens
 3. Status bar hints show `<:q> quit` instead of `<q> quit`
 4. Press `:`, type `q`, press `Enter` — TUI quits
+
+### Result
+
+Pass. Bare `q` no longer quits. Hints show `<:q> quit`. Command mode is the only
+way to quit (besides `Ctrl+C`).
+
+## Experiment 5: Restyle status bar hints
+
+### Hypothesis
+
+Removing the `<>` wrappers and dimming descriptions instead will free up space,
+allow showing full key sequences like `:q↵`, and look cleaner.
+
+### Changes
+
+In `tui/src/main.rs`:
+
+1. **New hint format.** Replace `<key> description` with `key description`,
+   where `key` is bright (FG) and `description` is dim (DIM). Separate hints
+   with two spaces. Use `↵` to represent Enter in key sequences.
+
+2. **Update all four mode hint lines:**
+   - **Browse:** `cmd+[ back  cmd+] fwd  cmd+r reload  ctrl+esc control`
+   - **Control:** `:q↵ quit  i edit url  ↵ browse`
+   - **Edit:** `↵ navigate  ctrl+esc control`
+   - **Command:** `↵ execute  ctrl+esc control`
+
+### Test
+
+1. Launch TUI — no `<>` characters in hints
+2. Key sequences are bright, descriptions are dim
+3. Control mode shows `:q↵ quit` (full key sequence including Enter)
+4. All four modes display correctly with the new style
