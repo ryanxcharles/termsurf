@@ -104,6 +104,28 @@ function WelcomePage() {
         internetMesh = new THREE.Mesh(internetGeo, internetMat);
         internetMesh.position.y = 0;
         scene.add(internetMesh);
+
+        // Subtitle — small, below
+        const subtitleGeo = new TextGeometry(
+          "advanced communications network for planet earth",
+          {
+            font,
+            size: 0.22,
+            depth: 0.02,
+            curveSegments: 12,
+          },
+        );
+        subtitleGeo.computeBoundingBox();
+        subtitleGeo.center();
+
+        const subtitleMat = new THREE.MeshStandardMaterial({
+          color: 0x666666,
+          metalness: 0.3,
+          roughness: 0.7,
+        });
+        const subtitleMesh = new THREE.Mesh(subtitleGeo, subtitleMat);
+        subtitleMesh.position.y = -2;
+        scene.add(subtitleMesh);
       },
     );
 
