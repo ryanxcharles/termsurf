@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use clap::{Parser, Subcommand};
 
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -49,6 +49,11 @@ enum Mode {
     Control,
     Edit,
     Command,
+}
+
+enum LoopEvent {
+    Key(KeyEvent),
+    Xpc(xpc::CompositorMessage),
 }
 
 // Command dispatch (Issue 659).
@@ -161,9 +166,10 @@ fn main() -> io::Result<()> {
         None => eprintln!("[web] TERMSURF_PANE_ID not set (not running inside TermSurf)"),
     }
 
+    let (tx, rx) = std::sync::mpsc::channel();
     let compositor = pane_id
         .as_ref()
-        .and_then(|_| xpc::CompositorConnection::connect());
+        .and_then(|_| xpc::CompositorConnection::connect(tx.clone()));
     match &compositor {
         Some(_) => eprintln!("[web] Connected to compositor"),
         None if pane_id.is_some() => {
@@ -177,6 +183,16 @@ fn main() -> io::Result<()> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
+
+    // Crossterm reader thread — sends key events to the unified channel (Issue 666).
+    let key_tx = tx;
+    std::thread::spawn(move || loop {
+        if let Ok(Event::Key(key)) = event::read() {
+            if key_tx.send(LoopEvent::Key(key)).is_err() {
+                break;
+            }
+        }
+    });
 
     let mut mode = Mode::Control;
     let mut last_viewport = Rect::default();
@@ -246,8 +262,9 @@ fn main() -> io::Result<()> {
             }
         }
 
-        if event::poll(Duration::from_millis(250))? {
-            if let Event::Key(key) = event::read()? {
+        // Unified event channel — blocks until a key or XPC event arrives (Issue 666).
+        match rx.recv() {
+            Ok(LoopEvent::Key(key)) => {
                 // Ctrl+C quits from any mode.
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     break;
@@ -397,11 +414,7 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
-        }
-
-        // Drain incoming messages from compositor (Issue 513).
-        if let Some(ref conn) = compositor {
-            while let Some(msg) = conn.try_recv() {
+            Ok(LoopEvent::Xpc(msg)) => {
                 match msg {
                     xpc::CompositorMessage::ModeChanged { browsing } => {
                         mode = if browsing {
@@ -446,6 +459,7 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
+            Err(_) => break,
         }
 
         // Safety timeout: clear stuck loading bar after 30 seconds (Issue 616).

@@ -63,7 +63,6 @@ pub enum CompositorMessage {
 /// A direct connection to the TermSurf app via its anonymous XPC listener.
 pub struct CompositorConnection {
     raw: XpcConnectionT,
-    rx: std::sync::mpsc::Receiver<CompositorMessage>,
 }
 
 unsafe impl Send for CompositorConnection {}
@@ -74,7 +73,7 @@ impl CompositorConnection {
     /// 1. Connect to `com.termsurf.xpc-gateway` (the gateway daemon)
     /// 2. Send `{ action: "connect" }` and receive the app's endpoint
     /// 3. Connect directly to the app via the endpoint
-    pub fn connect() -> Option<Self> {
+    pub fn connect(tx: std::sync::mpsc::Sender<super::LoopEvent>) -> Option<Self> {
         // Step 1: Connect to the gateway.
         // Debug builds set TERMSURF_XPC_SERVICE to the debug gateway name (Issue 653).
         let service_name = std::env::var("TERMSURF_XPC_SERVICE")
@@ -173,7 +172,7 @@ impl CompositorConnection {
         }
 
         // Set event handler that parses incoming messages (Issue 513).
-        let (tx, rx) = std::sync::mpsc::channel();
+        // Messages are sent directly to the unified LoopEvent channel (Issue 666).
         let handler_block = block2::RcBlock::new(move |event: XpcObjectT| {
             if event.is_null() {
                 return;
@@ -196,7 +195,9 @@ impl CompositorConnection {
             if action == "mode_changed" {
                 let browsing_key = CString::new("browsing").unwrap();
                 let browsing = unsafe { xpc_dictionary_get_bool(event, browsing_key.as_ptr()) };
-                let _ = tx.send(CompositorMessage::ModeChanged { browsing });
+                let _ = tx.send(super::LoopEvent::Xpc(CompositorMessage::ModeChanged {
+                    browsing,
+                }));
             } else if action == "url_changed" {
                 let url_key = CString::new("url").unwrap();
                 let url_ptr = unsafe { xpc_dictionary_get_string(event, url_key.as_ptr()) };
@@ -205,7 +206,7 @@ impl CompositorConnection {
                         .to_str()
                         .unwrap_or("")
                         .to_string();
-                    let _ = tx.send(CompositorMessage::UrlChanged { url });
+                    let _ = tx.send(super::LoopEvent::Xpc(CompositorMessage::UrlChanged { url }));
                 }
             } else if action == "loading_state" {
                 let state_key = CString::new("state").unwrap();
@@ -218,10 +219,10 @@ impl CompositorConnection {
                     let progress_key = CString::new("progress").unwrap();
                     let progress =
                         unsafe { xpc_dictionary_get_uint64(event, progress_key.as_ptr()) } as u8;
-                    let _ = tx.send(CompositorMessage::LoadingState {
+                    let _ = tx.send(super::LoopEvent::Xpc(CompositorMessage::LoadingState {
                         state,
                         _progress: progress,
-                    });
+                    }));
                 }
             } else if action == "title_changed" {
                 let title_key = CString::new("title").unwrap();
@@ -231,7 +232,9 @@ impl CompositorConnection {
                         .to_str()
                         .unwrap_or("")
                         .to_string();
-                    let _ = tx.send(CompositorMessage::TitleChanged { title });
+                    let _ = tx.send(super::LoopEvent::Xpc(CompositorMessage::TitleChanged {
+                        title,
+                    }));
                 }
             }
         });
@@ -246,7 +249,7 @@ impl CompositorConnection {
             xpc_release(gateway)
         };
 
-        Some(Self { raw: app_conn, rx })
+        Some(Self { raw: app_conn })
     }
 
     /// Send a `set_overlay` message to the app (direct connection).
@@ -297,11 +300,6 @@ impl CompositorConnection {
             xpc_connection_send_message(self.raw, dict);
             xpc_release(dict);
         }
-    }
-
-    /// Poll for an incoming message from the compositor (non-blocking).
-    pub fn try_recv(&self) -> Option<CompositorMessage> {
-        self.rx.try_recv().ok()
     }
 
     /// Tell the compositor to navigate to a new URL.
