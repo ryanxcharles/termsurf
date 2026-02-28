@@ -2,7 +2,7 @@
 # Generate app icon assets from a source image
 # Usage: ./scripts/generate-icons.sh
 #
-# Source image: assets/termsurf-2-black.png (relative to repo root)
+# Source image: assets/termsurf-2-black-2.png (relative to repo root)
 # Generates all icon sizes for AppIcon.appiconset and AppIconImage.imageset.
 
 set -e
@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GHOST_DIR="$(dirname "$SCRIPT_DIR")"
 REPO_ROOT="$(dirname "$GHOST_DIR")"
 
-PROD_SOURCE="$REPO_ROOT/assets/termsurf-2-black.png"
+PROD_SOURCE="$REPO_ROOT/assets/termsurf-2-black-2.png"
 APPICONSET="$GHOST_DIR/macos/Assets.xcassets/AppIcon.appiconset"
 APPICONIMAGE="$GHOST_DIR/macos/Assets.xcassets/AppIconImage.imageset"
 
