@@ -128,3 +128,23 @@ Create `146.0.7650.0-issue-663` from the latest TermSurf branch. Add to
 7. Right-click, then right-click elsewhere — old menu dismissed, new menu
    appears at new position
 8. No focus loss to Chromium process at any point
+
+### Result
+
+Cancelled. The implementation was straightforward — replace the early `return;`
+in `ShowContextMenu` with a call to `ExecuteJavaScriptForTests` injecting a
+DOM-based context menu. However, the experiment was cancelled before testing
+because modifying the Chromium fork is undesirable while a potential rewrite of
+Chromium Profile Server in Zig is under consideration. Minimizing Chromium fork
+changes reduces the maintenance burden if the C++ layer is replaced.
+
+## Conclusion
+
+Deferred. The JavaScript injection approach is validated as the simplest path to
+a browser context menu — no Zig changes, no Swift changes, no XPC round-trips,
+no coordinate mapping, no focus issues. The implementation requires only one C++
+file change (`shell_web_contents_view_delegate_mac.mm`). However, modifying the
+Chromium fork is being minimized while a Zig rewrite of Chromium Profile Server
+is under consideration. This issue should be revisited after the Zig rewrite
+decision is made — the same approach (injecting JavaScript from
+`ShowContextMenu`) will work regardless of whether the host is C++ or Zig.
