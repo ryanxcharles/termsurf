@@ -8,12 +8,12 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-GHOST_DIR="$(dirname "$SCRIPT_DIR")"
-REPO_ROOT="$(dirname "$GHOST_DIR")"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+GUI_DIR="$REPO_ROOT/gui"
 
 PROD_SOURCE="${1:-$REPO_ROOT/assets/termsurf-2-black-3.png}"
-APPICONSET="$GHOST_DIR/macos/Assets.xcassets/AppIcon.appiconset"
-APPICONIMAGE="$GHOST_DIR/macos/Assets.xcassets/AppIconImage.imageset"
+APPICONSET="$GUI_DIR/macos/Assets.xcassets/AppIcon.appiconset"
+APPICONIMAGE="$GUI_DIR/macos/Assets.xcassets/AppIconImage.imageset"
 
 # Check source file exists
 if [ ! -f "$PROD_SOURCE" ]; then

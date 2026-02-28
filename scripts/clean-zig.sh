@@ -5,7 +5,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-GUI_DIR="$(dirname "$SCRIPT_DIR")"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+GUI_DIR="$REPO_ROOT/gui"
 
 echo "Cleaning zig build artifacts..."
 rm -rf "$GUI_DIR/zig-out/"

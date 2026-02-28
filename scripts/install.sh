@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
 APP="/Applications/TermSurf.app"
 SRC="$REPO_DIR/gui/macos/build/ReleaseLocal/TermSurf.app"
 CHROMIUM="$REPO_DIR/chromium/src/out/Default"

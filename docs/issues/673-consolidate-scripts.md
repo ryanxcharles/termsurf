@@ -72,3 +72,21 @@ rmdir gui/scripts/
 3. `scripts/build-debug.sh` — runs without errors.
 4. `scripts/rename-ghostty.sh` — runs without errors (dry run if possible).
 5. All 7 scripts live in `scripts/`, no scripts at repo root or `gui/scripts/`.
+
+### Result: PASS
+
+All 7 scripts moved to `scripts/`. Path references fixed in 5 scripts
+(`clean-zig.sh`, `generate-icons.sh`, `build-debug.sh`, `build-release.sh`,
+`install.sh`). Two scripts needed no fixes (`deregister.sh` has no path refs,
+`rename-ghostty.sh` uses `git rev-parse`). All scripts pass syntax check. No
+scripts remain at the repo root or in `gui/scripts/`.
+
+## Conclusion
+
+All shell scripts consolidated into `scripts/` at the repo root. No more hunting
+across two locations.
+
+- 5 scripts moved from repo root → `scripts/`
+- 2 scripts moved from `gui/scripts/` → `scripts/`
+- Path references updated in 5 scripts to resolve `REPO_DIR` from `SCRIPT_DIR`'s
+  parent
