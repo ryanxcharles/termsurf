@@ -67,3 +67,73 @@ When the user types `web https://example.com`:
 - **Argument collision** — if a future subcommand name happens to also be a
   valid URL (unlikely), the subcommand takes priority. This is the intended
   behavior.
+
+## Experiment 1: Replace manual parsing with clap
+
+### Hypothesis
+
+Adding clap with derive macros and an optional subcommand enum will replace the
+hand-rolled argument loop while preserving both `web url <url>` (new) and
+`web <url>` (fallback) syntax.
+
+### Changes
+
+1. **Add clap dependency** — run `cargo add clap --features derive` in `tui/`.
+
+2. **Define CLI structs** in `tui/src/main.rs` above `main()`:
+
+   ```rust
+   use clap::{Parser, Subcommand};
+
+   #[derive(Parser)]
+   #[command(name = "web", about = "Terminal browser")]
+   struct Cli {
+       #[command(subcommand)]
+       command: Option<Commands>,
+
+       /// URL to open (fallback when no subcommand given)
+       url: Option<String>,
+
+       /// Browser profile name
+       #[arg(long, default_value = "default", global = true)]
+       profile: String,
+   }
+
+   #[derive(Subcommand)]
+   enum Commands {
+       /// Open a URL in the browser pane
+       Url {
+           /// The URL to open
+           url: String,
+       },
+   }
+   ```
+
+3. **Replace lines 110–142** (manual parsing) with:
+
+   ```rust
+   let cli = Cli::parse();
+
+   let profile = cli.profile;
+   // (existing profile validation)
+
+   let mut url = match cli.command {
+       Some(Commands::Url { url }) => url,
+       None => cli.url.unwrap_or_else(|| {
+           eprintln!("Usage: web [url] <url> [--profile <name>]");
+           std::process::exit(1);
+       }),
+   };
+   ```
+
+4. **Keep profile validation** unchanged (lines 128–137).
+
+### Test
+
+1. `cargo build` in `tui/` — compiles without errors
+2. `web url https://example.com` — opens the URL (new syntax)
+3. `web https://example.com` — opens the URL (fallback, backwards compatible)
+4. `web url https://example.com --profile test` — uses profile "test"
+5. `web https://example.com --profile test` — uses profile "test"
+6. `web` — shows help/error (no URL provided)
+7. `web --help` — shows clap-generated help with subcommands listed
