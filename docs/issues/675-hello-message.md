@@ -180,3 +180,46 @@ homepage from the GUI via the hello message. Config changes take effect
 immediately without restarting the terminal pane — each `web` invocation gets
 the latest config. CLI args still take precedence. Outside TermSurf (no XPC),
 falls back to env var then hardcoded default.
+
+## Experiment 2: Remove TERMSURF_HOMEPAGE env var
+
+### Hypothesis
+
+The `TERMSURF_HOMEPAGE` env var is now redundant. Inside TermSurf, the hello
+message provides live config. Outside TermSurf, there's no GUI to set the env
+var anyway, so it always falls through to the hardcoded default. Removing it
+simplifies the precedence chain without losing functionality.
+
+### Changes
+
+#### 1. Surface.zig — remove `env.put("TERMSURF_HOMEPAGE", ...)`
+
+Delete the line that propagates the homepage env var to child processes.
+
+#### 2. main.rs — remove `TERMSURF_HOMEPAGE` fallback
+
+Simplify the URL resolution from four levels to three:
+
+```rust
+let mut url = match cli.command {
+    Some(Commands::Url { url }) => url,
+    None => cli.url.unwrap_or_else(|| {
+        hello_homepage
+            .unwrap_or_else(|| "https://termsurf.com/welcome".to_string())
+    }),
+};
+```
+
+Precedence becomes:
+
+1. `web <url>` — explicit CLI arg wins
+2. `web` inside TermSurf — hello response (live config)
+3. `web` outside TermSurf — hardcoded `https://termsurf.com/welcome`
+
+### Test
+
+1. `cd gui && zig build` — compiles without errors
+2. `cd tui && cargo build` — compiles without errors
+3. `web` inside TermSurf — still opens configured homepage (via hello)
+4. `web google.com` — CLI arg still wins
+5. `env | grep TERMSURF_HOMEPAGE` — no longer set in shell environment
