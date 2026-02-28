@@ -67,12 +67,39 @@ gui/scripts/clean-zig.sh
 cd gui && zig build
 ```
 
+### Result: PASS
+
+All steps completed. `clean-zig.sh` created and runs without errors.
+`generate-icons.sh` updated to accept an optional filename argument. Icons
+regenerated from `assets/termsurf-2-black-2.png`. Clean build succeeded. New
+icon appears in Finder and dock.
+
+## Experiment 2: Update icon to new source image
+
+### Hypothesis
+
+Running the icon pipeline with `assets/termsurf-2-black-3.png` and a clean
+rebuild will update the app icon. Also update `generate-icons.sh` to default to
+the new source image.
+
+### Changes
+
+#### 1. Update default source in `gui/scripts/generate-icons.sh`
+
+Change the default from `termsurf-2-black-2.png` to `termsurf-2-black-3.png`.
+
+#### 2. Run the pipeline
+
+```bash
+gui/scripts/generate-icons.sh assets/termsurf-2-black-3.png
+gui/scripts/clean-zig.sh
+cd gui && zig build
+```
+
 ### Test
 
-1. `gui/scripts/clean-zig.sh` runs without errors.
-2. `gui/zig-out/`, `gui/.zig-cache/`, `gui/macos/build/` are gone.
-3. `chromium/src/out/` is untouched.
-4. `gui/scripts/generate-icons.sh` regenerates all 7 icon sizes + 3 AppIconImage
-   sizes.
-5. `cd gui && zig build` compiles without errors.
-6. `open gui/zig-out/TermSurf.app` — new icon appears in Finder and dock.
+1. `gui/scripts/generate-icons.sh` regenerates all 7 icon sizes + 3 AppIconImage
+   sizes from the new source.
+2. `gui/scripts/clean-zig.sh` runs without errors.
+3. `cd gui && zig build` compiles without errors.
+4. `open gui/zig-out/TermSurf.app` — new icon appears in Finder and dock.
