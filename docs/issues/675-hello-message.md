@@ -223,3 +223,29 @@ Precedence becomes:
 3. `web` inside TermSurf — still opens configured homepage (via hello)
 4. `web google.com` — CLI arg still wins
 5. `env | grep TERMSURF_HOMEPAGE` — no longer set in shell environment
+
+### Result: PASS
+
+Both builds succeed. New panes no longer have `TERMSURF_HOMEPAGE` in their
+environment. Homepage still works via the hello message. Existing panes retain
+the old env var (expected — env vars are baked at spawn time), but it's harmless
+since `send_hello` takes precedence.
+
+## Conclusion
+
+`web` now gets live config from the GUI via an XPC hello message at startup.
+Three-level precedence:
+
+1. `web <url>` — explicit CLI arg wins
+2. `web` inside TermSurf — hello response (live from config, no restart needed)
+3. `web` outside TermSurf — hardcoded `https://termsurf.com/welcome`
+
+The `TERMSURF_HOMEPAGE` env var has been removed — the hello message supersedes
+it entirely.
+
+Changes across 3 files:
+
+- `gui/src/apprt/xpc.zig` — `handleHello` handler with synchronous reply
+- `gui/src/Surface.zig` — removed `TERMSURF_HOMEPAGE` env var propagation
+- `tui/src/xpc.rs` — `send_hello` method (synchronous request-reply)
+- `tui/src/main.rs` — reordered startup, simplified fallback chain

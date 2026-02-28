@@ -671,9 +671,6 @@ pub fn init(
         // Propagate pane ID so child processes (e.g. `web`) can identify this surface.
         try env.put("TERMSURF_PANE_ID", std.mem.span(@as([*:0]const u8, &self.pane_id)));
 
-        // Propagate homepage so `web` without arguments opens the configured page (Issue 674).
-        try env.put("TERMSURF_HOMEPAGE", self.config.homepage);
-
         // Initialize our IO backend
         var io_exec = try termio.Exec.init(alloc, .{
             .command = command,

@@ -178,10 +178,7 @@ fn main() -> io::Result<()> {
     let mut url = match cli.command {
         Some(Commands::Url { url }) => url,
         None => cli.url.unwrap_or_else(|| {
-            hello_homepage.unwrap_or_else(|| {
-                std::env::var("TERMSURF_HOMEPAGE")
-                    .unwrap_or_else(|_| "https://termsurf.com/welcome".to_string())
-            })
+            hello_homepage.unwrap_or_else(|| "https://termsurf.com/welcome".to_string())
         }),
     };
 
