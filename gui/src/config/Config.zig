@@ -1060,6 +1060,17 @@ palette: Palette = .{},
 /// Available since: 1.1.0
 @"split-divider-color": ?Color = null,
 
+/// The border color of the focused split pane. If not set, no border is drawn.
+/// Specified as either hex (`#RRGGBB` or `RRGGBB`) or a named X11 color.
+@"focused-split-border-color": ?Color = null,
+
+/// The border color of unfocused split panes. If not set, no border is drawn.
+/// Specified as either hex (`#RRGGBB` or `RRGGBB`) or a named X11 color.
+@"unfocused-split-border-color": ?Color = null,
+
+/// The width of the split pane border in points. Set to 0 to disable borders.
+@"split-border-width": f64 = 0,
+
 /// Control when TermSurf preserves a zoomed split. Under normal circumstances,
 /// any operation that changes focus or layout of the split tree in a window
 /// will unzoom any zoomed split. This configuration allows you to control
@@ -4554,6 +4565,9 @@ pub fn finalize(self: *Config) !void {
 
     // Clamp our split opacity
     self.@"unfocused-split-opacity" = @min(1.0, @max(0.15, self.@"unfocused-split-opacity"));
+
+    // Clamp our split border width
+    self.@"split-border-width" = @min(10.0, @max(0, self.@"split-border-width"));
 
     // Clamp our contrast
     self.@"minimum-contrast" = @min(21, @max(1, self.@"minimum-contrast"));

@@ -230,6 +230,21 @@ extension TermSurf {
                     }
                 }
 
+                // Pane border (Issue 669).
+                if isSplit {
+                    let borderWidth = termsurf.config.splitBorderWidth
+                    if borderWidth > 0 {
+                        let borderColor = surfaceFocus
+                            ? termsurf.config.focusedSplitBorderColor
+                            : termsurf.config.unfocusedSplitBorderColor
+                        if let color = borderColor {
+                            Rectangle()
+                                .strokeBorder(color, lineWidth: borderWidth)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                }
+
                 #if canImport(AppKit)
                 // Grab handle for dragging the window. We want this to appear at the very
                 // top Z-index os it isn't faded by the unfocused overlay.

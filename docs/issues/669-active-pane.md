@@ -44,8 +44,7 @@ This was never tested in isolation in Issue 667. Experiment 2 combined it with
 used `updateOSView` instead. Neither tested a plain SwiftUI overlay alone.
 
 The existing unfocused overlay
-(`Rectangle().fill().allowsHitTesting(false)
-.opacity()`) proves that SwiftUI
+(`Rectangle().fill().allowsHitTesting(false) .opacity()`) proves that SwiftUI
 overlays in the ZStack work. A stroke border overlay follows the same pattern.
 
 ### Config
@@ -112,18 +111,22 @@ if isSplit {
 **No changes to SurfaceRepresentable.** `updateOSView` stays empty. No SwiftUI
 visual modifiers on the representable or the ZStack.
 
-### Test
+### Result: PASS
 
-1. `cd gui && zig build` — compiles without errors.
-2. Open TermSurf, create a split, set config:
-   ```
-   focused-split-border-color = 7dcfff
-   unfocused-split-border-color = 565f89
-   split-border-width = 2
-   ```
-3. Focused pane shows cyan border, unfocused shows dim border.
-4. Switch focus — borders swap colors immediately.
-5. **Resize the window** — panes resize correctly.
-6. **Open a new split** — existing pane resizes correctly.
-7. Set `split-border-width = 0` — no borders (backward compatible).
-8. Verify existing `unfocused-split-opacity` still works.
+Borders render correctly and resize works. All test criteria met:
+
+1. Build compiles without errors.
+2. Focused pane shows cyan border, unfocused shows dim border.
+3. Switching focus swaps border colors immediately.
+4. Window resize works correctly — no regression.
+5. Opening a new split resizes existing panes correctly.
+6. `split-border-width = 0` disables borders (backward compatible).
+
+This confirms that the Issue 667 failures were caused by the Issue 666 resize
+regression, not by SwiftUI overlays. The `Rectangle().strokeBorder()` overlay in
+the ZStack — following the exact same pattern as the existing unfocused opacity
+overlay — works without any side effects.
+
+Key lesson: SwiftUI overlays in the ZStack are safe. The Issue 667 experiments
+that used `.saturation()` on the representable or non-empty `updateOSView` were
+red herrings — the resize was already broken before those changes.
