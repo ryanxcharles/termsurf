@@ -70,3 +70,50 @@ In `tui/src/main.rs`:
    has no padding
 5. All titles sit tighter against the border corners
 6. Evaluate whether the tighter look is an improvement or too cramped
+
+### Result
+
+Pass. All titles render without padding spaces. The tighter look is cleaner and
+saves horizontal space. Titles sit flush against the border corners with no loss
+of readability.
+
+## Experiment 2: Remove colon trailing space
+
+### Hypothesis
+
+The command bar `:` prefix uses a 2-char layout slot with `": "`. Shrinking it
+to 1 char with `":"` removes the extra space between the colon and the cursor.
+
+### Changes
+
+In `tui/src/main.rs`:
+
+1. **Prefix layout constraint** (line ~533) — `Constraint::Length(2)` →
+   `Constraint::Length(1)`.
+
+2. **Prefix text** (line ~535) — `": "` → `":"`.
+
+### Test
+
+1. Press `:` from Control — cursor appears immediately after the colon with no
+   gap
+2. Type text — characters flow directly after `:`
+3. Evaluate whether it looks too cramped or appropriately tight
+
+### Result
+
+Pass. The colon and cursor sit flush with no gap, matching vim's `:` prompt
+behavior.
+
+## Conclusion
+
+Two experiments stripped all unnecessary padding from the TUI:
+
+1. **Title padding** — removed leading/trailing spaces from every block title
+   (URL bar, command bar, viewport, profile label, submode indicators). Titles
+   sit flush against border corners.
+
+2. **Colon spacing** — shrunk the command bar `:` prefix from 2 chars to 1,
+   eliminating the gap between colon and cursor.
+
+The result is a tighter, cleaner UI with no loss of readability.

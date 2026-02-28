@@ -530,9 +530,9 @@ fn ui(
 
         // Split inner area: ":" prefix + editor.
         let cmd_layout =
-            Layout::horizontal([Constraint::Length(2), Constraint::Min(0)]).split(cmd_inner);
+            Layout::horizontal([Constraint::Length(1), Constraint::Min(0)]).split(cmd_inner);
         frame.render_widget(
-            Paragraph::new(": ").style(Style::default().fg(YELLOW).bg(BG)),
+            Paragraph::new(":").style(Style::default().fg(YELLOW).bg(BG)),
             cmd_layout[0],
         );
         let theme = EditorTheme::default()
