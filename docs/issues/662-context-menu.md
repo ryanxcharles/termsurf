@@ -86,3 +86,142 @@ menus today and what modifications are required.
 5. **Right-click suppression** — determine whether we need to suppress
    Chromium's default right-click behavior (since it can't display its own menu)
    or whether it already fails silently.
+
+### Findings
+
+#### 1. Chromium `HandleContextMenu`
+
+**Method signature** (`content/public/browser/web_contents_delegate.h`):
+
+```cpp
+virtual bool HandleContextMenu(RenderFrameHost& render_frame_host,
+                               const ContextMenuParams& params);
+```
+
+Returns `true` to consume (suppresses default menu), `false` to pass through.
+Base implementation returns `false`.
+
+**Three-tier call flow** (`web_contents_impl.cc` lines 8731–8754):
+
+1. Guest embedders get first chance (`GuestHandleContextMenu`)
+2. `WebContentsDelegate::HandleContextMenu` gets second chance — **return true
+   to consume**
+3. `WebContentsViewDelegate::ShowContextMenu` gets final chance (platform UI)
+
+**`ContextMenuParams` key fields** (inherited from
+`blink::UntrustworthyContextMenuParams`):
+
+- `int x, y` — click coordinates relative to RenderView origin
+- `GURL link_url, page_url, frame_url` — URLs
+- `std::u16string selection_text` — selected text
+- `bool is_editable` — whether on an editable field
+- `blink::mojom::ContextMenuDataMediaType media_type` — what was right-clicked
+
+**Content Shell macOS implementation**
+(`shell_web_contents_view_delegate_mac.mm` lines 99–224): builds a full NSMenu
+with Back/Forward/Reload, Copy/Paste, Open Link, Inspect. Uses `params_.x`,
+`params_.y` for positioning.
+
+**Simplest intercept**: override `HandleContextMenu` in the WebContentsDelegate
+subclass, extract coordinates from `params`, send via XPC, return `true` to
+suppress the default macOS shell menu.
+
+#### 2. Existing XPC message types
+
+All XPC messages use a `"action"` key to identify the message type.
+
+**Chromium → GUI:**
+
+- `"server_register"` — process registration
+- `"tab_ready"` — tab init complete
+- `"ca_context"` — CALayerHost context ID
+- `"cursor_changed"` — cursor type
+- `"loading_state"` — load progress
+- `"url_changed"` — URL update
+- `"title_changed"` — page title
+
+**GUI → Chromium:**
+
+- `"create_tab"` — tab creation (url, pane_id, pixel_width, pixel_height)
+- `"navigate"` — navigation (pane_id, url)
+- `"resize"` — resize (pane_id, pixel_width, pixel_height)
+- `"mouse_event"` — mouse input (pane_id, type, button, x, y, click_count,
+  modifiers)
+- `"scroll_event"` — scroll input
+- `"mouse_move"` — mouse movement
+- `"key_event"` — keyboard input
+- `"focus_changed"` — focus state
+
+**Convention**: action strings are snake_case, coordinates are doubles, IDs are
+strings, dimensions are uint64. All dispatched in `handleMessage()` via
+`std.mem.eql(u8, action_str, "...")`.
+
+**New message**: `"context_menu_request"` from Chromium → GUI with `pane_id`
+(string), `x` (double), `y` (double).
+
+#### 3. Zig → Swift context menu path
+
+**Ghostty already has a context menu.** `SurfaceView_AppKit.swift` overrides
+`menu(for:)` (lines 1416–1490) to show an NSMenu with Copy, Paste, Split, Reset,
+Inspector items. AppKit positions it automatically from the event.
+
+**C API export pattern**: Zig exports functions in `embedded.zig` (e.g.,
+`termsurf_surface_binding_action`). Swift calls these from menu item handlers.
+The reverse path uses `termsurf_runtime_config_s.action_cb` — a callback from
+Zig to Swift's `App.action()` dispatcher, which routes `TERMSURF_ACTION_*`
+constants to Swift handler functions.
+
+**No menu-specific C API exists today.** Menus are handled entirely in Swift.
+For a browser context menu, the simplest path is: Zig receives XPC context menu
+request → calls a new C API export (e.g., `termsurf_surface_show_context_menu`)
+→ Swift builds and displays the NSMenu → user selects item → Swift calls back to
+Zig with the selection.
+
+#### 4. Coordinate mapping
+
+**Three coordinate spaces:**
+
+1. **Physical pixels** — macOS window coordinates, Y-flipped in Swift
+   (`frame.height - pos.y`)
+2. **Grid coordinates** — terminal cell positions, stored in
+   `overlay_grid_col/row/width/height`
+3. **Logical pixels** — physical pixels ÷ content scale, sent to Chromium via
+   XPC
+
+**`hitTestOverlay()`** (`Surface.zig` lines 2456–2478) converts physical →
+overlay-relative logical: subtracts overlay origin (grid × cell size), divides
+by content scale.
+
+**Reverse transform for NSMenu**: multiply logical coordinates by content scale,
+add overlay origin (grid × cell size), flip Y for macOS. The existing cell
+dimensions and content scale are all available in the renderer state.
+
+**Alternative**: since Ghostty's existing `menu(for:)` uses the NSEvent
+automatically, we could skip explicit coordinate mapping by intercepting the
+right-click at the Swift level before forwarding to Chromium, and showing the
+menu from the original NSEvent. This avoids the round-trip coordinate transform
+entirely.
+
+#### 5. Right-click suppression
+
+**Zig forwards right-clicks to Chromium unconditionally.** `mouseButtonCallback`
+(`Surface.zig` lines 4028–4087) calls `xpc.sendMouseEvent()` for all button
+types including `.right`. The button is sent as `"right"` with modifier flag
+`256` (1 << 8).
+
+**Chromium fails silently.** The macOS Content Shell `ShowContextMenu` tries to
+pop an NSMenu, but since Chromium runs headlessly (no native view in its
+process), the menu simply doesn't appear. No error is thrown.
+
+**No suppression needed** — but once we implement our own context menu, we
+should return `true` from `HandleContextMenu` to prevent Chromium from
+attempting its own (silent) menu display.
+
+### Result
+
+Pass. All five research areas answered. Key insight: Ghostty already has NSMenu
+infrastructure via `menu(for:)` in Swift, and Chromium's context menu fails
+silently. The simplest implementation path may be to intercept right-clicks at
+the Swift/Zig level (before forwarding to Chromium) rather than round-tripping
+through Chromium's `HandleContextMenu` → XPC → Swift. This avoids C++ changes
+and coordinate transform complexity entirely.
