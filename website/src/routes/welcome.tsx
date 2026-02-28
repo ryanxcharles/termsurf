@@ -156,7 +156,7 @@ function WelcomePage() {
     let internetMesh: THREE.Mesh | null = null;
 
     loader.load(
-      "https://cdn.jsdelivr.net/npm/three@0.183.2/examples/fonts/helvetiker_bold.typeface.json",
+      "/helvetiker_bold.typeface.json",
       (font) => {
         // "welcome to" — flat, above
         const welcomeGeo = new TextGeometry("welcome to", {
