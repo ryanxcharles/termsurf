@@ -1,0 +1,69 @@
+# Issue 664: Clap CLI Parser
+
+Add clap as the CLI argument parser for the `web` TUI, introducing subcommands.
+
+## Problem
+
+The `web` TUI parses arguments manually with `std::env::args()` and a
+hand-rolled `while` loop (lines 110–127 of `tui/src/main.rs`). This works for
+the current `web <url> [--profile <name>]` syntax but doesn't scale to
+subcommands. We want to introduce `web url <url>` as the canonical way to open a
+URL, while keeping `web <url>` as a backwards-compatible fallback when the
+argument isn't a known command.
+
+## Solution
+
+Replace the manual argument parsing with [clap](https://crates.io/crates/clap)
+using derive macros. Define a `Cli` struct with an optional subcommand enum.
+When no subcommand matches, treat the first positional argument as a URL
+(backwards compatibility).
+
+### Subcommand structure
+
+```
+web url <url> [--profile <name>]    # canonical
+web <url> [--profile <name>]        # fallback (if <url> isn't a command name)
+```
+
+Initial subcommands:
+
+- `url <url>` — open a URL in the browser pane
+
+Future subcommands (not in scope): `config`, `profile`, `version`, etc.
+
+### Changes
+
+In `tui/`:
+
+1. **Add clap dependency** — `cargo add clap --features derive` in `tui/`.
+
+2. **Define CLI structs** — in `tui/src/main.rs` (or a new `cli.rs` module):
+   - `Cli` struct with `#[derive(Parser)]`, a `--profile` global option, and an
+     optional `#[command(subcommand)]` field
+   - `Commands` enum with `#[derive(Subcommand)]` containing a
+     `Url { url:
+String }` variant
+
+3. **Replace manual parsing** — replace lines 110–142 with `Cli::parse()`.
+   Extract the URL from either `Commands::Url { url }` or the fallback
+   positional argument.
+
+4. **Profile validation** — keep the existing validation logic, applied to
+   clap's parsed `--profile` value.
+
+### Fallback behavior
+
+When the user types `web https://example.com`:
+
+- clap sees `https://example.com` as the first positional argument
+- It doesn't match any subcommand
+- The `Cli` struct captures it as a fallback `url` field (`Option<String>`)
+- If neither a subcommand nor a fallback URL is provided, clap shows help
+
+### Concerns
+
+- **Breaking change** — `web url https://example.com` is new syntax. The old
+  `web https://example.com` must continue to work.
+- **Argument collision** — if a future subcommand name happens to also be a
+  valid URL (unlikely), the subcommand takes priority. This is the intended
+  behavior.
