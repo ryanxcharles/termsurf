@@ -20,8 +20,17 @@ resize fix in place.
 
 ## Strategy
 
-Test features incrementally. Each experiment adds one thing. If it breaks
-resize, we know exactly which change caused it.
+Follow Ghostty's existing pattern: layout-dependent visual effects live in the
+platform layer, not the renderer. The renderer doesn't know if it's in a split —
+that state lives in `SurfaceWrapper.isSplit` (Swift) and GTK's `is-split`
+property. The existing unfocused pane dimming uses this same pattern (SwiftUI
+overlay on macOS, GTK Revealer on Linux).
+
+Config fields go in Zig (Config.zig) — shared across all platforms. The visual
+effect goes in Swift (SurfaceView.swift) — same ZStack overlay pattern as the
+existing unfocused dimming.
+
+Test features incrementally. Each experiment adds one thing.
 
 ## Experiment 1: Border via SwiftUI overlay
 
@@ -49,6 +58,8 @@ unfocused-split-border-color = 565f89
 split-border-width = 2
 ```
 
+All default to off (no border). Backward compatible.
+
 ### Changes
 
 #### 1. Config.zig — 3 new fields after `split-divider-color`
@@ -72,6 +83,8 @@ var focusedSplitBorderColor: Color? { ... }
 var unfocusedSplitBorderColor: Color? { ... }
 var splitBorderWidth: Double { ... }
 ```
+
+Same `termsurf_config_get` pattern as existing properties.
 
 #### 3. SurfaceView.swift — border overlay in the ZStack
 
