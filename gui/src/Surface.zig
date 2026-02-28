@@ -371,6 +371,7 @@ const DerivedConfig = struct {
     notify_on_command_finish_action: configpkg.Config.NotifyOnCommandFinishAction,
     notify_on_command_finish_after: Duration,
     key_remaps: input.KeyRemapSet,
+    homepage: [:0]const u8,
 
     const Link = struct {
         regex: oni.Regex,
@@ -448,6 +449,7 @@ const DerivedConfig = struct {
             .notify_on_command_finish_action = config.@"notify-on-command-finish-action",
             .notify_on_command_finish_after = config.@"notify-on-command-finish-after",
             .key_remaps = try config.@"key-remap".clone(alloc),
+            .homepage = config.homepage,
 
             // Assignments happen sequentially so we have to do this last
             // so that the memory is captured from allocs above.
@@ -668,6 +670,9 @@ pub fn init(
 
         // Propagate pane ID so child processes (e.g. `web`) can identify this surface.
         try env.put("TERMSURF_PANE_ID", std.mem.span(@as([*:0]const u8, &self.pane_id)));
+
+        // Propagate homepage so `web` without arguments opens the configured page (Issue 674).
+        try env.put("TERMSURF_HOMEPAGE", self.config.homepage);
 
         // Initialize our IO backend
         var io_exec = try termio.Exec.init(alloc, .{
