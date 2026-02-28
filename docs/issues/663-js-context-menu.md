@@ -62,3 +62,69 @@ In `chromium/src/content/chromium_profile_server/browser/`:
 - **Scroll position** — `params.x`/`params.y` are relative to the viewport, so
   the menu should be positioned with `position: fixed` to stay at the click
   point regardless of scroll.
+
+## Experiment 1: Inject context menu from ShowContextMenu
+
+### Hypothesis
+
+Replacing the disabled `ShowContextMenu` body with a call to
+`ExecuteJavaScriptForTests` that injects a DOM-based context menu will produce a
+working right-click menu inside the browser pane with no focus loss.
+
+### API choice
+
+`RenderFrameHost` offers three JavaScript execution methods:
+
+- `ExecuteJavaScript` — restricted to `chrome://` and `devtools://` URLs
+- `ExecuteJavaScriptInIsolatedWorld` — runs in an isolated world, no URL
+  restriction, but requires a non-zero `world_id`
+- `ExecuteJavaScriptForTests` — no restrictions, runs in any world
+
+Use `ExecuteJavaScriptForTests` with `ISOLATED_WORLD_ID_GLOBAL` for the simplest
+proof of concept. Can migrate to `ExecuteJavaScriptInIsolatedWorld` later for
+better isolation from page scripts.
+
+### Changes
+
+In
+`chromium/src/content/chromium_profile_server/browser/shell_web_contents_view_delegate_mac.mm`:
+
+1. **Replace the early `return;`** in `ShowContextMenu` (line 105) with
+   JavaScript injection code.
+
+2. **Build a JavaScript string** that:
+   - Removes any existing context menu (`#termsurf-ctx-menu`)
+   - Creates a `<div id="termsurf-ctx-menu">` with `position: fixed` at
+     `(params.x, params.y)`
+   - Styles it as a dark menu (Tokyo Night palette: bg `#1a1b26`, fg `#c0caf5`,
+     hover `#283457`, border `#565f89`, shadow, rounded corners,
+     `z-index: 999999`)
+   - Adds three items: Back, Forward, Reload
+   - Each item calls `history.back()`, `history.forward()`, or
+     `location.reload()` and removes the menu
+   - Adds a one-shot `click` listener on `document` to dismiss the menu when
+     clicking elsewhere
+   - Adds a one-shot `contextmenu` listener on `document` to dismiss the menu if
+     the user right-clicks again elsewhere (the new right-click will trigger a
+     fresh `ShowContextMenu`)
+
+3. **Call `render_frame_host.ExecuteJavaScriptForTests`** with the JavaScript
+   string, a null callback, and `ISOLATED_WORLD_ID_GLOBAL`.
+
+### Chromium branch
+
+Create `146.0.7650.0-issue-663` from the latest TermSurf branch. Add to
+`docs/chromium.md` Branches table.
+
+### Test
+
+1. Launch TermSurf, navigate to a page
+2. Right-click in the browser pane — see a dark styled context menu with Back,
+   Forward, Reload
+3. Click Back — page navigates back, menu disappears
+4. Click Forward — page navigates forward, menu disappears
+5. Click Reload — page reloads, menu disappears
+6. Right-click, then click elsewhere — menu dismisses
+7. Right-click, then right-click elsewhere — old menu dismissed, new menu
+   appears at new position
+8. No focus loss to Chromium process at any point
