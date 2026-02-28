@@ -79,9 +79,8 @@ messages can update.
 
 **GUI → Chromium** (sent from `gui/src/apprt/xpc.zig`):
 
-- `set_overlay` — pane overlay coordinates
-- `hello` — initial handshake (returns homepage)
-- Mouse/keyboard/focus/resize/navigate events
+- `set_overlay`, `create_tab`, `resize`, `navigate`
+- Mouse/keyboard/focus events
 
 **Chromium → GUI** (sent from
 `chromium_profile_server/browser/shell_browser_main_parts.cc`):
@@ -129,9 +128,15 @@ work for web content.
 #### 1. Chromium: Add per-tab color scheme state
 
 In `shell_browser_main_parts.h`, add a `preferred_color_scheme` field to the
-per-tab state (alongside `web_contents`, `pane_id`, etc.). Default to `kLight`.
+per-tab state (alongside `web_contents`, `pane_id`, etc.). Default to `kDark`.
 
-#### 2. Chromium: Handle `set_color_scheme` XPC message
+#### 2. Chromium: Read `dark` field in `create_tab` handler
+
+In `shell_browser_main_parts.cc`, read the `dark` bool from the `create_tab`
+message and store it in the per-tab state. `create_tab` is the hello message for
+each tab — the tab starts with the correct color scheme from the first frame.
+
+#### 3. Chromium: Handle `set_color_scheme` XPC message
 
 In `shell_browser_main_parts.cc`, add a handler for
 `action = "set_color_scheme"` with fields:
@@ -141,20 +146,21 @@ In `shell_browser_main_parts.cc`, add a handler for
 
 The handler updates the per-tab `preferred_color_scheme` and calls
 `web_contents->OnWebPreferencesChanged()` to push the new value to the renderer.
+This handles dynamic changes (e.g. user toggles macOS dark mode while a tab is
+open).
 
-#### 3. Chromium: Read per-tab state in `OverrideWebPreferences`
+#### 4. Chromium: Read per-tab state in `OverrideWebPreferences`
 
 Change `ShellContentBrowserClient::OverrideWebPreferences()` to look up the
 tab's `preferred_color_scheme` instead of only checking the command-line flag.
 Fall back to the command-line flag if no per-tab state exists.
 
-#### 4. GUI: Send `set_color_scheme` on tab creation
+#### 5. GUI: Send `dark` in `create_tab`
 
-In `gui/src/apprt/xpc.zig`, after sending `create_tab`, send a
-`set_color_scheme` message with the current
-`surface.config_conditional_state.theme`.
+In `gui/src/apprt/xpc.zig`, add a `dark` bool field to the `create_tab` XPC
+message, set from `surface.config_conditional_state.theme`.
 
-#### 5. GUI: Send `set_color_scheme` on theme change
+#### 6. GUI: Send `set_color_scheme` on theme change
 
 In `Surface.colorSchemeCallback()`, after updating the config conditional state,
 send a `set_color_scheme` XPC message to the Chromium server if this surface has
