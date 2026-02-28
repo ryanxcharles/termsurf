@@ -754,3 +754,22 @@ non-empty, period.
    `.shadow()`. A standalone `Rectangle().strokeBorder()` in the ZStack —
    without any modifiers on the representable or the ZStack itself — might
    actually work. This was not tested in isolation.
+
+## Conclusion
+
+**Issue closed. Resize is broken independently of this issue.**
+
+After reverting all Experiment 3 code changes (stashed) and rebuilding from
+clean source, resize is still broken — opening a split doesn't resize the
+existing pane, and window drag resize doesn't work. This means the resize
+regression predates Issue 667. All three experiments were chasing a symptom that
+already existed.
+
+The Experiment 2 and 3 conclusions incorrectly attributed the resize failure to
+our changes (SwiftUI modifiers, non-empty `updateOSView`). Those conclusions may
+still be partially valid — adding modifiers or touching `updateOSView` may make
+resize _worse_ — but the underlying resize bug exists without any of our
+changes.
+
+**Next step:** Open a dedicated issue to diagnose and fix the resize regression.
+Once resize works correctly, revisit Issue 667 to add pane borders.
