@@ -3,6 +3,8 @@ mod xpc;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
+use clap::{Parser, Subcommand};
+
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers,
 };
@@ -106,25 +108,33 @@ impl ClipboardTrait for UrlClipboard {
     }
 }
 
-fn main() -> io::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+#[derive(Parser)]
+#[command(name = "web", about = "Terminal browser")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
 
-    // Parse --profile flag.
-    let mut profile = String::from("default");
-    let mut url = None;
-    let mut i = 1;
-    while i < args.len() {
-        if args[i] == "--profile" {
-            if i + 1 < args.len() {
-                profile = args[i + 1].clone();
-                i += 2;
-                continue;
-            }
-        } else if url.is_none() {
-            url = Some(args[i].clone());
-        }
-        i += 1;
-    }
+    /// URL to open (fallback when no subcommand given)
+    url: Option<String>,
+
+    /// Browser profile name
+    #[arg(long, default_value = "default", global = true)]
+    profile: String,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Open a URL in the browser pane
+    Url {
+        /// The URL to open
+        url: String,
+    },
+}
+
+fn main() -> io::Result<()> {
+    let cli = Cli::parse();
+
+    let profile = cli.profile;
     // Validate profile name: lowercase alphanumeric, starts with a letter.
     if profile.is_empty()
         || !profile.bytes().next().unwrap().is_ascii_lowercase()
@@ -136,10 +146,13 @@ fn main() -> io::Result<()> {
         std::process::exit(1);
     }
 
-    let mut url = url.unwrap_or_else(|| {
-        eprintln!("Usage: web <url> [--profile <name>]");
-        std::process::exit(1);
-    });
+    let mut url = match cli.command {
+        Some(Commands::Url { url }) => url,
+        None => cli.url.unwrap_or_else(|| {
+            eprintln!("Usage: web [url] <url> [--profile <name>]");
+            std::process::exit(1);
+        }),
+    };
 
     // Connect to the TermSurf compositor via XPC (Issue 505).
     let pane_id = std::env::var("TERMSURF_PANE_ID").ok();

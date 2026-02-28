@@ -14,3 +14,4 @@ edtui = { path = "../vendor/edtui", default-features = false, features = ["arboa
 arboard = "3"
 libc = "0.2"
 block2 = "0.6"
+clap = { version = "4.5.60", features = ["derive"] }
