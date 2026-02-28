@@ -68,11 +68,85 @@ same (match `Event::Key`). All other events — including `Event::Resize` — fa
 through to the next `terminal.draw()` call, which picks up the new dimensions
 automatically.
 
-## Test
+## Experiment 1: Forward all terminal events
+
+### Changes
+
+Three edits in `tui/src/main.rs`:
+
+#### 1. Replace `LoopEvent::Key` with `LoopEvent::Terminal` (line 54)
+
+```rust
+enum LoopEvent {
+    Terminal(Event),
+    Xpc(xpc::CompositorMessage),
+}
+```
+
+The `KeyEvent` import can be removed — it's no longer used in the enum (the main
+loop destructures `Event::Key(key)` directly).
+
+#### 2. Forward all events from the reader thread (line 189)
+
+Replace:
+
+```rust
+std::thread::spawn(move || loop {
+    if let Ok(Event::Key(key)) = event::read() {
+        if key_tx.send(LoopEvent::Key(key)).is_err() {
+            break;
+        }
+    }
+});
+```
+
+With:
+
+```rust
+std::thread::spawn(move || loop {
+    match event::read() {
+        Ok(ev) => {
+            if key_tx.send(LoopEvent::Terminal(ev)).is_err() {
+                break;
+            }
+        }
+        Err(_) => break,
+    }
+});
+```
+
+#### 3. Unwrap `LoopEvent::Terminal` in the main loop (line 266)
+
+Replace:
+
+```rust
+Ok(LoopEvent::Key(key)) => {
+```
+
+With:
+
+```rust
+Ok(LoopEvent::Terminal(Event::Key(key))) => {
+```
+
+Add a catch-all arm before `Err(_)` for non-key terminal events:
+
+```rust
+Ok(LoopEvent::Terminal(_)) => {
+    // Resize, mouse, focus, paste, etc. — just redraw.
+}
+```
+
+No other changes needed. The existing key handling code is untouched — only the
+outer match arm pattern changes from `LoopEvent::Key(key)` to
+`LoopEvent::Terminal(Event::Key(key))`.
+
+### Test
 
 1. `cd tui && cargo build` — compiles without errors.
 2. Open TermSurf, run `web google.com`.
 3. Resize the window — TUI redraws immediately at the new size.
 4. Open a split pane — TUI in the original pane resizes correctly.
-5. Verify keyboard input still works.
+5. Verify keyboard input still works (all modes: Control, Browse, Edit,
+   Command).
 6. Verify XPC messages (mode changes, URL updates, loading state) still work.
