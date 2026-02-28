@@ -130,3 +130,90 @@ overlay — works without any side effects.
 Key lesson: SwiftUI overlays in the ZStack are safe. The Issue 667 experiments
 that used `.saturation()` on the representable or non-empty `updateOSView` were
 red herrings — the resize was already broken before those changes.
+
+## Experiment 2: Unfocused pane desaturation
+
+### Hypothesis
+
+A `.saturation()` modifier on `SurfaceRepresentable` will desaturate unfocused
+panes without breaking resize.
+
+Issue 667 Experiment 2 blamed `.saturation()` for breaking resize. But
+Experiment 1 above proved that the resize regression was caused by Issue 666,
+not by SwiftUI modifiers. The `.saturation()` modifier was never tested in
+isolation against a working baseline.
+
+SwiftUI's `.saturation()` applies a Core Image filter to the view's backing
+layer. For a Metal-backed NSView inside an NSViewRepresentable, this should work
+— SwiftUI wraps the view in a hosting layer and applies the CI filter on that
+layer. The question is whether it breaks resize. We test that directly.
+
+### Config
+
+One new config option:
+
+```
+unfocused-split-saturation = 0.5
+```
+
+Defaults to 1.0 (full color, no desaturation). Setting to 0.0 gives full
+grayscale. Backward compatible — existing behavior unchanged unless configured.
+
+### Changes
+
+#### 1. Config.zig — 1 new field after `split-border-width`
+
+```zig
+@"unfocused-split-saturation": f64 = 1.0,
+```
+
+Clamp in `finalize()`:
+
+```zig
+self.@"unfocused-split-saturation" = @min(1.0, @max(0, self.@"unfocused-split-saturation"));
+```
+
+#### 2. TermSurf.Config.swift — 1 new property after `splitBorderWidth`
+
+```swift
+var unfocusedSplitSaturation: Double {
+    guard let config = self.config else { return 1.0 }
+    var value: Double = 0
+    let key = "unfocused-split-saturation"
+    _ = termsurf_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8)))
+    return value
+}
+```
+
+#### 3. SurfaceView.swift — `.saturation()` on `SurfaceRepresentable`
+
+Add after `.focused($surfaceFocus)` (line 74):
+
+```swift
+SurfaceRepresentable(view: surfaceView, size: geo.size)
+    .focused($surfaceFocus)
+    .saturation(isSplit && !surfaceFocus
+        ? termsurf.config.unfocusedSplitSaturation : 1.0)
+    // ... remaining existing modifiers
+```
+
+No ZStack overlay needed — this is a direct modifier on the representable.
+
+**No changes to `updateOSView`.** It stays empty.
+
+### Test
+
+1. `cd gui && zig build` — compiles without errors.
+2. Open TermSurf, create a split, set config:
+   ```
+   unfocused-split-saturation = 0.5
+   ```
+3. Unfocused pane appears desaturated (washed out colors).
+4. Focused pane stays full color.
+5. Switch focus — saturation swaps immediately.
+6. **Resize the window** — panes resize correctly.
+7. **Open a new split** — existing pane resizes correctly.
+8. Set `unfocused-split-saturation = 1.0` — no desaturation (backward
+   compatible).
+9. Set `unfocused-split-saturation = 0.0` — full grayscale.
+10. Verify existing borders (Experiment 1) still work alongside desaturation.
