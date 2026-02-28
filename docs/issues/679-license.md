@@ -159,3 +159,19 @@ Ghostty's original MIT license stays in place inside the fork directory.
 3. `NOTICE` exists with Ghostty and Chromium attributions
 4. `gui/LICENSE` is unchanged (still Ghostty's MIT)
 5. No conflicts between TermSurf's MIT and upstream licenses
+
+### Result: PASS
+
+All three files created. `LICENSE` has MIT with Identellica LLC copyright.
+`TRADEMARKS.md` reserves the TermSurf name and logo with clear permitted/not
+permitted uses. `NOTICE` includes full Ghostty MIT and Chromium BSD 3-Clause
+copyright texts. `gui/LICENSE` unchanged.
+
+## Conclusion
+
+TermSurf is now properly licensed. MIT for the code, trademark protection for
+the brand — the same model used by Chromium/Chrome, Firefox/Mozilla, and Rust.
+
+- `LICENSE` — MIT, Copyright (c) 2025 Identellica LLC
+- `TRADEMARKS.md` — "TermSurf" name and logo reserved, forks must rebrand
+- `NOTICE` — Ghostty and Chromium upstream attributions
