@@ -513,13 +513,10 @@ fn ui(
             EditorMode::Search => "\u{F002} SEARCH",
         };
         let sc = submode_color(&cmd_state.mode);
-        let submode_label = Line::from(vec![
-            Span::raw(" ").style(Style::default().fg(sc)),
-            Span::raw(submode_text).style(Style::default().fg(sc)),
-            Span::raw(" "),
-        ]);
+        let submode_label =
+            Line::from(vec![Span::raw(submode_text).style(Style::default().fg(sc))]);
         let cmd_title = Line::from(vec![
-            Span::raw(" COMMAND ").style(Style::default().fg(url_border))
+            Span::raw("COMMAND").style(Style::default().fg(url_border))
         ]);
         let cmd_block = Block::default()
             .borders(Borders::ALL)
@@ -556,14 +553,9 @@ fn ui(
             EditorMode::Search => "\u{F002} SEARCH",
         };
         let sc = submode_color(&editor_state.mode);
-        let submode_label = Line::from(vec![
-            Span::raw(" ").style(Style::default().fg(sc)),
-            Span::raw(submode_text).style(Style::default().fg(sc)),
-            Span::raw(" "),
-        ]);
-        let url_title = Line::from(vec![
-            Span::raw(" URL ").style(Style::default().fg(url_border))
-        ]);
+        let submode_label =
+            Line::from(vec![Span::raw(submode_text).style(Style::default().fg(sc))]);
+        let url_title = Line::from(vec![Span::raw("URL").style(Style::default().fg(url_border))]);
         let theme = EditorTheme::default()
             .base(Style::default().fg(FG).bg(BG))
             .cursor_style(Style::default().fg(BG).bg(FG))
@@ -583,9 +575,7 @@ fn ui(
             layout[1],
         );
     } else {
-        let url_title = Line::from(vec![
-            Span::raw(" URL ").style(Style::default().fg(url_border))
-        ]);
+        let url_title = Line::from(vec![Span::raw("URL").style(Style::default().fg(url_border))]);
         let url_bar = Paragraph::new(url).style(Style::default().fg(FG)).block(
             Block::default()
                 .borders(Borders::ALL)
@@ -599,14 +589,13 @@ fn ui(
 
     // Viewport.
     let profile_title = Line::from(vec![
-        Span::raw(" \u{F007} ").style(Style::default().fg(COMMENT)),
+        Span::raw("\u{F007} ").style(Style::default().fg(COMMENT)),
         Span::raw(profile).style(Style::default().fg(FG)),
-        Span::raw(" "),
     ]);
     let viewport_title = if page_title.is_empty() {
-        " Viewport ".to_string()
+        "Viewport".to_string()
     } else {
-        format!(" {} ", page_title)
+        page_title.to_string()
     };
     let viewport_block = Block::default()
         .borders(Borders::ALL)
