@@ -172,3 +172,11 @@ This gives four levels of precedence:
 6. Type `web` in the SAME pane (no restart) — opens `https://termsurf.com`
 7. `web google.com` — still opens google.com (CLI arg wins)
 8. Run `web` outside TermSurf — falls back to env var or hardcoded default
+
+### Result: PASS
+
+Both GUI and TUI build successfully. `web` without arguments receives the
+homepage from the GUI via the hello message. Config changes take effect
+immediately without restarting the terminal pane — each `web` invocation gets
+the latest config. CLI args still take precedence. Outside TermSurf (no XPC),
+falls back to env var then hardcoded default.

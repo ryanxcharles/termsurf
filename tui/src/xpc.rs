@@ -302,6 +302,46 @@ impl CompositorConnection {
         }
     }
 
+    /// Send a synchronous `hello` message to get live config (Issue 675).
+    pub fn send_hello(&self, pane_id: &str) -> Option<String> {
+        let dict = unsafe { xpc_dictionary_create(std::ptr::null(), std::ptr::null(), 0) };
+        if dict.is_null() {
+            return None;
+        }
+
+        unsafe {
+            let key = CString::new("action").unwrap();
+            let val = CString::new("hello").unwrap();
+            xpc_dictionary_set_string(dict, key.as_ptr(), val.as_ptr());
+
+            let pk = CString::new("pane_id").unwrap();
+            let pv = CString::new(pane_id).unwrap();
+            xpc_dictionary_set_string(dict, pk.as_ptr(), pv.as_ptr());
+        }
+
+        let reply = unsafe { xpc_connection_send_message_with_reply_sync(self.raw, dict) };
+        unsafe { xpc_release(dict) };
+
+        if reply.is_null() {
+            return None;
+        }
+
+        let homepage_key = CString::new("homepage").unwrap();
+        let hp = unsafe { xpc_dictionary_get_string(reply, homepage_key.as_ptr()) };
+        let result = if !hp.is_null() {
+            Some(
+                unsafe { std::ffi::CStr::from_ptr(hp) }
+                    .to_str()
+                    .unwrap_or("")
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        unsafe { xpc_release(reply) };
+        result
+    }
+
     /// Tell the compositor to navigate to a new URL.
     pub fn send_navigate(&self, pane_id: &str, url: &str) {
         let dict = unsafe { xpc_dictionary_create(std::ptr::null(), std::ptr::null(), 0) };

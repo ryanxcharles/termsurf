@@ -151,14 +151,6 @@ fn main() -> io::Result<()> {
         std::process::exit(1);
     }
 
-    let mut url = match cli.command {
-        Some(Commands::Url { url }) => url,
-        None => cli.url.unwrap_or_else(|| {
-            std::env::var("TERMSURF_HOMEPAGE")
-                .unwrap_or_else(|_| "https://termsurf.com/welcome".to_string())
-        }),
-    };
-
     // Connect to the TermSurf compositor via XPC (Issue 505).
     let pane_id = std::env::var("TERMSURF_PANE_ID").ok();
     match &pane_id {
@@ -177,6 +169,21 @@ fn main() -> io::Result<()> {
         }
         _ => {}
     }
+
+    // Send hello to get live config from the GUI (Issue 675).
+    let hello_homepage = compositor
+        .as_ref()
+        .and_then(|conn| pane_id.as_ref().and_then(|pid| conn.send_hello(pid)));
+
+    let mut url = match cli.command {
+        Some(Commands::Url { url }) => url,
+        None => cli.url.unwrap_or_else(|| {
+            hello_homepage.unwrap_or_else(|| {
+                std::env::var("TERMSURF_HOMEPAGE")
+                    .unwrap_or_else(|_| "https://termsurf.com/welcome".to_string())
+            })
+        }),
+    };
 
     // Enter raw mode and alternate screen.
     enable_raw_mode()?;

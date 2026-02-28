@@ -41,6 +41,7 @@ extern "c" fn xpc_dictionary_get_int64(xdict: xpc_object_t, key: [*:0]const u8) 
 extern "c" fn xpc_dictionary_set_double(xdict: xpc_object_t, key: [*:0]const u8, value: f64) void;
 extern "c" fn xpc_dictionary_set_bool(xdict: xpc_object_t, key: [*:0]const u8, value: bool) void;
 extern "c" fn xpc_dictionary_get_remote_connection(msg: xpc_object_t) xpc_object_t;
+extern "c" fn xpc_dictionary_create_reply(original: xpc_object_t) xpc_object_t;
 extern "c" fn xpc_get_type(object: xpc_object_t) xpc_object_t;
 extern "c" fn xpc_retain(object: xpc_object_t) xpc_object_t;
 extern "c" fn xpc_release(object: xpc_object_t) void;
@@ -269,6 +270,8 @@ fn handleMessage(msg: xpc_object_t) void {
         handleTitleChanged(msg);
     } else if (std.mem.eql(u8, action_str, "navigate")) {
         handleNavigate(msg);
+    } else if (std.mem.eql(u8, action_str, "hello")) {
+        handleHello(msg);
     } else {
         log.warn("unknown action: {s}", .{action_str});
     }
@@ -555,6 +558,25 @@ fn handleNavigate(msg: xpc_object_t) void {
     }
 
     xpc_connection_send_message(server.peer, fwd);
+}
+
+fn handleHello(msg: xpc_object_t) void {
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    log.info("hello pane={s}", .{pane_id});
+
+    const reply = xpc_dictionary_create_reply(msg);
+    if (reply == null) return;
+
+    // Look up surface to read its config.
+    if (app.findSurfaceByPaneId(pane_id)) |surface| {
+        const homepage = surface.core().config.homepage;
+        xpc_dictionary_set_string(reply, "homepage", homepage);
+    }
+
+    const conn = xpc_dictionary_get_remote_connection(msg);
+    if (conn != null) {
+        xpc_connection_send_message(conn, reply);
+    }
 }
 
 // -- Focus lifecycle (Issue 606 Experiment 5) --
