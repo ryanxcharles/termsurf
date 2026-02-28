@@ -6,8 +6,8 @@ Reload options.
 ## Problem
 
 Right-clicking in the browser pane forwards the mouse event to Chromium, but
-Chromium renders headlessly via CALayerHost and has no window to attach a
-context menu to. The context menu request goes nowhere. Users have no way to
+Chromium's context menu was intentionally disabled in Issue 616 Experiment 9
+because it opened as a separate window and stole focus. Users have no way to
 navigate back/forward or reload without keyboard shortcuts.
 
 ## Architecture
@@ -209,22 +209,30 @@ entirely.
 types including `.right`. The button is sent as `"right"` with modifier flag
 `256` (1 << 8).
 
-**Chromium fails silently.** The macOS Content Shell `ShowContextMenu` tries to
-pop an NSMenu, but since Chromium runs headlessly (no native view in its
-process), the menu simply doesn't appear. No error is thrown.
+**Chromium's context menu is already disabled.** In
+`chromium_profile_server/browser/shell_web_contents_view_delegate_mac.mm` line
+104, `ShowContextMenu` returns immediately with the comment:
 
-**No suppression needed** — but once we implement our own context menu, we
-should return `true` from `HandleContextMenu` to prevent Chromium from
-attempting its own (silent) menu display.
+```cpp
+// Context menu disabled — input routed via TUI/XPC (Issue 616 Experiment 9).
+return;
+```
+
+The entire original menu body is commented out. This was done intentionally in
+Issue 616 because Chromium's NSMenu opened as a separate window, stealing focus
+from TermSurf.
+
+**No further suppression needed** — the context menu is already disabled in the
+Chromium fork.
 
 ### Result
 
 Pass. All five research areas answered. Key insight: Ghostty already has NSMenu
-infrastructure via `menu(for:)` in Swift, and Chromium's context menu fails
-silently. The simplest implementation path may be to intercept right-clicks at
-the Swift/Zig level (before forwarding to Chromium) rather than round-tripping
-through Chromium's `HandleContextMenu` → XPC → Swift. This avoids C++ changes
-and coordinate transform complexity entirely.
+infrastructure via `menu(for:)` in Swift, and Chromium's context menu is already
+intentionally disabled (Issue 616 Exp 9). The simplest implementation path is to
+intercept right-clicks at the Swift/Zig level (before forwarding to Chromium)
+rather than round-tripping through Chromium's `HandleContextMenu` → XPC → Swift.
+This avoids C++ changes and coordinate transform complexity entirely.
 
 ## Experiment 2: Browser context menu in Swift
 
