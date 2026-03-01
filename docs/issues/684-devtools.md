@@ -258,6 +258,25 @@ answers that question before investing in any plumbing.
 **Chromium profile server only.** No TUI or GUI changes. The user types
 `web devtools://1` and it flows through the existing `create_tab` path.
 
+#### 0. Create Chromium branch and build
+
+Create `146.0.7650.0-issue-684` from `146.0.7650.0-issue-680` (the most recent
+branch with all TermSurf modifications). Add it to the Branches table in
+`docs/chromium.md`.
+
+```bash
+cd chromium/src
+git checkout 146.0.7650.0-issue-680
+git checkout -b 146.0.7650.0-issue-684
+```
+
+Build after each change with:
+
+```bash
+export PATH="$(cd ../depot_tools && pwd):$PATH"
+autoninja -C out/Default chromium_profile_server
+```
+
 #### 1. Add auto-incrementing tab ID to `TabState`
 
 In `shell_browser_main_parts.h`, add a `tab_id` field to `TabState` and a
