@@ -58,7 +58,40 @@ splitting.
 
 No change needed in `main.rs` — the command string format is already correct.
 
-## Test
+## Experiment 1: Switch `initialInput` to `command`
+
+### Hypothesis
+
+If we set `config.command` instead of `config.initialInput` in `newSplit`, the
+`web devtools` process becomes the pane's direct child. When DevTools exits, the
+PTY closes, and Ghostty's existing child-exit logic closes the pane
+automatically. `TERMSURF_PANE_ID` is already in the environment for all
+surfaces, so the TUI can still connect via XPC.
+
+### Changes
+
+One line in one file.
+
+#### 1. Swift: `config.command` instead of `config.initialInput` (`TermSurf.App.swift`)
+
+In `newSplit` (line 844), replace:
+
+```swift
+config.initialInput = String(cString: pendingInput) + "\n"
+```
+
+with:
+
+```swift
+config.command = String(cString: pendingInput)
+```
+
+No `\n` — `command` is executed directly, not typed into a shell.
+
+No other files change. The TUI already sends `"{exe_path} devtools"` as the
+command string, which works with both `initialInput` and `command`.
+
+### Test
 
 1. Open a browser: `web google.com`
 2. `:devtools right` → split opens with DevTools
