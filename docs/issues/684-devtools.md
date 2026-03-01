@@ -1275,3 +1275,9 @@ names stay exactly as they are.
 3. `web google.com` in a pane
 4. `web last` in a split — should print profile, pane_id, tab_id
 5. `web devtools` in a split — should open DevTools
+
+### Result: SUCCESS
+
+Removing `tab_ready_count` does not break anything. `web last` and
+`web devtools` both work. This rules out Experiment 5 Hypothesis A — the counter
+was not the culprit.

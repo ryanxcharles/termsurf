@@ -118,9 +118,6 @@ var focused_pane: ?[]const u8 = null;
 /// The most recently active browser pane — updated on tab creation and focus (Issue 684).
 var last_browser_pane: ?[]const u8 = null;
 
-/// Diagnostic counter: how many times handleTabReady has been called.
-var tab_ready_count: i64 = 0;
-
 // -- Block types --
 
 /// Block with no captures (gateway, listener handlers).
@@ -615,7 +612,6 @@ fn handleCAContext(msg: xpc_object_t) void {
 }
 
 fn handleTabReady(msg: xpc_object_t) void {
-    tab_ready_count += 1;
     const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
     const tab_id = xpc_dictionary_get_int64(msg, "tab_id");
     const found_pane = panes.get(pane_id) != null;
@@ -627,7 +623,7 @@ fn handleTabReady(msg: xpc_object_t) void {
         }
     }
 
-    log.info("tab_ready pane={s} tab_id={d} found={} count={d}", .{ pane_id, tab_id, found_pane, tab_ready_count });
+    log.info("tab_ready pane={s} tab_id={d} found={}", .{ pane_id, tab_id, found_pane });
 }
 
 fn handleModeChanged(msg: xpc_object_t) void {
@@ -844,7 +840,6 @@ fn handleQueryLast(msg: xpc_object_t) void {
         // Diagnostic: report why no match was found.
         xpc_dictionary_set_int64(reply, "pane_count", @intCast(panes.count()));
         xpc_dictionary_set_bool(reply, "has_last", last_browser_pane != null);
-        xpc_dictionary_set_int64(reply, "tab_ready_count", tab_ready_count);
         if (last_browser_pane) |lpid| {
             var diag_z: [128]u8 = undefined;
             if (lpid.len < diag_z.len) {
