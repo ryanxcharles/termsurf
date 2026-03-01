@@ -912,3 +912,80 @@ Alternatively: `delete shell` directly (bypass `performClose:nil`), which is
 synchronous, then immediately erase TabState.
 
 **Code reverted** — Chromium shell_browser_main_parts.cc/.h and GUI xpc.zig.
+
+## Experiment 5: Log-only close_tab handler
+
+### Hypothesis
+
+Experiments 2–4 all crashed the profile server. Each experiment did different
+things inside `CloseTabByPaneId`, yet all failed identically. We assumed the
+crash was in our teardown code, but we haven't verified that the crash is even
+inside `CloseTabByPaneId`. It could be in the XPC message delivery, the GUI-side
+cleanup, or somewhere else entirely.
+
+This experiment does the absolute minimum: receive the `close_tab` message, log
+it, and return. No observer reset, no XPC cancel, no TabState erasure. Nothing
+is destroyed. If the remaining tab survives, the crash is confirmed to be in our
+teardown code. If it still dies, the crash is outside `CloseTabByPaneId` — in
+the GUI, the XPC transport, or somewhere we haven't considered.
+
+### Design
+
+Two changes: Chromium log-only handler, GUI disconnect signal.
+
+#### 1. Chromium: add log-only `CloseTabByPaneId` (`shell_browser_main_parts.cc`)
+
+```cpp
+void ShellBrowserMainParts::CloseTabByPaneId(const std::string& pane_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  LOG(INFO) << "[ProfileServer] CloseTabByPaneId (log-only) pane=" << pane_id
+            << ", tabs=" << tabs_.size();
+  // Intentionally do nothing. Diagnostic experiment to confirm
+  // the crash is inside our teardown code, not in message delivery.
+}
+```
+
+No observer reset. No XPC cancel. No tabs*.erase(). The tab stays fully alive in
+every data structure — `tabs*`, `windows\_`, compositor pipeline. It becomes a
+confirmed orphan, same as the pre-Issue-689 behavior but with a log message.
+
+#### 2. Chromium: add `close_tab` action handler (`shell_browser_main_parts.cc`)
+
+Same as Experiments 2–4:
+
+```cpp
+} else if (action && std::string_view(action) == "close_tab") {
+    const char* pane_id_str = xpc_dictionary_get_string(event, "pane_id");
+    std::string pane_id(pane_id_str ? pane_id_str : "");
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ShellBrowserMainParts::CloseTabByPaneId,
+                       base::Unretained(self), pane_id));
+}
+```
+
+#### 3. Chromium: declare in header (`shell_browser_main_parts.h`)
+
+```cpp
+void CloseTabByPaneId(const std::string& pane_id);
+```
+
+#### 4. GUI: send `close_tab` in `handleDisconnect` (`xpc.zig`)
+
+Same as Experiments 2–4.
+
+### Verification
+
+1. Build Chromium and GUI.
+2. Open one tab. `web status` — expect 1 tab, 1 pane.
+3. Open a second tab. `web status` — expect 2 tabs, 2 panes.
+4. Close one pane. `web status` — expect **2 tabs** (orphan, same as before
+   Issue 689), **1 pane**.
+5. **If 2 tabs, 1 pane:** crash is in our teardown code. All prior experiments
+   (2–4) crashed because of what they did INSIDE CloseTabByPaneId, not because
+   of the message itself. The next experiment can try the correct teardown
+   order.
+6. **If 0:** the crash is outside CloseTabByPaneId. Investigate: does the GUI's
+   `handleDisconnect` kill the server? Does `xpc_connection_send_message` on
+   `server.peer` have a side effect? Does the pane_count decrement path have a
+   bug?
