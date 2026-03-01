@@ -1942,6 +1942,38 @@ pub const CAPI = struct {
         };
     }
 
+    /// Split with pending initial input (Issue 690).
+    /// Stores the input string and triggers a normal split. The Swift layer
+    /// reads the pending input via termsurf_surface_get_pending_input().
+    var pending_initial_input: ?[*:0]const u8 = null;
+    var pending_initial_input_len: usize = 0;
+
+    export fn termsurf_surface_split_with_input(
+        ptr: *Surface,
+        direction: apprt.action.SplitDirection,
+        input_ptr: [*:0]const u8,
+    ) void {
+        const len = std.mem.len(input_ptr);
+        const buf = std.heap.page_allocator.alloc(u8, len + 1) catch return;
+        @memcpy(buf[0..len], input_ptr[0..len]);
+        buf[len] = 0;
+        pending_initial_input = @ptrCast(buf.ptr);
+        pending_initial_input_len = len + 1;
+
+        termsurf_surface_split(ptr, direction);
+    }
+
+    export fn termsurf_surface_get_pending_input() ?[*:0]const u8 {
+        const result = pending_initial_input;
+        pending_initial_input = null;
+        return result;
+    }
+
+    export fn termsurf_surface_free_pending_input(ptr: [*:0]const u8) void {
+        const len = std.mem.len(ptr);
+        std.heap.page_allocator.free(@constCast(ptr[0 .. len + 1]));
+    }
+
     /// Focus on the next split (if any).
     export fn termsurf_surface_split_focus(
         ptr: *Surface,

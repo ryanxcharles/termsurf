@@ -644,6 +644,35 @@ impl CompositorConnection {
         }
     }
 
+    /// Tell the compositor to open a split with a command (Issue 690).
+    pub fn send_open_split(&self, pane_id: &str, direction: &str, command: &str) {
+        let dict = unsafe { xpc_dictionary_create(std::ptr::null(), std::ptr::null(), 0) };
+        if dict.is_null() {
+            return;
+        }
+
+        unsafe {
+            let action_key = CString::new("action").unwrap();
+            let action_val = CString::new("open_split").unwrap();
+            xpc_dictionary_set_string(dict, action_key.as_ptr(), action_val.as_ptr());
+
+            let pane_key = CString::new("pane_id").unwrap();
+            let pane_val = CString::new(pane_id).unwrap();
+            xpc_dictionary_set_string(dict, pane_key.as_ptr(), pane_val.as_ptr());
+
+            let dir_key = CString::new("direction").unwrap();
+            let dir_val = CString::new(direction).unwrap();
+            xpc_dictionary_set_string(dict, dir_key.as_ptr(), dir_val.as_ptr());
+
+            let cmd_key = CString::new("command").unwrap();
+            let cmd_val = CString::new(command).unwrap();
+            xpc_dictionary_set_string(dict, cmd_key.as_ptr(), cmd_val.as_ptr());
+
+            xpc_connection_send_message(self.raw, dict);
+            xpc_release(dict);
+        }
+    }
+
     /// Notify the compositor of a mode change.
     pub fn send_mode_changed(&self, pane_id: &str, browsing: bool) {
         let dict = unsafe { xpc_dictionary_create(std::ptr::null(), std::ptr::null(), 0) };

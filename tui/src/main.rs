@@ -33,6 +33,7 @@ const PURPLE: Color = Color::Rgb(0xbb, 0x9a, 0xf7);
 const YELLOW: Color = Color::Rgb(0xe0, 0xaf, 0x68);
 const BLUE: Color = Color::Rgb(0x7a, 0xa2, 0xf7);
 const GREEN: Color = Color::Rgb(0x9e, 0xce, 0x6a);
+const RED: Color = Color::Rgb(0xf7, 0x76, 0x8e);
 
 fn submode_color(mode: &EditorMode) -> Color {
     match mode {
@@ -60,6 +61,8 @@ enum LoopEvent {
 enum CommandResult {
     Quit,
     SetColorScheme(String),
+    DevTools(String),  // direction: "right", "down", "left", "up" (Issue 690).
+    Error(String),     // error message for command bar (Issue 690).
     None,
 }
 
@@ -84,6 +87,16 @@ const COMMANDS: &[Command] = &[
             Some("light" | "l") => CommandResult::SetColorScheme("light".into()),
             Some("system" | "s") => CommandResult::SetColorScheme("system".into()),
             _ => CommandResult::None,
+        },
+    },
+    Command {
+        name: "devtools",
+        exec: |args| match args.first().copied() {
+            Some("right" | "r") | None => CommandResult::DevTools("right".into()),
+            Some("down" | "d") => CommandResult::DevTools("down".into()),
+            Some("left" | "l") => CommandResult::DevTools("left".into()),
+            Some("up" | "u") => CommandResult::DevTools("up".into()),
+            Some(other) => CommandResult::Error(format!("Unknown direction: {}", other)),
         },
     },
 ];
@@ -311,7 +324,14 @@ fn main() -> io::Result<()> {
         }
     });
 
+    // Capture executable path for `:devtools` split command (Issue 690).
+    let current_exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(String::from))
+        .unwrap_or_else(|| "web".to_string());
+
     let mut mode = Mode::Control;
+    let mut command_error: Option<String> = None; // Command bar error (Issue 690).
     let mut last_viewport = Rect::default();
     let mut loading_bar_active = false;
     let mut loading_bar_start: Option<Instant> = None;
@@ -351,6 +371,7 @@ fn main() -> io::Result<()> {
                 &page_title,
                 is_devtools,
                 inspected_tab_id,
+                &command_error,
             );
         })?;
 
@@ -529,6 +550,7 @@ fn main() -> io::Result<()> {
                     Mode::Command => {
                         // Esc in Normal mode exits Command → Control (Issue 665).
                         if key.code == KeyCode::Esc && cmd_state.mode == EditorMode::Normal {
+                            command_error = None;
                             mode = Mode::Control;
                         } else if key.code == KeyCode::Enter && cmd_state.mode != EditorMode::Search
                         {
@@ -546,10 +568,36 @@ fn main() -> io::Result<()> {
                                         conn.send_set_color_scheme(pid, &scheme);
                                     }
                                 }
+                                CommandResult::DevTools(direction) => {
+                                    if is_devtools {
+                                        command_error =
+                                            Some("Cannot open DevTools from a DevTools pane".into());
+                                    } else if let (Some(ref conn), Some(ref pid)) =
+                                        (&compositor, &pane_id)
+                                    {
+                                        match conn.send_query_devtools(pid, 0, &profile) {
+                                            Err(msg) => {
+                                                command_error = Some(msg);
+                                            }
+                                            Ok(_) => {
+                                                let cmd =
+                                                    format!("{} devtools", current_exe);
+                                                conn.send_open_split(pid, &direction, &cmd);
+                                            }
+                                        }
+                                    }
+                                }
+                                CommandResult::Error(msg) => {
+                                    command_error = Some(msg);
+                                }
                                 CommandResult::None => {}
                             }
-                            mode = Mode::Control;
+                            if command_error.is_none() {
+                                mode = Mode::Control;
+                            }
                         } else {
+                            // Clear command error on any non-Enter keystroke (Issue 690).
+                            command_error = None;
                             // Pass everything else to command edtui.
                             cmd_handler.on_key_event(key, &mut cmd_state);
                         }
@@ -670,6 +718,7 @@ fn ui(
     page_title: &str,
     is_devtools: bool,
     inspected_tab_id: i64,
+    command_error: &Option<String>,
 ) -> Rect {
     // Paint full background.
     frame.render_widget(
@@ -704,16 +753,23 @@ fn ui(
         let sc = submode_color(&cmd_state.mode);
         let submode_label =
             Line::from(vec![Span::raw(submode_text).style(Style::default().fg(sc))]);
+        // Red border on error, yellow otherwise (Issue 690).
+        let border_color = if command_error.is_some() { RED } else { url_border };
         let cmd_title = Line::from(vec![
-            Span::raw("COMMAND").style(Style::default().fg(url_border))
+            Span::raw("COMMAND").style(Style::default().fg(border_color))
         ]);
-        let cmd_block = Block::default()
+        let mut cmd_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(url_border).bg(BG))
-            .title_style(Style::default().fg(url_border))
+            .border_style(Style::default().fg(border_color).bg(BG))
+            .title_style(Style::default().fg(border_color))
             .title_top(cmd_title)
             .title_top(submode_label.alignment(Alignment::Right))
             .style(Style::default().bg(BG));
+        if let Some(ref err) = command_error {
+            cmd_block = cmd_block.title_bottom(
+                Line::from(err.as_str()).style(Style::default().fg(RED)),
+            );
+        }
         let cmd_inner = cmd_block.inner(layout[1]);
         frame.render_widget(cmd_block, layout[1]);
 

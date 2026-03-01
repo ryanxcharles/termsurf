@@ -60,6 +60,9 @@ extern "c" fn dispatch_async_f(queue: ?*anyopaque, context: ?*anyopaque, work: *
 extern const _dispatch_main_q: anyopaque;
 extern "c" fn xpc_connection_set_target_queue(connection: xpc_object_t, queue: ?*anyopaque) void;
 
+// Embedded C API exports (Issue 690).
+extern "c" fn termsurf_surface_split_with_input(ptr: *anyopaque, direction: c_int, input_ptr: [*:0]const u8) void;
+
 /// Cast a const extern symbol address to xpc_object_t for identity comparison.
 inline fn xpcPtr(ptr: *const anyopaque) xpc_object_t {
     return @constCast(ptr);
@@ -288,6 +291,8 @@ fn handleMessage(msg: xpc_object_t) void {
         handleQueryDevtools(msg);
     } else if (std.mem.eql(u8, action_str, "query_tabs")) {
         handleQueryTabs(msg);
+    } else if (std.mem.eql(u8, action_str, "open_split")) {
+        handleOpenSplit(msg);
     } else {
         log.warn("unknown action: {s}", .{action_str});
     }
@@ -1737,6 +1742,74 @@ pub fn sendKeyEvent(
     xpc_dictionary_set_uint64(msg, "modifiers", modifiers);
 
     xpc_connection_send_message(server.peer, msg);
+}
+
+/// Handle open_split: create a split with initial input (Issue 690).
+fn handleOpenSplit(msg: xpc_object_t) void {
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    const direction_str = str(xpc_dictionary_get_string(msg, "direction"));
+    const command = xpc_dictionary_get_string(msg, "command") orelse {
+        log.warn("open_split: missing command", .{});
+        return;
+    };
+
+    const p = panes.get(pane_id) orelse {
+        log.warn("open_split: no pane for {s}", .{pane_id});
+        return;
+    };
+    const surface = p.overlay_surface orelse {
+        log.warn("open_split: no surface for {s}", .{pane_id});
+        return;
+    };
+
+    const direction: c_int = if (std.mem.eql(u8, direction_str, "right"))
+        0 // right
+    else if (std.mem.eql(u8, direction_str, "down"))
+        1 // down
+    else if (std.mem.eql(u8, direction_str, "left"))
+        2 // left
+    else if (std.mem.eql(u8, direction_str, "up"))
+        3 // up
+    else {
+        log.warn("open_split: unknown direction {s}", .{direction_str});
+        return;
+    };
+
+    log.info("open_split pane={s} dir={s}", .{ pane_id, direction_str });
+
+    // CoreSurface → embedded Surface via @fieldParentPtr, then cast to opaque.
+    const Embedded = @import("embedded.zig");
+    const surface_ptr: *Embedded.Surface = @fieldParentPtr("core_surface", surface);
+
+    // Dispatch to main thread — the split call triggers NotificationCenter →
+    // termsurfDidNewSplit → replaceSurfaceTree → NSView mutations, which MUST
+    // run on the main thread (Issue 690 Exp 2).
+    const cmd = std.mem.span(command);
+    const SplitReq = struct {
+        surface: *anyopaque,
+        direction: c_int,
+        command_buf: [512]u8,
+        command_len: usize,
+
+        fn dispatch(raw: ?*anyopaque) callconv(.c) void {
+            const self: *@This() = @ptrCast(@alignCast(raw));
+            defer std.heap.c_allocator.destroy(self);
+            termsurf_surface_split_with_input(
+                self.surface,
+                self.direction,
+                @ptrCast(&self.command_buf),
+            );
+        }
+    };
+    const req = std.heap.c_allocator.create(SplitReq) catch return;
+    const copy_len = @min(cmd.len, req.command_buf.len - 1);
+    @memcpy(req.command_buf[0..copy_len], cmd[0..copy_len]);
+    req.command_buf[copy_len] = 0;
+    req.command_len = copy_len;
+    req.surface = @ptrCast(surface_ptr);
+    req.direction = direction;
+
+    dispatch_async_f(@constCast(&_dispatch_main_q), @ptrCast(req), &SplitReq.dispatch);
 }
 
 /// Remove a half-created pane from all maps and free it (auto-target failure cleanup).

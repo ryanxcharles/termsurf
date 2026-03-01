@@ -1106,6 +1106,11 @@ void termsurf_surface_mouse_pressure(termsurf_surface_t, uint32_t, double);
 void termsurf_surface_ime_point(termsurf_surface_t, double*, double*, double*, double*);
 void termsurf_surface_request_close(termsurf_surface_t);
 void termsurf_surface_split(termsurf_surface_t, termsurf_action_split_direction_e);
+void termsurf_surface_split_with_input(termsurf_surface_t,
+                                       termsurf_action_split_direction_e,
+                                       const char*);
+const char* termsurf_surface_get_pending_input(void);
+void termsurf_surface_free_pending_input(const char*);
 void termsurf_surface_split_focus(termsurf_surface_t,
                                  termsurf_action_goto_split_e);
 void termsurf_surface_split_resize(termsurf_surface_t,

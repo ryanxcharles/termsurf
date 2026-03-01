@@ -839,12 +839,20 @@ extension TermSurf {
                 guard let surface = target.target.surface else { return }
                 guard let surfaceView = self.surfaceView(from: surface) else { return }
 
+                var config = SurfaceConfiguration(from: termsurf_surface_inherited_config(surface, TERMSURF_SURFACE_CONTEXT_SPLIT))
+
+                // Check for pending initial input from open_split (Issue 690).
+                if let pendingInput = termsurf_surface_get_pending_input() {
+                    config.initialInput = String(cString: pendingInput) + "\n"
+                    termsurf_surface_free_pending_input(pendingInput)
+                }
+
                 NotificationCenter.default.post(
                     name: Notification.termsurfNewSplit,
                     object: surfaceView,
                     userInfo: [
                         "direction": direction,
-                        Notification.NewSurfaceConfigKey: SurfaceConfiguration(from: termsurf_surface_inherited_config(surface, TERMSURF_SURFACE_CONTEXT_SPLIT)),
+                        Notification.NewSurfaceConfigKey: config,
                     ]
                 )
 

@@ -561,3 +561,157 @@ Hypothesis 1 is the most likely — the `overlay_surface` pointer going stale
 after a split is removed is a known risk in the pane tracking architecture. The
 pointer is set once in `handleSetOverlay` and never updated when the split tree
 changes.
+
+## Experiment 2: Dispatch split creation to main thread
+
+### Hypothesis
+
+The crash is caused by an AppKit threading violation, not a stale pointer.
+
+When `handleOpenSplit` runs on the XPC serial background queue
+(`com.termsurf.ghost.xpc`), the entire call chain executes on that queue:
+
+```
+handleOpenSplit                          (xpc_queue)
+  → termsurf_surface_split_with_input    (xpc_queue)
+    → termsurf_surface_split             (xpc_queue)
+      → performAction(.new_split)        (xpc_queue)
+        → App.action callback            (xpc_queue)
+          → App.newSplit()               (xpc_queue)
+            → NotificationCenter.post    (xpc_queue)
+              → termsurfDidNewSplit       (xpc_queue)  ← observer runs on posting thread
+                → replaceSurfaceTree     (xpc_queue)
+                  → surfaceTree = new    (xpc_queue)  ← @Published didSet
+                    → surfaceTreeDidChange  (xpc_queue)
+                      → window.surfaceIsZoomed = ...   ← NSView mutation off main thread
+                      → window?.close()                ← NSWindow call off main thread
+```
+
+`NotificationCenter.post()` delivers to observers synchronously on the calling
+thread. Since the post originates on the XPC queue, `termsurfDidNewSplit` runs
+on the XPC queue, and `replaceSurfaceTree` manipulates the NSView hierarchy off
+the main thread.
+
+The first invocation may work because AppKit sometimes tolerates single
+off-main-thread mutations. The second invocation crashes because the view
+hierarchy is more complex (the split tree was already modified once) and
+AppKit's internal state is inconsistent from the first violation.
+
+Other XPC handlers (like `handleSetOverlay`) don't hit this because they only
+modify data-model fields on CoreSurface — no NSView manipulation. The split is
+the only handler that triggers view hierarchy changes.
+
+### Design
+
+One change in xpc.zig: dispatch the split call to the main queue using
+`dispatch_async_f`.
+
+#### 1. GUI: Dispatch to main queue in `handleOpenSplit` (`xpc.zig`)
+
+Add extern declarations for GCD main queue dispatch:
+
+```zig
+extern "c" fn dispatch_async_f(
+    queue: *anyopaque,
+    context: ?*anyopaque,
+    work: *const fn (?*anyopaque) callconv(.C) void,
+) void;
+extern "c" fn dispatch_get_main_queue() *anyopaque;
+```
+
+Modify `handleOpenSplit` to package arguments into a heap-allocated struct and
+dispatch to the main queue:
+
+```zig
+const SplitRequest = struct {
+    surface: *anyopaque,
+    direction: c_int,
+    command_buf: [512]u8,
+    command_len: usize,
+};
+
+fn handleOpenSplit(msg: xpc_object_t) void {
+    // ... existing pane/surface/direction lookup (unchanged) ...
+
+    const Embedded = @import("embedded.zig");
+    const surface_ptr: *Embedded.Surface = @fieldParentPtr("core_surface", surface);
+
+    // Package args for main-queue dispatch.
+    const req = alloc.create(SplitRequest) catch return;
+    req.surface = @ptrCast(surface_ptr);
+    req.direction = direction;
+    const cmd = std.mem.span(command);
+    const copy_len = @min(cmd.len, req.command_buf.len - 1);
+    @memcpy(req.command_buf[0..copy_len], cmd[0..copy_len]);
+    req.command_buf[copy_len] = 0;
+    req.command_len = copy_len;
+
+    dispatch_async_f(
+        dispatch_get_main_queue(),
+        @ptrCast(req),
+        &splitOnMainThread,
+    );
+}
+
+fn splitOnMainThread(ctx: ?*anyopaque) callconv(.C) void {
+    const req: *SplitRequest = @alignCast(@ptrCast(ctx orelse return));
+    defer alloc.destroy(req);
+    termsurf_surface_split_with_input(
+        req.surface,
+        req.direction,
+        @ptrCast(&req.command_buf),
+    );
+}
+```
+
+This ensures the entire chain — `performAction` → `NotificationCenter.post` →
+`termsurfDidNewSplit` → `replaceSurfaceTree` → NSView manipulation — runs on the
+main thread.
+
+### What's different from Experiment 1
+
+| Aspect        | Experiment 1                | Experiment 2                |
+| ------------- | --------------------------- | --------------------------- |
+| Split call    | Direct from XPC queue       | Dispatched to main queue    |
+| NSView safety | Off-main-thread (violation) | On main thread (correct)    |
+| Other code    | —                           | Unchanged from Experiment 1 |
+
+### Test
+
+Same test plan as Experiment 1, with emphasis on the close → reopen cycle:
+
+1. Open a browser: `web google.com`
+2. `:devtools right` → split opens with DevTools
+3. Close DevTools pane (`:q`)
+4. `:devtools left` → should open without crash
+5. Close and reopen 5 times → stable
+6. All error cases still work (DevTools-in-DevTools, invalid direction,
+   duplicate detection)
+
+### Result: SUCCESS
+
+Dispatching the split creation to the main thread via `dispatch_async_f` fixes
+the crash. The `:devtools` command now works reliably across multiple close →
+reopen cycles. The root cause was confirmed: `handleOpenSplit` ran the entire
+`performAction` → `NotificationCenter.post` → `replaceSurfaceTree` → NSView
+mutation chain on the XPC background queue, violating AppKit's main thread
+requirement.
+
+## Conclusion
+
+The `:devtools [direction]` TUI command works end-to-end. Seven files across TUI
+and GUI implement the feature:
+
+1. **TUI** (`main.rs`, `xpc.rs`): Parses `:devtools [right|down|left|up]`,
+   validates (no DevTools-from-DevTools, no duplicates), sends `open_split` XPC
+   message with the `web devtools` command string.
+2. **GUI** (`xpc.zig`): Receives `open_split`, dispatches to main thread via
+   `dispatch_async_f`, calls `termsurf_surface_split_with_input`.
+3. **GUI** (`embedded.zig`, `termsurf.h`): Stores pending initial input, exposes
+   C API for Swift to read it.
+4. **Swift** (`TermSurf.App.swift`): Reads pending input in `newSplit()`, sets
+   `config.initialInput` so the new shell receives the command.
+
+The critical fix was Experiment 2: dispatching the split creation from the XPC
+background queue to the main thread. Without this, the second invocation crashed
+because AppKit's NSView hierarchy was being mutated off the main thread.
