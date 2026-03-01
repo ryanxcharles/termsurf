@@ -356,3 +356,323 @@ GUI panes: 1
 4. **The fix is Phase 2:** Send an explicit `close_tab` message from the GUI to
    Chromium when a pane is cleaned up. This is the same direction as Issue 688
    Experiment 3, but now we can verify the fix with `web status`.
+
+## Experiment 2: Close tabs on pane cleanup
+
+### Hypothesis
+
+If the GUI sends a `close_tab` XPC message (with `pane_id`) to the Chromium
+profile server whenever a pane is cleaned up, and Chromium finds and destroys
+the matching tab using the same `Shell::Close()` path that `CloseTab` already
+uses, then `web status` will show tab counts matching pane counts after
+open/close cycles.
+
+### Background
+
+Research into Chromium's tab closure confirms `Shell::Close()` is the correct
+Content Shell API. Our existing `CloseTab(xpc_connection_t conn)` already calls
+it. The method works — it's just never triggered because pane cleanup in the GUI
+never signals Chromium. This is the same direction as Issue 688 Experiment 3,
+which crashed for unknown reasons. The difference now: we have `web status` to
+verify tab counts at every step.
+
+### Design
+
+#### Data flow
+
+```
+GUI pane closes → cleanupPane() / handleDisconnect()
+                     ↓
+          send close_tab { pane_id } on server.peer (control connection)
+                     ↓
+Chromium: StartDynamicMode handler → PostTask(CloseTabByPaneId)
+                     ↓
+          CloseTabByPaneId: find tab by pane_id → Shell::Close()
+                           cancel + release tab_connection
+                           erase from tabs_
+                           if empty → Shell::Shutdown()
+```
+
+### Changes
+
+#### 1. Chromium: add `CloseTabByPaneId` method (`shell_browser_main_parts.cc`)
+
+New method that mirrors `CloseTab` but matches by `pane_id` instead of
+connection pointer:
+
+```cpp
+void ShellBrowserMainParts::CloseTabByPaneId(const std::string& pane_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  for (auto it = tabs_.begin(); it != tabs_.end(); ++it) {
+    if ((*it)->pane_id == pane_id) {
+      LOG(INFO) << "[ProfileServer] CloseTabByPaneId pane=" << pane_id
+                << ", " << (tabs_.size() - 1) << " tab(s) remaining";
+      (*it)->tab_observer.reset();
+      (*it)->shell->Close();
+      if ((*it)->tab_connection) {
+        xpc_connection_cancel((*it)->tab_connection);
+        xpc_release((*it)->tab_connection);
+      }
+      tabs_.erase(it);
+      if (tabs_.empty()) {
+        LOG(INFO) << "[ProfileServer] No tabs remaining, exiting";
+        Shell::Shutdown();
+      }
+      return;
+    }
+  }
+  LOG(WARNING) << "[ProfileServer] CloseTabByPaneId: no tab for pane="
+               << pane_id;
+}
+```
+
+#### 2. Chromium: add `close_tab` action handler (`shell_browser_main_parts.cc`)
+
+In `StartDynamicMode`, after the `query_tabs` handler:
+
+```cpp
+} else if (action && std::string_view(action) == "close_tab") {
+    const char* pane_id_str = xpc_dictionary_get_string(event, "pane_id");
+    std::string pane_id(pane_id_str ? pane_id_str : "");
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ShellBrowserMainParts::CloseTabByPaneId,
+                       base::Unretained(self), pane_id));
+}
+```
+
+#### 3. Chromium: declare `CloseTabByPaneId` (`shell_browser_main_parts.h`)
+
+```cpp
+void CloseTabByPaneId(const std::string& pane_id);
+```
+
+#### 4. GUI: send `close_tab` in `handleDisconnect` (`xpc.zig`)
+
+In the web peer disconnect path (line 1787), before decrementing
+`server.pane_count`, send the close message. Only send if the server is alive
+and the pane had a tab:
+
+```zig
+// Close the Chromium tab (Issue 689).
+if (p.tab_sent) {
+    if (server.peer != null) {
+        const close_msg = xpc_dictionary_create(null, null, 0);
+        defer xpc_release(close_msg);
+        xpc_dictionary_set_string(close_msg, "action", "close_tab");
+        var pane_z: [37]u8 = undefined;
+        if (pane_id_key.len > 0 and pane_id_key.len <= 36) {
+            @memcpy(pane_z[0..pane_id_key.len], pane_id_key);
+            pane_z[pane_id_key.len] = 0;
+            xpc_dictionary_set_string(close_msg, "pane_id", @ptrCast(&pane_z));
+            xpc_connection_send_message(server.peer, close_msg);
+            log.info("sent close_tab pane={s}", .{pane_id_key});
+        }
+    }
+}
+```
+
+Insert this at line 1787 (inside `if (p.server) |server|`), before the
+`server.pane_count -= 1` line. This covers the normal disconnect path.
+
+`cleanupPane` does not need a separate close_tab because `cleanupPane` is only
+called from `deinit` (global shutdown) where the entire server is being killed
+anyway.
+
+### Result: FAILURE
+
+Closing one pane kills all tabs. The entire Chromium profile server exits when a
+single tab is closed, destroying every tab on that profile.
+
+**Root cause:** `Shell::Close()` cascades to `Shell::Shutdown()`. Content Shell
+tracks all Shells in a global `windows_` vector. When a Shell is destroyed, its
+destructor removes it from `windows_`. If `windows_` becomes empty, the platform
+delegate calls `DidCloseLastWindow()` → `Shell::Shutdown()`, which closes ALL
+remaining Shells and quits the run loop, killing the process.
+
+In theory, closing one Shell out of N should leave N-1 in `windows_`, so
+`DidCloseLastWindow` shouldn't fire. But the macOS path goes through
+`performClose:` → `windowShouldClose:` → `delete shell`, which interacts with
+the run loop. The destruction chain has side effects we don't fully control —
+`Shell::Close()` was designed for Content Shell's single-window-per-tab model
+where each Shell owns an NSWindow, not for our profile server where Shells share
+a headless process.
+
+**The deeper problem:** We're calling `Shell::Close()` — the standard Content
+Shell close API — but Content Shell's lifecycle model doesn't match ours. In
+standard Content Shell, closing the last window exits the process. In our
+profile server, we want to close individual tabs without affecting others.
+`Shell::Close()` is the wrong abstraction for us because it triggers
+window-level lifecycle hooks (`performClose:`, `DidCloseLastWindow`) that assume
+"one Shell = one window = one application instance."
+
+**What we need instead:** A way to destroy the WebContents and its compositor
+without going through Shell's window lifecycle. The tab's resources are: Shell
+(WebContents owner), ShellTabObserver, per-tab compositor
+(AcceleratedWidgetMac + Compositor + Layer + Bridge), and the per-tab XPC
+connection. We need to tear these down individually without calling
+`Shell::Close()`.
+
+**Code reverted** — both Chromium and GUI changes from this experiment.
+
+## Experiment 3: Defuse DidCloseLastWindow cascade
+
+### Hypothesis
+
+Experiment 2 failed because `Shell::Close()` cascades to `Shell::Shutdown()`
+through Content Shell's window lifecycle. The exact chain:
+
+```
+Shell::Close()
+  → performClose:nil                        (macOS window lifecycle)
+    → windowShouldClose: → delete shell     (synchronous)
+      → ~Shell()
+        → remove from windows_
+        → web_contents_.reset()
+        → if windows_.empty()
+          → DidCloseLastWindow()
+            → Shell::Shutdown()             ← KILLS ALL SHELLS + QUITS
+```
+
+Our fork's `DidCloseLastWindow()` (in `shell_platform_delegate.cc:22`) calls
+`Shell::Shutdown()` — the base class default. There is no macOS-specific
+override. This is the root cause: when the last Shell in the global `windows_`
+vector is destroyed, the platform delegate shuts down the entire process.
+
+But we already have our OWN shutdown trigger:
+`if (tabs_.empty()) Shell::Shutdown()` in `CloseTab` and `CloseTabByPaneId`.
+This is the correct trigger — it fires when our `tabs_` vector (which we
+control) is empty, not when Content Shell's `windows_` vector (which the Shell
+destructor controls) is empty.
+
+**The fix:** Make `DidCloseLastWindow()` a no-op. Remove `Shell::Shutdown()`
+from it. Our explicit `tabs_.empty()` checks become the sole shutdown path. Then
+re-apply Experiment 2's `close_tab` logic (which was correct except for the
+cascade).
+
+If this works, `web status` will show tab counts matching pane counts after
+open/close cycles, and closing one tab will not affect others.
+
+### Design
+
+Three changes: one in Chromium's platform delegate (the root fix), two
+re-applied from Experiment 2 (close_tab handler + GUI disconnect signal).
+
+#### 1. Chromium: make `DidCloseLastWindow` a no-op (`shell_platform_delegate.cc`)
+
+Current code (line 22–24):
+
+```cpp
+void ShellPlatformDelegate::DidCloseLastWindow() {
+  Shell::Shutdown();
+}
+```
+
+Change to:
+
+```cpp
+void ShellPlatformDelegate::DidCloseLastWindow() {
+  // No-op. Our ShellBrowserMainParts::CloseTab / CloseTabByPaneId
+  // call Shell::Shutdown() explicitly when tabs_ is empty.
+  // The default DidCloseLastWindow → Shutdown cascade would kill
+  // all tabs when closing any single tab (Issue 689 Experiment 2).
+}
+```
+
+This is the root fix. Without it, `Shell::Close()` cascades.
+
+#### 2. Chromium: re-add `CloseTabByPaneId` + `close_tab` handler
+
+Same as Experiment 2. New method in `shell_browser_main_parts.cc` after
+`HandleQueryTabs` (line ~1250):
+
+```cpp
+void ShellBrowserMainParts::CloseTabByPaneId(const std::string& pane_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  for (auto it = tabs_.begin(); it != tabs_.end(); ++it) {
+    if ((*it)->pane_id == pane_id) {
+      LOG(INFO) << "[ProfileServer] CloseTabByPaneId pane=" << pane_id
+                << ", " << (tabs_.size() - 1) << " tab(s) remaining";
+      (*it)->tab_observer.reset();
+      (*it)->shell->Close();
+      if ((*it)->tab_connection) {
+        xpc_connection_cancel((*it)->tab_connection);
+        xpc_release((*it)->tab_connection);
+      }
+      tabs_.erase(it);
+      if (tabs_.empty()) {
+        LOG(INFO) << "[ProfileServer] No tabs remaining, exiting";
+        Shell::Shutdown();
+      }
+      return;
+    }
+  }
+  LOG(WARNING) << "[ProfileServer] CloseTabByPaneId: no tab for pane="
+               << pane_id;
+}
+```
+
+New action handler in `StartDynamicMode`, after `query_tabs` (line ~342):
+
+```cpp
+} else if (action && std::string_view(action) == "close_tab") {
+    const char* pane_id_str = xpc_dictionary_get_string(event, "pane_id");
+    std::string pane_id(pane_id_str ? pane_id_str : "");
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ShellBrowserMainParts::CloseTabByPaneId,
+                       base::Unretained(self), pane_id));
+}
+```
+
+Declaration in `shell_browser_main_parts.h`:
+
+```cpp
+void CloseTabByPaneId(const std::string& pane_id);
+```
+
+#### 3. GUI: re-add `close_tab` in `handleDisconnect` (`xpc.zig`)
+
+Same as Experiment 2. Insert at line 1787 (inside `if (p.server) |server|`),
+before `server.pane_count -= 1`:
+
+```zig
+// Close the Chromium tab (Issue 689).
+if (p.tab_sent and server.peer != null) {
+    const close_msg = xpc_dictionary_create(null, null, 0);
+    defer xpc_release(close_msg);
+    xpc_dictionary_set_string(close_msg, "action", "close_tab");
+    var pane_z: [37]u8 = undefined;
+    if (pane_id_key.len > 0 and pane_id_key.len <= 36) {
+        @memcpy(pane_z[0..pane_id_key.len], pane_id_key);
+        pane_z[pane_id_key.len] = 0;
+        xpc_dictionary_set_string(close_msg, "pane_id", @ptrCast(&pane_z));
+        xpc_connection_send_message(server.peer, close_msg);
+        log.info("sent close_tab pane={s}", .{pane_id_key});
+    }
+}
+```
+
+### Verification
+
+1. Build both: `cd gui && zig build`, then
+   `cd chromium/src && autoninja -C out/Default chromium_profile_server`.
+2. Open TermSurf, `web google.com`. Run `web status` — expect 1 tab, 1 pane.
+3. Open a second browser tab (`web ryanxcharles.com`). `web status` — 2 tabs, 2
+   panes.
+4. Close the second pane (`:q`). `web status` — expect 1 tab, 1 pane. The closed
+   tab should be gone, and the first tab should be unaffected.
+5. Open DevTools (`web devtools`). `web status` — 2 tabs (1 browser + 1
+   devtools), 2 panes.
+6. Close DevTools pane. `web status` — expect 1 tab, 1 pane.
+7. Reopen DevTools. Should work without crash (no duplicate
+   `InspectorOverlayAgent`).
+8. Resize the terminal window. Should not crash (the original Issue 686
+   trigger).
+
+### What Experiment 2 lacked
+
+The only difference between this experiment and Experiment 2 is step 1 — making
+`DidCloseLastWindow` a no-op. The `CloseTabByPaneId` code and the GUI disconnect
+signal are identical. Experiment 2's code was correct; it just couldn't survive
+Shell::Close() triggering the cascade.
