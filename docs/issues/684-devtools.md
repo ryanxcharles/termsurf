@@ -1312,3 +1312,30 @@ No other changes.
 
 Removing `found_pane` does not break anything. The extra hash lookup was purely
 diagnostic.
+
+## Experiment 8: Simplify `handleQueryLast` failure reply
+
+### Goal
+
+Test whether removing the diagnostic fields from the `handleQueryLast` failure
+reply breaks `web last` or `web devtools`. This is Experiment 5 Hypothesis B —
+isolated.
+
+### Changes
+
+#### GUI (`xpc.zig`): Strip diagnostic fields from failure path
+
+In `handleQueryLast`, the `else` branch (no matching pane) currently populates
+`pane_count`, `has_last`, `last_pane`, `first_pane_tab_id`, and `first_pane_id`
+into the reply. Remove all of these — keep only the log line. The reply will be
+an empty dict (no `pane_id` key), which the TUI already interprets as failure.
+
+No other changes.
+
+### Test
+
+1. `cd gui && zig build` — compiles
+2. Rebuild and launch with `build-debug.sh --open`
+3. `web google.com` in a pane
+4. `web last` in a split — should print profile, pane_id, tab_id
+5. `web devtools` in a split — should open DevTools
