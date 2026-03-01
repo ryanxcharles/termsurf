@@ -655,3 +655,157 @@ internal HTTP address.
 - Lifecycle handling (inspected tab closes → DevTools tab behavior)
 - Keyboard shortcut (Cmd+I) to open DevTools from a browser pane
 - URL bar DevTools (typing `devtools://1` in an existing pane's URL bar)
+
+## Experiment 3: `web devtools` auto-targeting
+
+### Hypothesis
+
+If `web devtools` (bare keyword, no `://`) auto-targets the most recently
+focused browser tab, then the user can open DevTools without knowing any tab ID.
+This is the overwhelmingly common case — one browser tab open, user wants to
+inspect it.
+
+### Why the GUI resolves auto-targeting, not Chromium
+
+Chromium profile servers are per-profile. Each server only knows about its own
+tabs. But `web devtools` (bare, no `--profile`) needs to work across profiles —
+it should target whatever the user was just looking at, regardless of which
+profile it belongs to.
+
+The GUI is the only component that sees all panes across all profiles and tracks
+which one is focused. It already maintains `focused_pane` (the pane_id of the
+currently focused pane) in `xpc.zig`. The GUI is the correct place to resolve
+"most recent browser tab" into a concrete `(profile, tab_id)` pair.
+
+The resolution happens entirely in the GUI. Chromium always receives an explicit
+`inspected_tab_id > 0` — it never needs auto-targeting logic.
+
+### Plan
+
+Changes to TUI, GUI, and Chromium (minor). No new XPC actions.
+
+#### 1. Chromium: Include `tab_id` in `tab_ready` reply
+
+The `tab_ready` XPC message currently only sends `pane_id`. Add `tab_id` so the
+GUI can store it per-pane:
+
+```cpp
+// In CreateTab, after assigning tab_id:
+xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
+xpc_dictionary_set_string(msg, "action", "tab_ready");
+xpc_dictionary_set_string(msg, "pane_id", pane_id.c_str());
+xpc_dictionary_set_int64(msg, "tab_id", tab->tab_id);
+xpc_connection_send_message(tab_conn, msg);
+```
+
+For DevTools tabs (`tab_id == 0`), the field is 0 — the GUI uses this to
+distinguish browser panes from DevTools panes.
+
+#### 2. GUI: Store `tab_id` per-pane and track last focused browser pane
+
+**Add `tab_id` to `Pane` struct:**
+
+```zig
+tab_id: i64 = 0, // From tab_ready. 0 = DevTools or not yet assigned.
+```
+
+**Update `handleTabReady`** to store it:
+
+```zig
+fn handleTabReady(msg: xpc_object_t) void {
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    const tab_id = xpc_dictionary_get_int64(msg, "tab_id");
+    if (panes.get(pane_id)) |p| {
+        p.tab_id = tab_id;
+    }
+    log.info("tab_ready pane={s} tab_id={d}", .{ pane_id, tab_id });
+}
+```
+
+**Track `last_focused_browser_pane`** — a separate variable from `focused_pane`.
+Updated in the focus handler whenever a non-DevTools pane
+(`inspected_tab_id == 0`) receives focus:
+
+```zig
+var last_focused_browser_pane: ?[]const u8 = null;
+
+// In handleFocusChanged, when focused == true:
+if (p.inspected_tab_id == 0) {
+    last_focused_browser_pane = pane_id;
+}
+```
+
+This is separate from `focused_pane` because if the user focuses a DevTools pane
+and then runs `web devtools` from a third pane, we still want to target the
+browser tab, not the DevTools tab.
+
+**Resolve auto-targeting in `handleSetDevtoolsOverlay`:**
+
+When `inspected_tab_id == 0`, look up `last_focused_browser_pane` and use its
+`tab_id` and `server`:
+
+```zig
+if (p.inspected_tab_id == 0) {
+    // Auto-target: resolve from last focused browser pane.
+    const target_pane_id = last_focused_browser_pane orelse {
+        log.err("devtools auto-target: no browser pane has been focused", .{});
+        return;
+    };
+    const target = panes.get(target_pane_id) orelse {
+        log.err("devtools auto-target: pane {s} not found", .{target_pane_id});
+        return;
+    };
+    p.inspected_tab_id = target.tab_id;
+    // Use the target's server (profile), not the --profile argument.
+    p.server = target.server;
+    if (target.server) |s| s.pane_count += 1;
+}
+```
+
+This overrides both the `inspected_tab_id` and the `server` (profile) on the
+DevTools pane. The `--profile` flag is ignored when auto-targeting — the
+DevTools always connects to the same profile server as the inspected tab.
+
+When `inspected_tab_id > 0` (explicit `devtools://3`), the existing behavior is
+unchanged — the TUI's `--profile` flag determines the server.
+
+#### 3. TUI: Detect bare `devtools` keyword
+
+In `tui/src/main.rs`, add a check for bare `devtools` (exact match):
+
+```rust
+let inspected_tab_id: i64 = if raw_url.starts_with("devtools://") {
+    raw_url["devtools://".len()..].parse::<i64>().unwrap_or(0)
+} else if raw_url == "devtools" {
+    0  // Auto-target: GUI resolves to most recent browser tab.
+} else {
+    -1 // Not a DevTools request.
+};
+let is_devtools = inspected_tab_id >= 0;
+```
+
+Change the sentinel from `0` (not DevTools) to `-1` (not DevTools), so that `0`
+means "auto-target". The `is_devtools` flag controls whether to send
+`set_devtools_overlay` vs `set_overlay`.
+
+The URL bar displays `devtools` (no `://N`) until the profile server sends back
+`devtools://N` via `url_changed`, at which point it updates to show the resolved
+tab ID.
+
+#### 4. Chromium: No auto-targeting logic
+
+`CreateDevToolsTab` always receives `inspected_tab_id > 0` (resolved by the
+GUI). No changes to the tab lookup. The existing code handles it correctly.
+
+### Test
+
+1. Open TermSurf, navigate to a page: `web example.com`
+2. Open a Ghostty split pane
+3. Type `web devtools` (bare, no `://`, no number)
+4. **Verify:** DevTools opens and inspects the `example.com` tab
+5. **Verify URL bar:** Initially shows `devtools`, then updates to
+   `devtools://1` after the profile server resolves the tab
+6. **Verify explicit still works:** `web devtools://1` works as before
+7. **Verify cross-profile:** Open `web --profile work google.com`, focus it,
+   then open a split and type `web devtools` — should inspect the `work` profile
+   tab, not the `default` profile tab
