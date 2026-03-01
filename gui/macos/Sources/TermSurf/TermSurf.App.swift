@@ -841,9 +841,10 @@ extension TermSurf {
 
                 var config = SurfaceConfiguration(from: termsurf_surface_inherited_config(surface, TERMSURF_SURFACE_CONTEXT_SPLIT))
 
-                // Check for pending initial input from open_split (Issue 690).
+                // Check for pending command from open_split (Issue 691).
                 if let pendingInput = termsurf_surface_get_pending_input() {
-                    config.initialInput = String(cString: pendingInput) + "\n"
+                    config.command = String(cString: pendingInput)
+                    config.waitAfterCommand = false
                     termsurf_surface_free_pending_input(pendingInput)
                 }
 

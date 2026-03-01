@@ -101,3 +101,29 @@ command string, which works with both `initialInput` and `command`.
 6. Close and reopen 3 times → stable
 7. All error cases still work (DevTools-in-DevTools, invalid direction,
    duplicate detection)
+
+### Result: SUCCESS
+
+The pane closes automatically when DevTools exits. Two changes were needed
+instead of one:
+
+1. **`TermSurf.App.swift`**: `config.command` instead of `config.initialInput`,
+   plus `config.waitAfterCommand = false` to override any user config.
+2. **`embedded.zig`**: Fixed a bug where `wait_after_command` was only applied
+   when `true` — `if (opts.wait_after_command) { config = true; }` never cleared
+   an inherited `true` value. Changed to unconditional assignment:
+   `config.@"wait-after-command" = opts.wait_after_command`.
+
+## Conclusion
+
+DevTools splits now launch `web devtools` as the pane's direct command instead
+of typing it into a shell. When the user quits DevTools (`:q`), the pane closes
+immediately — no leftover shell, no "press any key" prompt.
+
+Two files changed from Issue 690's implementation:
+
+- **`TermSurf.App.swift`**: `config.command` replaces `config.initialInput`,
+  `waitAfterCommand` forced to `false`.
+- **`embedded.zig`**: `wait-after-command` is now unconditionally set from the
+  surface options, fixing a pre-existing bug where `false` could never override
+  an inherited `true`.
