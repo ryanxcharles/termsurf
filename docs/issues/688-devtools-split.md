@@ -439,8 +439,24 @@ Currently, `handleTabReady` does not store the server peer. The connection
 reference is available via `xpc_dictionary_get_remote_connection(msg)` on any
 message from the profile server (e.g., `tab_ready`), but it's never retained.
 
-This fix also benefits regular browser tabs — they have the same orphan problem,
-it just doesn't crash because independent tabs don't conflict.
+**This is not just a DevTools problem.** Every Chromium tab — browser and
+DevTools alike — has the same two-connection architecture. When any `web` pane
+closes, Connection A drops but Connection B survives. The Chromium tab persists
+as an orphan inside the profile server: its Shell, WebContents, compositor, and
+renderer all stay alive, consuming memory and GPU resources. This has been true
+since tabs were introduced but was never noticed because orphaned browser tabs
+don't conflict with each other — they just silently leak. The only reason it
+surfaced now is that DevTools orphans crash when a second inspector attaches to
+the same renderer.
+
+The orphan problem is masked by `killServer`: when the last pane on a profile
+closes, `handleDisconnect` kills the entire profile server process, which
+destroys all tabs (orphaned or not). So if a user opens one tab, closes it, and
+opens another, the server is killed and restarted — no orphan accumulates. But
+if a user has multiple panes on the same profile, closing one pane leaks its
+Chromium tab for the lifetime of the server.
+
+This fix closes all Chromium tabs properly, not just DevTools tabs.
 
 ### Changes
 
