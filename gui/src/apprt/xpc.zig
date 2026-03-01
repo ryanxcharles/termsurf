@@ -907,11 +907,18 @@ fn sendCreateTab(p: *Pane, server: *Server) void {
     xpc_dictionary_set_uint64(msg, "pixel_width", p.pending_pixel_w);
     xpc_dictionary_set_uint64(msg, "pixel_height", p.pending_pixel_h);
 
+    // Color scheme (Issue 680).
+    const dark: bool = if (p.overlay_surface) |surface|
+        surface.config_conditional_state.theme == .dark
+    else
+        true; // default to dark
+    xpc_dictionary_set_bool(msg, "dark", dark);
+
     xpc_connection_send_message(server.peer, msg);
     p.tab_sent = true;
 
-    log.info("sent create_tab pane={s} pixel={d}x{d}", .{
-        p.pane_id_key, p.pending_pixel_w, p.pending_pixel_h,
+    log.info("sent create_tab pane={s} pixel={d}x{d} dark={}", .{
+        p.pane_id_key, p.pending_pixel_w, p.pending_pixel_h, dark,
     });
 }
 
@@ -933,6 +940,42 @@ fn sendResize(p: *Pane, server: *Server) void {
     log.info("sent resize pane={s} pixel={d}x{d}", .{
         p.pane_id_key, p.pending_pixel_w, p.pending_pixel_h,
     });
+}
+
+// -- Color scheme (Issue 680) --
+
+/// Called from Surface.colorSchemeCallback (main thread). Dispatches to XPC queue.
+pub fn handleColorSchemeChanged(surface: *CoreSurface, dark: bool) void {
+    const ptr_val = @intFromPtr(surface);
+    const dispatch_fn = struct {
+        fn f(ctx: ?*anyopaque) callconv(.c) void {
+            const addr = @intFromPtr(ctx);
+            const surf_addr = addr & ~@as(usize, 1);
+            const is_dark = (addr & 1) != 0;
+            const pane_id = surface_to_pane.get(surf_addr) orelse return;
+            const p = panes.get(pane_id) orelse return;
+            if (!p.tab_sent) return;
+            const server = p.server orelse return;
+            if (server.peer == null) return;
+
+            const msg = xpc_dictionary_create(null, null, 0);
+            xpc_dictionary_set_string(msg, "action", "set_color_scheme");
+
+            var pane_z: [37]u8 = undefined;
+            if (p.pane_id_key.len > 0 and p.pane_id_key.len <= 36) {
+                @memcpy(pane_z[0..p.pane_id_key.len], p.pane_id_key);
+                pane_z[p.pane_id_key.len] = 0;
+                xpc_dictionary_set_string(msg, "pane_id", @ptrCast(&pane_z));
+            }
+
+            xpc_dictionary_set_bool(msg, "dark", is_dark);
+            xpc_connection_send_message(server.peer, msg);
+            log.info("sent set_color_scheme pane={s} dark={}", .{ pane_id, is_dark });
+        }
+    }.f;
+    // Encode dark state in low bit of pointer (Surface is aligned).
+    const encoded = ptr_val | @as(usize, if (dark) 1 else 0);
+    dispatch_async_f(xpc_queue, @ptrFromInt(encoded), dispatch_fn);
 }
 
 // -- Mouse input (Issue 606) --

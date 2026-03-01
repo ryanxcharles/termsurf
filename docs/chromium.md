@@ -10,7 +10,7 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `146.0.7650.0-issue-655`
+- Branch: `146.0.7650.0-issue-680`
 - Base version: `146.0.7650.0` (tracking Electron's Chromium version)
 
 ## Branch Strategy
@@ -66,6 +66,7 @@ find the most relevant recent branch, create a new branch from it
 | `146.0.7650.0-issue-643` | [Issue 643](issues/643-zig-profile-server-2.md)       | Zig Profile Server (Take 2)                 |
 | `146.0.7650.0-issue-644` | [Issue 644](issues/644-simplified-cpp.md)              | Simplified C++ profile server               |
 | `146.0.7650.0-issue-655` | [Issue 655](issues/655-substack-blank.md)             | Stub BadgeService binder                    |
+| `146.0.7650.0-issue-680` | [Issue 680](issues/680-dark-mode.md)                  | Dark mode via XPC                           |
 
 ## Patches
 

@@ -5331,6 +5331,12 @@ pub fn colorSchemeCallback(self: *Surface, scheme: apprt.ColorScheme) !void {
 
     // If mode 2031 is on, then we report the change live.
     self.queueIo(.{ .color_scheme_report = .{ .force = false } }, .unlocked);
+
+    // Forward color scheme to Chromium via XPC (Issue 680).
+    const xpc = @import("apprt/xpc.zig");
+    if (xpc.hasOverlayPane(self)) {
+        xpc.handleColorSchemeChanged(self, new_scheme == .dark);
+    }
 }
 
 pub fn posToViewport(self: Surface, xpos: f64, ypos: f64) terminal.point.Coordinate {
