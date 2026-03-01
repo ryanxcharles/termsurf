@@ -78,6 +78,7 @@ const Pane = struct {
     pending_pixel_h: u64 = 0,
     tab_sent: bool = false,
     browsing: bool = false,
+    inspected_tab_id: i64 = 0, // Issue 684: nonzero = DevTools pane.
 };
 
 /// Per-profile server state. Shared by all panes on the same profile.
@@ -252,6 +253,8 @@ fn handleMessage(msg: xpc_object_t) void {
 
     if (std.mem.eql(u8, action_str, "set_overlay")) {
         handleSetOverlay(msg);
+    } else if (std.mem.eql(u8, action_str, "set_devtools_overlay")) {
+        handleSetDevtoolsOverlay(msg);
     } else if (std.mem.eql(u8, action_str, "server_register")) {
         handleServerRegister(msg);
     } else if (std.mem.eql(u8, action_str, "tab_ready")) {
@@ -398,6 +401,104 @@ fn handleSetOverlay(msg: xpc_object_t) void {
     }
 }
 
+fn handleSetDevtoolsOverlay(msg: xpc_object_t) void {
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    const profile = str(xpc_dictionary_get_string(msg, "profile"));
+    const col = xpc_dictionary_get_uint64(msg, "col");
+    const row = xpc_dictionary_get_uint64(msg, "row");
+    const width = xpc_dictionary_get_uint64(msg, "width");
+    const height = xpc_dictionary_get_uint64(msg, "height");
+    const browsing = xpc_dictionary_get_bool(msg, "browsing");
+    const inspected_tab_id = xpc_dictionary_get_int64(msg, "inspected_tab_id");
+
+    log.info("set_devtools_overlay pane={s} inspected_tab_id={d} profile={s}", .{
+        pane_id, inspected_tab_id, profile,
+    });
+
+    // Look up the surface by pane ID.
+    const surface = app.findSurfaceByPaneId(pane_id) orelse {
+        log.warn("no surface found for pane={s}", .{pane_id});
+        return;
+    };
+
+    // Set overlay grid coordinates.
+    surface.core().setOverlay(
+        @intCast(col),
+        @intCast(row),
+        @intCast(width),
+        @intCast(height),
+    );
+
+    const cell = surface.core().getCellSize();
+    const new_pixel_w = width * @as(u64, cell.width);
+    const new_pixel_h = height * @as(u64, cell.height);
+
+    if (panes.get(pane_id)) |p| {
+        // Existing pane — resize path (same as set_overlay).
+        const old_w = p.pending_pixel_w;
+        const old_h = p.pending_pixel_h;
+        p.pending_pixel_w = new_pixel_w;
+        p.pending_pixel_h = new_pixel_h;
+        p.browsing = browsing;
+
+        if (p.tab_sent) {
+            if (p.server) |server| {
+                if (server.peer != null and (new_pixel_w != old_w or new_pixel_h != old_h)) {
+                    sendResize(p, server);
+                }
+            }
+        }
+    } else {
+        // New DevTools pane.
+        const p = alloc.create(Pane) catch {
+            log.err("failed to allocate Pane", .{});
+            return;
+        };
+        p.* = .{};
+
+        const pane_id_key = alloc.dupe(u8, pane_id) catch {
+            alloc.destroy(p);
+            return;
+        };
+        p.pane_id_key = pane_id_key;
+        panes.put(pane_id_key, p) catch {
+            alloc.free(pane_id_key);
+            alloc.destroy(p);
+            return;
+        };
+
+        p.overlay_surface = surface.core();
+        p.pending_pixel_w = new_pixel_w;
+        p.pending_pixel_h = new_pixel_h;
+        p.browsing = browsing;
+        p.inspected_tab_id = inspected_tab_id;
+
+        surface_to_pane.put(@intFromPtr(surface.core()), pane_id_key) catch {};
+
+        const conn = xpc_dictionary_get_remote_connection(msg);
+        if (conn != null) {
+            p.web_peer = xpc_retain(conn);
+            peer_to_pane.put(@intFromPtr(conn.?), pane_id_key) catch {};
+        }
+
+        log.info("new devtools pane={s} pixel={d}x{d} inspected_tab_id={d}", .{
+            pane_id, new_pixel_w, new_pixel_h, inspected_tab_id,
+        });
+
+        if (getOrCreateServer(profile)) |server| {
+            p.server = server;
+            server.pane_count += 1;
+
+            if (server.peer != null) {
+                sendCreateDevToolsTab(p, server);
+                if (p.browsing) {
+                    sendFocusChanged(p.pane_id_key, true);
+                }
+            }
+        }
+    }
+}
+
 fn handleServerRegister(msg: xpc_object_t) void {
     const profile = str(xpc_dictionary_get_string(msg, "profile"));
     log.info("server_register profile={s}", .{profile});
@@ -418,8 +519,15 @@ fn handleServerRegister(msg: xpc_object_t) void {
     var it = panes.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr.*;
-        if (p.server == server and !p.tab_sent and p.pending_url_len > 0) {
-            sendCreateTab(p, server);
+        if (p.server == server and !p.tab_sent) {
+            if (p.inspected_tab_id > 0) {
+                // DevTools pane (Issue 684).
+                sendCreateDevToolsTab(p, server);
+            } else if (p.pending_url_len > 0) {
+                sendCreateTab(p, server);
+            } else {
+                continue;
+            }
             if (p.browsing) {
                 sendFocusChanged(p.pane_id_key, true);
             }
@@ -965,6 +1073,37 @@ fn sendCreateTab(p: *Pane, server: *Server) void {
 
     log.info("sent create_tab pane={s} pixel={d}x{d} dark={}", .{
         p.pane_id_key, p.pending_pixel_w, p.pending_pixel_h, dark,
+    });
+}
+
+fn sendCreateDevToolsTab(p: *Pane, server: *Server) void {
+    const msg = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(msg, "action", "create_devtools_tab");
+
+    // Pane ID (null-terminated).
+    if (p.pane_id_key.len > 0 and p.pane_id_key.len <= 36) {
+        var pane_z: [37]u8 = undefined;
+        @memcpy(pane_z[0..p.pane_id_key.len], p.pane_id_key);
+        pane_z[p.pane_id_key.len] = 0;
+        xpc_dictionary_set_string(msg, "pane_id", @ptrCast(&pane_z));
+    }
+
+    xpc_dictionary_set_int64(msg, "inspected_tab_id", p.inspected_tab_id);
+    xpc_dictionary_set_uint64(msg, "pixel_width", p.pending_pixel_w);
+    xpc_dictionary_set_uint64(msg, "pixel_height", p.pending_pixel_h);
+
+    // Color scheme (Issue 680).
+    const dark: bool = if (p.overlay_surface) |surface|
+        surface.config_conditional_state.theme == .dark
+    else
+        true; // default to dark
+    xpc_dictionary_set_bool(msg, "dark", dark);
+
+    xpc_connection_send_message(server.peer, msg);
+    p.tab_sent = true;
+
+    log.info("sent create_devtools_tab pane={s} inspected_tab_id={d} dark={}", .{
+        p.pane_id_key, p.inspected_tab_id, dark,
     });
 }
 

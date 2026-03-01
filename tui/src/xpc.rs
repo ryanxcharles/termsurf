@@ -36,6 +36,7 @@ extern "C" {
     ) -> XpcObjectT;
     fn xpc_dictionary_set_string(dict: XpcObjectT, key: *const c_char, value: *const c_char);
     fn xpc_dictionary_set_uint64(dict: XpcObjectT, key: *const c_char, value: u64);
+    fn xpc_dictionary_set_int64(dict: XpcObjectT, key: *const c_char, value: i64);
     fn xpc_dictionary_get_value(dict: XpcObjectT, key: *const c_char) -> XpcObjectT;
     fn xpc_dictionary_get_string(dict: XpcObjectT, key: *const c_char) -> *const c_char;
     fn xpc_dictionary_get_bool(dict: XpcObjectT, key: *const c_char) -> bool;
@@ -289,6 +290,55 @@ impl CompositorConnection {
             let url_key = CString::new("url").unwrap();
             let url_c = CString::new(url).unwrap();
             xpc_dictionary_set_string(dict, url_key.as_ptr(), url_c.as_ptr());
+
+            let profile_key = CString::new("profile").unwrap();
+            let profile_c = CString::new(profile).unwrap();
+            xpc_dictionary_set_string(dict, profile_key.as_ptr(), profile_c.as_ptr());
+
+            let browsing_key = CString::new("browsing").unwrap();
+            xpc_dictionary_set_bool(dict, browsing_key.as_ptr(), browsing);
+
+            xpc_connection_send_message(self.raw, dict);
+            xpc_release(dict);
+        }
+    }
+
+    /// Tell the compositor to create a DevTools overlay (Issue 684).
+    pub fn send_set_devtools_overlay(
+        &self,
+        pane_id: &str,
+        col: u16,
+        row: u16,
+        width: u16,
+        height: u16,
+        inspected_tab_id: i64,
+        profile: &str,
+        browsing: bool,
+    ) {
+        let dict = unsafe { xpc_dictionary_create(std::ptr::null(), std::ptr::null(), 0) };
+        if dict.is_null() {
+            return;
+        }
+
+        let action = CString::new("set_devtools_overlay").unwrap();
+        let action_key = CString::new("action").unwrap();
+        let pane_id_c = CString::new(pane_id).unwrap();
+        let pane_id_key = CString::new("pane_id").unwrap();
+        let col_key = CString::new("col").unwrap();
+        let row_key = CString::new("row").unwrap();
+        let width_key = CString::new("width").unwrap();
+        let height_key = CString::new("height").unwrap();
+
+        unsafe {
+            xpc_dictionary_set_string(dict, action_key.as_ptr(), action.as_ptr());
+            xpc_dictionary_set_string(dict, pane_id_key.as_ptr(), pane_id_c.as_ptr());
+            xpc_dictionary_set_uint64(dict, col_key.as_ptr(), col as u64);
+            xpc_dictionary_set_uint64(dict, row_key.as_ptr(), row as u64);
+            xpc_dictionary_set_uint64(dict, width_key.as_ptr(), width as u64);
+            xpc_dictionary_set_uint64(dict, height_key.as_ptr(), height as u64);
+
+            let tid_key = CString::new("inspected_tab_id").unwrap();
+            xpc_dictionary_set_int64(dict, tid_key.as_ptr(), inspected_tab_id);
 
             let profile_key = CString::new("profile").unwrap();
             let profile_c = CString::new(profile).unwrap();

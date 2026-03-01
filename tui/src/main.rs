@@ -214,12 +214,23 @@ fn main() -> io::Result<()> {
         .as_ref()
         .and_then(|conn| pane_id.as_ref().and_then(|pid| conn.send_hello(pid)));
 
-    let mut url = normalize_url(&match cli.command {
+    // Detect devtools://N before normalizing (Issue 684).
+    let raw_url = match cli.command {
         Some(Commands::Url { url }) => url,
         None => cli.url.unwrap_or_else(|| {
             hello_homepage.unwrap_or_else(|| "https://termsurf.com/welcome".to_string())
         }),
-    });
+    };
+    let inspected_tab_id: i64 = if raw_url.starts_with("devtools://") {
+        raw_url["devtools://".len()..].parse::<i64>().unwrap_or(0)
+    } else {
+        0
+    };
+    let mut url = if inspected_tab_id > 0 {
+        raw_url // Keep devtools://N as-is, don't normalize.
+    } else {
+        normalize_url(&raw_url)
+    };
 
     // Enter raw mode and alternate screen.
     enable_raw_mode()?;
@@ -288,16 +299,30 @@ fn main() -> io::Result<()> {
         if viewport_rect != last_viewport {
             let first_overlay = last_viewport == Rect::default();
             if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
-                conn.send_set_overlay(
-                    pid,
-                    viewport_rect.x,
-                    viewport_rect.y,
-                    viewport_rect.width,
-                    viewport_rect.height,
-                    &url,
-                    &profile,
-                    mode == Mode::Browse,
-                );
+                if inspected_tab_id > 0 {
+                    // DevTools pane (Issue 684).
+                    conn.send_set_devtools_overlay(
+                        pid,
+                        viewport_rect.x,
+                        viewport_rect.y,
+                        viewport_rect.width,
+                        viewport_rect.height,
+                        inspected_tab_id,
+                        &profile,
+                        mode == Mode::Browse,
+                    );
+                } else {
+                    conn.send_set_overlay(
+                        pid,
+                        viewport_rect.x,
+                        viewport_rect.y,
+                        viewport_rect.width,
+                        viewport_rect.height,
+                        &url,
+                        &profile,
+                        mode == Mode::Browse,
+                    );
+                }
             }
             last_viewport = viewport_rect;
 
