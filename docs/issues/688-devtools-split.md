@@ -170,3 +170,199 @@ mechanism.
   `newSplit()`, `SurfaceConfiguration`
 - `gui/macos/Sources/TermSurf/Surface View/SurfaceView.swift` —
   `SurfaceConfiguration` struct with `command` and `initialInput` fields
+
+## Experiment 1: End-to-end `:devtools` command
+
+### Hypothesis
+
+If the TUI parses `:devtools [direction]`, validates the request, sends an
+`open_split` XPC message, and the GUI creates a split with `initialInput` set to
+the `web devtools` command, then DevTools opens in a new split with one command.
+
+### Changes
+
+#### 1. TUI: `CommandResult::Error` and `CommandResult::DevTools` (`main.rs`)
+
+Add two new variants to the `CommandResult` enum:
+
+```rust
+enum CommandResult {
+    Quit,
+    SetColorScheme(String),
+    DevTools(String),   // direction: "right", "down", "left", "up"
+    Error(String),      // error message to display
+    None,
+}
+```
+
+Add a `devtools` command to the `COMMANDS` array:
+
+```rust
+Command {
+    name: "devtools",
+    exec: |args| match args.first() {
+        Some(&"right" | &"r") | None => CommandResult::DevTools("right".into()),
+        Some(&"down" | &"d") => CommandResult::DevTools("down".into()),
+        Some(&"left" | &"l") => CommandResult::DevTools("left".into()),
+        Some(&"up" | &"u") => CommandResult::DevTools("up".into()),
+        Some(other) => CommandResult::Error(
+            format!("Unknown direction: {}", other),
+        ),
+    },
+},
+```
+
+#### 2. TUI: Command error display (`main.rs`)
+
+Add state variable and pass to `ui()`:
+
+```rust
+let mut command_error: Option<String> = None;
+```
+
+In the `Mode::Command` Enter handler, after calling `dispatch()`:
+
+- `CommandResult::Error(msg)` → store in `command_error`, stay in Command mode
+  (don't switch to Control)
+- All other results → clear `command_error`, proceed as normal
+
+In the `Mode::Command` key handler, clear the error on any keystroke that isn't
+Enter (so the user sees the error until they start typing again).
+
+Add `command_error: &Option<String>` parameter to `ui()`. In the command bar
+rendering:
+
+- If `command_error.is_some()`, use red border color instead of yellow
+- Add `.title_bottom()` with the error text styled red
+
+#### 3. TUI: DevTools validation and `open_split` (`main.rs`)
+
+In the `Mode::Command` Enter handler, when `dispatch()` returns
+`CommandResult::DevTools(direction)`:
+
+1. **Check `is_devtools`.** If true, set `command_error` to
+   `"Cannot open DevTools from a DevTools pane"` and stay in Command mode.
+2. **Call `query_devtools`.** Send `query_devtools(pane_id, 0, &profile)` to
+   check if the current tab already has DevTools. If it returns `Err(msg)`, set
+   `command_error` to the error message and stay in Command mode.
+3. **Send `open_split`.** If both checks pass, call
+   `send_open_split(pane_id, &direction, &command_string)` where
+   `command_string` is `"{current_exe} devtools"`.
+4. Switch to Control mode.
+
+Capture the executable path early in `main()`:
+
+```rust
+let current_exe = std::env::current_exe()
+    .ok()
+    .and_then(|p| p.to_str().map(String::from))
+    .unwrap_or_else(|| "web".to_string());
+```
+
+#### 4. TUI: `send_open_split` function (`xpc.rs`)
+
+Add a fire-and-forget XPC send function:
+
+```rust
+pub fn send_open_split(
+    &self,
+    pane_id: &str,
+    direction: &str,
+    command: &str,
+)
+```
+
+Sends:
+
+```
+{
+  action: "open_split",
+  pane_id: "...",
+  direction: "right",
+  command: "/full/path/to/web devtools"
+}
+```
+
+#### 5. GUI: `handleOpenSplit` handler (`xpc.zig`)
+
+Register `"open_split"` in `handleMessage`. The handler:
+
+1. Extract `pane_id`, `direction`, `command` from the XPC message.
+2. Look up the pane in `panes`, get its `overlay_surface`.
+3. Find the `Surface` (apprt surface) from the core surface. The existing
+   pattern is `app.findSurfaceByPaneId(pane_id)` — use the same lookup.
+4. Map direction string to `SplitDirection` enum (right=0, down=1, left=2,
+   up=3).
+5. Call `termsurf_surface_split_with_input(surface, direction, command)` — a new
+   C API export.
+
+#### 6. GUI: `termsurf_surface_split_with_input` C API (`embedded.zig`)
+
+Add a new export that behaves like `termsurf_surface_split` but also stores a
+pending `initialInput` string for the new surface:
+
+```zig
+export fn termsurf_surface_split_with_input(
+    ptr: *Surface,
+    direction: apprt.action.SplitDirection,
+    input: [*:0]const u8,
+) void
+```
+
+This function:
+
+1. Stores the input string in a module-level `pending_initial_input` variable.
+2. Calls `termsurf_surface_split(ptr, direction)` — the normal split path.
+3. The Swift notification handler picks up the pending input.
+
+#### 7. Swift: Read pending initial input (`TermSurf.App.swift`)
+
+In the `newSplit` case of the action dispatcher (line 838–850), after creating
+the `SurfaceConfiguration` from the inherited config:
+
+1. Check if `termsurf_surface_get_pending_input()` returns a non-null string.
+2. If so, set `config.initialInput` to that string + `"\n"` (the newline
+   triggers execution).
+3. Clear the pending input.
+
+Add a new C export in `embedded.zig`:
+
+```zig
+export fn termsurf_surface_get_pending_input() ?[*:0]const u8
+```
+
+This returns and clears the pending input string. It's a one-shot: the first
+call returns the string, subsequent calls return null until a new
+`split_with_input` is called.
+
+### Why `initialInput` over `command`
+
+Using `initialInput` (typing into the shell) rather than `command` (replacing
+the shell):
+
+- The new pane has a real shell. If `web devtools` exits (user quits DevTools),
+  the pane stays open with a shell prompt — the user can run another command.
+- With `command`, the pane would close when `web devtools` exits (or show
+  "Process exited" if `wait_after_command` is set). Less useful.
+- `initialInput` is typed after the shell starts, so shell configuration
+  (.zshrc, aliases, etc.) is fully loaded.
+
+The timing concern (shell not ready when input arrives) is mitigated by
+Ghostty's existing `initialInput` infrastructure — it buffers the input and
+sends it after the PTY is ready.
+
+### Test
+
+1. Open a browser: `web google.com`
+2. Press `:`, type `devtools right`, press Enter
+3. A split should open to the right, running `web devtools`
+4. The DevTools pane should auto-target the google.com tab
+5. Press `:`, type `devtools right` again → red command bar:
+   `"Tab N already has DevTools open"`
+6. Close DevTools, try again → should work
+7. In the DevTools pane, press `:`, type `devtools right` → red command bar:
+   `"Cannot open DevTools from a DevTools pane"`
+8. `:devtools down` → split below
+9. `:devtools` (no direction) → defaults to right
+10. `:devtools banana` → red command bar: `"Unknown direction: banana"`
+11. Type any character after seeing error → error clears, bar returns to yellow
