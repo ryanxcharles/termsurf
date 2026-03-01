@@ -428,37 +428,6 @@ impl CompositorConnection {
         let pane_key = CString::new("pane_id").unwrap();
         let pane_ptr = unsafe { xpc_dictionary_get_string(reply, pane_key.as_ptr()) };
         if pane_ptr.is_null() {
-            // Print diagnostics from the reply.
-            let count_key = CString::new("pane_count").unwrap();
-            let pane_count = unsafe { xpc_dictionary_get_int64(reply, count_key.as_ptr()) };
-            let has_key = CString::new("has_last").unwrap();
-            let has_last = unsafe { xpc_dictionary_get_bool(reply, has_key.as_ptr()) };
-            let last_key = CString::new("last_pane").unwrap();
-            let last_ptr = unsafe { xpc_dictionary_get_string(reply, last_key.as_ptr()) };
-            let last_str = if !last_ptr.is_null() {
-                unsafe { std::ffi::CStr::from_ptr(last_ptr) }
-                    .to_str()
-                    .unwrap_or("?")
-            } else {
-                "(null)"
-            };
-            let trc_key = CString::new("tab_ready_count").unwrap();
-            let tab_ready_count = unsafe { xpc_dictionary_get_int64(reply, trc_key.as_ptr()) };
-            let fptid_key = CString::new("first_pane_tab_id").unwrap();
-            let first_pane_tab_id = unsafe { xpc_dictionary_get_int64(reply, fptid_key.as_ptr()) };
-            let fpid_key = CString::new("first_pane_id").unwrap();
-            let fpid_ptr = unsafe { xpc_dictionary_get_string(reply, fpid_key.as_ptr()) };
-            let first_pane_id = if !fpid_ptr.is_null() {
-                unsafe { std::ffi::CStr::from_ptr(fpid_ptr) }
-                    .to_str()
-                    .unwrap_or("?")
-            } else {
-                "(null)"
-            };
-            eprintln!(
-                "[web] query_last diag: pane_count={} has_last={} last_pane={} tab_ready_count={} first_pane_id={} first_pane_tab_id={}",
-                pane_count, has_last, last_str, tab_ready_count, first_pane_id, first_pane_tab_id
-            );
             unsafe { xpc_release(reply) };
             return None;
         }
