@@ -178,3 +178,108 @@ an active browser pane.
 
 `prefers-color-scheme` works. Pages respond to the system color scheme both on
 initial load and dynamically when toggling macOS appearance.
+
+## Experiment 2: `:colorscheme` command
+
+### Hypothesis
+
+Adding a `:colorscheme dark|light|system` command to the TUI's command mode will
+let users manually override the browser pane's color scheme without changing
+system settings.
+
+### Design
+
+The chain: **TUI → GUI → Chromium**.
+
+1. User types `:colorscheme dark` (or `:col d` via prefix matching)
+2. TUI dispatches command, sends `set_color_scheme` XPC message to GUI
+3. GUI receives it in xpc.zig, forwards to Chromium via the existing
+   `handleColorSchemeChanged`
+4. Chromium updates `WebPreferences::preferred_color_scheme` and the page
+   re-evaluates `prefers-color-scheme`
+
+Three arguments:
+
+- `dark` — force dark mode on the browser pane
+- `light` — force light mode on the browser pane
+- `system` — read the current system theme and apply it (one-shot, not
+  persistent tracking)
+
+This only affects the browser pane's CSS `prefers-color-scheme`. The terminal
+itself continues to follow system settings via the existing KVO chain.
+
+### Changes
+
+#### 1. TUI: Add `colorscheme` command (`tui/src/main.rs`)
+
+The current `Command.exec` signature is `fn(args: &[&str]) -> CommandResult`
+with no access to the compositor. Add a new `CommandResult` variant:
+
+```rust
+enum CommandResult {
+    Quit,
+    SetColorScheme(String), // "dark", "light", "system"
+    None,
+}
+```
+
+Add the command to the `COMMANDS` table:
+
+```rust
+Command {
+    name: "colorscheme",
+    exec: |args| {
+        match args.first().map(|s| *s) {
+            Some("dark" | "d") => CommandResult::SetColorScheme("dark".into()),
+            Some("light" | "l") => CommandResult::SetColorScheme("light".into()),
+            Some("system" | "s") => CommandResult::SetColorScheme("system".into()),
+            _ => CommandResult::None,
+        }
+    },
+},
+```
+
+Handle the new result in the command dispatch match (where we have access to the
+compositor and pane_id):
+
+```rust
+CommandResult::SetColorScheme(scheme) => {
+    if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+        conn.send_set_color_scheme(pid, &scheme);
+    }
+}
+```
+
+#### 2. TUI: Add `send_set_color_scheme` to XPC client (`tui/src/xpc.rs`)
+
+New method on `CompositorConnection`:
+
+```rust
+pub fn send_set_color_scheme(&self, pane_id: &str, scheme: &str) {
+    // Send { action: "set_color_scheme", pane_id, scheme }
+}
+```
+
+Follows the same pattern as `send_navigate`.
+
+#### 3. GUI: Handle `set_color_scheme` from TUI (`gui/src/apprt/xpc.zig`)
+
+Add a new handler in the TUI message dispatcher for
+`action = "set_color_scheme"`:
+
+- Read `scheme` string field (`"dark"`, `"light"`, or `"system"`)
+- Look up the pane's overlay surface
+- For `dark`/`light`: call `handleColorSchemeChanged(surface, dark)`
+- For `system`: read `surface.config_conditional_state.theme` (already reflects
+  the current system setting via KVO) and forward that
+
+No Chromium changes needed — it already handles `set_color_scheme` XPC messages
+from Experiment 1.
+
+### Test
+
+1. Open TermSurf, navigate to a dark-mode-aware page
+2. Type `:colorscheme light` — page switches to light styles
+3. Type `:col d` — page switches back to dark styles (prefix matching)
+4. Type `:colorscheme system` — page follows current macOS appearance
+5. Verify `:colorscheme` with no argument or invalid argument is a no-op
