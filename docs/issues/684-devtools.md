@@ -1345,3 +1345,30 @@ No other changes.
 Removing all diagnostic fields from the failure reply does not break anything.
 An empty reply dict is sufficient — the TUI correctly interprets a missing
 `pane_id` key as failure. Hypothesis B ruled out.
+
+## Experiment 9: Simplify TUI `send_query_last` failure path
+
+### Goal
+
+Test whether removing the diagnostic `eprintln!` from `send_query_last` breaks
+`web last` or `web devtools`. This is Experiment 5 Hypothesis C — isolated.
+
+### Changes
+
+#### TUI (`xpc.rs`): Remove diagnostic dump on failure
+
+In `send_query_last`, the failure branch (when `pane_id` is null in the reply)
+currently reads `pane_count`, `has_last`, `last_pane`, `tab_ready_count`,
+`first_pane_tab_id`, and `first_pane_id` from the reply and prints them via
+`eprintln!`. Replace the entire block with just
+`xpc_release(reply); return None;`.
+
+No other changes.
+
+### Test
+
+1. `cd tui && cargo build` — compiles
+2. Rebuild and launch with `build-debug.sh --open`
+3. `web google.com` in a pane
+4. `web last` in a split — should print profile, pane_id, tab_id
+5. `web devtools` in a split — should open DevTools
