@@ -115,6 +115,47 @@ let current_exe = std::env::current_exe()
 
 When building the `open_split` command, construct: `"{current_exe} devtools"`
 
+### Error cases
+
+Two cases must be caught before sending the `open_split` XPC message:
+
+1. **`:devtools` typed in a DevTools pane.** You can't open DevTools for
+   DevTools. Checked locally — `is_devtools` is already a flag in the TUI. No
+   XPC needed.
+2. **`:devtools` typed in a browser tab that already has DevTools open.** The
+   `query_devtools` message (Issue 687) already checks for duplicates. The TUI
+   calls it before sending `open_split`. If it returns an error, the command bar
+   shows the error instead of splitting.
+
+Both cases are validated before any split is attempted.
+
+### Command bar error display
+
+When a command fails, the command bar turns red and shows an error message on a
+footer line below the input. This is a general-purpose error mechanism for
+command mode — any command can use it.
+
+**Visual behavior:**
+
+- The command bar border turns red (replacing the normal yellow)
+- A single-line error message appears below the command input, inside the bar's
+  bottom border area (e.g., `"Tab 4 already has DevTools open"`)
+- The error persists until the user types another character or exits command
+  mode (Esc)
+
+**Implementation:**
+
+Add a `CommandResult::Error(String)` variant to the `CommandResult` enum. When
+`dispatch()` returns an error, the event loop stores the error message in a
+`command_error: Option<String>` variable. The `ui()` function checks this
+variable — if set, it renders the command bar with a red border and the error
+text as a bottom title. Any subsequent keystroke in command mode clears the
+error.
+
+This pattern generalizes beyond DevTools — unrecognized commands, invalid
+arguments, or any future command that can fail will use the same red-bar
+mechanism.
+
 ## Relevant Code
 
 - `tui/src/main.rs` — `dispatch()` function (command mode), `CommandResult` enum
