@@ -226,3 +226,51 @@ keys are locked in DevTools mode — `i`, `A`, `I`, `n`, `v`, `V` are ignored. T
 viewport title shows `DevTools · profile/tab_id`, and the status bar shows only
 the available keys. The URL bar remains read-only with the `devtools://N`
 indicator.
+
+## Conclusion
+
+The crash from Issue 686 — two DevTools sessions on the same tab causing a
+`PaintController` DCHECK — is now prevented. The fix enforces Chromium's
+one-DevTools-per-page invariant at the GUI level, before the TUI ever starts.
+
+### What was built
+
+- **`query_devtools` synchronous XPC message.** The TUI sends this before
+  entering ratatui. The GUI resolves auto-targeting, checks for duplicate
+  `inspected_tab_id` across all panes, and replies with the resolved `tab_id` or
+  an error string. This is the first XPC message that returns structured errors
+  — `query_last` returns empty replies on failure, but `query_devtools` returns
+  `{ error: "..." }`.
+- **Launch-time rejection.** If the check fails, the TUI prints the error to
+  stderr and exits immediately. The ratatui UI never starts. No async error
+  handling, no runtime checks.
+- **Locked DevTools mode.** DevTools panes cannot navigate. All URL editing keys
+  (`i`, `A`, `I`, `n`, `v`, `V`) are disabled in Control mode. Enter in Edit
+  mode is a no-op safety guard. This eliminates the entire class of problems
+  where a user might navigate to a `devtools://` URL from within a running pane.
+- **Visual indicators.** Viewport title shows `DevTools · profile/tab_id`,
+  status bar shows only `:q⏎ quit  ⏎ browse`, URL bar shows `devtools://N`.
+
+### Design rationale
+
+We considered three alternatives before settling on the locked-mode approach:
+
+1. **Runtime error handling** — intercept every navigation, check for
+   duplicates, display errors in the TUI. Too complex: requires async GUI→TUI
+   error messages, a new error display area in the UI, and state reconciliation.
+2. **Separate `devtools` binary** — cleaner `web` code, but duplicates ~300
+   lines of XPC/event loop/ratatui infrastructure to avoid 6 conditionals.
+3. **Immutable URL bar only** — prevents typing `devtools://N` but doesn't
+   prevent back-navigation or other edge cases.
+
+The locked-mode approach eliminates all edge cases by reducing the problem to a
+single validation at launch time.
+
+### Changes
+
+- `gui/src/apprt/xpc.zig` — `handleQueryDevtools` handler, registered in
+  `handleMessage`
+- `tui/src/xpc.rs` — `send_query_devtools` synchronous request-reply
+- `tui/src/main.rs` — pre-check before ratatui, `if !is_devtools` guards on edit
+  keys, safety guard on Enter in Edit mode, viewport title override, reduced
+  status bar hints
