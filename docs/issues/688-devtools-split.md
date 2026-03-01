@@ -555,3 +555,171 @@ Also add it in the server peer disconnect handler's pane cleanup loop (the
    tab is cleaned up (check profile server logs for "Closing tab" messages)
 7. All error cases from Experiment 1 still work (DevTools-in-DevTools, duplicate
    detection, invalid direction)
+
+### Result: FAILURE
+
+Closing the DevTools pane destroys the browser tab too. The main `web` pane
+stays alive (the TUI is still running), but the Chromium content is gone. When
+the user presses `:` or any key in the browser pane, the TUI redraws, sends
+`set_overlay`, and the GUI creates a new tab from scratch — causing a full page
+reload.
+
+**Root cause:** `xpc_dictionary_get_remote_connection(msg)` in `handleTabReady`
+returns the same connection object for both the browser tab's `tab_ready` and
+the DevTools tab's `tab_ready`. This is most likely the profile server's control
+connection — the single bidirectional channel between the GUI and the profile
+server — not a per-tab connection. Both pane A (browser) and pane B (DevTools)
+store the same connection as `server_peer`.
+
+When pane B (DevTools) closes and its `server_peer` is cancelled, it cancels the
+shared control connection. This severs ALL communication between the GUI and the
+profile server. The profile server's error handler fires, destroying all tabs
+(browser and DevTools alike). The browser pane's Chromium content vanishes.
+
+The experiment's assumption was wrong: we assumed each tab has its own dedicated
+XPC connection from the profile server back to the GUI (Connection B). In
+reality, the profile server may send all tab events (`tab_ready`, `ca_context`,
+`loading_state`, etc.) on a single shared connection, not on the per-tab
+`tab_connection` created in `CreateTab`/`CreateDevToolsTab`.
+
+**What needs to happen:** Before fixing pane cleanup, we need to understand
+which connection `tab_ready` actually arrives on. If it's the control
+connection, we cannot cancel it to close individual tabs — we need an explicit
+`close_tab` XPC message instead. The profile server already has a `CloseTab`
+function; it just needs a new action in its control handler that accepts a
+`pane_id` and calls `CloseTab` for the matching tab.
+
+## Experiment 3: Explicit `close_tab` XPC message
+
+### Hypothesis
+
+If the GUI sends an explicit `close_tab` message (with `pane_id`) on the profile
+server's control connection during pane cleanup, the profile server can look up
+and destroy the correct tab without affecting other tabs or the shared
+connection. This avoids the Experiment 2 failure (cancelling the shared
+connection) and the Experiment 1 failure (orphaned Chromium tabs).
+
+### Background
+
+Experiments 1 and 2 established:
+
+1. **Orphaned tabs are universal.** Every Chromium tab leaks when its GUI pane
+   closes while other panes on the same profile exist. The profile server never
+   learns the pane is gone — Connection B (per-tab `tab_connection` created in
+   `CreateTab`/`CreateDevToolsTab`) stays alive.
+2. **Connection cancellation is too coarse.** Experiment 2 tried cancelling what
+   `xpc_dictionary_get_remote_connection(msg)` returned in `handleTabReady`, but
+   that returns the shared control connection. Cancelling it kills all tabs.
+3. **The control connection is the right channel.** The GUI already sends
+   `create_tab`, `resize`, `navigate`, `key_event`, etc. on `server.peer` (the
+   control connection). A `close_tab` message belongs here too.
+4. **`pane_id` is the right key.** Both sides already track it — the GUI stores
+   it in the `panes` map, and the profile server stores it in
+   `TabState.pane_id`. No new identifiers needed.
+5. **`CloseTab` already works.** The profile server's existing `CloseTab`
+   function properly destroys the Shell, cancels the per-tab `tab_connection`,
+   and removes the tab from `tabs_`. We just need a new entry point that finds
+   the tab by `pane_id` instead of by connection pointer.
+
+### Changes
+
+#### 1. Revert Experiment 2's `server_peer` approach (`xpc.zig`)
+
+Remove the `server_peer` field from the Pane struct and all code that retains,
+cancels, or releases it (in `handleTabReady`, `cleanupPane`, and
+`handleDisconnect`). The connection cancellation approach doesn't work.
+
+#### 2. Profile server: add `close_tab` action handler (Chromium patch)
+
+In the control connection's message handler (the `StartDynamicMode` handler in
+`shell_browser_main_parts.cc`), add a new action:
+
+```cpp
+} else if (action && std::string_view(action) == "close_tab") {
+    const char* pane_id_str = xpc_dictionary_get_string(event, "pane_id");
+    std::string pane_id(pane_id_str ? pane_id_str : "");
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ShellBrowserMainParts::CloseTabByPaneId,
+                       base::Unretained(self), pane_id));
+}
+```
+
+#### 3. Profile server: add `CloseTabByPaneId` method (Chromium patch)
+
+New method on `ShellBrowserMainParts`:
+
+```cpp
+void ShellBrowserMainParts::CloseTabByPaneId(const std::string& pane_id) {
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+    for (auto it = tabs_.begin(); it != tabs_.end(); ++it) {
+        if ((*it)->pane_id == pane_id) {
+            LOG(INFO) << "[ProfileServer] Closing tab for pane " << pane_id
+                      << ", " << (tabs_.size() - 1) << " tab(s) remaining";
+            (*it)->shell->Close();
+            if ((*it)->tab_connection) {
+                xpc_connection_cancel((*it)->tab_connection);
+                xpc_release((*it)->tab_connection);
+            }
+            tabs_.erase(it);
+            return;
+        }
+    }
+
+    LOG(WARNING) << "[ProfileServer] close_tab: no tab found for pane "
+                 << pane_id;
+}
+```
+
+This mirrors the existing `CloseTab(xpc_connection_t conn)` but matches by
+`pane_id` instead of connection pointer.
+
+#### 4. GUI: send `close_tab` in `cleanupPane` (`xpc.zig`)
+
+In `cleanupPane`, after releasing `web_peer` and before removing the pane from
+the map, send a fire-and-forget `close_tab` message on the profile server's
+control connection:
+
+```zig
+// Tell the profile server to close this tab (Issue 688).
+if (p.server) |server| {
+    if (server.peer) |peer| {
+        const msg = xpc_dictionary_create(null, null, 0);
+        defer xpc_release(msg);
+        xpc_dictionary_set_string(msg, "action", "close_tab");
+        xpc_dictionary_set_string(msg, "pane_id", pane_id_key.ptr);
+        xpc_connection_send_message(peer, msg);
+    }
+}
+```
+
+This goes in `cleanupPane` only — not in `handleDisconnect`'s server-peer
+disconnect path (when the server itself dies, all tabs are already gone).
+
+### Why this works
+
+- **No connection cancellation.** The control connection stays alive. Other tabs
+  are unaffected.
+- **Matches by `pane_id`.** Each tab has a unique `pane_id` stored in
+  `TabState`. The profile server finds exactly the right tab.
+- **Fires before pane removal.** `cleanupPane` sends the message while
+  `p.server` is still valid, then proceeds to remove the pane from the map.
+- **Idempotent.** If the tab was already closed (server died, profile killed),
+  the message arrives on a dead connection or finds no matching tab — no crash.
+- **Fixes the universal leak.** Every pane cleanup (browser and DevTools) now
+  tells the profile server to close the associated tab.
+
+### Test
+
+1. Open a browser: `web google.com`
+2. `:devtools right` → split opens with DevTools
+3. Close the DevTools pane (`:q`)
+4. Check profile server logs — should show "Closing tab for pane ..."
+5. `:devtools left` → DevTools reopens without crash
+6. Close and reopen 5 times → stable, no orphaned tabs
+7. Open two browser panes on the same profile (`web a.com`, `web b.com`)
+8. Close one pane → only that tab closes in the profile server, the other
+   continues working
+9. All error cases from Experiment 1 still work
+10. Existing `killServer` still works when the last pane on a profile closes
