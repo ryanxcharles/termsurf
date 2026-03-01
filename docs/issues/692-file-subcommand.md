@@ -181,3 +181,22 @@ Same as the issue-level test plan:
 7. Edit mode: `/tmp/test.html` → navigates to file URL
 8. Edit mode: `index.html` → still goes to `https://index.html`
 9. `web file:///tmp/test.html` → existing behavior unchanged
+
+### Result: SUCCESS
+
+All three changes work as designed. `web file index.html` resolves to
+`file:///absolute/path/to/index.html` and opens in the browser. Edit mode paths
+starting with `/`, `./`, or `../` resolve correctly. Bare filenames fall through
+to the existing URL logic.
+
+## Conclusion
+
+`web file <path>` opens local files in the browser pane. Three changes in
+`tui/src/main.rs`:
+
+1. **`File` subcommand**: New `Commands::File { path }` variant parsed by clap.
+2. **Path resolution**: `std::fs::canonicalize` resolves relative paths against
+   `$PWD`, errors on nonexistent files, and formats as `file://` URL.
+3. **Edit mode**: `normalize_url` detects paths starting with `/`, `./`, or
+   `../` and resolves them to `file://` URLs. Bare filenames are left as URLs to
+   avoid ambiguity.

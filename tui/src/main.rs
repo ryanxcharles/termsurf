@@ -190,6 +190,11 @@ enum Commands {
     Last,
     /// Show Chromium tab inventory for the current profile
     Status,
+    /// Open a local file in the browser pane
+    File {
+        /// Path to the file (relative or absolute)
+        path: String,
+    },
 }
 
 fn main() -> io::Result<()> {
@@ -268,6 +273,13 @@ fn main() -> io::Result<()> {
     // Detect devtools://N before normalizing (Issue 684).
     let raw_url = match cli.command {
         Some(Commands::Url { url }) => url,
+        Some(Commands::File { path }) => {
+            let absolute = std::fs::canonicalize(&path).unwrap_or_else(|e| {
+                eprintln!("Error: {}: {}", path, e);
+                std::process::exit(1);
+            });
+            format!("file://{}", absolute.display())
+        }
         Some(Commands::Last) | Some(Commands::Status) => unreachable!(), // Handled above.
         None => cli.url.unwrap_or_else(|| {
             hello_homepage.unwrap_or_else(|| "https://termsurf.com/welcome".to_string())
@@ -695,6 +707,15 @@ fn normalize_url(input: &str) -> String {
     let trimmed = input.trim();
     if trimmed.contains("://") {
         return trimmed.to_string();
+    }
+    // File paths: absolute or explicitly relative (Issue 692).
+    if trimmed.starts_with('/')
+        || trimmed.starts_with("./")
+        || trimmed.starts_with("../")
+    {
+        if let Ok(absolute) = std::fs::canonicalize(trimmed) {
+            return format!("file://{}", absolute.display());
+        }
     }
     // Extract the host portion (before any path/query).
     let host = trimmed.split('/').next().unwrap_or(trimmed);
