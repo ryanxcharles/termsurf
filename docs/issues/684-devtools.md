@@ -809,3 +809,278 @@ GUI). No changes to the tab lookup. The existing code handles it correctly.
 7. **Verify cross-profile:** Open `web --profile work google.com`, focus it,
    then open a split and type `web devtools` — should inspect the `work` profile
    tab, not the `default` profile tab
+
+### Result: FAILURE
+
+Both `web devtools` and `web devtools://0` hang indefinitely — the TUI shows a
+spinner that never resolves into a DevTools pane.
+
+### What went wrong
+
+The root cause is a `p.browsing` gate in `handlePaneFocusChanged`
+(`xpc.zig:850`):
+
+```zig
+if (is_focused) {
+    // Only focus if the web TUI is in browse mode.
+    if (p.browsing) {
+        sendFocusChanged(pane_id, true);
+    }
+}
+```
+
+`sendFocusChanged` is the only function that updates
+`last_focused_browser_pane`. But it is only called when gaining focus **if
+`p.browsing` is true** — meaning the user must be in Browse mode (having pressed
+Enter in the TUI). The TUI starts in Control mode
+(`let mut mode = Mode::Control`), so `p.browsing` is false by default.
+
+This means:
+
+1. **Opening `web google.com` does not track the pane.** The TUI starts in
+   Control mode, so `set_overlay` is sent with `browsing = false`. The pane is
+   created with `p.browsing = false`. The initial `sendFocusChanged` call at
+   pane creation is gated by `if (p.browsing)` — never called.
+   `last_focused_browser_pane` stays null.
+
+2. **Switching away from the pane and back does not track it.** macOS fires
+   `paneFocusChanged(true)` when the user returns to the pane. But
+   `handlePaneFocusChanged` checks `p.browsing` — it's still false (Control
+   mode), so `sendFocusChanged` is never called. `last_focused_browser_pane`
+   stays null.
+
+3. **`web devtools` fails because the tracker is null.** The GUI receives
+   `set_devtools_overlay` with `inspected_tab_id = 0`, creates a new Pane, hits
+   the auto-target block, checks `last_focused_browser_pane`, finds null, cleans
+   up the pane, and returns. Nothing is sent to Chromium. The TUI spins forever.
+
+The `p.browsing` gate exists for a good reason: Chromium keyboard/mouse
+forwarding should only activate in Browse mode. But `last_focused_browser_pane`
+was bolted onto `sendFocusChanged`, inheriting a gate that doesn't apply to it.
+"This pane has a browser tab" is true whether the user is in Control mode or
+Browse mode.
+
+**Secondary issues** (would have surfaced even if the browsing gate were fixed):
+
+4. **Half-created pane on failure.** The initial implementation created the Pane
+   in the `panes` map before checking whether auto-targeting could succeed. When
+   auto-targeting failed, the function returned early, leaving an orphaned pane
+   with no server and no tab. The TUI waited forever for a `tab_ready` that
+   would never arrive. This was partially fixed by adding `cleanupPane()`, but
+   the fundamental timing problem remained.
+
+5. **`tab_id` may be 0 at resolution time.** Even if `last_focused_browser_pane`
+   were set, the target pane's `tab_id` is only populated when the `tab_ready`
+   XPC message arrives from Chromium. There's a race: if the DevTools request
+   arrives before `tab_ready`, `target.tab_id` is still 0 and auto-targeting
+   fails.
+
+6. **No error feedback to the TUI.** When auto-targeting fails, there is no
+   mechanism to tell the TUI "this didn't work." The TUI has no timeout or
+   fallback — it just spins.
+
+### Ideas for next steps
+
+- **Track last browser pane independently of Chromium focus.** Update
+  `last_focused_browser_pane` in `handlePaneFocusChanged` regardless of
+  `p.browsing`. The browsing gate should only control Chromium focus
+  (`sendFocusChanged`), not the auto-target tracker. Alternatively, update it in
+  `handleTabReady` — every `tab_ready` with `tab_id > 0` means a browser tab was
+  just created, which is the most reliable signal.
+
+- **Add a timeout or error response.** If auto-targeting fails, the GUI should
+  send an error message back to the TUI via XPC so the TUI can display "No
+  browser tab to inspect" instead of spinning forever.
+
+- **Simplify: require explicit tab IDs for now.** `web devtools://1` already
+  works (Experiment 2). Auto-targeting is a convenience, not a blocker. Ship
+  explicit targeting first, add auto-targeting as a follow-up once the
+  focus-tracking infrastructure is more robust.
+
+## Experiment 4: `web last` diagnostic command
+
+### Hypothesis
+
+If `web last` queries the GUI for the most recently active browser pane and
+prints the profile, pane ID, and tab ID, then we can verify whether the GUI's
+tracking state is correct before attempting auto-targeting. This is a diagnostic
+tool and a prerequisite for reliable `web devtools` auto-targeting.
+
+### Why a diagnostic first
+
+Experiment 3 failed because `last_focused_browser_pane` was never populated —
+the `p.browsing` gate in `handlePaneFocusChanged` blocked the update. But we
+couldn't see this at runtime because there was no way to inspect the GUI's
+internal state. `web last` makes the state visible so we can verify the fix
+before building on top of it.
+
+### Plan
+
+Changes to TUI and GUI only. No Chromium changes.
+
+#### 1. GUI: Track `last_browser_pane` on tab creation, not focus
+
+Replace the broken focus-based tracker with a creation-based one. In
+`handleTabReady`, when `tab_id > 0` (browser tab, not DevTools), update a new
+`last_browser_pane` variable:
+
+```zig
+var last_browser_pane: ?[]const u8 = null;
+
+fn handleTabReady(msg: xpc_object_t) void {
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    const tab_id = xpc_dictionary_get_int64(msg, "tab_id");
+
+    if (panes.get(pane_id)) |p| {
+        p.tab_id = tab_id;
+        if (tab_id > 0) {
+            last_browser_pane = p.pane_id_key; // heap-allocated, stable
+        }
+    }
+
+    log.info("tab_ready pane={s} tab_id={d}", .{ pane_id, tab_id });
+}
+```
+
+Also update it in `handlePaneFocusChanged` **without** the `p.browsing` gate —
+any non-DevTools pane that gains focus is the last active browser pane
+regardless of mode:
+
+```zig
+// In handlePaneFocusChanged, when is_focused == true:
+if (p.inspected_tab_id == 0 and p.tab_id > 0) {
+    last_browser_pane = p.pane_id_key;
+}
+```
+
+Remove the old `last_focused_browser_pane` variable — it was never reliably
+populated.
+
+#### 2. GUI: Handle `query_last` request
+
+Add a new synchronous request/reply handler (same pattern as `hello`):
+
+```zig
+fn handleQueryLast(msg: xpc_object_t) void {
+    const profile_filter = str(xpc_dictionary_get_string(msg, "profile"));
+    const reply = xpc_dictionary_create_reply(msg) orelse return;
+
+    // If a profile filter is given, find the last browser pane for that profile.
+    // Otherwise use the global last_browser_pane.
+    var target_pane: ?*Pane = null;
+    var target_pane_id: []const u8 = "";
+
+    if (profile_filter.len > 0 and !std.mem.eql(u8, profile_filter, "(null)")) {
+        // Walk panes to find the last one matching this profile with tab_id > 0.
+        // For now, just check last_browser_pane and verify its profile matches.
+        if (last_browser_pane) |lpid| {
+            if (panes.get(lpid)) |p| {
+                if (p.server) |s| {
+                    if (std.mem.eql(u8, s.profile_key, profile_filter)) {
+                        target_pane = p;
+                        target_pane_id = lpid;
+                    }
+                }
+            }
+        }
+    } else {
+        if (last_browser_pane) |lpid| {
+            if (panes.get(lpid)) |p| {
+                target_pane = p;
+                target_pane_id = lpid;
+            }
+        }
+    }
+
+    if (target_pane) |p| {
+        xpc_dictionary_set_string(reply, "pane_id", target_pane_id.ptr);
+        xpc_dictionary_set_int64(reply, "tab_id", p.tab_id);
+        if (p.server) |s| {
+            xpc_dictionary_set_string(reply, "profile", s.profile_key.ptr);
+        }
+    }
+    // If no target found, reply has no fields — TUI checks for "pane_id".
+
+    const conn = xpc_dictionary_get_remote_connection(msg);
+    if (conn != null) {
+        xpc_connection_send_message(conn, reply);
+    }
+}
+```
+
+Wire it into the dispatch:
+
+```zig
+} else if (std.mem.eql(u8, action_str, "query_last")) {
+    handleQueryLast(msg);
+}
+```
+
+#### 3. TUI: Add `last` subcommand
+
+Add to the `Commands` enum:
+
+```rust
+#[derive(Subcommand)]
+enum Commands {
+    Url { url: String },
+    /// Show the last active browser pane/tab
+    Last,
+}
+```
+
+In `main()`, handle it before entering the TUI event loop:
+
+```rust
+if let Some(Commands::Last) = cli.command {
+    if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+        match conn.send_query_last(pid, &profile) {
+            Some((profile, pane_id, tab_id)) => {
+                println!("profile: {}", profile);
+                println!("pane_id: {}", pane_id);
+                println!("tab_id:  {}", tab_id);
+            }
+            None => {
+                println!("No active browser tab found.");
+            }
+        }
+    } else {
+        println!("Not running inside TermSurf.");
+    }
+    return Ok(());
+}
+```
+
+#### 4. TUI XPC: Add `send_query_last`
+
+Same synchronous request/reply pattern as `send_hello`:
+
+```rust
+pub fn send_query_last(
+    &self,
+    pane_id: &str,
+    profile: &str,
+) -> Option<(String, String, i64)> {
+    // Send { action: "query_last", pane_id, profile }
+    // Receive { pane_id, tab_id, profile } or empty dict
+    // Return Some((profile, pane_id, tab_id)) or None
+}
+```
+
+### Test
+
+1. Open TermSurf, navigate to a page: `web google.com`
+2. Open a Ghostty split pane
+3. Type `web last`
+4. **Expected output:**
+   ```
+   profile: default
+   pane_id: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+   tab_id:  1
+   ```
+5. Type `web last` again after opening a second browser tab — should show tab_id
+   2
+6. Type `web --profile work last` with no work-profile tab open — should show
+   "No active browser tab found."
+7. If `web last` shows correct data, the tracker is working and `web devtools`
+   auto-targeting can be built on top of it in the next experiment

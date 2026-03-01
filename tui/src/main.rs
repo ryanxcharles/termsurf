@@ -223,11 +223,14 @@ fn main() -> io::Result<()> {
     };
     let inspected_tab_id: i64 = if raw_url.starts_with("devtools://") {
         raw_url["devtools://".len()..].parse::<i64>().unwrap_or(0)
+    } else if raw_url == "devtools" {
+        0 // Auto-target: GUI resolves to most recent browser tab (Issue 684 Exp 3).
     } else {
-        0
+        -1 // Not a DevTools request.
     };
-    let mut url = if inspected_tab_id > 0 {
-        raw_url // Keep devtools://N as-is, don't normalize.
+    let is_devtools = inspected_tab_id >= 0;
+    let mut url = if is_devtools {
+        raw_url // Keep devtools://N or bare "devtools" as-is.
     } else {
         normalize_url(&raw_url)
     };
@@ -299,7 +302,7 @@ fn main() -> io::Result<()> {
         if viewport_rect != last_viewport {
             let first_overlay = last_viewport == Rect::default();
             if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
-                if inspected_tab_id > 0 {
+                if is_devtools {
                     // DevTools pane (Issue 684).
                     conn.send_set_devtools_overlay(
                         pid,

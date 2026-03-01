@@ -79,6 +79,7 @@ const Pane = struct {
     tab_sent: bool = false,
     browsing: bool = false,
     inspected_tab_id: i64 = 0, // Issue 684: nonzero = DevTools pane.
+    tab_id: i64 = 0, // From tab_ready. 0 = DevTools or not yet assigned.
 };
 
 /// Per-profile server state. Shared by all panes on the same profile.
@@ -113,6 +114,9 @@ var surface_to_pane: std.AutoHashMap(usize, []const u8) = undefined;
 
 /// The pane UUID that currently has Chromium focus (at most one). Issue 606.
 var focused_pane: ?[]const u8 = null;
+
+/// The most recently focused non-DevTools pane (for `web devtools` auto-targeting, Issue 684).
+var last_focused_browser_pane: ?[]const u8 = null;
 
 // -- Block types --
 
@@ -481,11 +485,50 @@ fn handleSetDevtoolsOverlay(msg: xpc_object_t) void {
             peer_to_pane.put(@intFromPtr(conn.?), pane_id_key) catch {};
         }
 
+        // Auto-target: resolve inspected_tab_id from last focused browser pane (Issue 684 Exp 3).
+        if (p.inspected_tab_id == 0) {
+            const target_pane_id = last_focused_browser_pane orelse {
+                log.err("devtools auto-target: no browser pane has been focused", .{});
+                cleanupPane(pane_id_key);
+                return;
+            };
+            const target = panes.get(target_pane_id) orelse {
+                log.err("devtools auto-target: pane {s} not found", .{target_pane_id});
+                cleanupPane(pane_id_key);
+                return;
+            };
+            if (target.tab_id == 0) {
+                log.err("devtools auto-target: target pane {s} has no tab_id yet", .{target_pane_id});
+                cleanupPane(pane_id_key);
+                return;
+            }
+            p.inspected_tab_id = target.tab_id;
+            log.info("devtools auto-target: resolved pane={s} tab_id={d}", .{
+                target_pane_id, target.tab_id,
+            });
+        }
+
         log.info("new devtools pane={s} pixel={d}x{d} inspected_tab_id={d}", .{
-            pane_id, new_pixel_w, new_pixel_h, inspected_tab_id,
+            pane_id, new_pixel_w, new_pixel_h, p.inspected_tab_id,
         });
 
-        if (getOrCreateServer(profile)) |server| {
+        // Use the target's server (profile) when auto-targeting, not the --profile argument.
+        if (p.inspected_tab_id != inspected_tab_id) {
+            // Auto-targeted — use the target pane's server.
+            const target_pane_id = last_focused_browser_pane.?;
+            const target = panes.get(target_pane_id).?;
+            if (target.server) |target_server| {
+                p.server = target_server;
+                target_server.pane_count += 1;
+
+                if (target_server.peer != null) {
+                    sendCreateDevToolsTab(p, target_server);
+                    if (p.browsing) {
+                        sendFocusChanged(p.pane_id_key, true);
+                    }
+                }
+            }
+        } else if (getOrCreateServer(profile)) |server| {
             p.server = server;
             server.pane_count += 1;
 
@@ -567,8 +610,14 @@ fn handleCAContext(msg: xpc_object_t) void {
 }
 
 fn handleTabReady(msg: xpc_object_t) void {
-    const tab_id = str(xpc_dictionary_get_string(msg, "tab_id"));
-    log.info("tab_ready tab_id={s}", .{tab_id});
+    const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
+    const tab_id = xpc_dictionary_get_int64(msg, "tab_id");
+
+    if (panes.get(pane_id)) |p| {
+        p.tab_id = tab_id;
+    }
+
+    log.info("tab_ready pane={s} tab_id={d}", .{ pane_id, tab_id });
 }
 
 fn handleModeChanged(msg: xpc_object_t) void {
@@ -749,6 +798,11 @@ fn sendFocusChanged(pane_id: []const u8, focused: bool) void {
             }
         }
         focused_pane = pane_id;
+
+        // Track last focused browser (non-DevTools) pane for auto-targeting (Issue 684).
+        if (p.inspected_tab_id == 0) {
+            last_focused_browser_pane = pane_id;
+        }
     } else {
         if (focused_pane) |prev| {
             if (std.mem.eql(u8, prev, pane_id)) {
@@ -1466,6 +1520,23 @@ pub fn sendKeyEvent(
     xpc_connection_send_message(server.peer, msg);
 }
 
+/// Remove a half-created pane from all maps and free it (auto-target failure cleanup).
+fn cleanupPane(pane_id_key: []const u8) void {
+    if (panes.get(pane_id_key)) |p| {
+        if (p.overlay_surface) |surface| {
+            surface.clearOverlay();
+            _ = surface_to_pane.remove(@intFromPtr(surface));
+        }
+        if (p.web_peer) |peer| {
+            _ = peer_to_pane.remove(@intFromPtr(peer));
+            xpc_release(peer);
+        }
+        _ = panes.remove(pane_id_key);
+        alloc.destroy(p);
+        alloc.free(pane_id_key);
+    }
+}
+
 // -- Disconnect handling --
 
 fn handleDisconnect(peer_addr: usize) void {
@@ -1483,6 +1554,13 @@ fn handleDisconnect(peer_addr: usize) void {
             if (focused_pane) |fp| {
                 if (std.mem.eql(u8, fp, pane_id_key)) {
                     focused_pane = null;
+                }
+            }
+
+            // Clear last_focused_browser_pane if this pane was it (Issue 684).
+            if (last_focused_browser_pane) |lp| {
+                if (std.mem.eql(u8, lp, pane_id_key)) {
+                    last_focused_browser_pane = null;
                 }
             }
 
