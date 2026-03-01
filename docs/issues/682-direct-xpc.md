@@ -309,3 +309,13 @@ handlers, ~50 lines total), the latency is negligible, and eliminating it would
 require endpoint forwarding, tab-readiness synchronization, and Chromium changes
 for the reverse direction. The hub topology through the GUI is simpler to reason
 about and maintain.
+
+## Conclusion
+
+A direct TUI→Chromium XPC connection is not worth the complexity. Static
+analysis of all 28 XPC messages across all four directions found only 5 true
+relays (~50 lines of code), each doing trivial field copying with zero state
+changes. The `set_color_scheme "system"` path requires GUI state the TUI doesn't
+have. The reverse direction (Chromium→TUI) would require Chromium changes and a
+new TUI listener. XPC relay latency is sub-millisecond. The hub topology through
+the GUI is the right architecture — simple, working, and cheap to maintain.
