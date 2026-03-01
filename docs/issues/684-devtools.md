@@ -1193,3 +1193,59 @@ comment.
    pane_id, tab_id
 4. `web status` with no browser open — prints "No active browser tab found."
 5. `web devtools` still works (auto-targeting unaffected)
+
+### Result: FAILURE
+
+After applying all four changes, both `web status` (the renamed `web last`) and
+`web devtools` broke. `web status` reported "No active browser tab found."
+instead of returning the active pane. `web devtools` timed out — it never
+opened. Reverting to the pre-cleanup code restored both commands immediately.
+
+### Conclusion
+
+The cleanup commit made four changes simultaneously. All four compiled and
+appeared logically sound — none seemed to alter control flow. Yet the result was
+a total regression: both the diagnostic command and DevTools auto-targeting
+stopped working. Reverting the commit fixed everything.
+
+Because all four changes were applied together, the specific culprit is not yet
+isolated. Hypotheses, in order of likelihood:
+
+**Hypothesis A: Removing `tab_ready_count` or `found_pane` from
+`handleTabReady`.** The `tab_ready_count += 1` line was a side-effecting
+statement at the top of `handleTabReady`. Removing it changed the function's
+compiled code layout. If the Zig compiler was making assumptions about side
+effects or reordering the remaining logic differently without it, the
+`panes.get(pane_id)` lookup or `last_browser_pane` assignment could have been
+optimized away or reordered. Similarly,
+`found_pane = panes.get(pane_id) != null` performed an extra hash lookup that
+may have had a stabilizing effect. This is the most suspicious change because it
+directly affects whether `last_browser_pane` gets set — and both
+`web last`/`web status` AND `web devtools` depend on it.
+
+**Hypothesis B: Removing diagnostic fields from `handleQueryLast` failure
+reply.** The failure path previously populated `pane_count`, `has_last`,
+`tab_ready_count`, `last_pane`, `first_pane_tab_id`, and `first_pane_id` into
+the reply dictionary. With those removed, the reply is an empty dict. It's
+possible that `xpc_dictionary_create_reply` returns a reply with some internal
+structure, and the TUI's `xpc_dictionary_get_string(reply, "pane_id")` behaves
+differently on a completely empty reply versus one with other keys set. This
+could cause the success path to misparse the reply.
+
+**Hypothesis C: Removing the TUI `eprintln!` diagnostic dump.** The TUI failure
+path previously read six fields from the reply before returning `None`. With
+those reads removed, the `xpc_release(reply)` happens immediately. If there's a
+use-after-free or timing issue with the XPC reply object, the extra reads may
+have acted as an accidental delay. Unlikely, but possible.
+
+**Hypothesis D: Renaming `Last` → `Status`.** Clap derives the subcommand name
+from the enum variant. `Last` becomes `last`, `Status` becomes `status`. If the
+user typed `web last` after the rename, clap would not recognize it and could
+fall through to the positional `url` argument, treating "last" as a URL. This
+would explain `web status` failing if there's a separate issue, but doesn't
+explain `web devtools` breaking — devtools doesn't depend on the subcommand
+name.
+
+**Next step.** Apply each of the four changes individually and test after each
+one to isolate the culprit. Start with hypothesis A (remove `tab_ready_count`
+only) since it's the most likely to affect `last_browser_pane` population.
