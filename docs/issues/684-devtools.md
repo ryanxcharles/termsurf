@@ -430,3 +430,112 @@ handling of non-standard schemes creates problems at multiple layers. A
 dedicated `create_devtools_tab` XPC action that never passes `devtools://`
 through GURL would avoid this entirely — the profile server would receive the
 inspected tab ID as a separate integer field, not encoded in a URL.
+
+## Experiment 2: Dedicated `create_devtools_tab` XPC action
+
+### Hypothesis
+
+A dedicated `create_devtools_tab` XPC action — separate from `create_tab` — will
+avoid the GURL parsing problems from Experiment 1. The inspected tab ID is
+passed as an integer field, not encoded in a URL. The profile server constructs
+the DevTools frontend URL internally and never sees `devtools://`.
+
+### Why this fixes Experiment 1
+
+Experiment 1 failed because `devtools://1` was passed through GURL at multiple
+layers (TUI `normalize_url`, GUI XPC forwarding, Chromium
+`Shell::CreateNewWindow`). Even after fixing the profile server's detection, the
+URL still flows through other code that may reject or mangle non-standard
+schemes.
+
+This experiment avoids GURL entirely for the `devtools://` scheme. The TUI
+detects `devtools://` as a string, extracts the integer tab ID, and sends a
+different XPC action with the tab ID as a separate field. The profile server
+receives a normal integer, looks up the tab, and loads the DevTools frontend URL
+(which is a standard `http://127.0.0.1:...` URL that GURL handles fine).
+
+### Plan
+
+Changes across all three components: TUI, GUI, and Chromium profile server.
+
+#### 0. Chromium branch
+
+Continue on `146.0.7650.0-issue-684`. Revert the Experiment 1 `devtools://`
+detection code in `CreateTab` (restore it to its pre-experiment state), then add
+the new `CreateDevToolsTab` method.
+
+#### 1. Chromium: Add `create_devtools_tab` XPC handler
+
+In `shell_browser_main_parts.cc`, add a new XPC action in the control connection
+event handler (alongside `create_tab`, `resize`, etc.):
+
+```cpp
+} else if (action && std::string_view(action) == "create_devtools_tab") {
+  const char* pane_id_str = xpc_dictionary_get_string(event, "pane_id");
+  std::string pane_id(pane_id_str ? pane_id_str : "");
+  int inspected_tab_id = (int)xpc_dictionary_get_int64(event, "inspected_tab_id");
+  int pw = (int)xpc_dictionary_get_uint64(event, "pixel_width");
+  int ph = (int)xpc_dictionary_get_uint64(event, "pixel_height");
+  bool dark = xpc_dictionary_get_bool(event, "dark");
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
+      base::BindOnce(&ShellBrowserMainParts::CreateDevToolsTab,
+                     base::Unretained(self), pane_id,
+                     inspected_tab_id, pw, ph, dark));
+}
+```
+
+#### 2. Chromium: Add `CreateDevToolsTab` method
+
+New method on `ShellBrowserMainParts`. Largely copied from `CreateTab` but with
+key differences:
+
+- Receives `inspected_tab_id` (integer) instead of a URL
+- Looks up the inspected tab's `WebContents` by tab ID
+- Constructs the DevTools frontend URL internally:
+  `http://127.0.0.1:{port}/devtools/devtools_app.html?targetType=tab`
+- Creates the Shell with this HTTP URL (standard GURL, no issues)
+- Creates `ShellDevToolsFrontend(shell, inspected_contents)` for bindings
+- Does NOT assign an auto-incrementing tab ID (DevTools tabs get `tab_id=0`)
+
+The compositor, CALayerParams callback, cursor callback, XPC tab connection, and
+`tab_ready` message are identical to `CreateTab`.
+
+#### 3. GUI: Forward `create_devtools_tab` XPC action
+
+In `gui/src/apprt/xpc.zig`, add handling for `create_devtools_tab` from the TUI.
+This is identical to the existing `set_overlay` → `create_tab` flow, but sends a
+`create_devtools_tab` action to the Chromium profile server with:
+
+- `pane_id` — the DevTools pane's ID
+- `inspected_tab_id` — the integer tab ID to inspect
+- `pixel_width`, `pixel_height` — pane dimensions
+- `dark` — color scheme
+
+This requires the GUI to know the tab ID for a given pane. The profile server
+already sends `tab_ready` — add a `tab_id` field to this message. The GUI stores
+it per-pane.
+
+#### 4. TUI: Detect `devtools://` and send different XPC action
+
+In `tui/src/main.rs`, detect when the URL starts with `devtools://`:
+
+- Extract the integer tab ID from the URL string (e.g. `devtools://3` → `3`)
+- Send a `create_devtools_tab` XPC message to the GUI instead of the normal
+  `set_overlay` flow
+- Include `inspected_tab_id` as a separate integer field
+
+In `tui/src/xpc.rs`, add a `send_create_devtools_tab` method.
+
+### Test
+
+1. Open TermSurf, navigate to a page: `web example.com`
+2. Open a Ghostty split pane
+3. Type `web devtools://1` — the TUI detects the scheme, sends
+   `create_devtools_tab` with `inspected_tab_id=1`
+4. **Verify rendering:** DevTools frontend renders in the new pane
+5. **Verify interaction:** Click Elements panel, expand DOM nodes, type in
+   Console
+6. **Verify hover highlighting:** Hover over an element in the Elements panel —
+   the corresponding element on the inspected page should highlight
+7. **Verify keyboard/mouse:** All DevTools panels accept input
