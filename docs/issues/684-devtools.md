@@ -1339,3 +1339,9 @@ No other changes.
 3. `web google.com` in a pane
 4. `web last` in a split — should print profile, pane_id, tab_id
 5. `web devtools` in a split — should open DevTools
+
+### Result: SUCCESS
+
+Removing all diagnostic fields from the failure reply does not break anything.
+An empty reply dict is sufficient — the TUI correctly interprets a missing
+`pane_id` key as failure. Hypothesis B ruled out.

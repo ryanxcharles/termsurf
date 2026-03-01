@@ -836,29 +836,6 @@ fn handleQueryLast(msg: xpc_object_t) void {
         log.info("query_last result: pane={s} tab_id={d}", .{ target_pane_id, p.tab_id });
     } else {
         log.info("query_last result: no matching browser pane", .{});
-        // Diagnostic: report why no match was found.
-        xpc_dictionary_set_int64(reply, "pane_count", @intCast(panes.count()));
-        xpc_dictionary_set_bool(reply, "has_last", last_browser_pane != null);
-        if (last_browser_pane) |lpid| {
-            var diag_z: [128]u8 = undefined;
-            if (lpid.len < diag_z.len) {
-                @memcpy(diag_z[0..lpid.len], lpid);
-                diag_z[lpid.len] = 0;
-                xpc_dictionary_set_string(reply, "last_pane", @ptrCast(&diag_z));
-            }
-        }
-        // Dump first pane's tab_id for diagnostics.
-        var it = panes.iterator();
-        if (it.next()) |entry| {
-            xpc_dictionary_set_int64(reply, "first_pane_tab_id", entry.value_ptr.*.tab_id);
-            var fpane_z: [128]u8 = undefined;
-            const fpk = entry.key_ptr.*;
-            if (fpk.len < fpane_z.len) {
-                @memcpy(fpane_z[0..fpk.len], fpk);
-                fpane_z[fpk.len] = 0;
-                xpc_dictionary_set_string(reply, "first_pane_id", @ptrCast(&fpane_z));
-            }
-        }
     }
 
     const conn = xpc_dictionary_get_remote_connection(msg);
