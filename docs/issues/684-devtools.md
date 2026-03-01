@@ -396,3 +396,37 @@ external browser, no screenshots.
   limitation)
 - DevTools crashes or shows blank content (compositor/GPU process issue with two
   WebContents in one profile server)
+
+### Result: FAILURE
+
+The DevTools pane times out — no browser content ever appears. The overlay never
+renders because the Chromium profile server never sends back a `ca_context_id`
+for the DevTools tab.
+
+Two issues were identified and fixed during the experiment, but the core problem
+persists:
+
+1. **GURL parsing (fixed).** `GURL("devtools://1")` doesn't recognize
+   `devtools://` as a standard scheme, so `url.SchemeIs("devtools")` returned
+   false and the DevTools detection was silently skipped. Fixed by parsing the
+   raw `url.spec()` string instead. However, the same GURL issue means
+   `Shell::CreateNewWindow(browser_context, url, ...)` receives an invalid GURL
+   for the initial creation — the Shell may be created in a broken state before
+   we override the URL to the DevTools frontend.
+
+2. **Deeper problem: the Shell is created with the invalid `devtools://1` URL.**
+   `CreateTab` constructs the Shell via
+   `Shell::CreateNewWindow(browser_context, load_url, ...)` where `load_url` is
+   correctly set to the DevTools frontend HTTP URL. But `Shell::CreateNewWindow`
+   internally calls `WebContents::Create()` and then `LoadURL()`. If the Shell's
+   internal state or the WebContents' initial navigation is tainted by the
+   invalid GURL, the DevTools frontend may never load properly — the renderer
+   process may fail to start, the compositor may never produce frames, and no
+   `ca_context_id` is ever generated.
+
+The fundamental issue is that the `devtools://` URL hijack approach tries to
+shoehorn a special-purpose tab into the generic `create_tab` path, but GURL's
+handling of non-standard schemes creates problems at multiple layers. A
+dedicated `create_devtools_tab` XPC action that never passes `devtools://`
+through GURL would avoid this entirely — the profile server would receive the
+inspected tab ID as a separate integer field, not encoded in a URL.
