@@ -676,3 +676,71 @@ The only difference between this experiment and Experiment 2 is step 1 — makin
 `DidCloseLastWindow` a no-op. The `CloseTabByPaneId` code and the GUI disconnect
 signal are identical. Experiment 2's code was correct; it just couldn't survive
 Shell::Close() triggering the cascade.
+
+### Result: FAILURE
+
+Opened one tab (count=1), opened a second (count=2), closed one pane — count
+dropped to 0. Closing one tab still kills all tabs, even with
+`DidCloseLastWindow` as a no-op.
+
+**Root cause:** The cascade does not come from `DidCloseLastWindow`. Making it a
+no-op had no effect. `Shell::Close()` kills the entire profile server through a
+different path.
+
+The cascade must originate from inside the macOS window lifecycle that
+`Shell::Close()` triggers. The chain is:
+
+```
+Shell::Close()
+  → g_platform->DestroyShell(this) returns true
+    → [window performClose:nil]
+      → windowShouldClose: → _shell.ClearAndDelete() → delete shell
+        → ~Shell()
+          → g_platform->CleanUp(this)     (erases from shell_data_map_)
+          → remove from windows_
+          → web_contents_.reset()          ← destroys WebContents
+          → if windows_.empty()
+            → DidCloseLastWindow()         (now no-op — doesn't matter)
+```
+
+With two shells, closing one leaves one in `windows_`. `DidCloseLastWindow`
+never fires. Yet the profile server still dies. This means the crash/cascade
+happens BEFORE the empty check — somewhere in the destruction of the first
+Shell's resources:
+
+1. **`performClose:nil` on hidden borderless NSWindows.** Content Shell creates
+   real NSWindows (even though ours are hidden with alpha=0). `performClose:nil`
+   triggers macOS window lifecycle hooks that may behave unexpectedly for
+   borderless windows without close buttons.
+2. **`web_contents_.reset()` observer chain.** Destroying a WebContents fires
+   `WebContentsDestroyed()` on all observers. If any observer (DevToolsAgent,
+   BrowserContext, RenderProcessHost) has a side effect that cascades to other
+   Shells, the entire process could crash or shut down.
+3. **Process crash.** The profile server may simply crash during Shell
+   destruction. A crash kills all tabs because the process dies. The LOG
+   statements in `CloseTabByPaneId` may not flush before the crash.
+
+**Conclusion:** `Shell::Close()` is fundamentally unsafe for our use case.
+Defusing `DidCloseLastWindow` was necessary but not sufficient — the cascade has
+a deeper source inside Shell's destruction. We cannot use `Shell::Close()` at
+all.
+
+**Next direction:** Bypass `Shell::Close()` entirely. Instead of going through
+Content Shell's window lifecycle, directly tear down the tab's resources:
+
+1. Reset the ShellTabObserver (stop observing)
+2. Detach WebContents from Shell (need new Shell method or `delete shell` with
+   the macOS window lifecycle bypassed)
+3. Destroy the per-tab compositor (AcceleratedWidgetMac, Compositor, Layer,
+   Bridge)
+4. Cancel and release the per-tab XPC connection
+5. Erase from `tabs_`
+
+The key question for the next experiment: can we call `delete shell` directly
+(bypassing `performClose:nil`) without crashing? The Shell destructor would
+still run (CleanUp, remove from windows*, web_contents*.reset()), but the macOS
+window lifecycle is skipped. If that path is stable, the fix is to replace
+`shell->Close()` with `delete shell`.
+
+**Code reverted** — all three files (Chromium platform delegate, Chromium main
+parts, GUI xpc.zig).
