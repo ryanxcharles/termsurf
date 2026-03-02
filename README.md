@@ -73,15 +73,19 @@ panes in the same window. You stay in flow.
 | **Edit**    | Vim-style URL editing with Normal/Insert submodes |
 | **Command** | `:` prefix for commands                           |
 
-| Key    | Mode    | Action             |
-| ------ | ------- | ------------------ |
-| Esc    | Browse  | Switch to Control  |
-| Enter  | Control | Switch to Browse   |
-| i      | Control | Edit URL (insert)  |
-| e      | Control | Edit URL (normal)  |
-| :      | Control | Enter Command mode |
-| q      | Control | Quit               |
-| Ctrl+C | Any     | Force quit         |
+| Key    | Mode    | Action                      |
+| ------ | ------- | --------------------------- |
+| Esc    | Browse  | Switch to Control           |
+| Enter  | Control | Switch to Browse            |
+| i      | Control | Edit URL (insert at cursor) |
+| A      | Control | Edit URL (insert at end)    |
+| I      | Control | Edit URL (insert at start)  |
+| n      | Control | Edit URL (normal mode)      |
+| v      | Control | Edit URL (visual mode)      |
+| V      | Control | Edit URL (visual line)      |
+| :      | Control | Enter Command mode          |
+| q      | Control | Quit                        |
+| Ctrl+C | Any     | Force quit                  |
 
 Context-sensitive Esc exits the current mode appropriately. Per-mode color
 indicators follow the LazyVim Tokyo Night palette.

@@ -8,15 +8,19 @@ Ghostty defaults or user-configured Ghostty keybindings.
 These are handled by the `web` TUI process (`tui/src/main.rs`) via crossterm key
 events received through the terminal PTY.
 
-| Key    | Mode    | Action             | Notes                                        |
-| ------ | ------- | ------------------ | -------------------------------------------- |
-| Esc    | Browse  | Switch to Control  | Sends `mode_changed(browsing: false)` to GUI |
-| Enter  | Control | Switch to Browse   | Sends `mode_changed(browsing: true)` to GUI  |
-| i      | Control | Edit URL (insert)  | Opens editor in insert mode (Issue 646)      |
-| e      | Control | Edit URL (normal)  | Opens editor in normal mode (Issue 658)      |
-| :      | Control | Enter Command mode | Yellow command bar (Issue 659)               |
-| q      | Control | Quit               |                                              |
-| Ctrl+C | Any     | Force quit         |                                              |
+| Key    | Mode    | Action                      | Notes                                        |
+| ------ | ------- | --------------------------- | -------------------------------------------- |
+| Esc    | Browse  | Switch to Control           | Sends `mode_changed(browsing: false)` to GUI |
+| Enter  | Control | Switch to Browse            | Sends `mode_changed(browsing: true)` to GUI  |
+| i      | Control | Edit URL (insert at cursor) | Opens editor in insert mode (Issue 646)      |
+| A      | Control | Edit URL (insert at end)    | Cursor jumps to end of line (Issue 658)      |
+| I      | Control | Edit URL (insert at start)  | Cursor jumps to start of line (Issue 658)    |
+| n      | Control | Edit URL (normal mode)      | Cursor at last position (Issue 658)          |
+| v      | Control | Edit URL (visual mode)      | Empty selection at cursor (Issue 658)        |
+| V      | Control | Edit URL (visual line)      | Entire URL selected (Issue 658)              |
+| :      | Control | Enter Command mode          | Yellow command bar (Issue 659)               |
+| q      | Control | Quit                        |                                              |
+| Ctrl+C | Any     | Force quit                  |                                              |
 
 ## GUI keybindings
 
