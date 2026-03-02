@@ -129,20 +129,58 @@ logging into Google in one profile doesn't affect the others.
 
 ## Getting Started
 
-### Prerequisites (macOS)
+macOS only for now. Three toolchains required: Zig (terminal), Rust (TUI), and
+Chromium (browser engine).
 
-- [Zig](https://ziglang.org/) (for building the terminal)
-- [Rust](https://rustup.rs/) (for building the `web` TUI)
+### Prerequisites
 
-### Build
+- **Zig 0.15.2+** — [ziglang.org](https://ziglang.org/)
+- **Rust** — [rustup.rs](https://rustup.rs/)
+- **Chromium depot_tools** —
+  [instructions](https://commondatastorage.googleapis.com/chrome-infra-docs/flat/depot_tools/docs/html/depot_tools_tutorial.html#_setting_up)
+
+### 1. Build the terminal (Zig)
 
 ```bash
-# Build the terminal
 cd gui && zig build
+```
 
-# Build the web TUI
+### 2. Build the `web` TUI (Rust)
+
+```bash
 cd tui && cargo build
 ```
+
+### 3. Build Chromium
+
+This is the big one. Full build takes ~1.5 hours and ~100 GB of disk space.
+Incremental builds take 15–20 seconds.
+
+```bash
+# Fetch Chromium source (one time, takes a while)
+cd chromium
+fetch chromium
+
+# Check out the TermSurf base version
+cd src
+git checkout 146.0.7650.0
+
+# Apply TermSurf patches
+git checkout -b 146.0.7650.0-termsurf
+git am ../../chromium/patches/termsurf/*.patch
+```
+
+Then build:
+
+```bash
+export PATH="$(cd ../depot_tools && pwd):$PATH"
+gn gen out/Default --args='is_debug=false symbol_level=0 is_component_build=true'
+autoninja -C out/Default chromium_profile_server
+```
+
+Always use `autoninja`, never `ninja` directly. See
+[chromium/README.md](chromium/README.md) for details on branch management, patch
+workflow, and recovery from build issues.
 
 ### Launch
 
@@ -153,10 +191,8 @@ open gui/zig-out/TermSurf.app
 Then in a TermSurf terminal pane:
 
 ```bash
-cd tui && cargo run -- google.com
+web google.com
 ```
-
-macOS only for now.
 
 ## Contributing
 
