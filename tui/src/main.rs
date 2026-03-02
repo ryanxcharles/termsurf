@@ -216,22 +216,11 @@ fn main() -> io::Result<()> {
 
     // Connect to the TermSurf compositor via XPC (Issue 505).
     let pane_id = std::env::var("TERMSURF_PANE_ID").ok();
-    match &pane_id {
-        Some(id) => eprintln!("[web] TERMSURF_PANE_ID = {}", id),
-        None => eprintln!("[web] TERMSURF_PANE_ID not set (not running inside TermSurf)"),
-    }
 
     let (tx, rx) = std::sync::mpsc::channel();
     let compositor = pane_id
         .as_ref()
         .and_then(|_| xpc::CompositorConnection::connect(tx.clone()));
-    match &compositor {
-        Some(_) => eprintln!("[web] Connected to compositor"),
-        None if pane_id.is_some() => {
-            eprintln!("[web] XPC service unavailable (is launchd plist loaded?)")
-        }
-        _ => {}
-    }
 
     // Handle `web last` subcommand — print last active browser pane and exit (Issue 684 Exp 4).
     if let Some(Commands::Last) = cli.command {
@@ -296,7 +285,13 @@ fn main() -> io::Result<()> {
     let mut url = if is_devtools {
         raw_url // Keep devtools://N or bare "devtools" as-is.
     } else {
-        normalize_url(&raw_url)
+        match resolve_input(&raw_url) {
+            Some(resolved) => resolved,
+            None => {
+                eprintln!("Error: '{}' is not a URL, file, or command", raw_url);
+                std::process::exit(1);
+            }
+        }
     };
 
     // Validate DevTools request before entering the UI (Issue 687).
@@ -547,12 +542,23 @@ fn main() -> io::Result<()> {
                                 .get(RowIndex::new(0))
                                 .map(|line| line.iter().collect())
                                 .unwrap_or_default();
-                            url = normalize_url(&new_url);
-                            editor_url = url.clone();
-                            mode = Mode::Browse;
-                            if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
-                                conn.send_navigate(pid, &url);
-                                conn.send_mode_changed(pid, true);
+                            match resolve_input(&new_url) {
+                                Some(resolved) => {
+                                    url = resolved;
+                                    editor_url = url.clone();
+                                    mode = Mode::Browse;
+                                    if let (Some(ref conn), Some(ref pid)) =
+                                        (&compositor, &pane_id)
+                                    {
+                                        conn.send_navigate(pid, &url);
+                                        conn.send_mode_changed(pid, true);
+                                    }
+                                }
+                                None => {
+                                    command_error =
+                                        Some(format!("'{}' is not a URL or file", new_url));
+                                    mode = Mode::Command;
+                                }
                             }
                         } else {
                             // Pass everything else to edtui (including Escape).
@@ -702,30 +708,53 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-/// Normalize a URL by prepending a scheme if missing (Issue 676).
-fn normalize_url(input: &str) -> String {
+/// Resolve bare input to a URL or file:// path (Issue 693).
+///
+/// Returns `None` if the input is not recognizable as a URL, file, or command.
+/// Callers should show an error for `None`.
+fn resolve_input(input: &str) -> Option<String> {
     let trimmed = input.trim();
+
+    // Step 1: Has a scheme — use as-is.
     if trimmed.contains("://") {
-        return trimmed.to_string();
+        return Some(trimmed.to_string());
     }
-    // File paths: absolute or explicitly relative (Issue 692).
+
+    // Step 3: Explicit file paths (/, ./, ../).
     if trimmed.starts_with('/')
         || trimmed.starts_with("./")
         || trimmed.starts_with("../")
     {
         if let Ok(absolute) = std::fs::canonicalize(trimmed) {
-            return format!("file://{}", absolute.display());
+            return Some(format!("file://{}", absolute.display()));
         }
     }
-    // Extract the host portion (before any path/query).
-    let host = trimmed.split('/').next().unwrap_or(trimmed);
-    if host.ends_with("localhost") || host.contains("localhost:") {
-        return format!("http://{trimmed}");
+
+    // Step 4: Contains ":" — treat as host:port URL.
+    if trimmed.contains(':') {
+        let host = trimmed.split(':').next().unwrap_or(trimmed);
+        if host.ends_with("localhost") || host.contains("localhost") {
+            return Some(format!("http://{trimmed}"));
+        }
+        return Some(format!("https://{trimmed}"));
     }
+
+    // Step 5: File exists — open as file.
+    if let Ok(absolute) = std::fs::canonicalize(trimmed) {
+        return Some(format!("file://{}", absolute.display()));
+    }
+
+    // Step 6: URL fallback (has a dot — looks like a domain).
     if trimmed.contains('.') {
-        return format!("https://{trimmed}");
+        let host = trimmed.split('/').next().unwrap_or(trimmed);
+        if host.ends_with("localhost") {
+            return Some(format!("http://{trimmed}"));
+        }
+        return Some(format!("https://{trimmed}"));
     }
-    trimmed.to_string()
+
+    // Step 7: Nothing matched.
+    None
 }
 
 /// Render the UI and return the viewport inner rect (grid coordinates).

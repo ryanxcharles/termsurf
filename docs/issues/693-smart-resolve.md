@@ -260,3 +260,26 @@ Same as the issue-level test plan:
 16. Edit mode: type `asdf` → red error in command bar
 17. `web url google.com` → `https://google.com` (explicit, unchanged)
 18. `web file index.html` → file (explicit, unchanged)
+
+### Result: SUCCESS
+
+The 7-step algorithm works as designed. Files are opened when they exist, URLs
+are normalized when they look like URLs, and garbage inputs produce clear
+errors.
+
+## Conclusion
+
+`web [whatever]` now uses a smart 7-step resolver (`resolve_input`) that
+replaces the old `normalize_url`. The resolution order:
+
+1. Has `://` → URL as-is
+2. `devtools` → DevTools (existing, unchanged)
+3. Starts with `/`, `./`, `../` → file path
+4. Contains `:` → URL (host:port)
+5. File exists at path → file
+6. Contains a dot → URL (normalize with `https://`)
+7. Nothing matched → error
+
+`resolve_input` returns `Option<String>`. `None` produces a clear error at the
+CLI (`exit(1)`) or a red command bar in Edit mode. The explicit subcommands
+`web url` and `web file` bypass the resolver entirely as escape hatches.
