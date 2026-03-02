@@ -1,6 +1,9 @@
 ---
 name: issues-and-experiments
-description: "Write and manage issue documents and experiments in docs/issues/. Use when creating a new issue, designing an experiment, recording experiment results, or closing an issue. Enforces the one-experiment-at-a-time workflow."
+description:
+  "Write and manage issue documents and experiments in docs/issues/. Use when
+  creating a new issue, designing an experiment, recording experiment results,
+  or closing an issue. Enforces the one-experiment-at-a-time workflow."
 ---
 
 # Issues and Experiments
@@ -115,7 +118,7 @@ documenting:
 2. Which branch it forks from and why (e.g., "from `146.0.7650.0-issue-607`
    because we need the keyboard forwarding code")
 
-Also add the new branch to the table in `docs/chromium.md`.
+Also add the new branch to the table in `chromium/README.md`.
 
 ### One at a time
 
@@ -174,5 +177,5 @@ This goes after the last experiment, still inside the issue document.
 6. **Repeat** — Design the next experiment based on what was learned. Continue
    until the issue's goal is met.
 7. **Close the issue** — Write the issue-level conclusion.
-8. **New problems discovered along the way** — Add to `docs/backlog.md`, not
-   to a new issue doc.
+8. **New problems discovered along the way** — Add to `docs/backlog.md`, not to
+   a new issue doc.

@@ -5,17 +5,21 @@ description: "Write entertaining commit messages as poetry"
 
 # GitPoet
 
-Write commit messages that accurately describe changes while delighting readers with poetic wit.
+Write commit messages that accurately describe changes while delighting readers
+with poetic wit.
 
 ## Philosophy
 
-Every commit tells a story. GitPoet transforms mundane diffs into memorable verses. The goal is to make people smile when they read the commit log on termsurf.com.
+Every commit tells a story. GitPoet transforms mundane diffs into memorable
+verses. The goal is to make people smile when they read the commit log on
+termsurf.com.
 
 ## Format
 
 Each commit message should have two parts:
 
-1. **First line**: A short, accurate summary (50 chars max) - this is the "title"
+1. **First line**: A short, accurate summary (50 chars max) - this is the
+   "title"
 2. **Body**: A short poem (2-8 lines) that humorously describes the change
 
 ## Style Guidelines
@@ -29,6 +33,7 @@ Each commit message should have two parts:
 ## Examples
 
 ### Haiku style
+
 ```
 Fix null pointer crash
 
@@ -38,6 +43,7 @@ Now it checks its path.
 ```
 
 ### Limerick style
+
 ```
 Add dark mode toggle
 
@@ -49,6 +55,7 @@ Their retinas now feel just right.
 ```
 
 ### Couplet style
+
 ```
 Refactor auth module
 
@@ -57,6 +64,7 @@ Now it's clean—we must confess.
 ```
 
 ### Free verse style
+
 ```
 Update dependencies
 
@@ -77,15 +85,16 @@ given, look at all uncommitted changes and commit everything.
 1. **Check the argument.** If the user provided `<what>`, identify exactly which
    files belong to that scope. Stage only those files.
 2. **Run git diff --staged** to see what's being committed
-3. **Understand the change**: What problem does it solve? What was added/removed/fixed?
+3. **Understand the change**: What problem does it solve? What was
+   added/removed/fixed?
 4. **Write the title**: Accurate, imperative mood, 50 chars max
 5. **Compose the poem**: Pick a style that fits the change, make it fun
 6. **Stage and commit** using the poetic message
 
 ## Chromium Fork Workflow
 
-The Chromium fork at `chromium/src/` is a separate git repo (gitignored
-from the main TermSurf repo). It doesn't use `main`. Branches are named
+The Chromium fork at `chromium/src/` is a separate git repo (gitignored from the
+main TermSurf repo). It doesn't use `main`. Branches are named
 `{version}-termsurf` (e.g., `146.0.7650.0-termsurf`), built as a series of
 commits on top of the vanilla Chromium version tag. The branch name encodes the
 upstream version.
@@ -102,11 +111,11 @@ authorship.
 1. Work inside `chromium/src/` on the `{version}-termsurf` branch
 2. Commit with git-poet
 3. Return to the main repo
-4. Update `docs/chromium.md` if the branch or version changed
+4. Update `chromium/README.md` if the branch or version changed
 5. Commit with git-poet — this records what TermSurf did at the project level
 
 **When creating a new Chromium branch**, add it to the Branches table in
-`docs/chromium.md` with a link to the corresponding issue doc.
+`chromium/README.md` with a link to the corresponding issue doc.
 
 ## When NOT to use GitPoet
 

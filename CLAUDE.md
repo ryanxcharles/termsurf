@@ -42,7 +42,7 @@ for the current issue. Never commit directly to an existing issue's branch.
    TermSurf modifications).
 2. Create a new branch from it: `{version}-issue-{N}` (e.g.,
    `146.0.7650.0-issue-625`).
-3. Add the new branch to the Branches table in `docs/chromium.md`.
+3. Add the new branch to the Branches table in `chromium/README.md`.
 
 This keeps every issue's Chromium changes isolated and traceable.
 

@@ -1,6 +1,8 @@
 ---
 name: build-chromium
-description: "Build the Chromium fork for TermSurf. Use when building, rebuilding, or troubleshooting the Chromium build."
+description:
+  "Build the Chromium fork for TermSurf. Use when building, rebuilding, or
+  troubleshooting the Chromium build."
 ---
 
 # Build Chromium
@@ -9,13 +11,13 @@ Build the Chromium fork for TermSurf. Everything stays inside the repo.
 
 ## Paths
 
-| What | Path |
-|------|------|
-| depot_tools | `chromium/depot_tools` |
-| Source root | `chromium/src` |
-| Build output | `chromium/src/out/Default/` |
-| Built app | `chromium/src/out/Default/One Profile.app/` |
-| GN args | `chromium/src/out/Default/args.gn` |
+| What         | Path                                        |
+| ------------ | ------------------------------------------- |
+| depot_tools  | `chromium/depot_tools`                      |
+| Source root  | `chromium/src`                              |
+| Build output | `chromium/src/out/Default/`                 |
+| Built app    | `chromium/src/out/Default/One Profile.app/` |
+| GN args      | `chromium/src/out/Default/args.gn`          |
 
 All paths are relative to `~/dev/termsurf`.
 
@@ -41,11 +43,13 @@ system. The only recovery is `gn clean out/Default`, which **deletes the entire
 build cache** and forces a full rebuild (~42,000 steps, ~1.5 hours).
 
 **Wrong:**
+
 ```bash
 ninja -C out/Default chromium_profile_server    # DO NOT DO THIS
 ```
 
 **Right:**
+
 ```bash
 autoninja -C out/Default chromium_profile_server  # Always use autoninja
 ```
@@ -100,14 +104,13 @@ outside the repo without explicit user approval.
 
 ## Branches
 
-The Chromium fork at `chromium/src` uses branches named
-`{version}-termsurf` or `{version}-issue-{N}` (e.g.,
-`146.0.7650.0-issue-414`). These are built as commits on top of the vanilla
-Chromium version tag.
+The Chromium fork at `chromium/src` uses branches named `{version}-termsurf` or
+`{version}-issue-{N}` (e.g., `146.0.7650.0-issue-414`). These are built as
+commits on top of the vanilla Chromium version tag.
 
 **ALWAYS create a new branch for every issue.** Never commit to an existing
 issue's branch. Find the most relevant recent branch, fork it to the new issue
-number, and add the new branch to the Branches table in `docs/chromium.md`.
+number, and add the new branch to the Branches table in `chromium/README.md`.
 
 ## Patches
 
@@ -121,8 +124,8 @@ rm -rf ../../chromium/patches/issue-{N}/
 git format-patch 146.0.7650.0..HEAD -o ../../chromium/patches/issue-{N}/
 ```
 
-Then commit the updated patches in the main repo alongside the `docs/chromium.md`
-update.
+Then commit the updated patches in the main repo alongside the
+`chromium/README.md` update.
 
 ## Full Workflow for a New Issue
 
@@ -144,12 +147,12 @@ update.
    git format-patch 146.0.7650.0..HEAD -o ../../chromium/patches/issue-{N}/
    ```
 7. Return to the main repo.
-8. Update `docs/chromium.md` (current branch + Branches table).
+8. Update `chromium/README.md` (current branch + Branches table).
 9. Commit patches and docs in the main repo with git-poet.
 
 ## Branch and Version Tracking
 
-`docs/chromium.md` tracks the current branch, commit, and a complete list of all
-branches with links to their issue docs. Any time this skill switches branches,
-updates the Chromium version, or creates a new branch, it must also update
-`docs/chromium.md` accordingly.
+`chromium/README.md` tracks the current branch, commit, and a complete list of
+all branches with links to their issue docs. Any time this skill switches
+branches, updates the Chromium version, or creates a new branch, it must also
+update `chromium/README.md` accordingly.
