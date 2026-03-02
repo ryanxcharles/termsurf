@@ -116,3 +116,65 @@ The `if (focused)` block is removed entirely. `pane_activation` (set in
 Refocusing a browser pane in browse mode now requires two clicks (focus +
 interact) instead of three. Control→browse activation and terminal
 click-to-focus still work correctly.
+
+## Experiment 2: Clear pane_activation on keypress
+
+### Problem
+
+Experiment 1 fixed the mouse-refocus path. But keyboard-driven focus still
+over-suppresses:
+
+```
+1. Esc → control mode
+2. Keyboard switch to another pane
+3. Keyboard switch back to browser pane
+     → focusCallback(true) → pane_activation = true
+4. Enter → browse mode
+     → keyCallback handles Enter, but pane_activation stays true
+5. Mouse click → pane_activation TRUE → consumed  ← BUG
+6. Second click → finally goes through
+```
+
+`pane_activation` is set when the pane gains focus (step 3), which is correct —
+it protects against accidental clicks. But keyboard interaction (step 4) proves
+the user is intentionally engaged with the pane. The flag should be cleared so
+the next mouse click goes through.
+
+### Hypothesis
+
+If we clear `pane_activation` early in `keyCallback`, any keypress on a focused
+pane will cancel click suppression. This covers Enter-to-browse and any other
+keyboard interaction that proves intentional engagement.
+
+### Changes
+
+One file, one line.
+
+#### Surface.zig — clear pane_activation in keyCallback
+
+At the top of `keyCallback` (~line 2737), after crash metadata but before any
+key processing:
+
+```zig
+// Any keypress proves intentional engagement — cancel click suppression (Issue 696).
+self.mouse.pane_activation = false;
+```
+
+### What stays the same
+
+- `pane_activation` set in `focusCallback` (Issue 670) — unchanged
+- `pane_activation` consumed in `mouseButtonCallback` (Issue 670) — unchanged
+- `pane_activation` guard in `cursorPosCallback` (Issue 695) — unchanged
+- `overlay_activation` in `notifyOverlayClicked` (Issue 606) — unchanged
+
+### Test
+
+1. Focus a browser pane via keyboard, press Enter to browse, click → click goes
+   through (not consumed)
+2. Focus a browser pane via mouse click → first click consumed (correct), second
+   goes through
+3. Focus a terminal pane via keyboard, type → no click suppression on next mouse
+   use
+4. Focus a terminal pane via mouse click → first click consumed (correct)
+5. Control→browse activation via overlay click still works (click overlay in
+   control mode, first click activates, second interacts)
