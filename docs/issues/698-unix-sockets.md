@@ -278,3 +278,119 @@ X11 is effectively legacy. Targeting Wayland only for a Linux port is safe.
 Most of the existing code is message handling logic (parsing fields, looking up
 panes, calling surface methods) — that stays the same. Only the transport layer
 changes.
+
+## Experiments
+
+### Experiment 1: Protobuf schema and code generation
+
+Define all 30 IPC messages in a `.proto` file and verify that code generation
+produces compilable output for all three languages (Rust, Zig, C++). This
+validates the serialization layer before touching any transport code.
+
+#### Changes
+
+**1. Create `proto/termsurf.proto`**
+
+Define a proto3 schema with all 30 current message types. Use a wrapper `oneof`
+pattern so every IPC message is a single `TermSurfMessage` type:
+
+```protobuf
+syntax = "proto3";
+package termsurf;
+
+message TermSurfMessage {
+  oneof msg {
+    CreateTab create_tab = 1;
+    CreateDevtoolsTab create_devtools_tab = 2;
+    TabReady tab_ready = 3;
+    Resize resize = 4;
+    CloseTab close_tab = 5;
+    Navigate navigate = 6;
+    CaContext ca_context = 7;
+    UrlChanged url_changed = 8;
+    LoadingState loading_state = 9;
+    TitleChanged title_changed = 10;
+    MouseEvent mouse_event = 11;
+    MouseMove mouse_move = 12;
+    ScrollEvent scroll_event = 13;
+    KeyEvent key_event = 14;
+    FocusChanged focus_changed = 15;
+    SetColorScheme set_color_scheme = 16;
+    ModeChanged mode_changed = 17;
+    CursorChanged cursor_changed = 18;
+    SetOverlay set_overlay = 19;
+    SetDevtoolsOverlay set_devtools_overlay = 20;
+    ServerRegister server_register = 21;
+    HelloRequest hello_request = 22;
+    HelloReply hello_reply = 23;
+    QueryLastRequest query_last_request = 24;
+    QueryLastReply query_last_reply = 25;
+    QueryDevtoolsRequest query_devtools_request = 26;
+    QueryDevtoolsReply query_devtools_reply = 27;
+    QueryTabsRequest query_tabs_request = 28;
+    QueryTabsReply query_tabs_reply = 29;
+    OpenSplit open_split = 30;
+  }
+}
+```
+
+Each inner message type has fields matching the current XPC dictionary keys.
+Request/reply pairs are separate message types (no XPC reply mechanism needed).
+
+**2. Rust — add prost to `tui/Cargo.toml` and create `tui/build.rs`**
+
+```toml
+[dependencies]
+prost = "0.14"
+
+[build-dependencies]
+prost-build = "0.14"
+```
+
+`tui/build.rs` runs `prost_build::compile_protos(&["../proto/termsurf.proto"])`.
+The generated Rust code lands in `target/` and is included via
+`include!(concat!(env!("OUT_DIR"), "/termsurf.rs"))` in a new `tui/src/proto.rs`
+module.
+
+**3. C++ — run `protoc` manually and check in the generated code**
+
+```bash
+protoc --cpp_out=chromium/src/content/chromium_profile_server/proto \
+  proto/termsurf.proto
+```
+
+This generates `termsurf.pb.h` and `termsurf.pb.cc`. Check them into the
+Chromium fork so the Chromium build doesn't need a `protoc` step (it already has
+`libprotobuf` at `third_party/protobuf/`). Add the generated files to the
+profile server's `BUILD.gn` sources list.
+
+**4. Zig — evaluate protobuf-c via C interop**
+
+Zig can call C directly. Use the
+[protobuf-c](https://github.com/allyourcodebase/protobuf-c) library:
+
+```bash
+protoc --c_out=gui/src/apprt/proto proto/termsurf.proto
+```
+
+This generates `termsurf.pb-c.h` and `termsurf.pb-c.c`. Add them to the Zig
+build via `addCSourceFile()` and link against `libprotobuf-c`. The Zig code
+calls the C serialization functions directly — no Zig-native protobuf library
+needed.
+
+If protobuf-c integration proves difficult (build system conflicts with
+Ghostty's build.zig), fall back to
+[zig-protobuf](https://github.com/Arwalk/zig-protobuf) which is a pure Zig
+implementation.
+
+#### Verification
+
+1. `cd tui && cargo build` — compiles with prost-generated Rust code, no errors.
+2. Zig build (`cd gui && zig build`) — compiles with protobuf-c generated C
+   code, no errors.
+3. Write a minimal round-trip test in Rust: create a `TermSurfMessage` with a
+   `CreateTab` payload, serialize to bytes, deserialize back, assert fields
+   match. Run with `cargo test`.
+4. Verify the `.proto` schema covers all 30 current XPC message types by
+   cross-referencing against the XPC message inventory in `xpc.zig` and
+   `xpc.rs`.
