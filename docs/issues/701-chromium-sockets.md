@@ -397,3 +397,29 @@ to TUI clients.
 
 **Fail criteria:** Build errors, runtime regressions (TUI can't connect, overlay
 doesn't render, disconnects cause crashes).
+
+**Result: PASS**
+
+Build clean on all three targets (macOS, iOS, iOS-simulator has pre-existing
+simdutf error). Implementation matched the design exactly — no surprises.
+
+Changes to `xpc.zig`:
+
+- Added `ClientConn` struct (fd, source, buf, buf_len, conn_type, server) and
+  `clients: [16]ClientConn` pool. Deleted `tui_fd`, `tui_source`, `tui_buf`,
+  `tui_buf_len`.
+- Added `Server.fd` alongside existing `Server.peer`.
+- `socketAcceptHandler`: finds empty slot, sets `dispatch_set_context` so read
+  handler receives `*ClientConn`.
+- `socketReadHandler`: uses context parameter instead of global state.
+- `handleClientDisconnect`: replaces `handleTuiDisconnect`, branches on
+  `conn_type` — TUI cleans up panes, Chromium clears `server.fd`.
+- `handleSocketMessage`: first message tags connection type (case 12 =
+  ServerRegister → chromium, anything else → tui). New case 12 routes to
+  `handleSocketServerRegister`.
+- `handleSocketServerRegister`: stores `conn.fd` as `server.fd`, links
+  `conn.server`, flushes pending tabs (mirrors XPC `handleServerRegister`).
+- `deinit`: iterates `clients` array instead of single `tui_fd`.
+- Listen backlog: 1 → 8.
+
+Runtime test pending — user will verify TUI still works.

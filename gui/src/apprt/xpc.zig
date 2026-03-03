@@ -105,6 +105,7 @@ const Pane = struct {
 const Server = struct {
     process: ?std.process.Child = null,
     peer: xpc_object_t = null,
+    fd: std.posix.fd_t = -1, // Issue 701: socket fd (coexists with peer during transition).
     profile_key: []const u8 = "", // heap-allocated, also the key in `servers`
     pane_count: usize = 0,
 };
@@ -140,13 +141,23 @@ var last_browser_pane: ?[]const u8 = null;
 /// Reverse lookup: Chromium tab_id → pane UUID string (Issue 694).
 var tab_to_pane: std.AutoHashMap(i64, []const u8) = undefined;
 
-// -- Socket state (Issue 700) --
+// -- Socket state (Issue 700, multi-client Issue 701) --
 
+const MAX_CLIENTS = 16;
+
+const ConnType = enum { unknown, tui, chromium };
+
+const ClientConn = struct {
+    fd: std.posix.fd_t = -1,
+    source: ?*anyopaque = null,
+    buf: [65536]u8 = undefined,
+    buf_len: usize = 0,
+    conn_type: ConnType = .unknown,
+    server: ?*Server = null, // set when conn_type == .chromium
+};
+
+var clients: [MAX_CLIENTS]ClientConn = [_]ClientConn{.{}} ** MAX_CLIENTS;
 var sock_fd: std.posix.fd_t = -1;
-var tui_fd: std.posix.fd_t = -1;
-var tui_source: ?*anyopaque = null;
-var tui_buf: [65536]u8 = undefined;
-var tui_buf_len: usize = 0;
 var sock_source: ?*anyopaque = null;
 var sock_path_buf: [256]u8 = undefined;
 var sock_path_len: usize = 0;
@@ -248,14 +259,11 @@ pub fn deinit() void {
     surface_to_pane.deinit();
     tab_to_pane.deinit();
 
-    // Socket cleanup (Issue 700).
-    if (tui_source) |src| {
-        dispatch_source_cancel(src);
-        tui_source = null;
-    }
-    if (tui_fd >= 0) {
-        std.posix.close(tui_fd);
-        tui_fd = -1;
+    // Socket cleanup (Issue 700/701).
+    for (&clients) |*c| {
+        if (c.source) |src| dispatch_source_cancel(src);
+        if (c.fd >= 0) std.posix.close(c.fd);
+        c.* = .{};
     }
     if (sock_source) |src| {
         dispatch_source_cancel(src);
@@ -2079,7 +2087,7 @@ fn initSocket() void {
         sock_fd = -1;
         return;
     };
-    std.posix.listen(sock_fd, 1) catch |err| {
+    std.posix.listen(sock_fd, 8) catch |err| {
         log.err("listen() failed: {}", .{err});
         std.posix.close(sock_fd);
         sock_fd = -1;
@@ -2108,154 +2116,193 @@ fn socketAcceptHandler(_: ?*anyopaque) callconv(.c) void {
         return;
     };
 
-    // Only one TUI connection at a time. Close old if any.
-    if (tui_fd >= 0) {
-        handleTuiDisconnect();
+    // Find an empty slot in the connection pool.
+    var slot: ?*ClientConn = null;
+    for (&clients) |*c| {
+        if (c.fd == -1) {
+            slot = c;
+            break;
+        }
     }
+    const conn = slot orelse {
+        log.err("too many clients, rejecting fd={}", .{client_fd});
+        std.posix.close(client_fd);
+        return;
+    };
 
-    tui_fd = client_fd;
-    tui_buf_len = 0;
+    conn.fd = client_fd;
+    conn.buf_len = 0;
+    conn.conn_type = .unknown;
+    conn.server = null;
 
-    // dispatch_source for reading from client.
-    tui_source = dispatch_source_create(
+    // dispatch_source for reading from client, with per-connection context.
+    conn.source = dispatch_source_create(
         @ptrCast(&_dispatch_source_type_read),
         @intCast(client_fd),
         0,
         xpc_queue,
     );
-    if (tui_source) |src| {
+    if (conn.source) |src| {
+        dispatch_set_context(src, conn);
         dispatch_source_set_event_handler_f(src, &socketReadHandler);
         dispatch_resume(src);
     }
 
-    log.info("TUI connected via socket fd={}", .{client_fd});
+    log.info("client connected fd={}", .{client_fd});
 }
 
-fn socketReadHandler(_: ?*anyopaque) callconv(.c) void {
-    if (tui_fd < 0) return;
+fn socketReadHandler(ctx: ?*anyopaque) callconv(.c) void {
+    const conn: *ClientConn = @ptrCast(@alignCast(ctx orelse return));
+    if (conn.fd < 0) return;
 
-    const n = std.posix.read(tui_fd, tui_buf[tui_buf_len..]) catch {
-        handleTuiDisconnect();
+    const n = std.posix.read(conn.fd, conn.buf[conn.buf_len..]) catch {
+        handleClientDisconnect(conn);
         return;
     };
     if (n == 0) {
-        // EOF — TUI disconnected.
-        handleTuiDisconnect();
+        handleClientDisconnect(conn);
         return;
     }
-    tui_buf_len += n;
+    conn.buf_len += n;
 
     // Extract complete length-prefixed messages.
-    while (tui_buf_len >= 4) {
-        const msg_len: usize = @as(u32, @bitCast([4]u8{ tui_buf[0], tui_buf[1], tui_buf[2], tui_buf[3] }));
-        if (tui_buf_len < 4 + msg_len) break;
+    while (conn.buf_len >= 4) {
+        const msg_len: usize = @as(u32, @bitCast([4]u8{ conn.buf[0], conn.buf[1], conn.buf[2], conn.buf[3] }));
+        if (conn.buf_len < 4 + msg_len) break;
 
         const pb_msg = pb.termsurf__term_surf_message__unpack(
             null,
             msg_len,
-            @ptrCast(tui_buf[4..].ptr),
+            @ptrCast(conn.buf[4..].ptr),
         );
         if (pb_msg) |msg| {
-            handleSocketMessage(tui_fd, msg);
+            handleSocketMessage(conn, msg);
             pb.termsurf__term_surf_message__free_unpacked(msg, null);
         }
 
         // Shift buffer.
         const consumed = 4 + msg_len;
-        if (consumed < tui_buf_len) {
-            std.mem.copyForwards(u8, tui_buf[0 .. tui_buf_len - consumed], tui_buf[consumed..tui_buf_len]);
+        if (consumed < conn.buf_len) {
+            std.mem.copyForwards(u8, conn.buf[0 .. conn.buf_len - consumed], conn.buf[consumed..conn.buf_len]);
         }
-        tui_buf_len -= consumed;
+        conn.buf_len -= consumed;
     }
 }
 
-fn handleTuiDisconnect() void {
-    log.info("TUI disconnected fd={}", .{tui_fd});
+fn handleClientDisconnect(conn: *ClientConn) void {
+    log.info("client disconnected fd={} type={s}", .{ conn.fd, @tagName(conn.conn_type) });
 
     // Cancel read source.
-    if (tui_source) |src| {
+    if (conn.source) |src| {
         dispatch_source_cancel(src);
-        tui_source = null;
+        conn.source = null;
     }
 
-    // Find and clean up all panes belonging to this TUI connection.
-    var keys_buf: [64][]const u8 = undefined;
-    var count: usize = 0;
+    if (conn.conn_type == .tui) {
+        // Find and clean up all panes belonging to this TUI connection.
+        var keys_buf: [64][]const u8 = undefined;
+        var count: usize = 0;
 
-    var it = panes.iterator();
-    while (it.next()) |entry| {
-        const p = entry.value_ptr.*;
-        if (p.web_fd >= 0 and p.web_fd == tui_fd and count < keys_buf.len) {
-            keys_buf[count] = entry.key_ptr.*;
-            count += 1;
+        var it = panes.iterator();
+        while (it.next()) |entry| {
+            const p = entry.value_ptr.*;
+            if (p.web_fd >= 0 and p.web_fd == conn.fd and count < keys_buf.len) {
+                keys_buf[count] = entry.key_ptr.*;
+                count += 1;
+            }
         }
-    }
 
-    for (0..count) |i| {
-        const pane_id_key = keys_buf[i];
-        if (panes.get(pane_id_key)) |p| {
-            if (p.overlay_surface) |surface| {
-                surface.clearOverlay();
-                _ = surface_to_pane.remove(@intFromPtr(surface));
-            }
-
-            // Clear focused/last pane refs.
-            if (focused_pane) |fp| {
-                if (std.mem.eql(u8, fp, pane_id_key)) focused_pane = null;
-            }
-            if (last_browser_pane) |lp| {
-                if (std.mem.eql(u8, lp, pane_id_key)) last_browser_pane = null;
-            }
-
-            // Clean up tab_to_pane.
-            if (p.tab_id != 0) _ = tab_to_pane.remove(p.tab_id);
-
-            // Close Chromium tab.
-            if (p.server) |server| {
-                if (p.tab_sent and server.peer != null) {
-                    const close_msg = xpc_dictionary_create(null, null, 0);
-                    xpc_dictionary_set_string(close_msg, "action", "close_tab");
-                    xpc_dictionary_set_int64(close_msg, "tab_id", p.tab_id);
-                    xpc_connection_send_message(server.peer, close_msg);
+        for (0..count) |i| {
+            const pane_id_key = keys_buf[i];
+            if (panes.get(pane_id_key)) |p| {
+                if (p.overlay_surface) |surface| {
+                    surface.clearOverlay();
+                    _ = surface_to_pane.remove(@intFromPtr(surface));
                 }
 
-                if (server.pane_count > 0) server.pane_count -= 1;
-                if (server.pane_count == 0) {
-                    killServer(server);
-                    if (server.peer) |sp| {
-                        _ = peer_to_profile.remove(@intFromPtr(sp));
-                        xpc_release(sp);
+                // Clear focused/last pane refs.
+                if (focused_pane) |fp| {
+                    if (std.mem.eql(u8, fp, pane_id_key)) focused_pane = null;
+                }
+                if (last_browser_pane) |lp| {
+                    if (std.mem.eql(u8, lp, pane_id_key)) last_browser_pane = null;
+                }
+
+                // Clean up tab_to_pane.
+                if (p.tab_id != 0) _ = tab_to_pane.remove(p.tab_id);
+
+                // Close Chromium tab.
+                if (p.server) |server| {
+                    if (p.tab_sent and server.peer != null) {
+                        const close_msg = xpc_dictionary_create(null, null, 0);
+                        xpc_dictionary_set_string(close_msg, "action", "close_tab");
+                        xpc_dictionary_set_int64(close_msg, "tab_id", p.tab_id);
+                        xpc_connection_send_message(server.peer, close_msg);
                     }
-                    _ = servers.remove(server.profile_key);
-                    freeKey(server.profile_key);
-                    alloc.destroy(server);
-                }
-            }
 
-            _ = panes.remove(pane_id_key);
-            freeKey(p.pane_id_key);
-            alloc.destroy(p);
+                    if (server.pane_count > 0) server.pane_count -= 1;
+                    if (server.pane_count == 0) {
+                        killServer(server);
+                        if (server.peer) |sp| {
+                            _ = peer_to_profile.remove(@intFromPtr(sp));
+                            xpc_release(sp);
+                        }
+                        _ = servers.remove(server.profile_key);
+                        freeKey(server.profile_key);
+                        alloc.destroy(server);
+                    }
+                }
+
+                _ = panes.remove(pane_id_key);
+                freeKey(p.pane_id_key);
+                alloc.destroy(p);
+            }
+        }
+    } else if (conn.conn_type == .chromium) {
+        // Clear the server's socket fd.
+        if (conn.server) |server| {
+            server.fd = -1;
+            log.info("chromium server disconnected profile={s}", .{server.profile_key});
         }
     }
 
-    if (tui_fd >= 0) {
-        std.posix.close(tui_fd);
-        tui_fd = -1;
+    if (conn.fd >= 0) {
+        std.posix.close(conn.fd);
     }
-    tui_buf_len = 0;
+
+    // Reset slot.
+    conn.fd = -1;
+    conn.source = null;
+    conn.buf_len = 0;
+    conn.conn_type = .unknown;
+    conn.server = null;
 }
 
 // -- Socket message dispatch (Issue 700) --
 
-fn handleSocketMessage(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermSurfMessage) void {
+fn handleSocketMessage(conn: *ClientConn, pb_msg: *pb.Termsurf__TermSurfMessage) void {
     const case = pb_msg.msg_case;
 
-    if (case == 19) {
+    // Connection type tagging: first message determines the type (Issue 701).
+    if (conn.conn_type == .unknown) {
+        if (case == 12) {
+            // server_register → chromium connection
+            conn.conn_type = .chromium;
+        } else {
+            conn.conn_type = .tui;
+        }
+        log.info("client fd={} tagged as {s}", .{ conn.fd, @tagName(conn.conn_type) });
+    }
+
+    if (case == 12) {
+        // server_register (Chromium → GUI via socket, Issue 701)
+        handleSocketServerRegister(conn, pb_msg);
+    } else if (case == 19) {
         // set_overlay
-        handleSocketSetOverlay(client_fd, pb_msg);
+        handleSocketSetOverlay(conn.fd, pb_msg);
     } else if (case == 20) {
         // set_devtools_overlay
-        handleSocketSetDevtoolsOverlay(client_fd, pb_msg);
+        handleSocketSetDevtoolsOverlay(conn.fd, pb_msg);
     } else if (case == 5) {
         // navigate
         handleSocketNavigate(pb_msg);
@@ -2270,18 +2317,52 @@ fn handleSocketMessage(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermSurf
         handleSocketOpenSplit(pb_msg);
     } else if (case == 23) {
         // hello_request
-        handleSocketHello(client_fd, pb_msg);
+        handleSocketHello(conn.fd, pb_msg);
     } else if (case == 25) {
         // query_last_request
-        handleSocketQueryLast(client_fd, pb_msg);
+        handleSocketQueryLast(conn.fd, pb_msg);
     } else if (case == 27) {
         // query_devtools_request
-        handleSocketQueryDevtools(client_fd, pb_msg);
+        handleSocketQueryDevtools(conn.fd, pb_msg);
     } else if (case == 29) {
         // query_tabs_request
-        handleSocketQueryTabs(client_fd, pb_msg);
+        handleSocketQueryTabs(conn.fd, pb_msg);
     } else {
         log.warn("unknown socket message case={}", .{case});
+    }
+}
+
+/// ServerRegister from a Chromium server via socket (Issue 701).
+fn handleSocketServerRegister(conn: *ClientConn, pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const m: *pb.Termsurf__ServerRegister = pb_msg.unnamed_0.server_register orelse return;
+    const profile = std.mem.span(pbStr(m.profile));
+    log.info("socket server_register profile={s} fd={}", .{ profile, conn.fd });
+
+    const server = servers.get(profile) orelse {
+        log.warn("socket server_register for unknown profile={s}", .{profile});
+        return;
+    };
+
+    // Store the socket fd on the server.
+    server.fd = conn.fd;
+    conn.server = server;
+
+    // Flush all pending tabs for this server (mirrors handleServerRegister).
+    var it = panes.iterator();
+    while (it.next()) |entry| {
+        const p = entry.value_ptr.*;
+        if (p.server == server and !p.tab_sent) {
+            if (p.inspected_tab_id > 0) {
+                sendCreateDevToolsTab(p, server);
+            } else if (p.pending_url_len > 0) {
+                sendCreateTab(p, server);
+            } else {
+                continue;
+            }
+            if (p.browsing) {
+                sendFocusChanged(p.pane_id_key, true);
+            }
+        }
     }
 }
 
