@@ -184,3 +184,90 @@ becomes `--ipc-socket=/path/to/gui.sock`. The GUI passes the actual socket path
   launchd plist.
 
 ## Experiments
+
+### Experiment 1: Protobuf in Chromium BUILD.gn
+
+**Goal:** Copy `termsurf.proto` into the Chromium tree, add a `proto_library`
+target, wire it into `chromium_profile_server_lib`, and verify `autoninja`
+compiles the generated C++ headers. Proof that the schema works in Chromium's
+build system before touching any runtime code.
+
+**Context:**
+
+Chromium ships `third_party/protobuf/` with a `proto_library.gni` template that
+compiles `.proto` files to C++ at build time. Existing examples:
+
+- `content/browser/private_aggregation/proto/BUILD.gn` — 14-line BUILD.gn with
+  `proto_library("private_aggregation_budgets_proto")`.
+- Pattern: import the `.gni`, declare `sources`, set
+  `cc_generator_options = "dllexport_decl=CONTENT_EXPORT:"` and
+  `cc_include = "content/common/content_export.h"`.
+
+The `chromium_profile_server_lib` static_library (BUILD.gn line 164) lists all
+profile server sources and deps. Adding a proto dep follows the standard
+pattern: add `":termsurf_proto"` to its `deps` list.
+
+**Steps:**
+
+1. Create the Chromium branch:
+
+   ```bash
+   cd chromium/src
+   git checkout 146.0.7650.0-issue-694
+   git checkout -b 146.0.7650.0-issue-701
+   ```
+
+2. Copy the proto file:
+
+   ```bash
+   cp proto/termsurf.proto \
+     chromium/src/content/chromium_profile_server/browser/termsurf.proto
+   ```
+
+3. Create `content/chromium_profile_server/browser/proto/BUILD.gn`:
+
+   ```gn
+   import("//third_party/protobuf/proto_library.gni")
+
+   proto_library("termsurf_proto") {
+     sources = [ "../termsurf.proto" ]
+   }
+   ```
+
+   Minimal — no `dllexport_decl` or `cc_include` needed since this is an
+   internal-only library (not exported via component DLL boundaries). The proto
+   lives in `browser/` and the BUILD.gn lives in `browser/proto/` to keep the
+   build target isolated.
+
+4. Wire into `chromium_profile_server_lib` — add to the `deps` list (after
+   `:protocol_sources` at BUILD.gn line 317):
+
+   ```gn
+   "browser/proto:termsurf_proto",
+   ```
+
+5. Add a smoke-test `#include` in `shell_browser_main_parts.cc`:
+
+   ```cpp
+   #include "content/chromium_profile_server/browser/termsurf.pb.h"
+   ```
+
+   And a trivial usage in a function body to verify compilation:
+
+   ```cpp
+   termsurf::TermSurfMessage msg;
+   msg.mutable_server_register()->set_profile("test");
+   ```
+
+6. Build:
+
+   ```bash
+   cd chromium/src
+   autoninja -C out/Default chromium_profile_server
+   ```
+
+**Pass criteria:** `autoninja` compiles without errors. The generated
+`termsurf.pb.h` is included and the trivial usage compiles.
+
+**Fail criteria:** Build errors from proto compilation, missing include paths,
+or linker failures.
