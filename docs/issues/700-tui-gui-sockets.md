@@ -133,164 +133,21 @@ Similarly, the GUI→TUI `ModeChanged` currently only sends `browsing` (no
 pane_id), which matches the protobuf schema. No change needed for that
 direction.
 
+## Ideas for experiments
+
+- **TUI socket client.** Create `tui/src/ipc.rs` with the same public API as
+  `xpc.rs` but using Unix sockets + prost. Replace `block2` ObjC FFI with pure
+  Rust. Switch `main.rs` from `mod xpc` to `mod ipc`.
+
+- **GUI socket listener.** Add a Unix domain socket listener to `xpc.zig`.
+  Accept TUI connections, read length-prefixed protobuf messages, dispatch to
+  the existing handler functions. Send replies and events back over the socket.
+  Add `web_fd` to `Pane` alongside `web_peer`.
+
+- **Proto schema update.** Add `string pane_id = 2` to `ModeChanged` (needed for
+  TUI→GUI direction). Regenerate GUI and TUI protobuf files.
+
+- **End-to-end integration.** Both sides compiled and working together. Full
+  verification of all 10 TUI→GUI and 8 GUI→TUI message types.
+
 ## Experiments
-
-### Experiment 1: TUI ipc.rs (socket client)
-
-Create `tui/src/ipc.rs` with the same public API as `xpc.rs` but using Unix
-sockets + prost. Switch `main.rs` from `mod xpc` to `mod ipc`. Verify it
-compiles.
-
-#### Changes
-
-**1. Update `proto/termsurf.proto`**
-
-Add `string pane_id = 2` to `ModeChanged` (needed for TUI→GUI direction).
-
-Regenerate: run `proto/generate.sh` and `cd tui && cargo build` (prost
-regenerates automatically via `build.rs`).
-
-**2. Add prost to `tui/Cargo.toml`**
-
-```toml
-[dependencies]
-prost = "0.14"
-
-[build-dependencies]
-prost-build = "0.14"
-```
-
-Remove `block2` (no longer needed — XPC ObjC blocks are gone).
-
-**3. Create `tui/build.rs`**
-
-```rust
-fn main() {
-    prost_build::Config::new()
-        .compile_protos(&["../proto/termsurf.proto"], &["../proto/"])
-        .unwrap();
-}
-```
-
-**4. Create `tui/src/ipc.rs`**
-
-Same public API as `xpc.rs`:
-
-```rust
-pub enum CompositorMessage {
-    ModeChanged { browsing: bool },
-    UrlChanged { url: String },
-    LoadingState { state: String, _progress: u8 },
-    TitleChanged { title: String },
-}
-
-pub struct CompositorConnection { ... }
-
-impl CompositorConnection {
-    pub fn connect(tx: Sender<LoopEvent>) -> Option<Self> { ... }
-    pub fn send_set_overlay(&self, ...) { ... }
-    pub fn send_set_devtools_overlay(&self, ...) { ... }
-    pub fn send_hello(&self, pane_id: &str) -> Option<String> { ... }
-    pub fn send_query_last(&self, ...) -> Option<(String, String, i64)> { ... }
-    pub fn send_query_devtools(&self, ...) -> Result<i64, String> { ... }
-    pub fn send_query_tabs(&self, ...) -> Result<String, String> { ... }
-    pub fn send_navigate(&self, pane_id: &str, url: &str) { ... }
-    pub fn send_set_color_scheme(&self, pane_id: &str, scheme: &str) { ... }
-    pub fn send_open_split(&self, ...) { ... }
-    pub fn send_mode_changed(&self, pane_id: &str, browsing: bool) { ... }
-}
-```
-
-Internals:
-
-- `connect()`: Build socket path from `$TMPDIR`, connect via
-  `std::os::unix::net::UnixStream`, spawn reader thread.
-- Reader thread: Loop reading 4-byte length prefix + protobuf payload. Dispatch
-  by `oneof` type: reply messages → `reply_tx` channel, event messages →
-  `LoopEvent` mpsc channel.
-- Fire-and-forget methods: Serialize `TermSurfMessage` with prost, write
-  length-prefixed to socket.
-- Sync query methods: Write request, block on `reply_rx`, deserialize reply.
-
-**5. Switch `main.rs` from `xpc` to `ipc`**
-
-Change `mod xpc;` to `mod ipc;`. Change all `xpc::CompositorMessage` to
-`ipc::CompositorMessage` and `xpc::CompositorConnection` to
-`ipc::CompositorConnection`. Change `LoopEvent::Xpc` to `LoopEvent::Ipc`.
-
-#### Verification
-
-```bash
-cd tui && cargo build
-```
-
-**Pass criterion:** Compiles with zero errors. No runtime test — the GUI socket
-listener doesn't exist yet.
-
-### Experiment 2: GUI socket listener
-
-Add a Unix domain socket listener to `xpc.zig`. Accept TUI connections, read
-length-prefixed protobuf messages, and dispatch to the existing handler
-functions. Send replies and events back over the socket.
-
-#### Changes
-
-**1. Add socket listener to `init()`**
-
-After the existing XPC setup:
-
-- Build socket path from `$TMPDIR` (or `$XDG_RUNTIME_DIR` on Linux)
-- `mkdir -p` the parent directory
-- Unlink any stale socket
-- Create `AF_UNIX` / `SOCK_STREAM` socket, bind, listen
-- Create `dispatch_source` (`DISPATCH_SOURCE_TYPE_READ`) on the listen fd,
-  targeting `xpc_queue`
-- The handler calls `accept()`, stores the client fd, creates a per-connection
-  `dispatch_source` for reading
-
-**2. Add per-connection read buffer and message extraction**
-
-Each TUI connection gets a read buffer. When the dispatch source fires:
-
-- `read()` into the buffer
-- Extract complete messages (4-byte LE length + payload)
-- Deserialize with `termsurf__term_surf_message__unpack()`
-- Switch on `msg_case` and call the existing handler function
-
-**3. Replace `web_peer` with socket fd**
-
-Currently `Pane.web_peer` is an `xpc_object_t` used to send events to the TUI.
-Add a `web_fd: i32 = -1` field. When a TUI connects via socket,
-`handleSetOverlay` stores the fd instead of the XPC connection. Event forwarding
-(`forwardUrlChanged`, `forwardLoadingState`, `forwardTitleChanged`,
-`sendModeChanged`) serializes a protobuf message and writes it to `web_fd`.
-
-For query handlers (`handleHello`, `handleQueryLast`, `handleQueryDevtools`,
-`handleQueryTabs`), serialize the reply and write to the client fd.
-
-**4. Add socket cleanup to `deinit()`**
-
-Close the listen fd, unlink the socket file, close all client fds, cancel
-dispatch sources.
-
-**5. Regenerate `gui/src/protobuf/` files**
-
-Run `proto/generate.sh` after the proto schema change in Experiment 1.
-
-#### Verification
-
-1. `cd gui && zig build` — compiles without errors
-2. `cd tui && cargo build` — compiles without errors
-3. Launch TermSurf, open a split, type `web google.com`
-4. Page loads (socket connection, hello, set_overlay all work)
-5. URL bar updates as page navigates (url_changed forwarded via socket)
-6. Loading indicator animates (loading_state forwarded)
-7. Navigate via `:open https://github.com` (navigate works)
-8. Open DevTools via `:devtools` (query_devtools, set_devtools_overlay work)
-9. Dark mode via `:colorscheme dark` (set_color_scheme works)
-10. Close pane — no crashes, no stale socket
-11. Multiple splits — all work independently
-12. `:tabs` — tab inventory works (query_tabs via socket)
-
-**Pass criterion:** All TUI↔GUI communication works over Unix sockets +
-protobuf. No regressions in any existing functionality.
