@@ -906,3 +906,166 @@ Unix domain sockets + protobuf work end-to-end across Zig and Rust. The full
 stack is proven: socket transport, length-prefix framing, and protobuf
 serialization. This is the exact pattern TUI (Rust) → GUI (Zig) will use in
 production. Ready to begin replacing XPC.
+
+### Experiment 4: Replace TUI↔GUI XPC with Unix sockets + protobuf
+
+Replace the entire TUI↔GUI IPC channel with Unix domain sockets and protobuf.
+The GUI↔Chromium channel remains on XPC (replaced in a later experiment).
+
+#### Architecture
+
+```
+Before:
+TUI --XPC--> Gateway --endpoint--> GUI --XPC--> Chromium
+
+After:
+TUI --socket+protobuf--> GUI --XPC--> Chromium
+```
+
+The gateway is no longer needed for TUI connections. The GUI listens directly on
+a Unix domain socket. The TUI connects to it by path.
+
+**Socket path:** `$TMPDIR/termsurf/gui.sock` (macOS) or
+`$XDG_RUNTIME_DIR/termsurf/gui.sock` (Linux). The GUI creates this at startup
+and removes it on shutdown. Stale sockets are unlinked before binding.
+
+**Framing:** Same as experiment 3 — 4-byte LE length prefix before each
+serialized `TermSurfMessage`.
+
+**Bidirectional messaging:** The socket carries traffic in both directions:
+
+- TUI→GUI: commands (`set_overlay`, `navigate`, etc.) and queries (`hello`,
+  `query_tabs`, etc.)
+- GUI→TUI: query replies (`HelloReply`, `QueryTabsReply`, etc.) and async events
+  forwarded from Chromium (`url_changed`, `loading_state`, `title_changed`,
+  `mode_changed`)
+
+**Multiplexing:** The TUI runs a reader thread that reads all incoming messages
+and routes them by type:
+
+- Reply messages (`HelloReply`, `QueryLastReply`, `QueryDevtoolsReply`,
+  `QueryTabsReply`) → pending query channel (the calling thread blocks on this)
+- Event messages (`ModeChanged`, `UrlChanged`, `LoadingState`, `TitleChanged`) →
+  existing `LoopEvent` mpsc channel (Issue 666)
+
+Since queries are synchronous (the TUI blocks until the reply arrives), there is
+at most one pending query at a time. A simple `Arc<Mutex<Option<mpsc::Sender>>>`
+suffices.
+
+**Thread safety on GUI side:** The GUI already uses a serial GCD queue for all
+XPC handlers. The socket reader uses `dispatch_source`
+(DISPATCH_SOURCE_TYPE_READ) targeting the same serial queue. This gives the same
+serialization guarantee — no mutexes needed for pane/server state.
+
+#### Changes
+
+**1. GUI: Add protobuf-c to the build system (`gui/build.zig`)**
+
+Add the generated `termsurf.pb-c.c` to the C source files and link
+`libprotobuf-c`. The generated code lives at `proto/termsurf.pb-c.c` (already
+exists from experiment 2). Add include paths for the generated header and system
+protobuf-c headers.
+
+**2. GUI: Add socket listener to `gui/src/apprt/xpc.zig`**
+
+In `init()`, after the existing XPC setup:
+
+- Build the socket path from `$TMPDIR`
+- Create the parent directory if needed (`mkdir -p`)
+- Unlink any stale socket
+- Create, bind, and listen on `AF_UNIX` / `SOCK_STREAM`
+- Create a `dispatch_source` (READ) on the listen fd, targeting `xpc_queue`
+- The dispatch_source handler calls `accept()`, then creates a per-connection
+  dispatch_source for reading
+
+In `deinit()`:
+
+- Close the socket fd
+- Unlink the socket file
+- Cancel dispatch sources
+
+**3. GUI: Add protobuf message reader and dispatcher**
+
+New function `handleSocketData(fd)` called by the per-connection
+dispatch_source:
+
+- Maintain a per-connection read buffer (append new data from `read()`)
+- Extract complete messages (4-byte length prefix + payload)
+- Deserialize with `termsurf__term_surf_message__unpack()`
+- Switch on `msg_case` and call the appropriate handler
+
+The handler switch replaces the string-based `action` dispatch. Each case
+extracts fields from the protobuf struct and calls the existing handler logic.
+For handlers that currently parse XPC dictionaries, extract the fields from
+protobuf and pass them directly.
+
+For query handlers (`hello`, `query_last`, `query_devtools`, `query_tabs`):
+serialize the reply as a `TermSurfMessage`, length-prefix it, and write to the
+client fd.
+
+For Chromium event forwarding (`url_changed`, `loading_state`, `title_changed`):
+replace `xpc_connection_send_message(p.web_peer, ...)` with a protobuf write to
+the TUI socket fd. Store the TUI's socket fd in the `Pane` struct (replacing
+`web_peer`).
+
+**4. TUI: Create `tui/src/ipc.rs` replacing `tui/src/xpc.rs`**
+
+New module with the same public API as `xpc.rs` but using sockets + protobuf:
+
+- `connect()`: build socket path from `$TMPDIR`, connect via
+  `std::os::unix::net::UnixStream`, spawn reader thread
+- Reader thread: read length-prefixed messages in a loop, dispatch by oneof type
+  to either the reply channel or the `LoopEvent` channel
+- `set_overlay()`, `navigate()`, `set_color_scheme()`, etc.: serialize as
+  `TermSurfMessage`, write length-prefixed to socket
+- `hello()`, `query_last()`, `query_devtools()`, `query_tabs()`: serialize
+  request, write to socket, block on reply channel, deserialize reply
+- `mode_changed()`, `open_split()`: serialize and send (fire-and-forget)
+
+Add `prost` and `prost-build` to `tui/Cargo.toml`. Add a `build.rs` that
+compiles `proto/termsurf.proto`. Remove the `block2` dependency.
+
+**5. TUI: Switch from `xpc.rs` to `ipc.rs`**
+
+In `tui/src/main.rs` (or wherever `CompositorConnection` is used), replace
+`mod xpc` with `mod ipc` and update the connection type. The public API is
+identical so callers don't change.
+
+**6. Keep XPC for Chromium (no changes)**
+
+The GUI's XPC listener, gateway connection, and all Chromium handlers
+(`server_register`, `tab_ready`, `ca_context`, `cursor_changed`,
+`sendCreateTab`, `sendMouseEvent`, `sendKeyEvent`, etc.) remain unchanged. Only
+the TUI-facing handlers and forwarding code change.
+
+#### What stays the same
+
+- All handler business logic (pane management, server spawning, focus tracking,
+  auto-targeting, tab lifecycle)
+- All Chromium communication (XPC)
+- All GUI public APIs (`sendMouseEvent`, `sendKeyEvent`, etc.)
+- The serial GCD queue synchronization model
+- The gateway process (still needed for Chromium; removed in a later experiment)
+
+#### Verification
+
+1. `cd gui && zig build` — compiles without errors
+2. `cd tui && cargo build` — compiles without errors
+3. Launch TermSurf, create a split, type `web google.com`
+4. Page loads (proves: socket connection, `hello`, `set_overlay`, Chromium tab
+   creation all work)
+5. URL bar updates as page loads (proves: `url_changed` forwarded from Chromium
+   via socket)
+6. Loading indicator animates (proves: `loading_state` forwarded)
+7. Navigate to another URL via `:open https://github.com` (proves: `navigate`)
+8. Open DevTools via `:devtools` (proves: `query_devtools`,
+   `set_devtools_overlay`)
+9. Switch dark mode via `:colorscheme dark` (proves: `set_color_scheme`)
+10. Close pane — no crashes, no stale socket (proves: cleanup)
+11. Open multiple splits with different URLs — all work independently
+12. Verify `query_tabs` works (`:tabs`)
+13. Verify existing `unfocused-split-opacity` still works (no regression)
+
+**Pass criterion:** All TUI↔GUI communication works over Unix sockets +
+protobuf. The XPC gateway is no longer needed for TUI connections. No
+regressions in any existing functionality.
