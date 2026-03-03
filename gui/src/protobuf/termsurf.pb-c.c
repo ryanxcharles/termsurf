@@ -3453,7 +3453,7 @@ const ProtobufCMessageDescriptor termsurf__open_split__descriptor =
   (ProtobufCMessageInit) termsurf__open_split__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
-static const ProtobufCFieldDescriptor termsurf__mode_changed__field_descriptors[1] =
+static const ProtobufCFieldDescriptor termsurf__mode_changed__field_descriptors[2] =
 {
   {
     "browsing",
@@ -3467,14 +3467,27 @@ static const ProtobufCFieldDescriptor termsurf__mode_changed__field_descriptors[
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
+  {
+    "pane_id",
+    2,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_STRING,
+    0,   /* quantifier_offset */
+    offsetof(Termsurf__ModeChanged, pane_id),
+    NULL,
+    &protobuf_c_empty_string,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
 };
 static const unsigned termsurf__mode_changed__field_indices_by_name[] = {
   0,   /* field[0] = browsing */
+  1,   /* field[1] = pane_id */
 };
 static const ProtobufCIntRange termsurf__mode_changed__number_ranges[1 + 1] =
 {
   { 1, 0 },
-  { 0, 1 }
+  { 0, 2 }
 };
 const ProtobufCMessageDescriptor termsurf__mode_changed__descriptor =
 {
@@ -3484,7 +3497,7 @@ const ProtobufCMessageDescriptor termsurf__mode_changed__descriptor =
   "Termsurf__ModeChanged",
   "termsurf",
   sizeof(Termsurf__ModeChanged),
-  1,
+  2,
   termsurf__mode_changed__field_descriptors,
   termsurf__mode_changed__field_indices_by_name,
   1,  termsurf__mode_changed__number_ranges,

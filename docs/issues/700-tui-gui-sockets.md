@@ -151,3 +151,97 @@ direction.
   verification of all 10 TUI→GUI and 8 GUI→TUI message types.
 
 ## Experiments
+
+### Experiment 1: TUI socket client
+
+Replace `tui/src/xpc.rs` (710 lines of unsafe XPC FFI) with `tui/src/ipc.rs`
+(pure Rust sockets + prost). Same public API — `CompositorConnection` with
+identical methods. Verify it compiles.
+
+#### Changes
+
+**1. Update `proto/termsurf.proto`**
+
+Add `string pane_id = 2` to `ModeChanged`. The TUI→GUI direction needs `pane_id`
+to identify which pane changed mode. The GUI→TUI direction ignores it (the TUI
+only has one pane).
+
+**2. Regenerate protobuf files**
+
+Run `proto/generate.sh` to update `gui/src/protobuf/termsurf.pb-c.{c,h}`.
+
+**3. Update `tui/Cargo.toml`**
+
+Replace `block2` with `prost`. Add `prost-build` to build-dependencies.
+
+```toml
+[dependencies]
+prost = "0.14"
+
+[build-dependencies]
+prost-build = "0.14"
+```
+
+**4. Create `tui/build.rs`**
+
+Prost code generation — compiles `proto/termsurf.proto` at build time.
+
+```rust
+fn main() {
+    prost_build::Config::new()
+        .compile_protos(&["../proto/termsurf.proto"], &["../proto/"])
+        .unwrap();
+}
+```
+
+**5. Create `tui/src/ipc.rs`**
+
+Same public types and methods as `xpc.rs`:
+
+- `CompositorMessage` enum (4 variants: `ModeChanged`, `UrlChanged`,
+  `LoadingState`, `TitleChanged`)
+- `CompositorConnection` struct
+- `connect(tx)` → builds socket path from `$TMPDIR`, connects via `UnixStream`,
+  spawns reader thread
+- 6 fire-and-forget methods: `send_set_overlay`, `send_set_devtools_overlay`,
+  `send_navigate`, `send_set_color_scheme`, `send_open_split`,
+  `send_mode_changed`
+- 4 sync query methods: `send_hello`, `send_query_last`, `send_query_devtools`,
+  `send_query_tabs`
+
+Internals:
+
+- Socket path: `$TMPDIR/termsurf/gui.sock`
+- Wire format: 4-byte LE length prefix + serialized `TermSurfMessage`
+- Reader thread: reads length-prefixed messages in a loop, routes reply messages
+  to a `reply_tx` channel and event messages to the `LoopEvent` mpsc channel
+- Sync queries: write request → block on `reply_rx` → return result
+- `send_set_color_scheme`: converts scheme string (`"dark"`, `"light"`,
+  `"system"`) to `dark` bool before sending
+- `Drop`: closes the `UnixStream` (reader thread exits on EOF)
+
+**6. Switch `main.rs` from `xpc` to `ipc`**
+
+- `mod xpc` → `mod ipc`
+- `xpc::CompositorMessage` → `ipc::CompositorMessage`
+- `xpc::CompositorConnection` → `ipc::CompositorConnection`
+- `LoopEvent::Xpc` → `LoopEvent::Ipc`
+
+#### Verification
+
+```bash
+cd tui && cargo build
+```
+
+**Pass criterion:** Compiles with zero errors. No runtime test — the GUI socket
+listener doesn't exist yet.
+
+#### Result: PASS
+
+`cargo build` compiles with zero errors and zero warnings. The TUI is now 100%
+pure Rust — no `block2`, no `extern "C"`, no `CString`, no `unsafe`. The
+`ipc.rs` module (265 lines) replaces `xpc.rs` (710 lines) with the same public
+API.
+
+The GUI also rebuilds cleanly with the regenerated protobuf files (adding
+`pane_id` to `ModeChanged`).

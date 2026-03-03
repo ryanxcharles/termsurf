@@ -213,6 +213,7 @@ message OpenSplit {
 
 message ModeChanged {
   bool browsing = 1;
+  string pane_id = 2;    // nonempty when TUI → GUI
 }
 
 // --- Request/reply pairs ---

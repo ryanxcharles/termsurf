@@ -1,4 +1,4 @@
-mod xpc;
+mod ipc;
 
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
@@ -54,15 +54,15 @@ enum Mode {
 
 enum LoopEvent {
     Terminal(Event),
-    Xpc(xpc::CompositorMessage),
+    Ipc(ipc::CompositorMessage),
 }
 
 // Command dispatch (Issue 659).
 enum CommandResult {
     Quit,
     SetColorScheme(String),
-    DevTools(String),  // direction: "right", "down", "left", "up" (Issue 690).
-    Error(String),     // error message for command bar (Issue 690).
+    DevTools(String), // direction: "right", "down", "left", "up" (Issue 690).
+    Error(String),    // error message for command bar (Issue 690).
     None,
 }
 
@@ -220,7 +220,7 @@ fn main() -> io::Result<()> {
     let (tx, rx) = std::sync::mpsc::channel();
     let compositor = pane_id
         .as_ref()
-        .and_then(|_| xpc::CompositorConnection::connect(tx.clone()));
+        .and_then(|_| ipc::CompositorConnection::connect(tx.clone()));
 
     // Handle `web last` subcommand — print last active browser pane and exit (Issue 684 Exp 4).
     if let Some(Commands::Last) = cli.command {
@@ -547,8 +547,7 @@ fn main() -> io::Result<()> {
                                     url = resolved;
                                     editor_url = url.clone();
                                     mode = Mode::Browse;
-                                    if let (Some(ref conn), Some(ref pid)) =
-                                        (&compositor, &pane_id)
+                                    if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id)
                                     {
                                         conn.send_navigate(pid, &url);
                                         conn.send_mode_changed(pid, true);
@@ -588,8 +587,9 @@ fn main() -> io::Result<()> {
                                 }
                                 CommandResult::DevTools(direction) => {
                                     if is_devtools {
-                                        command_error =
-                                            Some("Cannot open DevTools from a DevTools pane".into());
+                                        command_error = Some(
+                                            "Cannot open DevTools from a DevTools pane".into(),
+                                        );
                                     } else if let (Some(ref conn), Some(ref pid)) =
                                         (&compositor, &pane_id)
                                     {
@@ -598,8 +598,7 @@ fn main() -> io::Result<()> {
                                                 command_error = Some(msg);
                                             }
                                             Ok(_) => {
-                                                let cmd =
-                                                    format!("{} devtools", current_exe);
+                                                let cmd = format!("{} devtools", current_exe);
                                                 conn.send_open_split(pid, &direction, &cmd);
                                             }
                                         }
@@ -625,21 +624,21 @@ fn main() -> io::Result<()> {
             Ok(LoopEvent::Terminal(_)) => {
                 // Resize, mouse, focus, paste, etc. — just redraw.
             }
-            Ok(LoopEvent::Xpc(msg)) => {
+            Ok(LoopEvent::Ipc(msg)) => {
                 match msg {
-                    xpc::CompositorMessage::ModeChanged { browsing } => {
+                    ipc::CompositorMessage::ModeChanged { browsing } => {
                         mode = if browsing {
                             Mode::Browse
                         } else {
                             Mode::Control
                         };
                     }
-                    xpc::CompositorMessage::UrlChanged { url: new_url } => {
+                    ipc::CompositorMessage::UrlChanged { url: new_url } => {
                         url = new_url;
                         // Mark editor_url stale so enter_edit re-syncs (Issue 658).
                         editor_url.clear();
                     }
-                    xpc::CompositorMessage::LoadingState {
+                    ipc::CompositorMessage::LoadingState {
                         state,
                         _progress: _,
                     } => {
@@ -665,7 +664,7 @@ fn main() -> io::Result<()> {
                         };
                         let _ = stdout.flush();
                     }
-                    xpc::CompositorMessage::TitleChanged { title } => {
+                    ipc::CompositorMessage::TitleChanged { title } => {
                         page_title = title;
                     }
                 }
@@ -721,10 +720,7 @@ fn resolve_input(input: &str) -> Option<String> {
     }
 
     // Step 3: Explicit file paths (/, ./, ../).
-    if trimmed.starts_with('/')
-        || trimmed.starts_with("./")
-        || trimmed.starts_with("../")
-    {
+    if trimmed.starts_with('/') || trimmed.starts_with("./") || trimmed.starts_with("../") {
         if let Ok(absolute) = std::fs::canonicalize(trimmed) {
             return Some(format!("file://{}", absolute.display()));
         }
@@ -804,7 +800,11 @@ fn ui(
         let submode_label =
             Line::from(vec![Span::raw(submode_text).style(Style::default().fg(sc))]);
         // Red border on error, yellow otherwise (Issue 690).
-        let border_color = if command_error.is_some() { RED } else { url_border };
+        let border_color = if command_error.is_some() {
+            RED
+        } else {
+            url_border
+        };
         let cmd_title = Line::from(vec![
             Span::raw("COMMAND").style(Style::default().fg(border_color))
         ]);
@@ -816,9 +816,8 @@ fn ui(
             .title_top(submode_label.alignment(Alignment::Right))
             .style(Style::default().bg(BG));
         if let Some(ref err) = command_error {
-            cmd_block = cmd_block.title_bottom(
-                Line::from(err.as_str()).style(Style::default().fg(RED)),
-            );
+            cmd_block =
+                cmd_block.title_bottom(Line::from(err.as_str()).style(Style::default().fg(RED)));
         }
         let cmd_inner = cmd_block.inner(layout[1]);
         frame.render_widget(cmd_block, layout[1]);

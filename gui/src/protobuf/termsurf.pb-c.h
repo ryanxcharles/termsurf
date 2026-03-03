@@ -463,10 +463,14 @@ struct  Termsurf__ModeChanged
 {
   ProtobufCMessage base;
   protobuf_c_boolean browsing;
+  /*
+   * nonempty when TUI → GUI
+   */
+  char *pane_id;
 };
 #define TERMSURF__MODE_CHANGED__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&termsurf__mode_changed__descriptor) \
-, 0 }
+, 0, (char *)protobuf_c_empty_string }
 
 
 struct  Termsurf__HelloRequest
