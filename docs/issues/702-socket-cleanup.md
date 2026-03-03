@@ -305,3 +305,73 @@ Removed all dead XPC code from Chromium and the GUI build system.
 
 **Verified:** Chromium `autoninja` build clean. GUI `zig build` clean.
 `build-debug.sh` clean. Manual test passed.
+
+### Experiment 3: Heap-allocated client connections
+
+Replace the fixed-size `clients` array with heap-allocated `ClientConn`s so
+there is no limit on simultaneous TUI + Chromium connections.
+
+#### Problem
+
+```zig
+const MAX_CLIENTS = 16;
+var clients: [MAX_CLIENTS]ClientConn = [_]ClientConn{.{}} ** MAX_CLIENTS;
+```
+
+Each `ClientConn` has a 65KB read buffer, so 16 slots = 1MB pre-allocated. The
+fixed array caps connections at 16 and wastes memory for unused slots.
+
+#### Design
+
+Replace the fixed array with a `std.ArrayList(*ClientConn)`. Each connection is
+heap-allocated on accept and freed on disconnect, matching how `Pane` and
+`Server` are already managed.
+
+**New state:**
+
+```zig
+var clients: std.ArrayList(*ClientConn) = undefined;
+```
+
+Initialized in `init()` with `std.ArrayList(*ClientConn).init(alloc)`, deinited
+in `deinit()`.
+
+**socketAcceptHandler changes:**
+
+- Replace the slot-scanning loop with `alloc.create(ClientConn)`.
+- `clients.append(conn)` to track it.
+- On allocation failure, log and close the fd (same as the current "too many
+  clients" path, but this should only happen on OOM).
+
+**handleClientDisconnect changes:**
+
+- Instead of resetting the slot fields, remove the pointer from `clients` via
+  `swapRemove` (order doesn't matter), then `alloc.destroy(conn)`.
+- The Chromium ClientConn cleanup loop in the TUI disconnect handler
+  (`for (&clients)`) becomes `for (clients.items)`.
+
+**Other `for (&clients)` loops:**
+
+There is one in `handleClientDisconnect` (the Chromium cleanup loop at line
+1690). Change `for (&clients)` to `for (clients.items)`.
+
+#### What to remove
+
+- `MAX_CLIENTS` constant.
+- The fixed array declaration.
+
+#### What to change
+
+- `clients` type: `[MAX_CLIENTS]ClientConn` → `std.ArrayList(*ClientConn)`.
+- `socketAcceptHandler`: heap-allocate instead of scanning for empty slot.
+- `handleClientDisconnect`: `alloc.destroy` + list removal instead of field
+  reset.
+- Chromium cleanup loop: iterate `clients.items` instead of `&clients`.
+- `init()`: add `clients = std.ArrayList(*ClientConn).init(alloc)`.
+- `deinit()`: add `clients.deinit()`.
+
+#### Verification
+
+1. `cd gui && zig build` — must compile clean.
+2. Launch GUI, open multiple panes with `web`, verify connections work, close
+   panes, exit — all working.
