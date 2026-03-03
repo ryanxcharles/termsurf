@@ -271,3 +271,23 @@ pattern: add `":termsurf_proto"` to its `deps` list.
 
 **Fail criteria:** Build errors from proto compilation, missing include paths,
 or linker failures.
+
+**Result: PASS**
+
+Proto compilation and C++ code generation work. Two adjustments from the
+original design:
+
+1. **`option optimize_for = LITE_RUNTIME;`** — Required in the Chromium copy of
+   `termsurf.proto`. Without it, protoc generates full-protobuf code (`Message`
+   base class, `UnknownFieldSet`), but Chromium only links `protobuf_lite`.
+   Adding `LITE_RUNTIME` generates `MessageLite`-based code. This option is
+   ignored by protobuf-c (Zig) and prost (Rust).
+
+2. **`component_build_force_source_set = true`** — Required in the
+   `proto_library` target. In component builds (`is_component_build=true`), the
+   profile server is a shared library. Without this flag, the proto target
+   compiles as a static library whose protobuf runtime references aren't
+   resolved at link time.
+
+Generated `termsurf.pb.h` is 580KB with C++ accessors for all 30 messages. The
+smoke test in `ShellBrowserMainParts` constructor compiles and links clean.

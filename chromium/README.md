@@ -14,7 +14,7 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `146.0.7650.0-issue-694`
+- Branch: `146.0.7650.0-issue-701`
 - Base version: `146.0.7650.0` (tracking Electron's Chromium version)
 
 ## Branch Strategy
@@ -74,6 +74,7 @@ find the most relevant recent branch, create a new branch from it
 | `146.0.7650.0-issue-684`      | [Issue 684](../docs/issues/684-devtools.md)                   | DevTools via devtools:// URL                |
 | `146.0.7650.0-issue-689-exp3` | [Issue 689](../docs/issues/689-tab-lifecycle.md)              | Close tab teardown order                    |
 | `146.0.7650.0-issue-694`      | [Issue 694](../docs/issues/694-tab-id-chromium.md)            | Replace pane_id with tab_id                 |
+| `146.0.7650.0-issue-701`      | [Issue 701](../docs/issues/701-chromium-sockets.md)           | Replace GUI↔Chromium XPC with Unix sockets  |
 
 ## Patches
 
