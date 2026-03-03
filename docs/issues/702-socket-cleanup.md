@@ -150,3 +150,121 @@ Removed all dead XPC code from `gui/src/apprt/xpc.zig`. Net change: -1054 lines,
 - `zig build` compiles clean.
 - Manual test: launch GUI, `web google.com`, browse, navigate, exit TUI — all
   working.
+
+### Experiment 2: Remove dead XPC code from Chromium
+
+Remove all dead XPC code from the Chromium profile server. Same pattern as
+Experiment 1 — the socket path is the only live path, XPC fallbacks are dead.
+
+#### Scope
+
+Five files in `chromium/src/content/chromium_profile_server/`:
+
+- `browser/shell_browser_main_parts.cc`
+- `browser/shell_browser_main_parts.h`
+- `browser/shell_tab_observer.cc`
+- `browser/shell_tab_observer.h`
+- `common/shell_switches.h`
+
+Plus delete the XPC gateway daemon: `gui/xpc-gateway/` (entire directory).
+
+#### What to remove
+
+**shell_browser_main_parts.h:**
+
+- `#include <xpc/xpc.h>` (line 22).
+- `TabState::tab_connection` field (`xpc_connection_t`).
+- `control_connection_` and `app_endpoint_` member variables.
+- `CloseTab(xpc_connection_t)` and `HandleQueryTabs(xpc_object_t)` method
+  declarations.
+
+**shell_browser_main_parts.cc:**
+
+- `#include <xpc/xpc.h>` (line 98).
+- `StartDynamicMode()` — entire function (~195 lines). The XPC gateway
+  handshake, control connection event handler with 11 message types, server
+  registration, gateway cancel.
+- `kXpcService` dispatch in `InitializeMessageLoopContext()` — the
+  `if (cmd->HasSwitch(switches::kXpcService))` branch and the warning log that
+  mentions `--xpc-service`.
+- `CreateTab()` XPC fallback — the `else` branch that creates
+  `xpc_connection_create_from_endpoint`, sets up an event handler, sends
+  `tab_ready` via XPC, and calls `SetConnection()`. Also the dead XPC
+  CALayerParams callback lambda (~50 lines).
+- `CreateDevToolsTab()` — same pattern as `CreateTab()`, XPC connection
+  creation, event handler, tab_ready send, XPC CALayerParams callback.
+- `CloseTab(xpc_connection_t)` — entire function. Only called from the dead XPC
+  event handler.
+- `HandleQueryTabs(xpc_object_t)` — entire function. Only called from the dead
+  XPC event handler.
+- `CloseTabById()` — XPC cleanup branch
+  (`if (socket_fd_ < 0 && (*it)->tab_connection)`).
+- `PostMainMessageLoopRun()` — XPC cleanup for `control_connection_` and
+  `app_endpoint_`.
+
+**shell_tab_observer.h:**
+
+- `#include <xpc/xpc.h>`.
+- `SetConnection(xpc_connection_t)` method declaration.
+- `xpc_connection_` member variable.
+
+**shell_tab_observer.cc:**
+
+- `SetConnection()` method body.
+- `OnCursorChanged()` — XPC fallback (the `if (!xpc_connection_) return` +
+  `xpc_dictionary_*` block after the socket `return`).
+- `DidFinishNavigation()` — `else if (xpc_connection_)` branch.
+- `SendLoadingState()` — XPC fallback after the socket `return`.
+- `TitleWasSet()` — `else if (xpc_connection_)` branch.
+
+**shell_switches.h:**
+
+- `kXpcService` constant and its comment.
+
+**gui/xpc-gateway/:**
+
+- Delete the entire directory. The gateway daemon brokered XPC connections
+  between GUI and Chromium. No callers remain.
+
+#### What to keep
+
+- `StartSocketMode()` and all socket-based IPC.
+- `kIpcSocket` switch.
+- `SendSocketMessage()` and `SendProtobuf()`.
+- All `socket_fd_` fields and socket-path logic.
+- `CloseTabById()` — the socket-mode path (remove only the XPC cleanup branch).
+- `#include <xpc/xpc.h>` can be removed from all files — no XPC calls remain
+  after cleanup.
+
+#### Guard simplifications
+
+- `if (socket_fd_ >= 0) { ... } else { ... }` → unwrap the socket body, remove
+  the `else`.
+- `InitializeMessageLoopContext()` — remove the `kXpcService` branch, simplify
+  to just the socket path.
+
+#### Implementation order
+
+1. Delete `gui/xpc-gateway/` directory.
+2. Remove `kXpcService` from `shell_switches.h`.
+3. Clean up `shell_tab_observer.h` — remove XPC include, `SetConnection` decl,
+   `xpc_connection_` field.
+4. Clean up `shell_tab_observer.cc` — remove `SetConnection` body, remove XPC
+   fallback branches in all 4 message-sending functions.
+5. Clean up `shell_browser_main_parts.h` — remove XPC include, dead fields, dead
+   method declarations.
+6. Remove `StartDynamicMode()` entirely from `.cc`.
+7. Simplify `InitializeMessageLoopContext()` — remove `kXpcService` branch.
+8. Clean up `CreateTab()` — remove XPC connection creation, XPC event handler,
+   XPC `tab_ready` send, XPC CALayerParams callback.
+9. Clean up `CreateDevToolsTab()` — same as `CreateTab()`.
+10. Remove `CloseTab(xpc_connection_t)` entirely.
+11. Remove `HandleQueryTabs(xpc_object_t)` entirely.
+12. Clean up `CloseTabById()` — remove XPC cleanup branch.
+13. Clean up `PostMainMessageLoopRun()` — remove XPC cleanup.
+14. Remove `tab_connection` from `TabState` if no longer referenced.
+
+#### Verification
+
+1. Build Chromium — must compile clean.
+2. Launch GUI, `web google.com`, browse, navigate, exit TUI — all working.
