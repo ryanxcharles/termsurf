@@ -534,3 +534,16 @@ Verify Zig side still compiles after adding the env var.
 `SetOverlay`, and a Chromium browser overlay renders in the terminal pane.
 Events (LoadingState, UrlChanged, TitleChanged) flow back to the TUI and update
 the status bar. If runtime bugs surface, fix them and document.
+
+#### Result: PASS
+
+Full end-to-end round-trip works. The GUI creates `gui-debug.sock` at
+`$TMPDIR/termsurf/`, the TUI discovers it via `TERMSURF_SOCKET`, connects, and
+web pages render in the terminal pane.
+
+Code changes:
+
+- **GUI (`xpc.zig`):** Set `TERMSURF_SOCKET` env var after `initSocket()` so
+  child processes discover the correct socket path.
+- **TUI (`ipc.rs`):** Check `TERMSURF_SOCKET` first, fall back to default
+  `$TMPDIR/termsurf/gui.sock`.

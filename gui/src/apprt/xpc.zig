@@ -208,6 +208,11 @@ pub fn init(core_app: *CoreApp) void {
     // Unix socket listener for TUI connections (Issue 700).
     initSocket();
 
+    // Tell child processes (the `web` TUI) where to find our socket.
+    if (sock_fd >= 0) {
+        _ = internal_os.setenv("TERMSURF_SOCKET", sock_path_buf[0..sock_path_len :0]);
+    }
+
     // Debug builds set TERMSURF_XPC_SERVICE so child terminal sessions
     // (and the `web` TUI) know which gateway to connect to (Issue 653).
     if (comptime builtin.mode == .Debug) {
