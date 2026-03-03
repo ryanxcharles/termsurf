@@ -370,8 +370,47 @@ There is one in `handleClientDisconnect` (the Chromium cleanup loop at line
 - `init()`: add `clients = std.ArrayList(*ClientConn).init(alloc)`.
 - `deinit()`: add `clients.deinit()`.
 
-#### Verification
+#### Results
 
-1. `cd gui && zig build` — must compile clean.
-2. Launch GUI, open multiple panes with `web`, verify connections work, close
-   panes, exit — all working.
+**Result: Success.** Commit `TODO`.
+
+Replaced the fixed 16-slot `ClientConn` array with heap-allocated connections
+tracked by `std.ArrayList(*ClientConn)`. No fixed connection limit.
+
+**Changed in `gui/src/apprt/xpc.zig`:**
+
+- Removed `MAX_CLIENTS` constant and fixed `[16]ClientConn` array declaration.
+- `clients` is now `std.ArrayList(*ClientConn)`, initialized as `.{}` in
+  `init()`, deinited with `clients.deinit(alloc)` in `deinit()`.
+- `socketAcceptHandler()`: heap-allocates `ClientConn` via `alloc.create()`,
+  appends to list via `clients.append(alloc, conn)`. On OOM, logs and closes the
+  fd.
+- `handleClientDisconnect()`: removes connection from list via `swapRemove`,
+  frees with `alloc.destroy(conn)` instead of resetting slot fields.
+- Chromium cleanup loop (use-after-free prevention): iterates `clients.items`
+  with index, uses `swapRemove` + `alloc.destroy` instead of field reset.
+- `deinit()`: iterates `clients.items`, destroys each connection, then deinits
+  the list.
+
+**Note:** Zig 0.15's `ArrayList` doesn't store the allocator — it's passed
+per-call (`append(alloc, ...)`, `deinit(alloc)`). The design doc assumed 0.13
+API; implementation used the correct 0.15 API.
+
+**Verified:** `zig build` clean. Manual test passed — multiple panes with `web`,
+connections work, close panes, exit.
+
+## Conclusion
+
+All three parts of Issue 702 are complete:
+
+1. **Experiment 1** — Removed all dead XPC code from the GUI
+   (`gui/src/apprt/xpc.zig`). Net -800 lines.
+2. **Experiment 2** — Removed all dead XPC code from Chromium (5 files) and
+   deleted the XPC gateway daemon, build plumbing, LaunchAgent plists, and
+   deregister script. Net -930 lines across both repos.
+3. **Experiment 3** — Replaced the fixed 16-slot client connection pool with
+   heap-allocated `ArrayList(*ClientConn)`. No connection limit, no
+   pre-allocated memory.
+
+The codebase is now fully socket-based with no XPC remnants. IPC uses Unix
+domain sockets with length-prefixed protobuf exclusively.

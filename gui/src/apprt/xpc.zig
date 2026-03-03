@@ -106,8 +106,6 @@ var tab_to_pane: std.AutoHashMap(i64, []const u8) = undefined;
 
 // -- Socket state (Issue 700, multi-client Issue 701) --
 
-const MAX_CLIENTS = 16;
-
 const ConnType = enum { unknown, tui, chromium };
 
 const ClientConn = struct {
@@ -119,7 +117,7 @@ const ClientConn = struct {
     server: ?*Server = null, // set when conn_type == .chromium
 };
 
-var clients: [MAX_CLIENTS]ClientConn = [_]ClientConn{.{}} ** MAX_CLIENTS;
+var clients: std.ArrayList(*ClientConn) = undefined;
 var sock_fd: std.posix.fd_t = -1;
 var sock_source: ?*anyopaque = null;
 var sock_path_buf: [256]u8 = undefined;
@@ -133,11 +131,12 @@ pub fn init(core_app: *CoreApp) void {
     // Serial dispatch queue — all IPC handlers run here, no mutexes needed.
     ipc_queue = dispatch_queue_create("com.termsurf.ghost.ipc", null);
 
-    // Initialize maps.
+    // Initialize maps and client list.
     panes = std.StringHashMap(*Pane).init(alloc);
     servers = std.StringHashMap(*Server).init(alloc);
     surface_to_pane = std.AutoHashMap(usize, []const u8).init(alloc);
     tab_to_pane = std.AutoHashMap(i64, []const u8).init(alloc);
+    clients = .{};
 
     // Unix socket listener for TUI/Chromium connections (Issue 700/701).
     initSocket();
@@ -175,11 +174,12 @@ pub fn deinit() void {
     tab_to_pane.deinit();
 
     // Socket cleanup (Issue 700/701).
-    for (&clients) |*c| {
+    for (clients.items) |c| {
         if (c.source) |src| dispatch_source_cancel(src);
         if (c.fd >= 0) std.posix.close(c.fd);
-        c.* = .{};
+        alloc.destroy(c);
     }
+    clients.deinit(alloc);
     if (sock_source) |src| {
         dispatch_source_cancel(src);
         sock_source = null;
@@ -1551,24 +1551,20 @@ fn socketAcceptHandler(_: ?*anyopaque) callconv(.c) void {
         return;
     };
 
-    // Find an empty slot in the connection pool.
-    var slot: ?*ClientConn = null;
-    for (&clients) |*c| {
-        if (c.fd == -1) {
-            slot = c;
-            break;
-        }
-    }
-    const conn = slot orelse {
-        log.err("too many clients, rejecting fd={}", .{client_fd});
+    // Heap-allocate a new connection.
+    const conn = alloc.create(ClientConn) catch {
+        log.err("OOM allocating client, rejecting fd={}", .{client_fd});
         std.posix.close(client_fd);
         return;
     };
+    conn.* = .{ .fd = client_fd };
 
-    conn.fd = client_fd;
-    conn.buf_len = 0;
-    conn.conn_type = .unknown;
-    conn.server = null;
+    clients.append(alloc, conn) catch {
+        log.err("OOM tracking client, rejecting fd={}", .{client_fd});
+        std.posix.close(client_fd);
+        alloc.destroy(conn);
+        return;
+    };
 
     // dispatch_source for reading from client, with per-connection context.
     conn.source = dispatch_source_create(
@@ -1687,19 +1683,12 @@ fn handleClientDisconnect(conn: *ClientConn) void {
                         // Cancel the Chromium ClientConn's dispatch source
                         // before freeing the server to prevent use-after-free
                         // when the dead socket's dispatch source fires.
-                        for (&clients) |*c| {
+                        for (clients.items, 0..) |c, idx| {
                             if (c.conn_type == .chromium and c.server == server) {
-                                if (c.source) |src| {
-                                    dispatch_source_cancel(src);
-                                    c.source = null;
-                                }
-                                if (c.fd >= 0) {
-                                    std.posix.close(c.fd);
-                                    c.fd = -1;
-                                }
-                                c.conn_type = .unknown;
-                                c.server = null;
-                                c.buf_len = 0;
+                                if (c.source) |src| dispatch_source_cancel(src);
+                                if (c.fd >= 0) std.posix.close(c.fd);
+                                _ = clients.swapRemove(idx);
+                                alloc.destroy(c);
                                 break;
                             }
                         }
@@ -1727,12 +1716,14 @@ fn handleClientDisconnect(conn: *ClientConn) void {
         std.posix.close(conn.fd);
     }
 
-    // Reset slot.
-    conn.fd = -1;
-    conn.source = null;
-    conn.buf_len = 0;
-    conn.conn_type = .unknown;
-    conn.server = null;
+    // Remove from list and free.
+    for (clients.items, 0..) |c, idx| {
+        if (c == conn) {
+            _ = clients.swapRemove(idx);
+            break;
+        }
+    }
+    alloc.destroy(conn);
 }
 
 // -- Socket message dispatch (Issue 700) --
