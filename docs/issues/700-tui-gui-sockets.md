@@ -245,3 +245,188 @@ API.
 
 The GUI also rebuilds cleanly with the regenerated protobuf files (adding
 `pane_id` to `ModeChanged`).
+
+### Experiment 2: GUI socket listener
+
+Add a Unix domain socket listener to `xpc.zig`. Accept TUI connections, read
+length-prefixed protobuf messages, dispatch to handler functions. Send replies
+and events back over the socket. XPC remains for Chromium — both transports
+coexist.
+
+#### Changes
+
+**1. Add socket state to `xpc.zig`**
+
+New module-level variables:
+
+```zig
+var sock_fd: std.posix.fd_t = -1;
+var tui_fd: std.posix.fd_t = -1;  // single TUI connection (only one TUI per GUI)
+var tui_buf: [65536]u8 = undefined;
+var tui_buf_len: usize = 0;
+```
+
+Add `web_fd: std.posix.fd_t = -1` to the `Pane` struct. When `web_fd >= 0`, the
+pane's TUI is connected via socket (not XPC). When `web_peer != null`, it's XPC.
+
+**2. Add POSIX and dispatch_source externs**
+
+Zig's `std.posix` provides `socket`, `bind`, `listen`, `close`, `unlink`. For
+`accept`, `read`, and `write` on the socket, use `std.posix` as well.
+
+For async I/O on the `xpc_queue`, add dispatch_source externs:
+
+```zig
+extern "c" fn dispatch_source_create(
+    type: *const anyopaque, handle: usize, mask: u64, queue: ?*anyopaque
+) ?*anyopaque;
+extern "c" fn dispatch_source_set_event_handler_f(
+    source: ?*anyopaque, handler: *const fn (?*anyopaque) callconv(.c) void
+) void;
+extern "c" fn dispatch_source_set_cancel_handler_f(
+    source: ?*anyopaque, handler: ?*const fn (?*anyopaque) callconv(.c) void
+) void;
+extern "c" fn dispatch_resume(object: ?*anyopaque) void;
+extern "c" fn dispatch_source_cancel(source: ?*anyopaque) void;
+extern "c" fn dispatch_set_context(object: ?*anyopaque, context: ?*anyopaque) void;
+extern const _dispatch_source_type_read: anyopaque;
+```
+
+**3. Socket creation in `init()`**
+
+After XPC setup, create the Unix socket listener:
+
+- Build path: `$TMPDIR/termsurf/gui.sock` (release) or
+  `$TMPDIR/termsurf/gui-debug.sock` (debug)
+- `std.fs.cwd().makePath()` the directory
+- `std.posix.unlink()` any stale socket
+- `std.posix.socket(AF.UNIX, SOCK.STREAM, 0)` → `sock_fd`
+- `std.posix.bind()` with `sockaddr_un`
+- `std.posix.listen(sock_fd, 1)` — backlog 1 (only one TUI)
+- Create `dispatch_source(DISPATCH_SOURCE_TYPE_READ, sock_fd)` on `xpc_queue`
+- Set event handler → `acceptHandler`
+- `dispatch_resume`
+
+**4. Accept handler**
+
+When the listener socket is readable:
+
+```
+fn acceptHandler() {
+    tui_fd = std.posix.accept(sock_fd, ...)
+    // Create dispatch_source(READ, tui_fd) on xpc_queue
+    // Set event handler → clientReadHandler
+    // dispatch_resume
+}
+```
+
+Only one TUI connection at a time. If `tui_fd >= 0` already, close the old one.
+
+**5. Client read handler**
+
+When the client socket is readable:
+
+```
+fn clientReadHandler() {
+    n = std.posix.read(tui_fd, tui_buf[tui_buf_len..])
+    if n == 0: // EOF — TUI disconnected
+        handleTuiDisconnect()
+        return
+    tui_buf_len += n
+    // Extract complete length-prefixed messages
+    while tui_buf_len >= 4:
+        msg_len = read_u32_le(tui_buf[0..4])
+        if tui_buf_len < 4 + msg_len: break
+        pb_msg = termsurf__term_surf_message__unpack(null, msg_len, tui_buf[4..])
+        if pb_msg != null:
+            handleSocketMessage(tui_fd, pb_msg)
+            termsurf__term_surf_message__free_unpacked(pb_msg, null)
+        shift tui_buf left by 4 + msg_len
+}
+```
+
+**6. `handleSocketMessage` — protobuf dispatcher**
+
+Switch on `pb_msg.msg_case`:
+
+- `MSG_SET_OVERLAY` → extract fields from `pb_msg.set_overlay`, call existing
+  `handleSetOverlay` logic. Register `web_fd = client_fd` on the new pane
+  (instead of `web_peer` from XPC).
+- `MSG_SET_DEVTOOLS_OVERLAY` → same pattern, register `web_fd`.
+- `MSG_NAVIGATE` → extract `pane_id` + `url`, call existing navigate logic.
+- `MSG_SET_COLOR_SCHEME` → extract `pane_id` + `dark`, forward to Chromium. The
+  TUI already converts scheme→bool (Experiment 1), so the GUI receives a bool
+  directly — skip the scheme string resolution.
+- `MSG_MODE_CHANGED` → extract `pane_id` + `browsing`, call existing logic.
+- `MSG_OPEN_SPLIT` → extract fields, dispatch to main thread.
+- `MSG_HELLO_REQUEST` → look up surface config, build `HelloReply` protobuf,
+  send back over socket.
+- `MSG_QUERY_LAST_REQUEST` → same logic as `handleQueryLast`, build
+  `QueryLastReply` protobuf, send back.
+- `MSG_QUERY_DEVTOOLS_REQUEST` → same logic, build `QueryDevtoolsReply`, send
+  back.
+- `MSG_QUERY_TABS_REQUEST` → same logic, forward to Chromium via XPC, build
+  `QueryTabsReply` protobuf, send back.
+
+For the 6 fire-and-forget handlers, the logic is identical to the existing XPC
+handlers — the only difference is where `web_fd` comes from (socket fd instead
+of XPC peer). To avoid duplicating all the handler code, the implementation will
+construct XPC dictionaries from protobuf fields and feed them into the existing
+`handleMessage()`. This reuses all handler logic unchanged. The key difference:
+when creating a new pane from a socket connection, set `web_fd = client_fd`
+instead of retaining an XPC peer.
+
+For the 4 sync queries, the implementation will add a `socket_reply_fd` thread-
+local that the existing handlers check. If `>= 0`, they build a protobuf reply
+and send it over the socket instead of using `xpc_dictionary_create_reply`.
+
+Actually, simpler: `handleSocketMessage` handles queries directly (doesn't go
+through `handleMessage`), while fire-and-forget messages go through the XPC-dict
+adapter.
+
+**7. `sendProtobuf` helper**
+
+```zig
+fn sendProtobuf(fd: std.posix.fd_t, wrapper: *pb.Termsurf__TermSurfMessage) void {
+    const size = pb.termsurf__term_surf_message__get_packed_size(wrapper);
+    // Stack buffer for small messages, heap for large.
+    var buf: [4096]u8 = undefined;
+    const len_bytes = @as([4]u8, @bitCast(@as(u32, @intCast(size))));
+    // Write 4-byte LE length + packed protobuf.
+    _ = std.posix.write(fd, &len_bytes);
+    pb.termsurf__term_surf_message__pack(wrapper, buf[0..]);
+    _ = std.posix.write(fd, buf[0..size]);
+}
+```
+
+**8. Modify event forwarders**
+
+In `handleLoadingState`, `handleUrlChanged`, `handleTitleChanged`, and
+`sendModeToWeb`: check `p.web_fd >= 0` first. If so, build the corresponding
+protobuf event message and call `sendProtobuf`. Otherwise, use the existing XPC
+path.
+
+**9. TUI disconnect handler**
+
+When the TUI socket closes (read returns 0):
+
+- Find all panes where `web_fd == tui_fd`
+- For each: clean up overlay, close Chromium tab, decrement server pane count
+- Reset `tui_fd = -1`, `tui_buf_len = 0`
+- Cancel the client dispatch_source
+
+**10. Socket cleanup in `deinit()`**
+
+- Close `tui_fd` if open
+- Close `sock_fd` if open
+- Unlink the socket file
+- Cancel dispatch_sources
+
+#### Verification
+
+```bash
+cd gui && zig build
+```
+
+**Pass criterion:** Compiles with zero errors. No runtime test — the TUI and GUI
+have not been tested end-to-end together yet. That is Experiment 3.
