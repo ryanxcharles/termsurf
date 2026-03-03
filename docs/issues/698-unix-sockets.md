@@ -771,3 +771,105 @@ The full 30-message protobuf schema is validated across all three languages. The
 `oneof` wrapper pattern works correctly — type-safe dispatch replaces
 string-based action matching. The schema is ready to be used as the wire format
 when replacing XPC with Unix domain sockets.
+
+### Experiment 3: Unix domain socket round-trip (Zig server ↔ Rust client)
+
+Prove that a Zig server and Rust client can exchange protobuf messages over a
+Unix domain socket. This is the exact pattern TUI (Rust) → GUI (Zig) will use in
+production.
+
+#### Message framing
+
+Unix domain sockets are byte streams — there are no message boundaries. We need
+a framing protocol so the receiver knows where one protobuf message ends and the
+next begins. Use the simplest possible approach: **4-byte little-endian length
+prefix** before each serialized protobuf message.
+
+```
+[4 bytes: message length (u32 LE)] [N bytes: serialized TermSurfMessage]
+```
+
+This is a standard pattern (gRPC uses a similar 5-byte prefix). The 4-byte
+length supports messages up to 4 GB, far more than needed.
+
+#### Socket path
+
+Use `$TMPDIR/termsurf-test.sock` on macOS (where `$XDG_RUNTIME_DIR` is not set).
+In production, this will be `$XDG_RUNTIME_DIR/termsurf/gui.sock` on Linux and
+`$TMPDIR/termsurf/gui.sock` on macOS. For this experiment, a simple hardcoded
+path is fine.
+
+#### Changes
+
+**1. Create `proto/test-socket/server.zig`** — Zig Unix domain socket server
+
+- Bind and listen on `$TMPDIR/termsurf-test.sock` (unlink first if stale)
+- Accept one connection
+- Read a length-prefixed `TermSurfMessage` from the client
+- Assert it's a `HelloRequest` with `pane_id = "pane-1"`
+- Construct a `HelloReply` with `homepage = "https://termsurf.com"`
+- Write it back as a length-prefixed `TermSurfMessage`
+- Close the connection and clean up the socket file
+- Print "Zig server: pass"
+
+Uses POSIX socket API via `@cImport`: `socket()`, `bind()`, `listen()`,
+`accept()`, `read()`, `write()`, `close()`, `unlink()`. Zig has these in
+`std.posix` but the C API is fine too — matches how `gui/` will call them.
+
+**2. Create `proto/test-socket/client.rs`** — Rust Unix domain socket client
+(standalone binary in `proto/test-socket/client/`)
+
+- Connect to `$TMPDIR/termsurf-test.sock` via `std::os::unix::net::UnixStream`
+- Construct a `HelloRequest` with `pane_id = "pane-1"`
+- Serialize with prost and send as length-prefixed bytes
+- Read the length-prefixed reply
+- Deserialize as `TermSurfMessage`, assert it's a `HelloReply` with
+  `homepage = "https://termsurf.com"`
+- Print "Rust client: pass"
+
+**3. Create `proto/test-socket/build.zig`** — builds the Zig server
+
+Same pattern as `proto/test-zig/build.zig`: links protobuf-c, compiles the
+generated C code, adds POSIX socket headers.
+
+**4. Create `proto/test-socket/client/Cargo.toml`** and
+`proto/test-socket/client/build.rs` — builds the Rust client
+
+Same pattern as `proto/test-rust/`: prost + prost-build, compiles
+`termsurf.proto`.
+
+**5. Regenerate protobuf C code into `proto/test-socket/`**
+
+```bash
+protoc --c_out=proto/test-socket --proto_path=proto proto/termsurf.proto
+```
+
+**6. Add `.gitignore` files** for build artifacts in both directories.
+
+#### Verification
+
+Run the server and client in sequence:
+
+```bash
+# Terminal 1: start the Zig server (blocks waiting for connection)
+cd proto/test-socket && zig build run &
+
+# Terminal 2: run the Rust client
+cd proto/test-socket/client && cargo run
+
+# Wait for server to finish
+wait
+```
+
+Expected output:
+
+```
+Zig server: pass
+Rust client: pass
+```
+
+**Pass criterion:** A Rust client sends a length-prefixed protobuf
+`HelloRequest` over a Unix domain socket to a Zig server, which deserializes it,
+sends back a length-prefixed `HelloReply`, and the client deserializes the reply
+with all fields intact. This proves the full stack: socket transport +
+length-prefix framing + protobuf serialization across Zig and Rust.
