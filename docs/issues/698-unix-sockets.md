@@ -397,8 +397,8 @@ Libraries used:
 - **Rust:** prost 0.14.3 with prost-build 0.14.3. Code generation via
   `build.rs`, zero issues.
 - **Zig:** protobuf-c 1.5.2 via C interop (`@cImport`). Generated C code
-  compiles and links cleanly with Zig 0.15.2. The C struct fields are
-  accessible from Zig after dereferencing the `[*c]` pointer.
+  compiles and links cleanly with Zig 0.15.2. The C struct fields are accessible
+  from Zig after dereferencing the `[*c]` pointer.
 - **C++:** libprotobuf 33.4 (installed via Homebrew). Standard
   `SerializeToString` / `ParseFromString` API.
 
@@ -703,8 +703,8 @@ Key design decisions:
   type with both fields avoids duplication. The receiver checks which field is
   populated.
 - **`QueryTabsReply` uses `repeated TabInfo`.** The current XPC implementation
-  uses dynamic keys (`tab_0`, `tab_1`, ...) which is an anti-pattern. A
-  repeated message field is the idiomatic protobuf way.
+  uses dynamic keys (`tab_0`, `tab_1`, ...) which is an anti-pattern. A repeated
+  message field is the idiomatic protobuf way.
 - **No `action` field.** The `oneof` discriminator replaces the string-based
   action dispatch. Type safety instead of string matching.
 - **`oneof` field numbers 1-30.** One per message type, leaving room for future
@@ -738,3 +738,36 @@ Regenerate C++ code from `termsurf.proto`. Update `main.cc` to create a
 **Pass criterion:** The full 30-message schema compiles in all three languages,
 and a `TermSurfMessage` containing a `CreateTab` round-trips correctly through
 serialize/deserialize in each language.
+
+**Result:** Pass
+
+All three tests produce identical output:
+
+```
+Rust: pass (40 bytes)
+Zig:  pass (40 bytes)
+C++:  pass (40 bytes)
+```
+
+The full 30-message schema with `oneof` wrapper compiles and round-trips
+correctly in all three languages. The `TermSurfMessage` containing a `CreateTab`
+(url="https://termsurf.com", pane_id="pane-1", pixel_width=1920,
+pixel_height=1080, dark=true) serializes to 40 bytes and deserializes with all
+fields intact.
+
+Key observations:
+
+- **Rust (prost):** Clean enum-based `oneof` — pattern matching on
+  `Msg::CreateTab(tab)`. Zero unsafe code.
+- **Zig (protobuf-c):** The `oneof` maps to a C union with a `msg_case`
+  discriminator. Accessed via `msg.unnamed_0.create_tab` in Zig. Works but
+  requires pointer dereferencing for the nested message.
+- **C++ (libprotobuf):** Idiomatic `mutable_create_tab()` setter and
+  `msg_case()` discriminator. Cleanest API of the three.
+
+#### Conclusion
+
+The full 30-message protobuf schema is validated across all three languages. The
+`oneof` wrapper pattern works correctly — type-safe dispatch replaces
+string-based action matching. The schema is ready to be used as the wire format
+when replacing XPC with Unix domain sockets.

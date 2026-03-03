@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
 
     // Add the generated protobuf-c source file.
     exe.root_module.addCSourceFile(.{
-        .file = b.path("hello.pb-c.c"),
+        .file = b.path("termsurf.pb-c.c"),
     });
 
     // protobuf-c headers (for both the generated code and main.zig).

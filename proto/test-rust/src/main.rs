@@ -5,12 +5,17 @@ pub mod termsurf {
 }
 
 fn main() {
-    let original = termsurf::Hello {
-        name: "TermSurf".to_string(),
-        id: -42,
-        size: 1024,
-        x: 3.14,
-        active: true,
+    // Create a TermSurfMessage wrapping a CreateTab.
+    let original = termsurf::TermSurfMessage {
+        msg: Some(termsurf::term_surf_message::Msg::CreateTab(
+            termsurf::CreateTab {
+                url: "https://termsurf.com".to_string(),
+                pane_id: "pane-1".to_string(),
+                pixel_width: 1920,
+                pixel_height: 1080,
+                dark: true,
+            },
+        )),
     };
 
     // Serialize.
@@ -18,14 +23,19 @@ fn main() {
     original.encode(&mut buf).unwrap();
 
     // Deserialize.
-    let decoded = termsurf::Hello::decode(buf.as_slice()).unwrap();
+    let decoded = termsurf::TermSurfMessage::decode(buf.as_slice()).unwrap();
 
-    // Verify.
-    assert_eq!(decoded.name, "TermSurf");
-    assert_eq!(decoded.id, -42);
-    assert_eq!(decoded.size, 1024);
-    assert!((decoded.x - 3.14).abs() < f64::EPSILON);
-    assert!(decoded.active);
+    // Verify the oneof round-trips correctly.
+    match decoded.msg {
+        Some(termsurf::term_surf_message::Msg::CreateTab(tab)) => {
+            assert_eq!(tab.url, "https://termsurf.com");
+            assert_eq!(tab.pane_id, "pane-1");
+            assert_eq!(tab.pixel_width, 1920);
+            assert_eq!(tab.pixel_height, 1080);
+            assert!(tab.dark);
+        }
+        other => panic!("Expected CreateTab, got {:?}", other),
+    }
 
     println!("Rust: pass ({} bytes)", buf.len());
 }

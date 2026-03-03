@@ -1,33 +1,35 @@
 #include <cassert>
-#include <cmath>
 #include <cstdio>
 #include <string>
 
-#include "hello.pb.h"
+#include "termsurf.pb.h"
 
 int main() {
-    // Create a Hello message.
-    termsurf::Hello original;
-    original.set_name("TermSurf");
-    original.set_id(-42);
-    original.set_size(1024);
-    original.set_x(3.14);
-    original.set_active(true);
+    // Create a TermSurfMessage wrapping a CreateTab.
+    termsurf::TermSurfMessage original;
+    auto* tab = original.mutable_create_tab();
+    tab->set_url("https://termsurf.com");
+    tab->set_pane_id("pane-1");
+    tab->set_pixel_width(1920);
+    tab->set_pixel_height(1080);
+    tab->set_dark(true);
 
     // Serialize.
     std::string bytes;
     original.SerializeToString(&bytes);
 
     // Deserialize.
-    termsurf::Hello decoded;
+    termsurf::TermSurfMessage decoded;
     assert(decoded.ParseFromString(bytes));
 
-    // Verify fields.
-    assert(decoded.name() == "TermSurf");
-    assert(decoded.id() == -42);
-    assert(decoded.size() == 1024);
-    assert(std::fabs(decoded.x() - 3.14) < 1e-15);
-    assert(decoded.active() == true);
+    // Verify the oneof round-trips correctly.
+    assert(decoded.msg_case() == termsurf::TermSurfMessage::kCreateTab);
+    const auto& ct = decoded.create_tab();
+    assert(ct.url() == "https://termsurf.com");
+    assert(ct.pane_id() == "pane-1");
+    assert(ct.pixel_width() == 1920);
+    assert(ct.pixel_height() == 1080);
+    assert(ct.dark() == true);
 
     printf("C++: pass (%zu bytes)\n", bytes.size());
     return 0;
