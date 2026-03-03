@@ -210,8 +210,35 @@ Unix domain sockets work identically on macOS and Linux. This means:
 
 - The IPC layer is platform-agnostic from day one
 - On Linux, the same socket-based IPC works without any adaptation
-- The GPU compositing layer (CALayerHost vs Wayland subsurfaces vs DMA-BUF)
-  remains platform-specific, but IPC is shared
+- The GPU compositing layer (CALayerHost vs Wayland subsurfaces) remains
+  platform-specific, but IPC is shared
+
+### GPU compositing on Linux
+
+On macOS, CALayerHost lets Window Server composite Chromium's GPU output
+directly into TermSurf's window — zero copies, zero per-frame IPC. The closest
+Linux analog is **Wayland subsurfaces**.
+
+Wayland subsurfaces work the same way: Chromium renders to its own Wayland
+surface, and the Wayland compositor composites that surface at specific
+coordinates within TermSurf's window. The compositor handles GPU buffer sharing
+directly from VRAM, same as Window Server.
+
+Chromium already has full Wayland support via `--ozone-platform=wayland`. The
+rendering side is solved upstream. The integration question is how to get
+Chromium's Wayland surface reparented as a subsurface of TermSurf's window —
+similar to the CALayerHost `contextId` handshake, but using Wayland's
+`wl_subsurface` protocol.
+
+**Wayland is the default display server on every major desktop Linux distro:**
+
+- Fedora — default since 2016 (GNOME) and 2021 (KDE)
+- Ubuntu — default since 22.04 LTS (2022)
+- Debian — default since Debian 10 (2019)
+- Linux Mint — switched to Wayland in 2026
+- KDE Plasma — going Wayland-only, dropping X11 support entirely
+
+X11 is effectively legacy. Targeting Wayland only for a Linux port is safe.
 
 ### What could go wrong
 
