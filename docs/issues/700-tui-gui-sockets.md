@@ -430,3 +430,37 @@ cd gui && zig build
 
 **Pass criterion:** Compiles with zero errors. No runtime test — the TUI and GUI
 have not been tested end-to-end together yet. That is Experiment 3.
+
+#### Result: PASS
+
+`zig build` compiles with zero errors across all three targets (macOS, iOS,
+iOS-simulator).
+
+Key implementation details:
+
+- **Socket infrastructure:** `initSocket()` creates `$TMPDIR/termsurf/gui.sock`
+  (or `gui-debug.sock` in debug), binds, listens(1). `dispatch_source` on the
+  serial `xpc_queue` handles accept and read — same serialization as XPC.
+- **Wire format:** 4-byte LE length prefix + serialized protobuf-c, matching the
+  TUI's Rust side exactly.
+- **XPC-dict adapter:** Fire-and-forget messages (set_overlay, navigate,
+  set_color_scheme, mode_changed, open_split, set_devtools_overlay) construct an
+  XPC dictionary from protobuf fields and call the existing `handleMessage()`.
+  Zero handler duplication.
+- **Direct protobuf replies:** Sync queries (hello, query_last, query_devtools,
+  query_tabs) build protobuf reply structs directly and send them back over the
+  socket via `sendProtobuf()`.
+- **Event forwarders:** `handleLoadingState`, `handleUrlChanged`,
+  `handleTitleChanged`, `sendModeToWeb` check `p.web_fd >= 0` and send protobuf
+  when a socket client is connected, falling back to XPC otherwise.
+- **Cleanup:** `handleTuiDisconnect()` closes all socket-connected panes, closes
+  their Chromium tabs, and kills idle servers. `deinit()` cleans up the socket
+  file and dispatch sources.
+
+Zig ↔ protobuf-c quirks resolved during build:
+
+1. `error` is a Zig keyword → use `reply.@"error"` for the error field.
+2. Anonymous C unions in protobuf-c → access via `.unnamed_0.field_name`.
+3. `msg_case` is `c_uint`, not an enum → use directly, no `@intFromEnum`.
+4. Union field pointers are `[*c]T` → add explicit `*T` type annotation on
+   `orelse` unwrap to enable `.field` access.

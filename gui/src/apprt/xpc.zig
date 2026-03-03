@@ -65,6 +65,15 @@ extern "c" fn dispatch_async_f(queue: ?*anyopaque, context: ?*anyopaque, work: *
 extern const _dispatch_main_q: anyopaque;
 extern "c" fn xpc_connection_set_target_queue(connection: xpc_object_t, queue: ?*anyopaque) void;
 
+// -- Dispatch source C API (Issue 700) --
+
+extern "c" fn dispatch_source_create(source_type: *const anyopaque, handle: usize, mask: usize, queue: ?*anyopaque) ?*anyopaque;
+extern "c" fn dispatch_source_set_event_handler_f(source: ?*anyopaque, handler: *const fn (?*anyopaque) callconv(.c) void) void;
+extern "c" fn dispatch_set_context(object: ?*anyopaque, context: ?*anyopaque) void;
+extern "c" fn dispatch_resume(object: ?*anyopaque) void;
+extern "c" fn dispatch_source_cancel(source: ?*anyopaque) void;
+extern const _dispatch_source_type_read: anyopaque;
+
 // Embedded C API exports (Issue 690).
 extern "c" fn termsurf_surface_split_with_input(ptr: *anyopaque, direction: c_int, input_ptr: [*:0]const u8) void;
 
@@ -89,6 +98,7 @@ const Pane = struct {
     browsing: bool = false,
     inspected_tab_id: i64 = 0, // Issue 684: nonzero = DevTools pane.
     tab_id: i64 = 0, // From tab_ready. 0 = DevTools or not yet assigned.
+    web_fd: std.posix.fd_t = -1, // Issue 700: socket fd for TUI connections.
 };
 
 /// Per-profile server state. Shared by all panes on the same profile.
@@ -129,6 +139,17 @@ var last_browser_pane: ?[]const u8 = null;
 
 /// Reverse lookup: Chromium tab_id → pane UUID string (Issue 694).
 var tab_to_pane: std.AutoHashMap(i64, []const u8) = undefined;
+
+// -- Socket state (Issue 700) --
+
+var sock_fd: std.posix.fd_t = -1;
+var tui_fd: std.posix.fd_t = -1;
+var tui_source: ?*anyopaque = null;
+var tui_buf: [65536]u8 = undefined;
+var tui_buf_len: usize = 0;
+var sock_source: ?*anyopaque = null;
+var sock_path_buf: [256]u8 = undefined;
+var sock_path_len: usize = 0;
 
 // -- Block types --
 
@@ -184,6 +205,9 @@ pub fn init(core_app: *CoreApp) void {
 
     log.info("registered endpoint with xpc-gateway (serial queue)", .{});
 
+    // Unix socket listener for TUI connections (Issue 700).
+    initSocket();
+
     // Debug builds set TERMSURF_XPC_SERVICE so child terminal sessions
     // (and the `web` TUI) know which gateway to connect to (Issue 653).
     if (comptime builtin.mode == .Debug) {
@@ -218,6 +242,28 @@ pub fn deinit() void {
     peer_to_profile.deinit();
     surface_to_pane.deinit();
     tab_to_pane.deinit();
+
+    // Socket cleanup (Issue 700).
+    if (tui_source) |src| {
+        dispatch_source_cancel(src);
+        tui_source = null;
+    }
+    if (tui_fd >= 0) {
+        std.posix.close(tui_fd);
+        tui_fd = -1;
+    }
+    if (sock_source) |src| {
+        dispatch_source_cancel(src);
+        sock_source = null;
+    }
+    if (sock_fd >= 0) {
+        std.posix.close(sock_fd);
+        sock_fd = -1;
+    }
+    if (sock_path_len > 0) {
+        std.posix.unlink(sock_path_buf[0..sock_path_len]) catch {};
+        sock_path_len = 0;
+    }
 
     if (listener != null) {
         xpc_connection_cancel(listener);
@@ -676,6 +722,25 @@ fn handleLoadingState(msg: xpc_object_t) void {
     const tab_id = xpc_dictionary_get_int64(msg, "tab_id");
     const pane_id = tab_to_pane.get(tab_id) orelse return;
     const p = panes.get(pane_id) orelse return;
+
+    // Socket path (Issue 700).
+    if (p.web_fd >= 0) {
+        const state_str = xpc_dictionary_get_string(msg, "state") orelse return;
+        const progress = xpc_dictionary_get_uint64(msg, "progress");
+        var ls: pb.Termsurf__LoadingState = undefined;
+        pb.termsurf__loading_state__init(&ls);
+        ls.tab_id = tab_id;
+        ls.state = @ptrCast(@constCast(state_str));
+        ls.progress = progress;
+        var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+        pb.termsurf__term_surf_message__init(&wrapper);
+        wrapper.msg_case = @intCast(16); // LOADING_STATE
+        wrapper.unnamed_0.loading_state = &ls;
+        sendProtobuf(p.web_fd, &wrapper);
+        return;
+    }
+
+    // XPC path.
     if (p.web_peer == null) return;
 
     const state = xpc_dictionary_get_string(msg, "state") orelse return;
@@ -692,6 +757,23 @@ fn handleUrlChanged(msg: xpc_object_t) void {
     const tab_id = xpc_dictionary_get_int64(msg, "tab_id");
     const pane_id = tab_to_pane.get(tab_id) orelse return;
     const p = panes.get(pane_id) orelse return;
+
+    // Socket path (Issue 700).
+    if (p.web_fd >= 0) {
+        const url_str = xpc_dictionary_get_string(msg, "url") orelse return;
+        var uc: pb.Termsurf__UrlChanged = undefined;
+        pb.termsurf__url_changed__init(&uc);
+        uc.tab_id = tab_id;
+        uc.url = @ptrCast(@constCast(url_str));
+        var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+        pb.termsurf__term_surf_message__init(&wrapper);
+        wrapper.msg_case = @intCast(15); // URL_CHANGED
+        wrapper.unnamed_0.url_changed = &uc;
+        sendProtobuf(p.web_fd, &wrapper);
+        return;
+    }
+
+    // XPC path.
     if (p.web_peer == null) return;
 
     const url = xpc_dictionary_get_string(msg, "url") orelse return;
@@ -706,6 +788,23 @@ fn handleTitleChanged(msg: xpc_object_t) void {
     const tab_id = xpc_dictionary_get_int64(msg, "tab_id");
     const pane_id = tab_to_pane.get(tab_id) orelse return;
     const p = panes.get(pane_id) orelse return;
+
+    // Socket path (Issue 700).
+    if (p.web_fd >= 0) {
+        const title_str = xpc_dictionary_get_string(msg, "title") orelse return;
+        var tc: pb.Termsurf__TitleChanged = undefined;
+        pb.termsurf__title_changed__init(&tc);
+        tc.tab_id = tab_id;
+        tc.title = @ptrCast(@constCast(title_str));
+        var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+        pb.termsurf__term_surf_message__init(&wrapper);
+        wrapper.msg_case = @intCast(17); // TITLE_CHANGED
+        wrapper.unnamed_0.title_changed = &tc;
+        sendProtobuf(p.web_fd, &wrapper);
+        return;
+    }
+
+    // XPC path.
     if (p.web_peer == null) return;
 
     const title = xpc_dictionary_get_string(msg, "title") orelse return;
@@ -1107,6 +1206,20 @@ pub fn isOverlayBrowsing(surface: *CoreSurface) bool {
 // -- Mouse-driven mode switching (Issue 606 Experiment 6) --
 
 fn sendModeToWeb(p: *Pane, browsing: bool) void {
+    // Socket path (Issue 700).
+    if (p.web_fd >= 0) {
+        var mc: pb.Termsurf__ModeChanged = undefined;
+        pb.termsurf__mode_changed__init(&mc);
+        mc.browsing = @intFromBool(browsing);
+        var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+        pb.termsurf__term_surf_message__init(&wrapper);
+        wrapper.msg_case = @intCast(22); // MODE_CHANGED
+        wrapper.unnamed_0.mode_changed = &mc;
+        sendProtobuf(p.web_fd, &wrapper);
+        return;
+    }
+
+    // XPC path.
     if (p.web_peer == null) return;
     const msg = xpc_dictionary_create(null, null, 0);
     xpc_dictionary_set_string(msg, "action", "mode_changed");
@@ -1912,6 +2025,576 @@ fn freeKey(key: []const u8) void {
 /// Convert a nullable C string to a Zig slice, defaulting to "(null)".
 fn str(ptr: ?[*:0]const u8) []const u8 {
     return if (ptr) |p| std.mem.span(p) else "(null)";
+}
+
+// -- Socket listener (Issue 700) --
+
+/// Cast a protobuf-c C string (char*) to the sentinel pointer XPC expects.
+inline fn pbStr(ptr: [*c]u8) [*:0]const u8 {
+    if (ptr) |p| return @ptrCast(p);
+    return "";
+}
+
+fn initSocket() void {
+    const tmpdir = std.posix.getenv("TMPDIR") orelse "/tmp/";
+
+    const sock_name = if (comptime builtin.mode == .Debug) "gui-debug.sock" else "gui.sock";
+
+    const path = std.fmt.bufPrintZ(&sock_path_buf, "{s}termsurf/{s}", .{
+        tmpdir, sock_name,
+    }) catch {
+        log.err("socket path too long", .{});
+        return;
+    };
+    sock_path_len = path.len;
+
+    // Ensure the directory exists.
+    var dir_buf: [256]u8 = undefined;
+    const dir_path = std.fmt.bufPrintZ(&dir_buf, "{s}termsurf", .{tmpdir}) catch return;
+    std.fs.cwd().makePath(dir_path) catch {};
+
+    // Remove stale socket.
+    std.posix.unlink(path) catch {};
+
+    // Create, bind, listen.
+    sock_fd = std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0) catch |err| {
+        log.err("socket() failed: {}", .{err});
+        return;
+    };
+
+    const addr = std.net.Address.initUnix(path) catch |err| {
+        log.err("initUnix failed: {}", .{err});
+        std.posix.close(sock_fd);
+        sock_fd = -1;
+        return;
+    };
+    std.posix.bind(sock_fd, &addr.any, addr.getOsSockLen()) catch |err| {
+        log.err("bind() failed: {}", .{err});
+        std.posix.close(sock_fd);
+        sock_fd = -1;
+        return;
+    };
+    std.posix.listen(sock_fd, 1) catch |err| {
+        log.err("listen() failed: {}", .{err});
+        std.posix.close(sock_fd);
+        sock_fd = -1;
+        return;
+    };
+
+    // dispatch_source for accept on xpc_queue.
+    sock_source = dispatch_source_create(
+        @ptrCast(&_dispatch_source_type_read),
+        @intCast(sock_fd),
+        0,
+        xpc_queue,
+    );
+    if (sock_source) |src| {
+        dispatch_source_set_event_handler_f(src, &socketAcceptHandler);
+        dispatch_resume(src);
+    }
+
+    log.info("socket listener ready at {s}", .{path});
+}
+
+fn socketAcceptHandler(_: ?*anyopaque) callconv(.c) void {
+    // Accept new connection.
+    const client_fd = std.posix.accept(sock_fd, null, null, 0) catch |err| {
+        log.err("accept() failed: {}", .{err});
+        return;
+    };
+
+    // Only one TUI connection at a time. Close old if any.
+    if (tui_fd >= 0) {
+        handleTuiDisconnect();
+    }
+
+    tui_fd = client_fd;
+    tui_buf_len = 0;
+
+    // dispatch_source for reading from client.
+    tui_source = dispatch_source_create(
+        @ptrCast(&_dispatch_source_type_read),
+        @intCast(client_fd),
+        0,
+        xpc_queue,
+    );
+    if (tui_source) |src| {
+        dispatch_source_set_event_handler_f(src, &socketReadHandler);
+        dispatch_resume(src);
+    }
+
+    log.info("TUI connected via socket fd={}", .{client_fd});
+}
+
+fn socketReadHandler(_: ?*anyopaque) callconv(.c) void {
+    if (tui_fd < 0) return;
+
+    const n = std.posix.read(tui_fd, tui_buf[tui_buf_len..]) catch {
+        handleTuiDisconnect();
+        return;
+    };
+    if (n == 0) {
+        // EOF — TUI disconnected.
+        handleTuiDisconnect();
+        return;
+    }
+    tui_buf_len += n;
+
+    // Extract complete length-prefixed messages.
+    while (tui_buf_len >= 4) {
+        const msg_len: usize = @as(u32, @bitCast([4]u8{ tui_buf[0], tui_buf[1], tui_buf[2], tui_buf[3] }));
+        if (tui_buf_len < 4 + msg_len) break;
+
+        const pb_msg = pb.termsurf__term_surf_message__unpack(
+            null,
+            msg_len,
+            @ptrCast(tui_buf[4..].ptr),
+        );
+        if (pb_msg) |msg| {
+            handleSocketMessage(tui_fd, msg);
+            pb.termsurf__term_surf_message__free_unpacked(msg, null);
+        }
+
+        // Shift buffer.
+        const consumed = 4 + msg_len;
+        if (consumed < tui_buf_len) {
+            std.mem.copyForwards(u8, tui_buf[0 .. tui_buf_len - consumed], tui_buf[consumed..tui_buf_len]);
+        }
+        tui_buf_len -= consumed;
+    }
+}
+
+fn handleTuiDisconnect() void {
+    log.info("TUI disconnected fd={}", .{tui_fd});
+
+    // Cancel read source.
+    if (tui_source) |src| {
+        dispatch_source_cancel(src);
+        tui_source = null;
+    }
+
+    // Find and clean up all panes belonging to this TUI connection.
+    var keys_buf: [64][]const u8 = undefined;
+    var count: usize = 0;
+
+    var it = panes.iterator();
+    while (it.next()) |entry| {
+        const p = entry.value_ptr.*;
+        if (p.web_fd >= 0 and p.web_fd == tui_fd and count < keys_buf.len) {
+            keys_buf[count] = entry.key_ptr.*;
+            count += 1;
+        }
+    }
+
+    for (0..count) |i| {
+        const pane_id_key = keys_buf[i];
+        if (panes.get(pane_id_key)) |p| {
+            if (p.overlay_surface) |surface| {
+                surface.clearOverlay();
+                _ = surface_to_pane.remove(@intFromPtr(surface));
+            }
+
+            // Clear focused/last pane refs.
+            if (focused_pane) |fp| {
+                if (std.mem.eql(u8, fp, pane_id_key)) focused_pane = null;
+            }
+            if (last_browser_pane) |lp| {
+                if (std.mem.eql(u8, lp, pane_id_key)) last_browser_pane = null;
+            }
+
+            // Clean up tab_to_pane.
+            if (p.tab_id != 0) _ = tab_to_pane.remove(p.tab_id);
+
+            // Close Chromium tab.
+            if (p.server) |server| {
+                if (p.tab_sent and server.peer != null) {
+                    const close_msg = xpc_dictionary_create(null, null, 0);
+                    xpc_dictionary_set_string(close_msg, "action", "close_tab");
+                    xpc_dictionary_set_int64(close_msg, "tab_id", p.tab_id);
+                    xpc_connection_send_message(server.peer, close_msg);
+                }
+
+                if (server.pane_count > 0) server.pane_count -= 1;
+                if (server.pane_count == 0) {
+                    killServer(server);
+                    if (server.peer) |sp| {
+                        _ = peer_to_profile.remove(@intFromPtr(sp));
+                        xpc_release(sp);
+                    }
+                    _ = servers.remove(server.profile_key);
+                    freeKey(server.profile_key);
+                    alloc.destroy(server);
+                }
+            }
+
+            _ = panes.remove(pane_id_key);
+            freeKey(p.pane_id_key);
+            alloc.destroy(p);
+        }
+    }
+
+    if (tui_fd >= 0) {
+        std.posix.close(tui_fd);
+        tui_fd = -1;
+    }
+    tui_buf_len = 0;
+}
+
+// -- Socket message dispatch (Issue 700) --
+
+fn handleSocketMessage(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const case = pb_msg.msg_case;
+
+    if (case == 19) {
+        // set_overlay
+        handleSocketSetOverlay(client_fd, pb_msg);
+    } else if (case == 20) {
+        // set_devtools_overlay
+        handleSocketSetDevtoolsOverlay(client_fd, pb_msg);
+    } else if (case == 5) {
+        // navigate
+        handleSocketNavigate(pb_msg);
+    } else if (case == 11) {
+        // set_color_scheme
+        handleSocketSetColorScheme(pb_msg);
+    } else if (case == 22) {
+        // mode_changed
+        handleSocketModeChanged(pb_msg);
+    } else if (case == 21) {
+        // open_split
+        handleSocketOpenSplit(pb_msg);
+    } else if (case == 23) {
+        // hello_request
+        handleSocketHello(client_fd, pb_msg);
+    } else if (case == 25) {
+        // query_last_request
+        handleSocketQueryLast(client_fd, pb_msg);
+    } else if (case == 27) {
+        // query_devtools_request
+        handleSocketQueryDevtools(client_fd, pb_msg);
+    } else if (case == 29) {
+        // query_tabs_request
+        handleSocketQueryTabs(client_fd, pb_msg);
+    } else {
+        log.warn("unknown socket message case={}", .{case});
+    }
+}
+
+/// Fire-and-forget: set_overlay via XPC-dict adapter, then set web_fd.
+fn handleSocketSetOverlay(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const m: *pb.Termsurf__SetOverlay = pb_msg.unnamed_0.set_overlay orelse return;
+    const pane_id_z = pbStr(m.pane_id);
+
+    const dict = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(dict, "action", "set_overlay");
+    xpc_dictionary_set_string(dict, "pane_id", pane_id_z);
+    xpc_dictionary_set_string(dict, "url", pbStr(m.url));
+    xpc_dictionary_set_string(dict, "profile", pbStr(m.profile));
+    xpc_dictionary_set_uint64(dict, "col", m.col);
+    xpc_dictionary_set_uint64(dict, "row", m.row);
+    xpc_dictionary_set_uint64(dict, "width", m.width);
+    xpc_dictionary_set_uint64(dict, "height", m.height);
+    xpc_dictionary_set_bool(dict, "browsing", m.browsing != 0);
+    handleMessage(dict);
+
+    // Set web_fd on the pane.
+    const pane_id = std.mem.span(pane_id_z);
+    if (panes.get(pane_id)) |p| {
+        p.web_fd = client_fd;
+    }
+}
+
+/// Fire-and-forget: set_devtools_overlay via XPC-dict adapter, then set web_fd.
+fn handleSocketSetDevtoolsOverlay(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const m: *pb.Termsurf__SetDevtoolsOverlay = pb_msg.unnamed_0.set_devtools_overlay orelse return;
+    const pane_id_z = pbStr(m.pane_id);
+
+    const dict = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(dict, "action", "set_devtools_overlay");
+    xpc_dictionary_set_string(dict, "pane_id", pane_id_z);
+    xpc_dictionary_set_string(dict, "profile", pbStr(m.profile));
+    xpc_dictionary_set_uint64(dict, "col", m.col);
+    xpc_dictionary_set_uint64(dict, "row", m.row);
+    xpc_dictionary_set_uint64(dict, "width", m.width);
+    xpc_dictionary_set_uint64(dict, "height", m.height);
+    xpc_dictionary_set_bool(dict, "browsing", m.browsing != 0);
+    xpc_dictionary_set_int64(dict, "inspected_tab_id", m.inspected_tab_id);
+    handleMessage(dict);
+
+    // Set web_fd on the pane.
+    const pane_id = std.mem.span(pane_id_z);
+    if (panes.get(pane_id)) |p| {
+        p.web_fd = client_fd;
+    }
+}
+
+/// Fire-and-forget: navigate via XPC-dict adapter.
+fn handleSocketNavigate(pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const m: *pb.Termsurf__Navigate = pb_msg.unnamed_0.navigate orelse return;
+
+    const dict = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(dict, "action", "navigate");
+    xpc_dictionary_set_string(dict, "pane_id", pbStr(m.pane_id));
+    xpc_dictionary_set_string(dict, "url", pbStr(m.url));
+    handleMessage(dict);
+}
+
+/// Fire-and-forget: set_color_scheme via XPC-dict adapter.
+fn handleSocketSetColorScheme(pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const m: *pb.Termsurf__SetColorScheme = pb_msg.unnamed_0.set_color_scheme orelse return;
+
+    // The TUI sends dark (bool). Convert back to scheme string for the XPC handler.
+    const scheme: [*:0]const u8 = if (m.dark != 0) "dark" else "light";
+
+    const dict = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(dict, "action", "set_color_scheme");
+    xpc_dictionary_set_string(dict, "pane_id", pbStr(m.pane_id));
+    xpc_dictionary_set_string(dict, "scheme", scheme);
+    handleMessage(dict);
+}
+
+/// Fire-and-forget: mode_changed via XPC-dict adapter.
+fn handleSocketModeChanged(pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const m: *pb.Termsurf__ModeChanged = pb_msg.unnamed_0.mode_changed orelse return;
+
+    const dict = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(dict, "action", "mode_changed");
+    xpc_dictionary_set_string(dict, "pane_id", pbStr(m.pane_id));
+    xpc_dictionary_set_bool(dict, "browsing", m.browsing != 0);
+    handleMessage(dict);
+}
+
+/// Fire-and-forget: open_split via XPC-dict adapter.
+fn handleSocketOpenSplit(pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const m: *pb.Termsurf__OpenSplit = pb_msg.unnamed_0.open_split orelse return;
+
+    const dict = xpc_dictionary_create(null, null, 0);
+    xpc_dictionary_set_string(dict, "action", "open_split");
+    xpc_dictionary_set_string(dict, "pane_id", pbStr(m.pane_id));
+    xpc_dictionary_set_string(dict, "direction", pbStr(m.direction));
+    xpc_dictionary_set_string(dict, "command", pbStr(m.command));
+    handleMessage(dict);
+}
+
+/// Sync query: hello — look up homepage, reply with protobuf.
+fn handleSocketHello(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const req: *pb.Termsurf__HelloRequest = pb_msg.unnamed_0.hello_request orelse return;
+    const pane_id = std.mem.span(pbStr(req.pane_id));
+    log.info("socket hello pane={s}", .{pane_id});
+
+    // Look up surface to read config.
+    var homepage: [*:0]const u8 = "";
+    if (app.findSurfaceByPaneId(pane_id)) |surface| {
+        homepage = surface.core().config.homepage;
+    }
+
+    // Build protobuf reply.
+    var reply: pb.Termsurf__HelloReply = undefined;
+    pb.termsurf__hello_reply__init(&reply);
+    reply.homepage = @ptrCast(@constCast(homepage));
+
+    var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+    pb.termsurf__term_surf_message__init(&wrapper);
+    wrapper.msg_case = @intCast(24); // HELLO_REPLY
+    wrapper.unnamed_0.hello_reply = &reply;
+
+    sendProtobuf(client_fd, &wrapper);
+}
+
+/// Sync query: query_last — find last browser pane, reply with protobuf.
+fn handleSocketQueryLast(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const req: *pb.Termsurf__QueryLastRequest = pb_msg.unnamed_0.query_last_request orelse return;
+    const profile_filter = std.mem.span(pbStr(req.profile));
+    log.info("socket query_last profile_filter={s}", .{profile_filter});
+
+    var reply: pb.Termsurf__QueryLastReply = undefined;
+    pb.termsurf__query_last_reply__init(&reply);
+
+    // Same logic as handleQueryLast.
+    var target_pane: ?*Pane = null;
+    var target_pane_id: []const u8 = "";
+
+    if (last_browser_pane) |lpid| {
+        if (panes.get(lpid)) |p| {
+            if (profile_filter.len > 0 and !std.mem.eql(u8, profile_filter, "(null)")) {
+                if (p.server) |s| {
+                    if (std.mem.eql(u8, s.profile_key, profile_filter)) {
+                        target_pane = p;
+                        target_pane_id = lpid;
+                    }
+                }
+            } else {
+                target_pane = p;
+                target_pane_id = lpid;
+            }
+        }
+    }
+
+    // Null-terminated copies for protobuf-c.
+    var pane_z: [128]u8 = undefined;
+    var prof_z: [128]u8 = undefined;
+
+    if (target_pane) |p| {
+        if (target_pane_id.len < pane_z.len) {
+            @memcpy(pane_z[0..target_pane_id.len], target_pane_id);
+            pane_z[target_pane_id.len] = 0;
+            reply.pane_id = @ptrCast(&pane_z);
+        }
+        reply.tab_id = p.tab_id;
+        if (p.server) |s| {
+            if (s.profile_key.len < prof_z.len) {
+                @memcpy(prof_z[0..s.profile_key.len], s.profile_key);
+                prof_z[s.profile_key.len] = 0;
+                reply.profile = @ptrCast(&prof_z);
+            }
+        }
+    }
+
+    var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+    pb.termsurf__term_surf_message__init(&wrapper);
+    wrapper.msg_case = @intCast(26); // QUERY_LAST_REPLY
+    wrapper.unnamed_0.query_last_reply = &reply;
+
+    sendProtobuf(client_fd, &wrapper);
+}
+
+/// Sync query: query_devtools — validate DevTools request, reply with protobuf.
+fn handleSocketQueryDevtools(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const req: *pb.Termsurf__QueryDevtoolsRequest = pb_msg.unnamed_0.query_devtools_request orelse return;
+    log.info("socket query_devtools inspected_tab_id={d}", .{req.inspected_tab_id});
+
+    var reply: pb.Termsurf__QueryDevtoolsReply = undefined;
+    pb.termsurf__query_devtools_reply__init(&reply);
+
+    var resolved_tab_id: i64 = req.inspected_tab_id;
+
+    // Auto-target (inspected_tab_id == 0).
+    if (resolved_tab_id == 0) {
+        const target_pane_id = last_browser_pane orelse {
+            reply.@"error" = @ptrCast(@constCast(@as([*:0]const u8, "No browser tab found")));
+            var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+            pb.termsurf__term_surf_message__init(&wrapper);
+            wrapper.msg_case = @intCast(28);
+            wrapper.unnamed_0.query_devtools_reply = &reply;
+            sendProtobuf(client_fd, &wrapper);
+            return;
+        };
+        const target = panes.get(target_pane_id) orelse {
+            reply.@"error" = @ptrCast(@constCast(@as([*:0]const u8, "No browser tab found")));
+            var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+            pb.termsurf__term_surf_message__init(&wrapper);
+            wrapper.msg_case = @intCast(28);
+            wrapper.unnamed_0.query_devtools_reply = &reply;
+            sendProtobuf(client_fd, &wrapper);
+            return;
+        };
+        if (target.tab_id == 0) {
+            reply.@"error" = @ptrCast(@constCast(@as([*:0]const u8, "No browser tab found")));
+            var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+            pb.termsurf__term_surf_message__init(&wrapper);
+            wrapper.msg_case = @intCast(28);
+            wrapper.unnamed_0.query_devtools_reply = &reply;
+            sendProtobuf(client_fd, &wrapper);
+            return;
+        }
+        resolved_tab_id = target.tab_id;
+    }
+
+    // Check for duplicate.
+    var dup_it = panes.iterator();
+    while (dup_it.next()) |entry| {
+        const p = entry.value_ptr.*;
+        if (p.inspected_tab_id == resolved_tab_id) {
+            var err_buf: [128]u8 = undefined;
+            const err_msg = std.fmt.bufPrintZ(&err_buf, "Tab {d} already has DevTools open", .{resolved_tab_id}) catch "DevTools already open";
+            reply.@"error" = @ptrCast(@constCast(@as([*:0]const u8, @ptrCast(err_msg.ptr))));
+            var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+            pb.termsurf__term_surf_message__init(&wrapper);
+            wrapper.msg_case = @intCast(28);
+            wrapper.unnamed_0.query_devtools_reply = &reply;
+            sendProtobuf(client_fd, &wrapper);
+            return;
+        }
+    }
+
+    // Success.
+    reply.tab_id = resolved_tab_id;
+    var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+    pb.termsurf__term_surf_message__init(&wrapper);
+    wrapper.msg_case = @intCast(28); // QUERY_DEVTOOLS_REPLY
+    wrapper.unnamed_0.query_devtools_reply = &reply;
+    sendProtobuf(client_fd, &wrapper);
+}
+
+/// Sync query: query_tabs — count GUI panes, forward to Chromium, reply with protobuf.
+fn handleSocketQueryTabs(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermSurfMessage) void {
+    const req: *pb.Termsurf__QueryTabsRequest = pb_msg.unnamed_0.query_tabs_request orelse return;
+    const profile_str = std.mem.span(pbStr(req.profile));
+    log.info("socket query_tabs profile={s}", .{profile_str});
+
+    var reply: pb.Termsurf__QueryTabsReply = undefined;
+    pb.termsurf__query_tabs_reply__init(&reply);
+
+    // Count GUI panes.
+    var gui_pane_count: i64 = 0;
+    {
+        var it = panes.iterator();
+        while (it.next()) |entry| {
+            const p = entry.value_ptr.*;
+            if (p.server) |s| {
+                if (std.mem.eql(u8, s.profile_key, profile_str)) {
+                    gui_pane_count += 1;
+                }
+            }
+        }
+    }
+    reply.gui_panes = gui_pane_count;
+
+    // Forward to Chromium server via XPC.
+    const server = servers.get(profile_str);
+    if (server != null and server.?.peer != null) {
+        const fwd = xpc_dictionary_create(null, null, 0);
+        xpc_dictionary_set_string(fwd, "action", "query_tabs");
+        const chromium_reply = xpc_connection_send_message_with_reply_sync(server.?.peer, fwd);
+        xpc_release(fwd);
+
+        if (chromium_reply != null) {
+            reply.chromium_tabs = xpc_dictionary_get_int64(chromium_reply, "chromium_tabs");
+            reply.chromium_browser = xpc_dictionary_get_int64(chromium_reply, "chromium_browser");
+            reply.chromium_devtools = xpc_dictionary_get_int64(chromium_reply, "chromium_devtools");
+            xpc_release(chromium_reply);
+        }
+    }
+
+    var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+    pb.termsurf__term_surf_message__init(&wrapper);
+    wrapper.msg_case = @intCast(30); // QUERY_TABS_REPLY
+    wrapper.unnamed_0.query_tabs_reply = &reply;
+    sendProtobuf(client_fd, &wrapper);
+}
+
+/// Serialize and send a length-prefixed protobuf message over a socket.
+fn sendProtobuf(fd: std.posix.fd_t, wrapper: *pb.Termsurf__TermSurfMessage) void {
+    const size = pb.termsurf__term_surf_message__get_packed_size(wrapper);
+    if (size > 4096) {
+        log.warn("protobuf message too large: {}", .{size});
+        return;
+    }
+
+    var buf: [4100]u8 = undefined;
+
+    // 4-byte LE length prefix.
+    const len_u32: u32 = @intCast(size);
+    buf[0] = @intCast(len_u32 & 0xFF);
+    buf[1] = @intCast((len_u32 >> 8) & 0xFF);
+    buf[2] = @intCast((len_u32 >> 16) & 0xFF);
+    buf[3] = @intCast((len_u32 >> 24) & 0xFF);
+
+    // Pack the message.
+    _ = pb.termsurf__term_surf_message__pack(wrapper, @ptrCast(buf[4..].ptr));
+
+    // Write atomically.
+    _ = std.posix.write(fd, buf[0 .. 4 + size]) catch {};
 }
 
 /// Issue 699: Force the linker to include protobuf-c objects.
