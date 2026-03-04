@@ -20,18 +20,25 @@ These are non-negotiable. They were chosen after extensive experimentation
 across six generations (ts1–ts5, gui) and hundreds of experiments. Do NOT
 suggest alternatives.
 
-### XPC is the only IPC mechanism on macOS
+### Unix sockets + protobuf for all IPC
 
-All inter-process communication on macOS MUST use XPC. No exceptions. No Unix
-domain sockets, no named pipes, no shared memory.
+All inter-process communication uses Unix domain sockets with length-prefixed
+protobuf messages. The GUI listens on a PID-scoped socket
+(`$TMPDIR/termsurf/gui-{pid}.sock`), and both TUI and Chromium connect to it.
 
-IOSurface textures can only be transferred between processes via Mach ports, and
-Mach ports can only be transferred via XPC. This is a hard macOS kernel
-constraint, not a preference. Every IPC channel uses XPC because the texture
-channel requires it, and a second mechanism would add complexity for zero
-benefit.
+- **TUI → GUI:** The TUI reads the `TERMSURF_SOCKET` env var (set by the GUI) to
+  discover the socket path.
+- **GUI → Chromium:** The GUI passes `--ipc-socket={path}` when launching
+  Chromium server processes.
+- **Wire format:** 4-byte little-endian length prefix + serialized protobuf
+  (`termsurf.proto`).
+- **Serialization:** protobuf-c in Zig (GUI), prost in Rust (TUI), C++ protobuf
+  in Chromium.
 
-Proven in ts3 (Issues 303, 325–350) and ts4 (Issues 403, 407).
+Earlier generations (ts3–ts5) used XPC for IPC. Issues 698–701 replaced XPC with
+sockets, and Issue 702 removed all dead XPC code. CALayerHost compositing
+(zero-copy GPU rendering) does not require XPC — Window Server routes
+`CAContext` layer IDs between processes natively.
 
 ### Every Chromium issue gets its own branch
 
@@ -65,12 +72,12 @@ You evolved through six generations:
 - **ts4** (Chromium Content API experiments) — Proved in-process Chromium works:
   multiple profiles, 60fps. PoC only. Superseded by ts5.
 - **ts5** (Ghostty fork + out-of-process Chromium) — Proved end-to-end Chromium
-  streaming: IOSurface overlay, XPC, mouse/keyboard, focus, text selection. All
+  streaming: IOSurface overlay, IPC, mouse/keyboard, focus, text selection. All
   logic in Swift. Superseded by gui.
 - **gui** (Ghostty fork, Zig-first) — **Active development.** All browser
-  integration in Zig. XPC, CALayerHost compositing, keyboard/mouse forwarding —
-  all in Zig, matching Ghostty's architecture where Swift is a thin macOS
-  wrapper.
+  integration in Zig. Unix socket IPC, CALayerHost compositing, keyboard/mouse
+  forwarding — all in Zig, matching Ghostty's architecture where Swift is a thin
+  macOS wrapper.
 
 The prototypes (ts1–ts5) and cef-rs have been archived. Full documentation is in
 [docs/early-prototypes.md](docs/early-prototypes.md).
@@ -95,22 +102,24 @@ integration lived in Swift (CompositorXPC.swift).
 
 Key architectural decisions:
 
-- **XPC in Zig.** XPC is a C API (`<xpc/xpc.h>`). Zig calls it directly via
-  `@cImport`. No Swift intermediary needed.
+- **Socket IPC in Zig.** All IPC uses Unix domain sockets with length-prefixed
+  protobuf. The GUI listens on `$TMPDIR/termsurf/gui-{pid}.sock`. TUI and
+  Chromium connect as clients. The IPC module (`gui/src/apprt/xpc.zig`) handles
+  accept, framing, dispatch, and per-connection lifecycle.
 - **CALayerHost in Zig.** Browser panes render via `CALayerHost` — a CALayer
   subclass that displays a remote `CAContext` from Chromium's GPU process.
   Window Server composites directly from GPU VRAM. Zero per-frame IPC, zero
   texture copies. The Metal renderer sets up the CALayerHost layer tree in Zig.
 - **Input routing in Zig.** Zig already receives all keyboard/mouse events
   through `Surface.keyCallback()` and `mouseButtonCallback()`. In browse mode,
-  these route to Chromium via XPC instead of to the terminal.
+  these route to Chromium via socket IPC instead of to the terminal.
 - **Single source of truth.** Browse mode, focus state, pane profiles, overlay
   coordinates — all live in Zig's Surface struct.
 
 ### Current State
 
 Your GUI is a Ghostty fork with browser integration built in Zig. Current
-additions: XPC gateway connection and anonymous listener (Issue 601), pink
+additions: IPC gateway and connection management (Issues 601, 698–702), pink
 texture proof-of-concept (Issue 602), live Chromium streaming at 60fps with
 dynamic resize (Issue 603), multi-pane multi-profile server reuse (Issues
 604–605), mouse input forwarding with cursor changes and text selection (Issue
@@ -127,17 +136,16 @@ context-sensitive Esc key navigation (Issue 665), Esc latency fix via unified
 mpsc channel (Issue 666), active pane indicator with borders and desaturation
 (Issues 667–669), click-to-focus without pass-through (Issue 670), app icon
 update (Issue 671), inner border padding (Issue 672), script consolidation
-(Issue 673), configurable homepage (Issue 674), XPC hello message for live
-config (Issue 675), URL normalization (Issue 676), website deps and linting
-(Issues 677–678), MIT license and trademark (Issue 679), dark mode with
-`:colorscheme` command (Issue 680), `:quitall` and subsequence matching (Issue
-681), Chrome DevTools in split panes (Issues 684, 687, 690–691), multi-profile
-tracking fix (Issue 685), tab lifecycle — close tabs when panes close (Issue
-689), `web file` subcommand (Issue 692), smart input resolution (Issue 693),
-replace pane_id with tab_id in Chromium (Issue 694), activation drag suppression
-(Issue 695), double click suppression fix (Issue 696), Unix socket research
-(Issue 698), protobuf-c build integration (Issue 699), TUI↔GUI socket
-replacement (Issue 700), GUI↔Chromium socket replacement (Issue 701).
+(Issue 673), configurable homepage (Issue 674), hello message for live config
+(Issue 675), URL normalization (Issue 676), website deps and linting (Issues
+677–678), MIT license and trademark (Issue 679), dark mode with `:colorscheme`
+command (Issue 680), `:quitall` and subsequence matching (Issue 681), Chrome
+DevTools in split panes (Issues 684, 687, 690–691), multi-profile tracking fix
+(Issue 685), tab lifecycle — close tabs when panes close (Issue 689), `web file`
+subcommand (Issue 692), smart input resolution (Issue 693), replace pane_id with
+tab_id in Chromium (Issue 694), activation drag suppression (Issue 695), double
+click suppression fix (Issue 696), Unix socket + protobuf IPC replacing XPC
+(Issues 698–702).
 
 ### Source Layout
 
