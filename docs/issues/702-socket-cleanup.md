@@ -399,18 +399,88 @@ API; implementation used the correct 0.15 API.
 **Verified:** `zig build` clean. Manual test passed — multiple panes with `web`,
 connections work, close panes, exit.
 
-## Conclusion
+### Experiment 4: PID-scoped socket path
 
-All three parts of Issue 702 are complete:
+Add the GUI's PID to the socket path so multiple GUI instances can run
+simultaneously without conflict.
 
-1. **Experiment 1** — Removed all dead XPC code from the GUI
-   (`gui/src/apprt/xpc.zig`). Net -800 lines.
-2. **Experiment 2** — Removed all dead XPC code from Chromium (5 files) and
-   deleted the XPC gateway daemon, build plumbing, LaunchAgent plists, and
-   deregister script. Net -930 lines across both repos.
-3. **Experiment 3** — Replaced the fixed 16-slot client connection pool with
-   heap-allocated `ArrayList(*ClientConn)`. No connection limit, no
-   pre-allocated memory.
+#### Problem
 
-The codebase is now fully socket-based with no XPC remnants. IPC uses Unix
-domain sockets with length-prefixed protobuf exclusively.
+The socket path is fixed:
+
+```
+$TMPDIR/termsurf/gui.sock       (release)
+$TMPDIR/termsurf/gui-debug.sock (debug)
+```
+
+Two GUI instances fight over the same path — the second unlinks the first's
+socket. This prevents running multiple instances for testing.
+
+#### Design
+
+Include the GUI's PID in the socket filename:
+
+```
+$TMPDIR/termsurf/gui-{pid}.sock
+```
+
+No debug/release distinction needed — PIDs are unique.
+
+Both TUI and Chromium already discover the socket path dynamically:
+
+- **TUI** reads `TERMSURF_SOCKET` env var (set by GUI in `init()`, inherited by
+  child processes). No change needed — it already uses whatever path the GUI
+  sets.
+- **Chromium** receives `--ipc-socket={path}` as a command-line argument (set by
+  GUI in `launchServer()`). No change needed — it already uses whatever path the
+  GUI passes.
+
+The only change is in the GUI's `initSocket()` function.
+
+#### What to change
+
+**`gui/src/apprt/xpc.zig` — `initSocket()`:**
+
+Replace the fixed socket name:
+
+```zig
+const sock_name = if (comptime builtin.mode == .Debug) "gui-debug.sock" else "gui.sock";
+```
+
+With a PID-scoped name:
+
+```zig
+const pid = std.posix.getpid();
+var name_buf: [64]u8 = undefined;
+const sock_name = std.fmt.bufPrintZ(&name_buf, "gui-{d}.sock", .{pid}) catch return;
+```
+
+**TUI fallback path (`tui/src/ipc.rs`):**
+
+The TUI has a hardcoded fallback when `TERMSURF_SOCKET` is not set:
+
+```rust
+format!("{}/termsurf/gui.sock", tmpdir.trim_end_matches('/'))
+```
+
+This fallback can't work with PID-scoped paths (it doesn't know the GUI's PID).
+But the fallback is only hit when running the TUI standalone without a GUI
+parent — in normal operation, the GUI always sets `TERMSURF_SOCKET`. The
+fallback should be removed or changed to scan for any `gui-*.sock` file in the
+directory, but that's a separate concern. For now, leave the fallback as-is — it
+will just fail to connect, which is the correct behavior when no GUI is running.
+
+#### What stays the same
+
+- `TERMSURF_SOCKET` env var mechanism — already dynamic.
+- `--ipc-socket={path}` Chromium arg — already dynamic.
+- Socket directory (`$TMPDIR/termsurf/`) — unchanged.
+- All protobuf wire format — unchanged.
+
+#### Verification
+
+1. `cd gui && zig build` — must compile clean.
+2. Launch GUI instance A, note its socket path in logs.
+3. Launch GUI instance B, note its socket path — must be different.
+4. Both instances accept TUI and Chromium connections independently.
+5. Close one instance — the other continues working.
