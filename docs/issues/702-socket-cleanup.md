@@ -460,15 +460,24 @@ const sock_name = std.fmt.bufPrintZ(&name_buf, "gui-{d}.sock", .{pid}) catch ret
 The TUI has a hardcoded fallback when `TERMSURF_SOCKET` is not set:
 
 ```rust
-format!("{}/termsurf/gui.sock", tmpdir.trim_end_matches('/'))
+let sock_path = std::env::var("TERMSURF_SOCKET").unwrap_or_else(|_| {
+    let tmpdir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
+    format!("{}/termsurf/gui.sock", tmpdir.trim_end_matches('/'))
+});
 ```
 
-This fallback can't work with PID-scoped paths (it doesn't know the GUI's PID).
-But the fallback is only hit when running the TUI standalone without a GUI
-parent — in normal operation, the GUI always sets `TERMSURF_SOCKET`. The
-fallback should be removed or changed to scan for any `gui-*.sock` file in the
-directory, but that's a separate concern. For now, leave the fallback as-is — it
-will just fail to connect, which is the correct behavior when no GUI is running.
+Remove the fallback. If `TERMSURF_SOCKET` is not set, the TUI should fail with
+an error — it means no GUI is running. Replace with:
+
+```rust
+let sock_path = match std::env::var("TERMSURF_SOCKET") {
+    Ok(p) => p,
+    Err(_) => {
+        eprintln!("TERMSURF_SOCKET not set — is TermSurf running?");
+        return None;
+    }
+};
+```
 
 #### What stays the same
 
