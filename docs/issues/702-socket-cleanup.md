@@ -498,3 +498,33 @@ let sock_path = match std::env::var("TERMSURF_SOCKET") {
   guessing a path.
 
 **Verified:** `zig build` and `cargo build` both clean. Manual test passed.
+
+## Conclusion
+
+Issues 698–701 replaced all IPC with Unix sockets + protobuf, but left dead XPC
+code throughout the codebase and a fixed-size connection pool. This issue
+cleaned up all the remnants and made the socket infrastructure production-ready.
+
+**Experiment 1** removed ~800 lines of dead XPC code from the GUI
+(`gui/src/apprt/xpc.zig`) — gateway/listener infrastructure, 15 extern
+declarations, 3 block types, 10 dead functions, XPC fallback branches in every
+send function, and reverse-lookup maps. Renamed `xpc_queue` → `ipc_queue`.
+
+**Experiment 2** removed ~660 lines of dead XPC code from Chromium (5 files) —
+`StartDynamicMode()`, per-tab XPC connections, `CloseTab`/`HandleQueryTabs` XPC
+handlers, and all XPC fallback branches in the tab observer. Also deleted the
+XPC gateway daemon (`gui/xpc-gateway/`), its build plumbing in
+`TermSurfXcodebuild.zig`, `SMAppService` registration in `AppDelegate.swift`, 4
+LaunchAgent plists, and `scripts/deregister.sh`.
+
+**Experiment 3** replaced the fixed 16-slot `ClientConn` array (1MB
+pre-allocated) with heap-allocated `std.ArrayList(*ClientConn)`. Connections are
+allocated on accept and freed on disconnect — no fixed limit, no wasted memory.
+
+**Experiment 4** added the GUI's PID to the socket filename (`gui-{pid}.sock`),
+enabling multiple simultaneous GUI instances. Also removed the TUI's hardcoded
+socket path fallback — `TERMSURF_SOCKET` must be set or the TUI errors out.
+
+The codebase is now fully socket-based with zero XPC remnants. All IPC uses Unix
+domain sockets with length-prefixed protobuf. Multiple GUI instances can run
+side by side without conflict.
