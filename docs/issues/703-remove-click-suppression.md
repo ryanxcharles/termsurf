@@ -1,0 +1,85 @@
+# Issue 703: Remove click-to-activate suppression
+
+## Goal
+
+Mouse clicks and drags should always propagate to content immediately, without
+requiring a separate "activation" click first. Clicking a browser pane in
+control mode should switch to browse mode AND forward the click. Clicking an
+unfocused pane should focus it AND forward the click. The current behavior —
+requiring one click to activate, then another to interact — is annoying in
+practice.
+
+Keyboard focus still follows the click (the clicked pane becomes the active pane
+for keyboard input), but mouse events should never be swallowed.
+
+## Background
+
+Three issues built the current suppression system:
+
+- **Issue 670** — Added `pane_activation` flag. When a pane gains focus, the
+  first click is consumed (press and release swallowed). Rationale: panes should
+  behave like OS windows, where click-to-focus doesn't pass through.
+- **Issue 695** — Extended suppression to drags. Added early return in
+  `cursorPosCallback` when `pane_activation` is set, so mouse movement during
+  the suppressed click doesn't leak to Chromium.
+- **Issue 696** — Fixed double-suppression bug where both `pane_activation` and
+  `overlay_activation` fired on the same click, requiring three clicks to
+  interact. Removed the redundant `overlay_activation` set from
+  `paneFocusChanged()` and added keyboard-clears-suppression in `keyCallback()`.
+
+The overlay_activation flag (from Issue 606 Experiment 8) is now dead code — it
+is never set to `true` anywhere. Issue 696 removed the only place that set it.
+
+## Analysis
+
+There are two suppression mechanisms to remove:
+
+### 1. Pane activation suppression (`pane_activation` flag)
+
+When a pane gains focus via `focusCallback()`, `pane_activation` is set to
+`true`. This causes:
+
+- `mouseButtonCallback()` (line ~4055): returns early, swallowing press+release.
+- `cursorPosCallback()` (line ~4867): returns early, swallowing drag.
+- `keyCallback()` (line ~2740): clears the flag (keyboard engagement bypass).
+
+**To remove:** Delete the flag declaration, all places that set it, and all
+guards that check it.
+
+### 2. Overlay activation suppression (`overlay_activation` flag)
+
+This flag was designed to suppress the click that transitions from control mode
+to browse mode. It is now dead code — never set to `true` — but the guards still
+exist:
+
+- `mouseButtonCallback()` (line ~4069): checks `overlay_activation` to suppress
+  press+release on the overlay.
+- `mouseButtonCallback()` (line ~4120): clears `overlay_activation` when click
+  misses overlay.
+
+**To remove:** Delete the flag declaration and all guards.
+
+### 3. Control→browse click forwarding
+
+Currently, when a browser pane is in control mode and the user clicks the
+overlay, `notifyOverlayClicked()` switches to browse mode but does NOT forward
+the click to Chromium. The click is consumed by the mode switch.
+
+After removing suppression, this click should both switch to browse mode AND
+forward to Chromium, so the user's click lands where they intended.
+
+## Code locations
+
+All in `gui/src/Surface.zig` unless noted:
+
+| Location                         | What                                                          | Action                           |
+| -------------------------------- | ------------------------------------------------------------- | -------------------------------- |
+| Line ~283                        | `overlay_activation: bool = false` declaration                | Delete                           |
+| Line ~287                        | `pane_activation: bool = false` declaration                   | Delete                           |
+| Line ~2740                       | `self.mouse.pane_activation = false` in `keyCallback()`       | Delete                           |
+| Line ~3417-3420                  | Set `pane_activation = true` in `focusCallback()`             | Delete                           |
+| Line ~4055-4061                  | `pane_activation` guard in `mouseButtonCallback()`            | Delete                           |
+| Line ~4069-4074                  | `overlay_activation` guard in `mouseButtonCallback()`         | Delete                           |
+| Line ~4120                       | `overlay_activation = false` clear in `mouseButtonCallback()` | Delete                           |
+| Line ~4867                       | `pane_activation` guard in `cursorPosCallback()`              | Delete                           |
+| `gui/src/apprt/xpc.zig` ~801-809 | `notifyOverlayClicked()`                                      | Modify to also forward the click |

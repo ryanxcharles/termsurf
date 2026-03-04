@@ -303,6 +303,8 @@ git subtree pull --prefix=gui upstream main -m "Merge upstream Ghostty into gui"
   sockets
 - `docs/issues/702-socket-cleanup.md` — Dead XPC removal and unlimited client
   connections
+- `docs/issues/703-remove-click-suppression.md` — Remove click-to-activate
+  suppression
 - `docs/xdg.md` — XDG directory pattern and conventions
 
 ### Early Prototypes (ts1–ts5)
