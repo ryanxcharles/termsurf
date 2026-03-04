@@ -41,3 +41,16 @@ ready.
       that API. Fixed `blink.mojom.BadgeService` in Issue 655, but there are
       likely many more. Need to systematically review all Mojo interfaces.
       Discovered in Issue 655 Experiment 1.
+
+## 1.0 Milestone
+
+- [ ] Roamium and Zoomium
+- [ ] Gecko and Webkit (Recko and Zecko? Rebkit and Zebkit?)
+- [ ] All elementary web features
+- [ ] Multi-tab in one pane
+- [ ] Scrollback webviews
+- [ ] Partially hidden webviews
+- [ ] Documentation web page
+- [ ] Ghostboard, Wezboard, and Babycat
+- [ ] Whitepaper
+- [ ] Hosted passwords and bookmarks
