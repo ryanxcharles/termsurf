@@ -232,6 +232,299 @@ the previous one is complete.
 8. **Retire the old profile server** — Delete `chromium_profile_server/` from
    the active Chromium branch once all three bindings are verified equivalent.
 
+## Experiments
+
+### Experiment 1: Extract `libtermsurf_content` C library
+
+Factor the existing profile server's Chromium integration into a reusable C
+library. The library wraps Content API classes behind opaque handles and C
+function pointers, so any language with a C FFI can drive Chromium without
+touching C++.
+
+The library does NOT handle socket IPC or protobuf. Each binding package
+(Roamium, Zoomium, Plusium) provides its own `main()`, socket connection,
+message serialization, and dispatch. The C library is a pure Content API
+wrapper.
+
+#### Chromium branch
+
+Create `146.0.7650.0-issue-704` from `146.0.7650.0-issue-702` (the current
+working branch with socket IPC).
+
+#### C API
+
+All functions live in `libtermsurf_content.h`. Opaque handle types hide C++
+objects:
+
+```c
+#ifndef LIBTERMSURF_CONTENT_H_
+#define LIBTERMSURF_CONTENT_H_
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Opaque handles */
+typedef void* ts_browser_context_t;
+typedef void* ts_web_contents_t;
+
+/* --- Lifecycle --- */
+
+/* Initialize Chromium and run the message loop. Blocks until shutdown.
+   Call ts_set_on_initialized() before this to get a callback when ready.
+   argc/argv are forwarded to Chromium's ContentMain(). */
+int ts_content_main(int argc, const char** argv);
+
+/* Called on the UI thread when the browser is initialized and ready
+   for profile/tab creation. */
+void ts_set_on_initialized(void (*callback)(void* user_data), void* user_data);
+
+/* Post a task to the UI thread. Thread-safe — call from any thread.
+   This is how bindings marshal socket messages onto the UI thread. */
+void ts_post_task(void (*task)(void* user_data), void* user_data);
+
+/* Shut down Chromium and exit the message loop. */
+void ts_quit(void);
+
+/* --- Profiles --- */
+
+/* Create a BrowserContext with persistent storage at the given path.
+   Returns an opaque handle. */
+ts_browser_context_t ts_create_browser_context(const char* path);
+
+/* Destroy a BrowserContext and release its resources. */
+void ts_destroy_browser_context(ts_browser_context_t ctx);
+
+/* --- Tabs --- */
+
+/* Create a WebContents (tab) in the given BrowserContext.
+   Navigates to url. Sets initial viewport to width×height pixels.
+   dark=true sets prefers-color-scheme:dark. */
+ts_web_contents_t ts_create_web_contents(
+    ts_browser_context_t ctx,
+    const char* url,
+    int width,
+    int height,
+    bool dark);
+
+/* Create a DevTools WebContents inspecting another tab. */
+ts_web_contents_t ts_create_devtools_web_contents(
+    ts_browser_context_t ctx,
+    ts_web_contents_t inspected,
+    int width,
+    int height,
+    bool dark);
+
+/* Close and destroy a WebContents. */
+void ts_destroy_web_contents(ts_web_contents_t wc);
+
+/* --- Navigation --- */
+
+void ts_load_url(ts_web_contents_t wc, const char* url);
+
+/* --- Input --- */
+
+/* type: 0=down, 1=up. button: 0=left, 1=right, 2=middle. */
+void ts_forward_mouse_event(
+    ts_web_contents_t wc,
+    int type,
+    int button,
+    int x,
+    int y,
+    int click_count,
+    int modifiers);
+
+void ts_forward_mouse_move(
+    ts_web_contents_t wc,
+    int x,
+    int y,
+    int modifiers);
+
+/* phase/momentum_phase: 0=none, 1=began, 2=changed, 3=ended. */
+void ts_forward_scroll_event(
+    ts_web_contents_t wc,
+    int x,
+    int y,
+    float delta_x,
+    float delta_y,
+    int phase,
+    int momentum_phase,
+    bool precise,
+    int modifiers);
+
+/* type: 0=down, 1=up, 2=repeat. keycode is Windows VK code. */
+void ts_forward_key_event(
+    ts_web_contents_t wc,
+    int type,
+    int keycode,
+    const char* utf8,
+    int modifiers);
+
+/* --- State --- */
+
+void ts_set_focus(ts_web_contents_t wc, bool focused);
+void ts_set_color_scheme(ts_web_contents_t wc, bool dark);
+void ts_set_view_size(ts_web_contents_t wc, int width, int height);
+
+/* --- Callbacks --- */
+
+/* All callbacks fire on the UI thread. The wc parameter identifies which tab
+   changed. Bindings use these to send protobuf responses over the socket. */
+
+void ts_set_on_ca_context_id(
+    void (*cb)(ts_web_contents_t wc, uint32_t ca_context_id,
+               int width, int height, void* user_data),
+    void* user_data);
+
+void ts_set_on_url_changed(
+    void (*cb)(ts_web_contents_t wc, const char* url, void* user_data),
+    void* user_data);
+
+void ts_set_on_loading_state(
+    void (*cb)(ts_web_contents_t wc, const char* state, int progress,
+               void* user_data),
+    void* user_data);
+
+void ts_set_on_title_changed(
+    void (*cb)(ts_web_contents_t wc, const char* title, void* user_data),
+    void* user_data);
+
+void ts_set_on_cursor_changed(
+    void (*cb)(ts_web_contents_t wc, const char* cursor_type, void* user_data),
+    void* user_data);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif  /* LIBTERMSURF_CONTENT_H_ */
+```
+
+Key design decisions:
+
+- **`ts_post_task()`** — Thread-safe trampoline to the UI thread. Bindings read
+  from the socket on a background thread and post tasks to the UI thread for
+  Content API calls. This matches how the current profile server works
+  (`PostTask` to UI thread from socket reader thread).
+- **`user_data` on all callbacks** — Standard C pattern for closures. Bindings
+  pass their context (socket fd, state pointers) through this.
+- **String-based state/cursor values** — Matches the protobuf schema (e.g.,
+  `"loading"`, `"done"`, `"pointer"`, `"text"`). Avoids enum mapping at the C
+  boundary.
+- **No socket/protobuf in the library** — Keeps the C library focused. Each
+  binding handles protocol natively in its own language.
+
+#### File structure
+
+```
+chromium/src/content/libtermsurf_content/
+├── BUILD.gn                         # Static library target
+├── libtermsurf_content.h            # Public C header (above)
+├── libtermsurf_content.cc           # Implementation
+├── ts_main_delegate.h               # ContentMainDelegate subclass
+├── ts_main_delegate.cc
+├── ts_main_delegate_mac.h           # macOS-specific (Dock hiding)
+├── ts_main_delegate_mac.mm
+├── ts_browser_client.h              # ContentBrowserClient subclass
+├── ts_browser_client.cc
+├── ts_browser_main_parts.h          # BrowserMainParts subclass
+├── ts_browser_main_parts.cc
+├── ts_browser_main_parts_mac.mm     # macOS window setup
+├── ts_web_contents_delegate.h       # WebContentsDelegate (new-tab suppression)
+├── ts_web_contents_delegate.cc
+├── ts_tab_observer.h                # WebContentsObserver (state callbacks)
+├── ts_tab_observer.cc
+├── ts_compositor_bridge_mac.h       # PersistentCompositor for CAContext
+├── ts_compositor_bridge_mac.mm
+└── ts_ca_layer_bridge_mac.mm        # CALayer bridging
+```
+
+#### Implementation
+
+The implementation extracts logic from the current profile server
+(`chromium_profile_server/browser/shell_browser_main_parts.cc`). The key
+difference: instead of handling socket IPC internally, the library exposes C
+functions and fires C callbacks. The binding handles the protocol.
+
+**`ts_main_delegate`** — Subclasses `ContentMainDelegate` directly (not
+`ShellMainDelegate`). Creates `ts_browser_client`. Handles macOS Dock hiding via
+`--hidden` flag.
+
+**`ts_browser_client`** — Subclasses `ContentBrowserClient`. Creates
+`ts_browser_main_parts`. Registers Mojo binder stubs (BadgeService, etc.) to
+prevent renderer crashes.
+
+**`ts_browser_main_parts`** — Subclasses `BrowserMainParts`. On
+`PostCreateMainMessageLoop()`, fires the `on_initialized` callback. Manages the
+list of `BrowserContext` instances and `WebContents` instances.
+
+**`ts_web_contents_delegate`** — Handles `OpenURLFromTab()` to keep navigation
+in the same tab (no new windows). Handles `CloseContents()`.
+
+**`ts_tab_observer`** — Observes `DidFinishNavigation`, `LoadProgressChanged`,
+`DidStopLoading`, `TitleWasSet`, `DidChangeCursor`. Fires the registered C
+callbacks.
+
+**`ts_compositor_bridge`** — Manages the persistent compositor
+(`AcceleratedWidgetMacNSView` protocol) that provides stable CAContext IDs
+across navigations. Same pattern as the current profile server.
+
+#### BUILD.gn
+
+```gn
+static_library("libtermsurf_content") {
+  sources = [
+    "libtermsurf_content.cc",
+    "libtermsurf_content.h",
+    "ts_main_delegate.cc",
+    "ts_main_delegate.h",
+    "ts_browser_client.cc",
+    "ts_browser_client.h",
+    "ts_browser_main_parts.cc",
+    "ts_browser_main_parts.h",
+    "ts_web_contents_delegate.cc",
+    "ts_web_contents_delegate.h",
+    "ts_tab_observer.cc",
+    "ts_tab_observer.h",
+  ]
+
+  if (is_mac) {
+    sources += [
+      "ts_main_delegate_mac.h",
+      "ts_main_delegate_mac.mm",
+      "ts_browser_main_parts_mac.mm",
+      "ts_compositor_bridge_mac.h",
+      "ts_compositor_bridge_mac.mm",
+      "ts_ca_layer_bridge_mac.mm",
+    ]
+  }
+
+  deps = [
+    "//content/public/app",
+    "//content/public/browser",
+    "//content/public/common",
+    "//content/public/gpu",
+    "//content/public/renderer",
+    "//content/public/utility",
+    "//ui/display",
+    "//ui/events",
+    "//ui/gfx",
+  ]
+}
+```
+
+#### Verification
+
+1. `cd chromium/src && autoninja -C out/Default libtermsurf_content` — must
+   compile clean as a static library.
+2. Write a minimal `test_main.cc` that links `libtermsurf_content`, calls
+   `ts_set_on_initialized()` with a callback that creates a profile and tab,
+   then calls `ts_content_main()`. The callback should print "initialized" and
+   call `ts_quit()`. Verify it starts, prints, and exits cleanly.
+
 ## End state
 
 When this issue is complete, the Chromium Profile Server (a Content Shell fork)
