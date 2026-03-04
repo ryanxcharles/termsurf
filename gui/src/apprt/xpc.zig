@@ -1486,7 +1486,9 @@ inline fn pbStr(ptr: [*c]u8) [*:0]const u8 {
 fn initSocket() void {
     const tmpdir = std.posix.getenv("TMPDIR") orelse "/tmp/";
 
-    const sock_name = if (comptime builtin.mode == .Debug) "gui-debug.sock" else "gui.sock";
+    const pid = std.c.getpid();
+    var name_buf: [64]u8 = undefined;
+    const sock_name = std.fmt.bufPrintZ(&name_buf, "gui-{d}.sock", .{pid}) catch return;
 
     const path = std.fmt.bufPrintZ(&sock_path_buf, "{s}termsurf/{s}", .{
         tmpdir, sock_name,

@@ -486,10 +486,15 @@ let sock_path = match std::env::var("TERMSURF_SOCKET") {
 - Socket directory (`$TMPDIR/termsurf/`) — unchanged.
 - All protobuf wire format — unchanged.
 
-#### Verification
+#### Results
 
-1. `cd gui && zig build` — must compile clean.
-2. Launch GUI instance A, note its socket path in logs.
-3. Launch GUI instance B, note its socket path — must be different.
-4. Both instances accept TUI and Chromium connections independently.
-5. Close one instance — the other continues working.
+**Result: Success.**
+
+- **GUI** (`gui/src/apprt/xpc.zig`): Socket path changed from fixed
+  `gui.sock`/`gui-debug.sock` to `gui-{pid}.sock` using `std.c.getpid()`.
+  Multiple GUI instances now get unique socket paths.
+- **TUI** (`tui/src/ipc.rs`): Removed hardcoded fallback path. If
+  `TERMSURF_SOCKET` is not set, prints an error and returns `None` instead of
+  guessing a path.
+
+**Verified:** `zig build` and `cargo build` both clean. Manual test passed.

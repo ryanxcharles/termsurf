@@ -37,10 +37,13 @@ pub struct CompositorConnection {
 impl CompositorConnection {
     /// Connect to the TermSurf app via Unix domain socket.
     pub fn connect(tx: mpsc::Sender<super::LoopEvent>) -> Option<Self> {
-        let sock_path = std::env::var("TERMSURF_SOCKET").unwrap_or_else(|_| {
-            let tmpdir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
-            format!("{}/termsurf/gui.sock", tmpdir.trim_end_matches('/'))
-        });
+        let sock_path = match std::env::var("TERMSURF_SOCKET") {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("TERMSURF_SOCKET not set — is TermSurf running?");
+                return None;
+            }
+        };
 
         let stream = UnixStream::connect(&sock_path).ok()?;
         let reader = stream.try_clone().ok()?;
