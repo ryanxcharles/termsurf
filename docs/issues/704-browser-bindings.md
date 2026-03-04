@@ -196,6 +196,15 @@ own protocol-compatible browser engines (Gecko, WebKit) and plug them in.
 | ---------------------- | ---------------------------- |
 | `proto/termsurf.proto` | Protobuf message definitions |
 
+## End state
+
+When this issue is complete, the Chromium Profile Server (a Content Shell fork)
+is deleted from the active codebase. It will remain in historical branches and
+patches for reference, but it is no longer actively maintained. The three
+binding packages — Roamium, Zoomium, and Plusium — fully replace it.
+`libtermsurf_content` becomes the single maintained Chromium integration layer,
+and all browser binaries are thin wrappers around it.
+
 ## Ideas for experiments
 
 These are rough ideas, not commitments. Each experiment will be designed when
@@ -524,12 +533,3 @@ static_library("libtermsurf_content") {
    `ts_set_on_initialized()` with a callback that creates a profile and tab,
    then calls `ts_content_main()`. The callback should print "initialized" and
    call `ts_quit()`. Verify it starts, prints, and exits cleanly.
-
-## End state
-
-When this issue is complete, the Chromium Profile Server (a Content Shell fork)
-is deleted from the active codebase. It will remain in historical branches and
-patches for reference, but it is no longer actively maintained. The three
-binding packages — Roamium, Zoomium, and Plusium — fully replace it.
-`libtermsurf_content` becomes the single maintained Chromium integration layer,
-and all browser binaries are thin wrappers around it.
