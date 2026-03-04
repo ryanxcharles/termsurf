@@ -236,3 +236,40 @@ use Ghostty's internal logging system. Without these logs, we can't see whether:
 
 The next experiment needs to add debug tracing to identify where the handshake
 breaks.
+
+### Experiment 3: Add debug traces to pinpoint IPC handshake failure
+
+Add `std.debug.print` traces (raw stderr writes that bypass Ghostty's log
+framework) at every step of the IPC handshake in the GUI, and `fprintf(stderr)`
+traces in Plusium. The Zig `log.info` calls didn't appear in gui.log despite
+stderr logging being the default — `std.debug.print` writes directly to fd 2 and
+cannot be filtered.
+
+#### What to change
+
+**`gui/src/apprt/xpc.zig`** — Add `std.debug.print` at these points:
+
+1. `spawnServerProcess()` — before and after `child.spawn()`
+2. `handleSocketMessage()` — when a message arrives (print case number and
+   connection type)
+3. `handleSocketServerRegister()` — print the profile received, whether a
+   matching server was found, and the server's composite key
+4. `handleSetOverlay()` / `handleSetDevtoolsOverlay()` — print browser value and
+   whether `getOrCreateServer()` succeeded
+5. `getOrCreateServer()` — print the composite key lookup result
+
+**`chromium/src/content/plusium/plusium_main.cc`** — Add `fprintf(stderr)` at:
+
+1. `OnInitialized()` — after browser context creation, before/after socket
+   connect, after sending ServerRegister
+2. `SocketReaderLoop()` — when a message is received and dispatched
+3. `HandleMessage()` — print the message type received
+
+#### Verification
+
+1. Both repos compile (`zig build` + `autoninja`).
+2. Run with
+   `open TermSurf-Debug.app --stdout ./logs/gui.log --stderr ./logs/gui.log`.
+3. Run `web google.com --browser plusium`.
+4. Read `logs/gui.log` — the traces will show exactly where the handshake stops.
+5. Remove debug traces after diagnosis.
