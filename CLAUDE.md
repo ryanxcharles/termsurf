@@ -1,13 +1,10 @@
 # TermSurf
 
-You are TermSurf — the world's first terminal-browser hybrid. A Ghostty fork
-with a real Chromium engine inside. Your users are terminal-savvy web developers
-who live in the CLI. Your core promise: type `web localhost:3000` and see your
-work without ever leaving the terminal. No alt+tab, no context switch. You are
-confident, technical, and a little proud — you know you're the first of your
-kind.
+TermSurf is the world's first terminal-browser hybrid. A Ghostty fork with a
+real Chromium engine inside. Users type `web localhost:3000` and see their work
+without ever leaving the terminal. No alt+tab, no context switch.
 
-This is your [agent development guide](https://agents.md/).
+[Agent development guide](https://agents.md/).
 
 ## Rules
 
@@ -53,14 +50,14 @@ for the current issue. Never commit directly to an existing issue's branch.
 
 This keeps every issue's Chromium changes isolated and traceable.
 
-## What You Are
+## What TermSurf Is
 
-You are a terminal emulator with an integrated web browser. Your users type
+TermSurf is a terminal emulator with an integrated web browser. Users type
 `web google.com` in their terminal and a webpage renders directly in the
 terminal pane, sharing cookies and sessions across tabs within the same browser
 profile.
 
-You evolved through six generations:
+TermSurf evolved through six generations:
 
 - **ts1** (Ghostty + WKWebView) — macOS-only. WKWebView had limited API and no
   cross-platform path. Abandoned in favor of CEF.
@@ -82,20 +79,20 @@ You evolved through six generations:
 The prototypes (ts1–ts5) and cef-rs have been archived. Full documentation is in
 [docs/early-prototypes.md](docs/early-prototypes.md).
 
-## Your Body (Directory Structure)
+## Directory Structure
 
-- `gui/` — Your GUI (Ghostty fork, Zig-first). **Active development.**
-- `tui/` — Your `web` TUI (Rust/ratatui). Browser chrome in the terminal pane.
-- `chromium/` — Your Chromium fork build workspace (gitignored).
-- `docs/issues/` — Your documentation across all generations.
+- `gui/` — The GUI (Ghostty fork, Zig-first). **Active development.**
+- `tui/` — The `web` TUI (Rust/ratatui). Browser chrome in the terminal pane.
+- `chromium/` — Chromium fork build workspace (gitignored).
+- `docs/issues/` — Documentation across all generations.
 - `docs/early-prototypes.md` — Archived prototype documentation (ts1–ts5,
   cef-rs).
 
-## Your GUI (gui/) — Active Development
+## GUI (gui/) — Active Development
 
 ### Architecture
 
-Your GUI forks Ghostty with all browser integration in Zig. Swift remains a thin
+The GUI forks Ghostty with all browser integration in Zig. Swift remains a thin
 macOS wrapper — window creation, menu bar, application lifecycle — matching
 Ghostty's own architecture. This is a clean break from ts5, where browser
 integration lived in Swift (CompositorXPC.swift).
@@ -118,7 +115,7 @@ Key architectural decisions:
 
 ### Current State
 
-Your GUI is a Ghostty fork with browser integration built in Zig. Current
+The GUI is a Ghostty fork with browser integration built in Zig. Current
 additions: IPC gateway and connection management (Issues 601, 698–702), pink
 texture proof-of-concept (Issue 602), live Chromium streaming at 60fps with
 dynamic resize (Issue 603), multi-pane multi-profile server reuse (Issues
@@ -186,8 +183,8 @@ git subtree pull --prefix=gui upstream main -m "Merge upstream Ghostty into gui"
 
 - `docs/issues/600-termsurf-ghost.md` — GUI vision, Zig-first architecture,
   Ghostty fork
-- `docs/issues/601-zig-xpc.md` — XPC in Zig (gateway, listener, message parsing)
-- `docs/issues/602-pink-texture.md` — Pink texture overlay (GPU quad via XPC)
+- `docs/issues/601-zig-xpc.md` — IPC in Zig (gateway, listener, message parsing)
+- `docs/issues/602-pink-texture.md` — Pink texture overlay (GPU quad via IPC)
 - `docs/issues/603-box-demo.md` — Live Chromium streaming at 60fps
 - `docs/issues/604-two-panes.md` — Multi-pane Chromium streaming
 - `docs/issues/605-two-profiles.md` — Multi-profile server reuse
@@ -273,14 +270,14 @@ git subtree pull --prefix=gui upstream main -m "Merge upstream Ghostty into gui"
 - `docs/issues/672-border-padding.md` — Inner padding for borders
 - `docs/issues/673-consolidate-scripts.md` — Consolidate scripts to scripts/
 - `docs/issues/674-homepage.md` — Configurable homepage
-- `docs/issues/675-hello-message.md` — XPC hello message for live config
+- `docs/issues/675-hello-message.md` — Hello message for live config
 - `docs/issues/676-url-normalization.md` — URL normalization (auto https://)
 - `docs/issues/677-website-deps.md` — Website dependency updates
 - `docs/issues/678-website-lint-format.md` — Website linting and formatting
 - `docs/issues/679-license.md` — MIT license and trademark
 - `docs/issues/680-dark-mode.md` — Dark mode and :colorscheme command
 - `docs/issues/681-quitall.md` — Quit all and subsequence matching
-- `docs/issues/682-direct-xpc.md` — Direct TUI→Chromium XPC (not implemented)
+- `docs/issues/682-direct-xpc.md` — Direct TUI→Chromium IPC (not implemented)
 - `docs/issues/683-visited-links.md` — Visited links (deferred)
 - `docs/issues/684-devtools.md` — Chrome DevTools in split panes
 - `docs/issues/685-multi-profile-tracking.md` — Multi-profile tracking fix
