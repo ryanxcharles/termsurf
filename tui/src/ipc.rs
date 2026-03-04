@@ -72,6 +72,7 @@ impl CompositorConnection {
         url: &str,
         profile: &str,
         browsing: bool,
+        browser: &str,
     ) {
         self.send(Msg::SetOverlay(proto::SetOverlay {
             pane_id: pane_id.into(),
@@ -82,6 +83,7 @@ impl CompositorConnection {
             url: url.into(),
             profile: profile.into(),
             browsing,
+            browser: browser.into(),
         }));
     }
 
@@ -96,6 +98,7 @@ impl CompositorConnection {
         inspected_tab_id: i64,
         profile: &str,
         browsing: bool,
+        browser: &str,
     ) {
         self.send(Msg::SetDevtoolsOverlay(proto::SetDevtoolsOverlay {
             pane_id: pane_id.into(),
@@ -106,6 +109,7 @@ impl CompositorConnection {
             profile: profile.into(),
             browsing,
             inspected_tab_id,
+            browser: browser.into(),
         }));
     }
 

@@ -177,6 +177,10 @@ struct Cli {
     /// Browser profile name
     #[arg(long, global = true)]
     profile: Option<String>,
+
+    /// Browser binary to use ("chromium", "plusium", or absolute path)
+    #[arg(long, global = true)]
+    browser: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -202,6 +206,7 @@ fn main() -> io::Result<()> {
 
     let profile_arg = cli.profile; // Option<String> — None if no --profile given
     let profile = profile_arg.clone().unwrap_or_else(|| "default".to_string());
+    let browser = cli.browser.unwrap_or_default();
 
     // Validate profile name: lowercase alphanumeric, starts with a letter.
     if profile.is_empty()
@@ -397,6 +402,7 @@ fn main() -> io::Result<()> {
                         inspected_tab_id,
                         &profile,
                         mode == Mode::Browse,
+                        &browser,
                     );
                 } else {
                     conn.send_set_overlay(
@@ -408,6 +414,7 @@ fn main() -> io::Result<()> {
                         &url,
                         &profile,
                         mode == Mode::Browse,
+                        &browser,
                     );
                 }
             }
@@ -598,7 +605,14 @@ fn main() -> io::Result<()> {
                                                 command_error = Some(msg);
                                             }
                                             Ok(_) => {
-                                                let cmd = format!("{} devtools", current_exe);
+                                                let cmd = if browser.is_empty() {
+                                                    format!("{} devtools", current_exe)
+                                                } else {
+                                                    format!(
+                                                        "{} devtools --browser {}",
+                                                        current_exe, browser
+                                                    )
+                                                };
                                                 conn.send_open_split(pid, &direction, &cmd);
                                             }
                                         }

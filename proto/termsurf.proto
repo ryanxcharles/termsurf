@@ -190,6 +190,7 @@ message SetOverlay {
   string url = 6;
   string profile = 7;
   bool browsing = 8;
+  string browser = 9;
 }
 
 message SetDevtoolsOverlay {
@@ -201,6 +202,7 @@ message SetDevtoolsOverlay {
   string profile = 6;
   bool browsing = 7;
   int64 inspected_tab_id = 8;
+  string browser = 9;
 }
 
 message OpenSplit {
@@ -224,6 +226,7 @@ message HelloRequest {
 
 message HelloReply {
   string homepage = 1;
+  repeated string browsers = 2;
 }
 
 message QueryLastRequest {

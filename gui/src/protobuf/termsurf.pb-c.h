@@ -421,10 +421,11 @@ struct  Termsurf__SetOverlay
   char *url;
   char *profile;
   protobuf_c_boolean browsing;
+  char *browser;
 };
 #define TERMSURF__SET_OVERLAY__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&termsurf__set_overlay__descriptor) \
-, (char *)protobuf_c_empty_string, 0, 0, 0, 0, (char *)protobuf_c_empty_string, (char *)protobuf_c_empty_string, 0 }
+, (char *)protobuf_c_empty_string, 0, 0, 0, 0, (char *)protobuf_c_empty_string, (char *)protobuf_c_empty_string, 0, (char *)protobuf_c_empty_string }
 
 
 struct  Termsurf__SetDevtoolsOverlay
@@ -438,10 +439,11 @@ struct  Termsurf__SetDevtoolsOverlay
   char *profile;
   protobuf_c_boolean browsing;
   int64_t inspected_tab_id;
+  char *browser;
 };
 #define TERMSURF__SET_DEVTOOLS_OVERLAY__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&termsurf__set_devtools_overlay__descriptor) \
-, (char *)protobuf_c_empty_string, 0, 0, 0, 0, (char *)protobuf_c_empty_string, 0, 0 }
+, (char *)protobuf_c_empty_string, 0, 0, 0, 0, (char *)protobuf_c_empty_string, 0, 0, (char *)protobuf_c_empty_string }
 
 
 struct  Termsurf__OpenSplit
@@ -487,10 +489,12 @@ struct  Termsurf__HelloReply
 {
   ProtobufCMessage base;
   char *homepage;
+  size_t n_browsers;
+  char **browsers;
 };
 #define TERMSURF__HELLO_REPLY__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&termsurf__hello_reply__descriptor) \
-, (char *)protobuf_c_empty_string }
+, (char *)protobuf_c_empty_string, 0,NULL }
 
 
 struct  Termsurf__QueryLastRequest

@@ -71,13 +71,15 @@ const Pane = struct {
     inspected_tab_id: i64 = 0, // Issue 684: nonzero = DevTools pane.
     tab_id: i64 = 0, // From tab_ready. 0 = DevTools or not yet assigned.
     web_fd: std.posix.fd_t = -1, // Issue 700: socket fd for TUI connections.
+    browser: []const u8 = "", // Issue 704: browser name for this pane.
 };
 
-/// Per-profile server state. Shared by all panes on the same profile.
+/// Per-(profile, browser) server state. Shared by all panes on the same profile+browser.
 const Server = struct {
     process: ?std.process.Child = null,
     fd: std.posix.fd_t = -1, // Issue 701: socket fd.
     profile_key: []const u8 = "", // heap-allocated, also the key in `servers`
+    browser: []const u8 = "", // Issue 704: resolved browser name.
     pane_count: usize = 0,
 };
 
@@ -89,8 +91,11 @@ var ipc_queue: ?*anyopaque = null;
 /// Active panes, keyed by pane UUID string.
 var panes: std.StringHashMap(*Pane) = undefined;
 
-/// Active servers, keyed by profile name.
+/// Active servers, keyed by "{profile}\x00{browser}" composite key.
 var servers: std.StringHashMap(*Server) = undefined;
+
+/// Browser registry: name → absolute path. Issue 704.
+var browser_paths: std.StringHashMap([]const u8) = undefined;
 
 /// Reverse lookup: CoreSurface pointer address → pane UUID string (Issue 606).
 var surface_to_pane: std.AutoHashMap(usize, []const u8) = undefined;
@@ -134,9 +139,13 @@ pub fn init(core_app: *CoreApp) void {
     // Initialize maps and client list.
     panes = std.StringHashMap(*Pane).init(alloc);
     servers = std.StringHashMap(*Server).init(alloc);
+    browser_paths = std.StringHashMap([]const u8).init(alloc);
     surface_to_pane = std.AutoHashMap(usize, []const u8).init(alloc);
     tab_to_pane = std.AutoHashMap(i64, []const u8).init(alloc);
     clients = .{};
+
+    // Populate browser registry (Issue 704).
+    initBrowserRegistry();
 
     // Unix socket listener for TUI/Chromium connections (Issue 700/701).
     initSocket();
@@ -156,6 +165,7 @@ pub fn deinit() void {
         const p = entry.value_ptr.*;
         if (p.overlay_surface) |surface| surface.clearOverlay();
         freeKey(p.pane_id_key);
+        if (p.browser.len > 0) alloc.free(@constCast(p.browser));
         alloc.destroy(p);
     }
     panes.deinit();
@@ -166,9 +176,11 @@ pub fn deinit() void {
         const s = entry.value_ptr.*;
         killServer(s);
         freeKey(s.profile_key);
+        if (s.browser.len > 0) alloc.free(s.browser);
         alloc.destroy(s);
     }
     servers.deinit();
+    browser_paths.deinit();
 
     surface_to_pane.deinit();
     tab_to_pane.deinit();
@@ -238,14 +250,15 @@ fn handleSetOverlay(msg: xpc_object_t) void {
     const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
     const url = str(xpc_dictionary_get_string(msg, "url"));
     const profile = str(xpc_dictionary_get_string(msg, "profile"));
+    const browser = str(xpc_dictionary_get_string(msg, "browser"));
     const col = xpc_dictionary_get_uint64(msg, "col");
     const row = xpc_dictionary_get_uint64(msg, "row");
     const width = xpc_dictionary_get_uint64(msg, "width");
     const height = xpc_dictionary_get_uint64(msg, "height");
     const browsing = xpc_dictionary_get_bool(msg, "browsing");
 
-    log.info("set_overlay pane={s} col={} row={} w={} h={} url={s} profile={s} browsing={}", .{
-        pane_id, col, row, width, height, url, profile, browsing,
+    log.info("set_overlay pane={s} col={} row={} w={} h={} url={s} profile={s} browser={s} browsing={}", .{
+        pane_id, col, row, width, height, url, profile, browser, browsing,
     });
 
     // Look up the surface by pane ID.
@@ -330,8 +343,11 @@ fn handleSetOverlay(msg: xpc_object_t) void {
             pane_id, new_pixel_w, new_pixel_h,
         });
 
-        // Get or create server for this profile.
-        if (getOrCreateServer(profile)) |server| {
+        // Store browser on pane for DevTools auto-targeting (Issue 704).
+        p.browser = alloc.dupe(u8, browser) catch "";
+
+        // Get or create server for this (profile, browser) pair.
+        if (getOrCreateServer(profile, browser)) |server| {
             p.server = server;
             server.pane_count += 1;
 
@@ -349,6 +365,7 @@ fn handleSetOverlay(msg: xpc_object_t) void {
 fn handleSetDevtoolsOverlay(msg: xpc_object_t) void {
     const pane_id = str(xpc_dictionary_get_string(msg, "pane_id"));
     const profile = str(xpc_dictionary_get_string(msg, "profile"));
+    const browser = str(xpc_dictionary_get_string(msg, "browser"));
     const col = xpc_dictionary_get_uint64(msg, "col");
     const row = xpc_dictionary_get_uint64(msg, "row");
     const width = xpc_dictionary_get_uint64(msg, "width");
@@ -356,8 +373,8 @@ fn handleSetDevtoolsOverlay(msg: xpc_object_t) void {
     const browsing = xpc_dictionary_get_bool(msg, "browsing");
     const inspected_tab_id = xpc_dictionary_get_int64(msg, "inspected_tab_id");
 
-    log.info("set_devtools_overlay pane={s} inspected_tab_id={d} profile={s}", .{
-        pane_id, inspected_tab_id, profile,
+    log.info("set_devtools_overlay pane={s} inspected_tab_id={d} profile={s} browser={s}", .{
+        pane_id, inspected_tab_id, profile, browser,
     });
 
     // Look up the surface by pane ID.
@@ -463,7 +480,7 @@ fn handleSetDevtoolsOverlay(msg: xpc_object_t) void {
                     }
                 }
             }
-        } else if (getOrCreateServer(profile)) |server| {
+        } else if (getOrCreateServer(profile, browser)) |server| {
             p.server = server;
             server.pane_count += 1;
 
@@ -833,31 +850,112 @@ pub fn notifyNonOverlayClicked(surface: *CoreSurface) void {
     sendFocusChanged(pane_id_key, false);
 }
 
+/// Extract profile name from composite server key "{profile}\x00{browser}".
+fn serverProfile(server: *const Server) []const u8 {
+    const key = server.profile_key;
+    for (key, 0..) |c, i| {
+        if (c == 0) return key[0..i];
+    }
+    return key;
+}
+
+// -- Browser registry (Issue 704) --
+
+fn initBrowserRegistry() void {
+    const home = std.posix.getenv("HOME") orelse return;
+
+    // Dev fallback paths for known browsers.
+    const browsers = [_]struct { name: []const u8, suffix: []const u8 }{
+        .{ .name = "chromium", .suffix = "/dev/termsurf/chromium/src/out/Default/Chromium Profile Server.app/Contents/MacOS/Chromium Profile Server" },
+        .{ .name = "plusium", .suffix = "/dev/termsurf/chromium/src/out/Default/plusium" },
+    };
+
+    for (&browsers) |b| {
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "{s}{s}", .{ home, b.suffix }) catch continue;
+
+        // Check if binary exists.
+        if (std.fs.accessAbsolute(path, .{})) {
+            const name = alloc.dupe(u8, b.name) catch continue;
+            const path_owned = alloc.dupe(u8, path) catch {
+                alloc.free(name);
+                continue;
+            };
+            browser_paths.put(name, path_owned) catch {
+                alloc.free(name);
+                alloc.free(path_owned);
+                continue;
+            };
+            log.info("browser registered: {s} → {s}", .{ name, path_owned });
+        } else |_| {}
+    }
+}
+
+/// Build composite server key: "{profile}\x00{browser}".
+fn buildServerKey(profile: []const u8, browser: []const u8) ?[]u8 {
+    const key = alloc.alloc(u8, profile.len + 1 + browser.len) catch return null;
+    @memcpy(key[0..profile.len], profile);
+    key[profile.len] = 0;
+    @memcpy(key[profile.len + 1 ..], browser);
+    return key;
+}
+
+/// Resolve a browser specifier to an absolute path.
+/// Empty → "chromium" (default). Starts with "/" → absolute path. Otherwise → registry lookup.
+fn resolveBrowserPath(browser: []const u8) ?[]const u8 {
+    const name = if (browser.len == 0) "chromium" else browser;
+    if (name.len > 0 and name[0] == '/') return name;
+    return browser_paths.get(name);
+}
+
 // -- Server lifecycle --
 
-fn getOrCreateServer(profile: []const u8) ?*Server {
-    if (servers.get(profile)) |server| {
+fn getOrCreateServer(profile: []const u8, browser: []const u8) ?*Server {
+    const effective_browser: []const u8 = if (browser.len == 0) "chromium" else browser;
+
+    // Build composite key for lookup.
+    var key_buf: [512]u8 = undefined;
+    const key_len = profile.len + 1 + effective_browser.len;
+    if (key_len > key_buf.len) return null;
+    @memcpy(key_buf[0..profile.len], profile);
+    key_buf[profile.len] = 0;
+    @memcpy(key_buf[profile.len + 1 .. key_len], effective_browser);
+    const lookup_key = key_buf[0..key_len];
+
+    if (servers.get(lookup_key)) |server| {
         return server;
     }
 
-    // Create new server for this profile.
-    const profile_key = alloc.dupe(u8, profile) catch return null;
-    const server = alloc.create(Server) catch {
+    // Resolve browser path.
+    const browser_path = resolveBrowserPath(effective_browser) orelse {
+        log.err("unknown browser: {s}", .{effective_browser});
+        return null;
+    };
+
+    // Create new server for this (profile, browser) pair.
+    const profile_key = buildServerKey(profile, effective_browser) orelse return null;
+    const browser_owned = alloc.dupe(u8, effective_browser) catch {
         alloc.free(profile_key);
         return null;
     };
-    server.* = .{ .profile_key = profile_key };
+    const server = alloc.create(Server) catch {
+        alloc.free(profile_key);
+        alloc.free(browser_owned);
+        return null;
+    };
+    server.* = .{ .profile_key = profile_key, .browser = browser_owned };
     servers.put(profile_key, server) catch {
         alloc.free(profile_key);
+        alloc.free(browser_owned);
         alloc.destroy(server);
         return null;
     };
 
-    spawnServerProcess(server);
+    spawnServerProcess(server, browser_path);
     return server;
 }
 
-fn spawnServerProcess(server: *Server) void {
+fn spawnServerProcess(server: *Server, browser_path: []const u8) void {
     const home = std.posix.getenv("HOME") orelse {
         log.err("HOME not set, cannot spawn server", .{});
         return;
@@ -874,42 +972,13 @@ fn spawnServerProcess(server: *Server) void {
         return;
     };
 
-    // Resolution order: bundle → env var → dev fallback.
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const server_path = blk: {
-        // 1. Check inside app bundle (release/install builds).
-        var exe_buf: [std.fs.max_path_bytes]u8 = undefined;
-        if (std.fs.selfExePath(&exe_buf)) |exe| {
-            // Walk up 3 components: termsurf → MacOS → Contents → bundle root.
-            var dir: []const u8 = exe;
-            var i: usize = 0;
-            while (i < 3) : (i += 1) {
-                dir = std.fs.path.dirname(dir) orelse break;
-            }
-            if (i == 3) {
-                const helpers_path = std.fmt.bufPrintZ(
-                    &path_buf,
-                    "{s}/Contents/Chromium/Chromium Profile Server.app/Contents/MacOS/Chromium Profile Server",
-                    .{dir},
-                ) catch null;
-                if (helpers_path) |p| {
-                    if (std.fs.accessAbsolute(p[0..p.len], .{})) {
-                        break :blk helpers_path;
-                    } else |_| {}
-                }
-            }
-        } else |_| {}
-        // 2. Check environment variable override.
-        if (std.posix.getenv("TERMSURF_CHROMIUM_SERVER")) |p| {
-            break :blk std.fmt.bufPrintZ(&path_buf, "{s}", .{p}) catch null;
-        }
-        // 3. Dev fallback.
-        break :blk std.fmt.bufPrintZ(
-            &path_buf,
-            "{s}/dev/termsurf/chromium/src/out/Default/Chromium Profile Server.app/Contents/MacOS/Chromium Profile Server",
-            .{home},
-        ) catch null;
-    } orelse {
+    // Null-terminate the browser path for process spawn.
+    var server_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const server_path = std.fmt.bufPrintZ(
+        &server_path_buf,
+        "{s}",
+        .{browser_path},
+    ) catch {
         log.err("server path too long", .{});
         return;
     };
@@ -925,7 +994,7 @@ fn spawnServerProcess(server: *Server) void {
     const data_arg = std.fmt.bufPrintZ(
         &data_arg_buf,
         "--user-data-dir={s}/termsurf/" ++ (if (comptime builtin.mode == .Debug) "debug/" else "") ++ "chromium-profiles/{s}",
-        .{ data_home, server.profile_key },
+        .{ data_home, serverProfile(server) },
     ) catch {
         log.err("data dir path too long", .{});
         return;
@@ -970,7 +1039,7 @@ fn spawnServerProcess(server: *Server) void {
         .{state_home},
     ) catch return;
 
-    log.info("spawning server profile={s}", .{server.profile_key});
+    log.info("spawning server profile={s} browser={s}", .{ serverProfile(server), server.browser });
 
     var child = std.process.Child.init(
         &.{ server_path, ipc_arg, data_arg, hidden_arg, logging_arg, logfile_arg },
@@ -982,7 +1051,7 @@ fn spawnServerProcess(server: *Server) void {
     };
 
     server.process = child;
-    log.info("server spawned pid={d} profile={s}", .{ child.id, server.profile_key });
+    log.info("server spawned pid={d} profile={s} browser={s}", .{ child.id, serverProfile(server), server.browser });
 }
 
 fn killServer(server: *Server) void {
@@ -1455,6 +1524,7 @@ fn cleanupPane(pane_id_key: []const u8) void {
             surface.clearOverlay();
             _ = surface_to_pane.remove(@intFromPtr(surface));
         }
+        if (p.browser.len > 0) alloc.free(@constCast(p.browser));
         _ = panes.remove(pane_id_key);
         alloc.destroy(p);
         alloc.free(pane_id_key);
@@ -1697,12 +1767,14 @@ fn handleClientDisconnect(conn: *ClientConn) void {
 
                         _ = servers.remove(server.profile_key);
                         freeKey(server.profile_key);
+                        if (server.browser.len > 0) alloc.free(server.browser);
                         alloc.destroy(server);
                     }
                 }
 
                 _ = panes.remove(pane_id_key);
                 freeKey(p.pane_id_key);
+                if (p.browser.len > 0) alloc.free(@constCast(p.browser));
                 alloc.destroy(p);
             }
         }
@@ -1710,7 +1782,7 @@ fn handleClientDisconnect(conn: *ClientConn) void {
         // Clear the server's socket fd.
         if (conn.server) |server| {
             server.fd = -1;
-            log.info("chromium server disconnected profile={s}", .{server.profile_key});
+            log.info("chromium server disconnected profile={s} browser={s}", .{ serverProfile(server), server.browser });
         }
     }
 
@@ -1801,29 +1873,41 @@ fn handleSocketMessage(conn: *ClientConn, pb_msg: *pb.Termsurf__TermSurfMessage)
 }
 
 /// ServerRegister from a Chromium server via socket (Issue 701).
+/// The server sends its profile name. We match it to a server that was spawned
+/// but hasn't registered yet (fd == -1) with a matching profile (Issue 704).
 fn handleSocketServerRegister(conn: *ClientConn, pb_msg: *pb.Termsurf__TermSurfMessage) void {
     const m: *pb.Termsurf__ServerRegister = pb_msg.unnamed_0.server_register orelse return;
     const profile = std.mem.span(pbStr(m.profile));
     log.info("socket server_register profile={s} fd={}", .{ profile, conn.fd });
 
-    const server = servers.get(profile) orelse {
+    // Find a server with matching profile that hasn't registered yet.
+    var server: ?*Server = null;
+    var sit = servers.iterator();
+    while (sit.next()) |entry| {
+        const s = entry.value_ptr.*;
+        if (s.fd == -1 and std.mem.eql(u8, serverProfile(s), profile)) {
+            server = s;
+            break;
+        }
+    }
+    const srv = server orelse {
         log.warn("socket server_register for unknown profile={s}", .{profile});
         return;
     };
 
     // Store the socket fd on the server.
-    server.fd = conn.fd;
-    conn.server = server;
+    srv.fd = conn.fd;
+    conn.server = srv;
 
     // Flush all pending tabs for this server (mirrors handleServerRegister).
     var it = panes.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr.*;
-        if (p.server == server and !p.tab_sent) {
+        if (p.server == srv and !p.tab_sent) {
             if (p.inspected_tab_id > 0) {
-                sendCreateDevToolsTab(p, server);
+                sendCreateDevToolsTab(p, srv);
             } else if (p.pending_url_len > 0) {
-                sendCreateTab(p, server);
+                sendCreateTab(p, srv);
             } else {
                 continue;
             }
@@ -1844,6 +1928,7 @@ fn handleSocketSetOverlay(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermS
     xpc_dictionary_set_string(dict, "pane_id", pane_id_z);
     xpc_dictionary_set_string(dict, "url", pbStr(m.url));
     xpc_dictionary_set_string(dict, "profile", pbStr(m.profile));
+    xpc_dictionary_set_string(dict, "browser", pbStr(m.browser));
     xpc_dictionary_set_uint64(dict, "col", m.col);
     xpc_dictionary_set_uint64(dict, "row", m.row);
     xpc_dictionary_set_uint64(dict, "width", m.width);
@@ -1867,6 +1952,7 @@ fn handleSocketSetDevtoolsOverlay(client_fd: std.posix.fd_t, pb_msg: *pb.Termsur
     xpc_dictionary_set_string(dict, "action", "set_devtools_overlay");
     xpc_dictionary_set_string(dict, "pane_id", pane_id_z);
     xpc_dictionary_set_string(dict, "profile", pbStr(m.profile));
+    xpc_dictionary_set_string(dict, "browser", pbStr(m.browser));
     xpc_dictionary_set_uint64(dict, "col", m.col);
     xpc_dictionary_set_uint64(dict, "row", m.row);
     xpc_dictionary_set_uint64(dict, "width", m.width);
@@ -1942,10 +2028,24 @@ fn handleSocketHello(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermSurfMe
         homepage = surface.core().config.homepage;
     }
 
+    // Build browsers list from registry (Issue 704).
+    // Stack-allocated array of pointers (max 16 browsers).
+    var browser_ptrs_buf: [16]?[*:0]u8 = .{null} ** 16;
+    var n_browsers: usize = 0;
+    var bit = browser_paths.iterator();
+    while (bit.next()) |entry| {
+        if (n_browsers >= browser_ptrs_buf.len) break;
+        const name = alloc.dupeZ(u8, entry.key_ptr.*) catch continue;
+        browser_ptrs_buf[n_browsers] = name;
+        n_browsers += 1;
+    }
+
     // Build protobuf reply.
     var reply: pb.Termsurf__HelloReply = undefined;
     pb.termsurf__hello_reply__init(&reply);
     reply.homepage = @ptrCast(@constCast(homepage));
+    reply.n_browsers = n_browsers;
+    reply.browsers = @ptrCast(&browser_ptrs_buf);
 
     var wrapper: pb.Termsurf__TermSurfMessage = undefined;
     pb.termsurf__term_surf_message__init(&wrapper);
@@ -1953,6 +2053,14 @@ fn handleSocketHello(client_fd: std.posix.fd_t, pb_msg: *pb.Termsurf__TermSurfMe
     wrapper.unnamed_0.hello_reply = &reply;
 
     sendProtobuf(client_fd, &wrapper);
+
+    // Free temporary browser name copies.
+    for (browser_ptrs_buf[0..n_browsers]) |p| {
+        if (p) |ptr| {
+            const s = std.mem.span(ptr);
+            alloc.free(s.ptr[0 .. s.len + 1]);
+        }
+    }
 }
 
 /// Sync query: query_last — find last browser pane, reply with protobuf.

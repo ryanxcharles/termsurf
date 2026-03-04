@@ -3131,7 +3131,7 @@ const ProtobufCMessageDescriptor termsurf__cursor_changed__descriptor =
   (ProtobufCMessageInit) termsurf__cursor_changed__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
-static const ProtobufCFieldDescriptor termsurf__set_overlay__field_descriptors[8] =
+static const ProtobufCFieldDescriptor termsurf__set_overlay__field_descriptors[9] =
 {
   {
     "pane_id",
@@ -3229,8 +3229,21 @@ static const ProtobufCFieldDescriptor termsurf__set_overlay__field_descriptors[8
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
+  {
+    "browser",
+    9,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_STRING,
+    0,   /* quantifier_offset */
+    offsetof(Termsurf__SetOverlay, browser),
+    NULL,
+    &protobuf_c_empty_string,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
 };
 static const unsigned termsurf__set_overlay__field_indices_by_name[] = {
+  8,   /* field[8] = browser */
   7,   /* field[7] = browsing */
   1,   /* field[1] = col */
   4,   /* field[4] = height */
@@ -3243,7 +3256,7 @@ static const unsigned termsurf__set_overlay__field_indices_by_name[] = {
 static const ProtobufCIntRange termsurf__set_overlay__number_ranges[1 + 1] =
 {
   { 1, 0 },
-  { 0, 8 }
+  { 0, 9 }
 };
 const ProtobufCMessageDescriptor termsurf__set_overlay__descriptor =
 {
@@ -3253,14 +3266,14 @@ const ProtobufCMessageDescriptor termsurf__set_overlay__descriptor =
   "Termsurf__SetOverlay",
   "termsurf",
   sizeof(Termsurf__SetOverlay),
-  8,
+  9,
   termsurf__set_overlay__field_descriptors,
   termsurf__set_overlay__field_indices_by_name,
   1,  termsurf__set_overlay__number_ranges,
   (ProtobufCMessageInit) termsurf__set_overlay__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
-static const ProtobufCFieldDescriptor termsurf__set_devtools_overlay__field_descriptors[8] =
+static const ProtobufCFieldDescriptor termsurf__set_devtools_overlay__field_descriptors[9] =
 {
   {
     "pane_id",
@@ -3358,8 +3371,21 @@ static const ProtobufCFieldDescriptor termsurf__set_devtools_overlay__field_desc
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
+  {
+    "browser",
+    9,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_STRING,
+    0,   /* quantifier_offset */
+    offsetof(Termsurf__SetDevtoolsOverlay, browser),
+    NULL,
+    &protobuf_c_empty_string,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
 };
 static const unsigned termsurf__set_devtools_overlay__field_indices_by_name[] = {
+  8,   /* field[8] = browser */
   6,   /* field[6] = browsing */
   1,   /* field[1] = col */
   4,   /* field[4] = height */
@@ -3372,7 +3398,7 @@ static const unsigned termsurf__set_devtools_overlay__field_indices_by_name[] = 
 static const ProtobufCIntRange termsurf__set_devtools_overlay__number_ranges[1 + 1] =
 {
   { 1, 0 },
-  { 0, 8 }
+  { 0, 9 }
 };
 const ProtobufCMessageDescriptor termsurf__set_devtools_overlay__descriptor =
 {
@@ -3382,7 +3408,7 @@ const ProtobufCMessageDescriptor termsurf__set_devtools_overlay__descriptor =
   "Termsurf__SetDevtoolsOverlay",
   "termsurf",
   sizeof(Termsurf__SetDevtoolsOverlay),
-  8,
+  9,
   termsurf__set_devtools_overlay__field_descriptors,
   termsurf__set_devtools_overlay__field_indices_by_name,
   1,  termsurf__set_devtools_overlay__number_ranges,
@@ -3542,7 +3568,7 @@ const ProtobufCMessageDescriptor termsurf__hello_request__descriptor =
   (ProtobufCMessageInit) termsurf__hello_request__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
-static const ProtobufCFieldDescriptor termsurf__hello_reply__field_descriptors[1] =
+static const ProtobufCFieldDescriptor termsurf__hello_reply__field_descriptors[2] =
 {
   {
     "homepage",
@@ -3556,14 +3582,27 @@ static const ProtobufCFieldDescriptor termsurf__hello_reply__field_descriptors[1
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
+  {
+    "browsers",
+    2,
+    PROTOBUF_C_LABEL_REPEATED,
+    PROTOBUF_C_TYPE_STRING,
+    offsetof(Termsurf__HelloReply, n_browsers),
+    offsetof(Termsurf__HelloReply, browsers),
+    NULL,
+    &protobuf_c_empty_string,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
 };
 static const unsigned termsurf__hello_reply__field_indices_by_name[] = {
+  1,   /* field[1] = browsers */
   0,   /* field[0] = homepage */
 };
 static const ProtobufCIntRange termsurf__hello_reply__number_ranges[1 + 1] =
 {
   { 1, 0 },
-  { 0, 1 }
+  { 0, 2 }
 };
 const ProtobufCMessageDescriptor termsurf__hello_reply__descriptor =
 {
@@ -3573,7 +3612,7 @@ const ProtobufCMessageDescriptor termsurf__hello_reply__descriptor =
   "Termsurf__HelloReply",
   "termsurf",
   sizeof(Termsurf__HelloReply),
-  1,
+  2,
   termsurf__hello_reply__field_descriptors,
   termsurf__hello_reply__field_indices_by_name,
   1,  termsurf__hello_reply__number_ranges,

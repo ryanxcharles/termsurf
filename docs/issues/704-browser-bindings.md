@@ -1236,3 +1236,48 @@ const Pane = struct {
 
 Criteria 1–2 (compiles) are the gate. Criteria 3–6 are the end-to-end
 verification that the system works.
+
+#### Results
+
+**Partial failure.** Code compiles and `--browser` flag shows in `web --help`,
+but `web google.com --browser plusium` does not load a page — it times out.
+Default `web google.com` (Chromium Profile Server) still works.
+
+**What was implemented** (all compiles clean):
+
+- Proto: `browser` field on SetOverlay/SetDevtoolsOverlay, `browsers` on
+  HelloReply.
+- TUI: `--browser` CLI flag, passed through IPC.
+- GUI: browser registry, composite `(profile, browser)` server key,
+  `spawnServerProcess` accepts resolved path, `handleSocketServerRegister`
+  matches by profile + unregistered fd.
+
+**What failed:** Plusium spawns but the page never loads. The timeout suggests
+one of several failure points in the pipeline.
+
+**Debugging ideas:**
+
+1. **Is Plusium actually spawning?** Check `ps aux | grep plusium` after running
+   the command. If not, the browser registry path resolution or process spawn
+   failed silently.
+2. **Is Plusium connecting back?** Check the GUI IPC log for
+   `socket server_register` from the Plusium process. If missing, Plusium may
+   not be receiving `--ipc-socket` correctly, or it's crashing on startup before
+   connecting.
+3. **Is ServerRegister matching?** The new `handleSocketServerRegister` iterates
+   servers looking for matching profile + `fd == -1`. If the profile name
+   Plusium sends (extracted from `--user-data-dir` basename) doesn't match what
+   the GUI stored, the registration silently fails.
+4. **Is CreateTab being sent?** After registration, the GUI flushes pending
+   tabs. Check if the `sendCreateTab` path fires. If `server.fd` is still -1
+   after registration, the tab never gets created.
+5. **Plusium logs.** Check `~/.local/state/termsurf/chromium-server.log` for
+   Chromium-level errors. Plusium may be crashing during content initialization.
+6. **Plusium arguments.** Plusium's `main()` parses `--ipc-socket` and
+   `--user-data-dir` from argv. Verify the GUI is passing the right args — the
+   Chromium Profile Server uses a `.app` bundle path while Plusium is a bare
+   executable, so argument handling may differ.
+7. **Process spawn args.** The `spawnServerProcess` function passes `--hidden`,
+   `--enable-logging`, `--log-file` which are Content Shell flags. Plusium
+   passes these through to `ts_content_main(argc, argv)` but verify they don't
+   cause issues.
