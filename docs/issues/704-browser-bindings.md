@@ -1004,3 +1004,52 @@ API uses integers. Plusium maps:
 Criterion 1 (builds) is the gate for this experiment. Criteria 2–5 are stretch
 goals — if the library's API has gaps that prevent end-to-end functionality, we
 document them and fix the C library in a follow-up experiment.
+
+#### Results
+
+**Criterion 1 passes.** Plusium compiles and links clean (11MB arm64 binary).
+
+**Files created:**
+
+```
+chromium/src/content/plusium/
+├── BUILD.gn          # Executable + proto_library targets
+├── plusium_main.cc    # 430 lines: main, socket, dispatch, callbacks
+└── termsurf.proto     # Copied from proto/termsurf.proto
+```
+
+Also added `//content/plusium:plusium` to the root `BUILD.gn` `gn_all` group
+(required for GN target discovery).
+
+**Build issues encountered and fixed:**
+
+- **Exit-time destructors** (`-Werror,-Wexit-time-destructors`): Chromium
+  forbids global statics with destructors. Changed `std::vector<TabEntry>`,
+  `std::string` globals to raw pointers (`new` in `main()`, intentionally
+  leaked). Used `const char*` for string globals with `new char[]` buffers.
+- **`UNSAFE_BUFFERS` macro unavailable**: Plusium is a standalone binary, not
+  part of the Chromium base library. Suppressed unsafe-buffer-usage warnings
+  with `#pragma clang diagnostic ignored "-Wunsafe-buffer-usage"` instead.
+- **GN target not discovered**: New BUILD.gn files in Chromium are only found if
+  reachable from the root BUILD.gn dependency graph. Added Plusium to `gn_all`
+  in `BUILD.gn`.
+- **Protobuf linker errors**: Default `proto_library` generates full protobuf
+  code, but only `protobuf_lite.dylib` exists in the component build. Fixed with
+  `cc_generator_options = "lite"` to generate lite-compatible code.
+
+**Design:**
+
+- ~430 lines of C++ in a single file
+- Tab registry: `std::vector<TabEntry>*` mapping handles to tab_id/pane_id
+- Socket I/O: same wire format as the profile server (4-byte LE length prefix +
+  protobuf)
+- Threading: reader thread posts tasks via `ts_post_task()`, all dispatch on UI
+  thread
+- Callbacks write protobuf responses directly to socket (single-threaded, no
+  mutex)
+- String-to-int mapping for mouse/key types (protobuf uses strings, C API uses
+  ints)
+- Zero `chromium_profile_server` references
+
+**Status: SUCCESS (gate criterion).** Binary compiles and links. End-to-end
+testing (criteria 2–5) deferred to integration testing.
