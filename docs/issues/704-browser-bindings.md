@@ -1053,3 +1053,186 @@ Also added `//content/plusium:plusium` to the root `BUILD.gn` `gn_all` group
 
 **Status: SUCCESS (gate criterion).** Binary compiles and links. End-to-end
 testing (criteria 2–5) deferred to integration testing.
+
+### Experiment 4: `--browser` flag and generic browser support
+
+Add a `--browser` flag to the TUI and generic browser binary support in the GUI.
+This lets users run any browser binary — `web google.com --browser plusium` runs
+Plusium instead of the default Chromium Profile Server. Multiple browsers can
+run simultaneously for the same profile, enabling web developers to test their
+apps across different browser engines from within the same terminal.
+
+#### Design principles
+
+**Server processes are keyed by (profile, browser) pair.** Two panes with the
+same profile but different browsers spawn two separate server processes. Two
+panes with the same profile AND browser share one server process. This is a
+change from the current model where servers are keyed by profile alone.
+
+**The GUI maintains a browser registry.** On startup, the GUI scans the app
+bundle for available browser binaries and builds a name → path map. Known
+browsers currently: `"chromium"` (Chromium Profile Server) and `"plusium"`. The
+registry is sent to the TUI via `HelloReply` so the TUI can validate names and
+show them in help text.
+
+**The TUI sends a browser specifier.** The `--browser` flag accepts either a
+known short name (`"plusium"`) or an absolute path
+(`"/path/to/custom-browser"`). The specifier is passed to the GUI in the
+`SetOverlay` message. Empty means use the default.
+
+**The GUI resolves and spawns.** When the GUI receives a `SetOverlay` with a
+browser field:
+
+1. If empty → use the default browser (`"chromium"`)
+2. If it starts with `/` → absolute path, use directly
+3. Otherwise → look up in the browser registry
+
+The GUI then checks: is there a running server for this (profile, browser) pair?
+If yes, reuse it. If no, spawn a new server process with the resolved binary
+path.
+
+#### Proto changes
+
+Add `browser` field to `SetOverlay` and `SetDevtoolsOverlay`. Add `browsers`
+field to `HelloReply`.
+
+```protobuf
+message SetOverlay {
+  string pane_id = 1;
+  uint64 col = 2;
+  uint64 row = 3;
+  uint64 width = 4;
+  uint64 height = 5;
+  string url = 6;
+  string profile = 7;
+  bool browsing = 8;
+  string browser = 9;    // NEW: "chromium", "plusium", or absolute path
+}
+
+message SetDevtoolsOverlay {
+  string pane_id = 1;
+  uint64 col = 2;
+  uint64 row = 3;
+  uint64 width = 4;
+  uint64 height = 5;
+  string profile = 6;
+  bool browsing = 7;
+  int64 inspected_tab_id = 8;
+  string browser = 9;    // NEW
+}
+
+message HelloReply {
+  string homepage = 1;
+  repeated string browsers = 2;  // NEW: available browser names
+}
+```
+
+#### TUI changes
+
+**`tui/src/main.rs`** — Add `--browser` flag to the `Cli` struct:
+
+```rust
+/// Browser binary to use ("chromium", "plusium", or absolute path)
+#[arg(long, global = true)]
+browser: Option<String>,
+```
+
+Default is empty (GUI uses its default). Pass to `send_set_overlay()` and
+`send_set_devtools_overlay()`.
+
+**`tui/src/ipc.rs`** — Add `browser: &str` parameter to `send_set_overlay()` and
+`send_set_devtools_overlay()`. Include in the protobuf message construction.
+
+#### GUI changes
+
+**Server key change.** Currently `servers: StringHashMap(*Server)` is keyed by
+profile name. Change to key by `"{profile}\x00{browser}"` (null-separated
+composite key). This ensures (profile, browser) uniqueness while keeping the map
+structure.
+
+Add a `browser` field to the `Server` struct:
+
+```zig
+const Server = struct {
+    process: ?std.process.Child = null,
+    fd: std.posix.fd_t = -1,
+    profile_key: []const u8 = "",
+    browser: []const u8 = "",      // NEW: resolved browser name
+    pane_count: usize = 0,
+};
+```
+
+**Browser registry.** Add a `browser_paths: StringHashMap([]const u8)` map
+populated during init. On macOS, scan
+`{bundle}/Contents/Browsers/{name}.app/Contents/MacOS/{name}` for known
+browsers. Also support a dev fallback path for each:
+
+| Name       | Bundle path                                          | Dev fallback                                                          |
+| ---------- | ---------------------------------------------------- | --------------------------------------------------------------------- |
+| `chromium` | `{bundle}/Contents/Chromium/Chromium Profile Server` | `~/dev/termsurf/chromium/src/out/Default/Chromium Profile Server.app` |
+| `plusium`  | `{bundle}/Contents/Browsers/plusium`                 | `~/dev/termsurf/chromium/src/out/Default/plusium`                     |
+
+For dev builds, populate the registry from known dev paths. The exact layout can
+be refined later when we build the release bundle.
+
+**`spawnServerProcess()` changes.** Currently hardcodes the binary path. Change
+to accept the resolved binary path from the server's `browser` field. The
+`--ipc-socket` and `--user-data-dir` args stay the same.
+
+**`getOrCreateServer()` changes.** Currently takes `profile: []const u8`. Change
+to `getOrCreateServer(profile: []const u8, browser: []const u8)`:
+
+1. Build composite key `"{profile}\x00{browser}"`
+2. Look up in `servers` map
+3. If found, return existing server
+4. If not, create new server, resolve browser path, spawn process
+
+**`handleSocketSetOverlay()` changes.** Read the `browser` field from the
+protobuf message. Pass it to `getOrCreateServer()`. If empty, use `"chromium"`
+as default.
+
+**`handleSocketSetDevtoolsOverlay()` changes.** Same — read `browser` field,
+pass to `getOrCreateServer()`. For auto-targeted DevTools (inspected_tab_id
+resolved from the last browser pane), inherit the browser from the inspected
+pane's server.
+
+**`handleSocketHello()` changes.** Build the `browsers` list from the browser
+registry keys. Send it in `HelloReply`.
+
+#### Pane tracking
+
+Add `browser` to the `Pane` struct so DevTools auto-targeting can inherit the
+browser from the inspected pane:
+
+```zig
+const Pane = struct {
+    // ... existing fields ...
+    browser: []const u8 = "",  // NEW: browser name for this pane
+};
+```
+
+#### File changes summary
+
+| File                    | Changes                                                                  |
+| ----------------------- | ------------------------------------------------------------------------ |
+| `proto/termsurf.proto`  | Add `browser` to SetOverlay/SetDevtoolsOverlay, `browsers` to HelloReply |
+| `tui/src/main.rs`       | Add `--browser` CLI flag, pass to IPC calls                              |
+| `tui/src/ipc.rs`        | Add `browser` param to send_set_overlay/send_set_devtools_overlay        |
+| `gui/src/apprt/xpc.zig` | Browser registry, composite server key, resolve browser path             |
+
+#### Verification
+
+1. `cd tui && cargo build` — TUI compiles with `--browser` flag.
+2. `cd gui && zig build` — GUI compiles with browser registry and composite
+   server keys.
+3. Launch TermSurf, `web google.com` — default browser (Chromium Profile Server)
+   works as before.
+4. `web google.com --browser plusium` — Plusium binary is spawned instead. Page
+   loads, mouse/keyboard/resize all work.
+5. Open two panes: `web google.com` and `web google.com --browser plusium` —
+   both work simultaneously with separate server processes.
+6. Open two panes with same browser and profile — they share one server process
+   (same as current behavior).
+
+Criteria 1–2 (compiles) are the gate. Criteria 3–6 are the end-to-end
+verification that the system works.
