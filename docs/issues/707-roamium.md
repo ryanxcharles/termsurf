@@ -397,4 +397,92 @@ fn main() {
 4. `otool -l target/debug/roamium | grep -A2 LC_RPATH` — has both
    `@loader_path/.` and the Chromium build dir.
 
+#### Result: Success — Rust calls into Chromium via FFI
+
+`cargo build` compiles and links clean. The binary links
+`libtermsurf_content.dylib` and has both rpaths (`@loader_path/.` for release,
+Chromium build dir for development).
+
+Running from `out/Default/` (via symlink), the full chain works:
+
+```
+[Roamium] Entering ts_content_main
+[Roamium] Chromium initialized — creating browser context
+[Roamium] Browser context: 0x9e6e98780
+[Roamium] Smoke test passed — shutting down
+```
+
+Rust → `extern "C"` → `libtermsurf_content.dylib` → Chromium's ContentMain →
+initialized callback → `ts_create_browser_context` → `ts_quit`. The entire FFI
+pipeline works.
+
+**Child process issue:** Chromium spawns GPU, renderer, and network processes by
+re-executing the binary. These child processes need `icudtl.dat` and other data
+files next to the binary. When running from `roamium/target/debug/`, the files
+aren't there. Solution: copy the built binary into `chromium/src/out/Default/`
+after building — the same location where Plusium lives.
+
+### Experiment 3: Build scripts and binary placement
+
+The existing `build-debug.sh` and `build-release.sh` build the GUI, Chromium,
+and TUI. They need to also build Roamium and copy the binary into
+`chromium/src/out/Default/` so Chromium's child processes can find `icudtl.dat`
+and other data files.
+
+Also add a standalone `build-roamium.sh` for quick iteration during development.
+
+Both existing scripts currently build `chromium_profile_server` as the Chromium
+target. They should also build `plusium` (and eventually just Roamium will
+replace both).
+
+#### What to change
+
+**`scripts/build-roamium.sh`** (new) — Standalone script for quick Roamium
+builds:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+CHROMIUM_OUT="$REPO_DIR/chromium/src/out/Default"
+CHROMIUM_PROTOC="$CHROMIUM_OUT/protoc"
+
+if [ -x "$CHROMIUM_PROTOC" ]; then
+  export PROTOC="$CHROMIUM_PROTOC"
+fi
+
+cd "$REPO_DIR/roamium"
+cargo build "$@"
+
+# Determine target dir based on --release flag.
+if [[ " $* " == *" --release "* ]]; then
+  SRC="$REPO_DIR/roamium/target/release/roamium"
+else
+  SRC="$REPO_DIR/roamium/target/debug/roamium"
+fi
+
+cp "$SRC" "$CHROMIUM_OUT/roamium"
+echo "Copied roamium to $CHROMIUM_OUT/roamium"
+```
+
+**`scripts/build-debug.sh`** — Add Roamium section after TUI, copy binary to
+`out/Default`.
+
+**`scripts/build-release.sh`** — Same pattern but with `--release`.
+
+Both scripts also define `CHROMIUM_OUT` once at the top and update the "Done"
+output to include Roamium.
+
+#### Verification
+
+1. `scripts/build-roamium.sh` — builds and copies binary.
+2. `scripts/build-roamium.sh --release` — builds release and copies.
+3. `ls -la chromium/src/out/Default/roamium` — binary exists.
+4. `chromium/src/out/Default/roamium --no-sandbox` — smoke test passes, no child
+   process ICU errors.
+5. `scripts/build-debug.sh` — builds everything including Roamium.
+6. `scripts/build-release.sh` — builds everything including Roamium.
+
 #### Result
