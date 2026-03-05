@@ -754,10 +754,6 @@ Launch GUI, open a terminal pane.
       supports it, e.g. `web github.com`)
 - [ ] `:colorscheme light` — page switches back
 
-**Tabs inventory**
-
-- [ ] `:tabs` — shows tab list with correct URLs and tab IDs
-
 **Focus**
 
 - [ ] Click between terminal and browser panes — focus switches correctly
