@@ -784,61 +784,78 @@ See Experiment 10 for the fix.
 
 ### Experiment 10: Fix DevTools server routing
 
-DevTools fails because `handleSetDevtoolsOverlay` routes `CreateDevtoolsTab` to
-the wrong Chromium process. The DevTools TUI runs as `web devtools` with no
-`--browser` or `--profile` flags, so it defaults to
-`profile=default, browser=""`. The GUI then calls
-`getOrCreateServer("default", "")`, which spawns a new Chromium process that has
-no tabs — so `FindByTabId` fails.
+DevTools fails because the GUI routes `CreateDevtoolsTab` to the wrong Chromium
+process. Here's the full flow when you type `d` (`:devtools`):
 
-DevTools must always run in the same Chromium process as the inspected tab. The
-inspected tab's pane already stores a pointer to its server. So instead of
-calling `getOrCreateServer` with the DevTools TUI's args, look up the inspected
-tab's pane via `tab_to_pane` and use its server directly.
+1. TUI calls `send_query_devtools(pid, 0, &profile)` — auto-target
+2. GUI resolves `last_browser_pane` → gets the pane → returns bare `tab_id`
+3. TUI opens a split with `web devtools`
+4. New TUI process starts, auto-targets again, gets `tab_id=1`
+5. New TUI sends
+   `send_set_devtools_overlay(inspected_tab_id=1, profile="default", browser="")`
+6. GUI calls `getOrCreateServer("default", "")` — spawns wrong server
+
+The root cause is at step 2. `QueryDevtoolsReply` returns only a bare `tab_id`
+integer. It doesn't return the browser or profile that tab belongs to. The GUI
+knows this information — `last_browser_pane` points to a pane with a `server`
+that has `browser` and `profile_key` — but it throws it away.
+
+The fix: `QueryDevtoolsReply` should return the browser and profile of the
+inspected tab. Then the DevTools TUI passes them through in
+`send_set_devtools_overlay`, and the GUI routes to the correct server.
 
 #### What to change
 
-**`gui/src/apprt/xpc.zig`** — In `handleSetDevtoolsOverlay`, replace the entire
-server selection block (the
-`if (auto_targeted) { ... } else if (getOrCreateServer(...)) { ... }` block)
-with a single path that always looks up the inspected tab's server:
+**`proto/termsurf.proto`** — Add `browser` and `profile` to
+`QueryDevtoolsReply`:
 
-```zig
-// DevTools must run in the same Chromium process as the inspected tab.
-// Look up the inspected tab's pane and use its server.
-const inspected_pane_id = tab_to_pane.get(p.inspected_tab_id) orelse {
-    log.err("devtools: inspected tab_id={d} not found", .{p.inspected_tab_id});
-    cleanupPane(pane_id_key);
-    return;
-};
-const inspected_pane = panes.get(inspected_pane_id) orelse {
-    log.err("devtools: inspected pane {s} not found", .{inspected_pane_id});
-    cleanupPane(pane_id_key);
-    return;
-};
-if (inspected_pane.server) |target_server| {
-    p.server = target_server;
-    target_server.pane_count += 1;
-    if (target_server.fd >= 0) {
-        sendCreateDevToolsTab(p, target_server);
-        if (p.browsing) {
-            sendFocusChanged(p.pane_id_key, true);
-        }
-    }
+```protobuf
+message QueryDevtoolsReply {
+  int64 tab_id = 1;
+  string error = 2;
+  string browser = 3;
+  string profile = 4;
 }
 ```
 
-**`tui/src/main.rs`** — Revert the `--browser` flag in the DevTools split
-command. The command should always be `web devtools` — the GUI handles server
-routing:
+Sync to `chromium/src/content/plusium/termsurf.proto` as well.
 
-```rust
-let cmd = format!("{} devtools", current_exe);
+**`gui/src/apprt/xpc.zig`** — In `handleSocketQueryDevtools`, populate the
+reply's `browser` and `profile` from the inspected tab's pane/server:
+
+```zig
+// After resolving resolved_tab_id:
+const resolved_pane_id = tab_to_pane.get(resolved_tab_id) orelse ...;
+const resolved_pane = panes.get(resolved_pane_id) orelse ...;
+if (resolved_pane.server) |s| {
+    reply.browser = s.browser;  // e.g., "plusium"
+    reply.profile = ...; // extract profile from s.profile_key
+}
 ```
+
+Regenerate the protobuf-c files for the GUI after updating
+`proto/termsurf.proto`.
+
+**`tui/src/ipc.rs`** — Update `send_query_devtools` to return browser and
+profile from the reply, not just `tab_id`.
+
+**`tui/src/main.rs`** — After `send_query_devtools` returns, store the browser
+and profile. Pass them through `send_set_devtools_overlay`.
+
+**`tui/src/main.rs`** — Revert the `--browser` flag in the DevTools split
+command. It should always be `web devtools` — the GUI handles routing.
+
+**`gui/src/apprt/xpc.zig`** — In `handleSetDevtoolsOverlay`, replace the server
+selection block. Instead of two paths (auto-target vs `getOrCreateServer`),
+always look up the inspected tab's pane via `tab_to_pane` and use its server.
+DevTools must run in the same Chromium process as the inspected tab.
 
 #### Verification
 
-1. `cd gui && zig build` — compiles.
-2. Open `web google.com --browser plusium`, then `:devtools` — DevTools opens.
-3. Open `web google.com` (default browser), then `:devtools` — still works.
-4. Check logs: DevTools uses the same server fd as the inspected tab.
+1. All three build: protobuf-c regenerated, `zig build`, `cargo build`,
+   `autoninja plusium`.
+2. `web google.com --browser plusium`, then `d` — DevTools opens in Plusium.
+3. `web google.com` (default browser), then `d` — DevTools still works.
+4. `web google.com --profile test --browser plusium`, then `d` — DevTools opens
+   in the correct Plusium process for profile `test`.
+5. Logs show DevTools uses the same server fd as the inspected tab.
