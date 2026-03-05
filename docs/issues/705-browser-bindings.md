@@ -693,3 +693,75 @@ to test. Each item maps to a protobuf message or C API function.
 
 Walk through the checklist in order. For each item, mark pass or fail. Record
 any failures with a short description of the observed behavior.
+
+#### Result
+
+Everything passes except DevTools. See Experiment 9.
+
+### Experiment 9: Fix DevTools for Plusium
+
+DevTools doesn't work with Plusium. The `:devtools` command fails because
+Plusium's copy of `termsurf.proto` is out of date — it's missing the `browser`
+field that was added to the canonical proto.
+
+#### Root cause
+
+There are three copies of `termsurf.proto`:
+
+1. **`proto/termsurf.proto`** (canonical) — has `string browser = 9` in both
+   `SetOverlay` and `SetDevtoolsOverlay`
+2. **`chromium/src/content/plusium/termsurf.proto`** (Plusium) — **missing**
+   `browser` field in both messages
+3. **`chromium/src/content/chromium_profile_server/browser/termsurf.proto`**
+   (Profile Server) — separate copy
+
+The GUI's protobuf-c code is generated from the canonical proto, so it correctly
+serializes `browser`. But when Plusium deserializes incoming messages, it
+silently ignores the unknown field. This doesn't break normal page loads (the
+browser is determined by which binary the GUI launched), but it means Plusium
+can't see the `browser` field in any message.
+
+More importantly, the DevTools auto-target path in the GUI
+(`handleSetDevtoolsOverlay`, line 472) uses `target.server` directly — the
+inspected pane's server. This is actually correct for auto-targeting since
+DevTools should go to the same Chromium process as the inspected tab. But the
+`QueryDevtoolsRequest` proto doesn't include a `browser` field, so validation
+can't check browser-specific constraints.
+
+The fix is straightforward: sync Plusium's proto with the canonical version.
+
+#### What to change
+
+1. **Sync `chromium/src/content/plusium/termsurf.proto`** — copy `SetOverlay`
+   and `SetDevtoolsOverlay` definitions from `proto/termsurf.proto` to add
+   `string browser = 9` to both messages.
+
+2. **Add debug traces** to diagnose DevTools flow in Plusium:
+
+   **`content/plusium/plusium_main.cc`** — Add `fprintf(stderr)` to the
+   `kCreateDevtoolsTab` handler (case 2):
+
+   ```cpp
+   fprintf(stderr, "[DEBUG] kCreateDevtoolsTab: pane=%s inspected=%d dark=%d\n",
+           m.pane_id().c_str(), m.inspected_tab_id(), m.dark());
+   ```
+
+   **`gui/src/apprt/xpc.zig`** — Add `std.debug.print` to
+   `handleSetDevtoolsOverlay` at the server selection point:
+
+   ```zig
+   std.debug.print("[DEBUG] devtools server selection: auto_targeted={} server_fd={}\n",
+       .{ p.inspected_tab_id != inspected_tab_id,
+          if (p.server) |s| s.fd else -1 });
+   ```
+
+#### Verification
+
+1. Rebuild proto: `cd chromium/src && protoc` (regenerate if needed, or just
+   sync the `.proto` file — Plusium uses C++ protobuf which auto-generates at
+   build time).
+2. `autoninja -C out/Default plusium` — compiles.
+3. `cd gui && zig build` — compiles (GUI proto unchanged).
+4. Open `web google.com --browser plusium`, then `:devtools` — DevTools should
+   open in a split pane.
+5. Check stderr for `[DEBUG]` traces confirming the flow.
