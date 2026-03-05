@@ -433,3 +433,51 @@ This should produce exactly 2 patch files (vs. issue-707's 68).
 `resolveBrowserPath`, `getOrCreateServer`). Generated 2 patches for issue-708
 (down from 68). Updated README with new branch and build target. `web` works
 without `--browser` flag.
+
+## Conclusion
+
+Issue 708 is complete. The Chromium fork is now a clean, minimal branch
+containing only `libtermsurf_chromium` — a 16-file shared library that wraps
+Chromium's Content API through 23 exported C functions. Everything else is gone.
+
+### What changed
+
+**Chromium fork** — Branch `146.0.7650.0-issue-708` has 2 commits and 24 files
+on top of the vanilla tag. Compare this to issue-707's 68 commits and 258 files.
+The entire TermSurf footprint inside Chromium is now:
+
+- `content/libtermsurf_chromium/` — 16 source files (renamed from
+  `libtermsurf_content`)
+- 8 stock patches — 4 to Content Shell (hidden window, public DevTools
+  constructor, `kHidden` switch, GN target) and 4 to renderer host
+  (CALayerParams callback, cursor change callback)
+
+**Roamium** — Links `libtermsurf_chromium.dylib` instead of
+`libtermsurf_content.dylib`. One line changed in `build.rs`.
+
+**GUI** — Browser registry contains only `roamium`. The default browser resolves
+to `roamium` in all three code paths (`initBrowserRegistry`,
+`resolveBrowserPath`, `getOrCreateServer`). `web google.com` works without
+`--browser roamium`.
+
+**Build scripts** — `build-debug.sh` and `build-release.sh` build
+`libtermsurf_chromium` instead of `chromium_profile_server plusium`.
+
+**Patches** — `chromium/patches/issue-708/` contains 2 patch files (down from
+68).
+
+### What was deleted
+
+- **Chromium Profile Server** — ~100 forked Content Shell files, ~1,050 lines of
+  TermSurf code. Gone.
+- **Plusium** — 511-line C++ binary at `content/plusium/`. Gone.
+- **Browser registry entries** — `chromium` and `plusium` entries in GUI. Gone.
+- **68 commits of history** — Replaced by 2 clean commits from the vanilla tag.
+
+### Why this matters
+
+Every upstream Chromium merge now touches 24 files instead of 258. The patch set
+is 2 files instead of 68. The only TermSurf code inside the Chromium tree is a
+self-contained shared library with a stable C API. Roamium — built with Cargo
+outside the tree — is the sole browser binary. The architecture is clean: Zig
+GUI → Unix sockets → Rust Roamium → C API → Chromium Content API.
