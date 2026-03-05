@@ -354,3 +354,74 @@ launch TermSurf, type `web google.com`, confirm page loads.
 - `cargo build --release` succeeds
 - `web google.com` loads in TermSurf with `--browser roamium`
 - Build scripts reference only `libtermsurf_chromium` (no dead targets)
+
+### Result
+
+**Success.** Three files changed: `build.rs` link directive, both build scripts.
+Debug and release builds link `libtermsurf_chromium.dylib`. `web google.com`
+loads end-to-end. The clean Chromium branch is a verified drop-in replacement.
+
+## Experiment 3: GUI cleanup, patches, and documentation
+
+### Goal
+
+Remove dead browser entries from the GUI, make `roamium` the default browser,
+generate the fresh patch set for issue-708, and update `chromium/README.md`.
+After this, the entire stack — GUI, Roamium, Chromium fork, patches, docs — is
+consistent and complete.
+
+### Part A: GUI browser registry
+
+**`gui/src/apprt/xpc.zig`** — `initBrowserRegistry()` (line 843):
+
+Remove the `chromium` and `plusium` entries, keep only `roamium`:
+
+```zig
+const browsers = [_]struct { name: []const u8, suffix: []const u8 }{
+    .{ .name = "roamium", .suffix = "/dev/termsurf/chromium/src/out/Default/roamium" },
+};
+```
+
+**`gui/src/apprt/xpc.zig`** — `resolveBrowserPath()` (line 886):
+
+Change the default from `"chromium"` to `"roamium"`:
+
+```zig
+const name = if (browser.len == 0) "roamium" else browser;
+```
+
+After this, `web google.com` works without `--browser roamium`.
+
+### Part B: Generate patches
+
+```bash
+cd ~/dev/termsurf/chromium/src
+rm -rf ../../chromium/patches/issue-708/
+git format-patch 146.0.7650.0..HEAD -o ../../chromium/patches/issue-708/
+```
+
+This should produce exactly 2 patch files (vs. issue-707's 68).
+
+### Part C: Update chromium/README.md
+
+1. Update current branch: `146.0.7650.0-issue-707` → `146.0.7650.0-issue-708`
+2. Add issue-708 to the Branches table
+3. Update the build target in the Build section: `chromium_profile_server` →
+   `libtermsurf_chromium`
+
+### Steps
+
+1. Edit `gui/src/apprt/xpc.zig` — remove dead browser entries, change default.
+2. `cd gui && zig build` — verify GUI compiles.
+3. Generate patches for issue-708.
+4. Update `chromium/README.md`.
+5. Launch TermSurf, type `web google.com` (no `--browser` flag) — verify it
+   works with roamium as default.
+
+### Success criteria
+
+- GUI compiles with only `roamium` in browser registry
+- `web google.com` works without `--browser roamium`
+- `chromium/patches/issue-708/` contains exactly 2 patches
+- `chromium/README.md` lists issue-708 as current branch with
+  `libtermsurf_chromium` build target

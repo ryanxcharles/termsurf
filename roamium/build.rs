@@ -8,9 +8,9 @@ fn main() {
         .canonicalize()
         .expect("chromium/src/out/Default must exist — build Chromium first");
 
-    // Link-time: find libtermsurf_content.dylib.
+    // Link-time: find libtermsurf_chromium.dylib.
     println!("cargo:rustc-link-search=native={}", chromium_out.display());
-    println!("cargo:rustc-link-lib=dylib=termsurf_content");
+    println!("cargo:rustc-link-lib=dylib=termsurf_chromium");
 
     // Runtime: two rpaths.
     // 1. @loader_path/. — for release (dylib colocated with binary).

@@ -47,7 +47,7 @@ if [ -d "$CHROMIUM_SRC" ]; then
   fi
 
   echo "==> Building Chromium..."
-  autoninja -C out/Default chromium_profile_server plusium
+  autoninja -C out/Default libtermsurf_chromium
 else
   echo "==> Skipping Chromium (chromium/src not found)"
 fi
