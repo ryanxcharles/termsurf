@@ -273,3 +273,27 @@ cannot be filtered.
 3. Run `web google.com --browser plusium`.
 4. Read `logs/gui.log` — the traces will show exactly where the handshake stops.
 5. Remove debug traces after diagnosis.
+
+#### Result: Success
+
+The debug traces revealed the IPC handshake is **mostly working**. The full
+chain completes up to a point:
+
+1. TUI → GUI: hello (case=23) and set_overlay (case=19) arrive correctly.
+2. GUI creates server, spawns Plusium — Plusium starts, creates browser context,
+   connects to the GUI's Unix socket, sends ServerRegister.
+3. GUI receives ServerRegister (case=12), matches it to the spawned server,
+   flushes 1 pending tab by sending CreateTab.
+4. Plusium receives CreateTab (case=1) and calls `ts_create_web_contents()`.
+5. Plusium sends back ca_context (14), url_changed (15), loading_state (16),
+   title_changed (17) — all arrive at the GUI.
+
+**The bug: case=13 (tab_ready) is never sent.** Plusium sends ca_context (14)
+but never sends tab_ready (13). The `OnTabReady` callback assigns the `tab_id`
+to the tab entry, and tab_ready carries the `tab_id` + `pane_id` back to the
+GUI. Without it, the GUI can't associate the ca_context with the right pane —
+the ca_context message has `tab_id=0`.
+
+The `OnTabReady` callback in `libtermsurf_content` is either not firing, or
+`FindByHandle()` fails because the handle hasn't been stored in `g_tabs` yet
+(race between `ts_create_web_contents` returning and the callback firing).

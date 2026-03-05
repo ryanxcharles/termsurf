@@ -257,6 +257,8 @@ fn handleSetOverlay(msg: xpc_object_t) void {
     const height = xpc_dictionary_get_uint64(msg, "height");
     const browsing = xpc_dictionary_get_bool(msg, "browsing");
 
+    std.debug.print("[DEBUG] handleSetOverlay: pane={s} profile={s} browser={s} url={s}\n", .{ pane_id, profile, browser, url });
+
     log.info("set_overlay pane={s} col={} row={} w={} h={} url={s} profile={s} browser={s} browsing={}", .{
         pane_id, col, row, width, height, url, profile, browser, browsing,
     });
@@ -372,6 +374,8 @@ fn handleSetDevtoolsOverlay(msg: xpc_object_t) void {
     const height = xpc_dictionary_get_uint64(msg, "height");
     const browsing = xpc_dictionary_get_bool(msg, "browsing");
     const inspected_tab_id = xpc_dictionary_get_int64(msg, "inspected_tab_id");
+
+    std.debug.print("[DEBUG] handleSetDevtoolsOverlay: pane={s} profile={s} browser={s} inspected_tab_id={d}\n", .{ pane_id, profile, browser, inspected_tab_id });
 
     log.info("set_devtools_overlay pane={s} inspected_tab_id={d} profile={s} browser={s}", .{
         pane_id, inspected_tab_id, profile, browser,
@@ -913,6 +917,8 @@ fn resolveBrowserPath(browser: []const u8) ?[]const u8 {
 fn getOrCreateServer(profile: []const u8, browser: []const u8) ?*Server {
     const effective_browser: []const u8 = if (browser.len == 0) "chromium" else browser;
 
+    std.debug.print("[DEBUG] getOrCreateServer: profile={s} browser={s} effective_browser={s}\n", .{ profile, browser, effective_browser });
+
     // Build composite key for lookup.
     var key_buf: [512]u8 = undefined;
     const key_len = profile.len + 1 + effective_browser.len;
@@ -923,11 +929,15 @@ fn getOrCreateServer(profile: []const u8, browser: []const u8) ?*Server {
     const lookup_key = key_buf[0..key_len];
 
     if (servers.get(lookup_key)) |server| {
+        std.debug.print("[DEBUG] getOrCreateServer: found existing server fd={}\n", .{server.fd});
         return server;
     }
 
+    std.debug.print("[DEBUG] getOrCreateServer: no existing server, creating new\n", .{});
+
     // Resolve browser path.
     const browser_path = resolveBrowserPath(effective_browser) orelse {
+        std.debug.print("[DEBUG] getOrCreateServer: resolveBrowserPath FAILED for {s}\n", .{effective_browser});
         log.err("unknown browser: {s}", .{effective_browser});
         return null;
     };
@@ -1044,16 +1054,20 @@ fn spawnServerProcess(server: *Server, browser_path: []const u8) void {
 
     log.info("spawning server profile={s} browser={s}", .{ serverProfile(server), server.browser });
 
+    std.debug.print("[DEBUG] spawnServerProcess: about to spawn profile={s} browser={s} path={s}\n", .{ serverProfile(server), server.browser, browser_path });
+
     var child = std.process.Child.init(
         &.{ server_path, ipc_arg, data_arg, hidden_arg, nosandbox_arg, logging_arg, logfile_arg },
         alloc,
     );
     child.spawn() catch |err| {
+        std.debug.print("[DEBUG] spawnServerProcess: spawn FAILED err={}\n", .{err});
         log.err("failed to spawn server: {}", .{err});
         return;
     };
 
     server.process = child;
+    std.debug.print("[DEBUG] spawnServerProcess: spawned pid={d} profile={s} browser={s}\n", .{ child.id, serverProfile(server), server.browser });
     log.info("server spawned pid={d} profile={s} browser={s}", .{ child.id, serverProfile(server), server.browser });
 }
 
@@ -1808,6 +1822,8 @@ fn handleClientDisconnect(conn: *ClientConn) void {
 fn handleSocketMessage(conn: *ClientConn, pb_msg: *pb.Termsurf__TermSurfMessage) void {
     const case = pb_msg.msg_case;
 
+    std.debug.print("[DEBUG] handleSocketMessage: case={} fd={} conn_type={s}\n", .{ case, conn.fd, @tagName(conn.conn_type) });
+
     // Connection type tagging: first message determines the type (Issue 701).
     if (conn.conn_type == .unknown) {
         if (case == 12) {
@@ -1879,8 +1895,12 @@ fn handleSocketMessage(conn: *ClientConn, pb_msg: *pb.Termsurf__TermSurfMessage)
 /// The server sends its profile name. We match it to a server that was spawned
 /// but hasn't registered yet (fd == -1) with a matching profile (Issue 704).
 fn handleSocketServerRegister(conn: *ClientConn, pb_msg: *pb.Termsurf__TermSurfMessage) void {
-    const m: *pb.Termsurf__ServerRegister = pb_msg.unnamed_0.server_register orelse return;
+    const m: *pb.Termsurf__ServerRegister = pb_msg.unnamed_0.server_register orelse {
+        std.debug.print("[DEBUG] handleSocketServerRegister: server_register field is null\n", .{});
+        return;
+    };
     const profile = std.mem.span(pbStr(m.profile));
+    std.debug.print("[DEBUG] handleSocketServerRegister: profile={s} fd={}\n", .{ profile, conn.fd });
     log.info("socket server_register profile={s} fd={}", .{ profile, conn.fd });
 
     // Find a server with matching profile that hasn't registered yet.
@@ -1894,6 +1914,7 @@ fn handleSocketServerRegister(conn: *ClientConn, pb_msg: *pb.Termsurf__TermSurfM
         }
     }
     const srv = server orelse {
+        std.debug.print("[DEBUG] handleSocketServerRegister: NO matching server for profile={s}\n", .{profile});
         log.warn("socket server_register for unknown profile={s}", .{profile});
         return;
     };
@@ -1901,24 +1922,30 @@ fn handleSocketServerRegister(conn: *ClientConn, pb_msg: *pb.Termsurf__TermSurfM
     // Store the socket fd on the server.
     srv.fd = conn.fd;
     conn.server = srv;
+    std.debug.print("[DEBUG] handleSocketServerRegister: matched server key={s} fd={}\n", .{ srv.profile_key, conn.fd });
 
     // Flush all pending tabs for this server (mirrors handleServerRegister).
+    var pending_count: u32 = 0;
     var it = panes.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr.*;
         if (p.server == srv and !p.tab_sent) {
             if (p.inspected_tab_id > 0) {
+                std.debug.print("[DEBUG] handleSocketServerRegister: flushing devtools tab pane={s}\n", .{p.pane_id_key});
                 sendCreateDevToolsTab(p, srv);
             } else if (p.pending_url_len > 0) {
+                std.debug.print("[DEBUG] handleSocketServerRegister: flushing tab pane={s} url={s}\n", .{ p.pane_id_key, p.pending_url_buf[0..p.pending_url_len] });
                 sendCreateTab(p, srv);
             } else {
                 continue;
             }
+            pending_count += 1;
             if (p.browsing) {
                 sendFocusChanged(p.pane_id_key, true);
             }
         }
     }
+    std.debug.print("[DEBUG] handleSocketServerRegister: flushed {} pending tabs\n", .{pending_count});
 }
 
 /// Fire-and-forget: set_overlay via XPC-dict adapter, then set web_fd.
