@@ -755,13 +755,90 @@ The fix is straightforward: sync Plusium's proto with the canonical version.
           if (p.server) |s| s.fd else -1 });
    ```
 
+#### Result: Partial — proto synced, root cause found
+
+Syncing the proto fixed deserialization, and debug traces revealed the real bug.
+The logs show:
+
+```
+profile=test browser=plusium → spawns Plusium pid 53437 (server key: test)
+DevTools: profile=default browser=plusium inspected_tab_id=1
+  → auto_targeted=false (tab_id already resolved)
+  → getOrCreateServer("default", "plusium") → NEW server (wrong!)
+  → spawns Plusium pid 53460 (server key: default)
+  → FindByTabId(1) FAILED — tab_id=1 only exists in pid 53437
+```
+
+Two bugs:
+
+1. **Wrong server for DevTools.** The explicit path in
+   `handleSetDevtoolsOverlay` calls `getOrCreateServer(profile, browser)` using
+   the DevTools TUI's args (`profile=default`), not the inspected tab's server.
+   This spawns a new Chromium process that has no tabs.
+
+2. **`tab_to_pane` collision.** The map is keyed by bare `tab_id` (an `i64`).
+   Since each Chromium process starts tab IDs at 1, two servers can have
+   `tab_id=1`. The second `put` overwrites the first.
+
+See Experiment 10 for the fix.
+
+### Experiment 10: Fix DevTools server routing
+
+DevTools fails because `handleSetDevtoolsOverlay` routes `CreateDevtoolsTab` to
+the wrong Chromium process. The DevTools TUI runs as `web devtools` with no
+`--browser` or `--profile` flags, so it defaults to
+`profile=default, browser=""`. The GUI then calls
+`getOrCreateServer("default", "")`, which spawns a new Chromium process that has
+no tabs — so `FindByTabId` fails.
+
+DevTools must always run in the same Chromium process as the inspected tab. The
+inspected tab's pane already stores a pointer to its server. So instead of
+calling `getOrCreateServer` with the DevTools TUI's args, look up the inspected
+tab's pane via `tab_to_pane` and use its server directly.
+
+#### What to change
+
+**`gui/src/apprt/xpc.zig`** — In `handleSetDevtoolsOverlay`, replace the entire
+server selection block (the
+`if (auto_targeted) { ... } else if (getOrCreateServer(...)) { ... }` block)
+with a single path that always looks up the inspected tab's server:
+
+```zig
+// DevTools must run in the same Chromium process as the inspected tab.
+// Look up the inspected tab's pane and use its server.
+const inspected_pane_id = tab_to_pane.get(p.inspected_tab_id) orelse {
+    log.err("devtools: inspected tab_id={d} not found", .{p.inspected_tab_id});
+    cleanupPane(pane_id_key);
+    return;
+};
+const inspected_pane = panes.get(inspected_pane_id) orelse {
+    log.err("devtools: inspected pane {s} not found", .{inspected_pane_id});
+    cleanupPane(pane_id_key);
+    return;
+};
+if (inspected_pane.server) |target_server| {
+    p.server = target_server;
+    target_server.pane_count += 1;
+    if (target_server.fd >= 0) {
+        sendCreateDevToolsTab(p, target_server);
+        if (p.browsing) {
+            sendFocusChanged(p.pane_id_key, true);
+        }
+    }
+}
+```
+
+**`tui/src/main.rs`** — Revert the `--browser` flag in the DevTools split
+command. The command should always be `web devtools` — the GUI handles server
+routing:
+
+```rust
+let cmd = format!("{} devtools", current_exe);
+```
+
 #### Verification
 
-1. Rebuild proto: `cd chromium/src && protoc` (regenerate if needed, or just
-   sync the `.proto` file — Plusium uses C++ protobuf which auto-generates at
-   build time).
-2. `autoninja -C out/Default plusium` — compiles.
-3. `cd gui && zig build` — compiles (GUI proto unchanged).
-4. Open `web google.com --browser plusium`, then `:devtools` — DevTools should
-   open in a split pane.
-5. Check stderr for `[DEBUG]` traces confirming the flow.
+1. `cd gui && zig build` — compiles.
+2. Open `web google.com --browser plusium`, then `:devtools` — DevTools opens.
+3. Open `web google.com` (default browser), then `:devtools` — still works.
+4. Check logs: DevTools uses the same server fd as the inspected tab.

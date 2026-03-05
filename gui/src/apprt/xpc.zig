@@ -469,11 +469,14 @@ fn handleSetDevtoolsOverlay(msg: xpc_object_t) void {
         });
 
         // Use the target's server (profile) when auto-targeting, not the --profile argument.
-        if (p.inspected_tab_id != inspected_tab_id) {
+        const auto_targeted = p.inspected_tab_id != inspected_tab_id;
+        std.debug.print("[DEBUG] devtools server selection: auto_targeted={} inspected_tab_id={} resolved={} browser={s}\n", .{ auto_targeted, inspected_tab_id, p.inspected_tab_id, browser });
+        if (auto_targeted) {
             // Auto-targeted — use the target pane's server.
             const target_pane_id = last_browser_pane.?;
             const target = panes.get(target_pane_id).?;
             if (target.server) |target_server| {
+                std.debug.print("[DEBUG] devtools auto-target: using target server fd={} browser={s}\n", .{ target_server.fd, target_server.browser });
                 p.server = target_server;
                 target_server.pane_count += 1;
 
@@ -483,8 +486,11 @@ fn handleSetDevtoolsOverlay(msg: xpc_object_t) void {
                         sendFocusChanged(p.pane_id_key, true);
                     }
                 }
+            } else {
+                std.debug.print("[DEBUG] devtools auto-target: target has no server\n", .{});
             }
         } else if (getOrCreateServer(profile, browser)) |server| {
+            std.debug.print("[DEBUG] devtools explicit: using server fd={} browser={s}\n", .{ server.fd, server.browser });
             p.server = server;
             server.pane_count += 1;
 
