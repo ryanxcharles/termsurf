@@ -680,3 +680,103 @@ Two pre-existing Chromium warnings also appear (same as Plusium):
   — Chromium's compositor falls back to timer-based frame scheduling because the
   process doesn't own a display link. Does not affect rendering — CALayerHost
   compositing bypasses this path entirely.
+
+### Experiment 5: Full feature verification (debug + release)
+
+Manual testing checklist. Every feature Plusium supports must work identically
+in Roamium. Run the full checklist twice — once in debug mode, once in release
+mode.
+
+#### Setup
+
+**Debug:**
+
+```bash
+cd gui && zig build
+scripts/build-roamium.sh
+```
+
+**Release:**
+
+```bash
+cd gui && zig build -Doptimize=ReleaseFast
+scripts/build-roamium.sh --release
+```
+
+Launch GUI, open a terminal pane.
+
+#### Checklist
+
+**Page load**
+
+- [ ] `web google.com --browser roamium` — page renders
+- [ ] URL bar shows `https://www.google.com`
+- [ ] Page title appears in tab header
+- [ ] Loading indicator shows progress and completes
+
+**Navigation**
+
+- [ ] Click a link — new page loads, URL bar updates
+- [ ] Type a URL in the TUI and press Enter — navigates
+- [ ] Page title updates after navigation
+
+**Mouse input**
+
+- [ ] Click — activates buttons, follows links
+- [ ] Right-click — no crash (context menu may not appear, that's expected)
+- [ ] Click and drag — text selection works
+- [ ] Scroll — page scrolls smoothly (trackpad and mouse wheel)
+- [ ] Hover — cursor changes over links (pointer), text (I-beam), default
+
+**Keyboard input**
+
+- [ ] Type in a search box (Google search) — characters appear
+- [ ] Backspace — deletes characters
+- [ ] Enter — submits form
+- [ ] Tab — moves focus between form elements
+- [ ] Cmd+A — selects all text in input
+- [ ] Cmd+C / Cmd+V — copy/paste works
+
+**Resize**
+
+- [ ] Resize the window — browser pane resizes, content reflows
+- [ ] Split panes — browser pane adjusts to new size
+
+**DevTools**
+
+- [ ] `:devtools` — DevTools panel opens in a split pane
+- [ ] DevTools shows Elements/Console/Network tabs
+- [ ] Inspect element works (click in DevTools, highlights in page)
+
+**Color scheme**
+
+- [ ] `:colorscheme dark` — page switches to dark mode (test on a site that
+      supports it, e.g. `web github.com`)
+- [ ] `:colorscheme light` — page switches back
+
+**Tabs inventory**
+
+- [ ] `:tabs` — shows tab list with correct URLs and tab IDs
+
+**Focus**
+
+- [ ] Click between terminal and browser panes — focus switches correctly
+- [ ] Browser pane shows active indicator when focused
+
+**Close**
+
+- [ ] Close the browser pane — Roamium process exits cleanly
+- [ ] No zombie processes left (`ps aux | grep roamium`)
+
+**Multi-tab**
+
+- [ ] Open a second `web` pane with the same profile — reuses the same Roamium
+      process
+- [ ] Both tabs work independently (navigate, scroll, type)
+- [ ] Close one tab — the other keeps working
+- [ ] Close the last tab — Roamium exits
+
+#### Verification
+
+Run the full checklist above in debug mode. Record any failures, fix them, and
+re-test. Then repeat the entire checklist in release mode.
