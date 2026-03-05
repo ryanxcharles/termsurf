@@ -1,12 +1,13 @@
-# Issue 710: Gecko & WebKit engine research
+# Issue 710: Gecko, WebKit & Ladybird engine research
 
 ## Goal
 
-Determine what it takes to build Roamium equivalents for Gecko (Firefox) and
-WebKit (Safari). Each engine gets a C shared library wrapping its embedding API,
-plus a Rust binary that links the library and speaks the TermSurf protocol.
+Determine what it takes to build Roamium equivalents for Gecko (Firefox), WebKit
+(Safari), and Ladybird. Each engine gets a C shared library wrapping its
+embedding API, plus a Rust binary that links the library and speaks the TermSurf
+protocol.
 
-The end state is three browser backends — one per engine — all compatible with
+The end state is four browser backends — one per engine — all compatible with
 the same board (GUI, Wezboard, etc.):
 
 | Engine   | C library              | Rust binary        | Code name |
@@ -14,6 +15,7 @@ the same board (GUI, Wezboard, etc.):
 | Chromium | `libtermsurf_chromium` | Roamium            | (done)    |
 | Gecko    | `libtermsurf_gecko`    | TBD (e.g., Recko)  | TBD       |
 | WebKit   | `libtermsurf_webkit`   | TBD (e.g., Rebkit) | TBD       |
+| Ladybird | `libtermsurf_ladybird` | TBD                | TBD       |
 
 ## Background
 
@@ -25,7 +27,7 @@ engine's embedding API. The C library exports ~23 functions with C types only
 (`ts_init`, `ts_create_tab`, `ts_navigate`, `ts_send_mouse_event`, etc.). The
 Rust binary handles Unix socket IPC, protobuf parsing, and process lifecycle.
 
-The same pattern should work for Gecko and WebKit:
+The same pattern should work for Gecko, WebKit, and Ladybird:
 
 1. **C shared library** — Wraps the engine's embedding/content API. Exports
    `ts_*` functions with identical signatures (or as close as possible) to
@@ -61,7 +63,7 @@ For each engine:
 
 1. **Embedding API** — What is the official embedding API? How mature and stable
    is it? (Chromium has the Content API; Gecko has GeckoView; WebKit has
-   WKWebView / WebKitGTK.)
+   WKWebView / WebKitGTK; Ladybird has LibWeb.)
 
 2. **Headless/hidden rendering** — Can the engine render offscreen or to a
    hidden window while still producing GPU output for compositing? (Chromium
@@ -84,7 +86,7 @@ For each engine:
 
 7. **Build system** — What build system does the engine use? How do we add a
    shared library target? (Chromium uses GN/Ninja; Gecko uses moz.build/Make;
-   WebKit uses CMake.)
+   WebKit uses CMake; Ladybird uses CMake.)
 
 8. **Multi-profile** — Can we run multiple browser profiles (separate cookie
    jars, storage) in the same process? (Chromium uses `BrowserContext`; relevant
@@ -98,22 +100,83 @@ For each engine:
 
 ## Approach
 
-1. Clone both repos into `vendor/`:
+1. Clone all three repos into `vendor/`:
    - `vendor/firefox` — Full clone of `mozilla-firefox/firefox`
    - `vendor/webkit` — Full clone of `WebKit/WebKit`
+   - `vendor/ladybird` — Full clone of `LadybirdBrowser/ladybird`
 
 2. Research Gecko's embedding API (GeckoView, libxul, Servo components).
 
 3. Research WebKit's embedding API (WebKitGTK, WKWebView, MiniBrowser).
 
-4. For each engine, map the 10 research questions above to specific source
+4. Research Ladybird's embedding API (LibWeb, headless browser).
+
+5. For each engine, map the 10 research questions above to specific source
    locations and answer them.
 
-5. Assess feasibility and estimate the C library surface area for each engine.
+6. Assess feasibility and estimate the C library surface area for each engine.
 
 ## Repos
 
-| Engine          | GitHub                    | Size (full) |
-| --------------- | ------------------------- | ----------- |
-| Firefox (Gecko) | `mozilla-firefox/firefox` | ~4.5 GB     |
-| WebKit          | `WebKit/WebKit`           | ~11.9 GB    |
+| Engine          | GitHub                     | Size (full) |
+| --------------- | -------------------------- | ----------- |
+| Firefox (Gecko) | `mozilla-firefox/firefox`  | ~4.5 GB     |
+| WebKit          | `WebKit/WebKit`            | ~11.9 GB    |
+| Ladybird        | `LadybirdBrowser/ladybird` | ~418 MB     |
+
+## Experiment 1: Clone all three repos
+
+### Goal
+
+Clone Firefox, WebKit, and Ladybird into `vendor/` so we have local copies to
+research. Full clones (not shallow) so we can inspect history if needed.
+
+### Steps
+
+1. Clone Firefox:
+
+```bash
+cd ~/dev/termsurf
+git clone https://github.com/mozilla-firefox/firefox.git vendor/firefox
+```
+
+2. Clone WebKit:
+
+```bash
+cd ~/dev/termsurf
+git clone https://github.com/WebKit/WebKit.git vendor/webkit
+```
+
+3. Clone Ladybird:
+
+```bash
+cd ~/dev/termsurf
+git clone https://github.com/LadybirdBrowser/ladybird.git vendor/ladybird
+```
+
+4. Add all three to `.gitignore` (they're vendor dependencies, not part of the
+   TermSurf repo):
+
+```
+vendor/firefox/
+vendor/webkit/
+vendor/ladybird/
+```
+
+5. Verify all repos are intact:
+
+```bash
+ls vendor/firefox/layout/        # Gecko's layout engine
+ls vendor/webkit/Source/WebKit/  # WebKit's main source
+ls vendor/ladybird/Libraries/LibWeb/  # Ladybird's web engine
+```
+
+### Success criteria
+
+- `vendor/firefox/` exists with Gecko source (look for `layout/`, `dom/`,
+  `gfx/`, `parser/`)
+- `vendor/webkit/` exists with WebKit source (look for `Source/WebKit/`,
+  `Source/WebCore/`, `Source/JavaScriptCore/`)
+- `vendor/ladybird/` exists with Ladybird source (look for `Libraries/LibWeb/`,
+  `Libraries/LibJS/`)
+- All three are gitignored from the main repo

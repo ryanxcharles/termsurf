@@ -314,6 +314,8 @@ git subtree pull --prefix=gui upstream main -m "Merge upstream Ghostty into gui"
 - `docs/issues/707-roamium.md` — Roamium (shared lib + Rust rewrite)
 - `docs/issues/708-roamium-only.md` — Roamium-only (clean fork, renamed lib)
 - `docs/issues/709-wezboard.md` — Wezboard (WezTerm fork research)
+- `docs/issues/710-gecko-webkit-ladybird.md` — Gecko, WebKit & Ladybird engine
+  research
 - `docs/xdg.md` — XDG directory pattern and conventions
 
 ### Early Prototypes (ts1–ts5)
