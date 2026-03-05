@@ -272,3 +272,26 @@ same fundamental risk. They could all be replaced with integer ID lookups —
 `tab_id` for tabs, a `context_id` for profiles — matching the pattern that fixed
 DevTools. This would make the C API boundary fully integer-based, with no C++
 pointers ever crossing it.
+
+## Conclusion
+
+The DevTools crash in Plusium was caused by passing a `WebContents*` pointer
+through the C API boundary as `void*`. The pointer was stored by
+`ShellDevToolsBindings` and dereferenced asynchronously when the DevTools
+frontend DOM loaded. By that time, the pointer was corrupted.
+
+The fix was simple: pass `int inspected_tab_id` instead of `void* inspected` and
+look up `WebContents*` internally from `TsBrowserMainParts::tabs_` — the same
+pattern the Chromium Profile Server uses. Five files changed, ~10 lines each.
+
+Three experiments:
+
+1. **Diff Profile Server's DevTools files against stock** — all six files are
+   functionally identical. Eliminated the hypothesis that Profile Server had
+   special DevTools fixes.
+2. **Pass tab_id instead of void\*** — fixed the crash. The `void*` round-trip
+   was the root cause.
+3. **Audit remaining void\* usage** — 15 functions still use `ts_web_contents_t`
+   (`void*`) and 4 use `ts_browser_context_t` (`void*`). All are synchronous and
+   low-risk. Added safety comments to every function in `libtermsurf_content.h`
+   documenting the sync-only rule and referencing this issue as a warning.
