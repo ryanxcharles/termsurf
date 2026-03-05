@@ -331,3 +331,70 @@ silently returns null.
 4. If `OnTabReady` fires with `g_tabs` size=0 (before `push_back`), the fix is
    to push the entry before calling `ts_create_web_contents` and update the
    handle afterward.
+
+#### Result: Success
+
+The timing theory is confirmed. The log shows the exact sequence:
+
+1. `kCreateTab`: `g_tabs size=0` BEFORE `ts_create_web_contents`
+2. `OnTabReady`: fires **synchronously** during `ts_create_web_contents` —
+   `g_tabs size=0`, `FindByHandle FAILED — handle not in g_tabs`
+3. `kCreateTab`: `g_tabs size=0` AFTER `ts_create_web_contents`, BEFORE
+   `push_back`
+4. `kCreateTab`: `g_tabs size=1` AFTER `push_back` — too late
+5. `OnCaContextId`: fires later (async), `g_tabs size=1`,
+   `FindByHandle succeeded` — but `tab_id=0` because `OnTabReady` never set it
+
+`OnTabReady` fires synchronously on the same call stack during
+`ts_create_web_contents()`, before the entry is pushed to `g_tabs`. So
+`FindByHandle()` searches an empty vector and silently returns. The ca_context
+arrives later (async) and finds the entry, but with `tab_id=0` because
+`OnTabReady` never ran.
+
+**Fix:** Push the entry to `g_tabs` before calling `ts_create_web_contents()`,
+then update the handle afterward.
+
+### Experiment 5: Fix tab_ready timing bug
+
+Push the `TabEntry` to `g_tabs` **before** calling `ts_create_web_contents()`,
+so that `OnTabReady` (which fires synchronously during `ts_create_web_contents`)
+can find it via `FindByHandle()`. The handle field is set to a sentinel
+(`nullptr`) initially, then updated after `ts_create_web_contents` returns.
+
+The same bug exists in `kCreateDevtoolsTab` — fix both.
+
+#### What to change
+
+**`chromium/src/content/plusium/plusium_main.cc`** — In `kCreateTab`:
+
+```cpp
+case termsurf::TermSurfMessage::kCreateTab: {
+  auto& m = msg->create_tab();
+  // Push entry FIRST so OnTabReady can find it.
+  TabEntry entry;
+  entry.pane_id = m.pane_id();
+  g_tabs->push_back(std::move(entry));
+  TabEntry& ref = g_tabs->back();
+  // OnTabReady fires synchronously here — ref is already in g_tabs.
+  ref.handle = ts_create_web_contents(
+      g_browser_context, m.url().c_str(),
+      static_cast<int>(m.pixel_width()),
+      static_cast<int>(m.pixel_height()),
+      m.dark());
+  break;
+}
+```
+
+Apply the same pattern to `kCreateDevtoolsTab`.
+
+Also update `FindByHandle()` to skip entries with `handle == nullptr` (the
+sentinel), so an in-flight creation doesn't match a stale lookup.
+
+#### Verification
+
+1. `autoninja -C out/Default plusium` — compiles.
+2. Run `web google.com --browser plusium` with GUI logs redirected.
+3. Read `logs/gui.log` — `OnTabReady` should now succeed
+   (`FindByHandle succeeded`), and `OnCaContextId` should report a non-zero
+   `tab_id`.
+4. The page should render in the terminal.
