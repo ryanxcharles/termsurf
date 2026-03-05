@@ -785,3 +785,42 @@ tab, Cmd+A/C/V), resize, DevTools, color scheme switching, focus, clean
 shutdown, and multi-tab — all pass in both debug and release builds.
 
 Roamium is a verified drop-in replacement for Plusium.
+
+## Conclusion
+
+Roamium works. A Rust binary, built entirely outside Chromium's build system,
+controls a full Chromium browser through 20 C function calls. Pages load, render
+at 60fps, respond to mouse and keyboard, open DevTools, switch color schemes,
+manage multiple tabs, and shut down cleanly. The GUI cannot tell the difference
+between Roamium and Plusium.
+
+This completes a four-issue arc (704–707) that fundamentally changed how
+TermSurf talks to Chromium:
+
+- **Issue 704** extracted the C library (`libtermsurf_content`) and proved that
+  a standalone binary could wrap it. Plusium was born — 430 lines of C++ that
+  replaced the monolithic Chromium Profile Server's 1,050-line fork.
+- **Issue 705** made Plusium production-ready across 10 experiments: fixing the
+  tab_ready timing bug, dark mode, cursor changes, and completing the full
+  feature audit. Everything worked except DevTools.
+- **Issue 706** found and fixed the DevTools crash. The root cause was a `void*`
+  pointer corrupted across the C API boundary when used asynchronously. The fix
+  — passing `tab_id` integers instead of pointers — established the design rule
+  that no C++ pointers cross the library boundary for async use.
+- **Issue 707** proved the architecture works in a second language. Roamium
+  reimplements Plusium in ~400 lines of Rust — fewer than the C++ original —
+  with zero Chromium build system integration. Cargo builds it, a shell script
+  copies it next to Chromium, and it just works.
+
+The C library is the architectural keystone. `libtermsurf_content` exports 20
+functions with C types only — `int`, `const char*`, `void*`, `bool`, `uint32_t`.
+Any language with C FFI can control Chromium through it. Rust proved it in five
+experiments: shared library extraction, FFI smoke test, build scripts, full IPC
+pipeline, and comprehensive feature verification.
+
+What this means for TermSurf: the browser is now a plugin. The GUI launches any
+protocol-compatible binary — Roamium, Plusium, or a future Zoomium (Zig). Third
+parties could write bindings in Go, Swift, or Python. The protocol is simple
+(Unix socket + length-prefixed protobuf), the C library is stable, and the
+boundary is clean. TermSurf is no longer coupled to a single Chromium fork
+binary.
