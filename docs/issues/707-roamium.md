@@ -184,20 +184,56 @@ straightforward FFI — Rust calls the `extern "C"` function and blocks.
 
 ## Ideas for experiments
 
-1. **Standalone Rust binary with FFI bindings.** Create `roamium/` at the repo
+1. **Make libtermsurf_content a shared library.** Change `static_library` to
+   `shared_library` in its `BUILD.gn`. Update Plusium's `BUILD.gn` to depend
+   only on the dylib (remove direct `content_shell_app`/`content_shell_lib`
+   deps). Verify Plusium still works. This is a prerequisite for Roamium — it
+   proves the C library is a proper abstraction boundary, not just a source
+   grouping.
+
+2. **Standalone Rust binary with FFI bindings.** Create `roamium/` at the repo
    root (sibling to `gui/` and `tui/`). Write FFI bindings to
    `libtermsurf_content.h` (hand-written, ~20 `extern "C"` declarations). Reuse
    prost + the same proto file. Implement the full message loop. Build with
-   Cargo, link against Chromium's component build dylibs. Test by swapping
-   `--browser plusium` for `--browser roamium`.
-
-2. **Minimal smoke test first.** Before implementing the full message loop,
-   build a Roamium that just calls `ts_content_main()`, connects to the socket,
-   sends `ServerRegister`, and exits. Proves the FFI + linking + socket
-   connection work end-to-end.
+   Cargo, link `libtermsurf_content.dylib`. Test by swapping `--browser plusium`
+   for `--browser roamium`.
 
 3. **Shared proto crate.** Extract the proto compilation into a shared crate
    (`termsurf-proto/`) that both Roamium and the TUI depend on, eliminating
    duplicate `build.rs` codegen.
 
 ## Experiments
+
+### Experiment 1: Make libtermsurf_content a shared library
+
+Plusium currently links 430+ Chromium dylibs directly, even though it only calls
+20 `ts_*` functions from `libtermsurf_content`. The C library was designed as
+the abstraction boundary, but GN builds it as a `static_library` — the `.o`
+files get baked into the `plusium` binary, and all of Chromium's transitive
+dependencies leak through.
+
+Change `libtermsurf_content` to a `shared_library` so it becomes a proper
+boundary. Plusium (and later Roamium) links one dylib instead of 430.
+
+#### What to change
+
+**`content/libtermsurf_content/BUILD.gn`** — Change `static_library` to
+`shared_library`.
+
+**`content/plusium/BUILD.gn`** — Remove `//content/shell:content_shell_app` and
+`//content/shell:content_shell_lib` from Plusium's `deps`. These are
+`libtermsurf_content`'s internal dependencies — Plusium should not need them.
+Keep only `:termsurf_proto` and `//content/libtermsurf_content`.
+
+#### Verification
+
+1. `autoninja -C out/Default plusium` — builds clean.
+2. `ls -la out/Default/libtermsurf_content.dylib` — the dylib exists.
+3. `otool -L out/Default/plusium` — Plusium links `libtermsurf_content.dylib`,
+   not 430 Chromium dylibs directly.
+4. `nm -gU out/Default/libtermsurf_content.dylib | grep ts_` — all 20 `ts_*`
+   symbols are exported.
+5. `web google.com --browser plusium` — browse, navigate, DevTools — all
+   working.
+
+#### Result
