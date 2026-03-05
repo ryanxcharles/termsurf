@@ -69,9 +69,11 @@ find the most relevant recent branch, create a new branch from it
 | `146.0.7650.0-issue-642`      | [Issue 642](../docs/issues/642-zig-profile-server.md)         | Zig Profile Server                          |
 | `146.0.7650.0-issue-643`      | [Issue 643](../docs/issues/643-zig-profile-server-2.md)       | Zig Profile Server (Take 2)                 |
 | `146.0.7650.0-issue-644`      | [Issue 644](../docs/issues/644-simplified-cpp.md)             | Simplified C++ profile server               |
+| `146.0.7650.0-issue-644-exp3` | [Issue 644](../docs/issues/644-simplified-cpp.md)             | Simplified C++ profile server (Exp 3)       |
 | `146.0.7650.0-issue-655`      | [Issue 655](../docs/issues/655-substack-blank.md)             | Stub BadgeService binder                    |
 | `146.0.7650.0-issue-680`      | [Issue 680](../docs/issues/680-dark-mode.md)                  | Dark mode via XPC                           |
 | `146.0.7650.0-issue-684`      | [Issue 684](../docs/issues/684-devtools.md)                   | DevTools via devtools:// URL                |
+| `146.0.7650.0-issue-689`      | [Issue 689](../docs/issues/689-tab-lifecycle.md)              | Tab lifecycle                               |
 | `146.0.7650.0-issue-689-exp3` | [Issue 689](../docs/issues/689-tab-lifecycle.md)              | Close tab teardown order                    |
 | `146.0.7650.0-issue-694`      | [Issue 694](../docs/issues/694-tab-id-chromium.md)            | Replace pane_id with tab_id                 |
 | `146.0.7650.0-issue-701`      | [Issue 701](../docs/issues/701-chromium-sockets.md)           | Replace GUI↔Chromium XPC with Unix sockets  |
