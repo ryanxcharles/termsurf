@@ -1,7 +1,7 @@
 # TermSurf
 
-TermSurf is a protocol for embedding web browsers inside terminal emulators.
-Any terminal, any browser engine, any TUI — connected by a protobuf/Unix socket
+TermSurf is a protocol for embedding web browsers inside terminal emulators. Any
+terminal, any browser engine, any TUI — connected by a protobuf/Unix socket
 protocol. Users type `web localhost:3000` and see their work without ever
 leaving the terminal. No alt+tab, no context switch.
 
@@ -31,9 +31,9 @@ with the terminal (board) via the TermSurf protocol. One process per profile.
 | Engine   | C library              | Rust binary | Status     |
 | -------- | ---------------------- | ----------- | ---------- |
 | Chromium | `libtermsurf_chromium` | Roamium     | Done       |
-| WebKit   | `libtermsurf_webkit`   | Rebkit      | Planned    |
-| Gecko    | `libtermsurf_gecko`    | Recko       | Researched |
-| Ladybird | `libtermsurf_ladybird` | TBD         | Researched |
+| WebKit   | `libtermsurf_webkit`   | Surfari     | Planned    |
+| Gecko    | `libtermsurf_gecko`    | Waterwolf   | Researched |
+| Ladybird | `libtermsurf_ladybird` | Girlbat     | Researched |
 
 Each engine follows the same pattern: a C shared library wrapping the engine's
 embedding API (`ts_*` functions), linked by a Rust binary that handles Unix
@@ -51,16 +51,16 @@ forks of all major terminal emulators:
 - **Alacritty** — Planned.
 - **iTerm2** — Planned.
 
-Any terminal that implements the TermSurf protocol can host browser overlays.
-A "board" is a terminal emulator that listens on a Unix socket, accepts
+Any terminal that implements the TermSurf protocol can host browser overlays. A
+"board" is a terminal emulator that listens on a Unix socket, accepts
 connections from TUIs and browser engines, and renders browser content as
 overlays at pixel coordinates.
 
 ### Many TUIs
 
 The first TUI, `web`, provides browser chrome (URL bar, navigation, modes) in
-the terminal pane. But TermSurf is really a webview overlay protocol — many
-TUIs can embed web browsers with any engine:
+the terminal pane. But TermSurf is really a webview overlay protocol — many TUIs
+can embed web browsers with any engine:
 
 - `web` — General-purpose web browser TUI (current)
 - Future TUIs could include: documentation viewers, API explorers, email
@@ -120,36 +120,6 @@ for the current issue. Never commit directly to an existing issue's branch.
 3. Add the new branch to the Branches table in `chromium/README.md`.
 
 This keeps every issue's Chromium changes isolated and traceable.
-
-## What TermSurf Is
-
-TermSurf is a protocol and ecosystem for embedding web browsers inside terminal
-emulators. Users type `web google.com` in their terminal and a webpage renders
-directly in the terminal pane, sharing cookies and sessions across tabs within
-the same browser profile. The protocol connects three kinds of components:
-terminals (boards), browser engines (profile servers), and TUIs.
-
-TermSurf evolved through six generations:
-
-- **ts1** (Ghostty + WKWebView) — macOS-only. WKWebView had limited API and no
-  cross-platform path. Abandoned in favor of CEF.
-- **ts2** (WezTerm + in-process CEF) — CEF allows only one `root_cache_path` per
-  process, meaning one browser profile per application. Abandoned.
-- **ts3** (WezTerm + out-of-process CEF via XPC) — Each browser profile gets its
-  own CEF process. Superseded after 26 experiments (Issues 325–350) proved CEF
-  caps at ~31fps on macOS.
-- **ts4** (Chromium Content API experiments) — Proved in-process Chromium works:
-  multiple profiles, 60fps. PoC only. Superseded by ts5.
-- **ts5** (Ghostty fork + out-of-process Chromium) — Proved end-to-end Chromium
-  streaming: IOSurface overlay, IPC, mouse/keyboard, focus, text selection. All
-  logic in Swift. Superseded by gui.
-- **gui** (Ghostty fork, Zig-first) — **Active development.** All browser
-  integration in Zig. Unix socket IPC, CALayerHost compositing, keyboard/mouse
-  forwarding — all in Zig, matching Ghostty's architecture where Swift is a thin
-  macOS wrapper.
-
-The prototypes (ts1–ts5) and cef-rs have been archived. Full documentation is in
-[docs/early-prototypes.md](docs/early-prototypes.md).
 
 ## Directory Structure
 
@@ -255,123 +225,8 @@ git subtree pull --prefix=gui upstream main -m "Merge upstream Ghostty into gui"
 
 ### GUI (active)
 
-- `docs/issues/600-termsurf-ghost.md` — GUI vision, Zig-first architecture,
-  Ghostty fork
-- `docs/issues/601-zig-xpc.md` — IPC in Zig (gateway, listener, message parsing)
-- `docs/issues/602-pink-texture.md` — Pink texture overlay (GPU quad via IPC)
-- `docs/issues/603-box-demo.md` — Live Chromium streaming at 60fps
-- `docs/issues/604-two-panes.md` — Multi-pane Chromium streaming
-- `docs/issues/605-two-profiles.md` — Multi-profile server reuse
-- `docs/issues/606-mouse-input.md` — Mouse clicks, drag, scroll, cursor changes
-- `docs/issues/607-keyboard-input.md` — Basic key forwarding to Chromium
-- `docs/issues/608-search-input.md` — Search input (Google, address bar)
-- `docs/issues/609-keyboard-input-2.md` — Cmd+key bypass, clipboard, Tab
-- `docs/issues/610-app-icon.md` — App icon (blocked by bundle ID, resolved)
-- `docs/issues/611-rename.md` — Rename Ghostty → TermSurf
-- `docs/issues/612-icon.md` — App icon pipeline (release + debug icons)
-- `docs/issues/613-rename-directories.md` — Rename ghost/ → gui/, web/ → tui/
-- `docs/issues/614-docs-review.md` — Documentation review
-- `docs/issues/615-xdg.md` — XDG directory compliance
-- `docs/issues/616-web-features.md` — Missing web features inventory
-- `docs/issues/617-alpha.md` — Alpha release planning
-- `docs/issues/618-url-sync.md` — URL sync
-- `docs/issues/619-input-latency.md` — Input latency measurement and analysis
-- `docs/issues/620-zig-content-shell.md` — Zig Content Shell (in-process
-  attempt)
-- `docs/issues/621-single-process.md` — Single-process multi-profile performance
-- `docs/issues/622-javascript-is-slow.md` — JavaScript causes 2fps in
-  multi-profile
-- `docs/issues/623-viz-display-serialization.md` — Viz Display serialization
-  theory (debunked)
-- `docs/issues/624-chromium-ipc.md` — Chromium IPC architecture research
-- `docs/issues/625-calayerhost.md` — CALayerHost migration (replaced
-  FrameSinkVideoCapturer)
-- `docs/issues/626-x-y-calayerhost.md` — CALayerHost X/Y positioning fix
-- `docs/issues/627-resize-calayerhost.md` — CALayerHost resize fix
-- `docs/issues/628-navigation-calayerhost.md` — CALayerHost navigation (first
-  attempt, 8 experiments failed)
-- `docs/issues/629-understand-nav-calayerhost.md` — Navigation blank diagnosis
-- `docs/issues/630-nav-calayerhost-6.md` — Navigation blank fix (7 coordinated
-  fixes)
-- `docs/issues/631-continue-nav-calayerhost.md` — Navigation flicker
-  investigation
-- `docs/issues/632-nav-flicker-calayerhost.md` — Navigation flicker diagnosis
-- `docs/issues/633-persistent-compositor.md` — Persistent compositor for stable
-  CAContext
-- `docs/issues/634-calayerhost-audit.md` — CALayerHost feature audit (20/20)
-- `docs/issues/635-multi-pane-calayerhost.md` — Multi-pane persistent compositor
-  regression fix
-- `docs/issues/636-calayerhost-audit.md` — CALayerHost audit continued
-- `docs/issues/637-editable-url-bar.md` — Editable URL bar design
-- `docs/issues/638-page-title.md` — Page title sync via TitleWasSet
-- `docs/issues/639-open-in-same-tab.md` — Open target=\_blank in same tab
-- `docs/issues/640-project-cleanup.md` — Archive ts1–ts5, consolidate docs
-- `docs/issues/641-chromium-patches.md` — Chromium patch archive setup
-- `docs/issues/642-zig-profile-server.md` — Zig profile server (failed)
-- `docs/issues/643-zig-profile-server-2.md` — Zig profile server take 2 (failed)
-- `docs/issues/644-simplified-cpp.md` — Simplified C++ profile server (deferred)
-- `docs/issues/645-audit-xdg.md` — XDG audit (ghostty→termsurf paths)
-- `docs/issues/646-normal-insert.md` — Normal and Insert modes
-- `docs/issues/647-tui-restructure.md` — TUI layout restructure
-- `docs/issues/648-devtools-research.md` — DevTools research
-- `docs/issues/649-control-mode.md` — Start in Control mode
-- `docs/issues/650-installation.md` — Installation and bundling
-- `docs/issues/651-bundle-identifier.md` — Bundle identifier confusion fix
-- `docs/issues/652-termsurf-cli.md` — Rename CLI binary
-- `docs/issues/653-xpc-gateway.md` — XPC gateway isolation (deferred)
-- `docs/issues/654-cmd-h.md` — Fix Cmd+H keybinding override
-- `docs/issues/655-substack-blank.md` — Stub BadgeService binder
-- `docs/issues/656-rename-script.md` — Reproducible ghostty→termsurf rename
-  script
-- `docs/issues/657-url-edit-color.md` — Purple URL bar border in Edit mode
-- `docs/issues/658-edtui-improvements.md` — Vim-like editor modes, keybindings,
-  clipboard fix
-- `docs/issues/659-command-mode.md` — Vim-style command mode (:q, etc.)
-- `docs/issues/660-lazyvim-tokyonight-colors.md` — Per-mode submode indicator
-  colors
-- `docs/issues/661-title-spacing.md` — Tight title spacing, no padding
-- `docs/issues/662-context-menu.md` — Browser context menu (deferred)
-- `docs/issues/663-js-context-menu.md` — JS context menu injection (deferred)
-- `docs/issues/664-clap.md` — Clap CLI parser with subcommands
-- `docs/issues/665-esc.md` — Context-sensitive Esc key navigation
-- `docs/issues/666-devils-esc.md` — Esc latency fix (unified mpsc channel)
-- `docs/issues/667-active-pane.md` — Active pane indicator (blocked by resize)
-- `docs/issues/668-fix-resize.md` — Fix missing Event::Resize forwarding
-- `docs/issues/669-active-pane.md` — Active pane indicator (borders +
-  desaturation)
-- `docs/issues/670-click-to-focus.md` — Click-to-focus without pass-through
-- `docs/issues/671-app-icon.md` — App icon update and clean-zig.sh
-- `docs/issues/672-border-padding.md` — Inner padding for borders
-- `docs/issues/673-consolidate-scripts.md` — Consolidate scripts to scripts/
-- `docs/issues/674-homepage.md` — Configurable homepage
-- `docs/issues/675-hello-message.md` — Hello message for live config
-- `docs/issues/676-url-normalization.md` — URL normalization (auto https://)
-- `docs/issues/677-website-deps.md` — Website dependency updates
-- `docs/issues/678-website-lint-format.md` — Website linting and formatting
-- `docs/issues/679-license.md` — MIT license and trademark
-- `docs/issues/680-dark-mode.md` — Dark mode and :colorscheme command
-- `docs/issues/681-quitall.md` — Quit all and subsequence matching
-- `docs/issues/682-direct-xpc.md` — Direct TUI→Chromium IPC (not implemented)
-- `docs/issues/683-visited-links.md` — Visited links (deferred)
-- `docs/issues/684-devtools.md` — Chrome DevTools in split panes
-- `docs/issues/685-multi-profile-tracking.md` — Multi-profile tracking fix
-- `docs/issues/686-chromium-crash.md` — Chromium crash diagnosis (duplicate
-  DevTools)
-- `docs/issues/687-one-devtools.md` — One DevTools per tab enforcement
-- `docs/issues/688-devtools-split.md` — DevTools split (blocked by tab
-  lifecycle)
-- `docs/issues/689-tab-lifecycle.md` — Tab lifecycle — close tabs when panes
-  close
-- `docs/issues/690-devtools-split.md` — DevTools split command
-- `docs/issues/691-devtools-direct-command.md` — DevTools direct command
-- `docs/issues/692-file-subcommand.md` — `web file` subcommand
-- `docs/issues/693-smart-resolve.md` — Smart input resolution
-- `docs/issues/694-tab-id-chromium.md` — Replace pane_id with tab_id in Chromium
-- `docs/issues/695-suppress-activation-drag.md` — Suppress activation drag
-- `docs/issues/696-double-click-suppression.md` — Double click suppression fix
-- `docs/issues/697-update-docs.md` — Documentation update
-- `docs/issues/698-unix-sockets.md` — Replace XPC with Unix domain sockets
-- `docs/issues/699-protobuf-build.md` — Build protobuf-c into the GUI
+Recent issues:
+
 - `docs/issues/700-tui-gui-sockets.md` — Replace TUI↔GUI XPC with Unix sockets
 - `docs/issues/701-chromium-sockets.md` — Replace GUI↔Chromium XPC with Unix
   sockets
@@ -388,7 +243,6 @@ git subtree pull --prefix=gui upstream main -m "Merge upstream Ghostty into gui"
 - `docs/issues/709-wezboard.md` — Wezboard (WezTerm fork research)
 - `docs/issues/710-gecko-webkit-ladybird.md` — Gecko, WebKit & Ladybird engine
   research
-- `docs/xdg.md` — XDG directory pattern and conventions
 
 ### Early Prototypes (ts1–ts5)
 
