@@ -44,13 +44,14 @@ ready.
 
 ## 1.0 Milestone
 
-- [ ] Roamium and Zoomium
-- [ ] Gecko and Webkit (Recko and Zecko? Rebkit and Zebkit?)
+- [ ] Linux, macOS and Windows
+- [ ] Chromium, Webkit, Ladybird, and Gecko
+- [ ] Ghostty, Wezterm, Kitty, Alacritty, iTerm2
 - [ ] All elementary web features
 - [ ] Multi-tab in one pane
 - [ ] Scrollback webviews
 - [ ] Partially hidden webviews
+- [ ] Miniaturized webviews
 - [ ] Documentation web page
-- [ ] Ghostboard, Wezboard, and Babycat
 - [ ] Whitepaper
 - [ ] Hosted passwords and bookmarks
