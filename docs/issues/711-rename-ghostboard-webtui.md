@@ -588,3 +588,34 @@ prefers a simple, descriptive name over the domain-based name.
 3. `grep -r 'termsurf\.com/' .prettierignore` — no stale references in root
 4. `grep -r 'termsurf\.com/' ghostboard/.prettierignore ghostboard/.gitattributes`
    — no stale references
+
+**Result:** Pass
+
+All verifications passed. Git detected all 33 files as renames (100% match).
+
+#### Conclusion
+
+Clean rename from `termsurf.com/` to `homepage/`. The intermediate
+`termsurf.com/` name lasted one commit before the user chose `homepage/` — a
+simpler, domain-agnostic name.
+
+## Conclusion
+
+All three top-level directories now have descriptive names that reflect their
+role in the project:
+
+| Before     | After         | Role                               |
+| ---------- | ------------- | ---------------------------------- |
+| `gui/`     | `ghostboard/` | Ghostboard terminal (Ghostty fork) |
+| `tui/`     | `webtui/`     | The `web` TUI (Rust/ratatui)       |
+| `website/` | `homepage/`   | termsurf.com website               |
+
+The macOS app displays "TermSurf Ghostboard" (with a space) in the menu bar,
+Dock, and /Applications. Experiment 2 discovered that `PRODUCT_NAME` is the
+single source of truth for all user-visible app naming on macOS — dashes in
+`PRODUCT_NAME` leak into every surface. Experiment 3 fixed this by switching
+from a dash to a space.
+
+Along the way, the immutability rule for concluded issue documents was
+formalized in `CLAUDE.md` — historical docs are never modified, even when the
+paths they reference become outdated.
