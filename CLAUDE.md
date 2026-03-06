@@ -292,6 +292,8 @@ Recent issues:
 - `docs/issues/709-wezboard.md` — Wezboard (WezTerm fork research)
 - `docs/issues/710-gecko-webkit-ladybird.md` — Gecko, WebKit & Ladybird engine
   research
+- `docs/issues/711-rename-ghostboard-webtui.md` — Rename GUI to Ghostboard, TUI
+  to webtui
 
 ### Early Prototypes (ts1–ts5)
 

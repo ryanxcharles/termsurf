@@ -1,0 +1,38 @@
+# Issue 711: Rename GUI to Ghostboard, TUI to webtui
+
+## Goal
+
+Rename the GUI application from "TermSurf" to "TermSurf Ghostboard" and the TUI
+from `web` to `webtui`. Fix the build and all documentation to reflect the new
+names.
+
+## Background
+
+TermSurf is evolving from a single app into a protocol ecosystem. The current
+names are ambiguous:
+
+- **GUI** is called "TermSurf" — but TermSurf is the protocol, not one specific
+  terminal. As we add more boards (Wezboard, Kittyboard, etc.), we need a name
+  that identifies this specific board as the Ghostty fork. "TermSurf Ghostboard"
+  makes the relationship clear: it's the Ghostty-based board for the TermSurf
+  protocol.
+
+- **TUI** is called `web` — a generic name that doesn't convey what it is. As we
+  add more TUIs, each needs a distinct identity. `webtui` is more descriptive: a
+  TUI for web browsing.
+
+### What changes
+
+- **GUI app name:** TermSurf → TermSurf Ghostboard
+- **TUI binary name:** `web` → `webtui`
+- **Documentation:** CLAUDE.md, README files, issue docs, code comments
+- **Build system:** Binary names, bundle names, build targets
+- **Code:** String literals, log messages, error messages referencing the old
+  names
+
+### What stays the same
+
+- **Directory names:** `gui/` and `tui/` — these are structural, not branding
+- **Protocol:** `termsurf.proto` — unchanged
+- **Socket paths:** `$TMPDIR/termsurf/gui-{pid}.sock` — unchanged
+- **Config directories:** XDG paths using `termsurf` — unchanged
