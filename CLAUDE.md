@@ -84,20 +84,42 @@ implementations of the protocol.
 
 ## Architectural Decisions
 
+### Multi-process architecture
+
+TermSurf is multi-process by necessity, not by choice. Each browser engine
+process serves exactly one profile (one set of cookies, storage, and cache).
+This is a hard constraint imposed by Chromium (one `BrowserContext` per
+process), and Gecko and Ladybird have the same limitation. This constraint is
+the defining architectural fact of TermSurf — it shaped every generation from
+ts2 onward.
+
+The multi-process design has a second benefit: it enables multi-engine support.
+Because each browser process is an independent program speaking the TermSurf
+protocol, the board doesn't care which engine is behind it. A user can have one
+pane running Roamium (Chromium), another running Surfari (WebKit), and a third
+running Girlbat (Ladybird) — all in the same terminal window, all speaking the
+same protobuf messages.
+
+WebKit is the exception — `WKWebsiteDataStore` supports multiple profiles in
+one process — but the one-process-per-profile model still works for it, and
+keeping the architecture uniform is more valuable than optimizing for one
+engine.
+
 ### Unix sockets + protobuf for all IPC
 
 All inter-process communication uses Unix domain sockets with length-prefixed
-protobuf messages. The GUI listens on a PID-scoped socket
-(`$TMPDIR/termsurf/gui-{pid}.sock`), and both TUI and Chromium connect to it.
+protobuf messages. The board (terminal) listens on a PID-scoped socket
+(`$TMPDIR/termsurf/gui-{pid}.sock`), and both TUIs and browser engines connect
+to it as clients.
 
-- **TUI → GUI:** The TUI reads the `TERMSURF_SOCKET` env var (set by the GUI) to
-  discover the socket path.
-- **GUI → Chromium:** The GUI passes `--ipc-socket={path}` when launching
-  Chromium server processes.
+- **TUI → Board:** The TUI reads the `TERMSURF_SOCKET` env var (set by the
+  board) to discover the socket path.
+- **Board → Engine:** The board passes `--ipc-socket={path}` when launching
+  browser engine processes.
 - **Wire format:** 4-byte little-endian length prefix + serialized protobuf
   (`termsurf.proto`).
-- **Serialization:** protobuf-c in Zig (GUI), prost in Rust (TUI), C++ protobuf
-  in Chromium.
+- **Serialization:** protobuf-c in Zig (board), prost in Rust (TUI and
+  engines), C++ protobuf in Chromium.
 
 Earlier generations (ts3–ts5) used XPC for IPC. Issues 698–701 replaced XPC with
 sockets, and Issue 702 removed all dead XPC code. CALayerHost compositing
