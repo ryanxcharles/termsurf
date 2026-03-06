@@ -105,6 +105,36 @@ one process — but the one-process-per-profile model still works for it, and
 keeping the architecture uniform is more valuable than optimizing for one
 engine.
 
+**Process topology:**
+
+```
+┌─────────┐  ┌─────────┐  ┌─────────┐
+│  TUI 1  │  │  TUI 2  │  │  TUI N  │    N TUIs (e.g., `web`)
+└────┬────┘  └────┬────┘  └────┬────┘
+     │            │            │
+     └────────────┼────────────┘
+                  │  Unix socket
+           ┌──────┴──────┐
+           │    Board    │                1 board (terminal emulator)
+           │  (Ghostty)  │
+           └──┬───┬───┬──┘
+              │   │   │
+              │   │   │  Unix sockets
+              │   │   │
+     ┌────────┘   │   └────────┐
+     │            │            │
+┌────┴────┐ ┌────┴────┐ ┌────┴────┐
+│ Roamium │ │ Surfari │ │ Roamium │    M engines (one per profile)
+│ profile │ │ profile │ │ profile │
+│   "A"   │ │   "B"   │ │   "C"   │
+└─────────┘ └─────────┘ └─────────┘
+```
+
+N TUIs connect to 1 board. The board manages M browser engine processes, each
+serving one profile. Different profiles can use different engines. The board is
+the hub — it routes messages between TUIs and engines, manages pane layout, and
+composites browser overlays into the terminal window.
+
 ### Unix sockets + protobuf for all IPC
 
 All inter-process communication uses Unix domain sockets with length-prefixed
