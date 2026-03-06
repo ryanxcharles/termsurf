@@ -23,7 +23,8 @@ names are ambiguous:
 
 ### What changes
 
-- **GUI app name:** TermSurf → TermSurf Ghostboard
+- **GUI app name:** TermSurf → TermSurf Ghostboard (filename:
+  TermSurf-Ghostboard)
 - **GUI directory:** `gui/` → `ghostboard/`
 - **TUI package name:** `web` → `webtui` (binary stays `web`)
 - **TUI directory:** `tui/` → `webtui/`
@@ -39,9 +40,10 @@ names are ambiguous:
 ### Socket path change
 
 The board socket path changes from `$TMPDIR/termsurf/gui-{pid}.sock` to
-`$TMPDIR/termsurf/ghostboard-{pid}.sock`. This aligns the socket name with the
-board name and allows multiple different boards to run simultaneously without
-path collisions (e.g., `ghostboard-{pid}.sock` vs `wezboard-{pid}.sock`).
+`$TMPDIR/termsurf/termsurf-ghostboard-{pid}.sock`. This aligns the socket name
+with the board name and allows multiple different boards to run simultaneously
+without path collisions (e.g., `termsurf-ghostboard-{pid}.sock` vs
+`termsurf-wezboard-{pid}.sock`).
 
 ### XDG directory restructure
 
@@ -114,7 +116,7 @@ simultaneously without browser profile lock conflicts.
 
 - `TERMSURF_CONFIG_DIR` → `$XDG_CONFIG_HOME/termsurf/ghostboard`
 - `TERMSURF_DATA_DIR` → `$XDG_DATA_HOME/termsurf/ghostboard`
-- `TERMSURF_SOCKET` → `$TMPDIR/termsurf/ghostboard-{pid}.sock`
+- `TERMSURF_SOCKET` → `$TMPDIR/termsurf/termsurf-ghostboard-{pid}.sock`
 
 Browser engine processes inherit these and append their own name (e.g.,
 `$TERMSURF_DATA_DIR/roamium` for Chromium's profile directory).
@@ -203,3 +205,136 @@ Directory renamed, package renamed, build scripts updated. The TUI now lives at
 `webtui/` with package name `webtui` while the user-facing binary stays `web`.
 No code changes were needed in the GUI or TUI source — only paths and the Cargo
 package name.
+
+### Experiment 2: Rename `gui/` to `ghostboard/`
+
+Rename the GUI directory from `gui/` to `ghostboard/`, rename the app from
+"TermSurf" to "TermSurf Ghostboard", update XDG paths from `termsurf/` to
+`termsurf/ghostboard/`, and change the socket name from `gui-{pid}.sock` to
+`termsurf-ghostboard-{pid}.sock`.
+
+This is a large rename touching the directory, build system, Xcode project, menu
+bar, About page, XDG paths, socket path, scripts, gitignore, and CLAUDE.md.
+
+#### Changes
+
+**1. Directory rename:**
+
+- `gui/` → `ghostboard/`
+
+**2. Socket path** (`ghostboard/src/apprt/xpc.zig` line 1552):
+
+- `"gui-{d}.sock"` → `"termsurf-ghostboard-{d}.sock"`
+
+**3. XDG paths** — add `ghostboard/` subdirectory under `termsurf/`:
+
+All XDG paths currently use `termsurf/` as the subdirectory. They need to become
+`termsurf/ghostboard/` so that each board gets its own namespace.
+
+- `ghostboard/src/config/file_load.zig`:
+  - `"termsurf/config.ghostty"` → `"termsurf/ghostboard/config.ghostty"`
+  - `"termsurf/config"` → `"termsurf/ghostboard/config"`
+- `ghostboard/src/crash/dir.zig`:
+  - `"termsurf/crash"` → `"termsurf/ghostboard/crash"`
+- `ghostboard/src/crash/sentry.zig`:
+  - `"termsurf/sentry"` → `"termsurf/ghostboard/sentry"`
+- `ghostboard/src/cli/ssh-cache/DiskCache.zig`:
+  - `"termsurf"` → `"termsurf/ghostboard"` (ssh cache path)
+- `ghostboard/src/cli/ssh_cache.zig`:
+  - `"termsurf"` → `"termsurf/ghostboard"` (ssh cache path)
+
+**4. App name in UI** — "TermSurf" → "TermSurf Ghostboard":
+
+- `ghostboard/macos/Sources/Features/About/AboutView.swift` line 51:
+  - `Text("TermSurf")` → `Text("TermSurf Ghostboard")`
+  - Line 54: Update description text to mention Ghostboard
+- `ghostboard/macos/Sources/App/macOS/MainMenu.xib`:
+  - `title="TermSurf"` → `title="TermSurf Ghostboard"` (menu bar app name)
+  - `title="About TermSurf"` → `title="About TermSurf Ghostboard"`
+  - `title="Hide TermSurf"` → `title="Hide TermSurf Ghostboard"`
+  - `title="Quit TermSurf"` → `title="Quit TermSurf Ghostboard"`
+- `ghostboard/macos/Sources/App/iOS/iOSApp.swift` line 45:
+  - `Text("TermSurf")` → `Text("TermSurf Ghostboard")`
+
+**5. Xcode project** (`ghostboard/macos/TermSurf.xcodeproj/project.pbxproj`):
+
+- All `INFOPLIST_KEY_CFBundleDisplayName = TermSurf` → `"TermSurf Ghostboard"`
+  (5 occurrences)
+- `INFOPLIST_KEY_CFBundleDisplayName = "TermSurf[DEBUG]"` →
+  `"TermSurf Ghostboard[DEBUG]"`
+- `PRODUCT_NAME = TermSurf` → `"TermSurf-Ghostboard"` (2 occurrences for release
+  configs — these control the `.app` bundle name)
+- `PRODUCT_NAME = "TermSurf-Debug"` → `"TermSurf-Ghostboard-Debug"`
+
+**6. Zig build** (`ghostboard/src/build/TermSurfXcodebuild.zig` line 52):
+
+- `"TermSurf-Debug"` → `"TermSurf-Ghostboard-Debug"`
+- `"TermSurf"` → `"TermSurf-Ghostboard"`
+
+**7. Zig help text** — references to `TermSurf.app`:
+
+- `ghostboard/src/cli/help.zig` line 56:
+  - `"TermSurf.app"` → `"TermSurf-Ghostboard.app"`
+- `ghostboard/src/main_termsurf.zig` lines 80, 83, 84:
+  - `"TermSurf.app"` → `"TermSurf-Ghostboard.app"`
+- `ghostboard/src/cli/list_themes.zig` line 90:
+  - `"TermSurf.app"` → `"TermSurf-Ghostboard.app"`
+- `ghostboard/src/config/Config.zig` line 558:
+  - `"TermSurf.app"` → `"TermSurf-Ghostboard.app"`
+
+**8. `.gitignore`:**
+
+- All `gui/` prefixes → `ghostboard/`
+
+**9. Build scripts:**
+
+- `scripts/build-debug.sh`:
+  - `cd "$REPO_DIR/gui"` → `cd "$REPO_DIR/ghostboard"`
+  - `$REPO_DIR/gui/macos/build/Debug/TermSurf-Debug.app` →
+    `$REPO_DIR/ghostboard/macos/build/Debug/TermSurf-Ghostboard-Debug.app`
+- `scripts/build-release.sh`:
+  - `cd "$REPO_DIR/gui"` → `cd "$REPO_DIR/ghostboard"`
+  - `$REPO_DIR/gui/macos/build/ReleaseLocal/TermSurf.app` →
+    `$REPO_DIR/ghostboard/macos/build/ReleaseLocal/TermSurf-Ghostboard.app`
+- `scripts/install.sh`:
+  - `APP="/Applications/TermSurf.app"` →
+    `APP="/Applications/TermSurf-Ghostboard.app"`
+  - `SRC="$REPO_DIR/gui/macos/build/ReleaseLocal/TermSurf.app"` →
+    `SRC="$REPO_DIR/ghostboard/macos/build/ReleaseLocal/TermSurf-Ghostboard.app"`
+  - Update all `lsregister -u` paths
+- `scripts/clean-zig.sh`:
+  - `GUI_DIR="$REPO_ROOT/gui"` → `GUI_DIR="$REPO_ROOT/ghostboard"`
+- `scripts/rename-ghostty.sh`:
+  - `GUI_DIR="${1:-gui}"` → `GUI_DIR="${1:-ghostboard}"`
+  - Update comment and echo strings
+- `scripts/generate-icons.sh`:
+  - `GUI_DIR="$REPO_ROOT/gui"` → `GUI_DIR="$REPO_ROOT/ghostboard"`
+
+**10. `CLAUDE.md`:**
+
+- All `gui/` directory references → `ghostboard/`
+- Update "GUI (gui/)" section heading to "Ghostboard (ghostboard/)"
+- Update description to use "Ghostboard" terminology
+
+**11. Not changed:**
+
+- XDG `"termsurf"` references in build system files (`TermSurfResources.zig`,
+  `TermSurfLib.zig`, etc.) — these refer to the installed resource directory
+  name, not the config/data XDG path
+- `TERM_PROGRAM` = `"termsurf"` — this is the protocol identity, not the board
+- Historical issue docs — same rationale as Experiment 1
+- The Xcode project directory remains `TermSurf.xcodeproj` — renaming it is
+  fragile (hundreds of internal path references) and unnecessary since the
+  display name is what users see
+
+#### Verification
+
+1. `cd ghostboard && zig build` — must compile
+2. App bundle is named `TermSurf-Ghostboard.app` or
+   `TermSurf-Ghostboard-Debug.app`
+3. Launch the app — dock shows "TermSurf Ghostboard", menu bar shows "TermSurf
+   Ghostboard", About page shows "TermSurf Ghostboard"
+4. Socket path is `$TMPDIR/termsurf/termsurf-ghostboard-{pid}.sock`
+5. Config file loads from `~/.config/termsurf/ghostboard/config.ghostty`
+6. `grep -r 'gui/' .gitignore` — no stale `gui/` references
+7. `grep '"gui/' CLAUDE.md` — no stale `gui/` references
