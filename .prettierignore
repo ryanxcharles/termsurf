@@ -15,7 +15,7 @@ macos/
 images/Ghostty.icon/icon.json
 
 # website dev run
-homepage/.next
+website/.next
 
 # shaders
 *.frag

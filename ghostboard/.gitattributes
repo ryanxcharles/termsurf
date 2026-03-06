@@ -2,7 +2,7 @@ build.zig.zon.nix linguist-generated=true
 build.zig.zon.txt linguist-generated=true
 build.zig.zon.json linguist-generated=true
 vendor/** linguist-vendored
-homepage/** linguist-documentation
+website/** linguist-documentation
 pkg/breakpad/vendor/** linguist-vendored
 pkg/glfw/wayland-headers/** linguist-vendored
 pkg/libintl/config.h linguist-generated=true

@@ -56,3 +56,17 @@ Historical issue docs are immutable — no changes to concluded issues.
 2. `grep -r 'homepage/' .prettierignore` — no stale references in root
 3. `grep -r 'homepage/' ghostboard/.prettierignore ghostboard/.gitattributes` —
    no stale references
+
+**Result:** Pass
+
+All verifications passed. Git detected all files as renames (100% match).
+
+#### Conclusion
+
+Clean rename back to `website/`.
+
+## Conclusion
+
+The directory is back to `website/` where it started. Issue 711 renamed it
+through `termsurf.com/` and `homepage/`, but the original name was the best fit
+all along.
