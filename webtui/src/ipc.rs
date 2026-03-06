@@ -114,20 +114,15 @@ impl CompositorConnection {
     }
 
     /// Send a synchronous `hello` message to get live config (Issue 675).
-    pub fn send_hello(&self, pane_id: &str) -> Option<String> {
+    /// Returns (homepage, browsers) — Issue 712.
+    pub fn send_hello(&self, pane_id: &str) -> Option<(String, Vec<String>)> {
         self.send(Msg::HelloRequest(proto::HelloRequest {
             pane_id: pane_id.into(),
         }));
 
         let reply = self.recv_reply()?;
         match reply.msg? {
-            Msg::HelloReply(r) => {
-                if r.homepage.is_empty() {
-                    None
-                } else {
-                    Some(r.homepage)
-                }
-            }
+            Msg::HelloReply(r) => Some((r.homepage, r.browsers)),
             _ => None,
         }
     }

@@ -260,9 +260,19 @@ fn main() -> io::Result<()> {
     }
 
     // Send hello to get live config from the GUI (Issue 675).
-    let hello_homepage = compositor
+    // Returns (homepage, browsers) — Issue 712.
+    let (hello_homepage, hello_browsers) = compositor
         .as_ref()
-        .and_then(|conn| pane_id.as_ref().and_then(|pid| conn.send_hello(pid)));
+        .and_then(|conn| pane_id.as_ref().and_then(|pid| conn.send_hello(pid)))
+        .map(|(hp, br)| (Some(hp), br))
+        .unwrap_or((None, vec![]));
+
+    // Default browser from hello reply when --browser not specified (Issue 712).
+    if browser.is_empty() {
+        if let Some(first) = hello_browsers.first() {
+            browser = first.clone();
+        }
+    }
 
     // Detect devtools://N before normalizing (Issue 684).
     let raw_url = match cli.command {
@@ -276,7 +286,9 @@ fn main() -> io::Result<()> {
         }
         Some(Commands::Last) | Some(Commands::Status) => unreachable!(), // Handled above.
         None => cli.url.unwrap_or_else(|| {
-            hello_homepage.unwrap_or_else(|| "https://termsurf.com/welcome".to_string())
+            hello_homepage
+                .filter(|hp| !hp.is_empty())
+                .unwrap_or_else(|| "https://termsurf.com/welcome".to_string())
         }),
     };
     let mut inspected_tab_id: i64 = if raw_url.starts_with("devtools://") {
@@ -379,6 +391,8 @@ fn main() -> io::Result<()> {
     // Event loop.
     loop {
         let mut viewport_rect = Rect::default();
+        // Extract display name from browser (last path component for absolute paths).
+        let browser_label = browser.rsplit('/').next().unwrap_or(&browser);
         terminal.draw(|frame| {
             viewport_rect = ui(
                 frame,
@@ -391,6 +405,7 @@ fn main() -> io::Result<()> {
                 is_devtools,
                 inspected_tab_id,
                 &command_error,
+                browser_label,
             );
         })?;
 
@@ -779,6 +794,7 @@ fn ui(
     is_devtools: bool,
     inspected_tab_id: i64,
     command_error: &Option<String>,
+    browser_label: &str,
 ) -> Rect {
     // Paint full background.
     frame.render_widget(
@@ -907,10 +923,15 @@ fn ui(
     } else {
         page_title.to_string()
     };
+    let engine_label = Line::from(vec![
+        Span::raw("\u{F268} ").style(Style::default().fg(COMMENT)),
+        Span::raw(browser_label).style(Style::default().fg(DIM)),
+    ]);
     let viewport_block = Block::default()
         .borders(Borders::ALL)
         .title(viewport_title)
         .title_top(profile_title.alignment(Alignment::Right))
+        .title_bottom(engine_label)
         .border_style(Style::default().fg(viewport_border).bg(BG))
         .title_style(Style::default().fg(viewport_border))
         .style(Style::default().bg(BG));

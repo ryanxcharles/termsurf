@@ -112,3 +112,34 @@ colors.
 3. Launch with `--browser roamium` — same result
 4. Launch with `--browser /full/path/to/roamium` — shows "roamium" (last
    component)
+
+**Result:** Pass
+
+All verifications passed. The TUI now reads the `browsers` list from the
+`HelloReply`, defaults to the first entry when `--browser` isn't specified, and
+displays the engine name with a globe icon in the viewport bottom-left border.
+
+#### Conclusion
+
+The engine label displays correctly. The TUI now explicitly chooses which
+browser engine to use from Ghostboard's registry rather than sending an empty
+string and relying on Ghostboard's implicit default.
+
+### Experiment 2: Move engine label to bottom-right, remove icon
+
+Experiment 1 added an unrequested Chrome icon and placed the label bottom-left.
+Move it to bottom-right and display just the engine name with no icon.
+
+#### Changes
+
+**1. `webtui/src/main.rs` — update engine label in `ui()`:**
+
+- Remove the Chrome icon span (`\u{F268}`)
+- Change from two spans to a single span: just `browser_label` in `DIM`
+- Change `.title_bottom(engine_label)` to
+  `.title_bottom(engine_label.alignment(Alignment::Right))`
+
+#### Verification
+
+1. `cd webtui && cargo build` — compiles clean
+2. Launch — engine name appears bottom-right with no icon
