@@ -15,7 +15,7 @@ macos/
 images/TermSurf.icon/icon.json
 
 # website dev run
-website/.next
+termsurf.com/.next
 
 # shaders
 *.frag
