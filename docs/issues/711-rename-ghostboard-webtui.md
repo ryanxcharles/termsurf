@@ -12,10 +12,10 @@ TermSurf is evolving from a single app into a protocol ecosystem. The current
 names are ambiguous:
 
 - **GUI** is called "TermSurf" — but TermSurf is the protocol, not one specific
-  terminal. As we add more boards (Wezboard, Kittyboard, etc.), we need a name
-  that identifies this specific board as the Ghostty fork. "TermSurf Ghostboard"
-  makes the relationship clear: it's the Ghostty-based board for the TermSurf
-  protocol.
+  terminal. As we add more boards (Wezboard, iBoard2, Babycat, etc.), we need a
+  name that identifies this specific board as the Ghostty fork. "TermSurf
+  Ghostboard" makes the relationship clear: it's the Ghostty-based board for the
+  TermSurf protocol.
 
 - **TUI** is called `web` — a generic name that doesn't convey what it is. As we
   add more TUIs, each needs a distinct identity. `webtui` is more descriptive: a
