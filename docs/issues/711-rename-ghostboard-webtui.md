@@ -338,3 +338,126 @@ All XDG paths currently use `termsurf/` as the subdirectory. They need to become
 5. Config file loads from `~/.config/termsurf/ghostboard/config.ghostty`
 6. `grep -r 'gui/' .gitignore` — no stale `gui/` references
 7. `grep '"gui/' CLAUDE.md` — no stale `gui/` references
+
+**Result:** Fail
+
+The Zig build compiled and the directory rename, socket path, XDG paths,
+scripts, `.gitignore`, and `CLAUDE.md` all updated correctly. However, the app
+name approach — using `PRODUCT_NAME = "TermSurf-Ghostboard"` for the filename
+and `CFBundleDisplayName = "TermSurf Ghostboard"` for the display name — failed.
+
+macOS ignores `CFBundleDisplayName` for the menu bar and Dock. Instead, it
+derives these from `CFBundleName`, which Xcode auto-generates from
+`PRODUCT_NAME`. So the dash from the filename leaked into every user-visible
+surface: the menu bar said "TermSurf-Ghostboard", the Dock said
+"TermSurf-Ghostboard", and `/Applications` showed "TermSurf-Ghostboard".
+
+We attempted to fix this by adding an explicit `CFBundleName` key in
+`TermSurf-Info.plist` set to "TermSurf Ghostboard" (with space), hoping it would
+override the `PRODUCT_NAME`-derived value. This did not work — the dash still
+appeared everywhere.
+
+**Root cause:** macOS uses `PRODUCT_NAME` as the definitive source for the app's
+display identity in the menu bar and Dock. `CFBundleDisplayName` is only used
+for App Store listings and localized display names, not for the running app's
+chrome. `CFBundleName` set in the plist may be overridden by Xcode's
+`GENERATE_INFOPLIST_FILE` merging behavior. The only reliable way to control
+what the user sees is to make `PRODUCT_NAME` itself contain the desired display
+string — which means it cannot contain dashes if we don't want dashes visible.
+
+**Conclusion:** The filename-has-dash / display-name-has-space split is not
+viable on macOS. The next experiment must use a `PRODUCT_NAME` without dashes
+(e.g., "Ghostboard") so that the `.app` filename, menu bar, and Dock all show
+the same dash-free name. This means either:
+
+1. Use a single-word `PRODUCT_NAME` like `Ghostboard` (app becomes
+   `Ghostboard.app`, display name "Ghostboard")
+2. Use a space in `PRODUCT_NAME` like `TermSurf Ghostboard` (app becomes
+   `TermSurf Ghostboard.app`, display name "TermSurf Ghostboard") — spaces in
+   `.app` filenames are common on macOS (e.g., "Visual Studio Code.app", "Google
+   Chrome.app")
+
+Option 2 is preferred — spaces in macOS app names are standard practice, and the
+earlier concern about spaces was likely about other contexts (binary names,
+socket paths) rather than `.app` bundles specifically.
+
+### Experiment 3: Fix app name — use space instead of dash
+
+Experiment 2 correctly renamed the directory, socket path, XDG paths, UI
+strings, scripts, and docs. The only thing that failed was the dash in
+`PRODUCT_NAME`. This experiment fixes that single issue: replace every
+`TermSurf-Ghostboard` with `TermSurf Ghostboard` (space) so macOS shows the
+correct name everywhere.
+
+Spaces in `.app` filenames are standard on macOS: "Google Chrome.app", "Visual
+Studio Code.app", "Firefox Nightly.app". The earlier no-spaces rule was about
+binary names and socket paths, not app bundles.
+
+#### Changes
+
+**1. Xcode project** (`ghostboard/macos/TermSurf.xcodeproj/project.pbxproj`):
+
+- `PRODUCT_NAME = "TermSurf-Ghostboard"` → `"TermSurf Ghostboard"` (2
+  occurrences — ReleaseLocal and Release configs)
+- `PRODUCT_NAME = "TermSurf-Ghostboard-Debug"` → `"TermSurf Ghostboard Debug"`
+
+**2. Zig build** (`ghostboard/src/build/TermSurfXcodebuild.zig` line 52):
+
+- `"TermSurf-Ghostboard-Debug"` → `"TermSurf Ghostboard Debug"`
+- `"TermSurf-Ghostboard"` → `"TermSurf Ghostboard"`
+
+**3. Zig help text** — `.app` references need quoted paths since they contain
+spaces:
+
+- `ghostboard/src/cli/help.zig` line 56–57:
+  - `TermSurf-Ghostboard.app` → `"TermSurf Ghostboard.app"` (add quotes for
+    shell usage in help text)
+- `ghostboard/src/main_termsurf.zig` lines 80, 83, 84:
+  - `TermSurf-Ghostboard.app` → `"TermSurf Ghostboard.app"`
+- `ghostboard/src/cli/list_themes.zig` line 90:
+  - `TermSurf-Ghostboard.app` → `TermSurf Ghostboard.app` (doc comment, no
+    quotes needed)
+- `ghostboard/src/config/Config.zig` line 558:
+  - `TermSurf-Ghostboard.app` → `TermSurf Ghostboard.app` (doc comment, no
+    quotes needed)
+
+**4. Build scripts:**
+
+- `scripts/build-debug.sh` line 33:
+  - `TermSurf-Ghostboard-Debug.app` → `"TermSurf Ghostboard Debug.app"` (quote
+    for shell)
+- `scripts/build-release.sh` line 33:
+  - `TermSurf-Ghostboard.app` → `"TermSurf Ghostboard.app"` (quote for shell)
+- `scripts/install.sh` lines 6–7, 57–59:
+  - `TermSurf-Ghostboard.app` → `"TermSurf Ghostboard.app"`
+  - `TermSurf-Ghostboard-Debug.app` → `"TermSurf Ghostboard Debug.app"`
+
+**5. `CLAUDE.md`:**
+
+- Update install script description: `/Applications/TermSurf-Ghostboard.app` →
+  `/Applications/TermSurf Ghostboard.app`
+
+**6. `TermSurf-Info.plist`:**
+
+- Remove the `CFBundleName` key added in the failed fix attempt — it's no longer
+  needed since `PRODUCT_NAME` itself will be "TermSurf Ghostboard"
+
+**7. Not changed:**
+
+- `CFBundleDisplayName` values — already correct ("TermSurf Ghostboard" /
+  "TermSurf Ghostboard[DEBUG]")
+- Menu bar titles — already correct ("TermSurf Ghostboard")
+- AboutView.swift — already correct ("TermSurf Ghostboard")
+- Socket path — already correct (`termsurf-ghostboard-{pid}.sock`, no spaces)
+- XDG paths — already correct (`termsurf/ghostboard/`)
+- `.gitignore` — already correct (`ghostboard/`)
+- Directory name — already correct (`ghostboard/`)
+
+#### Verification
+
+1. `cd ghostboard && zig build` — must compile
+2. Build the full app — `scripts/build-debug.sh`
+3. App bundle is named `TermSurf Ghostboard Debug.app` (space, no dash)
+4. Launch the app — Dock shows "TermSurf Ghostboard", menu bar shows "TermSurf
+   Ghostboard", About page shows "TermSurf Ghostboard"
+5. `/Applications/` path in `install.sh` uses quoted `"TermSurf Ghostboard.app"`

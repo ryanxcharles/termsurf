@@ -42,10 +42,10 @@ lines) is almost entirely reusable across engines.
 
 ### Multiple terminals (boards)
 
-Although TermSurf currently ships as a Ghostty fork (`gui/`), we will implement
-forks of all major terminal emulators:
+Although TermSurf currently ships as a Ghostty fork (`ghostboard/`), we will
+implement forks of all major terminal emulators:
 
-- **Ghostty** (gui/) — Current board. Active development.
+- **Ghostboard** (ghostboard/) — Current board. Active development.
 - **WezTerm** (Wezboard) — Researched in Issue 709. Strong architectural match.
 - **Kitty** — Planned.
 - **Alacritty** — Planned.
@@ -138,8 +138,8 @@ composites browser overlays into the terminal window.
 
 All inter-process communication uses Unix domain sockets with length-prefixed
 protobuf messages. The board (terminal) listens on a PID-scoped socket
-(`$TMPDIR/termsurf/gui-{pid}.sock`), and both TUIs and browser engines connect
-to it as clients.
+(`$TMPDIR/termsurf/termsurf-ghostboard-{pid}.sock`), and both TUIs and browser
+engines connect to it as clients.
 
 - **TUI → Board:** The TUI reads the `TERMSURF_SOCKET` env var (set by the
   board) to discover the socket path.
@@ -170,28 +170,29 @@ This keeps every issue's Chromium changes isolated and traceable.
 
 ## Directory Structure
 
-- `gui/` — The GUI (Ghostty fork, Zig-first). **Active development.**
+- `ghostboard/` — Ghostboard (Ghostty fork, Zig-first). **Active development.**
 - `webtui/` — The `web` TUI (Rust/ratatui). Browser chrome in the terminal pane.
 - `chromium/` — Chromium fork build workspace (gitignored).
 - `docs/issues/` — Documentation across all generations.
 - `docs/early-prototypes.md` — Archived prototype documentation (ts1–ts5,
   cef-rs).
 
-## GUI (gui/) — Active Development
+## Ghostboard (ghostboard/) — Active Development
 
 ### Architecture
 
-The GUI forks Ghostty with all browser integration in Zig. Swift remains a thin
-macOS wrapper — window creation, menu bar, application lifecycle — matching
+Ghostboard forks Ghostty with all browser integration in Zig. Swift remains a
+thin macOS wrapper — window creation, menu bar, application lifecycle — matching
 Ghostty's own architecture. This is a clean break from ts5, where browser
 integration lived in Swift (CompositorXPC.swift).
 
 Key architectural decisions:
 
 - **Socket IPC in Zig.** All IPC uses Unix domain sockets with length-prefixed
-  protobuf. The GUI listens on `$TMPDIR/termsurf/gui-{pid}.sock`. TUI and
-  Chromium connect as clients. The IPC module (`gui/src/apprt/xpc.zig`) handles
-  accept, framing, dispatch, and per-connection lifecycle.
+  protobuf. Ghostboard listens on
+  `$TMPDIR/termsurf/termsurf-ghostboard-{pid}.sock`. TUI and Chromium connect as
+  clients. The IPC module (`ghostboard/src/apprt/xpc.zig`) handles accept,
+  framing, dispatch, and per-connection lifecycle.
 - **CALayerHost in Zig.** Browser panes render via `CALayerHost` — a CALayer
   subclass that displays a remote `CAContext` from Chromium's GPU process.
   Window Server composites directly from GPU VRAM. Zero per-frame IPC, zero
@@ -204,7 +205,7 @@ Key architectural decisions:
 
 ### Current State
 
-The GUI is a Ghostty fork with browser integration built in Zig. Current
+Ghostboard is a Ghostty fork with browser integration built in Zig. Current
 additions: IPC gateway and connection management (Issues 601, 698–702), pink
 texture proof-of-concept (Issue 602), live Chromium streaming at 60fps with
 dynamic resize (Issue 603), multi-pane multi-profile server reuse (Issues
@@ -237,34 +238,35 @@ Chromium fork with renamed libtermsurf_chromium (Issue 708).
 
 ### Source Layout
 
-- `gui/src/` — Shared Zig core (libtermsurf)
-- `gui/src/Surface.zig` — Core surface (holds browser state)
-- `gui/src/renderer/Metal.zig` — Metal renderer
-- `gui/src/renderer/metal/` — Metal pipeline, shaders, IOSurface layer
-- `gui/src/apprt/embedded.zig` — C API exports
-- `gui/include/ghostty.h` — libghostty C API headers
-- `gui/macos/` — macOS app (Swift, thin wrapper)
-- `gui/build.zig` — Build system
-- `gui/build.zig.zon` — Dependencies
+- `ghostboard/src/` — Shared Zig core (libtermsurf)
+- `ghostboard/src/Surface.zig` — Core surface (holds browser state)
+- `ghostboard/src/renderer/Metal.zig` — Metal renderer
+- `ghostboard/src/renderer/metal/` — Metal pipeline, shaders, IOSurface layer
+- `ghostboard/src/apprt/embedded.zig` — C API exports
+- `ghostboard/include/ghostty.h` — libghostty C API headers
+- `ghostboard/macos/` — macOS app (Swift, thin wrapper)
+- `ghostboard/build.zig` — Build system
+- `ghostboard/build.zig.zon` — Dependencies
 
 ### Build & Install
 
-All build scripts live in `scripts/`. They handle GUI, Chromium, TUI, and
+All build scripts live in `scripts/`. They handle Ghostboard, Chromium, TUI, and
 Roamium together.
 
-| Script                                        | Purpose                                                                                                                    |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/build-debug.sh [--clean] [--open]`   | Build all components (GUI debug, Chromium, TUI, Roamium). `--clean` wipes build dirs first, `--open` launches.             |
-| `scripts/build-release.sh [--clean] [--open]` | Same as above but ReleaseFast builds.                                                                                      |
-| `scripts/install.sh`                          | Install release build to `/Applications/TermSurf.app`, bundle Chromium + TUI, codesign, symlink CLIs to `/usr/local/bin/`. |
-| `scripts/build-roamium.sh [args]`             | Build Roamium only and copy binary to `chromium/src/out/Default/`. Pass `--release` for release build.                     |
-| `scripts/clean-zig.sh`                        | Clean Zig build artifacts + Xcode DerivedData. Preserves Chromium cache.                                                   |
-| `scripts/rename-ghostty.sh [dir]`             | Rename all Ghostty references to TermSurf in `gui/`. Re-runnable after upstream merges.                                    |
-| `scripts/generate-icons.sh [image]`           | Generate app icon assets from a source image (default: `assets/termsurf-2-black-3.png`).                                   |
-| `scripts/nerd-font-test.sh`                   | Print Nerd Font test glyphs for visual verification.                                                                       |
+| Script                                        | Purpose                                                                                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/build-debug.sh [--clean] [--open]`   | Build all components (Ghostboard debug, Chromium, TUI, Roamium). `--clean` wipes build dirs first, `--open` launches.                 |
+| `scripts/build-release.sh [--clean] [--open]` | Same as above but ReleaseFast builds.                                                                                                 |
+| `scripts/install.sh`                          | Install release build to `/Applications/TermSurf-Ghostboard.app`, bundle Chromium + TUI, codesign, symlink CLIs to `/usr/local/bin/`. |
+| `scripts/build-roamium.sh [args]`             | Build Roamium only and copy binary to `chromium/src/out/Default/`. Pass `--release` for release build.                                |
+| `scripts/clean-zig.sh`                        | Clean Zig build artifacts + Xcode DerivedData. Preserves Chromium cache.                                                              |
+| `scripts/rename-ghostty.sh [dir]`             | Rename all Ghostty references to TermSurf in `ghostboard/`. Re-runnable after upstream merges.                                        |
+| `scripts/generate-icons.sh [image]`           | Generate app icon assets from a source image (default: `assets/termsurf-2-black-3.png`).                                              |
+| `scripts/nerd-font-test.sh`                   | Print Nerd Font test glyphs for visual verification.                                                                                  |
 
-For GUI-only iteration, `cd gui && zig build` still works. The full build
-scripts also auto-detect Chromium's `protoc` so you don't need a system install.
+For Ghostboard-only iteration, `cd ghostboard && zig build` still works. The
+full build scripts also auto-detect Chromium's `protoc` so you don't need a
+system install.
 
 ### Upstream Merges
 
@@ -272,14 +274,14 @@ Same approach as ts5 (Issue 418 Experiment 3):
 
 ```bash
 git fetch upstream
-git subtree pull --prefix=gui upstream main -m "Merge upstream Ghostty into gui"
+git subtree pull --prefix=ghostboard upstream main -m "Merge upstream Ghostty into ghostboard"
 ```
 
 ## Documentation
 
 All documentation is in `docs/` or in `README.md` files throughout the codebase.
 
-### GUI (active)
+### Ghostboard (active)
 
 Recent issues:
 

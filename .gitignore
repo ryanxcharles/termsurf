@@ -62,26 +62,26 @@ ts5/vgcore.*
 ts5/*/.build/
 ts5/*/Sources/*/*.metallib
 
-# TermSurf GUI (gui/)
-gui/zig-cache/
-gui/.zig-cache/
-gui/zig-out/
-gui/build/
-gui/.flatpak-builder/
-gui/flatpak/builddir/
-gui/flatpak/repo/
-gui/result*
-gui/.nixos-test-history
-gui/example/*.wasm
-gui/test/ghostty
-gui/test/cases/**/*.actual.png
-gui/glad.zip
-gui/Box_test.ppm
-gui/Box_test_diff.ppm
-gui/ghostty.qcow2
-gui/vgcore.*
-gui/*/.build/
-gui/*/Sources/*/*.metallib
+# TermSurf Ghostboard (ghostboard/)
+ghostboard/zig-cache/
+ghostboard/.zig-cache/
+ghostboard/zig-out/
+ghostboard/build/
+ghostboard/.flatpak-builder/
+ghostboard/flatpak/builddir/
+ghostboard/flatpak/repo/
+ghostboard/result*
+ghostboard/.nixos-test-history
+ghostboard/example/*.wasm
+ghostboard/test/ghostty
+ghostboard/test/cases/**/*.actual.png
+ghostboard/glad.zip
+ghostboard/Box_test.ppm
+ghostboard/Box_test_diff.ppm
+ghostboard/ghostty.qcow2
+ghostboard/vgcore.*
+ghostboard/*/.build/
+ghostboard/*/Sources/*/*.metallib
 
 # Browser (browser/)
 browser/zig-cache/

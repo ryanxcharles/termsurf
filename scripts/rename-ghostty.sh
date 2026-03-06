@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# rename-ghostty.sh — Rename all "ghostty" references in gui/ to "termsurf"
+# rename-ghostty.sh — Rename all "ghostty" references in ghostboard/ to "termsurf"
 # Re-runnable after upstream Ghostty merges.
 set -euo pipefail
 
-GUI_DIR="${1:-gui}"
+GUI_DIR="${1:-ghostboard}"
 export LC_ALL=C
 cd "$(git rev-parse --show-toplevel)"
 
@@ -13,7 +13,7 @@ if [ ! -d "$GUI_DIR" ]; then
 fi
 
 echo "=== rename-ghostty.sh ==="
-echo "Renaming ghostty → termsurf in $GUI_DIR/"
+echo "Renaming ghostty → termsurf in $GUI_DIR/ (ghostboard)"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────
