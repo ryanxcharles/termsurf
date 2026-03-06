@@ -24,7 +24,9 @@ names are ambiguous:
 ### What changes
 
 - **GUI app name:** TermSurf → TermSurf Ghostboard
+- **GUI directory:** `gui/` → `ghostboard/`
 - **TUI binary name:** `web` → `webtui`
+- **TUI directory:** `tui/` → `webtui/`
 - **Documentation:** CLAUDE.md, README files, issue docs, code comments
 - **Build system:** Binary names, bundle names, build targets
 - **Code:** String literals, log messages, error messages referencing the old
@@ -32,7 +34,6 @@ names are ambiguous:
 
 ### What stays the same
 
-- **Directory names:** `gui/` and `tui/` — these are structural, not branding
 - **Protocol:** `termsurf.proto` — unchanged
 - **Socket paths:** `$TMPDIR/termsurf/gui-{pid}.sock` — unchanged
 - **Config directories:** XDG paths using `termsurf` — unchanged
