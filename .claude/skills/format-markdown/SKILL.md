@@ -13,7 +13,7 @@ Run `prettier` on every markdown file after creating or editing it.
 
 After every Write or Edit to any `.md` file in the project. This includes:
 
-- Issue documents (`docs/issues/*.md`)
+- Issue documents (`issues/*.md`)
 - Documentation (`docs/*.md`)
 - `README.md` files
 - `CLAUDE.md` files

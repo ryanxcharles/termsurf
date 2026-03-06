@@ -417,7 +417,7 @@ ts2 embedded CEF directly inside WezTerm's process. CEF allows only one
 TermSurf requires multiple profiles (like Chrome profiles), so CEF had to move
 to separate processes — one per profile. That's ts3.
 
-Historical docs: `docs/issues/200-*.md` through `docs/issues/210-*.md`
+Historical docs: `issues/200-*.md` through `issues/210-*.md`
 
 ## TermSurf 1.x (ts1/) — Legacy
 
@@ -535,83 +535,83 @@ as a testbed before ts1 integration. Changes made to the example:
 
 ### TermSurf 5.0
 
-- `docs/issues/417-ghostty-vs-wezterm.md` — Terminal emulator selection
+- `issues/417-ghostty-vs-wezterm.md` — Terminal emulator selection
   (Ghostty)
-- `docs/issues/418-repo-restructure.md` — Repo restructure and Ghostty import
-- `docs/issues/500-rename.md` — Rename Ghostty references to TermSurf in ts5
-- `docs/issues/501-two-profiles.md` — Two-profile browser demo in ts5
-- `docs/issues/502-attach-delay.md` — Eliminate hardcoded capturer attach delay
-- `docs/issues/503-one-two-three.md` — One, two, or three profiles (one process
+- `issues/418-repo-restructure.md` — Repo restructure and Ghostty import
+- `issues/500-rename.md` — Rename Ghostty references to TermSurf in ts5
+- `issues/501-two-profiles.md` — Two-profile browser demo in ts5
+- `issues/502-attach-delay.md` — Eliminate hardcoded capturer attach delay
+- `issues/503-one-two-three.md` — One, two, or three profiles (one process
   per profile)
-- `docs/issues/504-web-tui.md` — `web` TUI chrome (ratatui terminal app)
-- `docs/issues/505-pink-texture.md` — Pink texture overlay (GPU quad via XPC)
-- `docs/issues/506-smappservice.md` — SMAppService for xpc-gateway registration
-- `docs/issues/507-chromium.md` — First Chromium streaming attempt (IOSurface
+- `issues/504-web-tui.md` — `web` TUI chrome (ratatui terminal app)
+- `issues/505-pink-texture.md` — Pink texture overlay (GPU quad via XPC)
+- `issues/506-smappservice.md` — SMAppService for xpc-gateway registration
+- `issues/507-chromium.md` — First Chromium streaming attempt (IOSurface
   crashes)
-- `docs/issues/508-checkerboard.md` — IOSurface overlay pipeline (Metal texture
+- `issues/508-checkerboard.md` — IOSurface overlay pipeline (Metal texture
   from IOSurface)
-- `docs/issues/509-chromium.md` — Chromium streaming (retry), Retina resolution
-- `docs/issues/510-two-profiles.md` — Two-profile streaming, dynamic resize
-- `docs/issues/511-three-profiles.md` — Three profiles, server reuse per profile
-- `docs/issues/512-vsync.md` — Vsync desynchronization, 120fps oversampling fix
-- `docs/issues/513-ctrl-esc.md` — Ctrl+Esc escape hatch (mode switching)
-- `docs/issues/514-mouse.md` — Mouse clicks and URL sync
-- `docs/issues/515-drag.md` — Focus state and text selection
+- `issues/509-chromium.md` — Chromium streaming (retry), Retina resolution
+- `issues/510-two-profiles.md` — Two-profile streaming, dynamic resize
+- `issues/511-three-profiles.md` — Three profiles, server reuse per profile
+- `issues/512-vsync.md` — Vsync desynchronization, 120fps oversampling fix
+- `issues/513-ctrl-esc.md` — Ctrl+Esc escape hatch (mode switching)
+- `issues/514-mouse.md` — Mouse clicks and URL sync
+- `issues/515-drag.md` — Focus state and text selection
 
 ### TermSurf 4.0
 
-- `docs/issues/400-a-new-hope.md` — Original ts4 vision and architecture sketch
-- `docs/issues/401-chromium-feasibility.md` — Content API surface analysis
-- `docs/issues/401-programming-language.md` — Language selection (Rust + C++)
-- `docs/issues/402-wezterm-vs-alacritty.md` — Terminal emulator comparison
+- `issues/400-a-new-hope.md` — Original ts4 vision and architecture sketch
+- `issues/401-chromium-feasibility.md` — Content API surface analysis
+- `issues/401-programming-language.md` — Language selection (Rust + C++)
+- `issues/402-wezterm-vs-alacritty.md` — Terminal emulator comparison
   (superseded by Issue 404)
-- `docs/issues/403-swift-rust-cpp.md` — Multi-process IOSurface compositing PoC
-- `docs/issues/404-terminal-emulator.md` — Terminal emulator evaluation (Ghostty
+- `issues/403-swift-rust-cpp.md` — Multi-process IOSurface compositing PoC
+- `issues/404-terminal-emulator.md` — Terminal emulator evaluation (Ghostty
   selected)
-- `docs/issues/405-architecture-comparison.md` — In-process vs out-of-process
+- `issues/405-architecture-comparison.md` — In-process vs out-of-process
   terminal (Ghostty fork selected)
-- `docs/issues/406-chromium.md` — Profile isolation analysis; CEF ruled out
-- `docs/issues/407-chromium-poc.md` — In-process Chromium PoC plan
-- `docs/issues/408-two-profiles.md` — Two profiles side by side at 60fps
-- `docs/issues/409-electron-patch.md` — Electron's full 147-patch set
-- `docs/issues/410-two-profiles-2.md` — Two profiles attempt 2
-- `docs/issues/410-partial-electron.md` — Partial Electron patches for fps fix
-- `docs/issues/411-two-profiles-3.md` — 60fps two profiles without Electron
-- `docs/issues/412-one-profile.md` — Isolate 2fps cause in one-profile app
-- `docs/issues/413-one-profile-2.md` — One-profile to two-profile conversion
-- `docs/issues/414-two-profiles-xpc.md` — Two profiles via XPC at full speed
-- `docs/issues/415-swift-receiver.md` — Issue 414 receiver reimplemented in
+- `issues/406-chromium.md` — Profile isolation analysis; CEF ruled out
+- `issues/407-chromium-poc.md` — In-process Chromium PoC plan
+- `issues/408-two-profiles.md` — Two profiles side by side at 60fps
+- `issues/409-electron-patch.md` — Electron's full 147-patch set
+- `issues/410-two-profiles-2.md` — Two profiles attempt 2
+- `issues/410-partial-electron.md` — Partial Electron patches for fps fix
+- `issues/411-two-profiles-3.md` — 60fps two profiles without Electron
+- `issues/412-one-profile.md` — Isolate 2fps cause in one-profile app
+- `issues/413-one-profile-2.md` — One-profile to two-profile conversion
+- `issues/414-two-profiles-xpc.md` — Two profiles via XPC at full speed
+- `issues/415-swift-receiver.md` — Issue 414 receiver reimplemented in
   Swift
-- `docs/issues/416-rust-receiver.md` — Issue 414 receiver reimplemented in Rust
+- `issues/416-rust-receiver.md` — Issue 414 receiver reimplemented in Rust
 
 ### TermSurf 3.0
 
-- `docs/issues/301-architecture.md` — High-level architecture overview
-- `docs/issues/302-webview.md` — Webview rendering implementation
-- `docs/issues/303-xpc.md` — XPC architecture for inter-process communication
-- `docs/issues/304-webpage.md` — Webpage rendering solutions
-- `docs/issues/305-profile.md` — Profile isolation for browser data
-- `docs/issues/306-resize.md` — Resize support implementation
+- `issues/301-architecture.md` — High-level architecture overview
+- `issues/302-webview.md` — Webview rendering implementation
+- `issues/303-xpc.md` — XPC architecture for inter-process communication
+- `issues/304-webpage.md` — Webpage rendering solutions
+- `issues/305-profile.md` — Profile isolation for browser data
+- `issues/306-resize.md` — Resize support implementation
 
 ### TermSurf 2.0
 
-- `docs/issues/200-architecture.md` — Technical decisions and design rationale
-- `docs/issues/201-cef.md` — CEF integration via cef-rs
-- `docs/issues/207-cef-wezterm.md` — CEF + WezTerm integration details
-- `docs/issues/202-cef-mvp.md` through `206-cef-mvp5.md` — MVP iteration
+- `issues/200-architecture.md` — Technical decisions and design rationale
+- `issues/201-cef.md` — CEF integration via cef-rs
+- `issues/207-cef-wezterm.md` — CEF + WezTerm integration details
+- `issues/202-cef-mvp.md` through `206-cef-mvp5.md` — MVP iteration
   experiments
-- `docs/issues/208-profile.md` — CEF browser profile research
-- `docs/issues/209-web.md` — Web command experiments
-- `docs/issues/210-wezterm-analysis.md` — WezTerm + cef-rs architecture analysis
+- `issues/208-profile.md` — CEF browser profile research
+- `issues/209-web.md` — Web command experiments
+- `issues/210-wezterm-analysis.md` — WezTerm + cef-rs architecture analysis
 
 ### TermSurf 1.x
 
-- `docs/issues/100-bookmarks.md` — Bookmarks implementation plan
-- `docs/issues/101-build.md` — Build instructions and troubleshooting
-- `docs/issues/102-console.md` — Console bridging and JavaScript API
-- `docs/issues/103-ctrl-z.md` — ctrl+z/fg analysis (deferred)
-- `docs/issues/104-keybindings.md` — Webview keyboard shortcuts and modes
-- `docs/issues/105-libghostty.md` — Changes to libghostty
-- `docs/issues/106-release.md` — Release procedure and versioning
-- `docs/issues/107-target-blank.md` — target="\_blank" link handling
-- `docs/issues/108-webview.md` — WebView implementation and API checklist
+- `issues/100-bookmarks.md` — Bookmarks implementation plan
+- `issues/101-build.md` — Build instructions and troubleshooting
+- `issues/102-console.md` — Console bridging and JavaScript API
+- `issues/103-ctrl-z.md` — ctrl+z/fg analysis (deferred)
+- `issues/104-keybindings.md` — Webview keyboard shortcuts and modes
+- `issues/105-libghostty.md` — Changes to libghostty
+- `issues/106-release.md` — Release procedure and versioning
+- `issues/107-target-blank.md` — target="\_blank" link handling
+- `issues/108-webview.md` — WebView implementation and API checklist

@@ -56,6 +56,8 @@ ready.
 - [ ] Whitepaper
 - [ ] Hosted passwords and bookmarks
 - [ ] Remote terminals, i.e. ssh
+- [ ] browser.nvim
+- [ ] Run VSCode inside TermSurf
 
 ## 2.0 Milestone
 

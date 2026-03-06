@@ -129,7 +129,7 @@ Then commit the updated patches in the main repo alongside the
 
 ## Full Workflow for a New Issue
 
-1. Create a new issue doc in `docs/issues/`.
+1. Create a new issue doc in `issues/`.
 2. Determine Chromium needs modification.
 3. Fork the most relevant recent branch (not necessarily the immediate prior
    branch — that might have been a failed experiment):

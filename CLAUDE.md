@@ -173,7 +173,8 @@ This keeps every issue's Chromium changes isolated and traceable.
 - `ghostboard/` — Ghostboard (Ghostty fork, Zig-first). **Active development.**
 - `webtui/` — The `web` TUI (Rust/ratatui). Browser chrome in the terminal pane.
 - `chromium/` — Chromium fork build workspace (gitignored).
-- `docs/issues/` — Documentation across all generations.
+- `issues/` — Issue documents across all generations (immutable history).
+- `website/` — termsurf.com project website.
 - `docs/early-prototypes.md` — Archived prototype documentation (ts1–ts5,
   cef-rs).
 
@@ -285,23 +286,23 @@ All documentation is in `docs/` or in `README.md` files throughout the codebase.
 
 Recent issues:
 
-- `docs/issues/700-tui-gui-sockets.md` — Replace TUI↔GUI XPC with Unix sockets
-- `docs/issues/701-chromium-sockets.md` — Replace GUI↔Chromium XPC with Unix
+- `issues/700-tui-gui-sockets.md` — Replace TUI↔GUI XPC with Unix sockets
+- `issues/701-chromium-sockets.md` — Replace GUI↔Chromium XPC with Unix
   sockets
-- `docs/issues/702-socket-cleanup.md` — Dead XPC removal and unlimited client
+- `issues/702-socket-cleanup.md` — Dead XPC removal and unlimited client
   connections
-- `docs/issues/703-remove-click-suppression.md` — Remove click-to-activate
+- `issues/703-remove-click-suppression.md` — Remove click-to-activate
   suppression
-- `docs/issues/704-browser-bindings.md` — Browser bindings (libtermsurf_content)
-- `docs/issues/705-browser-bindings.md` — Browser bindings continued (DevTools
+- `issues/704-browser-bindings.md` — Browser bindings (libtermsurf_content)
+- `issues/705-browser-bindings.md` — Browser bindings continued (DevTools
   fix)
-- `docs/issues/706-plusium-devtools.md` — Plusium DevTools crash fix
-- `docs/issues/707-roamium.md` — Roamium (shared lib + Rust rewrite)
-- `docs/issues/708-roamium-only.md` — Roamium-only (clean fork, renamed lib)
-- `docs/issues/709-wezboard.md` — Wezboard (WezTerm fork research)
-- `docs/issues/710-gecko-webkit-ladybird.md` — Gecko, WebKit & Ladybird engine
+- `issues/706-plusium-devtools.md` — Plusium DevTools crash fix
+- `issues/707-roamium.md` — Roamium (shared lib + Rust rewrite)
+- `issues/708-roamium-only.md` — Roamium-only (clean fork, renamed lib)
+- `issues/709-wezboard.md` — Wezboard (WezTerm fork research)
+- `issues/710-gecko-webkit-ladybird.md` — Gecko, WebKit & Ladybird engine
   research
-- `docs/issues/711-rename-ghostboard-webtui.md` — Rename GUI to Ghostboard, TUI
+- `issues/711-rename-ghostboard-webtui.md` — Rename GUI to Ghostboard, TUI
   to webtui
 
 ### Early Prototypes (ts1–ts5)
@@ -311,9 +312,9 @@ Issue docs for all prototype generations are indexed in
 
 ### General
 
-- `docs/issues/002-merge-upstream.md` — How to merge changes from upstream repos
-- `docs/issues/001-competitors.md` — Terminal-browser hybrid comparison
-- `docs/issues/003-website.md` — termsurf.com website
+- `issues/002-merge-upstream.md` — How to merge changes from upstream repos
+- `issues/001-competitors.md` — Terminal-browser hybrid comparison
+- `issues/003-website.md` — termsurf.com website
 - `TODO.md` — Task checklist and future issues. Only one issue is active at a
   time (the highest-numbered issue doc without a `## Conclusion`). When a new
   problem is identified during work on the active issue, add it to the "Future
@@ -321,7 +322,7 @@ Issue docs for all prototype generations are indexed in
 
 ### Immutability
 
-Issue documents in `docs/issues/` that have a `## Conclusion` are historical
+Issue documents in `issues/` that have a `## Conclusion` are historical
 records. They are **immutable** and must NEVER be modified. They capture what
 happened at the time — even if details (like directory names or paths) are now
 outdated. History stays as it was written.

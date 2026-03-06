@@ -1,21 +1,21 @@
 ---
 name: issues-and-experiments
 description:
-  "Write and manage issue documents and experiments in docs/issues/. Use when
+  "Write and manage issue documents and experiments in issues/. Use when
   creating a new issue, designing an experiment, recording experiment results,
   or closing an issue. Enforces the one-experiment-at-a-time workflow."
 ---
 
 # Issues and Experiments
 
-Every significant piece of work gets an issue document in `docs/issues/`. Issues
+Every significant piece of work gets an issue document in `issues/`. Issues
 describe the problem, provide background, and propose solutions. Experiments are
 the incremental steps that solve the problem.
 
 ## One Issue at a Time
 
 Only one issue is active at a time. The active issue is the highest-numbered
-issue doc in `docs/issues/` that does not have a `## Conclusion`. All work
+issue doc in `issues/` that does not have a `## Conclusion`. All work
 focuses on this issue until it is closed.
 
 When a new problem is discovered during work on the active issue, do NOT create
@@ -29,13 +29,13 @@ TODO.
 
 ### Location and naming
 
-All issue documents live in `docs/issues/`. Each has a sequential number and a
+All issue documents live in `issues/`. Each has a sequential number and a
 short descriptive name:
 
 ```
-docs/issues/514-mouse.md
-docs/issues/513-ctrl-esc.md
-docs/issues/512-vsync.md
+issues/514-mouse.md
+issues/513-ctrl-esc.md
+issues/512-vsync.md
 ```
 
 The number is globally sequential across all generations (ts1–ts5). The name is
