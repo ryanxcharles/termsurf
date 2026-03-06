@@ -940,11 +940,9 @@ Register in parent `moz.build`: `DIRS += ["termsurf"]`.
 
 #### Q8. Multi-profile
 
-**Firefox cannot run multiple isolated profiles in one process.** This is a
-significant limitation compared to Chromium and WebKit.
-
-The profile service (`toolkit/profile/nsToolkitProfileService.cpp`) binds to
-**one profile directory per launch**:
+**One profile per process** — same as Chromium. The profile service
+(`toolkit/profile/nsToolkitProfileService.cpp`) binds to **one profile directory
+per launch**:
 
 ```idl
 interface nsIToolkitProfileService {
@@ -958,14 +956,9 @@ Each profile has a directory lock (`nsProfileLock`). `BrowsingContext`
 (`docshell/base/BrowsingContext.h`) manages DOM window/frame hierarchy, not
 profile isolation.
 
-Firefox's new "Selectable Profiles" feature
-(`browser/components/profiles/SelectableProfileService.sys.mjs`) allows profile
-switching within one session, but only one is active at a time.
-
-**For libtermsurf_gecko:** Each profile requires a **separate Gecko process**.
-This is the same as Roamium's current architecture (one process per profile), so
-it's not a blocker — but it means we can't consolidate multiple profiles into
-fewer processes.
+**For libtermsurf_gecko:** Each profile requires a separate Gecko process. This
+is exactly how TermSurf already works — one Roamium process per profile — so
+it's a perfect fit.
 
 #### Q9. Fork size
 
@@ -989,9 +982,9 @@ Estimated modifications:
 4. **No XPCOM interface changes needed** — all required interfaces
    (`nsIWebProgressListener`, `nsIWebNavigation`, `nsIWidget`) are public.
 
-**Estimate:** ~5–10 modified stock files (if NSView overlay), or ~15–20 (if
-IOSurface extraction). New code: ~1,000–1,500 lines in C library + existing
-Roamium Rust binary (~400 lines reusable).
+**Estimate:** \~5–10 modified stock files (if NSView overlay), or \~15–20 (if
+IOSurface extraction). New code: \~1,000–1,500 lines in C library + existing
+Roamium Rust binary (\~400 lines reusable).
 
 #### Q10. Cross-platform
 
@@ -1034,7 +1027,7 @@ Chromium.**
 | GPU compositing      | CAContext + CALayerHost   | NSView (native)         | IOSurface mach ports or NSView overlay |
 | Input handling       | Manual injection          | NSView first responder  | SynthesizeNative*Event()               |
 | DevTools             | Had to expose constructor | `_inspector` (public)   | RDP over WebSocket                     |
-| Multi-profile        | Multiple in one process   | Multiple in one process | One per process                        |
+| Multi-profile        | One per process           | Multiple in one process | One per process                        |
 | Build system         | GN/Ninja                  | CMake                   | moz.build/mach                         |
 | Init complexity      | Low (Content API)         | Very low (WKWebView)    | High (XPCOM bootstrap)                 |
 
@@ -1048,14 +1041,11 @@ Chromium.**
    loading libxul, getting service managers. Much heavier than WebKit's
    `[[WKWebView alloc] init]`.
 
-3. **One profile per process** — Cannot consolidate multiple profiles like
-   Chromium/WebKit. Every profile needs its own Gecko process.
-
-4. **No direct CAContext** — GPU compositing requires either the NSView overlay
+3. **No direct CAContext** — GPU compositing requires either the NSView overlay
    approach (simpler, like WebKit) or IOSurface extraction (complex, requires
    forking the compositor).
 
-5. **WebRender (Rust) in the rendering path** — Gecko's renderer is written in
+4. **WebRender (Rust) in the rendering path** — Gecko's renderer is written in
    Rust. Any compositor modifications require understanding both C++ and Rust
    codebases.
 
