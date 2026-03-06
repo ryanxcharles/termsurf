@@ -100,10 +100,9 @@ pane running Roamium (Chromium), another running Surfari (WebKit), and a third
 running Girlbat (Ladybird) — all in the same terminal window, all speaking the
 same protobuf messages.
 
-WebKit is the exception — `WKWebsiteDataStore` supports multiple profiles in
-one process — but the one-process-per-profile model still works for it, and
-keeping the architecture uniform is more valuable than optimizing for one
-engine.
+WebKit is the exception — `WKWebsiteDataStore` supports multiple profiles in one
+process — but the one-process-per-profile model still works for it, and keeping
+the architecture uniform is more valuable than optimizing for one engine.
 
 **Process topology:**
 
@@ -121,9 +120,9 @@ engine.
               │   │   │
               │   │   │  Unix sockets
               │   │   │
-     ┌────────┘   │   └────────┐
-     │            │            │
-┌────┴────┐ ┌────┴────┐ ┌────┴────┐
+     ┌────────┘   │   └──────┐
+     │            │          │
+┌────┴────┐ ┌─────┴───┐ ┌────┴────┐
 │ Roamium │ │ Surfari │ │ Roamium │    M engines (one per profile)
 │ profile │ │ profile │ │ profile │
 │   "A"   │ │   "B"   │ │   "C"   │
@@ -148,8 +147,8 @@ to it as clients.
   browser engine processes.
 - **Wire format:** 4-byte little-endian length prefix + serialized protobuf
   (`termsurf.proto`).
-- **Serialization:** protobuf-c in Zig (board), prost in Rust (TUI and
-  engines), C++ protobuf in Chromium.
+- **Serialization:** protobuf-c in Zig (board), prost in Rust (TUI and engines),
+  C++ protobuf in Chromium.
 
 Earlier generations (ts3–ts5) used XPC for IPC. Issues 698–701 replaced XPC with
 sockets, and Issue 702 removed all dead XPC code. CALayerHost compositing
