@@ -923,15 +923,12 @@ fn ui(
     } else {
         page_title.to_string()
     };
-    let engine_label = Line::from(vec![
-        Span::raw("\u{F268} ").style(Style::default().fg(COMMENT)),
-        Span::raw(browser_label).style(Style::default().fg(DIM)),
-    ]);
+    let engine_label = Line::from(Span::raw(browser_label).style(Style::default().fg(DIM)));
     let viewport_block = Block::default()
         .borders(Borders::ALL)
         .title(viewport_title)
         .title_top(profile_title.alignment(Alignment::Right))
-        .title_bottom(engine_label)
+        .title_bottom(engine_label.alignment(Alignment::Right))
         .border_style(Style::default().fg(viewport_border).bg(BG))
         .title_style(Style::default().fg(viewport_border))
         .style(Style::default().bg(BG));
