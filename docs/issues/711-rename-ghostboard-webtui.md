@@ -153,6 +153,22 @@ name from `web` to `webtui`. The binary name stays `web` — users still type
 - `tui/` → `webtui/` in all other references
 - Update "The first TUI, `web`" description to mention `webtui/` directory
 
+**`scripts/build-debug.sh`:**
+
+- `cd "$REPO_DIR/tui"` → `cd "$REPO_DIR/webtui"`
+- `$REPO_DIR/tui/target/debug/web` → `$REPO_DIR/webtui/target/debug/web`
+- Comment `# --- Web TUI (Rust) ---` unchanged (describes what it is, not the
+  directory)
+
+**`scripts/build-release.sh`:**
+
+- Same changes as `build-debug.sh` (release paths)
+
+**`scripts/install.sh`:**
+
+- `WEB="$REPO_DIR/tui/target/release/web"` →
+  `WEB="$REPO_DIR/webtui/target/release/web"`
+
 **`gui/src/apprt/xpc.zig`:**
 
 - No changes. The `web_fd` field name, `sendModeToWeb()` function, and `.tui`
