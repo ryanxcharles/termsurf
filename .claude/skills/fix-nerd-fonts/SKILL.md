@@ -1,6 +1,9 @@
 ---
 name: fix-nerd-fonts
-description: "Verify and fix Nerd Font icons after editing files. Use whenever writing or editing a file that contains Nerd Font characters (Private Use Area codepoints)."
+description:
+  "Verify and fix Nerd Font icons after editing files. Use whenever writing or
+  editing a file that contains Nerd Font characters (Private Use Area
+  codepoints)."
 ---
 
 # Fix Nerd Fonts
@@ -14,10 +17,10 @@ characters. This skill ensures they survive every edit.
 **After every Write or Edit to a file that contains Nerd Font icons.** Currently
 the known files are:
 
-| File | Icons |
-|------|-------|
-| `tui/src/main.rs` | nf-md-web (U+F059F), nf-fa-keyboard_o (U+F11C), nf-fa-user (U+F007) |
-| `issues/504-web-tui.md` | nf-md-web (U+F059F), nf-fa-keyboard_o (U+F11C), nf-fa-user (U+F007), nf-md-refresh (U+F0450) |
+| File                        | Icons                                                                                        |
+| --------------------------- | -------------------------------------------------------------------------------------------- |
+| `tui/src/main.rs`           | nf-md-web (U+F059F), nf-fa-keyboard_o (U+F11C), nf-fa-user (U+F007)                          |
+| `issues/0000504-web-tui.md` | nf-md-web (U+F059F), nf-fa-keyboard_o (U+F11C), nf-fa-user (U+F007), nf-md-refresh (U+F0450) |
 
 Update this table when new files or icons are added.
 
@@ -104,14 +107,14 @@ Unicode escape syntax. Raw UTF-8 bytes are silently corrupted by text editors,
 LLM tools, clipboard operations, and diff/patch workflows. Unicode escapes are
 pure ASCII and survive any tool chain.
 
-| Language | Syntax | Example (U+F007) | Example (U+F059F) |
-|----------|--------|-------------------|--------------------|
-| Rust | `\u{XXXX}` | `"\u{F007}"` | `"\u{F059F}"` |
-| Zig | `\u{XXXX}` | `"\u{F007}"` | `"\u{F059F}"` |
-| Python | `\uXXXX` / `\U00XXXXXX` | `'\uF007'` | `'\U000F059F'` |
-| C/C++ | `\uXXXX` / `\UXXXXXXXX` | `u8"\uF007"` | `u8"\U000F059F"` |
-| Swift | `\u{XXXX}` | `"\u{F007}"` | `"\u{F059F}"` |
-| JavaScript | `\u{XXXX}` | `"\u{F007}"` | `"\u{F059F}"` |
+| Language   | Syntax                  | Example (U+F007) | Example (U+F059F) |
+| ---------- | ----------------------- | ---------------- | ----------------- |
+| Rust       | `\u{XXXX}`              | `"\u{F007}"`     | `"\u{F059F}"`     |
+| Zig        | `\u{XXXX}`              | `"\u{F007}"`     | `"\u{F059F}"`     |
+| Python     | `\uXXXX` / `\U00XXXXXX` | `'\uF007'`       | `'\U000F059F'`    |
+| C/C++      | `\uXXXX` / `\UXXXXXXXX` | `u8"\uF007"`     | `u8"\U000F059F"`  |
+| Swift      | `\u{XXXX}`              | `"\u{F007}"`     | `"\u{F059F}"`     |
+| JavaScript | `\u{XXXX}`              | `"\u{F007}"`     | `"\u{F059F}"`     |
 
 **When editing a file that contains raw Nerd Font bytes**, convert them to
 Unicode escapes as part of the edit. Use `xxd` or `python3` to identify the
@@ -125,4 +128,5 @@ When introducing a new Nerd Font icon to the project:
 2. Add it to the verification script's `icons` dict.
 3. Add a placeholder constant for it.
 4. Use the placeholder-and-replace pattern for the first embed.
-5. **Use Unicode escape syntax** (`\u{...}` in Rust/Zig, etc.) — never raw bytes.
+5. **Use Unicode escape syntax** (`\u{...}` in Rust/Zig, etc.) — never raw
+   bytes.

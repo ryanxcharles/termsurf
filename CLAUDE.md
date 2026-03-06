@@ -286,23 +286,23 @@ All documentation is in `docs/` or in `README.md` files throughout the codebase.
 
 Recent issues:
 
-- `issues/700-tui-gui-sockets.md` — Replace TUI↔GUI XPC with Unix sockets
-- `issues/701-chromium-sockets.md` — Replace GUI↔Chromium XPC with Unix
+- `issues/0000700-tui-gui-sockets.md` — Replace TUI↔GUI XPC with Unix sockets
+- `issues/0000701-chromium-sockets.md` — Replace GUI↔Chromium XPC with Unix
   sockets
-- `issues/702-socket-cleanup.md` — Dead XPC removal and unlimited client
+- `issues/0000702-socket-cleanup.md` — Dead XPC removal and unlimited client
   connections
-- `issues/703-remove-click-suppression.md` — Remove click-to-activate
+- `issues/0000703-remove-click-suppression.md` — Remove click-to-activate
   suppression
-- `issues/704-browser-bindings.md` — Browser bindings (libtermsurf_content)
-- `issues/705-browser-bindings.md` — Browser bindings continued (DevTools
+- `issues/0000704-browser-bindings.md` — Browser bindings (libtermsurf_content)
+- `issues/0000705-browser-bindings.md` — Browser bindings continued (DevTools
   fix)
-- `issues/706-plusium-devtools.md` — Plusium DevTools crash fix
-- `issues/707-roamium.md` — Roamium (shared lib + Rust rewrite)
-- `issues/708-roamium-only.md` — Roamium-only (clean fork, renamed lib)
-- `issues/709-wezboard.md` — Wezboard (WezTerm fork research)
-- `issues/710-gecko-webkit-ladybird.md` — Gecko, WebKit & Ladybird engine
+- `issues/0000706-plusium-devtools.md` — Plusium DevTools crash fix
+- `issues/0000707-roamium.md` — Roamium (shared lib + Rust rewrite)
+- `issues/0000708-roamium-only.md` — Roamium-only (clean fork, renamed lib)
+- `issues/0000709-wezboard.md` — Wezboard (WezTerm fork research)
+- `issues/0000710-gecko-webkit-ladybird.md` — Gecko, WebKit & Ladybird engine
   research
-- `issues/711-rename-ghostboard-webtui.md` — Rename GUI to Ghostboard, TUI
+- `issues/0000711-rename-ghostboard-webtui.md` — Rename GUI to Ghostboard, TUI
   to webtui
 
 ### Early Prototypes (ts1–ts5)
@@ -312,9 +312,9 @@ Issue docs for all prototype generations are indexed in
 
 ### General
 
-- `issues/002-merge-upstream.md` — How to merge changes from upstream repos
-- `issues/001-competitors.md` — Terminal-browser hybrid comparison
-- `issues/003-website.md` — termsurf.com website
+- `issues/0000002-merge-upstream.md` — How to merge changes from upstream repos
+- `issues/0000001-competitors.md` — Terminal-browser hybrid comparison
+- `issues/0000003-website.md` — termsurf.com website
 - `TODO.md` — Task checklist and future issues. Only one issue is active at a
   time (the highest-numbered issue doc without a `## Conclusion`). When a new
   problem is identified during work on the active issue, add it to the "Future
@@ -322,10 +322,10 @@ Issue docs for all prototype generations are indexed in
 
 ### Immutability
 
-Issue documents in `issues/` that have a `## Conclusion` are historical
-records. They are **immutable** and must NEVER be modified. They capture what
-happened at the time — even if details (like directory names or paths) are now
-outdated. History stays as it was written.
+Issue documents in `issues/` that have a `## Conclusion` are historical records.
+They are **immutable** and must NEVER be modified. They capture what happened at
+the time — even if details (like directory names or paths) are now outdated.
+History stays as it was written.
 
 ## Remember
 

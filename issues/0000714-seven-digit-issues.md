@@ -28,10 +28,11 @@ immutable — no future growth will force another rename.
 - Rename every file in `issues/` from `{N}-{name}.md` to `{0000N}-{name}.md`
   (7-digit zero-padded).
 - Update all internal cross-references: issue documents that link to other issue
-  files (e.g., `[Issue 411](../issues/411-two-profiles-3.md)` →
+  files (e.g., `[Issue 411](../issues/0000411-two-profiles-3.md)` →
   `[Issue 411](../issues/0000411-two-profiles-3.md)`).
 - Update `chromium/README.md` branch table links (e.g.,
-  `../issues/411-two-profiles-3.md` → `../issues/0000411-two-profiles-3.md`).
+  `../issues/0000411-two-profiles-3.md` →
+  `../issues/0000411-two-profiles-3.md`).
 - Update `docs/early-prototypes.md` issue references.
 - Update `CLAUDE.md` issue references.
 - Update any other files that reference issue filenames by path.
@@ -40,11 +41,11 @@ immutable — no future growth will force another rename.
 
 ### What changes
 
-| Before                             | After                                  |
-| ---------------------------------- | -------------------------------------- |
-| `issues/001-competitors.md`        | `issues/0000001-competitors.md`        |
-| `issues/100-bookmarks.md`          | `issues/0000100-bookmarks.md`          |
-| `issues/714-seven-digit-issues.md` | `issues/0000714-seven-digit-issues.md` |
+| Before                                 | After                                  |
+| -------------------------------------- | -------------------------------------- |
+| `issues/0000001-competitors.md`        | `issues/0000001-competitors.md`        |
+| `issues/0000100-bookmarks.md`          | `issues/0000100-bookmarks.md`          |
+| `issues/0000714-seven-digit-issues.md` | `issues/0000714-seven-digit-issues.md` |
 
 ### What stays the same
 

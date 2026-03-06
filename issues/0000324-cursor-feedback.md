@@ -407,6 +407,7 @@ WMEK::Move => {
 
 **Challenge:** The current `handle_webview_mouse_event` returns `bool` and
 doesn't have access to `context` to call `set_cursor`. We need to either:
+
 - Return the cursor to apply from the handler, or
 - Store the cursor on TermWindow state and apply it after the handler returns
 
@@ -498,8 +499,8 @@ Cursor feedback for ts3 webviews is complete:
    on what element is under the mouse.
 
 2. **XPC cursor messaging** — The profile server sends cursor type to the GUI
-   via XPC `cursor_change` action. The GUI stores cursor type per pane in a
-   new `webview_cursors` HashMap.
+   via XPC `cursor_change` action. The GUI stores cursor type per pane in a new
+   `webview_cursors` HashMap.
 
 3. **Cursor type mapping** — Added `cef_cursor_to_mouse_cursor()` helper that
    maps CEF's cursor types to WezTerm's `MouseCursor` enum:
@@ -555,32 +556,32 @@ context.set_cursor(Some(MouseCursor::Hand))
 
 ### Files Modified
 
-| File | Changes |
-|------|---------|
-| `termsurf-profile/src/main.rs` | Added `on_cursor_change` to DisplayHandler |
-| `webview_xpc.rs` | Added `webview_cursors` field, `get_cursor()`, `cursor_change` handler |
-| `mouseevent.rs` | Added `cef_cursor_to_mouse_cursor()`, changed handler return type |
+| File                           | Changes                                                                |
+| ------------------------------ | ---------------------------------------------------------------------- |
+| `termsurf-profile/src/main.rs` | Added `on_cursor_change` to DisplayHandler                             |
+| `webview_xpc.rs`               | Added `webview_cursors` field, `get_cursor()`, `cursor_change` handler |
+| `mouseevent.rs`                | Added `cef_cursor_to_mouse_cursor()`, changed handler return type      |
 
 ### What's Next
 
 With cursor feedback complete, the core mouse input features are done:
 
-| Feature | Status | Issue |
-|---------|--------|-------|
-| Mouse move/click | Complete | 319 |
-| Double/triple-click | Complete | 320 |
-| Scroll | Complete | 321 |
-| Drag selection | Complete | 322 |
-| Shift-click extend | Complete | 323 |
-| Cursor feedback | Complete | 324 |
+| Feature             | Status   | Issue |
+| ------------------- | -------- | ----- |
+| Mouse move/click    | Complete | 319   |
+| Double/triple-click | Complete | 320   |
+| Scroll              | Complete | 321   |
+| Drag selection      | Complete | 322   |
+| Shift-click extend  | Complete | 323   |
+| Cursor feedback     | Complete | 324   |
 
 Remaining mouse-related features:
 
-| Feature | Priority | Notes |
-|---------|----------|-------|
-| Cmd-click | Medium | Open links (modifiers passed, needs link URL extraction) |
-| Right-click | Medium | Context menus (currently suppressed) |
-| Middle-click | Low | Paste or open in new tab |
+| Feature      | Priority | Notes                                                    |
+| ------------ | -------- | -------------------------------------------------------- |
+| Cmd-click    | Medium   | Open links (modifiers passed, needs link URL extraction) |
+| Right-click  | Medium   | Context menus (currently suppressed)                     |
+| Middle-click | Low      | Paste or open in new tab                                 |
 
 Recommended next focus: Move beyond mouse input to other webview features like
 navigation controls, tab management, or profile switching.
@@ -589,7 +590,7 @@ navigation controls, tab management, or profile switching.
 
 ## References
 
-- `docs/issues/323-shift-click.md` — Shift-click (completed)
+- `docs/issues/0000323-shift-click.md` — Shift-click (completed)
 - CEF `cef_cursor_type_t` enum in cef-rs bindings
 - WezTerm `MouseCursor` enum in `window` crate
 - `ts3/wezterm-gui/src/termwindow/mouseevent.rs` — Mouse event handling

@@ -384,16 +384,16 @@ issue-specific branches.
 
 ## Branches
 
-| Branch                   | Issue                                       | Description                  |
-| ------------------------ | ------------------------------------------- | ---------------------------- |
-| `146.0.7650.0-termsurf`  | —                                           | Main working branch for v146 |
-| `146.0.7650.0-electron`  | —                                           | Electron's v146 base         |
-| `146.0.7650.0-issue-411` | [Issue 411](issues/411-two-profiles-3.md)   | Two profiles experiment 3    |
-| `146.0.7650.0-issue-412` | [Issue 412](issues/412-one-profile.md)      | One profile                  |
-| `146.0.7650.0-issue-413` | [Issue 413](issues/413-one-profile-2.md)    | One profile experiment 2     |
-| `146.0.7650.0-issue-414` | [Issue 414](issues/414-two-profiles-xpc.md) | Two profiles via XPC         |
-| `146.0.7650.0-issue-415` | [Issue 415](issues/415-swift-receiver.md)   | Swift receiver               |
-| `146.0.7650.0-issue-416` | [Issue 416](issues/416-rust-receiver.md)    | Rust receiver                |
+| Branch                   | Issue                                           | Description                  |
+| ------------------------ | ----------------------------------------------- | ---------------------------- |
+| `146.0.7650.0-termsurf`  | —                                               | Main working branch for v146 |
+| `146.0.7650.0-electron`  | —                                               | Electron's v146 base         |
+| `146.0.7650.0-issue-411` | [Issue 411](issues/0000411-two-profiles-3.md)   | Two profiles experiment 3    |
+| `146.0.7650.0-issue-412` | [Issue 412](issues/0000412-one-profile.md)      | One profile                  |
+| `146.0.7650.0-issue-413` | [Issue 413](issues/0000413-one-profile-2.md)    | One profile experiment 2     |
+| `146.0.7650.0-issue-414` | [Issue 414](issues/0000414-two-profiles-xpc.md) | Two profiles via XPC         |
+| `146.0.7650.0-issue-415` | [Issue 415](issues/0000415-swift-receiver.md)   | Swift receiver               |
+| `146.0.7650.0-issue-416` | [Issue 416](issues/0000416-rust-receiver.md)    | Rust receiver                |
 
 ## Local Setup
 
@@ -644,7 +644,7 @@ ts5/ghostty.qcow2
 ts5/vgcore.*
 ```
 
-#### Step 4: Update `docs/issues/002-merge-upstream.md`
+#### Step 4: Update `docs/issues/0000002-merge-upstream.md`
 
 Add a ts5 section mirroring the ts1 section. The merge command is:
 
@@ -694,8 +694,9 @@ If this fails, debug and fix before committing. Common issues:
 #### Step 8: Commit
 
 Stage all changes (`.gitmodules`, `.gitignore`, `CLAUDE.md`,
-`docs/issues/002-merge-upstream.md`, `.claude/skills/merge-upstream/SKILL.md`)
-and commit. The Ghostty import itself (Step 1) is already committed separately.
+`docs/issues/0000002-merge-upstream.md`,
+`.claude/skills/merge-upstream/SKILL.md`) and commit. The Ghostty import itself
+(Step 1) is already committed separately.
 
 #### Result
 
@@ -724,12 +725,11 @@ only works when there is no competing rename history.
 
 ### Experiment 2: Subtree merge with rename detection disabled
 
-**Hypothesis:** Experiment 1 failed because rename detection found the `/ →
-ts1/`
-renames and overrode the subtree mapping. The `-X no-renames` strategy option
-disables rename detection entirely. Without rename detection, git won't find the
-ts1/ renames and the `-X subtree=ts5` mapping should work cleanly — placing all
-upstream files into `ts5/` as new additions.
+**Hypothesis:** Experiment 1 failed because rename detection found the
+`/ → ts1/` renames and overrode the subtree mapping. The `-X no-renames`
+strategy option disables rename detection entirely. Without rename detection,
+git won't find the ts1/ renames and the `-X subtree=ts5` mapping should work
+cleanly — placing all upstream files into `ts5/` as new additions.
 
 **Command:**
 
@@ -847,7 +847,7 @@ ts5/ghostty.qcow2
 ts5/vgcore.*
 ```
 
-#### Step 3: Update `docs/issues/002-merge-upstream.md`
+#### Step 3: Update `docs/issues/0000002-merge-upstream.md`
 
 Add a ts5 section. Key differences from ts1:
 

@@ -15,8 +15,8 @@ the incremental steps that solve the problem.
 ## One Issue at a Time
 
 Only one issue is active at a time. The active issue is the highest-numbered
-issue doc in `issues/` that does not have a `## Conclusion`. All work
-focuses on this issue until it is closed.
+issue doc in `issues/` that does not have a `## Conclusion`. All work focuses on
+this issue until it is closed.
 
 When a new problem is discovered during work on the active issue, do NOT create
 a new issue doc for it. Instead, add it to the "Future issues" section of
@@ -29,13 +29,13 @@ TODO.
 
 ### Location and naming
 
-All issue documents live in `issues/`. Each has a sequential number and a
-short descriptive name:
+All issue documents live in `issues/`. Each has a sequential number and a short
+descriptive name:
 
 ```
-issues/514-mouse.md
-issues/513-ctrl-esc.md
-issues/512-vsync.md
+issues/0000514-mouse.md
+issues/0000513-ctrl-esc.md
+issues/0000512-vsync.md
 ```
 
 The number is globally sequential across all generations (ts1–ts5). The name is

@@ -40,8 +40,8 @@ and configuration files. The code inside the directories doesn't change — both
 **Documentation:**
 
 - `docs/keybindings.md` — References to `ghost/src/` and `web/src/`
-- `docs/issues/600-termsurf-ghost.md` through `docs/issues/612-icon.md` — All
-  recent issues contain references to `ghost/` and `web/` paths in code
+- `docs/issues/0000600-termsurf-ghost.md` through `docs/issues/0000612-icon.md`
+  — All recent issues contain references to `ghost/` and `web/` paths in code
   examples, build commands, and file inventories
 
 **Scripts:**
@@ -79,11 +79,10 @@ they won't be used as instructions for future work.
 
 #### Goal
 
-`ghost/` is renamed to `gui/`, `web/` is renamed to `tui/`. `cd gui && zig
-build`
-succeeds. All living documents (CLAUDE.md, .gitignore, keybindings.md, Claude
-skills) reference the new paths. Historical issue docs (600–612) are left
-unchanged.
+`ghost/` is renamed to `gui/`, `web/` is renamed to `tui/`.
+`cd gui && zig build` succeeds. All living documents (CLAUDE.md, .gitignore,
+keybindings.md, Claude skills) reference the new paths. Historical issue docs
+(600–612) are left unchanged.
 
 #### Steps
 

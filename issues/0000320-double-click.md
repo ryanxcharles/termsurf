@@ -28,12 +28,12 @@ Users expect standard text selection behavior in web content:
 
 Issue 319 established basic mouse input for ts3 webviews:
 
-| Feature | Status | Implementation |
-|---------|--------|----------------|
-| Mouse move | Working | `send_mouse_move()` via XPC |
-| Left click | Working | `send_mouse_click()` via XPC |
-| Hover effects | Working | CSS :hover triggers correctly |
-| Coordinate transform | Working | Physical → logical with DPI scaling |
+| Feature                 | Status  | Implementation                          |
+| ----------------------- | ------- | --------------------------------------- |
+| Mouse move              | Working | `send_mouse_move()` via XPC             |
+| Left click              | Working | `send_mouse_click()` via XPC            |
+| Hover effects           | Working | CSS :hover triggers correctly           |
+| Coordinate transform    | Working | Physical → logical with DPI scaling     |
 | Control panel exclusion | Working | Clicks above webview handled separately |
 
 ### Current Click Implementation
@@ -55,11 +55,11 @@ xpc_manager.send_mouse_click(
 CEF's `send_mouse_click_event` accepts a `click_count` parameter that determines
 selection behavior:
 
-| click_count | CEF Behavior |
-|-------------|--------------|
-| 1 | Position cursor, no selection |
-| 2 | Select word under cursor |
-| 3 | Select line/paragraph |
+| click_count | CEF Behavior                  |
+| ----------- | ----------------------------- |
+| 1           | Position cursor, no selection |
+| 2           | Select word under cursor      |
+| 3           | Select line/paragraph         |
 
 ### Architecture Reference
 
@@ -101,13 +101,14 @@ Track recent clicks to detect double/triple clicks:
 1. **Store last click info** — Position (x, y) and timestamp
 2. **On new click** — Check if within time threshold (~500ms) and position
    threshold (~5 pixels)
-3. **Increment or reset** — If thresholds met, increment count (max 3); otherwise
-   reset to 1
+3. **Increment or reset** — If thresholds met, increment count (max 3);
+   otherwise reset to 1
 4. **Send to CEF** — Pass computed click_count with the click event
 
 ### State Requirements
 
 Need to track per-pane:
+
 - Last click timestamp
 - Last click position (x, y)
 - Current click count (1, 2, or 3)
@@ -115,6 +116,7 @@ Need to track per-pane:
 ### Threshold Values
 
 Standard double-click thresholds:
+
 - **Time**: 500ms (typical OS default)
 - **Distance**: 5 pixels (allow slight movement between clicks)
 
@@ -130,15 +132,15 @@ Standard double-click thresholds:
 
 After double-click, these features remain for full mouse support:
 
-| Feature | Priority | Notes |
-|---------|----------|-------|
-| Scroll wheel | High | `send_mouse_wheel()`, delta × 120 for CEF |
-| Trackpad scroll | High | Same as wheel, may need gesture handling |
-| Drag selection | Medium | Track button state across moves |
-| Modifier keys | Medium | Shift-click, Cmd-click, Ctrl-click |
-| Right-click | Medium | Context menu or forward to CEF |
-| Middle-click | Low | Paste or open in new tab |
-| Cursor feedback | Low | CEF → GUI reverse channel for cursor shape |
+| Feature         | Priority | Notes                                      |
+| --------------- | -------- | ------------------------------------------ |
+| Scroll wheel    | High     | `send_mouse_wheel()`, delta × 120 for CEF  |
+| Trackpad scroll | High     | Same as wheel, may need gesture handling   |
+| Drag selection  | Medium   | Track button state across moves            |
+| Modifier keys   | Medium   | Shift-click, Cmd-click, Ctrl-click         |
+| Right-click     | Medium   | Context menu or forward to CEF             |
+| Middle-click    | Low      | Paste or open in new tab                   |
+| Cursor feedback | Low      | CEF → GUI reverse channel for cursor shape |
 
 ## Experiments
 
@@ -146,8 +148,9 @@ After double-click, these features remain for full mouse support:
 
 **Status:** SUCCESS
 
-**Hypothesis:** Adding click timing/position tracking to TermWindow and computing
-click_count based on thresholds will enable CEF to receive double/triple clicks.
+**Hypothesis:** Adding click timing/position tracking to TermWindow and
+computing click_count based on thresholds will enable CEF to receive
+double/triple clicks.
 
 **Approach:** The XPC infrastructure already passes `click_count` to CEF — it's
 just hardcoded to 1. Add per-pane click state and compute the count dynamically.
@@ -321,8 +324,8 @@ Double-click and triple-click text selection now works in ts3 webviews:
 1. **Double-click selects word** — Two rapid clicks on a word highlight the
    entire word, matching standard browser behavior.
 
-2. **Triple-click selects line/paragraph** — Three rapid clicks select the
-   full line or paragraph element.
+2. **Triple-click selects line/paragraph** — Three rapid clicks select the full
+   line or paragraph element.
 
 3. **Automatic reset** — Click count resets to 1 if more than 500ms passes
    between clicks or if the mouse moves more than 5 pixels.
@@ -337,9 +340,9 @@ Double-click and triple-click text selection now works in ts3 webviews:
    users may click in different webview panes. Using a global click state would
    incorrectly detect double-clicks across panes.
 
-3. **Press computes, Release reuses** — The click count is computed on Press
-   and stored. Release reuses the same count rather than recomputing, ensuring
-   CEF receives matching Press/Release click counts.
+3. **Press computes, Release reuses** — The click count is computed on Press and
+   stored. Release reuses the same count rather than recomputing, ensuring CEF
+   receives matching Press/Release click counts.
 
 ### Implementation Summary
 
@@ -375,29 +378,29 @@ compute_click_count(pane_id, x, y)
 
 ### Files Modified
 
-| File | Changes |
-|------|---------|
-| `mouseevent.rs` | Added `ClickState` struct, `compute_click_count()` method |
-| `mod.rs` | Added `click_state: RefCell<HashMap<PaneId, ClickState>>` field |
+| File            | Changes                                                         |
+| --------------- | --------------------------------------------------------------- |
+| `mouseevent.rs` | Added `ClickState` struct, `compute_click_count()` method       |
+| `mod.rs`        | Added `click_state: RefCell<HashMap<PaneId, ClickState>>` field |
 
 ### What's Next
 
 With double-click complete, these mouse features remain:
 
-| Feature | Priority | Notes |
-|---------|----------|-------|
-| Scroll wheel | High | Most requested after click/selection |
-| Drag selection | Medium | Click-and-drag to select text ranges |
-| Modifier keys | Medium | Shift-click to extend selection |
-| Right-click | Medium | Context menus |
-| Cursor feedback | Low | Change cursor shape over links, text, etc. |
+| Feature         | Priority | Notes                                      |
+| --------------- | -------- | ------------------------------------------ |
+| Scroll wheel    | High     | Most requested after click/selection       |
+| Drag selection  | Medium   | Click-and-drag to select text ranges       |
+| Modifier keys   | Medium   | Shift-click to extend selection            |
+| Right-click     | Medium   | Context menus                              |
+| Cursor feedback | Low      | Change cursor shape over links, text, etc. |
 
 Recommended next issue: **321-scroll** for scroll wheel support.
 
 ## References
 
-- `docs/issues/319-mouse.md` — Basic mouse input (completed)
-- `docs/issues/317-input.md` — Keyboard input (completed)
+- `docs/issues/0000319-mouse.md` — Basic mouse input (completed)
+- `docs/issues/0000317-input.md` — Keyboard input (completed)
 - `ts3/wezterm-gui/src/termwindow/mouseevent.rs` — Mouse event handling
 - `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` — XPC mouse methods
 - `ts3/termsurf-profile/src/main.rs` — CEF mouse event handlers

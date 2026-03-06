@@ -102,7 +102,7 @@ generating protocol buffers, building Rust targets via `gn_rs`).
 
 - `gui/src/apprt/xpc.zig` — the GUI's XPC module (unchanged, points at
   `chromium/src/out/Default/Zig Profile Server.app`)
-- `docs/issues/643-zig-profile-server-2.md` — this document
+- `docs/issues/0000643-zig-profile-server-2.md` — this document
 - `browser/` — can be cleaned up after the code is moved
 
 ### Build workflow

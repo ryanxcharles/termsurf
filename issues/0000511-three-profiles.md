@@ -961,7 +961,7 @@ if let uuid = peerPaneIds.removeValue(forKey: peerId) {
 Add a row to the Branches table:
 
 ```
-| `146.0.7650.0-issue-511` | [Issue 511](issues/511-three-profiles.md) | Per-tab pane routing        |
+| `146.0.7650.0-issue-511` | [Issue 511](issues/0000511-three-profiles.md) | Per-tab pane routing        |
 ```
 
 #### Build

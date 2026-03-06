@@ -29,16 +29,16 @@ Users need to extend existing selections using Shift-click:
 
 Previous issues established input infrastructure for ts3 webviews:
 
-| Feature | Status | Issue |
-|---------|--------|-------|
-| Keyboard input | Working | 317 |
-| Mouse move | Working | 319 |
-| Left click | Working | 319 |
-| Hover effects | Working | 319 |
-| Double-click (word select) | Working | 320 |
-| Triple-click (line select) | Working | 320 |
-| Scroll (trackpad) | Working | 321 |
-| Drag selection | Working | 322 |
+| Feature                    | Status  | Issue |
+| -------------------------- | ------- | ----- |
+| Keyboard input             | Working | 317   |
+| Mouse move                 | Working | 319   |
+| Left click                 | Working | 319   |
+| Hover effects              | Working | 319   |
+| Double-click (word select) | Working | 320   |
+| Triple-click (line select) | Working | 320   |
+| Scroll (trackpad)          | Working | 321   |
+| Drag selection             | Working | 322   |
 
 ### Current Click Implementation
 
@@ -70,11 +70,11 @@ pub fn send_mouse_click(
 
 CEF uses these flags for keyboard modifiers:
 
-| Flag | Value | Meaning |
-|------|-------|---------|
-| `EVENTFLAG_SHIFT_DOWN` | 1 << 1 | Shift key is pressed |
-| `EVENTFLAG_CONTROL_DOWN` | 1 << 2 | Control key is pressed |
-| `EVENTFLAG_ALT_DOWN` | 1 << 3 | Alt/Option key is pressed |
+| Flag                     | Value  | Meaning                        |
+| ------------------------ | ------ | ------------------------------ |
+| `EVENTFLAG_SHIFT_DOWN`   | 1 << 1 | Shift key is pressed           |
+| `EVENTFLAG_CONTROL_DOWN` | 1 << 2 | Control key is pressed         |
+| `EVENTFLAG_ALT_DOWN`     | 1 << 3 | Alt/Option key is pressed      |
 | `EVENTFLAG_COMMAND_DOWN` | 1 << 7 | Command key is pressed (macOS) |
 
 For Shift-click selection extension, we need `0x02` (`EVENTFLAG_SHIFT_DOWN`).
@@ -174,12 +174,12 @@ WMEK::Press(MousePress::Left) => {
 
 After Shift-click, these features remain:
 
-| Feature | Priority | Notes |
-|---------|----------|-------|
-| Cmd-click | Medium | Open links in new tab (may need special handling) |
-| Right-click | Medium | Context menus |
-| Middle-click | Low | Paste or open in new tab |
-| Cursor feedback | Low | Change cursor shape over links, text |
+| Feature         | Priority | Notes                                             |
+| --------------- | -------- | ------------------------------------------------- |
+| Cmd-click       | Medium   | Open links in new tab (may need special handling) |
+| Right-click     | Medium   | Context menus                                     |
+| Middle-click    | Low      | Paste or open in new tab                          |
+| Cursor feedback | Low      | Change cursor shape over links, text              |
 
 ## Experiments
 
@@ -315,9 +315,9 @@ tail -f /tmp/termsurf-gui.log | grep "\[MOUSE\]"
 
 Shift-click selection extension for ts3 webviews is complete:
 
-1. **Modifier conversion** — Added `modifiers_to_cef_flags()` helper that converts
-   WezTerm's `Modifiers` bitmask to CEF event flags (Shift=0x02, Ctrl=0x04,
-   Alt=0x08, Cmd=0x80).
+1. **Modifier conversion** — Added `modifiers_to_cef_flags()` helper that
+   converts WezTerm's `Modifiers` bitmask to CEF event flags (Shift=0x02,
+   Ctrl=0x04, Alt=0x08, Cmd=0x80).
 
 2. **Click event modifiers** — Updated Press and Release handlers to include
    keyboard modifiers in click events sent to CEF.
@@ -361,20 +361,20 @@ CEF extends selection to click point
 
 ### Files Modified
 
-| File | Changes |
-|------|---------|
+| File            | Changes                                                          |
+| --------------- | ---------------------------------------------------------------- |
 | `mouseevent.rs` | Added `modifiers_to_cef_flags()`, updated Press/Release handlers |
 
 ### What's Next
 
 With Shift-click complete, the remaining mouse input features are:
 
-| Feature | Priority | Notes |
-|---------|----------|-------|
-| Cmd-click | Medium | Open links in new tab (modifier now passed, needs link detection) |
-| Right-click | Medium | Context menus |
-| Middle-click | Low | Paste or open in new tab |
-| Cursor feedback | Low | Change cursor shape over links, text |
+| Feature         | Priority | Notes                                                             |
+| --------------- | -------- | ----------------------------------------------------------------- |
+| Cmd-click       | Medium   | Open links in new tab (modifier now passed, needs link detection) |
+| Right-click     | Medium   | Context menus                                                     |
+| Middle-click    | Low      | Paste or open in new tab                                          |
+| Cursor feedback | Low      | Change cursor shape over links, text                              |
 
 Recommended next issue: **324-right-click** for context menu support, or
 **Cmd-click link handling** if link detection is already working.
@@ -383,7 +383,7 @@ Recommended next issue: **324-right-click** for context menu support, or
 
 ## References
 
-- `docs/issues/322-drag-selection.md` — Drag selection (completed)
+- `docs/issues/0000322-drag-selection.md` — Drag selection (completed)
 - WezTerm `Modifiers` type in `window` crate
 - CEF event flags: `cef_event_flags_t` in cef-rs bindings
 - `ts3/wezterm-gui/src/termwindow/mouseevent.rs` — Mouse event handling

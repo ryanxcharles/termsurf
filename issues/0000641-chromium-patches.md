@@ -56,10 +56,10 @@ automatically ignored.
 
 35 branches exist locally. 33 are logged in `docs/chromium.md`. Two are missing:
 
-| Branch                   | Issue doc                                           | Notes                            |
-| ------------------------ | --------------------------------------------------- | -------------------------------- |
-| `146.0.7650.0-issue-507` | None (`docs/issues/507-chromium.md` does not exist) | First Chromium streaming attempt |
-| `146.0.7650.0-issue-635` | None (`docs/issues/635-*.md` does not exist)        | Persistent compositor work       |
+| Branch                   | Issue doc                                               | Notes                            |
+| ------------------------ | ------------------------------------------------------- | -------------------------------- |
+| `146.0.7650.0-issue-507` | None (`docs/issues/0000507-chromium.md` does not exist) | First Chromium streaming attempt |
+| `146.0.7650.0-issue-635` | None (`docs/issues/0000635-*.md` does not exist)        | Persistent compositor work       |
 
 ### Branch types
 
@@ -132,8 +132,7 @@ the branch workflow. The new flow when creating a Chromium branch for an issue:
 1. Make a new issue doc.
 2. Determine Chromium needs modification.
 3. Fork the most relevant recent branch (not necessarily the immediate prior
-   branch — that might have been a failed experiment) to
-   `{version}-issue-{N}`.
+   branch — that might have been a failed experiment) to `{version}-issue-{N}`.
 4. Make changes, build, test.
 5. Commit to the issue branch with git-poet.
 6. Generate patches:

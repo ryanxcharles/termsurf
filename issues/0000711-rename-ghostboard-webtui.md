@@ -177,7 +177,7 @@ name from `web` to `webtui`. The binary name stays `web` — users still type
   enum variant refer to the protocol concept (TUI connection), not the directory
   name. These will be revisited in a later experiment if needed.
 
-**`docs/issues/711-rename-ghostboard-webtui.md`:**
+**`docs/issues/0000711-rename-ghostboard-webtui.md`:**
 
 - Already up to date.
 
@@ -511,7 +511,7 @@ gets a descriptive directory name.
 
 - `website/** linguist-documentation` → `termsurf.com/** linguist-documentation`
 
-**6. `docs/issues/003-website.md`:**
+**6. `docs/issues/0000003-website.md`:**
 
 - Absolutely do not change this file. We NEVER change historical issue
   documents, even if they are out of date. Issue documents are immutable records
@@ -576,7 +576,7 @@ prefers a simple, descriptive name over the domain-based name.
 
 **6. Not changed:**
 
-- `docs/issues/003-website.md` — historical, immutable
+- `docs/issues/0000003-website.md` — historical, immutable
 - `ghostboard/src/apprt/gtk/class/window.zig` — GTK action name, not a directory
   reference
 - `CLAUDE.md` — historical references describe past issues, not directory paths

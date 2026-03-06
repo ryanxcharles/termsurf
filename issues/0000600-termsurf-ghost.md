@@ -169,12 +169,12 @@ input handling, Metal renderer, and surface management.
 
 ### Files changed
 
-| File                                | Change                             |
-| ----------------------------------- | ---------------------------------- |
-| `ghost/`                            | New directory (Ghostty subtree)    |
-| `.gitignore`                        | Added ghost/ build output patterns |
-| `CLAUDE.md`                         | Added Ghost section, updated ts5   |
-| `docs/issues/600-termsurf-ghost.md` | This issue                         |
+| File                                    | Change                             |
+| --------------------------------------- | ---------------------------------- |
+| `ghost/`                                | New directory (Ghostty subtree)    |
+| `.gitignore`                            | Added ghost/ build output patterns |
+| `CLAUDE.md`                             | Added Ghost section, updated ts5   |
+| `docs/issues/0000600-termsurf-ghost.md` | This issue                         |
 
 ### What's next
 

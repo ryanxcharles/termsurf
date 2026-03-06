@@ -205,6 +205,7 @@ webview_mouse_buttons: RefCell::new(HashMap::new()),
 ```
 
 The value is a bitmask of held buttons using CEF's event flags:
+
 - `0x10` = `EVENTFLAG_LEFT_MOUSE_BUTTON`
 - `0x20` = `EVENTFLAG_MIDDLE_MOUSE_BUTTON`
 - `0x40` = `EVENTFLAG_RIGHT_MOUSE_BUTTON`
@@ -322,8 +323,8 @@ Drag selection for ts3 webviews is complete:
 2. **Button state tracking** — Per-pane `webview_mouse_buttons` HashMap stores
    which buttons are currently held using CEF's event flag bitmask.
 
-3. **Modifier propagation** — Mouse move events include the button state in
-   the modifiers field, telling CEF when to extend selection.
+3. **Modifier propagation** — Mouse move events include the button state in the
+   modifiers field, telling CEF when to extend selection.
 
 4. **Copy support** — Selected text can be copied with Cmd+C (from issue 317).
 
@@ -372,32 +373,32 @@ Release LEFT
 
 ### Files Modified
 
-| File | Changes |
-|------|---------|
-| `mod.rs` | Added `webview_mouse_buttons: RefCell<HashMap<PaneId, u32>>` |
-| `mouseevent.rs` | Updated Press/Release/Move handlers for button tracking |
+| File            | Changes                                                      |
+| --------------- | ------------------------------------------------------------ |
+| `mod.rs`        | Added `webview_mouse_buttons: RefCell<HashMap<PaneId, u32>>` |
+| `mouseevent.rs` | Updated Press/Release/Move handlers for button tracking      |
 
 ### What's Next
 
 With drag selection complete, these mouse features remain:
 
-| Feature | Priority | Notes |
-|---------|----------|-------|
-| Modifier keys | Medium | Shift-click to extend, Cmd-click for links |
-| Right-click | Medium | Context menus |
-| Middle-click | Low | Paste or open in new tab |
-| Cursor feedback | Low | Change cursor shape over links, text |
+| Feature         | Priority | Notes                                      |
+| --------------- | -------- | ------------------------------------------ |
+| Modifier keys   | Medium   | Shift-click to extend, Cmd-click for links |
+| Right-click     | Medium   | Context menus                              |
+| Middle-click    | Low      | Paste or open in new tab                   |
+| Cursor feedback | Low      | Change cursor shape over links, text       |
 
-Recommended next issue: **323-modifier-keys** for Shift-click selection extension
-and Cmd-click link handling.
+Recommended next issue: **323-modifier-keys** for Shift-click selection
+extension and Cmd-click link handling.
 
 ---
 
 ## References
 
-- `docs/issues/319-mouse.md` — Basic mouse input (completed)
-- `docs/issues/320-double-click.md` — Double/triple click (completed)
-- `docs/issues/321-scroll.md` — Scroll support (completed)
+- `docs/issues/0000319-mouse.md` — Basic mouse input (completed)
+- `docs/issues/0000320-double-click.md` — Double/triple click (completed)
+- `docs/issues/0000321-scroll.md` — Scroll support (completed)
 - CEF event flags: `cef_event_flags_t` in cef-rs bindings
 - `ts3/wezterm-gui/src/termwindow/mouseevent.rs` — Mouse event handling
 - `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` — XPC mouse methods
