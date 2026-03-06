@@ -30,7 +30,7 @@ fi
 echo "==> Building GUI (ReleaseFast)..."
 zig build -Doptimize=ReleaseFast
 
-APP="$REPO_DIR/ghostboard/macos/build/ReleaseLocal/TermSurf-Ghostboard.app"
+APP="$REPO_DIR/ghostboard/macos/build/ReleaseLocal/TermSurf Ghostboard.app"
 
 # --- Chromium ---
 

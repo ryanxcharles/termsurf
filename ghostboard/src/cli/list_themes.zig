@@ -87,7 +87,7 @@ const ThemeListElement = struct {
 /// The second directory is the `themes` subdirectory of the TermSurf resources
 /// directory. TermSurf ships with a multitude of themes that will be installed
 /// into this directory. On macOS, this directory is the
-/// `TermSurf-Ghostboard.app/Contents/Resources/termsurf/themes`. On Linux, this directory
+/// `TermSurf Ghostboard.app/Contents/Resources/termsurf/themes`. On Linux, this directory
 /// is the `share/termsurf/themes` (wherever you installed the TermSurf "share"
 /// directory). If you're running TermSurf from the source, this is the
 /// `zig-out/share/termsurf/themes` directory.

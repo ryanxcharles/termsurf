@@ -3,8 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
-APP="/Applications/TermSurf-Ghostboard.app"
-SRC="$REPO_DIR/ghostboard/macos/build/ReleaseLocal/TermSurf-Ghostboard.app"
+APP="/Applications/TermSurf Ghostboard.app"
+SRC="$REPO_DIR/ghostboard/macos/build/ReleaseLocal/TermSurf Ghostboard.app"
 CHROMIUM="$REPO_DIR/chromium/src/out/Default"
 WEB="$REPO_DIR/webtui/target/release/web"
 
@@ -54,9 +54,9 @@ codesign --force --deep --sign - "$APP"
 # Unregister build tree copies so Spotlight only finds /Applications.
 echo "==> Unregistering build tree copies from Launch Services..."
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
-"$LSREGISTER" -u "$REPO_DIR/ghostboard/macos/build/Debug/TermSurf-Ghostboard-Debug.app" 2>/dev/null || true
-"$LSREGISTER" -u "$REPO_DIR/ghostboard/macos/build/Debug/TermSurf-Ghostboard.app" 2>/dev/null || true
-"$LSREGISTER" -u "$REPO_DIR/ghostboard/macos/build/ReleaseLocal/TermSurf-Ghostboard.app" 2>/dev/null || true
+"$LSREGISTER" -u "$REPO_DIR/ghostboard/macos/build/Debug/TermSurf Ghostboard Debug.app" 2>/dev/null || true
+"$LSREGISTER" -u "$REPO_DIR/ghostboard/macos/build/Debug/TermSurf Ghostboard.app" 2>/dev/null || true
+"$LSREGISTER" -u "$REPO_DIR/ghostboard/macos/build/ReleaseLocal/TermSurf Ghostboard.app" 2>/dev/null || true
 
 # Symlink CLI tools.
 echo "==> Symlinking CLI tools to /usr/local/bin/..."

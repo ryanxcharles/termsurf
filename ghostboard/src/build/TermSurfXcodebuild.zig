@@ -49,7 +49,7 @@ pub fn init(
     };
 
     const env = try std.process.getEnvMap(b.allocator);
-    const app_name = if (config.optimize == .Debug) "TermSurf-Ghostboard-Debug" else "TermSurf-Ghostboard";
+    const app_name = if (config.optimize == .Debug) "TermSurf Ghostboard Debug" else "TermSurf Ghostboard";
     const app_path = b.fmt("macos/build/{s}/{s}.app", .{ xc_config, app_name });
 
     // Our step to build the TermSurf macOS app.

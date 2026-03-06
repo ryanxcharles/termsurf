@@ -30,7 +30,7 @@ fi
 echo "==> Building GUI (Debug)..."
 zig build
 
-APP="$REPO_DIR/ghostboard/macos/build/Debug/TermSurf-Ghostboard-Debug.app"
+APP="$REPO_DIR/ghostboard/macos/build/Debug/TermSurf Ghostboard Debug.app"
 
 # --- Chromium ---
 

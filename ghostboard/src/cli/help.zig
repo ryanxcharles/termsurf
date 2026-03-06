@@ -53,8 +53,8 @@ pub fn run(alloc: Allocator) !u8 {
         \\`termsurf -e top` will run the `top` command inside the terminal.
         \\
         \\On macOS, launching the terminal emulator from the CLI is not
-        \\supported and only actions are supported. Use `open -na TermSurf-Ghostboard.app`
-        \\instead, or `open -na TermSurf-Ghostboard.app --args --foo=bar --baz=quz` to pass
+        \\supported and only actions are supported. Use `open -na "TermSurf Ghostboard.app"`
+        \\instead, or `open -na "TermSurf Ghostboard.app" --args --foo=bar --baz=quz` to pass
         \\arguments.
         \\
         \\Available actions:

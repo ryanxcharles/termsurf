@@ -555,7 +555,7 @@ language: ?[:0]const u8 = null,
 /// The second directory is the `themes` subdirectory of the TermSurf resources
 /// directory. TermSurf ships with a multitude of themes that will be installed
 /// into this directory. On macOS, this list is in the
-/// `TermSurf-Ghostboard.app/Contents/Resources/termsurf/themes` directory. On Linux, this
+/// `TermSurf Ghostboard.app/Contents/Resources/termsurf/themes` directory. On Linux, this
 /// list is in the `share/termsurf/themes` directory (wherever you installed the
 /// TermSurf "share" directory.
 ///

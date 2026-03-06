@@ -257,7 +257,7 @@ Roamium together.
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `scripts/build-debug.sh [--clean] [--open]`   | Build all components (Ghostboard debug, Chromium, TUI, Roamium). `--clean` wipes build dirs first, `--open` launches.                 |
 | `scripts/build-release.sh [--clean] [--open]` | Same as above but ReleaseFast builds.                                                                                                 |
-| `scripts/install.sh`                          | Install release build to `/Applications/TermSurf-Ghostboard.app`, bundle Chromium + TUI, codesign, symlink CLIs to `/usr/local/bin/`. |
+| `scripts/install.sh`                          | Install release build to `/Applications/TermSurf Ghostboard.app`, bundle Chromium + TUI, codesign, symlink CLIs to `/usr/local/bin/`. |
 | `scripts/build-roamium.sh [args]`             | Build Roamium only and copy binary to `chromium/src/out/Default/`. Pass `--release` for release build.                                |
 | `scripts/clean-zig.sh`                        | Clean Zig build artifacts + Xcode DerivedData. Preserves Chromium cache.                                                              |
 | `scripts/rename-ghostty.sh [dir]`             | Rename all Ghostty references to TermSurf in `ghostboard/`. Re-runnable after upstream merges.                                        |
