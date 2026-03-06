@@ -143,3 +143,25 @@ Move it to bottom-right and display just the engine name with no icon.
 
 1. `cd webtui && cargo build` — compiles clean
 2. Launch — engine name appears bottom-right with no icon
+
+**Result:** Pass
+
+Engine name displays bottom-right with no icon.
+
+#### Conclusion
+
+Label is now where the user asked for it — bottom-right, text only.
+
+## Conclusion
+
+The browser engine name now displays in the bottom-right of the viewport border.
+Two things were accomplished:
+
+1. **Engine label** — The viewport border shows the active engine name (e.g.,
+   "roamium") so the user always knows which browser is rendering the page.
+
+2. **Explicit engine selection** — The TUI now reads the `browsers` list from
+   Ghostboard's `HelloReply` and picks the first entry as the default when
+   `--browser` isn't specified. It sends an explicit engine name to Ghostboard
+   instead of `""`, eliminating the implicit default that lived only on the
+   Ghostboard side.
