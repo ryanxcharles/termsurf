@@ -96,15 +96,16 @@ simultaneously without browser profile lock conflicts.
 
 2. **Board owns browser data** — browser data lives under the board that manages
    it. `termsurf/ghostboard/roamium/` and `termsurf/wezboard/roamium/` are
-   completely separate. No shared state between boards unless explicitly desired.
+   completely separate. No shared state between boards unless explicitly
+   desired.
 
 3. **TUIs get their own subdirectory** — `termsurf/webtui/` for config. TUIs are
    lightweight and may not need `data`/`cache`/`state`, but the structure is
    ready if they do.
 
 4. **Future boards just pick a name** — A new board (e.g., Wezboard) uses
-   `termsurf/wezboard/` in the same structure. No coordination needed. Completely
-   isolated from Ghostboard.
+   `termsurf/wezboard/` in the same structure. No coordination needed.
+   Completely isolated from Ghostboard.
 
 5. **Backwards compatibility** — Current data in flat `termsurf/` paths needs a
    one-time migration into `termsurf/ghostboard/`.
