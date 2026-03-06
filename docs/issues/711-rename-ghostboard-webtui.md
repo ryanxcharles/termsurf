@@ -23,8 +23,8 @@ names are ambiguous:
 
 ### What changes
 
-- **GUI app name:** TermSurf → TermSurf Ghostboard (filename:
-  TermSurf-Ghostboard)
+- **GUI app name:** TermSurf → TermSurf Ghostboard (filename: TermSurf
+  Ghostboard.app)
 - **GUI directory:** `gui/` → `ghostboard/`
 - **TUI package name:** `web` → `webtui` (binary stays `web`)
 - **TUI directory:** `tui/` → `webtui/`
@@ -461,3 +461,23 @@ spaces:
 4. Launch the app — Dock shows "TermSurf Ghostboard", menu bar shows "TermSurf
    Ghostboard", About page shows "TermSurf Ghostboard"
 5. `/Applications/` path in `install.sh` uses quoted `"TermSurf Ghostboard.app"`
+
+**Result:** Pass
+
+All five checks passed. The Zig build compiled cleanly. The app bundle is named
+`TermSurf Ghostboard Debug.app` (space, no dash). The Dock shows "TermSurf
+Ghostboard", the menu bar shows "TermSurf Ghostboard", and the About page shows
+"TermSurf Ghostboard". No dashes visible anywhere in the UI.
+
+#### Conclusion
+
+Using a space in `PRODUCT_NAME` is the correct approach on macOS. The earlier
+assumption that `.app` filenames cannot have spaces was wrong — spaces are
+standard (Google Chrome.app, Visual Studio Code.app). macOS derives the menu bar
+and Dock name directly from `PRODUCT_NAME`, so it must contain the exact string
+you want users to see. `CFBundleDisplayName` and `CFBundleName` cannot override
+this when `GENERATE_INFOPLIST_FILE = YES`.
+
+Combined with Experiment 2's directory rename, socket path, XDG paths, and UI
+string changes, the full rename from `gui/` → `ghostboard/` and "TermSurf" →
+"TermSurf Ghostboard" is now complete.
