@@ -16,15 +16,13 @@ A clean build with zero warnings. Not just suppressed — actually fixed.
 
 ## Background
 
-These warnings are inherited from upstream WezTerm. Since WezTerm is no longer
-actively maintained, we own this codebase now and should keep it clean.
-
-The dominant issue (188 of 193 warnings) is the legacy `objc` 0.2 crate. Its
-`msg_send!`, `class!`, and `sel!` macros emit `cfg(feature = "cargo-clippy")`
-checks, which modern Rust flags as `unexpected cfg`. The proper fix is migrating
-to `objc2`, which the codebase already partially uses (`objc2-core-graphics`,
-`objc2-foundation`, `objc2-user-notifications` are workspace deps, and
-`window.rs` has one `objc2_core_graphics` call).
+These warnings are inherited from upstream WezTerm. The dominant issue (188 of
+193 warnings) is the legacy `objc` 0.2 crate. Its `msg_send!`, `class!`, and
+`sel!` macros emit `cfg(feature = "cargo-clippy")` checks, which modern Rust
+flags as `unexpected cfg`. The proper fix is migrating to `objc2`, which the
+codebase already partially uses (`objc2-core-graphics`, `objc2-foundation`,
+`objc2-user-notifications` are workspace deps, and `window.rs` has one
+`objc2_core_graphics` call).
 
 ## Analysis
 
@@ -113,6 +111,43 @@ Key differences:
 
 1. **Quick fixes** — Remove 2 unnecessary `unsafe` blocks, 1 dead assignment,
    suppress scaffolding warnings. Knocks out all non-`objc` warnings in minutes.
+
+## Experiments
+
+### Experiment 1: Quick fixes
+
+#### Goal
+
+Fix the 5 non-`objc` warnings so only the `cargo-clippy` cfg noise remains.
+
+#### Changes
+
+1. **`wezboard-toast-notification/src/macos.rs`** — Remove 2 unnecessary
+   `unsafe` blocks.
+
+   Line 97:
+   `LazyLock::new(|| unsafe { UNUserNotificationCenter::currentNotificationCenter() })`
+   → `LazyLock::new(|| UNUserNotificationCenter::currentNotificationCenter())`
+
+   Line 101: `INIT.call_once(|| unsafe {` → `INIT.call_once(|| {`
+
+   Both `currentNotificationCenter()` and
+   `requestAuthorizationWithOptions_completionHandler()` are safe in
+   `objc2-user-notifications` 0.3.2.
+
+2. **`wezboard-gui/src/termwindow/render/screen_line.rs`** — Delete the dead
+   assignment at line 677: `phys_cell_idx += info.pos.num_cells as usize;`. The
+   variable is incremented but never read again before the next loop iteration
+   overwrites it.
+
+3. **`wezboard-gui/src/termsurf/state.rs`** — Add `#[allow(dead_code)]` to
+   `TermSurfState` and `state()`. These are intentional scaffolding for future
+   protocol experiments.
+
+#### Verification
+
+`cargo build -p wezboard-gui` produces only `cargo-clippy` cfg warnings (188)
+and their summary lines. No other warnings.
 
 2. **Migrate `connection.rs` + `mod.rs`** — Smallest files (46 lines total, 13
    call sites, no `ClassDecl`). Good warmup to establish the migration pattern
