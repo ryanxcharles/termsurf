@@ -260,3 +260,11 @@ The root `.gitmodules` already has entries for `ts2/deps/...` and
 1. `git submodule status` lists exactly four `wezboard/deps/...` entries
 2. `.gitmodules` contains only `wezboard/deps/...` entries (no ts1/ts2/ts3)
 3. `cargo build -p wezterm-gui` from `wezboard/` still compiles
+
+#### Result
+
+Pass. Removed 16 dead submodule entries (8 ts1, 4 ts2, 4 ts3) from
+`.gitmodules`. Registered the four wezboard submodules properly via
+`git submodule add` at their pinned commits (zlib 1.3.1, libpng 1.6.44,
+freetype2 2.13.3, harfbuzz 11.2.1). Build still compiles. `git submodule status`
+now shows exactly four entries, all under `wezboard/deps/`.
