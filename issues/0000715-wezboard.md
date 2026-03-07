@@ -414,3 +414,6 @@ Key discoveries during implementation:
   protected from renaming.
 - `cargo build -p wezboard-gui` compiles with only 2 harmless warnings (same as
   pre-rename). The 159MB debug binary builds successfully.
+- The app launches, reads config from
+  `~/.config/termsurf/wezboard/wezboard.lua`, and displays a working terminal
+  window. XDG paths correctly nest under `termsurf/wezboard`.
