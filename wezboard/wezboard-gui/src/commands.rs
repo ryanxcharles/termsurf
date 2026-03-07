@@ -383,11 +383,14 @@ impl CommandDef {
         let inputmap = InputMap::new(config);
 
         let mut candidates_for_removal = vec![];
-        let wezboard_perform_key_assignment_sel =
-            window::os::macos::sel2to1(objc2::sel!(wezboardPerformKeyAssignment:));
+        let wezboard_perform_key_assignment_sel = objc2::sel!(wezboardPerformKeyAssignment:);
 
         /// Mark menu items as candidates for removal
-        fn mark_candidates(menu: &Menu, candidates: &mut Vec<MenuItem>, action: SEL) {
+        fn mark_candidates(
+            menu: &Menu,
+            candidates: &mut Vec<MenuItem>,
+            action: objc2::runtime::Sel,
+        ) {
             for item in menu.items() {
                 if let Some(submenu) = item.get_sub_menu() {
                     mark_candidates(&submenu, candidates, action);
@@ -539,20 +542,14 @@ impl CommandDef {
                     let mods: Modifiers = candidate[0].1;
                     let mut equiv_mods = NSEventModifierFlags::empty();
 
+                    equiv_mods.set(NSEventModifierFlags::Shift, mods.contains(Modifiers::SHIFT));
+                    equiv_mods.set(NSEventModifierFlags::Option, mods.contains(Modifiers::ALT));
                     equiv_mods.set(
-                        NSEventModifierFlags::NSShiftKeyMask,
-                        mods.contains(Modifiers::SHIFT),
-                    );
-                    equiv_mods.set(
-                        NSEventModifierFlags::NSAlternateKeyMask,
-                        mods.contains(Modifiers::ALT),
-                    );
-                    equiv_mods.set(
-                        NSEventModifierFlags::NSControlKeyMask,
+                        NSEventModifierFlags::Control,
                         mods.contains(Modifiers::CTRL),
                     );
                     equiv_mods.set(
-                        NSEventModifierFlags::NSCommandKeyMask,
+                        NSEventModifierFlags::Command,
                         mods.contains(Modifiers::SUPER),
                     );
 

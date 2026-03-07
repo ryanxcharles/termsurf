@@ -2003,7 +2003,9 @@ fn dpi_for_window_screen(ns_window: *mut Object, config: &ConfigHandle) -> Optio
             objc2::msg_send![ns_window as *const _ as *const AnyObject, screen];
         __r as id
     };
-    let info = crate::os::macos::connection::nsscreen_to_screen_info(screen);
+    let info = crate::os::macos::connection::nsscreen_to_screen_info(unsafe {
+        &*(screen as *const objc2_app_kit::NSScreen)
+    });
 
     config.dpi_by_screen.get(&info.name).copied()
 }
@@ -2466,7 +2468,7 @@ impl WindowView {
         _sel: Sel,
         menu_item: *mut Object,
     ) {
-        let menu_item = MenuItem::with_menu_item(menu_item);
+        let menu_item = MenuItem::with_menu_item(menu_item as *mut _ as *mut AnyObject);
         // Safe because wezboardPerformKeyAssignment: is only used with KeyAssignment
         let action = menu_item.get_represented_item();
         log::debug!("wezboard_perform_key_assignment {action:?}",);

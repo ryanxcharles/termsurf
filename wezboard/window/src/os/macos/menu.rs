@@ -1,119 +1,93 @@
-use crate::macos::{cls1to2, get_class as get_objc_class, nsstring, nsstring_to_str, sel2to1};
-use crate::superclass;
-pub use cocoa::appkit::NSEventModifierFlags;
-use cocoa::appkit::{NSApp, NSApplication, NSMenu, NSMenuItem};
-pub use cocoa::base::SEL;
-use cocoa::base::{id, nil};
-use cocoa::foundation::NSInteger;
+use crate::macos::nsstring_to_str;
 use config::keyassignment::KeyAssignment;
-use objc::declare::ClassDecl;
-use objc::rc::StrongPtr;
-use objc::runtime::{Class, Object, Sel, BOOL, NO, YES};
-use objc2::runtime::AnyObject;
+use objc2::rc::Retained;
+use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
+pub use objc2_app_kit::NSEventModifierFlags;
+use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem};
+use objc2_foundation::{MainThreadMarker, NSInteger, NSString};
 use std::ffi::c_void;
 
 pub struct Menu {
-    menu: StrongPtr,
+    menu: Retained<NSMenu>,
 }
 
 impl Menu {
     pub fn new_with_title(title: &str) -> Self {
-        unsafe {
-            let menu = NSMenu::alloc(nil);
-            let menu = StrongPtr::new(menu.initWithTitle_(*nsstring(title)));
-            Self { menu }
-        }
+        let mtm = MainThreadMarker::new().unwrap();
+        let menu = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str(title));
+        Self { menu }
     }
 
-    pub fn autorelease(self) -> *mut Object {
-        self.menu.autorelease()
+    pub fn autorelease(self) -> *mut AnyObject {
+        let ptr = Retained::into_raw(self.menu) as *mut AnyObject;
+        unsafe { objc2::msg_send![ptr, autorelease] }
     }
 
     pub fn item_at_index(&self, index: usize) -> Option<MenuItem> {
-        let index = index as i64;
-        let item = unsafe { self.menu.itemAtIndex_(index) };
-        if item.is_null() {
-            None
-        } else {
-            Some(MenuItem {
-                item: unsafe { StrongPtr::retain(item) },
-            })
-        }
+        let index = index as NSInteger;
+        let item = self.menu.itemAtIndex(index);
+        item.map(|item| MenuItem { item })
     }
 
     pub fn assign_as_main_menu(&self) {
-        unsafe {
-            let ns_app = NSApp();
-            ns_app.setMainMenu_(*self.menu);
-        }
+        let mtm = MainThreadMarker::new().unwrap();
+        let ns_app = NSApplication::sharedApplication(mtm);
+        ns_app.setMainMenu(Some(&self.menu));
     }
 
     pub fn get_main_menu() -> Option<Self> {
-        unsafe {
-            let ns_app = NSApp();
-            let existing = ns_app.mainMenu();
-            if existing.is_null() {
-                None
-            } else {
-                Some(Self {
-                    menu: StrongPtr::retain(existing),
-                })
-            }
-        }
+        let mtm = MainThreadMarker::new().unwrap();
+        let ns_app = NSApplication::sharedApplication(mtm);
+        let menu = ns_app.mainMenu()?;
+        Some(Self { menu })
     }
 
     pub fn assign_as_help_menu(&self) {
-        unsafe {
-            let ns_app = NSApp();
-            let () = objc2::msg_send![ns_app as *const AnyObject, setHelpMenu: *self.menu as *mut AnyObject];
-        }
+        let mtm = MainThreadMarker::new().unwrap();
+        let ns_app = NSApplication::sharedApplication(mtm);
+        ns_app.setHelpMenu(Some(&self.menu));
     }
 
     pub fn assign_as_windows_menu(&self) {
-        unsafe {
-            let ns_app = NSApp();
-            ns_app.setWindowsMenu_(*self.menu);
-        }
+        let mtm = MainThreadMarker::new().unwrap();
+        let ns_app = NSApplication::sharedApplication(mtm);
+        ns_app.setWindowsMenu(Some(&self.menu));
     }
 
     pub fn assign_as_services_menu(&self) {
-        unsafe {
-            let ns_app = NSApp();
-            ns_app.setServicesMenu_(*self.menu);
-        }
+        let mtm = MainThreadMarker::new().unwrap();
+        let ns_app = NSApplication::sharedApplication(mtm);
+        ns_app.setServicesMenu(Some(&self.menu));
     }
 
     pub fn assign_as_app_menu(&self) {
+        let mtm = MainThreadMarker::new().unwrap();
+        let ns_app = NSApplication::sharedApplication(mtm);
         unsafe {
-            let ns_app = NSApp();
             let sel = objc2::sel!(setAppleMenu:);
             let () = objc2::msg_send![
-                ns_app as *const AnyObject,
+                &*ns_app,
                 performSelector: sel,
-                withObject: *self.menu as *mut AnyObject
+                withObject: &*self.menu
             ];
         }
     }
 
     pub fn add_item(&self, item: &MenuItem) {
-        unsafe {
-            self.menu.addItem_(*item.item);
-        }
+        self.menu.addItem(&item.item);
     }
 
     pub fn item_with_title(&self, title: &str) -> Option<MenuItem> {
         unsafe {
             let item: *mut AnyObject = objc2::msg_send![
-                *self.menu as *const AnyObject,
-                itemWithTitle: *nsstring(title) as *mut AnyObject
+                &*self.menu,
+                itemWithTitle: &*NSString::from_str(title)
             ];
-            let item = item as id;
             if item.is_null() {
                 None
             } else {
-                Some(MenuItem {
-                    item: StrongPtr::retain(item),
-                })
+                let item = Retained::retain(item as *mut NSMenuItem).unwrap();
+                Some(MenuItem { item })
             }
         }
     }
@@ -137,20 +111,16 @@ impl Menu {
     }
 
     pub fn remove_all_items(&self) {
-        unsafe {
-            let () = objc2::msg_send![*self.menu as *const AnyObject, removeAllItems];
-        }
+        self.menu.removeAllItems();
     }
 
     pub fn remove_item(&self, item: &MenuItem) {
-        unsafe {
-            let () = objc2::msg_send![*self.menu as *const AnyObject, removeItem: *item.item as *mut AnyObject];
-        }
+        self.menu.removeItem(&item.item);
     }
 
     pub fn items(&self) -> Vec<MenuItem> {
         unsafe {
-            let n: NSInteger = objc2::msg_send![*self.menu as *const AnyObject, numberOfItems];
+            let n: NSInteger = objc2::msg_send![&*self.menu, numberOfItems];
             let mut items = vec![];
             for i in 0..n {
                 items.push(self.item_at_index(i as _).expect("index to be valid"));
@@ -159,11 +129,11 @@ impl Menu {
         }
     }
 
-    pub fn index_of_item_with_represented_object(&self, object: id) -> Option<usize> {
+    pub fn index_of_item_with_represented_object(&self, object: *mut AnyObject) -> Option<usize> {
         unsafe {
             let n: NSInteger = objc2::msg_send![
-                *self.menu as *const AnyObject,
-                indexOfItemWithRepresentedObject: object as *mut AnyObject
+                &*self.menu,
+                indexOfItemWithRepresentedObject: object
             ];
             if n == -1 {
                 None
@@ -175,7 +145,8 @@ impl Menu {
 
     pub fn index_of_item_with_represented_item(&self, item: &RepresentedItem) -> Option<usize> {
         let wrapped = item.clone().wrap();
-        self.index_of_item_with_represented_object(*wrapped)
+        let ptr = Retained::as_ptr(&wrapped) as *mut AnyObject;
+        self.index_of_item_with_represented_object(ptr)
     }
 
     pub fn get_item_with_represented_item(&self, item: &RepresentedItem) -> Option<MenuItem> {
@@ -185,7 +156,7 @@ impl Menu {
 }
 
 pub struct MenuItem {
-    item: StrongPtr,
+    item: Retained<NSMenuItem>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -194,20 +165,23 @@ pub enum RepresentedItem {
 }
 
 impl RepresentedItem {
-    fn wrap(self) -> StrongPtr {
-        let wrapper: *mut AnyObject =
-            unsafe { objc2::msg_send![cls1to2(get_wrapper_class()), alloc] };
-        let wrapper = unsafe { StrongPtr::new(wrapper as id) };
+    fn wrap(self) -> Retained<AnyObject> {
+        let wrapper_cls =
+            AnyClass::get(c"WezboardNSMenuRepresentedItem").unwrap_or_else(|| get_wrapper_class());
+        let wrapper: *mut AnyObject = unsafe { objc2::msg_send![wrapper_cls, alloc] };
+        let wrapper: *mut AnyObject = unsafe { objc2::msg_send![wrapper, init] };
         let item = Box::new(self);
         let item: *const RepresentedItem = Box::into_raw(item);
         let item = item as *const c_void;
+        #[allow(deprecated)]
         unsafe {
-            (**wrapper).set_ivar(WRAPPER_FIELD_NAME, item);
+            *(*wrapper).get_mut_ivar::<*const c_void>(WRAPPER_FIELD_NAME) = item;
+            Retained::from_raw(wrapper).unwrap()
         }
-        wrapper
     }
 
-    unsafe fn ref_item(wrapper: id) -> Option<RepresentedItem> {
+    unsafe fn ref_item(wrapper: *mut AnyObject) -> Option<RepresentedItem> {
+        #[allow(deprecated)]
         let item = (*wrapper).get_ivar::<*const c_void>(WRAPPER_FIELD_NAME);
         let item = (*item) as *const RepresentedItem;
         if item.is_null() {
@@ -219,215 +193,163 @@ impl RepresentedItem {
 }
 
 impl MenuItem {
-    pub fn with_menu_item(item: id) -> Self {
-        let item = unsafe { StrongPtr::retain(item) };
+    pub fn with_menu_item(item: *mut AnyObject) -> Self {
+        let item = item as *mut NSMenuItem;
+        let item = unsafe { Retained::retain(item).unwrap() };
         Self { item }
     }
 
     pub fn new_separator() -> Self {
-        let item = unsafe { StrongPtr::new(NSMenuItem::separatorItem(nil)) };
+        let mtm = MainThreadMarker::new().unwrap();
+        let item = NSMenuItem::separatorItem(mtm);
         Self { item }
     }
 
-    pub fn new_with(title: &str, action: Option<SEL>, key: &str) -> Self {
+    pub fn new_with(title: &str, action: Option<Sel>, key: &str) -> Self {
+        let mtm = MainThreadMarker::new().unwrap();
         unsafe {
-            let item = NSMenuItem::alloc(nil);
-            let item = item.initWithTitle_action_keyEquivalent_(
-                *nsstring(title),
-                action.unwrap_or_else(|| SEL::from_ptr(std::ptr::null())),
-                *nsstring(key),
+            let item = NSMenuItem::initWithTitle_action_keyEquivalent(
+                mtm.alloc::<NSMenuItem>(),
+                &NSString::from_str(title),
+                action,
+                &NSString::from_str(key),
             );
-
-            Self {
-                item: StrongPtr::new(item),
-            }
+            Self { item }
         }
     }
 
-    pub fn get_action(&self) -> Option<SEL> {
-        unsafe {
-            // action returns a Sel-sized pointer; get as raw pointer then transmute
-            let s: *const std::ffi::c_void =
-                objc2::msg_send![*self.item as *const AnyObject, action];
-            if s.is_null() {
-                None
-            } else {
-                Some(std::mem::transmute(s))
-            }
-        }
+    pub fn get_action(&self) -> Option<Sel> {
+        self.item.action()
     }
 
     pub fn set_tool_tip(&self, tip: &str) {
-        unsafe {
-            let () = objc2::msg_send![*self.item as *const AnyObject, setToolTip: *nsstring(tip) as *mut AnyObject];
-        }
+        self.item.setToolTip(Some(&NSString::from_str(tip)));
     }
 
-    pub fn set_target(&self, target: id) {
+    pub fn set_target(&self, target: *mut AnyObject) {
         unsafe {
-            self.item.setTarget_(target);
+            let () = objc2::msg_send![&*self.item, setTarget: target];
         }
     }
 
     pub fn set_sub_menu(&self, menu: &Menu) {
-        unsafe {
-            self.item.setSubmenu_(*menu.menu);
-        }
+        self.item.setSubmenu(Some(&menu.menu));
     }
 
     pub fn get_sub_menu(&self) -> Option<Menu> {
-        unsafe {
-            let menu: *mut AnyObject = objc2::msg_send![*self.item as *const AnyObject, submenu];
-            let menu = menu as id;
-            if menu.is_null() {
-                None
-            } else {
-                Some(Menu {
-                    menu: StrongPtr::retain(menu),
-                })
-            }
-        }
+        let menu = self.item.submenu()?;
+        Some(Menu { menu })
     }
 
     pub fn get_parent_item(&self) -> Option<Self> {
-        unsafe {
-            let item: *mut AnyObject = objc2::msg_send![*self.item as *const AnyObject, parentItem];
-            let item = item as id;
-            if item.is_null() {
-                None
-            } else {
-                Some(Self {
-                    item: StrongPtr::retain(item),
-                })
-            }
-        }
+        let item = unsafe { self.item.parentItem()? };
+        Some(Self { item })
     }
 
     pub fn get_menu(&self) -> Option<Menu> {
-        unsafe {
-            let item: *mut AnyObject = objc2::msg_send![*self.item as *const AnyObject, menu];
-            let item = item as id;
-            if item.is_null() {
-                None
-            } else {
-                Some(Menu {
-                    menu: StrongPtr::retain(item),
-                })
-            }
-        }
+        let menu = unsafe { self.item.menu()? };
+        Some(Menu { menu })
     }
 
     /// Set an integer tag to identify this item
     pub fn set_tag(&self, tag: NSInteger) {
-        unsafe {
-            let () = objc2::msg_send![*self.item as *const AnyObject, setTag: tag];
-        }
+        self.item.setTag(tag);
     }
 
     pub fn get_title(&self) -> String {
-        unsafe {
-            let title: *mut AnyObject = objc2::msg_send![*self.item as *const AnyObject, title];
-            nsstring_to_str(title as *mut Object).to_string()
-        }
+        let title = self.item.title();
+        let ptr = Retained::as_ptr(&title) as *mut AnyObject;
+        unsafe { nsstring_to_str(ptr.cast()).to_string() }
     }
 
     pub fn set_title(&self, title: &str) {
-        unsafe {
-            let () = objc2::msg_send![*self.item as *const AnyObject, setTitle: *nsstring(title) as *mut AnyObject];
-        }
+        self.item.setTitle(&NSString::from_str(title));
     }
 
     pub fn set_key_equivalent(&self, equiv: &str) {
-        unsafe {
-            let () = objc2::msg_send![*self.item as *const AnyObject, setKeyEquivalent: *nsstring(equiv) as *mut AnyObject];
-        }
+        self.item.setKeyEquivalent(&NSString::from_str(equiv));
     }
 
     pub fn get_tag(&self) -> NSInteger {
-        unsafe { objc2::msg_send![*self.item as *const AnyObject, tag] }
+        self.item.tag()
     }
 
     /// Associate the item to an object
-    fn set_represented_object(&self, object: id) {
+    fn set_represented_object(&self, object: *mut AnyObject) {
         unsafe {
-            let () = objc2::msg_send![*self.item as *const AnyObject, setRepresentedObject: object as *mut AnyObject];
+            let () = objc2::msg_send![&*self.item, setRepresentedObject: object];
         }
     }
 
-    fn get_represented_object(&self) -> Option<StrongPtr> {
+    fn get_represented_object(&self) -> Option<Retained<AnyObject>> {
         unsafe {
-            let object: *mut AnyObject =
-                objc2::msg_send![*self.item as *const AnyObject, representedObject];
-            let object = object as id;
+            let object: *mut AnyObject = objc2::msg_send![&*self.item, representedObject];
             if object.is_null() {
                 None
             } else {
-                Some(StrongPtr::retain(object))
+                Some(Retained::retain(object).unwrap())
             }
         }
     }
 
     pub fn set_represented_item(&self, item: RepresentedItem) {
         let wrapper = item.wrap();
-        self.set_represented_object(*wrapper);
+        self.set_represented_object(Retained::as_ptr(&wrapper) as *mut AnyObject);
     }
 
     pub fn get_represented_item(&self) -> Option<RepresentedItem> {
         let wrapper = self.get_represented_object()?;
-        unsafe { RepresentedItem::ref_item(*wrapper) }
+        unsafe { RepresentedItem::ref_item(Retained::as_ptr(&wrapper) as *mut AnyObject) }
     }
 
     pub fn set_key_equiv_modifier_mask(&self, mods: NSEventModifierFlags) {
-        unsafe {
-            let () = objc2::msg_send![*self.item as *const AnyObject, setKeyEquivalentModifierMask: mods.bits() as usize];
-        }
+        self.item.setKeyEquivalentModifierMask(mods);
     }
 }
 
-const WRAPPER_CLS_NAME: &str = "WezboardNSMenuRepresentedItem";
+const WRAPPER_CLS_NAME: &std::ffi::CStr = c"WezboardNSMenuRepresentedItem";
 const WRAPPER_FIELD_NAME: &str = "item";
+const WRAPPER_FIELD_CNAME: &std::ffi::CStr = c"item";
 /// Wraps RepresentedItem in an NSObject so that we can associate
 /// it with a MenuItem
-fn get_wrapper_class() -> &'static Class {
-    Class::get(WRAPPER_CLS_NAME).unwrap_or_else(|| {
-        let mut cls = ClassDecl::new(WRAPPER_CLS_NAME, get_objc_class(c"NSObject"))
+fn get_wrapper_class() -> &'static AnyClass {
+    AnyClass::get(WRAPPER_CLS_NAME).unwrap_or_else(|| {
+        let mut cls = ClassBuilder::new(WRAPPER_CLS_NAME, AnyClass::get(c"NSObject").unwrap())
             .expect("Unable to register class");
 
-        extern "C" fn dealloc(this: &mut Object, _sel: Sel) {
+        extern "C" fn dealloc(this: *mut AnyObject, _sel: Sel) {
             unsafe {
-                let item = this.get_ivar::<*mut c_void>(WRAPPER_FIELD_NAME);
+                #[allow(deprecated)]
+                let item = (*this).get_ivar::<*mut c_void>(WRAPPER_FIELD_NAME);
                 let item = (*item) as *mut RepresentedItem;
                 let item = Box::from_raw(item);
                 drop(item);
-                let superclass = superclass(this);
-                let () = objc2::msg_send![
-                    super(this as *const _ as *const AnyObject, cls1to2(superclass)),
-                    dealloc
-                ];
+                let superclass = (*this).class().superclass().unwrap();
+                let () = objc2::msg_send![super(this as *const AnyObject, superclass), dealloc];
             }
         }
 
-        extern "C" fn is_equal(this: &mut Object, _sel: Sel, that: *mut Object) -> BOOL {
+        extern "C" fn is_equal(this: *mut AnyObject, _sel: Sel, that: *mut AnyObject) -> Bool {
             unsafe {
                 let this_item = RepresentedItem::ref_item(this);
                 let that_item = RepresentedItem::ref_item(that);
                 if this_item == that_item {
-                    YES
+                    Bool::YES
                 } else {
-                    NO
+                    Bool::NO
                 }
             }
         }
 
-        cls.add_ivar::<*mut c_void>(WRAPPER_FIELD_NAME);
+        cls.add_ivar::<*mut c_void>(WRAPPER_FIELD_CNAME);
         unsafe {
             cls.add_method(
-                sel2to1(objc2::sel!(dealloc)),
-                dealloc as extern "C" fn(&mut Object, Sel),
+                objc2::sel!(dealloc),
+                dealloc as extern "C" fn(*mut AnyObject, Sel),
             );
             cls.add_method(
-                sel2to1(objc2::sel!(isEqual:)),
-                is_equal as extern "C" fn(&mut Object, Sel, *mut Object) -> BOOL,
+                objc2::sel!(isEqual:),
+                is_equal as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) -> Bool,
             );
         }
         cls.register()

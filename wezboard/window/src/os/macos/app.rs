@@ -1,11 +1,10 @@
-use super::sel2to1;
 use crate::connection::ConnectionOps;
 use crate::macos::menu::RepresentedItem;
 use crate::macos::{nsstring, nsstring_to_str};
 use crate::menu::{Menu, MenuItem};
 use crate::{ApplicationEvent, Connection};
-use config::WindowCloseConfirmation;
 use config::keyassignment::KeyAssignment;
+use config::WindowCloseConfirmation;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2_app_kit::NSApplicationTerminateReply;
@@ -139,13 +138,13 @@ extern "C" fn application_dock_menu(
     let dock_menu = Menu::new_with_title("");
     let new_window_item = MenuItem::new_with(
         "New Window",
-        Some(sel2to1(objc2::sel!(wezboardPerformKeyAssignment:))),
+        Some(objc2::sel!(wezboardPerformKeyAssignment:)),
         "",
     );
     new_window_item
         .set_represented_item(RepresentedItem::KeyAssignment(KeyAssignment::SpawnWindow));
     dock_menu.add_item(&new_window_item);
-    dock_menu.autorelease() as *mut _ as *mut AnyObject
+    dock_menu.autorelease()
 }
 
 fn get_class() -> &'static AnyClass {
