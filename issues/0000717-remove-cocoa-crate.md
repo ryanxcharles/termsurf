@@ -646,3 +646,114 @@ displays a terminal. The fixes were mechanical — `YES` → `true`, `NO` → `f
 `addTrackingRect` `userData` fix was discovered during testing (not in the
 original design) — another case of objc2's strict type checking catching a type
 code mismatch (`@` vs `^v`).
+
+### Experiment 4: Migrate `mod.rs`
+
+Migrate the two shared helpers `nsstring()` and `nsstring_to_str()` from
+`cocoa`/`objc` 0.2 types to pure `objc2`/`objc2-foundation`. This eliminates the
+`.cast()` bridges that every caller currently needs and unblocks `window.rs`
+migration by removing the last reason other files import
+`objc::runtime::Object`.
+
+#### Changes
+
+**`mod.rs`** — Rewrite both helpers and remove all `cocoa`/`objc` imports:
+
+`nsstring(s: &str) -> StrongPtr` → `nsstring(s: &str) -> Retained<NSString>`:
+
+```rust
+fn nsstring(s: &str) -> Retained<NSString> {
+    NSString::from_str(s)
+}
+```
+
+Uses `objc2_foundation::NSString::from_str` directly. Returns
+`Retained<NSString>` instead of `StrongPtr`.
+
+`nsstring_to_str(ns: *mut Object) -> &str` →
+`nsstring_to_str(ns: *mut AnyObject) -> &str`:
+
+```rust
+unsafe fn nsstring_to_str<'a>(mut ns: *mut AnyObject) -> &'a str {
+    let attributed_string_cls = AnyClass::get(c"NSAttributedString").unwrap();
+    let is_astring: bool =
+        objc2::msg_send![ns, isKindOfClass: attributed_string_cls];
+    if is_astring {
+        ns = objc2::msg_send![ns, string];
+    }
+    let ns = ns as *const NSString;
+    (*ns).to_str()
+}
+```
+
+Uses `NSString::to_str()` (from `objc2_foundation`) instead of manual
+`UTF8String`/`len`/`from_raw_parts`. Takes `*mut AnyObject` instead of
+`*mut Object`, eliminating `.cast()` at every call site.
+
+Remove all `cocoa` and `objc` 0.2 imports from `mod.rs`. The bridge helpers
+(`sel2to1`, `cls1to2`, `cls2to1`, `get_class`) stay — `window.rs` still uses
+them. They move from `cocoa`/`objc` imports to standalone transmute functions
+(which they already are).
+
+Wait — `sel2to1` returns `objc::runtime::Sel`, `cls2to1` returns
+`&objc::runtime::Class`, `cls1to2` takes `&objc::runtime::Class`, and
+`get_class` returns `&objc::runtime::Class`. These all depend on `objc::runtime`
+types. Since `window.rs` still uses `objc` 0.2 types (`Class`, `Object`, `Sel`,
+`BOOL`), these helpers must remain until `window.rs` is migrated. The `objc`
+import moves from `mod.rs` to being implicit via the helper return types — but
+we still need `use objc::runtime::{Class, Sel}` etc. in `mod.rs` for the bridge
+helpers.
+
+So the plan is: migrate `nsstring`/`nsstring_to_str` only. Keep bridge helpers
+as-is. Remove `cocoa` imports but keep `objc::runtime` imports for the bridge
+helper types.
+
+**Callers to update** (remove `.cast()` and `*` dereferences):
+
+`app.rs`:
+
+- `nsstring(...)` returns `Retained<NSString>` now. Callers that did
+  `*nsstring(s) as *mut AnyObject` change to `&*nsstring(s)` or pass as
+  `&NSString`.
+- Lines 25–28: `nsstring("...") ` — used in `msg_send!` as
+  `*message_text as *mut AnyObject`. Change to `&*message_text`.
+- Lines 30–33: same pattern for `setMessageText:`, `setInformativeText:`,
+  `addButtonWithTitle:`.
+- Line 125: `nsstring_to_str(file_name.cast())` → `nsstring_to_str(file_name)`.
+
+`menu.rs`:
+
+- Line 257: `nsstring_to_str(ptr.cast())` → `nsstring_to_str(ptr)`.
+- Remove `use crate::macos::nsstring_to_str` if the only import was for the
+  `.cast()` variant — but it's still needed, just without `.cast()`.
+
+`clipboard.rs`:
+
+- Line 30: `nsstring_to_str(obj.cast())` → `nsstring_to_str(obj)`.
+- Line 38: `nsstring_to_str((&*s as *const NSString).cast_mut().cast())` →
+  simplify to `nsstring_to_str(Retained::as_ptr(&s) as *mut AnyObject)` or
+  `(*s).to_str()` directly.
+
+`connection.rs`:
+
+- Line 141: `nsstring_to_str(name_obj.cast())` → `nsstring_to_str(name_obj)`.
+- Line 220: `nsstring_to_str(ptr.cast())` → `nsstring_to_str(ptr)`.
+
+`window.rs`:
+
+- Lines 670, 1366: `*nsstring(s)` → need to check what the cocoa API expects.
+  `window.setTitle_(*nsstring(...))` takes `id` — change to use `msg_send!` with
+  `&*nsstring(s)`, or keep using the cocoa trait method with a cast.
+- Lines 2164, 2203: `nsstring_to_str(astring)` where `astring` is `id`
+  (`*mut Object`) — change to `nsstring_to_str(astring as *mut AnyObject)`.
+- Lines 2661–2662, 3020: `nsstring_to_str(nsevent.characters())` where the
+  return is `id` — same cast.
+- Lines 3312, 3342: `nsstring_to_str(file)` where `file` is `id` — same cast.
+
+#### Verification
+
+1. `cd wezboard && cargo build` — zero errors, zero warnings
+2. `cargo run --bin wezboard-gui` — app launches without crashing
+3. `mod.rs` has zero `cocoa::` imports
+4. No `.cast()` calls remain in `nsstring_to_str` call sites (except `window.rs`
+   which may still need `as *mut AnyObject` casts for `id` values)
