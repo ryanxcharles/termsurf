@@ -32,6 +32,7 @@ impl crate::TermWindow {
     pub fn paint_pane(
         &mut self,
         pos: &PositionedPane,
+        num_panes: usize,
         layers: &mut TripleLayerQuadAllocator,
     ) -> anyhow::Result<()> {
         if self.config.use_box_model_render {
@@ -151,7 +152,7 @@ impl crate::TermWindow {
             )
         };
 
-        let bw = if !pos.is_zoomed {
+        let bw = if num_panes > 1 && !pos.is_zoomed {
             self.config.split_border_width.evaluate_as_pixels(
                 config::DimensionContext {
                     dpi: self.dimensions.dpi as f32,
@@ -608,9 +609,10 @@ impl crate::TermWindow {
     pub fn paint_pane_border(
         &mut self,
         pos: &PositionedPane,
+        num_panes: usize,
         layers: &mut TripleLayerQuadAllocator,
     ) -> anyhow::Result<()> {
-        if pos.is_zoomed {
+        if num_panes <= 1 || pos.is_zoomed {
             return Ok(());
         }
 

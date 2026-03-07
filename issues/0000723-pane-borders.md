@@ -630,3 +630,17 @@ if num_panes <= 1 || pos.is_zoomed {
 3. Create a split — borders appear on both panes, content inset active
 4. Close split pane — borders disappear, content returns to full area
 5. Zoom a pane — borders disappear while zoomed
+
+**Result:** Pass
+
+Single-pane windows no longer draw borders or inset content. Splitting creates
+borders on all panes, closing the split removes them, and zooming hides them.
+The `num_panes` parameter gates both `bw` in `paint_pane` and the early return
+in `paint_pane_border`.
+
+#### Conclusion
+
+Borders now correctly appear only when multiple panes are visible. Combined with
+Experiment 4's per-pane inset, the border system is complete: configurable
+focused/unfocused colors, configurable width, content inset on all edges, and
+automatic hide for single-pane and zoomed states.
