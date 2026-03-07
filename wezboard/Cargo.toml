@@ -154,8 +154,9 @@ num-traits = {version="0.2", default-features=false }
 objc = "0.2"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = [
-  "NSApplication", "NSEvent", "NSMenu", "NSMenuItem",
-  "NSPasteboard", "NSRunningApplication", "NSScreen"
+  "NSApplication", "NSEvent", "NSGraphics", "NSMenu", "NSMenuItem",
+  "NSPasteboard", "NSRunningApplication", "NSScreen",
+  "NSView", "NSWindow"
 ] }
 objc2-core-foundation = "0.3"
 objc2-core-graphics = { version = "0.3", features = ["CGContext"] }

@@ -116,37 +116,37 @@ use objc::runtime::{Object, BOOL, NO, YES};
 
 ### Experiment 1: Replace cocoa constants and bitflags
 
-Replace all `cocoa::appkit` constant and bitflag types with their `objc2-app-kit`
-equivalents. Because these types flow into cocoa trait method calls
-(`setStyleMask_`, `setPresentationOptions_`, `modifierFlags()`, etc.), those
-specific call sites must also be migrated to `msg_send!` or `objc2-app-kit`
-typed methods — otherwise the types don't match.
+Replace all `cocoa::appkit` constant and bitflag types with their
+`objc2-app-kit` equivalents. Because these types flow into cocoa trait method
+calls (`setStyleMask_`, `setPresentationOptions_`, `modifierFlags()`, etc.),
+those specific call sites must also be migrated to `msg_send!` or
+`objc2-app-kit` typed methods — otherwise the types don't match.
 
 This experiment does NOT migrate all ~50 cocoa trait calls. It only migrates the
-~17 that take or return bitflag/constant types. The remaining trait calls (frame,
-title, level, etc.) stay as-is for a later experiment.
+~17 that take or return bitflag/constant types. The remaining trait calls
+(frame, title, level, etc.) stay as-is for a later experiment.
 
 #### Type replacements
 
-| Old (`cocoa::appkit`)                                          | New (`objc2-app-kit`)                                         |
-| -------------------------------------------------------------- | ------------------------------------------------------------- |
-| `NSWindowStyleMask::NSTitledWindowMask`                        | `NSWindowStyleMask::Titled`                                   |
-| `NSWindowStyleMask::NSClosableWindowMask`                      | `NSWindowStyleMask::Closable`                                 |
-| `NSWindowStyleMask::NSMiniaturizableWindowMask`                | `NSWindowStyleMask::Miniaturizable`                           |
-| `NSWindowStyleMask::NSResizableWindowMask`                     | `NSWindowStyleMask::Resizable`                                |
-| `NSWindowStyleMask::NSFullScreenWindowMask`                    | `NSWindowStyleMask::FullScreen`                               |
-| `NSWindowStyleMask::NSFullSizeContentViewWindowMask`           | `NSWindowStyleMask::FullSizeContentView`                      |
-| `NSWindowStyleMask::NSBorderlessWindowMask`                    | `NSWindowStyleMask::Borderless`                               |
-| `NSBackingStoreBuffered`                                       | `NSBackingStoreType::Buffered`                                |
-| `NSViewHeightSizable \| NSViewWidthSizable`                    | `NSAutoresizingMaskOptions::ViewHeightSizable \| ...ViewWidthSizable` |
-| `NSApplicationActivateIgnoringOtherApps`                       | `NSApplicationActivationOptions::ActivateIgnoringOtherApps`   |
-| `NSApplicationPresentationOptions::NSApplicationPresentationAutoHideMenuBar` | `NSApplicationPresentationOptions::AutoHideMenuBar` |
-| `NSApplicationPresentationOptions::NSApplicationPresentationAutoHideDock`    | `NSApplicationPresentationOptions::AutoHideDock`    |
-| `NSApplicationPresentationOptions::NSApplicationPresentationDefault`         | `NSApplicationPresentationOptions::Default`         |
-| `NSEventModifierFlags::NSShiftKeyMask`                         | `NSEventModifierFlags::Shift`                                 |
-| `NSEventModifierFlags::NSAlternateKeyMask`                     | `NSEventModifierFlags::Option`                                |
-| `NSEventModifierFlags::NSControlKeyMask`                       | `NSEventModifierFlags::Control`                               |
-| `NSEventModifierFlags::NSCommandKeyMask`                       | `NSEventModifierFlags::Command`                               |
+| Old (`cocoa::appkit`)                                                        | New (`objc2-app-kit`)                                                 |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `NSWindowStyleMask::NSTitledWindowMask`                                      | `NSWindowStyleMask::Titled`                                           |
+| `NSWindowStyleMask::NSClosableWindowMask`                                    | `NSWindowStyleMask::Closable`                                         |
+| `NSWindowStyleMask::NSMiniaturizableWindowMask`                              | `NSWindowStyleMask::Miniaturizable`                                   |
+| `NSWindowStyleMask::NSResizableWindowMask`                                   | `NSWindowStyleMask::Resizable`                                        |
+| `NSWindowStyleMask::NSFullScreenWindowMask`                                  | `NSWindowStyleMask::FullScreen`                                       |
+| `NSWindowStyleMask::NSFullSizeContentViewWindowMask`                         | `NSWindowStyleMask::FullSizeContentView`                              |
+| `NSWindowStyleMask::NSBorderlessWindowMask`                                  | `NSWindowStyleMask::Borderless`                                       |
+| `NSBackingStoreBuffered`                                                     | `NSBackingStoreType::Buffered`                                        |
+| `NSViewHeightSizable \| NSViewWidthSizable`                                  | `NSAutoresizingMaskOptions::ViewHeightSizable \| ...ViewWidthSizable` |
+| `NSApplicationActivateIgnoringOtherApps`                                     | `NSApplicationActivationOptions::ActivateIgnoringOtherApps`           |
+| `NSApplicationPresentationOptions::NSApplicationPresentationAutoHideMenuBar` | `NSApplicationPresentationOptions::AutoHideMenuBar`                   |
+| `NSApplicationPresentationOptions::NSApplicationPresentationAutoHideDock`    | `NSApplicationPresentationOptions::AutoHideDock`                      |
+| `NSApplicationPresentationOptions::NSApplicationPresentationDefault`         | `NSApplicationPresentationOptions::Default`                           |
+| `NSEventModifierFlags::NSShiftKeyMask`                                       | `NSEventModifierFlags::Shift`                                         |
+| `NSEventModifierFlags::NSAlternateKeyMask`                                   | `NSEventModifierFlags::Option`                                        |
+| `NSEventModifierFlags::NSControlKeyMask`                                     | `NSEventModifierFlags::Control`                                       |
+| `NSEventModifierFlags::NSCommandKeyMask`                                     | `NSEventModifierFlags::Command`                                       |
 
 #### Cocoa trait calls to migrate (17 sites)
 
@@ -177,8 +177,8 @@ let _: () = objc2::msg_send![
 ];
 ```
 
-**`NSWindow::initWithContentRect_styleMask_backing_defer_()` → `msg_send!`**
-(1 site: line 498):
+**`NSWindow::initWithContentRect_styleMask_backing_defer_()` → `msg_send!`** (1
+site: line 498):
 
 ```rust
 // Before:
@@ -286,9 +286,9 @@ use objc2_app_kit::{
 #### `.bits()` compatibility
 
 `cocoa`'s bitflags use the `bitflags` crate and expose `.bits()` returning
-`u64`. `objc2-app-kit`'s bitflags use a custom `bitflags!` macro with `.0`
-field access (the inner `NSUInteger`). Update `key_modifiers` line 1945/1948
-which call `flags.bits()`:
+`u64`. `objc2-app-kit`'s bitflags use a custom `bitflags!` macro with `.0` field
+access (the inner `NSUInteger`). Update `key_modifiers` line 1945/1948 which
+call `flags.bits()`:
 
 ```rust
 // Before:

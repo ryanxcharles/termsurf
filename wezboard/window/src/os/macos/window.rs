@@ -16,10 +16,12 @@ use crate::{
 use anyhow::{anyhow, bail, ensure};
 use async_trait::async_trait;
 use cocoa::appkit::{
-    self, NSApplication, NSApplicationActivateIgnoringOtherApps,
-    NSApplicationPresentationOptions, NSBackingStoreBuffered, NSEvent, NSEventModifierFlags,
-    NSOpenGLContext, NSOpenGLPixelFormat, NSPasteboard, NSRunningApplication, NSScreen, NSView,
-    NSViewHeightSizable, NSViewWidthSizable, NSWindow, NSWindowStyleMask,
+    self, NSApplication, NSEvent, NSOpenGLContext, NSOpenGLPixelFormat,
+    NSPasteboard, NSRunningApplication, NSScreen, NSView, NSWindow,
+};
+use objc2_app_kit::{
+    NSApplicationPresentationOptions, NSAutoresizingMaskOptions,
+    NSBackingStoreType, NSEventModifierFlags, NSWindowStyleMask,
 };
 use cocoa::base::*;
 use cocoa::foundation::{
@@ -495,13 +497,18 @@ impl Window {
                 let __r: *mut AnyObject = objc2::msg_send![get_window_class(), alloc];
                 __r as id
             };
-            let window = StrongPtr::new(NSWindow::initWithContentRect_styleMask_backing_defer_(
-                window,
-                rect,
-                style_mask,
-                NSBackingStoreBuffered,
-                NO,
-            ));
+            let cg_rect = CGRect::new(
+                CGPoint::new(rect.origin.x, rect.origin.y),
+                CGSize::new(rect.size.width, rect.size.height),
+            );
+            let window: *mut AnyObject = objc2::msg_send![
+                window as *const _ as *const AnyObject,
+                initWithContentRect: cg_rect,
+                styleMask: style_mask,
+                backing: NSBackingStoreType::Buffered,
+                defer: NO
+            ];
+            let window = StrongPtr::new(window as id);
 
             apply_decorations_to_window(
                 &window,
@@ -577,7 +584,11 @@ impl Window {
             window.setAcceptsMouseMovedEvents_(YES);
 
             let view = WindowView::init_with_frame(&inner, rect)?;
-            view.setAutoresizingMask_(NSViewHeightSizable | NSViewWidthSizable);
+            let _: () = objc2::msg_send![
+                *view as *const _ as *const AnyObject,
+                setAutoresizingMask: NSAutoresizingMaskOptions::ViewHeightSizable
+                    | NSAutoresizingMaskOptions::ViewWidthSizable
+            ];
 
             let () = objc2::msg_send![
                 *view as *const _ as *const _ as *const AnyObject,
@@ -867,8 +878,10 @@ impl WindowOps for Window {
         // We only need this for non-native full screen mode.
 
         let native_full_screen = {
-            let style_mask = unsafe { NSWindow::styleMask(self.ns_window) };
-            style_mask.contains(NSWindowStyleMask::NSFullScreenWindowMask)
+            let style_mask: NSWindowStyleMask = unsafe {
+                objc2::msg_send![self.ns_window as *const _ as *const AnyObject, styleMask]
+            };
+            style_mask.contains(NSWindowStyleMask::FullScreen)
         };
 
         let border_dimensions = if window_state.contains(WindowState::FULL_SCREEN)
@@ -1005,8 +1018,10 @@ impl WindowInner {
     }
 
     fn is_native_fullscreen(&self) -> bool {
-        let style_mask = unsafe { NSWindow::styleMask(*self.window) };
-        style_mask.contains(NSWindowStyleMask::NSFullScreenWindowMask)
+        let style_mask: NSWindowStyleMask = unsafe {
+            objc2::msg_send![*self.window as *const _ as *const AnyObject, styleMask]
+        };
+        style_mask.contains(NSWindowStyleMask::FullScreen)
     }
 
     /// If we were in native full screen mode, exit it and return true.
@@ -1051,9 +1066,10 @@ impl WindowInner {
                     self.window.setFrame_display_(saved_rect, YES);
                     self.window.makeKeyAndOrderFront_(nil);
                     self.window.setOpaque_(NO);
-                    current_app.setPresentationOptions_(
-                        NSApplicationPresentationOptions::NSApplicationPresentationDefault,
-                    );
+                    let _: () = objc2::msg_send![
+                        current_app as *const _ as *const AnyObject,
+                        setPresentationOptions: NSApplicationPresentationOptions::empty()
+                    ];
                 },
                 None => unsafe {
                     // Go full screen
@@ -1068,15 +1084,19 @@ impl WindowInner {
                     let screen_rect = NSScreen::frame(main_screen);
 
                     self.window.orderOut_(nil);
-                    self.window
-                        .setStyleMask_(NSWindowStyleMask::NSBorderlessWindowMask);
+                    let _: () = objc2::msg_send![
+                        *self.window as *const _ as *const AnyObject,
+                        setStyleMask: NSWindowStyleMask::Borderless
+                    ];
                     self.window.setFrame_display_(screen_rect, YES);
                     self.window.makeKeyAndOrderFront_(nil);
                     self.window.setOpaque_(YES);
-                    current_app.setPresentationOptions_(
-                        NSApplicationPresentationOptions:: NSApplicationPresentationAutoHideMenuBar
-                            | NSApplicationPresentationOptions::NSApplicationPresentationAutoHideDock
-                    );
+                    let _: () = objc2::msg_send![
+                        current_app as *const _ as *const AnyObject,
+                        setPresentationOptions:
+                            NSApplicationPresentationOptions::AutoHideMenuBar
+                                | NSApplicationPresentationOptions::AutoHideDock
+                    ];
                 },
             }
         }
@@ -1176,14 +1196,19 @@ impl WindowInner {
     fn show(&mut self) {
         unsafe {
             let current_app = NSRunningApplication::currentApplication(nil);
-            current_app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps);
+            let _: bool = objc2::msg_send![
+                current_app as *const _ as *const AnyObject,
+                activateWithOptions: 2usize
+            ];
 
             // Stupid hack: adjust the window style mask and set it back
             // to what it was.
             // Without this, the CAMetalLayer used by webgpu seems to get
             // stuck with a scale factor of 2 despite us having configured 1.
-            self.window
-                .setStyleMask_(NSWindowStyleMask::NSBorderlessWindowMask);
+            let _: () = objc2::msg_send![
+                *self.window as *const _ as *const AnyObject,
+                setStyleMask: NSWindowStyleMask::Borderless
+            ];
 
             apply_decorations_to_window(
                 &self.window,
@@ -1422,7 +1447,10 @@ fn apply_decorations_to_window(
     let mask = decoration_to_mask(decorations, integrated_title_button_style);
     let decorations = effective_decorations(decorations, integrated_title_button_style);
     unsafe {
-        window.setStyleMask_(mask);
+        let _: () = objc2::msg_send![
+            **window as *const _ as *const AnyObject,
+            setStyleMask: mask
+        ];
 
         let hidden = if decorations.contains(WindowDecorations::TITLE)
             || decorations.contains(WindowDecorations::INTEGRATED_BUTTONS)
@@ -1467,44 +1495,44 @@ fn decoration_to_mask(
             | WindowDecorations::MACOS_FORCE_ENABLE_SHADOW,
     );
     if decorations == WindowDecorations::TITLE | WindowDecorations::RESIZE {
-        NSWindowStyleMask::NSTitledWindowMask
-            | NSWindowStyleMask::NSClosableWindowMask
-            | NSWindowStyleMask::NSMiniaturizableWindowMask
-            | NSWindowStyleMask::NSResizableWindowMask
+        NSWindowStyleMask::Titled
+            | NSWindowStyleMask::Closable
+            | NSWindowStyleMask::Miniaturizable
+            | NSWindowStyleMask::Resizable
     } else if decorations
         == WindowDecorations::MACOS_FORCE_SQUARE_CORNERS | WindowDecorations::RESIZE
     {
-        NSWindowStyleMask::NSClosableWindowMask
-            | NSWindowStyleMask::NSMiniaturizableWindowMask
-            | NSWindowStyleMask::NSResizableWindowMask
-            | NSWindowStyleMask::NSFullSizeContentViewWindowMask
+        NSWindowStyleMask::Closable
+            | NSWindowStyleMask::Miniaturizable
+            | NSWindowStyleMask::Resizable
+            | NSWindowStyleMask::FullSizeContentView
     } else if decorations == WindowDecorations::RESIZE
         || decorations == WindowDecorations::INTEGRATED_BUTTONS
         || decorations == WindowDecorations::INTEGRATED_BUTTONS | WindowDecorations::RESIZE
     {
-        NSWindowStyleMask::NSTitledWindowMask
-            | NSWindowStyleMask::NSClosableWindowMask
-            | NSWindowStyleMask::NSMiniaturizableWindowMask
-            | NSWindowStyleMask::NSResizableWindowMask
-            | NSWindowStyleMask::NSFullSizeContentViewWindowMask
+        NSWindowStyleMask::Titled
+            | NSWindowStyleMask::Closable
+            | NSWindowStyleMask::Miniaturizable
+            | NSWindowStyleMask::Resizable
+            | NSWindowStyleMask::FullSizeContentView
     } else if decorations == WindowDecorations::NONE {
-        NSWindowStyleMask::NSTitledWindowMask
-            | NSWindowStyleMask::NSClosableWindowMask
-            | NSWindowStyleMask::NSMiniaturizableWindowMask
-            | NSWindowStyleMask::NSFullSizeContentViewWindowMask
+        NSWindowStyleMask::Titled
+            | NSWindowStyleMask::Closable
+            | NSWindowStyleMask::Miniaturizable
+            | NSWindowStyleMask::FullSizeContentView
     } else if decorations == WindowDecorations::TITLE {
-        NSWindowStyleMask::NSTitledWindowMask
-            | NSWindowStyleMask::NSClosableWindowMask
-            | NSWindowStyleMask::NSMiniaturizableWindowMask
+        NSWindowStyleMask::Titled
+            | NSWindowStyleMask::Closable
+            | NSWindowStyleMask::Miniaturizable
     } else if decorations == WindowDecorations::MACOS_FORCE_SQUARE_CORNERS {
-        NSWindowStyleMask::NSClosableWindowMask
-            | NSWindowStyleMask::NSMiniaturizableWindowMask
-            | NSWindowStyleMask::NSFullSizeContentViewWindowMask
+        NSWindowStyleMask::Closable
+            | NSWindowStyleMask::Miniaturizable
+            | NSWindowStyleMask::FullSizeContentView
     } else {
-        NSWindowStyleMask::NSTitledWindowMask
-            | NSWindowStyleMask::NSClosableWindowMask
-            | NSWindowStyleMask::NSMiniaturizableWindowMask
-            | NSWindowStyleMask::NSResizableWindowMask
+        NSWindowStyleMask::Titled
+            | NSWindowStyleMask::Closable
+            | NSWindowStyleMask::Miniaturizable
+            | NSWindowStyleMask::Resizable
     }
 }
 
@@ -1746,7 +1774,7 @@ impl Keyboard {
             None => std::ptr::null(),
         };
 
-        let modifier_key_state: u32 = (params.modifier_flags.bits() >> 16) as u32 & 0xFF;
+        let modifier_key_state: u32 = (params.modifier_flags.0 >> 16) as u32 & 0xFF;
 
         let kbd_type = unsafe { LMGetKbdType() } as _;
         #[allow(non_upper_case_globals)]
@@ -1939,19 +1967,19 @@ fn decode_mouse_buttons(mask: u64) -> MouseButtons {
 fn key_modifiers(flags: NSEventModifierFlags) -> Modifiers {
     let mut mods = Modifiers::NONE;
 
-    if flags.contains(NSEventModifierFlags::NSShiftKeyMask) {
+    if flags.contains(NSEventModifierFlags::Shift) {
         mods |= Modifiers::SHIFT;
     }
-    if flags.contains(NSEventModifierFlags::NSAlternateKeyMask) && (flags.bits() & 0x20) != 0 {
+    if flags.contains(NSEventModifierFlags::Option) && (flags.0 & 0x20) != 0 {
         mods |= Modifiers::LEFT_ALT | Modifiers::ALT;
     }
-    if flags.contains(NSEventModifierFlags::NSAlternateKeyMask) && (flags.bits() & 0x40) != 0 {
+    if flags.contains(NSEventModifierFlags::Option) && (flags.0 & 0x40) != 0 {
         mods |= Modifiers::RIGHT_ALT | Modifiers::ALT;
     }
-    if flags.contains(NSEventModifierFlags::NSControlKeyMask) {
+    if flags.contains(NSEventModifierFlags::Control) {
         mods |= Modifiers::CTRL;
     }
-    if flags.contains(NSEventModifierFlags::NSCommandKeyMask) {
+    if flags.contains(NSEventModifierFlags::Command) {
         mods |= Modifiers::SUPER;
     }
 
@@ -2324,23 +2352,23 @@ impl WindowView {
             let current_app = unsafe { NSApplication::sharedApplication(nil) };
             let target_options = match (is_key, is_simple_full_screen) {
                 (true, true) => {
-                    NSApplicationPresentationOptions::NSApplicationPresentationAutoHideMenuBar
-                        | NSApplicationPresentationOptions::NSApplicationPresentationAutoHideDock
+                    NSApplicationPresentationOptions::AutoHideMenuBar
+                        | NSApplicationPresentationOptions::AutoHideDock
                 }
                 (true, false) | (false, _) => {
-                    NSApplicationPresentationOptions::NSApplicationPresentationDefault
+                    NSApplicationPresentationOptions::empty()
                 }
             };
             unsafe {
-                let current_options: NSApplicationPresentationOptions = {
-                    let bits: usize = objc2::msg_send![
-                        current_app as *const _ as *const AnyObject,
-                        presentationOptions
-                    ];
-                    NSApplicationPresentationOptions::from_bits_truncate(bits as u64)
-                };
+                let current_options: NSApplicationPresentationOptions = objc2::msg_send![
+                    current_app as *const _ as *const AnyObject,
+                    presentationOptions
+                ];
                 if current_options != target_options {
-                    current_app.setPresentationOptions_(target_options);
+                    let _: () = objc2::msg_send![
+                        current_app as *const _ as *const AnyObject,
+                        setPresentationOptions: target_options
+                    ];
                 }
             }
         }
@@ -2443,7 +2471,10 @@ impl WindowView {
                 f64::copysign(backing_rect.size.height, point.y),
             );
             mouse_buttons = decode_mouse_buttons(NSEvent::pressedMouseButtons(nsevent));
-            modifiers = key_modifiers(nsevent.modifierFlags());
+            let modifier_flags: NSEventModifierFlags = objc2::msg_send![
+                nsevent as *const _ as *const AnyObject, modifierFlags
+            ];
+            modifiers = key_modifiers(modifier_flags);
             screen_coords = NSEvent::mouseLocation(nsevent);
         }
         let event = MouseEvent {
@@ -2605,9 +2636,11 @@ impl WindowView {
         let is_a_repeat = unsafe { nsevent.isARepeat() == YES };
         let chars = unsafe { nsstring_to_str(nsevent.characters() as *mut AnyObject) };
         let unmod = unsafe { nsstring_to_str(nsevent.charactersIgnoringModifiers() as *mut AnyObject) };
-        let modifier_flags = unsafe { nsevent.modifierFlags() };
+        let modifier_flags: NSEventModifierFlags = unsafe {
+            objc2::msg_send![nsevent as *const _ as *const AnyObject, modifierFlags]
+        };
         let modifiers = key_modifiers(modifier_flags);
-        let leds = if modifier_flags.bits() & (1 << 16) != 0 {
+        let leds = if modifier_flags.0 & (1 << 16) != 0 {
             KeyboardLedStatus::CAPS_LOCK
         } else {
             KeyboardLedStatus::empty()
@@ -2967,7 +3000,9 @@ impl WindowView {
         #[allow(unused_macros)]
         macro_rules! yes_no { (YES) => { Bool::YES }; (NO) => { Bool::NO }; }
         let chars = unsafe { nsstring_to_str(nsevent.characters() as *mut AnyObject) };
-        let modifier_flags = unsafe { nsevent.modifierFlags() };
+        let modifier_flags: NSEventModifierFlags = unsafe {
+            objc2::msg_send![nsevent as *const _ as *const AnyObject, modifierFlags]
+        };
         let modifiers = key_modifiers(modifier_flags);
 
         log::trace!(
@@ -2998,9 +3033,11 @@ impl WindowView {
     extern "C" fn flags_changed(this_raw: *mut AnyObject, _sel: Sel, nsevent_ao: *mut AnyObject) {
         let this = unsafe { &mut *(this_raw as *mut Object) };
         let nsevent = nsevent_ao as id;
-        let modifier_flags = unsafe { nsevent.modifierFlags() };
+        let modifier_flags: NSEventModifierFlags = unsafe {
+            objc2::msg_send![nsevent as *const _ as *const AnyObject, modifierFlags]
+        };
         let modifiers = key_modifiers(modifier_flags);
-        let leds = if modifier_flags.bits() & (1 << 16) != 0 {
+        let leds = if modifier_flags.0 & (1 << 16) != 0 {
             KeyboardLedStatus::CAPS_LOCK
         } else {
             KeyboardLedStatus::empty()
@@ -3083,8 +3120,10 @@ impl WindowView {
             let is_full_screen = inner.fullscreen.is_some()
                 || inner.window.as_ref().map_or(false, |window| {
                     let window = window.load();
-                    let style_mask = unsafe { NSWindow::styleMask(*window) };
-                    style_mask.contains(NSWindowStyleMask::NSFullScreenWindowMask)
+                    let style_mask: NSWindowStyleMask = unsafe {
+                        objc2::msg_send![*window as *const _ as *const AnyObject, styleMask]
+                    };
+                    style_mask.contains(NSWindowStyleMask::FullScreen)
                 });
 
             let live_resizing = inner.live_resizing;
