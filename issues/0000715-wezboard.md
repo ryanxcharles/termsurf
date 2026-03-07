@@ -101,3 +101,61 @@ WezTerm and TermSurf use different bit positions:
 | Ctrl     | `1<<3`  | `1<<1`   |
 | Alt      | `1<<2`  | `1<<2`   |
 | Super    | `1<<4`  | `1<<3`   |
+
+## Experiments
+
+### Experiment 1: Fork WezTerm into wezboard/
+
+#### Goal
+
+Merge upstream WezTerm into the monorepo as `wezboard/` using `git subtree add`,
+the same method used for Ghostboard (Issue 600) and earlier WezTerm forks (Issue
+418 Experiment 3).
+
+#### Context
+
+The WezTerm remote already exists:
+
+- Remote: `wezterm` → `github.com/wezterm/wezterm`
+- Latest upstream: `wezterm/main` at `05343b3`
+
+Almost all WezTerm commits are already in the repo's history (from the ts2-era
+subtree merge). This experiment adds WezTerm at the current upstream HEAD into a
+new `wezboard/` prefix.
+
+#### Steps
+
+1. Fetch latest from the wezterm remote:
+
+   ```bash
+   git fetch wezterm
+   ```
+
+2. Subtree-add WezTerm into `wezboard/`:
+
+   ```bash
+   git subtree add --prefix=wezboard wezterm main
+   ```
+
+   This creates a merge commit that places all WezTerm files under `wezboard/`.
+   The merge commit message will be the standard subtree format:
+   `Add 'wezboard/' from commit '{hash}'`.
+
+3. Verify the directory exists and contains expected files:
+
+   ```bash
+   ls wezboard/Cargo.toml wezboard/wezterm-gui/ wezboard/mux/
+   ```
+
+#### Verification
+
+1. `ls wezboard/Cargo.toml` — workspace manifest exists
+2. `ls wezboard/wezterm-gui/src/main.rs` — GUI entry point exists
+3. `ls wezboard/mux/src/pane.rs` — Pane trait source exists
+4. `wc -l wezboard/Cargo.toml` — non-trivial file (workspace with many members)
+
+#### What this does NOT include
+
+- No renaming (Experiment 2)
+- No building (Experiment 2)
+- No protocol integration (later experiments)
