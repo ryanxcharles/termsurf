@@ -4,7 +4,7 @@
 //! This allows other code to collect the ring buffer and display it
 //! within the application.
 use chrono::prelude::*;
-use env_logger::filter::{Builder as FilterBuilder, Filter};
+use env_filter::{Builder as FilterBuilder, Filter};
 use log::{Level, LevelFilter, Log, Record};
 use std::collections::HashMap;
 use std::fs::File;
