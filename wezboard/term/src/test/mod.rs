@@ -1127,10 +1127,12 @@ fn test_scroll_margins() {
     term.print("1\n2\n3\n4\n");
     assert_all_contents(&term, file!(), line!(), &["1", "2", "3", "4", ""]);
 
-    let margins = CSI::Cursor(wezboard_escape_parser::csi::Cursor::SetTopAndBottomMargins {
-        top: OneBased::new(1),
-        bottom: OneBased::new(2),
-    });
+    let margins = CSI::Cursor(
+        wezboard_escape_parser::csi::Cursor::SetTopAndBottomMargins {
+            top: OneBased::new(1),
+            bottom: OneBased::new(2),
+        },
+    );
     term.print(format!("{}", margins));
 
     term.print("z\n");
