@@ -114,3 +114,126 @@ All of these disappear once `cocoa` is replaced with `objc2-app-kit` /
 
 4. **`core_text.rs` + final cleanup** — Remove last `cocoa::base::id` usage,
    remove `cocoa` and `objc` from workspace deps.
+
+## Experiments
+
+### Experiment 1: Migrate `app.rs` and `clipboard.rs`
+
+Migrate the two smallest standalone files to pure `objc2` / `objc2-app-kit` /
+`objc2-foundation` — zero `cocoa` or `objc` 0.2 imports. This establishes
+patterns for the remaining files.
+
+`mod.rs` stays hybrid: `nsstring()` and `nsstring_to_str()` still return
+`StrongPtr` / take `*mut Object`, since every other file depends on them. Bridge
+helpers (`sel2to1`, `cls1to2`, `cls2to1`, `get_class`) remain for now — other
+files still use them. Both are cleaned up in a later experiment.
+
+#### Changes
+
+**`app.rs`** — Replace all `cocoa` and `objc` 0.2 imports:
+
+| Old (`cocoa` / `objc` 0.2)                       | New (`objc2`)                                                        |
+| ------------------------------------------------ | -------------------------------------------------------------------- |
+| `cocoa::appkit::NSApplicationTerminateReply`     | `objc2_app_kit::NSApplicationTerminateReply`                         |
+| `cocoa::foundation::NSInteger`                   | `objc2_foundation::NSInteger`                                        |
+| `objc::declare::ClassDecl`                       | `objc2::runtime::ClassBuilder`                                       |
+| `objc::rc::StrongPtr`                            | `objc2::rc::Retained<AnyObject>`                                     |
+| `objc::runtime::{Class, Object, Sel, BOOL, ...}` | `objc2::runtime::{AnyClass, AnyObject, Sel}` + `bool`/`true`/`false` |
+| `cls1to2(get_objc_class(c"NSObject"))`           | `AnyClass::get(c"NSObject").unwrap()`                                |
+| `sel2to1(objc2::sel!(...))`                      | `objc2::sel!(...)` directly                                          |
+| `ClassDecl::new(name, superclass)`               | `ClassBuilder::new(c"Name", &superclass)`                            |
+| `cls.add_ivar::<BOOL>("launched")`               | `cls.add_ivar::<bool>(c"launched")`                                  |
+| `StrongPtr::new(delegate)`                       | `Retained::from_raw(delegate).unwrap()`                              |
+| `*delegate` (deref StrongPtr)                    | `&*delegate` or `Retained::as_ptr(&delegate)`                        |
+| `(*delegate).set_ivar("launched", NO)`           | `*(*delegate).get_mut_ivar::<bool>(c"launched") = false`             |
+| `NSTerminateCancel as u64`                       | `NSApplicationTerminateReply::NSTerminateCancel.0 as u64`            |
+| `NSTerminateNow as u64`                          | `NSApplicationTerminateReply::NSTerminateNow.0 as u64`               |
+
+Specific function changes:
+
+- `application_should_terminate` — Return type stays `u64`. Use
+  `NSApplicationTerminateReply::NSTerminateCancel.0 as u64` (the struct wraps
+  `NSUInteger`).
+- `application_did_finish_launching` / `application_open_untitled_file` /
+  `application_open_file` — Change `BOOL` params/ivars to `bool`. The callback
+  signatures use `*mut AnyObject` instead of `*mut Object`.
+- `application_dock_menu` — Return `*mut AnyObject` instead of `*mut Object`.
+  The `sel2to1(objc2::sel!(...))` call becomes just `objc2::sel!(...)` since
+  `Menu::new_with` still accepts `SEL` (which is `objc::runtime::Sel`). Wait —
+  this function calls `MenuItem::new_with` which takes `Option<SEL>` where `SEL`
+  is re-exported from `cocoa::base::SEL`. This is actually `objc::runtime::Sel`.
+  Since `menu.rs` isn't migrated yet, keep `sel2to1(objc2::sel!(...))` in this
+  one call site. Import `sel2to1` only for this.
+- `get_class` — Use `ClassBuilder::new(c"WezboardAppDelegate", superclass)` with
+  `AnyClass::get(c"NSObject").unwrap()` as superclass. `ClassBuilder` takes
+  `objc2::runtime::Sel` directly, so all `sel2to1()` wrappers around
+  `add_method` calls are removed. `add_ivar` takes `&CStr` names.
+  `cls.register()` returns `&'static AnyClass` — wrap the return type.
+- `create_app_delegate` — Returns `Retained<AnyObject>` instead of `StrongPtr`.
+  The allocator pattern becomes:
+  ```rust
+  let cls = get_class();
+  let delegate: *mut AnyObject = objc2::msg_send![cls, alloc];
+  let delegate: *mut AnyObject = objc2::msg_send![delegate, init];
+  // set ivar through mut ref
+  (*delegate).get_mut_ivar::<bool>(c"launched") = false; // ERROR: no set_ivar on AnyObject
+  ```
+  Actually, `AnyObject` in objc2 doesn't have `set_ivar` or `get_mut_ivar` as
+  inherent methods. Use `Ivar::load` + pointer writes, or use `objc2::msg_send!`
+  to call setters. The simplest approach: use `*mut AnyObject` and write through
+  the ivar pointer using `objc2::runtime::AnyObject`'s `class()` method to get
+  the ivar offset, or just use raw `msg_send!` to set the value. Alternatively,
+  since `bool` defaults to `false` after `init`, we may not even need to set the
+  ivar explicitly — just ensure the ivar is `false` by default (which it is,
+  since ObjC zeroes ivars on alloc).
+
+**`clipboard.rs`** — Replace all `cocoa` imports with `objc2-app-kit`:
+
+| Old (`cocoa`)                          | New (`objc2-app-kit`)                                   |
+| -------------------------------------- | ------------------------------------------------------- |
+| `cocoa::appkit::NSPasteboard` trait    | `objc2_app_kit::NSPasteboard` struct methods            |
+| `cocoa::appkit::NSFilenamesPboardType` | `objc2_app_kit::NSFilenamesPboardType`                  |
+| `cocoa::appkit::NSStringPboardType`    | `objc2_app_kit::NSStringPboardType`                     |
+| `cocoa::base::{id, nil, BOOL, YES}`    | `*mut AnyObject` / `bool` (or typed `Retained` returns) |
+| `cocoa::foundation::NSArray` trait     | `objc2_foundation::NSArray` struct or `msg_send!`       |
+
+Specific method replacements:
+
+- `Clipboard::new` — `NSPasteboard::generalPasteboard(nil)` becomes
+  `NSPasteboard::generalPasteboard()` which returns `Retained<NSPasteboard>`.
+  Store `Retained<NSPasteboard>` instead of `id`.
+- `Clipboard::read` —
+  `self.pasteboard.propertyListForType(NSFilenamesPboardType)` becomes
+  `self.pasteboard.propertyListForType(NSFilenamesPboardType)` returning
+  `Option<Retained<AnyObject>>`. The null check becomes `.is_some()`. For
+  iterating the plist as an array, downcast to `Retained<NSArray<NSString>>` or
+  use `msg_send!` for `count`/`objectAtIndex:`.
+  `self.pasteboard.stringForType(NSStringPboardType)` returns
+  `Option<Retained<NSString>>`. Convert to `&str` via
+  `nsstring_to_str(&*s as *const _ as *mut Object)` (still using the shared
+  helper).
+- `Clipboard::write` — `self.pasteboard.clearContents()` works directly. Replace
+  `writeObjects(NSArray::arrayWithObject(nil, ...))` with
+  `self.pasteboard.setString_forType(&ns_str, NSPasteboardTypeString)` — this is
+  simpler and avoids the `NSPasteboardWriting` protocol object complexity. Use
+  `NSPasteboardTypeString` instead of `NSStringPboardType` (modern constant).
+  The `BOOL == YES` check becomes a simple `bool` check.
+
+**`window/Cargo.toml`** — Add `objc2-app-kit` features needed for
+`NSPasteboard`:
+
+```toml
+objc2-app-kit = { workspace = true, features = ["NSPasteboard", ...] }
+```
+
+Check which features are already enabled and add any missing ones.
+
+#### Verification
+
+1. `cd wezboard && cargo build` — must compile with zero errors
+2. `cargo build 2>&1 | grep "warning.*cocoa\|warning.*objc[^2]"` — no new
+   warnings from the migration
+3. Confirm `app.rs` has zero `cocoa::` or `objc::` imports
+4. Confirm `clipboard.rs` has zero `cocoa::` or `objc::` imports
+5. Manual test: launch wezboard, verify clipboard paste works (Cmd+V), verify
+   app quit dialog appears with `AlwaysPrompt` config
