@@ -167,20 +167,152 @@ Fix: Add `// SAFETY:` comments to the new unsafe blocks we introduced (ivar
 helpers, `Retained::from_raw`, `Box::from_raw`, `msg_send!` blocks that do
 non-obvious things). Don't retrofit comments to inherited upstream code.
 
-## Ideas for experiments
+## Experiments
 
-1. **Quick mechanical fixes** — No-op CGRect removal (12 sites), magic number
-   constants, dead code deletion, null guard on `Box::from_raw`, safety
-   comments. Pure cleanup, no behavior change.
+### Experiment 1: Quick mechanical fixes
 
-2. **`__r` boilerplate reduction** — Either a helper macro/function or direct
-   type annotation refactor for the 44 `__r as id` sites.
+#### Goal
 
-3. **Error handling** — Replace `Retained::from_raw().unwrap()` with proper
-   error propagation. Fix `Weak::load().unwrap()` double unwrap.
+Fix smells 2, 4, 5, 6, 8, 11, 13 — all the changes that are pure cleanup with no
+behavior change. Build and run the app to verify nothing breaks.
 
-4. **Ivar access consistency** — Pick one approach (deprecated API with
-   suppression vs manual helpers) and apply everywhere.
+#### Changes
 
-5. **`set_var` fix** — Wrap in `unsafe` with safety comment, or switch to a
-   different mechanism for passing the socket path.
+**Smell 2 — Safety comments on ivar helpers** (`window.rs:1982-1991`)
+
+Add `// SAFETY:` comments to `get_view_ivar` and `set_view_ivar`:
+
+```rust
+// SAFETY: The VIEW_CLS_CNAME ivar is registered in the ClassBuilder for
+// WezboardWindowView with type *mut c_void. The caller guarantees obj is a
+// valid instance of that class.
+unsafe fn get_view_ivar(obj: &AnyObject) -> *mut c_void {
+```
+
+Same pattern for `set_view_ivar`.
+
+**Smell 4 — Named constants for magic numbers** (`window.rs`)
+
+Add constants near the top of the file (after existing constant definitions):
+
+```rust
+const NS_OPENGL_CP_SURFACE_OPACITY: isize = 236;
+const NS_OPENGL_CP_SWAP_INTERVAL: isize = 222;
+const NS_WINDOW_TABBING_MODE_DISALLOWED: isize = 2;
+const NS_WINDOW_CLOSE_BUTTON: u64 = 0;
+const NS_WINDOW_MINIATURIZE_BUTTON: u64 = 1;
+const NS_WINDOW_ZOOM_BUTTON: u64 = 2;
+```
+
+Replace all 6 inline magic numbers with these constants.
+
+**Smell 5 — Null guard on `Box::from_raw`** (`menu.rs:315-324`)
+
+Before:
+
+```rust
+extern "C" fn dealloc(this: *mut AnyObject, _sel: Sel) {
+    unsafe {
+        #[allow(deprecated)]
+        let item = (*this).get_ivar::<*mut c_void>(WRAPPER_FIELD_NAME);
+        let item = (*item) as *mut RepresentedItem;
+        let item = Box::from_raw(item);
+        drop(item);
+```
+
+After:
+
+```rust
+extern "C" fn dealloc(this: *mut AnyObject, _sel: Sel) {
+    unsafe {
+        #[allow(deprecated)]
+        let item = (*this).get_ivar::<*mut c_void>(WRAPPER_FIELD_NAME);
+        if !(*item).is_null() {
+            let item = (*item) as *mut RepresentedItem;
+            drop(Box::from_raw(item));
+        }
+```
+
+**Smell 6 — Remove no-op CGRect re-wrapping** (`window.rs`, 12 sites)
+
+Every site follows one of two patterns:
+
+Pattern A — intermediate variable that's only used as a msg_send arg:
+
+```rust
+// Before:
+let frame: CGRect = objc2::msg_send![..., frame];
+let frame_cg = CGRect::new(CGPoint::new(frame.origin.x, ...), ...);
+let backing_cg: CGRect = objc2::msg_send![..., convertRectToBacking: frame_cg];
+let backing_frame = CGRect::new(CGPoint::new(backing_cg.origin.x, ...), ...);
+
+// After:
+let frame: CGRect = objc2::msg_send![..., frame];
+let backing_frame: CGRect = objc2::msg_send![..., convertRectToBacking: frame];
+```
+
+Pattern B — intermediate variable used directly:
+
+```rust
+// Before:
+let saved_cg = CGRect::new(CGPoint::new(saved_rect.origin.x, ...), ...);
+objc2::msg_send![..., setFrame: saved_cg, display: true];
+
+// After:
+objc2::msg_send![..., setFrame: saved_rect, display: true];
+```
+
+Sites:
+
+| Line | Pattern | What to do                                                   |
+| ---- | ------- | ------------------------------------------------------------ |
+| 346  | A       | Delete `frame_cg`, pass `frame` to `convertRectToBacking`    |
+| 348  | A       | Delete `backing_frame`, use `backing_cg` directly            |
+| 435  | A       | Delete `frame_cg`, pass `frame` to `contentRectForFrameRect` |
+| 437  | A       | Delete `content_frame`, use `content_cg` directly            |
+| 667  | A       | Same as 346                                                  |
+| 669  | A       | Same as 348                                                  |
+| 974  | A       | Same as 346                                                  |
+| 976  | A       | Same as 348                                                  |
+| 1129 | B       | Delete `saved_cg`, pass `saved_rect` directly                |
+| 2318 | A       | Delete `frame_cg`, pass `frame` to `contentRectForFrameRect` |
+| 2322 | A       | Delete `frame_cg`, pass `frame` to `convertRectToBacking`    |
+| 3475 | A       | Delete `cg_rect`, pass `rect` directly to `initWithFrame`    |
+
+**Smell 8 — `set_var` safety comment** (`listener.rs:21`)
+
+Before:
+
+```rust
+std::env::set_var("TERMSURF_SOCKET", &sock_path);
+```
+
+After:
+
+```rust
+// SAFETY: Called during startup on the main thread before any child
+// processes or threads read TERMSURF_SOCKET.
+unsafe { std::env::set_var("TERMSURF_SOCKET", &sock_path) };
+```
+
+**Smell 11 — Delete dead `TermSurfState`**
+
+Delete `wezboard-gui/src/termsurf/state.rs` entirely. Remove `pub mod state;`
+from `wezboard-gui/src/termsurf/mod.rs`.
+
+**Smell 13 — Safety comments on non-obvious unsafe blocks**
+
+Add `// SAFETY:` comments to the `Retained::from_raw` calls (smells 1 & 3 get
+proper error handling in a later experiment; for now just document the
+invariants). Add comments to the `Box::from_raw` in menu dealloc (updated
+above). Don't retrofit comments to inherited upstream unsafe blocks.
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors, zero warnings
+2. `cargo run --bin wezboard-gui` — app launches, window opens, terminal works
+3. No magic numbers remain (grep for `236isize`, `222isize`, `2_isize`,
+   `1u64 /*`, `0u64 /*`, `2u64 /*`)
+4. No no-op CGRect re-wrapping remains
+5. `state.rs` deleted
+6. All new unsafe blocks have `// SAFETY:` comments
