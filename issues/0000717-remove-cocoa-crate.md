@@ -970,3 +970,29 @@ be used elsewhere in window.rs. Check and remove if unused.
 5. No `objc::Encode` impls in window.rs
 6. No `ClassDecl` in window.rs
 7. Local `NSRange` wrapper removed
+
+#### Results
+
+**PASS.** All changes applied. Two runtime crashes found and fixed during
+verification:
+
+1. **`drawLayer:inContext:`** — The `context` parameter was declared as
+   `*mut AnyObject` (encoding `@`) but NSView's superclass declares it as
+   `CGContextRef` (encoding `^{CGContext=}`). objc2's `ClassBuilder` validates
+   type encodings against the superclass at registration time and panicked.
+   Fixed by using `*mut CGContext` from `objc2_core_graphics`.
+
+2. **`draggingEntered:`** — Return type was `Bool` but the ObjC protocol
+   declares `NSDragOperation` (`NSUInteger` = `usize`). Same encoding
+   validation caught it. Fixed by returning `usize` (0 = `NSDragOperationNone`,
+   1 = `NSDragOperationCopy`).
+
+Both bugs existed silently in the old code because `ClassDecl` (objc 0.2) never
+validated type encodings — it blindly called `class_addMethod`. The migration to
+`ClassBuilder` exposed them.
+
+**Bridge helpers removed from `mod.rs`:** `sel2to1`, `cls2to1`, `cls1to2`,
+`get_class` — all confirmed unused after the migration.
+
+Net diff: 5 files changed, −187 lines. Commits: `9c7308f` (main changes),
+fixup commit (CGContext + draggingEntered fixes).

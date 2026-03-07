@@ -38,6 +38,7 @@ use objc::runtime::{Object, BOOL, NO, YES};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, AnyProtocol, Bool, ClassBuilder, Sel};
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
+use objc2_core_graphics::CGContext;
 use objc2_foundation::NSRange;
 use promise::Future;
 use raw_window_handle::{
@@ -3169,7 +3170,7 @@ impl WindowView {
         _view: *mut AnyObject,
         _sel: Sel,
         _layer_id: *mut AnyObject,
-        _context: *mut AnyObject,
+        _context: *mut CGContext,
     ) {
     }
 
@@ -3248,9 +3249,10 @@ impl WindowView {
         }
     }
 
-    extern "C" fn dragging_entered(this_raw: *mut AnyObject, _: Sel, sender_ao: *mut AnyObject) -> Bool {
+    extern "C" fn dragging_entered(this_raw: *mut AnyObject, _: Sel, sender_ao: *mut AnyObject) -> usize {
         let this = unsafe { &mut *(this_raw as *mut Object) };
         let sender = sender_ao as id;
+        // NSDragOperationNone = 0, NSDragOperationCopy = 1
         if let Some(this) = Self::get_this(this) {
             let mut inner = this.inner.borrow_mut();
 
@@ -3260,13 +3262,13 @@ impl WindowView {
                 __r as id
             };
             if pb.is_null() {
-                return Bool::NO;
+                return 0; // NSDragOperationNone
             }
 
             let filenames =
                 unsafe { NSPasteboard::propertyListForType(pb, appkit::NSFilenamesPboardType) };
             if filenames.is_null() {
-                return Bool::NO;
+                return 0; // NSDragOperationNone
             }
 
             let paths = unsafe { filenames.iter() }
@@ -3277,7 +3279,7 @@ impl WindowView {
                 .collect::<Vec<_>>();
             inner.events.dispatch(WindowEvent::DraggedFile(paths));
         }
-        Bool::YES
+        1 // NSDragOperationCopy
     }
 
     extern "C" fn perform_drag_operation(this_raw: *mut AnyObject, _: Sel, sender_ao: *mut AnyObject) -> Bool {
@@ -3389,7 +3391,7 @@ impl WindowView {
             cls.add_method(objc2::sel!(displayLayer:),
                 Self::display_layer as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject));
             cls.add_method(objc2::sel!(drawLayer:inContext:),
-                Self::draw_layer_in_context as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject));
+                Self::draw_layer_in_context as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut CGContext));
             cls.add_method(objc2::sel!(isFlipped),
                 Self::is_flipped as extern "C" fn(*mut AnyObject, Sel) -> Bool);
             cls.add_method(objc2::sel!(isOpaque),
@@ -3475,7 +3477,7 @@ impl WindowView {
                 Self::first_rect_for_character_range
                     as extern "C" fn(*mut AnyObject, Sel, NSRange, *mut NSRange) -> CGRect);
             cls.add_method(objc2::sel!(draggingEntered:),
-                Self::dragging_entered as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) -> Bool);
+                Self::dragging_entered as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) -> usize);
             cls.add_method(objc2::sel!(performDragOperation:),
                 Self::perform_drag_operation as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) -> Bool);
         }
