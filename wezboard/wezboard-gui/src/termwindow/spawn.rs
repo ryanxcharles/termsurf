@@ -1,6 +1,6 @@
 use crate::spawn::SpawnWhere;
-use config::TermConfig;
 use config::keyassignment::{SpawnCommand, SpawnTabDomain};
+use config::TermConfig;
 use std::sync::Arc;
 
 impl super::TermWindow {
