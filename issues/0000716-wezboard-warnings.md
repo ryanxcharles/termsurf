@@ -149,6 +149,8 @@ Fix the 5 non-`objc` warnings so only the `cargo-clippy` cfg noise remains.
 `cargo build -p wezboard-gui` produces only `cargo-clippy` cfg warnings (188)
 and their summary lines. No other warnings.
 
+#### Strategy
+
 2. **Migrate `connection.rs` + `mod.rs`** — Smallest files (46 lines total, 13
    call sites, no `ClassDecl`). Good warmup to establish the migration pattern
    before tackling bigger files. Requires adding `objc2-app-kit` workspace dep.
@@ -171,3 +173,18 @@ and their summary lines. No other warnings.
    (`wezboard-font/core_text.rs` has 2, `wezboard-gui/commands.rs` has 1). Then
    remove the `objc` 0.2 dependency from the workspace entirely. End state: zero
    warnings.
+
+#### Result
+
+Pass. All 5 non-`objc` warnings eliminated:
+
+- Removed 2 unnecessary `unsafe` blocks in
+  `wezboard-toast-notification/src/macos.rs`.
+- Deleted dead `phys_cell_idx` assignment in `screen_line.rs` and made the
+  variable immutable (removing the cascading
+  `variable does not need to be
+  mutable` warning).
+- Added `#[allow(dead_code)]` to scaffolding in `state.rs`.
+
+`cargo build -p wezboard-gui` now produces only the 188 `cargo-clippy` cfg
+warnings from the legacy `objc` 0.2 crate.
