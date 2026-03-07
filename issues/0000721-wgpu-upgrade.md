@@ -148,3 +148,27 @@ with zero errors — wgpu 26.0.1 resolved (with naga 26.0.0, wgpu-hal 26.0.6,
 metal 0.32.0). The app launched, rendered the terminal, and quit normally. The
 only breaking change was the new `depth_slice: None` field on
 `RenderPassColorAttachment`, exactly as predicted from the ts2 upgrade history.
+
+### Experiment 2: wgpu 26 → 27
+
+Bump wgpu from 26.0.0 to 27.0.0. This version has two breaking changes: a
+removed lifetime parameter on `BufferViewMut` and a new required field
+`experimental_features` on `DeviceDescriptor`.
+
+#### Changes
+
+1. **`wezboard/Cargo.toml`** (line 269): Change `wgpu = "26.0.0"` to
+   `wgpu = "27.0.0"`.
+
+2. **`wezboard-gui/src/renderstate.rs`** (line 194): Remove lifetime parameter
+   from `BufferViewMut`. Change `mapping: wgpu::BufferViewMut<'static>,` to
+   `mapping: wgpu::BufferViewMut,`.
+
+3. **`wezboard-gui/src/termwindow/webgpu.rs`** (line 335): Add
+   `experimental_features: wgpu::ExperimentalFeatures::default(),` after
+   `trace: wgpu::Trace::Off,`.
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. `cargo run --bin wezboard-gui` — app launches and renders
