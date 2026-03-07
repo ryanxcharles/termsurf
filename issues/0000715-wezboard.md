@@ -159,3 +159,17 @@ new `wezboard/` prefix.
 - No renaming (Experiment 2)
 - No building (Experiment 2)
 - No protocol integration (later experiments)
+
+#### Result
+
+Pass. Forked WezTerm into `wezboard/` via
+`git subtree add --prefix=wezboard wezterm main`. The subtree merge commit
+(`0bf1e8a`) places all of upstream WezTerm (at commit `05343b3`) under
+`wezboard/`. All four verification checks pass: workspace manifest (282 lines),
+GUI entry point, Pane trait source, and the standard subtree merge commit
+format.
+
+This is the same fork pattern used for Ghostboard (Issue 600) —
+`git subtree add` preserves the full upstream commit history while placing files
+under a subdirectory. Future upstream merges use
+`git subtree pull --prefix=wezboard wezterm main`.
