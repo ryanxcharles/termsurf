@@ -172,3 +172,12 @@ removed lifetime parameter on `BufferViewMut` and a new required field
 
 1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
 2. `cargo run --bin wezboard-gui` — app launches and renders
+
+#### Results
+
+Success. All three changes applied cleanly. `cargo build -p wezboard-gui`
+compiled with zero errors — wgpu 27.0.1 resolved (with naga 27.0.3, wgpu-hal
+27.0.4, wgpu-core 27.0.3). The app launched, rendered the terminal, and quit
+normally. Both breaking changes were exactly as predicted from the ts2 upgrade
+history: the removed `'static` lifetime on `BufferViewMut` and the new
+`experimental_features` field on `DeviceDescriptor`.
