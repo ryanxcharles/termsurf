@@ -330,3 +330,114 @@ Pure mechanical cleanup — no behavior changes, no regressions. The remaining
 smells (1, 3, 7, 9, 10) require deeper refactoring: error handling for fallible
 ObjC inits (1, 3), boilerplate reduction (7), type alias consolidation (9), and
 ivar approach unification (10). These should be tackled in Experiment 2.
+
+### Experiment 2: Fallible ObjC init error handling
+
+#### Goal
+
+Replace `.unwrap()` on `Retained::from_raw` and `Weak::load` with proper error
+handling so that null ObjC init returns produce actionable errors instead of
+panics. Fixes smells 1 and 3.
+
+#### Changes
+
+**Smell 1 — `Retained::from_raw(...).unwrap()` on fallible ObjC inits**
+
+All four sites already live in functions that return `anyhow::Result`, so each
+`.unwrap()` becomes `.ok_or_else(|| anyhow!("..."))` + `?`.
+
+**Site A: NSWindow init** (`window.rs:555`)
+
+```rust
+// Before:
+let window = Retained::from_raw(window).unwrap();
+
+// After:
+let window = Retained::from_raw(window)
+    .ok_or_else(|| anyhow!("failed to init NSWindow"))?;
+```
+
+**Site B: NSView initWithFrame** (`window.rs:~3588`)
+
+```rust
+// Before:
+Retained::from_raw(__r).unwrap()
+
+// After:
+Retained::from_raw(__r)
+    .ok_or_else(|| anyhow!("failed to init NSView"))?
+```
+
+**Site C: AppDelegate init** (`app.rs:206`)
+
+`create_app_delegate` currently returns `Retained<AnyObject>`. Change it to
+return `anyhow::Result<Retained<AnyObject>>` and propagate with `?`. Update the
+caller in `connection.rs:38` to add `?`.
+
+```rust
+// app.rs — before:
+pub fn create_app_delegate() -> Retained<AnyObject> {
+    ...
+    Retained::from_raw(delegate).unwrap()
+}
+
+// app.rs — after:
+pub fn create_app_delegate() -> anyhow::Result<Retained<AnyObject>> {
+    ...
+    Retained::from_raw(delegate)
+        .ok_or_else(|| anyhow!("failed to init AppDelegate"))
+}
+
+// connection.rs — before:
+let delegate = create_app_delegate();
+
+// connection.rs — after:
+let delegate = create_app_delegate()?;
+```
+
+**Site D: menu wrapper init** (`menu.rs:170`)
+
+`RepresentedItem::wrap` currently returns `Retained<AnyObject>`. Change it to
+return `anyhow::Result<Retained<AnyObject>>`. Propagate `?` to all callers
+(likely `MenuItem` methods that call `.wrap()`).
+
+```rust
+// menu.rs — before:
+fn wrap(self) -> Retained<AnyObject> {
+    ...
+    Retained::from_raw(wrapper).unwrap()
+}
+
+// menu.rs — after:
+fn wrap(self) -> anyhow::Result<Retained<AnyObject>> {
+    ...
+    Retained::from_raw(wrapper)
+        .ok_or_else(|| anyhow!("failed to init menu wrapper"))
+}
+```
+
+**Smell 3 — `Weak::load().unwrap()` double unwrap** (`window.rs:1909`)
+
+`enable_opengl` already returns `anyhow::Result`, so replace the double unwrap
+with proper error handling:
+
+```rust
+// Before:
+let view = self.view_id.as_ref().unwrap().load().unwrap();
+
+// After:
+let view = self
+    .view_id
+    .as_ref()
+    .ok_or_else(|| anyhow!("view_id not set"))?
+    .load()
+    .ok_or_else(|| anyhow!("view has been deallocated"))?;
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. `cargo run --bin wezboard-gui` — app launches, window opens
+3. Grep confirms no `Retained::from_raw(...).unwrap()` remains in our modified
+   files
+4. Grep confirms no `load().unwrap()` remains on `view_id`
