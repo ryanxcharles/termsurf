@@ -608,7 +608,7 @@ pub struct WindowFrameConfig {
     pub border_bottom_color: Option<RgbaColor>,
 }
 
-const fn default_zero_pixel() -> Dimension {
+pub const fn default_zero_pixel() -> Dimension {
     Dimension::Pixels(0.)
 }
 

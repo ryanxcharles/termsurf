@@ -7,10 +7,11 @@ differentiate active vs inactive panes, matching the Ghostboard feature set.
 
 ## Background
 
-Ghostboard (Ghostty fork) implemented this feature across Issues 667-669 and
-672. The final solution uses three config keys — `focused-split-border-color`,
-`unfocused-split-border-color`, and `split-border-width` — rendered as SwiftUI
-overlay rectangles with content inset by the border width.
+Ghostboard (Ghostty fork) implemented this feature across Issues 667-669
+and 672. The final solution uses three config keys —
+`focused-split-border-color`, `unfocused-split-border-color`, and
+`split-border-width` — rendered as SwiftUI overlay rectangles with content inset
+by the border width.
 
 Wezboard (WezTerm fork) does not have this feature. WezTerm only draws a thin
 1px split divider line using the palette's `split` color via `filled_rectangle`
@@ -147,6 +148,7 @@ pub fn paint_pane_border(
 ```
 
 Logic:
+
 - Early return if `num_panes <= 1` or `pos.is_zoomed`.
 - Evaluate `self.config.split_border_width` as pixels using `DimensionContext`
   (same pattern as `padding_left_top`). Early return if 0.
@@ -165,23 +167,23 @@ Logic:
   - Right: `rect(x + width - bw, y, bw, height)`
 
 **(b) Inset content in `paint_pane`** — When `split_border_width > 0` and
-`num_panes > 1` (and not zoomed), adjust `background_rect` and `left_pixel_x`
-to push content inward on interior edges:
+`num_panes > 1` (and not zoomed), adjust `background_rect` and `left_pixel_x` to
+push content inward on interior edges:
 
 - `paint_pane` signature changes to accept `num_panes: usize`.
 - After computing `background_rect` (line 152), if borders are active:
   - On interior left edge (`pos.left != 0`): shift `background_rect.origin.x`
     right by `bw`, reduce width by `bw`, add `bw` to `left_pixel_x`.
-  - On interior top edge (`pos.top != 0`): shift `background_rect.origin.y`
-    down by `bw`, reduce height by `bw`. The `top_pixel_y` used for line
-    rendering is per-pane, so add `bw` to it.
-  - On interior right edge
-    (`pos.left + pos.width < self.terminal_size.cols`): reduce width by `bw`.
-  - On interior bottom edge
-    (`pos.top + pos.height < self.terminal_size.rows`): reduce height by `bw`.
+  - On interior top edge (`pos.top != 0`): shift `background_rect.origin.y` down
+    by `bw`, reduce height by `bw`. The `top_pixel_y` used for line rendering is
+    per-pane, so add `bw` to it.
+  - On interior right edge (`pos.left + pos.width < self.terminal_size.cols`):
+    reduce width by `bw`.
+  - On interior bottom edge (`pos.top + pos.height < self.terminal_size.rows`):
+    reduce height by `bw`.
 
-**4. `wezboard/wezboard-gui/src/termwindow/render/paint.rs`** — Three changes
-in `paint_pass()`:
+**4. `wezboard/wezboard-gui/src/termwindow/render/paint.rs`** — Three changes in
+`paint_pass()`:
 
 **(a)** Capture `num_panes` before the pane loop (line 249):
 
@@ -228,3 +230,21 @@ if split_border_width == 0. {
 5. Single pane — no borders drawn
 6. Remove config options — original thin divider behavior restored
 7. Zoom a pane (`Ctrl+Shift+Z`) — borders disappear while zoomed
+
+**Result:** Partial
+
+Border rendering works correctly: focused/unfocused colors apply, borders draw
+at the configured width on layer 2, `paint_split` is skipped when
+`split_border_width > 0`, and single-pane windows have no borders. However, the
+content inset does not work — borders paint over pane content instead of pushing
+it inward. The `background_rect`, `left_pixel_x`, and `top_pixel_y` adjustments
+in `paint_pane` do not effectively prevent the border from covering terminal
+text.
+
+#### Conclusion
+
+The border drawing infrastructure is solid. The content inset approach needs
+rethinking — adjusting `background_rect` and pixel offsets inside `paint_pane`
+is not sufficient to push the rendered terminal lines away from the border
+region. Experiment 2 should focus on fixing the content inset so borders don't
+obscure text.

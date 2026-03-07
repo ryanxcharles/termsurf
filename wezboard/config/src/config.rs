@@ -620,6 +620,15 @@ pub struct Config {
     #[dynamic(default = "default_inactive_pane_hsb")]
     pub inactive_pane_hsb: HsbTransform,
 
+    #[dynamic(default)]
+    pub focused_split_border_color: Option<RgbaColor>,
+
+    #[dynamic(default)]
+    pub unfocused_split_border_color: Option<RgbaColor>,
+
+    #[dynamic(try_from = "crate::units::PixelUnit", default = "crate::color::default_zero_pixel")]
+    pub split_border_width: Dimension,
+
     #[dynamic(default = "default_one_point_oh")]
     pub text_background_opacity: f32,
 

@@ -246,6 +246,7 @@ impl crate::TermWindow {
             .context("filled_rectangle for window background")?;
         }
 
+        let num_panes = panes.len();
         for pos in panes {
             if pos.is_active {
                 self.update_text_cursor(&pos);
@@ -254,14 +255,25 @@ impl crate::TermWindow {
                     mux::Mux::get().record_focus_for_current_identity(pos.pane.pane_id());
                 }
             }
-            self.paint_pane(&pos, &mut layers).context("paint_pane")?;
+            self.paint_pane(&pos, &mut layers, num_panes)
+                .context("paint_pane")?;
+            self.paint_pane_border(&pos, &mut layers, num_panes)?;
         }
 
-        if let Some(pane) = self.get_active_pane_or_overlay() {
-            let splits = self.get_splits();
-            for split in &splits {
-                self.paint_split(&mut layers, split, &pane)
-                    .context("paint_split")?;
+        let split_border_width = self.config.split_border_width.evaluate_as_pixels(
+            config::DimensionContext {
+                dpi: self.dimensions.dpi as f32,
+                pixel_max: self.dimensions.pixel_width as f32,
+                pixel_cell: self.render_metrics.cell_size.width as f32,
+            },
+        );
+        if split_border_width == 0. {
+            if let Some(pane) = self.get_active_pane_or_overlay() {
+                let splits = self.get_splits();
+                for split in &splits {
+                    self.paint_split(&mut layers, split, &pane)
+                        .context("paint_split")?;
+                }
             }
         }
 
