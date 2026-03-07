@@ -107,6 +107,61 @@ async fn handle_message(
             (&**stream).write_all(&len).await?;
             (&**stream).write_all(&payload).await?;
         }
+        Some(Msg::UrlChanged(u)) => {
+            log::info!("UrlChanged: tab_id={} url={}", u.tab_id, u.url);
+            forward_to_tui(u.tab_id, Msg::UrlChanged(u), state);
+        }
+        Some(Msg::LoadingState(l)) => {
+            log::debug!("LoadingState: tab_id={} state={}", l.tab_id, l.state);
+            forward_to_tui(l.tab_id, Msg::LoadingState(l), state);
+        }
+        Some(Msg::TitleChanged(t)) => {
+            log::info!("TitleChanged: tab_id={} title={}", t.tab_id, t.title);
+            forward_to_tui(t.tab_id, Msg::TitleChanged(t), state);
+        }
+        Some(Msg::Navigate(n)) => {
+            log::info!("Navigate: pane_id={} url={}", n.pane_id, n.url);
+            let url = n.url.clone();
+            forward_to_chromium(
+                &n.pane_id,
+                |tab_id| {
+                    Msg::Navigate(proto::Navigate {
+                        tab_id,
+                        pane_id: String::new(),
+                        url,
+                    })
+                },
+                state,
+            );
+        }
+        Some(Msg::SetColorScheme(s)) => {
+            log::info!("SetColorScheme: pane_id={} dark={}", s.pane_id, s.dark);
+            let dark = s.dark;
+            {
+                let mut st = state.lock().unwrap();
+                if let Some(pane) = st.panes.get_mut(&s.pane_id) {
+                    pane.dark = dark;
+                }
+            }
+            forward_to_chromium(
+                &s.pane_id,
+                |tab_id| {
+                    Msg::SetColorScheme(proto::SetColorScheme {
+                        tab_id,
+                        pane_id: String::new(),
+                        dark,
+                    })
+                },
+                state,
+            );
+        }
+        Some(Msg::ModeChanged(m)) => {
+            log::info!("ModeChanged: pane_id={} browsing={}", m.pane_id, m.browsing);
+            let mut st = state.lock().unwrap();
+            if let Some(pane) = st.panes.get_mut(&m.pane_id) {
+                pane.browsing = m.browsing;
+            }
+        }
         Some(other) => {
             log::debug!("unhandled TermSurf message: {:?}", other);
         }
@@ -115,6 +170,43 @@ async fn handle_message(
         }
     }
     Ok(())
+}
+
+fn forward_to_tui(tab_id: i64, msg: Msg, state: &SharedState) {
+    let st = state.lock().unwrap();
+    let Some(pane_id) = st.tab_to_pane.get(&tab_id) else {
+        log::warn!("forward_to_tui: unknown tab_id={}", tab_id);
+        return;
+    };
+    let Some(pane) = st.panes.get(pane_id) else {
+        return;
+    };
+    let wrapped = TermSurfMessage { msg: Some(msg) };
+    let _ = pane.tui_tx.try_send(wrapped.encode_to_vec());
+}
+
+fn forward_to_chromium(pane_id: &str, build_msg: impl FnOnce(i64) -> Msg, state: &SharedState) {
+    let st = state.lock().unwrap();
+    let Some(pane) = st.panes.get(pane_id) else {
+        log::warn!("forward_to_chromium: unknown pane_id={}", pane_id);
+        return;
+    };
+    if pane.tab_id == 0 {
+        log::warn!("forward_to_chromium: pane {} has no tab yet", pane_id);
+        return;
+    }
+    let tab_id = pane.tab_id;
+    let key = TermSurfState::server_key(&pane.profile, &pane.browser);
+    let Some(server) = st.servers.get(&key) else {
+        return;
+    };
+    let Some(ref server_tx) = server.tx else {
+        return;
+    };
+    let msg = TermSurfMessage {
+        msg: Some(build_msg(tab_id)),
+    };
+    let _ = server_tx.try_send(msg.encode_to_vec());
 }
 
 fn handle_set_overlay(
