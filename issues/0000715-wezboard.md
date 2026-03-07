@@ -452,30 +452,36 @@ Ghostboard).
 Set `TERMSURF_SOCKET={path}` in child process environment so TUIs can discover
 it.
 
+#### Code location
+
+All TermSurf code lives inside `wezboard-gui` as a module — no separate crate.
+This matches Ghostboard's pattern (socket server in `xpc.zig`, part of the
+apprt) and gives the module direct access to `Mux`, `Window`, the renderer, and
+everything else it will need for future integration (BrowserPane, CALayerHost,
+input routing).
+
 #### New files
 
-1. **`wezboard/termsurf/Cargo.toml`** — New crate `termsurf` with deps: `prost`,
-   `smol`, `async-io`, `log`, `anyhow`, `wezboard-uds`.
-2. **`wezboard/termsurf/build.rs`** — Compile `proto/termsurf.proto` via
-   `prost-build`.
-3. **`wezboard/termsurf/src/lib.rs`** — Public API: `TermSurfListener`,
-   `TermSurfState`, generated protobuf types.
-4. **`wezboard/termsurf/src/listener.rs`** — `TermSurfListener` struct with
-   `run()` method (blocking accept loop, mirrors `LocalListener`).
-5. **`wezboard/termsurf/src/conn.rs`** — Per-connection async handler. Reads
-   length-prefixed messages, detects connection type on first message
-   (`ServerRegister` = Chromium, else = TUI), dispatches to stub handlers.
-6. **`wezboard/termsurf/src/state.rs`** — `TermSurfState` global (empty
-   registries for now).
+1. **`wezboard/wezboard-gui/build.rs`** — Compile `proto/termsurf.proto` via
+   `prost-build`. The proto file path is `../../proto/termsurf.proto` relative
+   to the crate root.
+2. **`wezboard/wezboard-gui/src/termsurf/mod.rs`** — Module root. Re-exports
+   `TermSurfListener`, generated protobuf types.
+3. **`wezboard/wezboard-gui/src/termsurf/listener.rs`** — `TermSurfListener`
+   struct with `run()` method (blocking accept loop, mirrors `LocalListener`).
+4. **`wezboard/wezboard-gui/src/termsurf/conn.rs`** — Per-connection async
+   handler. Reads length-prefixed messages, detects connection type on first
+   message (`ServerRegister` = Chromium, else = TUI), dispatches to stub
+   handlers.
+5. **`wezboard/wezboard-gui/src/termsurf/state.rs`** — `TermSurfState` global
+   (empty registries for now).
 
 #### Modified files
 
-1. **`wezboard/Cargo.toml`** — Add `termsurf` to workspace members and
-   dependencies.
-2. **`wezboard/wezboard-gui/Cargo.toml`** — Add `termsurf` dependency.
-3. **`wezboard/wezboard-gui/src/main.rs`** — In `async_run_terminal_gui()`,
-   after `spawn_mux_server()`, call `spawn_termsurf_server()` which creates a
-   `TermSurfListener` on a new thread.
+1. **`wezboard/wezboard-gui/Cargo.toml`** — Add `prost` and `prost-build` deps.
+2. **`wezboard/wezboard-gui/src/main.rs`** — Add `mod termsurf;`. In
+   `async_run_terminal_gui()`, after `spawn_mux_server()`, call
+   `spawn_termsurf_server()` which creates a `TermSurfListener` on a new thread.
 
 #### Connection type detection
 
@@ -532,12 +538,12 @@ fn handle_message(msg: TermSurfMessage, conn: &mut Connection) {
 
 #### Steps
 
-1. Create the `termsurf` crate with protobuf compilation.
-2. Implement `TermSurfListener` (accept loop on dedicated thread).
-3. Implement per-connection async handler (length-prefixed framing + dispatch).
-4. Wire into `wezboard-gui/src/main.rs`.
-5. Build and verify socket is created on startup.
-6. Test with `socat` or a small script that sends a `HelloRequest`.
+1. Add `prost` and `prost-build` to `wezboard-gui/Cargo.toml`, create `build.rs`
+   to compile the proto.
+2. Create `src/termsurf/` module with listener, connection handler, and state.
+3. Wire `spawn_termsurf_server()` into `main.rs`.
+4. Build and verify socket is created on startup.
+5. Test with `socat` or a small script that sends a `HelloRequest`.
 
 #### Verification
 
