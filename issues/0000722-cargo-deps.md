@@ -52,8 +52,39 @@ The update splits naturally into two steps:
 
 ## Files affected
 
-| File                                | Changes                         |
-| ----------------------------------- | ------------------------------- |
-| `wezboard/Cargo.lock`               | Updated by `cargo update`       |
-| `wezboard/env-bootstrap/Cargo.toml` | `env_logger` version bump       |
-| `wezboard/env-bootstrap/src/lib.rs` | Migrate `filter::Builder` usage |
+| File                                    | Changes                         |
+| --------------------------------------- | ------------------------------- |
+| `wezboard/Cargo.lock`                   | Updated by `cargo update`       |
+| `wezboard/env-bootstrap/Cargo.toml`     | `env_logger` version bump       |
+| `wezboard/env-bootstrap/src/ringlog.rs` | Migrate `filter::Builder` usage |
+
+## Experiments
+
+### Experiment 1: Update all cross-platform dependencies
+
+Update all outdated cross-platform dependencies in a single experiment. This
+combines the `cargo update` patch bumps with the env-bootstrap env_logger
+0.10→0.11 migration, since they're all small changes that belong together.
+
+#### Changes
+
+1. **`cargo update`** — Run `cargo update` in `wezboard/` to bump
+   semver-compatible deps: `bitflags` 2.10.0→2.11.0, `env_logger` 0.11.8→0.11.9,
+   `env_filter` 0.1.4→1.0.0, `thiserror` 2.0.17→2.0.18, `thiserror-impl`
+   2.0.17→2.0.18. Zero code changes needed.
+
+2. **`wezboard/env-bootstrap/Cargo.toml`** (line 17): Change
+   `env_logger = "0.10"` to `env_logger = { workspace = true }` (workspace
+   version is "0.11"). Add `env_filter = "1.0"` as a new direct dependency.
+
+3. **`wezboard/env-bootstrap/src/ringlog.rs`** (line 7): Change import from
+   `env_logger::filter::{Builder as FilterBuilder, Filter}` to
+   `env_filter::{Builder as FilterBuilder, Filter}`. The `env_filter` crate
+   provides identical `Builder` and `Filter` types with the same API
+   (`filter_module`, `parse`, `filter_level`, `build`, `matches`, `enabled`,
+   `filter`).
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. `cargo run --bin wezboard-gui` — app launches and renders
