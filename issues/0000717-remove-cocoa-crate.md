@@ -715,7 +715,7 @@ helper types.
 - `nsstring(...)` returns `Retained<NSString>` now. Callers that did
   `*nsstring(s) as *mut AnyObject` change to `&*nsstring(s)` or pass as
   `&NSString`.
-- Lines 25–28: `nsstring("...") ` — used in `msg_send!` as
+- Lines 25–28: `nsstring("...")` — used in `msg_send!` as
   `*message_text as *mut AnyObject`. Change to `&*message_text`.
 - Lines 30–33: same pattern for `setMessageText:`, `setInformativeText:`,
   `addButtonWithTitle:`.
@@ -983,9 +983,9 @@ verification:
    Fixed by using `*mut CGContext` from `objc2_core_graphics`.
 
 2. **`draggingEntered:`** — Return type was `Bool` but the ObjC protocol
-   declares `NSDragOperation` (`NSUInteger` = `usize`). Same encoding
-   validation caught it. Fixed by returning `usize` (0 = `NSDragOperationNone`,
-   1 = `NSDragOperationCopy`).
+   declares `NSDragOperation` (`NSUInteger` = `usize`). Same encoding validation
+   caught it. Fixed by returning `usize` (0 = `NSDragOperationNone`, 1 =
+   `NSDragOperationCopy`).
 
 Both bugs existed silently in the old code because `ClassDecl` (objc 0.2) never
 validated type encodings — it blindly called `class_addMethod`. The migration to
@@ -994,5 +994,55 @@ validated type encodings — it blindly called `class_addMethod`. The migration 
 **Bridge helpers removed from `mod.rs`:** `sel2to1`, `cls2to1`, `cls1to2`,
 `get_class` — all confirmed unused after the migration.
 
-Net diff: 5 files changed, −187 lines. Commits: `9c7308f` (main changes),
-fixup commit (CGContext + draggingEntered fixes).
+Net diff: 5 files changed, −187 lines. Commits: `9c7308f` (main changes), fixup
+commit (CGContext + draggingEntered fixes).
+
+## Conclusion
+
+Five experiments completed across this issue. All passed.
+
+### What was accomplished
+
+**Fully migrated files** (zero `cocoa::` or `objc::` imports):
+
+- `window/src/os/macos/app.rs` — Experiment 1
+- `window/src/os/macos/clipboard.rs` — Experiment 1
+- `window/src/os/macos/menu.rs` — Experiment 2
+- `window/src/os/macos/connection.rs` — Experiment 2
+- `window/src/os/macos/mod.rs` — Experiment 4 (bridge helpers removed in Exp 5)
+
+**Partially migrated:**
+
+- `window/src/os/macos/window.rs` — Experiments 3 and 5 migrated the class
+  registration system (`ClassDecl` → `ClassBuilder`), all ~52 callback
+  signatures to objc2 types, removed `MsgSendRect`/`MsgSendSize`/local
+  `NSRange`/all geometry `transmute` calls, and fixed 16 `msg_send!` type
+  mismatches. Still uses `cocoa` traits for method calls (~50 call sites) and
+  `objc` 0.2 for `StrongPtr`/`WeakPtr`/`Object`/`BOOL`/`YES`/`NO`.
+
+**Key patterns established:**
+
+- Callback bridge pattern: `*mut AnyObject` in signature, cast to
+  `&mut Object`/`id` at top of body for cocoa trait compatibility
+- `ClassBuilder` validates type encodings against superclass — stricter than
+  `ClassDecl`, which caught two latent bugs (`CGContextRef` encoding mismatch in
+  `drawLayer:inContext:`, `NSDragOperation` return type in `draggingEntered:`)
+- `CStr` literals (`c"..."`) for all ObjC name lookups
+
+### What remains (for a future issue)
+
+1. **`window.rs` cocoa trait calls** (~50 sites) — Replace `NSWindow::frame()`,
+   `NSEvent::characters()`, `NSScreen::frame()`, etc. with `objc2-app-kit` typed
+   methods. This is the bulk of remaining work.
+
+2. **`window.rs` objc 0.2 types** — Replace `StrongPtr`/`WeakPtr` with
+   `Retained<T>`/`Weak<T>`, `Object` with `AnyObject`, `BOOL`/`YES`/`NO` with
+   `bool`/`true`/`false`. Once cocoa trait calls are gone, the callback bridge
+   pattern (`let this = &mut *(this as *mut Object)`) can be removed.
+
+3. **`wezboard-font/src/locator/core_text.rs`** — Still imports
+   `cocoa::base::id`. Trivial replacement with `*mut AnyObject`.
+
+4. **Remove `cocoa` and `objc` dependencies** — After all files are migrated,
+   delete from `window/Cargo.toml`, `wezboard-font/Cargo.toml`, and workspace
+   `Cargo.toml`.
