@@ -11,8 +11,7 @@ use crate::Appearance;
 use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicyRegular, NSScreen};
 use cocoa::base::{id, nil};
 use cocoa::foundation::{NSArray, NSInteger};
-use objc::runtime::{Object, BOOL, YES};
-use objc::*;
+use objc2::runtime::AnyObject;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -37,7 +36,7 @@ impl Connection {
             ns_app.setActivationPolicy_(NSApplicationActivationPolicyRegular);
 
             let delegate = create_app_delegate();
-            let () = msg_send![ns_app, setDelegate: delegate];
+            let () = objc2::msg_send![ns_app as *const AnyObject, setDelegate: *delegate as *mut AnyObject];
 
             let conn = Self {
                 ns_app,
@@ -123,10 +122,11 @@ impl ConnectionOps for Connection {
             // bounce via an event callback to encourage stop to apply
             // to the correct level of run loop
             promise::spawn::spawn_into_main_thread(async move {
-                let () = msg_send![NSApp(), stop: nil];
+                let app = NSApp() as *const AnyObject;
+                let () = objc2::msg_send![app, stop: std::ptr::null::<AnyObject>()];
                 // Generate a UI event so that the run loop breaks out
                 // after receiving the stop
-                let () = msg_send![NSApp(), abortModal];
+                let () = objc2::msg_send![app, abortModal];
             })
             .detach();
         }
@@ -134,8 +134,10 @@ impl ConnectionOps for Connection {
 
     fn get_appearance(&self) -> Appearance {
         let name = unsafe {
-            let appearance: id = msg_send![self.ns_app, effectiveAppearance];
-            nsstring_to_str(msg_send![appearance, name])
+            let appearance: *mut AnyObject =
+                objc2::msg_send![self.ns_app as *const AnyObject, effectiveAppearance];
+            let name_obj: *mut AnyObject = objc2::msg_send![appearance, name];
+            nsstring_to_str(name_obj as *mut objc::runtime::Object)
         };
         log::debug!("NSAppearanceName is {name}");
         match name {
@@ -162,7 +164,7 @@ impl ConnectionOps for Connection {
 
     fn hide_application(&self) {
         unsafe {
-            let () = msg_send![self.ns_app, hide: self.ns_app];
+            let () = objc2::msg_send![self.ns_app as *const AnyObject, hide: self.ns_app as *const AnyObject];
         }
     }
 
@@ -199,7 +201,7 @@ impl ConnectionOps for Connection {
     }
 }
 
-pub fn nsscreen_to_screen_info(screen: *mut Object) -> ScreenInfo {
+pub fn nsscreen_to_screen_info(screen: *mut objc::runtime::Object) -> ScreenInfo {
     let frame = unsafe { NSScreen::frame(screen) };
     let backing_frame = unsafe { NSScreen::convertRectToBacking_(screen, frame) };
     let rect = euclid::rect(
@@ -208,9 +210,20 @@ pub fn nsscreen_to_screen_info(screen: *mut Object) -> ScreenInfo {
         backing_frame.size.width as isize,
         backing_frame.size.height as isize,
     );
-    let has_name: BOOL = unsafe { msg_send!(screen, respondsToSelector: sel!(localizedName)) };
-    let name = if has_name == YES {
-        unsafe { nsstring_to_str(msg_send!(screen, localizedName)) }.to_string()
+
+    let responds_to_name: bool = unsafe {
+        objc2::msg_send![
+            screen as *const AnyObject,
+            respondsToSelector: objc2::sel!(localizedName)
+        ]
+    };
+    let name = if responds_to_name {
+        unsafe {
+            let name_obj: *mut AnyObject =
+                objc2::msg_send![screen as *const AnyObject, localizedName];
+            nsstring_to_str(name_obj as *mut objc::runtime::Object)
+        }
+        .to_string()
     } else {
         format!(
             "{}x{}@{},{}",
@@ -221,10 +234,15 @@ pub fn nsscreen_to_screen_info(screen: *mut Object) -> ScreenInfo {
         )
     };
 
-    let has_max_fps: BOOL =
-        unsafe { msg_send!(screen, respondsToSelector: sel!(maximumFramesPerSecond)) };
-    let max_fps = if has_max_fps == YES {
-        let max_fps: NSInteger = unsafe { msg_send!(screen, maximumFramesPerSecond) };
+    let responds_to_fps: bool = unsafe {
+        objc2::msg_send![
+            screen as *const AnyObject,
+            respondsToSelector: objc2::sel!(maximumFramesPerSecond)
+        ]
+    };
+    let max_fps = if responds_to_fps {
+        let max_fps: NSInteger =
+            unsafe { objc2::msg_send![screen as *const AnyObject, maximumFramesPerSecond] };
         Some(max_fps as usize)
     } else {
         None

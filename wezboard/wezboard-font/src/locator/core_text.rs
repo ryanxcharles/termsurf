@@ -1,5 +1,4 @@
 #![cfg(target_os = "macos")]
-#![allow(unexpected_cfgs)] // <https://github.com/SSheldon/rust-objc/issues/125>
 
 use crate::locator::{FontDataSource, FontLocator, FontOrigin};
 use crate::parser::ParsedFont;
@@ -11,7 +10,7 @@ use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::{CFString, CFStringRef};
 use core_text::font::*;
 use core_text::font_descriptor::*;
-use objc::*;
+use objc2::runtime::{AnyClass, AnyObject};
 use rangeset::RangeSet;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -252,14 +251,21 @@ fn build_fallback_list_impl() -> anyhow::Result<Vec<ParsedFont>> {
     let menlo =
         new_from_name("Menlo", 0.0).map_err(|_| anyhow::anyhow!("failed to get Menlo font"))?;
 
-    let user_defaults: id = unsafe { msg_send![class!(NSUserDefaults), standardUserDefaults] };
+    let user_defaults: id = unsafe {
+        let cls = AnyClass::get(c"NSUserDefaults").unwrap();
+        let __r: *mut AnyObject = objc2::msg_send![cls, standardUserDefaults];
+        __r as id
+    };
 
     let apple_lang = "AppleLanguages"
         .parse::<CFString>()
         .map_err(|_| anyhow::anyhow!("failed to parse lang name en as CFString"))?;
 
-    let langs: CFArray<CFString> =
-        unsafe { msg_send![user_defaults, stringArrayForKey:apple_lang] };
+    let langs: CFArray<CFString> = unsafe {
+        let key_ptr = apple_lang.as_concrete_TypeRef() as *const _ as *const AnyObject;
+        let __r: *mut AnyObject = objc2::msg_send![user_defaults as *const _ as *const AnyObject, stringArrayForKey: key_ptr];
+        CFArray::wrap_under_get_rule(__r as *const _)
+    };
 
     let cascade = cascade_list_for_languages(&menlo, &langs);
     let mut fonts = vec![];

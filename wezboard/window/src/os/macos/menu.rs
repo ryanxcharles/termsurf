@@ -1,4 +1,4 @@
-use crate::macos::{nsstring, nsstring_to_str};
+use crate::macos::{cls1to2, get_class as get_objc_class, nsstring, nsstring_to_str, sel2to1};
 use crate::superclass;
 pub use cocoa::appkit::NSEventModifierFlags;
 use cocoa::appkit::{NSApp, NSApplication, NSMenu, NSMenuItem};
@@ -9,7 +9,7 @@ use config::keyassignment::KeyAssignment;
 use objc::declare::ClassDecl;
 use objc::rc::StrongPtr;
 use objc::runtime::{Class, Object, Sel, BOOL, NO, YES};
-pub use objc::*;
+use objc2::runtime::AnyObject;
 use std::ffi::c_void;
 
 pub struct Menu {
@@ -65,7 +65,7 @@ impl Menu {
     pub fn assign_as_help_menu(&self) {
         unsafe {
             let ns_app = NSApp();
-            let () = msg_send![ns_app, setHelpMenu:*self.menu];
+            let () = objc2::msg_send![ns_app as *const AnyObject, setHelpMenu: *self.menu as *mut AnyObject];
         }
     }
 
@@ -86,7 +86,12 @@ impl Menu {
     pub fn assign_as_app_menu(&self) {
         unsafe {
             let ns_app = NSApp();
-            let () = msg_send![ns_app, performSelector:sel!(setAppleMenu:) withObject:*self.menu];
+            let sel = objc2::sel!(setAppleMenu:);
+            let () = objc2::msg_send![
+                ns_app as *const AnyObject,
+                performSelector: sel,
+                withObject: *self.menu as *mut AnyObject
+            ];
         }
     }
 
@@ -98,7 +103,11 @@ impl Menu {
 
     pub fn item_with_title(&self, title: &str) -> Option<MenuItem> {
         unsafe {
-            let item: id = msg_send![*self.menu, itemWithTitle:*nsstring(title)];
+            let item: *mut AnyObject = objc2::msg_send![
+                *self.menu as *const AnyObject,
+                itemWithTitle: *nsstring(title) as *mut AnyObject
+            ];
+            let item = item as id;
             if item.is_null() {
                 None
             } else {
@@ -129,19 +138,19 @@ impl Menu {
 
     pub fn remove_all_items(&self) {
         unsafe {
-            let () = msg_send![*self.menu, removeAllItems];
+            let () = objc2::msg_send![*self.menu as *const AnyObject, removeAllItems];
         }
     }
 
     pub fn remove_item(&self, item: &MenuItem) {
         unsafe {
-            let () = msg_send![*self.menu, removeItem:*item.item];
+            let () = objc2::msg_send![*self.menu as *const AnyObject, removeItem: *item.item as *mut AnyObject];
         }
     }
 
     pub fn items(&self) -> Vec<MenuItem> {
         unsafe {
-            let n: NSInteger = msg_send![*self.menu, numberOfItems];
+            let n: NSInteger = objc2::msg_send![*self.menu as *const AnyObject, numberOfItems];
             let mut items = vec![];
             for i in 0..n {
                 items.push(self.item_at_index(i as _).expect("index to be valid"));
@@ -152,7 +161,10 @@ impl Menu {
 
     pub fn index_of_item_with_represented_object(&self, object: id) -> Option<usize> {
         unsafe {
-            let n: NSInteger = msg_send![*self.menu, indexOfItemWithRepresentedObject: object];
+            let n: NSInteger = objc2::msg_send![
+                *self.menu as *const AnyObject,
+                indexOfItemWithRepresentedObject: object as *mut AnyObject
+            ];
             if n == -1 {
                 None
             } else {
@@ -183,8 +195,9 @@ pub enum RepresentedItem {
 
 impl RepresentedItem {
     fn wrap(self) -> StrongPtr {
-        let wrapper: id = unsafe { msg_send![get_wrapper_class(), alloc] };
-        let wrapper = unsafe { StrongPtr::new(wrapper) };
+        let wrapper: *mut AnyObject =
+            unsafe { objc2::msg_send![cls1to2(get_wrapper_class()), alloc] };
+        let wrapper = unsafe { StrongPtr::new(wrapper as id) };
         let item = Box::new(self);
         let item: *const RepresentedItem = Box::into_raw(item);
         let item = item as *const c_void;
@@ -233,18 +246,20 @@ impl MenuItem {
 
     pub fn get_action(&self) -> Option<SEL> {
         unsafe {
-            let s: SEL = msg_send![*self.item, action];
-            if s.as_ptr().is_null() {
+            // action returns a Sel-sized pointer; get as raw pointer then transmute
+            let s: *const std::ffi::c_void =
+                objc2::msg_send![*self.item as *const AnyObject, action];
+            if s.is_null() {
                 None
             } else {
-                Some(s)
+                Some(std::mem::transmute(s))
             }
         }
     }
 
     pub fn set_tool_tip(&self, tip: &str) {
         unsafe {
-            let () = msg_send![*self.item, setToolTip:*nsstring(tip)];
+            let () = objc2::msg_send![*self.item as *const AnyObject, setToolTip: *nsstring(tip) as *mut AnyObject];
         }
     }
 
@@ -262,7 +277,8 @@ impl MenuItem {
 
     pub fn get_sub_menu(&self) -> Option<Menu> {
         unsafe {
-            let menu: id = msg_send![*self.item, submenu];
+            let menu: *mut AnyObject = objc2::msg_send![*self.item as *const AnyObject, submenu];
+            let menu = menu as id;
             if menu.is_null() {
                 None
             } else {
@@ -275,7 +291,8 @@ impl MenuItem {
 
     pub fn get_parent_item(&self) -> Option<Self> {
         unsafe {
-            let item: id = msg_send![*self.item, parentItem];
+            let item: *mut AnyObject = objc2::msg_send![*self.item as *const AnyObject, parentItem];
+            let item = item as id;
             if item.is_null() {
                 None
             } else {
@@ -288,7 +305,8 @@ impl MenuItem {
 
     pub fn get_menu(&self) -> Option<Menu> {
         unsafe {
-            let item: id = msg_send![*self.item, menu];
+            let item: *mut AnyObject = objc2::msg_send![*self.item as *const AnyObject, menu];
+            let item = item as id;
             if item.is_null() {
                 None
             } else {
@@ -302,43 +320,45 @@ impl MenuItem {
     /// Set an integer tag to identify this item
     pub fn set_tag(&self, tag: NSInteger) {
         unsafe {
-            let () = msg_send![*self.item, setTag: tag];
+            let () = objc2::msg_send![*self.item as *const AnyObject, setTag: tag];
         }
     }
 
     pub fn get_title(&self) -> String {
         unsafe {
-            let title: id = msg_send![*self.item, title];
-            nsstring_to_str(title).to_string()
+            let title: *mut AnyObject = objc2::msg_send![*self.item as *const AnyObject, title];
+            nsstring_to_str(title as *mut Object).to_string()
         }
     }
 
     pub fn set_title(&self, title: &str) {
         unsafe {
-            let () = msg_send![*self.item, setTitle:*nsstring(title)];
+            let () = objc2::msg_send![*self.item as *const AnyObject, setTitle: *nsstring(title) as *mut AnyObject];
         }
     }
 
     pub fn set_key_equivalent(&self, equiv: &str) {
         unsafe {
-            let () = msg_send![*self.item, setKeyEquivalent:*nsstring(equiv)];
+            let () = objc2::msg_send![*self.item as *const AnyObject, setKeyEquivalent: *nsstring(equiv) as *mut AnyObject];
         }
     }
 
     pub fn get_tag(&self) -> NSInteger {
-        unsafe { msg_send![*self.item, tag] }
+        unsafe { objc2::msg_send![*self.item as *const AnyObject, tag] }
     }
 
     /// Associate the item to an object
     fn set_represented_object(&self, object: id) {
         unsafe {
-            let () = msg_send![*self.item, setRepresentedObject: object];
+            let () = objc2::msg_send![*self.item as *const AnyObject, setRepresentedObject: object as *mut AnyObject];
         }
     }
 
     fn get_represented_object(&self) -> Option<StrongPtr> {
         unsafe {
-            let object: id = msg_send![*self.item, representedObject];
+            let object: *mut AnyObject =
+                objc2::msg_send![*self.item as *const AnyObject, representedObject];
+            let object = object as id;
             if object.is_null() {
                 None
             } else {
@@ -359,7 +379,7 @@ impl MenuItem {
 
     pub fn set_key_equiv_modifier_mask(&self, mods: NSEventModifierFlags) {
         unsafe {
-            let () = msg_send![*self.item, setKeyEquivalentModifierMask: mods];
+            let () = objc2::msg_send![*self.item as *const AnyObject, setKeyEquivalentModifierMask: mods.bits() as usize];
         }
     }
 }
@@ -370,8 +390,8 @@ const WRAPPER_FIELD_NAME: &str = "item";
 /// it with a MenuItem
 fn get_wrapper_class() -> &'static Class {
     Class::get(WRAPPER_CLS_NAME).unwrap_or_else(|| {
-        let mut cls =
-            ClassDecl::new(WRAPPER_CLS_NAME, class!(NSObject)).expect("Unable to register class");
+        let mut cls = ClassDecl::new(WRAPPER_CLS_NAME, get_objc_class(c"NSObject"))
+            .expect("Unable to register class");
 
         extern "C" fn dealloc(this: &mut Object, _sel: Sel) {
             unsafe {
@@ -380,7 +400,10 @@ fn get_wrapper_class() -> &'static Class {
                 let item = Box::from_raw(item);
                 drop(item);
                 let superclass = superclass(this);
-                let () = msg_send![super(this, superclass), dealloc];
+                let () = objc2::msg_send![
+                    super(this as *const _ as *const AnyObject, cls1to2(superclass)),
+                    dealloc
+                ];
             }
         }
 
@@ -398,9 +421,12 @@ fn get_wrapper_class() -> &'static Class {
 
         cls.add_ivar::<*mut c_void>(WRAPPER_FIELD_NAME);
         unsafe {
-            cls.add_method(sel!(dealloc), dealloc as extern "C" fn(&mut Object, Sel));
             cls.add_method(
-                sel!(isEqual:),
+                sel2to1(objc2::sel!(dealloc)),
+                dealloc as extern "C" fn(&mut Object, Sel),
+            );
+            cls.add_method(
+                sel2to1(objc2::sel!(isEqual:)),
                 is_equal as extern "C" fn(&mut Object, Sel, *mut Object) -> BOOL,
             );
         }

@@ -1,17 +1,17 @@
+use super::{cls1to2, get_class as get_objc_class, sel2to1};
 use crate::connection::ConnectionOps;
 use crate::macos::menu::RepresentedItem;
 use crate::macos::{nsstring, nsstring_to_str};
 use crate::menu::{Menu, MenuItem};
 use crate::{ApplicationEvent, Connection};
 use cocoa::appkit::NSApplicationTerminateReply;
-use cocoa::base::id;
 use cocoa::foundation::NSInteger;
 use config::keyassignment::KeyAssignment;
 use config::WindowCloseConfirmation;
 use objc::declare::ClassDecl;
 use objc::rc::StrongPtr;
 use objc::runtime::{Class, Object, Sel, BOOL, NO, YES};
-use objc::*;
+use objc2::runtime::{AnyClass, AnyObject};
 
 const CLS_NAME: &str = "WezboardAppDelegate";
 
@@ -25,22 +25,23 @@ extern "C" fn application_should_terminate(
         match config::configuration().window_close_confirmation {
             WindowCloseConfirmation::NeverPrompt => terminate_now(),
             WindowCloseConfirmation::AlwaysPrompt => {
-                let alert: id = msg_send![class!(NSAlert), alloc];
-                let alert: id = msg_send![alert, init];
+                let ns_alert_cls = AnyClass::get(c"NSAlert").unwrap();
+                let alert: *mut AnyObject = objc2::msg_send![ns_alert_cls, alloc];
+                let alert: *mut AnyObject = objc2::msg_send![alert, init];
                 let message_text = nsstring("Terminate Wezboard?");
                 let info_text = nsstring("Detach and close all panes and terminate wezboard?");
                 let cancel = nsstring("Cancel");
                 let ok = nsstring("Ok");
 
-                let () = msg_send![alert, setMessageText: message_text];
-                let () = msg_send![alert, setInformativeText: info_text];
-                let () = msg_send![alert, addButtonWithTitle: cancel];
-                let () = msg_send![alert, addButtonWithTitle: ok];
+                let () = objc2::msg_send![alert, setMessageText: *message_text as *mut AnyObject];
+                let () = objc2::msg_send![alert, setInformativeText: *info_text as *mut AnyObject];
+                let () = objc2::msg_send![alert, addButtonWithTitle: *cancel as *mut AnyObject];
+                let () = objc2::msg_send![alert, addButtonWithTitle: *ok as *mut AnyObject];
                 #[allow(non_upper_case_globals)]
                 const NSModalResponseCancel: NSInteger = 1000;
                 #[allow(non_upper_case_globals, dead_code)]
                 const NSModalResponseOK: NSInteger = 1001;
-                let result: NSInteger = msg_send![alert, runModal];
+                let result: NSInteger = objc2::msg_send![alert, runModal];
                 log::info!("alert result is {result}");
 
                 if result == NSModalResponseCancel {
@@ -134,8 +135,11 @@ extern "C" fn application_dock_menu(
     _app: *mut Object,
 ) -> *mut Object {
     let dock_menu = Menu::new_with_title("");
-    let new_window_item =
-        MenuItem::new_with("New Window", Some(sel!(wezboardPerformKeyAssignment:)), "");
+    let new_window_item = MenuItem::new_with(
+        "New Window",
+        Some(sel2to1(objc2::sel!(wezboardPerformKeyAssignment:))),
+        "",
+    );
     new_window_item
         .set_represented_item(RepresentedItem::KeyAssignment(KeyAssignment::SpawnWindow));
     dock_menu.add_item(&new_window_item);
@@ -144,39 +148,39 @@ extern "C" fn application_dock_menu(
 
 fn get_class() -> &'static Class {
     Class::get(CLS_NAME).unwrap_or_else(|| {
-        let mut cls = ClassDecl::new(CLS_NAME, class!(NSObject))
+        let mut cls = ClassDecl::new(CLS_NAME, get_objc_class(c"NSObject"))
             .expect("Unable to register application delegate class");
 
         cls.add_ivar::<BOOL>("launched");
 
         unsafe {
             cls.add_method(
-                sel!(applicationShouldTerminate:),
+                sel2to1(objc2::sel!(applicationShouldTerminate:)),
                 application_should_terminate as extern "C" fn(&mut Object, Sel, *mut Object) -> u64,
             );
             cls.add_method(
-                sel!(applicationWillFinishLaunching:),
+                sel2to1(objc2::sel!(applicationWillFinishLaunching:)),
                 application_will_finish_launching as extern "C" fn(&mut Object, Sel, *mut Object),
             );
             cls.add_method(
-                sel!(applicationDidFinishLaunching:),
+                sel2to1(objc2::sel!(applicationDidFinishLaunching:)),
                 application_did_finish_launching as extern "C" fn(&mut Object, Sel, *mut Object),
             );
             cls.add_method(
-                sel!(application:openFile:),
+                sel2to1(objc2::sel!(application:openFile:)),
                 application_open_file as extern "C" fn(&mut Object, Sel, *mut Object, *mut Object),
             );
             cls.add_method(
-                sel!(applicationDockMenu:),
+                sel2to1(objc2::sel!(applicationDockMenu:)),
                 application_dock_menu
                     as extern "C" fn(&mut Object, Sel, *mut Object) -> *mut Object,
             );
             cls.add_method(
-                sel!(wezboardPerformKeyAssignment:),
+                sel2to1(objc2::sel!(wezboardPerformKeyAssignment:)),
                 wezboard_perform_key_assignment as extern "C" fn(&mut Object, Sel, *mut Object),
             );
             cls.add_method(
-                sel!(applicationOpenUntitledFile:),
+                sel2to1(objc2::sel!(applicationOpenUntitledFile:)),
                 application_open_untitled_file
                     as extern "C" fn(&mut Object, Sel, *mut Object) -> BOOL,
             );
@@ -189,8 +193,9 @@ fn get_class() -> &'static Class {
 pub fn create_app_delegate() -> StrongPtr {
     let cls = get_class();
     unsafe {
-        let delegate: *mut Object = msg_send![cls, alloc];
-        let delegate: *mut Object = msg_send![delegate, init];
+        let delegate: *mut AnyObject = objc2::msg_send![cls1to2(cls), alloc];
+        let delegate: *mut AnyObject = objc2::msg_send![delegate, init];
+        let delegate = delegate as *mut Object;
         (*delegate).set_ivar("launched", NO);
         StrongPtr::new(delegate)
     }

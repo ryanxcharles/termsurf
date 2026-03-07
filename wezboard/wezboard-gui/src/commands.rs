@@ -383,8 +383,8 @@ impl CommandDef {
         let inputmap = InputMap::new(config);
 
         let mut candidates_for_removal = vec![];
-        #[allow(unexpected_cfgs)] // <https://github.com/SSheldon/rust-objc/issues/125>
-        let wezboard_perform_key_assignment_sel = sel!(wezboardPerformKeyAssignment:);
+        let wezboard_perform_key_assignment_sel =
+            window::os::macos::sel2to1(objc2::sel!(wezboardPerformKeyAssignment:));
 
         /// Mark menu items as candidates for removal
         fn mark_candidates(menu: &Menu, candidates: &mut Vec<MenuItem>, action: SEL) {
