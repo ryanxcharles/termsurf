@@ -64,12 +64,7 @@ impl Menu {
         let mtm = MainThreadMarker::new().unwrap();
         let ns_app = NSApplication::sharedApplication(mtm);
         unsafe {
-            let sel = objc2::sel!(setAppleMenu:);
-            let () = objc2::msg_send![
-                &*ns_app,
-                performSelector: sel,
-                withObject: &*self.menu
-            ];
+            let () = objc2::msg_send![&*ns_app, setAppleMenu: &*self.menu];
         }
     }
 

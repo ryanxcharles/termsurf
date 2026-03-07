@@ -516,3 +516,60 @@ Method replacements:
 4. Confirm `app.rs` has zero `sel2to1` usage
 5. Manual test: launch wezboard, verify menus work (File, Edit, Window, Help),
    verify dock menu, verify screen info in logs
+
+#### Result: FAILED
+
+Build succeeded with zero errors and zero warnings. Static verification passed
+(no `cocoa::` or `objc::` imports in `menu.rs`/`connection.rs`, no `sel2to1` in
+`app.rs`). But the app crashes at launch.
+
+**Crash 1 — `assign_as_app_menu` (fixed mid-experiment):**
+
+```
+panicked at window/src/os/macos/menu.rs:68:22:
+invalid message send to -[NSApplication performSelector:withObject:]:
+expected return to have type code '@', but found 'v'
+```
+
+The original code used `performSelector:withObject:` to call the private
+`setAppleMenu:` API. This worked with cocoa/objc 0.2 because `msg_send!` didn't
+validate return types. But objc2's `msg_send!` enforces type codes, and
+`performSelector:withObject:` returns `id` while the design called for `let ()`.
+Fixed by calling `setAppleMenu:` directly via `msg_send!` instead of going
+through `performSelector:withObject:`.
+
+**Crash 2 — `window.rs:607` (unfixed):**
+
+```
+panicked at window/src/os/macos/window.rs:607:25
+```
+
+This is on the line:
+```rust
+let _: () = objc2::msg_send![*window as *const _ as *const _ as *const AnyObject, setTabbingMode:2];
+```
+
+This code was not modified by the experiment. However, the experiment changed
+`NSEventModifierFlags` from the `cocoa::appkit` type to
+`objc2_app_kit::NSEventModifierFlags` via `pub use` in `menu.rs`. Since
+`window.rs` imports `NSEventModifierFlags` from `cocoa::appkit` directly, the
+two types are now different — cocoa's `NSEventModifierFlags` in `window.rs` vs
+objc2's in `commands.rs` and `menu.rs`. The crash may be caused by objc2's
+stricter runtime validation propagating through the changed type environment, or
+by a subtle interaction between the two type systems at the msg_send boundary.
+The exact root cause needs investigation in the next experiment.
+
+**Downstream changes not in the original plan:**
+
+`commands.rs` was not listed as a file to modify, but it imports
+`window::os::macos::menu::*` which pulls in the re-exported
+`NSEventModifierFlags` and previously `SEL`. The migration required:
+- `SEL` → `objc2::runtime::Sel`
+- `sel2to1(objc2::sel!(...))` → `objc2::sel!(...)`
+- `NSShiftKeyMask` → `Shift`, `NSAlternateKeyMask` → `Option`,
+  `NSControlKeyMask` → `Control`, `NSCommandKeyMask` → `Command`
+
+**Lesson:** Build success is not enough. Must always launch and test before
+marking an experiment as done. The design should have anticipated the
+`performSelector:withObject:` return type issue and the downstream `commands.rs`
+impact.
