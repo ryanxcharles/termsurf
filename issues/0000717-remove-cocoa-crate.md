@@ -757,3 +757,25 @@ helper types.
 3. `mod.rs` has zero `cocoa::` imports
 4. No `.cast()` calls remain in `nsstring_to_str` call sites (except `window.rs`
    which may still need `as *mut AnyObject` casts for `id` values)
+
+#### Result: PASS
+
+All changes compile with zero errors. `mod.rs` has zero `cocoa::` imports. All
+`.cast()` bridges removed from `nsstring_to_str` callers across 5 files.
+
+Key details:
+
+- `nsstring()` now returns `Retained<NSString>` via `NSString::from_str()`.
+  Callers in `app.rs` pass via `Retained::as_ptr()`. Callers in `window.rs` cast
+  through `as *const _ as id` for cocoa trait methods that still expect `id`.
+- `nsstring_to_str()` now takes `*mut AnyObject` and uses raw `msg_send!` for
+  `UTF8String` and `lengthOfBytesUsingEncoding:` (NSUTF8StringEncoding = 4)
+  instead of cocoa's `NSString` trait methods. The design suggested
+  `NSString::to_str()` but raw `msg_send!` avoids needing to cast through
+  `*const NSString` and keeps the function self-contained.
+- `app.rs`, `clipboard.rs`, `menu.rs`, `connection.rs` — removed `.cast()` from
+  all `nsstring_to_str` call sites.
+- `window.rs` — added `as *mut AnyObject` casts for `id` values passed to
+  `nsstring_to_str` (8 call sites), and `Retained::as_ptr() as *const _ as id`
+  for `nsstring()` results passed to cocoa's `NSWindow::setTitle_` (2 call
+  sites).
