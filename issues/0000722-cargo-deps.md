@@ -88,3 +88,16 @@ combines the `cargo update` patch bumps with the env-bootstrap env_logger
 
 1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
 2. `cargo run --bin wezboard-gui` — app launches and renders
+
+**Result:** Pass
+
+`cargo update` bumped 206 packages to their latest compatible versions. The
+env-bootstrap migration from `env_logger::filter` to `env_filter` compiled
+cleanly — the `env_filter` crate exports identical `Builder` and `Filter` types.
+Build succeeded with zero errors, app launched and rendered correctly.
+
+#### Conclusion
+
+All cross-platform dependencies are up to date. The env_logger 0.10→0.11
+migration was straightforward: add `env_filter = "1.0"` as a direct dependency
+and change one import line. The Windows-only deps remain untouched (can't test).
