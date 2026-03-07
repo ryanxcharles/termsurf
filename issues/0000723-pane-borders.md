@@ -67,7 +67,8 @@ Without insetting, the border (layer 2) paints over the outermost pixels of
 terminal text (layer 0). Ghostboard solved this in Issue 672 by reducing the
 content area by the border width on each interior edge.
 
-In WezTerm, pane content positioning is controlled by two values in `paint_pane`:
+In WezTerm, pane content positioning is controlled by two values in
+`paint_pane`:
 
 - **`left_pixel_x`** (line 340) — horizontal start of text rendering, computed
   from `padding_left + border.left + (pos.left * cell_width)`.
@@ -75,8 +76,8 @@ In WezTerm, pane content positioning is controlled by two values in `paint_pane`
   `top_bar_height + padding_top + border.top`.
 
 The `background_rect` (lines 110-152) has edge detection logic: it checks
-`pos.left == 0`, `pos.top == 0`, and whether `pos.left + pos.width` reaches
-the terminal's column count to decide whether to extend to the window edge.
+`pos.left == 0`, `pos.top == 0`, and whether `pos.left + pos.width` reaches the
+terminal's column count to decide whether to extend to the window edge.
 
 The inset should only apply on **interior edges** — edges where panes meet other
 panes. Window-edge panes don't need inset on the side touching the window frame,
