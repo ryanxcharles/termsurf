@@ -748,3 +748,114 @@ Once all imports are gone:
 5. `grep -c 'cocoa' wezboard-font/src/locator/core_text.rs` returns 0
 6. `cocoa` and `objc` absent from all `Cargo.toml` files
 7. `cargo build` still succeeds after dependency removal
+
+#### Results: PASSED
+
+All 7 verification checks pass. 253 insertions, 326 deletions — net reduction of
+73 lines. Both `cocoa` and `objc` 0.2 are completely gone from the codebase.
+
+**`wezboard/window/src/os/macos/window.rs`:**
+
+- **Deleted imports**: `cocoa::base::*`,
+  `cocoa::foundation::{NSFastEnumeration, NSPoint, NSRect, NSSize, NSString}`,
+  `objc::rc::{StrongPtr, WeakPtr}`,
+  `objc::runtime::{Object, BOOL, NO, YES}`.
+- **Added imports**: `objc2::rc::{Retained, Weak}`.
+- **Added local alias**: `type id = *mut AnyObject` — preserves the ~108 `id`
+  usage sites without mass-renaming.
+- **Deleted `cg_to_ns_rect` helper** — no longer needed since all geometry types
+  are now `CGRect`/`CGPoint`/`CGSize`.
+- **Deleted unused `VIEW_CLS_NAME` constant** — only `VIEW_CLS_CNAME` (the
+  `&CStr` variant) is needed.
+
+**`Object` → `AnyObject` (~49 sites):**
+
+- All callback casts (`&mut *(this_raw as *mut Object)` →
+  `&mut *(this_raw as *mut AnyObject)`).
+- Function signatures: `superclass(this: &Object)`, `dpi_for_window_screen`,
+  `set_window_position`, `mouse_common`, `key_common`, `get_this`.
+
+**`BOOL`/`YES`/`NO` → `bool`/`true`/`false` (~38 sites):**
+
+- `BOOL` return type annotations → `bool` (3 sites: `hasPreciseScrollingDeltas`,
+  `isARepeat`, `isEqual`).
+- `YES`/`NO` in `msg_send!` args → `true`/`false` (~20 YES, ~15 NO).
+- `is_equal != NO` pattern → just use `bool` directly.
+- `Bool::YES`/`Bool::NO` for extern "C" callback returns left unchanged (already
+  objc2).
+
+**`NSRect`/`NSPoint`/`NSSize` → `CGRect`/`CGPoint`/`CGSize`:**
+
+- Struct field `fullscreen: Option<NSRect>` → `Option<CGRect>`.
+- Thread-local `LAST_POSITION: Option<NSPoint>` → `Option<CGPoint>`.
+- Function signatures: `cartesian_to_screen_point`, `screen_point_to_cartesian`,
+  `point_in_rect`, `init_with_frame`.
+- All `NSRect::new(NSPoint::new(...), NSSize::new(...))` →
+  `CGRect::new(CGPoint::new(...), CGSize::new(...))`.
+
+**`StrongPtr` → `Retained<AnyObject>` (4 struct fields, 4 function params):**
+
+- `WindowInner::view`, `WindowInner::window` → `Retained<AnyObject>`.
+- `GlState::_pixel_format`, `GlState::gl_context` → `Retained<AnyObject>`.
+- `StrongPtr::new(ptr)` → `Retained::from_raw(ptr).unwrap()`.
+- `*strong_ptr as *const _` → `Retained::as_ptr(&r) as *const _`.
+- `pixel_format.is_null()` / `gl_context.is_null()` → `Option` handling with
+  `.ok_or_else()`.
+- Function params `apply_decorations_to_window(window: &StrongPtr, ...)` →
+  `&Retained<AnyObject>`.
+
+**`WeakPtr` → `Weak<AnyObject>` (2 struct fields):**
+
+- `Inner::view_id`, `Inner::window` → `Option<Weak<AnyObject>>`.
+- `strong.weak()` → `Weak::from_retained(&retained)`.
+- `weak.load()` → returns `Option<Retained<AnyObject>>` (was `StrongPtr`),
+  updated all call sites to use `if let Some(loaded) = weak.load()` pattern.
+
+**Helper functions refactored:**
+
+- `get_titlebar_view_container`, `get_view_superview`, `get_view_subviews` now
+  take `&Retained<AnyObject>` and return `Option<Retained<AnyObject>>` instead
+  of taking `&StrongPtr` and returning `Option<WeakPtr>`.
+- Uses `Retained::retain(raw_ptr)` to create retained references from raw
+  msg_send results.
+
+**`get_ivar`/`set_ivar` replacement (4 sites):**
+
+- Added `get_view_ivar` and `set_view_ivar` helper functions using manual ivar
+  offset access (`obj.class().instance_variable().offset()`), since
+  `AnyObject` does not have the `get_ivar`/`set_ivar` methods from
+  `objc::runtime::Object`.
+- `drop_inner`: `*this.get_ivar(...)` → `get_view_ivar(this)`.
+- `get_this`: same pattern.
+- `init_with_frame`: `(**view_id).set_ivar(...)` → `set_view_ivar(...)`.
+
+**`NSFastEnumeration` `.iter()` → count/objectAtIndex loop (2 sites):**
+
+- `dragging_entered` and `perform_drag_operation` drag-and-drop handlers
+  replaced `filenames.iter()` with `count` + `objectAtIndex:` msg_send loop.
+
+**`.UTF8String()` → msg_send (1 site):**
+
+- `get_view_class_name`: replaced `class_name.UTF8String()` (cocoa NSString
+  trait method) with `msg_send![... UTF8String]`.
+
+**Unnecessary `unsafe` blocks removed (~8 sites):**
+
+- `WindowView::get_this(&*self.view)` no longer requires unsafe since
+  `Retained<AnyObject>` deref is safe.
+
+**`wezboard/wezboard-font/src/locator/core_text.rs`:**
+
+- Replaced `use cocoa::base::id` with local
+  `type id = *mut objc2::runtime::AnyObject`.
+
+**Cargo.toml changes:**
+
+- `wezboard/Cargo.toml`: removed `cocoa` and `objc` from
+  `[workspace.dependencies]`.
+- `wezboard/window/Cargo.toml`: removed `cocoa.workspace = true` and
+  `objc.workspace = true`.
+- `wezboard/wezboard-font/Cargo.toml`: removed `cocoa.workspace = true` and
+  `objc.workspace = true`.
+- `Cargo.lock`: `cocoa`, `cocoa-foundation`, `block`, and old `core-graphics`
+  0.23 removed from the dependency tree.
