@@ -1082,3 +1082,62 @@ sole source of per-pane positioning (replacing the global origin), or
 should be added only once, not combined with grid coordinates that already
 include it. The exact relationship between the TUI's col/row, the global metrics
 origin, and the CALayer coordinate space needs closer inspection.
+
+## Conclusion
+
+### Progress
+
+Seven experiments across two tracks: **overlay visibility** (solved) and
+**multi-pane overlay positioning** (unsolved).
+
+**Solved:**
+
+- **Tab switching** (Exps 1–2): Overlays hide when switching to a tab without a
+  webview and reappear on switch back. Required two changes: a
+  `sync_overlay_visibility` function called from the `WindowInvalidated` handler,
+  and setting `TERMSURF_PANE_ID` in Wezboard's `domain.rs` so the TUI's pane
+  identity matches the mux pane ID.
+
+- **Query handlers** (Exp 5): Implemented `QueryLastRequest`,
+  `QueryDevtoolsRequest`, and `QueryTabsRequest` reply handlers. These don't
+  affect the multi-pane bug but complete the protocol for `:last`, `web devtools`,
+  and `:status`.
+
+- **Debug instrumentation** (Exps 4, 6): Comprehensive logging across the
+  connection lifecycle — accept, message sequence, server reuse, disconnect state
+  snapshots, and per-message type names.
+
+**Diagnosed but unsolved:**
+
+- **Multi-pane overlays** (Exps 3, 6, 7): The second overlay IS fully created —
+  the entire pipeline (SetOverlay → CreateTab → TabReady → CaContext →
+  CALayerHost) completes successfully. But all panes' positioning layers get the
+  same pixel origin from the global `metrics::get()`, so the second overlay is
+  drawn on top of the first. Experiment 7 tried adding `col * cell_w` and
+  `row * cell_h` to the global origin, but this double-counted the offset,
+  pushing the first overlay down/right.
+
+### Remaining bugs
+
+1. **Overlay positioning formula** — The relationship between `origin_x`/
+   `origin_y` (global content area offset), the TUI's `col`/`row` (grid
+   coordinates), and the CALayer coordinate space is not yet understood. The
+   global origin may already include padding that the grid coordinates replicate,
+   or the grid coordinates may be window-relative rather than content-relative.
+   Need to inspect the actual col/row values the TUI sends and compare with
+   Ghostboard's coordinate handling in `Surface.zig` and `Metal.zig`.
+
+2. **White flash on resize** — When a split opens and the first pane resizes,
+   Chromium re-sends CaContext with the same context ID. `handle_ca_context`
+   swaps the CALayerHost (remove old, add new), briefly showing a blank frame.
+   This is cosmetic but noticeable. Could be fixed by skipping the swap when the
+   context ID hasn't changed, or by using an opacity transition.
+
+### Remaining protocol work
+
+Wezboard now handles 14 of 30 TermSurf protocol messages (47%). Still missing:
+
+- **Input forwarding** (4): `KeyEvent`, `MouseEvent`, `MouseMove`, `ScrollEvent`
+- **DevTools** (2): `CreateDevtoolsTab`, `SetDevtoolsOverlay`
+- **Other** (3): `FocusChanged`, `CursorChanged`, `OpenSplit`
+- Plus several reply-only messages the board sends but doesn't receive
