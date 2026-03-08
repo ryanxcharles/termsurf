@@ -227,3 +227,41 @@ layer.
    content exists)
 8. Mouse clicks pass through overlay to terminal (hitTest: returns nil)
 9. Close pane — layers cleaned up, no crash
+
+**Result:** Pass
+
+Browser content is visible in the Wezboard terminal window. The hypothesis was
+correct: WezTerm's layer-backed view does not composite manually added
+sublayers. The transparent layer-hosting overlay NSView fixes this — CALayerHost
+content now renders on screen.
+
+Logs confirm the full sequence:
+
+- `created overlay NSView`
+- `created CALayerHost contextId=2673521954`
+- `UrlChanged`, `TitleChanged` — page loaded successfully
+- TUI disconnect cleaned up pane without crash
+
+One crash was encountered during implementation: `setAutoresizingMask:` on
+NSView expects `NSUInteger` (u64 on 64-bit macOS), not `u32` like CALayer's
+`CAAutoresizingMask`. Fixed by passing `18u64`.
+
+**Remaining issues:**
+
+- **Wrong position** — The webview renders at the top-left corner of the window,
+  not inside the terminal pane. The positioning layer's frame needs to account
+  for the pane's grid position (row/column offset + padding).
+- **Wrong size** — The webview is smaller than the window. The pixel dimensions
+  come from placeholder values (`overlay.width * 10`, `overlay.height * 20`) in
+  `handle_set_overlay()`, not actual cell metrics. Accurate cell dimensions are
+  needed.
+
+Both issues are sizing/positioning problems, not rendering problems. The core
+overlay architecture works.
+
+#### Conclusion
+
+The layer-backed vs layer-hosting hypothesis (Hypothesis 7) was confirmed. The
+overlay NSView approach successfully renders browser content in Wezboard. Next
+steps: fix positioning and sizing to place the webview correctly within the
+terminal pane.

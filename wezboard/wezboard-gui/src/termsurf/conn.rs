@@ -537,15 +537,119 @@ fn cls(name: &[u8]) -> &'static objc2::runtime::AnyClass {
 }
 
 #[cfg(target_os = "macos")]
-fn get_backing_layer() -> Option<*mut objc2::runtime::AnyObject> {
+fn register_overlay_class() -> &'static objc2::runtime::AnyClass {
+    use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
+    use std::ffi::CStr;
+
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    let name = CStr::from_bytes_with_nul(b"TermSurfOverlayView\0").unwrap();
+
+    ONCE.call_once(|| {
+        let superclass = AnyClass::get(CStr::from_bytes_with_nul(b"NSView\0").unwrap()).unwrap();
+        let mut cls = ClassBuilder::new(name, superclass)
+            .expect("Unable to register TermSurfOverlayView class");
+
+        // hitTest: returns nil — all mouse events pass through to the terminal view
+        extern "C" fn hit_test(
+            _this: *mut AnyObject,
+            _sel: Sel,
+            _point: objc2_core_foundation::CGPoint,
+        ) -> *mut AnyObject {
+            std::ptr::null_mut()
+        }
+
+        extern "C" fn accepts_first_responder(_this: *mut AnyObject, _sel: Sel) -> Bool {
+            Bool::NO
+        }
+
+        unsafe {
+            cls.add_method(
+                objc2::sel!(hitTest:),
+                hit_test
+                    as extern "C" fn(
+                        *mut AnyObject,
+                        Sel,
+                        objc2_core_foundation::CGPoint,
+                    ) -> *mut AnyObject,
+            );
+            cls.add_method(
+                objc2::sel!(acceptsFirstResponder),
+                accepts_first_responder as extern "C" fn(*mut AnyObject, Sel) -> Bool,
+            );
+        }
+
+        cls.register();
+    });
+
+    AnyClass::get(name).unwrap()
+}
+
+/// Get or create the transparent overlay NSView and return its root layer.
+/// The overlay is layer-hosting (we own the layer tree), so CALayerHost
+/// sublayers composite correctly — unlike WezTerm's layer-backed terminal view.
+#[cfg(target_os = "macos")]
+fn get_or_create_overlay(
+    state: &mut super::state::TermSurfState,
+) -> Option<*mut objc2::runtime::AnyObject> {
     use objc2::msg_send;
-    use objc2::runtime::AnyObject;
+    use objc2::runtime::{AnyObject, Bool};
+    use objc2_core_foundation::CGRect;
+
+    if state.overlay_view != 0 {
+        // Already created — return its layer
+        let view = state.overlay_view as *mut AnyObject;
+        unsafe {
+            let layer: *mut AnyObject = msg_send![view, layer];
+            return if layer.is_null() { None } else { Some(layer) };
+        }
+    }
 
     let fe = crate::frontend::try_front_end()?;
     let ns_view = fe.first_ns_view()?;
+    let ns_view = ns_view as *mut AnyObject;
+
     unsafe {
-        let layer: *mut AnyObject = msg_send![ns_view as *mut AnyObject, layer];
-        if layer.is_null() { None } else { Some(layer) }
+        // Get superview (contentView of the window)
+        let superview: *mut AnyObject = msg_send![ns_view, superview];
+        if superview.is_null() {
+            log::warn!("get_or_create_overlay: terminal view has no superview");
+            return None;
+        }
+
+        // Get terminal view's frame for overlay sizing
+        let frame: CGRect = msg_send![ns_view, frame];
+
+        // Create overlay view
+        let overlay_class = register_overlay_class();
+        let overlay: *mut AnyObject = msg_send![overlay_class, alloc];
+        let overlay: *mut AnyObject = msg_send![overlay, initWithFrame: frame];
+
+        // Set autoresizing mask: width + height sizable (follows parent resizes)
+        // NSView uses NSUInteger (u64) for autoresizingMask, unlike CALayer (u32)
+        let _: () = msg_send![overlay, setAutoresizingMask: 18u64];
+
+        // Create root layer and make the overlay layer-hosting.
+        // CRITICAL: assign layer BEFORE setting wantsLayer (layer-hosting order).
+        let ca_layer_class = cls(b"CALayer\0");
+        let root_layer: *mut AnyObject = msg_send![ca_layer_class, layer];
+        let _: () = msg_send![root_layer, setOpaque: Bool::NO];
+        let _: () = msg_send![overlay, setLayer: root_layer];
+        let _: () = msg_send![overlay, setWantsLayer: Bool::YES];
+
+        // Add overlay as subview on top of terminal view
+        let _: () = msg_send![superview, addSubview: overlay];
+
+        // Retain overlay so it stays alive
+        let _: *mut AnyObject = msg_send![overlay, retain];
+
+        state.overlay_view = overlay as usize;
+        log::info!("created overlay NSView");
+
+        if root_layer.is_null() {
+            None
+        } else {
+            Some(root_layer)
+        }
     }
 }
 
@@ -560,14 +664,17 @@ fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
         log::warn!("handle_ca_context: unknown tab_id={}", ca_context.tab_id);
         return;
     };
-    let Some(pane) = st.panes.get_mut(&pane_id) else {
+    if !st.panes.contains_key(&pane_id) {
+        return;
+    }
+
+    // Get or create overlay before borrowing pane mutably
+    let Some(root_layer) = get_or_create_overlay(&mut st) else {
+        log::warn!("handle_ca_context: no overlay root layer");
         return;
     };
 
-    let Some(backing_layer) = get_backing_layer() else {
-        log::warn!("handle_ca_context: no backing layer");
-        return;
-    };
+    let pane = st.panes.get_mut(&pane_id).unwrap();
 
     let context_id = ca_context.ca_context_id as u32;
     pane.ca_context_id = context_id;
@@ -596,9 +703,9 @@ fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
             let zero_point = CGPoint::new(0.0, 0.0);
             let _: () = msg_send![flipped, setAnchorPoint: zero_point];
             let _: () = msg_send![flipped, setAutoresizingMask: 18u32]; // widthSizable | heightSizable
-            let parent_bounds: CGRect = msg_send![backing_layer, bounds];
+            let parent_bounds: CGRect = msg_send![root_layer, bounds];
             let _: () = msg_send![flipped, setFrame: parent_bounds];
-            let _: () = msg_send![backing_layer, addSublayer: flipped];
+            let _: () = msg_send![root_layer, addSublayer: flipped];
             let _: *mut AnyObject = msg_send![flipped, retain];
 
             // positioning_layer
@@ -643,19 +750,19 @@ fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
         }
 
         // Position the overlay
-        update_ca_layer_frame(pane, backing_layer);
+        update_ca_layer_frame(pane, root_layer);
 
         let _: () = msg_send![ca_transaction, commit];
     }
 }
 
 #[cfg(target_os = "macos")]
-unsafe fn update_ca_layer_frame(pane: &Pane, backing_layer: *mut objc2::runtime::AnyObject) {
+unsafe fn update_ca_layer_frame(pane: &Pane, root_layer: *mut objc2::runtime::AnyObject) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 
-    let scale: f64 = msg_send![backing_layer, contentsScale];
+    let scale: f64 = msg_send![root_layer, contentsScale];
     let scale = if scale > 0.0 { scale } else { 1.0 };
     let w = pane.pixel_width as f64 / scale;
     let h = pane.pixel_height as f64 / scale;
