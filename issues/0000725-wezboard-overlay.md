@@ -526,3 +526,39 @@ extra row.
 
 The correct formula should be `top_bar_height + padding_top` without
 `border.top`. Same for x: `padding_left` without `border.left`.
+
+### Experiment 4: Remove border from origin formula
+
+Experiment 3 added `border.top` and `border.left` to the content origin, but the
+overlay NSView shares the contentView's coordinate space — the border offset is
+already implicit. Remove the border terms from the origin calculation.
+
+#### Changes
+
+##### 1. EDIT `wezboard/wezboard-gui/src/termwindow/resize.rs`
+
+Remove the `border` variable and simplify the origin calculation:
+
+```rust
+// before:
+let border = self.get_os_border();
+let origin_x = pad_left + border.left.get() as f32;
+let origin_y = top_bar_height + pad_top + border.top.get() as f32;
+
+// after:
+let origin_x = pad_left;
+let origin_y = top_bar_height + pad_top;
+```
+
+No other files need changes — `metrics.rs`, `mod.rs` (constructor), and
+`conn.rs` are already correct. The constructor in `mod.rs` already omits border
+(it was noted that `os_parameters` is `None` at construction time).
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Launch Wezboard, run `web google.com`
+3. Webview top edge aligns with terminal content (below tab bar)
+4. Webview left edge aligns with first terminal column
+5. Resize window — webview stays aligned
+6. Close pane — clean shutdown
