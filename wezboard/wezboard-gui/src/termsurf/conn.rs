@@ -162,6 +162,17 @@ async fn handle_message(
                 pane.browsing = m.browsing;
             }
         }
+        Some(Msg::CaContext(c)) => {
+            log::info!(
+                "CaContext: tab_id={} context_id={}",
+                c.tab_id,
+                c.ca_context_id
+            );
+            #[cfg(target_os = "macos")]
+            if c.ca_context_id != 0 {
+                handle_ca_context(c, state);
+            }
+        }
         Some(other) => {
             log::debug!("unhandled TermSurf message: {:?}", other);
         }
@@ -280,6 +291,10 @@ fn handle_set_overlay(
         browsing: overlay.browsing,
         dark: false,
         inspected_tab_id: 0,
+        ca_context_id: 0,
+        ca_layer_host: 0,
+        ca_layer_flipped: 0,
+        ca_layer_positioning: 0,
     };
     st.panes.insert(overlay.pane_id.clone(), pane);
 
@@ -400,6 +415,14 @@ fn handle_disconnect(conn_type: ConnType, tx: &Sender<Vec<u8>>, state: &SharedSt
                             }
                         }
                     }
+                    #[cfg(target_os = "macos")]
+                    if pane.ca_layer_host != 0 {
+                        remove_ca_layers(
+                            pane.ca_layer_host,
+                            pane.ca_layer_positioning,
+                            pane.ca_layer_flipped,
+                        );
+                    }
                     log::info!("removed pane {} on TUI disconnect", pane_id);
                 }
             }
@@ -505,4 +528,169 @@ fn send_create_tab(server_tx: &Sender<Vec<u8>>, pane: &Pane) -> anyhow::Result<(
     server_tx.try_send(payload)?;
     log::info!("sent CreateTab: pane_id={} url={}", pane.pane_id, pane.url);
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn cls(name: &[u8]) -> &'static objc2::runtime::AnyClass {
+    let cname = std::ffi::CStr::from_bytes_with_nul(name).unwrap();
+    objc2::runtime::AnyClass::get(cname).unwrap()
+}
+
+#[cfg(target_os = "macos")]
+fn get_backing_layer() -> Option<*mut objc2::runtime::AnyObject> {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    let fe = crate::frontend::try_front_end()?;
+    let ns_view = fe.first_ns_view()?;
+    unsafe {
+        let layer: *mut AnyObject = msg_send![ns_view as *mut AnyObject, layer];
+        if layer.is_null() { None } else { Some(layer) }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyObject, Bool};
+    use objc2_core_foundation::{CGPoint, CGRect};
+
+    let mut st = state.lock().unwrap();
+    let Some(pane_id) = st.tab_to_pane.get(&ca_context.tab_id).cloned() else {
+        log::warn!("handle_ca_context: unknown tab_id={}", ca_context.tab_id);
+        return;
+    };
+    let Some(pane) = st.panes.get_mut(&pane_id) else {
+        return;
+    };
+
+    let Some(backing_layer) = get_backing_layer() else {
+        log::warn!("handle_ca_context: no backing layer");
+        return;
+    };
+
+    let context_id = ca_context.ca_context_id as u32;
+    pane.ca_context_id = context_id;
+
+    // Update pixel dimensions from CaContext if provided
+    if ca_context.pixel_width > 0 {
+        pane.pixel_width = ca_context.pixel_width;
+    }
+    if ca_context.pixel_height > 0 {
+        pane.pixel_height = ca_context.pixel_height;
+    }
+
+    unsafe {
+        let ca_transaction = cls(b"CATransaction\0");
+        let _: () = msg_send![ca_transaction, begin];
+        let _: () = msg_send![ca_transaction, setDisableActions: Bool::YES];
+
+        if pane.ca_layer_host == 0 {
+            // First time: create the 3-layer hierarchy
+            let ca_layer_class = cls(b"CALayer\0");
+            let ca_layer_host_class = cls(b"CALayerHost\0");
+
+            // flipped_layer
+            let flipped: *mut AnyObject = msg_send![ca_layer_class, layer];
+            let _: () = msg_send![flipped, setGeometryFlipped: Bool::YES];
+            let zero_point = CGPoint::new(0.0, 0.0);
+            let _: () = msg_send![flipped, setAnchorPoint: zero_point];
+            let _: () = msg_send![flipped, setAutoresizingMask: 18u32]; // widthSizable | heightSizable
+            let parent_bounds: CGRect = msg_send![backing_layer, bounds];
+            let _: () = msg_send![flipped, setFrame: parent_bounds];
+            let _: () = msg_send![backing_layer, addSublayer: flipped];
+            let _: *mut AnyObject = msg_send![flipped, retain];
+
+            // positioning_layer
+            let positioning: *mut AnyObject = msg_send![ca_layer_class, layer];
+            let _: () = msg_send![positioning, setAnchorPoint: zero_point];
+            let _: () = msg_send![flipped, addSublayer: positioning];
+            let _: *mut AnyObject = msg_send![positioning, retain];
+
+            // CALayerHost
+            let host: *mut AnyObject = msg_send![ca_layer_host_class, layer];
+            let _: () = msg_send![host, setContextId: context_id];
+            let _: () = msg_send![host, setAnchorPoint: zero_point];
+            let _: () = msg_send![host, setAutoresizingMask: 36u32]; // maxXMargin | maxYMargin
+            let _: () = msg_send![positioning, addSublayer: host];
+            let _: *mut AnyObject = msg_send![host, retain];
+
+            pane.ca_layer_flipped = flipped as usize;
+            pane.ca_layer_positioning = positioning as usize;
+            pane.ca_layer_host = host as usize;
+
+            log::info!("created CALayerHost contextId={}", context_id);
+        } else {
+            // Atomic swap: create new host, add, remove old, release old
+            let ca_layer_host_class = cls(b"CALayerHost\0");
+            let new_host: *mut AnyObject = msg_send![ca_layer_host_class, layer];
+            let zero_point = CGPoint::new(0.0, 0.0);
+            let _: () = msg_send![new_host, setContextId: context_id];
+            let _: () = msg_send![new_host, setAnchorPoint: zero_point];
+            let _: () = msg_send![new_host, setAutoresizingMask: 36u32];
+
+            let positioning = pane.ca_layer_positioning as *mut AnyObject;
+            let _: () = msg_send![positioning, addSublayer: new_host];
+            let _: *mut AnyObject = msg_send![new_host, retain];
+
+            let old_host = pane.ca_layer_host as *mut AnyObject;
+            let _: () = msg_send![old_host, removeFromSuperlayer];
+            let _: () = msg_send![old_host, release];
+
+            pane.ca_layer_host = new_host as usize;
+
+            log::info!("swapped CALayerHost contextId={}", context_id);
+        }
+
+        // Position the overlay
+        update_ca_layer_frame(pane, backing_layer);
+
+        let _: () = msg_send![ca_transaction, commit];
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn update_ca_layer_frame(pane: &Pane, backing_layer: *mut objc2::runtime::AnyObject) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+
+    let scale: f64 = msg_send![backing_layer, contentsScale];
+    let scale = if scale > 0.0 { scale } else { 1.0 };
+    let w = pane.pixel_width as f64 / scale;
+    let h = pane.pixel_height as f64 / scale;
+    let frame = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(w, h));
+
+    let positioning = pane.ca_layer_positioning as *mut AnyObject;
+    let _: () = msg_send![positioning, setFrame: frame];
+}
+
+#[cfg(target_os = "macos")]
+fn remove_ca_layers(host: usize, positioning: usize, flipped: usize) {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyObject, Bool};
+
+    unsafe {
+        let ca_transaction = cls(b"CATransaction\0");
+        let _: () = msg_send![ca_transaction, begin];
+        let _: () = msg_send![ca_transaction, setDisableActions: Bool::YES];
+
+        if host != 0 {
+            let layer = host as *mut AnyObject;
+            let _: () = msg_send![layer, removeFromSuperlayer];
+            let _: () = msg_send![layer, release];
+        }
+        if positioning != 0 {
+            let layer = positioning as *mut AnyObject;
+            let _: () = msg_send![layer, removeFromSuperlayer];
+            let _: () = msg_send![layer, release];
+        }
+        if flipped != 0 {
+            let layer = flipped as *mut AnyObject;
+            let _: () = msg_send![layer, removeFromSuperlayer];
+            let _: () = msg_send![layer, release];
+        }
+
+        let _: () = msg_send![ca_transaction, commit];
+    }
 }

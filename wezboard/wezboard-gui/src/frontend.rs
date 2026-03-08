@@ -1,7 +1,7 @@
+use crate::TermWindow;
 use crate::scripting::guiwin::GuiWin;
 use crate::spawn::SpawnWhere;
 use crate::termwindow::TermWindowNotif;
-use crate::TermWindow;
 use ::window::*;
 use anyhow::{Context, Error};
 use config::keyassignment::{KeyAssignment, SpawnCommand};
@@ -317,6 +317,17 @@ impl GuiFrontEnd {
                     }
                 }
             }
+        }
+    }
+
+    pub fn first_ns_view(&self) -> Option<*mut std::ffi::c_void> {
+        use ::window::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let windows = self.known_windows.borrow();
+        let window = windows.keys().next()?;
+        let handle = window.window_handle().ok()?;
+        match handle.as_raw() {
+            RawWindowHandle::AppKit(h) => Some(h.ns_view.as_ptr()),
+            _ => None,
         }
     }
 

@@ -1072,3 +1072,38 @@ fn remove_ca_layers(host: usize, positioning: usize, flipped: usize) {
    - `created CALayerHost contextId=...`
 4. Browser content visible as overlay in terminal window.
 5. Close the `web` pane. Confirm layers cleaned up, no crash.
+
+**Result:** Fail
+
+Build succeeded with zero errors. CaContext message received with nonzero
+context ID (`CaContext: tab_id=1 context_id=4223629142`), CALayerHost created
+(`created CALayerHost contextId=4223629142`), and pane cleanup on TUI disconnect
+worked without crash. However, no browser content was visible in the terminal
+window. The CALayerHost layer tree was attached but rendered nothing on screen.
+
+Initial run crashed because `objc2` validates ObjC return types strictly —
+`-[CALayer retain]` returns `id` (type code `@`), not `void`. Fixed by typing
+retain calls as `*mut AnyObject` instead of `()`.
+
+Possible causes for invisible overlay:
+
+- WezTerm's backing layer may be CAMetalLayer with `contentsScale = 1.0`
+  (hardcoded in `make_backing_layer`), which could affect CALayerHost
+  compositing differently than Ghostboard's Metal renderer.
+- The flipped/positioning layer frame may be wrong — placeholder pixel
+  dimensions (`width * 10`, `height * 20`) divided by `contentsScale = 1.0`
+  could place the overlay at an incorrect size or position.
+- CALayerHost may need the window's CAContext to be configured differently for
+  cross-process layer hosting to work with WezTerm's rendering pipeline.
+- The layer may be hidden behind the CAMetalLayer's opaque content — need to
+  verify z-ordering and opacity.
+
+#### Conclusion
+
+The protocol plumbing works end-to-end: CaContext arrives, CALayerHost is
+created with the correct context ID, and cleanup is crash-free. The rendering
+pipeline is the problem — the CALayerHost sublayer exists but isn't producing
+visible output. Next experiment should investigate why: check layer hierarchy
+visibility, z-order relative to CAMetalLayer content, contentsScale
+interactions, and whether the CALayerHost is actually receiving frames from
+Chromium's GPU process.

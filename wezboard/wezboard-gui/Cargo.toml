@@ -126,6 +126,7 @@ windows = { workspace=true, features = [
 
 [target.'cfg(target_os="macos")'.dependencies]
 objc2.workspace = true
+objc2-core-foundation.workspace = true
 
 [dev-dependencies]
 benchmarking.workspace = true

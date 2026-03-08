@@ -17,6 +17,10 @@ pub struct Pane {
     pub browsing: bool,
     pub dark: bool,
     pub inspected_tab_id: i64,
+    pub ca_context_id: u32,
+    pub ca_layer_host: usize,
+    pub ca_layer_flipped: usize,
+    pub ca_layer_positioning: usize,
 }
 
 /// Per-server state. One server = one Roamium process = one profile.
