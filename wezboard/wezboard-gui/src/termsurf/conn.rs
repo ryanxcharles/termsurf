@@ -1152,6 +1152,42 @@ unsafe fn update_ca_layer_frame(pane: &mut Pane, root_layer: *mut objc2::runtime
     let _: () = msg_send![positioning, setFrame: frame];
 }
 
+/// Reposition all overlay CALayers using current cell metrics and pane positions.
+/// Called from the window resize handler so overlays track pane positions on every frame.
+#[cfg(target_os = "macos")]
+pub fn reposition_all_overlays() {
+    let Some(state) = super::state::global() else {
+        return;
+    };
+    let mut st = state.lock().unwrap();
+
+    // Collect pane_ids that have layers (ca_layer_positioning != 0)
+    let pane_ids: Vec<String> = st
+        .panes
+        .iter()
+        .filter(|(_, p)| p.ca_layer_positioning != 0)
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    for pane_id in &pane_ids {
+        let Some(mux_window_id) = get_pane_mux_window(pane_id) else {
+            continue;
+        };
+        let Some(root_layer) = get_or_create_overlay(&mut st, mux_window_id) else {
+            continue;
+        };
+        let Some(pane) = st.panes.get_mut(pane_id) else {
+            continue;
+        };
+        unsafe {
+            update_ca_layer_frame(pane, root_layer);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn reposition_all_overlays() {}
+
 #[cfg(target_os = "macos")]
 fn remove_ca_layers(host: usize, positioning: usize, flipped: usize) {
     use objc2::msg_send;

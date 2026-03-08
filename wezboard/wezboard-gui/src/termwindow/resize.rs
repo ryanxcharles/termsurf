@@ -90,6 +90,7 @@ impl super::TermWindow {
             border.left.get() as u32,
             border.top.get() as u32,
         );
+        crate::termsurf::reposition_all_overlays();
     }
 
     pub fn apply_pending_scale_changes(&mut self) {

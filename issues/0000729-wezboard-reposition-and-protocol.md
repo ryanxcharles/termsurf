@@ -246,3 +246,18 @@ restoring the original `return Ok(());`.
 3. Slowly resize the window horizontally — both overlays track their panes
 4. Resize vertically — overlays stay aligned
 5. Single pane still works (regression check)
+
+**Result:** Success
+
+Overlays track pane positions during slow and fast window resizes. Driving
+repositioning from WezTerm's resize handler (right after `metrics::set()`)
+ensures every resize increment updates overlay positions, regardless of whether
+the TUI sends a `SetOverlay` message.
+
+#### Conclusion
+
+Repositioning overlays from the window resize handler is the correct approach.
+The resize handler fires on every resize increment and has fresh cell metrics,
+so `reposition_all_overlays()` always computes correct pixel positions. This
+decouples overlay positioning from TUI message timing — the window owns
+positioning, the TUI owns dimensions.
