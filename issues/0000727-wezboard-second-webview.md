@@ -144,3 +144,147 @@ formula without adding new state.
 
 Research only — no code changes. Success = we know exactly which API to call and
 what coordinates it returns.
+
+### Result: Success
+
+Found the complete data path. WezTerm already computes per-pane positions.
+
+**`PositionedPane` struct** (mux/src/tab.rs:58–79):
+
+```rust
+pub struct PositionedPane {
+    pub index: usize,
+    pub is_active: bool,
+    pub is_zoomed: bool,
+    pub left: usize,        // cell offset from tab top-left
+    pub top: usize,         // cell offset from tab top-left
+    pub width: usize,       // in cells
+    pub pixel_width: usize,
+    pub height: usize,      // in cells
+    pub pixel_height: usize,
+    pub pane: Arc<dyn Pane>,
+}
+```
+
+`left` and `top` are in **cells**, relative to the tab's top-left corner. For a
+vertical split, the right pane has `left = left_pane_width + 1` (1 cell for the
+divider). `pixel_width`/`pixel_height` are the pane's pixel dimensions.
+
+**How to get it:** `tab.iter_panes()` returns `Vec<PositionedPane>` for all
+panes in the active tab. This is already used at termwindow/mod.rs:1308 inside
+the `WindowInvalidated` handler for `sync_overlay_visibility`:
+
+```rust
+for positioned in tab.iter_panes() {
+    active_ids.insert(positioned.pane.pane_id().to_string());
+}
+```
+
+**PaneId mapping:** WezTerm's `PaneId` is `usize` (mux/src/pane.rs:25). The TUI
+gets its pane_id from `TERMSURF_PANE_ID` env var, which is set as
+`pane_id.to_string()` in domain.rs:483. So our String pane_id parses back to
+usize for matching against `positioned.pane.pane_id()`.
+
+**Pixel conversion formula** (render/pane.rs:109–136):
+
+```rust
+let cell_width = self.render_metrics.cell_size.width as f32;
+let cell_height = self.render_metrics.cell_size.height as f32;
+let top_pixel_y = top_bar_height + padding_top + border.top;
+
+// For pane at pos.left, pos.top (in cells):
+let x = padding_left + border.left + (pos.left as f32 * cell_width);
+let y = top_pixel_y + (pos.top as f32 * cell_height);
+```
+
+The render code has special cases for `pos.left == 0` and `pos.top == 0`
+(extends to window edge), but the overlay doesn't need those — we want the
+grid-aligned position.
+
+**Accessibility from TermSurf code:** The TermSurf connection handler runs on
+the main thread via `promise::spawn::spawn_into_main_thread`. The Mux is
+accessible from the main thread via `Mux::get()`. So we can call
+`tab.iter_panes()` from `handle_ca_context` to look up the pane's cell position,
+then convert to pixels using the same formula as the render code.
+
+**Proposed formula for `update_ca_layer_frame`:**
+
+```rust
+let (cell_w, cell_h, padding_left, top_bar_height) = super::metrics::get();
+// Look up pane's cell position from mux
+let (pane_left, pane_top) = get_pane_cell_position(pane_id);
+// Window-absolute pixel position:
+let x = (padding_left + border_left + (pane_left + col) * cell_w) / scale;
+let y = (top_bar_height + padding_top + border_top + (pane_top + row) * cell_h) / scale;
+```
+
+Where `pane_left`/`pane_top` come from `PositionedPane.left`/`.top`, and
+`col`/`row` are the TUI's pane-relative grid offset (0, 1 for URL bar skip).
+
+**Key insight:** `padding_top` and `border.top` are not currently stored in
+metrics. We need to either add them to the metrics bridge or access them from
+the Mux/TermWindow at query time. The simplest approach: expand `metrics::set()`
+to include `padding_top` and `border_width`, since these are already computed in
+resize.rs where `metrics::set()` is called.
+
+## Experiment 2: Implement per-pane overlay positioning
+
+### Hypothesis
+
+Using `PositionedPane.left`/`.top` from the mux plus the TUI's col/row, we can
+position each overlay correctly over its own pane.
+
+### Design
+
+Three changes:
+
+**1. Expand metrics bridge** (metrics.rs + termwindow/resize.rs)
+
+Add `padding_top` and `border_left`/`border_top` to `metrics::set()` so the
+positioning formula has all the values it needs. Currently metrics stores
+`(cell_w, cell_h, padding_left, top_bar_height)`. Add `padding_top` and the
+border values.
+
+**2. Add pane position lookup** (conn.rs)
+
+Add a helper function that queries the mux for a pane's cell position:
+
+```rust
+fn get_pane_cell_position(pane_id: &str) -> (usize, usize) {
+    let numeric_id: usize = pane_id.parse().unwrap_or(0);
+    let mux = Mux::get();
+    for window_id in mux.iter_windows() {
+        if let Some(w) = mux.get_window(window_id) {
+            if let Some(tab) = w.get_active() {
+                for pos in tab.iter_panes() {
+                    if pos.pane.pane_id() == numeric_id {
+                        return (pos.left, pos.top);
+                    }
+                }
+            }
+        }
+    }
+    (0, 0) // fallback: single pane at origin
+}
+```
+
+**3. Fix positioning formula** (conn.rs `update_ca_layer_frame`)
+
+```rust
+let (cell_w, cell_h, pad_left, top_bar_h, pad_top, border_left, border_top)
+    = super::metrics::get();
+let (pane_left, pane_top) = get_pane_cell_position(&pane.pane_id);
+let x = (pad_left + border_left + (pane_left as u32 + pane.col as u32) * cell_w)
+    as f64 / scale;
+let y = (top_bar_h + pad_top + border_top + (pane_top as u32 + pane.row as u32) * cell_h)
+    as f64 / scale;
+```
+
+### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Launch Wezboard, run `web google.com`
+3. Single pane overlay renders in correct position (no regression)
+4. Open a vertical split, run `web google.com` in the second pane
+5. Both overlays visible, each over its own pane
+6. Close one pane — remaining overlay repositions correctly
