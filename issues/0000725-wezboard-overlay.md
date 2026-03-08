@@ -851,3 +851,56 @@ The cell metrics bridge works. Webview has correct size (real cell dimensions)
 and correct position (below tab bar, at left padding). The overlay fills the
 terminal content area including padding — correct behavior since the webview
 replaces terminal content entirely.
+
+### Experiment 9: Clean up debug code
+
+Remove all debug `eprintln!` calls, unused variables, and dead code paths left
+over from experiments 3-8.
+
+#### Changes
+
+##### 1. EDIT `wezboard/wezboard-gui/src/termwindow/mod.rs`
+
+Remove the `eprintln!` block (lines 664-675). Remove the `top_bar_height`
+variable — inline it into the `metrics::set()` call since it's only used once.
+
+##### 2. EDIT `wezboard/wezboard-gui/src/termwindow/resize.rs`
+
+Remove `pad_top` (unused since experiment 8). Remove intermediate variables
+`origin_x` and `origin_y` — inline directly into `metrics::set()`. Remove the
+`pad_left` binding and call `self.padding_left_top()` inline or bind only what's
+needed. Simplify to:
+
+```rust
+// Push cell metrics to TermSurf overlay code
+let tab_bar_height = if self.show_tab_bar {
+    self.tab_bar_pixel_height().unwrap_or(0.)
+} else {
+    0.
+};
+let top_bar_height = if self.config.tab_bar_at_bottom {
+    0.0
+} else {
+    tab_bar_height
+};
+let (pad_left, _) = self.padding_left_top();
+crate::termsurf::metrics::set(
+    self.render_metrics.cell_size.width as u32,
+    self.render_metrics.cell_size.height as u32,
+    pad_left as u32,
+    top_bar_height as u32,
+);
+```
+
+##### 3. EDIT `wezboard/wezboard-gui/src/termsurf/conn.rs`
+
+Remove the `eprintln!` in `update_ca_layer_frame()`. Rename `pad_left`/`pad_top`
+to `origin_x`/`origin_y` to match the atomic names.
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors, zero warnings
+   from our code
+2. Launch Wezboard, run `web google.com`
+3. Webview still correctly positioned (no regressions)
+4. No debug output on stderr
