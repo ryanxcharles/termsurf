@@ -598,3 +598,187 @@ the full TermSurf protocol — specifically the three query request/reply pairs
 (`QueryLastRequest`, `QueryDevtoolsRequest`, `QueryTabsRequest`). Implementing
 the remaining protocol messages will fix the multi-pane issue and complete the
 Wezboard PoC.
+
+### Experiment 5: Implement query request/reply handlers
+
+#### Background
+
+Experiment 4 proved the overlay code works for multiple panes. The TUI crashes
+because Wezboard silently drops synchronous query messages that expect replies.
+The TUI calls `recv_reply()` with a 5-second timeout, gets nothing back, and
+dies.
+
+These three query handlers are the first priority because they're the immediate
+cause of the TUI crash. The remaining missing messages (`SetDevtoolsOverlay`,
+`OpenSplit`, `CursorChanged`) are fire-and-forget — missing them won't crash the
+TUI, just limit features. Input forwarding (`KeyEvent`, `MouseEvent`,
+`MouseMove`, `ScrollEvent`) is a separate feature that neither board implements
+yet.
+
+By implementing the query handlers first, we unblock multi-pane and can verify
+the overlay lifecycle work from Experiments 1–4 actually works end-to-end.
+
+The three query messages and their semantics (from Ghostboard's implementation
+in `xpc.zig` and the TUI's `ipc.rs`):
+
+**QueryLastRequest → QueryLastReply:**
+
+The TUI sends `{ pane_id, profile }`. The board finds the last browser pane
+(optionally filtered by profile) and replies with `{ pane_id, tab_id, profile }`
+or `{ error }`. Used by `:last` to reopen the previous session. Ghostboard
+tracks this in `last_browser_pane`. Wezboard already stores
+`state.last_browser_pane` (set in `handle_tab_ready`) but never reads it.
+
+**QueryDevtoolsRequest → QueryDevtoolsReply:**
+
+The TUI sends `{ pane_id, inspected_tab_id, profile }`. The board validates the
+request: if `inspected_tab_id == 0`, auto-targets to `last_browser_pane`'s
+tab_id; checks no existing DevTools pane already inspects that tab; looks up the
+inspected tab's browser and profile. Replies with `{ tab_id, browser, profile }`
+or `{ error }`. Used by `web devtools` to open DevTools in a split.
+
+**QueryTabsRequest → QueryTabsReply:**
+
+The TUI sends `{ pane_id, profile }`. The board counts GUI panes matching the
+profile and replies with `{ gui_panes }` (Ghostboard currently leaves
+`chromium_tabs`, `chromium_browser`, `chromium_devtools`, and `tabs` unpopulated
+— defaults to 0/empty). Used by `:status` command.
+
+#### Changes
+
+**`wezboard/wezboard-gui/src/termsurf/conn.rs`** — Add three match arms in
+`handle_message` (before the `Some(other)` catch-all):
+
+**1. QueryLastRequest:**
+
+```rust
+Some(Msg::QueryLastRequest(q)) => {
+    log::info!("QueryLastRequest: pane_id={} profile={}", q.pane_id, q.profile);
+    let st = state.lock().unwrap();
+    let reply = if let Some(ref last_id) = st.last_browser_pane {
+        if let Some(pane) = st.panes.get(last_id) {
+            if q.profile.is_empty() || pane.profile == q.profile {
+                proto::QueryLastReply {
+                    pane_id: last_id.clone(),
+                    tab_id: pane.tab_id,
+                    profile: pane.profile.clone(),
+                    error: String::new(),
+                }
+            } else {
+                proto::QueryLastReply {
+                    error: "No matching pane for profile".into(),
+                    ..Default::default()
+                }
+            }
+        } else {
+            proto::QueryLastReply {
+                error: "Last pane no longer exists".into(),
+                ..Default::default()
+            }
+        }
+    } else {
+        proto::QueryLastReply {
+            error: "No browser pane yet".into(),
+            ..Default::default()
+        }
+    };
+    drop(st);
+    let msg = TermSurfMessage { msg: Some(Msg::QueryLastReply(reply)) };
+    let payload = msg.encode_to_vec();
+    let len = (payload.len() as u32).to_le_bytes();
+    (&**stream).write_all(&len).await?;
+    (&**stream).write_all(&payload).await?;
+}
+```
+
+**2. QueryDevtoolsRequest:**
+
+```rust
+Some(Msg::QueryDevtoolsRequest(q)) => {
+    log::info!(
+        "QueryDevtoolsRequest: pane_id={} inspected_tab_id={} profile={}",
+        q.pane_id, q.inspected_tab_id, q.profile
+    );
+    let st = state.lock().unwrap();
+
+    // Resolve inspected_tab_id (0 means auto-target to last browser pane)
+    let resolved_tab_id = if q.inspected_tab_id != 0 {
+        q.inspected_tab_id
+    } else if let Some(ref last_id) = st.last_browser_pane {
+        st.panes.get(last_id).map(|p| p.tab_id).unwrap_or(0)
+    } else {
+        0
+    };
+
+    let reply = if resolved_tab_id == 0 {
+        proto::QueryDevtoolsReply {
+            error: "No browser tab found".into(),
+            ..Default::default()
+        }
+    } else {
+        // Check for duplicate DevTools
+        let already_open = st.panes.values().any(|p| p.inspected_tab_id == resolved_tab_id);
+        if already_open {
+            proto::QueryDevtoolsReply {
+                error: format!("Tab {} already has DevTools open", resolved_tab_id),
+                ..Default::default()
+            }
+        } else if let Some(inspected_pane_id) = st.tab_to_pane.get(&resolved_tab_id) {
+            let inspected_pane = st.panes.get(inspected_pane_id).unwrap();
+            proto::QueryDevtoolsReply {
+                tab_id: resolved_tab_id,
+                browser: inspected_pane.browser.clone(),
+                profile: inspected_pane.profile.clone(),
+                error: String::new(),
+            }
+        } else {
+            proto::QueryDevtoolsReply {
+                error: "Inspected tab not found".into(),
+                ..Default::default()
+            }
+        }
+    };
+    drop(st);
+    let msg = TermSurfMessage { msg: Some(Msg::QueryDevtoolsReply(reply)) };
+    let payload = msg.encode_to_vec();
+    let len = (payload.len() as u32).to_le_bytes();
+    (&**stream).write_all(&len).await?;
+    (&**stream).write_all(&payload).await?;
+}
+```
+
+**3. QueryTabsRequest:**
+
+```rust
+Some(Msg::QueryTabsRequest(q)) => {
+    log::info!("QueryTabsRequest: pane_id={} profile={}", q.pane_id, q.profile);
+    let st = state.lock().unwrap();
+    let gui_panes = st.panes.values()
+        .filter(|p| q.profile.is_empty() || p.profile == q.profile)
+        .count() as i64;
+    let reply = proto::QueryTabsReply {
+        gui_panes,
+        chromium_tabs: 0,
+        chromium_browser: 0,
+        chromium_devtools: 0,
+        tabs: vec![],
+        error: String::new(),
+    };
+    drop(st);
+    let msg = TermSurfMessage { msg: Some(Msg::QueryTabsReply(reply)) };
+    let payload = msg.encode_to_vec();
+    let len = (payload.len() as u32).to_le_bytes();
+    (&**stream).write_all(&len).await?;
+    (&**stream).write_all(&payload).await?;
+}
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Launch Wezboard, run `web google.com` in the first pane
+3. Open a split pane, run `web google.com` again
+4. **Expected:** both overlays visible simultaneously, second TUI does not crash
+5. Close the first TUI, open a new one
+6. **Expected:** the new overlay appears, TUI stays alive
+7. Open a new tab, switch back — overlays show/hide correctly
