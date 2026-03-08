@@ -1,12 +1,12 @@
 use super::proto;
-use super::proto::term_surf_message::Msg;
 use super::proto::TermSurfMessage;
+use super::proto::term_surf_message::Msg;
 use super::state::{Pane, Server, SharedState, TermSurfState};
 use anyhow::Context;
 use prost::Message;
+use smol::Async;
 use smol::channel::Sender;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
-use smol::Async;
 use std::collections::HashSet;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
@@ -246,6 +246,13 @@ fn handle_set_overlay(
     };
 
     let is_new = !st.panes.contains_key(&overlay.pane_id);
+    log::info!(
+        "SetOverlay: pane_id={} is_new={} pixel={}x{}",
+        overlay.pane_id,
+        is_new,
+        pixel_w,
+        pixel_h
+    );
 
     if !is_new {
         // Resize: update dimensions, extract values before releasing mutable borrow
@@ -385,9 +392,10 @@ fn handle_tab_ready(ready: proto::TabReady, state: &SharedState) -> anyhow::Resu
             st.last_browser_pane = Some(ready.pane_id.clone());
         }
         log::info!(
-            "TabReady: pane_id={} tab_id={}",
+            "TabReady: pane_id={} tab_id={} tab_to_pane_count={}",
             ready.pane_id,
-            ready.tab_id
+            ready.tab_id,
+            st.tab_to_pane.len()
         );
     } else {
         log::warn!("TabReady: unknown pane_id={}", ready.pane_id);
@@ -684,6 +692,12 @@ fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
     };
 
     let pane = st.panes.get_mut(&pane_id).unwrap();
+    log::info!(
+        "handle_ca_context: tab_id={} pane_id={} has_layers={}",
+        ca_context.tab_id,
+        pane_id,
+        pane.ca_layer_host != 0
+    );
 
     let context_id = ca_context.ca_context_id as u32;
     pane.ca_context_id = context_id;
@@ -735,7 +749,13 @@ fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
             pane.ca_layer_positioning = positioning as usize;
             pane.ca_layer_host = host as usize;
 
-            log::info!("created CALayerHost contextId={}", context_id);
+            log::info!(
+                "CALayerHost created: pane_id={} contextId={} flipped={:#x} host={:#x}",
+                pane_id,
+                context_id,
+                pane.ca_layer_flipped,
+                pane.ca_layer_host
+            );
         } else {
             // Atomic swap: create new host, add, remove old, release old
             let ca_layer_host_class = cls(b"CALayerHost\0");
@@ -820,11 +840,23 @@ pub fn sync_overlay_visibility(active_pane_ids: &HashSet<String>) {
         return;
     };
     let st = state.lock().unwrap();
+    log::info!(
+        "sync_overlay_visibility: active_ids={:?} pane_count={}",
+        active_pane_ids,
+        st.panes.len()
+    );
     for (pane_id, pane) in &st.panes {
         if pane.ca_layer_flipped == 0 {
+            log::info!("  pane_id={} skipped (no layer)", pane_id);
             continue;
         }
         let is_active = active_pane_ids.contains(pane_id);
+        log::info!(
+            "  pane_id={} is_active={} ca_layer_flipped={:#x}",
+            pane_id,
+            is_active,
+            pane.ca_layer_flipped
+        );
         unsafe {
             use objc2::msg_send;
             use objc2::runtime::Bool;

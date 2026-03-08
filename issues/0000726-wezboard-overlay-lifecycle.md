@@ -524,3 +524,77 @@ pane's lifecycle to determine which hypothesis (or what other cause) is correct.
    - Does `handle_ca_context` find the pane and create layers?
    - Does `sync_overlay_visibility` hide the second pane's layer?
 6. The log output will identify the exact failure point
+
+**Result:** Partial
+
+The debug logs revealed that the board-side overlay code works correctly for
+multiple panes. The second pane's full lifecycle completes successfully:
+
+```
+SetOverlay: pane_id=1 is_new=true pixel=1014x1980
+sent CreateTab: pane_id=1 url=https://ryanxcharles.com
+TabReady: pane_id=1 tab_id=2 tab_to_pane_count=2
+CaContext: tab_id=2 context_id=2345823755
+handle_ca_context: tab_id=2 pane_id=1 has_layers=false
+CALayerHost created: pane_id=1 contextId=2345823755 flipped=0xbbf61c000 host=0xbbf4d99c0
+```
+
+The overlay IS created and briefly visible. Then ~2 seconds later, the TUI
+disconnects:
+
+```
+TermSurf client disconnected (Tui)
+removed pane 1 on TUI disconnect
+```
+
+The "flash" is not a visibility sync issue — it's the overlay appearing, the TUI
+process dying, and `handle_disconnect` cleaning up the pane and its CALayers.
+
+Further testing revealed the problem is even broader: closing the first TUI and
+reopening a new one also fails. This is not a concurrency issue — it's a state
+issue. Any TUI after the first one crashes.
+
+The root cause is that Wezboard only implements 11 of 30 TermSurf protocol
+messages. The TUI sends synchronous query messages that expect replies, but
+Wezboard silently drops them (line 177-178 of `handle_message`). The TUI blocks
+on `recv_reply()` with a 5-second timeout, then crashes.
+
+**Missing message handlers that cause TUI crashes (synchronous, need replies):**
+
+| Message                | What Ghostboard does                                              | Wezboard |
+| ---------------------- | ----------------------------------------------------------------- | -------- |
+| `QueryLastRequest`     | Finds last browser pane by profile, replies with `QueryLastReply` | Missing  |
+| `QueryDevtoolsRequest` | Validates DevTools tab, replies with `QueryDevtoolsReply`         | Missing  |
+| `QueryTabsRequest`     | Counts panes/tabs, replies with `QueryTabsReply`                  | Missing  |
+
+**Missing message handlers (fire-and-forget, won't crash but incomplete):**
+
+| Message              | What Ghostboard does             | Wezboard |
+| -------------------- | -------------------------------- | -------- |
+| `SetDevtoolsOverlay` | Creates/resizes DevTools overlay | Missing  |
+| `OpenSplit`          | Opens a split pane               | Missing  |
+| `CursorChanged`      | Updates mouse cursor type        | Missing  |
+
+**Not needed yet (input forwarding — both boards missing):**
+
+| Message       | Status              |
+| ------------- | ------------------- |
+| `KeyEvent`    | Both boards missing |
+| `MouseEvent`  | Both boards missing |
+| `MouseMove`   | Both boards missing |
+| `ScrollEvent` | Both boards missing |
+
+Ghostboard handles 18 of 30 messages (60%). Wezboard handles 11 (37%). The three
+missing query handlers are the immediate cause of the TUI crash — the TUI sends
+a synchronous request, Wezboard drops it, the TUI blocks waiting for a reply
+that never comes.
+
+#### Conclusion
+
+The debug logs disproved the original hypotheses about CALayer setup or
+visibility sync. The overlay creation path works correctly for multiple panes.
+The actual bug is that the TUI process dies because Wezboard doesn't implement
+the full TermSurf protocol — specifically the three query request/reply pairs
+(`QueryLastRequest`, `QueryDevtoolsRequest`, `QueryTabsRequest`). Implementing
+the remaining protocol messages will fix the multi-pane issue and complete the
+Wezboard PoC.

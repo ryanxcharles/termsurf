@@ -1,8 +1,8 @@
-use crate::TermWindow;
 use crate::termwindow::TermWindowNotif;
+use crate::TermWindow;
 use config::keyassignment::{ClipboardCopyDestination, ClipboardPasteSource};
-use mux::Mux;
 use mux::pane::Pane;
+use mux::Mux;
 use std::sync::Arc;
 use window::{Clipboard, WindowOps};
 
