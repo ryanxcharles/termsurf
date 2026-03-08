@@ -661,6 +661,18 @@ impl TermWindow {
             padding_left as u32,
             (top_bar_height + padding_top) as u32,
         );
+        eprintln!(
+            "termsurf metrics: cell={}x{} padding_left={} padding_top={} \
+             tab_bar_height={} top_bar_height={} origin=({}, {})",
+            render_metrics.cell_size.width,
+            render_metrics.cell_size.height,
+            padding_left,
+            padding_top,
+            tab_bar_height,
+            top_bar_height,
+            padding_left,
+            top_bar_height + padding_top,
+        );
 
         let mut dimensions = Dimensions {
             pixel_width: (terminal_size.pixel_width + padding_left + padding_right) as usize,

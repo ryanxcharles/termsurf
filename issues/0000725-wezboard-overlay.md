@@ -694,3 +694,66 @@ and `metrics::set()` call.
 4. Check output for `termsurf metrics` line with component breakdown
 5. Check output for `termsurf frame` line with final frame values
 6. Compare `top_bar_height` to `cell_height` — identify the extra row
+
+**Result:** Pass (diagnostic)
+
+The logs revealed the actual values:
+
+```
+cell=13x30  padding_left=13  padding_top=15
+tab_bar_height=50  top_bar_height=50
+origin=(13, 65)  scale=1
+frame=(13, 65, 2054, 1980)
+```
+
+The webview is 30px (one `cell_height`) too low. Correct `origin_y` should be
+35, not 65. That means
+`origin_y = tab_bar_height - cell_height + padding_top = 50 - 30 + 15 = 35`.
+
+### Experiment 7: Subtract cell_height from tab bar offset
+
+The tab bar height of 50 overshoots by exactly one cell_height (30). Try
+`origin_y = top_bar_height - cell_height + padding_top` and log the terminal
+view and overlay view NSView frames to understand why the extra cell_height
+exists.
+
+#### Changes
+
+##### 1. EDIT `wezboard/wezboard-gui/src/termwindow/mod.rs`
+
+Change the origin_y calculation to subtract one cell_height:
+
+```rust
+crate::termsurf::metrics::set(
+    render_metrics.cell_size.width as u32,
+    render_metrics.cell_size.height as u32,
+    padding_left as u32,
+    (top_bar_height + padding_top)
+        .saturating_sub(render_metrics.cell_size.height as usize) as u32,
+);
+```
+
+Update the `eprintln!` to show the new formula.
+
+##### 2. EDIT `wezboard/wezboard-gui/src/termwindow/resize.rs`
+
+Same change — subtract cell_height from origin_y:
+
+```rust
+let origin_y = (top_bar_height + pad_top
+    - self.render_metrics.cell_size.height as f32)
+    .max(0.0);
+```
+
+##### 3. Keep `eprintln!` in conn.rs and mod.rs
+
+Keep the debug logs to verify the new values.
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Run from CLI, pipe output
+3. Confirm `origin_y` is now 35 (= 50 - 30 + 15)
+4. Webview top edge aligns with terminal content
+5. Resize window — webview stays aligned
+6. Close pane — clean shutdown

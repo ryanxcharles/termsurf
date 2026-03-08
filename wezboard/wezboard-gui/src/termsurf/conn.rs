@@ -777,6 +777,11 @@ unsafe fn update_ca_layer_frame(pane: &Pane, root_layer: *mut objc2::runtime::An
     let (_, _, pad_left, pad_top) = super::metrics::get();
     let x = pad_left as f64 / scale;
     let y = pad_top as f64 / scale;
+    eprintln!(
+        "termsurf frame: origin_x={} origin_y={} scale={} \
+         frame=({}, {}, {}, {})",
+        pad_left, pad_top, scale, x, y, w, h,
+    );
     let frame = CGRect::new(CGPoint::new(x, y), CGSize::new(w, h));
 
     let positioning = pane.ca_layer_positioning as *mut AnyObject;
