@@ -350,6 +350,51 @@ fn send_mode_and_focus(pane_id_str: &str, browsing: bool) {
     );
 }
 
+/// Handle pane focus change. Sends FocusChanged(false) to old pane's Chromium,
+/// FocusChanged(true) to new pane's Chromium if it's in browse mode.
+pub fn handle_pane_focus(pane_id: usize) {
+    let pane_id_str = pane_id.to_string();
+    let Some(state) = super::shared_state() else {
+        return;
+    };
+
+    let (old_pane, new_is_browsing) = {
+        let mut st = state.lock().unwrap();
+        let old = st.focused_pane.take();
+        let new_is_browsing = st
+            .panes
+            .get(&pane_id_str)
+            .map(|p| p.browsing)
+            .unwrap_or(false);
+        st.focused_pane = Some(pane_id_str.clone());
+        (old, new_is_browsing)
+    };
+
+    // Unfocus old pane's Chromium
+    if let Some(ref old_id) = old_pane {
+        if *old_id != pane_id_str {
+            send_to_chromium(
+                old_id,
+                Msg::FocusChanged(proto::FocusChanged {
+                    tab_id: 0,
+                    focused: false,
+                }),
+            );
+        }
+    }
+
+    // Focus new pane's Chromium if browsing
+    if new_is_browsing {
+        send_to_chromium(
+            &pane_id_str,
+            Msg::FocusChanged(proto::FocusChanged {
+                tab_id: 0,
+                focused: true,
+            }),
+        );
+    }
+}
+
 /// Map a pane's Chromium cursor type to a WezTerm MouseCursor.
 pub fn cursor_for_pane(pane_id: usize) -> MouseCursor {
     let pane_id_str = pane_id.to_string();

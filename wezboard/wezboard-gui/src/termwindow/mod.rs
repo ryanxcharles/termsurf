@@ -1324,7 +1324,8 @@ impl TermWindow {
                 MuxNotification::SaveToDownloads { .. } => {
                     // Handled by frontend
                 }
-                MuxNotification::PaneFocused(_) => {
+                MuxNotification::PaneFocused(pane_id) => {
+                    crate::termsurf::input::handle_pane_focus(pane_id);
                     // Also handled by clientpane
                     self.update_title_post_status();
                 }

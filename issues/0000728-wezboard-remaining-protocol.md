@@ -816,3 +816,108 @@ System cursor now updates over the browser overlay. Chromium sends
 `try_forward_mouse` returns true, the cursor is applied via `cursor_for_pane`
 which maps Chromium types to WezTerm's `MouseCursor` enum (hand for links, text
 beam for inputs, arrow for everything else). All regression checks pass.
+
+### Experiment 5: FocusChanged on pane switch
+
+#### Goal
+
+When the user switches between terminal panes (click, Ctrl+Shift+Arrow), send
+`FocusChanged(false)` to the old pane's Chromium and `FocusChanged(true)` to
+the new pane's Chromium (if it's in browse mode). Without this, the browser in
+an unfocused pane keeps its focus state — text cursors blink in form fields,
+selection highlights persist, etc.
+
+#### Design
+
+WezTerm's mux fires `MuxNotification::PaneFocused(pane_id)` whenever the active
+pane changes (tab.rs:1782). Wezboard already handles this notification in
+`mod.rs:1327` but only calls `update_title_post_status()`. Add a TermSurf hook
+here.
+
+The hook needs to:
+
+1. Find the previously focused TermSurf pane (if any) and send
+   `FocusChanged(false)` to its Chromium
+2. Check if the newly focused pane is a TermSurf pane in browse mode — if so,
+   send `FocusChanged(true)` to its Chromium
+3. Update `focused_pane` in TermSurf state to track the current focus
+
+The `focused_pane` field already exists in `TermSurfState` (state.rs:49) but is
+never written. This experiment puts it to use.
+
+#### Changes
+
+**1. `termsurf/input.rs` — Add `handle_pane_focus` public function**
+
+```rust
+pub fn handle_pane_focus(pane_id: usize) {
+    let pane_id_str = pane_id.to_string();
+    let Some(state) = super::shared_state() else {
+        return;
+    };
+
+    let (old_pane, new_is_browsing) = {
+        let mut st = state.lock().unwrap();
+        let old = st.focused_pane.take();
+        let new_is_browsing = st
+            .panes
+            .get(&pane_id_str)
+            .map(|p| p.browsing)
+            .unwrap_or(false);
+        st.focused_pane = Some(pane_id_str.clone());
+        (old, new_is_browsing)
+    };
+
+    // Unfocus old pane's Chromium
+    if let Some(ref old_id) = old_pane {
+        if *old_id != pane_id_str {
+            send_to_chromium(
+                old_id,
+                Msg::FocusChanged(proto::FocusChanged {
+                    tab_id: 0,
+                    focused: false,
+                }),
+            );
+        }
+    }
+
+    // Focus new pane's Chromium if browsing
+    if new_is_browsing {
+        send_to_chromium(
+            &pane_id_str,
+            Msg::FocusChanged(proto::FocusChanged {
+                tab_id: 0,
+                focused: true,
+            }),
+        );
+    }
+}
+```
+
+**2. `termwindow/mod.rs` — Call hook from PaneFocused handler**
+
+```rust
+MuxNotification::PaneFocused(pane_id) => {
+    crate::termsurf::input::handle_pane_focus(*pane_id);
+    self.update_title_post_status();
+}
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Open two split panes, each with a browser overlay
+3. Click on pane A's overlay (enters browse mode), click a text field
+4. Click on pane B — text cursor in pane A's browser should stop blinking
+5. Click on pane A's overlay again — text cursor resumes
+6. Use Ctrl+Shift+Arrow to switch panes — same focus behavior
+7. Single pane with no splits — still works normally (regression check)
+
+**Result:** Success
+
+Pane focus changes now notify Chromium. The `MuxNotification::PaneFocused`
+handler calls `handle_pane_focus`, which tracks the previously focused pane in
+`TermSurfState.focused_pane` and sends `FocusChanged(false)` to the old pane's
+Chromium and `FocusChanged(true)` to the new pane's Chromium (if browsing).
+Text cursors stop blinking and selections deactivate when switching away from a
+pane. All regression checks pass.
