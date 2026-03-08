@@ -874,3 +874,201 @@ SetColorScheme) to Chromium via `forward_to_chromium` with pane_id→tab_id
 translation. ModeChanged updates local state without forwarding. The two helper
 functions (`forward_to_tui`, `forward_to_chromium`) cleanly encapsulate the
 routing patterns. Ready for Experiment 3.
+
+### Experiment 3: CALayerHost rendering
+
+Display browser content as an overlay in the terminal window. Chromium's GPU
+process creates a `CAContext` with a Window Server context ID and sends it via
+the `CaContext` protobuf message. The board creates a `CALayerHost` with that
+context ID as a sublayer of the terminal view's backing layer. Window Server
+composites the browser content directly from GPU VRAM — zero per-frame IPC, zero
+texture copies.
+
+#### Layer tree
+
+Ghostboard uses a 3-layer sandwich (Issues 625–627):
+
+```
+view.layer (CAMetalLayer — wgpu renders terminal here)
+  └─ flipped_layer (CALayer, geometryFlipped=YES → top-origin Y)
+       └─ positioning_layer (CALayer, explicit frame = overlay rect)
+            └─ CALayerHost (contextId = Chromium GPU context)
+```
+
+- **flipped_layer**: Converts macOS bottom-origin Y to top-origin (matching grid
+  coordinates). Auto-fills parent via
+  `autoresizingMask = widthSizable | heightSizable`. Initial frame set to parent
+  bounds.
+- **positioning_layer**: Holds the explicit frame at overlay position.
+  `anchorPoint = (0, 0)`, no autoresizing mask. Updated by
+  `update_ca_layer_frame()`.
+- **CALayerHost**: Displays remote GPU content. `contextId` set to Chromium's
+  `CAContext` ID. `anchorPoint = (0, 0)`,
+  `autoresizingMask = maxXMargin | maxYMargin` (pins to top-left of
+  positioning_layer).
+
+All layer mutations wrapped in `CATransaction` with `setDisableActions: true` to
+suppress animations and ensure immediate commit.
+
+#### Getting the backing layer
+
+The protocol handler runs on the main thread (via `spawn_into_main_thread`). It
+can access the frontend registry to get the NSView's backing layer:
+
+```rust
+let fe = crate::frontend::try_front_end()?;
+// New method on GuiFrontEnd:
+let ns_view = fe.first_ns_view()?;
+let layer: *mut AnyObject = msg_send![ns_view as *mut AnyObject, layer];
+```
+
+`known_windows` is private on `GuiFrontEnd`, so we add a public
+`first_ns_view()` method that extracts the NSView pointer via `HasWindowHandle`
+→ `AppKitWindowHandle`. This avoids modifying the `window` crate.
+
+#### Coordinate conversion
+
+SetOverlay sends grid coordinates (col, row, width, height in cells). The
+current code stores placeholder pixel dimensions (`width * 10`, `height * 20`).
+For CALayerHost positioning, convert pixels to logical points:
+
+```
+point_x = pixel_x / contentsScale
+point_y = pixel_y / contentsScale
+point_w = pixel_w / contentsScale
+point_h = pixel_h / contentsScale
+```
+
+For this experiment, use the placeholder pixel dimensions. Real cell metrics
+come in a later experiment.
+
+#### ObjC runtime pattern
+
+Use the same `objc2::msg_send!` + `AnyClass::get()` pattern as
+`window.rs:make_backing_layer()`:
+
+```rust
+let class = AnyClass::get(c"CALayerHost").unwrap();
+let host: *mut AnyObject = msg_send![class, layer];
+let _: () = msg_send![host, setContextId: context_id as u32];
+```
+
+CGRect for frame setting:
+
+```rust
+#[repr(C)]
+struct CGRect { origin: CGPoint, size: CGSize }
+#[repr(C)]
+struct CGPoint { x: f64, y: f64 }
+#[repr(C)]
+struct CGSize { width: f64, height: f64 }
+```
+
+#### Changes
+
+**1. `wezboard/wezboard-gui/src/termsurf/state.rs`** — Add CALayerHost state
+fields to `Pane`:
+
+```rust
+pub ca_context_id: u32,          // 0 until CaContext received
+pub ca_layer_host: usize,        // raw *mut AnyObject as usize (Send-safe)
+pub ca_layer_flipped: usize,     // 0 = not created
+pub ca_layer_positioning: usize, // 0 = not created
+```
+
+Using `usize` for raw ObjC pointers keeps `Pane` Send+Sync compatible with
+`Arc<Mutex<>>`. Initialize all four to 0 in `handle_set_overlay()`.
+
+**2. `wezboard/wezboard-gui/src/frontend.rs`** — Add public method to get the
+first window's NSView pointer:
+
+```rust
+pub fn first_ns_view(&self) -> Option<*mut std::ffi::c_void> {
+    use window::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let windows = self.known_windows.borrow();
+    let window = windows.keys().next()?;
+    let handle = window.window_handle().ok()?;
+    match handle.as_raw() {
+        RawWindowHandle::AppKit(h) => Some(h.ns_view.as_ptr()),
+        _ => None,
+    }
+}
+```
+
+**3. `wezboard/wezboard-gui/src/termsurf/conn.rs`** — Handle CaContext message
+and manage CALayerHost lifecycle:
+
+**(a) New match arm in `handle_message`:**
+
+```rust
+Some(Msg::CaContext(c)) => {
+    log::info!("CaContext: tab_id={} context_id={}", c.tab_id, c.ca_context_id);
+    if c.ca_context_id != 0 {
+        handle_ca_context(c, state);
+    }
+}
+```
+
+**(b) `handle_ca_context()` function:**
+
+1. Lock state, look up `tab_to_pane[tab_id]` → pane_id.
+2. Get backing layer: `try_front_end()` → `first_ns_view()` →
+   `msg_send![ns_view, layer]`.
+3. If `pane.ca_layer_host == 0` (first CaContext): create the 3-layer hierarchy:
+   - `flipped_layer`: `[CALayer layer]`, `geometryFlipped = YES`,
+     `anchorPoint = (0,0)`,
+     `autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable` (2 | 16 =
+     18), `frame = [backing_layer bounds]`,
+     `[backing_layer addSublayer: flipped_layer]`.
+   - `positioning_layer`: `[CALayer layer]`, `anchorPoint = (0,0)`,
+     `[flipped_layer addSublayer: positioning_layer]`.
+   - `CALayerHost`: `[CALayerHost layer]`, `contextId = ca_context_id`,
+     `anchorPoint = (0,0)`,
+     `autoresizingMask = kCALayerMaxXMargin | kCALayerMaxYMargin` (4 | 32 = 36),
+     `[positioning_layer addSublayer: host]`.
+   - Store all three pointers as `usize` on pane. Retain each.
+4. If `pane.ca_layer_host != 0` (context_id update): atomic swap — create new
+   CALayerHost, add to positioning_layer, remove old from superlayer, release
+   old, update pointer.
+5. Call `update_ca_layer_frame()` to position the overlay.
+
+All mutations wrapped in `CATransaction begin` / `setDisableActions: true` /
+`commit`.
+
+**(c) `update_ca_layer_frame()` function:**
+
+```rust
+fn update_ca_layer_frame(pane: &Pane, backing_layer: *mut AnyObject) {
+    let scale: f64 = msg_send![backing_layer, contentsScale];
+    let w = pane.pixel_width as f64 / scale;
+    let h = pane.pixel_height as f64 / scale;
+    let frame = CGRect {
+        origin: CGPoint { x: 0.0, y: 0.0 },
+        size: CGSize { width: w, height: h },
+    };
+    // CATransaction begin/setDisableActions/commit
+    // Set positioning_layer frame
+}
+```
+
+**(d) Cleanup on TUI disconnect:**
+
+In `handle_disconnect()`, when removing a pane that has `ca_layer_host != 0`,
+call `remove_ca_layers()`:
+
+```rust
+fn remove_ca_layers(host: usize, positioning: usize, flipped: usize) {
+    // CATransaction begin/setDisableActions/commit
+    // removeFromSuperlayer + release for each non-zero layer
+}
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors.
+2. Launch Wezboard, run `web google.com` in a pane.
+3. Confirm logs:
+   - `CaContext: tab_id=1 context_id=...` (nonzero context ID)
+   - `created CALayerHost contextId=...`
+4. Browser content visible as overlay in terminal window.
+5. Close the `web` pane. Confirm layers cleaned up, no crash.
