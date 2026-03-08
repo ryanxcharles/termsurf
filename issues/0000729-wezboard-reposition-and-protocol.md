@@ -434,11 +434,11 @@ message OpenSplit {
 #### Direction mapping
 
 | TUI direction | `SplitDirection` | `target_is_second` |
-|---|---|---|
-| `"right"` | `Horizontal` | `true` |
-| `"left"` | `Horizontal` | `false` |
-| `"down"` | `Vertical` | `true` |
-| `"up"` | `Vertical` | `false` |
+| ------------- | ---------------- | ------------------ |
+| `"right"`     | `Horizontal`     | `true`             |
+| `"left"`      | `Horizontal`     | `false`            |
+| `"down"`      | `Vertical`       | `true`             |
+| `"up"`        | `Vertical`       | `false`            |
 
 #### Design
 
@@ -539,13 +539,14 @@ fn handle_open_split(split: proto::OpenSplit, state: &SharedState) {
 ```
 
 Key points:
+
 - Runs the split asynchronously via `promise::spawn::spawn` since
   `mux.split_pane()` is async
 - Uses `CommandBuilder::from_argv` to run the command directly (no shell)
 - Uses `SplitSize::Percent(50)` for a 50/50 split
-- The new pane automatically gets `TERMSURF_SOCKET` and `TERMSURF_PANE_ID`
-  from WezTerm's environment, so the `web devtools` process connects back to
-  the board
+- The new pane automatically gets `TERMSURF_SOCKET` and `TERMSURF_PANE_ID` from
+  WezTerm's environment, so the `web devtools` process connects back to the
+  board
 
 #### Verification
 
@@ -565,16 +566,249 @@ sends `HelloRequest` (pane_id=1), and sends `QueryDevtoolsRequest` (which
 resolves `inspected_tab_id=0` to tab 1 via `last_browser_pane`). All of this
 works.
 
-The failure: the DevTools TUI then sends `SetDevtoolsOverlay` — not
-`SetOverlay` — to request a DevTools overlay. Wezboard doesn't handle
-`SetDevtoolsOverlay` yet; it falls through to the `Some(other)` catch-all and
-is logged as `type=Other`. No overlay is created, no `CreateDevtoolsTab` is
-sent to Chromium, so nothing renders. The TUI sits idle showing "DevTools"
-with no webview.
+The failure: the DevTools TUI then sends `SetDevtoolsOverlay` — not `SetOverlay`
+— to request a DevTools overlay. Wezboard doesn't handle `SetDevtoolsOverlay`
+yet; it falls through to the `Some(other)` catch-all and is logged as
+`type=Other`. No overlay is created, no `CreateDevtoolsTab` is sent to Chromium,
+so nothing renders. The TUI sits idle showing "DevTools" with no webview.
 
 #### Conclusion
 
 `OpenSplit` is implemented and working. The missing piece is
-`SetDevtoolsOverlay` handling (which creates a pane with `inspected_tab_id`
-set and sends `CreateDevtoolsTab` to Chromium instead of `CreateTab`) — this
-is the next experiment.
+`SetDevtoolsOverlay` handling (which creates a pane with `inspected_tab_id` set
+and sends `CreateDevtoolsTab` to Chromium instead of `CreateTab`) — this is the
+next experiment.
+
+### Experiment 5: Handle SetDevtoolsOverlay and CreateDevtoolsTab
+
+#### Goal
+
+Handle `SetDevtoolsOverlay` so the DevTools TUI gets a browser overlay showing
+Chrome DevTools for the inspected tab. This is the last missing piece —
+Experiment 4 proved `OpenSplit` works and the DevTools TUI connects, but its
+`SetDevtoolsOverlay` message is ignored.
+
+#### Background
+
+`SetDevtoolsOverlay` is nearly identical to `SetOverlay`:
+
+| Field            | SetOverlay | SetDevtoolsOverlay |
+| ---------------- | ---------- | ------------------ |
+| pane_id          | ✓          | ✓                  |
+| col, row         | ✓          | ✓                  |
+| width, height    | ✓          | ✓                  |
+| profile          | ✓          | ✓                  |
+| browsing         | ✓          | ✓                  |
+| browser          | ✓          | ✓                  |
+| url              | ✓          | ✗                  |
+| inspected_tab_id | ✗          | ✓                  |
+
+The only difference: `SetOverlay` has a `url` to navigate to;
+`SetDevtoolsOverlay` has an `inspected_tab_id` to open DevTools for.
+
+Similarly, `CreateDevtoolsTab` is like `CreateTab` but with `inspected_tab_id`
+instead of `url`:
+
+```protobuf
+message CreateTab {
+  string url = 1;
+  string pane_id = 2;
+  uint64 pixel_width = 3;
+  uint64 pixel_height = 4;
+  bool dark = 5;
+}
+
+message CreateDevtoolsTab {
+  string pane_id = 1;
+  int64 inspected_tab_id = 2;
+  uint64 pixel_width = 3;
+  uint64 pixel_height = 4;
+  bool dark = 5;
+}
+```
+
+The Roamium/Chromium side already handles `CreateDevtoolsTab` — it opens
+DevTools targeting the specified tab. The board just needs to send it.
+
+#### Design
+
+**1. `conn.rs` — Add `SetDevtoolsOverlay` to `msg_type_name`**
+
+```rust
+Some(Msg::SetDevtoolsOverlay(_)) => "SetDevtoolsOverlay",
+```
+
+**2. `conn.rs` — Add `SetDevtoolsOverlay` to `handle_message`**
+
+```rust
+Some(Msg::SetDevtoolsOverlay(d)) => {
+    handle_set_devtools_overlay(d, tx.clone(), state)?;
+}
+```
+
+**3. `conn.rs` — Add `handle_set_devtools_overlay` function**
+
+This mirrors `handle_set_overlay` with two differences:
+
+- Stores `inspected_tab_id` on the pane (instead of `url`)
+- Calls `send_create_devtools_tab` (instead of `send_create_tab`)
+
+```rust
+fn handle_set_devtools_overlay(
+    overlay: proto::SetDevtoolsOverlay,
+    tui_tx: Sender<Vec<u8>>,
+    state: &SharedState,
+) -> anyhow::Result<()> {
+    let mut st = state.lock().unwrap();
+    let browser = if overlay.browser.is_empty() {
+        "roamium".to_string()
+    } else {
+        overlay.browser.clone()
+    };
+
+    let (cell_w, cell_h, _, _, _, _) = super::metrics::get();
+    let pixel_w = if cell_w > 0 { overlay.width * cell_w as u64 }
+                  else { overlay.width * 10 };
+    let pixel_h = if cell_h > 0 { overlay.height * cell_h as u64 }
+                  else { overlay.height * 20 };
+
+    let is_new = !st.panes.contains_key(&overlay.pane_id);
+
+    if !is_new {
+        // Resize path — same as SetOverlay
+        let (tab_id, profile, browser_name) = {
+            let pane = st.panes.get_mut(&overlay.pane_id).unwrap();
+            pane.pixel_width = pixel_w;
+            pane.pixel_height = pixel_h;
+            pane.col = overlay.col;
+            pane.row = overlay.row;
+            (pane.tab_id, pane.profile.clone(), pane.browser.clone())
+        };
+        if tab_id != 0 {
+            // Send Resize to Chromium
+            let key = TermSurfState::server_key(&profile, &browser_name);
+            if let Some(server) = st.servers.get(&key) {
+                if let Some(ref server_tx) = server.tx {
+                    let msg = TermSurfMessage {
+                        msg: Some(Msg::Resize(proto::Resize {
+                            tab_id, pixel_width: pixel_w, pixel_height: pixel_h,
+                        })),
+                    };
+                    let _ = server_tx.try_send(msg.encode_to_vec());
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    // Create new pane — like SetOverlay but with inspected_tab_id, no url
+    let pane = Pane {
+        pane_id: overlay.pane_id.clone(),
+        profile: overlay.profile.clone(),
+        browser: browser.clone(),
+        url: String::new(),  // DevTools has no URL
+        col: overlay.col,
+        row: overlay.row,
+        pixel_width: pixel_w,
+        pixel_height: pixel_h,
+        tab_id: 0,
+        tui_tx,
+        browsing: overlay.browsing,
+        dark: false,
+        inspected_tab_id: overlay.inspected_tab_id,
+        // ... CA layer fields initialized to 0/defaults
+    };
+    st.panes.insert(overlay.pane_id.clone(), pane);
+
+    // Reuse existing server (DevTools uses the same Chromium process)
+    let key = TermSurfState::server_key(&overlay.profile, &browser);
+    if !st.servers.contains_key(&key) {
+        drop(st);
+        let server = spawn_server(&overlay.profile, &browser)?;
+        let mut st = state.lock().unwrap();
+        st.servers.insert(key.clone(), server);
+        let server = st.servers.get(&key).unwrap();
+        if let Some(ref server_tx) = server.tx {
+            let pane = st.panes.get(&overlay.pane_id).unwrap();
+            send_create_devtools_tab(server_tx, pane)?;
+        }
+    } else {
+        let server = st.servers.get_mut(&key).unwrap();
+        server.pane_count += 1;
+        let server_tx = server.tx.clone();
+        if let Some(ref stx) = server_tx {
+            let pane = st.panes.get(&overlay.pane_id).unwrap();
+            send_create_devtools_tab(stx, pane)?;
+        }
+    }
+    Ok(())
+}
+```
+
+**4. `conn.rs` — Add `send_create_devtools_tab` function**
+
+```rust
+fn send_create_devtools_tab(
+    server_tx: &Sender<Vec<u8>>,
+    pane: &Pane,
+) -> anyhow::Result<()> {
+    let msg = TermSurfMessage {
+        msg: Some(Msg::CreateDevtoolsTab(proto::CreateDevtoolsTab {
+            pane_id: pane.pane_id.clone(),
+            inspected_tab_id: pane.inspected_tab_id,
+            pixel_width: pane.pixel_width,
+            pixel_height: pane.pixel_height,
+            dark: pane.dark,
+        })),
+    };
+    let payload = msg.encode_to_vec();
+    server_tx.try_send(payload)?;
+    log::info!(
+        "sent CreateDevtoolsTab: pane_id={} inspected_tab_id={}",
+        pane.pane_id, pane.inspected_tab_id
+    );
+    Ok(())
+}
+```
+
+**5. `conn.rs` — Update `handle_server_register` pending flush**
+
+When a server registers, it flushes pending panes (those with `tab_id == 0`).
+Currently it always calls `send_create_tab`. It needs to check
+`inspected_tab_id` and call `send_create_devtools_tab` for DevTools panes:
+
+```rust
+for pane_id in pending {
+    let pane = st.panes.get(&pane_id).unwrap();
+    if pane.inspected_tab_id != 0 {
+        send_create_devtools_tab(&server_tx, pane)?;
+    } else {
+        send_create_tab(&server_tx, pane)?;
+    }
+}
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Open `web lite.duckduckgo.com`
+3. Type `:devtools right` — DevTools panel opens in a split to the right
+4. DevTools renders and shows the inspected page's DOM/elements
+5. Type `:devtools down` from the original pane — DevTools opens below
+6. Close DevTools pane — original pane unaffected
+
+**Result:** Success
+
+`SetDevtoolsOverlay` is handled and `CreateDevtoolsTab` is sent to Chromium. The
+DevTools TUI spawns via `OpenSplit`, connects, sends `SetDevtoolsOverlay`, and
+the board creates the pane with `inspected_tab_id` and sends `CreateDevtoolsTab`
+to Chromium. DevTools renders in the split pane.
+
+#### Conclusion
+
+`SetDevtoolsOverlay` and `CreateDevtoolsTab` complete the DevTools protocol path
+in Wezboard. The handler mirrors `handle_set_overlay` with two differences:
+`inspected_tab_id` instead of `url`, and `send_create_devtools_tab` instead of
+`send_create_tab`. The `handle_server_register` pending flush also checks
+`inspected_tab_id` to dispatch the correct create message. Combined with
+Experiment 4's `OpenSplit`, the full `:devtools` flow now works end-to-end.

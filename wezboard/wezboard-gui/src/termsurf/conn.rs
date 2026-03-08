@@ -126,6 +126,7 @@ fn msg_type_name(msg: &TermSurfMessage) -> &'static str {
         Some(Msg::CloseTab(_)) => "CloseTab",
         Some(Msg::CursorChanged(_)) => "CursorChanged",
         Some(Msg::OpenSplit(_)) => "OpenSplit",
+        Some(Msg::SetDevtoolsOverlay(_)) => "SetDevtoolsOverlay",
         Some(_) => "Other",
         None => "None",
     }
@@ -394,6 +395,9 @@ async fn handle_message(
             );
             handle_open_split(o);
         }
+        Some(Msg::SetDevtoolsOverlay(d)) => {
+            handle_set_devtools_overlay(d, tx.clone(), state)?;
+        }
         Some(other) => {
             log::debug!("unhandled TermSurf message: {:?}", other);
         }
@@ -583,6 +587,118 @@ fn handle_set_overlay(
     Ok(())
 }
 
+fn handle_set_devtools_overlay(
+    overlay: proto::SetDevtoolsOverlay,
+    tui_tx: Sender<Vec<u8>>,
+    state: &SharedState,
+) -> anyhow::Result<()> {
+    let mut st = state.lock().unwrap();
+    let browser = if overlay.browser.is_empty() {
+        "roamium".to_string()
+    } else {
+        overlay.browser.clone()
+    };
+
+    let (cell_w, cell_h, _, _, _, _) = super::metrics::get();
+    let pixel_w = if cell_w > 0 {
+        overlay.width * cell_w as u64
+    } else {
+        overlay.width * 10
+    };
+    let pixel_h = if cell_h > 0 {
+        overlay.height * cell_h as u64
+    } else {
+        overlay.height * 20
+    };
+
+    let is_new = !st.panes.contains_key(&overlay.pane_id);
+
+    if !is_new {
+        // Resize path — same as SetOverlay
+        let (tab_id, profile, browser_name) = {
+            let pane = st.panes.get_mut(&overlay.pane_id).unwrap();
+            pane.pixel_width = pixel_w;
+            pane.pixel_height = pixel_h;
+            pane.col = overlay.col;
+            pane.row = overlay.row;
+            (pane.tab_id, pane.profile.clone(), pane.browser.clone())
+        };
+        if tab_id != 0 {
+            let key = TermSurfState::server_key(&profile, &browser_name);
+            if let Some(server) = st.servers.get(&key) {
+                if let Some(ref server_tx) = server.tx {
+                    let msg = TermSurfMessage {
+                        msg: Some(Msg::Resize(proto::Resize {
+                            tab_id,
+                            pixel_width: pixel_w,
+                            pixel_height: pixel_h,
+                        })),
+                    };
+                    let _ = server_tx.try_send(msg.encode_to_vec());
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    log::info!(
+        "SetDevtoolsOverlay: pane_id={} profile={} browser={} inspected_tab_id={}",
+        overlay.pane_id,
+        overlay.profile,
+        browser,
+        overlay.inspected_tab_id
+    );
+
+    // Create new pane — like SetOverlay but with inspected_tab_id, no url
+    let pane = Pane {
+        pane_id: overlay.pane_id.clone(),
+        profile: overlay.profile.clone(),
+        browser: browser.clone(),
+        url: String::new(),
+        col: overlay.col,
+        row: overlay.row,
+        pixel_width: pixel_w,
+        pixel_height: pixel_h,
+        tab_id: 0,
+        tui_tx,
+        browsing: overlay.browsing,
+        dark: false,
+        inspected_tab_id: overlay.inspected_tab_id,
+        ca_context_id: 0,
+        ca_layer_host: 0,
+        ca_layer_flipped: 0,
+        ca_layer_positioning: 0,
+        overlay_origin_x: 0.0,
+        overlay_origin_y: 0.0,
+        overlay_scale: 1.0,
+        cursor_type: 0,
+    };
+    st.panes.insert(overlay.pane_id.clone(), pane);
+
+    // Reuse existing server (DevTools uses the same Chromium process)
+    let key = TermSurfState::server_key(&overlay.profile, &browser);
+    if !st.servers.contains_key(&key) {
+        drop(st);
+        let server = spawn_server(&overlay.profile, &browser)?;
+        let mut st = state.lock().unwrap();
+        st.servers.insert(key.clone(), server);
+        let server = st.servers.get(&key).unwrap();
+        if let Some(ref server_tx) = server.tx {
+            let pane = st.panes.get(&overlay.pane_id).unwrap();
+            send_create_devtools_tab(server_tx, pane)?;
+        }
+    } else {
+        let server = st.servers.get_mut(&key).unwrap();
+        server.pane_count += 1;
+        let server_tx = server.tx.clone();
+        if let Some(ref stx) = server_tx {
+            let pane = st.panes.get(&overlay.pane_id).unwrap();
+            send_create_devtools_tab(stx, pane)?;
+        }
+    }
+    Ok(())
+}
+
 fn handle_server_register(
     reg: proto::ServerRegister,
     server_tx: Sender<Vec<u8>>,
@@ -613,7 +729,11 @@ fn handle_server_register(
 
         for pane_id in pending {
             let pane = st.panes.get(&pane_id).unwrap();
-            send_create_tab(&server_tx, pane)?;
+            if pane.inspected_tab_id != 0 {
+                send_create_devtools_tab(&server_tx, pane)?;
+            } else {
+                send_create_tab(&server_tx, pane)?;
+            }
         }
     } else {
         log::warn!(
@@ -883,6 +1003,28 @@ fn send_create_tab(server_tx: &Sender<Vec<u8>>, pane: &Pane) -> anyhow::Result<(
     let payload = msg.encode_to_vec();
     server_tx.try_send(payload)?;
     log::info!("sent CreateTab: pane_id={} url={}", pane.pane_id, pane.url);
+    Ok(())
+}
+
+fn send_create_devtools_tab(
+    server_tx: &Sender<Vec<u8>>,
+    pane: &Pane,
+) -> anyhow::Result<()> {
+    let msg = TermSurfMessage {
+        msg: Some(Msg::CreateDevtoolsTab(proto::CreateDevtoolsTab {
+            pane_id: pane.pane_id.clone(),
+            inspected_tab_id: pane.inspected_tab_id,
+            pixel_width: pane.pixel_width,
+            pixel_height: pane.pixel_height,
+            dark: pane.dark,
+        })),
+    };
+    let payload = msg.encode_to_vec();
+    server_tx.try_send(payload)?;
+    log::info!(
+        "sent CreateDevtoolsTab: pane_id={} inspected_tab_id={}",
+        pane.pane_id, pane.inspected_tab_id
+    );
     Ok(())
 }
 
