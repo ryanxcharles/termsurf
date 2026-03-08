@@ -458,3 +458,78 @@ log::info!(
 2. Open a split pane, run `web ryanxcharles.com` from the right side
 3. Read the logs — check what `pane_left` value is, what `cell_w` is, and
    whether `pane_left * cell_w` matches the expected left pane pixel width
+
+### Result: Success (diagnostics)
+
+Logs confirmed the mux data is correct and revealed the root cause:
+
+```
+mux pane id=0 left=0 top=0 width=79 height=72 pixel=1027x2160
+mux pane id=1 left=80 top=0 width=80 height=72 pixel=1040x2160
+pane_id=1 metrics cell=(13,30) origin=(13,50) scale=1
+frame=(13.0,50.0,1014.0,1980.0)
+```
+
+The mux correctly reports pane 1 at left=80 cells. But `scale=1` is wrong — this
+is a Retina display where `contentsScale` should be 2.0. The overlay root
+layer's `contentsScale` was never set (defaults to 1.0).
+
+All metrics (cell_w=13, origin_x=13, origin_y=50) are in **physical pixels**.
+CALayer frames use **logical points** (points = pixels / scale). Since
+scale=1.0, no pixel→point conversion happens. For origin_x=13, the error is only
+6.5 points (imperceptible). But for
+`pane_left * cell_w = 80 * 13 = 1040 pixels`, it should be 520 points —
+rendering at 1040 points puts it past the window boundary. This is exactly the
+Exp 3 failure.
+
+## Experiment 5: Fix contentsScale and add pane offset
+
+### Hypothesis
+
+Setting the overlay root layer's `contentsScale` to the actual screen scale
+factor (2.0 on Retina) will make the `/ scale` division correctly convert
+physical pixels to logical points. Combined with the pane offset from
+`PositionedPane.left/top`, the overlay will position correctly over any pane.
+
+### Design
+
+Two changes in `conn.rs`:
+
+**1. Set `contentsScale` on the root layer** (in `get_or_create_overlay`)
+
+After creating the root layer, query the window's `backingScaleFactor` and set
+it on the layer:
+
+```rust
+// Get the backing scale factor from the window
+let window: *mut AnyObject = msg_send![superview, window];
+let backing_scale: f64 = msg_send![window, backingScaleFactor];
+let _: () = msg_send![root_layer, setContentsScale: backing_scale];
+```
+
+**2. Add pane offset to `update_ca_layer_frame`**
+
+Same `get_pane_cell_position` helper from Exp 3, same formula. Now that `scale`
+will be 2.0 on Retina, the division works correctly:
+
+```rust
+let (cell_w, cell_h, origin_x, origin_y) = super::metrics::get();
+let (pane_left, pane_top) = get_pane_cell_position(&pane.pane_id);
+let x = (origin_x as u64 + pane_left as u64 * cell_w as u64) as f64 / scale;
+let y = (origin_y as u64 + pane_top as u64 * cell_h as u64) as f64 / scale;
+```
+
+With correct scale=2.0 on Retina:
+
+- Left pane (pane_left=0): x = (13 + 0) / 2 = 6.5 points
+- Right pane (pane_left=80): x = (13 + 1040) / 2 = 526.5 points
+
+Keep the debug logging from Exp 4 to verify the values.
+
+### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Single pane: `web google.com` — overlay in correct position
+3. Split pane, open from RIGHT side — overlay appears over right pane
+4. Split pane, open from LEFT side — overlay appears over left pane
+5. Check logs: `scale=2` on Retina, computed x/y values are reasonable
