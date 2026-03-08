@@ -547,57 +547,32 @@ TermSurf client disconnected (Tui)
 removed pane 1 on TUI disconnect
 ```
 
-The "flash" is not a visibility sync issue — it's the overlay appearing, the TUI
-process dying, and `handle_disconnect` cleaning up the pane and its CALayers.
+The "flash" is not a visibility sync issue — it's the overlay appearing, then
+the TUI's socket connection dropping, and `handle_disconnect` cleaning up the
+pane and its CALayers. The TUI process itself does not crash — it stays alive
+but loses its webview because the board-side cleanup removes the overlay.
 
-Further testing revealed the problem is even broader: closing the first TUI and
-reopening a new one also fails. This is not a concurrency issue — it's a state
-issue. Any TUI after the first one crashes.
+The disconnect also happens when closing the first TUI and reopening a new one.
+Any TUI after the first one loses its webview the same way.
 
-The root cause is that Wezboard only implements 11 of 30 TermSurf protocol
-messages. The TUI sends synchronous query messages that expect replies, but
-Wezboard silently drops them (line 177-178 of `handle_message`). The TUI blocks
-on `recv_reply()` with a 5-second timeout, then crashes.
+Wezboard only implements 11 of 30 TermSurf protocol messages. The missing query
+handlers (`QueryLastRequest`, `QueryDevtoolsRequest`, `QueryTabsRequest`) were
+hypothesized as the cause, but Experiment 5 disproved this — implementing all
+three query handlers had no effect. The TUI handles missing query replies
+gracefully (5-second timeout, returns `None`) and continues running.
 
-**Missing message handlers that cause TUI crashes (synchronous, need replies):**
-
-| Message                | What Ghostboard does                                              | Wezboard |
-| ---------------------- | ----------------------------------------------------------------- | -------- |
-| `QueryLastRequest`     | Finds last browser pane by profile, replies with `QueryLastReply` | Missing  |
-| `QueryDevtoolsRequest` | Validates DevTools tab, replies with `QueryDevtoolsReply`         | Missing  |
-| `QueryTabsRequest`     | Counts panes/tabs, replies with `QueryTabsReply`                  | Missing  |
-
-**Missing message handlers (fire-and-forget, won't crash but incomplete):**
-
-| Message              | What Ghostboard does             | Wezboard |
-| -------------------- | -------------------------------- | -------- |
-| `SetDevtoolsOverlay` | Creates/resizes DevTools overlay | Missing  |
-| `OpenSplit`          | Opens a split pane               | Missing  |
-| `CursorChanged`      | Updates mouse cursor type        | Missing  |
-
-**Not needed yet (input forwarding — both boards missing):**
-
-| Message       | Status              |
-| ------------- | ------------------- |
-| `KeyEvent`    | Both boards missing |
-| `MouseEvent`  | Both boards missing |
-| `MouseMove`   | Both boards missing |
-| `ScrollEvent` | Both boards missing |
-
-Ghostboard handles 18 of 30 messages (60%). Wezboard handles 11 (37%). The three
-missing query handlers are the immediate cause of the TUI crash — the TUI sends
-a synchronous request, Wezboard drops it, the TUI blocks waiting for a reply
-that never comes.
+The actual cause of the socket disconnect / missing webview remains unknown.
+The overlay creation pipeline works correctly (as proven by the logs above),
+but something causes the connection to drop shortly after.
 
 #### Conclusion
 
-The debug logs disproved the original hypotheses about CALayer setup or
-visibility sync. The overlay creation path works correctly for multiple panes.
-The actual bug is that the TUI process dies because Wezboard doesn't implement
-the full TermSurf protocol — specifically the three query request/reply pairs
-(`QueryLastRequest`, `QueryDevtoolsRequest`, `QueryTabsRequest`). Implementing
-the remaining protocol messages will fix the multi-pane issue and complete the
-Wezboard PoC.
+The debug logs proved the overlay creation path works correctly for multiple
+panes. The second pane's full lifecycle (SetOverlay → CreateTab → TabReady →
+CaContext → CALayerHost) completes successfully and the overlay briefly appears.
+But the TUI's socket connection drops ~2 seconds later, causing board-side
+cleanup to remove the overlay. The root cause of the disconnect is still
+unknown — it is not the missing query handlers (disproved by Experiment 5).
 
 ### Experiment 5: Implement query request/reply handlers
 
