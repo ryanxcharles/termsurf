@@ -43,22 +43,22 @@ The full browser overlay pipeline is functional:
 
 ### Messages currently handled (14 of 30)
 
-| #   | Message              | Direction        | Handler                |
-| --- | -------------------- | ---------------- | ---------------------- |
-| 1   | ServerRegister       | Chromium → Board | handle_server_register |
-| 2   | SetOverlay           | TUI → Board      | handle_set_overlay     |
-| 3   | TabReady             | Chromium → Board | handle_tab_ready       |
-| 4   | HelloRequest         | TUI → Board      | inline reply           |
-| 5   | UrlChanged           | Chromium → Board | forward_to_tui         |
-| 6   | LoadingState         | Chromium → Board | forward_to_tui         |
-| 7   | TitleChanged         | Chromium → Board | forward_to_tui         |
-| 8   | Navigate             | TUI → Board      | forward_to_chromium    |
-| 9   | SetColorScheme       | TUI → Board      | forward_to_chromium    |
-| 10  | ModeChanged          | TUI → Board      | update pane state      |
-| 11  | CaContext            | Chromium → Board | handle_ca_context      |
-| 12  | QueryLastRequest     | TUI → Board      | inline reply           |
-| 13  | QueryDevtoolsRequest | TUI → Board      | inline reply           |
-| 14  | QueryTabsRequest     | TUI → Board      | inline reply           |
+| #  | Message              | Direction        | Handler                |
+| -- | -------------------- | ---------------- | ---------------------- |
+| 1  | ServerRegister       | Chromium → Board | handle_server_register |
+| 2  | SetOverlay           | TUI → Board      | handle_set_overlay     |
+| 3  | TabReady             | Chromium → Board | handle_tab_ready       |
+| 4  | HelloRequest         | TUI → Board      | inline reply           |
+| 5  | UrlChanged           | Chromium → Board | forward_to_tui         |
+| 6  | LoadingState         | Chromium → Board | forward_to_tui         |
+| 7  | TitleChanged         | Chromium → Board | forward_to_tui         |
+| 8  | Navigate             | TUI → Board      | forward_to_chromium    |
+| 9  | SetColorScheme       | TUI → Board      | forward_to_chromium    |
+| 10 | ModeChanged          | TUI → Board      | update pane state      |
+| 11 | CaContext            | Chromium → Board | handle_ca_context      |
+| 12 | QueryLastRequest     | TUI → Board      | inline reply           |
+| 13 | QueryDevtoolsRequest | TUI → Board      | inline reply           |
+| 14 | QueryTabsRequest     | TUI → Board      | inline reply           |
 
 ### Messages NOT handled (16 of 30)
 
@@ -728,12 +728,12 @@ types to WezTerm's `MouseCursor` enum.
 
 Chromium cursor type mapping (from Ghostboard's `mapChromiumCursor`):
 
-| Chromium type | Name         | MouseCursor  |
-| ------------- | ------------ | ------------ |
-| 0             | kPointer     | Arrow        |
-| 2             | kHand        | Hand         |
-| 3             | kIBeam       | Text         |
-| all others    | —            | Arrow        |
+| Chromium type | Name     | MouseCursor |
+| ------------- | -------- | ----------- |
+| 0             | kPointer | Arrow       |
+| 2             | kHand    | Hand        |
+| 3             | kIBeam   | Text        |
+| all others    | —        | Arrow       |
 
 WezTerm only has Arrow, Hand, Text, SizeUpDown, and SizeLeftRight. All
 unsupported Chromium cursor types fall back to Arrow.
@@ -752,11 +752,13 @@ Initialize to `0` wherever panes are created.
 **2. `termsurf/conn.rs` — Handle CursorChanged message**
 
 Add to `msg_type_name`:
+
 ```rust
 Some(Msg::CursorChanged(_)) => "CursorChanged",
 ```
 
 Add to `handle_message`:
+
 ```rust
 Some(Msg::CursorChanged(c)) => {
     log::info!("CursorChanged: tab_id={} cursor_type={}", c.tab_id, c.cursor_type);
@@ -822,9 +824,9 @@ beam for inputs, arrow for everything else). All regression checks pass.
 #### Goal
 
 When the user switches between terminal panes (click, Ctrl+Shift+Arrow), send
-`FocusChanged(false)` to the old pane's Chromium and `FocusChanged(true)` to
-the new pane's Chromium (if it's in browse mode). Without this, the browser in
-an unfocused pane keeps its focus state — text cursors blink in form fields,
+`FocusChanged(false)` to the old pane's Chromium and `FocusChanged(true)` to the
+new pane's Chromium (if it's in browse mode). Without this, the browser in an
+unfocused pane keeps its focus state — text cursors blink in form fields,
 selection highlights persist, etc.
 
 #### Design
@@ -918,6 +920,74 @@ MuxNotification::PaneFocused(pane_id) => {
 Pane focus changes now notify Chromium. The `MuxNotification::PaneFocused`
 handler calls `handle_pane_focus`, which tracks the previously focused pane in
 `TermSurfState.focused_pane` and sends `FocusChanged(false)` to the old pane's
-Chromium and `FocusChanged(true)` to the new pane's Chromium (if browsing).
-Text cursors stop blinking and selections deactivate when switching away from a
-pane. All regression checks pass.
+Chromium and `FocusChanged(true)` to the new pane's Chromium (if browsing). Text
+cursors stop blinking and selections deactivate when switching away from a pane.
+All regression checks pass.
+
+### Experiment 6: Send FocusChanged when TUI toggles browse mode
+
+#### Goal
+
+Fix: entering browse mode via TUI (e.g., pressing Enter) doesn't give Chromium
+focus. Text fields accept keystrokes but don't show a blinking cursor because
+Chromium thinks it's unfocused.
+
+#### Root cause
+
+There are two paths into browse mode:
+
+1. **Click on overlay** — `try_forward_mouse` in `input.rs` calls
+   `send_mode_and_focus(true)`, which sends both `ModeChanged` to TUI and
+   `FocusChanged(true)` to Chromium. Works correctly.
+
+2. **TUI sends ModeChanged** (e.g., pressing Enter) — the `ModeChanged` handler
+   in `conn.rs:210-216` only updates `pane.browsing` in state. It never sends
+   `FocusChanged` to Chromium. Chromium doesn't know it has focus.
+
+The same bug exists for exiting browse mode via TUI — if the TUI sends
+`ModeChanged(browsing=false)`, Chromium never gets `FocusChanged(false)`.
+
+#### Design
+
+After updating `pane.browsing` in the `ModeChanged` handler, call
+`forward_to_chromium` to send `FocusChanged` to the browser engine. The mutex
+lock from the state update drops at the end of the `if let` block, so
+`forward_to_chromium` can safely acquire it again.
+
+#### Changes
+
+**1. `termsurf/conn.rs` — Forward FocusChanged in ModeChanged handler**
+
+```rust
+Some(Msg::ModeChanged(m)) => {
+    log::info!("ModeChanged: pane_id={} browsing={}", m.pane_id, m.browsing);
+    {
+        let mut st = state.lock().unwrap();
+        if let Some(pane) = st.panes.get_mut(&m.pane_id) {
+            pane.browsing = m.browsing;
+        }
+    }
+    let browsing = m.browsing;
+    forward_to_chromium(
+        &m.pane_id,
+        |tab_id| {
+            Msg::FocusChanged(proto::FocusChanged {
+                tab_id,
+                focused: browsing,
+            })
+        },
+        state,
+    );
+}
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Open `web lite.duckduckgo.com`
+3. Press Enter to enter browse mode (via TUI)
+4. Click on the search input box — blinking text cursor appears
+5. Type — keystrokes appear in the input (regression check)
+6. Press Esc — exits browse mode (regression check)
+7. Click on overlay — enters browse mode, click text field, cursor blinks
+   (regression check for click-to-browse path)
