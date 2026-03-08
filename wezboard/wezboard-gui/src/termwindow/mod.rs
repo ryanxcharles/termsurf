@@ -1305,8 +1305,8 @@ impl TermWindow {
                     for window_id in mux.iter_windows() {
                         if let Some(w) = mux.get_window(window_id) {
                             if let Some(tab) = w.get_active() {
-                                if let Some(pane) = tab.get_active_pane() {
-                                    active_ids.insert(pane.pane_id().to_string());
+                                for positioned in tab.iter_panes() {
+                                    active_ids.insert(positioned.pane.pane_id().to_string());
                                 }
                             }
                         }

@@ -22,13 +22,13 @@ use std::time::Duration;
 use termwiz::cell::{Cell, CellAttributes};
 use termwiz::color::AnsiColor;
 use termwiz::lineedit::{LineEditBuffer, Movement};
-use termwiz::surface::{CursorVisibility, SEQ_ZERO, SequenceNo};
+use termwiz::surface::{CursorVisibility, SequenceNo, SEQ_ZERO};
 use unicode_segmentation::*;
 use url::Url;
 use wezboard_term::color::ColorPalette;
 use wezboard_term::{
-    Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType, StableRowIndex, TerminalSize,
-    unicode_column_width,
+    unicode_column_width, Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, SemanticType,
+    StableRowIndex, TerminalSize,
 };
 use window::{KeyCode as WKeyCode, Modifiers, WindowOps};
 

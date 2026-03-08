@@ -397,3 +397,24 @@ if let Some(tab) = w.get_active() {
 8. **Expected:** both overlays reappear
 9. Open a second window, run `web google.com`
 10. **Expected:** all three overlays visible across both windows
+
+**Result:** Fail
+
+The second pane's webview does not appear. The first webview remains visible
+after a brief flash. Behavior is identical to before the change — replacing
+`get_active_pane()` with `iter_panes()` had no effect.
+
+This means the problem is not about which pane IDs are in the active set. The
+second pane IS in the set (since `iter_panes()` returns all panes in the active
+tab), yet its overlay still disappears. The root cause must be elsewhere —
+likely in the overlay creation or CALayer setup path for the second pane, not in
+the visibility sync logic.
+
+#### Conclusion
+
+The `get_active_pane()` vs `iter_panes()` distinction was not the cause. The
+second overlay flashes (briefly appears then vanishes) regardless of which pane
+IDs are in the active set. The bug is upstream of `sync_overlay_visibility` —
+something in the overlay creation, CALayer tree setup, or the interaction
+between two concurrent pane connections is preventing the second overlay from
+persisting.
