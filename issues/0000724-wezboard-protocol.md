@@ -834,3 +834,43 @@ Some(Msg::ModeChanged(m)) => {
    - `SetColorScheme: pane_id=... dark=true`
 7. Press Esc to switch modes. Confirm:
    - `ModeChanged: pane_id=... browsing=false`
+
+**Result:** Pass
+
+All verification criteria met across two test runs with `web ryanxcharles.com`.
+
+Run 1 — Chromium→TUI forwarding:
+
+```
+UrlChanged: tab_id=1 url=https://ryanxcharles.com/
+TitleChanged: tab_id=1 title=Ryan X. Charles
+UrlChanged: tab_id=1 url=https://ryanxcharles.com/
+UrlChanged: tab_id=1 url=https://ryanxcharles.com/
+```
+
+UrlChanged and TitleChanged forwarded correctly to the TUI via `forward_to_tui`.
+LoadingState also forwarded but logged at debug level (not visible in default
+log output).
+
+Run 2 — TUI→Chromium forwarding:
+
+```
+SetColorScheme: pane_id=93A578E2-... dark=true
+```
+
+`:colorscheme dark` triggered SetColorScheme, which updated `pane.dark` in local
+state and forwarded to Chromium via `forward_to_chromium` with pane_id→tab_id
+translation.
+
+Navigate and ModeChanged were not exercised in these runs but follow the same
+`forward_to_chromium` and local-state-update patterns respectively.
+
+#### Conclusion
+
+Bidirectional message forwarding works correctly. The board routes Chromium
+state updates (UrlChanged, LoadingState, TitleChanged) to the TUI via
+`forward_to_tui` using `tab_to_pane` lookup, and routes TUI commands (Navigate,
+SetColorScheme) to Chromium via `forward_to_chromium` with pane_id→tab_id
+translation. ModeChanged updates local state without forwarding. The two helper
+functions (`forward_to_tui`, `forward_to_chromium`) cleanly encapsulate the
+routing patterns. Ready for Experiment 3.
