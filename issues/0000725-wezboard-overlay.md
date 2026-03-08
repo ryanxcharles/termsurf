@@ -911,3 +911,53 @@ All debug `eprintln!` calls removed. Unused variables cleaned up. Variable names
 in `conn.rs` renamed to match the atomic names (`origin_x`/`origin_y`). Build
 produces zero warnings from our code. Webview still correctly positioned — no
 regressions.
+
+## Conclusion
+
+Issue 725 solved browser overlay rendering in Wezboard across nine experiments.
+
+**Experiment 1** identified why the overlay was invisible: WezTerm's terminal
+view is layer-backed (AppKit owns the layer tree), so manually added CALayerHost
+sublayers don't composite. The fix was a transparent layer-hosting NSView as a
+sibling subview — the overlay renders on top of the terminal view with its own
+layer tree that we control.
+
+**Experiments 2-9** fixed overlay sizing and positioning. The cell metrics
+bridge (`metrics.rs`) uses global atomics to pass TermWindow's render data to
+the async connection code. The webview gets correct pixel dimensions from real
+cell metrics (`cell_width * columns`, `cell_height * rows`). The y-offset is
+just `top_bar_height` — the tab bar pixel height when the tab bar is at the top.
+Six experiments of trial and error (and one critical debug logging experiment)
+revealed that the webview replaces the entire content area below the tab bar,
+including padding — so `padding_top` and `border.top` don't belong in the
+offset.
+
+**What works now:**
+
+- Browser content visible in the Wezboard terminal window
+- Correct overlay size from real cell metrics
+- Correct overlay position (below tab bar, at left padding)
+- Tab lifecycle: CreateTab, TabReady, CloseTab
+- Navigation: URL forwarding between TUI and Chromium
+- State: URL changes, loading state, title changes, color scheme
+- CALayerHost compositing with zero-copy GPU rendering
+- Clean shutdown on pane close
+
+**Remaining work for the Wezboard PoC:**
+
+Wezboard handles 11 of 30 TermSurf protocol messages. The remaining messages
+fall into four categories:
+
+1. **Input forwarding** — `KeyEvent`, `MouseEvent`, `MouseMove`, `ScrollEvent`.
+   Without these, the browser overlay is view-only. This is the most important
+   missing piece.
+2. **Dynamic resize** — The overlay doesn't resize when the window resizes. The
+   metrics bridge updates on resize, but `conn.rs` doesn't re-read them or call
+   `update_ca_layer_frame()`. Need a notification path from TermWindow to the
+   connection code.
+3. **Tab queries** — `QueryLastRequest`, `QueryDevtoolsRequest`,
+   `QueryTabsRequest`. The TUI uses these for session restore and DevTools
+   discovery.
+4. **Auxiliary features** — `FocusChanged`, `CursorChanged`,
+   `SetDevtoolsOverlay`, `CreateDevtoolsTab`, `OpenSplit`. Nice-to-have for a
+   full browser experience but not essential for the PoC.
