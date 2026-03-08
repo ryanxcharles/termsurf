@@ -1,7 +1,7 @@
 use super::proto;
 use super::proto::TermSurfMessage;
 use super::proto::term_surf_message::Msg;
-use ::window::{KeyCode, Modifiers, MouseEvent, MouseEventKind as WMEK, MousePress};
+use ::window::{KeyCode, Modifiers, MouseCursor, MouseEvent, MouseEventKind as WMEK, MousePress};
 use prost::Message;
 
 /// Check if pane is browsing and forward key. Returns Some(true) if consumed.
@@ -11,7 +11,11 @@ pub fn try_forward_key(
     modifiers: Modifiers,
     is_down: bool,
     key_event: Option<&::window::KeyEvent>,
+    only_key_bindings: bool,
 ) -> Option<bool> {
+    if only_key_bindings {
+        return None;
+    }
     let pane_id_str = pane_id.to_string();
     let state = super::shared_state()?;
     let browsing = {
@@ -195,7 +199,7 @@ pub fn try_forward_mouse(pane_id: usize, event: &MouseEvent) -> bool {
                         y: rel_y,
                         delta_x: 0.0,
                         delta_y: *delta as f64,
-                        phase: 0,
+                        phase: 4,
                         momentum_phase: 0,
                         precise: false,
                         modifiers: mods,
@@ -346,6 +350,23 @@ fn send_mode_and_focus(pane_id_str: &str, browsing: bool) {
     );
 }
 
+/// Map a pane's Chromium cursor type to a WezTerm MouseCursor.
+pub fn cursor_for_pane(pane_id: usize) -> MouseCursor {
+    let pane_id_str = pane_id.to_string();
+    let Some(state) = super::shared_state() else {
+        return MouseCursor::Arrow;
+    };
+    let st = state.lock().unwrap();
+    let Some(pane) = st.panes.get(&pane_id_str) else {
+        return MouseCursor::Arrow;
+    };
+    match pane.cursor_type {
+        2 => MouseCursor::Hand,
+        3 => MouseCursor::Text,
+        _ => MouseCursor::Arrow,
+    }
+}
+
 fn hit_test_overlay(pane_id_str: &str, event: &MouseEvent) -> Option<(f64, f64)> {
     let state = super::shared_state()?;
     let st = state.lock().unwrap();
@@ -359,7 +380,8 @@ fn hit_test_overlay(pane_id_str: &str, event: &MouseEvent) -> Option<(f64, f64)>
     let my = event.coords.y as f64;
 
     if mx >= ox && my >= oy && mx < ox + ow && my < oy + oh {
-        Some((mx - ox, my - oy))
+        let scale = pane.overlay_scale;
+        Some(((mx - ox) / scale, (my - oy) / scale))
     } else {
         None
     }

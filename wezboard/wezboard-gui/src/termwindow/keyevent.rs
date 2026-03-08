@@ -255,6 +255,7 @@ impl super::TermWindow {
             raw_modifiers,
             is_down,
             key_event,
+            only_key_bindings == OnlyKeyBindings::Yes,
         ) {
             return result;
         }

@@ -9,5 +9,5 @@ pub mod proto {
 }
 
 pub use listener::spawn_termsurf_server;
-pub use state::SharedState;
 pub use state::global as shared_state;
+pub use state::SharedState;

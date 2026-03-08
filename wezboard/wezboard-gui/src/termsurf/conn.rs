@@ -124,6 +124,7 @@ fn msg_type_name(msg: &TermSurfMessage) -> &'static str {
         Some(Msg::Resize(_)) => "Resize",
         Some(Msg::CreateTab(_)) => "CreateTab",
         Some(Msg::CloseTab(_)) => "CloseTab",
+        Some(Msg::CursorChanged(_)) => "CursorChanged",
         Some(_) => "Other",
         None => "None",
     }
@@ -222,6 +223,15 @@ async fn handle_message(
             #[cfg(target_os = "macos")]
             if c.ca_context_id != 0 {
                 handle_ca_context(c, state);
+            }
+        }
+        Some(Msg::CursorChanged(c)) => {
+            log::debug!("CursorChanged: tab_id={} cursor_type={}", c.tab_id, c.cursor_type);
+            let mut st = state.lock().unwrap();
+            if let Some(pane_id) = st.tab_to_pane.get(&c.tab_id).cloned() {
+                if let Some(pane) = st.panes.get_mut(&pane_id) {
+                    pane.cursor_type = c.cursor_type;
+                }
             }
         }
         Some(Msg::QueryLastRequest(q)) => {
@@ -505,6 +515,8 @@ fn handle_set_overlay(
         ca_layer_positioning: 0,
         overlay_origin_x: 0.0,
         overlay_origin_y: 0.0,
+        overlay_scale: 1.0,
+        cursor_type: 0,
     };
     st.panes.insert(overlay.pane_id.clone(), pane);
 
@@ -1095,6 +1107,7 @@ unsafe fn update_ca_layer_frame(pane: &mut Pane, root_layer: *mut objc2::runtime
         (origin_y as u64 + border_top as u64 + (pane_top as u64 + pane.row) * cell_h as u64) as f64;
     pane.overlay_origin_x = x_backing;
     pane.overlay_origin_y = y_backing;
+    pane.overlay_scale = scale;
     let x = x_backing / scale;
     let y = y_backing / scale;
 

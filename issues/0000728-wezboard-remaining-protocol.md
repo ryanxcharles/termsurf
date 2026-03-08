@@ -43,22 +43,22 @@ The full browser overlay pipeline is functional:
 
 ### Messages currently handled (14 of 30)
 
-| #  | Message              | Direction        | Handler                |
-| -- | -------------------- | ---------------- | ---------------------- |
-| 1  | ServerRegister       | Chromium → Board | handle_server_register |
-| 2  | SetOverlay           | TUI → Board      | handle_set_overlay     |
-| 3  | TabReady             | Chromium → Board | handle_tab_ready       |
-| 4  | HelloRequest         | TUI → Board      | inline reply           |
-| 5  | UrlChanged           | Chromium → Board | forward_to_tui         |
-| 6  | LoadingState         | Chromium → Board | forward_to_tui         |
-| 7  | TitleChanged         | Chromium → Board | forward_to_tui         |
-| 8  | Navigate             | TUI → Board      | forward_to_chromium    |
-| 9  | SetColorScheme       | TUI → Board      | forward_to_chromium    |
-| 10 | ModeChanged          | TUI → Board      | update pane state      |
-| 11 | CaContext            | Chromium → Board | handle_ca_context      |
-| 12 | QueryLastRequest     | TUI → Board      | inline reply           |
-| 13 | QueryDevtoolsRequest | TUI → Board      | inline reply           |
-| 14 | QueryTabsRequest     | TUI → Board      | inline reply           |
+| #   | Message              | Direction        | Handler                |
+| --- | -------------------- | ---------------- | ---------------------- |
+| 1   | ServerRegister       | Chromium → Board | handle_server_register |
+| 2   | SetOverlay           | TUI → Board      | handle_set_overlay     |
+| 3   | TabReady             | Chromium → Board | handle_tab_ready       |
+| 4   | HelloRequest         | TUI → Board      | inline reply           |
+| 5   | UrlChanged           | Chromium → Board | forward_to_tui         |
+| 6   | LoadingState         | Chromium → Board | forward_to_tui         |
+| 7   | TitleChanged         | Chromium → Board | forward_to_tui         |
+| 8   | Navigate             | TUI → Board      | forward_to_chromium    |
+| 9   | SetColorScheme       | TUI → Board      | forward_to_chromium    |
+| 10  | ModeChanged          | TUI → Board      | update pane state      |
+| 11  | CaContext            | Chromium → Board | handle_ca_context      |
+| 12  | QueryLastRequest     | TUI → Board      | inline reply           |
+| 13  | QueryDevtoolsRequest | TUI → Board      | inline reply           |
+| 14  | QueryTabsRequest     | TUI → Board      | inline reply           |
 
 ### Messages NOT handled (16 of 30)
 
@@ -563,3 +563,256 @@ is actively changing.
 5. Scroll on a page — page scrolls without crashing Chromium
 6. Type in the search box — keystrokes appear (regression check)
 7. Press Esc — returns to control mode (regression check)
+
+**Result:** Success
+
+Both bugs from Experiment 1 are fixed:
+
+1. **Coordinate scale** — Storing `overlay_scale` in pane state and dividing
+   overlay-relative coordinates by scale in `hit_test_overlay` converts backing
+   pixels to logical/CSS pixels. Mouse hover and click now land directly under
+   the cursor on Retina displays.
+
+2. **Scroll phase** — Setting `phase: 4` (`kPhaseChanged`) for discrete wheel
+   events satisfies Chromium's DCHECK. Scrolling works without crashes.
+
+All regression checks pass: keyboard input, Esc to exit browse mode, click to
+enter browse mode, click outside to exit.
+
+### Experiment 3: Fix Esc key not exiting browse mode
+
+#### Goal
+
+Make the Esc key exit browse mode. Currently, pressing Esc while in browse mode
+does nothing — the user is stuck in browse mode with no keyboard escape.
+
+#### Root cause
+
+WezTerm's key event pipeline fires two events per keypress: `RawKeyEvent` first,
+then `KeyEvent`. The raw event carries `KeyCode::Physical(Escape)`, the decoded
+event carries `KeyCode::Char('\u{1b}')`.
+
+The problem:
+
+1. `raw_key_event_impl` calls `process_key` with `KeyCode::Physical(Escape)`
+2. `process_key` runs the TermSurf check first — `try_forward_key` sees the pane
+   is browsing, doesn't recognize `Physical(Escape)` as Esc (it only checks
+   `Char('\u{1b}')`), so it falls through to the "forward key to Chromium" path
+3. It sends a useless `KeyEvent` proto with `windows_key_code: 0` to Chromium
+   and returns `Some(true)` (consumed)
+4. `process_key` returns `true` → `key.set_handled()` is called
+5. Back in `window.rs:2754`: the windowing layer sees `raw_key_handled` is set
+   and **returns early, never dispatching the decoded `KeyEvent`**
+6. `key_event_impl` never runs, so the `Char('\u{1b}')` path that would match
+   the Esc check never fires
+
+This affects ALL keys in browse mode — every key gets forwarded twice (once from
+the raw path with a garbage keycode, once from the decoded path with the correct
+keycode). But Esc is the only key where the double-forward causes a functional
+bug, because the Esc exit check only matches the decoded form.
+
+#### Design
+
+Skip the TermSurf intercept during the raw key event path. Only intercept during
+the decoded key event path where we have proper `KeyCode::Char(...)` values.
+
+**Option A: Pass `only_key_bindings` to `try_forward_key`**
+
+Add a parameter to `try_forward_key` and return `None` (don't intercept) when
+`only_key_bindings` is true. The raw path always passes `OnlyKeyBindings::Yes`,
+the decoded path passes `OnlyKeyBindings::No`.
+
+This is clean because it means TermSurf only intercepts once per keypress (the
+decoded path), and the keycode is always in the `Char(...)` form that
+`keycode_to_windows_vk` can translate. It also eliminates the duplicate
+forwarding bug.
+
+**Option B: Match `Physical(Escape)` in the Esc check**
+
+Add `KeyCode::Physical(PhysKeyCode::Escape)` to the Esc detection pattern. This
+fixes the Esc bug but doesn't fix the double-forwarding problem — every key
+still gets sent to Chromium twice (once with garbage from the raw path).
+
+**Decision: Option A.** It fixes both the Esc bug and the double-forwarding
+problem with a single change.
+
+#### Changes
+
+**1. `termsurf/input.rs` — Add `only_key_bindings: bool` parameter**
+
+Change the `try_forward_key` signature to add a boolean parameter. At the top of
+the function, before the state lookup, return `None` if `only_key_bindings` is
+true:
+
+```rust
+pub fn try_forward_key(
+    pane_id: usize,
+    keycode: &KeyCode,
+    modifiers: Modifiers,
+    is_down: bool,
+    key_event: Option<&::window::KeyEvent>,
+    only_key_bindings: bool,
+) -> Option<bool> {
+    if only_key_bindings {
+        return None;
+    }
+    // ... rest unchanged
+}
+```
+
+**2. `termwindow/keyevent.rs` — Pass `only_key_bindings` at call site**
+
+In `process_key` (line 252), pass the `only_key_bindings` parameter:
+
+```rust
+if let Some(result) = crate::termsurf::input::try_forward_key(
+    pane.pane_id(),
+    keycode,
+    raw_modifiers,
+    is_down,
+    key_event,
+    only_key_bindings == OnlyKeyBindings::Yes,
+) {
+    return result;
+}
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Click on overlay — enters browse mode
+3. Press Esc — exits browse mode, keys go to terminal
+4. Type in browser while in browse mode — keystrokes appear (regression check)
+5. Click a link — navigates correctly (regression check)
+6. Scroll — page scrolls (regression check)
+
+**Result:** Success
+
+Esc now exits browse mode. Skipping the TermSurf intercept during the raw key
+path (`OnlyKeyBindings::Yes`) ensures the raw `KeyCode::Physical(Escape)` event
+passes through without being consumed, allowing the decoded
+`KeyCode::Char('\u{1b}')` event to fire and match the Esc check. This also
+eliminates the double-forwarding bug where every key was sent to Chromium twice
+(once from the raw path with a garbage keycode, once from the decoded path with
+the correct keycode). All regression checks pass.
+
+### Experiment 4: CursorChanged — update system cursor over overlay
+
+#### Goal
+
+When Chromium sends `CursorChanged` (e.g., hand cursor over a link, text cursor
+over an input field), update the system cursor. Currently the cursor stays as an
+arrow over the overlay because `mouse_event_terminal` returns early when
+`try_forward_mouse` returns true, never reaching WezTerm's `set_cursor` call.
+
+#### Design
+
+Three changes:
+
+1. **Store cursor type in pane state.** Add `cursor_type: i64` to `Pane` struct
+   (default 0 = arrow). The `CursorChanged` handler in `conn.rs` updates this
+   field when Chromium sends the message.
+
+2. **Handle CursorChanged in conn.rs.** Add a match arm in `handle_message` that
+   looks up the pane by `tab_id` and stores the `cursor_type`. No forwarding
+   needed — this message is consumed by the board.
+
+3. **Apply cursor after try_forward_mouse.** In `mouseevent.rs`, after
+   `try_forward_mouse` returns true, read the pane's `cursor_type` from state
+   and call `context.set_cursor()` with the mapped `MouseCursor` value before
+   returning.
+
+Add a public helper `cursor_for_pane(pane_id: usize) -> MouseCursor` in
+`input.rs` that reads the stored cursor type and maps Chromium's integer cursor
+types to WezTerm's `MouseCursor` enum.
+
+Chromium cursor type mapping (from Ghostboard's `mapChromiumCursor`):
+
+| Chromium type | Name         | MouseCursor  |
+| ------------- | ------------ | ------------ |
+| 0             | kPointer     | Arrow        |
+| 2             | kHand        | Hand         |
+| 3             | kIBeam       | Text         |
+| all others    | —            | Arrow        |
+
+WezTerm only has Arrow, Hand, Text, SizeUpDown, and SizeLeftRight. All
+unsupported Chromium cursor types fall back to Arrow.
+
+#### Changes
+
+**1. `termsurf/state.rs` — Add `cursor_type` field to `Pane`**
+
+```rust
+pub overlay_scale: f64,
+pub cursor_type: i64,
+```
+
+Initialize to `0` wherever panes are created.
+
+**2. `termsurf/conn.rs` — Handle CursorChanged message**
+
+Add to `msg_type_name`:
+```rust
+Some(Msg::CursorChanged(_)) => "CursorChanged",
+```
+
+Add to `handle_message`:
+```rust
+Some(Msg::CursorChanged(c)) => {
+    log::info!("CursorChanged: tab_id={} cursor_type={}", c.tab_id, c.cursor_type);
+    let mut st = state.lock().unwrap();
+    if let Some(pane_id) = st.tab_to_pane.get(&c.tab_id).cloned() {
+        if let Some(pane) = st.panes.get_mut(&pane_id) {
+            pane.cursor_type = c.cursor_type;
+        }
+    }
+}
+```
+
+**3. `termsurf/input.rs` — Add `cursor_for_pane` helper**
+
+```rust
+pub fn cursor_for_pane(pane_id: usize) -> MouseCursor {
+    let pane_id_str = pane_id.to_string();
+    let Some(state) = super::shared_state() else {
+        return MouseCursor::Arrow;
+    };
+    let st = state.lock().unwrap();
+    let Some(pane) = st.panes.get(&pane_id_str) else {
+        return MouseCursor::Arrow;
+    };
+    match pane.cursor_type {
+        2 => MouseCursor::Hand,
+        3 => MouseCursor::Text,
+        _ => MouseCursor::Arrow,
+    }
+}
+```
+
+**4. `termwindow/mouseevent.rs` — Apply cursor after forward**
+
+```rust
+if crate::termsurf::input::try_forward_mouse(pane.pane_id(), &event) {
+    context.set_cursor(Some(
+        crate::termsurf::input::cursor_for_pane(pane.pane_id()),
+    ));
+    return;
+}
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Hover over a link — cursor changes to hand
+3. Hover over text input — cursor changes to text beam
+4. Hover over non-interactive area — cursor is arrow
+5. Move cursor off overlay — cursor reverts to normal terminal cursor
+6. Click, type, scroll — still work (regression check)
+
+**Result:** Success
+
+System cursor now updates over the browser overlay. Chromium sends
+`CursorChanged` messages with integer cursor types, stored in pane state. After
+`try_forward_mouse` returns true, the cursor is applied via `cursor_for_pane`
+which maps Chromium types to WezTerm's `MouseCursor` enum (hand for links, text
+beam for inputs, arrow for everything else). All regression checks pass.

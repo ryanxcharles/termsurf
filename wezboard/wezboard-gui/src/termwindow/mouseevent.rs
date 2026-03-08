@@ -1,16 +1,16 @@
 use crate::tabbar::TabBarItem;
 use crate::termwindow::{
-    GuiWin, MouseCapture, PositionedSplit, ScrollHit, TMB, TermWindowNotif, UIItem, UIItemType,
+    GuiWin, MouseCapture, PositionedSplit, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
 };
 use ::window::{
     MouseButtons as WMB, MouseCursor, MouseEvent, MouseEventKind as WMEK, MousePress,
     WindowDecorations, WindowOps, WindowState,
 };
-use config::MouseEventAltScreen;
 use config::keyassignment::{KeyAssignment, MouseEventTrigger, SpawnTabDomain};
-use mux::Mux;
+use config::MouseEventAltScreen;
 use mux::pane::{Pane, WithPaneLines};
 use mux::tab::SplitDirection;
+use mux::Mux;
 use mux_lua::MuxPane;
 use std::convert::TryInto;
 use std::ops::Sub;
@@ -655,6 +655,9 @@ impl super::TermWindow {
     ) {
         // Forward to browser overlay if click hits overlay (TermSurf).
         if crate::termsurf::input::try_forward_mouse(pane.pane_id(), &event) {
+            context.set_cursor(Some(
+                crate::termsurf::input::cursor_for_pane(pane.pane_id()),
+            ));
             return;
         }
 
