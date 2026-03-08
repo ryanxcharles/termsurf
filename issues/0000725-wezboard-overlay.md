@@ -574,3 +574,54 @@ The current origin formula is `top_bar_height + padding_top`. Since removing
 border didn't help, the error must be in either `top_bar_height` or
 `padding_top` — one of them contributes an extra cell height that shouldn't be
 there.
+
+### Experiment 5: Debug log all metric values
+
+Two experiments failed because we guessed at the formula instead of inspecting
+actual values. Add debug logging at both write and read sites to see every
+component's value at runtime.
+
+#### Changes
+
+##### 1. EDIT `wezboard/wezboard-gui/src/termwindow/resize.rs`
+
+Add a `log::info!` after computing the origin values, logging every component:
+
+```rust
+log::info!(
+    "termsurf metrics: cell={}x{} pad_left={} pad_top={} \
+     tab_bar_height={} top_bar_height={} origin=({}, {})",
+    self.render_metrics.cell_size.width,
+    self.render_metrics.cell_size.height,
+    pad_left,
+    pad_top,
+    tab_bar_height,
+    top_bar_height,
+    origin_x,
+    origin_y,
+);
+```
+
+##### 2. EDIT `wezboard/wezboard-gui/src/termsurf/conn.rs`
+
+Add a `log::info!` in `update_ca_layer_frame()` after computing the frame
+values, logging the raw atomic values and the final frame coordinates:
+
+```rust
+log::info!(
+    "termsurf frame: origin_x={} origin_y={} scale={} \
+     frame=({}, {}, {}, {})",
+    pad_left, pad_top, scale, x, y, w, h,
+);
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Launch Wezboard, run `web google.com`
+3. Check `~/dev/termsurf/logs/wezboard.log` for the logged values
+4. Compare `top_bar_height` vs `cell_height` — are they equal? Is
+   `top_bar_height` one cell too many?
+5. Check `pad_top` — is it nonzero when it shouldn't be?
+6. Check `scale` — is it 1.0 or 2.0?
+7. Use the logged values to determine which component adds the extra row
