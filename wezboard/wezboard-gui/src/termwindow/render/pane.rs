@@ -152,25 +152,6 @@ impl crate::TermWindow {
             )
         };
 
-        let bw = if num_panes > 1 && !pos.is_zoomed {
-            self.config
-                .split_border_width
-                .evaluate_as_pixels(config::DimensionContext {
-                    dpi: self.dimensions.dpi as f32,
-                    pixel_max: self.dimensions.pixel_width as f32,
-                    pixel_cell: self.render_metrics.cell_size.width as f32,
-                }) as f32
-        } else {
-            0.0
-        };
-        let mut background_rect = background_rect;
-        if bw > 0.0 {
-            background_rect.origin.x += bw;
-            background_rect.origin.y += bw;
-            background_rect.size.width -= bw * 2.0;
-            background_rect.size.height -= bw * 2.0;
-        }
-
         if self.window_background.is_empty() {
             // Per-pane, palette-specified background
 
@@ -354,21 +335,19 @@ impl crate::TermWindow {
                 filled_box: TextureRect,
                 window_is_transparent: bool,
                 layers: &'a mut TripleLayerQuadAllocator<'b>,
-                border_inset: f32,
                 error: Option<anyhow::Error>,
             }
 
             let left_pixel_x = padding_left
                 + border.left.get() as f32
-                + (pos.left as f32 * self.render_metrics.cell_size.width as f32)
-                + bw;
+                + (pos.left as f32 * self.render_metrics.cell_size.width as f32);
 
             let mut render = LineRender {
                 term_window: self,
                 selrange,
                 rectangular,
                 dims,
-                top_pixel_y: top_pixel_y + bw,
+                top_pixel_y,
                 left_pixel_x,
                 pos,
                 pane_id,
@@ -386,7 +365,6 @@ impl crate::TermWindow {
                 filled_box,
                 window_is_transparent,
                 layers,
-                border_inset: bw,
                 error: None,
             };
 
@@ -516,8 +494,7 @@ impl crate::TermWindow {
                                 top_pixel_y: *quad_key.top_pixel_y,
                                 left_pixel_x: self.left_pixel_x,
                                 pixel_width: self.dims.cols as f32
-                                    * self.term_window.render_metrics.cell_size.width as f32
-                                    - self.border_inset * 2.0,
+                                    * self.term_window.render_metrics.cell_size.width as f32,
                                 stable_line_idx: Some(stable_row),
                                 line: &line,
                                 selection: selrange.clone(),

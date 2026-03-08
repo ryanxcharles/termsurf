@@ -381,3 +381,17 @@ pixel_width: self.dims.cols as f32
 3. Terminal text in split panes renders edge-to-edge — no inward shift
 4. Colored borders still render on top of content on layer 2
 5. Single pane — no borders, no change from before
+
+**Result:** Success
+
+Removing the padding fixes both problems. Webview overlays align with pane edges
+(no gap from inset), and terminal text renders edge-to-edge without shifting.
+The 2px border draws on layer 2 on top of content, overlapping the outermost
+pixels — visually clean and correct.
+
+#### Conclusion
+
+The content inset/padding was unnecessary. Drawing borders on layer 2 (on top of
+content) is sufficient — the border overlaps a thin strip of the pane edge,
+which is imperceptible at 2px. Removing the padding eliminates the
+webview/terminal misalignment and the broken right/bottom inset.
