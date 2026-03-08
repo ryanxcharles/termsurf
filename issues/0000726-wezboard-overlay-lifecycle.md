@@ -327,3 +327,73 @@ the pane identity bridge between WezTerm's mux and the TermSurf protocol.
 Combined with Experiment 1's `sync_overlay_visibility` (called from the
 `WindowInvalidated` handler), tab switching now correctly hides and shows
 browser overlays.
+
+### Experiment 3: Fix overlay visibility for splits and multiple windows
+
+#### Background
+
+Experiments 1–2 solved tab switching: overlays hide when switching to a tab
+without a webview and reappear when switching back. But opening a second pane
+(split or new window) with a webview exposes a bug — the second overlay flashes
+briefly then disappears, while the first remains visible.
+
+The root cause is in the `WindowInvalidated` handler at `mod.rs:1298`. It builds
+the active pane set using `tab.get_active_pane()`, which returns only the single
+**focused** pane per tab. In a split layout, both panes are visible on screen,
+but only one is focused. The non-focused pane's overlay gets hidden by
+`sync_overlay_visibility`.
+
+The flash occurs because:
+
+1. The second TUI connects and sends `SetOverlay` → CALayer created → overlay
+   visible
+2. `WindowInvalidated` fires (triggered by the new pane or focus change)
+3. `sync_overlay_visibility` runs — the focused pane is still the first one, so
+   the second pane's overlay is hidden
+
+The fix is to collect **all panes in each window's active tab**, not just the
+focused pane. WezTerm's `Tab::iter_panes()` returns a `Vec<PositionedPane>` with
+every pane in the tab's split tree. Each `PositionedPane` has a `.pane` field
+(`Arc<dyn Pane>`) with a `.pane_id()` method.
+
+This correctly handles all cases:
+
+- **Single pane**: one pane in the active tab → its overlay is visible
+- **Split panes**: all panes in the active tab → all overlays visible
+- **Tab switch**: panes on inactive tabs are not iterated → their overlays
+  hidden
+- **Multiple windows**: each window contributes all panes from its active tab
+
+#### Changes
+
+**`wezboard/wezboard-gui/src/termwindow/mod.rs`** — In the `WindowInvalidated`
+handler (~line 1298), replace `get_active_pane()` with `iter_panes()`:
+
+```rust
+// Before (only the focused pane):
+if let Some(tab) = w.get_active() {
+    if let Some(pane) = tab.get_active_pane() {
+        active_ids.insert(pane.pane_id().to_string());
+    }
+}
+
+// After (all panes in the active tab):
+if let Some(tab) = w.get_active() {
+    for positioned in tab.iter_panes() {
+        active_ids.insert(positioned.pane.pane_id().to_string());
+    }
+}
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Launch Wezboard, run `web google.com` in the first pane
+3. Open a split pane, run `web google.com` again
+4. **Expected:** both overlays visible simultaneously
+5. Switch to a new tab (Cmd+T)
+6. **Expected:** both overlays disappear
+7. Switch back
+8. **Expected:** both overlays reappear
+9. Open a second window, run `web google.com`
+10. **Expected:** all three overlays visible across both windows
