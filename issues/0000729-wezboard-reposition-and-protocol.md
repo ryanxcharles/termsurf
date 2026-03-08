@@ -261,3 +261,123 @@ The resize handler fires on every resize increment and has fresh cell metrics,
 so `reposition_all_overlays()` always computes correct pixel positions. This
 decouples overlay positioning from TUI message timing — the window owns
 positioning, the TUI owns dimensions.
+
+### Experiment 3: Remove split border padding
+
+#### Goal
+
+Remove the content inset/padding that was added alongside `split_border_width`
+in Issue 723 Experiment 4. The padding shifts pane content inward on all 4 sides
+to prevent the border from overlapping text. This causes two problems:
+
+1. The webview overlay doesn't know about the inset, so it renders at the wrong
+   position/size — it fills the full pane region while terminal content is
+   shifted inward.
+2. The right/bottom padding doesn't work correctly — content still bleeds under
+   the border on those edges.
+
+The border itself (4 colored rectangles drawn on layer 2 by `paint_pane_border`)
+is correct and stays. Only the padding logic in `paint_pane` is removed.
+
+#### Design
+
+All changes in `wezboard/wezboard-gui/src/termwindow/render/pane.rs`.
+
+**1. Remove `bw` computation and background rect inset (lines 155-172)**
+
+Delete the `bw` variable and the `background_rect` inset block. The background
+rect goes back to its original size — the border draws on top of it on layer 2.
+
+Before:
+
+```rust
+let bw = if num_panes > 1 && !pos.is_zoomed {
+    self.config
+        .split_border_width
+        .evaluate_as_pixels(config::DimensionContext {
+            dpi: self.dimensions.dpi as f32,
+            pixel_max: self.dimensions.pixel_width as f32,
+            pixel_cell: self.render_metrics.cell_size.width as f32,
+        }) as f32
+} else {
+    0.0
+};
+let mut background_rect = background_rect;
+if bw > 0.0 {
+    background_rect.origin.x += bw;
+    background_rect.origin.y += bw;
+    background_rect.size.width -= bw * 2.0;
+    background_rect.size.height -= bw * 2.0;
+}
+```
+
+After: (deleted entirely)
+
+**2. Remove `+ bw` from text position offsets (lines 361-371)**
+
+Remove `+ bw` from `left_pixel_x` (line 364) and `top_pixel_y` (line 371). Text
+renders at its original position — the border overlaps the outermost pixels of
+text, which at 2px is barely visible.
+
+Before:
+
+```rust
+let left_pixel_x = padding_left
+    + border.left.get() as f32
+    + (pos.left as f32 * self.render_metrics.cell_size.width as f32)
+    + bw;
+
+let mut render = LineRender {
+    ...
+    top_pixel_y: top_pixel_y + bw,
+    ...
+    border_inset: bw,
+    ...
+};
+```
+
+After:
+
+```rust
+let left_pixel_x = padding_left
+    + border.left.get() as f32
+    + (pos.left as f32 * self.render_metrics.cell_size.width as f32);
+
+let mut render = LineRender {
+    ...
+    top_pixel_y: top_pixel_y,
+    ...
+    // border_inset field removed
+    ...
+};
+```
+
+**3. Remove `border_inset` field from `LineRender` struct (line 357)**
+
+Delete the `border_inset: f32` field declaration.
+
+**4. Remove `border_inset` from pixel_width calculation (line 520)**
+
+Before:
+
+```rust
+pixel_width: self.dims.cols as f32
+    * self.term_window.render_metrics.cell_size.width as f32
+    - self.border_inset * 2.0,
+```
+
+After:
+
+```rust
+pixel_width: self.dims.cols as f32
+    * self.term_window.render_metrics.cell_size.width as f32,
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Open two side-by-side panes with browser overlays — overlays should align
+   with pane edges (no gap from inset)
+3. Terminal text in split panes renders edge-to-edge — no inward shift
+4. Colored borders still render on top of content on layer 2
+5. Single pane — no borders, no change from before
