@@ -82,7 +82,8 @@ impl super::TermWindow {
             tab_bar_height
         };
         let origin_x = pad_left;
-        let origin_y = top_bar_height + pad_top;
+        let origin_y =
+            (top_bar_height + pad_top - self.render_metrics.cell_size.height as f32).max(0.0);
         crate::termsurf::metrics::set(
             self.render_metrics.cell_size.width as u32,
             self.render_metrics.cell_size.height as u32,

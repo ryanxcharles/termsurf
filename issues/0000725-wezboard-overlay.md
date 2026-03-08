@@ -757,3 +757,58 @@ Keep the debug logs to verify the new values.
 4. Webview top edge aligns with terminal content
 5. Resize window — webview stays aligned
 6. Close pane — clean shutdown
+
+**Result:** Fail
+
+The webview moved but overshot — now almost one row too high. The logs confirm
+`origin_y=35`. Bracketing the correct value:
+
+- `origin_y=65` (exp 3-4): one row too low
+- `origin_y=35` (exp 7): almost one row too high
+- Correct value: ~50 = `top_bar_height` alone
+
+The correct formula is just `origin_y = top_bar_height` — no `padding_top`, no
+`cell_height` subtraction. The padding positions terminal text within the
+content area, but the webview overlay should fill the entire content area
+starting right where the tab bar ends, including the padding region.
+
+### Experiment 8: Use tab bar height only
+
+Set `origin_y = top_bar_height` — just the tab bar height, nothing else. The
+webview should start immediately below the tab bar and fill the rest of the
+window, covering the padding area (which is correct — the webview replaces the
+terminal content, padding and all).
+
+#### Changes
+
+##### 1. EDIT `wezboard/wezboard-gui/src/termwindow/mod.rs`
+
+Simplify origin_y to just `top_bar_height`:
+
+```rust
+crate::termsurf::metrics::set(
+    render_metrics.cell_size.width as u32,
+    render_metrics.cell_size.height as u32,
+    padding_left as u32,
+    top_bar_height as u32,
+);
+```
+
+Update `eprintln!` accordingly.
+
+##### 2. EDIT `wezboard/wezboard-gui/src/termwindow/resize.rs`
+
+Same change:
+
+```rust
+let origin_y = top_bar_height;
+```
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Run from CLI, pipe output
+3. Confirm `origin_y` is now 50 (= `top_bar_height`)
+4. Webview top edge aligns immediately below the tab bar
+5. Resize window — webview stays aligned
+6. Close pane — clean shutdown
