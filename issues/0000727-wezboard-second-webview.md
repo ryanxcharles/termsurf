@@ -313,3 +313,85 @@ The `get_pane_cell_position` lookup from the mux is architecturally correct, but
 the formula for combining grid origin + pane cell offset + TUI viewport offset
 needs rethinking. The TUI's row=1 should offset within the pane's area, not be
 added to the window-level grid origin.
+
+## Experiment 3: Minimal pane offset (mux lookup only)
+
+### Hypothesis
+
+The current baseline formula positions the overlay correctly for a single pane
+(or the left pane in a split). It fails only because it doesn't account for the
+pane's cell offset within the tab. Adding ONLY `PositionedPane.left * cell_w`
+and `PositionedPane.top * cell_h` to the existing formula — without changing
+metrics, without adding the TUI's col/row — will position the overlay correctly
+for any pane.
+
+For the left pane, `PositionedPane.left = 0` and `.top = 0`, so the formula
+reduces to the baseline (no regression). For the right pane in a vertical split,
+`.left > 0` shifts the overlay rightward by the correct amount.
+
+### Why Exp 2 failed
+
+Two unnecessary changes broke it:
+
+1. **Changed metrics values** — added `border_left` and
+   `padding_top + border_top` to the stored origin, shifting the first overlay
+   from its correct baseline position.
+2. **Added TUI's col/row** — the TUI sends `row=1` (skip URL bar), which added
+   an extra `cell_height` to y on top of the grid origin. Double-counted.
+
+### Design
+
+One file changed: `conn.rs`. Two modifications:
+
+**1. Add `get_pane_cell_position` helper**
+
+```rust
+fn get_pane_cell_position(pane_id: &str) -> (usize, usize) {
+    let numeric_id: usize = match pane_id.parse() {
+        Ok(id) => id,
+        Err(_) => return (0, 0),
+    };
+    let mux = mux::Mux::get();
+    for window_id in mux.iter_windows() {
+        if let Some(w) = mux.get_window(window_id) {
+            if let Some(tab) = w.get_active() {
+                for pos in tab.iter_panes() {
+                    if pos.pane.pane_id() == numeric_id {
+                        return (pos.left, pos.top);
+                    }
+                }
+            }
+        }
+    }
+    (0, 0)
+}
+```
+
+**2. Add pane offset to `update_ca_layer_frame`**
+
+Change from:
+
+```rust
+let (_, _, origin_x, origin_y) = super::metrics::get();
+let x = origin_x as f64 / scale;
+let y = origin_y as f64 / scale;
+```
+
+To:
+
+```rust
+let (cell_w, cell_h, origin_x, origin_y) = super::metrics::get();
+let (pane_left, pane_top) = get_pane_cell_position(&pane.pane_id);
+let x = (origin_x as u64 + pane_left as u64 * cell_w as u64) as f64 / scale;
+let y = (origin_y as u64 + pane_top as u64 * cell_h as u64) as f64 / scale;
+```
+
+No changes to metrics.rs, resize.rs, or state.rs. No col/row fields on Pane.
+
+### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Single pane: `web google.com` — overlay in correct position (no regression)
+3. Split pane, open from RIGHT side — overlay appears over right pane
+4. Split pane, open from LEFT side — overlay appears over left pane
+5. Close the TUI — overlay removed cleanly
