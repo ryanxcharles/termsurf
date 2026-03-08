@@ -395,3 +395,186 @@ The content inset/padding was unnecessary. Drawing borders on layer 2 (on top of
 content) is sufficient — the border overlaps a thin strip of the pane edge,
 which is imperceptible at 2px. Removing the padding eliminates the
 webview/terminal misalignment and the broken right/bottom inset.
+
+### Experiment 4: OpenSplit — create split pane with command
+
+#### Goal
+
+Handle the `OpenSplit` protocol message so the TUI's `:devtools` command can
+create a new split pane running a specified command. This is the foundation for
+DevTools support — the TUI sends `OpenSplit` with a direction and command (e.g.,
+`"/path/to/web devtools"`), and the board creates a split pane running that
+command.
+
+#### Background
+
+The TUI's `:devtools [direction]` command (webtui/src/main.rs:617-634):
+
+1. Calls `query_devtools` to validate (no duplicates, resolve tab ID)
+2. Sends `OpenSplit { pane_id, direction, command }` where:
+   - `direction` is `"right"`, `"down"`, `"left"`, or `"up"`
+   - `command` is `"/path/to/web devtools"` (full path to the `web` binary +
+     "devtools" argument)
+
+Ghostboard handles this by calling `termsurf_surface_split_with_input()`, which
+stores the command as "pending input" typed into the new shell. Wezboard can do
+better: use `SplitSource::Spawn` with a `CommandBuilder` to run the command
+directly as the new pane's process.
+
+#### Proto definition
+
+```protobuf
+message OpenSplit {
+  string pane_id = 1;
+  string direction = 2;  // "right", "down", "left", "up"
+  string command = 3;     // full executable path + args
+}
+```
+
+#### Direction mapping
+
+| TUI direction | `SplitDirection` | `target_is_second` |
+|---|---|---|
+| `"right"` | `Horizontal` | `true` |
+| `"left"` | `Horizontal` | `false` |
+| `"down"` | `Vertical` | `true` |
+| `"up"` | `Vertical` | `false` |
+
+#### Design
+
+**1. `termsurf/conn.rs` — Add `OpenSplit` to message dispatch**
+
+Add to `msg_type_name`:
+
+```rust
+Some(Msg::OpenSplit(_)) => "OpenSplit",
+```
+
+Add to `handle_message`:
+
+```rust
+Some(Msg::OpenSplit(o)) => {
+    log::info!("OpenSplit: pane_id={} direction={} command={}",
+        o.pane_id, o.direction, o.command);
+    handle_open_split(o, state);
+}
+```
+
+**2. `termsurf/conn.rs` — Add `handle_open_split` function**
+
+```rust
+fn handle_open_split(split: proto::OpenSplit, state: &SharedState) {
+    use mux::tab::{SplitDirection, SplitRequest, SplitSize};
+
+    // Parse direction
+    let (direction, target_is_second) = match split.direction.as_str() {
+        "right" => (SplitDirection::Horizontal, true),
+        "left" => (SplitDirection::Horizontal, false),
+        "down" => (SplitDirection::Vertical, true),
+        "up" => (SplitDirection::Vertical, false),
+        other => {
+            log::warn!("OpenSplit: unknown direction '{}'", other);
+            return;
+        }
+    };
+
+    // Find the mux pane ID
+    let numeric_pane_id: usize = match split.pane_id.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            log::warn!("OpenSplit: invalid pane_id '{}'", split.pane_id);
+            return;
+        }
+    };
+
+    // Find which mux window owns this pane
+    let Some(mux_window_id) = get_pane_mux_window(&split.pane_id) else {
+        log::warn!("OpenSplit: pane {} not in any mux window", split.pane_id);
+        return;
+    };
+
+    // Build the command
+    let args: Vec<String> = split.command
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    if args.is_empty() {
+        log::warn!("OpenSplit: empty command");
+        return;
+    }
+
+    let request = SplitRequest {
+        direction,
+        target_is_second,
+        top_level: false,
+        size: SplitSize::Percent(50),
+    };
+
+    // Spawn async split
+    let command = split.command.clone();
+    promise::spawn::spawn(async move {
+        let mux = mux::Mux::get();
+        let cmd_builder = portable_pty::CommandBuilder::from_argv(
+            args.iter().map(|s| s.as_str().into()).collect(),
+        );
+        match mux.split_pane(
+            numeric_pane_id,
+            request,
+            mux::domain::SplitSource::Spawn {
+                command: Some(cmd_builder),
+                command_dir: None,
+            },
+            config::keyassignment::SpawnTabDomain::CurrentPaneDomain,
+        ).await {
+            Ok((pane, _size)) => {
+                log::info!("OpenSplit: created pane {} with command '{}'",
+                    pane.pane_id(), command);
+            }
+            Err(e) => {
+                log::error!("OpenSplit: split_pane failed: {:#}", e);
+            }
+        }
+    }).detach();
+}
+```
+
+Key points:
+- Runs the split asynchronously via `promise::spawn::spawn` since
+  `mux.split_pane()` is async
+- Uses `CommandBuilder::from_argv` to run the command directly (no shell)
+- Uses `SplitSize::Percent(50)` for a 50/50 split
+- The new pane automatically gets `TERMSURF_SOCKET` and `TERMSURF_PANE_ID`
+  from WezTerm's environment, so the `web devtools` process connects back to
+  the board
+
+#### Verification
+
+1. `cd wezboard && cargo build -p wezboard-gui` — zero errors
+2. Open `web lite.duckduckgo.com`
+3. Type `:devtools right` — a new split pane should appear to the right
+4. The new pane should run `web devtools` and connect to the board
+5. Type `:devtools down` — split below
+6. Type `:devtools left` — split to the left
+7. Type `:devtools up` — split above
+
+**Result:** Partial success
+
+`OpenSplit` itself works correctly — the split pane is created in the right
+direction and `web devtools` runs in it. The new TUI connects to the board,
+sends `HelloRequest` (pane_id=1), and sends `QueryDevtoolsRequest` (which
+resolves `inspected_tab_id=0` to tab 1 via `last_browser_pane`). All of this
+works.
+
+The failure: the DevTools TUI then sends `SetDevtoolsOverlay` — not
+`SetOverlay` — to request a DevTools overlay. Wezboard doesn't handle
+`SetDevtoolsOverlay` yet; it falls through to the `Some(other)` catch-all and
+is logged as `type=Other`. No overlay is created, no `CreateDevtoolsTab` is
+sent to Chromium, so nothing renders. The TUI sits idle showing "DevTools"
+with no webview.
+
+#### Conclusion
+
+`OpenSplit` is implemented and working. The missing piece is
+`SetDevtoolsOverlay` handling (which creates a pane with `inspected_tab_id`
+set and sends `CreateDevtoolsTab` to Chromium instead of `CreateTab`) — this
+is the next experiment.

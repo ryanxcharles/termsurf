@@ -125,6 +125,7 @@ fn msg_type_name(msg: &TermSurfMessage) -> &'static str {
         Some(Msg::CreateTab(_)) => "CreateTab",
         Some(Msg::CloseTab(_)) => "CloseTab",
         Some(Msg::CursorChanged(_)) => "CursorChanged",
+        Some(Msg::OpenSplit(_)) => "OpenSplit",
         Some(_) => "Other",
         None => "None",
     }
@@ -384,6 +385,15 @@ async fn handle_message(
             (&**stream).write_all(&len).await?;
             (&**stream).write_all(&payload).await?;
         }
+        Some(Msg::OpenSplit(o)) => {
+            log::info!(
+                "OpenSplit: pane_id={} direction={} command={}",
+                o.pane_id,
+                o.direction,
+                o.command
+            );
+            handle_open_split(o);
+        }
         Some(other) => {
             log::debug!("unhandled TermSurf message: {:?}", other);
         }
@@ -634,6 +644,80 @@ fn handle_tab_ready(ready: proto::TabReady, state: &SharedState) -> anyhow::Resu
         log::warn!("TabReady: unknown pane_id={}", ready.pane_id);
     }
     Ok(())
+}
+
+fn handle_open_split(split: proto::OpenSplit) {
+    use mux::tab::{SplitDirection, SplitRequest, SplitSize};
+
+    // Parse direction
+    let (direction, target_is_second) = match split.direction.as_str() {
+        "right" => (SplitDirection::Horizontal, true),
+        "left" => (SplitDirection::Horizontal, false),
+        "down" => (SplitDirection::Vertical, true),
+        "up" => (SplitDirection::Vertical, false),
+        other => {
+            log::warn!("OpenSplit: unknown direction '{}'", other);
+            return;
+        }
+    };
+
+    let numeric_pane_id: usize = match split.pane_id.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            log::warn!("OpenSplit: invalid pane_id '{}'", split.pane_id);
+            return;
+        }
+    };
+
+    // Build the command from the space-separated string
+    let args: Vec<String> = split
+        .command
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    if args.is_empty() {
+        log::warn!("OpenSplit: empty command");
+        return;
+    }
+
+    let request = SplitRequest {
+        direction,
+        target_is_second,
+        top_level: false,
+        size: SplitSize::Percent(50),
+    };
+
+    let command = split.command.clone();
+    promise::spawn::spawn(async move {
+        let mux = mux::Mux::get();
+        let cmd_builder = portable_pty::CommandBuilder::from_argv(
+            args.iter().map(|s| s.as_str().into()).collect(),
+        );
+        match mux
+            .split_pane(
+                numeric_pane_id,
+                request,
+                mux::domain::SplitSource::Spawn {
+                    command: Some(cmd_builder),
+                    command_dir: None,
+                },
+                config::keyassignment::SpawnTabDomain::CurrentPaneDomain,
+            )
+            .await
+        {
+            Ok((pane, _size)) => {
+                log::info!(
+                    "OpenSplit: created pane {} with command '{}'",
+                    pane.pane_id(),
+                    command
+                );
+            }
+            Err(e) => {
+                log::error!("OpenSplit: split_pane failed: {:#}", e);
+            }
+        }
+    })
+    .detach();
 }
 
 fn handle_disconnect(conn_type: ConnType, tx: &Sender<Vec<u8>>, state: &SharedState) {
