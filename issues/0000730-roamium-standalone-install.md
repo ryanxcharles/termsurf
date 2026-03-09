@@ -289,3 +289,143 @@ web --browser /usr/local/bin/roamium termsurf.com
    second test to confirm navigation works
 6. DevTools: `:devtools right` — verify helper processes spawn correctly from
    the installed location
+
+**Result:** Fail
+
+The install script works — files are copied, symlink resolves, dylibs load via
+`@loader_path/.`. But Roamium crashes immediately:
+
+```
+[ERROR:base/i18n/icu_util.cc:177] icudtl.dat not found in bundle
+[FATAL:base/i18n/icu_util.cc:306] Check failed: result.
+```
+
+Chromium on macOS loads resources (`icudtl.dat`, `.pak` files) via
+`PathForFrameworkBundleResource()` (`base/apple/foundation_util.mm:108`), which
+calls `[NSBundle URLForResource:withExtension:]` on the framework bundle. This
+API expects an actual macOS bundle structure (`*.framework/Resources/`). A flat
+directory isn't an NSBundle, so the lookup returns nil.
+
+The resource loading path on macOS (`base/i18n/icu_util.cc:167-170`):
+
+```cpp
+#else  // !BUILDFLAG(IS_APPLE)
+  // Assume it is in the framework bundle's Resources directory.
+  FilePath data_path = apple::PathForFrameworkBundleResource(kIcuDataFileName);
+```
+
+On non-Apple platforms (line 148), Chromium uses `DIR_ASSETS` which resolves to
+the directory containing the executable — exactly what we want. But on macOS it
+unconditionally uses the framework bundle API.
+
+The `OverrideFrameworkBundlePath()` in `paths_apple.mm` is called before
+`ContentMain` and navigates up from the binary expecting
+`.app/Contents/Frameworks/Content Shell Framework.framework`. When the binary is
+at `/usr/local/lib/roamium/roamium`, this navigation produces a nonsensical
+path.
+
+#### Conclusion
+
+The install script and symlink approach is correct — dylibs load fine via
+`@loader_path`. The blocker is Chromium's macOS resource loading, which
+unconditionally uses NSBundle APIs that require framework bundle structure. The
+Chromium fork needs a patch to fall back to the executable's directory when no
+framework bundle exists. This is the next experiment.
+
+### Experiment 3: Patch Chromium resource loading for flat install
+
+#### Goal
+
+Patch `paths_apple.mm` in the Chromium fork so that when Roamium runs as a plain
+binary (not inside a `.app` or `.framework` bundle), resource loading falls back
+to the directory containing the executable.
+
+#### Background
+
+Chromium's macOS resource loading chain:
+
+1. `shell_content_main.cc:30` calls `OverrideFrameworkBundlePath()`
+2. `paths_apple.mm:52` navigates up from the binary to find
+   `Contents/Frameworks/Content Shell Framework.framework`
+3. `SetOverrideFrameworkBundlePath()` sets this as the framework bundle
+4. `icu_util.cc:169` calls `PathForFrameworkBundleResource("icudtl.dat")`
+5. `foundation_util.mm:108` calls `[NSBundle URLForResource:...]` on the
+   framework bundle → returns nil for flat directories
+
+On non-Apple platforms, `icu_util.cc:148` uses `DIR_ASSETS` (the executable's
+directory). The `.pak` loading in content_shell likely has the same pattern.
+
+The fix: when the binary is not inside a bundle, override the framework bundle
+path to point at the executable's own directory. `NSBundle` can represent any
+directory if created with `bundleWithPath:` — the `URLForResource` API will then
+look for files directly in that directory.
+
+#### Branch
+
+Fork `146.0.7650.0-issue-708` → `146.0.7650.0-issue-730`:
+
+```bash
+cd ~/dev/termsurf/chromium/src
+export PATH="$(cd ../depot_tools && pwd):$PATH"
+git checkout 146.0.7650.0-issue-708
+git checkout -b 146.0.7650.0-issue-730
+```
+
+#### Design
+
+**1. `content/shell/app/paths_apple.mm` — Handle non-bundled binaries**
+
+Modify `GetContentsPath()` to detect when the binary isn't inside a `.app`
+bundle. When it's a flat binary, `OverrideFrameworkBundlePath()` should point
+the framework bundle at the directory containing the executable.
+
+```cpp
+void OverrideFrameworkBundlePath() {
+  base::FilePath exe_path;
+  base::PathService::Get(base::FILE_EXE, &exe_path);
+  base::FilePath exe_dir = exe_path.DirName();
+
+  // Check if we're inside a .app bundle by looking for "Contents" ancestor.
+  bool in_bundle = false;
+  base::FilePath check = exe_dir;
+  for (int i = 0; i < 10 && !check.empty(); i++) {
+    if (check.BaseName().value() == "Contents") {
+      in_bundle = true;
+      break;
+    }
+    check = check.DirName();
+  }
+
+  base::FilePath framework_path;
+  if (in_bundle) {
+    // Standard bundle path: Contents/Frameworks/Content Shell Framework.framework
+    framework_path =
+        GetFrameworksPath().Append("Content Shell Framework.framework");
+  } else {
+    // Flat binary: use the executable's directory as the "framework bundle".
+    // NSBundle will look for resources directly in this directory.
+    framework_path = exe_dir;
+  }
+
+  base::apple::SetOverrideFrameworkBundlePath(framework_path);
+}
+```
+
+**2. Similarly patch `OverrideChildProcessPath()`** to handle the flat case —
+when not in a bundle, the child process is the executable itself (already the
+default behavior when `CHILD_PROCESS_EXE` isn't overridden, so this may be a
+no-op).
+
+**3. Similarly patch `OverrideOuterBundlePath()` and `OverrideBundleID()`** to
+handle the non-bundled case gracefully (return early or use defaults).
+
+#### Verification
+
+1. Apply patches to Chromium fork on a new branch
+2. Rebuild Chromium: `autoninja -C out/Default chromium_profile_server`
+3. Rebuild Roamium: `scripts/build-roamium.sh --release`
+4. Reinstall: `scripts/install-roamium.sh`
+5. Test: `/usr/local/bin/roamium --help 2>&1` — no ICU crash
+6. Test in Ghostboard: `web --browser /usr/local/bin/roamium termsurf.com` —
+   page renders
+7. Verify `.pak` files also load (page content renders, not just process start)
