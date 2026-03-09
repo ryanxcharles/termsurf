@@ -344,3 +344,37 @@ downstream function signatures (`try_forward_raw_scroll`, the
 `dispatch_window_event` match arm). The protobuf `ScrollEvent` already uses
 `u64` for these fields, so the only changes are in the Rust types between
 NSEvent and protobuf serialization.
+
+### Experiment 2: Fix u32 → u64 for NSEventPhase types
+
+#### Goal
+
+Fix the runtime crash from Experiment 1 by using the correct Rust type (`u64`)
+for `NSEventPhase` and `NSEventMomentumPhase` return values from `msg_send!`.
+
+#### Root cause
+
+`NSEventPhase` is `typedef NSUInteger`, which is `unsigned long` on 64-bit macOS
+— 8 bytes, ObjC type encoding `'Q'`. Experiment 1 used `u32` (encoding `'I'`),
+and `objc2` panics on the type mismatch before the message is even sent.
+
+#### Changes
+
+Four files, same change: `u32` → `u64` for `phase` and `momentum_phase`.
+
+| File | Line(s) | Change |
+|------|---------|--------|
+| `wezboard/window/src/os/macos/window.rs` | 2563, 2566 | `let phase: u32` → `let phase: u64`, same for `momentum_phase` |
+| `wezboard/window/src/lib.rs` | 205–206 | `RawScrollEvent` fields `phase: u32` → `phase: u64`, same for `momentum_phase` |
+| `wezboard/wezboard-gui/src/termwindow/mod.rs` | match arm | Already destructured without type annotation — no change needed |
+| `wezboard/wezboard-gui/src/termsurf/input.rs` | 426–427 | `try_forward_raw_scroll` params `phase: u32` → `phase: u64`, same for `momentum_phase` |
+
+The proto `ScrollEvent` already uses `u64` for both fields, so the `as u64`
+casts in `try_forward_raw_scroll` become no-ops and can be removed.
+
+#### Verification
+
+1. `cargo build` compiles without errors
+2. Launch Wezboard, `web` a page — trackpad scroll works without crash
+3. Momentum scrolling works (inertial scroll after finger lift)
+4. Terminal scrolling still works with no browser overlay
