@@ -678,3 +678,53 @@ icon assets to the same new logo.
 4. Launching Wezboard from `/Applications/` works — terminal opens
 5. `web lite.duckduckgo.com` inside Wezboard uses installed Roamium
 6. Ghostboard icon also updated via `scripts/generate-icons.sh`
+
+#### Result
+
+Success. All three steps completed:
+
+1. `terminal.icns` regenerated from `termsurf-9.png` — all iconset sizes
+   generated, packed with `iconutil`
+2. `scripts/install-wezboard.sh` created and working — copies template bundle,
+   adds binary, codesigns
+3. Ghostboard icons updated via
+   `scripts/generate-icons.sh assets/termsurf-9.png`
+
+#### Conclusion
+
+Wezboard is now installable as a macOS `.app` bundle. The install script copies
+the template bundle (which includes the new icon, Info.plist, and ANGLE dylibs),
+adds the release binary, and ad-hoc codesigns. Both Wezboard and Ghostboard now
+use the `termsurf-9` logo.
+
+### Experiment 7: Update to termsurf-10 logo
+
+#### Goal
+
+Replace `termsurf-9.png` with `termsurf-10.png` (same logo with extra border for
+better dock appearance) across all icon assets, then reinstall Wezboard.
+
+#### Design
+
+**1. Regenerate `terminal.icns` from `assets/termsurf-10.png`**
+
+Same `sips` + `iconutil` approach as Experiment 6, targeting
+`wezboard/assets/macos/Wezboard.app/Contents/Resources/terminal.icns`.
+
+**2. Update Ghostboard icons**
+
+Run `scripts/generate-icons.sh assets/termsurf-10.png`.
+
+**3. Reinstall Wezboard**
+
+Run `scripts/install-wezboard.sh` to install the updated app bundle with the new
+icon.
+
+#### Verification
+
+1. `terminal.icns` is regenerated from `termsurf-10.png`
+2. Ghostboard icon assets updated to `termsurf-10`
+3. `scripts/install-wezboard.sh` completes without errors
+4. `/Applications/Wezboard.app` shows the new icon with border in Finder/Dock
+5. Launching Wezboard from `/Applications/` works
+6. `web lite.duckduckgo.com` inside Wezboard uses installed Roamium
