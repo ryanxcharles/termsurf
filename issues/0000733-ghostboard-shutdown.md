@@ -134,3 +134,25 @@ memory) stays unchanged.
 3. Run Ghostboard, open a webview, close it — Roamium should exit gracefully (no
    SIGKILL in logs)
 4. Reopen a webview — should work (server entry removed, fresh spawn)
+
+**Result:** Pass
+
+Build compiles successfully. All changes applied cleanly.
+
+#### Conclusion
+
+The experiment worked as designed. Ghostboard now sends a `Shutdown` protobuf
+message instead of SIGKILL when `pane_count` drops to 0, then waits for the
+process to exit. `killServer()` remains as a safety net for app-exit cleanup.
+
+## Conclusion
+
+Ghostboard now gracefully shuts down Roamium using the `Shutdown` protocol
+message added in Issue 732. When the last pane for a profile closes, Ghostboard
+sends `Shutdown` (msg_case 31) over the Unix socket and waits for Roamium to
+exit on its own — allowing Chromium's cleanup handlers to run properly. SIGKILL
+(`killServer()`) is preserved only as a safety net during app-exit.
+
+Additionally fixed `proto/generate.sh` to point at the correct
+`ghostboard/src/protobuf/` output directory and regenerated the protobuf-c
+bindings to include the `Termsurf__Shutdown` struct.
