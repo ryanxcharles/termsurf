@@ -198,10 +198,12 @@ regenerates from `proto/termsurf.proto`, so rebuilding Roamium picks up the new
 
 1. `cd roamium && cargo build` — compiles with new Shutdown handler
 2. `cd wezboard && cargo build` — compiles with Shutdown send logic
-3. Open a webview (`web localhost:3000`), confirm it loads
-4. Close the tab — logs show "last pane closed for server key=..., sending
+3. Use `web --browser /path/to/roamium/target/debug/roamium localhost:3000` to
+   test with the debug build (absolute path bypasses the installed version)
+4. Confirm the webview loads
+5. Close the tab — logs show "last pane closed for server key=..., sending
    Shutdown"
-5. Open a new webview (`web localhost:3000`) — it should appear and load
-6. Repeat steps 3–5 multiple times to confirm reliability
-7. Open two webviews, close one — server stays alive (pane_count > 0). Close the
+6. Open a new webview with the same `--browser` path — it should appear and load
+7. Repeat steps 4–6 multiple times to confirm reliability
+8. Open two webviews, close one — server stays alive (pane_count > 0). Close the
    second — Shutdown is sent, server exits
