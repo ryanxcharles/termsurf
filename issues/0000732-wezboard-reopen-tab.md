@@ -88,81 +88,120 @@ disconnect was processed.
 
 ## Experiments
 
-### Experiment 1: Remove stale servers before spawning
+### Experiment 1: Board-controlled server lifecycle via Shutdown message
 
 #### Goal
 
-When `handle_set_overlay` finds an existing server entry, check if the server is
-actually alive. If it's dead (process exited or `tx` is `None` with no active
-panes), remove the stale entry and spawn a fresh server.
+The board (GUI) should own the Roamium process lifecycle. Currently Roamium
+self-terminates when its last tab closes (`dispatch.rs:119`), but the board
+doesn't know this happened, leaving a stale server entry that blocks future tab
+creation.
+
+The fix: add a `Shutdown` protocol message. The board sends it when `pane_count`
+drops to 0. Roamium receives it and exits gracefully. Roamium no longer
+self-terminates — the board is the only authority that decides when Roamium
+exits.
+
+This will temporarily break Ghostboard (which doesn't send `Shutdown` yet).
+Ghostboard will be fixed in a later issue.
 
 #### Changes
 
-**File: `wezboard/wezboard-gui/src/termsurf/conn.rs`** — `handle_set_overlay`,
-lines 554–585
+**1. `proto/termsurf.proto`** — add Shutdown message
 
-Replace the simple `contains_key` check with a liveness check. Before deciding
-to reuse a server, verify it's actually reachable:
+Add to the `oneof msg` block (next available tag is 31):
+
+```protobuf
+Shutdown shutdown = 31;
+```
+
+Add the message definition (empty — it's a signal, no payload needed):
+
+```protobuf
+message Shutdown {}
+```
+
+**2. `roamium/src/dispatch.rs`** — handle Shutdown, remove self-kill
+
+Add a `Shutdown` handler in the `match inner` block:
 
 ```rust
-// Get or create server
-let key = TermSurfState::server_key(&overlay.profile, &browser);
-let needs_spawn = match st.servers.get_mut(&key) {
-    None => true,
-    Some(server) => {
-        // Check if server process has exited
-        let process_dead = match server.process {
-            Some(ref mut child) => match child.try_wait() {
-                Ok(Some(_)) => true,  // Process exited
-                _ => false,           // Still running (or error)
-            },
-            None => true,             // No process handle
-        };
-        if process_dead || (server.tx.is_none() && server.pane_count == 0) {
-            log::info!(
-                "SetOverlay: removing stale server key={} process_dead={} tx={} pane_count={}",
-                key, process_dead, server.tx.is_some(), server.pane_count
-            );
-            st.servers.remove(&key);
-            true
-        } else {
-            false
-        }
-    }
-};
-
-if needs_spawn {
-    // Must drop lock before spawning (spawn_server doesn't need state)
-    drop(st);
-    let server = spawn_server(&overlay.profile, &browser)?;
-    let mut st = state.lock().unwrap();
-    st.servers.insert(key.clone(), server);
-    // If server already connected (unlikely for fresh spawn), send CreateTab
-    let server = st.servers.get(&key).unwrap();
-    if let Some(ref server_tx) = server.tx {
-        let pane = st.panes.get(&overlay.pane_id).unwrap();
-        send_create_tab(server_tx, pane)?;
-    }
-} else {
-    let server = st.servers.get_mut(&key).unwrap();
-    server.pane_count += 1;
-    // ... existing reuse logic (log, send CreateTab if tx available) ...
+Msg::Shutdown(_) => {
+    unsafe { ffi::ts_quit() };
 }
 ```
 
-The key insight: `try_wait()` on the `Child` process handle is non-blocking and
-tells us if the process has already exited. Combined with the `tx` and
-`pane_count` checks, this catches both failure modes described in the issue
-background.
+Remove the self-kill from `CloseTab` (lines 118–120). The handler becomes:
 
-No other files need changes — this is entirely within the get-or-create logic in
-`handle_set_overlay`.
+```rust
+Msg::CloseTab(m) => {
+    let tab_id = m.tab_id;
+    if let Some(t) = find_by_tab_id(tab_id) {
+        unsafe { ffi::ts_destroy_web_contents(t.handle) };
+    }
+    tabs().retain(|t| t.tab_id != tab_id);
+    // No longer self-kills — board sends Shutdown when ready.
+}
+```
+
+**3. `wezboard/wezboard-gui/src/termsurf/conn.rs`** — send Shutdown on last pane
+close
+
+In `handle_disconnect`, TUI branch (lines 876–886), after decrementing
+`server.pane_count`, check if it reached 0. If so, send `Shutdown` and mark the
+server for removal:
+
+```rust
+server.pane_count = server.pane_count.saturating_sub(1);
+if let Some(ref server_tx) = server.tx {
+    let msg = TermSurfMessage {
+        msg: Some(Msg::CloseTab(proto::CloseTab {
+            tab_id: pane.tab_id,
+        })),
+    };
+    let _ = server_tx.try_send(msg.encode_to_vec());
+
+    // Last pane — tell Roamium to exit gracefully.
+    if server.pane_count == 0 {
+        log::info!(
+            "last pane closed for server key={}, sending Shutdown",
+            key
+        );
+        let shutdown_msg = TermSurfMessage {
+            msg: Some(Msg::Shutdown(proto::Shutdown {})),
+        };
+        let _ = server_tx.try_send(shutdown_msg.encode_to_vec());
+        servers_to_remove.push(key.clone());
+    }
+}
+```
+
+Collect keys during the pane removal loop, then remove after:
+
+```rust
+for key in &servers_to_remove {
+    st.servers.remove(key);
+}
+```
+
+This is needed because we can't remove from `st.servers` while iterating panes
+that reference it.
+
+No changes to `handle_set_overlay` — the get-or-create logic already works
+correctly when the server entry doesn't exist.
+
+**4. Rebuild Roamium protobuf** — the `prost-build` step in Roamium's `build.rs`
+regenerates from `proto/termsurf.proto`, so rebuilding Roamium picks up the new
+`Shutdown` message automatically.
 
 #### Verification
 
-1. `cd wezboard && cargo build` — compiles without errors
-2. Open a webview (`web localhost:3000`), confirm it loads
-3. Close the tab (Ctrl+D or close the pane)
-4. Open a new webview (`web localhost:3000`) — it should appear and load
-5. Verify logs show "removing stale server" on the second open
-6. Repeat steps 2–4 multiple times to confirm reliability
+1. `cd roamium && cargo build` — compiles with new Shutdown handler
+2. `cd wezboard && cargo build` — compiles with Shutdown send logic
+3. Open a webview (`web localhost:3000`), confirm it loads
+4. Close the tab — logs show "last pane closed for server key=..., sending
+   Shutdown"
+5. Open a new webview (`web localhost:3000`) — it should appear and load
+6. Repeat steps 3–5 multiple times to confirm reliability
+7. Open two webviews, close one — server stays alive (pane_count > 0). Close the
+   second — Shutdown is sent, server exits
