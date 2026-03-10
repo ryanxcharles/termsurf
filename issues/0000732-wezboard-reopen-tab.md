@@ -212,3 +212,26 @@ regenerates from `proto/termsurf.proto`, so rebuilding Roamium picks up the new
 7. Repeat steps 4–6 multiple times to confirm reliability
 8. Open two webviews, close one — server stays alive (pane_count > 0). Close the
    second — Shutdown is sent, server exits
+
+**Result:** Pass
+
+Implemented all changes as designed. Both `scripts/build-roamium.sh` and
+`cd wezboard && cargo build` succeed. Closing the last tab sends Shutdown to
+Roamium, which exits gracefully. The stale server entry is removed from
+`st.servers`, so subsequent `handle_set_overlay` calls correctly spawn a fresh
+Roamium process. Reopening a webview after closing the last one works reliably.
+
+#### Conclusion
+
+Board-controlled shutdown works. The board is now the sole authority over
+Roamium's lifecycle — Roamium no longer self-terminates on last tab close.
+
+## Conclusion
+
+The stale server problem is fixed. When the last pane for a server closes,
+Wezboard sends a `Shutdown` message to Roamium and removes the server entry from
+`st.servers`. This ensures the get-or-create logic in `handle_set_overlay`
+correctly falls through to the spawn path on subsequent webview opens.
+
+Ghostboard does not yet send `Shutdown` — this is a known gap that will be
+addressed in a future issue.

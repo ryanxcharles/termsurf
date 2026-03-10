@@ -867,6 +867,7 @@ fn handle_disconnect(conn_type: ConnType, tx: &Sender<Vec<u8>>, state: &SharedSt
                 .filter(|(_, p)| p.tui_tx.same_channel(tx))
                 .map(|(id, _)| id.clone())
                 .collect();
+            let mut servers_to_remove: Vec<String> = vec![];
             for pane_id in &to_remove {
                 if let Some(pane) = st.panes.remove(pane_id) {
                     if pane.tab_id != 0 {
@@ -882,6 +883,13 @@ fn handle_disconnect(conn_type: ConnType, tx: &Sender<Vec<u8>>, state: &SharedSt
                                     })),
                                 };
                                 let _ = server_tx.try_send(msg.encode_to_vec());
+                                if server.pane_count == 0 {
+                                    let shutdown_msg = TermSurfMessage {
+                                        msg: Some(Msg::Shutdown(proto::Shutdown {})),
+                                    };
+                                    let _ = server_tx.try_send(shutdown_msg.encode_to_vec());
+                                    servers_to_remove.push(key.clone());
+                                }
                             }
                         }
                     }
@@ -895,6 +903,10 @@ fn handle_disconnect(conn_type: ConnType, tx: &Sender<Vec<u8>>, state: &SharedSt
                     }
                     log::info!("removed pane {} on TUI disconnect", pane_id);
                 }
+            }
+            for key in &servers_to_remove {
+                st.servers.remove(key);
+                log::info!("removed server {} (no remaining panes)", key);
             }
             log::info!(
                 "handle_disconnect: after TUI cleanup panes={} servers={} tab_to_pane={}",

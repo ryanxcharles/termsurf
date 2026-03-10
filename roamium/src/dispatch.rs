@@ -116,9 +116,6 @@ pub fn handle_message(msg: &TermSurfMessage) {
                 unsafe { ffi::ts_destroy_web_contents(t.handle) };
             }
             tabs().retain(|t| t.tab_id != tab_id);
-            if tabs().is_empty() {
-                unsafe { ffi::ts_quit() };
-            }
         }
         Msg::Navigate(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
@@ -193,6 +190,9 @@ pub fn handle_message(msg: &TermSurfMessage) {
             if let Some(t) = find_by_tab_id(m.tab_id) {
                 unsafe { ffi::ts_set_color_scheme(t.handle, m.dark) };
             }
+        }
+        Msg::Shutdown(_) => {
+            unsafe { ffi::ts_quit() };
         }
         Msg::QueryTabsRequest(_) => {
             let mut browser_count: i64 = 0;
