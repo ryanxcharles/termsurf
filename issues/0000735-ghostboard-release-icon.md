@@ -127,3 +127,47 @@ The file-level changes are correct. The next experiment needs to address the
 build/cache layer so the release icon actually appears in the running app. This
 likely means clearing the macOS icon cache and/or performing a clean build to
 force the asset catalog to recompile.
+
+### Experiment 2: Clear macOS icon cache
+
+#### Description
+
+The release icon files were correct on disk after Experiment 1, but macOS served
+the old cached icon. Clear the icon services cache and restart the Dock to force
+macOS to re-read the icon from the compiled app.
+
+#### Changes
+
+No code changes. Run:
+
+```bash
+sudo rm -rf /Library/Caches/com.apple.iconservices.store && killall Dock
+```
+
+#### Verification
+
+1. Launch Ghostboard. The release icon (blue ghost) appears in the Dock
+   immediately — no flash of the old surfer-boy icon.
+2. In debug mode, the debug icon (orange/green ghost) still appears after the
+   runtime swap.
+
+**Result:** Pass
+
+After clearing `/Library/Caches/com.apple.iconservices.store` and restarting the
+Dock, the new blue ghost release icon appears immediately. The debug icon
+continues to work as before. Both icons now display correctly.
+
+#### Conclusion
+
+The build system compiled the new icons correctly in Experiment 1. The only
+problem was the macOS icon services cache, which aggressively caches app icons
+and does not invalidate when an app is rebuilt with new assets. Clearing the
+cache resolved the issue.
+
+## Conclusion
+
+Both the release icon (`ghostboard-1.png`, blue ghost) and the debug icon
+(`ghostboard-1-debug.png`, orange/green ghost) now display correctly in
+Ghostboard. The `generate-icons.sh` script defaults to the new source image.
+After changing app icons, the macOS icon cache must be cleared manually with
+`sudo rm -rf /Library/Caches/com.apple.iconservices.store && killall Dock`.
