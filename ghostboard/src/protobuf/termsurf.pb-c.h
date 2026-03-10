@@ -47,7 +47,6 @@ typedef struct Termsurf__QueryDevtoolsReply Termsurf__QueryDevtoolsReply;
 typedef struct Termsurf__QueryTabsRequest Termsurf__QueryTabsRequest;
 typedef struct Termsurf__TabInfo Termsurf__TabInfo;
 typedef struct Termsurf__QueryTabsReply Termsurf__QueryTabsReply;
-typedef struct Termsurf__Shutdown Termsurf__Shutdown;
 
 
 /* --- enums --- */
@@ -86,8 +85,7 @@ typedef enum {
   TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_DEVTOOLS_REQUEST = 27,
   TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_DEVTOOLS_REPLY = 28,
   TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_TABS_REQUEST = 29,
-  TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_TABS_REPLY = 30,
-  TERMSURF__TERM_SURF_MESSAGE__MSG_SHUTDOWN = 31
+  TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_TABS_REPLY = 30
     PROTOBUF_C__FORCE_ENUM_TO_BE_INT_SIZE(TERMSURF__TERM_SURF_MESSAGE__MSG__CASE)
 } Termsurf__TermSurfMessage__MsgCase;
 
@@ -150,7 +148,6 @@ struct  Termsurf__TermSurfMessage
      * TUI → GUI
      */
     Termsurf__SetOverlay *set_overlay;
-    Termsurf__Shutdown *shutdown;
     Termsurf__TabReady *tab_ready;
     Termsurf__TitleChanged *title_changed;
     Termsurf__UrlChanged *url_changed;
@@ -587,15 +584,6 @@ struct  Termsurf__QueryTabsReply
 #define TERMSURF__QUERY_TABS_REPLY__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&termsurf__query_tabs_reply__descriptor) \
 , 0, 0, 0, 0, 0,NULL, (char *)protobuf_c_empty_string }
-
-
-struct  Termsurf__Shutdown
-{
-  ProtobufCMessage base;
-};
-#define TERMSURF__SHUTDOWN__INIT \
- { PROTOBUF_C_MESSAGE_INIT (&termsurf__shutdown__descriptor) \
- }
 
 
 /* Termsurf__TermSurfMessage methods */
@@ -1206,25 +1194,6 @@ Termsurf__QueryTabsReply *
 void   termsurf__query_tabs_reply__free_unpacked
                      (Termsurf__QueryTabsReply *message,
                       ProtobufCAllocator *allocator);
-/* Termsurf__Shutdown methods */
-void   termsurf__shutdown__init
-                     (Termsurf__Shutdown         *message);
-size_t termsurf__shutdown__get_packed_size
-                     (const Termsurf__Shutdown   *message);
-size_t termsurf__shutdown__pack
-                     (const Termsurf__Shutdown   *message,
-                      uint8_t             *out);
-size_t termsurf__shutdown__pack_to_buffer
-                     (const Termsurf__Shutdown   *message,
-                      ProtobufCBuffer     *buffer);
-Termsurf__Shutdown *
-       termsurf__shutdown__unpack
-                     (ProtobufCAllocator  *allocator,
-                      size_t               len,
-                      const uint8_t       *data);
-void   termsurf__shutdown__free_unpacked
-                     (Termsurf__Shutdown *message,
-                      ProtobufCAllocator *allocator);
 /* --- per-message closures --- */
 
 typedef void (*Termsurf__TermSurfMessage_Closure)
@@ -1323,9 +1292,6 @@ typedef void (*Termsurf__TabInfo_Closure)
 typedef void (*Termsurf__QueryTabsReply_Closure)
                  (const Termsurf__QueryTabsReply *message,
                   void *closure_data);
-typedef void (*Termsurf__Shutdown_Closure)
-                 (const Termsurf__Shutdown *message,
-                  void *closure_data);
 
 /* --- services --- */
 
@@ -1364,7 +1330,6 @@ extern const ProtobufCMessageDescriptor termsurf__query_devtools_reply__descript
 extern const ProtobufCMessageDescriptor termsurf__query_tabs_request__descriptor;
 extern const ProtobufCMessageDescriptor termsurf__tab_info__descriptor;
 extern const ProtobufCMessageDescriptor termsurf__query_tabs_reply__descriptor;
-extern const ProtobufCMessageDescriptor termsurf__shutdown__descriptor;
 
 PROTOBUF_C__END_DECLS
 

@@ -2560,12 +2560,10 @@ impl WindowView {
         let raw_horz_delta = horz_delta;
         horz_delta /= scale;
 
-        let phase: u64 = unsafe {
-            objc2::msg_send![nsevent as *const _ as *const AnyObject, phase]
-        };
-        let momentum_phase: u64 = unsafe {
-            objc2::msg_send![nsevent as *const _ as *const AnyObject, momentumPhase]
-        };
+        let phase: u64 =
+            unsafe { objc2::msg_send![nsevent as *const _ as *const AnyObject, phase] };
+        let momentum_phase: u64 =
+            unsafe { objc2::msg_send![nsevent as *const _ as *const AnyObject, momentumPhase] };
 
         if let Some(myself) = Self::get_this(this) {
             let mut inner = myself.inner.borrow_mut();
@@ -2574,19 +2572,14 @@ impl WindowView {
             {
                 let view = this_raw as id;
                 unsafe {
-                    let location: CGPoint = objc2::msg_send![
-                        nsevent as *const _ as *const AnyObject,
-                        locationInWindow
-                    ];
+                    let location: CGPoint =
+                        objc2::msg_send![nsevent as *const _ as *const AnyObject, locationInWindow];
                     let point: CGPoint = objc2::msg_send![
                         view as *const _ as *const AnyObject,
                         convertPoint: location,
                         fromView: std::ptr::null::<AnyObject>()
                     ];
-                    let rect = CGRect::new(
-                        CGPoint::new(0., 0.),
-                        CGSize::new(point.x, point.y),
-                    );
+                    let rect = CGRect::new(CGPoint::new(0., 0.), CGSize::new(point.x, point.y));
                     let backing_rect: CGRect = objc2::msg_send![
                         view as *const _ as *const AnyObject,
                         convertRectToBacking: rect

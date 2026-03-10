@@ -26,20 +26,20 @@ install_ghostboard() {
   fi
 
   echo "==> Installing Ghostboard to $APP..."
-  rm -rf "$APP"
-  cp -R "$SRC" "$APP"
+  sudo rm -rf "$APP"
+  sudo cp -R "$SRC" "$APP"
 
   # Bundle web TUI.
   if [ -f "$WEB" ]; then
     echo "==> Bundling web TUI..."
-    cp "$WEB" "$APP/Contents/MacOS/web"
+    sudo cp "$WEB" "$APP/Contents/MacOS/web"
   else
     echo "Warning: web TUI not found at $WEB (skipping)"
   fi
 
   # Re-sign.
   echo "==> Codesigning..."
-  codesign --force --deep --sign - "$APP"
+  sudo codesign --force --deep --sign - "$APP"
 
   # Unregister build tree copies from Launch Services.
   echo "==> Unregistering build tree copies..."
@@ -49,8 +49,8 @@ install_ghostboard() {
 
   # Symlinks.
   echo "==> Symlinking CLI tools..."
-  ln -sf "$APP/Contents/MacOS/termsurf" /usr/local/bin/termsurf
-  ln -sf "$APP/Contents/MacOS/web" /usr/local/bin/web
+  sudo ln -sf "$APP/Contents/MacOS/termsurf" /usr/local/bin/termsurf
+  sudo ln -sf "$APP/Contents/MacOS/web" /usr/local/bin/web
 
   echo "  App:  $APP"
   echo "  CLI:  /usr/local/bin/termsurf"

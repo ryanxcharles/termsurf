@@ -49,7 +49,6 @@ message TermSurfMessage {
     QueryDevtoolsReply query_devtools_reply = 28;
     QueryTabsRequest query_tabs_request = 29;
     QueryTabsReply query_tabs_reply = 30;
-    Shutdown shutdown = 31;
   }
 }
 
@@ -276,4 +275,3 @@ message QueryTabsReply {
   string error = 6;
 }
 
-message Shutdown {}

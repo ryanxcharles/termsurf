@@ -191,9 +191,6 @@ pub fn handle_message(msg: &TermSurfMessage) {
                 unsafe { ffi::ts_set_color_scheme(t.handle, m.dark) };
             }
         }
-        Msg::Shutdown(_) => {
-            unsafe { ffi::ts_quit() };
-        }
         Msg::QueryTabsRequest(_) => {
             let mut browser_count: i64 = 0;
             let mut devtools_count: i64 = 0;

@@ -119,3 +119,58 @@ Two lines of `ts_post_task(Some(quit_trampoline), ...)` in `reader_loop` plus a
 small trampoline function are sufficient. EOF and read errors now trigger a
 clean Chromium shutdown via the UI thread, matching the graceful `Shutdown`
 message path.
+
+### Experiment 2: Remove Shutdown message from protocol
+
+#### Description
+
+Now that Roamium exits on socket EOF (Experiment 1), the explicit `Shutdown`
+protobuf message is redundant. When the last pane closes, the GUI can simply
+close the socket — Roamium sees EOF and quits. Removing `Shutdown` simplifies
+the protocol and eliminates a message that now serves no purpose.
+
+#### Changes
+
+**`proto/termsurf.proto`**
+
+1. Remove `Shutdown shutdown = 31;` from the `oneof msg` block (line 52).
+2. Remove `message Shutdown {}` definition (line 279).
+
+**`ghostboard/src/apprt/xpc.zig`**
+
+1. Delete the `sendShutdown()` function (lines 1051–1060).
+2. At the call site in `handleClientDisconnect()` (line 1749), remove the
+   `sendShutdown(server)` call. The existing code already calls `proc.wait()`
+   and cleans up the server afterward — closing the socket fd naturally produces
+   EOF for Roamium.
+
+**`ghostboard/src/protobuf/termsurf.pb-c.h` and `termsurf.pb-c.c`**
+
+Regenerate from the updated proto. These are generated files — remove all
+`Termsurf__Shutdown` struct definitions, function declarations
+(`termsurf__shutdown__init`, `__pack`, `__unpack`, `__free_unpacked`,
+`__get_packed_size`), the `TERMSURF__TERM_SURF_MESSAGE__MSG_SHUTDOWN` enum
+value, and the `shutdown` union member.
+
+**`wezboard/wezboard-gui/src/termsurf/conn.rs`**
+
+1. Remove the Shutdown message construction and send (lines 887–890). The server
+   removal on line 891 (`servers_to_remove.push`) already drops the `server_tx`
+   channel, closing the socket and producing EOF.
+
+**`roamium/src/dispatch.rs`**
+
+1. Remove the `Msg::Shutdown(_)` match arm (lines 194–196). Roamium no longer
+   receives this message — it exits via EOF instead.
+
+#### Verification
+
+1. Regenerate protobuf-c files:
+   `chromium/src/out/Default/protoc --c_out=ghostboard/src/protobuf proto/termsurf.proto`
+2. Build all components:
+   `./scripts/build.sh roamium && ./scripts/build.sh wezboard && ./scripts/build.sh ghostboard`
+3. Launch Wezboard with a browser pane, close the pane — Roamium should exit
+   (EOF from socket close).
+4. Launch Wezboard with a browser pane, `kill -9` the GUI — Roamium should exit
+   (EOF from crash).
+5. Repeat steps 3–4 with Ghostboard.

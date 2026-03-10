@@ -1084,17 +1084,16 @@ impl TermWindow {
                 ..
             } => {
                 if let Some(pane) = self.get_active_pane_or_overlay() {
-                    self.raw_scroll_consumed =
-                        crate::termsurf::input::try_forward_raw_scroll(
-                            pane.pane_id(),
-                            coords,
-                            delta_x,
-                            delta_y,
-                            phase,
-                            momentum_phase,
-                            precise,
-                            modifiers,
-                        );
+                    self.raw_scroll_consumed = crate::termsurf::input::try_forward_raw_scroll(
+                        pane.pane_id(),
+                        coords,
+                        delta_x,
+                        delta_y,
+                        phase,
+                        momentum_phase,
+                        precise,
+                        modifiers,
+                    );
                 }
                 Ok(true)
             }

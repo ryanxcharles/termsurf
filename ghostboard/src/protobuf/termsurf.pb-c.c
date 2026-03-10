@@ -1447,52 +1447,7 @@ void   termsurf__query_tabs_reply__free_unpacked
   assert(message->base.descriptor == &termsurf__query_tabs_reply__descriptor);
   protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
 }
-void   termsurf__shutdown__init
-                     (Termsurf__Shutdown         *message)
-{
-  static const Termsurf__Shutdown init_value = TERMSURF__SHUTDOWN__INIT;
-  *message = init_value;
-}
-size_t termsurf__shutdown__get_packed_size
-                     (const Termsurf__Shutdown *message)
-{
-  assert(message->base.descriptor == &termsurf__shutdown__descriptor);
-  return protobuf_c_message_get_packed_size ((const ProtobufCMessage*)(message));
-}
-size_t termsurf__shutdown__pack
-                     (const Termsurf__Shutdown *message,
-                      uint8_t       *out)
-{
-  assert(message->base.descriptor == &termsurf__shutdown__descriptor);
-  return protobuf_c_message_pack ((const ProtobufCMessage*)message, out);
-}
-size_t termsurf__shutdown__pack_to_buffer
-                     (const Termsurf__Shutdown *message,
-                      ProtobufCBuffer *buffer)
-{
-  assert(message->base.descriptor == &termsurf__shutdown__descriptor);
-  return protobuf_c_message_pack_to_buffer ((const ProtobufCMessage*)message, buffer);
-}
-Termsurf__Shutdown *
-       termsurf__shutdown__unpack
-                     (ProtobufCAllocator  *allocator,
-                      size_t               len,
-                      const uint8_t       *data)
-{
-  return (Termsurf__Shutdown *)
-     protobuf_c_message_unpack (&termsurf__shutdown__descriptor,
-                                allocator, len, data);
-}
-void   termsurf__shutdown__free_unpacked
-                     (Termsurf__Shutdown *message,
-                      ProtobufCAllocator *allocator)
-{
-  if(!message)
-    return;
-  assert(message->base.descriptor == &termsurf__shutdown__descriptor);
-  protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
-}
-static const ProtobufCFieldDescriptor termsurf__term_surf_message__field_descriptors[31] =
+static const ProtobufCFieldDescriptor termsurf__term_surf_message__field_descriptors[30] =
 {
   {
     "create_tab",
@@ -1854,18 +1809,6 @@ static const ProtobufCFieldDescriptor termsurf__term_surf_message__field_descrip
     PROTOBUF_C_FIELD_FLAG_ONEOF,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
-  {
-    "shutdown",
-    31,
-    PROTOBUF_C_LABEL_NONE,
-    PROTOBUF_C_TYPE_MESSAGE,
-    offsetof(Termsurf__TermSurfMessage, msg_case),
-    offsetof(Termsurf__TermSurfMessage, shutdown),
-    &termsurf__shutdown__descriptor,
-    NULL,
-    PROTOBUF_C_FIELD_FLAG_ONEOF,             /* flags */
-    0,NULL,NULL    /* reserved1,reserved2, etc */
-  },
 };
 static const unsigned termsurf__term_surf_message__field_indices_by_name[] = {
   13,   /* field[13] = ca_context */
@@ -1895,7 +1838,6 @@ static const unsigned termsurf__term_surf_message__field_indices_by_name[] = {
   10,   /* field[10] = set_color_scheme */
   19,   /* field[19] = set_devtools_overlay */
   18,   /* field[18] = set_overlay */
-  30,   /* field[30] = shutdown */
   12,   /* field[12] = tab_ready */
   16,   /* field[16] = title_changed */
   14,   /* field[14] = url_changed */
@@ -1903,7 +1845,7 @@ static const unsigned termsurf__term_surf_message__field_indices_by_name[] = {
 static const ProtobufCIntRange termsurf__term_surf_message__number_ranges[1 + 1] =
 {
   { 1, 0 },
-  { 0, 31 }
+  { 0, 30 }
 };
 const ProtobufCMessageDescriptor termsurf__term_surf_message__descriptor =
 {
@@ -1913,7 +1855,7 @@ const ProtobufCMessageDescriptor termsurf__term_surf_message__descriptor =
   "Termsurf__TermSurfMessage",
   "termsurf",
   sizeof(Termsurf__TermSurfMessage),
-  31,
+  30,
   termsurf__term_surf_message__field_descriptors,
   termsurf__term_surf_message__field_indices_by_name,
   1,  termsurf__term_surf_message__number_ranges,
@@ -4175,23 +4117,5 @@ const ProtobufCMessageDescriptor termsurf__query_tabs_reply__descriptor =
   termsurf__query_tabs_reply__field_indices_by_name,
   1,  termsurf__query_tabs_reply__number_ranges,
   (ProtobufCMessageInit) termsurf__query_tabs_reply__init,
-  NULL,NULL,NULL    /* reserved[123] */
-};
-#define termsurf__shutdown__field_descriptors NULL
-#define termsurf__shutdown__field_indices_by_name NULL
-#define termsurf__shutdown__number_ranges NULL
-const ProtobufCMessageDescriptor termsurf__shutdown__descriptor =
-{
-  PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
-  "termsurf.Shutdown",
-  "Shutdown",
-  "Termsurf__Shutdown",
-  "termsurf",
-  sizeof(Termsurf__Shutdown),
-  0,
-  termsurf__shutdown__field_descriptors,
-  termsurf__shutdown__field_indices_by_name,
-  0,  termsurf__shutdown__number_ranges,
-  (ProtobufCMessageInit) termsurf__shutdown__init,
   NULL,NULL,NULL    /* reserved[123] */
 };

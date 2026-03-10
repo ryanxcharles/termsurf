@@ -1048,17 +1048,6 @@ fn killServer(server: *Server) void {
     server.process = null;
 }
 
-fn sendShutdown(server: *Server) void {
-    if (server.fd < 0) return;
-    var sd: pb.Termsurf__Shutdown = undefined;
-    pb.termsurf__shutdown__init(&sd);
-    var wrapper: pb.Termsurf__TermSurfMessage = undefined;
-    pb.termsurf__term_surf_message__init(&wrapper);
-    wrapper.msg_case = 31; // SHUTDOWN
-    wrapper.unnamed_0.shutdown = &sd;
-    sendProtobuf(server.fd, &wrapper);
-}
-
 fn sendCreateTab(p: *Pane, server: *Server) void {
     // Color scheme (Issue 680).
     const dark: bool = if (p.overlay_surface) |surface|
@@ -1746,15 +1735,8 @@ fn handleClientDisconnect(conn: *ClientConn) void {
 
                     if (server.pane_count > 0) server.pane_count -= 1;
                     if (server.pane_count == 0) {
-                        sendShutdown(server);
-                        if (server.process) |*proc| {
-                            _ = proc.wait() catch {};
-                        }
-                        server.process = null;
-
-                        // Cancel the Chromium ClientConn's dispatch source
-                        // before freeing the server to prevent use-after-free
-                        // when the dead socket's dispatch source fires.
+                        // Close the Chromium client connection first so Roamium
+                        // sees EOF and exits cleanly.
                         for (clients.items, 0..) |c, idx| {
                             if (c.conn_type == .chromium and c.server == server) {
                                 if (c.source) |src| dispatch_source_cancel(src);
@@ -1764,6 +1746,11 @@ fn handleClientDisconnect(conn: *ClientConn) void {
                                 break;
                             }
                         }
+
+                        if (server.process) |*proc| {
+                            _ = proc.wait() catch {};
+                        }
+                        server.process = null;
 
                         _ = servers.remove(server.profile_key);
                         freeKey(server.profile_key);

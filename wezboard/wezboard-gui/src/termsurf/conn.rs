@@ -884,10 +884,6 @@ fn handle_disconnect(conn_type: ConnType, tx: &Sender<Vec<u8>>, state: &SharedSt
                                 };
                                 let _ = server_tx.try_send(msg.encode_to_vec());
                                 if server.pane_count == 0 {
-                                    let shutdown_msg = TermSurfMessage {
-                                        msg: Some(Msg::Shutdown(proto::Shutdown {})),
-                                    };
-                                    let _ = server_tx.try_send(shutdown_msg.encode_to_vec());
                                     servers_to_remove.push(key.clone());
                                 }
                             }
@@ -945,9 +941,7 @@ fn resolve_browser_path(browser: &str) -> anyhow::Result<String> {
         return Ok(name.to_string());
     }
 
-    let candidates: &[(&str, &str)] = &[
-        ("roamium", "/usr/local/roamium/roamium"),
-    ];
+    let candidates: &[(&str, &str)] = &[("roamium", "/usr/local/roamium/roamium")];
 
     for (n, path) in candidates {
         if *n == name && std::path::Path::new(path).exists() {
@@ -1016,10 +1010,7 @@ fn send_create_tab(server_tx: &Sender<Vec<u8>>, pane: &Pane) -> anyhow::Result<(
     Ok(())
 }
 
-fn send_create_devtools_tab(
-    server_tx: &Sender<Vec<u8>>,
-    pane: &Pane,
-) -> anyhow::Result<()> {
+fn send_create_devtools_tab(server_tx: &Sender<Vec<u8>>, pane: &Pane) -> anyhow::Result<()> {
     let msg = TermSurfMessage {
         msg: Some(Msg::CreateDevtoolsTab(proto::CreateDevtoolsTab {
             pane_id: pane.pane_id.clone(),
@@ -1033,7 +1024,8 @@ fn send_create_devtools_tab(
     server_tx.try_send(payload)?;
     log::info!(
         "sent CreateDevtoolsTab: pane_id={} inspected_tab_id={}",
-        pane.pane_id, pane.inspected_tab_id
+        pane.pane_id,
+        pane.inspected_tab_id
     );
     Ok(())
 }
