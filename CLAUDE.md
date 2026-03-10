@@ -26,7 +26,8 @@ later.
 ### Every major browser engine
 
 Each browser engine runs as a separate "profile server" process, communicating
-with the terminal (board) via the TermSurf protocol. One process per profile.
+with the GUI (terminal emulator) via the TermSurf protocol. One process per
+profile.
 
 | Engine   | C library              | Rust binary | Status     |
 | -------- | ---------------------- | ----------- | ---------- |
@@ -40,21 +41,22 @@ embedding API (`ts_*` functions), linked by a Rust binary that handles Unix
 socket IPC, protobuf parsing, and process lifecycle. The Rust binary (~400
 lines) is almost entirely reusable across engines.
 
-### Multiple terminals (boards)
+### Multiple GUIs
 
 Although TermSurf currently ships as a Ghostty fork (`ghostboard/`), we will
 implement forks of all major terminal emulators:
 
-- **Ghostboard** (ghostboard/) — Current board. Active development.
-- **WezTerm** (Wezboard) — Researched in Issue 709. Strong architectural match.
+- **Ghostboard** (ghostboard/) — Current GUI. Active development.
+- **Wezboard** (wezboard/) — WezTerm fork. Active development. Full protocol
+  support, CALayerHost rendering, input forwarding, DevTools (Issues 715–732).
 - **Kitty** — Planned.
 - **Alacritty** — Planned.
 - **iTerm2** — Planned.
 
 Any terminal that implements the TermSurf protocol can host browser overlays. A
-"board" is a terminal emulator that listens on a Unix socket, accepts
-connections from TUIs and browser engines, and renders browser content as
-overlays at pixel coordinates.
+GUI is a terminal emulator that listens on a Unix socket, accepts connections
+from TUIs and browser engines, and renders browser content as overlays at pixel
+coordinates.
 
 ### Many TUIs
 
@@ -95,7 +97,7 @@ ts2 onward.
 
 The multi-process design has a second benefit: it enables multi-engine support.
 Because each browser process is an independent program speaking the TermSurf
-protocol, the board doesn't care which engine is behind it. A user can have one
+protocol, the GUI doesn't care which engine is behind it. A user can have one
 pane running Roamium (Chromium), another running Surfari (WebKit), and a third
 running Girlbat (Ladybird) — all in the same terminal window, all speaking the
 same protobuf messages.
@@ -114,7 +116,7 @@ the architecture uniform is more valuable than optimizing for one engine.
      └────────────┼────────────┘
                   │  Unix socket
            ┌──────┴──────┐
-           │    Board    │                1 board (terminal emulator)
+           │     GUI     │                1 GUI (terminal emulator)
            │  (Ghostty)  │
            └──┬───┬───┬──┘
               │   │   │
@@ -129,31 +131,36 @@ the architecture uniform is more valuable than optimizing for one engine.
 └─────────┘ └─────────┘ └─────────┘
 ```
 
-N TUIs connect to 1 board. The board manages M browser engine processes, each
-serving one profile. Different profiles can use different engines. The board is
+N TUIs connect to 1 GUI. The GUI manages M browser engine processes, each
+serving one profile. Different profiles can use different engines. The GUI is
 the hub — it routes messages between TUIs and engines, manages pane layout, and
 composites browser overlays into the terminal window.
 
 ### Unix sockets + protobuf for all IPC
 
 All inter-process communication uses Unix domain sockets with length-prefixed
-protobuf messages. The board (terminal) listens on a PID-scoped socket
+protobuf messages. The GUI (terminal) listens on a PID-scoped socket
 (`$TMPDIR/termsurf/termsurf-ghostboard-{pid}.sock`), and both TUIs and browser
 engines connect to it as clients.
 
-- **TUI → Board:** The TUI reads the `TERMSURF_SOCKET` env var (set by the
-  board) to discover the socket path.
-- **Board → Engine:** The board passes `--ipc-socket={path}` when launching
-  browser engine processes.
+- **TUI → GUI:** The TUI reads the `TERMSURF_SOCKET` env var (set by the GUI) to
+  discover the socket path.
+- **GUI → Engine:** The GUI passes `--ipc-socket={path}` when launching browser
+  engine processes.
 - **Wire format:** 4-byte little-endian length prefix + serialized protobuf
   (`termsurf.proto`).
-- **Serialization:** protobuf-c in Zig (board), prost in Rust (TUI and engines),
+- **Serialization:** protobuf-c in Zig (GUI), prost in Rust (TUI and engines),
   C++ protobuf in Chromium.
 
 Earlier generations (ts3–ts5) used XPC for IPC. Issues 698–701 replaced XPC with
 sockets, and Issue 702 removed all dead XPC code. CALayerHost compositing
 (zero-copy GPU rendering) does not require XPC — Window Server routes
 `CAContext` layer IDs between processes natively.
+
+- **Graceful shutdown:** The GUI sends a `Shutdown` protobuf message to browser
+  engine processes before terminating them (Issue 732 added the message, Issue
+  733 made Ghostboard use it instead of SIGKILL). This allows engines to clean
+  up resources and exit gracefully.
 
 ### Every Chromium issue gets its own branch
 
@@ -171,7 +178,9 @@ This keeps every issue's Chromium changes isolated and traceable.
 ## Directory Structure
 
 - `ghostboard/` — Ghostboard (Ghostty fork, Zig-first). **Active development.**
+- `wezboard/` — Wezboard (WezTerm fork, Rust). **Active development.**
 - `webtui/` — The `web` TUI (Rust/ratatui). Browser chrome in the terminal pane.
+- `roamium/` — Roamium (Chromium browser binary, Rust).
 - `chromium/` — Chromium fork build workspace (gitignored).
 - `issues/` — Issue documents across all generations (immutable history).
 - `website/` — termsurf.com project website.
@@ -237,6 +246,19 @@ click suppression fix (Issue 696), Unix socket + protobuf IPC replacing XPC
 library (Issues 704–706), Roamium Rust browser binary (Issue 707), clean
 Chromium fork with renamed libtermsurf_chromium (Issue 708).
 
+### Wezboard Current State
+
+Wezboard is a WezTerm fork with browser integration built in Rust. Current
+additions: WezTerm fork with rename script and initial build (Issue 715), build
+warning cleanup (Issue 716), cocoa crate removal and objc2 migration (Issues
+717–719), manual testing after migration (Issue 720), wgpu 25→28 upgrade (Issue
+721), cargo dependency updates (Issue 722), focused/unfocused split pane borders
+(Issue 723), TermSurf protocol implementation (Issue 724), CALayerHost browser
+overlay rendering (Issue 725), overlay lifecycle and protocol (Issue 726),
+second webview positioning (Issue 727), remaining protocol messages (Issues
+728–729), Roamium standalone install (Issue 730), scroll crash fix (Issue 731),
+Shutdown message and tab reopen fix (Issue 732).
+
 ### Source Layout
 
 - `ghostboard/src/` — Shared Zig core (libtermsurf)
@@ -248,6 +270,23 @@ Chromium fork with renamed libtermsurf_chromium (Issue 708).
 - `ghostboard/macos/` — macOS app (Swift, thin wrapper)
 - `ghostboard/build.zig` — Build system
 - `ghostboard/build.zig.zon` — Dependencies
+
+#### Wezboard
+
+- `wezboard/wezboard/src/main.rs` — Main GUI application entry point
+- `wezboard/wezboard-gui/` — GUI rendering and window management
+- `wezboard/wezboard-surface/` — Surface/pane rendering
+- `wezboard/mux/` — Terminal multiplexer core
+- `wezboard/termwiz/` — Terminal widget library
+- `wezboard/config/` — Configuration parsing
+
+#### Roamium
+
+- `roamium/src/main.rs` — Entry point, process initialization and lifecycle
+- `roamium/src/dispatch.rs` — Message dispatch and routing (core IPC handler)
+- `roamium/src/ipc.rs` — Unix socket IPC protocol (socket framing)
+- `roamium/src/ffi.rs` — FFI bindings to libtermsurf_chromium C library
+- `roamium/build.rs` — Build script for protobuf code generation
 
 ### Build & Install
 
@@ -304,6 +343,34 @@ Recent issues:
   research
 - `issues/0000711-rename-ghostboard-webtui.md` — Rename GUI to Ghostboard, TUI
   to webtui
+- `issues/0000715-wezboard.md` — Wezboard (WezTerm fork, rename, initial build)
+- `issues/0000716-wezboard-warnings.md` — Wezboard build warnings
+- `issues/0000717-remove-cocoa-crate.md` — Remove `cocoa` crate from Wezboard
+- `issues/0000718-finish-cocoa-removal.md` — Finish `cocoa` and `objc` 0.2
+  removal
+- `issues/0000719-wezboard-code-smells.md` — Wezboard code smells from objc2
+  migration
+- `issues/0000720-wezboard-manual-test.md` — Manual test after objc2 migration
+- `issues/0000721-wgpu-upgrade.md` — Upgrade wgpu from 25 to 28
+- `issues/0000722-cargo-deps.md` — Update outdated cargo dependencies
+- `issues/0000723-pane-borders.md` — Split pane borders for Wezboard
+- `issues/0000724-wezboard-protocol.md` — Implement TermSurf protocol in
+  Wezboard
+- `issues/0000725-wezboard-overlay.md` — Wezboard browser overlay rendering
+- `issues/0000726-wezboard-overlay-lifecycle.md` — Overlay lifecycle and
+  remaining protocol
+- `issues/0000727-wezboard-second-webview.md` — Second webview positioning
+- `issues/0000728-wezboard-remaining-protocol.md` — Complete remaining protocol
+- `issues/0000729-wezboard-reposition-and-protocol.md` — Overlay reposition on
+  resize
+- `issues/0000730-roamium-standalone-install.md` — Roamium standalone install
+- `issues/0000731-wezboard-scroll-crash.md` — Wezboard scroll crashes Roamium
+- `issues/0000732-wezboard-reopen-tab.md` — Shutdown message and tab reopen fix
+- `issues/0000733-ghostboard-shutdown.md` — Ghostboard sends Shutdown instead of
+  SIGKILL
+- `issues/0000734-build-scripts.md` — Consistent build and install scripts
+- `issues/0000735-ghostboard-release-icon.md` — Ghostboard app icons
+- `issues/0000736-roamium-process-leak.md` — Roamium process leak on GUI crash
 
 ### Early Prototypes (ts1–ts5)
 

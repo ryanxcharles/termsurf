@@ -5,8 +5,8 @@ Ghostty defaults or user-configured Ghostty keybindings.
 
 ## `web` TUI keybindings
 
-These are handled by the `web` TUI process (`tui/src/main.rs`) via crossterm key
-events received through the terminal PTY.
+These are handled by the `web` TUI process (`webtui/src/main.rs`) via crossterm
+key events received through the terminal PTY.
 
 | Key    | Mode    | Action                      | Notes                                        |
 | ------ | ------- | --------------------------- | -------------------------------------------- |
@@ -24,8 +24,8 @@ events received through the terminal PTY.
 
 ## GUI keybindings
 
-These are handled in TermSurf's Zig core (`gui/src/Surface.zig`), intercepted in
-`keyCallback` before keybinding processing.
+These are handled in TermSurf's Zig core (`ghostboard/src/Surface.zig`),
+intercepted in `keyCallback` before keybinding processing.
 
 | Key | Mode   | Action            | Notes                                                                                                                                                            |
 | --- | ------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -33,7 +33,7 @@ These are handled in TermSurf's Zig core (`gui/src/Surface.zig`), intercepted in
 
 ## Browser navigation keybindings
 
-These are forwarded from the GUI to Chromium via XPC `key_event` messages.
+These are forwarded from the GUI to Chromium via protobuf socket messages.
 Chromium handles them internally via its default keybinding logic.
 
 | Key   | Mode   | Action  | Notes                                       |
@@ -70,8 +70,9 @@ Command all map to `browsing: false` from the GUI's perspective.
 
 ## Mode synchronization
 
-Mode state is shared between the GUI and `web` via `mode_changed` XPC messages
-on the existing direct connection (Issue 513). Both sides send and receive:
+Mode state is shared between the GUI and `web` via `mode_changed` protobuf
+socket messages on the existing direct connection (Issue 513). Both sides send
+and receive:
 
 - **`web` changes mode** (Esc, Enter) → sends `mode_changed` to GUI
 - **GUI changes mode** (Esc in browse mode) → sends `mode_changed` to `web`

@@ -110,8 +110,10 @@ Vim-style subsequence matching — `:cs dark` works for `:colorscheme dark`.
 
 ### Terminal
 
-Based on [Ghostty](https://ghostty.org/). All Ghostty features, configuration,
-and keybindings work out of the box. TermSurf adds browser integration on top.
+Based on [Ghostty](https://ghostty.org/) (Ghostboard) and
+[WezTerm](https://wezfurlong.org/wezterm/) (Wezboard). All native terminal
+features, configuration, and keybindings work out of the box. TermSurf adds
+browser integration on top.
 
 ## Profiles
 
@@ -190,22 +192,23 @@ management, patch workflow, and recovery from build issues.
 ### 3. Build and run (development)
 
 ```bash
-./scripts/build-debug.sh --open
+./scripts/build.sh ghostboard --open
 ```
 
-This builds all three components (GUI, Chromium, TUI) in debug mode and opens
-the app. Flags: `--clean` to rebuild from scratch, `--open` to launch after
-building.
+This builds Ghostboard in debug mode and opens the app. Flags: `--clean` to
+rebuild from scratch, `--open` to launch after building, `--release` for
+optimized builds. Components: `ghostboard`, `wezboard`, `roamium`, `webtui`,
+`chromium`, `all`.
 
 ### 4. Build and install (release)
 
 ```bash
-./scripts/build-release.sh
-sudo ./scripts/install.sh
+./scripts/build.sh all --release
+./scripts/install.sh all
 ```
 
-`build-release.sh` builds optimized binaries (`ReleaseFast` for Zig, `--release`
-for Rust). `install.sh` copies the app bundle to `/Applications/TermSurf.app`,
+`build.sh --release` builds optimized binaries (`ReleaseFast` for Zig,
+`--release` for Rust). `install.sh` copies the app bundle to `/Applications/`,
 bundles the Chromium server and `web` TUI inside it, re-signs the bundle, and
 symlinks `termsurf` and `web` to `/usr/local/bin/`.
 
