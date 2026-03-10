@@ -103,3 +103,19 @@ unsafe extern "C" fn quit_trampoline(_data: *mut c_void) {
    `ps aux | grep roamium` — should show no running processes
 5. Compare with current behavior (before the fix): Roamium would remain as an
    orphan indefinitely
+
+**Result:** Pass
+
+Launched Wezboard (PID 42486) with a browser pane using the dev build
+(`--browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium`).
+Force-killed Wezboard with `kill -9 42486`. The dev Roamium exited cleanly — no
+orphan processes for that socket. Old orphans from an earlier test using the
+installed binary (without the fix) confirmed the leak still exists without the
+change.
+
+#### Conclusion
+
+Two lines of `ts_post_task(Some(quit_trampoline), ...)` in `reader_loop` plus a
+small trampoline function are sufficient. EOF and read errors now trigger a
+clean Chromium shutdown via the UI thread, matching the graceful `Shutdown`
+message path.

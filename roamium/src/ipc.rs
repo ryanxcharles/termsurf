@@ -45,9 +45,17 @@ pub fn reader_loop(mut stream: UnixStream) {
 
     loop {
         let n = match stream.read(&mut tmp) {
-            Ok(0) => return,
+            Ok(0) => {
+                eprintln!("[Roamium] socket EOF — requesting quit");
+                unsafe { ffi::ts_post_task(Some(quit_trampoline), std::ptr::null_mut()) };
+                return;
+            }
             Ok(n) => n,
-            Err(_) => return,
+            Err(e) => {
+                eprintln!("[Roamium] socket read error: {e} — requesting quit");
+                unsafe { ffi::ts_post_task(Some(quit_trampoline), std::ptr::null_mut()) };
+                return;
+            }
         };
         buf.extend_from_slice(&tmp[..n]);
 
@@ -68,6 +76,11 @@ pub fn reader_loop(mut stream: UnixStream) {
             buf.drain(..4 + msg_len);
         }
     }
+}
+
+/// Trampoline called on the UI thread to quit the browser process.
+unsafe extern "C" fn quit_trampoline(_data: *mut c_void) {
+    unsafe { ffi::ts_quit() };
 }
 
 /// Trampoline called on the UI thread by ts_post_task.
