@@ -58,3 +58,79 @@ block. In Ghostboard's protobuf-c bindings, this corresponds to `msg_case = 31`.
 The message body is empty — it's a signal with no payload. Need to check how
 protobuf-c handles the new field (the `.c`/`.h` files may need regeneration from
 `termsurf.proto`).
+
+## Experiments
+
+### Experiment 1: Send Shutdown and wait for graceful exit
+
+#### Description
+
+Replace the SIGKILL in `handleClientDisconnect` with a `Shutdown` protobuf
+message. When `pane_count` reaches 0, send `Shutdown` over the socket and call
+`proc.wait()` to let Roamium exit on its own. Keep `killServer()` (SIGKILL) only
+for app-exit cleanup as a safety net.
+
+#### Changes
+
+**1. Regenerate protobuf-c bindings**
+
+The generation script `proto/generate.sh` still references the old `gui/`
+directory. Update it to output to `ghostboard/src/protobuf/`, then run it:
+
+```bash
+protoc-c --c_out=ghostboard/src/protobuf --proto_path=proto proto/termsurf.proto
+```
+
+This adds `Termsurf__Shutdown` struct, `termsurf__shutdown__init()`, and
+`msg_case = 31` to the generated `.pb-c.h` and `.pb-c.c` files.
+
+**2. `proto/generate.sh`** — fix output directory
+
+Change `gui/src/protobuf` to `ghostboard/src/protobuf` (line 6) and update the
+echo message (line 8).
+
+**3. `ghostboard/src/apprt/xpc.zig`** — add `sendShutdown` helper
+
+Add a new function near `killServer()` (after line 1049):
+
+```zig
+fn sendShutdown(server: *Server) void {
+    if (server.fd < 0) return;
+    var sd: pb.Termsurf__Shutdown = undefined;
+    pb.termsurf__shutdown__init(&sd);
+    var wrapper: pb.Termsurf__TermSurfMessage = undefined;
+    pb.termsurf__term_surf_message__init(&wrapper);
+    wrapper.msg_case = 31; // SHUTDOWN
+    wrapper.unnamed_0.shutdown = &sd;
+    sendProtobuf(server.fd, &wrapper);
+}
+```
+
+**4. `ghostboard/src/apprt/xpc.zig`** — replace `killServer` with
+`sendShutdown` + `waitServer` in `handleClientDisconnect`
+
+At line 1737–1738, replace `killServer(server)` with:
+
+```zig
+sendShutdown(server);
+// Wait for graceful exit after Shutdown message.
+if (server.process) |*proc| {
+    _ = proc.wait() catch {};
+}
+server.process = null;
+```
+
+The rest of the cleanup block (cancel dispatch source, remove server, free
+memory) stays unchanged.
+
+**5. No changes to `killServer()`** — it remains for app-exit cleanup (lines
+173-182) where we need guaranteed termination regardless of socket state.
+
+#### Verification
+
+1. `protoc-c --c_out=ghostboard/src/protobuf --proto_path=proto proto/termsurf.proto`
+   — regenerates bindings with Shutdown
+2. `cd ghostboard && zig build` — compiles with new sendShutdown function
+3. Run Ghostboard, open a webview, close it — Roamium should exit gracefully (no
+   SIGKILL in logs)
+4. Reopen a webview — should work (server entry removed, fresh spawn)
