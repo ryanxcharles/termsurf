@@ -254,16 +254,16 @@ Chromium fork with renamed libtermsurf_chromium (Issue 708).
 All build scripts live in `scripts/`. They handle Ghostboard, Chromium, TUI, and
 Roamium together.
 
-| Script                                        | Purpose                                                                                                                               |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/build-debug.sh [--clean] [--open]`   | Build all components (Ghostboard debug, Chromium, TUI, Roamium). `--clean` wipes build dirs first, `--open` launches.                 |
-| `scripts/build-release.sh [--clean] [--open]` | Same as above but ReleaseFast builds.                                                                                                 |
-| `scripts/install.sh`                          | Install release build to `/Applications/TermSurf Ghostboard.app`, bundle Chromium + TUI, codesign, symlink CLIs to `/usr/local/bin/`. |
-| `scripts/build-roamium.sh [args]`             | Build Roamium only and copy binary to `chromium/src/out/Default/`. Pass `--release` for release build.                                |
-| `scripts/clean-zig.sh`                        | Clean Zig build artifacts + Xcode DerivedData. Preserves Chromium cache.                                                              |
-| `scripts/rename-ghostty.sh [dir]`             | Rename all Ghostty references to TermSurf in `ghostboard/`. Re-runnable after upstream merges.                                        |
-| `scripts/generate-icons.sh [image]`           | Generate app icon assets from a source image (default: `assets/termsurf-2-black-3.png`).                                              |
-| `scripts/nerd-font-test.sh`                   | Print Nerd Font test glyphs for visual verification.                                                                                  |
+| Script                                                   | Purpose                                                                              |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `scripts/build.sh <comp> [--release] [--clean] [--open]` | Build a component. Components: ghostboard, wezboard, roamium, webtui, chromium, all. |
+| `scripts/install.sh <comp>`                              | Install a component. Components: ghostboard, wezboard, roamium, webtui, all.         |
+| `scripts/uninstall.sh <comp>`                            | Uninstall a component. Components: ghostboard, wezboard, roamium, webtui, all.       |
+| `scripts/clean-zig.sh`                                   | Clean Zig build artifacts + Xcode DerivedData. Preserves Chromium cache.             |
+| `scripts/rename-ghostty.sh [dir]`                        | Rename all Ghostty references to TermSurf in `ghostboard/`. Re-runnable.             |
+| `scripts/rename-wezterm.sh [dir]`                        | Rename all WezTerm references to Wezboard in `wezboard/`. Re-runnable.               |
+| `scripts/generate-icons.sh [image]`                      | Generate app icon assets from a source image.                                        |
+| `scripts/nerd-font-test.sh`                              | Print Nerd Font test glyphs for visual verification.                                 |
 
 For Ghostboard-only iteration, `cd ghostboard && zig build` still works. The
 full build scripts also auto-detect Chromium's `protoc` so you don't need a
