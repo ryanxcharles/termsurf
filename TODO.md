@@ -48,7 +48,7 @@ ready.
 
 - [ ] Linux, macOS and Windows
 - [ ] Chromium, Webkit, Ladybird, and Gecko
-- [ ] Ghostty, Wezterm, Kitty, Alacritty, iTerm2
+- [ ] Wezterm (active), Ghostty, Kitty, Alacritty, iTerm2
 - [ ] All elementary web features (Downloads, Bookmarks, Passwords, etc.)
 - [ ] Multi-tab in one pane
 - [ ] Scrollback webviews

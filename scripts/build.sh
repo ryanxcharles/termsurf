@@ -20,7 +20,7 @@ for arg in "$@"; do
     -*)
       echo "Unknown flag: $arg"
       echo "Usage: $0 <component> [--release] [--clean] [--open]"
-      echo "Components: ghostboard, wezboard, roamium, webtui, chromium, all"
+      echo "Components: wezboard, roamium, webtui, chromium, all"
       exit 1
       ;;
     *)
@@ -36,7 +36,7 @@ done
 
 if [ -z "$COMPONENT" ]; then
   echo "Usage: $0 <component> [--release] [--clean] [--open]"
-  echo "Components: ghostboard, wezboard, roamium, webtui, chromium, all"
+  echo "Components: wezboard, roamium, webtui, chromium, all"
   exit 1
 fi
 
@@ -44,28 +44,6 @@ fi
 if [ -x "$CHROMIUM_PROTOC" ]; then
   export PROTOC="$CHROMIUM_PROTOC"
 fi
-
-build_ghostboard() {
-  cd "$REPO_DIR/ghostboard"
-  if $CLEAN; then
-    echo "==> Cleaning Ghostboard..."
-    rm -rf zig-out zig-cache macos/build/Debug macos/build/ReleaseLocal
-  fi
-  if $RELEASE; then
-    echo "==> Building Ghostboard (release)..."
-    zig build -Doptimize=ReleaseFast
-    APP="$REPO_DIR/ghostboard/macos/build/ReleaseLocal/TermSurf Ghostboard.app"
-  else
-    echo "==> Building Ghostboard (debug)..."
-    zig build
-    APP="$REPO_DIR/ghostboard/macos/build/Debug/TermSurf Ghostboard Debug.app"
-  fi
-  echo "  Ghostboard: $APP"
-  if $OPEN; then
-    echo "==> Opening $APP..."
-    open "$APP"
-  fi
-}
 
 build_chromium() {
   if [ ! -d "$CHROMIUM_SRC" ]; then
@@ -136,13 +114,11 @@ build_wezboard() {
 }
 
 case "$COMPONENT" in
-  ghostboard) build_ghostboard ;;
   chromium)   build_chromium ;;
   webtui)     build_webtui ;;
   roamium)    build_roamium ;;
   wezboard)   build_wezboard ;;
   all)
-    build_ghostboard
     build_chromium
     build_webtui
     build_roamium
@@ -152,7 +128,7 @@ case "$COMPONENT" in
     ;;
   *)
     echo "Unknown component: $COMPONENT"
-    echo "Components: ghostboard, wezboard, roamium, webtui, chromium, all"
+    echo "Components: wezboard, roamium, webtui, chromium, all"
     exit 1
     ;;
 esac

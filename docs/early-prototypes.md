@@ -9,14 +9,15 @@ For the active codebase, see [CLAUDE.md](../CLAUDE.md).
 
 ## Archive Log
 
-| What             | Commit    | Date       | Notes                             |
-| ---------------- | --------- | ---------- | --------------------------------- |
-| `vendor/cef-rs/` | `2c7c5d7` | 2026-02-21 | CEF Rust bindings (ts2, ts3)      |
-| `ts1/`           | `0bdf837` | 2026-02-25 | Ghostty + WKWebView               |
-| `ts2/`           | `0bdf837` | 2026-02-25 | WezTerm + in-process CEF          |
-| `ts3/`           | `0bdf837` | 2026-02-25 | WezTerm + out-of-process CEF      |
-| `ts4/`           | `0bdf837` | 2026-02-25 | Chromium Content API PoC          |
-| `ts5/`           | `0bdf837` | 2026-02-25 | Ghostty + out-of-process Chromium |
+| What             | Commit          | Date       | Notes                                                                                                                                                                 |
+| ---------------- | --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vendor/cef-rs/` | `2c7c5d7`       | 2026-02-21 | CEF Rust bindings (ts2, ts3)                                                                                                                                          |
+| `ts1/`           | `0bdf837`       | 2026-02-25 | Ghostty + WKWebView                                                                                                                                                   |
+| `ts2/`           | `0bdf837`       | 2026-02-25 | WezTerm + in-process CEF                                                                                                                                              |
+| `ts3/`           | `0bdf837`       | 2026-02-25 | WezTerm + out-of-process CEF                                                                                                                                          |
+| `ts4/`           | `0bdf837`       | 2026-02-25 | Chromium Content API PoC                                                                                                                                              |
+| `ts5/`           | `0bdf837`       | 2026-02-25 | Ghostty + out-of-process Chromium                                                                                                                                     |
+| `ghostboard/`    | `90b966458bd17` | 2026-03-11 | Ghostboard Legacy (Ghostty fork, Zig). Archived to focus on Wezboard during protocol iteration. Will be re-created from fresh Ghostty fork after protocol stabilizes. |
 
 To recover a directory:
 
@@ -172,6 +173,77 @@ history breaks the subtree merge strategy. See Issue 418 Experiments 1–3.
 git fetch upstream
 git subtree pull --prefix=ts5 upstream main -m "Merge upstream Ghostty into ts5"
 ```
+
+## Ghostboard Legacy (ghostboard/) — Archived
+
+### Architecture
+
+Ghostboard forks Ghostty with all browser integration in Zig. Swift remains a
+thin macOS wrapper — window creation, menu bar, application lifecycle — matching
+Ghostty's own architecture. This is a clean break from ts5, where browser
+integration lived in Swift (CompositorXPC.swift).
+
+Key architectural decisions:
+
+- **Socket IPC in Zig.** All IPC uses Unix domain sockets with length-prefixed
+  protobuf. Ghostboard listens on
+  `$TMPDIR/termsurf/termsurf-ghostboard-{pid}.sock`. TUI and Chromium connect as
+  clients. The IPC module (`ghostboard/src/apprt/xpc.zig`) handles accept,
+  framing, dispatch, and per-connection lifecycle.
+- **CALayerHost in Zig.** Browser panes render via `CALayerHost` — a CALayer
+  subclass that displays a remote `CAContext` from Chromium's GPU process.
+  Window Server composites directly from GPU VRAM. Zero per-frame IPC, zero
+  texture copies. The Metal renderer sets up the CALayerHost layer tree in Zig.
+- **Input routing in Zig.** Zig already receives all keyboard/mouse events
+  through `Surface.keyCallback()` and `mouseButtonCallback()`. In browse mode,
+  these route to Chromium via socket IPC instead of to the terminal.
+- **Single source of truth.** Browse mode, focus state, pane profiles, overlay
+  coordinates — all live in Zig's Surface struct.
+
+### Current State
+
+Ghostboard is a Ghostty fork with browser integration built in Zig. Current
+additions: IPC gateway and connection management (Issues 601, 698–702), pink
+texture proof-of-concept (Issue 602), live Chromium streaming at 60fps with
+dynamic resize (Issue 603), multi-pane multi-profile server reuse (Issues
+604–605), mouse input forwarding with cursor changes and text selection (Issue
+606), keyboard input forwarding with Cmd+key bypass (Issues 607–609), branding
+and app icon (Issues 611–612), directory rename from ghost/web to gui/tui (Issue
+613), XDG directory compliance (Issue 615), loading progress indicator and
+browser navigation keybindings (Issue 616), CALayerHost migration replacing
+FrameSinkVideoCapturer with zero-copy Window Server compositing (Issues
+624–632), reproducible rename script for upstream merges (Issue 656), purple
+Edit mode border (Issue 657), vim-like editor modes and keybindings (Issue 658),
+vim-style command mode (Issue 659), per-mode submode colors (Issue 660), tight
+title spacing (Issue 661), clap CLI parser with subcommands (Issue 664),
+context-sensitive Esc key navigation (Issue 665), Esc latency fix via unified
+mpsc channel (Issue 666), active pane indicator with borders and desaturation
+(Issues 667–669), click-to-focus without pass-through (Issue 670), app icon
+update (Issue 671), inner border padding (Issue 672), script consolidation
+(Issue 673), configurable homepage (Issue 674), hello message for live config
+(Issue 675), URL normalization (Issue 676), website deps and linting (Issues
+677–678), MIT license and trademark (Issue 679), dark mode with `:colorscheme`
+command (Issue 680), `:quitall` and subsequence matching (Issue 681), Chrome
+DevTools in split panes (Issues 684, 687, 690–691), multi-profile tracking fix
+(Issue 685), tab lifecycle — close tabs when panes close (Issue 689), `web file`
+subcommand (Issue 692), smart input resolution (Issue 693), replace pane_id with
+tab_id in Chromium (Issue 694), activation drag suppression (Issue 695), double
+click suppression fix (Issue 696), Unix socket + protobuf IPC replacing XPC
+(Issues 698–702), click suppression removal (Issue 703), browser bindings C
+library (Issues 704–706), Roamium Rust browser binary (Issue 707), clean
+Chromium fork with renamed libtermsurf_chromium (Issue 708).
+
+### Source Layout
+
+- `ghostboard/src/` — Shared Zig core (libtermsurf)
+- `ghostboard/src/Surface.zig` — Core surface (holds browser state)
+- `ghostboard/src/renderer/Metal.zig` — Metal renderer
+- `ghostboard/src/renderer/metal/` — Metal pipeline, shaders, IOSurface layer
+- `ghostboard/src/apprt/embedded.zig` — C API exports
+- `ghostboard/include/ghostty.h` — libghostty C API headers
+- `ghostboard/macos/` — macOS app (Swift, thin wrapper)
+- `ghostboard/build.zig` — Build system
+- `ghostboard/build.zig.zon` — Dependencies
 
 ## TermSurf 4.0 (ts4/) — Superseded
 
