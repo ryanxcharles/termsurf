@@ -260,13 +260,13 @@ install_webtui() {
 Add `install_webtui` to the `all)` case, after `install_wezboard`:
 
 ```bash
-  all)
-    install_roamium
-    install_wezboard
-    install_webtui
-    echo ""
-    echo "Done (all)."
-    ;;
+all)
+  install_roamium
+  install_wezboard
+  install_webtui
+  echo ""
+  echo "Done (all)."
+  ;;
 ```
 
 #### Verification
@@ -275,6 +275,16 @@ Add `install_webtui` to the `all)` case, after `install_wezboard`:
 2. `scripts/install.sh webtui` — copies `web` to `/usr/local/bin/web`.
 3. `which web` — returns `/usr/local/bin/web`.
 4. `web --help` — binary runs.
+
+**Result:** Pass
+
+`install_webtui()` copies the release binary to `/usr/local/bin/web` and
+`install_webtui` is called in the `all)` case.
+
+#### Conclusion
+
+Webtui install works. The stub is replaced with a real install function and
+webtui is included in `all`.
 
 ### Experiment 3: Single sudo for install script
 
@@ -312,6 +322,17 @@ operations without `sudo`.
    root).
 3. `scripts/install.sh` with no args — still prints usage and exits without
    asking for a password (the sudo re-exec happens after arg validation).
+
+**Result:** Pass
+
+The install script prompts for a password once at the top and runs all 13
+operations as root without further prompts. Usage with no args prints help
+without a password prompt.
+
+#### Conclusion
+
+Single sudo re-exec works. Both install and uninstall scripts should use this
+pattern.
 
 ### Experiment 4: Fix uninstall script
 
@@ -365,3 +386,31 @@ operations without `sudo`.
 2. `ls /usr/local/bin/web` — file is gone.
 3. `scripts/uninstall.sh` with no args — prints usage, no password prompt.
 4. Read the `all)` case — confirms `uninstall_webtui` is called.
+
+**Result:** Pass
+
+Uninstall script prompts once, removes `/usr/local/bin/web`, and the `all)` case
+includes `uninstall_webtui`.
+
+#### Conclusion
+
+All three fixes applied: webtui added to `all`, single sudo re-exec at the top,
+and sudo prefixes removed from individual commands.
+
+## Conclusion
+
+Ghostboard is archived and the build/install/uninstall scripts are cleaned up.
+Four experiments:
+
+1. **Archive Ghostboard** — Removed `ghostboard/` directory, updated all docs
+   and scripts, preserved Ghostboard Legacy in `docs/early-prototypes.md`.
+2. **Fix webtui install** — Replaced the placeholder `install_webtui()` with a
+   real install that copies the release binary to `/usr/local/bin/web`, and
+   added webtui back to the `all)` case.
+3. **Single sudo for install script** — Replaced 13 individual `sudo` calls with
+   a single `exec sudo` re-exec at the top. One password prompt per install.
+4. **Fix uninstall script** — Applied the same single-sudo pattern, added
+   missing webtui to `all)`, and removed sudo prefixes from individual commands.
+
+Wezboard is the sole active GUI. The install and uninstall scripts are
+consistent, correct, and prompt for a password exactly once.
