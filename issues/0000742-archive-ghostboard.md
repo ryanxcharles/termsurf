@@ -275,3 +275,40 @@ Add `install_webtui` to the `all)` case, after `install_wezboard`:
 2. `scripts/install.sh webtui` — copies `web` to `/usr/local/bin/web`.
 3. `which web` — returns `/usr/local/bin/web`.
 4. `web --help` — binary runs.
+
+### Experiment 3: Single sudo for install script
+
+#### Description
+
+The install script calls `sudo` on every individual operation (12 calls across
+the three install functions). On machines where sudo doesn't cache credentials,
+this means typing the password up to 12 times per install. Fix this by having
+the script re-exec itself as root with a single `sudo` at the top, then run all
+operations without `sudo`.
+
+#### Changes
+
+**`scripts/install.sh`**
+
+1. Add a root check after the `COMPONENT` validation (after line 15). If not
+   root, re-exec with sudo:
+
+   ```bash
+   if [ "$(id -u)" -ne 0 ]; then
+     exec sudo "$0" "$@"
+   fi
+   ```
+
+2. Remove every `sudo` prefix from commands inside the three install functions:
+   - `install_roamium()`: 7 `sudo` calls (lines 28–29, 32, 35–37, 40–41)
+   - `install_wezboard()`: 5 `sudo` calls (lines 59–62, 65)
+   - `install_webtui()`: 1 `sudo` call (line 80)
+
+#### Verification
+
+1. `scripts/install.sh webtui` — prompts for password exactly once, then
+   installs without further prompts.
+2. `ls -la /usr/local/bin/web` — file is owned by root (confirming it ran as
+   root).
+3. `scripts/install.sh` with no args — still prints usage and exits without
+   asking for a password (the sudo re-exec happens after arg validation).
