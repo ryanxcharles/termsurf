@@ -203,3 +203,50 @@ The GUI remains the process manager:
 The TUI does NOT launch or kill browser processes. It asks the GUI (via
 `SetOverlay`), gets back a `BrowserReady` with the socket path and tab_id, and
 connects directly.
+
+### Why direct sockets, not a proxy envelope
+
+An alternative approach would keep the hub-and-spoke topology and add a generic
+proxy envelope (`ProxyToBrowser { pane_id, bytes }` /
+`ProxyToTui { tab_id, bytes }`). The GUI would relay opaque bytes between TUI
+and browser, replacing per-message forwarding with a single generic function.
+This is less upfront work — no new sockets, no multi-connection handling.
+
+However, the proxy envelope is a detour, not a stepping stone. The work does not
+carry over to direct sockets:
+
+- The generic relay code in both GUIs would be written and then deleted.
+- The `tab_to_pane` / `pane_to_tab` ID mapping would be maintained and then
+  deleted.
+- The TUI would wrap messages in envelopes and then stop wrapping them.
+- The browser would receive unwrapped messages from the GUI and then switch to
+  receiving them from a TUI connection.
+
+The direct socket approach has three concrete pieces of work:
+
+1. **Roamium listener** (~50 lines of Rust) — Add `--listen-socket=`, accept TUI
+   connections, tag connections as TUI vs GUI. Same pattern as the existing
+   `ipc::connect` but in reverse.
+2. **GUI sends `BrowserReady` to TUI** — One new message sent after `TabReady`
+   arrives. A few lines in each GUI.
+3. **TUI opens a second connection** — Connect to browser socket, send
+   `TuiRegister`, spawn a second reader thread. The event loop already
+   multiplexes GUI events via `mpsc` — the browser reader thread sends to the
+   same channel.
+
+After that, forwarding code is deleted from both GUIs — a net reduction in
+complexity. No intermediate state, no throwaway work.
+
+### Staged implementation
+
+The three pieces above map to three experiments, each independently testable:
+
+1. **Roamium listener** — Add the listening socket and TUI registration. The GUI
+   still works as before. Nothing is removed yet. Verify: a test client can
+   connect and register.
+2. **TUI direct connection** — GUI sends `BrowserReady`, TUI connects to browser
+   socket. Content messages flow directly. GUI forwarding still exists but is
+   now unused for these messages. Verify: navigation works end-to-end over the
+   direct socket.
+3. **Remove forwarding** — Delete proxy code from both GUIs, remove ID maps,
+   split proto files. Verify: everything still works, GUI code is smaller.
