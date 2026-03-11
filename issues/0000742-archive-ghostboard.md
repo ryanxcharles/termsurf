@@ -65,3 +65,137 @@ the future re-creation.
 - `roamium/` — Roamium works with any GUI. No changes needed.
 - `webtui/` — The TUI doesn't know which GUI it's connected to. No changes
   needed.
+
+## Experiments
+
+### Experiment 1: Archive ghostboard and update docs
+
+#### Description
+
+Delete the `ghostboard/` directory, update all documentation and scripts to
+reflect that Wezboard is the sole active GUI, and add Ghostboard Legacy to the
+archive log. This is a single experiment because the changes are all
+documentation and file deletion — no code logic to test.
+
+#### Changes
+
+**Delete `ghostboard/`**
+
+```bash
+git rm -r ghostboard/
+```
+
+The full history is preserved in git. Recovery:
+`git checkout <commit>~1 -- ghostboard/`
+
+**`docs/early-prototypes.md`** — Add archive entry
+
+Add a new row to the Archive Log table after the ts5 entry:
+
+```
+| `ghostboard/`    | `{hash}` | 2026-03-11 | Ghostboard Legacy (Ghostty fork, Zig). Archived to focus on Wezboard during protocol iteration. Will be re-created from fresh Ghostty fork after protocol stabilizes. |
+```
+
+Add a new section after the ts5 documentation: "## Ghostboard Legacy
+(ghostboard/) — Archived". Move the Ghostboard-specific content from CLAUDE.md
+(architecture, current state, source layout) into this section so the knowledge
+is preserved in the archive doc rather than lost.
+
+**`CLAUDE.md`** — Remove Ghostboard from active development
+
+1. **Vision / Multiple GUIs section** — Remove Ghostboard from the active list.
+   Keep it mentioned as planned/future. Update the table:
+
+   ```
+   | Ghostboard | ghostboard/ | Archived. Will return from fresh Ghostty fork. |
+   ```
+
+2. **Directory Structure** — Change the Ghostboard entry:
+
+   ```
+   - `ghostboard/` — Archived. See docs/early-prototypes.md.
+   ```
+
+3. **Remove "Ghostboard (ghostboard/) — Active Development" section** — Delete
+   the entire section including Architecture, Current State subsections. This
+   content moves to `docs/early-prototypes.md`.
+
+4. **Remove "Wezboard Current State" from under Ghostboard** — Move this to be
+   its own top-level section "Wezboard (wezboard/) — Active Development" since
+   it's now the sole GUI.
+
+5. **Source Layout** — Remove the Ghostboard subsection. Keep Wezboard and
+   Roamium.
+
+6. **Build & Install** — Update the scripts table to remove `ghostboard` from
+   the component lists. Remove the Ghostboard-only iteration note
+   (`cd ghostboard && zig build`).
+
+7. **Upstream Merges** — Remove the Ghostboard upstream merge instructions
+   entirely. Wezboard has its own rename script already documented.
+
+**`TODO.md`** — Update 1.0 Milestone
+
+Change the terminal emulator line from:
+
+```
+- [ ] Ghostty, Wezterm, Kitty, Alacritty, iTerm2
+```
+
+To:
+
+```
+- [ ] Wezterm (active), Ghostty, Kitty, Alacritty, iTerm2
+```
+
+**`scripts/build.sh`** — Remove Ghostboard
+
+1. Delete the `build_ghostboard()` function.
+2. Remove `ghostboard)` from the case statement.
+3. Remove `build_ghostboard` from the `all)` case.
+4. Update usage strings to remove `ghostboard` from component lists.
+
+**`scripts/install.sh`** — Remove Ghostboard
+
+1. Delete the `install_ghostboard()` function.
+2. Remove `ghostboard)` from the case statement.
+3. Remove `install_ghostboard` from the `all)` case.
+4. Update usage strings.
+5. Update `install_webtui()` message — it currently says "bundled inside
+   Ghostboard". Change to reference Wezboard or just install standalone.
+
+**`scripts/uninstall.sh`** — Remove Ghostboard
+
+1. Delete the `uninstall_ghostboard()` function.
+2. Remove `ghostboard)` from the case statement.
+3. Remove `uninstall_ghostboard` from the `all)` case.
+4. Update usage strings.
+
+**`scripts/clean-zig.sh`** — Delete entirely
+
+This script only cleans Ghostboard's Zig build artifacts. With Ghostboard
+archived, it has no purpose.
+
+**`scripts/rename-ghostty.sh`** — Delete entirely
+
+This script renames Ghostty references inside `ghostboard/`. With the directory
+archived, it has no purpose. When Ghostboard is re-created from a fresh fork, a
+new rename script will be written.
+
+**`scripts/generate-icons.sh`** — Delete entirely
+
+This script generates icons for Ghostboard's macOS app icon assets. With
+Ghostboard archived, it has no purpose.
+
+#### Verification
+
+1. `git status` — Confirm `ghostboard/` is staged for deletion, all doc/script
+   changes are staged.
+2. `grep -r ghostboard scripts/` — No references remain in scripts.
+3. `./scripts/build.sh wezboard` — Still builds successfully.
+4. `./scripts/build.sh roamium` — Still builds successfully.
+5. `./scripts/build.sh webtui` — Still builds successfully.
+6. Review `CLAUDE.md` — Ghostboard is mentioned only as archived/future, not as
+   active.
+7. Review `docs/early-prototypes.md` — Ghostboard Legacy section preserves the
+   architecture and current state documentation.
