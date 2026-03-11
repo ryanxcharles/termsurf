@@ -68,7 +68,18 @@ install_wezboard() {
 }
 
 install_webtui() {
-  echo "To install standalone: cargo install --path webtui"
+  local WEB="$REPO_DIR/webtui/target/release/web"
+
+  if [ ! -f "$WEB" ]; then
+    echo "Error: Release build not found at $WEB"
+    echo "Run: scripts/build.sh webtui --release"
+    exit 1
+  fi
+
+  echo "==> Installing webtui to /usr/local/bin/web..."
+  sudo cp "$WEB" /usr/local/bin/web
+
+  echo "  Bin: /usr/local/bin/web"
 }
 
 case "$COMPONENT" in
@@ -78,6 +89,7 @@ case "$COMPONENT" in
   all)
     install_roamium
     install_wezboard
+    install_webtui
     echo ""
     echo "Done (all)."
     ;;
