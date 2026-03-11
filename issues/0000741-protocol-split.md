@@ -316,3 +316,144 @@ without any GUI changes, but Roamium is always launched by the GUI and the GUI
 controls its arguments. The `--listen-socket=` flag must be passed by Wezboard
 for the listener to activate. Fold this into Experiment 2, which modifies
 Wezboard anyway.
+
+### Experiment 2: Wezboard passes listen socket, TUI connects directly
+
+#### Description
+
+Complete the direct connection path end-to-end. Wezboard passes
+`--listen-socket=` when spawning Roamium, sends a new `BrowserReady` message to
+the TUI after `TabReady` arrives, and the TUI opens a second socket connection
+to the browser. Content messages (UrlChanged, LoadingState, TitleChanged) arrive
+over the direct connection. Navigate and SetColorScheme are sent directly to the
+browser. The existing GUI forwarding still works in parallel — nothing is
+removed yet.
+
+This experiment subsumes the untested piece of Experiment 1 (Wezboard must pass
+the flag for the listener to activate) and adds the full TUI↔Browser path.
+
+#### Changes
+
+**`proto/termsurf.proto`** — Add `BrowserReady` message
+
+Add field 31 to the `TermSurfMessage` oneof:
+
+```protobuf
+// GUI → TUI
+BrowserReady browser_ready = 31;
+```
+
+Add the message definition:
+
+```protobuf
+message BrowserReady {
+  string pane_id = 1;
+  int64 tab_id = 2;
+  string browser_socket = 3;
+}
+```
+
+The GUI sends this to the TUI after `TabReady` arrives from the browser. It
+carries the `tab_id` (so the TUI can address the tab directly) and the
+`browser_socket` path (so the TUI can connect).
+
+**`wezboard/wezboard-gui/src/termsurf/state.rs`** — Store listen socket path
+
+Add `listen_socket: String` to the `Server` struct. This is the path Wezboard
+passed to Roamium via `--listen-socket=`.
+
+**`wezboard/wezboard-gui/src/termsurf/conn.rs`** — Two changes
+
+1. **`spawn_server`**: Construct the listen socket path
+   (`$TMPDIR/termsurf/termsurf-roamium-{child_pid}.sock`) and pass
+   `--listen-socket={path}` to Roamium. Store the path in
+   `Server.listen_socket`.
+
+   Note: the path uses the child PID (from `child.id()`), not Wezboard's PID.
+   Each Roamium process gets its own unique socket.
+
+2. **`handle_tab_ready`**: After establishing the `tab_to_pane` mapping, look up
+   the server for this pane, get its `listen_socket`, and send `BrowserReady` to
+   the TUI:
+
+   ```rust
+   let msg = TermSurfMessage {
+       msg: Some(Msg::BrowserReady(proto::BrowserReady {
+           pane_id: ready.pane_id.clone(),
+           tab_id: ready.tab_id,
+           browser_socket: server.listen_socket.clone(),
+       })),
+   };
+   let _ = pane.tui_tx.try_send(msg.encode_to_vec());
+   ```
+
+**`webtui/src/ipc.rs`** — Add browser connection and direct sends
+
+1. **Add `BrowserReady` to `CompositorMessage` enum:**
+
+   ```rust
+   BrowserReady { tab_id: i64, browser_socket: String },
+   ```
+
+2. **Add `BrowserReady` dispatch** in `dispatch_message`: Send it to the event
+   channel as `CompositorMessage::BrowserReady`.
+
+3. **Add `BrowserConnection` struct:**
+
+   ```rust
+   pub struct BrowserConnection {
+       stream: Mutex<UnixStream>,
+       pub tab_id: i64,
+   }
+   ```
+
+   With methods:
+   - `connect(path, tab_id, tx) -> Option<Self>` — Connect to the browser
+     socket, spawn a reader thread that sends to the same `LoopEvent` channel as
+     the GUI connection. The reader thread reuses the same `reader_loop`
+     function (it reads the same protobuf wire format). No `reply_tx` needed —
+     the browser connection doesn't do request/reply pairs.
+   - `send_navigate(url)` — Send `Navigate { tab_id, pane_id: "", url }`
+     directly to the browser.
+   - `send_set_color_scheme(dark)` — Send
+     `SetColorScheme { tab_id, pane_id: "", dark }` directly to the browser.
+
+   The `send()` helper writes the length-prefixed protobuf to `self.stream`.
+
+4. **Refactor `dispatch_message`**: The browser reader thread receives broadcast
+   messages from Roamium (UrlChanged, LoadingState, TitleChanged, CursorChanged,
+   TabReady, CaContext, QueryTabsReply). It dispatches UrlChanged, LoadingState,
+   and TitleChanged the same way the GUI reader does. Other messages are ignored
+   (the TUI doesn't need CaContext or CursorChanged).
+
+**`webtui/src/main.rs`** — Handle `BrowserReady`, use direct connection
+
+1. **Handle `BrowserReady` in the event loop**: When received, call
+   `BrowserConnection::connect()` with the socket path, tab_id, and the same
+   `tx` sender. Store the `BrowserConnection` as `Option<BrowserConnection>`.
+
+2. **Send Navigate via browser connection**: When the user presses Enter in Edit
+   mode, if `browser_conn` is `Some`, call `browser_conn.send_navigate(&url)`
+   instead of `compositor.send_navigate(pane_id, &url)`.
+
+3. **Send SetColorScheme via browser connection**: Same pattern — if
+   `browser_conn` is `Some`, send directly.
+
+Content messages (UrlChanged, LoadingState, TitleChanged) will now arrive from
+both the GUI (forwarded) and the browser (direct). The TUI already handles these
+idempotently — receiving the same URL or title twice just overwrites the same
+variable. No deduplication needed.
+
+#### Verification
+
+1. `./scripts/build.sh roamium` and `./scripts/build.sh webtui` and
+   `./scripts/build.sh wezboard` — all build without errors.
+2. Launch Wezboard, run `web ryanxcharles.com`.
+3. Check Roamium logs for "listener bound" and "client connected" — confirms
+   Experiment 1's untested code now works.
+4. Navigate to a different page — confirm URL bar updates (UrlChanged arrives
+   via direct connection).
+5. Run `:colorscheme dark` — confirm the page changes color scheme (sent
+   directly to browser).
+6. The system works end-to-end: TUI receives content events from the browser and
+   sends Navigate/SetColorScheme directly to the browser.
