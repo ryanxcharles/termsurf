@@ -291,10 +291,28 @@ connected client receives every event. Inbound message dispatch is unchanged —
 1. Build Roamium: `./scripts/build.sh roamium`
 2. The existing system works unchanged — launch Wezboard, browse a page, verify
    UrlChanged/LoadingState/TitleChanged still arrive at the TUI (via GUI proxy).
-3. Write a test script (`scripts/test-browser-socket.sh`) that:
-   a. Finds the Roamium listen socket in `$TMPDIR/termsurf/`.
-   b. Connects to it with `socat` or a small Rust program.
-   c. Navigates to a page in the browser.
-   d. Observes that TabReady, CaContext, UrlChanged, LoadingState, TitleChanged,
-      and CursorChanged all arrive on the direct connection.
+3. Write a test script (`scripts/test-browser-socket.sh`) that: a. Finds the
+   Roamium listen socket in `$TMPDIR/termsurf/`. b. Connects to it with `socat`
+   or a small Rust program. c. Navigates to a page in the browser. d. Observes
+   that TabReady, CaContext, UrlChanged, LoadingState, TitleChanged, and
+   CursorChanged all arrive on the direct connection.
 4. Verify Roamium logs show the connection accepted.
+
+**Result:** Fail
+
+The code changes are correct — Roamium accepts `--listen-socket=`, binds a
+listener, accepts connections, and broadcasts to all writers. However, the
+experiment cannot be verified because Wezboard (the GUI) does not pass
+`--listen-socket=` when spawning Roamium. Without that argument, Roamium never
+starts its listener, so there is no socket to connect to. Verification requires
+modifying Wezboard's spawn command to pass the flag, which is a GUI change —
+outside the scope of this experiment.
+
+#### Conclusion
+
+The Roamium-side implementation is complete but untestable in isolation. The
+experiment's scope was too narrow: it assumed the listener could be verified
+without any GUI changes, but Roamium is always launched by the GUI and the GUI
+controls its arguments. The `--listen-socket=` flag must be passed by Wezboard
+for the listener to activate. Fold this into Experiment 2, which modifies
+Wezboard anyway.
