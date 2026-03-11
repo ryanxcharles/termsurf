@@ -77,9 +77,7 @@ the GUI:
 3. Browser responds with `TabReady { pane_id, tab_id }` to the GUI.
 4. GUI sends `BrowserReady { tab_id, browser_socket }` to the TUI.
 5. TUI connects directly to Roamium's listening socket.
-6. TUI sends `TuiRegister { tab_id }` so the browser knows which connection owns
-   which tab.
-7. All content-level messages now flow directly: TUI↔Browser.
+6. All content-level messages now flow directly: TUI↔Browser.
 
 ### Roamium socket model
 
@@ -114,15 +112,18 @@ CreateTab is a CreateTab regardless of who sends it. The browser receives
 protobuf messages and acts on them; it doesn't restrict which client can send
 which message.
 
-The only connection-awareness the browser needs is registration:
-`ServerRegister` identifies a GUI connection, `TuiRegister` identifies a TUI
-connection. After registration, the browser knows where to route events
-(CaContext → GUI, UrlChanged → TUI). All messages share one proto, one wrapper,
-one handler.
+The browser doesn't need to know what kind of client is connected. Every
+connection gets every event — the browser broadcasts all outbound messages
+(TabReady, CaContext, UrlChanged, etc.) to all connections. Each client ignores
+what it doesn't care about. The GUI ignores UrlChanged. The TUI ignores
+CursorChanged. No registration, no connection types, no routing logic.
+
+`ServerRegister` stays as the only identification message — it tells the browser
+which profile this process serves, not what kind of client is connecting.
 
 This future-proofs the protocol. If the GUI ever needs UrlChanged (e.g., for a
-window title), it just listens — no protocol change. If the TUI ever needs to
-send Resize directly, it just sends it.
+window title), it already receives it. If the TUI ever needs to send Resize
+directly, it just sends it.
 
 **`proto/termsurf_gui.proto`** — TUI↔GUI channel
 
@@ -138,21 +139,21 @@ QueryDevtoolsRequest/Reply                     (TUI ↔ GUI)
 **`proto/termsurf_browser.proto`** — Browser channel (GUI and TUI both connect)
 
 ```
-ServerRegister                                 (GUI → Browser)
-TuiRegister                                    (TUI → Browser) — NEW
-CreateTab, CreateDevtoolsTab, CloseTab, Resize (GUI → Browser)
-MouseEvent, MouseMove, ScrollEvent, KeyEvent   (GUI → Browser)
-FocusChanged                                   (GUI → Browser)
-Navigate                                       (TUI → Browser)
-SetColorScheme                                 (TUI → Browser)
-TabReady                                       (Browser → GUI)
-CaContext                                      (Browser → GUI)
-CursorChanged                                  (Browser → GUI)
-UrlChanged                                     (Browser → TUI)
-LoadingState                                   (Browser → TUI)
-TitleChanged                                   (Browser → TUI)
-QueryTabsRequest/Reply                         (TUI ↔ Browser)
-Shutdown                                       (GUI → Browser)
+ServerRegister                                 (Client → Browser)
+CreateTab, CreateDevtoolsTab, CloseTab, Resize (Client → Browser)
+MouseEvent, MouseMove, ScrollEvent, KeyEvent   (Client → Browser)
+FocusChanged                                   (Client → Browser)
+Navigate                                       (Client → Browser)
+SetColorScheme                                 (Client → Browser)
+QueryTabsRequest                               (Client → Browser)
+TabReady                                       (Browser → all clients)
+CaContext                                      (Browser → all clients)
+CursorChanged                                  (Browser → all clients)
+UrlChanged                                     (Browser → all clients)
+LoadingState                                   (Browser → all clients)
+TitleChanged                                   (Browser → all clients)
+QueryTabsReply                                 (Browser → all clients)
+Shutdown                                       (Client → Browser)
 ```
 
 Navigate and SetColorScheme lose their dual-use fields — no more `pane_id` in
@@ -199,15 +200,14 @@ carry over to direct sockets:
 
 The direct socket approach has three concrete pieces of work:
 
-1. **Roamium listener** (~50 lines of Rust) — Add `--listen-socket=`, accept TUI
-   connections, tag connections as TUI vs GUI. Same pattern as the existing
+1. **Roamium listener** (~50 lines of Rust) — Add `--listen-socket=`, accept
+   connections, broadcast events to all. Same pattern as the existing
    `ipc::connect` but in reverse.
 2. **GUI sends `BrowserReady` to TUI** — One new message sent after `TabReady`
    arrives. A few lines in each GUI.
-3. **TUI opens a second connection** — Connect to browser socket, send
-   `TuiRegister`, spawn a second reader thread. The event loop already
-   multiplexes GUI events via `mpsc` — the browser reader thread sends to the
-   same channel.
+3. **TUI opens a second connection** — Connect to browser socket, spawn a second
+   reader thread. The event loop already multiplexes GUI events via `mpsc` — the
+   browser reader thread sends to the same channel.
 
 After that, forwarding code is deleted from both GUIs — a net reduction in
 complexity. No intermediate state, no throwaway work.
@@ -221,10 +221,10 @@ proven.
 
 The four experiments, each independently testable:
 
-1. **Roamium listener** — Add `--listen-socket=`, accept TUI connections, handle
-   `TuiRegister`. Shared across both GUIs — the browser doesn't care which GUI
+1. **Roamium listener** — Add `--listen-socket=`, accept connections, broadcast
+   events to all. Shared across both GUIs — the browser doesn't care which GUI
    launched it. The GUI still works as before. Nothing is removed yet. Verify: a
-   test client can connect and register.
+   test client can connect and receive events.
 2. **Wezboard + TUI direct connection** — Wezboard sends `BrowserReady` after
    `TabReady`. TUI connects to browser socket. Content messages flow directly.
    Wezboard forwarding still exists but is now unused for these messages.
@@ -235,3 +235,66 @@ The four experiments, each independently testable:
 4. **Port to Ghostboard** — Implement `BrowserReady` in Ghostboard, remove its
    forwarding code. The proto files and Roamium are already done. Verify:
    everything works with Ghostboard.
+
+## Experiments
+
+### Experiment 1: Roamium listener
+
+#### Description
+
+Add a listening socket to Roamium so clients can connect directly. Today Roamium
+has a single outbound connection to the GUI. This experiment adds an inbound
+listener that accepts any number of connections and broadcasts all outbound
+events (TabReady, CaContext, UrlChanged, LoadingState, TitleChanged,
+CursorChanged, QueryTabsReply) to every connected client. Inbound messages from
+any connection are dispatched the same way. The GUI connection and all existing
+behavior remain unchanged.
+
+#### Changes
+
+**`roamium/src/main.rs`** — Parse `--listen-socket=`
+
+Add a new `OnceLock<String>` for the listen socket path. Parse
+`--listen-socket=` from argv alongside the existing `--ipc-socket=`. In
+`on_initialized`, after connecting to the GUI, call `ipc::listen()` to start the
+listener.
+
+**`roamium/src/ipc.rs`** — Add listener and broadcast
+
+Current state: `ipc.rs` has a single global `WRITER` (the GUI connection) and
+`send()` always writes to it. Change this to broadcast to all connections.
+
+Rename `WRITER` to `WRITERS: Mutex<Vec<UnixStream>>`. The GUI connection is the
+first entry. Each accepted listener connection adds another entry.
+
+- `connect()` — Same as today, but pushes to `WRITERS` instead of setting a
+  single `WRITER`.
+- `listen(path: &str)` — Bind a `UnixListener`, spawn an accept thread. Each
+  accepted connection clones the write half into `WRITERS` and spawns a reader
+  thread (same `reader_loop` pattern as the GUI connection).
+- `send()` — Iterate `WRITERS`, write the message to each. Remove any connection
+  that errors (client disconnected). This replaces the single-writer send.
+
+The accept thread and reader threads post messages to the UI thread via
+`ts_post_task`, same as the GUI reader thread. The reader thread for a listener
+connection does NOT quit the process on EOF — only the GUI connection EOF
+triggers shutdown (a disconnected client is not fatal).
+
+**`roamium/src/dispatch.rs`** — No changes
+
+All callbacks already call `ipc::send()`. Since `send()` now broadcasts, every
+connected client receives every event. Inbound message dispatch is unchanged —
+`handle_message()` doesn't care which connection the message came from.
+
+#### Verification
+
+1. Build Roamium: `./scripts/build.sh roamium`
+2. The existing system works unchanged — launch Wezboard, browse a page, verify
+   UrlChanged/LoadingState/TitleChanged still arrive at the TUI (via GUI proxy).
+3. Write a test script (`scripts/test-browser-socket.sh`) that:
+   a. Finds the Roamium listen socket in `$TMPDIR/termsurf/`.
+   b. Connects to it with `socat` or a small Rust program.
+   c. Navigates to a page in the browser.
+   d. Observes that TabReady, CaContext, UrlChanged, LoadingState, TitleChanged,
+      and CursorChanged all arrive on the direct connection.
+4. Verify Roamium logs show the connection accepted.
