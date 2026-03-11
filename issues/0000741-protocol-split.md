@@ -625,3 +625,81 @@ TUI↔Browser connection. However, SetColorScheme fails when sent directly from
 the TUI to the browser, indicating the direct path for TUI→Browser commands is
 not working correctly. The next experiment should investigate why the browser
 does not apply SetColorScheme when received over the direct connection.
+
+### Experiment 4: Shorten Roamium listener socket path
+
+The real root cause of experiment 3's failure: Roamium's listener socket never
+bound. The logs show
+`[Roamium] listener bind failed: path must be shorter than SUN_LEN`. Unix domain
+sockets have a 104-byte path limit on macOS (108 on Linux). The current path
+format is:
+
+```
+{tmpdir}/termsurf/termsurf-roamium-{gui_pid}-{profile}-{browser_path_with_slashes_replaced}.sock
+```
+
+Which produces paths like:
+
+```
+/var/folders/gh/nd9n2wpn4xb0s8m73msnz7tc0000gn/T//termsurf/termsurf-roamium-85041-default--Users-ryan-dev-termsurf-chromium-src-out-Default-roamium.sock
+```
+
+The full filesystem path to the browser binary is redundant — only the process
+name matters for identification. The GUI PID, profile, and process name are
+sufficient for uniqueness.
+
+#### Changes
+
+**`wezboard/wezboard-gui/src/termsurf/conn.rs`** — `spawn_server()` (line 975)
+
+Replace the socket path format. Extract the filename from the browser path and
+append a 4-byte SHA-256 hash of the full path for uniqueness (allows testing two
+different builds of the same binary name):
+
+```rust
+// Before:
+let listen_sock = format!(
+    "{}/termsurf/termsurf-roamium-{}-{}-{}.sock",
+    std::env::temp_dir().display(),
+    std::process::id(),
+    profile,
+    browser.replace('/', "-")
+);
+
+// After:
+use sha2::{Digest, Sha256};
+
+let browser_name = std::path::Path::new(&browser)
+    .file_name()
+    .and_then(|n| n.to_str())
+    .unwrap_or("browser");
+let hash = Sha256::digest(browser.as_bytes());
+let hash_hex = format!(
+    "{:02x}{:02x}{:02x}{:02x}",
+    hash[0], hash[1], hash[2], hash[3]
+);
+let listen_sock = format!(
+    "{}/termsurf/{}-{}-{}-{}.sock",
+    std::env::temp_dir().display(),
+    browser_name,
+    hash_hex,
+    std::process::id(),
+    profile,
+);
+```
+
+This produces paths like
+`/var/folders/.../termsurf/roamium-a1b2c3d4-85041-default.sock` — well within
+the 104-byte limit, while still distinguishing two different builds of the same
+binary name.
+
+Add `sha2` to `wezboard-gui/Cargo.toml` if not already present.
+
+#### Verification
+
+1. `cargo check -p wezboard-gui` — builds without errors.
+2. Launch Wezboard, run `web ryanxcharles.com`.
+3. Check Wezboard logs — confirm `[Roamium] listener bound:` appears (not
+   `bind failed`).
+4. `:colorscheme dark` — page changes to dark mode.
+5. `:colorscheme light` — page changes back to light mode.
