@@ -214,14 +214,24 @@ complexity. No intermediate state, no throwaway work.
 
 ### Staged implementation
 
-The three pieces above map to three experiments, each independently testable:
+Prove the architecture on one GUI first, then port. Wezboard is the right
+starting point — it's Rust (like the TUI and Roamium), under active development,
+and easier to iterate on. Ghostboard (Zig) gets ported after the design is
+proven.
 
-1. **Roamium listener** — Add the listening socket and TUI registration. The GUI
-   still works as before. Nothing is removed yet. Verify: a test client can
-   connect and register.
-2. **TUI direct connection** — GUI sends `BrowserReady`, TUI connects to browser
-   socket. Content messages flow directly. GUI forwarding still exists but is
-   now unused for these messages. Verify: navigation works end-to-end over the
-   direct socket.
-3. **Remove forwarding** — Delete proxy code from both GUIs, remove ID maps,
-   split proto files. Verify: everything still works, GUI code is smaller.
+The four experiments, each independently testable:
+
+1. **Roamium listener** — Add `--listen-socket=`, accept TUI connections, handle
+   `TuiRegister`. Shared across both GUIs — the browser doesn't care which GUI
+   launched it. The GUI still works as before. Nothing is removed yet. Verify: a
+   test client can connect and register.
+2. **Wezboard + TUI direct connection** — Wezboard sends `BrowserReady` after
+   `TabReady`. TUI connects to browser socket. Content messages flow directly.
+   Wezboard forwarding still exists but is now unused for these messages.
+   Verify: navigation works end-to-end over the direct socket with Wezboard.
+3. **Remove Wezboard forwarding** — Delete proxy code from Wezboard, remove ID
+   maps, split proto files. Verify: everything still works with Wezboard, GUI
+   code is smaller.
+4. **Port to Ghostboard** — Implement `BrowserReady` in Ghostboard, remove its
+   forwarding code. The proto files and Roamium are already done. Verify:
+   everything works with Ghostboard.
