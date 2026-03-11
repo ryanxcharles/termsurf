@@ -49,6 +49,9 @@ message TermSurfMessage {
     QueryDevtoolsReply query_devtools_reply = 28;
     QueryTabsRequest query_tabs_request = 29;
     QueryTabsReply query_tabs_reply = 30;
+
+    // GUI → TUI (direct browser connection)
+    BrowserReady browser_ready = 31;
   }
 }
 
@@ -216,6 +219,12 @@ message OpenSplit {
 message ModeChanged {
   bool browsing = 1;
   string pane_id = 2;    // nonempty when TUI → GUI
+}
+
+message BrowserReady {
+  string pane_id = 1;
+  int64 tab_id = 2;
+  string browser_socket = 3;
 }
 
 // --- Request/reply pairs ---

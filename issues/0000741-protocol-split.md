@@ -457,3 +457,26 @@ variable. No deduplication needed.
    directly to browser).
 6. The system works end-to-end: TUI receives content events from the browser and
    sends Navigate/SetColorScheme directly to the browser.
+
+**Result:** Pass
+
+End-to-end direct TUI↔Browser connection works. Wezboard passes
+`--listen-socket=` to Roamium, sends `BrowserReady` to the TUI after `TabReady`,
+and the TUI connects directly to the browser's listen socket. Navigate and
+SetColorScheme are sent directly; UrlChanged, LoadingState, and TitleChanged
+arrive directly from the browser.
+
+Implementation notes:
+
+- Listen socket path uses GUI PID + profile + browser as unique key (since child
+  PID isn't known before spawn):
+  `$TMPDIR/termsurf/termsurf-roamium-{gui_pid}-{profile}-{browser}.sock`
+- `BrowserConnection` reuses the existing `reader_loop` with a dummy `reply_tx`
+- GUI forwarding still works in parallel — nothing removed yet
+
+#### Conclusion
+
+The direct TUI↔Browser connection path is fully operational. The TUI can now
+send commands to and receive events from the browser without routing through the
+GUI. Next step is to stop forwarding content messages through the GUI (protocol
+split).

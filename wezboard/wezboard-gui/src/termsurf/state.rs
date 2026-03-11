@@ -36,6 +36,7 @@ pub struct Server {
     #[allow(dead_code)]
     pub process: Option<Child>,
     pub tx: Option<Sender<Vec<u8>>>,
+    pub listen_socket: String,
     pub pane_count: usize,
 }
 

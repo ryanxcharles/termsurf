@@ -342,6 +342,7 @@ fn main() -> io::Result<()> {
     // Crossterm reader thread — forwards relevant terminal events (Issue 668).
     // Key, Resize, and Paste wake the main loop. Mouse and Focus are dropped
     // to avoid redrawing on every pixel of mouse movement.
+    let browser_tx = tx.clone();
     let key_tx = tx;
     std::thread::spawn(move || loop {
         match event::read() {
@@ -368,6 +369,7 @@ fn main() -> io::Result<()> {
     let mut loading_bar_start: Option<Instant> = None;
     const LOADING_TIMEOUT: Duration = Duration::from_secs(30);
     let mut page_title = String::new();
+    let mut browser_conn: Option<ipc::BrowserConnection> = None;
 
     // edtui state (Issue 637, 658).
     let mut editor_state = EditorState::new(Lines::from(url.as_str()));
@@ -576,9 +578,15 @@ fn main() -> io::Result<()> {
                                     url = resolved;
                                     editor_url = url.clone();
                                     mode = Mode::Browse;
-                                    if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id)
+                                    if let Some(ref bc) = browser_conn {
+                                        bc.send_navigate(&url);
+                                    } else if let (Some(ref conn), Some(ref pid)) =
+                                        (&compositor, &pane_id)
                                     {
                                         conn.send_navigate(pid, &url);
+                                    }
+                                    if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id)
+                                    {
                                         conn.send_mode_changed(pid, true);
                                     }
                                 }
@@ -609,7 +617,10 @@ fn main() -> io::Result<()> {
                             match dispatch(&cmd_text) {
                                 CommandResult::Quit => break,
                                 CommandResult::SetColorScheme(scheme) => {
-                                    if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id)
+                                    if let Some(ref bc) = browser_conn {
+                                        bc.send_set_color_scheme(&scheme);
+                                    } else if let (Some(ref conn), Some(ref pid)) =
+                                        (&compositor, &pane_id)
                                     {
                                         conn.send_set_color_scheme(pid, &scheme);
                                     }
@@ -695,6 +706,19 @@ fn main() -> io::Result<()> {
                     }
                     ipc::CompositorMessage::TitleChanged { title } => {
                         page_title = title;
+                    }
+                    ipc::CompositorMessage::BrowserReady {
+                        tab_id,
+                        browser_socket,
+                    } => {
+                        // Connect directly to the browser engine.
+                        if let Some(conn) = ipc::BrowserConnection::connect(
+                            &browser_socket,
+                            tab_id,
+                            browser_tx.clone(),
+                        ) {
+                            browser_conn = Some(conn);
+                        }
                     }
                 }
             }

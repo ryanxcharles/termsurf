@@ -26,6 +26,7 @@ pub enum CompositorMessage {
     UrlChanged { url: String },
     LoadingState { state: String, _progress: u8 },
     TitleChanged { title: String },
+    BrowserReady { tab_id: i64, browser_socket: String },
 }
 
 /// A direct connection to the TermSurf app via Unix domain socket.
@@ -307,6 +308,66 @@ fn reader_loop(
     }
 }
 
+/// A direct connection to a browser engine process (Roamium) via Unix socket.
+/// Enables the TUI to send Navigate/SetColorScheme directly to the browser,
+/// bypassing the GUI for content messages.
+pub struct BrowserConnection {
+    stream: Mutex<UnixStream>,
+    pub tab_id: i64,
+}
+
+impl BrowserConnection {
+    /// Connect to a browser engine's listen socket and spawn a reader thread.
+    pub fn connect(path: &str, tab_id: i64, tx: mpsc::Sender<super::LoopEvent>) -> Option<Self> {
+        let stream = UnixStream::connect(path).ok()?;
+        let reader = stream.try_clone().ok()?;
+
+        // Dummy reply_tx — browser doesn't do request/reply with TUI.
+        let (reply_tx, _reply_rx) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            reader_loop(reader, tx, reply_tx);
+        });
+
+        eprintln!("BrowserConnection: connected to {} tab_id={}", path, tab_id);
+
+        Some(Self {
+            stream: Mutex::new(stream),
+            tab_id,
+        })
+    }
+
+    /// Send a Navigate message directly to the browser.
+    pub fn send_navigate(&self, url: &str) {
+        self.send(Msg::Navigate(proto::Navigate {
+            tab_id: self.tab_id,
+            pane_id: String::new(),
+            url: url.into(),
+        }));
+    }
+
+    /// Send a SetColorScheme message directly to the browser.
+    pub fn send_set_color_scheme(&self, scheme: &str) {
+        let dark = scheme == "dark";
+        self.send(Msg::SetColorScheme(proto::SetColorScheme {
+            tab_id: self.tab_id,
+            pane_id: String::new(),
+            dark,
+        }));
+    }
+
+    fn send(&self, msg: Msg) {
+        let wrapper = TermSurfMessage { msg: Some(msg) };
+        let payload = wrapper.encode_to_vec();
+        let len = (payload.len() as u32).to_le_bytes();
+
+        if let Ok(mut stream) = self.stream.lock() {
+            let _ = stream.write_all(&len);
+            let _ = stream.write_all(&payload);
+        }
+    }
+}
+
 fn dispatch_message(
     msg: TermSurfMessage,
     event_tx: &mpsc::Sender<super::LoopEvent>,
@@ -343,6 +404,12 @@ fn dispatch_message(
         Some(Msg::TitleChanged(m)) => {
             let _ = event_tx.send(super::LoopEvent::Ipc(CompositorMessage::TitleChanged {
                 title: m.title.clone(),
+            }));
+        }
+        Some(Msg::BrowserReady(m)) => {
+            let _ = event_tx.send(super::LoopEvent::Ipc(CompositorMessage::BrowserReady {
+                tab_id: m.tab_id,
+                browser_socket: m.browser_socket.clone(),
             }));
         }
 

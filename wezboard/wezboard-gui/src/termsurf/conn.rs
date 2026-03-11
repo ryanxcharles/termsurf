@@ -1,12 +1,12 @@
 use super::proto;
-use super::proto::term_surf_message::Msg;
 use super::proto::TermSurfMessage;
+use super::proto::term_surf_message::Msg;
 use super::state::{Pane, Server, SharedState, TermSurfState};
 use anyhow::Context;
 use prost::Message;
+use smol::Async;
 use smol::channel::Sender;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
-use smol::Async;
 use std::collections::HashSet;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
@@ -754,6 +754,34 @@ fn handle_tab_ready(ready: proto::TabReady, state: &SharedState) -> anyhow::Resu
         if inspected == 0 {
             st.last_browser_pane = Some(ready.pane_id.clone());
         }
+
+        // Send BrowserReady to the TUI so it can connect directly to the browser.
+        let pane = st.panes.get(&ready.pane_id).unwrap();
+        let server_key = TermSurfState::server_key(&pane.profile, &pane.browser);
+        let listen_socket = st
+            .servers
+            .get(&server_key)
+            .map(|s| s.listen_socket.clone())
+            .unwrap_or_default();
+        if !listen_socket.is_empty() {
+            let browser_ready = TermSurfMessage {
+                msg: Some(Msg::BrowserReady(proto::BrowserReady {
+                    pane_id: ready.pane_id.clone(),
+                    tab_id: ready.tab_id,
+                    browser_socket: listen_socket.clone(),
+                })),
+            };
+            let payload = browser_ready.encode_to_vec();
+            let tui_tx = pane.tui_tx.clone();
+            let _ = tui_tx.try_send(payload);
+            log::info!(
+                "BrowserReady: pane_id={} tab_id={} socket={}",
+                ready.pane_id,
+                ready.tab_id,
+                listen_socket
+            );
+        }
+
         log::info!(
             "TabReady: pane_id={} tab_id={} tab_to_pane_count={}",
             ready.pane_id,
@@ -968,9 +996,20 @@ fn spawn_server(profile: &str, browser: &str) -> anyhow::Result<Server> {
     });
     let log_file = format!("{}/termsurf/chromium-server.log", state_home);
 
+    // Construct listen socket path before spawn. Use GUI PID + profile + browser
+    // as unique key since we don't know the child PID yet.
+    let listen_sock = format!(
+        "{}/termsurf/termsurf-roamium-{}-{}-{}.sock",
+        std::env::temp_dir().display(),
+        std::process::id(),
+        profile,
+        browser.replace('/', "-")
+    );
+
     let child = std::process::Command::new(&binary)
         .arg(format!("--ipc-socket={}", sock))
         .arg(format!("--user-data-dir={}", user_data_dir))
+        .arg(format!("--listen-socket={}", listen_sock))
         .arg("--hidden")
         .arg("--no-sandbox")
         .arg("--enable-logging")
@@ -979,10 +1018,11 @@ fn spawn_server(profile: &str, browser: &str) -> anyhow::Result<Server> {
         .with_context(|| format!("spawn {}", binary))?;
 
     log::info!(
-        "spawned {} (pid={}) for profile={}",
+        "spawned {} (pid={}) for profile={} listen_socket={}",
         browser,
         child.id(),
-        profile
+        profile,
+        listen_sock
     );
 
     Ok(Server {
@@ -990,6 +1030,7 @@ fn spawn_server(profile: &str, browser: &str) -> anyhow::Result<Server> {
         browser: browser.to_string(),
         process: Some(child),
         tx: None,
+        listen_socket: listen_sock,
         pane_count: 1,
     })
 }
