@@ -141,3 +141,28 @@ from the first window but is never called — superseded by the current
 
 1. `./scripts/build.sh wezboard --release`
 2. Zero warnings from Wezboard.
+
+**Result:** Pass
+
+`./scripts/build.sh wezboard --release` compiles with zero warnings. All four
+fixes are mechanical — no logic changes, no behavioral differences.
+
+#### Conclusion
+
+Fixed all four Wezboard warnings: removed unused `SharedState` re-export,
+prefixed unused `num_panes` parameter, annotated intentionally-stored `process`
+field with `#[allow(dead_code)]`, and removed unused `first_ns_view` method.
+
+## Conclusion
+
+Both Roamium and Wezboard now build warning-free in release mode. Five warnings
+were eliminated across two experiments:
+
+1. **Roamium** — Removed the `ts_destroy_browser_context` FFI declaration, a
+   no-op stub for multi-context support that TermSurf decided against (one
+   profile per process).
+2. **Wezboard** — Four mechanical fixes: dead re-export removal, unused
+   parameter prefixing, dead_code annotation on an intentionally-held field, and
+   unused method removal.
+
+`./scripts/build.sh all --release` now produces zero warnings.
