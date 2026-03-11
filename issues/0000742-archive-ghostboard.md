@@ -199,3 +199,20 @@ Ghostboard archived, it has no purpose.
    active.
 7. Review `docs/early-prototypes.md` — Ghostboard Legacy section preserves the
    architecture and current state documentation.
+
+**Result:** Partial
+
+Ghostboard archived, all docs and scripts updated, Ghostboard Legacy preserved
+in `docs/early-prototypes.md`. Verification items 1–2 and 6–7 pass. However,
+`install_webtui()` now just prints a message instead of actually installing the
+`web` binary to `/usr/local/bin/`. The old Ghostboard install bundled webtui
+into the app and symlinked it — that path is gone, but no replacement install
+was added. `scripts/install.sh webtui` needs to build and copy the binary to
+`/usr/local/bin/web`.
+
+#### Conclusion
+
+The archive itself is complete — Ghostboard is removed, docs are updated, and
+the Ghostboard Legacy section preserves the knowledge. The webtui install path
+is broken: there's no way to install `web` to `/usr/local/bin/` via
+`scripts/install.sh webtui`. Next experiment should fix the webtui install.
