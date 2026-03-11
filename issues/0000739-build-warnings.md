@@ -102,3 +102,42 @@ for multi-context support (multiple profiles per process) that TermSurf decided
 against — each engine process serves exactly one profile. The function was a
 no-op in `libtermsurf_chromium` and was never called by any consumer. Roamium
 now builds warning-free. Four Wezboard warnings remain for the next experiment.
+
+### Experiment 2: Fix four Wezboard warnings
+
+#### Description
+
+Fix all four remaining Wezboard build warnings in one pass. Each is a small,
+independent change — no logic modifications, just dead code removal and
+annotation.
+
+#### Changes
+
+**`wezboard/wezboard-gui/src/termsurf/mod.rs`**
+
+Remove line 14 (`pub use state::SharedState;`). The re-export is unused — all
+consumers import `SharedState` directly from `super::state::` within the
+`termsurf` module. Outside code accesses state via the `shared_state` function
+re-export on line 13.
+
+**`wezboard/wezboard-gui/src/termwindow/render/pane.rs`**
+
+Prefix `num_panes` with an underscore (`_num_panes`) on line 35. The parameter
+is only forwarded to `paint_pane_opengl` — `paint_pane` itself doesn't use it.
+
+**`wezboard/wezboard-gui/src/termsurf/state.rs`**
+
+Add `#[allow(dead_code)]` above the `process` field on line 36. The field
+intentionally holds the `Child` handle to keep the Roamium process alive. It
+will be read when we add graceful server shutdown.
+
+**`wezboard/wezboard-gui/src/frontend.rs`**
+
+Remove the `first_ns_view` method at line 323. It extracts an `NSView` pointer
+from the first window but is never called — superseded by the current
+`CALayerHost` overlay approach. Easy to recreate if ever needed.
+
+#### Verification
+
+1. `./scripts/build.sh wezboard --release`
+2. Zero warnings from Wezboard.
