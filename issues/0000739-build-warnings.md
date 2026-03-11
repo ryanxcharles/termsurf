@@ -11,12 +11,18 @@ Clean build with zero warnings for both Roamium and Wezboard.
 ### Roamium (1 warning)
 
 1. **`ts_destroy_browser_context` never used** (`roamium/src/ffi.rs:24`) — The
-   FFI declaration exists for the `libtermsurf_chromium` C function but is never
-   called from Rust. The function destroys a browser context (profile). Roamium
-   currently never destroys contexts — it runs one context for its lifetime and
-   the OS reclaims resources on exit. The declaration should stay (it's part of
-   the C API surface and will be needed for graceful profile cleanup), but needs
-   an `#[allow(dead_code)]` annotation to silence the warning.
+   FFI declaration exists but is never called because Roamium has no `Shutdown`
+   handler. The `handle_message` dispatch (`dispatch.rs:223`) sends `Shutdown`
+   to `_ => {}`. When the GUI sends `Shutdown`, Roamium should destroy all tabs,
+   call `ts_destroy_browser_context`, and exit cleanly. Fix: add a `Shutdown`
+   handler that calls it, which also eliminates the dead-code warning.
+
+Research Content Shell's shutdown path
+(`content/shell/browser/shell_browser_main_parts.cc` and
+`shell_main_delegate.cc`) to understand the correct teardown sequence — which
+objects to destroy, in what order, and whether
+`BrowserContext::ShutdownStoragePartitions()` or similar cleanup is needed
+before destroying the context.
 
 ### Wezboard (4 warnings)
 
