@@ -721,3 +721,42 @@ browser was never established. With the shortened path format
 successfully and all direct TUI↔Browser messages work. The forwarding removal
 from Experiment 3 is now validated: content messages flow directly between TUI
 and browser without GUI proxying.
+
+## Conclusion
+
+The TUI now talks directly to the browser engine over its own Unix socket,
+eliminating all content-message proxying through the GUI. This was the issue's
+core goal.
+
+What was accomplished:
+
+- **Roamium listener** — Roamium accepts a `--listen-socket=` argument, binds a
+  listening socket, and broadcasts all outbound events to every connected
+  client. Inbound messages from any connection are dispatched identically.
+- **BrowserReady handoff** — Wezboard sends a
+  `BrowserReady { tab_id, browser_socket }` message to the TUI after `TabReady`
+  arrives from the browser, giving the TUI everything it needs to connect
+  directly.
+- **Direct TUI↔Browser connection** — The TUI connects to the browser's listen
+  socket and sends Navigate and SetColorScheme directly. UrlChanged,
+  LoadingState, and TitleChanged arrive directly from the browser.
+- **Forwarding removed from Wezboard** — The five forwarded message types
+  (UrlChanged, LoadingState, TitleChanged, Navigate, SetColorScheme) no longer
+  pass through the GUI. Wezboard logs them at debug level but takes no action.
+  `forward_to_tui()` was deleted.
+- **Socket path fix** — The listener socket path uses
+  `{browser_name}-{4-byte-hash}-{gui_pid}-{profile}.sock` to stay within the
+  104-byte Unix domain socket limit on macOS.
+
+What was deferred:
+
+- **Proto split** — The single `TermSurfMessage` oneof was not split into
+  separate `termsurf_gui.proto` and `termsurf_browser.proto` files. Everything
+  still uses one message type. This is a cleanup that can happen when the
+  protocol grows enough to justify it.
+- **Ghostboard port** — Ghostboard still forwards content messages through the
+  GUI. The Roamium and proto changes are shared, so porting requires only
+  Ghostboard-side changes (send `BrowserReady`, remove forwarding).
+- **Wezboard forwarding cleanup** — `forward_to_chromium()` and `tab_to_pane`
+  still exist for CursorChanged, CaContext, and other GUI-owned messages. These
+  are not content messages and belong in the GUI.
