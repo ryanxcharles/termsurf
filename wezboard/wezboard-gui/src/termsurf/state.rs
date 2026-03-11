@@ -33,6 +33,7 @@ pub struct Pane {
 pub struct Server {
     pub profile: String,
     pub browser: String,
+    #[allow(dead_code)]
     pub process: Option<Child>,
     pub tx: Option<Sender<Vec<u8>>>,
     pub pane_count: usize,

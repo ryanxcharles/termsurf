@@ -32,7 +32,7 @@ impl crate::TermWindow {
     pub fn paint_pane(
         &mut self,
         pos: &PositionedPane,
-        num_panes: usize,
+        _num_panes: usize,
         layers: &mut TripleLayerQuadAllocator,
     ) -> anyhow::Result<()> {
         if self.config.use_box_model_render {

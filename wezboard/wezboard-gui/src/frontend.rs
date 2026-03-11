@@ -320,17 +320,6 @@ impl GuiFrontEnd {
         }
     }
 
-    pub fn first_ns_view(&self) -> Option<*mut std::ffi::c_void> {
-        use ::window::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        let windows = self.known_windows.borrow();
-        let window = windows.keys().next()?;
-        let handle = window.window_handle().ok()?;
-        match handle.as_raw() {
-            RawWindowHandle::AppKit(h) => Some(h.ns_view.as_ptr()),
-            _ => None,
-        }
-    }
-
     pub fn ns_view_for_mux_window(
         &self,
         mux_window_id: MuxWindowId,
