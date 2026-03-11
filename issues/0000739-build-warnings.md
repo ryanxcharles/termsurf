@@ -88,3 +88,17 @@ Remove line 24 (`pub fn ts_destroy_browser_context(ctx: TsBrowserContext);`).
 
 1. `./scripts/build.sh roamium --release`
 2. Zero warnings from Roamium.
+
+**Result:** Pass
+
+`./scripts/build.sh roamium --release` compiles with zero warnings. The removed
+declaration had no callers in Roamium or Ghostboard, and the C library symbol
+remains exported but harmlessly unused.
+
+#### Conclusion
+
+Removed `ts_destroy_browser_context` from `roamium/src/ffi.rs`. This was a stub
+for multi-context support (multiple profiles per process) that TermSurf decided
+against — each engine process serves exactly one profile. The function was a
+no-op in `libtermsurf_chromium` and was never called by any consumer. Roamium
+now builds warning-free. Four Wezboard warnings remain for the next experiment.
