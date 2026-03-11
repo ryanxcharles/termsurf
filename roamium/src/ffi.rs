@@ -21,7 +21,6 @@ extern "C" {
     // --- Profiles ---
 
     pub fn ts_create_browser_context(path: *const c_char) -> TsBrowserContext;
-    pub fn ts_destroy_browser_context(ctx: TsBrowserContext);
 
     // --- Tabs ---
 
