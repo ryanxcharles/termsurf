@@ -12,6 +12,7 @@ use proto::{Msg, TermSurfMessage};
 // --- Globals (set before ts_content_main, read on UI thread) ---
 
 static SOCKET_PATH: OnceLock<String> = OnceLock::new();
+static LISTEN_PATH: OnceLock<String> = OnceLock::new();
 static PROFILE_NAME: OnceLock<String> = OnceLock::new();
 
 static mut BROWSER_CONTEXT: ffi::TsBrowserContext = ptr::null_mut();
@@ -51,6 +52,11 @@ unsafe extern "C" fn on_initialized(_user_data: *mut c_void) {
     std::thread::spawn(move || {
         ipc::reader_loop(reader);
     });
+
+    // Start listener if --listen-socket was provided.
+    if let Some(path) = LISTEN_PATH.get() {
+        ipc::listen(path);
+    }
 }
 
 // --- main ---
@@ -60,6 +66,8 @@ fn main() {
     for arg in std::env::args().skip(1) {
         if let Some(val) = arg.strip_prefix("--ipc-socket=") {
             let _ = SOCKET_PATH.set(val.to_string());
+        } else if let Some(val) = arg.strip_prefix("--listen-socket=") {
+            let _ = LISTEN_PATH.set(val.to_string());
         } else if let Some(val) = arg.strip_prefix("--user-data-dir=") {
             let name = val.rsplit('/').next().unwrap_or(val);
             let _ = PROFILE_NAME.set(name.to_string());

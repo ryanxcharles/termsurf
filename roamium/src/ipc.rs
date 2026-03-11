@@ -1,6 +1,6 @@
 use std::ffi::c_void;
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Mutex;
 
 use prost::Message;
@@ -8,12 +8,12 @@ use prost::Message;
 use crate::ffi;
 use crate::proto::TermSurfMessage;
 
-/// Global write half of the socket. Callbacks write from the main thread;
-/// the reader thread uses a separate clone.
-static WRITER: Mutex<Option<UnixStream>> = Mutex::new(None);
+/// Global write streams. The GUI connection and any listener clients are all
+/// stored here. `send()` broadcasts to every connection.
+static WRITERS: Mutex<Vec<UnixStream>> = Mutex::new(Vec::new());
 
 /// Connect to the GUI's Unix socket. Returns the read half for the reader
-/// thread and stores the write half in WRITER.
+/// thread and stores the write half in WRITERS.
 pub fn connect(path: &str) -> Option<UnixStream> {
     let stream = match UnixStream::connect(path) {
         Ok(s) => s,
@@ -23,37 +23,103 @@ pub fn connect(path: &str) -> Option<UnixStream> {
         }
     };
     let reader = stream.try_clone().ok()?;
-    *WRITER.lock().unwrap() = Some(stream);
+    WRITERS.lock().unwrap().push(stream);
     Some(reader)
 }
 
-/// Send a protobuf message over the socket (4-byte LE length prefix).
+/// Send a protobuf message to all connected writers (4-byte LE length prefix).
+/// Disconnected writers are silently removed.
 pub fn send(msg: &TermSurfMessage) {
     let payload = msg.encode_to_vec();
     let len = (payload.len() as u32).to_le_bytes();
-    if let Some(ref mut stream) = *WRITER.lock().unwrap() {
-        let _ = stream.write_all(&len);
-        let _ = stream.write_all(&payload);
-    }
+    WRITERS.lock().unwrap().retain_mut(|stream| {
+        if stream.write_all(&len).is_err() {
+            return false;
+        }
+        if stream.write_all(&payload).is_err() {
+            return false;
+        }
+        true
+    });
 }
 
-/// Reader loop: runs on a background thread. Reads length-prefixed protobuf
-/// messages and posts each to the UI thread via ts_post_task.
-pub fn reader_loop(mut stream: UnixStream) {
+/// Start a listener on the given Unix socket path. Accepts connections in a
+/// background thread; each client gets a reader thread and a write half pushed
+/// into WRITERS for broadcast.
+pub fn listen(path: &str) {
+    // Remove stale socket file from a previous crash.
+    let _ = std::fs::remove_file(path);
+
+    // Ensure parent directory exists.
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let listener = match UnixListener::bind(path) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[Roamium] listener bind failed: {e}");
+            return;
+        }
+    };
+    eprintln!("[Roamium] listener bound: {path}");
+
+    std::thread::spawn(move || {
+        for conn in listener.incoming() {
+            match conn {
+                Ok(stream) => {
+                    eprintln!("[Roamium] client connected");
+                    let reader = match stream.try_clone() {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("[Roamium] clone failed: {e}");
+                            continue;
+                        }
+                    };
+                    WRITERS.lock().unwrap().push(stream);
+                    std::thread::spawn(move || {
+                        read_messages(reader, false);
+                    });
+                }
+                Err(e) => {
+                    eprintln!("[Roamium] accept error: {e}");
+                }
+            }
+        }
+    });
+}
+
+/// Reader loop for the GUI connection. EOF/error causes a quit.
+pub fn reader_loop(stream: UnixStream) {
+    read_messages(stream, true);
+}
+
+/// Shared message-reading loop. Reads length-prefixed protobuf messages and
+/// posts each to the UI thread. If `quit_on_eof` is true, requests a quit
+/// when the connection drops (used for the GUI connection).
+fn read_messages(mut stream: UnixStream, quit_on_eof: bool) {
     let mut buf = Vec::with_capacity(4096);
     let mut tmp = [0u8; 4096];
 
     loop {
         let n = match stream.read(&mut tmp) {
             Ok(0) => {
-                eprintln!("[Roamium] socket EOF — requesting quit");
-                unsafe { ffi::ts_post_task(Some(quit_trampoline), std::ptr::null_mut()) };
+                if quit_on_eof {
+                    eprintln!("[Roamium] socket EOF — requesting quit");
+                    unsafe { ffi::ts_post_task(Some(quit_trampoline), std::ptr::null_mut()) };
+                } else {
+                    eprintln!("[Roamium] client disconnected");
+                }
                 return;
             }
             Ok(n) => n,
             Err(e) => {
-                eprintln!("[Roamium] socket read error: {e} — requesting quit");
-                unsafe { ffi::ts_post_task(Some(quit_trampoline), std::ptr::null_mut()) };
+                if quit_on_eof {
+                    eprintln!("[Roamium] socket read error: {e} — requesting quit");
+                    unsafe { ffi::ts_post_task(Some(quit_trampoline), std::ptr::null_mut()) };
+                } else {
+                    eprintln!("[Roamium] client read error: {e}");
+                }
                 return;
             }
         };
