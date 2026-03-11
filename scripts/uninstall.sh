@@ -9,13 +9,18 @@ if [ -z "$COMPONENT" ]; then
   exit 1
 fi
 
+# Re-exec as root so we only prompt for the password once.
+if [ "$(id -u)" -ne 0 ]; then
+  exec sudo "$0" "$@"
+fi
+
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
 
 uninstall_roamium() {
   echo "==> Uninstalling Roamium..."
-  sudo rm -rf /usr/local/roamium
-  sudo rm -f /usr/local/bin/roamium
-  sudo rm -rf /usr/local/lib/roamium
+  rm -rf /usr/local/roamium
+  rm -f /usr/local/bin/roamium
+  rm -rf /usr/local/lib/roamium
 
   echo "  Removed: /usr/local/roamium"
 }
@@ -24,7 +29,7 @@ uninstall_wezboard() {
   local APP="/Applications/TermSurf Wezboard.app"
 
   echo "==> Uninstalling Wezboard..."
-  sudo rm -rf "$APP"
+  rm -rf "$APP"
 
   echo "  Removed: $APP"
 }
@@ -43,6 +48,7 @@ case "$COMPONENT" in
   all)
     uninstall_roamium
     uninstall_wezboard
+    uninstall_webtui
     echo ""
     echo "Done (all)."
     ;;
