@@ -461,3 +461,57 @@ dollar. OVHcloud for a bigger company with standardized support.
 1. At least 4 Dallas providers compared on specs, pricing, and bandwidth.
 2. Requirements (NVMe, RAM, unmetered bandwidth) evaluated for each.
 3. Top picks identified with trade-offs noted.
+
+### Experiment 4: Compare OS options
+
+#### Description
+
+Compare operating system options available from SpinServers and OVHcloud for the
+TermSurf dedicated server. Requirements: run Git bare repos, PostgreSQL, a web
+server (nginx), and Rust toolchain.
+
+#### Findings
+
+**SpinServers OS options:**
+
+- Linux auto-install (Rocky Linux, AlmaLinux, and standard distros)
+- Windows Server, ESXi also available
+- OS selected during provisioning via their panel
+- Replaced CentOS 8 with Rocky/Alma when CentOS hit EOL
+
+**OVHcloud OS options (90+ templates):**
+
+- Debian (multiple versions)
+- Ubuntu (multiple versions)
+- Rocky Linux / AlmaLinux
+- Red Hat Enterprise Linux (paid license)
+- Fedora
+- CentOS (legacy)
+- Arch Linux
+- Windows Server, Proxmox VE
+- Can also install your own OS
+
+**Comparison of the two best candidates for TermSurf:**
+
+| Factor          | Debian                  | Ubuntu              |
+| --------------- | ----------------------- | ------------------- |
+| Stability       | Rock-solid, slower      | Slightly newer pkgs |
+| Git version     | Usually older           | More current        |
+| Ecosystem       | Minimal, server-focused | Larger community    |
+| Package manager | apt                     | apt (same)          |
+| Release cycle   | ~2yr, 5yr LTS           | 6mo, 5yr LTS        |
+| Rust toolchain  | rustup (same)           | rustup (same)       |
+| PostgreSQL      | In repos                | In repos            |
+
+#### Decision
+
+**Ubuntu Server LTS (24.04).** Most common choice for this workload —
+well-documented, current packages, 5-year support. Git, PostgreSQL, nginx, and
+Rust all install easily. Both SpinServers and OVH offer it. Debian is equally
+valid for minimalism, but the differences are marginal.
+
+#### Verification
+
+1. OS options documented for both SpinServers and OVHcloud.
+2. Debian vs Ubuntu compared for TermSurf's requirements.
+3. OS decision made: Ubuntu Server 24.04 LTS.
