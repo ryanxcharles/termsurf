@@ -1,7 +1,7 @@
 # Trademarks
 
 "TermSurf", the TermSurf logo, and related branding are trademarks of
-Identellica LLC. These trademarks are not licensed under the MIT License that
+TermSurf. These trademarks are not licensed under the MIT License that
 covers the source code.
 
 ## What This Means
@@ -9,7 +9,7 @@ covers the source code.
 You are free to fork, modify, and redistribute the software under the MIT
 License. However, you may not use the "TermSurf" name, logo, or branding in your
 fork or derivative work in a way that suggests it is the official TermSurf
-project or is endorsed by Identellica LLC.
+project or is endorsed by TermSurf.
 
 If you distribute a modified version, please use a different name and branding.
 
@@ -24,4 +24,4 @@ If you distribute a modified version, please use a different name and branding.
 
 - Using "TermSurf" as the name of a fork or derivative product
 - Using the TermSurf logo or icon in a fork or derivative product
-- Implying official endorsement or affiliation with Identellica LLC
+- Implying official endorsement or affiliation with TermSurf
