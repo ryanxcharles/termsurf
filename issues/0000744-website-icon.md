@@ -142,6 +142,16 @@ export function Header() {
 4. TypeScript catches typos — changing the `$icon` argument to a bad path causes
    a type error.
 
+**Result:** Pass
+
+Pipeline generates PNG at 192px, ICO at 32px, copies favicon, and produces
+type-safe `icons.ts`. Header uses `$icon()` for the logo.
+
+#### Conclusion
+
+Icon processing pipeline works. Old `resize-logo.ts` and manual logo files
+replaced with a repeatable `build:icons` script.
+
 ### Experiment 3: Replace Identellica LLC with TermSurf
 
 #### Description
@@ -191,3 +201,26 @@ Remove the `<a href="https://identellica.com">` wrapper.
    matches.
 2. Read `issues/0000679-license.md` — unchanged (immutable).
 3. `bun run dev` — footer shows "© 2026 TermSurf".
+
+**Result:** Pass
+
+All references to Identellica LLC replaced with TermSurf. Copyright year
+corrected to 2026. Footer link removed. Immutable issue doc untouched.
+
+#### Conclusion
+
+Copyright and branding updated across LICENSE, NOTICE, TRADEMARKS.md, and
+Footer.tsx.
+
+## Conclusion
+
+Website icons and branding updated. Three experiments:
+
+1. **Replace website logo** — Copied new surfer logo to `public/logo.png`.
+2. **Icon processing pipeline** — Built `process-icons.ts` to generate
+   web-optimized assets from raw PNGs at 3x Retina resolution. Produces PNG,
+   ICO, favicon, and a type-safe `icons.ts` for compile-time checked image
+   references. Replaces `resize-logo.ts`.
+3. **Rebrand copyright** — Replaced Identellica LLC with TermSurf across
+   LICENSE, NOTICE, TRADEMARKS.md, and the website footer. Copyright year
+   corrected to 2026.
