@@ -138,7 +138,191 @@ report below.
 
 #### Findings
 
-_{to be filled in after research}_
+##### 1. go-git pluggable backends
+
+go-git has a fully pluggable `Storer` interface with six sub-interfaces
+(EncodedObjectStorer, ReferenceStorer, ShallowStorer, IndexStorer, ConfigStorer,
+ModuleStorer). Two built-in backends: filesystem and memory. The repo ships an
+Aerospike database example at `_examples/storage/`.
+
+go-git also has a **built-in server transport** at `plumbing/transport/server` —
+implements `git-upload-pack` (pull/fetch) and `git-receive-pack` (push). A
+`MapLoader` maps endpoint strings to custom `Storer` implementations. A new
+`backend/http` package provides Smart HTTP handlers returning `http.Handler`.
+
+**Limitations:** ~8x memory overhead vs native git, ~4x slower cloning for large
+repos, no pack protocol v2, no partial clone, single-threaded packfile
+processing. No maintained PostgreSQL or S3 backend exists — the Aerospike
+example is the only database reference.
+
+**Chromium scale:** Problematic. The memory overhead and lack of partial clone
+make it unsuitable for Chromium-sized repos without significant work. Could work
+for smaller repos.
+
+##### 2. gitoxide custom backends
+
+gitoxide does **not** support pluggable object storage backends. The ODB
+(`gix_odb::Store`) is hardcoded to Git's on-disk format (loose objects +
+packfiles). There is no trait to implement a custom backend.
+
+gitoxide also has **no server-side protocol implementation** — `gix-transport`
+and `gix-protocol` are client-only. The maintainer recommends using lower-level
+crates (`gix-pack`, `gix-object`, `gix-revwalk`) as building blocks but
+implementing the server yourself.
+
+By contrast, **libgit2** (`git2` crate) has an explicit `Odb` backend API where
+you can register custom backends via `OdbBackend`.
+
+**Chromium scale:** Not applicable — no pluggable backend, no server support.
+
+##### 3. GitHub architecture
+
+GitHub uses **Spokes** (formerly DGit) — application-layer replication of bare
+Git repos on local disk. Three replicas per repo, three-phase commit for writes,
+any replica can serve reads. MySQL for all metadata (routing, auth, repo
+ownership). Standard Git on file servers, not a proprietary fork.
+
+330+ million repos, ~19 PB of data. GitHub invested in upstream Git features:
+cruft packs (52-92% size reduction), geometric repacking, MIDX improvements,
+"Project Cyclops" for monorepo push performance.
+
+**Chromium scale:** GitHub handles it, but with filesystem storage + Spokes
+replication, not a database backend.
+
+##### 4. GitLab Gitaly
+
+Gitaly is a Go gRPC service that wraps all Git operations behind protobuf RPCs.
+**Strictly filesystem-backed** — spawns `git` CLI processes and uses libgit2 via
+`gitaly-git2go`. NFS is explicitly unsupported.
+
+Gitaly Cluster (Praefect) adds replication across 3+ nodes with PostgreSQL for
+cluster metadata only. Scales to ~2,000+ active users per cluster. Hugging Face
+and Scalingo use it.
+
+The gRPC interface is clean — you could theoretically reimplement it with a
+database backend, but Gitaly itself is deeply coupled to the filesystem.
+
+**Chromium scale:** Production-proven at GitLab.com scale, but filesystem-only.
+
+##### 5. Database-backed Git implementations
+
+**Gitgres** (Feb 2026) — Stores Git objects and refs in PostgreSQL. ~2,000 lines
+of C implementing `git_odb_backend` and `git_refdb_backend` via libpq. Standard
+`git push`/`git clone` work through a `git-remote-gitgres` helper. Missing full
+`upload-pack`/`receive-pack` over SSH/HTTP. Being explored as a Forgejo backend.
+[github.com/andrew/gitgres](https://github.com/andrew/gitgres)
+
+**libgit2-backends** — Official standalone ODB backends for libgit2 targeting
+SQLite, MySQL, Redis, and Memcached. Reference implementations, not widely
+deployed.
+[github.com/libgit2/libgit2-backends](https://github.com/libgit2/libgit2-backends)
+
+**git-remote-s3 (AWS Labs)** — S3 as a serverless Git remote. Also supports Git
+LFS to the same bucket.
+[github.com/awslabs/git-remote-s3](https://github.com/awslabs/git-remote-s3)
+
+**git-remote-s3 (Rust)** — Independent Rust implementation using gitoxide and
+rust-s3.
+[github.com/josephvoss/git-remote-s3](https://github.com/josephvoss/git-remote-s3)
+
+**JGit** — Java Git implementation with built-in S3 support
+(`jgit clone amazon-s3://...`).
+
+No existing projects use **FoundationDB** or **TiKV** as Git backends, though
+both are architecturally well-suited (ordered KV with transactions).
+
+**Chromium scale:** Gitgres is a PoC — no scale testing. S3 backends could
+handle blob storage at scale but add latency. FoundationDB/TiKV would need
+greenfield implementation.
+
+##### 6. Git smart protocol
+
+A smart HTTP server needs **4 endpoints**:
+
+| Endpoint                                   | Method | Purpose        |
+| ------------------------------------------ | ------ | -------------- |
+| `$REPO/info/refs?service=git-upload-pack`  | GET    | Ref discovery  |
+| `$REPO/git-upload-pack`                    | POST   | Fetch/clone    |
+| `$REPO/info/refs?service=git-receive-pack` | GET    | Push ref disc. |
+| `$REPO/git-receive-pack`                   | POST   | Push           |
+
+All data uses pkt-line framing. The protocol is ~30% ref management, ~60% object
+transfer (packfile negotiation + streaming), ~10% capabilities/framing.
+
+**Key insight:** The wire protocol doesn't care about on-disk format. A server
+needs to: enumerate refs, resolve object graphs, generate packfiles, and unpack
+received packfiles. Internal storage is an implementation detail.
+
+The simplest servers shell out to `git upload-pack --stateless-rpc` and
+`git receive-pack --stateless-rpc` and pipe stdin/stdout through HTTP. Grack
+(Ruby) does this in ~200 lines.
+
+Protocol v2 improves ref advertisement (client requests only needed refs instead
+of receiving all), but push still uses v1's `receive-pack`.
+
+##### 7. Chromium-scale considerations
+
+Chromium: 35M+ lines of code, 1M+ lifetime commits, 100K+ commits/year, 15-20+
+GB clone. Google hosts it with **Gerrit** (code review + push) and **Gitiles**
+(read-only browser), both open source, both built on JGit.
+
+**Microsoft Scalar** (now built into Git since 2.38): configures partial clone,
+sparse checkout, background maintenance, commit graphs, and fsmonitor. Replaced
+VFSForGit (which used a kernel-level virtual filesystem).
+
+Key server-side techniques for large repos:
+
+- **Partial clone** (`--filter=blob:none`) — fetch blobs on demand
+- **Reachability bitmaps** — per-commit bitsets, 50%+ clone speedup
+- **Commit graph** — precomputed graph file for fast log/merge-base
+- **Multi-pack index (MIDX)** — index across multiple packfiles
+- **Cruft packs** — compact unreachable objects (52-92% size reduction)
+
+##### 8. Jujutsu
+
+Jujutsu is a **client-side tool** with no server component. It has a clean
+pluggable `Backend` trait (Google uses it internally with a custom cloud
+backend), but the only production-ready backend is `GitBackend` which stores
+data in a real Git repo via gitoxide.
+
+No Git protocol server. Network operations (`jj git fetch/push`) shell out to
+the Git CLI. A server/daemon architecture is on the roadmap but not implemented.
+
+**Chromium scale:** Not applicable for hosting.
+
+#### Candidate approaches
+
+**Approach A: go-git + PostgreSQL.** Use go-git's pluggable `Storer` interface
+with a PostgreSQL backend, and go-git's built-in server transport for smart
+HTTP. This is the most direct path — go-git provides both the storage
+abstraction and the protocol implementation. Main risk is performance at
+Chromium scale (8x memory overhead, no partial clone). Could work for TermSurf's
+own repos; may need a hybrid approach for Chromium (e.g., native git for
+transport, database for storage).
+
+**Approach B: libgit2 + PostgreSQL (Gitgres model).** Use libgit2's pluggable
+ODB with a PostgreSQL backend (as Gitgres demonstrates). Implement
+upload-pack/receive-pack over HTTP using libgit2's pack generation. libgit2 is
+more mature than go-git for object manipulation and has better memory
+characteristics. Could be called from Rust via the `git2` crate or from Go via
+`git2go`. Main risk is that Gitgres is early-stage and libgit2's server-side
+story is less complete than go-git's.
+
+**Approach C: Hybrid — native git transport + database object store.** Use
+standard `git upload-pack --stateless-rpc` / `git receive-pack --stateless-rpc`
+for the protocol layer (shelling out like Grack/Gitea), but intercept object
+storage at the filesystem level using FUSE or a custom git alternate. Objects
+are read from / written to a database, but git thinks it's talking to a
+filesystem. This avoids reimplementing the protocol but adds the complexity of a
+virtual filesystem layer. Microsoft's VFSForGit proves the concept (though they
+abandoned it for Scalar).
+
+**Approach D: S3/object storage + metadata database.** Store packfiles and large
+blobs in S3/GCS, with PostgreSQL for refs, metadata, and small objects. Use
+native git or go-git for protocol handling. This is a pragmatic split: the
+database handles queryable metadata, object storage handles bulk data. AWS's
+git-remote-s3 and JGit's S3 support are precedents. Scales well for Chromium
+blob storage but adds latency for small object access.
 
 #### Verification
 
