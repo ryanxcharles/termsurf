@@ -52,32 +52,92 @@ The new logo displays correctly in the header.
 
 Logo replaced. Favicon still needs updating.
 
-### Experiment 2: Generate favicon from new logo
+### Experiment 2: Icon processing pipeline
 
 #### Description
 
-Generate a new `favicon.ico` from `assets/termsurf-11-transparent.png`. ICO
-files typically contain multiple sizes (16x16, 32x32, 48x48). Use `sharp` to
-resize and convert, or use ImageMagick/`sips` if available.
+Build an icon processing pipeline that converts raw PNGs into web-optimized
+assets. All website images go through this pipeline so they display crisply on
+3x Retina displays (display size × 3 = asset size).
 
-Also update `website/scripts/resize-logo.ts` to point at the new source image so
-future runs regenerate from the correct file.
+The pipeline processes every PNG in `website/raw-icons/`, generates sized
+outputs in multiple formats, and produces a TypeScript type file for type-safe
+image references. This replaces `website/scripts/resize-logo.ts`.
 
 #### Changes
 
-**`website/scripts/resize-logo.ts`** — Update the `SOURCE` path:
+**Install `png-to-ico`:**
 
-```typescript
-const SOURCE = join(
-  import.meta.dir,
-  "../../assets/termsurf-11-transparent.png",
-);
+```bash
+cd website && bun add png-to-ico
 ```
 
-**Generate favicon** — Use the resize script or a one-off command to create
-`website/public/favicon.ico` from the new logo at 32x32.
+**Create `website/raw-icons/`** — Copy the source image:
+
+```bash
+mkdir -p website/raw-icons
+cp assets/termsurf-11-transparent.png website/raw-icons/
+```
+
+**Create `website/scripts/process-icons.ts`** — Modeled after
+`~/dev/ryanxcharles-com/homepage/process-icons.ts`:
+
+- Reads all PNGs from `website/raw-icons/`
+- Config:
+  - PNG at 192px (3x of 64px logo display size)
+  - ICO at 32px (standard favicon)
+- For each source PNG and each format/size:
+  - PNG/WebP: `sharp` resize and convert to
+    `website/public/images/{name}-{size}.{ext}`
+  - ICO: `sharp` resize to PNG buffer, then `png-to-ico` to
+    `website/public/images/{name}-{size}.ico`
+- After processing, copy `termsurf-11-transparent-32.ico` to
+  `website/public/favicon.ico`
+- Generate `website/src/util/icons.ts`:
+
+  ```typescript
+  export type Icon =
+    | "/images/termsurf-11-transparent-192.png"
+    | "/images/termsurf-11-transparent-32.ico";
+  export const $icon = (icon: Icon) => icon;
+  ```
+
+**Delete `website/scripts/resize-logo.ts`** — Subsumed by the new script.
+
+**Delete `website/public/logo.png` and `website/public/test-logo.png`** —
+Replaced by generated images.
+
+**Update `website/package.json`** — Add script:
+
+```json
+"build:icons": "bun run scripts/process-icons.ts"
+```
+
+**Update `website/src/components/Header.tsx`** — Use the generated image with
+type-safe import:
+
+```tsx
+import { $icon } from "../util/icons";
+
+export function Header() {
+  return (
+    <header className="text-center mb-12 pb-8 border-b border-border">
+      <img
+        src={$icon("/images/termsurf-11-transparent-192.png")}
+        alt="TermSurf logo"
+        className="w-16 h-16 mx-auto mb-4"
+      />
+      ...
+    </header>
+  );
+}
+```
 
 #### Verification
 
-1. Open the website — favicon in the browser tab shows the new surfer logo.
-2. `website/scripts/resize-logo.ts` points to the new source image.
+1. `cd website && bun run build:icons` — generates files in
+   `website/public/images/` and `website/public/favicon.ico`.
+2. `cat website/src/util/icons.ts` — type file lists all generated paths.
+3. `bun run dev` — logo displays in header, favicon shows in browser tab.
+4. TypeScript catches typos — changing the `$icon` argument to a bad path causes
+   a type error.
