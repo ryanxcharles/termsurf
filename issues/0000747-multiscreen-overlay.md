@@ -95,17 +95,107 @@ the observed behavior and suggests the root cause may be elsewhere.
 - `wezboard/window/src/os/macos/connection.rs` — `with_window_inner` →
   `spawn_into_main_thread`
 
-### Analysis
+### Root cause
 
-The root cause is not yet identified. The theoretical analysis in Issue 746
-explored display link phase differences, spawn queue hop counts, and layer
-coordinate systems, but none fully explain why `pos.left` would be stale when
-the split tree has already been updated. Logging is needed to determine:
+The initial analysis in the "What this tells us" section above was wrong. It
+assumed the resize and reposition both come from `set_overlay_frame` in
+`paint_pass`. They don't. The resize is visible because **Chromium itself
+renders smaller content**, not because the CALayer frame changed.
 
-1. Whether `set_overlay_frame` is called with the wrong x on the second screen,
-   or not called at all after the split.
-2. What `pos.left` value `paint_pass` sees on the second screen after the split.
-3. Whether the `WindowInvalidated` notification reaches the second window and
-   triggers `setNeedsDisplay: true`.
-4. The timing relationship between the split completion, the notification chain,
-   and the display refresh on the second screen.
+There are **two independent code paths** that set the CALayer frame:
+
+1. **`set_overlay_frame()`** (conn.rs:1372) — called from `paint_pass()` every
+   frame. Uses `paint_pane()` coordinates which include `pos.left` from the
+   split tree. **Correct.**
+
+2. **`update_ca_layer_frame()`** (conn.rs:1331) — called from
+   `handle_ca_context()` whenever Chromium sends a `CaContext` message. Uses
+   global `metrics` atomics and `pane.col` — has **no knowledge of `pos.left`**.
+   Always positions the overlay as if the pane is at the left edge. **Wrong
+   after a split.**
+
+The `on_ca_context_id` callback fires on **every GPU frame swap** (traced
+through Chromium: `DidSwapBuffersComplete` → `DidReceiveCALayerParams` →
+`AcceleratedWidgetCALayerParamsUpdated` → `ca_layer_params_callback_` →
+`TsNotifyCAContextId`). This means every time Chromium renders a frame —
+including after a resize — it sends a `CaContext` message, which triggers
+`update_ca_layer_frame`.
+
+The sequence on split:
+
+1. Split happens. Tree updated. `pos.left` is now correct.
+2. `paint_pass` runs (terminal panes reposition correctly). `set_overlay_frame`
+   sets the overlay to the **correct** position and size.
+3. TUI sends SetOverlay resize → Roamium sends Resize to Chromium.
+4. Chromium resizes, renders a new frame at the smaller size. The user sees
+   smaller content because Chromium's CALayerHost displays the new smaller
+   frame.
+5. Chromium fires `on_ca_context_id` → Roamium sends `CaContext` to GUI.
+6. `handle_ca_context` → `update_ca_layer_frame` → **overwrites** the frame with
+   `origin_x + border_left + pane.col * cell_w`. No `pos.left`. The overlay
+   snaps back to the left edge with the correct width.
+
+Step 6 clobbers step 2. The user sees the overlay at the left edge with the
+correct (smaller) size.
+
+Pressing ESC triggers another `paint_pass` → `set_overlay_frame` with the
+correct `pos.left`. No `CaContext` follows (Chromium isn't resizing), so the
+correct position sticks.
+
+On the primary screen, the timing works out so that another `paint_pass` runs
+after step 6 (from PaneOutput or other activity), correcting it before the user
+notices. On the secondary screen, the display link phase means no additional
+`paint_pass` runs until the user interacts.
+
+## Experiments
+
+### Experiment 1: Remove update_ca_layer_frame
+
+#### Description
+
+`update_ca_layer_frame` is the sole cause of the bug. It runs on every
+`CaContext` message (every Chromium frame swap) and overwrites the correct
+position set by `set_overlay_frame` with a position that has no split tree
+awareness.
+
+The fix: delete `update_ca_layer_frame` and its call site. The render pass
+already calls `set_overlay_frame` every frame in `paint_pass`, which computes
+the correct position from `paint_pane()`. The first frame after the CALayerHost
+is created will position the overlay correctly — a one-frame delay that is
+imperceptible.
+
+The `handle_ca_context` function still needs to create the layer hierarchy
+(flipped layer, positioning layer, CALayerHost) and swap CALayerHost on context
+ID changes. It just shouldn't set the frame position.
+
+#### Changes
+
+**`wezboard-gui/src/termsurf/conn.rs`:**
+
+1. Delete the `update_ca_layer_frame` function (lines 1330–1369, both the
+   `#[cfg(target_os = "macos")]` implementation and any non-macOS stub).
+
+2. In `handle_ca_context`, remove the call to `update_ca_layer_frame` (line
+   1307: `update_ca_layer_frame(pane, root_layer);`). The `root_layer` variable
+   is still needed for `get_or_create_overlay` and
+   `msg_send![root_layer, bounds]` / `msg_send![root_layer, addSublayer]` in the
+   layer creation block. No other code references `update_ca_layer_frame`.
+
+No other files change.
+
+#### Verification
+
+Build:
+
+- [ ] `cd wezboard && cargo build` — compiles without errors.
+
+Edge case checklist (test on both screens):
+
+- [ ] Open a webview — positioned and sized correctly.
+- [ ] Split pane to the left — webview repositions to the right immediately.
+- [ ] Same test on second screen — webview repositions immediately (the bug).
+- [ ] Open a new tab — webview disappears.
+- [ ] Switch back — webview at correct position.
+- [ ] Resize the window — webview tracks pane position.
+- [ ] Close the split pane — webview expands to fill.
+- [ ] Open a second window on a second screen, open webview — correct position.
