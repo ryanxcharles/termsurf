@@ -103,6 +103,39 @@ reads.
   `metrics::set()` and `reposition_all_overlays()`
 - `wezboard/mux/src/tab.rs` — `iter_panes_impl()`, split tree traversal
 
+### Edge cases
+
+The goal of this issue is to solve all edge cases for the webview overlay that
+are already handled by the underlying terminal. The overlay should be positioned
+using the same calculations as terminal pane content. This means the overlay
+will be correct in every case the terminal handles correctly. If the terminal
+itself has a bug (e.g., stale scale factor when moving between displays with
+different backing scale factors), the overlay will have the same bug. We will
+fix those terminal-level issues in future work, not in this issue.
+
+1. Open a webview — positioned and sized correctly.
+2. Split pane to the left — webview correctly positioned on the right.
+3. Open a new tab — webview disappears (no longer visible).
+4. Resize the window (on the other tab) — resizes correctly, no webview visible.
+5. Switch back to the first tab — webview visible at correct position.
+6. Resize the window while the webview is visible — webview tracks pane
+   position.
+7. Move the window to a different display with a different backing scale factor
+   — sized and positioned correctly (may be limited by terminal's own handling
+   of display changes).
+8. Open a new window, then switch tabs, open/close webviews, open/close panes —
+   all webviews correct in both windows.
+9. Multiple webviews visible simultaneously — all positioned and sized correctly
+   in their respective panes.
+10. Resize while on a different tab, then switch back to a tab with multiple
+    webviews — all webviews correctly repositioned and resized.
+11. Font size change — webviews reposition correctly after cell dimensions
+    change.
+12. Zoom a pane — zoomed pane's webview fills the space, other panes' webviews
+    hide.
+13. Close a split pane — remaining pane expands, its webview repositions to fill
+    the larger space.
+
 ## Experiments
 
 ### Experiment 1: Position overlay from the render pass
@@ -815,11 +848,32 @@ call (line 93).**
 
 #### Verification
 
-1. `cd wezboard && cargo build` — compiles without errors.
-2. Open a webview in a single pane — correct position immediately.
-3. Split the pane (add pane to left) — webview stays at correct position in its
-   pane.
-4. Split the pane (add pane above) — same, webview tracks.
-5. Switch to a different tab, resize the window, switch back — webview correct.
-6. Resize while webview tab is active — webview tracks pane.
-7. Click inside webview — mouse events land at correct coordinates.
+Build:
+
+- [ ] `cd wezboard && cargo build` — compiles without errors.
+
+Edge case checklist:
+
+- [ ] Open a webview — positioned and sized correctly.
+- [ ] Split pane to the left — webview correctly positioned on the right.
+- [ ] Open a new tab — webview disappears (no longer visible).
+- [ ] Resize the window (on the other tab) — resizes correctly, no webview
+      visible.
+- [ ] Switch back to the first tab — webview visible at correct position.
+- [ ] Resize the window while the webview is visible — webview tracks pane
+      position.
+- ~~Move the window to a different display with a different backing scale factor
+  — unable to test (no non-Retina display available).~~
+- [ ] Open a new window, then switch tabs, open/close webviews, open/close panes
+      — all webviews correct in both windows.
+- [ ] Multiple webviews visible simultaneously — all positioned and sized
+      correctly in their respective panes.
+- [ ] Resize while on a different tab, then switch back to a tab with multiple
+      webviews — all webviews correctly repositioned and resized.
+- [ ] Font size change — webviews reposition correctly after cell dimensions
+      change.
+- [ ] Zoom a pane — zoomed pane's webview fills the space, other panes' webviews
+      hide.
+- [ ] Close a split pane — remaining pane expands, its webview repositions to
+      fill the larger space.
+- [ ] Click inside webview — mouse events land at correct coordinates.
