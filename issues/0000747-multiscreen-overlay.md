@@ -199,3 +199,22 @@ Edge case checklist (test on both screens):
 - [ ] Resize the window — webview tracks pane position.
 - [ ] Close the split pane — webview expands to fill.
 - [ ] Open a second window on a second screen, open webview — correct position.
+
+**Result:** Fail
+
+Opening a webview positions it at (0,0) — the overlay is completely misplaced
+from the start. `update_ca_layer_frame` was providing the initial positioning
+that `set_overlay_frame` in `paint_pass` hadn't run yet to set. Without it, the
+overlay has no position until the next paint pass happens to run, and that
+doesn't happen until user interaction (e.g. pressing ESC). The function isn't
+just clobbering — it's also the only thing that positions the overlay on first
+creation.
+
+#### Conclusion
+
+`update_ca_layer_frame` cannot simply be deleted. It serves a critical role:
+initial overlay positioning when the CALayerHost is first created (before any
+`paint_pass` has run with overlay coordinates). The fix needs to either (a) make
+`update_ca_layer_frame` split-aware so it positions correctly, or (b) ensure
+`set_overlay_frame` runs immediately after layer creation before the user sees
+anything.
