@@ -402,3 +402,56 @@ CALayerHost is first created. After that, `set_overlay_frame` from `paint_pass`
 is the sole authority on overlay position. The root cause was never the formula
 itself — it was that the formula ran on every Chromium frame swap, overwriting
 correct positions with split-unaware ones.
+
+## Conclusion
+
+Issues 746 and 747 together replaced the overlay positioning system and fixed
+every known positioning bug across all screens.
+
+### What was accomplished
+
+**Issue 746** replaced the overlay's broken positioning system with one that
+piggybacks on the terminal's own render pass. The old system
+(`reposition_all_overlays`, `get_pane_cell_position`, global `metrics` atomics)
+computed overlay coordinates independently from the terminal renderer — a
+duplicated formula that was wrong in multiple ways. The new system returns pixel
+coordinates from `paint_pane()` and passes them directly to
+`set_overlay_frame()`. Five experiments, three architectural changes kept:
+
+1. `paint_pane()` returns pixel origin coordinates accounting for padding,
+   borders, tab bar, and split divider offsets.
+2. `paint_pass()` calls `set_overlay_frame()` every frame with split-tree-aware
+   coordinates.
+3. `set_overlay_frame()` converts backing pixels to logical points via
+   `dpi / 72.0`, wrapped in a `CATransaction` to suppress animation.
+4. `spawn.rs` fires `MuxNotification::WindowInvalidated` after split to trigger
+   immediate repaint.
+5. Deleted `reposition_all_overlays()` and `get_pane_cell_position()`.
+
+**Issue 747** fixed the remaining multi-screen bug. The root cause:
+`update_ca_layer_frame()` ran on every Chromium GPU frame swap (via
+`handle_ca_context`), overwriting the correct position set by
+`set_overlay_frame()` with a split-unaware formula. On the primary screen,
+another `paint_pass` corrected it before the user noticed. On secondary screens,
+display link timing meant no corrective repaint occurred until user interaction.
+The fix: move the `update_ca_layer_frame()` call inside the first-creation
+branch of `handle_ca_context()`. After layer creation, `set_overlay_frame()` is
+the sole authority on position.
+
+### What works
+
+- Open, split, resize, tab switch, switch back — all correct on all screens.
+- Scale correct on Retina displays (`dpi / 72.0` = 2.0).
+- No animation artifacts (CATransaction suppresses implicit animations).
+- Split triggers immediate overlay reposition via `WindowInvalidated`.
+- Multi-screen: overlays reposition correctly on split on secondary displays.
+- New tab hides overlay, switch back restores it.
+- Close split — remaining pane expands, overlay fills.
+
+### Key insight
+
+The overlay positioning system now has a clean separation of concerns:
+`update_ca_layer_frame()` handles initial placement when the CALayerHost is
+first created, and `set_overlay_frame()` from `paint_pass()` handles everything
+after that. No code path overwrites another. One authority at each stage of the
+overlay lifecycle.
