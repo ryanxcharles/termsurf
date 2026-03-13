@@ -398,3 +398,129 @@ the overlay is never at 0,0) and focus on fixing the three original bugs
 (active-tab-only lookup, formula mismatch, no reposition on tab switch) without
 removing the initial positioning step. The render pass can _update_ the position
 every frame, but it must not be the _only_ place that sets it.
+
+### Experiment 2: Fix the three bugs in existing positioning code
+
+#### Description
+
+Keep the existing `update_ca_layer_frame()` / `reposition_all_overlays()`
+architecture. Fix the three bugs directly:
+
+1. `get_pane_cell_position()` searches all tabs, not just the active one.
+2. The overlay formula matches `paint_pane()`'s text positioning exactly.
+3. `reposition_all_overlays()` is called on tab switch.
+
+No new functions, no new positioning path. The existing code works — it just has
+three specific bugs.
+
+#### Bug 1 fix: search all tabs in `get_pane_cell_position()`
+
+The current code calls `w.get_active()` and only searches that tab:
+
+```rust
+if let Some(tab) = w.get_active() {
+    for pos in tab.iter_panes() { ... }
+}
+```
+
+Fix: iterate all tabs in the window, not just the active one:
+
+```rust
+for tab in w.iter() {
+    for pos in tab.iter_panes() { ... }
+}
+```
+
+This ensures the pane is found regardless of which tab is active.
+
+#### Bug 2 fix: align overlay formula with `paint_pane()`
+
+The current `update_ca_layer_frame()` formula:
+
+```rust
+let x_backing = origin_x + border_left + (pane_left + col) * cell_w;
+let y_backing = origin_y + border_top + (pane_top + row) * cell_h;
+```
+
+The `paint_pane()` text positioning formula (`left_pixel_x`, line 341):
+
+```rust
+let left_pixel_x = padding_left + border.left + pos.left * cell_width;
+let top_pixel_y = top_bar_height + padding_top + border.top;
+```
+
+These are equivalent: `origin_x` = `padding_left`, `origin_y` =
+`top_bar_height + padding_top`, and `border_left`/`border_top` match. The
+overlay's `(col, row)` offset within the pane is additive. The formulas already
+match for text content positioning.
+
+The background rect in `paint_pane()` has edge-case handling (leftmost panes
+start at x=0, half-cell offsets for split dividers), but those are for
+background fill — not content positioning. The overlay should align with text
+content, not background edges. So the current formula is correct for non-split
+panes.
+
+However, there's a potential issue for split panes where the pane is not at
+position (0,0). The background rect uses `- (cell_width / 2.0)` for non-leftmost
+panes and `- (cell_height / 2.0)` for non-topmost panes to account for split
+dividers eating into the cell grid. If the overlay's `(col, row)` starts at
+(0, 0) within the pane (the TUI's first visible cell), the overlay position
+should match `left_pixel_x` — which does NOT include the half-cell offset. So
+the current formula is already correct.
+
+**No code change needed for Bug 2.** The formula matches `paint_pane()`'s text
+positioning. The three bugs are really two bugs.
+
+#### Bug 3 fix: reposition on tab switch
+
+Add a `reposition_all_overlays()` call to `activate_tab()` in
+`wezboard-gui/src/termwindow/mod.rs`. This is the single function that all tab
+switches flow through (`activate_tab_relative` and `activate_last_tab` both call
+`activate_tab`).
+
+After line 2261 (`self.update_scrollbar();`), add:
+
+```rust
+crate::termsurf::reposition_all_overlays();
+```
+
+With the Bug 1 fix, `reposition_all_overlays()` will now correctly find panes in
+non-active tabs (because `get_pane_cell_position` searches all tabs). And
+calling it on tab switch ensures overlays are repositioned when the user
+switches back to a tab with a webview.
+
+#### Changes
+
+**`wezboard-gui/src/termsurf/conn.rs` — `get_pane_cell_position()`:**
+
+Change `w.get_active()` to `w.iter()`. Replace:
+
+```rust
+if let Some(tab) = w.get_active() {
+    for pos in tab.iter_panes() {
+```
+
+With:
+
+```rust
+for tab in w.iter() {
+    for pos in tab.iter_panes() {
+```
+
+And remove the corresponding closing brace.
+
+**`wezboard-gui/src/termwindow/mod.rs` — `activate_tab()`:**
+
+Add `crate::termsurf::reposition_all_overlays();` after
+`self.update_scrollbar();` (line 2261).
+
+#### Verification
+
+1. `cd wezboard && cargo build` — compiles without errors.
+2. Open a webview — correct position (unchanged, immediate positioning still
+   works).
+3. Split the pane — webview stays positioned correctly.
+4. Switch to a different tab, resize the window, switch back — webview is at the
+   correct position (Bug 1 + Bug 3 fix).
+5. Switch tabs without resizing — webview repositions correctly on switch back
+   (Bug 3 fix).
