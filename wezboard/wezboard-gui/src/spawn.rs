@@ -1,12 +1,12 @@
-use anyhow::{Context, anyhow, bail};
-use config::TermConfig;
+use anyhow::{anyhow, bail, Context};
 use config::keyassignment::SpawnCommand;
-use mux::Mux;
-use mux::MuxNotification;
+use config::TermConfig;
 use mux::activity::Activity;
 use mux::domain::SplitSource;
 use mux::tab::SplitRequest;
 use mux::window::WindowId as MuxWindowId;
+use mux::Mux;
+use mux::MuxNotification;
 use portable_pty::CommandBuilder;
 use std::sync::Arc;
 use wezboard_term::TerminalSize;

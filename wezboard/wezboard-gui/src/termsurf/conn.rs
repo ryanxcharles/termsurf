@@ -1,13 +1,13 @@
 use super::proto;
-use super::proto::term_surf_message::Msg;
 use super::proto::TermSurfMessage;
+use super::proto::term_surf_message::Msg;
 use super::state::{Pane, Server, SharedState, TermSurfState};
 use anyhow::Context;
 use prost::Message;
 use sha2::{Digest, Sha256};
+use smol::Async;
 use smol::channel::Sender;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
-use smol::Async;
 use std::collections::HashSet;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
@@ -1281,6 +1281,9 @@ fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
                 pane.ca_layer_flipped,
                 pane.ca_layer_host
             );
+
+            // Position the overlay
+            update_ca_layer_frame(pane, root_layer);
         } else {
             // Atomic swap: create new host, add, remove old, release old
             let ca_layer_host_class = cls(b"CALayerHost\0");
@@ -1302,9 +1305,6 @@ fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
 
             log::info!("swapped CALayerHost contextId={}", context_id);
         }
-
-        // Position the overlay
-        update_ca_layer_frame(pane, root_layer);
 
         let _: () = msg_send![ca_transaction, commit];
     }

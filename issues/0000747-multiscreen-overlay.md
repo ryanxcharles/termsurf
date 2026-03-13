@@ -376,14 +376,29 @@ No other files change.
 
 Build:
 
-- [ ] `cd wezboard && cargo build` — compiles without errors.
+- [x] `cd wezboard && cargo build` — compiles without errors.
 
 Functional (test on both screens):
 
-- [ ] Open a webview — positioned and sized correctly (initial positioning
+- [x] Open a webview — positioned and sized correctly (initial positioning
       preserved).
-- [ ] Split pane to the left — webview repositions to the right immediately.
-- [ ] Same test on second screen — webview repositions immediately (the bug).
-- [ ] Resize the window — webview tracks pane position.
-- [ ] Close the split pane — webview expands to fill.
-- [ ] Open a new tab, switch back — webview at correct position.
+- [x] Split pane to the left — webview repositions to the right immediately.
+- [x] Same test on second screen — webview repositions immediately (the bug).
+- [x] Resize the window — webview tracks pane position.
+- [x] Close the split pane — webview expands to fill.
+- [x] Open a new tab, switch back — webview at correct position.
+
+**Result:** Pass
+
+All verification checks passed on both screens. Moving `update_ca_layer_frame`
+into the first-creation branch only preserves correct initial positioning while
+preventing subsequent Chromium frame swaps from clobbering the split-aware
+position set by `set_overlay_frame`.
+
+#### Conclusion
+
+The fix was a one-line move: `update_ca_layer_frame` only needs to run when the
+CALayerHost is first created. After that, `set_overlay_frame` from `paint_pass`
+is the sole authority on overlay position. The root cause was never the formula
+itself — it was that the formula ran on every Chromium frame swap, overwriting
+correct positions with split-unaware ones.
