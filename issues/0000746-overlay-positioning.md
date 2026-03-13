@@ -1093,3 +1093,70 @@ The next experiment should ensure the GUI repaints with the updated layout
 immediately after a split completes — either by firing a `WindowInvalidated`
 notification from the split code, or by explicitly calling `window.invalidate()`
 after the async split task finishes.
+
+### Experiment 5: Notify GUI after async split
+
+#### Description
+
+The split is async — `spawn_command_impl` spawns a `promise::spawn::spawn` task
+that calls `mux.split_pane().await`. When the task completes, the split tree is
+updated, but the mux never fires a notification to tell the GUI. The key
+handler's `context.invalidate()` (keyevent.rs:327) fires a repaint before the
+async task runs, so the first paint sees the old tree.
+
+Fix: after `mux.split_pane().await` returns in `spawn_command_internal`, fire
+`MuxNotification::WindowInvalidated(src_window_id)`. This uses the existing
+notification path — `WindowInvalidated` is already handled in mod.rs:1328 where
+it calls `window.invalidate()` and syncs overlay visibility. The notification is
+fired from within the async task, so the tree is guaranteed to be updated by the
+time `paint_pass` runs in response.
+
+#### Changes
+
+**`wezboard-gui/src/spawn.rs` — add `WindowInvalidated` notification after
+split:**
+
+Add `use mux::MuxNotification;` to the imports. After line 120
+(`pane.set_config(term_config);`), add:
+
+```rust
+mux.notify(MuxNotification::WindowInvalidated(src_window_id));
+```
+
+This fires inside the `if let Some(tab)` block, after the split is complete and
+the pane is configured. `src_window_id` is already in scope (line 98). `mux` is
+already bound (line 46: `let mux = Mux::get();`).
+
+No other files change.
+
+#### Verification
+
+Build:
+
+- [ ] `cd wezboard && cargo build` — compiles without errors.
+
+Edge case checklist:
+
+- [ ] Open a webview — positioned and sized correctly.
+- [ ] Split pane to the left — webview correctly positioned on the right.
+- [ ] Open a new tab — webview disappears (no longer visible).
+- [ ] Resize the window (on the other tab) — resizes correctly, no webview
+      visible.
+- [ ] Switch back to the first tab — webview visible at correct position.
+- [ ] Resize the window while the webview is visible — webview tracks pane
+      position.
+- ~~Move the window to a different display with a different backing scale factor
+  — unable to test (no non-Retina display available).~~
+- [ ] Open a new window, then switch tabs, open/close webviews, open/close panes
+      — all webviews correct in both windows.
+- [ ] Multiple webviews visible simultaneously — all positioned and sized
+      correctly in their respective panes.
+- [ ] Resize while on a different tab, then switch back to a tab with multiple
+      webviews — all webviews correctly repositioned and resized.
+- [ ] Font size change — webviews reposition correctly after cell dimensions
+      change.
+- [ ] Zoom a pane — zoomed pane's webview fills the space, other panes' webviews
+      hide.
+- [ ] Close a split pane — remaining pane expands, its webview repositions to
+      fill the larger space.
+- [ ] Click inside webview — mouse events land at correct coordinates.
