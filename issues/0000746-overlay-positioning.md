@@ -1248,3 +1248,88 @@ The root cause needs debugging with logging to determine exactly when
 from `WindowInvalidated` actually fires on the second screen. The next
 experiment should add targeted logging to `set_overlay_frame` and `paint_pass`'s
 overlay block to capture the coordinates and timing on both screens.
+
+## Conclusion
+
+This issue replaced the overlay's broken positioning system with one that
+piggybacks on the terminal's own render pass. Five experiments, three
+architectural changes kept, one bug remaining.
+
+### What was accomplished
+
+**The overlay now gets its position from `paint_pane()`.** The old system
+(`update_ca_layer_frame`, `reposition_all_overlays`, `get_pane_cell_position`,
+and global `metrics` atomics) computed overlay coordinates independently from
+the terminal renderer. This duplicated formula was wrong in multiple ways: it
+only searched the active tab, it missed edge cases like split divider offsets,
+and it never ran on tab switches. The new system returns
+`(left_pixel_x, top_pixel_y)` from `paint_pane()` and uses those coordinates
+directly in `set_overlay_frame()`. No separate formula, no global metrics lookup
+for positioning. The render pass already knows exactly where every pane goes —
+the overlay now uses that.
+
+**Key changes (experiments 3–5, all kept):**
+
+1. **`pane.rs`** — `paint_pane()` returns `(f32, f32)` instead of `()`. The
+   returned values are the pixel origin of the pane's cell grid, already
+   accounting for padding, borders, tab bar, and split divider offsets.
+
+2. **`paint.rs`** — After each `paint_pane()` call, the overlay block reads the
+   pane's `col`, `row`, `pixel_width`, `pixel_height` from TermSurf state and
+   calls `set_overlay_frame(pane_id, x, y, w, h, dpi)` using the paint_pane
+   coordinates plus cell-sized offsets.
+
+3. **`conn.rs`** — New `set_overlay_frame()` function. Converts backing pixels
+   to logical points using `dpi / 72.0` (macOS base DPI, equivalent to
+   `backingScaleFactor`). Wraps `setFrame:` in a `CATransaction` with
+   `setDisableActions:YES` to suppress Core Animation interpolation. The old
+   `reposition_all_overlays()` and `get_pane_cell_position()` were deleted.
+
+4. **`conn.rs`** — `update_ca_layer_frame()` kept for initial placement only
+   (when `handle_ca_context` creates the CALayerHost). The render pass takes
+   over on the next frame.
+
+5. **`spawn.rs`** — After `mux.split_pane().await` completes, fires
+   `MuxNotification::WindowInvalidated(src_window_id)` to trigger a repaint with
+   the updated split tree. Without this, the overlay stayed at its pre-split
+   position until an unrelated event caused a repaint.
+
+6. **`resize.rs`** — Removed the `reposition_all_overlays()` call. The render
+   pass handles repositioning every frame.
+
+7. **`mod.rs`** — Re-exports `set_overlay_frame` instead of
+   `reposition_all_overlays`.
+
+### What works
+
+- Single window, single screen: all positioning correct (open, split, resize,
+  tab switch, switch back).
+- Scale is correct on Retina displays (`dpi / 72.0` = 2.0).
+- No animation artifacts (CATransaction suppresses implicit animations).
+- Split pane triggers immediate overlay reposition (WindowInvalidated
+  notification).
+
+### What doesn't work
+
+- **Multi-screen split repositioning.** Open a second window, move it to a
+  second screen, open a webview, split to the left. The overlay resizes (width
+  shrinks) but does not reposition (x stays at 0 instead of moving right). First
+  screen and first window are unaffected. The bug is specific to a window on a
+  secondary display.
+
+### Remaining checklist items (untested)
+
+- New tab hides overlay, switch back restores it.
+- Resize on different tab, switch back — overlay correct.
+- Font size change — overlay repositions.
+- Zoom pane — zoomed pane's overlay fills space, others hide.
+- Close split — remaining pane expands, overlay fills.
+- Mouse click coordinates land correctly inside overlay.
+- Multiple simultaneous overlays.
+
+### Next steps
+
+The multi-screen bug needs targeted logging in `set_overlay_frame` and the
+paint_pass overlay block to determine what coordinates are computed for the
+second screen's window. The issue should continue in a new issue doc (747)
+focused specifically on multi-screen overlay positioning.
