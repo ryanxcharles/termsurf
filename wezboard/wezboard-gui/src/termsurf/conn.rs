@@ -1378,7 +1378,7 @@ pub fn set_overlay_frame(
     dpi: usize,
 ) {
     use objc2::msg_send;
-    use objc2::runtime::AnyObject;
+    use objc2::runtime::{AnyObject, Bool};
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 
     let Some(state) = super::state::global() else {
@@ -1393,7 +1393,7 @@ pub fn set_overlay_frame(
         return;
     }
 
-    let scale = dpi as f64 / ::window::default_dpi();
+    let scale = dpi as f64 / 72.0;
     let scale = if scale > 0.0 { scale } else { 1.0 };
 
     pane.overlay_origin_x = x_backing;
@@ -1407,7 +1407,11 @@ pub fn set_overlay_frame(
     unsafe {
         let layer = pane.ca_layer_positioning as *mut AnyObject;
         let frame = CGRect::new(CGPoint::new(x, y), CGSize::new(w, h));
+        let ca = cls(b"CATransaction\0");
+        let _: () = msg_send![ca, begin];
+        let _: () = msg_send![ca, setDisableActions: Bool::YES];
         let _: () = msg_send![layer, setFrame: frame];
+        let _: () = msg_send![ca, commit];
     }
 }
 

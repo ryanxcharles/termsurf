@@ -1007,11 +1007,11 @@ No changes to any other file. Experiment 3's changes to `pane.rs`, `paint.rs`,
 
 Build:
 
-- [ ] `cd wezboard && cargo build` — compiles without errors.
+- [x] `cd wezboard && cargo build` — compiles without errors.
 
 Edge case checklist:
 
-- [ ] Open a webview — positioned and sized correctly.
+- [x] Open a webview — positioned and sized correctly.
 - [ ] Split pane to the left — webview correctly positioned on the right.
 - [ ] Open a new tab — webview disappears (no longer visible).
 - [ ] Resize the window (on the other tab) — resizes correctly, no webview
@@ -1034,3 +1034,62 @@ Edge case checklist:
 - [ ] Close a split pane — remaining pane expands, its webview repositions to
       fill the larger space.
 - [ ] Click inside webview — mouse events land at correct coordinates.
+
+Stopped testing at item 2.
+
+**Result:** Partial
+
+The scale fix (`dpi / 72.0` instead of `dpi / default_dpi()`) and animation
+suppression (`CATransaction` with `setDisableActions:YES`) both work. Opening a
+webview in a single unsplit pane positions it correctly with no animation
+artifacts. The scale is now 2.0 on Retina (correct) instead of 1.0 (wrong).
+
+However, splitting a pane reveals a timing problem: the overlay stays at its old
+position (left side) after a split creates a new pane on the left. The overlay
+should move to the right (where the original pane now lives). Pressing any key
+(including ESC) fixes the position — the overlay snaps to the correct location
+on the right.
+
+The positioning calculations are correct (confirmed by the keypress fix). The
+problem is that the overlay doesn't know the layout changed until something
+triggers a fresh repaint with the updated split tree.
+
+#### Conclusion
+
+The scale and animation fixes are correct and should be kept. The remaining
+problem is a **stale layout** issue when splitting panes.
+
+**Root cause analysis:** The split is async — `spawn_command_impl` (spawn.rs:29)
+calls `promise::spawn::spawn(async move { ... }).detach()`. The async task calls
+`mux.split_pane().await`, which calls `domain.split_pane().await` →
+`tab.split_and_insert()`. The key handler's `context.invalidate()` (keyevent.rs
+line 327) triggers a repaint immediately after spawning the async task — before
+the split has completed. This first paint sees the old (pre-split) tree and
+positions the overlay at the old location.
+
+After the split completes, the mux does NOT fire a `WindowInvalidated`
+notification. The split code (`mux/src/lib.rs:split_pane`,
+`mux/src/domain.rs:split_pane`, `mux/src/tab.rs:split_and_insert`) modifies the
+tree and resizes panes, but never calls `self.notify(WindowInvalidated(...))`.
+The only way the GUI learns about the layout change is through indirect
+`PaneOutput` notifications — when the new pane's shell outputs text, or when the
+original pane's TUI redraws after SIGWINCH. These `PaneOutput` notifications go
+through a multi-hop async chain:
+
+1. PTY reader thread → `Mux::notify_from_any_thread` → `spawn_into_main_thread`
+2. Main thread → `mux.notify()` → subscriber callback → `spawn_into_main_thread`
+3. Main thread → `mux_pane_output_event_callback` → `window.notify()`
+4. Window event handler → `mux_pane_output_event` → `is_pane_visible` →
+   `window.invalidate()`
+
+On macOS, the spawn queue (`window/src/spawn.rs`) is driven by a
+`CFRunLoopObserver` on `kCFRunLoopAllActivities` that processes **one task per
+invocation**. Each hop in the chain above requires a separate observer
+invocation. Combined with macOS's display phase timing (which may run before all
+queued tasks are processed), the repaint with the updated tree may be delayed or
+may not happen at all until an external event (keypress) forces a fresh repaint.
+
+The next experiment should ensure the GUI repaints with the updated layout
+immediately after a split completes — either by firing a `WindowInvalidated`
+notification from the split code, or by explicitly calling `window.invalidate()`
+after the async split task finishes.
