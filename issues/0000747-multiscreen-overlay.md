@@ -218,3 +218,77 @@ initial overlay positioning when the CALayerHost is first created (before any
 `update_ca_layer_frame` split-aware so it positions correctly, or (b) ensure
 `set_overlay_frame` runs immediately after layer creation before the user sees
 anything.
+
+### Experiment 2: Reuse stored overlay coordinates in update_ca_layer_frame
+
+#### Description
+
+The pane already stores `overlay_origin_x`, `overlay_origin_y`, and
+`overlay_scale` — set by `set_overlay_frame` every frame from `paint_pass` with
+the correct split-tree-aware coordinates.
+
+`update_ca_layer_frame` currently ignores these and recomputes position from
+scratch using `pane.col * cell_w` — a formula with no split tree awareness.
+
+The fix: make `update_ca_layer_frame` check whether `set_overlay_frame` has
+already run (indicated by `overlay_scale > 0.0`). If so, reuse the stored
+`overlay_origin_x/y` and `overlay_scale` instead of recomputing. If not (first
+creation, before any `paint_pass`), fall back to the current formula.
+
+This way:
+
+- **First creation:** reasonable initial positioning (same as today).
+- **Every subsequent Chromium frame swap:** reapplies the last known-good
+  position from `paint_pass` instead of clobbering it.
+- **After a split:** Chromium fires `CaContext`, but `update_ca_layer_frame`
+  reuses the correct position that `set_overlay_frame` already computed.
+
+#### Changes
+
+**`wezboard-gui/src/termsurf/conn.rs`** — `update_ca_layer_frame`:
+
+Replace the position computation (lines 1336–1347) with a branch:
+
+```rust
+let (x, y, w, h) = if pane.overlay_scale > 0.0 {
+    // set_overlay_frame has run — reuse its split-aware coordinates.
+    let scale = pane.overlay_scale;
+    let x = pane.overlay_origin_x / scale;
+    let y = pane.overlay_origin_y / scale;
+    let w = pane.pixel_width as f64 / scale;
+    let h = pane.pixel_height as f64 / scale;
+    (x, y, w, h)
+} else {
+    // First creation, before any paint_pass. Best-effort initial placement.
+    let scale: f64 = msg_send![root_layer, contentsScale];
+    let scale = if scale > 0.0 { scale } else { 1.0 };
+    let w = pane.pixel_width as f64 / scale;
+    let h = pane.pixel_height as f64 / scale;
+    let (cell_w, cell_h, origin_x, origin_y, border_left, border_top) = super::metrics::get();
+    let x_backing = (origin_x as u64 + border_left as u64 + pane.col * cell_w as u64) as f64;
+    let y_backing = (origin_y as u64 + border_top as u64 + pane.row * cell_h as u64) as f64;
+    pane.overlay_origin_x = x_backing;
+    pane.overlay_origin_y = y_backing;
+    pane.overlay_scale = scale;
+    let x = x_backing / scale;
+    let y = y_backing / scale;
+    (x, y, w, h)
+};
+```
+
+No other files change.
+
+#### Verification
+
+Build:
+
+- [ ] `cd wezboard && cargo build` — compiles without errors.
+
+Functional (test on both screens):
+
+- [ ] Open a webview — positioned and sized correctly.
+- [ ] Split pane to the left — webview repositions to the right immediately.
+- [ ] Same test on second screen — webview repositions immediately (the bug).
+- [ ] Resize the window — webview tracks pane position.
+- [ ] Close the split pane — webview expands to fill.
+- [ ] Open a new tab, switch back — webview at correct position.
