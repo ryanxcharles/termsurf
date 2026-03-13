@@ -638,3 +638,126 @@ half-cell split offsets, possible coordinate system mismatch), producing correct
 results only when pos.left=0 (single pane) and wrong results when pos.left > 0
 (split panes). The next experiment must reuse `paint_pane()`'s actual computed
 values, not reconstruct them.
+
+### Experiment 3: Read pixel coordinates from paint_pane()
+
+#### Description
+
+`paint_pane()` already computes the exact pixel origin of each pane's cell grid:
+
+```rust
+// pane.rs line 341-343
+let left_pixel_x = padding_left
+    + border.left.get() as f32
+    + (pos.left as f32 * self.render_metrics.cell_size.width as f32);
+
+// pane.rs line 79
+let top_pixel_y = top_bar_height + padding_top + border.top.get() as f32;
+```
+
+The first cell of pane content renders at
+`(left_pixel_x, top_pixel_y + pos.top * cell_height)`. This is the terminal's
+authoritative position — it accounts for padding, borders, tab bar, split
+offsets, and every edge case.
+
+This experiment makes `paint_pane()` return these computed values so
+`paint_pass()` can read them and pass them directly to `set_overlay_frame()`. No
+separate formula. The overlay position is:
+
+```
+overlay_x = left_pixel_x + col * cell_width
+overlay_y = (top_pixel_y + pos.top * cell_height) + row * cell_height
+```
+
+Where `col` and `row` are the webview's offset within the pane (from the TUI
+protocol), and `cell_width`/`cell_height` come from `render_metrics` — the same
+values `paint_pane()` uses. The pane's pixel origin comes verbatim from
+`paint_pane()`.
+
+#### Changes
+
+**`wezboard-gui/src/termwindow/render/pane.rs` — return cell grid origin from
+`paint_pane()`:**
+
+Change the return type from `anyhow::Result<()>` to
+`anyhow::Result<(f32, f32)>`, returning
+`(left_pixel_x, top_pixel_y + pos.top * cell_height)` — the pixel position of
+the pane's first cell. Both values are already computed; this just passes them
+out.
+
+For the `use_box_model_render` early return (line 39), return `(0.0, 0.0)` — box
+model rendering is a separate path and we don't position overlays in it.
+
+**`wezboard-gui/src/termwindow/render/paint.rs` — use returned values:**
+
+In the `for pos in panes` loop, capture the return value from `paint_pane()` and
+use it to position the overlay:
+
+```rust
+let (pane_pixel_x, pane_pixel_y) = self.paint_pane(&pos, num_panes, &mut layers)
+    .context("paint_pane")?;
+
+// Update webview overlay position using paint_pane's coordinates.
+{
+    let pane_id = pos.pane.pane_id();
+    let overlay_info = crate::termsurf::state::global().and_then(|state| {
+        let st = state.lock().unwrap();
+        let id = pane_id.to_string();
+        st.panes
+            .get(&id)
+            .filter(|p| p.ca_layer_positioning != 0)
+            .map(|p| (p.col, p.row, p.pixel_width, p.pixel_height))
+    });
+    if let Some((col, row, pw, ph)) = overlay_info {
+        let cell_w = self.render_metrics.cell_size.width as f64;
+        let cell_h = self.render_metrics.cell_size.height as f64;
+        let x = pane_pixel_x as f64 + col as f64 * cell_w;
+        let y = pane_pixel_y as f64 + row as f64 * cell_h;
+        crate::termsurf::set_overlay_frame(
+            pane_id,
+            x, y,
+            pw as f64, ph as f64,
+        );
+    }
+}
+```
+
+No padding. No border. No tab bar. No edge-case branches. Those are all inside
+`paint_pane()` already and baked into `pane_pixel_x` and `pane_pixel_y`.
+
+**`wezboard-gui/src/termsurf/conn.rs` — add `set_overlay_frame()`:**
+
+Same function as experiment 2 (reads `contentsScale` from `ca_layer_positioning`
+layer, converts backing pixels to points, updates `overlay_origin_x/y/scale` for
+input.rs, sets CALayer frame). No changes from that design.
+
+**`wezboard-gui/src/termsurf/conn.rs` — keep `handle_ca_context()` with
+`update_ca_layer_frame()`:**
+
+Initial placement stays. The render pass takes over on the next frame.
+
+**`wezboard-gui/src/termsurf/conn.rs` — delete old helpers:**
+
+- Delete `reposition_all_overlays()` (both macOS and non-macOS).
+- Delete `get_pane_cell_position()`.
+
+Keep `get_pane_mux_window()` (used by `handle_ca_context`). Keep
+`update_ca_layer_frame()` (initial placement).
+
+**`wezboard-gui/src/termwindow/resize.rs` — remove `reposition_all_overlays()`
+call (line 93).**
+
+**`wezboard-gui/src/termsurf/mod.rs` — replace
+`pub use conn::reposition_all_overlays;` with
+`pub use conn::set_overlay_frame;`.**
+
+#### Verification
+
+1. `cd wezboard && cargo build` — compiles without errors.
+2. Open a webview in a single pane — correct position immediately.
+3. Split the pane (add pane to left) — webview stays at correct position in its
+   pane.
+4. Split the pane (add pane above) — same, webview tracks.
+5. Switch to a different tab, resize the window, switch back — webview correct.
+6. Resize while webview tab is active — webview tracks pane.
+7. Click inside webview — mouse events land at correct coordinates.
