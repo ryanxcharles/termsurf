@@ -102,3 +102,148 @@ reads.
 - `wezboard/wezboard-gui/src/termwindow/resize.rs` — Resize handler, calls
   `metrics::set()` and `reposition_all_overlays()`
 - `wezboard/mux/src/tab.rs` — `iter_panes_impl()`, split tree traversal
+
+## Experiments
+
+### Experiment 1: Position overlay from the render pass
+
+#### Description
+
+Move overlay positioning into `paint_pass()`, where `PositionedPane` and all
+layout values are already computed. Add a new function
+`termsurf::set_overlay_frame()` that takes pixel coordinates and updates the
+CALayer directly. Remove the old metrics-based positioning system.
+
+#### Changes
+
+**Add `set_overlay_frame()` to `wezboard-gui/src/termsurf/conn.rs`:**
+
+```rust
+#[cfg(target_os = "macos")]
+pub fn set_overlay_frame(pane_id: usize, x: f64, y: f64, w: f64, h: f64) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+
+    let Some(state) = super::state::global() else {
+        return;
+    };
+    let mut st = state.lock().unwrap();
+    let id = pane_id.to_string();
+    let Some(pane) = st.panes.get_mut(&id) else {
+        return;
+    };
+    if pane.ca_layer_positioning == 0 {
+        return;
+    }
+    unsafe {
+        let layer = pane.ca_layer_positioning as *mut AnyObject;
+        let frame = CGRect::new(CGPoint::new(x, y), CGSize::new(w, h));
+        let _: () = msg_send![layer, setFrame: frame];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_overlay_frame(_pane_id: usize, _x: f64, _y: f64, _w: f64, _h: f64) {}
+```
+
+**Call it from `paint_pass()` in
+`wezboard-gui/src/termwindow/render/paint.rs`:**
+
+After the existing `self.paint_pane()` and `self.paint_pane_border()` calls
+(lines 258-260), add an overlay position update for each pane. Compute the
+overlay's pixel origin using the same values `paint_pane()` uses:
+
+```rust
+for pos in panes {
+    // ... existing paint_pane / paint_pane_border calls ...
+
+    // Update webview overlay position using the same coordinates
+    // that paint_pane() uses for terminal content.
+    {
+        let cell_width = self.render_metrics.cell_size.width as f64;
+        let cell_height = self.render_metrics.cell_size.height as f64;
+        let (padding_left, padding_top) = self.padding_left_top();
+        let border = self.get_os_border();
+        let tab_bar_height = if self.show_tab_bar && !self.config.tab_bar_at_bottom {
+            self.tab_bar_pixel_height().unwrap_or(0.) as f64
+        } else {
+            0.0
+        };
+        let top_pixel_y = tab_bar_height + padding_top as f64 + border.top.get() as f64;
+
+        // Pane origin in points — same formula as paint_pane's background_rect
+        let pane_x = if pos.left == 0 {
+            padding_left as f64 + border.left.get() as f64
+        } else {
+            padding_left as f64 + border.left.get() as f64
+                + (pos.left as f64 * cell_width)
+        };
+        let pane_y = top_pixel_y + (pos.top as f64 * cell_height);
+
+        // Read overlay cell offset (col, row) from TermSurf state
+        let pane_id = pos.pane.pane_id();
+        let id_str = pane_id.to_string();
+        let overlay_info = {
+            if let Some(state) = crate::termsurf::state::global() {
+                let st = state.lock().unwrap();
+                st.panes.get(&id_str).map(|p| (p.col, p.row, p.pixel_width, p.pixel_height))
+            } else {
+                None
+            }
+        };
+        if let Some((col, row, pw, ph)) = overlay_info {
+            let x = pane_x + (col as f64 * cell_width);
+            let y = pane_y + (row as f64 * cell_height);
+            let w = pw as f64 / self.dimensions.dpi; // convert backing to points
+            let h = ph as f64 / self.dimensions.dpi;
+            crate::termsurf::set_overlay_frame(pane_id, x, y, w, h);
+        }
+    }
+}
+```
+
+Note: the backing-to-points conversion needs to match what
+`update_ca_layer_frame` currently does — dividing by the CALayer's
+`contentsScale`. We may need to pass the scale factor or retrieve it from the
+window's backing scale. The exact conversion will be verified during
+implementation.
+
+**Update `handle_set_overlay()` in `conn.rs`:**
+
+The `handle_set_overlay()` function currently uses `metrics::get()` to convert
+overlay cell dimensions to pixel dimensions (lines 440-450). This still needs
+cell metrics to compute `pixel_width`/`pixel_height` for the `Resize` message
+sent to Chromium. Keep `metrics::set()` for this purpose only — but it no longer
+drives positioning.
+
+**Remove old positioning code from `conn.rs`:**
+
+- Delete `update_ca_layer_frame()` (lines 1363-1407).
+- Delete `reposition_all_overlays()` (lines 1412-1440).
+- Delete `get_pane_cell_position()` (lines 1332-1360).
+- Remove `update_ca_layer_frame()` calls from `handle_ca_context()`.
+
+**Remove `reposition_all_overlays()` call from `resize.rs`:**
+
+Delete line 93 (`crate::termsurf::reposition_all_overlays();`). The render pass
+now handles repositioning every frame.
+
+**Clean up `state.rs` `Pane` struct:**
+
+Remove fields that are no longer needed:
+
+- `overlay_origin_x` — was cached for logging, no longer computed separately
+- `overlay_origin_y` — same
+- `overlay_scale` — same
+
+#### Verification
+
+1. Open a webview in a pane. It displays at the correct position.
+2. Split the pane. The webview stays correctly positioned in its pane.
+3. Switch to a different tab, resize the window, switch back. The webview is at
+   the correct position and size.
+4. Resize the window while the webview tab is active. The webview tracks the
+   pane position correctly.
+5. Open a second webview in a split pane. Both overlays are correctly
+   positioned.
