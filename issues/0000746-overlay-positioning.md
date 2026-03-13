@@ -321,3 +321,80 @@ Remove all assignments to these fields (in `handle_set_overlay`,
    pane position correctly.
 5. Open a second webview in a split pane. Both overlays are correctly
    positioned.
+
+**Result:** Fail
+
+Two problems observed:
+
+**Problem 1: Overlay starts at (0,0).** When a webview first opens, the overlay
+appears at the window origin (0,0) — ignoring all padding, borders, and tab bar.
+It stays there until something triggers a repaint (like a keypress).
+
+Root cause: We removed the `update_ca_layer_frame()` call from
+`handle_ca_context()`, relying on `paint_pass()` to position it on the next
+frame. But `paint_pass()` only runs when something triggers a repaint. After
+`handle_ca_context` adds the CALayer to the window's layer tree, there is no
+guaranteed repaint — the terminal content hasn't changed, so nothing invalidates
+the frame. The CALayer sits at its default (0,0) position until an external
+event (keypress, mouse move) forces a repaint.
+
+The old code positioned the overlay immediately inside `handle_ca_context`
+because it couldn't wait — there's no guarantee the render loop will run again
+soon. Deferring to the render pass created a race condition where the CALayer
+exists but hasn't been positioned yet.
+
+**Problem 2: After keypress, overlay moves but to the wrong position (too far
+down and to the right).** When a repaint finally happens and `paint_pass()`
+runs, the computed position overshoots.
+
+Root cause: The formula double-counts the pane's cell offset. `pos.left` and
+`pos.top` from `PositionedPane` already represent the pane's absolute cell
+position within the tab grid. But we then add `col` and `row` (the overlay's
+cell offset within the pane) using the same multiplication:
+
+```rust
+let x = pad_left + border_left + (pos.left + col) * cell_w;
+let y = top_y + (pos.top + row) * cell_h;
+```
+
+This is correct for the _content start_ of the overlay within the pane. But
+`paint_pane()` positions text at
+`padding_left + border.left + pos.left * cell_width` — the pane origin, not the
+overlay offset. The overlay's `(col, row)` offset is an additional displacement
+within the pane. So the formula itself is arithmetically correct, but the
+position it computes doesn't match what `paint_pane()` would give for the same
+pane corner, because `paint_pane()` starts at `(pos.left, pos.top)` and the
+overlay adds `(col, row)` on top.
+
+The more likely cause: `padding_left_top()` and `get_os_border()` return values
+in backing pixels (f32), and all the render pass arithmetic is in backing
+pixels. But the old code used the `metrics::get()` values (stored as u32 from
+the resize handler), which may have been computed differently or at a different
+time. The values from `padding_left_top()` might not exactly match what
+`metrics::set()` stored, leading to a systematic offset.
+
+Additionally, `tab_bar_pixel_height()` returns `Result<f32>` and the old code
+path through `metrics::set()` in `resize.rs` computed `top_bar_height` slightly
+differently (as a single `f32` passed to `metrics::set`). Any floating-point
+discrepancy between the two paths would show up as a position error.
+
+#### Conclusion
+
+The approach of deferring overlay positioning entirely to the render pass has
+two fundamental problems:
+
+1. **Timing gap.** The CALayer must be positioned when it's created, not on the
+   next repaint. There's no guarantee a repaint happens promptly after
+   `handle_ca_context`. The old code positioned immediately because it had to.
+
+2. **Value mismatch.** Even when the render pass does run, computing the
+   position from `padding_left_top()`, `get_os_border()`, and
+   `tab_bar_pixel_height()` in `paint_pass()` doesn't produce the same result as
+   the old metrics-based path. The render pass values and the metrics values may
+   differ due to when they're computed and how they're rounded.
+
+The next experiment should keep immediate positioning in `handle_ca_context` (so
+the overlay is never at 0,0) and focus on fixing the three original bugs
+(active-tab-only lookup, formula mismatch, no reposition on tab switch) without
+removing the initial positioning step. The render pass can _update_ the position
+every frame, but it must not be the _only_ place that sets it.
