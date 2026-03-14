@@ -96,13 +96,13 @@ remain untouched.
 scripts/build.sh wezboard
 ```
 
-| #   | Test                    | Steps                                          | Expected                              |
-| --- | ----------------------- | ---------------------------------------------- | ------------------------------------- |
-| 1   | No flash in right split | Split pane, run `web google.com` in right pane | Webview appears on right, no flash    |
-| 2   | No flash in left split  | Split pane, run `web google.com` in left pane  | Webview appears on left, no flash     |
-| 3   | No flash without split  | Single pane, run `web google.com`              | Webview appears normally              |
-| 4   | Resize after split      | Open webview in right split, resize window     | Webview repositions correctly         |
-| 5   | Split after webview     | Open webview, then split pane                  | Webview resizes/repositions correctly |
+| # | Test                    | Steps                                          | Expected                              |
+| - | ----------------------- | ---------------------------------------------- | ------------------------------------- |
+| 1 | No flash in right split | Split pane, run `web google.com` in right pane | Webview appears on right, no flash    |
+| 2 | No flash in left split  | Split pane, run `web google.com` in left pane  | Webview appears on left, no flash     |
+| 3 | No flash without split  | Single pane, run `web google.com`              | Webview appears normally              |
+| 4 | Resize after split      | Open webview in right split, resize window     | Webview repositions correctly         |
+| 5 | Split after webview     | Open webview, then split pane                  | Webview resizes/repositions correctly |
 
 **Result:** Fail
 
@@ -121,3 +121,57 @@ authorities — it's caused by the gap between CALayerHost creation and the firs
 instead of approximately correct). The fix needs to either (a) make
 `update_ca_layer_frame()` split-aware so the first frame is correct, or (b)
 defer CALayerHost visibility until `set_overlay_frame()` has run at least once.
+
+### Experiment 2: Hide positioning layer until first set_overlay_frame
+
+#### Description
+
+Create the positioning layer hidden at CALayerHost creation time. Unhide it on
+the first `set_overlay_frame()` call. This way the overlay is invisible during
+the gap between creation and the first paint pass, then appears at the correct
+split-aware position.
+
+This is better than making `update_ca_layer_frame()` split-aware because:
+
+- It keeps positioning in one place (`set_overlay_frame()`)
+- It works for future multiple-webviews-per-pane where each webview's position
+  is independent and only known at render time
+- `update_ca_layer_frame()` can be deleted since it's no longer needed
+
+#### Changes
+
+**`wezboard/wezboard-gui/src/termsurf/conn.rs`**
+
+1. In `get_or_create_overlay()` (~line 1155), after creating the overlay NSView,
+   set it hidden:
+
+   ```rust
+   let _: () = msg_send![overlay, setHidden: Bool::YES];
+   ```
+
+2. Remove the call to `update_ca_layer_frame(pane, root_layer)` at ~line 1286.
+
+3. Delete the entire `update_ca_layer_frame()` function (~lines 1330-1369).
+
+4. In `set_overlay_frame()` (~line 1372), after setting the frame, unhide the
+   overlay if it's hidden. Add a `overlay_hidden` bool to the `Pane` struct
+   (default `true`), flip it to `false` on the first `set_overlay_frame()` call,
+   and call `setHidden: NO` on the overlay NSView.
+
+**`wezboard/wezboard-gui/src/termsurf/state.rs`**
+
+5. Add `pub overlay_hidden: bool` to the `Pane` struct, defaulting to `true`.
+
+#### Verification
+
+```bash
+scripts/build.sh wezboard
+```
+
+| # | Test                    | Steps                                          | Expected                              |
+| - | ----------------------- | ---------------------------------------------- | ------------------------------------- |
+| 1 | No flash in right split | Split pane, run `web google.com` in right pane | Webview appears on right, no flash    |
+| 2 | No flash in left split  | Split pane, run `web google.com` in left pane  | Webview appears on left, no flash     |
+| 3 | No flash without split  | Single pane, run `web google.com`              | Webview appears normally              |
+| 4 | Resize after split      | Open webview in right split, resize window     | Webview repositions correctly         |
+| 5 | Split after webview     | Open webview, then split pane                  | Webview resizes/repositions correctly |
