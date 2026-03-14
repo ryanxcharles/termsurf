@@ -9,98 +9,175 @@ content-editable regions, and selecting text on a read-only page.
 
 ## Background
 
-Keyboard input is forwarded to Chromium via `ts_forward_key_event()` (Issue
-728). When the user presses Cmd+C in browse mode, Wezboard sends a `KeyEvent`
-to Roamium, which calls `ts_forward_key_event(wc, 0, VK_C, "c", CMD)`. Chromium
-receives this and Blink processes it as an editing command.
+### The Chromium side is already solved
 
-However, clipboard operations fail silently. The most likely cause is that
-Chromium's clipboard path goes through the `blink::mojom::ClipboardHost` Mojo
-interface, and the Content Shell setup used by libtermsurf_chromium may not bind
-this interface. This is the same class of problem identified in the Mojo
-interface audit TODO item — the renderer crashes or silently fails when it calls
-a Mojo API that the embedder hasn't registered.
+Issue 609 (Ghostboard) solved clipboard for Chromium. The key learning:
+**Chromium's renderer does not re-interpret raw keyboard events.** On macOS,
+Chromium's input path works like this:
 
-### How Chromium clipboard works internally
+1. NSEvent → `interpretKeyEvents:` → Cocoa calls `doCommandBySelector:`
+2. The selector is converted to an editing command string (`"copy"`, `"paste"`)
+3. `ForwardKeyboardEventWithCommands` sends the key event AND the editing
+   commands to the renderer
+4. The renderer applies the commands directly — it never looks at the raw key
+   event
 
-1. Blink receives the Cmd+C editing command
-2. Blink calls `ClipboardHost::WriteText()` via Mojo IPC (renderer → browser)
-3. The browser process handles the Mojo call in `ClipboardHostImpl`
-4. `ClipboardHostImpl` calls `ui::Clipboard::WriteText()`
-5. On macOS, `ui::Clipboard` writes to `NSPasteboard`
+Issue 609 Experiment 4 fixed this by using `ForwardKeyboardEventWithCommands`
+with explicit editing commands for Cmd+key combinations. This code was carried
+forward into `libtermsurf_chromium` — the current
+`TsBrowserMainParts::ForwardKeyEvent` in `ts_browser_main_parts.cc` already uses
+`ForwardKeyboardEventWithCommands` with the correct command mapping:
 
-For paste, the reverse: Blink calls `ClipboardHost::ReadText()`, the browser
-reads from `NSPasteboard`, and sends the result back via Mojo.
+- Cmd+A → `"selectAll"`
+- Cmd+C → `"copy"`
+- Cmd+V → `"paste"`
+- Cmd+X → `"cut"`
+- Cmd+Z → `"undo"`
 
-### Prior art: CEF (Issue 206)
+The Chromium side needs no changes.
 
-The old CEF-based architecture handled clipboard differently — it called
-`frame.copy()` / `frame.paste()` / `frame.cut()` directly via FFI because CEF
-ran in the same process. This isn't possible in TermSurf's multi-process
-architecture where Roamium and Wezboard are separate processes communicating via
-Unix sockets.
+### Prior art: CEF (Issues 206, 318)
 
-However, if the Mojo interface is properly bound, we may not need any protocol
-changes at all. Chromium's browser process (running inside Roamium) has direct
-access to `NSPasteboard`. The clipboard operations would be handled entirely
-within the Roamium process — Blink sends clipboard data via Mojo to the browser
-process, the browser process reads/writes `NSPasteboard`. No IPC to Wezboard
-needed.
+The ts2/ts3 CEF architecture used direct `frame.copy()` / `frame.paste()` /
+`frame.cut()` FFI calls. Key learnings:
 
-### Current protocol (no clipboard messages)
+- **macOS clipboard asymmetry:** Background processes can WRITE to the clipboard
+  but cannot READ it. Paste required proxying through the GUI.
+- **Key event synthesis is unsafe:** Simulating key events through message loops
+  caused re-entrancy panics. Direct API calls are safer.
+- **Menu shortcuts intercept before key events:** `performKeyEquivalent` on
+  macOS consumes Cmd+key before `keyDown` fires.
 
-The TermSurf protocol has 31 message types. None are clipboard-related. If the
-Mojo path works, no new messages are needed — clipboard stays internal to
-Chromium/Roamium.
+### The real problem: Wezboard intercepts Cmd+C/V before the browser sees them
 
-## Analysis
+The key event pipeline in Wezboard has two stages:
 
-There are two possible failure modes:
+1. **`raw_key_event_impl()`** — Called first. Passes `OnlyKeyBindings::Yes` to
+   `process_key()`. This causes `try_forward_key()` to return `None` (line 74 of
+   `input.rs`), skipping the browser forward. Then `process_key()` checks
+   keybindings and finds Cmd+C → `CopyTo(Clipboard)`, which copies the terminal
+   selection. The event is marked handled.
 
-### 1. Missing Mojo binding (most likely)
+2. **`key_event_impl()`** — Called second, but only if the raw handler didn't
+   consume the event. Passes `OnlyKeyBindings::No`. Would correctly forward to
+   the browser, but never runs because step 1 already consumed the event.
 
-`ClipboardHostImpl` is registered in Chrome's `RenderFrameHostImpl` but may not
-be bound in the Content Shell setup. If `ClipboardHost` isn't registered,
-clipboard Mojo calls from the renderer are silently dropped. This would explain
-why copy/paste fails without any crash.
+The flow:
 
-**Fix:** Ensure `ClipboardHostImpl` is bound in the browser process. This may
-already be handled by `content::RenderFrameHostImpl` (which does bind
-`ClipboardHost` by default), in which case the problem is elsewhere.
+```
+Cmd+C pressed
+  → raw_key_event_impl()
+    → process_key(OnlyKeyBindings::Yes)
+      → try_forward_key(only_key_bindings=true)
+        → returns None (skips browser)           ← BUG
+      → lookup_key() finds Cmd+C → CopyTo
+      → copies terminal text, marks handled
+  → key_event_impl() never called
+  → browser never sees the event
+```
 
-### 2. Key event not triggering editing commands
+The fix: when `only_key_bindings` is true but the pane is in browse mode,
+forward to the browser instead of returning `None`. Browse mode should take
+priority over terminal keybindings for keys that the browser needs.
 
-`ts_forward_key_event()` injects events at the `WebInputEvent` level via
-`RenderWidgetHost::ForwardKeyboardEvent()`. This should trigger Blink's editing
-command handling, but there may be a missing step — Chrome normally processes
-Cmd+C at the browser level (via accelerators) before it reaches the renderer.
-If the editing command doesn't fire, no clipboard call happens at all.
+### macOS `performKeyEquivalent`
 
-**Fix:** Either ensure the key event reaches Blink's editing command handler, or
-add a dedicated `ts_exec_command()` C API that calls
-`web_contents->GetFocusedFrame()->ExecuteEditingCommand("copy")` directly.
+Wezboard's `perform_key_equivalent` (in `window.rs:3085`) returns `Bool::NO` for
+Cmd+C/V, letting macOS route them to `keyDown`. This is fine — the problem is
+entirely in the Rust key processing pipeline, not in the macOS event layer.
+(Ghostboard had the opposite problem — its `performKeyEquivalent` consumed
+Cmd+key events before they reached the forwarding code.)
 
-### Proposed approach
+## Experiments
 
-1. **Diagnose first.** Add logging in Chromium to determine whether (a) the
-   Cmd+C key event reaches Blink's editing command handler, and (b) the
-   `ClipboardHost` Mojo interface is bound.
+### Experiment 1: Forward Cmd+key in browse mode
 
-2. **Fix the Mojo binding** if that's the issue. This is the minimal fix — no
-   protocol changes, no new C API functions.
+#### Description
 
-3. **If key events don't trigger editing commands**, add `ts_exec_command()` to
-   the C API and call it from Roamium when it receives a KeyEvent that matches
-   Cmd+C/V/X. Alternatively, handle clipboard at the Wezboard level by
-   intercepting Cmd+C/V/X before forwarding and using the system clipboard
-   directly — but this would require new protocol messages
-   (`ClipboardWrite`/`ClipboardRead`) and is more complex.
+Change `try_forward_key()` in `input.rs` to forward key events to the browser
+when the pane is in browse mode, even when `only_key_bindings` is true. This is
+a one-line change: remove the early `return None` when `only_key_bindings` is
+true, and instead check browse mode first.
 
-### Files likely involved
+The current code:
 
-- `chromium/src/content/libtermsurf_chromium/libtermsurf_chromium.cc` — may need
-  Mojo binding or new C API
-- `chromium/src/content/libtermsurf_chromium/libtermsurf_chromium.h` — C API
-  header if adding `ts_exec_command()`
-- `roamium/src/dispatch.rs` — may need to intercept clipboard key events
-- `roamium/src/ffi.rs` — FFI bindings if adding new C functions
+```rust
+if only_key_bindings {
+    return None;
+}
+// ... check browsing, forward to browser
+```
+
+Should become:
+
+```rust
+// Check browse mode BEFORE checking only_key_bindings.
+// When browsing, the browser gets the key — even if this is the
+// keybindings-only pass (raw_key_event_impl). This prevents terminal
+// bindings like Cmd+C → CopyTo from stealing clipboard shortcuts.
+```
+
+#### Changes
+
+**`wezboard/wezboard-gui/src/termsurf/input.rs`** — In `try_forward_key()`, move
+the browse mode check before the `only_key_bindings` check:
+
+```rust
+pub fn try_forward_key(
+    pane_id: usize,
+    keycode: &KeyCode,
+    modifiers: Modifiers,
+    is_down: bool,
+    key_event: Option<&::window::KeyEvent>,
+    only_key_bindings: bool,
+) -> Option<bool> {
+    let pane_id_str = pane_id.to_string();
+    let state = super::shared_state()?;
+    let browsing = {
+        let st = state.lock().unwrap();
+        let pane = st.panes.get(&pane_id_str)?;
+        pane.browsing
+    };
+
+    if !browsing {
+        if only_key_bindings {
+            return None;
+        }
+        return None;
+    }
+
+    // Pane is browsing — forward to browser regardless of only_key_bindings.
+
+    // Esc key press (no Ctrl) exits browse mode
+    // ... rest unchanged
+```
+
+The `!browsing` branch returns `None` either way, keeping the existing behavior
+for non-browsing panes. When browsing, the function falls through to send the
+key to Chromium — `only_key_bindings` is ignored because the browser should
+receive all key events in browse mode.
+
+#### Verification
+
+```bash
+scripts/build.sh wezboard
+scripts/install.sh wezboard
+```
+
+Launch Wezboard, open a web page with `web`, click a text field to enter browse
+mode.
+
+| # | Test                      | Steps                                             | Expected                      |
+| - | ------------------------- | ------------------------------------------------- | ----------------------------- |
+| 1 | Cmd+C copies browser text | Select text on page, Cmd+C, paste in terminal     | Browser selection pasted      |
+| 2 | Cmd+V pastes into browser | Copy text in terminal, click browser field, Cmd+V | Text appears in browser field |
+| 3 | Cmd+X cuts browser text   | Select text in browser field, Cmd+X               | Text removed, on clipboard    |
+| 4 | Cmd+A selects all         | Click browser field with text, Cmd+A, type "X"    | All text replaced with "X"    |
+| 5 | Cmd+Z undoes              | Type "hello", Cmd+A, type "X", Cmd+Z              | "hello" restored              |
+| 6 | Regular typing works      | Type "hello" in browser field                     | "hello" appears               |
+| 7 | Esc exits browse mode     | Press Esc                                         | Returns to control mode       |
+| 8 | Cmd+C in control mode     | Exit browse mode, Cmd+C                           | Copies terminal selection     |
+| 9 | Cmd+V in control mode     | Exit browse mode, Cmd+V                           | Pastes into terminal          |
+
+Tests 8-9 are regression checks — Cmd+C/V must still work normally outside
+browse mode.
