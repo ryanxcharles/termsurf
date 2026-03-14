@@ -137,10 +137,27 @@ scripts/install.sh all
 
 Test:
 
-| # | Test                        | Steps                                                | Expected                                |
-| - | --------------------------- | ---------------------------------------------------- | --------------------------------------- |
-| 1 | target="\_blank" link       | Visit a page with a `target="_blank"` link, click it | Current tab navigates to the link's URL |
-| 2 | window.open()               | Visit a page that calls `window.open()`, trigger it  | Current tab navigates to the opened URL |
-| 3 | Normal links still work     | Click a regular link (no target attribute)           | Navigates normally                      |
-| 4 | Back/forward after redirect | After a target="\_blank" redirect, press back        | Returns to previous page                |
-| 5 | No orphan windows           | After all tests, check for stray Chromium windows    | No orphaned Shell windows               |
+| #   | Test                        | Steps                                                | Expected                                |
+| --- | --------------------------- | ---------------------------------------------------- | --------------------------------------- |
+| 1   | target="\_blank" link       | Visit a page with a `target="_blank"` link, click it | Current tab navigates to the link's URL |
+| 2   | window.open()               | Visit a page that calls `window.open()`, trigger it  | Current tab navigates to the opened URL |
+| 3   | Normal links still work     | Click a regular link (no target attribute)           | Navigates normally                      |
+| 4   | Back/forward after redirect | After a target="\_blank" redirect, press back        | Returns to previous page                |
+| 5   | No orphan windows           | After all tests, check for stray Chromium windows    | No orphaned Shell windows               |
+
+**Result:** Pass
+
+All five tests pass.
+
+#### Conclusion
+
+The Issue 639 fix re-applied cleanly to the current Content Shell paths. The
+three `WebContentsDelegate` overrides suppress new window creation and navigate
+the current tab instead.
+
+## Conclusion
+
+Re-applied the Issue 639 `target="_blank"` fix to the current Chromium branch
+(`146.0.7650.0-issue-750`). Links with `target="_blank"` and `window.open()`
+calls now navigate the current tab. No changes needed in Roamium or Wezboard —
+the fix is entirely in Content Shell's `WebContentsDelegate`.
