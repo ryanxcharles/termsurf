@@ -20,6 +20,7 @@ pub struct Pane {
     pub dark: bool,
     pub inspected_tab_id: i64,
     pub ca_context_id: u32,
+    pub pending_context_id: Option<u32>,
     pub ca_layer_host: usize,
     pub ca_layer_flipped: usize,
     pub ca_layer_positioning: usize,

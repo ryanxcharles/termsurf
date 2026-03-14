@@ -1,6 +1,6 @@
 use crate::termwindow::{RenderFrame, TermWindowNotif};
-use ::window::bitmaps::atlas::OutOfTextureSpace;
 use ::window::WindowOps;
+use ::window::bitmaps::atlas::OutOfTextureSpace;
 use anyhow::Context;
 use smol::Timer;
 use std::time::{Duration, Instant};
@@ -268,22 +268,41 @@ impl crate::TermWindow {
                     let id = pane_id.to_string();
                     st.panes
                         .get(&id)
-                        .filter(|p| p.ca_layer_positioning != 0)
-                        .map(|p| (p.col, p.row, p.pixel_width, p.pixel_height))
+                        .filter(|p| p.ca_layer_positioning != 0 || p.pending_context_id.is_some())
+                        .map(|p| {
+                            (
+                                p.col,
+                                p.row,
+                                p.pixel_width,
+                                p.pixel_height,
+                                p.pending_context_id,
+                            )
+                        })
                 });
-                if let Some((col, row, pw, ph)) = overlay_info {
+                if let Some((col, row, pw, ph, pending)) = overlay_info {
                     let cell_w = self.render_metrics.cell_size.width as f64;
                     let cell_h = self.render_metrics.cell_size.height as f64;
                     let x = pane_pixel_x as f64 + col as f64 * cell_w;
                     let y = pane_pixel_y as f64 + row as f64 * cell_h;
-                    crate::termsurf::set_overlay_frame(
-                        pane_id,
-                        x,
-                        y,
-                        pw as f64,
-                        ph as f64,
-                        self.dimensions.dpi,
-                    );
+                    if pending.is_some() {
+                        crate::termsurf::create_pending_ca_layer_host(
+                            pane_id,
+                            x,
+                            y,
+                            pw as f64,
+                            ph as f64,
+                            self.dimensions.dpi,
+                        );
+                    } else {
+                        crate::termsurf::set_overlay_frame(
+                            pane_id,
+                            x,
+                            y,
+                            pw as f64,
+                            ph as f64,
+                            self.dimensions.dpi,
+                        );
+                    }
                 }
             }
         }

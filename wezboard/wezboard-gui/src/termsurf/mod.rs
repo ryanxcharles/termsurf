@@ -8,6 +8,7 @@ pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/termsurf.rs"));
 }
 
+pub use conn::create_pending_ca_layer_host;
 pub use conn::set_overlay_frame;
 pub use listener::spawn_termsurf_server;
 pub use state::global as shared_state;

@@ -73,14 +73,14 @@ use raw_window_handle::{
 };
 use std::any::Any;
 use std::cell::RefCell;
-use std::ffi::{CStr, c_void};
+use std::ffi::{c_void, CStr};
 use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::time::Instant;
 use wezboard_font::FontConfiguration;
-use wezboard_input_types::{IntegratedTitleButtonStyle, KeyboardLedStatus, is_ascii_control};
+use wezboard_input_types::{is_ascii_control, IntegratedTitleButtonStyle, KeyboardLedStatus};
 
 #[allow(non_upper_case_globals)]
 const NSViewLayerContentsPlacementTopLeft: isize = 11;

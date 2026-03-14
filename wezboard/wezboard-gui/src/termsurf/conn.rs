@@ -1,13 +1,13 @@
 use super::proto;
-use super::proto::term_surf_message::Msg;
 use super::proto::TermSurfMessage;
+use super::proto::term_surf_message::Msg;
 use super::state::{Pane, Server, SharedState, TermSurfState};
 use anyhow::Context;
 use prost::Message;
 use sha2::{Digest, Sha256};
+use smol::Async;
 use smol::channel::Sender;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
-use smol::Async;
 use std::collections::HashSet;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
@@ -516,6 +516,7 @@ fn handle_set_overlay(
         dark: false,
         inspected_tab_id: 0,
         ca_context_id: 0,
+        pending_context_id: None,
         ca_layer_host: 0,
         ca_layer_flipped: 0,
         ca_layer_positioning: 0,
@@ -640,6 +641,7 @@ fn handle_set_devtools_overlay(
         dark: false,
         inspected_tab_id: overlay.inspected_tab_id,
         ca_context_id: 0,
+        pending_context_id: None,
         ca_layer_host: 0,
         ca_layer_flipped: 0,
         ca_layer_positioning: 0,
@@ -1162,7 +1164,7 @@ fn get_or_create_overlay(
         let _: () = msg_send![root_layer, setOpaque: Bool::NO];
         // Set contentsScale to match the screen's backing scale factor (2.0 on Retina).
         // Without this, contentsScale defaults to 1.0 and all pixel→point conversions
-        // in update_ca_layer_frame are wrong.
+        // in set_overlay_frame are wrong.
         let window: *mut AnyObject = msg_send![superview, window];
         if !window.is_null() {
             let backing_scale: f64 = msg_send![window, backingScaleFactor];
@@ -1193,7 +1195,7 @@ fn get_or_create_overlay(
 fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
     use objc2::msg_send;
     use objc2::runtime::{AnyObject, Bool};
-    use objc2_core_foundation::{CGPoint, CGRect};
+    use objc2_core_foundation::CGPoint;
 
     let mut st = state.lock().unwrap();
     let Some(pane_id) = st.tab_to_pane.get(&ca_context.tab_id).cloned() else {
@@ -1210,8 +1212,8 @@ fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
         return;
     };
 
-    // Get or create overlay before borrowing pane mutably
-    let Some(root_layer) = get_or_create_overlay(&mut st, mux_window_id) else {
+    // Ensure overlay NSView exists before borrowing pane mutably
+    if get_or_create_overlay(&mut st, mux_window_id).is_none() {
         log::warn!("handle_ca_context: no overlay root layer");
         return;
     };
@@ -1235,56 +1237,20 @@ fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
         pane.pixel_height = ca_context.pixel_height;
     }
 
-    unsafe {
-        let ca_transaction = cls(b"CATransaction\0");
-        let _: () = msg_send![ca_transaction, begin];
-        let _: () = msg_send![ca_transaction, setDisableActions: Bool::YES];
-
-        if pane.ca_layer_host == 0 {
-            // First time: create the 3-layer hierarchy
-            let ca_layer_class = cls(b"CALayer\0");
-            let ca_layer_host_class = cls(b"CALayerHost\0");
-
-            // flipped_layer
-            let flipped: *mut AnyObject = msg_send![ca_layer_class, layer];
-            let _: () = msg_send![flipped, setGeometryFlipped: Bool::YES];
-            let zero_point = CGPoint::new(0.0, 0.0);
-            let _: () = msg_send![flipped, setAnchorPoint: zero_point];
-            let _: () = msg_send![flipped, setAutoresizingMask: 18u32]; // widthSizable | heightSizable
-            let parent_bounds: CGRect = msg_send![root_layer, bounds];
-            let _: () = msg_send![flipped, setFrame: parent_bounds];
-            let _: () = msg_send![root_layer, addSublayer: flipped];
-            let _: *mut AnyObject = msg_send![flipped, retain];
-
-            // positioning_layer
-            let positioning: *mut AnyObject = msg_send![ca_layer_class, layer];
-            let _: () = msg_send![positioning, setAnchorPoint: zero_point];
-            let _: () = msg_send![flipped, addSublayer: positioning];
-            let _: *mut AnyObject = msg_send![positioning, retain];
-
-            // CALayerHost
-            let host: *mut AnyObject = msg_send![ca_layer_host_class, layer];
-            let _: () = msg_send![host, setContextId: context_id];
-            let _: () = msg_send![host, setAnchorPoint: zero_point];
-            let _: () = msg_send![host, setAutoresizingMask: 36u32]; // maxXMargin | maxYMargin
-            let _: () = msg_send![positioning, addSublayer: host];
-            let _: *mut AnyObject = msg_send![host, retain];
-
-            pane.ca_layer_flipped = flipped as usize;
-            pane.ca_layer_positioning = positioning as usize;
-            pane.ca_layer_host = host as usize;
-
-            log::info!(
-                "CALayerHost created: pane_id={} contextId={} flipped={:#x} host={:#x}",
-                pane_id,
-                context_id,
-                pane.ca_layer_flipped,
-                pane.ca_layer_host
-            );
-
-            // Position the overlay
-            update_ca_layer_frame(pane, root_layer);
-        } else {
+    if pane.ca_layer_host == 0 {
+        // Defer CALayerHost creation to the render pass, which knows the
+        // correct split-aware position. This avoids a one-frame flash.
+        pane.pending_context_id = Some(context_id);
+        log::info!(
+            "deferred CALayerHost creation: pane_id={} contextId={}",
+            pane_id,
+            context_id
+        );
+    } else {
+        unsafe {
+            let ca_transaction = cls(b"CATransaction\0");
+            let _: () = msg_send![ca_transaction, begin];
+            let _: () = msg_send![ca_transaction, setDisableActions: Bool::YES];
             // Atomic swap: create new host, add, remove old, release old
             let ca_layer_host_class = cls(b"CALayerHost\0");
             let new_host: *mut AnyObject = msg_send![ca_layer_host_class, layer];
@@ -1304,9 +1270,9 @@ fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
             pane.ca_layer_host = new_host as usize;
 
             log::info!("swapped CALayerHost contextId={}", context_id);
-        }
 
-        let _: () = msg_send![ca_transaction, commit];
+            let _: () = msg_send![ca_transaction, commit];
+        }
     }
 }
 
@@ -1325,47 +1291,6 @@ fn get_pane_mux_window(pane_id: &str) -> Option<mux::window::WindowId> {
         }
     }
     None
-}
-
-#[cfg(target_os = "macos")]
-unsafe fn update_ca_layer_frame(pane: &mut Pane, root_layer: *mut objc2::runtime::AnyObject) {
-    use objc2::msg_send;
-    use objc2::runtime::AnyObject;
-    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-
-    let scale: f64 = msg_send![root_layer, contentsScale];
-    let scale = if scale > 0.0 { scale } else { 1.0 };
-    let w = pane.pixel_width as f64 / scale;
-    let h = pane.pixel_height as f64 / scale;
-    let (cell_w, cell_h, origin_x, origin_y, border_left, border_top) = super::metrics::get();
-    let x_backing = (origin_x as u64 + border_left as u64 + pane.col * cell_w as u64) as f64;
-    let y_backing = (origin_y as u64 + border_top as u64 + pane.row * cell_h as u64) as f64;
-    pane.overlay_origin_x = x_backing;
-    pane.overlay_origin_y = y_backing;
-    pane.overlay_scale = scale;
-    let x = x_backing / scale;
-    let y = y_backing / scale;
-
-    log::info!(
-        "update_ca_layer_frame: pane_id={} origin=({},{}) border=({},{}) cell=({},{}) scale={} → frame=({:.1},{:.1},{:.1},{:.1})",
-        pane.pane_id,
-        origin_x,
-        origin_y,
-        border_left,
-        border_top,
-        cell_w,
-        cell_h,
-        scale,
-        x,
-        y,
-        w,
-        h
-    );
-
-    let frame = CGRect::new(CGPoint::new(x, y), CGSize::new(w, h));
-
-    let positioning = pane.ca_layer_positioning as *mut AnyObject;
-    let _: () = msg_send![positioning, setFrame: frame];
 }
 
 #[cfg(target_os = "macos")]
@@ -1417,6 +1342,120 @@ pub fn set_overlay_frame(
 
 #[cfg(not(target_os = "macos"))]
 pub fn set_overlay_frame(_pane_id: usize, _x: f64, _y: f64, _w: f64, _h: f64, _dpi: usize) {}
+
+#[cfg(target_os = "macos")]
+pub fn create_pending_ca_layer_host(
+    pane_id: usize,
+    x_backing: f64,
+    y_backing: f64,
+    w_backing: f64,
+    h_backing: f64,
+    dpi: usize,
+) {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyObject, Bool};
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+
+    let Some(state) = super::state::global() else {
+        return;
+    };
+    let mut st = state.lock().unwrap();
+    let id = pane_id.to_string();
+
+    let context_id = match st.panes.get_mut(&id) {
+        Some(pane) => match pane.pending_context_id.take() {
+            Some(id) => id,
+            None => return,
+        },
+        None => return,
+    };
+
+    let Some(mux_window_id) = get_pane_mux_window(&id) else {
+        return;
+    };
+    let Some(root_layer) = get_or_create_overlay(&mut st, mux_window_id) else {
+        return;
+    };
+
+    let pane = st.panes.get_mut(&id).unwrap();
+
+    let scale = dpi as f64 / 72.0;
+    let scale = if scale > 0.0 { scale } else { 1.0 };
+
+    pane.overlay_origin_x = x_backing;
+    pane.overlay_origin_y = y_backing;
+    pane.overlay_scale = scale;
+
+    let x = x_backing / scale;
+    let y = y_backing / scale;
+    let w = w_backing / scale;
+    let h = h_backing / scale;
+
+    unsafe {
+        let ca_transaction = cls(b"CATransaction\0");
+        let _: () = msg_send![ca_transaction, begin];
+        let _: () = msg_send![ca_transaction, setDisableActions: Bool::YES];
+
+        let ca_layer_class = cls(b"CALayer\0");
+        let ca_layer_host_class = cls(b"CALayerHost\0");
+
+        // flipped_layer
+        let flipped: *mut AnyObject = msg_send![ca_layer_class, layer];
+        let _: () = msg_send![flipped, setGeometryFlipped: Bool::YES];
+        let zero_point = CGPoint::new(0.0, 0.0);
+        let _: () = msg_send![flipped, setAnchorPoint: zero_point];
+        let _: () = msg_send![flipped, setAutoresizingMask: 18u32]; // widthSizable | heightSizable
+        let parent_bounds: CGRect = msg_send![root_layer, bounds];
+        let _: () = msg_send![flipped, setFrame: parent_bounds];
+        let _: () = msg_send![root_layer, addSublayer: flipped];
+        let _: *mut AnyObject = msg_send![flipped, retain];
+
+        // positioning_layer — created at the correct position
+        let positioning: *mut AnyObject = msg_send![ca_layer_class, layer];
+        let _: () = msg_send![positioning, setAnchorPoint: zero_point];
+        let frame = CGRect::new(CGPoint::new(x, y), CGSize::new(w, h));
+        let _: () = msg_send![positioning, setFrame: frame];
+        let _: () = msg_send![flipped, addSublayer: positioning];
+        let _: *mut AnyObject = msg_send![positioning, retain];
+
+        // CALayerHost
+        let host: *mut AnyObject = msg_send![ca_layer_host_class, layer];
+        let _: () = msg_send![host, setContextId: context_id];
+        let _: () = msg_send![host, setAnchorPoint: zero_point];
+        let _: () = msg_send![host, setAutoresizingMask: 36u32]; // maxXMargin | maxYMargin
+        let _: () = msg_send![positioning, addSublayer: host];
+        let _: *mut AnyObject = msg_send![host, retain];
+
+        pane.ca_layer_flipped = flipped as usize;
+        pane.ca_layer_positioning = positioning as usize;
+        pane.ca_layer_host = host as usize;
+
+        log::info!(
+            "CALayerHost created at ({:.1},{:.1},{:.1},{:.1}): pane_id={} contextId={} flipped={:#x} host={:#x}",
+            x,
+            y,
+            w,
+            h,
+            pane_id,
+            context_id,
+            pane.ca_layer_flipped,
+            pane.ca_layer_host
+        );
+
+        let _: () = msg_send![ca_transaction, commit];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn create_pending_ca_layer_host(
+    _pane_id: usize,
+    _x: f64,
+    _y: f64,
+    _w: f64,
+    _h: f64,
+    _dpi: usize,
+) {
+}
 
 #[cfg(target_os = "macos")]
 fn remove_ca_layers(host: usize, positioning: usize, flipped: usize) {
