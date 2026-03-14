@@ -35,6 +35,19 @@ function HomePage() {
   return (
     <>
       <section className="mb-8">
+        <h1 className="text-lg font-bold text-primary">
+          Root access to the 'net.
+        </h1>
+        <p className="text-sm text-muted mt-3">
+          Control the web from your terminal. TermSurf is a protocol that embeds
+          web browsers inside terminal emulators — any engine, any terminal,
+          total control.
+        </p>
+        <div className="mt-4 text-muted text-xs">
+          ──────────────────────────────────────────────────────────
+        </div>
+      </section>
+      <section className="mb-8">
         <h2 className="text-sm font-bold text-foreground mb-4">
           ┌─ Latest Post ─┐
         </h2>
