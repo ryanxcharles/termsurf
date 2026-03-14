@@ -140,9 +140,6 @@ pub fn try_forward_key(
     };
 
     if !browsing {
-        if only_key_bindings {
-            return None;
-        }
         return None;
     }
 
@@ -152,10 +149,9 @@ pub fn try_forward_key(
     // ... rest unchanged
 ```
 
-The `!browsing` branch returns `None` either way, keeping the existing behavior
-for non-browsing panes. When browsing, the function falls through to send the
-key to Chromium — `only_key_bindings` is ignored because the browser should
-receive all key events in browse mode.
+When not browsing, return `None` so terminal keybindings work normally. When
+browsing, fall through to send the key to Chromium — `only_key_bindings` is
+ignored because the browser should receive all key events in browse mode.
 
 #### Verification
 
