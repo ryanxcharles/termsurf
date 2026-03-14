@@ -48,79 +48,78 @@ The ts2/ts3 CEF architecture used direct `frame.copy()` / `frame.paste()` /
 - **Menu shortcuts intercept before key events:** `performKeyEquivalent` on
   macOS consumes Cmd+key before `keyDown` fires.
 
-### The real problem: Wezboard intercepts Cmd+C/V before the browser sees them
+### The real problem: macOS menu system eats Cmd+C/V/X before Rust code sees them
 
-The key event pipeline in Wezboard has two stages:
+The macOS event flow for Cmd+C:
 
-1. **`raw_key_event_impl()`** — Called first. Passes `OnlyKeyBindings::Yes` to
-   `process_key()`. This causes `try_forward_key()` to return `None` (line 74 of
-   `input.rs`), skipping the browser forward. Then `process_key()` checks
-   keybindings and finds Cmd+C → `CopyTo(Clipboard)`, which copies the terminal
-   selection. The event is marked handled.
+1. macOS calls `performKeyEquivalent` on the view
+2. Wezboard returns `Bool::NO` — "I didn't handle this"
+3. macOS checks the menu bar, finds **Edit → Copy to clipboard** (Cmd+C)
+4. macOS invokes `wezboardPerformKeyAssignment:` → `CopyTo(Clipboard)`
+5. Terminal copies its selection to the system clipboard
+6. **`keyDown` is never called** → `key_common` never runs → `try_forward_key`
+   never runs → the browser never sees the event
 
-2. **`key_event_impl()`** — Called second, but only if the raw handler didn't
-   consume the event. Passes `OnlyKeyBindings::No`. Would correctly forward to
-   the browser, but never runs because step 1 already consumed the event.
+The Rust key processing pipeline (`raw_key_event_impl` → `process_key` →
+`try_forward_key`) never executes for Cmd+C/V because the macOS menu system
+consumes the event at step 3. This is the same problem Ghostboard had (Issue 609
+Experiment 2) — just manifesting through the menu bar instead of
+`performKeyEquivalent` bindings.
 
-The flow:
+### Two-part fix
 
-```
-Cmd+C pressed
-  → raw_key_event_impl()
-    → process_key(OnlyKeyBindings::Yes)
-      → try_forward_key(only_key_bindings=true)
-        → returns None (skips browser)           ← BUG
-      → lookup_key() finds Cmd+C → CopyTo
-      → copies terminal text, marks handled
-  → key_event_impl() never called
-  → browser never sees the event
-```
+The fix requires changes in two layers:
 
-The fix: when `only_key_bindings` is true but the pane is in browse mode,
-forward to the browser instead of returning `None`. Browse mode should take
-priority over terminal keybindings for keys that the browser needs.
+1. **`perform_key_equivalent`** (window crate, `window.rs`): When the Cmd
+   modifier is held and the character is one of `c`, `v`, `x`, `a`, `z`, route
+   the event through `key_common` and return `Bool::YES`. This prevents the
+   macOS menu system from intercepting the event. We only intercept these
+   specific keys — other Cmd+key combos (Cmd+T, Cmd+W, Cmd+N) must still reach
+   the menu system.
 
-### macOS `performKeyEquivalent`
+2. **`try_forward_key`** (wezboard-gui, `input.rs`): Check browse mode before
+   the `only_key_bindings` guard. When browsing, forward to the browser. When
+   not browsing, return `None` so the normal keybinding lookup handles Cmd+C →
+   `CopyTo` for terminal copy.
 
-Wezboard's `perform_key_equivalent` (in `window.rs:3085`) returns `Bool::NO` for
-Cmd+C/V, letting macOS route them to `keyDown`. This is fine — the problem is
-entirely in the Rust key processing pipeline, not in the macOS event layer.
-(Ghostboard had the opposite problem — its `performKeyEquivalent` consumed
-Cmd+key events before they reached the forwarding code.)
+Together: `perform_key_equivalent` ensures the event reaches Rust code, and
+`try_forward_key` routes it to either the browser (browse mode) or the terminal
+keybinding system (control mode).
 
 ## Experiments
 
-### Experiment 1: Forward Cmd+key in browse mode
+### Experiment 1: Bypass menu system for clipboard keys in browse mode
 
 #### Description
 
-Change `try_forward_key()` in `input.rs` to forward key events to the browser
-when the pane is in browse mode, even when `only_key_bindings` is true. This is
-a one-line change: remove the early `return None` when `only_key_bindings` is
-true, and instead check browse mode first.
-
-The current code:
-
-```rust
-if only_key_bindings {
-    return None;
-}
-// ... check browsing, forward to browser
-```
-
-Should become:
-
-```rust
-// Check browse mode BEFORE checking only_key_bindings.
-// When browsing, the browser gets the key — even if this is the
-// keybindings-only pass (raw_key_event_impl). This prevents terminal
-// bindings like Cmd+C → CopyTo from stealing clipboard shortcuts.
-```
+Two changes that work together to route Cmd+C/V/X/A/Z to the browser when in
+browse mode, while preserving terminal clipboard behavior in control mode.
 
 #### Changes
 
-**`wezboard/wezboard-gui/src/termsurf/input.rs`** — In `try_forward_key()`, move
-the browse mode check before the `only_key_bindings` check:
+**`wezboard/window/src/os/macos/window.rs`** — In `perform_key_equivalent`,
+before the `Bool::NO` fallthrough, add a check for clipboard-related Cmd+key
+events. Route them through `key_common` to bypass the menu system:
+
+```rust
+if modifiers == Modifiers::SUPER
+    && matches!(chars, "a" | "c" | "v" | "x" | "z")
+{
+    Self::key_common(this, nsevent, true);
+    return Bool::YES;
+}
+```
+
+This goes after the existing Cmd+period / Ctrl+Esc / Ctrl+Tab / Shift+Tab block
+and before the `Bool::NO` return. It uses the same `key_common` + `Bool::YES`
+pattern that already exists for Ctrl+Esc.
+
+This unconditionally intercepts these five keys — it doesn't check browse mode
+because the `window` crate has no access to TermSurf state. The browse mode
+routing happens in the next layer.
+
+**`wezboard/wezboard-gui/src/termsurf/input.rs`** — In `try_forward_key()`,
+check browse mode before the `only_key_bindings` guard:
 
 ```rust
 pub fn try_forward_key(
@@ -149,9 +148,9 @@ pub fn try_forward_key(
     // ... rest unchanged
 ```
 
-When not browsing, return `None` so terminal keybindings work normally. When
-browsing, fall through to send the key to Chromium — `only_key_bindings` is
-ignored because the browser should receive all key events in browse mode.
+When browsing, the browser gets the key. When not browsing, `try_forward_key`
+returns `None`, and `process_key` falls through to the keybinding lookup which
+finds Cmd+C → `CopyTo(Clipboard)` — terminal copy still works.
 
 #### Verification
 
@@ -163,17 +162,19 @@ scripts/install.sh wezboard
 Launch Wezboard, open a web page with `web`, click a text field to enter browse
 mode.
 
-| # | Test                      | Steps                                             | Expected                      |
-| - | ------------------------- | ------------------------------------------------- | ----------------------------- |
-| 1 | Cmd+C copies browser text | Select text on page, Cmd+C, paste in terminal     | Browser selection pasted      |
-| 2 | Cmd+V pastes into browser | Copy text in terminal, click browser field, Cmd+V | Text appears in browser field |
-| 3 | Cmd+X cuts browser text   | Select text in browser field, Cmd+X               | Text removed, on clipboard    |
-| 4 | Cmd+A selects all         | Click browser field with text, Cmd+A, type "X"    | All text replaced with "X"    |
-| 5 | Cmd+Z undoes              | Type "hello", Cmd+A, type "X", Cmd+Z              | "hello" restored              |
-| 6 | Regular typing works      | Type "hello" in browser field                     | "hello" appears               |
-| 7 | Esc exits browse mode     | Press Esc                                         | Returns to control mode       |
-| 8 | Cmd+C in control mode     | Exit browse mode, Cmd+C                           | Copies terminal selection     |
-| 9 | Cmd+V in control mode     | Exit browse mode, Cmd+V                           | Pastes into terminal          |
+| #  | Test                      | Steps                                             | Expected                      |
+| -- | ------------------------- | ------------------------------------------------- | ----------------------------- |
+| 1  | Cmd+C copies browser text | Select text on page, Cmd+C, paste in terminal     | Browser selection pasted      |
+| 2  | Cmd+V pastes into browser | Copy text in terminal, click browser field, Cmd+V | Text appears in browser field |
+| 3  | Cmd+X cuts browser text   | Select text in browser field, Cmd+X               | Text removed, on clipboard    |
+| 4  | Cmd+A selects all         | Click browser field with text, Cmd+A, type "X"    | All text replaced with "X"    |
+| 5  | Cmd+Z undoes              | Type "hello", Cmd+A, type "X", Cmd+Z              | "hello" restored              |
+| 6  | Regular typing works      | Type "hello" in browser field                     | "hello" appears               |
+| 7  | Esc exits browse mode     | Press Esc                                         | Returns to control mode       |
+| 8  | Cmd+C in control mode     | Exit browse mode, Cmd+C                           | Copies terminal selection     |
+| 9  | Cmd+V in control mode     | Exit browse mode, Cmd+V                           | Pastes into terminal          |
+| 10 | Cmd+T still works         | Press Cmd+T                                       | Opens new tab                 |
+| 11 | Cmd+W still works         | Press Cmd+W                                       | Closes current tab            |
 
-Tests 8-9 are regression checks — Cmd+C/V must still work normally outside
-browse mode.
+Tests 8-9 verify terminal clipboard still works in control mode. Tests 10-11
+verify that non-clipboard Cmd+key shortcuts still route through the menu system.
