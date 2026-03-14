@@ -11,9 +11,9 @@ function HomePage() {
     <>
       <section className="mb-8">
         <h2 className="text-sm font-bold text-foreground mb-4">
-          ┌─ Blog ─┐
+          ┌─ Latest Post ─┐
         </h2>
-        <p className="text-muted text-sm">Coming soon.</p>
+        <p className="text-muted text-sm">No posts yet.</p>
       </section>
       <CommitLog commits={commitsData.commits.slice(0, 10)} />
     </>

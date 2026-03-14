@@ -2,7 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { $icon } from "../util/icons";
 
 const NAV_ITEMS = [
-  { to: "/", label: "blog" },
+  { to: "/blog", label: "blog" },
   { to: "/commits", label: "commits" },
   { to: "/docs", label: "docs" },
   { to: "/about", label: "about" },
