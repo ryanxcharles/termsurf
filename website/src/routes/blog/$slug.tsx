@@ -4,6 +4,9 @@ import { getBlogPost } from "../../server/blog";
 
 export const Route = createFileRoute("/blog/$slug")({
   loader: ({ params: { slug } }) => getBlogPost({ data: slug }),
+  head: ({ loaderData }) => ({
+    meta: [{ title: `${loaderData?.title ?? "post"} — TermSurf` }],
+  }),
   component: BlogPost,
 });
 

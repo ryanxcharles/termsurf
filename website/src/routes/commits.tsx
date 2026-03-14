@@ -3,6 +3,7 @@ import { CommitLog } from "../components/CommitLog";
 import commitsData from "../../data/commits.json";
 
 export const Route = createFileRoute("/commits")({
+  head: () => ({ meta: [{ title: "commits — TermSurf" }] }),
   component: CommitsPage,
 });
 
