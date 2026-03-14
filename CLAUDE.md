@@ -297,6 +297,7 @@ Recent issues:
   (render-pass based)
 - `issues/0000747-multiscreen-overlay.md` — Overlay doesn't reposition on split
   (second screen)
+- `issues/0000748-clipboard.md` — Browser clipboard (copy/cut/paste)
 
 ### Early Prototypes (ts1–ts5)
 
