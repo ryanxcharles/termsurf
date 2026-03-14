@@ -1,16 +1,31 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Outlet } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/blog")({
-  component: BlogPage,
+  component: BlogLayout,
+  head: () => ({
+    links: [
+      {
+        rel: "alternate",
+        type: "application/json",
+        title: "JSON Feed",
+        href: "/blog/feed.json",
+      },
+      {
+        rel: "alternate",
+        type: "application/atom+xml",
+        title: "Atom Feed",
+        href: "/blog/feed.atom.xml",
+      },
+      {
+        rel: "alternate",
+        type: "application/rss+xml",
+        title: "RSS Feed",
+        href: "/blog/feed.rss.xml",
+      },
+    ],
+  }),
 });
 
-function BlogPage() {
-  return (
-    <section>
-      <h2 className="text-sm font-bold text-foreground mb-4">
-        ┌─ Blog ─┐
-      </h2>
-      <p className="text-muted text-sm">Coming soon.</p>
-    </section>
-  );
+function BlogLayout() {
+  return <Outlet />;
 }
