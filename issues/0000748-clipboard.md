@@ -162,19 +162,19 @@ scripts/install.sh wezboard
 Launch Wezboard, open a web page with `web`, click a text field to enter browse
 mode.
 
-| #   | Test                      | Steps                                             | Expected                      |
-| --- | ------------------------- | ------------------------------------------------- | ----------------------------- |
-| 1   | Cmd+C copies browser text | Select text on page, Cmd+C, paste in terminal     | Browser selection pasted      |
-| 2   | Cmd+V pastes into browser | Copy text in terminal, click browser field, Cmd+V | Text appears in browser field |
-| 3   | Cmd+X cuts browser text   | Select text in browser field, Cmd+X               | Text removed, on clipboard    |
-| 4   | Cmd+A selects all         | Click browser field with text, Cmd+A, type "X"    | All text replaced with "X"    |
-| 5   | Cmd+Z undoes              | Type "hello", Cmd+A, type "X", Cmd+Z              | "hello" restored              |
-| 6   | Regular typing works      | Type "hello" in browser field                     | "hello" appears               |
-| 7   | Esc exits browse mode     | Press Esc                                         | Returns to control mode       |
-| 8   | Cmd+C in control mode     | Exit browse mode, Cmd+C                           | Copies terminal selection     |
-| 9   | Cmd+V in control mode     | Exit browse mode, Cmd+V                           | Pastes into terminal          |
-| 10  | Cmd+T still works         | Press Cmd+T                                       | Opens new tab                 |
-| 11  | Cmd+W still works         | Press Cmd+W                                       | Closes current tab            |
+| #  | Test                      | Steps                                             | Expected                      |
+| -- | ------------------------- | ------------------------------------------------- | ----------------------------- |
+| 1  | Cmd+C copies browser text | Select text on page, Cmd+C, paste in terminal     | Browser selection pasted      |
+| 2  | Cmd+V pastes into browser | Copy text in terminal, click browser field, Cmd+V | Text appears in browser field |
+| 3  | Cmd+X cuts browser text   | Select text in browser field, Cmd+X               | Text removed, on clipboard    |
+| 4  | Cmd+A selects all         | Click browser field with text, Cmd+A, type "X"    | All text replaced with "X"    |
+| 5  | Cmd+Z undoes              | Type "hello", Cmd+A, type "X", Cmd+Z              | "hello" restored              |
+| 6  | Regular typing works      | Type "hello" in browser field                     | "hello" appears               |
+| 7  | Esc exits browse mode     | Press Esc                                         | Returns to control mode       |
+| 8  | Cmd+C in control mode     | Exit browse mode, Cmd+C                           | Copies terminal selection     |
+| 9  | Cmd+V in control mode     | Exit browse mode, Cmd+V                           | Pastes into terminal          |
+| 10 | Cmd+T still works         | Press Cmd+T                                       | Opens new tab                 |
+| 11 | Cmd+W still works         | Press Cmd+W                                       | Closes current tab            |
 
 Tests 8-9 verify terminal clipboard still works in control mode. Tests 10-11
 verify that non-clipboard Cmd+key shortcuts still route through the menu system.
@@ -399,3 +399,28 @@ The targeted carve-out approach works. The key lessons:
 3. Physical keycodes need explicit VK mapping since `keycode_to_windows_vk` only
    handled `Char` variants, and the `OnlyKeyBindings::Yes` passes use
    `KeyCode::Physical`.
+
+## Conclusion
+
+Copy, cut, paste, select all, and undo (Cmd+C/X/V/A/Z) now work in browser
+overlays. The fix has two parts: `perform_key_equivalent` intercepts these five
+Cmd+keys before the macOS menu system can consume them, and `try_forward_key`
+routes them to the browser during browse mode's keybinding-only passes.
+
+The Chromium side needed no changes — `ForwardKeyboardEventWithCommands` from
+Issue 609 already handles editing commands correctly.
+
+Key architectural finding: WezTerm's key pipeline calls `process_key` multiple
+times per keystroke with `OnlyKeyBindings::Yes` before the final
+`OnlyKeyBindings::No` pass. Any interception of keys that have default
+keybindings (like Cmd+C → `CopyTo`) must happen during the `Yes` passes, or the
+keybinding consumes the event first and the `No` pass never runs. The
+`perform_key_equivalent` interception alone is insufficient — it gets the event
+into the Rust pipeline, but the keybinding lookup still wins. The targeted
+carve-out in `try_forward_key` is what actually routes the event to the browser.
+
+Note: these five keys now bypass the macOS menu system unconditionally (both
+browse and control mode). In control mode they still reach the correct
+keybinding via `raw_key_event_impl` instead of the menu path. If the menu flash
+animation or menu item validation is ever needed, browse mode state would need
+to be exposed to the window crate.
