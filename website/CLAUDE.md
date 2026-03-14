@@ -152,6 +152,37 @@ Cypherpunk / brutalist terminal aesthetic:
 - **Dense layout.** Tight spacing, less padding.
 - **Scanline overlay.** Subtle CRT scanlines via `body::after` in globals.css.
 
+### Voice
+
+We write like Wired Issue 1.02. Breathless. Electric. Like we just plugged into
+something bigger than ourselves and we're trying to explain it before the
+connection drops. The 'net is a living thing and we're inside it. Every sentence
+should make the reader want to open a terminal.
+
+- **Write like a dispatch from cyberspace.** Not a product page. Not a pitch
+  deck. A dispatch.
+- **The 'net is alive.** It hums. It sprawls. It doesn't have "users" — it has
+  citizens, rebels, explorers. TermSurf doesn't "help you browse" — it jacks
+  you into the web from the command line.
+- **Declare, don't sell.** "The web runs in your terminal" — not "TermSurf
+  provides an integrated browsing experience."
+- **Verbs that hack.** "Fork." "Hack." "Override." "Intercept." "Jack in."
+  Never "leverage," "utilize," "onboard," or "streamline."
+- **Name the metal.** Chromium, WebKit, Gecko, Unix sockets, protobuf,
+  CALayerHost. The reader wants to know what's under the hood. Tell them. They
+  can handle it.
+- **First person plural.** *We* wrote this. *We* ship the code. *You* run it.
+  This isn't a corporation talking. It's a mailing list.
+- **Short sentences.** Staccato. Let them hit. Information wants to be free and
+  it doesn't want to wait for your subordinate clause.
+- **Lowercase is default.** UPPERCASE IS FOR SHOUTING. Title Case is for suits.
+- **Bracket links like it's Usenet.** `[fork the source]` `[read the protocol]`
+  — not "Get Started" buttons with drop shadows.
+- **No adjectives that sell.** No "powerful." No "innovative." No "seamless." If
+  the thing is good, the reader will feel it in their chest.
+- **Address the reader like they have root.** "Your terminal." "Your keyboard."
+  Not "end users." Not "customers." You're an operator. Act like one.
+
 ### Welcome page
 
 The `/welcome` route is a standalone Three.js 3D experience. It has its own
