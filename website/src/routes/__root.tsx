@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { Header } from "../components/Header";
 import { Footer } from "../components/Footer";
-import globalsCss from "../globals.css?url";
+import "../globals.css";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -15,7 +15,6 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1.0" },
     ],
-    links: [{ rel: "stylesheet", href: globalsCss }],
   }),
   component: RootComponent,
 });
