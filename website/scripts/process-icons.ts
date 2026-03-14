@@ -36,10 +36,7 @@ async function processFile(file: string) {
       outputPaths.push(webPath);
 
       if (format === "ico") {
-        const buffer = await sharp(sourcePath)
-          .resize(size, size)
-          .toFormat("png")
-          .toBuffer();
+        const buffer = await sharp(sourcePath).resize(size, size).toFormat("png").toBuffer();
         const icoBuffer = await pngToIco([buffer]);
         fs.writeFileSync(outputPath, new Uint8Array(icoBuffer));
       } else {

@@ -39,9 +39,7 @@ function CommitRow({ commit }: { commit: Commit }) {
       >
         <span className="text-muted">{expanded ? "[-]" : "[+]"}</span>
         <code className="text-secondary">{commit.hash.slice(0, 7)}</code>
-        <span className="text-foreground truncate flex-1">
-          {commit.message}
-        </span>
+        <span className="text-foreground truncate flex-1">{commit.message}</span>
         <span className="text-success">{commit.author}</span>
         <span className="text-muted">{formatRelativeDate(commit.date)}</span>
       </button>
@@ -49,23 +47,26 @@ function CommitRow({ commit }: { commit: Commit }) {
       {expanded && (
         <div className="ml-10 mb-2">
           <pre className="text-xs leading-none whitespace-pre-wrap">
-            <span className="text-muted">┌──────────────────────────────────────────────────────{"\n"}</span>
+            <span className="text-muted">
+              ┌──────────────────────────────────────────────────────{"\n"}
+            </span>
             {commit.body && commit.body.length > 0 ? (
               commit.body.split("\n").map((line, i) => (
                 <span key={i}>
                   <span className="text-muted">│</span>
-                  <span className="text-foreground-dark"> {line}</span>{"\n"}
+                  <span className="text-foreground-dark"> {line}</span>
+                  {"\n"}
                 </span>
               ))
             ) : (
               <span>
                 <span className="text-muted">│</span>
-                <span className="text-muted italic"> No commit message</span>{"\n"}
+                <span className="text-muted italic"> No commit message</span>
+                {"\n"}
               </span>
             )}
             <span>
-              <span className="text-muted">│</span>
-              {" "}
+              <span className="text-muted">│</span>{" "}
               <a
                 href={`${GITHUB_REPO}/commit/${commit.hash}`}
                 target="_blank"
@@ -73,9 +74,12 @@ function CommitRow({ commit }: { commit: Commit }) {
                 className="text-accent hover:text-primary"
               >
                 [view on GitHub]
-              </a>{"\n"}
+              </a>
+              {"\n"}
             </span>
-            <span className="text-muted">└──────────────────────────────────────────────────────</span>
+            <span className="text-muted">
+              └──────────────────────────────────────────────────────
+            </span>
           </pre>
         </div>
       )}
@@ -86,9 +90,7 @@ function CommitRow({ commit }: { commit: Commit }) {
 export function CommitLog({ commits }: CommitLogProps) {
   return (
     <section>
-      <h2 className="text-sm font-bold text-foreground mb-2">
-        ┌─ Recent Commits ─┐
-      </h2>
+      <h2 className="text-sm font-bold text-foreground mb-2">┌─ Recent Commits ─┐</h2>
       <ul>
         {commits.map((commit) => (
           <CommitRow key={commit.hash} commit={commit} />

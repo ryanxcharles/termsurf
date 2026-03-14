@@ -87,12 +87,12 @@ protobuf over Unix domain sockets.
 Every browser engine runs as a separate process speaking the same protocol.
 This means TermSurf is not tied to any single engine:
 
-| Engine   | Binary   | Status     |
-| -------- | -------- | ---------- |
-| Chromium | Roamium  | Working    |
-| WebKit   | Surfari  | Planned    |
-| Gecko    | Waterwolf| Planned    |
-| Ladybird | Girlbat  | Planned    |
+| Engine   | Binary    | Status  |
+| -------- | --------- | ------- |
+| Chromium | Roamium   | Working |
+| WebKit   | Surfari   | Planned |
+| Gecko    | Waterwolf | Planned |
+| Ladybird | Girlbat   | Planned |
 
 Each engine follows the same pattern: a C shared library wrapping the engine's
 embedding API, linked by a Rust binary that handles Unix socket IPC, protobuf

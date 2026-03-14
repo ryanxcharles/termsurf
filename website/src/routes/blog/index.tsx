@@ -9,9 +9,7 @@ export const Route = createFileRoute("/blog/")({
 function BlogIndex() {
   return (
     <section>
-      <h2 className="text-sm font-bold text-foreground mb-4">
-        ┌─ Blog ─┐
-      </h2>
+      <h2 className="text-sm font-bold text-foreground mb-4">┌─ Blog ─┐</h2>
       <ul>
         {blogData.posts.map((post) => (
           <li key={post.slug} className="py-1">
@@ -21,9 +19,7 @@ function BlogIndex() {
               className="flex gap-3 items-baseline text-sm hover:bg-background-highlight/30"
             >
               <span className="text-muted">{post.date}</span>
-              <span className="text-accent hover:text-primary flex-1">
-                {post.title}
-              </span>
+              <span className="text-accent hover:text-primary flex-1">{post.title}</span>
               <span className="text-success">{post.author}</span>
             </Link>
           </li>

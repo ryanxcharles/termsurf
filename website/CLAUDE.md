@@ -6,13 +6,13 @@ routing via the Vite plugin.
 
 ## Build Commands
 
-| Command | Purpose |
-| --- | --- |
-| `bun run dev` | Start dev server |
-| `bun run build` | TanStack Start production build (client + server) |
-| `bun run build:blog` | Generate blog.json + feeds from blog-posts/ |
-| `bun run build:commits` | Generate commits.json from git history |
-| `bun run build:data` | Run all data generators (commits + blog) |
+| Command                 | Purpose                                           |
+| ----------------------- | ------------------------------------------------- |
+| `bun run dev`           | Start dev server                                  |
+| `bun run build`         | TanStack Start production build (client + server) |
+| `bun run build:blog`    | Generate blog.json + feeds from blog-posts/       |
+| `bun run build:commits` | Generate commits.json from git history            |
+| `bun run build:data`    | Run all data generators (commits + blog)          |
 
 Always run `build:data` before `build` to ensure data files are up to date.
 
@@ -25,13 +25,13 @@ Routes live in `src/routes/`. The TanStack Start Vite plugin generates
 
 ### Naming conventions
 
-| Pattern | Example | URL |
-| --- | --- | --- |
-| Index | `routes/index.tsx` | `/` |
-| Static | `routes/about.tsx` | `/about` |
-| Dynamic param | `routes/blog/$slug.tsx` | `/blog/:slug` |
-| Layout (with URL) | `routes/blog.tsx` | Wraps all `/blog/*` children |
-| Pathless layout | `routes/_app/dashboard.tsx` | `/dashboard` (layout without URL segment) |
+| Pattern           | Example                     | URL                                       |
+| ----------------- | --------------------------- | ----------------------------------------- |
+| Index             | `routes/index.tsx`          | `/`                                       |
+| Static            | `routes/about.tsx`          | `/about`                                  |
+| Dynamic param     | `routes/blog/$slug.tsx`     | `/blog/:slug`                             |
+| Layout (with URL) | `routes/blog.tsx`           | Wraps all `/blog/*` children              |
+| Pathless layout   | `routes/_app/dashboard.tsx` | `/dashboard` (layout without URL segment) |
 
 ### Server functions
 
@@ -71,7 +71,9 @@ Dynamic segments use `$` in filenames. Access with `Route.useLoaderData()` or
 `Route.useParams()`:
 
 ```tsx
-<Link to="/blog/$slug" params={{ slug: post.slug }}>Read</Link>
+<Link to="/blog/$slug" params={{ slug: post.slug }}>
+  Read
+</Link>
 ```
 
 ### Root route
@@ -171,7 +173,7 @@ should make the reader want to open a terminal.
 - **Name the metal.** Chromium, WebKit, Gecko, Unix sockets, protobuf,
   CALayerHost. The reader wants to know what's under the hood. Tell them. They
   can handle it.
-- **First person plural.** *We* wrote this. *We* ship the code. *You* run it.
+- **First person plural.** _We_ wrote this. _We_ ship the code. _You_ run it.
   This isn't a corporation talking. It's a mailing list.
 - **Short sentences.** Staccato. Let them hit. Information wants to be free and
   it doesn't want to wait for your subordinate clause.

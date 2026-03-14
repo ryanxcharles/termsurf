@@ -35,20 +35,15 @@ function HomePage() {
   return (
     <>
       <section className="mb-8">
-        <h1 className="text-lg font-bold text-primary">
-          Root access to the 'net.
-        </h1>
+        <h1 className="text-lg font-bold text-primary">Root access to the 'net.</h1>
         <p className="text-sm text-muted mt-3">
           Hack the web from your terminal.{" "}
           <span className="bg-accent text-background">
-            TermSurf is a protocol that overlays web browser engines, like
-            Chromium and WebKit, in your terminal emulator.
+            TermSurf is a protocol that overlays web browser engines, like Chromium and WebKit, in
+            your terminal emulator.
           </span>{" "}
           Unlimited power to control every web page from your keyboard.{" "}
-          <a
-            href="https://github.com/termsurf/termsurf"
-            className="text-accent hover:text-primary"
-          >
+          <a href="https://github.com/termsurf/termsurf" className="text-accent hover:text-primary">
             [fork the source on GitHub]
           </a>
         </p>
@@ -57,18 +52,14 @@ function HomePage() {
         </div>
       </section>
       <section className="mb-8">
-        <h2 className="text-sm font-bold text-foreground mb-4">
-          ┌─ Latest Post ─┐
-        </h2>
+        <h2 className="text-sm font-bold text-foreground mb-4">┌─ Latest Post ─┐</h2>
         {latestPost ? (
           <Link
             to="/blog/$slug"
             params={{ slug: latestPost.slug }}
             className="block hover:bg-background-highlight/30 text-sm"
           >
-            <span className="text-accent hover:text-primary">
-              {latestPost.title}
-            </span>
+            <span className="text-accent hover:text-primary">{latestPost.title}</span>
             <span className="text-muted ml-3">{latestPost.date}</span>
             <span className="text-success ml-3">{latestPost.author}</span>
           </Link>

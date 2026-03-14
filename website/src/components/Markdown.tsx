@@ -8,10 +8,7 @@ import remarkMath from "remark-math";
 import remarkSmartypants from "remark-smartypants";
 
 const remarkPlugins = [remarkSmartypants, remarkGfm, remarkMath];
-const rehypePlugins = [
-  rehypeKatex,
-  [rehypeHighlight, { languages: common }] as const,
-];
+const rehypePlugins = [rehypeKatex, [rehypeHighlight, { languages: common }] as const];
 
 export function Markdown({ content }: { content: string }) {
   return (

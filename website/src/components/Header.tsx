@@ -29,11 +29,7 @@ export function Header() {
               <Link
                 key={to}
                 to={to}
-                className={
-                  active
-                    ? "text-primary"
-                    : "text-muted hover:text-accent"
-                }
+                className={active ? "text-primary" : "text-muted hover:text-accent"}
               >
                 {active ? `>[${label}]` : `[${label}]`}
               </Link>

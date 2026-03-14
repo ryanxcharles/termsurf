@@ -1,7 +1,4 @@
-import {
-  createStartHandler,
-  defaultStreamHandler,
-} from "@tanstack/react-start/server";
+import { createStartHandler, defaultStreamHandler } from "@tanstack/react-start/server";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 

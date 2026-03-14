@@ -52,10 +52,7 @@ function buildBlog() {
   const blogData: BlogData = {
     posts: posts.map(({ content: _, ...meta }) => meta),
   };
-  writeFileSync(
-    join(DATA_DIR, "blog.json"),
-    JSON.stringify(blogData, null, 2) + "\n",
-  );
+  writeFileSync(join(DATA_DIR, "blog.json"), JSON.stringify(blogData, null, 2) + "\n");
   console.log(`  blog.json: ${posts.length} posts (metadata only)`);
 
   // Generate feeds
