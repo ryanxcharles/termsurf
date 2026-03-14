@@ -1,6 +1,328 @@
 {
-  "generatedAt": "2026-03-12T13:07:42.963Z",
+  "generatedAt": "2026-03-14T14:24:45.785Z",
   "commits": [
+    {
+      "hash": "54d6c6597a86d4359d0997efd1755dbe91b34ee0",
+      "message": "Fix ASCII art line spacing in blog posts",
+      "body": "The art had gaps between each row,\nLike a picket fence letting wind blow.\nline-height: 1 —\nNow the lines touch, it's done,\nBox-drawing chars in one seamless flow.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T09:22:31-05:00"
+    },
+    {
+      "hash": "2142f3f182f36db2e4ba71522c0ce43b75a7fe8c",
+      "message": "Fix commit detail box-drawing borders",
+      "body": "CSS border-left, you served us well,\nBut beside ASCII lines you looked like hell.\nNow one <pre> holds the frame—\n┌ │ └ — all the same,\nNo gaps, no seams, one monospace shell.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T09:20:20-05:00"
+    },
+    {
+      "hash": "fbddcd834730531538ed914583e6a7c37f5acf4e",
+      "message": "Proper Case nav, titles, and view-all links",
+      "body": "The labels stood lowercase, meek,\nNow Proper Case gives them mystique.\nTwo \"view all\" links appear,\nMuted, quiet, but clear—\nFor the curious operator to seek.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T09:15:58-05:00"
+    },
+    {
+      "hash": "d784b2240da3aa9209cd0eb63bc1143245ccbf7c",
+      "message": "Add page titles to all routes",
+      "body": "Every tab said \"TermSurf\" — nothing more,\nNo hint of the page you'd come for.\nNow blog, docs, about,\nEach title rings out,\nLike nameplates on every front door.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T09:09:26-05:00"
+    },
+    {
+      "hash": "78c705e8a79c9b6541bb4d43408d081a6ff826c9",
+      "message": "Add voice guidelines to website CLAUDE.md",
+      "body": "The aesthetic had monospace and scan lines,\nBut the words had no rules, no guidelines.\nNow we write like it's '93,\nDispatches from cyberspace, free—\nNo \"leverage.\" No \"seamless.\" Just punch lines.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T09:05:37-05:00"
+    },
+    {
+      "hash": "cfa295cba07b1eae878c30752ff28bde9effec9d",
+      "message": "Add GitHub link to hero section",
+      "body": "No download yet, no binary to ship,\nBut the source is there for the taking.\nA bracket link whispers, \"fork this,\"\nTo every cypherpunk in the making.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T08:57:59-05:00"
+    },
+    {
+      "hash": "79fea41b1104810c444b6e3d0eec781166c6e677",
+      "message": "Update hero copy with cypherpunk tone",
+      "body": "Hack the web, not \"control\" it—\nUnlimited power, keyboard-lit.\nChromium, WebKit, overlaid,\nIn your terminal, unafraid.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T08:56:06-05:00"
+    },
+    {
+      "hash": "462a1f6cfff46d67ce3b003061d76bdb615c1e45",
+      "message": "Add hero tagline to home page",
+      "body": "Root access to the 'net—\nA tagline the homepage now wears.\nNo more jumping to posts,\nFirst we make our boasts,\nThen the content beneath it declares.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T08:50:03-05:00"
+    },
+    {
+      "hash": "e869a76c5a6b633e3fa0500873950077ef034bad",
+      "message": "Add server entry for static file serving",
+      "body": "The SSR handler knew how to render,\nBut static assets? \"Not my agenda.\"\nSo server.ts now checks the disk\nFor CSS and JS — no more risk,\nThen falls through to the Start contender.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T08:38:24-05:00"
+    },
+    {
+      "hash": "2c271a70e9b340d49c6b08e1e63cfb5b805544fe",
+      "message": "Fix CSS not loading in production",
+      "body": "The ?url import pointed nowhere,\nProduction assets lost in thin air.\nA plain import instead—\nThe framework's well-read,\nIt injects the styles with great care.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T08:33:33-05:00"
+    },
+    {
+      "hash": "8ff040dd091118c8ad40868d52abf140b8d1ad85",
+      "message": "Move blog posts into website/blog-posts",
+      "body": "The markdown wandered far from home,\nIn docs/blog it used to roam.\nNow nestled where the website lives,\nNo copy hack the deploy forgives.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T08:29:25-05:00"
+    },
+    {
+      "hash": "66ad31a6a3e8b81b0bb3f70be8429836eb75b084",
+      "message": "Migrate website to TanStack Start",
+      "body": "The server was custom-built, bespoke,\nA Bun SSR artisanal yoke.\nTanStack Start took the wheel,\nNow blog posts reveal\nTheir markdown from disk when invoked.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T08:15:03-05:00"
+    },
+    {
+      "hash": "a47fef42209e40d181bcfb4aec9252b036177212",
+      "message": "Add blog pages with markdown rendering",
+      "body": "Remark parses, rehype highlights,\nKaTeX waits for math-filled nights.\nBlog layout, listing, post by slug—\nProse styled dark in the cypherpunk mug.\nFeeds in the head, the reader delights.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T07:42:44-05:00"
+    },
+    {
+      "hash": "cbb501e514d3740dfce581e55e928e36526ce876",
+      "message": "Add website CLAUDE.md",
+      "body": "A guide for agents yet to come,\nOn routes and themes and how things run.\nMonospace, brackets, scanline haze—\nAll documented for future days.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T07:40:02-05:00"
+    },
+    {
+      "hash": "b875ad1a990610a076ac979d410a8be4cf135bde",
+      "message": "Add blog with first post and build pipeline",
+      "body": "A post was born in docs/blog today,\nTOML front matter showed it the way.\nA script reads the markdown, feeds the machine,\nThree feeds pour out — JSON, Atom, RSS stream.\nThe blog has a voice. Let it have its say.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T07:34:32-05:00"
+    },
+    {
+      "hash": "63d12021d68744c150e32cc16662bc50fb69bfee",
+      "message": "Separate home page from blog page",
+      "body": "Home is home and blog is blog,\nEach deserves its own back-log.\nSlash takes you where the landing lives,\nSlash-blog is where the writing gives.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T07:24:08-05:00"
+    },
+    {
+      "hash": "0d10417b1e5e94e133f160f4a174d9cf7e8b0b76",
+      "message": "Add site navigation and page routes",
+      "body": "Four brackets in a row they stand,\n>[blog] [commits] [docs] [about] — the band.\nThe root now wraps, the welcome stays free,\nEach page a route in the routing tree.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T07:23:01-05:00"
+    },
+    {
+      "hash": "4f9df00218975e7c32eea953e9401cbfc1fee7a4",
+      "message": "Remove dot grid background",
+      "body": "The dots were keen but out of line,\nThey clashed with text — a bad design.\nThe scanlines stay, the dots depart,\nSometimes less is better art.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T07:20:23-05:00"
+    },
+    {
+      "hash": "8c0bcf953ea3424e3cf190eb97b3520f58ffe5f6",
+      "message": "Redesign homepage as cypherpunk",
+      "body": "Monospace glyphs and scanline haze,\nBox-drawing borders, a brutalist phase.\nDot grids behind, no corners round,\n[+] to expand what commits have found.\nThe terminal aesthetic, finally crowned.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T07:19:33-05:00"
+    },
+    {
+      "hash": "78be669d3401d0ff6523329c1e7290d404e44848",
+      "message": "Fix install all skipping webtui",
+      "body": "Codesign warned of unsealed contents,\nset -e took that as repentance.\nThe script died mid-stride,\nwebtui left outside—\nNow || true grants it safe entrance.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T07:13:26-05:00"
+    },
+    {
+      "hash": "283f5b97d93995059826497637c9a2cf1382590a",
+      "message": "Add light mode with Tokyo Night Day",
+      "body": "The night was dark, the code was too,\nBut users in the sun had no clue.\nNow Day is default, Night is dark—\nprefers-color-scheme lights the spark.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-14T07:12:29-05:00"
+    },
+    {
+      "hash": "a94dd0999a198d46a7abca556bc456fcc7c4b779",
+      "message": "Issue 747: close with conclusion",
+      "body": "Two issues, one overlay, zero bugs remain.\n746 gave paint_pass the reins,\n747 stopped the clobber chain.\nNow every screen, every split, every pane—\nThe overlay lands where it should. No strain.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T07:59:31-05:00"
+    },
+    {
+      "hash": "91f056f90e8334e7c72631859c9d2f8ee4a699c4",
+      "message": "Issue 747: fix overlay split repositioning",
+      "body": "Each frame swap clobbered the overlay's place,\nA split-unaware formula set the wrong space.\nNow it only positions on birth—\nAfter that, paint_pass has worth,\nAnd the second screen shows the right face.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T07:53:47-05:00"
+    },
+    {
+      "hash": "95bb9b4cf0f8fbb5020be62c9f3094d16565fc69",
+      "message": "Issue 747: design experiment 3",
+      "body": "Don't touch the function, move the call—\nFirst creation needs it, swaps need none at all.\nOne branch to build, one branch to swap,\nOnly the first should position therop.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T07:49:43-05:00"
+    },
+    {
+      "hash": "2a6bceb3bc15971e508a5e865ecc2885072646f0",
+      "message": "Issue 747: experiment 2 failed",
+      "body": "Scale was zero, the branch fell through,\nThe else ran the same old code we knew.\nStored coords can't save you\nWhen nothing yet gave you\nA paint_pass with split-aware view.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T07:42:30-05:00"
+    },
+    {
+      "hash": "fb2777245982ddd368b0c6b2e62a9b8c8a0f687f",
+      "message": "Issue 747: design experiment 2",
+      "body": "Why recompute what you already know?\nThe pane recalls where overlays go.\nIf scale's been set before,\nDon't recalculate once more—\nJust trust the coordinates' flow.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T07:38:10-05:00"
+    },
+    {
+      "hash": "f04a62790ea1d65e2507b046bd0b5acdee91b3a4",
+      "message": "Issue 747: experiment 1 failed",
+      "body": "We tried to delete the function,\nRemove it with conviction—\nBut the overlay, bereft,\nSat at zero, zero, left,\nAwaiting paint_pass benediction.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T07:35:08-05:00"
+    },
+    {
+      "hash": "d261ffcd8060894922af5c04ecc068627de92235",
+      "message": "Issue 747: root cause and experiment 1",
+      "body": "Two functions fought to set one frame,\nAnd neither knew the other's name.\npaint_pass said \"right!\" — Chromium said \"left!\"\nThe user was of position bereft.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T07:30:02-05:00"
+    },
+    {
+      "hash": "82fbfbbf34c29a327841436d4b1390d6273575fa",
+      "message": "Issue 747: multiscreen overlay positioning",
+      "body": "Screen one, screen two,\nThe overlay knew what to do—\nResize? No sweat.\nReposition? Not yet.\nIt needs a keypress as a cue.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T07:09:42-05:00"
+    },
+    {
+      "hash": "5d2b2bc4587f969f68afe691764c192d261f4e24",
+      "message": "Issue 746: close with conclusion",
+      "body": "Five experiments walked into a bar.\nThree stayed, two didn't get far.\nThe overlay now tracks the pane—\nOne screen's joy, two screens' pain.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T07:04:40-05:00"
+    },
+    {
+      "hash": "5af3f229bea479cfc6f9ab1112edd498e99ff51c",
+      "message": "Issue 746: experiment 5 partial, notify split",
+      "body": "The split was async, the tree was new,\nBut the overlay sat, without a clue.\nA notification sent — \"Repaint, I say!\"\nOne screen obliged, the other… went astray.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T07:00:54-05:00"
+    },
+    {
+      "hash": "2172245245e973ef2983a3c930c4f9b9c838ab0e",
+      "message": "Issue 746: design experiment 5",
+      "body": "The split runs async, the mux stays mute,\nNo notification down the route.\nOne line to add: \"WindowInvalidated!\"\nSo paint_pass runs, the tree updated.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T06:35:20-05:00"
+    },
+    {
+      "hash": "c7ac968d90887bb95baa28c56bd9595017d65cb3",
+      "message": "Issue 746: experiment 4 partial, fix scale",
+      "body": "The scale was one, it should be two,\nDPI / DPI — wrong thing to do.\nDivide by seventy-two instead,\nAnd wrap in CATransaction (no animation dread).\nThe overlay lands right — unless you split,\nThen async splits delay the fit.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T06:29:47-05:00"
+    },
+    {
+      "hash": "615eabc01142c013fd5d4dac965330fcc1ed9b86",
+      "message": "Issue 746: experiment 3 fails, design experiment 4",
+      "body": "The scale said \"one\" — a blatant lie,\nDefault DPI matched the sky.\nBoth were one-forty-four,\nDivision gave us nothing more,\nSo the overlay went sailing by.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T06:06:44-05:00"
+    },
+    {
+      "hash": "ecca792e0d9171a02af7f30d540db0f40492caef",
+      "message": "Issue 746: add edge cases and checklist",
+      "body": "Thirteen cases on the wall,\nThirteen cases to test—\nOne's crossed out (no screen at all),\nBut we'll verify the rest.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T05:51:14-05:00"
+    },
+    {
+      "hash": "486675a57b135b58a47037c655b00babec0a0209",
+      "message": "Issue 746: use DPI for scale in experiment 3",
+      "body": "The sublayer said \"my scale is fine!\"\nBut it never inherited the line.\nNow we ask the DPI,\nSame source, same reply—\nOne hundred forty-four over seventy-two: divine.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T05:43:44-05:00"
+    },
+    {
+      "hash": "21bfd078c1e47db0659f0dfcfa746e705eb10e1c",
+      "message": "Issue 746: design experiment 3",
+      "body": "\"Just return it,\" they said,\n\"The value's right there.\"\nTwo experiments wrote formulas instead—\nThird time: read, don't declare.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T05:34:22-05:00"
+    },
+    {
+      "hash": "24377adb137cbd9f075e899c3859d61fc977e4fe",
+      "message": "Issue 746: experiment 2 fails",
+      "body": "A formula walked into a bar,\nSaid \"I'll compute position by far!\"\n  paint_pane said \"That's mine,\"\n  \"You've crossed every line—\nYou're not even close to on par.\"\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T05:27:33-05:00"
+    },
+    {
+      "hash": "5251378e1ae3da1ac185f9365f3129107b15791c",
+      "message": "Issue 746: redesign experiment 2",
+      "body": "The first try lost the frame at birth,\nThe second guessed its scale on earth.\nNow: place it once when layers appear,\nThen paint_pass keeps it right from here—\nWith contentsScale, the truth, not math.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T05:15:29-05:00"
+    },
+    {
+      "hash": "a925f175facc020b75dea8a3f133c231feaa5664",
+      "message": "Issue 746: design experiment 2",
+      "body": "Two bugs, not three—the formula's fine,\nJust search all tabs and reposition on switch time.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T05:12:15-05:00"
+    },
+    {
+      "hash": "29cd42992920246d7f2f3b3bf1625917b2d0850c",
+      "message": "Issue 746: experiment 1 fails",
+      "body": "We moved the overlay to paint_pass,\nBut the CALayer showed up—alas—\nAt zero, zero, bare,\nThen too far down from there.\nYou can't defer what needs a first class.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T05:01:17-05:00"
+    },
+    {
+      "hash": "412ef70a3cb0e9a9dfeee338d56ee852114645cf",
+      "message": "Issue 746: use platform default_dpi()",
+      "body": "Seventy-two was fine for Mac alone,\nBut Linux runs at ninety-six, we've known.\nPass DPI in, let the function divide—\ndefault_dpi() picks the right side.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T04:43:37-05:00"
+    },
+    {
+      "hash": "9fe173b78b945e845d344cc8ee2027761895d8ac",
+      "message": "Issue 746: revise experiment 1 design",
+      "body": "Backing pixels in, points come out,\nDPI over seventy-two, no doubt.\nThe scale was a mystery, now it's clear—\nSame source the whole renderer holds dear.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T04:40:28-05:00"
+    },
+    {
+      "hash": "576b76818f15709b04c574ce0f5911a820a0cc1d",
+      "message": "Issue 746: design experiment 1",
+      "body": "Two formulas fought for one pane's fate,\nThe render pass knew, but arrived too late.\nNow paint_pass() shall set the frame—\nOne truth, one path, one positioning game.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T04:24:58-05:00"
+    },
+    {
+      "hash": "f8265e260743f3f43d55ad70f765106c98b9c1b8",
+      "message": "Issue 746: overlay positioning bug",
+      "body": "The overlay drifts when tabs are switched,\nIts formula from paint_pane() ditched.\nThree bugs conspire to move the frame—\nOne source of truth shall end the game.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-13T04:18:57-05:00"
+    },
+    {
+      "hash": "ebf013fb2edb6560bd8b4787eff2b21577255ee0",
+      "message": "Update website commit data",
+      "body": "The commits grew stale, the dates were wrong,\nThe hashes no longer sang their song.\nA fresh JSON pour, the feed renewed—\nNow termsurf.com shows the latest brood.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+      "author": "Ryan X. Charles",
+      "date": "2026-03-12T08:08:09-05:00"
+    },
     {
       "hash": "3752c392cd1088cfc88de5a849b568a39a39c262",
       "message": "Issue 745: close with SpinServers decision",
@@ -28,328 +350,6 @@
       "body": "The database dream was tempting, true,\nBut filesystems do what databases can't do.\nOVH in Dallas, NVMe and bare,\nUnmetered bandwidth beyond compare—\nOne box to host them all, brand new.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
       "date": "2026-03-12T05:57:51-05:00"
-    },
-    {
-      "hash": "4aa2929e0dcecda1ee207ae40b1da4b28accfeca",
-      "message": "Issue 745: complete experiment 1 research",
-      "body": "Eight agents scoured the web in flight,\nFrom go-git's Storer to Gitgres' might.\nFour approaches found, none yet in prod—\nBut the wire protocol gives a nod:\nStorage is yours to get right.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-12T04:58:09-05:00"
-    },
-    {
-      "hash": "10d78ba039e487a67da51d4f4e2d2bb8bf94753c",
-      "message": "Issue 745: design experiment 1",
-      "body": "Eight topics to search, eight trails to blaze,\nThrough go-git, gitoxide, and GitHub's maze.\nCan a database hold what filesystems keep?\nTime to Google before we leap.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-12T04:50:42-05:00"
-    },
-    {
-      "hash": "ca9f4cc2490bbca5c9344af9231f5eb5614995b3",
-      "message": "Issue 745: research self-hosted Git",
-      "body": "Can Git live inside a database?\nCan Chromium fit in that space?\nEleven leads to chase,\nSeven questions to face—\nTime to research the self-hosted case.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-12T04:49:37-05:00"
-    },
-    {
-      "hash": "928cbf98f32dd070c1034457980e77604ca45487",
-      "message": "Issue 744: close issue",
-      "body": "Three experiments, all passed with grace,\nIcons, pipeline, branding in place.\nThe surfer rides on, the favicon gleams,\nTermSurf is the name in the copyright dreams.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-12T04:44:48-05:00"
-    },
-    {
-      "hash": "d3cc09ff13274a66539c4586f7674476bdfedfbd",
-      "message": "Issue 744: rebrand to TermSurf copyright",
-      "body": "Identellica, we bid thee well,\nYour LLC has served its spell.\nTermSurf now stands in every line,\nCopyright 2026—the name is mine.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-12T04:43:05-05:00"
-    },
-    {
-      "hash": "54df301122beaa51dd00ed1c51c8e84a7cb4f752",
-      "message": "Issue 744: design experiment 3",
-      "body": "Identellica, your time has passed,\nTermSurf's the name that's built to last.\nFour files to change, one left alone—\nThe old issue keeps its historical tone.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-12T04:41:14-05:00"
-    },
-    {
-      "hash": "d3eff5f5c3a24b8ecf628fbe469066a592bd49aa",
-      "message": "Issue 744: icon processing pipeline",
-      "body": "Sharp resizes, png-to-ico converts,\nTypes generated, no more old consorts.\nDrop a PNG in raw-icons' embrace,\nOut come assets for every place—\nRetina-crisp at 3x, of course.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-12T04:35:43-05:00"
-    },
-    {
-      "hash": "b20ab9ab8a71f07a274c86cd7405e285b1c84356",
-      "message": "Issue 744: design experiment 2",
-      "body": "Raw icons in, sharp icons out,\nType-safe paths to leave no doubt.\nA pipeline born from PNG,\nFor Retina at 3x, crisp and free.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-12T04:30:34-05:00"
-    },
-    {
-      "hash": "d88227a0cfb4400ad282574b249bf26c6f090b41",
-      "message": "Issue 744: new logo and issue doc",
-      "body": "A surfer rides a neon wave,\nThe old icon sent to its grave.\nNew logo in place,\nA fresh hooded face—\nFavicon's next up to be saved.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-12T04:19:52-05:00"
-    },
-    {
-      "hash": "69812385a528bed72d37a08b5a4386aad87361c3",
-      "message": "Issue 743: unbind Cmd+R, close issue",
-      "body": "Cmd+R once reloaded config,\nThe browser page left hanging stiff.\nNow the key flows free,\nTo Chromium's decree—\nRefresh works. The fix? One diff.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T11:04:24-05:00"
-    },
-    {
-      "hash": "a00b935982b4c89547300933c1bb2a914f71792d",
-      "message": "Issue 743: design experiment 1",
-      "body": "Cmd+R, set your keys to none,\nLet the browser have its fun.\nConfig watches files on disk—\nOne less shortcut, zero risk.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T11:01:23-05:00"
-    },
-    {
-      "hash": "0c265700ff522bf68befa3d6afdcbcb8f0f46c44",
-      "message": "Issue 743: Cmd+R intercepted by Wezboard",
-      "body": "Cmd+R pressed, config reloads—\nBut the browser wants its page!\nThe key was caught, the wrong path chose,\nNow documented for the next stage.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T11:00:26-05:00"
-    },
-    {
-      "hash": "2144d9e5eb7175d3537a110eda014cdbe1bf52c3",
-      "message": "Issue 742: close issue",
-      "body": "Four experiments came and went,\nEach one on fixing bent.\nGhost archived, webtui installed,\nSudo tamed, uninstall recalled—\n742 is done. We rest content.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T10:40:10-05:00"
-    },
-    {
-      "hash": "0af8030dbc6bc9462976c27c676a8d663cf796ca",
-      "message": "Issue 742: fix uninstall script",
-      "body": "Webtui was left out of \"all,\"\nAnd sudo was missing its call.\nOne gate at the top,\nThree bugs made to stop—\nNow uninstall truly removes all.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T10:36:11-05:00"
-    },
-    {
-      "hash": "e2a0652cc0d7e483257283e81c6982383726a55d",
-      "message": "Issue 742: design experiment 4",
-      "body": "Uninstall script forgot its webtui,\nAnd sudo it lacked, oh me oh my.\nA plan is now laid—\nThree fixes are made,\nOne gate, one call, one last goodbye.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T10:33:22-05:00"
-    },
-    {
-      "hash": "3c96ec30bfe5dcdfe967a30e1212ac45f0f8907c",
-      "message": "Issue 742: single sudo for install script",
-      "body": "Thirteen sudos walked into a bar,\nEach one demanding a password by far.\n\"Exec once at the top!\"\nNow the prompts finally stop—\nOne gate to rule them, au revoir.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T10:30:58-05:00"
-    },
-    {
-      "hash": "7620eaad13b0ae1aa53b4e2d9f64b45a8a2f8e35",
-      "message": "Issue 742: design experiment 3",
-      "body": "Thirteen sudos walked into a bar,\nThe bouncer said, \"You've gone too far.\"\nNow one sudo guards the door,\nAnd the rest need type no more.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T10:28:56-05:00"
-    },
-    {
-      "hash": "5c3777338b1cc105f817f9f3f9f81b689c5019dd",
-      "message": "Issue 742: fix webtui install",
-      "body": "A stub once stood where code should be,\n\"cargo install\" it said, unhelpfully.\nNow the script copies the binary right,\nTo /usr/local/bin in broad daylight.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T10:26:14-05:00"
-    },
-    {
-      "hash": "6f913c3cf3d82555c4f034b4d25210285842265d",
-      "message": "Issue 742: design experiment 2",
-      "body": "The web TUI had no place to stay,\ninstall.sh just shrugged and walked away.\nExperiment 2 draws up the plan:\nsudo cp, like a moving van.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T10:24:23-05:00"
-    },
-    {
-      "hash": "2bdb473525f5bf4c9c58cab07bd33f9de008ec2b",
-      "message": "Issue 742: partial pass, experiment 1",
-      "body": "The archive worked, the docs are clean,\nBut webtui install? Nowhere to be seen.\nIt prints a message, helpful and polite—\nBut /usr/local/bin stays empty tonight.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T10:20:49-05:00"
-    },
-    {
-      "hash": "2874f578f75333f77cc0c052c5a1195920524e46",
-      "message": "Issue 742: archive ghostboard, implement exp 1",
-      "body": "Ghostboard served us well, a Zig-built shrine,\nBut two GUIs for one protocol's a sign\nOf doubled work with every proto change—\nSo Wezboard stands alone upon the range.\n\nThe code sleeps safe in git's eternal keep,\nWhile docs preserve the architecture deep.\nWhen protocols are stable, calm, and clear,\nA fresh fork of Ghostty shall appear.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T10:19:27-05:00"
-    },
-    {
-      "hash": "7254dd914c1e64dab4f7aee6fc66e5186b9f505a",
-      "message": "Issue 742: design experiment 1",
-      "body": "One experiment to rule them all:\nDelete the dir, update each call,\nScripts trimmed, docs moved—\nThe archive approved—\nGhostboard sleeps, but will stand tall.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T08:58:03-05:00"
-    },
-    {
-      "hash": "532d78ee848b8c36f0d5333c019d22fc8a4f069f",
-      "message": "Issue 742: create archive ghostboard issue",
-      "body": "Dear Ghostboard, we must part ways—\nNot forever, just for a phase.\nWezboard carries the torch alone,\nTill the protocol is fully grown.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T08:56:15-05:00"
-    },
-    {
-      "hash": "483198d7a20c00188ad74c59aefa216cad764698",
-      "message": "Issue 741: close issue",
-      "body": "The GUI was a middleman, passing notes in class—\nNow TUI and browser talk direct, no more through the glass.\nFour experiments later, the protocol stands free,\nSeven-forty-one is done. On to seven-forty-three!\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T08:50:36-05:00"
-    },
-    {
-      "hash": "b0b29201772d7271a7f730dfc67a3e37530df1f3",
-      "message": "Issue 741: shorten socket path, pass experiment 4",
-      "body": "The socket path grew long and proud,\nToo many bytes—the kernel howled.\nA hash, a name, a trim, a snip—\nNow Unix lets the bytes all fit.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T08:46:22-05:00"
-    },
-    {
-      "hash": "097fae523ba02f265c50d4d8189ff39b554ae40d",
-      "message": "Issue 741: design experiment 4",
-      "body": "A socket path grew long and wide,\nPast SUN_LEN it could not slide.\nNow name plus hash, compact and neat,\nKeeps the bind from tasting defeat.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T08:33:34-05:00"
-    },
-    {
-      "hash": "83018bfedab03643b261fbf53c889add1814920b",
-      "message": "Issue 741: mark experiment 3 as failed",
-      "body": "The forwarding paths were cut,\nDirect lines were strung—\nPages loaded just fine, but\nDark mode held its tongue.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T08:25:24-05:00"
-    },
-    {
-      "hash": "dc5e5e580f605cb3fc9032ff1d7e0c14f86edeeb",
-      "message": "Issue 741: design experiment 3",
-      "body": "Five proxies walked through Wezboard's door,\nRelaying messages—what a bore.\nExperiment 3 says \"you're fired,\"\nYour forwarding's no longer required,\nThe TUI talks direct evermore.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T08:04:06-05:00"
-    },
-    {
-      "hash": "c9829a2936f18c3733d9c70cceb46513f56c5083",
-      "message": "Issue 741: direct TUI↔Browser connection",
-      "body": "The browser and TUI now speak directly—\nno middleman required for Navigate,\nSetColorScheme, or content events.\nThe GUI just whispers \"BrowserReady\"\nand steps politely out of the way.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T07:58:24-05:00"
-    },
-    {
-      "hash": "49b3497e7818866ffe25f7fe2e353fdeb79c1168",
-      "message": "Issue 741: design experiment 2",
-      "body": "The TUI whispered to the GUI,\n\"Why must you stand between us, why?\"\nNow BrowserReady shows the way—\nDirect socket, no relay.\nThe middleman can only sigh.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T07:39:37-05:00"
-    },
-    {
-      "hash": "5f3aa1f86e60e6b3cbb329e148a8e7c1f873b664",
-      "message": "Issue 741: mark experiment 1 as failed",
-      "body": "The code was right, the tests were tight,\nBut no one passed the flag at night.\nWezboard spawns Roamium bare—\nNo --listen-socket anywhere.\nCan't test a door that's never there.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T07:34:13-05:00"
-    },
-    {
-      "hash": "70b473507bd73538bcb72ac499260d68432f56b8",
-      "message": "Issue 741: add listener socket to Roamium",
-      "body": "A lone socket stood in the dark,\nSpeaking only to one GUI spark.\nNow it listens wide,\nLets clients inside,\nAnd broadcasts to all in the park.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T07:31:24-05:00"
-    },
-    {
-      "hash": "7581a66a340215353e6ac2247289edce85f3f916",
-      "message": "Add WezTerm license to NOTICE",
-      "body": "A fork deserves its credit due,\nWez Longboard, we acknowledge you.\nMIT in full, directory set right—\nGhostboard's path corrected tonight.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T07:25:53-05:00"
-    },
-    {
-      "hash": "e740337e05ee5933872b9809382f6b3b6ad5c4c5",
-      "message": "Issue 741: simplify to broadcast, drop TuiRegister",
-      "body": "No registration needed, no routing games—\nThe browser just shouts to all its frames.\nConnect and listen, that's all you do,\nEvery event flows straight to you.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T07:18:52-05:00"
-    },
-    {
-      "hash": "f2f8cec0e8a8ea82d392195659dc0b4192398ee4",
-      "message": "Issue 741: stage Wezboard first, Ghostboard last",
-      "body": "Prove it once in Rust, then port to Zig—\nFour experiments, small to big.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T06:56:22-05:00"
-    },
-    {
-      "hash": "82f5c31fa69c5ba004a12d35ee1252d6b3ea4ca7",
-      "message": "Issue 741: rewrite design doc",
-      "body": "A document grown through debate and revision,\nRewritten with clarity, structure, precision.\nSame destination, a cleaner map—\nNo vestigial detours, no circular trap.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T06:49:52-05:00"
-    },
-    {
-      "hash": "8991305ef043a9f9d9f36f30584e39e934565d09",
-      "message": "Issue 741: define process responsibilities",
-      "body": "The GUI relayed what it never read,\nA middleman with nothing to be said.\nNow each process owns its role alone—\nWindow, content, chrome — three to the bone.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T06:47:50-05:00"
-    },
-    {
-      "hash": "d5703b8aec0565c3882d6e2a0b02d8a0236a7833",
-      "message": "Issue 741: consolidate to two protos",
-      "body": "Three protos seemed right, then we thought twice—\nOne browser API for every device.\nGUI or TUI, the browser won't care,\nJust register your type and pull up a chair.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T06:43:44-05:00"
-    },
-    {
-      "hash": "f4c82e5c0707767eef1c1429193486baf4007146",
-      "message": "Issue 741: add direct socket rationale",
-      "body": "\"Why build a bridge to tear it down?\"\nThe proxy detour earned a frown.\nThree pieces, staged, no throwaway—\nDirect sockets win the day.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T06:39:29-05:00"
-    },
-    {
-      "hash": "345267c7718445a621a54bcea9d74e1a26ef5bd7",
-      "message": "Issue 741: design protocol split",
-      "body": "The hub grew tired of passing notes,\nBetween the TUI and browser boats.\n\"Why not talk direct?\" they said one day—\nThree channels now, each its own way.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T06:31:21-05:00"
-    },
-    {
-      "hash": "9908830bcf80df3632aaa4e9ec0f1c9ac234c57d",
-      "message": "Issue 740: record pass and close issue",
-      "body": "Two experiments, both alike in dignity—\nOne fixed the menu, one the dock.\nNow \"TermSurf Wezboard\" reigns with equanimity,\nAcross every UI block.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T05:58:39-05:00"
-    },
-    {
-      "hash": "188b9ea52a376179201a07819bf0e8efeddb62a0",
-      "message": "Issue 740 Exp 2: rename app bundle directory",
-      "body": "The dock said \"Wezboard\" — how plain!\nThe bundle's old name was to blame.\nWe renamed the .app,\nUpdated each path and map,\nNow \"TermSurf Wezboard\" stakes its claim.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T05:53:32-05:00"
-    },
-    {
-      "hash": "5b0fa362e2ec374448ff6e91cf5f7cf6d0c17a89",
-      "message": "Issue 740 Exp 1: record partial result",
-      "body": "The menu bar learned its brand new name,\nBut the dock icon stayed the same.\nInfo.plist tried its best—\nmacOS said, \"I'm not impressed,\nThe bundle path is what I claim.\"\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T05:41:09-05:00"
-    },
-    {
-      "hash": "b7100db00650dc5149569783dd2c52878df4595e",
-      "message": "Issue 740: design display name rename",
-      "body": "The dock said \"Wezboard,\" plain and bare,\nNo family name to show it cared.\n\"TermSurf Wezboard\" — now that's a name\nThat tells the world from whence it came.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T05:27:26-05:00"
-    },
-    {
-      "hash": "7ba2b43ab416fb25b148a26de43ef14a88a73fac",
-      "message": "Issue 739: record pass and close issue",
-      "body": "Five warnings haunted the build,\nThe compiler grumbled, unfulfilled.\nTwo experiments later—all clear,\nNot a single warning to hear.\nThe release log? Peacefully stilled.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T05:11:31-05:00"
-    },
-    {
-      "hash": "473d371e7a4703a6a4671cd97f00eef94fd261c7",
-      "message": "Issue 739 Exp 2: fix four Wezboard warnings",
-      "body": "Four warnings walked into a build,\nThe compiler scowled, not thrilled.\nDead code got the axe,\nUnused vars got underscore tax—\nNow release builds are warning-free guild.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
-      "author": "Ryan X. Charles",
-      "date": "2026-03-11T05:10:15-05:00"
     }
   ]
 }
