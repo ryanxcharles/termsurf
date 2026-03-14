@@ -162,19 +162,19 @@ scripts/install.sh wezboard
 Launch Wezboard, open a web page with `web`, click a text field to enter browse
 mode.
 
-| #  | Test                      | Steps                                             | Expected                      |
-| -- | ------------------------- | ------------------------------------------------- | ----------------------------- |
-| 1  | Cmd+C copies browser text | Select text on page, Cmd+C, paste in terminal     | Browser selection pasted      |
-| 2  | Cmd+V pastes into browser | Copy text in terminal, click browser field, Cmd+V | Text appears in browser field |
-| 3  | Cmd+X cuts browser text   | Select text in browser field, Cmd+X               | Text removed, on clipboard    |
-| 4  | Cmd+A selects all         | Click browser field with text, Cmd+A, type "X"    | All text replaced with "X"    |
-| 5  | Cmd+Z undoes              | Type "hello", Cmd+A, type "X", Cmd+Z              | "hello" restored              |
-| 6  | Regular typing works      | Type "hello" in browser field                     | "hello" appears               |
-| 7  | Esc exits browse mode     | Press Esc                                         | Returns to control mode       |
-| 8  | Cmd+C in control mode     | Exit browse mode, Cmd+C                           | Copies terminal selection     |
-| 9  | Cmd+V in control mode     | Exit browse mode, Cmd+V                           | Pastes into terminal          |
-| 10 | Cmd+T still works         | Press Cmd+T                                       | Opens new tab                 |
-| 11 | Cmd+W still works         | Press Cmd+W                                       | Closes current tab            |
+| #   | Test                      | Steps                                             | Expected                      |
+| --- | ------------------------- | ------------------------------------------------- | ----------------------------- |
+| 1   | Cmd+C copies browser text | Select text on page, Cmd+C, paste in terminal     | Browser selection pasted      |
+| 2   | Cmd+V pastes into browser | Copy text in terminal, click browser field, Cmd+V | Text appears in browser field |
+| 3   | Cmd+X cuts browser text   | Select text in browser field, Cmd+X               | Text removed, on clipboard    |
+| 4   | Cmd+A selects all         | Click browser field with text, Cmd+A, type "X"    | All text replaced with "X"    |
+| 5   | Cmd+Z undoes              | Type "hello", Cmd+A, type "X", Cmd+Z              | "hello" restored              |
+| 6   | Regular typing works      | Type "hello" in browser field                     | "hello" appears               |
+| 7   | Esc exits browse mode     | Press Esc                                         | Returns to control mode       |
+| 8   | Cmd+C in control mode     | Exit browse mode, Cmd+C                           | Copies terminal selection     |
+| 9   | Cmd+V in control mode     | Exit browse mode, Cmd+V                           | Pastes into terminal          |
+| 10  | Cmd+T still works         | Press Cmd+T                                       | Opens new tab                 |
+| 11  | Cmd+W still works         | Press Cmd+W                                       | Closes current tab            |
 
 Tests 8-9 verify terminal clipboard still works in control mode. Tests 10-11
 verify that non-clipboard Cmd+key shortcuts still route through the menu system.
@@ -379,3 +379,23 @@ Same 11-test table as Experiment 1. The critical difference: tests 6 (regular
 typing) and 7 (Esc exits browse mode) must still work — these broke in
 Experiment 1 because the `only_key_bindings` guard was removed entirely. Now
 only the five clipboard keys bypass it.
+
+**Result:** Pass
+
+All 11 tests passed. Cmd+C/V/X/A/Z work in browse mode, regular typing and Esc
+still work, terminal clipboard works in control mode, and Cmd+T/W still route
+through the menu system.
+
+#### Conclusion
+
+The targeted carve-out approach works. The key lessons:
+
+1. `perform_key_equivalent` must intercept Cmd+{a,c,v,x,z} to prevent the macOS
+   menu system from consuming them — this was correct in Experiment 1.
+2. The `only_key_bindings` guard cannot be removed entirely — it protects the
+   multi-pass key pipeline. Instead, a targeted exception for clipboard keys
+   when browsing lets them through during `OnlyKeyBindings::Yes` passes while
+   leaving all other keys on the normal path.
+3. Physical keycodes need explicit VK mapping since `keycode_to_windows_vk` only
+   handled `Char` variants, and the `OnlyKeyBindings::Yes` passes use
+   `KeyCode::Physical`.

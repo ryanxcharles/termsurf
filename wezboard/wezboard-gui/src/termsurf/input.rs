@@ -1,6 +1,6 @@
 use super::proto;
-use super::proto::term_surf_message::Msg;
 use super::proto::TermSurfMessage;
+use super::proto::term_surf_message::Msg;
 use ::window::{
     KeyCode, Modifiers, MouseButtons, MouseCursor, MouseEvent, MouseEventKind as WMEK, MousePress,
 };
@@ -71,9 +71,6 @@ pub fn try_forward_key(
     key_event: Option<&::window::KeyEvent>,
     only_key_bindings: bool,
 ) -> Option<bool> {
-    if only_key_bindings {
-        return None;
-    }
     let pane_id_str = pane_id.to_string();
     let state = super::shared_state()?;
     let browsing = {
@@ -84,6 +81,15 @@ pub fn try_forward_key(
 
     if !browsing {
         return None;
+    }
+
+    if only_key_bindings {
+        // During OnlyKeyBindings::Yes passes, only intercept clipboard
+        // Cmd+keys. Everything else returns None so the normal multi-pass
+        // pipeline continues.
+        if !(modifiers == Modifiers::SUPER && is_clipboard_key(keycode)) {
+            return None;
+        }
     }
 
     // Esc key press (no Ctrl) exits browse mode
@@ -338,6 +344,20 @@ pub fn try_forward_mouse(pane_id: usize, event: &MouseEvent) -> bool {
     false
 }
 
+fn is_clipboard_key(keycode: &KeyCode) -> bool {
+    match keycode {
+        KeyCode::Char(c) => matches!(c, 'a' | 'c' | 'v' | 'x' | 'z'),
+        KeyCode::Physical(phys) => {
+            use ::window::PhysKeyCode;
+            matches!(
+                phys,
+                PhysKeyCode::A | PhysKeyCode::C | PhysKeyCode::V | PhysKeyCode::X | PhysKeyCode::Z
+            )
+        }
+        _ => false,
+    }
+}
+
 fn keycode_to_windows_vk(key: &KeyCode) -> i64 {
     match key {
         KeyCode::Char(c) => match c {
@@ -373,6 +393,17 @@ fn keycode_to_windows_vk(key: &KeyCode) -> i64 {
         KeyCode::PageUp => 0x21,
         KeyCode::PageDown => 0x22,
         KeyCode::Insert => 0x2D,
+        KeyCode::Physical(phys) => {
+            use ::window::PhysKeyCode;
+            match phys {
+                PhysKeyCode::A => 0x41,
+                PhysKeyCode::C => 0x43,
+                PhysKeyCode::V => 0x56,
+                PhysKeyCode::X => 0x58,
+                PhysKeyCode::Z => 0x5A,
+                _ => 0,
+            }
+        }
         _ => 0,
     }
 }

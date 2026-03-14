@@ -73,14 +73,14 @@ use raw_window_handle::{
 };
 use std::any::Any;
 use std::cell::RefCell;
-use std::ffi::{c_void, CStr};
+use std::ffi::{CStr, c_void};
 use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::time::Instant;
 use wezboard_font::FontConfiguration;
-use wezboard_input_types::{is_ascii_control, IntegratedTitleButtonStyle, KeyboardLedStatus};
+use wezboard_input_types::{IntegratedTitleButtonStyle, KeyboardLedStatus, is_ascii_control};
 
 #[allow(non_upper_case_globals)]
 const NSViewLayerContentsPlacementTopLeft: isize = 11;
@@ -3124,6 +3124,9 @@ impl WindowView {
             Self::key_common(this, nsevent, true);
 
             // Prevent macOS from calling doCommandBySelector(cancel:)
+            Bool::YES
+        } else if modifiers == Modifiers::SUPER && matches!(chars, "a" | "c" | "v" | "x" | "z") {
+            Self::key_common(this, nsevent, true);
             Bool::YES
         } else {
             // Allow macOS to process built-in shortcuts like CMD-`
