@@ -49,13 +49,57 @@ this initial flash.
 
 ### The fix
 
-`update_ca_layer_frame()` is wrong for split panes and redundant —
-`set_overlay_frame()` will correct the position on the very next paint pass. The
-simplest fix: don't set the frame in `update_ca_layer_frame()` at all. Instead,
-position the CALayerHost offscreen initially (e.g., at a negative coordinate
-like `-10000`) so there's no visible flash, and let the first
-`set_overlay_frame()` from `paint_pass()` place it correctly.
+There should be exactly one place that computes overlay position:
+`set_overlay_frame()`. Having a second function that duplicates the calculation
+is a maintenance hazard — the next time the formula changes, someone has to
+remember to update both.
 
-Alternatively, `update_ca_layer_frame()` could be removed entirely and the
-initial frame could be set to zero-size or offscreen in `handle_ca_context()`
-directly.
+Remove `update_ca_layer_frame()` entirely. At first creation time, don't set a
+frame at all — the CALayerHost defaults to zero-size at origin, which is
+invisible. On the very next frame, `paint_pass()` calls `set_overlay_frame()`
+and places it correctly. This is how terminal panes work — they don't
+pre-compute position at creation time, they get rendered at the correct position
+on the next paint pass.
+
+The zero-size initial frame won't affect the browser. The CALayer frame is
+purely a display property — it controls where the composited GPU layer appears
+in the window. The browser's viewport size is controlled by the `Resize`
+protobuf message over the Unix socket, which is independent. Chromium is already
+rendering at its correct size before the `CaContext` message arrives.
+
+## Experiments
+
+### Experiment 1: Remove update_ca_layer_frame
+
+#### Description
+
+Delete `update_ca_layer_frame()` and its call site. The CALayerHost will be
+created with no explicit frame (defaults to zero-rect), and
+`set_overlay_frame()` from `paint_pass()` will place it correctly on the next
+frame.
+
+#### Changes
+
+**`wezboard/wezboard-gui/src/termsurf/conn.rs`**
+
+1. Remove the call to `update_ca_layer_frame(pane, root_layer)` at ~line 1286
+   (inside the first-creation branch of `handle_ca_context()`).
+
+2. Delete the entire `update_ca_layer_frame()` function (~lines 1330-1369).
+
+No other changes needed. `set_overlay_frame()` and the `paint_pass()` call site
+remain untouched.
+
+#### Verification
+
+```bash
+scripts/build.sh wezboard
+```
+
+| # | Test                    | Steps                                          | Expected                              |
+| - | ----------------------- | ---------------------------------------------- | ------------------------------------- |
+| 1 | No flash in right split | Split pane, run `web google.com` in right pane | Webview appears on right, no flash    |
+| 2 | No flash in left split  | Split pane, run `web google.com` in left pane  | Webview appears on left, no flash     |
+| 3 | No flash without split  | Single pane, run `web google.com`              | Webview appears normally              |
+| 4 | Resize after split      | Open webview in right split, resize window     | Webview repositions correctly         |
+| 5 | Split after webview     | Open webview, then split pane                  | Webview resizes/repositions correctly |
