@@ -67,7 +67,7 @@ install_wezboard() {
   cp "$BINARY" "$APP/Contents/MacOS/wezboard-gui"
 
   echo "==> Codesigning..."
-  codesign --force --deep --sign - "$APP"
+  codesign --force --deep --sign - "$APP" || true
 
   echo "  App: $APP"
 }
