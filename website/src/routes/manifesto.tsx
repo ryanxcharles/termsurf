@@ -30,7 +30,7 @@ function ManifestoPage() {
           your machine that you do not control.
         </p>
         <p>
-          We aren't civilians. We are root. We inspect every request. Override
+          We aren't civilians. We inspect every request. Override
           every header. Pipe responses into scripts. Open DevTools in a split
           pane while tailing logs in another. We need the web the same way we
           need the filesystem — raw, fast, and under <em>our</em> complete
@@ -54,7 +54,7 @@ function ManifestoPage() {
         </p>
         <p>We surf by day. We hack by night. We build TermSurf for us.</p>
         <p>
-          TermSurfers are <em>root</em>.
+          We are <em>root</em>.
         </p>
         <p className="pt-2">— Max Commits, San Tokyo, Hawaii</p>
         <p className="pt-2">
