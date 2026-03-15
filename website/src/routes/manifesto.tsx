@@ -22,27 +22,28 @@ function ManifestoPage() {
         <p>The browser took it away.</p>
         <p>
           Big tech brought the web to three billion people. That is a real
-          achievement. But Chrome, Safari, Edge — they are built for civilians.
-          They hide the network. They hide the DOM. They wrap everything in a
-          GUI designed for people who do not know what a process is. You cannot
-          pipe a browser. You cannot script it. You cannot embed it in your
-          workflow. The browser is a walled garden on an open operating system.
-          It is the last system on your machine that you do not control.
+          achievement. But Chrome, Safari, and Edge are built for newbs. They
+          hide the network. They hide the DOM. They wrap everything in a GUI for
+          NPCs who do not know what a process is. You cannot pipe a browser. You
+          cannot script it. You cannot embed it in your workflow. The browser is
+          a walled garden on an open operating system. It is the last system on
+          your machine that you do not control.
         </p>
         <p>
-          We are not civilians. We are root. We need to inspect every request.
-          Override every header. Pipe responses into scripts. Open DevTools in a
-          split pane while tailing logs in another. We need the web the same way
-          we need the filesystem — raw, fast, and under <em>our</em> complete
+          We aren't civilians. We are root. We inspect every request. Override
+          every header. Pipe responses into scripts. Open DevTools in a split
+          pane while tailing logs in another. We need the web the same way we
+          need the filesystem — raw, fast, and under <em>our</em> complete
           control.
         </p>
         <p>
           The browser we need does not exist as a standalone app. The window is
           the wrong container. The right container is the terminal — where
-          everything else already lives. The browser should be TUI. It should
-          sit in the shell, next to the editor, next to the logs. It should
-          resize with a keystroke. It should speak protobuf over a Unix socket.
-          It should be a component in the system, not walled garden.
+          everything else already lives. The browser should be a TUI, like
+          Neovim or Lazygit. It should sit in the shell, next to the editor,
+          next to the repo, next to the logs. It should resize with a keystroke.
+          It should speak protobuf over a Unix socket. It should be a component
+          in the system, not walled garden.
         </p>
         <p>
           So we built TermSurf. Full Chromium. Full GPU rendering. Zero-copy
