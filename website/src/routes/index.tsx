@@ -63,7 +63,7 @@ function HomePage() {
           className="w-full"
         />
         <h2 className="text-sm font-bold text-foreground mt-3">
-          TermSurf Wezboard: The First GUI for TermSurf
+          TermSurf Wezboard: A GUI for TermSurf
         </h2>
         <p className="text-sm text-muted mt-2">
           TermSurf supports GPU-rendered web pages at 60fps+ using real browser
