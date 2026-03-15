@@ -6,7 +6,7 @@ Type `web` and a full web browser opens right in your terminal pane. No window
 switching. No context loss. Just web.
 
 ```bash
-web google.com
+web termsurf.com/welcome
 ```
 
 ![TermSurf screenshot showing a browser pane alongside terminal panes](assets/screenshot2.png)
