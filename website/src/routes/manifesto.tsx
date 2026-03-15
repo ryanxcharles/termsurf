@@ -16,8 +16,8 @@ function ManifestoPage() {
         <p>
           The terminal gave us that. Every process, every socket, every file —
           reachable from a single prompt. The terminal does not hide things. It
-          does not decide what we are allowed to see. We are the programmers. We
-          are the sysadmins. We are the webmasters. We are in charge.
+          is our cockpit. The computer is our exoskeleton. We are ready for
+          anything.
         </p>
         <p>The browser took that away.</p>
         <p>
