@@ -11,7 +11,7 @@ function ManifestoPage() {
       <h2 className="text-sm font-bold text-foreground mb-4">┌─ Manifesto ─┐</h2>
       <div className="text-sm space-y-4 text-foreground-dark">
         <p>
-          We surf by day. We hack by night. We sleep somewhere in between.
+          We surf by day. We hack by night. We build TermSurf so we never have to leave.
         </p>
         <p>
           We live in the terminal. It is our cockpit. Total control. Every
@@ -60,7 +60,7 @@ function ManifestoPage() {
           is there too.
         </p>
         <p className="pt-2">
-          — Max Commits, on behalf of the termsurfers
+          — Max Commits, San Tokyo, Hawaii
         </p>
         <p className="pt-2">
           <a
