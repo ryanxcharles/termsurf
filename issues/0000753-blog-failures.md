@@ -54,8 +54,11 @@ pointer; Swift doesn't match. Fatal error:
 `CefApp_0_CToCpp called with invalid version -1`. Rust's `#[repr(C)]` solved it.
 
 **Ghostboard archived, Wezboard replaced it.** Ghostboard (Ghostty fork)
-completed full browser integration but the protocol wasn't stable. Archived in
-favor of Wezboard (WezTerm fork) which was easier to modify.
+completed full browser integration, but Ghostty only runs on Linux and macOS.
+WezTerm already runs on Windows, making it the better foundation to prove
+TermSurf works cross-platform. WezTerm is also Rust, which has a much larger
+ecosystem than Zig — packages like ratatui and edtui are available off the shelf
+instead of needing to be written from scratch.
 
 ### Failed experiments by theme
 
@@ -127,5 +130,59 @@ favor of Wezboard (WezTerm fork) which was easier to modify.
 - Swift/Zig CEF integration → Rust with `#[repr(C)]`
 - FrameSinkVideoCapturer → CALayerHost (zero-copy rendering)
 - Key event synthesis → direct frame methods (avoided re-entrancy)
-- Ghostboard → Wezboard (easier to modify)
+- Ghostboard → Wezboard (cross-platform, Rust ecosystem)
 - XPC for all IPC → Unix sockets + protobuf
+
+## Experiments
+
+### Experiment 1: Write the blog post
+
+#### Description
+
+Write a blog post titled something like "750 Issues and Counting: Everything
+That Didn't Work" (exact title TBD during writing). The post uses the
+cypherpunk/Wired 1990s voice established in the website CLAUDE.md.
+
+#### Structure
+
+The post has three acts:
+
+**Act 1: The graveyard (~40%).** Open with the biggest, most dramatic failure —
+the CEF framerate ceiling. 26 experiments. Never broke 31fps. Then cascade
+through the other dead ends: multi-profile 2fps, Electron patches that had zero
+effect, Swift structs that crash CEF. Each failure is a short, punchy paragraph.
+Don't explain everything — name the metal, state the failure, move on. The
+reader should feel the velocity of hitting walls.
+
+**Act 2: The turn (~20%).** This is the reward. About 2/3 through, pivot from
+"everything that broke" to "what the failures taught us." The failures aren't
+random — they cluster around a few recurring constraints (performance walls,
+coordinate math, cross-process complexity, lost work during refactoring). This
+section names the patterns and shows how each dead end pointed toward the
+architecture TermSurf has today. The reader gets the payoff: the failures were
+the map.
+
+**Act 3: What works now (~20%).** Brief. Show the current state — the
+architecture that all those failures forced into existence.
+One-process-per-profile. Unix sockets + protobuf. CALayerHost zero-copy
+rendering. The protocol is the product. End with the list of successful pivots
+as proof that the graveyard built the road.
+
+Keep the post under 1500 words. Short paragraphs. Staccato sentences. Name the
+metal.
+
+#### Changes
+
+**`blog/2026-03-15-everything-that-didnt-work.md`**
+
+Create a new blog post with TOML front matter. Use the established markdown
+format from the existing post.
+
+#### Verification
+
+```bash
+cd website && bun run build:blog
+```
+
+Blog data should build with 2 posts. Visit `http://localhost:3000/blog` and
+verify the new post appears and renders correctly.
