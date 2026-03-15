@@ -139,9 +139,8 @@ instead of needing to be written from scratch.
 
 #### Description
 
-Write a blog post titled something like "750 Issues and Counting: Everything
-That Didn't Work" (exact title TBD during writing). The post uses the
-cypherpunk/Wired 1990s voice established in the website CLAUDE.md.
+Write a blog post titled "How Not to Build a Terminal Browser". The post uses
+the cypherpunk/Wired 1990s voice established in the website CLAUDE.md.
 
 #### Structure
 
@@ -173,7 +172,7 @@ metal.
 
 #### Changes
 
-**`blog/2026-03-15-everything-that-didnt-work.md`**
+**`blog/2026-03-15-how-not-to-build-a-terminal-browser.md`**
 
 Create a new blog post with TOML front matter. Use the established markdown
 format from the existing post.
