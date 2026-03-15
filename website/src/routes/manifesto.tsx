@@ -11,7 +11,7 @@ function ManifestoPage() {
       <h2 className="text-sm font-bold text-foreground mb-4">┌─ Manifesto ─┐</h2>
       <div className="text-sm space-y-4 text-foreground-dark">
         <p>
-          We surf by day. We hack by night. We build TermSurf so we never have to leave.
+          We surf by day. We hack by night. We build TermSurf for <em>us</em>.
         </p>
         <p>
           We live in the terminal. It is our cockpit. Total control. Every
