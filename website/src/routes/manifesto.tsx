@@ -12,27 +12,27 @@ function ManifestoPage() {
         ┌─ Manifesto ─┐
       </h2>
       <div className="text-sm space-y-4 text-foreground-dark">
-        <p>We need total control.</p>
+        <p>We need total control over our computers.</p>
         <p>
           The terminal gave us that. Every process, every socket, every file —
           reachable from a single prompt. The terminal does not hide things. It
-          is our cockpit. The computer is our exoskeleton. We are ready for
-          anything.
+          is our cockpit. The computer is our exoskeleton. We are all-powerful.
+          Ready for anything.
         </p>
         <p>The browser took that away.</p>
         <p>
           Chrome, Safari, and Edge are built for newbs. They hide the network.
           They hide the DOM. They wrap everything in a GUI for NPCs who do not
           know what a process is. You cannot pipe a browser. You cannot script
-          it. You cannot embed it in your workflow. The browser is a walled
+          it. The browser is a walled
           garden on an open operating system. It is the last system on your
           machine that you do not control.
         </p>
         <p>
-          We aren't civilians. We inspect every request. Override every header.
-          Pipe responses into scripts. Open DevTools in a split pane while
-          tailing logs in another. We need the web the same way we need the
-          filesystem — raw, fast, and under <em>our</em> complete control.
+          We aren't mere consumers. We inspect every request. Override every
+          header. Pipe responses into scripts. Open DevTools in a split pane
+          while tailing logs in another. We need the web the same way we need
+          the filesystem — raw, fast, and under <em>our</em> complete control.
         </p>
         <p>
           The browser we need does not exist as a standalone app. The window is
