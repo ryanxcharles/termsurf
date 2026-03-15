@@ -30,11 +30,10 @@ function ManifestoPage() {
           your machine that you do not control.
         </p>
         <p>
-          We aren't civilians. We inspect every request. Override
-          every header. Pipe responses into scripts. Open DevTools in a split
-          pane while tailing logs in another. We need the web the same way we
-          need the filesystem — raw, fast, and under <em>our</em> complete
-          control.
+          We aren't civilians. We inspect every request. Override every header.
+          Pipe responses into scripts. Open DevTools in a split pane while
+          tailing logs in another. We need the web the same way we need the
+          filesystem — raw, fast, and under <em>our</em> complete control.
         </p>
         <p>
           The browser we need does not exist as a standalone app. The window is
@@ -52,7 +51,7 @@ function ManifestoPage() {
           is there — right next to your shell. <em>In</em> your shell. No
           alt-tab. No context switch. No walled garden.
         </p>
-        <p>We surf by day. We hack by night. We build TermSurf for us.</p>
+        <p>We surf by day. We hack by night. We build for us.</p>
         <p>
           We are <em>root</em>.
         </p>
