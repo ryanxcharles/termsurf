@@ -35,15 +35,20 @@ function HomePage() {
   return (
     <>
       <section className="mb-8">
-        <h1 className="text-lg font-bold text-primary">Root access to the 'net.</h1>
+        <h1 className="text-lg font-bold text-primary">
+          Root access to the 'net.
+        </h1>
         <p className="text-sm text-muted mt-3">
           Hack the web from your terminal.{" "}
           <span className="bg-accent text-background">
-            TermSurf is a protocol that overlays web browser engines, like Chromium and WebKit, in
-            your terminal emulator.
+            TermSurf is a protocol that overlays web browser engines, like
+            Chromium and WebKit, in your terminal emulator.
           </span>{" "}
           Unlimited power to control every web page from your keyboard.{" "}
-          <a href="https://github.com/termsurf/termsurf" className="text-accent hover:text-primary">
+          <a
+            href="https://github.com/termsurf/termsurf"
+            className="text-accent hover:text-primary"
+          >
             [fork the source on GitHub]
           </a>
         </p>
@@ -57,28 +62,53 @@ function HomePage() {
           alt="TermSurf — a browser pane alongside terminal panes"
           className="w-full"
         />
+        <h2 className="text-sm font-bold text-foreground mt-3">
+          TermSurf Wezboard: The First GUI for TermSurf
+        </h2>
+        <p className="text-sm text-muted mt-2">
+          TermSurf supports GPU-rendered web pages at 60fps+ using real browser
+          engines like Chromium and WebKit. <em>In your terminal</em>.
+          Furthermore, TermSurf is the only browser that supports multiple
+          profiles and multiple engines in the same window at the same time.{" "}
+          <Link to="/docs" className="text-accent hover:text-primary">
+            [learn more in the docs]
+          </Link>
+        </p>
+        <div className="mt-4 text-muted text-xs">
+          ──────────────────────────────────────────────────────────
+        </div>
       </section>
       <section className="mb-8">
-        <h2 className="text-sm font-bold text-foreground mb-4">┌─ Latest Post ─┐</h2>
+        <h2 className="text-sm font-bold text-foreground mb-4">
+          ┌─ Latest Post ─┐
+        </h2>
         {latestPost ? (
           <Link
             to="/blog/$slug"
             params={{ slug: latestPost.slug }}
             className="block hover:bg-background-highlight/30 text-sm"
           >
-            <span className="text-accent hover:text-primary">{latestPost.title}</span>
+            <span className="text-accent hover:text-primary">
+              {latestPost.title}
+            </span>
             <span className="text-muted ml-3">{latestPost.date}</span>
             <span className="text-success ml-3">{latestPost.author}</span>
           </Link>
         ) : (
           <p className="text-muted text-sm">No posts yet.</p>
         )}
-        <Link to="/blog" className="text-sm text-muted hover:text-accent mt-3 inline-block">
+        <Link
+          to="/blog"
+          className="text-sm text-muted hover:text-accent mt-3 inline-block"
+        >
           [view all posts]
         </Link>
       </section>
       <CommitLog commits={commitsData.commits.slice(0, 10)} />
-      <Link to="/commits" className="text-sm text-muted hover:text-accent mt-3 inline-block">
+      <Link
+        to="/commits"
+        className="text-sm text-muted hover:text-accent mt-3 inline-block"
+      >
         [view all commits]
       </Link>
     </>
