@@ -126,10 +126,28 @@ it for each candidate pane.
 scripts/build.sh wezboard
 ```
 
-| # | Test                          | Steps                                                         | Expected                           |
-| - | ----------------------------- | ------------------------------------------------------------- | ---------------------------------- |
-| 1 | Scroll inactive webview       | Split pane, webview on right, focus left, scroll over right   | Right webview scrolls              |
-| 2 | Scroll active webview         | Focus the webview pane, scroll over it                        | Webview scrolls (no regression)    |
-| 3 | Scroll terminal pane          | Scroll over a terminal pane with no webview                   | Terminal scrolls normally          |
-| 4 | Scroll outside overlay bounds | Scroll over the terminal area of a pane that has a webview    | Terminal scrolls, not the webview  |
-| 5 | Two webviews, scroll each     | Two split panes with webviews, scroll over each without focus | Each webview scrolls independently |
+| #   | Test                          | Steps                                                         | Expected                           |
+| --- | ----------------------------- | ------------------------------------------------------------- | ---------------------------------- |
+| 1   | Scroll inactive webview       | Split pane, webview on right, focus left, scroll over right   | Right webview scrolls              |
+| 2   | Scroll active webview         | Focus the webview pane, scroll over it                        | Webview scrolls (no regression)    |
+| 3   | Scroll terminal pane          | Scroll over a terminal pane with no webview                   | Terminal scrolls normally          |
+| 4   | Scroll outside overlay bounds | Scroll over the terminal area of a pane that has a webview    | Terminal scrolls, not the webview  |
+| 5   | Two webviews, scroll each     | Two split panes with webviews, scroll over each without focus | Each webview scrolls independently |
+
+**Result:** Pass
+
+All five tests pass.
+
+#### Conclusion
+
+Hit-testing all overlay panes instead of only the active pane allows scroll
+events to reach any visible webview. The new `try_forward_scroll_any_pane()`
+iterates all panes with browser overlays, and the first geometric hit receives
+the scroll.
+
+## Conclusion
+
+Scroll events now target the overlay under the cursor regardless of pane focus.
+Added `try_forward_scroll_any_pane()` which iterates all overlay panes and
+hit-tests each one, replacing the previous active-pane-only path. The
+lower-level `try_forward_raw_scroll()` remains public for targeted use.

@@ -624,3 +624,43 @@ pub fn try_forward_raw_scroll(
     }
     false
 }
+
+/// Forward raw scroll event to whichever overlay pane the cursor is over.
+/// Iterates all panes with browser overlays and hit-tests each one.
+/// Returns true if any overlay consumed the scroll.
+pub fn try_forward_scroll_any_pane(
+    coords: ::window::Point,
+    delta_x: f64,
+    delta_y: f64,
+    phase: u64,
+    momentum_phase: u64,
+    precise: bool,
+    modifiers: Modifiers,
+) -> bool {
+    let Some(state) = super::shared_state() else {
+        return false;
+    };
+    let candidates: Vec<usize> = {
+        let st = state.lock().unwrap();
+        st.panes
+            .values()
+            .filter(|p| p.tab_id != 0 && p.ca_layer_host != 0)
+            .filter_map(|p| p.pane_id.parse().ok())
+            .collect()
+    };
+    for pane_id in candidates {
+        if try_forward_raw_scroll(
+            pane_id,
+            coords,
+            delta_x,
+            delta_y,
+            phase,
+            momentum_phase,
+            precise,
+            modifiers,
+        ) {
+            return true;
+        }
+    }
+    false
+}
