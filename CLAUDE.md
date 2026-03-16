@@ -184,7 +184,8 @@ This keeps every issue's Chromium changes isolated and traceable.
 - `webtui/` — The `web` TUI (Rust/ratatui). Browser chrome in the terminal pane.
 - `roamium/` — Roamium (Chromium browser binary, Rust).
 - `chromium/` — Chromium fork build workspace (gitignored).
-- `issues/` — Issue documents across all generations (immutable history).
+- `issues/` — Issue folders with README.md and TOML frontmatter. See
+  `issues/README.md` for the full index.
 - `website/` — termsurf.com project website.
 - `docs/early-prototypes.md` — Archived prototype documentation (ts1–ts5,
   cef-rs, Ghostboard Legacy).
@@ -243,259 +244,150 @@ install.
 ## Documentation
 
 All documentation is in `docs/` or in `README.md` files throughout the codebase.
-
-### Recent issues
-
-Recent issues:
-
-- `issues/0000700-tui-gui-sockets.md` — Replace TUI↔GUI XPC with Unix sockets
-- `issues/0000701-chromium-sockets.md` — Replace GUI↔Chromium XPC with Unix
-  sockets
-- `issues/0000702-socket-cleanup.md` — Dead XPC removal and unlimited client
-  connections
-- `issues/0000703-remove-click-suppression.md` — Remove click-to-activate
-  suppression
-- `issues/0000704-browser-bindings.md` — Browser bindings (libtermsurf_content)
-- `issues/0000705-browser-bindings.md` — Browser bindings continued (DevTools
-  fix)
-- `issues/0000706-plusium-devtools.md` — Plusium DevTools crash fix
-- `issues/0000707-roamium.md` — Roamium (shared lib + Rust rewrite)
-- `issues/0000708-roamium-only.md` — Roamium-only (clean fork, renamed lib)
-- `issues/0000709-wezboard.md` — Wezboard (WezTerm fork research)
-- `issues/0000710-gecko-webkit-ladybird.md` — Gecko, WebKit & Ladybird engine
-  research
-- `issues/0000711-rename-ghostboard-webtui.md` — Rename GUI to Ghostboard, TUI
-  to webtui
-- `issues/0000715-wezboard.md` — Wezboard (WezTerm fork, rename, initial build)
-- `issues/0000716-wezboard-warnings.md` — Wezboard build warnings
-- `issues/0000717-remove-cocoa-crate.md` — Remove `cocoa` crate from Wezboard
-- `issues/0000718-finish-cocoa-removal.md` — Finish `cocoa` and `objc` 0.2
-  removal
-- `issues/0000719-wezboard-code-smells.md` — Wezboard code smells from objc2
-  migration
-- `issues/0000720-wezboard-manual-test.md` — Manual test after objc2 migration
-- `issues/0000721-wgpu-upgrade.md` — Upgrade wgpu from 25 to 28
-- `issues/0000722-cargo-deps.md` — Update outdated cargo dependencies
-- `issues/0000723-pane-borders.md` — Split pane borders for Wezboard
-- `issues/0000724-wezboard-protocol.md` — Implement TermSurf protocol in
-  Wezboard
-- `issues/0000725-wezboard-overlay.md` — Wezboard browser overlay rendering
-- `issues/0000726-wezboard-overlay-lifecycle.md` — Overlay lifecycle and
-  remaining protocol
-- `issues/0000727-wezboard-second-webview.md` — Second webview positioning
-- `issues/0000728-wezboard-remaining-protocol.md` — Complete remaining protocol
-- `issues/0000729-wezboard-reposition-and-protocol.md` — Overlay reposition on
-  resize
-- `issues/0000730-roamium-standalone-install.md` — Roamium standalone install
-- `issues/0000731-wezboard-scroll-crash.md` — Wezboard scroll crashes Roamium
-- `issues/0000732-wezboard-reopen-tab.md` — Shutdown message and tab reopen fix
-- `issues/0000733-ghostboard-shutdown.md` — Ghostboard sends Shutdown instead of
-  SIGKILL
-- `issues/0000734-build-scripts.md` — Consistent build and install scripts
-- `issues/0000735-ghostboard-release-icon.md` — Ghostboard app icons
-- `issues/0000736-roamium-process-leak.md` — Roamium process leak on GUI crash
-- `issues/0000746-overlay-positioning.md` — Fix webview overlay positioning
-  (render-pass based)
-- `issues/0000747-multiscreen-overlay.md` — Overlay doesn't reposition on split
-  (second screen)
-- `issues/0000748-clipboard.md` — Browser clipboard (copy/cut/paste)
-
-### Early Prototypes (ts1–ts5)
-
 Issue docs for all prototype generations are indexed in
 [docs/early-prototypes.md](docs/early-prototypes.md).
 
-### General
-
-- `issues/0000002-merge-upstream.md` — How to merge changes from upstream repos
-- `issues/0000001-competitors.md` — Terminal-browser hybrid comparison
-- `issues/0000003-website.md` — termsurf.com website
-- `TODO.md` — Task checklist and future issues. Only one issue is active at a
-  time (the highest-numbered issue doc without a `## Conclusion`). When a new
-  problem is identified during work on the active issue, add it to the "Future
-  issues" section of TODO.md instead of creating an issue doc.
-
-### Immutability
-
-Issue documents in `issues/` that have a `## Conclusion` are historical records.
-They are **immutable** and must NEVER be modified. They capture what happened at
-the time — even if details (like directory names or paths) are now outdated.
-History stays as it was written.
-
 ## Issues and Experiments
 
-Every significant piece of work gets an issue document in `issues/`. Issues
-describe the problem, provide background, and propose solutions. Experiments are
-the incremental steps that solve the problem.
+Every significant piece of work gets an issue in `issues/`. Issues describe the
+problem, provide background, and propose solutions. Experiments are the
+incremental steps that solve the problem.
 
-### One Issue at a Time
+### Issue Structure
 
-Only one issue is active at a time. The active issue is the highest-numbered
-issue doc in `issues/` that does not have a `## Conclusion`. All work focuses on
-this issue until it is closed.
-
-When a new problem is discovered during work on the active issue, do NOT create
-a new issue doc for it. Instead, add it to the "Future issues" section of
-`TODO.md` — a checkboxed list of problems waiting to become issues. When the
-active issue is closed and we're ready to start the next piece of work, promote
-a TODO item to a full issue doc (next sequential number) and remove it from the
-TODO.
-
-### Issue Documents
-
-#### Location and naming
-
-All issue documents live in `issues/`. Each has a sequential number and a short
-descriptive name:
+Each issue is a **folder** containing a `README.md` with TOML frontmatter:
 
 ```
-issues/0000514-mouse.md
-issues/0000513-ctrl-esc.md
-issues/0000512-vsync.md
+issues/0000756-surfari/
+├── README.md          ← main issue document with frontmatter
+├── 01-build-webkit.md ← optional: additional files for long issues
+└── 02-compositing.md
 ```
 
-The number is globally sequential across all generations (ts1–ts5). The name is
-lowercase, hyphenated, and describes the topic — not the solution.
+The folder name is `{number}-{slug}`. The number is globally sequential across
+all generations (ts1–ts5). The slug is lowercase, hyphenated, and describes the
+topic.
 
-#### Structure of a new issue
+The full index of all issues is at `issues/README.md`. Regenerate it with:
 
-A new issue document has these sections:
+```bash
+scripts/build-issues-index.sh
+```
+
+#### Frontmatter
+
+Every `README.md` starts with TOML frontmatter:
+
+```
++++
+status = "open"
+opened = "2026-03-16"
++++
+```
+
+Or for closed issues:
+
+```
++++
+status = "closed"
+opened = "2026-03-16"
+closed = "2026-03-16"
++++
+```
+
+#### README.md structure
+
+After the frontmatter, a new issue has these sections:
 
 1. **Title** (H1) — `# Issue {N}: {descriptive title}`
-2. **Goal** — One or two sentences describing the desired outcome from the
-   user's perspective.
-3. **Background** — Context: what led to this issue, what prior work is
-   relevant, what constraints exist.
-4. **Architecture** / **Analysis** / **Proposed Solutions** — Technical details,
-   diagrams, trade-offs, ideas for how to solve the problem. Use whatever
-   heading name fits the content.
+2. **Goal** — One or two sentences describing the desired outcome.
+3. **Background** — Context, prior work, constraints.
+4. **Architecture** / **Analysis** / **Proposed Solutions** — Technical details.
 
-A new issue does **not** have an Experiments section yet. The issue is a problem
-statement and analysis, not a solution plan.
+A new issue does **not** have an Experiments section yet.
 
-#### What NOT to put in a new issue
+#### Additional files
 
-**Never list experiments upfront.** Do not write "Experiment 1: ..., Experiment
-2: ..., Experiment 3: ..." when creating an issue. The outcome of each
-experiment may change what comes next. Listing them in advance creates false
-commitments and wastes design effort on experiments that may never happen.
+For long issues, split experiments or sub-topics into numbered files:
+`01-name.md`, `02-name.md`, etc. Link them from the README.md. Keep each file
+under ~1000 lines to fit in an AI agent's context window.
 
-Instead, the issue body may include sections like:
+### Multiple Open Issues
 
-- "Ideas for experiments"
-- "Proposed solutions"
-- "Possible approaches"
-
-These are loose, exploratory. They are not numbered experiments with
-verification criteria.
+Multiple issues can be open at the same time. This allows interleaving work —
+a large issue like Surfari can stay open while smaller issues are opened and
+closed alongside it.
 
 ### Experiments
 
 #### When to create an experiment
 
-Only after the issue's product requirements are clear and the team is ready to
-implement the next step. Each experiment is designed, implemented, and concluded
-before the next one is designed.
+Only after the issue's requirements are clear. Each experiment is designed,
+implemented, and concluded before the next one is designed.
 
-#### Adding the Experiments section
-
-When the first experiment is ready to be designed, add an `## Experiments`
-heading at the bottom of the issue document, followed by the experiment:
-
-```markdown
-## Experiments
-
-### Experiment 1: {short descriptive title}
-
-{design content}
-```
+**Never list experiments upfront.** The outcome of each experiment informs what
+comes next.
 
 #### Experiment structure
 
 Each experiment has:
 
 1. **Title** (H3) — `### Experiment {N}: {descriptive title}`
-2. **Description** — What this experiment will do and why. What hypothesis is
-   being tested or what capability is being added.
-3. **Changes** — The specific code changes required, listed by file.
-4. **Verification** — How to test that the experiment worked. Include concrete
-   steps and a pass/fail criterion.
+2. **Description** — What and why.
+3. **Changes** — Specific code changes, listed by file.
+4. **Verification** — How to test. Concrete steps and pass/fail criteria.
 
 #### Chromium branches
 
-If an experiment modifies Chromium code, it MUST create a new branch in the
-Chromium repo (`chromium/src/`). Always fork the most relevant recent branch —
-usually the branch from the previous issue or experiment that has the code you
-need. Never work directly on an existing branch from a different issue.
-
-Each experiment that touches Chromium includes a `### Chromium branch` section
-documenting:
-
-1. The new branch name: `{version}-issue-{N}` (e.g., `146.0.7650.0-issue-608`)
-2. Which branch it forks from and why (e.g., "from `146.0.7650.0-issue-607`
-   because we need the keyboard forwarding code")
-
-Also add the new branch to the table in `chromium/README.md`.
+If an experiment modifies Chromium code, it MUST create a new branch:
+`{version}-issue-{N}`. Fork the most relevant recent branch. Add it to the
+table in `chromium/README.md`.
 
 #### One at a time
 
-Design and implement one experiment at a time. After Experiment 1 is concluded,
-then — and only then — design Experiment 2. The result of Experiment 1 (success,
-partial success, or failure) directly informs what Experiment 2 should be.
+Design and implement one experiment at a time. The result of Experiment 1
+directly informs what Experiment 2 should be.
 
 #### Recording results
 
-After implementing and testing an experiment, add a result and conclusion
-directly below the experiment's verification section:
+After testing, add a result below the verification section:
 
 ```markdown
 **Result:** Pass / Partial / Fail
 
-{description of what happened}
+{description}
 
 #### Conclusion
 
-{what we learned, what changed, what to do next}
+{what we learned, what to do next}
 ```
 
-Use the appropriate result:
-
-- **Pass** — The experiment achieved its verification criteria.
-- **Partial** — Some goals were met, others were not. Describe what worked and
-  what didn't.
-- **Fail** — The approach did not work. Describe why and what was learned.
-
-All three outcomes are valuable. Failed experiments eliminate dead ends and
-inform better designs.
+All three outcomes are valuable. Failed experiments eliminate dead ends.
 
 ### Closing an Issue
 
-When all experiments have satisfied the issue's product requirements (the Goal),
-add a top-level conclusion:
+Add a `## Conclusion` section after the last experiment. Update the frontmatter
+to `status = "closed"` with a `closed` date. Regenerate the index:
 
-```markdown
-## Conclusion
-
-{summary of what was accomplished, key findings, and any follow-up work}
+```bash
+scripts/build-issues-index.sh
 ```
 
-This goes after the last experiment, still inside the issue document.
+### Immutability
+
+Closed issues are historical records. They are **immutable** and must NEVER be
+modified. History stays as it was written.
 
 ### Process Summary
 
-1. **Check the TODO** — If starting fresh, pick an item from the "Future issues"
-   section of `TODO.md` and promote it to a new issue doc.
-2. **Create the issue** — Problem statement, background, analysis. No
-   experiments yet.
-3. **Design Experiment 1** — Add `## Experiments` and `### Experiment 1` when
-   ready.
-4. **Implement Experiment 1** — Write the code.
-5. **Record the result** — Pass, partial, or fail with a conclusion.
-6. **Repeat** — Design the next experiment based on what was learned. Continue
-   until the issue's goal is met.
-7. **Close the issue** — Write the issue-level conclusion.
-8. **New problems discovered along the way** — Add to the "Future issues"
-   section of `TODO.md`, not to a new issue doc.
+1. **Create the issue** — `issues/{number}-{slug}/README.md` with frontmatter,
+   goal, background. No experiments yet.
+2. **Design Experiment 1** — Add `## Experiments` and `### Experiment 1`.
+3. **Implement Experiment 1** — Write the code.
+4. **Record the result** — Pass, partial, or fail with a conclusion.
+5. **Repeat** — Design the next experiment. Continue until the goal is met.
+6. **Close the issue** — Write the `## Conclusion`, update frontmatter, rebuild
+   index.
 
 ## Remember
 
