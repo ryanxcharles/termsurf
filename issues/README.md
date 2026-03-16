@@ -2,9 +2,10 @@
 
 ## Open
 
-| #   | Issue                                                             | Opened     |
-| --- | ----------------------------------------------------------------- | ---------- |
-| 756 | [Surfari — WebKit engine for TermSurf](0000756-surfari/README.md) | 2026-03-16 |
+| #   | Issue                                                                          | Opened     |
+| --- | ------------------------------------------------------------------------------ | ---------- |
+| 756 | [Surfari — WebKit engine for TermSurf](0000756-surfari/README.md)              | 2026-03-16 |
+| 757 | [Disable overlay fade animation on tab switch](0000757-overlay-fade/README.md) | 2026-03-16 |
 
 ## Closed
 
