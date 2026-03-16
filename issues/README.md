@@ -2,15 +2,15 @@
 
 ## Open
 
-| #   | Issue                                                                                          | Opened     |
-| --- | ---------------------------------------------------------------------------------------------- | ---------- |
-| 756 | [Surfari — WebKit engine for TermSurf](0000756-surfari/README.md)                              | 2026-03-16 |
-| 758 | [TUI processes messages for all tabs, not just its own](0000758-tui-message-routing/README.md) | 2026-03-16 |
+| #   | Issue                                                             | Opened     |
+| --- | ----------------------------------------------------------------- | ---------- |
+| 756 | [Surfari — WebKit engine for TermSurf](0000756-surfari/README.md) | 2026-03-16 |
 
 ## Closed
 
 | #   | Issue                                                                                                        | Opened     | Closed     |
 | --- | ------------------------------------------------------------------------------------------------------------ | ---------- | ---------- |
+| 758 | [TUI processes messages for all tabs, not just its own](0000758-tui-message-routing/README.md)               | 2026-03-16 | 2026-03-16 |
 | 757 | [Disable overlay fade animation on tab switch](0000757-overlay-fade/README.md)                               | 2026-03-16 | 2026-03-16 |
 | 755 | [Scroll broken in neovim when webviews are open](0000755-scroll-neovim/README.md)                            | 2026-03-16 | 2026-03-16 |
 | 754 | [Screenshot pipeline and homepage hero](0000754-screenshots/README.md)                                       | 2026-03-15 | 2026-03-15 |

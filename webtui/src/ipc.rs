@@ -52,8 +52,9 @@ impl CompositorConnection {
         let (reply_tx, reply_rx) = mpsc::channel();
 
         // Reader thread: reads length-prefixed protobuf messages.
+        // tab_id=0: Wezboard messages don't need tab filtering.
         std::thread::spawn(move || {
-            reader_loop(reader, tx, reply_tx);
+            reader_loop(reader, tx, reply_tx, 0);
         });
 
         Some(Self {
@@ -280,6 +281,7 @@ fn reader_loop(
     mut stream: UnixStream,
     event_tx: mpsc::Sender<super::LoopEvent>,
     reply_tx: mpsc::Sender<TermSurfMessage>,
+    tab_id: i64,
 ) {
     let mut buf = Vec::with_capacity(4096);
     let mut tmp = [0u8; 4096];
@@ -301,7 +303,7 @@ fn reader_loop(
 
             let payload = &buf[4..4 + msg_len];
             if let Ok(msg) = TermSurfMessage::decode(payload) {
-                dispatch_message(msg, &event_tx, &reply_tx);
+                dispatch_message(msg, &event_tx, &reply_tx, tab_id);
             }
             buf.drain(..4 + msg_len);
         }
@@ -325,8 +327,9 @@ impl BrowserConnection {
         // Dummy reply_tx — browser doesn't do request/reply with TUI.
         let (reply_tx, _reply_rx) = mpsc::channel();
 
+        let id = tab_id;
         std::thread::spawn(move || {
-            reader_loop(reader, tx, reply_tx);
+            reader_loop(reader, tx, reply_tx, id);
         });
 
         Some(Self {
@@ -370,6 +373,7 @@ fn dispatch_message(
     msg: TermSurfMessage,
     event_tx: &mpsc::Sender<super::LoopEvent>,
     reply_tx: &mpsc::Sender<TermSurfMessage>,
+    tab_id: i64,
 ) {
     match &msg.msg {
         // Reply messages → reply channel (sync queries block on this).
@@ -389,17 +393,26 @@ fn dispatch_message(
             }));
         }
         Some(Msg::UrlChanged(m)) => {
+            if tab_id != 0 && m.tab_id != 0 && m.tab_id != tab_id {
+                return;
+            }
             let _ = event_tx.send(super::LoopEvent::Ipc(CompositorMessage::UrlChanged {
                 url: m.url.clone(),
             }));
         }
         Some(Msg::LoadingState(m)) => {
+            if tab_id != 0 && m.tab_id != 0 && m.tab_id != tab_id {
+                return;
+            }
             let _ = event_tx.send(super::LoopEvent::Ipc(CompositorMessage::LoadingState {
                 state: m.state.clone(),
                 _progress: m.progress as u8,
             }));
         }
         Some(Msg::TitleChanged(m)) => {
+            if tab_id != 0 && m.tab_id != 0 && m.tab_id != tab_id {
+                return;
+            }
             let _ = event_tx.send(super::LoopEvent::Ipc(CompositorMessage::TitleChanged {
                 title: m.title.clone(),
             }));

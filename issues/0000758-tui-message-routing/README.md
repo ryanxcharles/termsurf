@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-03-16"
+closed = "2026-03-16"
 +++
 
 # Issue 758: TUI processes messages for all tabs, not just its own
@@ -144,10 +145,26 @@ cd webtui && cargo build
 scripts/build.sh wezboard
 ```
 
-| # | Test                          | Steps                                              | Expected                          |
-| - | ----------------------------- | -------------------------------------------------- | --------------------------------- |
-| 1 | Navigate doesn't bleed        | Two TUIs same profile, navigate in one             | Only that TUI's URL changes       |
-| 2 | Title doesn't bleed           | Two TUIs same profile, navigate to different pages | Each TUI shows its own page title |
-| 3 | Loading state doesn't bleed   | Navigate in one TUI while other is idle            | Only navigating TUI shows loading |
-| 4 | Single TUI still works        | One TUI, navigate normally                         | URL, title, loading all update    |
-| 5 | Different profiles still work | Two TUIs different profiles, navigate in each      | Each works independently          |
+| #   | Test                          | Steps                                              | Expected                          |
+| --- | ----------------------------- | -------------------------------------------------- | --------------------------------- |
+| 1   | Navigate doesn't bleed        | Two TUIs same profile, navigate in one             | Only that TUI's URL changes       |
+| 2   | Title doesn't bleed           | Two TUIs same profile, navigate to different pages | Each TUI shows its own page title |
+| 3   | Loading state doesn't bleed   | Navigate in one TUI while other is idle            | Only navigating TUI shows loading |
+| 4   | Single TUI still works        | One TUI, navigate normally                         | URL, title, loading all update    |
+| 5   | Different profiles still work | Two TUIs different profiles, navigate in each      | Each works independently          |
+
+**Result:** Pass
+
+All five tests pass.
+
+#### Conclusion
+
+Filtering by `tab_id` in `dispatch_message` prevents browser state messages from
+bleeding across TUIs. Each TUI now only processes messages for its own tab.
+
+## Conclusion
+
+The TUI was processing all browser state messages regardless of which tab they
+belonged to. The fix: pass the TUI's `tab_id` into `reader_loop` and
+`dispatch_message`, and filter `UrlChanged`, `LoadingState`, and `TitleChanged`
+by matching `m.tab_id` against the TUI's own tab_id. TUI-side fix only.
