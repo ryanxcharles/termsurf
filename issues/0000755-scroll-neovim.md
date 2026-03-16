@@ -178,13 +178,13 @@ Also remove the debug logging from experiment 1.
 scripts/build.sh wezboard
 ```
 
-| # | Test                            | Steps                                                  | Expected                       |
-| - | ------------------------------- | ------------------------------------------------------ | ------------------------------ |
-| 1 | Scroll neovim with webview tab  | Neovim in tab 1, webview in tab 2, scroll in tab 1     | Neovim scrolls                 |
-| 2 | Scroll webview in active tab    | Switch to tab 2, scroll over webview                   | Webview scrolls                |
-| 3 | Scroll neovim without webviews  | No webviews open, scroll in neovim                     | Neovim scrolls (no regression) |
-| 4 | Scroll split webview            | Webview in split pane same tab, scroll over it         | Webview scrolls                |
-| 5 | Scroll terminal next to webview | Webview in right split, scroll over left terminal pane | Terminal scrolls               |
+| #   | Test                            | Steps                                                  | Expected                       |
+| --- | ------------------------------- | ------------------------------------------------------ | ------------------------------ |
+| 1   | Scroll neovim with webview tab  | Neovim in tab 1, webview in tab 2, scroll in tab 1     | Neovim scrolls                 |
+| 2   | Scroll webview in active tab    | Switch to tab 2, scroll over webview                   | Webview scrolls                |
+| 3   | Scroll neovim without webviews  | No webviews open, scroll in neovim                     | Neovim scrolls (no regression) |
+| 4   | Scroll split webview            | Webview in split pane same tab, scroll over it         | Webview scrolls                |
+| 5   | Scroll terminal next to webview | Webview in right split, scroll over left terminal pane | Terminal scrolls               |
 
 **Result:** Pass
 
@@ -196,3 +196,12 @@ Adding a `visible` bool to the `Pane` struct, set by `sync_overlay_visibility`,
 and filtering on it in `try_forward_scroll_any_pane` fixes the issue. Only
 visible overlays are scroll candidates. Hidden tabs no longer intercept scroll
 events.
+
+## Conclusion
+
+Scroll events in neovim were broken when browser overlays existed on other tabs.
+The root cause: `try_forward_scroll_any_pane` iterated all panes with
+`ca_layer_host != 0`, including panes on hidden tabs whose overlay bounds
+overlapped with the visible tab's content area. The fix: a `visible` bool on the
+`Pane` struct, maintained by `sync_overlay_visibility`, filters out hidden panes
+from scroll hit-testing.
