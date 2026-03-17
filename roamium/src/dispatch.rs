@@ -336,3 +336,21 @@ pub unsafe extern "C" fn on_cursor_changed(
     };
     crate::ipc::send(&msg);
 }
+
+pub unsafe extern "C" fn on_target_url_changed(
+    wc: TsWebContents,
+    url: *const std::os::raw::c_char,
+    _user_data: *mut c_void,
+) {
+    let Some(t) = find_by_handle(wc) else { return };
+    let url_str = unsafe { std::ffi::CStr::from_ptr(url) }
+        .to_string_lossy()
+        .into_owned();
+    let msg = TermSurfMessage {
+        msg: Some(Msg::TargetUrlChanged(proto::termsurf::TargetUrlChanged {
+            tab_id: t.tab_id,
+            url: url_str,
+        })),
+    };
+    crate::ipc::send(&msg);
+}

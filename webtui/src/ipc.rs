@@ -26,6 +26,7 @@ pub enum CompositorMessage {
     UrlChanged { url: String },
     LoadingState { state: String, _progress: u8 },
     TitleChanged { title: String },
+    TargetUrlChanged { url: String },
     BrowserReady { tab_id: i64, browser_socket: String },
 }
 
@@ -415,6 +416,14 @@ fn dispatch_message(
             }
             let _ = event_tx.send(super::LoopEvent::Ipc(CompositorMessage::TitleChanged {
                 title: m.title.clone(),
+            }));
+        }
+        Some(Msg::TargetUrlChanged(m)) => {
+            if tab_id != 0 && m.tab_id != 0 && m.tab_id != tab_id {
+                return;
+            }
+            let _ = event_tx.send(super::LoopEvent::Ipc(CompositorMessage::TargetUrlChanged {
+                url: m.url.clone(),
             }));
         }
         Some(Msg::BrowserReady(m)) => {

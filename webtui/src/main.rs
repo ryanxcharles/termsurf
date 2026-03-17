@@ -369,6 +369,7 @@ fn main() -> io::Result<()> {
     let mut loading_bar_start: Option<Instant> = None;
     const LOADING_TIMEOUT: Duration = Duration::from_secs(30);
     let mut page_title = String::new();
+    let mut target_url = String::new();
     let mut browser_conn: Option<ipc::BrowserConnection> = None;
 
     // edtui state (Issue 637, 658).
@@ -408,6 +409,7 @@ fn main() -> io::Result<()> {
                 inspected_tab_id,
                 &command_error,
                 browser_label,
+                &target_url,
             );
         })?;
 
@@ -707,6 +709,9 @@ fn main() -> io::Result<()> {
                     ipc::CompositorMessage::TitleChanged { title } => {
                         page_title = title;
                     }
+                    ipc::CompositorMessage::TargetUrlChanged { url: new_target } => {
+                        target_url = new_target;
+                    }
                     ipc::CompositorMessage::BrowserReady {
                         tab_id,
                         browser_socket,
@@ -819,6 +824,7 @@ fn ui(
     inspected_tab_id: i64,
     command_error: &Option<String>,
     browser_label: &str,
+    target_url: &str,
 ) -> Rect {
     // Paint full background.
     frame.render_widget(
@@ -948,7 +954,7 @@ fn ui(
         page_title.to_string()
     };
     let engine_label = Line::from(Span::raw(browser_label).style(Style::default().fg(DIM)));
-    let viewport_block = Block::default()
+    let mut viewport_block = Block::default()
         .borders(Borders::ALL)
         .title(viewport_title)
         .title_top(profile_title.alignment(Alignment::Right))
@@ -956,6 +962,10 @@ fn ui(
         .border_style(Style::default().fg(viewport_border).bg(BG))
         .title_style(Style::default().fg(viewport_border))
         .style(Style::default().bg(BG));
+    if !target_url.is_empty() {
+        let hover_label = Line::from(Span::raw(target_url).style(Style::default().fg(DIM)));
+        viewport_block = viewport_block.title_bottom(hover_label);
+    }
     let inner = viewport_block.inner(layout[0]);
     let viewport_text = format!(
         "origin: ({}, {})\nsize: {} x {}",

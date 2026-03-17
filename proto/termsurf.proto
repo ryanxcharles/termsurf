@@ -31,6 +31,7 @@ message TermSurfMessage {
     LoadingState loading_state = 16;
     TitleChanged title_changed = 17;
     CursorChanged cursor_changed = 18;
+    TargetUrlChanged target_url_changed = 32;
 
     // TUI → GUI
     SetOverlay set_overlay = 19;
@@ -180,6 +181,11 @@ message TitleChanged {
 message CursorChanged {
   int64 tab_id = 1;
   int64 cursor_type = 2;
+}
+
+message TargetUrlChanged {
+  int64 tab_id = 1;
+  string url = 2;    // empty = hover ended
 }
 
 // --- TUI → GUI ---

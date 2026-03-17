@@ -117,4 +117,9 @@ extern "C" {
         cb: Option<unsafe extern "C" fn(TsWebContents, c_int, *mut c_void)>,
         user_data: *mut c_void,
     );
+
+    pub fn ts_set_on_target_url_changed(
+        cb: Option<unsafe extern "C" fn(TsWebContents, *const c_char, *mut c_void)>,
+        user_data: *mut c_void,
+    );
 }
