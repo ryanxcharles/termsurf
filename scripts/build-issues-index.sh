@@ -31,15 +31,12 @@ for dir in "$ISSUES_DIR"/*/; do
   # Strip issue number prefix from title (e.g. "Issue 756: Surfari" → "Surfari")
   title=$(echo "$title" | sed 's/^Issue [0-9]*: //')
 
-  path="${basename}/README.md"
-
-  # Strip leading zeros from issue number for display
-  display_num=$(echo "$num" | sed 's/^0*//')
+  link="[${num}](${basename}/README.md)"
 
   if [ "$status" = "open" ]; then
-    open_rows="${open_rows}| ${display_num} | ${path} | ${title} | ${opened} |\n"
+    open_rows="${open_rows}| ${link} | ${title} | ${opened} |\n"
   else
-    closed_rows="${closed_rows}${num}\t| ${display_num} | ${path} | ${title} | ${opened} | ${closed} |\n"
+    closed_rows="${closed_rows}${num}\t| ${link} | ${title} | ${opened} | ${closed} |\n"
   fi
 done
 
@@ -52,16 +49,16 @@ sorted_closed=$(echo -e "$closed_rows" | sort -r -t$'\t' -k1 | cut -f2-)
   echo ""
   echo "## Open"
   echo ""
-  echo "| # | Path | Title | Opened |"
-  echo "| - | ---- | ----- | ------ |"
+  echo "| # | Title | Opened |"
+  echo "| - | ----- | ------ |"
   if [ -n "$open_rows" ]; then
     echo -e "$open_rows" | sed '/^$/d'
   fi
   echo ""
   echo "## Closed"
   echo ""
-  echo "| # | Path | Title | Opened | Closed |"
-  echo "| - | ---- | ----- | ------ | ------ |"
+  echo "| # | Title | Opened | Closed |"
+  echo "| - | ----- | ------ | ------ |"
   if [ -n "$sorted_closed" ]; then
     echo "$sorted_closed" | sed '/^$/d'
   fi
