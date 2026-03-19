@@ -231,6 +231,7 @@ message BrowserReady {
   string pane_id = 1;
   int64 tab_id = 2;
   string browser_socket = 3;
+  string browser = 4;
 }
 
 // --- Request/reply pairs ---

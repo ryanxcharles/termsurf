@@ -748,6 +748,7 @@ fn handle_tab_ready(ready: proto::TabReady, state: &SharedState) -> anyhow::Resu
                     pane_id: ready.pane_id.clone(),
                     tab_id: ready.tab_id,
                     browser_socket: listen_socket.clone(),
+                    browser: pane.browser.clone(),
                 })),
             };
             let payload = browser_ready.encode_to_vec();

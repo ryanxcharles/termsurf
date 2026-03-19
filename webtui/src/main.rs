@@ -715,7 +715,11 @@ fn main() -> io::Result<()> {
                     ipc::CompositorMessage::BrowserReady {
                         tab_id,
                         browser_socket,
+                        browser: resolved_browser,
                     } => {
+                        if !resolved_browser.is_empty() {
+                            browser = resolved_browser;
+                        }
                         // Connect directly to the browser engine.
                         if let Some(conn) = ipc::BrowserConnection::connect(
                             &browser_socket,

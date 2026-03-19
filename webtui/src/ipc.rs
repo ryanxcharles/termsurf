@@ -22,12 +22,27 @@ use proto::TermSurfMessage;
 
 /// Messages received from the compositor.
 pub enum CompositorMessage {
-    ModeChanged { browsing: bool },
-    UrlChanged { url: String },
-    LoadingState { state: String, _progress: u8 },
-    TitleChanged { title: String },
-    TargetUrlChanged { url: String },
-    BrowserReady { tab_id: i64, browser_socket: String },
+    ModeChanged {
+        browsing: bool,
+    },
+    UrlChanged {
+        url: String,
+    },
+    LoadingState {
+        state: String,
+        _progress: u8,
+    },
+    TitleChanged {
+        title: String,
+    },
+    TargetUrlChanged {
+        url: String,
+    },
+    BrowserReady {
+        tab_id: i64,
+        browser_socket: String,
+        browser: String,
+    },
 }
 
 /// A direct connection to the TermSurf app via Unix domain socket.
@@ -430,6 +445,7 @@ fn dispatch_message(
             let _ = event_tx.send(super::LoopEvent::Ipc(CompositorMessage::BrowserReady {
                 tab_id: m.tab_id,
                 browser_socket: m.browser_socket.clone(),
+                browser: m.browser.clone(),
             }));
         }
 
