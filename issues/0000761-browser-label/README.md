@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-03-19"
+closed = "2026-03-19"
 +++
 
 # Issue 761: Browser engine label missing when using default
@@ -155,8 +156,25 @@ scripts/build.sh wezboard
 cd webtui && cargo build
 ```
 
-| # | Test                 | Steps                                                    | Expected                                   |
-| - | -------------------- | -------------------------------------------------------- | ------------------------------------------ |
-| 1 | Default shows label  | Run `web localhost:3000` (no --browser)                  | "roamium" appears in viewport bottom-right |
-| 2 | Explicit still works | Run `web --browser roamium localhost`                    | "roamium" appears in viewport bottom-right |
-| 3 | Absolute path works  | Run `web --browser /usr/local/roamium/roamium localhost` | "roamium" in bottom-right                  |
+| #   | Test                 | Steps                                                    | Expected                                   |
+| --- | -------------------- | -------------------------------------------------------- | ------------------------------------------ |
+| 1   | Default shows label  | Run `web localhost:3000` (no --browser)                  | "roamium" appears in viewport bottom-right |
+| 2   | Explicit still works | Run `web --browser roamium localhost`                    | "roamium" appears in viewport bottom-right |
+| 3   | Absolute path works  | Run `web --browser /usr/local/roamium/roamium localhost` | "roamium" in bottom-right                  |
+
+**Result:** Pass
+
+All three tests pass. The engine label now appears in the viewport bottom-right
+regardless of whether `--browser` is specified.
+
+#### Conclusion
+
+Threading `pane.browser` through `BrowserReady` was the only change needed. The
+GUI already resolved the default; the TUI just wasn't told.
+
+## Conclusion
+
+The browser engine label now always appears in the viewport bottom-right. The
+fix adds a `browser` field to the `BrowserReady` protobuf message. The GUI
+populates it from `pane.browser` (which holds the resolved engine name), and the
+TUI updates its local `browser` variable on receipt.
