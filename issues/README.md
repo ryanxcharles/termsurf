@@ -2,10 +2,11 @@
 
 ## Open
 
-| #                                            | Title                                 | Opened     |
-| -------------------------------------------- | ------------------------------------- | ---------- |
-| [0000756](0000756-surfari/README.md)         | Surfari — WebKit engine for TermSurf  | 2026-03-16 |
-| [0000760](0000760-cli-short-flags/README.md) | Add short flags for TUI CLI arguments | 2026-03-17 |
+| #                                               | Title                                                   | Opened     |
+| ----------------------------------------------- | ------------------------------------------------------- | ---------- |
+| [0000756](0000756-surfari/README.md)            | Surfari — WebKit engine for TermSurf                    | 2026-03-16 |
+| [0000760](0000760-cli-short-flags/README.md)    | Add short flags for TUI CLI arguments                   | 2026-03-17 |
+| [0000762](0000762-persistent-cookies/README.md) | Cookies and network state not persisted across restarts | 2026-03-19 |
 
 ## Closed
 
