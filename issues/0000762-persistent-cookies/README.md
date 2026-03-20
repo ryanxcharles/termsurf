@@ -81,3 +81,108 @@ context_params->file_paths->http_server_properties_file_name =
 
 Chromium-only change. One function in `shell_content_browser_client.cc` (or a
 TermSurf override). No protocol, Roamium, or TUI changes needed.
+
+## Experiments
+
+### Experiment 1: Override ConfigureNetworkContextParamsForShell in TsBrowserClient
+
+#### Description
+
+Override the virtual method `ConfigureNetworkContextParamsForShell()` in
+`TsBrowserClient` (our `ShellContentBrowserClient` subclass) to set `file_paths`
+on the network context params. This tells the network service to write cookies,
+cache, and HTTP state to disk inside the profile directory.
+
+The method is `virtual` and `protected` on `ShellContentBrowserClient` (line 227
+of `shell_content_browser_client.h`), specifically designed for subclass
+overrides. Our `TsBrowserClient` already overrides three other methods on this
+class.
+
+#### Chromium branch
+
+Create `146.0.7650.0-issue-762` from `146.0.7650.0-issue-759` (the most recent
+branch). After committing, generate patches with:
+
+```bash
+cd chromium/src
+rm -rf ../../chromium/patches/issue-762/
+git format-patch 146.0.7650.0..HEAD -o ../../chromium/patches/issue-762/
+```
+
+Add the new branch to the Branches table in `chromium/README.md` and update the
+Current State section.
+
+#### Changes
+
+**1. Chromium: `content/libtermsurf_chromium/ts_browser_client.h`**
+
+Add the override declaration (~line 34, after `OverrideWebPreferences`):
+
+```cpp
+void ConfigureNetworkContextParamsForShell(
+    BrowserContext* context,
+    network::mojom::NetworkContextParams* context_params,
+    cert_verifier::mojom::CertVerifierCreationParams*
+        cert_verifier_creation_params) override;
+```
+
+Add required forward declarations / includes if needed:
+
+```cpp
+#include "services/network/public/mojom/network_context.mojom.h"
+```
+
+**2. Chromium: `content/libtermsurf_chromium/ts_browser_client.cc`**
+
+Add the include (~line 6):
+
+```cpp
+#include "content/shell/browser/shell_browser_context.h"
+#include "services/network/public/mojom/network_context.mojom.h"
+```
+
+Add the override implementation (~after `OverrideWebPreferences`, line 82):
+
+```cpp
+void TsBrowserClient::ConfigureNetworkContextParamsForShell(
+    BrowserContext* context,
+    network::mojom::NetworkContextParams* context_params,
+    cert_verifier::mojom::CertVerifierCreationParams*
+        cert_verifier_creation_params) {
+  // Call base class for user_agent, accept_language, zstd, etc.
+  ShellContentBrowserClient::ConfigureNetworkContextParamsForShell(
+      context, context_params, cert_verifier_creation_params);
+
+  // Set file paths so the network service persists cookies, cache, etc.
+  auto* shell_context = static_cast<ShellBrowserContext*>(context);
+  base::FilePath path = shell_context->GetPath();
+
+  context_params->file_paths =
+      network::mojom::NetworkContextFilePaths::New();
+  context_params->file_paths->data_directory = path.Append("Network");
+  context_params->file_paths->unsandboxed_data_path = path;
+  context_params->file_paths->cookie_database_name =
+      base::FilePath("Cookies");
+  context_params->file_paths->http_cache_directory = path.Append("Cache");
+  context_params->file_paths->http_server_properties_file_name =
+      base::FilePath("Network Persistent State");
+}
+```
+
+Calls the base class first to preserve its setup (user agent, accept language,
+zstd, CORS), then adds `file_paths`. The directory structure matches Chrome's
+conventions: `Network/` for data, `Cache/` for HTTP cache, `Cookies` for the
+cookie database.
+
+#### Verification
+
+```bash
+scripts/build.sh chromium
+```
+
+| # | Test                  | Steps                                                      | Expected                                           |
+| - | --------------------- | ---------------------------------------------------------- | -------------------------------------------------- |
+| 1 | Cookies persist       | Log into a site, quit Roamium, reopen, check login state   | User remains logged in                             |
+| 2 | Files created on disk | Check `~/.local/share/termsurf/chromium-profiles/default/` | `Network/`, `Cache/`, `Cookies` files exist        |
+| 3 | Multiple profiles     | Log into different sites on two profiles, restart both     | Each profile retains its own cookies independently |
+| 4 | No regression         | Browse normally, navigate, open DevTools                   | Everything works as before                         |
