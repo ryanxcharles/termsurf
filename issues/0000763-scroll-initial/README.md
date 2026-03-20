@@ -58,3 +58,65 @@ overlay is first created or when `TabReady` is handled in `conn.rs`.
 ### Scope
 
 Wezboard-only change. One or two call sites in the GUI code.
+
+## Experiments
+
+### Experiment 1: Call sync_overlay_visibility from PaneFocused handler
+
+#### Description
+
+Add a `sync_overlay_visibility()` call to the `PaneFocused` notification handler
+in `termwindow/mod.rs`. This is the same place that already calls
+`handle_pane_focus()`. Since `PaneFocused` fires on both keyboard and mouse pane
+switches, this ensures visibility is always synced.
+
+This also fixes the initial open: `PaneFocused` fires when the first pane is
+activated after creation.
+
+#### Changes
+
+**1. Wezboard: `wezboard-gui/src/termwindow/mod.rs`**
+
+In the `PaneFocused` handler (~line 1352), add the active-pane-ID gathering and
+`sync_overlay_visibility()` call — the same pattern used in the
+`WindowInvalidated` handler at lines 1331-1341:
+
+```rust
+MuxNotification::PaneFocused(pane_id) => {
+    crate::termsurf::input::handle_pane_focus(pane_id);
+
+    // Sync overlay visibility so pane.visible is correct
+    // for scroll forwarding (Issue 763).
+    let mut active_ids = std::collections::HashSet::new();
+    for window_id in mux.iter_windows() {
+        if let Some(w) = mux.get_window(window_id) {
+            if let Some(tab) = w.get_active() {
+                for positioned in tab.iter_panes() {
+                    active_ids.insert(positioned.pane.pane_id().to_string());
+                }
+            }
+        }
+    }
+    crate::termsurf::conn::sync_overlay_visibility(&active_ids);
+
+    // Also handled by clientpane
+    self.update_title_post_status();
+}
+```
+
+This duplicates the active-ID gathering from the `WindowInvalidated` handler. A
+future cleanup could extract this into a helper, but for now the duplication is
+minimal and keeps the fix contained.
+
+#### Verification
+
+```bash
+scripts/build.sh wezboard
+```
+
+| # | Test                           | Steps                                            | Expected                 |
+| - | ------------------------------ | ------------------------------------------------ | ------------------------ |
+| 1 | Scroll works on first open     | Open `web localhost:9616`, scroll on a long page | Page scrolls immediately |
+| 2 | Scroll works after kb switch   | Switch pane with keyboard, switch back, scroll   | Page scrolls             |
+| 3 | Scroll works after mouse click | Click another pane, click back, scroll           | Page scrolls             |
+| 4 | Hidden tabs don't scroll       | Open two tabs, scroll on visible tab             | Only visible tab scrolls |
