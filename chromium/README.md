@@ -14,7 +14,7 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `146.0.7650.0-issue-759`
+- Branch: `146.0.7650.0-issue-762`
 - Base version: `146.0.7650.0` (tracking Electron's Chromium version)
 
 ## Branch Strategy
@@ -85,6 +85,7 @@ find the most relevant recent branch, create a new branch from it
 | `146.0.7650.0-issue-708`      | [Issue 708](../issues/0000708-roamium-only.md)               | Roamium-only (clean fork, renamed lib)      |
 | `146.0.7650.0-issue-750`      | [Issue 750](../issues/0000750-target-blank.md)               | Suppress new-window, navigate same tab      |
 | `146.0.7650.0-issue-759`      | [Issue 759](../issues/0000759-link-hover-url/README.md)      | UpdateTargetURL for link hover              |
+| `146.0.7650.0-issue-762`      | [Issue 762](../issues/0000762-persistent-cookies/README.md)  | Persist cookies via NetworkContextFilePaths |
 
 ## Patches
 
