@@ -1351,6 +1351,22 @@ impl TermWindow {
                 }
                 MuxNotification::PaneFocused(pane_id) => {
                     crate::termsurf::input::handle_pane_focus(pane_id);
+
+                    // Sync overlay visibility so pane.visible is correct
+                    // for scroll forwarding (Issue 763).
+                    let mux = Mux::get();
+                    let mut active_ids = std::collections::HashSet::new();
+                    for window_id in mux.iter_windows() {
+                        if let Some(w) = mux.get_window(window_id) {
+                            if let Some(tab) = w.get_active() {
+                                for positioned in tab.iter_panes() {
+                                    active_ids.insert(positioned.pane.pane_id().to_string());
+                                }
+                            }
+                        }
+                    }
+                    crate::termsurf::conn::sync_overlay_visibility(&active_ids);
+
                     // Also handled by clientpane
                     self.update_title_post_status();
                 }
