@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-03-20"
+closed = "2026-03-20"
 +++
 
 # Issue 763: Scroll doesn't work until keyboard pane switch
@@ -114,14 +115,14 @@ minimal and keeps the fix contained.
 scripts/build.sh wezboard
 ```
 
-| # | Test                           | Steps                                            | Expected                 |
-| - | ------------------------------ | ------------------------------------------------ | ------------------------ |
-| 1 | Scroll works on first open     | Open `web localhost:9616`, scroll on a long page | Page scrolls immediately |
-| 2 | Scroll works after kb switch   | Switch pane with keyboard, switch back, scroll   | Page scrolls             |
-| 3 | Scroll works after mouse click | Click another pane, click back, scroll           | Page scrolls             |
-| 4 | Hidden tabs don't scroll       | Open two tabs, scroll on visible tab             | Only visible tab scrolls |
+| #   | Test                           | Steps                                            | Expected                 |
+| --- | ------------------------------ | ------------------------------------------------ | ------------------------ |
+| 1   | Scroll works on first open     | Open `web localhost:9616`, scroll on a long page | Page scrolls immediately |
+| 2   | Scroll works after kb switch   | Switch pane with keyboard, switch back, scroll   | Page scrolls             |
+| 3   | Scroll works after mouse click | Click another pane, click back, scroll           | Page scrolls             |
+| 4   | Hidden tabs don't scroll       | Open two tabs, scroll on visible tab             | Only visible tab scrolls |
 
-**Result:** Fail
+**Result:** Partial (see Experiment 2)
 
 Test 1 fails — scrolling still doesn't work on first open. Tests 2-3 were not
 tested because Test 1 is the primary symptom.
@@ -186,9 +187,41 @@ Same change in the `SetDevtoolsOverlay` handler (~line 652).
 scripts/build.sh wezboard
 ```
 
-| # | Test                           | Steps                                            | Expected                 |
-| - | ------------------------------ | ------------------------------------------------ | ------------------------ |
-| 1 | Scroll works on first open     | Open `web localhost:9616`, scroll on a long page | Page scrolls immediately |
-| 2 | Scroll works after kb switch   | Switch pane with keyboard, switch back, scroll   | Page scrolls             |
-| 3 | Scroll works after mouse click | Click another pane, click back, scroll           | Page scrolls             |
-| 4 | Hidden tabs don't scroll       | Open two tabs, scroll on visible tab             | Only visible tab scrolls |
+| #   | Test                           | Steps                                            | Expected                 |
+| --- | ------------------------------ | ------------------------------------------------ | ------------------------ |
+| 1   | Scroll works on first open     | Open `web localhost:9616`, scroll on a long page | Page scrolls immediately |
+| 2   | Scroll works after kb switch   | Switch pane with keyboard, switch back, scroll   | Page scrolls             |
+| 3   | Scroll works after mouse click | Click another pane, click back, scroll           | Page scrolls             |
+| 4   | Hidden tabs don't scroll       | Open two tabs, scroll on visible tab             | Only visible tab scrolls |
+
+**Result:** Pass
+
+Scrolling works immediately on first open.
+
+#### Conclusion
+
+The fix was trivial: initialize `visible: true` instead of `visible: false` when
+creating the pane in `SetOverlay` and `SetDevtoolsOverlay`. The overlay is
+always created for the active pane, so it should start visible.
+`sync_overlay_visibility` handles hiding it later on tab switch.
+
+## Conclusion
+
+Two experiments, two changes:
+
+1. **Experiment 1** (kept, partially successful): Added
+   `sync_overlay_visibility` to the `PaneFocused` handler in
+   `termwindow/mod.rs`. This fixes the mouse-click pane switching case —
+   previously only keyboard switching triggered `WindowInvalidated`, which was
+   the only path that synced visibility. However, it didn't fix the initial open
+   because `PaneFocused` fires before the overlay exists.
+
+2. **Experiment 2** (the fix): Changed `visible: false` to `visible: true` in
+   both `SetOverlay` and `SetDevtoolsOverlay` pane creation (`conn.rs`). The TUI
+   only sends `SetOverlay` for the active pane, so it should be visible from
+   birth. Two lines changed.
+
+The root issue was that `visible` defaulted to `false` and was only set to
+`true` by `sync_overlay_visibility`, which only ran on `WindowInvalidated`
+notifications — a path that keyboard pane switching triggered but mouse clicking
+and initial creation did not.

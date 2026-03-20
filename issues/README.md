@@ -2,16 +2,16 @@
 
 ## Open
 
-| #                                            | Title                                          | Opened     |
-| -------------------------------------------- | ---------------------------------------------- | ---------- |
-| [0000756](0000756-surfari/README.md)         | Surfari — WebKit engine for TermSurf           | 2026-03-16 |
-| [0000760](0000760-cli-short-flags/README.md) | Add short flags for TUI CLI arguments          | 2026-03-17 |
-| [0000763](0000763-scroll-initial/README.md)  | Scroll doesn't work until keyboard pane switch | 2026-03-20 |
+| #                                            | Title                                 | Opened     |
+| -------------------------------------------- | ------------------------------------- | ---------- |
+| [0000756](0000756-surfari/README.md)         | Surfari — WebKit engine for TermSurf  | 2026-03-16 |
+| [0000760](0000760-cli-short-flags/README.md) | Add short flags for TUI CLI arguments | 2026-03-17 |
 
 ## Closed
 
 | #                                                             | Title                                                                         | Opened     | Closed     |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
+| [0000763](0000763-scroll-initial/README.md)                   | Scroll doesn't work until keyboard pane switch                                | 2026-03-20 | 2026-03-20 |
 | [0000762](0000762-persistent-cookies/README.md)               | Cookies and network state not persisted across restarts                       | 2026-03-19 | 2026-03-20 |
 | [0000761](0000761-browser-label/README.md)                    | Browser engine label missing when using default                               | 2026-03-19 | 2026-03-19 |
 | [0000759](0000759-link-hover-url/README.md)                   | Show link URL on hover                                                        | 2026-03-17 | 2026-03-17 |
