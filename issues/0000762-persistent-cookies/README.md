@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-03-19"
+closed = "2026-03-20"
 +++
 
 # Issue 762: Cookies and network state not persisted across restarts
@@ -354,3 +355,56 @@ cd test-html && bun run server.ts
 | 3   | Cookie test visit 2   | Quit Roamium, reopen, navigate to `/test-cookie.html`   | Shows "Visit count: 2"                             |
 | 4   | Files created on disk | `ls ~/.local/share/termsurf/chromium-profiles/default/` | `Network/`, `Cache/` dirs and `Cookies` file exist |
 | 5   | No regression         | Browse the web normally, navigate, open DevTools        | Everything works as before                         |
+
+**Result:** Pass
+
+Pages load normally, the cookie test counter increments across restarts, and
+browsing works as before.
+
+#### Conclusion
+
+The critical fix was `enable_encrypted_cookies = false`. Without it, the network
+service tried to create an encrypted cookie store but had no encryption
+provider, hitting `NOTREACHED()` and crashing the entire network stack. The
+additional params (`http_cache_enabled`, `cookie_manager_params`,
+`restore_old_session_cookies`, `persist_session_cookies`) follow Electron's
+proven pattern.
+
+## Conclusion
+
+Cookies and network state now persist across Roamium restarts. The fix overrides
+`ConfigureNetworkContextParamsForShell` in `TsBrowserClient` to set `file_paths`
+on the network context params, telling the network service to write cookies,
+HTTP cache, and HTTP state to disk inside the profile directory.
+
+### What we learned
+
+**Experiment 1 failed catastrophically** because `enable_encrypted_cookies`
+defaults to `true` in Chromium's protobuf definition. When `file_paths` is set
+with a `cookie_database_name`, the network service creates a persistent
+`SQLitePersistentCookieStore` and expects an encryption provider. Without one,
+it hits `NOTREACHED()` on non-Android platforms — a crash that kills the network
+service entirely. No network service means no HTTP requests, which means every
+page is a white screen.
+
+**Experiment 2 succeeded** by following Electron's implementation as a
+reference. The key differences from Experiment 1:
+
+1. **`enable_encrypted_cookies = false`** — the root cause fix. Without an
+   encryption provider, this must be disabled.
+2. **`http_cache_enabled = true`** — enables the HTTP cache when a cache
+   directory is provided.
+3. **`cookie_manager_params`** initialized to a default instance.
+4. **`restore_old_session_cookies` and `persist_session_cookies`** set
+   explicitly to `false`.
+5. **Guard clause** — skip persistence if the path is empty or the context is
+   off-the-record.
+6. **Additional file paths** — `transport_security_persister_file_name` and
+   `trust_token_database_name` match Electron's configuration.
+
+**Lesson:** Content shell is a test harness with intentionally minimal
+configuration. Adding persistent storage requires understanding the full
+contract that Chrome's network service expects — not just `file_paths`, but also
+encryption settings, cache flags, and cookie manager params. Electron's
+`network_context_service.cc` is the best reference for Content API embedders
+that need persistence.
