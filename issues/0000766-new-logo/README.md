@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-03-26"
+closed = "2026-03-26"
 +++
 
 # Issue 766: Update icons with termsurf-12 logo
@@ -91,3 +92,25 @@ and any templates that reference the old filename).
 | 1 | Dock icon updated       | Build and launch Wezboard, check dock          | New termsurf-12 logo appears in dock     |
 | 2 | Website favicon updated | Run website dev server, check browser tab icon | New termsurf-12 transparent logo appears |
 | 3 | Website 192px icon      | Check website manifest/meta tags               | 192px icon uses new logo                 |
+
+**Result:** Pass
+
+Both the dock icon and website icon display the new termsurf-12 logo. The dock
+icon was generated using `sips` + `iconutil` (macOS native tools) since the
+source is PNG rather than SVG. The website icons were generated with the
+existing Sharp-based `process-icons.ts` script.
+
+#### Conclusion
+
+Both icons updated successfully. The dock icon generation used `sips` for
+resizing and `iconutil` for `.icns` creation instead of the existing
+ImageMagick-based `update.sh` (which expects SVG input). The website icon
+pipeline worked as-is after updating the `faviconSource` reference and
+`Header.tsx` import.
+
+## Conclusion
+
+The termsurf-12 logo is now used for both the Wezboard dock icon and the website
+favicon/header. The dock icon was revised once after the initial update. For
+future logo changes, the process is: resize with `sips`, build `.iconset`, and
+convert with `iconutil`.
