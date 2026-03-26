@@ -16,7 +16,7 @@ export function Header() {
       <div className="flex items-center justify-between text-sm">
         <Link to="/" className="flex items-center gap-2 text-primary font-bold">
           <img
-            src={$icon("/images/termsurf-11-transparent-192.png")}
+            src={$icon("/images/termsurf-12-transparent-192.png")}
             alt="TermSurf logo"
             className="w-6 h-6"
           />
