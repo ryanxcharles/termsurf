@@ -2,9 +2,10 @@
 
 ## Open
 
-| #                                    | Title                                | Opened     |
-| ------------------------------------ | ------------------------------------ | ---------- |
-| [0000756](0000756-surfari/README.md) | Surfari — WebKit engine for TermSurf | 2026-03-16 |
+| #                                                    | Title                                      | Opened     |
+| ---------------------------------------------------- | ------------------------------------------ | ---------- |
+| [0000756](0000756-surfari/README.md)                 | Surfari — WebKit engine for TermSurf       | 2026-03-16 |
+| [0000767](0000767-overlay-titlebar-offset/README.md) | Webview overlay offset by title bar height | 2026-03-26 |
 
 ## Closed
 
