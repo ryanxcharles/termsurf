@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-03-26"
+closed = "2026-03-26"
 +++
 
 # Issue 767: Webview overlay offset by title bar height
@@ -111,3 +112,82 @@ This eliminates the NSThemeFrame dependency entirely:
 4. Title bar, fullscreen, notch — all handled automatically because macOS
    already positions the contentView correctly.
 5. No need to match the contentView's exact frame in a private Apple view.
+
+## Experiments
+
+### Experiment 1: Move overlay from NSThemeFrame to contentView
+
+Make the overlay a subview of the contentView (`ns_view`) instead of a sibling
+in NSThemeFrame. This puts the overlay in the same coordinate space as the
+terminal rendering, eliminating the title bar offset mismatch.
+
+#### Changes
+
+**`wezboard/wezboard-gui/src/termsurf/conn.rs`** — `get_or_create_overlay()`
+
+1. Remove the `superview` lookup (`msg_send![ns_view, superview]`) and its null
+   check.
+2. Use `ns_view`'s **bounds** (not frame) to size the overlay. `bounds` gives
+   the view's own coordinate space `(0, 0, W, H)`, while `frame` gives the
+   position in the superview's coordinate space. Since the overlay is now a
+   child of `ns_view`, it should fill `ns_view`'s bounds.
+3. Change `msg_send![superview, addSubview: overlay]` to
+   `msg_send![ns_view, addSubview: overlay]`.
+4. Update the `backingScaleFactor` lookup to get the window from `ns_view`
+   instead of from `superview` (since we no longer have `superview`). Use
+   `msg_send![ns_view, window]`.
+5. Update the comment on line 1144 to reflect the new parent.
+
+No other files change. The overlay positioning code (`set_overlay_frame`,
+`create_pending_ca_layer_host`, `paint.rs` coordinate pass-through) remains
+identical — the coordinate values were already correct, only the coordinate
+space was wrong.
+
+#### Verification
+
+1. **Title bar offset (the bug):**
+   - Comment out `window_decorations = "RESIZE"` in the Wezboard config.
+   - Launch Wezboard. The macOS title bar should appear.
+   - Open a browser overlay (`web` TUI).
+   - **Pass:** The webview top edge aligns with the terminal pane content. No
+     gap, no overlap.
+   - **Fail:** The webview is still offset from the terminal content.
+
+2. **RESIZE mode (regression check):**
+   - Set `window_decorations = "RESIZE"`.
+   - Open a browser overlay.
+   - **Pass:** The webview aligns with terminal content (same as before).
+
+3. **Split panes:**
+   - Open a browser overlay in one pane, split the pane.
+   - **Pass:** The webview repositions correctly after the split, in both
+     decoration modes.
+
+4. **Window resize:**
+   - Resize the window by dragging.
+   - **Pass:** The webview tracks the terminal pane position during and after
+     resize.
+
+5. **Input pass-through:**
+   - Click on terminal text that is visible next to the webview.
+   - **Pass:** Mouse clicks reach the terminal (not swallowed by the overlay).
+
+**Result:** Pass
+
+All five verification steps pass. The webview aligns with terminal content in
+both decoration modes, repositions correctly on split and resize, and input
+passes through to the terminal.
+
+#### Conclusion
+
+The fix is a three-line change: use `bounds` instead of `frame`, add the overlay
+to `ns_view` instead of `superview`, and get the window from `ns_view`. The
+`superview` (NSThemeFrame) lookup is removed entirely.
+
+## Conclusion
+
+The overlay was added to NSThemeFrame (a private Apple view) as a sibling of the
+contentView. NSThemeFrame gives the contentView special positioning below the
+title bar, but arbitrary subviews don't get this treatment. Moving the overlay
+to be a child of the contentView puts it in the same coordinate space as the
+terminal rendering, fixing the offset for all window decoration modes.

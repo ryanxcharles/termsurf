@@ -1141,20 +1141,15 @@ fn get_or_create_overlay(
     let ns_view = ns_view as *mut AnyObject;
 
     unsafe {
-        // Get superview (contentView of the window)
-        let superview: *mut AnyObject = msg_send![ns_view, superview];
-        if superview.is_null() {
-            log::warn!("get_or_create_overlay: terminal view has no superview");
-            return None;
-        }
-
-        // Get terminal view's frame for overlay sizing
-        let frame: CGRect = msg_send![ns_view, frame];
+        // Size overlay to fill the contentView (ns_view).  Use bounds (not
+        // frame) because the overlay is a child of ns_view, so it lives in
+        // ns_view's own coordinate space.
+        let bounds: CGRect = msg_send![ns_view, bounds];
 
         // Create overlay view
         let overlay_class = register_overlay_class();
         let overlay: *mut AnyObject = msg_send![overlay_class, alloc];
-        let overlay: *mut AnyObject = msg_send![overlay, initWithFrame: frame];
+        let overlay: *mut AnyObject = msg_send![overlay, initWithFrame: bounds];
 
         // Set autoresizing mask: width + height sizable (follows parent resizes)
         // NSView uses NSUInteger (u64) for autoresizingMask, unlike CALayer (u32)
@@ -1168,7 +1163,7 @@ fn get_or_create_overlay(
         // Set contentsScale to match the screen's backing scale factor (2.0 on Retina).
         // Without this, contentsScale defaults to 1.0 and all pixel→point conversions
         // in set_overlay_frame are wrong.
-        let window: *mut AnyObject = msg_send![superview, window];
+        let window: *mut AnyObject = msg_send![ns_view, window];
         if !window.is_null() {
             let backing_scale: f64 = msg_send![window, backingScaleFactor];
             let _: () = msg_send![root_layer, setContentsScale: backing_scale];
@@ -1177,8 +1172,9 @@ fn get_or_create_overlay(
         let _: () = msg_send![overlay, setLayer: root_layer];
         let _: () = msg_send![overlay, setWantsLayer: Bool::YES];
 
-        // Add overlay as subview on top of terminal view
-        let _: () = msg_send![superview, addSubview: overlay];
+        // Add overlay as subview of the contentView so it shares the same
+        // coordinate space as the terminal rendering.
+        let _: () = msg_send![ns_view, addSubview: overlay];
 
         // Retain overlay so it stays alive
         let _: *mut AnyObject = msg_send![overlay, retain];

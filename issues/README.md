@@ -2,15 +2,15 @@
 
 ## Open
 
-| #                                                    | Title                                      | Opened     |
-| ---------------------------------------------------- | ------------------------------------------ | ---------- |
-| [0000756](0000756-surfari/README.md)                 | Surfari — WebKit engine for TermSurf       | 2026-03-16 |
-| [0000767](0000767-overlay-titlebar-offset/README.md) | Webview overlay offset by title bar height | 2026-03-26 |
+| #                                    | Title                                | Opened     |
+| ------------------------------------ | ------------------------------------ | ---------- |
+| [0000756](0000756-surfari/README.md) | Surfari — WebKit engine for TermSurf | 2026-03-16 |
 
 ## Closed
 
 | #                                                             | Title                                                                         | Opened     | Closed     |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
+| [0000767](0000767-overlay-titlebar-offset/README.md)          | Webview overlay offset by title bar height                                    | 2026-03-26 | 2026-03-26 |
 | [0000766](0000766-new-logo/README.md)                         | Update icons with termsurf-12 logo                                            | 2026-03-26 | 2026-03-26 |
 | [0000765](0000765-terminfo-crash/README.md)                   | Wezboard pane crashes on XTGETTCAP (corrupted terminfo)                       | 2026-03-22 | 2026-03-22 |
 | [0000764](0000764-viewport-profile-label/README.md)           | Move profile label to bottom-right with engine name                           | 2026-03-20 | 2026-03-20 |
