@@ -2,9 +2,10 @@
 
 ## Open
 
-| #                                    | Title                                | Opened     |
-| ------------------------------------ | ------------------------------------ | ---------- |
-| [0000756](0000756-surfari/README.md) | Surfari — WebKit engine for TermSurf | 2026-03-16 |
+| #                                               | Title                                                | Opened     |
+| ----------------------------------------------- | ---------------------------------------------------- | ---------- |
+| [0000756](0000756-surfari/README.md)            | Surfari — WebKit engine for TermSurf                 | 2026-03-16 |
+| [0000768](0000768-cloudflare-website/README.md) | Migrate termsurf.com from Fly.io to Cloudflare Pages | 2026-03-29 |
 
 ## Closed
 
