@@ -4,6 +4,7 @@ export interface BlogPost {
   author: string;
   date: string;
   content?: string;
+  html?: string;
 }
 
 export interface BlogData {

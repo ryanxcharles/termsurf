@@ -1,0 +1,9 @@
+---
+import Base from "../layouts/Base.astro";
+import { CommitLog } from "../components/CommitLog";
+import commitsData from "../../data/commits.json";
+---
+
+<Base title="Commits — TermSurf">
+  <CommitLog client:load commits={commitsData.commits} />
+</Base>

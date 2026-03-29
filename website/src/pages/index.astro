@@ -1,0 +1,87 @@
+---
+import Base from "../layouts/Base.astro";
+import { CommitLog } from "../components/CommitLog";
+import commitsData from "../../data/commits.json";
+import blogData from "../../data/blog.json";
+
+const latestPost = blogData.posts[0];
+---
+
+<Base title="TermSurf">
+  <section class="mb-8">
+    <h1 class="text-lg font-bold text-primary">
+      Root access to the 'net.
+    </h1>
+    <p class="text-sm text-muted mt-3">
+      Hack the web from your terminal.{" "}
+      <span class="bg-accent text-background">
+        TermSurf is a protocol that overlays web browser engines, like
+        Chromium and WebKit, in your terminal emulator.
+      </span>{" "}
+      Unlimited power to control every web page from your keyboard.{" "}
+      <a
+        href="https://github.com/termsurf/termsurf"
+        class="text-accent hover:text-primary"
+      >
+        [fork the source on GitHub]
+      </a>
+    </p>
+    <div class="mt-4 text-muted text-xs">
+      ──────────────────────────────────────────────────────────
+    </div>
+  </section>
+  <section class="mb-8">
+    <img
+      src="/images/screenshot2.webp"
+      alt="TermSurf — a browser pane alongside terminal panes"
+      class="w-full"
+    />
+    <h2 class="text-sm font-bold text-foreground mt-3">
+      TermSurf Wezboard: A GUI for TermSurf
+    </h2>
+    <p class="text-sm text-muted mt-2">
+      TermSurf supports GPU-rendered web pages at 60fps+ using real browser
+      engines like Chromium and WebKit. <em>In your terminal</em>.
+      Furthermore, TermSurf is the only browser that supports multiple
+      profiles and multiple engines in the same window at the same time.{" "}
+      <a href="/docs" class="text-accent hover:text-primary">
+        [learn more in the docs]
+      </a>
+    </p>
+    <div class="mt-4 text-muted text-xs">
+      ──────────────────────────────────────────────────────────
+    </div>
+  </section>
+  <section class="mb-8">
+    <h2 class="text-sm font-bold text-foreground mb-4">
+      ┌─ Latest Post ─┐
+    </h2>
+    {latestPost ? (
+      <a
+        href={`/blog/${latestPost.slug}`}
+        class="block hover:bg-background-highlight/30 text-sm"
+      >
+        <span class="text-accent hover:text-primary">
+          {latestPost.title}
+        </span>
+        <span class="text-muted ml-3">{latestPost.date}</span>
+        <span class="text-success ml-3">{latestPost.author}</span>
+      </a>
+    ) : (
+      <p class="text-muted text-sm">No posts yet.</p>
+    )}
+    <a
+      href="/blog"
+      class="text-sm text-muted hover:text-accent mt-3 inline-block"
+    >
+      [view all posts]
+    </a>
+  </section>
+  <CommitLog client:load commits={commitsData.commits.slice(0, 10)} />
+  <a
+    href="/commits"
+    class="text-sm text-muted hover:text-accent mt-3 inline-block"
+  >
+    [view all commits]
+  </a>
+</Base>

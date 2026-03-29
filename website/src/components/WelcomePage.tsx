@@ -1,14 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { TextGeometry } from "three/addons/geometries/TextGeometry.js";
 import { FontLoader } from "three/addons/loaders/FontLoader.js";
 
-export const Route = createFileRoute("/welcome")({
-  component: WelcomePage,
-});
-
-function WelcomePage() {
+export function WelcomePage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [showModal, setShowModal] = useState(false);
 

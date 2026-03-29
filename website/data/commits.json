@@ -1,355 +1,355 @@
 {
-  "generatedAt": "2026-03-15T13:15:01.645Z",
+  "generatedAt": "2026-03-29T09:19:26.300Z",
   "commits": [
     {
-      "hash": "3e111aeec5268db03ed62c18fa53c29e8df624c4",
-      "message": "Revise blog: XPC dropped for sockets",
-      "body": "XPC was macOS-only glue we didn't need—\nCALayerHost sends just an integer seed.\nA layer ID over any socket flies,\nSo Unix domain won, no platform ties.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "0d93c88b34e9d0c2485de0e377ae7ed990c2697b",
+      "message": "Impl Issue 768 Experiment 1: design Astro migration",
+      "body": "Ten routes mapped, four components weighed,\nA plan to turn SSR to static displayed.\nTanStack bows out, Astro steps in—\nLet the great migration begin.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T07:19:16-05:00"
+      "date": "2026-03-29T04:11:31-05:00"
     },
     {
-      "hash": "f363183daac6f953b058aea88c9b1822aa013596",
-      "message": "Revise blog: soften CEF, remove Swift",
-      "body": "CEF could work — but why fight the API\nWhen you can fork the source and fly?\nSwift's section cut, the story tighter—\nFewer ghosts make the signal brighter.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "046c98a5f6b96308fb88d5f12398a55722e9cd86",
+      "message": "Open Issue 768: cloudflare website migration",
+      "body": "Fly.io served us well, a docker on the wire,\nBut static pages on the edge burn brighter fire.\nCloudflare's CDN spans three hundred points of light—\nTime to leave the server, join the cacheable night.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T07:16:26-05:00"
+      "date": "2026-03-29T04:05:31-05:00"
     },
     {
-      "hash": "9f2a59a26016b5e5c540b28dbf0c5bf5e44b62fc",
-      "message": "Change blog author to Max Commits",
-      "body": "Wez Longboard has left the building.\nMax Commits takes the byline now—\nMore commits, more dispatches, more pow.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "e6b9d88e00fb71d493cf8439c2bfa963cb3dc3f0",
+      "message": "update build/install scripts",
+      "body": "",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T06:59:37-05:00"
+      "date": "2026-03-27T08:50:09-05:00"
     },
     {
-      "hash": "cdbe7ebb781ca7963a480f8a27a2ae900a535c29",
-      "message": "Close Issue 753: blog posts",
-      "body": "Two dispatches sent from the wire,\nCypherpunk prose, the terminal's fire.\nThe graveyard mapped, the intro rewired—\nWez Longboard, signing off, inspired.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "5254ffee3a2e25eae20f0117c639629c6e25db42",
+      "message": "Close Issue 767: fix overlay titlebar offset",
+      "body": "The overlay lived in NSThemeFrame,\nA sibling lost, without a claim.\nContentView got placed below the bar,\nBut overlay stayed — a bridge too far.\n\nNow a child of the view it serves,\nSame coordinates, same gentle curves.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T06:54:01-05:00"
+      "date": "2026-03-26T19:32:43-05:00"
     },
     {
-      "hash": "4505f666978a04555cc4e7f00cfe2ba82d3cd776",
-      "message": "Impl Issue 753 Experiment 2",
-      "body": "Terminal, meet browser.\nBrowser, meet terminal.\nWez Longboard jacked the signal in—\nCypherpunk voice, monospace grin.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "b1dc8463f6030f3871dc331206d9121bf05cb3ba",
+      "message": "Open Issue 767: overlay titlebar offset",
+      "body": "The overlay thought it lived\nWhere the content view resides,\nBut NSThemeFrame had other plans—\nA title bar to hide.\n\nSix bugs deep, the coordinates were right,\nThe space they lived in wasn't quite.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T06:53:23-05:00"
+      "date": "2026-03-26T19:00:39-05:00"
     },
     {
-      "hash": "3356db9c3e35880c393e208b37cdb5c26410387e",
-      "message": "Pass Issue 753 Experiment 1",
-      "body": "Dispatched from the wreckage,\nthe signal came through.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "2fea992ac091a1152f220293fcea427b9172c1c2",
+      "message": "Close Issue 766: update icons with new logo",
+      "body": "Third time's the charm, they say—\nThe logo found its final way.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T06:45:10-05:00"
+      "date": "2026-03-26T05:08:22-05:00"
     },
     {
-      "hash": "38c2705a4ae0c75c02ab69822059a66e1574ba47",
-      "message": "Rewrite blog post in cypherpunk voice",
-      "body": "The signal flatlines. The wire is dead.\nWez Longboard reports from the wreckage instead.\nCircuits rewired, coordinates reforged—\nEvery dead end a dispatch from the gorge.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "2999e6c2fa3a1deb55de865b89b4e46ea12ac2c5",
+      "message": "Close Issue 766: update icons with new logo",
+      "body": "Twelve's the charm, the surf looks right,\nIn dock and web, a pixeled sight.\nsips and Sharp both did their part—\nThe logo's landed, a work of art.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T06:44:05-05:00"
+      "date": "2026-03-26T04:47:02-05:00"
     },
     {
-      "hash": "6e5f20f28600a1144d3ff226a3d01536c44125a2",
-      "message": "Fix timeline in blog post",
-      "body": "Six months? We've barely been alive\nFor ten weeks — let's not overdrive.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "31abdfaed81d8bdf532a93af1f7c750d5957c696",
+      "message": "Update dock icon with revised logo",
+      "body": "The logo changed, the icon followed—\nsips resized, iconutil swallowed.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T06:35:15-05:00"
+      "date": "2026-03-26T04:44:12-05:00"
     },
     {
-      "hash": "bd70c713c5b1c994b9485380428f9aeb481bf634",
-      "message": "Impl Issue 753 Experiment 1",
-      "body": "How not to build a terminal browser:\nTry CEF, try Swift, try Electron's patches—\nHit every wall, light every match,\nThen write it down so others can watch\nThe graveyard glow with arrows attached.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "29ad7e2e93c036459987d54f921759f95d6dc072",
+      "message": "Impl Issue 766 Experiment 1",
+      "body": "The twelfth logo takes the stage,\nDock and web turn a new page.\niconutil forged the icns bright,\nSharp resized the favicon right.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T06:32:07-05:00"
+      "date": "2026-03-26T04:31:47-05:00"
     },
     {
-      "hash": "15673071b188f48c759d3bc1d6cad66d32057c5d",
-      "message": "Rename Issue 753 blog post title",
-      "body": "\"How Not to Build a Terminal Browser\"—\nA title that cuts like a hacksaw through copper.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "18151558a860cb90306046018af13d95d9cbb0bb",
+      "message": "Format Issue 766 table alignment",
+      "body": "Prettier trims the extra dashes,\nTables tidy in small flashes.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T06:27:01-05:00"
+      "date": "2026-03-26T04:17:41-05:00"
     },
     {
-      "hash": "128eb450577febc39b76626beb5a1485076b5616",
-      "message": "Design Issue 753 Experiment 1",
-      "body": "Ghostboard's ghost was laid to rest—\nNot for flaws, but Windows is the test.\nRust's crates outnumber Zig's by miles,\nAnd three-act blogs deserve good styles.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "cf9fb37387b63f2d481a3ddb212466e806425ae3",
+      "message": "Add termsurf-12 logo files",
+      "body": "Version twelve, the surf is new,\nOne opaque, one see-through.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T06:24:41-05:00"
+      "date": "2026-03-26T04:17:36-05:00"
     },
     {
-      "hash": "3503c40b66842038f639b966362c44312175f5d1",
-      "message": "Add Issue 753: blog post on failures",
-      "body": "Seven hundred issues, fifty-plus dead ends,\nCEF at 31fps, Chromium that bends.\nEvery wrong turn taught us where to go—\nNow let's write it up so others know.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "8e4c527686951c551e265215a567ec6987d0d375",
+      "message": "Fix Issue 766 dock icon experiment",
+      "body": "The install script copies the whole bundle—\nNo manual icns shuffle to fumble.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T06:20:07-05:00"
+      "date": "2026-03-26T04:16:50-05:00"
     },
     {
-      "hash": "5392a7319ad256af2b849ed9d99725ffed5bb0a6",
-      "message": "Close Issue 752: scroll inactive pane",
-      "body": "The wheel once asked, \"Who's focused here?\"\nWe said, \"Forget it — just check who's near.\"\nAll overlays now hear the call,\nThe cursor decides, focus means nothing at all.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "0c37e33d3154969fd761a800850fcf85ac4adfda",
+      "message": "Open Issue 766: update icons with new logo",
+      "body": "Twelve iterations of the surf,\nA logo worthy of the turf.\nDock and web shall wear it proud—\ntermsurf-12, fresh from the cloud.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T06:20:00-05:00"
+      "date": "2026-03-26T04:13:59-05:00"
     },
     {
-      "hash": "277a93fb01c1178376632006b102d0b5527ed7fc",
-      "message": "Design Issue 752 Experiment 1",
-      "body": "The scroll asked, \"Who's active here?\"\nWe said, \"Who cares? Just check who's near.\"\nHit-test every pane in sight,\nThe one beneath the cursor's right.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "ac73bb243b2ed13320aa8843564cc94c1b77f884",
+      "message": "Close Issue 765: corrupted terminfo crash",
+      "body": "One byte adrift, the header lied,\nThe parser panicked, the pane died.\ntic recompiled from source with care—\nNow vim and shannon make a pair.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T05:56:31-05:00"
+      "date": "2026-03-22T16:20:31-05:00"
     },
     {
-      "hash": "d73e5d87fe371cf44ec962260d5f601a076cdbe0",
-      "message": "Add Issue 752: scroll inactive pane",
-      "body": "The wheel spins over a sleeping pane,\nBut the scroll event falls like silent rain.\nOnly the active one gets the feed—\nTime to let all overlays heed.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "6a1fc82f8a37885661e78b73ba29bb75a5b9a70f",
+      "message": "Impl Issue 765 Experiment 1",
+      "body": "The header said thirty-two,\nBut thirty-three was what was true.\nOne byte off, the parse would fail—\ntic recompiled and told the tale.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T05:53:55-05:00"
+      "date": "2026-03-22T16:17:32-05:00"
     },
     {
-      "hash": "9949d744a5c2c8a96a414ac5fbc392227da0d4e0",
-      "message": "Fix scanline overlay on welcome page",
-      "body": "The CRT lines crept where they shouldn't go,\nInterlacing the welcome's Three.js show.\nScoped to a class, the scanlines now know:\nOnly the main site gets that retro glow.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "06fb55992f03cdcad27b8b715629d1c7ff64cca1",
+      "message": "Format Issue 765 table alignment",
+      "body": "Prettier trimmed the dashes neat,\nThe table columns now look sweet.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-15T05:27:21-05:00"
+      "date": "2026-03-22T16:16:01-05:00"
     },
     {
-      "hash": "8d88d3dd0e0b6925f9020037af02e31ae9b9bbca",
-      "message": "Close Issue 751: blog top level + deploy",
-      "body": "Build it, ship it, watch it fly—\nOne script to rule the deploy sky.\nBlog posts roam free at repo root,\nAnd docs will follow the same route.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "bd9ebb9cdc238bdcb23ee7d34a26b6f63e2a2477",
+      "message": "Open Issue 765: corrupted terminfo crash",
+      "body": "A binary rename, one byte awry,\nThe header lied about the name size. Why?\ntic shall recompile what sed destroyed—\nNo more Parse errors to avoid.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T15:48:16-05:00"
+      "date": "2026-03-22T16:15:27-05:00"
     },
     {
-      "hash": "535822edd954f598cc13445740f6f1f8d63fba4c",
-      "message": "Impl Issue 751 Experiment 1",
-      "body": "The blog escaped its nested cage,\nMoved to the root — a wider stage.\nDocker's context grew to see\nBoth website/ and blog/ — now free.\nNext stop: docs on every page.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "455abd1187b0fcde6be9416b11e3d286b1cc04af",
+      "message": "Close Issue 764: profile/engine label",
+      "body": "Two became one, a slash the seam,\nProfile and engine share the dream.\nBottom-right, united, standing tall—\nOne label now to show them all.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T15:44:15-05:00"
+      "date": "2026-03-20T08:40:57-05:00"
     },
     {
-      "hash": "b669e3ddd8d4ba4d174a351e2bdf9e9027db1ef7",
-      "message": "Design Issue 751 Experiment 1",
-      "body": "The blog broke free from website's nest,\nTo live at root with all the rest.\nWiden context, ignore the chrome,\nAnd docs will follow blog posts home.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "92560cffda1b8996636987cdde49625298df8b5f",
+      "message": "Impl Issue 764 Experiment 1",
+      "body": "The profile dropped from up on high,\nTo join the engine down nearby.\nOne slash to bind them, bottom-right—\nA cleaner viewport, pure delight.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T15:37:06-05:00"
+      "date": "2026-03-20T08:37:14-05:00"
     },
     {
-      "hash": "1094cd7cd4cd439839e1a775cb750a2152ee8ee3",
-      "message": "Add Issue 751: blog posts to top level",
-      "body": "The blog lived in website's embrace,\nBut docs need a wider build space.\nMove posts to the root,\nWiden Docker's pursuit—\nThen docs can take blog's former place.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "a62a54ace4ddf8c89f7028d45a0112b502ce2446",
+      "message": "Design Issue 764 Experiment 1",
+      "body": "Profile up top, engine down below—\nTwo labels split, a scattered show.\nOne line to bind them, slash between,\nThe tidiest bottom-right you've seen.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T15:35:28-05:00"
+      "date": "2026-03-20T08:26:17-05:00"
     },
     {
-      "hash": "f77c153c9b4be5316737be9bbc102d986e1e19a6",
-      "message": "Add Chromium patches for Issue 750",
-      "body": "Three patches stacked in tidy rows,\nA record of each change that flows.\nShould the branch be lost or swept away,\nThese patches let us rebuild the day.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "ad54f625f78f1886a1a6ca5315c42ee9a8039d9d",
+      "message": "Open Issue 764: profile/engine label",
+      "body": "The profile sat up top alone,\nThe engine down below on its own.\nNow they'll share a line, a slash between—\nThe neatest bottom-right you've seen.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T15:10:20-05:00"
+      "date": "2026-03-20T08:24:09-05:00"
     },
     {
-      "hash": "56bfdc2443c69b8e6a4b9ab03e8ed1a03c19e3de",
-      "message": "Close Issue 750: target=\"_blank\" links",
-      "body": "A link once whispered \"_blank\" and was lost,\nNo window, no tab — a silent cost.\nIssue 639's ghost returned from the dead,\nRe-applied the fix, same-tab instead.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "6ed1c8ae7bb8972e3714a5935dd6289ed888dc1f",
+      "message": "Close Issue 760: CLI short flags",
+      "body": "-p and -b, short and sweet,\nSeven fewer chars to beat.\nClap derives them, clean and bright—\nTwo keystrokes feel just right.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T15:09:00-05:00"
+      "date": "2026-03-20T08:20:01-05:00"
     },
     {
-      "hash": "5ccef4e2735d60452c65d99655ff4440a64dff46",
-      "message": "Design Issue 750 Experiment 1",
-      "body": "The fix we wrote in six-three-nine,\nGot lost in a refactoring mine.\nNow the patch must return—\nSame lesson to learn:\nSuppress, defer, navigate in line.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "3fc0b6e1263b3b70520e5e8463a874926d9a5b97",
+      "message": "Impl Issue 760 Experiment 1",
+      "body": "Two letters saved per flag invocation,\nA micro-optimization for the nation.\n-p for profile, -b for browser too—\nLess typing means more time to brew.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T14:58:47-05:00"
+      "date": "2026-03-20T08:18:19-05:00"
     },
     {
-      "hash": "9e0bf555b1d22bcb81efe2bcee7dbe55a480ff77",
-      "message": "Add Issue 750: target=\"_blank\" links",
-      "body": "A link said \"_blank\" and vanished to air,\nNo tab, no window, no page anywhere.\nIssue 639 once knew how to cope—\nTime to re-apply that same-tab hope.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "254d68870f9ac164dfebbdf19600d6cd3018beb1",
+      "message": "Close Issue 763: scroll on initial open",
+      "body": "Two experiments walked into a bar.\nThe first arrived too early by far—\nPaneFocused ran before the pane was made.\nThe second flipped a bool, and scroll obeyed.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T14:55:17-05:00"
+      "date": "2026-03-20T08:10:04-05:00"
     },
     {
-      "hash": "69d46a56ef5656476384a6d30358b6997fe68870",
-      "message": "Close Issue 749: overlay flash fix",
-      "body": "The flash has fled, the layer behaves,\nBorn where it belongs, no misplaced waves.\nTwo experiments tried, one lesson learned:\nDon't build where you can't see — wait your turn.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "523cdb6baaf92905a425e4d0eddee61ec60367da",
+      "message": "Impl Issue 763 Experiment 2",
+      "body": "visible: false → visible: true,\nTwo lines changed, the scroll breaks through.\nBorn seen, not hidden in the dark—\nThe overlay lights up from the start.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T14:37:22-05:00"
+      "date": "2026-03-20T08:06:24-05:00"
     },
     {
-      "hash": "c3ef931c472caf5f85dd0d8d58dbce16ed50f0c0",
-      "message": "Impl Issue 749 Experiment 2",
-      "body": "The layer once leapt before it looked,\nAnd flashed where it was not yet booked.\nNow the socket just saves the ID,\nThe render pass builds it where it should be—\nBorn in place, no position mistook.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "091d350d7685789557e3cd7cffa05218ac1d7d6d",
+      "message": "Design Issue 763 Experiment 2",
+      "body": "Born visible, not born in shade—\nWhy start false when the pane's displayed?\nSetOverlay creates what's on the screen,\nSo visible: true from the very first scene.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T14:35:22-05:00"
+      "date": "2026-03-20T08:05:16-05:00"
     },
     {
-      "hash": "08850d23a55760fb82d8be88889b67091baa8ea9",
-      "message": "Redesign Issue 749 Experiment 2",
-      "body": "Why create the layer, then move it?\nSaid the render pass, \"I know the spot—\nJust hand me the context ID,\nI'll build it where it ought to be,\nAnd spare us all that misplaced dot.\"\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "bb16d24ced13f2addbabcd1d4baed9caf8942526",
+      "message": "Mark Issue 763 Experiment 1 as failure",
+      "body": "PaneFocused ran before the pane was born,\nThe overlay missed the visibility horn.\nTiming was off — the sync ran too soon,\nThe scroll still silent as the moon.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T14:27:56-05:00"
+      "date": "2026-03-20T08:02:39-05:00"
     },
     {
-      "hash": "0494bdd56ae97e96f9d91f01cabbf3c2d0a58cb6",
-      "message": "Design Issue 749 Experiment 2",
-      "body": "The overlay flashed because it showed\nBefore it knew just where to go—\nNow hide it first, then place it right,\nOne frame of patience, no more fright.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "a06d018e4cec0a48323e83f4bec67ddce57ff01b",
+      "message": "Impl Issue 763 Experiment 1",
+      "body": "The visible flag sat false and cold,\nNo PaneFocused path had made it bold.\nNow sync runs on every focus change—\nScroll events no longer out of range.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T14:25:53-05:00"
+      "date": "2026-03-20T07:57:20-05:00"
     },
     {
-      "hash": "0290b95ba2bafc72ff47b2ff143b9bb590c80e8c",
-      "message": "Fail Issue 749 Experiment 1: remove update_ca_layer_frame",
-      "body": "Removing update_ca_layer_frame() caused the overlay to flash at (0,0)\ninstead of the wrong pane — worse, not better. The flash is caused by\nthe timing gap between CALayerHost creation and the first paint_pass(),\nnot by having two positioning authorities.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "338929bbde8e1228cc4c35e1ac07cac78385dd5b",
+      "message": "Design Issue 763 Experiment 1",
+      "body": "PaneFocused fires for mouse and key,\nBut visibility? Set only by one, you see.\nNow both paths sync the visible flag—\nNo more scroll events left in the bag.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T14:25:09-05:00"
+      "date": "2026-03-20T07:55:59-05:00"
     },
     {
-      "hash": "1d363fbee57515b458ea3679eeb5b9b4f8aa27d3",
-      "message": "Design Issue 749 Experiment 1",
-      "body": "Two functions placed the overlay frame—\nOne right, one wrong, both staking their claim.\n  Delete the pretender,\n  Let paint_pass be the sender:\nOne source of truth ends the blame game.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "4c9cd93141b23cec154716e510986fa48ab930e9",
+      "message": "Open Issue 763: scroll on initial open",
+      "body": "The scroll was lost, the wheel spun free,\nNo visible flag to set it free.\nKeyboard switch? It worked just fine—\nMouse click left the scroll behind.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T14:07:16-05:00"
+      "date": "2026-03-20T07:52:07-05:00"
     },
     {
-      "hash": "5cf758ad8ae9e2b6721620b6d292fdf766036f7f",
-      "message": "Add Issue 749: initial overlay flash",
-      "body": "A webview born in a split on the right,\nFirst appears on the left — what a sight!\n  Two paths set the frame,\n  But one has no name\nFor pos.left, so it guesses. Not quite.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "fa48c787312cedf5abc10a474aad5e2e9fddfcd9",
+      "message": "Add IndexedDB persistence test",
+      "body": "IndexedDB opened wide its store,\nThe count survived — it kept the score.\nFrom one to two the number grew,\nThe storage partition pulls through.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T13:52:49-05:00"
+      "date": "2026-03-20T07:32:04-05:00"
     },
     {
-      "hash": "f9f67dfe28f73b9688c2bf9865be5178a18ea7ce",
-      "message": "Close Issue 748: browser clipboard",
-      "body": "Cmd+C tried to flee,\nThrough menus and multi-pass—\nNow it's home. Ctrl+V.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "cf78766b038e14510035a83cea5c7492bdfc484f",
+      "message": "Add localStorage persistence test",
+      "body": "localStorage remembers well,\nAcross restarts it cast its spell.\nA counter climbs from one to two—\nThe storage partition came through.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T13:47:38-05:00"
+      "date": "2026-03-20T07:28:14-05:00"
     },
     {
-      "hash": "26610814413ce306c05ec3c9aad601f3a0166e57",
-      "message": "Fix Issue 748: browser clipboard keys",
-      "body": "The menu bar said \"Cmd+C? That's mine!\"\nThe key pipeline said \"Get in line!\"\n  We carved out five keys,\n  For the browser to seize,\nNow copy and paste work just fine.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "af8faeb64cdf00df4d9cad69140458750b1289e2",
+      "message": "Close Issue 762: persistent cookies",
+      "body": "Two experiments, one hard lesson learned:\nThe crypto delegate must be earned.\nEncryption off, the cookies stay,\nLogins persist beyond the day.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T13:43:39-05:00"
+      "date": "2026-03-20T07:25:53-05:00"
     },
     {
-      "hash": "84e43407036f545d5a7deaf59afc5c84a366868f",
-      "message": "Design Issue 748 Experiment 2",
-      "body": "Physical keys and keybinding passes—\nThe multi-pass pipeline surpasses\n  Our blanket bypass.\n  Now a targeted class:\nFive Cmd+keys get surgical passes.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "3dcfe8047592b806f348c798fa896d53a87eaaf6",
+      "message": "Impl Issue 762 Experiment 2",
+      "body": "Experiment 1 crashed on NOTREACHED(),\nEncrypted cookies, key unbreached.\nNow encryption's off, the params complete—\nCookie persistence, take two, repeat.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T13:31:10-05:00"
+      "date": "2026-03-20T07:23:13-05:00"
     },
     {
-      "hash": "1eb35a23eca3eca3092751e2febd0f608235c9d6",
-      "message": "Record Issue 748 Experiment 1 failure",
-      "body": "The multi-pass key pipeline laughed,\nAt our guard we had so deftly daft,\n  \"OnlyKeyBindings? Gone!\"\n  But three passes marched on—\nAnd no keystroke reached the browser's craft.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "27d76b55a944f8cc184d3dbec36ef54562cf682e",
+      "message": "Revert Issue 762 Experiment 1",
+      "body": "The cookies sought a home on disk,\nBut file_paths broke the network risk.\nWhite screens, no pages, nothing loads—\nReverted down the safer roads.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T13:22:39-05:00"
+      "date": "2026-03-20T07:04:02-05:00"
     },
     {
-      "hash": "1ff4094eb31269e2d0c4ee71e33bcd21f6fc89c2",
-      "message": "Fix Issue 748: menu steals Cmd+C first",
-      "body": "performKeyEquivalent said NO,\nso the menu bar ran the show.\nNow we catch c, v, x, a, z—\nroute through key_common instead,\nand let try_forward_key decide where to go.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "fcf6e8d712571a3626b96fc7e80b679bb2f22bef",
+      "message": "Impl Issue 762 Experiment 1",
+      "body": "In RAM the cookies briefly dwelt,\nEach restart made the sessions melt.\nfile_paths now points them to the disk—\nNo more the ephemeral risk.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T13:14:38-05:00"
+      "date": "2026-03-20T06:48:29-05:00"
     },
     {
-      "hash": "bb20461da5e15fde2096cc3a1b78d0726937511a",
-      "message": "Simplify browse mode check in Issue 748",
-      "body": "Two branches, same return—\ndead code cleared in a single turn.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "a12b8ff060997cc717c687d53204cca4f5e68b06",
+      "message": "Design Issue 762 Experiment 1",
+      "body": "file_paths was null,\nCookies fell into the void—\nOverride shall save.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T12:58:01-05:00"
+      "date": "2026-03-20T06:18:44-05:00"
     },
     {
-      "hash": "4417d063e97265816431314b37684b74b8637daa",
-      "message": "Rewrite Issue 748 with correct root cause",
-      "body": "The Mojo pipe was never to blame,\nNor Chromium's renderer playing a game.\nraw_key_event steals Cmd+C for the terminal's sake,\nWhile the browser sits idle—a simple mistake.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "0dcffb041838170dc10ddafae63cca031568df1c",
+      "message": "Open Issue 762: persistent cookies",
+      "body": "The cookies vanished every night,\nNo session lived to see the light.\nfile_paths was never set, you see—\nContent shell stored them ephemerally.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T12:51:54-05:00"
+      "date": "2026-03-19T17:54:09-05:00"
     },
     {
-      "hash": "73be0137d6d3a65a64434e2bb529884fd863d1b5",
-      "message": "Add Issue 748: browser clipboard",
-      "body": "Cmd+C was sent but nothing came,\nThe Mojo pipe had no one to blame.\nClipboardHost unbound,\nNo pasteboard was found—\nNow an issue exists to stake its claim.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "61cf129e1677af192262e1fac1f32e9783360e41",
+      "message": "Close Issue 761: browser engine label",
+      "body": "The engine spoke, the label heard,\nBrowserReady carried the word.\nNo more blank where a name should be—\nRoamium shows for all to see.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T12:43:45-05:00"
+      "date": "2026-03-19T07:56:49-05:00"
     },
     {
-      "hash": "cc02e04128d6ee6179d6307cb482f21e48de5a56",
-      "message": "Serve raw markdown at /blog/<slug>.md",
-      "body": "The posts lay wrapped in HTML lace,\nBut agents craved a simpler place.\nNow curl the .md, the source is bare—\nFront matter, prose, it's all right there.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "cd6601f89622ed5ccd9e6c56cf9c785354fd00d6",
+      "message": "Impl Issue 761 Experiment 1",
+      "body": "\"Who rendered me?\" the viewport cried,\nThe engine's name it could not hide.\nBrowserReady now names the guest,\nAnd roamium shines bottom-right, impressed.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T12:33:02-05:00"
+      "date": "2026-03-19T07:48:09-05:00"
     },
     {
-      "hash": "09f3ba9d725af0990da89d02e4a8716164a52f43",
-      "message": "Move GitHub link outside commit card",
-      "body": "The link lived inside the box,\nCrowding the message like mismatched socks.\nNow it sits underneath,\nMuted, discreet, beneath—\nOutside the └── it quietly talks.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "2f6a04164928b18f6cef047fbedf7b93779036f7",
+      "message": "Design Issue 761 Experiment 1",
+      "body": "Four files, one field, problem solved—\nThe nameless engine gets absolved.\npane.browser was there all along,\nBrowserReady just forgot the song.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T12:19:16-05:00"
+      "date": "2026-03-19T07:44:45-05:00"
     },
     {
-      "hash": "a0b5491c44050fac5a89a264c1cc11771c02a1e9",
-      "message": "Format codebase with oxfmt",
-      "body": "The formatter came through like a breeze,\nTrimming whitespace and tightening trees.\nSixteen files aligned,\nEvery bracket refined—\nNow the linter can rest, if you please.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "37a36d6f80c5075412f7b3f58880d595f1c47bd2",
+      "message": "Open Issue 761: browser engine label",
+      "body": "The engine hides when not named,\nThe bottom-right sits blank, ashamed.\nBrowserReady shall confess\nWhich engine wears the dress.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T12:16:16-05:00"
+      "date": "2026-03-19T07:20:38-05:00"
     },
     {
-      "hash": "6018cb670c261a55e09c122ec3bb9d937bec8e72",
-      "message": "Highlight protocol description on home page",
-      "body": "One sentence glows bright,\nAccent on background inverse—\nLike grep found the match.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "cd1a4481c4e2e1d9250f2b7422fed5e85c20ee60",
+      "message": "Use linked issue numbers in index",
+      "body": "Seven digits, fixed and neat,\nClickable links and gf can meet.\nThe best of both worlds in a row—\nBrowser clicks AND vim can go.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T12:15:08-05:00"
+      "date": "2026-03-18T05:38:21-05:00"
     },
     {
-      "hash": "f65bf0665301d95f1bc73bb9350bd5a7cc458971",
-      "message": "Regenerate commits.json",
-      "body": "Fresh data from the log,\nTwo hundred lines reshuffled—\nThe commits remember.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "bebe4813f6bab1bf77d053cd6a123b687ae6e328",
+      "message": "Use bare paths in issues index for gf",
+      "body": "The link text wandered, column to column,\nThe cursor searched—the result was solemn.\nNow paths stand still at column seven,\nAnd gf works like keyboard heaven.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T09:25:02-05:00"
+      "date": "2026-03-17T18:51:39-05:00"
     },
     {
-      "hash": "54d6c6597a86d4359d0997efd1755dbe91b34ee0",
-      "message": "Fix ASCII art line spacing in blog posts",
-      "body": "The art had gaps between each row,\nLike a picket fence letting wind blow.\nline-height: 1 —\nNow the lines touch, it's done,\nBox-drawing chars in one seamless flow.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "f0b3212c280e79d9c2132147f3c15a1b88eb9fd6",
+      "message": "Open Issue 760: CLI short flags",
+      "body": "Typing --profile every time?\nThat's seven extra chars—a crime!\nSoon -p and -b will do the trick,\nTwo keystrokes: short and slick.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T09:22:31-05:00"
+      "date": "2026-03-17T18:48:15-05:00"
     },
     {
-      "hash": "2142f3f182f36db2e4ba71522c0ce43b75a7fe8c",
-      "message": "Fix commit detail box-drawing borders",
-      "body": "CSS border-left, you served us well,\nBut beside ASCII lines you looked like hell.\nNow one <pre> holds the frame—\n┌ │ └ — all the same,\nNo gaps, no seams, one monospace shell.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "3dd20b5df5ece1e0ec4227215229b9419f1a72c6",
+      "message": "Close Issue 759: show link URL on hover",
+      "body": "Five layers deep, the hover flew,\nFrom Blink to border — now you knew\nExactly where that link would go,\nBefore you clicked. The TUI told you so.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T09:20:20-05:00"
+      "date": "2026-03-17T05:18:49-05:00"
     },
     {
-      "hash": "fbddcd834730531538ed914583e6a7c37f5acf4e",
-      "message": "Proper Case nav, titles, and view-all links",
-      "body": "The labels stood lowercase, meek,\nNow Proper Case gives them mystique.\nTwo \"view all\" links appear,\nMuted, quiet, but clear—\nFor the curious operator to seek.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "4a68470209b8cf93dc7a72658b70304d65f342ee",
+      "message": "Impl Issue 759 Experiment 1",
+      "body": "From Blink to border, five layers crossed,\nNo hover URL shall again be lost.\nShell speaks, Roamium relays the news,\nThe TUI shows where each link pursues.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T09:15:58-05:00"
+      "date": "2026-03-17T05:11:52-05:00"
     },
     {
-      "hash": "d784b2240da3aa9209cd0eb63bc1143245ccbf7c",
-      "message": "Add page titles to all routes",
-      "body": "Every tab said \"TermSurf\" — nothing more,\nNo hint of the page you'd come for.\nNow blog, docs, about,\nEach title rings out,\nLike nameplates on every front door.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "e25e7b0a486a8a6a5ceb13533865f696190c195b",
+      "message": "Format Issue 759 table alignment",
+      "body": "Prettier trimmed the dashes down,\nTables tidy, less to frown.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T09:09:26-05:00"
+      "date": "2026-03-17T05:05:18-05:00"
     },
     {
-      "hash": "78c705e8a79c9b6541bb4d43408d081a6ff826c9",
-      "message": "Add voice guidelines to website CLAUDE.md",
-      "body": "The aesthetic had monospace and scan lines,\nBut the words had no rules, no guidelines.\nNow we write like it's '93,\nDispatches from cyberspace, free—\nNo \"leverage.\" No \"seamless.\" Just punch lines.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "bd0a69ee739fd488d418270109ff86f4f73f0729",
+      "message": "Add Chromium branch to Issue 759 Exp 1",
+      "body": "A branch forgot to state its name,\nNow 759 can stake its claim.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T09:05:37-05:00"
+      "date": "2026-03-17T05:04:57-05:00"
     },
     {
-      "hash": "cfa295cba07b1eae878c30752ff28bde9effec9d",
-      "message": "Add GitHub link to hero section",
-      "body": "No download yet, no binary to ship,\nBut the source is there for the taking.\nA bracket link whispers, \"fork this,\"\nTo every cypherpunk in the making.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+      "hash": "8b20ffd6c71616a480c6c89f48422da5ba89f26d",
+      "message": "Design Issue 759 Experiment 1",
+      "body": "Eleven files, five layers deep,\nFrom Blink to border, quite a sweep.\nUpdateTargetURL shall speak its name,\nAnd bottom-left shall show the aim.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
       "author": "Ryan X. Charles",
-      "date": "2026-03-14T08:57:59-05:00"
+      "date": "2026-03-17T05:02:09-05:00"
     }
   ]
 }

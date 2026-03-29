@@ -1,6 +1,6 @@
 /**
  * Reads markdown blog posts from the top-level blog/ directory, parses TOML front matter,
- * and generates data/blog.json + feed files in public/blog/.
+ * renders markdown to HTML, and generates data/blog.json + feed files in public/blog/.
  * Run with: bun run build:blog
  */
 
@@ -8,12 +8,31 @@ import { readFileSync, writeFileSync, readdirSync, mkdirSync } from "fs";
 import { join } from "path";
 import toml from "toml";
 import { Feed } from "feed";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkSmartypants from "remark-smartypants";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import remarkRehype from "remark-rehype";
+import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
+import rehypeStringify from "rehype-stringify";
 import type { BlogPost, BlogData } from "../src/blog";
 
 const DOCS_DIR = join(import.meta.dir, "../../blog");
 const DATA_DIR = join(import.meta.dir, "../data");
 const PUBLIC_DIR = join(import.meta.dir, "../public/blog");
 const SITE_URL = "https://termsurf.com";
+
+const markdownProcessor = unified()
+  .use(remarkParse)
+  .use(remarkSmartypants)
+  .use(remarkGfm)
+  .use(remarkMath)
+  .use(remarkRehype)
+  .use(rehypeKatex)
+  .use(rehypeHighlight)
+  .use(rehypeStringify);
 
 function parseFrontMatter(raw: string): { meta: Record<string, string>; content: string } {
   const parts = raw.split("+++");
@@ -25,7 +44,12 @@ function parseFrontMatter(raw: string): { meta: Record<string, string>; content:
   return { meta, content };
 }
 
-function buildBlog() {
+async function renderMarkdown(content: string): Promise<string> {
+  const result = await markdownProcessor.process(content);
+  return String(result);
+}
+
+async function buildBlog() {
   const files = readdirSync(DOCS_DIR)
     .filter((f) => f.endsWith(".md"))
     .sort()
@@ -37,6 +61,7 @@ function buildBlog() {
     const raw = readFileSync(join(DOCS_DIR, file), "utf-8");
     const { meta, content } = parseFrontMatter(raw);
     const slug = file.replace(/\.md$/, "");
+    const html = await renderMarkdown(content);
 
     posts.push({
       slug,
@@ -44,16 +69,17 @@ function buildBlog() {
       author: meta.author,
       date: meta.date,
       content,
+      html,
     });
   }
 
-  // Write blog.json (metadata only, content loaded at runtime via server fn)
+  // Write blog.json (metadata + rendered HTML)
   mkdirSync(DATA_DIR, { recursive: true });
   const blogData: BlogData = {
-    posts: posts.map(({ content: _, ...meta }) => meta),
+    posts: posts.map(({ content: _, ...rest }) => rest),
   };
   writeFileSync(join(DATA_DIR, "blog.json"), JSON.stringify(blogData, null, 2) + "\n");
-  console.log(`  blog.json: ${posts.length} posts (metadata only)`);
+  console.log(`  blog.json: ${posts.length} posts (with rendered HTML)`);
 
   // Generate feeds
   mkdirSync(PUBLIC_DIR, { recursive: true });
@@ -86,7 +112,7 @@ function buildBlog() {
       link: `${SITE_URL}/blog/${post.slug}`,
       date: new Date(post.date),
       description: post.title,
-      content: post.content,
+      content: post.html,
     });
   }
 

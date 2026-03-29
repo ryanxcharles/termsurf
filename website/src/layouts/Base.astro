@@ -1,0 +1,30 @@
+---
+interface Props {
+  title: string;
+}
+const { title } = Astro.props;
+import "../styles/style.css";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+---
+
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="alternate" type="application/json" title="JSON Feed" href="/blog/feed.json" />
+    <link rel="alternate" type="application/atom+xml" title="Atom Feed" href="/blog/feed.atom.xml" />
+    <link rel="alternate" type="application/rss+xml" title="RSS Feed" href="/blog/feed.rss.xml" />
+  </head>
+  <body class="bg-background text-foreground min-h-screen font-sans">
+    <div class="scanline-overlay max-w-3xl mx-auto px-4 py-6">
+      <Header />
+      <main>
+        <slot />
+      </main>
+      <Footer />
+    </div>
+  </body>
+</html>
