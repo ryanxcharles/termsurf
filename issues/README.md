@@ -2,11 +2,12 @@
 
 ## Open
 
-| #                                               | Title                                                | Opened     |
-| ----------------------------------------------- | ---------------------------------------------------- | ---------- |
-| [0000756](0000756-surfari/README.md)            | Surfari — WebKit engine for TermSurf                 | 2026-03-16 |
-| [0000768](0000768-cloudflare-website/README.md) | Migrate termsurf.com from Fly.io to Cloudflare Pages | 2026-03-29 |
-| [0000771](0000771-tab-id-collision/README.md)   | Tab ID collision across browser profiles             | 2026-04-05 |
+| #                                               | Title                                                     | Opened     |
+| ----------------------------------------------- | --------------------------------------------------------- | ---------- |
+| [0000756](0000756-surfari/README.md)            | Surfari — WebKit engine for TermSurf                      | 2026-03-16 |
+| [0000768](0000768-cloudflare-website/README.md) | Migrate termsurf.com from Fly.io to Cloudflare Pages      | 2026-03-29 |
+| [0000771](0000771-tab-id-collision/README.md)   | Tab ID collision across browser profiles                  | 2026-04-05 |
+| [0000772](0000772-command-shortcuts/README.md)  | Explicit command shortcuts and rename colorscheme to dark | 2026-04-05 |
 
 ## Closed
 
