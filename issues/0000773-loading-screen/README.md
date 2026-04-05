@@ -62,3 +62,100 @@ If it takes more than ~120 seconds, suggest checking if Roamium is installed.
 The TUI already has a main event loop that redraws on every event. Adding a
 loading state that renders a centered message in the viewport should be
 straightforward.
+
+## Experiments
+
+### Experiment 1: Loading log in the viewport
+
+Render a vertical log of startup stages inside the viewport area. Each stage
+gets a line with a status icon (✓ done, ⠋ in progress, ✗ error). The log
+replaces the current viewport debug text (`origin: ... size: ...`) until the
+browser overlay appears.
+
+#### Changes
+
+**`webtui/src/main.rs`**
+
+1. Add a `LoadingStage` enum and a
+   `loading_log: Vec<(LoadingStage, StageStatus)>` state variable:
+
+   ```rust
+   enum LoadingStage {
+       ConnectingToGui,
+       StartingBrowser,
+       WaitingForChromium,
+       LoadingPage,
+       Ready,
+   }
+
+   enum StageStatus {
+       InProgress,
+       Done,
+       Error(String),
+   }
+   ```
+
+2. Add `browser_ready: bool` flag (initially `false`, set to `true` on
+   `BrowserReady` message).
+
+3. Populate stages at the appropriate points in the existing flow:
+   - After `CompositorConnection::connect` succeeds → push
+     `ConnectingToGui / Done`
+   - If connect fails → push `ConnectingToGui / Error`
+   - After `send_set_overlay` → push `StartingBrowser / Done`
+   - Enter event loop with `WaitingForChromium / InProgress`
+   - On `BrowserReady` message → mark `WaitingForChromium / Done`, push
+     `LoadingPage / InProgress`, set `browser_ready = true`
+   - On first `LoadingState { state: "done" }` → mark `LoadingPage / Done`, push
+     `Ready / Done`, clear loading log after a brief delay
+
+4. Update the `ui()` function:
+   - Add `loading_log: &[(LoadingStage, StageStatus)]` and `browser_ready: bool`
+     parameters
+   - When `!browser_ready`, render the loading log inside the viewport area
+     instead of the debug text. Each line:
+     - `InProgress`: `⠋ {stage description}` in accent color, with elapsed time
+       if `WaitingForChromium`
+     - `Done`: `✓ {stage description}` in success color
+     - `Error`: `✗ {error message}` in danger color
+   - When `browser_ready`, render the viewport as before (the browser overlay
+     covers it anyway)
+
+5. Add a 30-second warning: if `WaitingForChromium` exceeds 30s, append a muted
+   line: `First launch is slow — Chromium is initializing`
+
+6. Add a 120-second timeout: if `WaitingForChromium` exceeds 120s, change status
+   to `Error("Timeout — is Roamium installed?")`.
+
+7. Thread an `Instant` through the `WaitingForChromium` stage to compute elapsed
+   time for display.
+
+#### No IPC changes needed
+
+All the stage transitions are already observable from existing events:
+
+- GUI connection → happens before the event loop
+- SetOverlay sent → happens on first viewport render
+- BrowserReady → already an IPC message
+- LoadingState → already an IPC message
+
+#### Verification
+
+1. **Fresh install (cold start):**
+   - Uninstall and reinstall via Homebrew.
+   - Open Wezboard, type `web ryanxcharles.com`.
+   - **Pass:** See staged log: connecting, starting, waiting (with elapsed
+     time), loading, then browser appears.
+
+2. **Warm start:**
+   - Close and reopen `web ryanxcharles.com`.
+   - **Pass:** Stages flash quickly, browser appears in a few seconds.
+
+3. **Roamium not installed:**
+   - Temporarily rename `/opt/homebrew/opt/termsurf-roamium/roamium`.
+   - Run `web ryanxcharles.com`.
+   - **Pass:** Log shows error after timeout.
+
+4. **Normal operation after load:**
+   - Navigate to other pages after initial load.
+   - **Pass:** Loading log does not reappear. Normal TUI behavior.
