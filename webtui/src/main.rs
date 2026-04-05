@@ -52,6 +52,35 @@ enum Mode {
     Command,
 }
 
+// Loading screen stages (Issue 773).
+#[derive(Clone)]
+enum LoadingStage {
+    ConnectingToGui,
+    StartingBrowser,
+    WaitingForChromium,
+    LoadingPage,
+    Ready,
+}
+
+#[derive(Clone)]
+enum StageStatus {
+    InProgress,
+    Done,
+    Error(String),
+}
+
+impl LoadingStage {
+    fn label(&self) -> &'static str {
+        match self {
+            LoadingStage::ConnectingToGui => "Connected to GUI",
+            LoadingStage::StartingBrowser => "Starting browser engine",
+            LoadingStage::WaitingForChromium => "Waiting for Chromium",
+            LoadingStage::LoadingPage => "Loading page",
+            LoadingStage::Ready => "Ready",
+        }
+    }
+}
+
 enum LoopEvent {
     Terminal(Event),
     Ipc(ipc::CompositorMessage),
@@ -344,6 +373,19 @@ fn main() -> io::Result<()> {
     let mut mode = Mode::Control;
     let mut is_dark = true;
     let mut command_error: Option<String> = None; // Command bar error (Issue 690).
+    let mut browser_ready = false;
+    let mut loading_log: Vec<(LoadingStage, StageStatus)> = Vec::new();
+    let mut chromium_wait_start: Option<Instant> = None;
+
+    // Populate initial loading stages (Issue 773).
+    if compositor.is_some() {
+        loading_log.push((LoadingStage::ConnectingToGui, StageStatus::Done));
+    } else if pane_id.is_some() {
+        loading_log.push((
+            LoadingStage::ConnectingToGui,
+            StageStatus::Error("Failed to connect to GUI".into()),
+        ));
+    }
     let mut last_viewport = Rect::default();
     let mut loading_bar_active = false;
     let mut loading_bar_start: Option<Instant> = None;
@@ -390,6 +432,9 @@ fn main() -> io::Result<()> {
                 &command_error,
                 browser_label,
                 &target_url,
+                &loading_log,
+                browser_ready,
+                chromium_wait_start,
             );
         })?;
 
@@ -433,6 +478,11 @@ fn main() -> io::Result<()> {
                 let _ = stdout.flush();
                 loading_bar_active = true;
                 loading_bar_start = Some(Instant::now());
+
+                // Loading stages (Issue 773).
+                loading_log.push((LoadingStage::StartingBrowser, StageStatus::Done));
+                loading_log.push((LoadingStage::WaitingForChromium, StageStatus::InProgress));
+                chromium_wait_start = Some(Instant::now());
             }
         }
 
@@ -683,6 +733,15 @@ fn main() -> io::Result<()> {
                             "done" => {
                                 loading_bar_active = false;
                                 loading_bar_start = None;
+                                // Loading stages (Issue 773).
+                                for entry in loading_log.iter_mut() {
+                                    if matches!(entry.0, LoadingStage::LoadingPage)
+                                        && matches!(entry.1, StageStatus::InProgress)
+                                    {
+                                        entry.1 = StageStatus::Done;
+                                    }
+                                }
+                                loading_log.push((LoadingStage::Ready, StageStatus::Done));
                                 write!(stdout, "\x1b]9;4;0\x1b\\")
                             }
                             "error" => {
@@ -716,6 +775,18 @@ fn main() -> io::Result<()> {
                         ) {
                             browser_conn = Some(conn);
                         }
+
+                        // Loading stages (Issue 773).
+                        browser_ready = true;
+                        // Mark WaitingForChromium as done.
+                        for entry in loading_log.iter_mut() {
+                            if matches!(entry.0, LoadingStage::WaitingForChromium)
+                                && matches!(entry.1, StageStatus::InProgress)
+                            {
+                                entry.1 = StageStatus::Done;
+                            }
+                        }
+                        loading_log.push((LoadingStage::LoadingPage, StageStatus::InProgress));
                     }
                 }
             }
@@ -734,6 +805,24 @@ fn main() -> io::Result<()> {
                     let _ = stdout.flush();
                     loading_bar_active = false;
                     loading_bar_start = None;
+                }
+            }
+        }
+
+        // Loading timeout: mark error if Chromium never connects (Issue 773).
+        if !browser_ready {
+            if let Some(start) = chromium_wait_start {
+                if start.elapsed() >= Duration::from_secs(120) {
+                    for entry in loading_log.iter_mut() {
+                        if matches!(entry.0, LoadingStage::WaitingForChromium)
+                            && matches!(entry.1, StageStatus::InProgress)
+                        {
+                            entry.1 = StageStatus::Error(
+                                "Timeout — is Roamium installed?".into(),
+                            );
+                        }
+                    }
+                    chromium_wait_start = None; // Don't keep re-triggering.
                 }
             }
         }
@@ -817,6 +906,9 @@ fn ui(
     command_error: &Option<String>,
     browser_label: &str,
     target_url: &str,
+    loading_log: &[(LoadingStage, StageStatus)],
+    browser_ready: bool,
+    chromium_wait_start: Option<Instant>,
 ) -> Rect {
     // Paint full background.
     frame.render_widget(
@@ -957,15 +1049,68 @@ fn ui(
         viewport_block = viewport_block.title_bottom(hover_label);
     }
     let inner = viewport_block.inner(layout[0]);
-    let viewport_text = format!(
-        "origin: ({}, {})\nsize: {} x {}",
-        inner.x, inner.y, inner.width, inner.height
-    );
-    let viewport = Paragraph::new(viewport_text)
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(FG).bg(BG))
-        .block(viewport_block);
-    frame.render_widget(viewport, layout[0]);
+
+    if !browser_ready && !loading_log.is_empty() {
+        // Render loading log (Issue 773).
+        let mut lines: Vec<Line> = Vec::new();
+        lines.push(Line::from("")); // top padding
+
+        for (stage, status) in loading_log {
+            let (icon, color) = match status {
+                StageStatus::Done => ("✓", GREEN),
+                StageStatus::InProgress => ("⠋", CYAN),
+                StageStatus::Error(_) => ("✗", RED),
+            };
+            let mut spans = vec![
+                Span::raw("  ").style(Style::default()),
+                Span::raw(icon).style(Style::default().fg(color)),
+                Span::raw(" ").style(Style::default()),
+            ];
+            match status {
+                StageStatus::Error(msg) => {
+                    spans.push(Span::raw(msg.clone()).style(Style::default().fg(color)));
+                }
+                _ => {
+                    let mut label = stage.label().to_string();
+                    // Show elapsed time for WaitingForChromium.
+                    if matches!(stage, LoadingStage::WaitingForChromium)
+                        && matches!(status, StageStatus::InProgress)
+                    {
+                        if let Some(start) = chromium_wait_start {
+                            let elapsed = start.elapsed().as_secs();
+                            label = format!("{} ({}s)", label, elapsed);
+                        }
+                    }
+                    spans.push(Span::raw(label).style(Style::default().fg(color)));
+                }
+            }
+            lines.push(Line::from(spans));
+        }
+
+        // Warnings based on elapsed time.
+        if let Some(start) = chromium_wait_start {
+            let elapsed = start.elapsed().as_secs();
+            if elapsed >= 120 {
+                // This is handled in the timeout below, but show inline too.
+            } else if elapsed >= 30 {
+                lines.push(Line::from(""));
+                lines.push(Line::from(
+                    Span::raw("    First launch is slow — Chromium is initializing")
+                        .style(Style::default().fg(COMMENT)),
+                ));
+            }
+        }
+
+        let loading_widget = Paragraph::new(lines)
+            .style(Style::default().fg(FG).bg(BG))
+            .block(viewport_block);
+        frame.render_widget(loading_widget, layout[0]);
+    } else {
+        let viewport = Paragraph::new("")
+            .style(Style::default().fg(FG).bg(BG))
+            .block(viewport_block);
+        frame.render_widget(viewport, layout[0]);
+    }
 
     // Status bar.
     let status_layout = Layout::horizontal([
