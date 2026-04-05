@@ -273,3 +273,57 @@ subsequent lookups on this connection would use `("", tab_id)`.
 The approach is correct but the implementation has a bug, likely in how
 `server_key` is captured from `ServerRegister`. Experiment 2 should simplify the
 pattern to avoid the double-match issue.
+
+### Experiment 2: Add debug logs to diagnose the failure
+
+Code analysis cannot determine why the browser fails to load. The logic traces
+correctly on paper, but something fails at runtime. Add targeted debug logs at
+every decision point in the composite-key flow to identify exactly which step
+breaks.
+
+#### Changes
+
+**`wezboard/wezboard-gui/src/termsurf/conn.rs`**
+
+1. After `handle_server_register` returns in the connection loop (line 103):
+   ```rust
+   log::info!("ServerRegister: captured server_key={:?}", server_key);
+   ```
+
+2. In `handle_tab_ready`, after inserting the composite key (line 773):
+   ```rust
+   log::info!(
+       "TabReady: inserted tab_to_pane key=({:?}, {}) -> pane_id={}",
+       skey, ready.tab_id, ready.pane_id
+   );
+   ```
+
+3. In `handle_ca_context`, before the lookup (line 1248):
+   ```rust
+   log::info!(
+       "handle_ca_context: looking up key=({:?}, {}), tab_to_pane has {} entries: {:?}",
+       skey, ca_context.tab_id, st.tab_to_pane.len(),
+       st.tab_to_pane.keys().collect::<Vec<_>>()
+   );
+   ```
+
+4. In `handle_message` for CursorChanged, before the lookup (line 238):
+   ```rust
+   log::info!(
+       "CursorChanged: server_key={:?} tab_id={}",
+       server_key, c.tab_id
+   );
+   ```
+
+#### Verification
+
+1. Build Wezboard, launch it, run `web ryanxcharles.com`.
+2. Check the log output (stdout or log file).
+3. Look for:
+   - `ServerRegister: captured server_key=Some(...)` — confirms key was set.
+     If `None`, the `handle_server_register` matching failed.
+   - `TabReady: inserted tab_to_pane key=(...)` — confirms the insert happened
+     and what key was used.
+   - `handle_ca_context: looking up key=(...)` — confirms what key is used for
+     lookup and whether the tab_to_pane map contains a matching entry.
+4. The mismatch between insert and lookup keys (if any) will reveal the bug.
