@@ -374,6 +374,7 @@ fn main() -> io::Result<()> {
     let mut is_dark = true;
     let mut command_error: Option<String> = None; // Command bar error (Issue 690).
     let mut browser_ready = false;
+    let mut page_loaded = false;
     let mut loading_log: Vec<(LoadingStage, StageStatus)> = Vec::new();
     let mut chromium_wait_start: Option<Instant> = None;
 
@@ -487,9 +488,10 @@ fn main() -> io::Result<()> {
         }
 
         // Unified event channel.
-        // During loading, use a short timeout for smooth spinner animation.
-        // After browser is ready, block until an event arrives (Issue 668, 773).
-        let event = if !browser_ready {
+        // During loading, use a short timeout for smooth spinner animation and
+        // to keep the GUI repainting (so the CALayerHost overlay appears).
+        // After the page has fully loaded, block until an event arrives (Issue 668, 773).
+        let event = if !page_loaded {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(e) => Ok(e),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
@@ -753,6 +755,7 @@ fn main() -> io::Result<()> {
                                     }
                                 }
                                 loading_log.push((LoadingStage::Ready, StageStatus::Done));
+                                page_loaded = true;
                                 write!(stdout, "\x1b]9;4;0\x1b\\")
                             }
                             "error" => {
