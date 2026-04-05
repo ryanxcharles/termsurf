@@ -29,7 +29,7 @@ enough commands that explicit shortcuts are clearer.
 | Command       | Aliases                        | Args                                      |
 | ------------- | ------------------------------ | ----------------------------------------- |
 | `quit`        | (subsequence: q, qu, qui, ...) | none                                      |
-| `quitall`     | (subsequence: qa, ...)         | none                                      |
+| `quitall`     | (subsequence: qa, ...)         | none (identical to quit)                  |
 | `colorscheme` | (subsequence: c, cs, ...)      | `dark\|d`, `light\|l`, `system\|s`        |
 | `devtools`    | (subsequence: d, de, dev, ...) | `right\|r`, `down\|d`, `left\|l`, `up\|u` |
 
@@ -73,7 +73,6 @@ The `colorscheme` command becomes `dark` with toggle behavior:
 | Command  | Accepted names   | Args                                                   |
 | -------- | ---------------- | ------------------------------------------------------ |
 | quit     | `quit`, `q`      | none                                                   |
-| quit all | `quitall`, `qa`  | none                                                   |
 | dark     | `dark`, `da`     | (none)=toggle, `on\|yes\|y`, `off\|no\|n`, `system\|s` |
 | devtools | `devtools`, `de` | `right\|r`, `down\|d`, `left\|l`, `up\|u`              |
 
@@ -112,10 +111,6 @@ dark with toggle, update docs.
    ```rust
    Command {
        names: &["quit", "q"],
-       exec: |_| CommandResult::Quit,
-   },
-   Command {
-       names: &["quitall", "qa"],
        exec: |_| CommandResult::Quit,
    },
    Command {
@@ -202,7 +197,6 @@ dark with toggle, update docs.
    | Command              | Shortcut | Action                      |
    | -------------------- | -------- | --------------------------- |
    | `:quit`              | `:q`     | Quit                        |
-   | `:quitall`           | `:qa`    | Quit all panes              |
    | `:dark [on\|off\|s]` | `:da`    | Toggle/set dark mode        |
    | `:devtools [dir]`    | `:de`    | Open DevTools in split pane |
    ```
