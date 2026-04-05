@@ -16,7 +16,7 @@ const formatConfigs = [
 ] as const;
 
 // Source icon used for favicon.
-const faviconSource = "termsurf-12-transparent";
+const faviconSource = "termsurf-13-transparent";
 
 const outputPaths: string[] = [];
 
