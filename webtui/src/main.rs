@@ -486,8 +486,19 @@ fn main() -> io::Result<()> {
             }
         }
 
-        // Unified event channel — blocks until a terminal or XPC event arrives (Issue 668).
-        match rx.recv() {
+        // Unified event channel.
+        // During loading, use a short timeout for smooth spinner animation.
+        // After browser is ready, block until an event arrives (Issue 668, 773).
+        let event = if !browser_ready {
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(e) => Ok(e),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        } else {
+            rx.recv()
+        };
+        match event {
             Ok(LoopEvent::Terminal(Event::Key(key))) => {
                 // Ctrl+C quits from any mode.
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -1052,13 +1063,18 @@ fn ui(
 
     if !browser_ready && !loading_log.is_empty() {
         // Render loading log (Issue 773).
+        const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let spinner_frame = chromium_wait_start
+            .map(|s| (s.elapsed().as_millis() / 100) as usize % SPINNER.len())
+            .unwrap_or(0);
+
         let mut lines: Vec<Line> = Vec::new();
         lines.push(Line::from("")); // top padding
 
         for (stage, status) in loading_log {
             let (icon, color) = match status {
                 StageStatus::Done => ("✓", GREEN),
-                StageStatus::InProgress => ("⠋", CYAN),
+                StageStatus::InProgress => (SPINNER[spinner_frame], CYAN),
                 StageStatus::Error(_) => ("✗", RED),
             };
             let mut spans = vec![
