@@ -224,3 +224,52 @@ Thread the server_key through the connection reader loop and use a composite
 5. **Close and reopen:**
    - Open two profiles, close one, reopen it.
    - **Pass:** No stale mappings. The new pane works correctly.
+
+**Result:** Fail
+
+No browser loads at all — complete breakage.
+
+#### Failure analysis
+
+The most likely cause is that `ServerRegister` is now handled in the connection
+loop body **before** `handle_message`, but the `ServerRegister` match in
+`handle_message` was removed. This means `handle_server_register` runs correctly
+and returns the `server_key`. However, the problem is likely in how
+`handle_message` receives the `server_key`.
+
+The connection loop has one socket per connection. A TUI and a browser engine
+are separate connections. The `server_key` is set when a `ServerRegister`
+message arrives on a browser connection. But `TabReady` also arrives on that
+same browser connection — so the `server_key` should be available.
+
+The real issue is probably that `handle_tab_ready` does NOT receive the
+connection's `server_key`. It builds its own key from `pane.profile` and
+`pane.browser`. But `TabReady` arrives on the browser's socket, and
+`handle_tab_ready` looks up `st.panes[ready.pane_id]` to get profile/browser. If
+the pane exists and has the correct profile/browser, the insert should work.
+
+However, `handle_ca_context` receives `server_key` from the connection. If
+`server_key` is `None` at the time `CaContext` arrives (e.g., because the
+`ServerRegister` → `handle_server_register` call didn't return the key
+correctly, or because the `matches!` guard consumed the message before the inner
+destructure could extract it), then the lookup key would be `("", tab_id)` which
+would never match the insert key `("profile\0browser", tab_id)`.
+
+The most suspicious code is the double-match pattern:
+
+```rust
+if matches!(&msg.msg, Some(Msg::ServerRegister(_))) {
+    if let Some(Msg::ServerRegister(r)) = msg.msg {
+```
+
+The outer `matches!` borrows `msg.msg`, then the inner `if let` moves it. This
+should work in Rust (the borrow from `matches!` is temporary), but if the
+compiler optimizes differently or if `msg.msg` is `None` after the borrow, the
+inner match would fail silently — `server_key` would stay `None`, and all
+subsequent lookups on this connection would use `("", tab_id)`.
+
+#### Conclusion
+
+The approach is correct but the implementation has a bug, likely in how
+`server_key` is captured from `ServerRegister`. Experiment 2 should simplify the
+pattern to avoid the double-match issue.
