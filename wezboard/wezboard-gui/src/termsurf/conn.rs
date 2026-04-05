@@ -43,6 +43,7 @@ pub async fn handle_connection(stream: UnixStream, state: SharedState) -> anyhow
 
     let mut buf = Vec::with_capacity(4096);
     let mut conn_type = ConnType::Unknown;
+    let mut server_key: Option<String> = None;
     let mut tmp = [0u8; 4096];
     let mut msg_count: u64 = 0;
 
@@ -93,8 +94,10 @@ pub async fn handle_connection(stream: UnixStream, state: SharedState) -> anyhow
                 log::info!("TermSurf connection type: {:?}", conn_type);
             }
 
-            if let Err(err) = handle_message(msg, &stream, &tx, &state).await {
-                log::error!("TermSurf handle error: {:#}", err);
+            match handle_message(msg, &stream, &tx, &server_key, &state).await {
+                Ok(Some(key)) => server_key = Some(key),
+                Ok(None) => {}
+                Err(err) => log::error!("TermSurf handle error: {:#}", err),
             }
 
             buf.drain(..4 + len);
@@ -137,11 +140,12 @@ async fn handle_message(
     msg: TermSurfMessage,
     stream: &Arc<Async<UnixStream>>,
     tx: &Sender<Vec<u8>>,
+    server_key: &Option<String>,
     state: &SharedState,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<String>> {
     match msg.msg {
         Some(Msg::ServerRegister(r)) => {
-            handle_server_register(r, tx.clone(), state)?;
+            return Ok(handle_server_register(r, tx.clone(), state)?);
         }
         Some(Msg::SetOverlay(o)) => {
             handle_set_overlay(o, tx.clone(), state)?;
@@ -225,7 +229,7 @@ async fn handle_message(
             );
             #[cfg(target_os = "macos")]
             if c.ca_context_id != 0 {
-                handle_ca_context(c, state);
+                handle_ca_context(c, server_key, state);
             }
         }
         Some(Msg::CursorChanged(c)) => {
@@ -235,7 +239,9 @@ async fn handle_message(
                 c.cursor_type
             );
             let mut st = state.lock().unwrap();
-            if let Some(pane_id) = st.tab_to_pane.get(&c.tab_id).cloned() {
+            let skey = server_key.as_deref().unwrap_or("");
+            let lookup = (skey.to_string(), c.tab_id);
+            if let Some(pane_id) = st.tab_to_pane.get(&lookup).cloned() {
                 if let Some(pane) = st.panes.get_mut(&pane_id) {
                     pane.cursor_type = c.cursor_type;
                 }
@@ -320,7 +326,18 @@ async fn handle_message(
                             error: format!("Tab {} already has DevTools open", resolved_tab_id),
                             ..Default::default()
                         }
-                    } else if let Some(inspected_pane_id) = st.tab_to_pane.get(&resolved_tab_id) {
+                    } else if let Some(inspected_pane_id) = {
+                        // Find the pane with this tab_id to get its profile/browser
+                        st.panes
+                            .values()
+                            .find(|p| p.tab_id == resolved_tab_id)
+                            .map(|p| {
+                                let skey =
+                                    TermSurfState::server_key(&p.profile, &p.browser);
+                                st.tab_to_pane.get(&(skey, resolved_tab_id))
+                            })
+                            .flatten()
+                    } {
                         let inspected_pane = st.panes.get(inspected_pane_id).unwrap();
                         proto::QueryDevtoolsReply {
                             tab_id: resolved_tab_id,
@@ -393,7 +410,7 @@ async fn handle_message(
             log::debug!("empty TermSurf message");
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 fn forward_to_chromium(pane_id: &str, build_msg: impl FnOnce(i64) -> Msg, state: &SharedState) {
@@ -682,7 +699,7 @@ fn handle_server_register(
     reg: proto::ServerRegister,
     server_tx: Sender<Vec<u8>>,
     state: &SharedState,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<String>> {
     let mut st = state.lock().unwrap();
 
     log::info!("ServerRegister: profile={}", reg.profile);
@@ -697,12 +714,12 @@ fn handle_server_register(
         }
     });
 
-    if let Some((_key, browser, profile)) = matched {
+    if let Some((ref key, ref browser, ref profile)) = matched {
         // Flush pending tabs
         let pending: Vec<String> = st
             .panes
             .iter()
-            .filter(|(_, p)| p.profile == profile && p.browser == browser && p.tab_id == 0)
+            .filter(|(_, p)| p.profile == *profile && p.browser == *browser && p.tab_id == 0)
             .map(|(id, _)| id.clone())
             .collect();
 
@@ -714,21 +731,24 @@ fn handle_server_register(
                 send_create_tab(&server_tx, pane)?;
             }
         }
+        Ok(Some(key.clone()))
     } else {
         log::warn!(
             "ServerRegister: no matching server for profile={}",
             reg.profile
         );
+        Ok(None)
     }
-
-    Ok(())
 }
 
 fn handle_tab_ready(ready: proto::TabReady, state: &SharedState) -> anyhow::Result<()> {
     let mut st = state.lock().unwrap();
     if st.panes.contains_key(&ready.pane_id) {
         st.panes.get_mut(&ready.pane_id).unwrap().tab_id = ready.tab_id;
-        st.tab_to_pane.insert(ready.tab_id, ready.pane_id.clone());
+        let pane = st.panes.get(&ready.pane_id).unwrap();
+        let skey = TermSurfState::server_key(&pane.profile, &pane.browser);
+        st.tab_to_pane
+            .insert((skey, ready.tab_id), ready.pane_id.clone());
         let inspected = st.panes.get(&ready.pane_id).unwrap().inspected_tab_id;
         if inspected == 0 {
             st.last_browser_pane = Some(ready.pane_id.clone());
@@ -879,7 +899,8 @@ fn handle_disconnect(conn_type: ConnType, tx: &Sender<Vec<u8>>, state: &SharedSt
             for pane_id in &to_remove {
                 if let Some(pane) = st.panes.remove(pane_id) {
                     if pane.tab_id != 0 {
-                        st.tab_to_pane.remove(&pane.tab_id);
+                        let skey = TermSurfState::server_key(&pane.profile, &pane.browser);
+                        st.tab_to_pane.remove(&(skey, pane.tab_id));
                         // Send CloseTab to server
                         let key = TermSurfState::server_key(&pane.profile, &pane.browser);
                         if let Some(server) = st.servers.get_mut(&key) {
@@ -1191,14 +1212,24 @@ fn get_or_create_overlay(
 }
 
 #[cfg(target_os = "macos")]
-fn handle_ca_context(ca_context: proto::CaContext, state: &SharedState) {
+fn handle_ca_context(
+    ca_context: proto::CaContext,
+    server_key: &Option<String>,
+    state: &SharedState,
+) {
     use objc2::msg_send;
     use objc2::runtime::{AnyObject, Bool};
     use objc2_core_foundation::CGPoint;
 
     let mut st = state.lock().unwrap();
-    let Some(pane_id) = st.tab_to_pane.get(&ca_context.tab_id).cloned() else {
-        log::warn!("handle_ca_context: unknown tab_id={}", ca_context.tab_id);
+    let skey = server_key.as_deref().unwrap_or("");
+    let lookup = (skey.to_string(), ca_context.tab_id);
+    let Some(pane_id) = st.tab_to_pane.get(&lookup).cloned() else {
+        log::warn!(
+            "handle_ca_context: unknown server_key={} tab_id={}",
+            skey,
+            ca_context.tab_id
+        );
         return;
     };
     if !st.panes.contains_key(&pane_id) {
