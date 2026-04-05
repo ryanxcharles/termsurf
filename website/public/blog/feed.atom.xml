@@ -12,7 +12,7 @@
     <link rel="self" href="https://termsurf.com/blog/feed.atom.xml"/>
     <subtitle>TermSurf — Terminal + Browser</subtitle>
     <icon>https://termsurf.com/favicon.ico</icon>
-    <rights>Copyright (C) 2026 TermSurf</rights>
+    <rights>Copyright (C) 2026 Astrohacker</rights>
     <entry>
         <title type="html"><![CDATA[How Not to Build a Terminal Browser]]></title>
         <id>https://termsurf.com/blog/2026-03-15-how-not-to-build-a-terminal-browser</id>
