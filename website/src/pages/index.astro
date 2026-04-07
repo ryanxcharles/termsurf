@@ -2,11 +2,26 @@
 import Base from "../layouts/Base.astro";
 ---
 
-<Base title="TermSurf">
+<Base title="TermSurf" showHeaderBrand={false}>
   <section class="mb-8">
-    <h1 class="text-lg font-bold text-primary">
-      Root access to the 'net.
-    </h1>
+    <div class="mb-8 flex items-center gap-4">
+      <picture>
+        <source
+          srcset="/images/termsurf-14-dark-192.png"
+          media="(prefers-color-scheme: dark)"
+        />
+        <img
+          src="/images/termsurf-14-light-192.png"
+          alt="TermSurf logo"
+          class="h-16 w-16"
+        />
+      </picture>
+      <div>
+        <h1 class="text-foreground text-xl font-bold">TermSurf</h1>
+        <p class="text-primary text-sm font-bold">Root access to the 'net.</p>
+      </div>
+    </div>
+
     <p class="text-sm text-muted mt-3">
       TermSurf is a protocol that overlays web browser engines, like
       Chromium and WebKit, in your terminal emulator.{" "}

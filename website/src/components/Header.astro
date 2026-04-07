@@ -1,4 +1,8 @@
 ---
+interface Props {
+  showBrand?: boolean;
+}
+const { showBrand = true } = Astro.props;
 const pathname = Astro.url.pathname;
 const NAV_ITEMS = [
   { to: "https://github.com/termsurf/termsurf", label: "GitHub", external: true },
@@ -8,20 +12,24 @@ const NAV_ITEMS = [
 
 <header class="mb-8">
   <div class="flex items-center justify-between text-sm">
-    <a href="/" class="flex items-center gap-2 text-primary font-bold">
-      <picture>
-        <source
-          srcset="/images/termsurf-14-dark-192.png"
-          media="(prefers-color-scheme: dark)"
-        />
-        <img
-          src="/images/termsurf-14-light-192.png"
-          alt="TermSurf logo"
-          class="w-6 h-6"
-        />
-      </picture>
-      TermSurf
-    </a>
+    {showBrand ? (
+      <a href="/" class="flex items-center gap-2 text-primary font-bold">
+        <picture>
+          <source
+            srcset="/images/termsurf-14-dark-192.png"
+            media="(prefers-color-scheme: dark)"
+          />
+          <img
+            src="/images/termsurf-14-light-192.png"
+            alt="TermSurf logo"
+            class="w-6 h-6"
+          />
+        </picture>
+        TermSurf
+      </a>
+    ) : (
+      <div></div>
+    )}
     <nav class="flex gap-3">
       {NAV_ITEMS.map((item) => {
         const active = pathname === item.to;
