@@ -10,6 +10,7 @@
 | [0000775](0000775-devtools-multi-profile/README.md) | DevTools gets confused with multiple profiles open         | 2026-04-11 |
 | [0000776](0000776-pdf-not-loading/README.md)        | PDF files show blank white screen instead of rendering     | 2026-04-11 |
 | [0000777](0000777-split-border-overlap/README.md)   | Split border overlaps pane content and blocks mouse resize | 2026-04-11 |
+| [0000778](0000778-back-nav-title-stale/README.md)   | Back navigation leaves stale title in webtui               | 2026-04-12 |
 
 ## Closed
 
