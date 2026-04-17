@@ -12,6 +12,7 @@
 | [0000777](0000777-split-border-overlap/README.md)       | Split border overlaps pane content and blocks mouse resize | 2026-04-11 |
 | [0000778](0000778-back-nav-title-stale/README.md)       | Back navigation leaves stale title in webtui               | 2026-04-12 |
 | [0000779](0000779-date-picker-popup-position/README.md) | Date picker popup renders outside webview overlay          | 2026-04-15 |
+| [0000780](0000780-link-drag-freeze/README.md)           | Link drag freezes the browser                              | 2026-04-17 |
 
 ## Closed
 
