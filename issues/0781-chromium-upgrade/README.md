@@ -230,3 +230,31 @@ This experiment passes when all three build commands complete successfully:
 If any command fails, record the failure, the relevant log or command output,
 and whether Experiment 3 should fix the baseline before starting the Chromium
 upgrade.
+
+**Result:** Pass
+
+All baseline builds completed successfully on 2026-05-18.
+
+Commands:
+
+1. `scripts/build.sh chromium`
+2. `scripts/build.sh roamium`
+3. `scripts/build.sh wezboard`
+
+Build outputs:
+
+- Chromium: `/Users/ryan/dev/termsurf/chromium/src/out/Default`
+- Roamium: `/Users/ryan/dev/termsurf/chromium/src/out/Default/roamium`
+- Wezboard GUI: `/Users/ryan/dev/termsurf/wezboard/target/debug/wezboard-gui`
+- Wezboard CLI: `/Users/ryan/dev/termsurf/wezboard/target/debug/wezboard`
+
+The first Roamium and Wezboard attempts failed because the sandbox blocked Cargo
+from writing to caches under `~/.cargo`. Rerunning the same commands with
+permission to use the normal Cargo cache completed successfully. No Chromium
+clean was performed, and no Chromium branch was created.
+
+#### Conclusion
+
+The current `146.0.7650.0` baseline is buildable. Experiment 3 can start the
+first Chromium migration attempt, targeting `148.0.7778.97` on a new Chromium
+branch named `148.0.7778.97-issue-781`.
