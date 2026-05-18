@@ -329,3 +329,57 @@ base, or synced with `gclient sync`. It also fails if more than half of the
 `issue-762` patches fail to apply, or if the conflicts are too tangled to
 classify into a small number of follow-up tasks. In that case, Experiment 4
 should try the intermediate checkpoint `147.0.7727.139`.
+
+**Result:** Pass
+
+The direct migration from `146.0.7650.0` to `148.0.7778.97` succeeded.
+
+Actions completed:
+
+1. Preserved pre-existing four-digit Chromium edits in stashes before changing
+   branches.
+2. Created Chromium branch `148.0.7778.97-issue-781` from upstream tag
+   `148.0.7778.97`.
+3. Ran `gclient sync` for Chromium 148.
+4. Applied the archived Issue 762 patch series with `git am`.
+5. Regenerated `chromium/patches/issue-781/` from `148.0.7778.97..HEAD`.
+6. Updated `chromium/README.md` Current State and Branches table.
+
+Patch application:
+
+- Patch 1 applied cleanly.
+- Patch 2 stopped on
+  `content/browser/renderer_host/render_widget_host_view_mac.h` because the
+  nearby Chromium include context changed in 148. The hunk was resolved by
+  placing `ui/gfx/ca_layer_params.h` in the new include block.
+- Patches 3 through 7 applied cleanly after Patch 2 continued.
+- Patch 8 is the Chromium 148 migration fix for the
+  `WebContentsDelegate::CreateCustomWebContents` signature change.
+
+Build verification:
+
+1. `scripts/build.sh chromium` passed.
+2. `scripts/build.sh roamium` passed.
+3. `scripts/build.sh wezboard` passed.
+
+Notes:
+
+- The first Chromium build failed after 1h39m33s because Chromium 148 added
+  `WindowOpenDisposition` and `blink::mojom::WindowFeatures` parameters to
+  `CreateCustomWebContents`. Updating TermSurf's override fixed the failure.
+- `gclient sync` reported stale DEPS directories including
+  `third_party/lighttpd` and `third_party/harfbuzz-ng/src`. They were not
+  deleted.
+- `gclient sync` required stashing pre-existing local edits in nested Chromium
+  dependency repos: Boringssl, JetStream, and Skia.
+- `scripts/build.sh chromium` warned that `enable_nacl = false` no longer has an
+  effect in Chromium 148. The build continued successfully.
+
+#### Conclusion
+
+A direct jump to Electron-stable Chromium `148.0.7778.97` is viable. The
+migration required one small patch context adjustment and one downstream API
+signature update, then Chromium, Roamium, and Wezboard all built successfully.
+The next experiment can assess whether to move from `148.0.7778.97` to the newer
+Chromium stable patch `148.0.7778.168` or continue toward the 149/150 checkpoint
+path.

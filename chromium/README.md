@@ -14,8 +14,8 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `146.0.7650.0-issue-762`
-- Base version: `146.0.7650.0` (tracking Electron's Chromium version)
+- Branch: `148.0.7778.97-issue-781`
+- Base version: `148.0.7778.97` (tracking Electron's Chromium version)
 
 ## Branch Strategy
 
@@ -86,12 +86,13 @@ find the most relevant recent branch, create a new branch from it
 | `146.0.7650.0-issue-750`      | [Issue 750](../issues/0750-target-blank.md)               | Suppress new-window, navigate same tab      |
 | `146.0.7650.0-issue-759`      | [Issue 759](../issues/0759-link-hover-url/README.md)      | UpdateTargetURL for link hover              |
 | `146.0.7650.0-issue-762`      | [Issue 762](../issues/0762-persistent-cookies/README.md)  | Persist cookies via NetworkContextFilePaths |
+| `148.0.7778.97-issue-781`     | [Issue 781](../issues/0781-chromium-upgrade/README.md)    | Chromium 148 migration                      |
 
 ## Patches
 
 `patches/` contains `git format-patch` output for every TermSurf branch. Each
 subdirectory holds the complete patch set needed to reconstruct that branch from
-the vanilla `146.0.7650.0` tag.
+its vanilla Chromium base tag.
 
 ```
 patches/
