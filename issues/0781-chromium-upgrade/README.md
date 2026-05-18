@@ -92,3 +92,49 @@ requires it. The build cache is valuable.
   the Chromium patch set be reorganized first?
 - Does the current packaging layout still match newer Chromium app bundle and
   framework output?
+
+## Experiments
+
+### Experiment 1: Map Chromium releases since 146
+
+#### Description
+
+Before changing code or creating a Chromium branch, map the Chromium versions
+released since TermSurf last updated Roamium's Chromium base. This experiment is
+read-only discovery work. It should establish the available version landscape
+and recommend the smallest sensible set of migration targets.
+
+The current TermSurf base is `146.0.7650.0`. The mapping should start there and
+cover every newer Chromium milestone relevant to this issue.
+
+#### Changes
+
+No code changes.
+
+Collect version data from:
+
+- Chromium release channels and milestone data
+- Electron stable, beta, alpha, and nightly release metadata
+- Chromium tags available to `chromium/src`
+- TermSurf's current `chromium/README.md` branch and patch documentation
+
+Record the findings in this issue as a table with:
+
+- Chromium milestone
+- representative Chromium version or tag
+- release channel/source
+- Electron version, if applicable
+- whether the tag exists and is fetchable
+- notes about why it is or is not a useful upgrade checkpoint
+
+#### Verification
+
+This experiment passes when the issue contains:
+
+1. A table of Chromium versions newer than `146.0.7650.0`.
+2. A shortlist of candidate upgrade targets.
+3. A recommendation for Experiment 2.
+
+Experiment 1 should not modify Chromium source, create a Chromium branch, or run
+large builds. Its job is to choose where the migration should aim before we
+spend build time.
