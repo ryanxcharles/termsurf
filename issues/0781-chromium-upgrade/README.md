@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-18"
+closed = "2026-05-18"
 +++
 
 # Issue 781: Chromium Upgrade Path
@@ -383,3 +384,20 @@ signature update, then Chromium, Roamium, and Wezboard all built successfully.
 The next experiment can assess whether to move from `148.0.7778.97` to the newer
 Chromium stable patch `148.0.7778.168` or continue toward the 149/150 checkpoint
 path.
+
+## Conclusion
+
+Issue 781 succeeded. Roamium now builds against Electron-stable Chromium
+`148.0.7778.97`, which was the latest Chromium version supported by stable
+Electron at the time of the migration.
+
+The direct 146-to-148 migration was viable. The archived Issue 762 Chromium
+patches carried forward with one small include-context adjustment, and Chromium
+148 required one API signature update for
+`WebContentsDelegate::CreateCustomWebContents`. After that, Chromium, Roamium,
+and Wezboard all built successfully.
+
+The active Chromium branch is `148.0.7778.97-issue-781`, and the patch archive
+is recorded in `chromium/patches/issue-781/`. Stale local DEPS directories left
+over from the Chromium 146 checkout were removed, and a final `gclient sync`
+completed without stale-directory warnings.

@@ -13,12 +13,12 @@
 | [0778](0778-back-nav-title-stale/README.md)       | Back navigation leaves stale title in webtui                                | 2026-04-12 |
 | [0779](0779-date-picker-popup-position/README.md) | Native popups (date picker, select dropdown) render outside webview overlay | 2026-04-15 |
 | [0780](0780-link-drag-freeze/README.md)           | Link drag freezes the browser                                               | 2026-04-17 |
-| [0781](0781-chromium-upgrade/README.md)           | Chromium Upgrade Path                                                       | 2026-05-18 |
 
 ## Closed
 
 | #                                                       | Title                                                                         | Opened     | Closed     |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
+| [0781](0781-chromium-upgrade/README.md)                 | Chromium Upgrade Path                                                         | 2026-05-18 | 2026-05-18 |
 | [0773](0773-loading-screen/README.md)                   | Loading screen for browser startup                                            | 2026-04-05 | 2026-04-05 |
 | [0772](0772-command-shortcuts/README.md)                | Explicit command shortcuts and rename colorscheme to dark                     | 2026-04-05 | 2026-04-05 |
 | [0771](0771-tab-id-collision/README.md)                 | Tab ID collision across browser profiles                                      | 2026-04-05 | 2026-04-05 |
