@@ -359,3 +359,179 @@ transitions.
 The core border-box model is implemented and buildable. The next experiment
 should run the manual split-pane checks, tighten any visual or mouse-positioning
 drift found at runtime, and then decide whether the issue can be closed.
+
+### Experiment 2: Make Border Geometry Match Pane Sizing
+
+#### Description
+
+Experiment 1 proved the basic direction, but it only changed local rendering
+geometry. That avoids drawing the border directly over glyphs, but it does not
+make the pane's visible cell grid agree with the terminal and mux dimensions. If
+a pane still has 80 columns while only 79 columns fit inside the bordered
+content rect, the rightmost cell can become invisible instead of clipped. That
+is not acceptable.
+
+This experiment should make the whole pane contract coherent: the mux pane
+position, terminal renderable dimensions, pane background, split border, browser
+overlay origin, and mouse coordinate mapping must all agree on the same visible
+content grid.
+
+#### Changes
+
+1. **Plumb border inset into pane sizing.**
+
+   In the tab/pane sizing path, account for the active split border inset before
+   assigning the visible cell dimensions to each pane. Start by tracing
+   `wezboard/wezboard-gui/src/termwindow/resize.rs` for window-to-tab sizing and
+   `wezboard/mux/src/tab.rs` for split layout and per-pane resize. When multiple
+   panes are visible and the pane is not zoomed:
+   - Convert `split_border_width` from logical pixels to physical pixels using
+     the same helper added in Experiment 1.
+   - Compute how many full terminal cells remain visible after reserving
+     `2 * border_width` horizontally and vertically.
+   - Set the pane's effective/renderable cell width and height to that visible
+     grid.
+
+   The PTY, `RenderableDimensions`, `PositionedPane.width`,
+   `PositionedPane.height`, line rendering, selection, and mouse mapping must
+   agree on this visible grid. Do not merely shrink `RenderScreenLineParams` at
+   paint time.
+
+   If borders would consume too much space in a tiny pane, clamp the visible
+   grid to at least one column by one row and reduce or suppress the effective
+   border for that pane so geometry never goes negative.
+
+2. **Keep split coordinates in the same grid.**
+
+   `PositionedSplit.left`, `PositionedSplit.top`, and `PositionedSplit.size` are
+   cell coordinates. When borders reduce the visible pane grid, split positions
+   must be recomputed or derived in the same coordinate system as
+   `PositionedPane.left`, `PositionedPane.top`, `PositionedPane.width`, and
+   `PositionedPane.height`.
+
+   Do not leave dividers at pre-inset cell positions while pane content uses a
+   bordered visible grid. The divider pixel position, split hit region, pane
+   content origin, and pane dimensions must all derive from one coherent split
+   layout.
+
+3. **Use one rect model for border, background, and content.**
+
+   Rework `PaneRenderGeometry` so it exposes:
+   - `outer_rect` — the pane area including the border.
+   - `border_rect` — the area painted by the border.
+   - `content_rect` — the cell-aligned area where terminal content begins.
+   - `background_rect` — the pane background fill area.
+
+   When borders are active, drop the old half-cell expansion on interior pane
+   edges. Adjacent pane outer rects should meet pixel-perfectly, and
+   `content_rect` should be `outer_rect` inset by `border_width` on all four
+   sides. The distance from the inner edge of the visible border to the start of
+   terminal content must be exactly `border_width` on every edge, including
+   interior split edges.
+
+4. **Define shared-edge border precedence.**
+
+   Adjacent panes share interior border pixels. If the focused and unfocused
+   border colors differ, the focused pane's border should win on shared edges so
+   focus highlighting remains visible and deterministic.
+
+5. **Eliminate unpainted interior strips.**
+
+   Ensure layer 0 background fills every pixel inside the pane that is not
+   intentionally transparent:
+   - The border area should be painted by the border.
+   - The content area should be painted by the pane background and line
+     backgrounds.
+   - If rounding leaves any non-content pixel inside the border, paint it with
+     the pane background.
+
+   Interior split edges must not show the window background as a seam between a
+   border and the pane content.
+
+6. **Restore captured mouse offset preservation.**
+
+   In `wezboard/wezboard-gui/src/termwindow/mouseevent.rs`, keep the Experiment
+   1 content-origin correction, but restore the old behavior for captured mouse
+   drags outside the pane bounds:
+   - Negative horizontal drift past the left edge must preserve `x_pixel_offset`
+     instead of clamping everything to column 0.
+   - Negative vertical drift past the top edge must preserve `y_pixel_offset`
+     instead of clamping everything to row 0.
+   - Drag-selection and terminal mouse forwarding should continue to receive
+     stable out-of-bounds offsets.
+
+7. **Keep resize hit regions easy to grab.**
+
+   Use the old full-cell split hit region as the minimum mouse target when
+   borders are enabled:
+   - Vertical divider target width: `max(border_width, cell_width)`.
+   - Horizontal divider target height: `max(border_width, cell_height)`.
+
+   The visible old divider should still be suppressed when borders are enabled.
+
+8. **Remove unrelated formatting churn.**
+
+   Keep the diff limited to the files required for this experiment. Avoid
+   import-only churn unless the edited code requires it.
+
+#### Verification
+
+1. Build Wezboard:
+
+   ```bash
+   scripts/build.sh wezboard
+   ```
+
+2. Configure:
+
+   ```lua
+   config.focused_split_border_color = "#7dcfff"
+   config.unfocused_split_border_color = "#565f89"
+   config.split_border_width = 4
+   ```
+
+3. Single pane:
+   - No border is drawn.
+   - The pane has the same cell dimensions and content origin as before.
+   - Mouse clicks and selection behave as before.
+
+4. Split panes:
+   - Borders appear on all panes.
+   - Focused and unfocused panes use the correct border colors.
+   - The focused border wins on shared interior edges.
+   - Content starts exactly one converted `split_border_width` inside the
+     visible border on every edge, including interior split edges.
+   - No window-background seam appears between the border and pane background.
+   - Rightmost glyphs and the bottom row remain visible.
+   - Dividers sit exactly between the panes in the same coordinate system as the
+     visible cell grid.
+   - The pane's reported terminal dimensions match the visible cell grid. Check
+     this with `stty size` or `tput cols` inside the split pane.
+   - Very small panes still show at least a 1x1 visible cell grid and do not
+     produce negative geometry or paint artifacts.
+
+5. DPI:
+   - On a 2x Retina display, `split_border_width = 4` reserves 8 physical
+     pixels.
+   - On a 1x display, `split_border_width = 4` reserves 4 physical pixels.
+   - Moving the window between displays with different scale/DPI recomputes the
+     border width and visible pane grid.
+   - Reloading config after changing `split_border_width` recomputes pane sizes,
+     border geometry, hit regions, and overlay positions.
+
+6. Mouse behavior:
+   - Hovering over the border/divider region shows the resize cursor.
+   - Dragging the divider resizes panes.
+   - The old thin divider is not drawn when borders are enabled.
+   - Removing `split_border_width` restores the old divider and old resize
+     target.
+   - Clicking and selecting text hit the expected cells after the inset.
+   - Drag-selection that leaves a pane past the left or top edge preserves
+     negative pixel offsets and does not snap incorrectly.
+
+7. Overlay and zoom:
+   - Browser overlays align with terminal content inside the inset pane.
+   - Zooming a pane hides borders, removes the inset, and restores the full pane
+     grid.
+   - Unzooming restores borders, inset, overlay alignment, and resize hit
+     regions.
