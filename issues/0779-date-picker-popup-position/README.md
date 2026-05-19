@@ -405,3 +405,40 @@ fix the issue:
 
 8. If the result is Fail or Partial, include the relevant Wezboard, Roamium, and
    Chromium log excerpts in the result before designing the next experiment.
+
+**Result:** Fail
+
+Implemented the screen-bounds path through the stack:
+
+- `Resize` now carries absolute webview bounds in Chromium-style screen DIPs
+  (`screen_x`, `screen_y`, `screen_width`, `screen_height`, `screen_scale`).
+- Wezboard computes the overlay's Cocoa screen rect from the CALayerHost view,
+  converts it to top-left DIP coordinates, stores it on the pane, and sends
+  throttled resize messages only when size or screen bounds change.
+- Roamium forwards bounded resize messages through the new `ts_set_view_bounds`
+  FFI call, falling back to `ts_set_view_size` when bounds are unavailable.
+- Chromium branch `148.0.7778.97-issue-779` adds `ts_set_view_bounds` and
+  applies the incoming screen rect to the per-tab `RenderWidgetHostView` while
+  preserving the existing content-size and compositor resize path.
+
+Build verification passed:
+
+```bash
+scripts/build.sh wezboard
+scripts/build.sh roamium
+scripts/build.sh chromium
+```
+
+Manual verification failed. Running the latest local Wezboard, Roamium,
+Chromium, and `web` TUI builds produced the exact same visible behavior as
+before: native inputs still open completely outside the Wezboard window, far
+outside the webview bounds.
+
+#### Conclusion
+
+This disproves the first fix candidate. Passing the absolute webview rect
+through `Resize` and applying it to `RenderWidgetHostView::SetBounds` does not
+affect the coordinate path used by macOS native controls. The next experiment
+must move deeper into Chromium's macOS view/root-window coordinate plumbing,
+likely `RenderWidgetHostViewMac` popup positioning, root-window bounds, or
+screen-info conversion.

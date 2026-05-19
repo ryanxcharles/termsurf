@@ -1,13 +1,13 @@
 use super::proto;
-use super::proto::term_surf_message::Msg;
 use super::proto::TermSurfMessage;
+use super::proto::term_surf_message::Msg;
 use super::state::{Pane, Server, SharedState, TermSurfState};
 use anyhow::Context;
 use prost::Message;
 use sha2::{Digest, Sha256};
+use smol::Async;
 use smol::channel::Sender;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
-use smol::Async;
 use std::collections::HashSet;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
@@ -436,6 +436,82 @@ fn forward_to_chromium(pane_id: &str, build_msg: impl FnOnce(i64) -> Msg, state:
     let _ = server_tx.try_send(msg.encode_to_vec());
 }
 
+fn resize_dip_changed(a: f64, b: f64) -> bool {
+    (a - b).abs() > 0.5
+}
+
+fn build_resize_message(pane: &Pane) -> proto::Resize {
+    proto::Resize {
+        tab_id: pane.tab_id,
+        pixel_width: pane.pixel_width,
+        pixel_height: pane.pixel_height,
+        screen_x: pane.screen_x,
+        screen_y: pane.screen_y,
+        screen_width: pane.screen_width,
+        screen_height: pane.screen_height,
+        screen_scale: pane.screen_scale,
+    }
+}
+
+fn resize_message_changed(pane: &Pane) -> bool {
+    !pane.last_sent_resize_valid
+        || pane.pixel_width != pane.last_sent_pixel_width
+        || pane.pixel_height != pane.last_sent_pixel_height
+        || resize_dip_changed(pane.screen_x, pane.last_sent_screen_x)
+        || resize_dip_changed(pane.screen_y, pane.last_sent_screen_y)
+        || resize_dip_changed(pane.screen_width, pane.last_sent_screen_width)
+        || resize_dip_changed(pane.screen_height, pane.last_sent_screen_height)
+        || resize_dip_changed(pane.screen_scale, pane.last_sent_screen_scale)
+}
+
+fn mark_resize_message_sent(pane: &mut Pane) {
+    pane.last_sent_resize_valid = true;
+    pane.last_sent_pixel_width = pane.pixel_width;
+    pane.last_sent_pixel_height = pane.pixel_height;
+    pane.last_sent_screen_x = pane.screen_x;
+    pane.last_sent_screen_y = pane.screen_y;
+    pane.last_sent_screen_width = pane.screen_width;
+    pane.last_sent_screen_height = pane.screen_height;
+    pane.last_sent_screen_scale = pane.screen_scale;
+}
+
+fn send_resize_if_changed(st: &mut TermSurfState, pane_id: &str) {
+    let Some(pane) = st.panes.get(pane_id) else {
+        return;
+    };
+    if pane.tab_id == 0 || !resize_message_changed(pane) {
+        return;
+    }
+
+    let key = TermSurfState::server_key(&pane.profile, &pane.browser);
+    let msg = build_resize_message(pane);
+    let Some(server_tx) = st.servers.get(&key).and_then(|server| server.tx.clone()) else {
+        return;
+    };
+
+    log::info!(
+        "Resize: pane_id={} tab_id={} pixels={}x{} screen=({:.1},{:.1},{:.1},{:.1}) scale={:.2}",
+        pane_id,
+        msg.tab_id,
+        msg.pixel_width,
+        msg.pixel_height,
+        msg.screen_x,
+        msg.screen_y,
+        msg.screen_width,
+        msg.screen_height,
+        msg.screen_scale
+    );
+
+    let resize_msg = TermSurfMessage {
+        msg: Some(Msg::Resize(msg)),
+    };
+    if server_tx.try_send(resize_msg.encode_to_vec()).is_ok() {
+        if let Some(pane) = st.panes.get_mut(pane_id) {
+            mark_resize_message_sent(pane);
+        }
+    }
+}
+
 fn handle_set_overlay(
     overlay: proto::SetOverlay,
     tui_tx: Sender<Vec<u8>>,
@@ -476,35 +552,20 @@ fn handle_set_overlay(
 
     if !is_new {
         // Resize: update dimensions, extract values before releasing mutable borrow
-        let (tab_id, profile, browser_name) = {
+        {
             let pane = st.panes.get_mut(&overlay.pane_id).unwrap();
             pane.pixel_width = pixel_w;
             pane.pixel_height = pixel_h;
             pane.col = overlay.col;
             pane.row = overlay.row;
-            (pane.tab_id, pane.profile.clone(), pane.browser.clone())
-        };
+        }
         log::info!(
             "SetOverlay resize: pane_id={} {}x{}",
             overlay.pane_id,
             pixel_w,
             pixel_h
         );
-        if tab_id != 0 {
-            let key = TermSurfState::server_key(&profile, &browser_name);
-            if let Some(server) = st.servers.get(&key) {
-                if let Some(ref server_tx) = server.tx {
-                    let resize_msg = TermSurfMessage {
-                        msg: Some(Msg::Resize(proto::Resize {
-                            tab_id,
-                            pixel_width: pixel_w,
-                            pixel_height: pixel_h,
-                        })),
-                    };
-                    let _ = server_tx.try_send(resize_msg.encode_to_vec());
-                }
-            }
-        }
+        send_resize_if_changed(&mut st, &overlay.pane_id);
         return Ok(());
     }
 
@@ -539,6 +600,19 @@ fn handle_set_overlay(
         overlay_origin_x: 0.0,
         overlay_origin_y: 0.0,
         overlay_scale: 1.0,
+        screen_x: 0.0,
+        screen_y: 0.0,
+        screen_width: 0.0,
+        screen_height: 0.0,
+        screen_scale: 1.0,
+        last_sent_resize_valid: false,
+        last_sent_pixel_width: 0,
+        last_sent_pixel_height: 0,
+        last_sent_screen_x: 0.0,
+        last_sent_screen_y: 0.0,
+        last_sent_screen_width: 0.0,
+        last_sent_screen_height: 0.0,
+        last_sent_screen_scale: 0.0,
         cursor_type: 0,
         visible: true,
     };
@@ -608,29 +682,14 @@ fn handle_set_devtools_overlay(
 
     if !is_new {
         // Resize path — same as SetOverlay
-        let (tab_id, profile, browser_name) = {
+        {
             let pane = st.panes.get_mut(&overlay.pane_id).unwrap();
             pane.pixel_width = pixel_w;
             pane.pixel_height = pixel_h;
             pane.col = overlay.col;
             pane.row = overlay.row;
-            (pane.tab_id, pane.profile.clone(), pane.browser.clone())
-        };
-        if tab_id != 0 {
-            let key = TermSurfState::server_key(&profile, &browser_name);
-            if let Some(server) = st.servers.get(&key) {
-                if let Some(ref server_tx) = server.tx {
-                    let msg = TermSurfMessage {
-                        msg: Some(Msg::Resize(proto::Resize {
-                            tab_id,
-                            pixel_width: pixel_w,
-                            pixel_height: pixel_h,
-                        })),
-                    };
-                    let _ = server_tx.try_send(msg.encode_to_vec());
-                }
-            }
         }
+        send_resize_if_changed(&mut st, &overlay.pane_id);
         return Ok(());
     }
 
@@ -665,6 +724,19 @@ fn handle_set_devtools_overlay(
         overlay_origin_x: 0.0,
         overlay_origin_y: 0.0,
         overlay_scale: 1.0,
+        screen_x: 0.0,
+        screen_y: 0.0,
+        screen_width: 0.0,
+        screen_height: 0.0,
+        screen_scale: 1.0,
+        last_sent_resize_valid: false,
+        last_sent_pixel_width: 0,
+        last_sent_pixel_height: 0,
+        last_sent_screen_x: 0.0,
+        last_sent_screen_y: 0.0,
+        last_sent_screen_width: 0.0,
+        last_sent_screen_height: 0.0,
+        last_sent_screen_scale: 0.0,
         cursor_type: 0,
         visible: true,
     };
@@ -787,6 +859,7 @@ fn handle_tab_ready(ready: proto::TabReady, state: &SharedState) -> anyhow::Resu
             ready.tab_id,
             st.tab_to_pane.len()
         );
+        send_resize_if_changed(&mut st, &ready.pane_id);
     } else {
         log::warn!("TabReady: unknown pane_id={}", ready.pane_id);
     }
@@ -1327,6 +1400,91 @@ fn get_pane_mux_window(pane_id: &str) -> Option<mux::window::WindowId> {
 }
 
 #[cfg(target_os = "macos")]
+fn update_overlay_screen_rect(
+    st: &mut TermSurfState,
+    pane_id: &str,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    scale: f64,
+) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+
+    let mut screen_x = 0.0;
+    let mut screen_y = 0.0;
+    let mut screen_width = w;
+    let mut screen_height = h;
+    let mut found_screen_rect = false;
+
+    if let Some(mux_window_id) = get_pane_mux_window(pane_id) {
+        if let Some(overlay_view) = st.overlay_views.get(&mux_window_id).copied() {
+            unsafe {
+                let view = overlay_view as *mut AnyObject;
+                let window: *mut AnyObject = msg_send![view, window];
+                if !window.is_null() {
+                    let local_rect = CGRect::new(CGPoint::new(x, y), CGSize::new(w, h));
+                    let window_rect: CGRect = msg_send![
+                        view,
+                        convertRect: local_rect,
+                        toView: std::ptr::null_mut::<AnyObject>()
+                    ];
+                    let cocoa_screen_rect: CGRect =
+                        msg_send![window, convertRectToScreen: window_rect];
+                    let screen: *mut AnyObject = msg_send![window, screen];
+                    if !screen.is_null() {
+                        let screen_frame: CGRect = msg_send![screen, frame];
+                        screen_x = cocoa_screen_rect.origin.x;
+                        screen_y = screen_frame.origin.y + screen_frame.size.height
+                            - cocoa_screen_rect.origin.y
+                            - cocoa_screen_rect.size.height;
+                        screen_width = cocoa_screen_rect.size.width;
+                        screen_height = cocoa_screen_rect.size.height;
+                        found_screen_rect = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(pane) = st.panes.get_mut(pane_id) {
+        pane.screen_x = screen_x;
+        pane.screen_y = screen_y;
+        pane.screen_width = screen_width;
+        pane.screen_height = screen_height;
+        pane.screen_scale = scale;
+    }
+
+    if found_screen_rect {
+        log::info!(
+            "overlay screen rect: pane_id={} view=({:.1},{:.1},{:.1},{:.1}) screen=({:.1},{:.1},{:.1},{:.1}) scale={:.2}",
+            pane_id,
+            x,
+            y,
+            w,
+            h,
+            screen_x,
+            screen_y,
+            screen_width,
+            screen_height,
+            scale
+        );
+    } else {
+        log::warn!(
+            "overlay screen rect unavailable: pane_id={} view=({:.1},{:.1},{:.1},{:.1}) scale={:.2}",
+            pane_id,
+            x,
+            y,
+            w,
+            h,
+            scale
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
 pub fn set_overlay_frame(
     pane_id: usize,
     x_backing: f64,
@@ -1344,38 +1502,47 @@ pub fn set_overlay_frame(
     };
     let mut st = state.lock().unwrap();
     let id = pane_id.to_string();
-    let Some(pane) = st.panes.get_mut(&id) else {
-        return;
-    };
-    if pane.ca_layer_positioning == 0 {
-        return;
-    }
 
     let scale = dpi as f64 / 72.0;
     let scale = if scale > 0.0 { scale } else { 1.0 };
-
-    pane.overlay_origin_x = x_backing;
-    pane.overlay_origin_y = y_backing;
-    pane.overlay_scale = scale;
-    pane.visible = true;
 
     let x = x_backing / scale;
     let y = y_backing / scale;
     let w = w_backing / scale;
     let h = h_backing / scale;
+
+    let (positioning_layer, flipped_layer) = {
+        let Some(pane) = st.panes.get_mut(&id) else {
+            return;
+        };
+        if pane.ca_layer_positioning == 0 {
+            return;
+        }
+
+        pane.overlay_origin_x = x_backing;
+        pane.overlay_origin_y = y_backing;
+        pane.overlay_scale = scale;
+        pane.visible = true;
+
+        (pane.ca_layer_positioning, pane.ca_layer_flipped)
+    };
+
+    update_overlay_screen_rect(&mut st, &id, x, y, w, h, scale);
+
     unsafe {
-        let layer = pane.ca_layer_positioning as *mut AnyObject;
+        let layer = positioning_layer as *mut AnyObject;
         let frame = CGRect::new(CGPoint::new(x, y), CGSize::new(w, h));
         let ca = cls(b"CATransaction\0");
         let _: () = msg_send![ca, begin];
         let _: () = msg_send![ca, setDisableActions: Bool::YES];
         let _: () = msg_send![layer, setFrame: frame];
-        if pane.ca_layer_flipped != 0 {
-            let flipped = pane.ca_layer_flipped as *mut AnyObject;
+        if flipped_layer != 0 {
+            let flipped = flipped_layer as *mut AnyObject;
             let _: () = msg_send![flipped, setHidden: Bool::NO];
         }
         let _: () = msg_send![ca, commit];
     }
+    send_resize_if_changed(&mut st, &id);
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1482,6 +1649,9 @@ pub fn create_pending_ca_layer_host(
 
         let _: () = msg_send![ca_transaction, commit];
     }
+
+    update_overlay_screen_rect(&mut st, &id, x, y, w, h, scale);
+    send_resize_if_changed(&mut st, &id);
 }
 
 #[cfg(not(target_os = "macos"))]
