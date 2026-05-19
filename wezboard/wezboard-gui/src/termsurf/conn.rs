@@ -1357,6 +1357,7 @@ pub fn set_overlay_frame(
     pane.overlay_origin_x = x_backing;
     pane.overlay_origin_y = y_backing;
     pane.overlay_scale = scale;
+    pane.visible = true;
 
     let x = x_backing / scale;
     let y = y_backing / scale;
@@ -1369,6 +1370,10 @@ pub fn set_overlay_frame(
         let _: () = msg_send![ca, begin];
         let _: () = msg_send![ca, setDisableActions: Bool::YES];
         let _: () = msg_send![layer, setFrame: frame];
+        if pane.ca_layer_flipped != 0 {
+            let flipped = pane.ca_layer_flipped as *mut AnyObject;
+            let _: () = msg_send![flipped, setHidden: Bool::NO];
+        }
         let _: () = msg_send![ca, commit];
     }
 }

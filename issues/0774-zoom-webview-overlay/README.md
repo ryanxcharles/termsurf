@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-04-11"
+closed = "2026-05-19"
 +++
 
 # Issue 774: Zooming non-browser pane leaves webview overlay visible
@@ -168,3 +169,34 @@ policy into the paint loop.
 
 7. Confirm no protocol changes are present and no Chromium/Roamium changes are
    required.
+
+**Result:** Pass
+
+Implemented the GUI-side overlay visibility sync path. `WindowInvalidated` and
+`PaneFocused` now share a single zoom-aware helper, `TabResized` also runs that
+helper so zoom/unzoom updates browser overlay visibility, `set_overlay_frame`
+marks visible overlays visible again by unhiding `ca_layer_flipped`, and
+`is_pane_visible` now preserves tab-overlay handling while using
+`tab.iter_panes()` for normal zoom-aware pane visibility.
+
+The debug Wezboard build passes:
+
+```bash
+scripts/build.sh wezboard
+```
+
+Manual GUI verification passed. Zooming a browser pane expands the browser
+overlay, zooming a terminal-only pane hides the browser overlay, and unzooming
+restores the browser overlay to its split pane.
+
+#### Conclusion
+
+The implementation follows the existing TermSurf overlay architecture and
+requires no protocol, Roamium, or Chromium changes. The zoom-hidden browser
+overlay now follows the same visible pane set as the terminal renderer.
+
+## Conclusion
+
+Issue 774 is closed by Experiment 1. Browser overlays now hide when their owning
+pane is hidden by zoom, and visible overlays are restored when zoom ends or when
+the browser pane itself is zoomed.

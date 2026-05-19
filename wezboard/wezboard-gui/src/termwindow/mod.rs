@@ -54,7 +54,7 @@ use mux_lua::MuxPane;
 use smol::channel::Sender;
 use smol::Timer;
 use std::cell::{RefCell, RefMut};
-use std::collections::{HashMap, LinkedList};
+use std::collections::{HashMap, HashSet, LinkedList};
 use std::ops::Add;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1325,20 +1325,7 @@ impl TermWindow {
                 MuxNotification::WindowInvalidated(_) => {
                     window.invalidate();
                     self.update_title_post_status();
-
-                    // Sync TermSurf overlay visibility with active panes
-                    let mux = Mux::get();
-                    let mut active_ids = std::collections::HashSet::new();
-                    for window_id in mux.iter_windows() {
-                        if let Some(w) = mux.get_window(window_id) {
-                            if let Some(tab) = w.get_active() {
-                                for positioned in tab.iter_panes() {
-                                    active_ids.insert(positioned.pane.pane_id().to_string());
-                                }
-                            }
-                        }
-                    }
-                    crate::termsurf::conn::sync_overlay_visibility(&active_ids);
+                    self.sync_termsurf_overlay_visibility();
                 }
                 MuxNotification::WindowRemoved(_window_id) => {
                     // Handled by frontend
@@ -1354,23 +1341,13 @@ impl TermWindow {
 
                     // Sync overlay visibility so pane.visible is correct
                     // for scroll forwarding (Issue 763).
-                    let mux = Mux::get();
-                    let mut active_ids = std::collections::HashSet::new();
-                    for window_id in mux.iter_windows() {
-                        if let Some(w) = mux.get_window(window_id) {
-                            if let Some(tab) = w.get_active() {
-                                for positioned in tab.iter_panes() {
-                                    active_ids.insert(positioned.pane.pane_id().to_string());
-                                }
-                            }
-                        }
-                    }
-                    crate::termsurf::conn::sync_overlay_visibility(&active_ids);
+                    self.sync_termsurf_overlay_visibility();
 
                     // Also handled by clientpane
                     self.update_title_post_status();
                 }
                 MuxNotification::TabResized(_) => {
+                    self.sync_termsurf_overlay_visibility();
                     // Also handled by wezboard-client
                     self.update_title_post_status();
                 }
@@ -1480,6 +1457,21 @@ impl TermWindow {
         }
     }
 
+    fn sync_termsurf_overlay_visibility(&self) {
+        let mux = Mux::get();
+        let mut active_ids = HashSet::new();
+        for window_id in mux.iter_windows() {
+            if let Some(w) = mux.get_window(window_id) {
+                if let Some(tab) = w.get_active() {
+                    for positioned in tab.iter_panes() {
+                        active_ids.insert(positioned.pane.pane_id().to_string());
+                    }
+                }
+            }
+        }
+        crate::termsurf::conn::sync_overlay_visibility(&active_ids);
+    }
+
     fn is_pane_visible(&mut self, pane_id: PaneId) -> bool {
         let mux = Mux::get();
         let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
@@ -1497,7 +1489,9 @@ impl TermWindow {
             return tab_overlay.pane_id() == pane_id;
         }
 
-        tab.contains_pane(pane_id)
+        tab.iter_panes()
+            .iter()
+            .any(|pos| pos.pane.pane_id() == pane_id)
     }
 
     fn mux_pane_output_event(&mut self, pane_id: PaneId) {
