@@ -96,8 +96,19 @@ policy into the paint loop.
 
    In `wezboard/wezboard-gui/src/termsurf/conn.rs`, update `set_overlay_frame`
    so a successful frame update also marks the pane visible and calls
-   `setHidden: NO` on the CA layer. This makes the frame update path robust if a
-   browser overlay was previously hidden by zoom and then becomes visible again.
+   `setHidden: NO` on `pane.ca_layer_flipped`.
+
+   The target layer matters: `sync_overlay_visibility` hides `ca_layer_flipped`,
+   not `ca_layer_positioning` and not `ca_layer_host`. Unhiding only
+   `ca_layer_positioning` would leave the parent flipped layer hidden and the
+   overlay would remain invisible.
+
+   This makes the frame update path robust if a browser overlay was previously
+   hidden by zoom and then becomes visible again. The concrete race to avoid is:
+   unzoom clears `self.zoomed`, a paint runs and calls `set_overlay_frame` for
+   the now-visible browser pane, but the queued `TabResized` visibility sync has
+   not yet been processed. In that case the frame update should restore
+   visibility immediately.
 
    Keep `sync_overlay_visibility` as the authoritative hide/show operation for
    panes that are not currently rendered.
@@ -105,11 +116,15 @@ policy into the paint loop.
 4. **Fix pane-visible checks to respect zoom.**
 
    In `wezboard/wezboard-gui/src/termwindow/mod.rs`, update `is_pane_visible` so
-   it checks the zoom-respecting rendered pane list:
+   it preserves the existing tab-overlay short-circuit, then checks the
+   zoom-respecting rendered pane list:
    `tab.iter_panes().iter().any(|p| p.pane.pane_id() == pane_id)`.
 
    Do not use `tab.contains_pane(pane_id)` for visibility, because it checks
-   split-tree membership and therefore treats zoom-hidden panes as visible.
+   split-tree membership and therefore treats zoom-hidden panes as visible. This
+   is related consistency work: steps 1-3 hide the visible CALayer, while this
+   step prevents zoom-hidden panes from triggering output invalidations as if
+   they were still visible.
 
 5. **Do not change the TermSurf protocol.**
 
@@ -146,5 +161,10 @@ policy into the paint loop.
    - focus terminal, zoom terminal;
    - focus browser, zoom browser.
 
-6. Confirm no protocol changes are present and no Chromium/Roamium changes are
+6. While a terminal-only pane is zoomed and the browser overlay is hidden:
+   - switch to another tab and back; the browser overlay remains hidden until
+     unzoom;
+   - resize the window; the browser overlay remains hidden until unzoom.
+
+7. Confirm no protocol changes are present and no Chromium/Roamium changes are
    required.
