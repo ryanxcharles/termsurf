@@ -255,9 +255,10 @@ fix the issue:
    - `double screen_height`
    - `double screen_scale`
 
-   These should represent the webview overlay rect in macOS screen points, not
-   terminal cells and not backing pixels. Keep the existing `pixel_width` and
-   `pixel_height` fields unchanged for content size.
+   These should represent the webview overlay rect in Chromium-style screen DIP:
+   top-left origin, device-independent points, not terminal cells and not
+   backing pixels. Keep the existing `pixel_width` and `pixel_height` fields
+   unchanged for content size.
 
    Regenerate Rust protobuf bindings using the repo's existing protobuf build
    path.
@@ -272,6 +273,8 @@ fix the issue:
      `set_overlay_frame`;
    - convert that rect from the overlay NSView/window coordinate system to
      screen coordinates using Cocoa APIs, not hand-rolled origin math;
+   - convert the Cocoa/AppKit screen rect into the protocol's Chromium-style
+     top-left screen DIP convention before sending;
    - record the resulting `screen_x`, `screen_y`, `screen_width`,
      `screen_height`, and `screen_scale` on the TermSurf pane state.
 
@@ -279,7 +282,8 @@ fix the issue:
    - pane id;
    - backing frame;
    - logical/view frame;
-   - converted screen rect;
+   - Cocoa/AppKit screen rect;
+   - protocol screen rect;
    - scale/dpi used.
 
 3. **Send screen bounds to Roamium on resize/update.**
@@ -290,6 +294,11 @@ fix the issue:
    - existing-pane `SetOverlay` resize path;
    - the frame update path after `set_overlay_frame` changes the overlay
      position.
+
+   Do not send a `Resize` on every paint. Store the last screen-bounds message
+   sent for each pane and only send when content size or screen bounds changed
+   beyond a small tolerance, for example 0.5 DIP for position/size and exact
+   change for pixel dimensions.
 
    If the tab id is not known yet, store the bounds and send them as soon as the
    tab id becomes available.
@@ -312,13 +321,23 @@ fix the issue:
    update the WebContents view / RenderWidgetHostView host so Chromium's screen
    rect matches the rect sent by Wezboard.
 
-   The first candidate implementation should update the same object currently
-   resized by `ResizeTab`, but with both origin and size. If there are multiple
-   possible APIs, prefer the one that affects the screen rect used by
-   RenderWidgetHostViewMac popup positioning.
+   The first candidate implementation should update the per-tab WebContents /
+   RenderWidgetHostView native view bounds, not move the shared host `NSWindow`.
+   Moving the whole host window can break multiple tabs/webviews in the same
+   Roamium process. If the native view frame is relative to its host `NSWindow`,
+   normalize the incoming absolute screen rect by subtracting the host window's
+   screen origin before calling `setFrame:` or the equivalent Chromium view
+   bounds API.
+
+   If updating the per-tab native view does not affect popup placement, keep the
+   logs and record that result. The next candidate would be a more direct
+   RenderWidgetHostViewMac screen-coordinate override, such as the path used by
+   popup positioning / `GetBoundsInRootWindow` / screen-info conversion.
 
    Add Chromium-side logs showing, for each resize/bounds update:
    - incoming screen rect;
+   - host window screen rect/origin;
+   - normalized native-view frame;
    - WebContents native view bounds;
    - RenderWidgetHostView bounds;
    - any available window/screen bounds returned by Chromium after the update.
@@ -365,15 +384,20 @@ fix the issue:
 5. In each position, click:
    - date input;
    - select dropdown;
-   - color input;
    - datalist input.
+
+   Also click the color input and record what happens, but do not treat color
+   picker anchoring as required for this experiment. On macOS Chromium may use
+   the global `NSColorPanel`, which is not necessarily anchored to the webview.
 
 6. Pass criteria:
    - each native popup opens anchored to the clicked control;
    - moving the webview pane to another split position does not detach the
      popup;
-   - Wezboard logs and Chromium logs agree on the webview screen rect within
-     expected rounding/scale tolerance.
+   - Wezboard logs and Chromium logs agree on the webview screen rect within 1
+     DIP.
+   - continuous resize or pane movement for several seconds produces a small
+     finite number of screen-bounds resize sends, not one send per paint frame.
 
 7. Fail criteria:
    - any native popup still opens far outside the webview;
