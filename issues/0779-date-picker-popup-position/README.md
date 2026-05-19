@@ -94,3 +94,98 @@ Possible root causes to investigate:
 3. Click the dropdown.
 4. Observe: the dropdown menu appears at a detached location, not anchored to
    the `<select>` element the user clicked.
+
+## Experiments
+
+### Experiment 1: Add a Native Popup Reproduction Page
+
+#### Description
+
+Create a focused reproduction page in `test-html` for native popup positioning.
+Before changing Chromium, Roamium, or the TermSurf protocol, we need a stable
+local page that demonstrates the bug using plain browser-native controls.
+
+`test-html` is the right place because it already hosts manual browser behavior
+checks at `http://localhost:9616`, including pages for mouse input, dialogs,
+file upload/download, storage, and page zoom. This issue should get the same
+kind of small deterministic test page.
+
+The page should make the coordinate bug obvious without implying that the
+control's position inside the HTML document is the root cause. The bug is about
+the webview overlay's position on the screen: Chromium appears to place native
+popup windows using a screen origin that does not match where Wezboard
+composites the CALayerHost. The same control should behave differently when the
+webview pane is moved to a different split position on the screen.
+
+The page should therefore keep the controls simple and ordinary, and draw clear
+visual bounds so the tester can tell whether a popup is attached to the webview
+or appears detached elsewhere on the screen.
+
+#### Changes
+
+1. **Add `test-html/public/test-native-popups.html`.**
+
+   The page should include:
+   - `<input type="date">`
+   - `<input type="time">`
+   - `<input type="datetime-local">`
+   - `<input type="color">`
+   - a native single `<select>`
+   - an `<input list="...">` with a `<datalist>` for suggestion-popup behavior
+
+   Use plain HTML, CSS, and minimal JavaScript. No framework dependency is
+   needed.
+
+2. **Make the bug visually measurable.**
+
+   The page should:
+   - draw an obvious bordered test area representing the visible webview
+     content;
+   - label each control with the expected behavior: the native popup should
+     appear anchored to that control, not far away elsewhere on the screen;
+   - show the last focused/clicked control in an on-page log so screenshots make
+     clear which element triggered the popup.
+
+3. **Link the page from `test-html/public/index.html`.**
+
+   Add a link under the existing input/browser-behavior section, for example:
+   `Native Popups — date picker, select dropdown, color picker, datalist`.
+
+4. **Do not fix the underlying bug in this experiment.**
+
+   This experiment is only for reproduction. It should not modify Wezboard,
+   Roamium, Chromium, protobufs, or overlay coordinate code.
+
+#### Verification
+
+1. Start the test server:
+
+   ```bash
+   bun test-html/server.ts
+   ```
+
+2. Open Wezboard and create a split layout where the browser pane is on the
+   right side of the terminal window.
+
+3. Open the reproduction page:
+
+   ```bash
+   web http://localhost:9616/test-native-popups.html
+   ```
+
+4. Click the native popup controls in the right-side browser pane:
+   - date input;
+   - select dropdown;
+   - color input;
+   - datalist input.
+
+5. Confirm the issue is reproducible:
+   - the clicked control is visibly inside the webview overlay;
+   - the native popup appears detached from that control, outside the webview
+     overlay, or at an obviously wrong screen coordinate;
+   - the page log identifies which control was clicked.
+
+6. Repeat with the browser pane on the left or as the only pane. The bug may be
+   less visible there, but this comparison helps show that the bad offset is
+   tied to the webview overlay's screen position, not the control's position
+   inside the page.
