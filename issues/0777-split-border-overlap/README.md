@@ -632,8 +632,11 @@ background rect as the bordered pane's outer rect.
 1. **Reserve border space before rendering.**
 
    Add a layout-level bordered pane mapping before `paint_pane` sees pane
-   positions. This should be near the GUI's tab/pane positioning path, not in
-   line rendering and not by resizing panes from paint.
+   positions. Start in `wezboard/wezboard-gui/src/termwindow/resize.rs`,
+   especially `apply_dimensions`, and follow the path through `tab.resize(size)`
+   into `wezboard/mux/src/tab.rs`. The border reservation belongs in this
+   window-to-tab sizing/layout path, not in line rendering and not by resizing
+   panes from paint.
 
    When `split_border_width > 0`, `num_panes > 1`, and the pane is not zoomed:
    - Convert `split_border_width` from logical pixels to physical pixels using
@@ -651,6 +654,15 @@ background rect as the bordered pane's outer rect.
    `outer_rect`, split hit region, browser overlay origin, and mouse-to-cell
    mapping all derive from the same bordered layout. Do not shrink only
    `RenderScreenLineParams`, and do not resize PTYs from paint.
+
+   Recompute the bordered layout when any input to pane geometry changes: window
+   resize, split/unsplit, zoom/unzoom, `split_border_width` config reload,
+   DPI/display-scale change, or font/cell-size change. The pane PTY resize
+   should happen as part of those layout events, and not once per frame.
+
+   If the border would leave a pane with less than a 1x1 content grid, suppress
+   or reduce the effective border for that pane rather than producing negative
+   geometry.
 
 2. **Create a bordered pane geometry helper.**
 
@@ -690,8 +702,15 @@ background rect as the bordered pane's outer rect.
    borders touch at that boundary; they do not overlap content and they do not
    leave an unpainted seam.
 
+   The vertical case has the same invariant:
+   `top_pane.outer_rect.max_y() == bottom_pane.outer_rect.origin.y`.
+
+   Borders are per leaf pane. Nested splits, T-junctions, and corners between
+   three or more panes should fall out of per-pane border drawing; no special
+   corner renderer is required.
+
    Paint unfocused pane borders first and focused pane borders last so focused
-   edges win on shared boundaries.
+   edges win if rounding creates shared pixels at boundaries or corners.
 
 5. **Register split resize hit regions from split boundaries.**
 
@@ -700,10 +719,10 @@ background rect as the bordered pane's outer rect.
    always register `UIItemType::Split`.
 
    For bordered panes:
-   - The vertical resize hit region should straddle the boundary at
-     `padding_left + os_border.left + split.left * cell_width`.
-   - The horizontal resize hit region should straddle the boundary at
-     `top_pixel_y + split.top * cell_height`.
+   - The vertical resize hit region should straddle the computed boundary where
+     `left_pane.outer_rect.max_x() == right_pane.outer_rect.origin.x`.
+   - The horizontal resize hit region should straddle the computed boundary
+     where `top_pane.outer_rect.max_y() == bottom_pane.outer_rect.origin.y`.
    - Minimum target thickness is the old full-cell hit region:
      `max(border_width, cell_width)` or `max(border_width, cell_height)`.
 
@@ -713,7 +732,8 @@ background rect as the bordered pane's outer rect.
 6. **Update overlay and mouse geometry from the same helper.**
 
    Browser overlay frames should use the bordered content origin returned by
-   `paint_pane`.
+   `paint_pane`. In the bordered case, `paint_pane` should return
+   `(content_origin_x, content_origin_y)`.
 
    In `wezboard/wezboard-gui/src/termwindow/mouseevent.rs`, update
    `mouse_position_for_pane` so mouse-to-cell mapping subtracts the same
@@ -772,6 +792,10 @@ background rect as the bordered pane's outer rect.
    - For an interior split, verify the left pane's `outer_rect.max_x()` equals
      the right pane's `outer_rect.origin.x` by logging or inspecting the
      computed geometry while testing.
+   - For a stacked split, verify the top pane's `outer_rect.max_y()` equals the
+     bottom pane's `outer_rect.origin.y`.
+   - Nested splits and T-junctions do not show unpainted seams or special-case
+     corner artifacts.
 
 5. Edge-cell visibility:
    - In each split pane, print text that reaches the rightmost column and bottom
@@ -807,3 +831,7 @@ background rect as the bordered pane's outer rect.
      physical pixels.
    - On a 1x display, `split_border_width = 4` draws and reserves 4 physical
      pixels.
+   - Moving the window between displays with different scale factors recomputes
+     the bordered layout.
+   - Reloading config after changing `split_border_width` recomputes pane sizes,
+     split hit regions, overlays, and mouse mapping.
