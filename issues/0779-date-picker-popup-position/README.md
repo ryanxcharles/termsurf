@@ -442,3 +442,170 @@ affect the coordinate path used by macOS native controls. The next experiment
 must move deeper into Chromium's macOS view/root-window coordinate plumbing,
 likely `RenderWidgetHostViewMac` popup positioning, root-window bounds, or
 screen-info conversion.
+
+### Experiment 3: Trace Native Popup Coordinates
+
+#### Description
+
+Experiment 2 failed because the webview screen rect reached Chromium but native
+popups still opened completely outside the Wezboard window. That means the
+implementation updated a value that rendering or generic bounds code may see,
+but the macOS native popup path does not use it.
+
+This experiment is research-first. Do not attempt another fix yet. Instead,
+trace the exact Chromium macOS coordinate path used by native controls, compare
+Roamium against a known-good content shell window, and add enough logs to
+identify the correct injection point for the next fix.
+
+The working hypothesis is that content shell works because its `NSWindow`,
+`NSView`, `WebContentsView`, and `RenderWidgetHostViewMac` live in a real
+visible AppKit hierarchy. Roamium renders via CALayerHost in Wezboard, but
+Chromium's native view hierarchy still lives in Roamium's hidden host window.
+Native popups likely ask that hidden hierarchy for screen coordinates.
+
+#### Changes
+
+1. **Map the native popup call paths.**
+
+   In `chromium/src/`, inspect the macOS code paths for:
+   - `<select>` popup menus;
+   - datalist / autofill suggestions;
+   - date and time pickers;
+   - root-window and screen-coordinate conversion helpers used by those
+     controls.
+
+   Start with local source searches around:
+   - `RenderWidgetHostViewMac`;
+   - `ShowPopupMenu`;
+   - `PopupMenuHelper`;
+   - `AutofillPopup`;
+   - `DateTimeChooser`;
+   - `GetBoundsInRootWindow`;
+   - `GetViewBounds`;
+   - `convertRect`;
+   - `convertRectToScreen`.
+
+   Record the findings in this experiment before implementing a fix. The result
+   should name the functions that compute the final popup anchor rect.
+
+2. **Add Chromium-side popup coordinate logs.**
+
+   On the Issue 779 Chromium branch, add temporary diagnostic logs with a
+   consistent prefix, for example `[termsurf-popup-trace]`, at the coordinate
+   functions identified in step 1.
+
+   For each popup event, log:
+   - popup/control type when available (`select`, autofill/datalist, date/time);
+   - incoming anchor rect from Blink or renderer code;
+   - `RenderWidgetHostViewMac` bounds;
+   - `GetBoundsInRootWindow` result;
+   - `GetViewBounds` or equivalent view bounds result;
+   - native `NSView` frame and bounds;
+   - native `NSWindow` frame;
+   - `NSView convertRect:toView:nil` result;
+   - `NSWindow convertRectToScreen:` result;
+   - final popup screen rect passed to AppKit or Chromium popup UI.
+
+   The logs should be detailed but temporary. They are the experiment output,
+   not the final product.
+
+3. **Keep the existing TermSurf bounds logs.**
+
+   Preserve the Experiment 2 logs in Wezboard and Chromium that show:
+   - Wezboard's computed webview screen rect;
+   - the `Resize` payload sent to Roamium;
+   - Chromium's received `ts_set_view_bounds` values.
+
+   The important comparison is between TermSurf's known intended webview rect
+   and the rect used by the native popup path.
+
+4. **Compare Roamium with content shell.**
+
+   Build and run a known-good Chromium/content shell target if available from
+   the local checkout. Open the same reproduction page:
+
+   ```bash
+   http://localhost:9616/test-native-popups.html
+   ```
+
+   In content shell, click the same native controls and collect the same
+   `[termsurf-popup-trace]` logs. Content shell does not need to run TermSurf;
+   it is the baseline for how Chromium behaves when the AppKit view hierarchy
+   matches the visible window.
+
+   If content shell requires a different target or runner, record the exact
+   command used in the result.
+
+5. **Run the Roamium reproduction with logs enabled.**
+
+   Run the local debug builds, open the reproduction page in Wezboard, and put
+   the browser pane in a position where the bug is obvious, such as the
+   top-right split.
+
+   Click at least:
+   - select dropdown;
+   - datalist input;
+   - date input.
+
+   Color input can be clicked and recorded, but it remains a known exception if
+   Chromium delegates it to the global `NSColorPanel`.
+
+6. **Analyze the logs before proposing a fix.**
+
+   The result must answer these questions:
+   - Does Wezboard compute the correct visible webview screen rect?
+   - Does Chromium receive that same rect through `ts_set_view_bounds`?
+   - Which native popup coordinate function ignores or loses that rect?
+   - Which native view/window rect is still wrong?
+   - How does the same function differ in content shell?
+   - What is the next fix location: `RenderWidgetHostViewMac`,
+     `WebContentsViewMac`, root-window bounds, screen-info conversion, host
+     `NSWindow`/`NSView` placement, or popup-specific code?
+
+#### Verification
+
+1. Build the affected targets:
+
+   ```bash
+   scripts/build.sh chromium
+   scripts/build.sh roamium
+   scripts/build.sh wezboard
+   ```
+
+   Build content shell or the nearest available known-good Chromium shell target
+   if it is not already present.
+
+2. Start the reproduction server:
+
+   ```bash
+   bun test-html/server.ts
+   ```
+
+3. Collect logs from content shell:
+   - open `http://localhost:9616/test-native-popups.html`;
+   - click select, datalist, and date controls;
+   - save the relevant `[termsurf-popup-trace]` log excerpts.
+
+4. Collect logs from Roamium/Wezboard:
+   - run local Wezboard;
+   - run local `web` with `--browser` pointing at
+     `chromium/src/out/Default/roamium`;
+   - open the reproduction page;
+   - move the browser pane to the top-right or another visibly offset split;
+   - click select, datalist, and date controls;
+   - save the relevant Wezboard, Roamium, and Chromium log excerpts.
+
+5. Pass criteria:
+   - the experiment identifies the exact Chromium function or object that
+     computes the wrong popup screen rect in Roamium;
+   - logs include both the correct TermSurf/Wezboard webview rect and the wrong
+     native popup rect;
+   - content shell logs show the corresponding known-good coordinate path;
+   - the conclusion names one concrete next fix location.
+
+6. Fail criteria:
+   - logs are too broad to determine which coordinate conversion is wrong;
+   - content shell cannot be used and no equivalent known-good baseline is
+     recorded;
+   - the result proposes another fix without first identifying the coordinate
+     source used by native popups.
