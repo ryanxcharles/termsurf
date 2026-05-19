@@ -835,3 +835,19 @@ background rect as the bordered pane's outer rect.
      the bordered layout.
    - Reloading config after changing `split_border_width` recomputes pane sizes,
      split hit regions, overlays, and mouse mapping.
+
+**Result:** Fail
+
+The implementation built successfully, but visual testing showed that the border
+still does not change the terminal content position. When the border appears,
+the content does not shift inward, so the core requirement of this issue remains
+unsatisfied.
+
+#### Conclusion
+
+Experiment 4 did not restore Ghostboard-style border-box pane geometry. The
+attempt still treated the border primarily as paint around an existing terminal
+cell grid instead of making the visible content grid move when borders appear.
+The next attempt must not be accepted unless opening a split pane visibly shifts
+the terminal content by the configured border width while keeping resize handles
+usable.
