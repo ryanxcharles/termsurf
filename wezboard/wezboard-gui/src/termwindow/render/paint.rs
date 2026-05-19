@@ -307,20 +307,36 @@ impl crate::TermWindow {
             }
         }
 
-        let split_border_width =
-            self.config
-                .split_border_width
-                .evaluate_as_pixels(config::DimensionContext {
-                    dpi: self.dimensions.dpi as f32,
-                    pixel_max: self.dimensions.pixel_width as f32,
-                    pixel_cell: self.render_metrics.cell_size.width as f32,
-                });
-        if split_border_width == 0. {
-            if let Some(pane) = self.get_active_pane_or_overlay() {
-                let splits = self.get_splits();
+        if let Some(pane) = self.get_active_pane_or_overlay() {
+            let splits = self.get_splits();
+            if !splits.is_empty() {
+                let split_border_width = self.split_border_width_physical(num_panes, false);
                 for split in &splits {
-                    self.paint_split(&mut layers, split, &pane)
-                        .context("paint_split")?;
+                    let hit_thickness = if split_border_width == 0.0 {
+                        match split.direction {
+                            mux::tab::SplitDirection::Horizontal => {
+                                self.render_metrics.cell_size.width as f32
+                            }
+                            mux::tab::SplitDirection::Vertical => {
+                                self.render_metrics.cell_size.height as f32
+                            }
+                        }
+                    } else {
+                        match split.direction {
+                            mux::tab::SplitDirection::Horizontal => split_border_width
+                                .max(self.render_metrics.cell_size.width as f32 / 2.0),
+                            mux::tab::SplitDirection::Vertical => split_border_width
+                                .max(self.render_metrics.cell_size.height as f32 / 2.0),
+                        }
+                    };
+                    self.paint_split(
+                        &mut layers,
+                        split,
+                        &pane,
+                        split_border_width == 0.0,
+                        hit_thickness,
+                    )
+                    .context("paint_split")?;
                 }
             }
         }

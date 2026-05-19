@@ -10,7 +10,7 @@ use config::MouseEventAltScreen;
 use config::keyassignment::{KeyAssignment, MouseEventTrigger, SpawnTabDomain};
 use mux::Mux;
 use mux::pane::{Pane, WithPaneLines};
-use mux::tab::SplitDirection;
+use mux::tab::{PositionedPane, SplitDirection};
 use mux_lua::MuxPane;
 use std::convert::TryInto;
 use std::ops::Sub;
@@ -24,6 +24,75 @@ use wezboard_term::input::{MouseButton, MouseEventKind as TMEK};
 use wezboard_term::{ClickPosition, LastMouseClick, StableRowIndex};
 
 impl super::TermWindow {
+    fn mouse_position_for_pane(
+        &self,
+        event: &MouseEvent,
+        pos: &PositionedPane,
+        num_panes: usize,
+        mouse_grabbed: bool,
+    ) -> ClickPosition {
+        let geometry = self.pane_render_geometry(pos, num_panes).ok();
+        let origin_x = geometry
+            .as_ref()
+            .map(|g| g.content_origin_x.round() as isize)
+            .unwrap_or(0);
+        let origin_y = geometry
+            .as_ref()
+            .map(|g| g.content_origin_y.round() as isize)
+            .unwrap_or(0);
+        let cell_width = self.render_metrics.cell_size.width as f32;
+        let cell_height = self.render_metrics.cell_size.height;
+
+        let rel_x = event.coords.x - origin_x;
+        let rel_y = event.coords.y - origin_y;
+        let x = (rel_x.max(0) as f32) / cell_width;
+        let column = if mouse_grabbed { x } else { x.round() }.trunc() as usize;
+        let row = (rel_y.max(0) / cell_height) as i64;
+
+        let mut x_pixel_offset = rel_x;
+        if column > 0 {
+            x_pixel_offset = x_pixel_offset.max(0) % self.render_metrics.cell_size.width;
+        }
+
+        let mut y_pixel_offset = rel_y;
+        if row > 0 {
+            y_pixel_offset = y_pixel_offset.max(0) % self.render_metrics.cell_size.height;
+        }
+
+        ClickPosition {
+            column,
+            row,
+            x_pixel_offset,
+            y_pixel_offset,
+        }
+    }
+
+    fn window_cell_position(&self, event: &MouseEvent) -> (usize, i64) {
+        let border = self.get_os_border();
+        let first_line_offset = if self.show_tab_bar && !self.config.tab_bar_at_bottom {
+            self.tab_bar_pixel_height().unwrap_or(0.) as isize
+        } else {
+            0
+        } + border.top.get() as isize;
+        let (padding_left, padding_top) = self.padding_left_top();
+        let y = (event
+            .coords
+            .y
+            .sub(padding_top as isize)
+            .sub(first_line_offset)
+            .max(0)
+            / self.render_metrics.cell_size.height) as i64;
+        let x = ((event
+            .coords
+            .x
+            .sub((padding_left + border.left.get() as f32) as isize)
+            .max(0) as f32)
+            / self.render_metrics.cell_size.width as f32)
+            .round()
+            .trunc() as usize;
+        (x, y)
+    }
+
     fn resolve_ui_item(&self, event: &MouseEvent) -> Option<UIItem> {
         let x = event.coords.x;
         let y = event.coords.y;
@@ -67,55 +136,30 @@ impl super::TermWindow {
 
         self.current_mouse_event.replace(event.clone());
 
-        let border = self.get_os_border();
-
-        let first_line_offset = if self.show_tab_bar && !self.config.tab_bar_at_bottom {
-            self.tab_bar_pixel_height().unwrap_or(0.) as isize
+        let panes_to_render = self.get_panes_to_render();
+        let num_panes = panes_to_render.len();
+        let click_position = panes_to_render
+            .iter()
+            .find(|pos| pos.pane.pane_id() == pane.pane_id())
+            .map(|pos| {
+                self.mouse_position_for_pane(&event, pos, num_panes, pane.is_mouse_grabbed())
+            });
+        let ClickPosition {
+            column: x,
+            row: y,
+            x_pixel_offset,
+            y_pixel_offset,
+        } = if let Some(click_position) = click_position {
+            click_position
         } else {
-            0
-        } + border.top.get() as isize;
-
-        let (padding_left, padding_top) = self.padding_left_top();
-
-        let y = (event
-            .coords
-            .y
-            .sub(padding_top as isize)
-            .sub(first_line_offset)
-            .max(0)
-            / self.render_metrics.cell_size.height) as i64;
-
-        let x = (event
-            .coords
-            .x
-            .sub((padding_left + border.left.get() as f32) as isize)
-            .max(0) as f32)
-            / self.render_metrics.cell_size.width as f32;
-        let x = if !pane.is_mouse_grabbed() {
-            // Round the x coordinate so that we're a bit more forgiving of
-            // the horizontal position when selecting cells
-            x.round()
-        } else {
-            x
-        }
-        .trunc() as usize;
-
-        let mut y_pixel_offset = event
-            .coords
-            .y
-            .sub(padding_top as isize)
-            .sub(first_line_offset);
-        if y > 0 {
-            y_pixel_offset = y_pixel_offset.max(0) % self.render_metrics.cell_size.height;
-        }
-
-        let mut x_pixel_offset = event
-            .coords
-            .x
-            .sub((padding_left + border.left.get() as f32) as isize);
-        if x > 0 {
-            x_pixel_offset = x_pixel_offset.max(0) % self.render_metrics.cell_size.width;
-        }
+            let (x, y) = self.window_cell_position(&event);
+            ClickPosition {
+                column: x,
+                row: y,
+                x_pixel_offset: 0,
+                y_pixel_offset: 0,
+            }
+        };
 
         self.last_mouse_coords = (x, y);
 
@@ -180,7 +224,7 @@ impl super::TermWindow {
                 }
 
                 if let Some((item, start_event)) = self.dragging.take() {
-                    self.drag_ui_item(item, start_event, x, y, event, context);
+                    self.drag_ui_item(item, start_event, event, context);
                     return;
                 }
             }
@@ -256,8 +300,7 @@ impl super::TermWindow {
         mut item: UIItem,
         split: PositionedSplit,
         start_event: MouseEvent,
-        x: usize,
-        y: i64,
+        event: &MouseEvent,
         context: &dyn WindowOps,
     ) {
         let mux = Mux::get();
@@ -265,6 +308,7 @@ impl super::TermWindow {
             Some(tab) => tab,
             None => return,
         };
+        let (x, y) = self.window_cell_position(event);
         let delta = match split.direction {
             SplitDirection::Horizontal => (x as isize).saturating_sub(split.left as isize),
             SplitDirection::Vertical => (y as isize).saturating_sub(split.top as isize),
@@ -336,14 +380,12 @@ impl super::TermWindow {
         &mut self,
         item: UIItem,
         start_event: MouseEvent,
-        x: usize,
-        y: i64,
         event: MouseEvent,
         context: &dyn WindowOps,
     ) {
         match item.item_type {
             UIItemType::Split(split) => {
-                self.drag_split(item, split, start_event, x, y, context);
+                self.drag_split(item, split, start_event, &event, context);
             }
             UIItemType::ScrollThumb => {
                 self.drag_scroll_thumb(item, start_event, event, context);
@@ -682,12 +724,15 @@ impl super::TermWindow {
             Some(MouseCapture::TerminalPane(_))
         );
 
-        for pos in self.get_panes_to_render() {
+        let (global_column, global_row) = self.window_cell_position(&event);
+        let panes_to_render = self.get_panes_to_render();
+        let num_panes = panes_to_render.len();
+        for pos in panes_to_render {
             if !is_already_captured
-                && row >= pos.top as i64
-                && row <= (pos.top + pos.height) as i64
-                && column >= pos.left
-                && column <= pos.left + pos.width
+                && global_row >= pos.top as i64
+                && global_row <= (pos.top + pos.height) as i64
+                && global_column >= pos.left
+                && global_column <= pos.left + pos.width
             {
                 if pane.pane_id() != pos.pane.pane_id() {
                     // We're over a pane that isn't active
@@ -719,22 +764,20 @@ impl super::TermWindow {
                         }
                     }
                 }
-                column = column.saturating_sub(pos.left);
-                row = row.saturating_sub(pos.top as i64);
+                let click_position =
+                    self.mouse_position_for_pane(&event, &pos, num_panes, pane.is_mouse_grabbed());
+                column = click_position.column;
+                row = click_position.row;
+                x_pixel_offset = click_position.x_pixel_offset;
+                y_pixel_offset = click_position.y_pixel_offset;
                 break;
             } else if is_already_captured && pane.pane_id() == pos.pane.pane_id() {
-                column = column.saturating_sub(pos.left);
-                row = row.saturating_sub(pos.top as i64).max(0);
-
-                if position.column < pos.left {
-                    x_pixel_offset -= self.render_metrics.cell_size.width
-                        * (pos.left as isize - position.column as isize);
-                }
-                if position.row < pos.top as i64 {
-                    y_pixel_offset -= self.render_metrics.cell_size.height
-                        * (pos.top as isize - position.row as isize);
-                }
-
+                let click_position =
+                    self.mouse_position_for_pane(&event, &pos, num_panes, pane.is_mouse_grabbed());
+                column = click_position.column;
+                row = click_position.row;
+                x_pixel_offset = click_position.x_pixel_offset;
+                y_pixel_offset = click_position.y_pixel_offset;
                 break;
             }
         }

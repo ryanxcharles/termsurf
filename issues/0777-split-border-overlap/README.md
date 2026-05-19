@@ -1003,3 +1003,24 @@ This experiment must explicitly avoid the Experiment 2 and 4 failure modes:
 6. Regression:
    - Removing `split_border_width` restores the old thin divider behavior.
    - Zooming a pane hides the border and removes the content shift.
+
+**Result:** Pass
+
+Experiment 5 restored the Experiment 1 presentation-geometry approach and works
+correctly in visual testing. Split borders appear when panes are split, terminal
+content shifts inward as intended, normal window padding remains intact, and the
+later layout-level regressions are gone.
+
+The debug Wezboard build also completes with:
+
+```bash
+scripts/build.sh wezboard
+```
+
+#### Conclusion
+
+The correct fix for Issue 777 is the pragmatic presentation-layer model from
+Experiment 1, not the mux/PTY/layout-level model attempted in Experiments 2
+and 4. Wezboard's existing split geometry should remain stable; the split border
+feature should shift rendering, overlays, mouse mapping, and hit regions around
+that existing geometry.
