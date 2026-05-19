@@ -1118,6 +1118,17 @@ Use a single log prefix across all components:
 Every log line should include the pane id or tab id when available so lines from
 Wezboard, `web`, Roamium, and Chromium can be joined manually.
 
+Each component must read `TERMSURF_ISSUE_779_TRACE` once and cache the result:
+use `OnceLock<bool>` or equivalent on the Rust side and a function-local static
+or equivalent on the Chromium side. Do not read environment variables from paint
+loops, overlay placement loops, or popup callbacks after the cached value has
+been initialized.
+
+This experiment diagnoses `<select>` first. Date/time inputs, datalist
+suggestions, and color pickers may travel through different Chromium or AppKit
+paths; if the `<select>` findings do not explain those controls, follow-up
+experiments should add similarly narrow logs for those specific subsystems.
+
 #### Changes
 
 1. **Add `webtui` baseline draw logs.**
@@ -1143,6 +1154,21 @@ Wezboard, `web`, Roamium, and Chromium can be joined manually.
    This tells us whether `web` actually drew and what viewport rect it asked
    Wezboard to cover.
 
+   These logs must not use stdout or stderr, because `web` owns the terminal
+   screen. Write them directly to:
+
+   ```text
+   $XDG_STATE_HOME/termsurf/webtui-trace.log
+   ```
+
+   If `XDG_STATE_HOME` is unset, use
+   `$HOME/.local/state/termsurf/webtui-trace.log`.
+
+   Also add a `webtui_chrome_overlap` log at `SetOverlay` send time. It should
+   compare the viewport rect returned by `ui(...)` against the full terminal
+   frame area and classify whether `web` itself is about to request an overlay
+   that covers its URL or status chrome.
+
 2. **Add Wezboard overlay receive and placement logs.**
 
    In `wezboard/wezboard-gui/src/termsurf/conn.rs`, log when Wezboard receives
@@ -1152,6 +1178,7 @@ Wezboard, `web`, Roamium, and Chromium can be joined manually.
    Include:
    - pane id and tab id if known;
    - received overlay cell rect `(col,row,width,height)`;
+   - current `cell_width_px` and `cell_height_px`;
    - computed pixel size from current cell metrics;
    - CALayerHost frame in view points;
    - root overlay view bounds;
@@ -1170,6 +1197,17 @@ Wezboard, `web`, Roamium, and Chromium can be joined manually.
    the viewport rect sent by `web` or covers the URL/status chrome area. This is
    what makes a repeated "web TUI disappeared" failure visible in logs.
 
+   Use one of these reason values:
+   - `none`;
+   - `frame_extends_above_viewport`;
+   - `frame_extends_below_viewport`;
+   - `frame_extends_left_of_viewport`;
+   - `frame_extends_right_of_viewport`;
+   - `frame_wider_than_viewport`;
+   - `frame_taller_than_viewport`;
+   - `missing_viewport`;
+   - `unknown`.
+
 3. **Add one Roamium boundary log.**
 
    In `roamium/src/dispatch.rs`, log only when a resize/create message is
@@ -1184,11 +1222,19 @@ Wezboard, `web`, Roamium, and Chromium can be joined manually.
 
 4. **Add one Chromium popup-entry log.**
 
-   In Chromium, log only at `PopupMenuHelper::ShowPopupMenu(...)` for native
-   `<select>` popup positioning. Do not log in `GetViewBounds()` or repeated
-   bounds callbacks.
+   In Chromium, add one tab mapping log in `libtermsurf_chromium` where a
+   WebContents is created or registered for a TermSurf tab:
+
+   ```text
+   [issue-779-trace] chromium_tab_map tab_id=... webcontents=...
+   ```
+
+   Then log only at `PopupMenuHelper::ShowPopupMenu(...)` for native `<select>`
+   popup positioning. Do not log in `GetViewBounds()` or repeated bounds
+   callbacks.
 
    Include:
+   - `webcontents` pointer, so it can be joined to `chromium_tab_map`;
    - input `bounds`;
    - `web_contents->GetContainerBounds()`;
    - computed `bounds_in_screen`;
@@ -1209,6 +1255,8 @@ Wezboard, `web`, Roamium, and Chromium can be joined manually.
    ```
 
    If the variable is unset, behavior and log volume should be unchanged.
+
+   All log extraction should use only the `[issue-779-trace]` prefix.
 
 6. **No behavior changes.**
 
@@ -1232,7 +1280,20 @@ Wezboard, `web`, Roamium, and Chromium can be joined manually.
    bun test-html/server.ts
    ```
 
-3. Start local Wezboard with trace enabled and logs in the repo log directory:
+3. Run a trace-off baseline before enabling any trace.
+
+   Start local Wezboard without `TERMSURF_ISSUE_779_TRACE` and open:
+
+   ```bash
+   /Users/ryan/dev/termsurf/webtui/target/debug/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     http://localhost:9616/test-native-popups.html
+   ```
+
+   Confirm the `web` TUI is visible and usable. If trace-off is already broken,
+   stop: the failure is not caused by the trace experiment.
+
+4. Start local Wezboard with trace enabled and logs in the repo log directory:
 
    ```bash
    mkdir -p logs/issue-779-exp6-state/termsurf
@@ -1243,7 +1304,7 @@ Wezboard, `web`, Roamium, and Chromium can be joined manually.
      2>&1 | tee logs/issue-779-exp6-wezboard.log
    ```
 
-4. In local Wezboard, run local `web` with local Roamium:
+5. In local Wezboard, run local `web` with local Roamium:
 
    ```bash
    TERMSURF_ISSUE_779_TRACE=1 \
@@ -1252,12 +1313,20 @@ Wezboard, `web`, Roamium, and Chromium can be joined manually.
      http://localhost:9616/test-native-popups.html
    ```
 
-5. Confirm baseline TUI behavior first:
+6. Confirm trace files exist:
+
+   ```bash
+   test -f logs/issue-779-exp6-state/termsurf/webtui-trace.log
+   test -f logs/issue-779-exp6-state/termsurf/chromium-server.log
+   ```
+
+7. Confirm baseline TUI behavior first:
    - the `web` TUI is visible;
    - the URL/status chrome is visible;
    - the browser overlay is confined to the viewport area;
-   - logs contain `webtui` draw, `SetOverlay`, Wezboard receive, and Wezboard
-     placement lines;
+   - logs contain `webtui` draw, `webtui_chrome_overlap`, `SetOverlay`, Wezboard
+     receive, and Wezboard placement lines;
+   - `webtui_chrome_overlap` is `false`;
    - `overlay_chrome_overlap` is `false`.
 
    If the TUI fails to render or is hidden again, stop before clicking native
@@ -1269,29 +1338,32 @@ Wezboard, `web`, Roamium, and Chromium can be joined manually.
      more than the viewport;
    - another named point shown by the trace.
 
-6. If the baseline is good, click the `<select>` control on the proof page.
+8. If the baseline is good, click the `<select>` control on the proof page.
 
-7. Extract logs:
+9. Extract logs:
 
    ```bash
-   rg "\\[issue-779-trace\\]|PopupMenuHelper::ShowPopupMenu" \
+   rg "\\[issue-779-trace\\]" \
      logs/issue-779-exp6-wezboard.log \
+     logs/issue-779-exp6-state/termsurf/webtui-trace.log \
      logs/issue-779-exp6-state/termsurf/chromium-server.log
    ```
 
-8. Pass criteria:
-   - trace is opt-in and quiet when `TERMSURF_ISSUE_779_TRACE` is unset;
-   - `web` remains visible and usable with trace enabled;
-   - if `web` is not visible, the logs identify the exact failing stage;
-   - the `<select>` popup log names the first divergent coordinate among webview
-     overlay screen rect, Chromium view bounds, container bounds, and popup
-     `bounds_in_screen`;
-   - no application behavior changes are made.
+10. Pass criteria:
 
-9. Fail criteria:
-   - logs emit without `TERMSURF_ISSUE_779_TRACE=1`;
-   - `web` disappears again and the logs do not identify why;
-   - native popup misplacement occurs but the logs cannot identify the
-     coordinate source;
-   - any geometry, protocol, FFI, popup, focus, input, or lifecycle behavior is
-     changed.
+- trace is opt-in and quiet when `TERMSURF_ISSUE_779_TRACE` is unset;
+- `web` remains visible and usable with trace enabled;
+- if `web` is not visible, the logs identify the exact failing stage;
+- the `<select>` popup log names the first divergent coordinate among webview
+  overlay screen rect, Chromium view bounds, container bounds, and popup
+  `bounds_in_screen`;
+- no application behavior changes are made.
+
+11. Fail criteria:
+
+- logs emit without `TERMSURF_ISSUE_779_TRACE=1`;
+- `web` disappears again and the logs do not identify why;
+- native popup misplacement occurs but the logs cannot identify the coordinate
+  source;
+- any geometry, protocol, FFI, popup, focus, input, or lifecycle behavior is
+  changed.
