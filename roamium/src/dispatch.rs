@@ -106,24 +106,7 @@ pub fn handle_message(msg: &TermSurfMessage) {
         Msg::Resize(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
                 unsafe {
-                    if m.screen_width > 0.0 && m.screen_height > 0.0 {
-                        ffi::ts_set_view_bounds(
-                            t.handle,
-                            m.pixel_width as i32,
-                            m.pixel_height as i32,
-                            m.screen_x,
-                            m.screen_y,
-                            m.screen_width,
-                            m.screen_height,
-                            m.screen_scale,
-                        );
-                    } else {
-                        ffi::ts_set_view_size(
-                            t.handle,
-                            m.pixel_width as i32,
-                            m.pixel_height as i32,
-                        );
-                    }
+                    ffi::ts_set_view_size(t.handle, m.pixel_width as i32, m.pixel_height as i32);
                 }
             }
         }

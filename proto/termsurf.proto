@@ -78,14 +78,6 @@ message Resize {
   int64 tab_id = 1;
   uint64 pixel_width = 2;
   uint64 pixel_height = 3;
-  // Absolute webview bounds in Chromium-style screen DIPs:
-  // top-left origin, logical units, with screen_scale recording the
-  // backing-pixel scale used to derive the rect.
-  double screen_x = 4;
-  double screen_y = 5;
-  double screen_width = 6;
-  double screen_height = 7;
-  double screen_scale = 8;
 }
 
 message CloseTab {
@@ -298,3 +290,4 @@ message QueryTabsReply {
   repeated TabInfo tabs = 5;
   string error = 6;
 }
+

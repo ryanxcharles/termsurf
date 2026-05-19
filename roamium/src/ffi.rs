@@ -85,16 +85,6 @@ extern "C" {
     pub fn ts_set_focus(wc: TsWebContents, focused: bool);
     pub fn ts_set_color_scheme(wc: TsWebContents, dark: bool);
     pub fn ts_set_view_size(wc: TsWebContents, width: c_int, height: c_int);
-    pub fn ts_set_view_bounds(
-        wc: TsWebContents,
-        width: c_int,
-        height: c_int,
-        screen_x: f64,
-        screen_y: f64,
-        screen_width: f64,
-        screen_height: f64,
-        screen_scale: f64,
-    );
 
     // --- Callbacks ---
 
