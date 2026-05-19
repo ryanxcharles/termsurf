@@ -23,6 +23,8 @@ use window::color::LinearRgba;
 #[derive(Clone, Copy)]
 pub(crate) struct PaneRenderGeometry {
     pub(crate) outer_rect: ::window::RectF,
+    pub(crate) background_rect: ::window::RectF,
+    pub(crate) content_rect: ::window::RectF,
     pub(crate) border_width: f32,
     pub(crate) content_origin_x: f32,
     pub(crate) content_origin_y: f32,
@@ -81,7 +83,40 @@ impl crate::TermWindow {
         let cell_width = self.render_metrics.cell_size.width as f32;
         let cell_height = self.render_metrics.cell_size.height as f32;
 
-        // We want to fill out to the edges of the splits.
+        let border_width = self.split_border_width_for_pane(pos, num_panes);
+
+        if border_width > 0.0 {
+            let content_origin_x =
+                padding_left + border.left.get() as f32 + (pos.left as f32 * cell_width);
+            let content_origin_y = top_pixel_y + pos.top as f32 * cell_height;
+            let content_pixel_width = pos.width as f32 * cell_width;
+            let content_pixel_height = pos.height as f32 * cell_height;
+            let outer_rect = euclid::rect(
+                (content_origin_x - border_width).max(0.0),
+                (content_origin_y - border_width).max(0.0),
+                content_pixel_width + border_width * 2.0,
+                content_pixel_height + border_width * 2.0,
+            );
+            let content_rect = euclid::rect(
+                content_origin_x,
+                content_origin_y,
+                content_pixel_width,
+                content_pixel_height,
+            );
+            return Ok(PaneRenderGeometry {
+                outer_rect,
+                background_rect: outer_rect,
+                content_rect,
+                border_width,
+                content_origin_x,
+                content_origin_y,
+                content_pixel_width,
+                content_pixel_height,
+            });
+        }
+
+        // We want to fill out to the edges of the splits when legacy split
+        // borders are not active.
         let (x, width_delta) = if pos.left == 0 {
             (
                 0.,
@@ -119,7 +154,6 @@ impl crate::TermWindow {
             },
         );
 
-        let border_width = self.split_border_width_for_pane(pos, num_panes);
         let content_origin_x =
             padding_left + border.left.get() as f32 + (pos.left as f32 * cell_width) + border_width;
         let content_origin_y = top_pixel_y + pos.top as f32 * cell_height + border_width;
@@ -129,6 +163,13 @@ impl crate::TermWindow {
 
         Ok(PaneRenderGeometry {
             outer_rect,
+            background_rect: outer_rect,
+            content_rect: euclid::rect(
+                content_origin_x,
+                content_origin_y,
+                content_pixel_width,
+                content_pixel_height,
+            ),
             border_width,
             content_origin_x,
             content_origin_y,
@@ -211,16 +252,7 @@ impl crate::TermWindow {
         let cell_width = self.render_metrics.cell_size.width as f32;
         let cell_height = self.render_metrics.cell_size.height as f32;
         let geometry = self.pane_render_geometry(pos, num_panes)?;
-        let background_rect = if geometry.border_width > 0.0 {
-            euclid::rect(
-                geometry.content_origin_x,
-                geometry.content_origin_y,
-                geometry.content_pixel_width,
-                geometry.content_pixel_height,
-            )
-        } else {
-            geometry.outer_rect
-        };
+        let background_rect = geometry.background_rect;
 
         if self.window_background.is_empty() {
             // Per-pane, palette-specified background
@@ -376,8 +408,8 @@ impl crate::TermWindow {
             (sel.range.clone(), sel.rectangular)
         };
 
-        let left_pixel_x = geometry.content_origin_x;
-        let top_pixel_y = geometry.content_origin_y - pos.top as f32 * cell_height;
+        let left_pixel_x = geometry.content_rect.origin.x;
+        let top_pixel_y = geometry.content_rect.origin.y - pos.top as f32 * cell_height;
         let content_cols =
             ((geometry.content_pixel_width / cell_width).floor() as usize).min(dims.cols);
         let content_rows = ((geometry.content_pixel_height / cell_height).floor() as usize)
@@ -675,7 +707,7 @@ impl crate::TermWindow {
         metrics::histogram!("paint_pane.lines").record(start.elapsed());
         log::trace!("lines elapsed {:?}", start.elapsed());
 
-        Ok((left_pixel_x, geometry.content_origin_y))
+        Ok((left_pixel_x, geometry.content_rect.origin.y))
     }
 
     pub fn paint_pane_border(

@@ -3592,7 +3592,55 @@ impl TermWindow {
                     p.pane = Arc::clone(&overlay.pane);
                 }
             }
+            self.apply_split_border_visible_grid(&mut panes);
             panes
+        }
+    }
+
+    fn apply_split_border_visible_grid(&self, panes: &mut [PositionedPane]) {
+        let num_panes = panes.len();
+        if num_panes <= 1 {
+            return;
+        }
+
+        let cell_width = self.render_metrics.cell_size.width as f32;
+        let cell_height = self.render_metrics.cell_size.height as f32;
+        for pane in panes {
+            let border_width = self.split_border_width_for_pane(pane, num_panes);
+            if border_width == 0.0 {
+                continue;
+            }
+
+            let visible_cols = ((pane.width as f32 * cell_width - border_width * 2.0) / cell_width)
+                .floor()
+                .max(1.0) as usize;
+            let visible_rows = ((pane.height as f32 * cell_height - border_width * 2.0)
+                / cell_height)
+                .floor()
+                .max(1.0) as usize;
+            let visible_cols = visible_cols.min(pane.width.max(1));
+            let visible_rows = visible_rows.min(pane.height.max(1));
+
+            let size = TerminalSize {
+                rows: visible_rows,
+                cols: visible_cols,
+                pixel_width: visible_cols * self.render_metrics.cell_size.width as usize,
+                pixel_height: visible_rows * self.render_metrics.cell_size.height as usize,
+                dpi: self.dimensions.dpi as u32,
+            };
+            let current_dims = pane.pane.get_dimensions();
+            let needs_resize = current_dims.cols != visible_cols
+                || current_dims.viewport_rows != visible_rows
+                || current_dims.pixel_width != size.pixel_width
+                || current_dims.pixel_height != size.pixel_height
+                || current_dims.dpi != size.dpi;
+            if needs_resize {
+                pane.pane.resize(size).ok();
+            }
+            pane.width = visible_cols;
+            pane.height = visible_rows;
+            pane.pixel_width = size.pixel_width;
+            pane.pixel_height = size.pixel_height;
         }
     }
 

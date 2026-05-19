@@ -535,3 +535,28 @@ content grid.
      grid.
    - Unzooming restores borders, inset, overlay alignment, and resize hit
      regions.
+
+**Result:** Partial
+
+Implemented the correction path and verified that the debug Wezboard build
+completes with `scripts/build.sh wezboard`.
+
+The GUI now adjusts each bordered pane's visible `PositionedPane` dimensions and
+resizes the pane PTY to that visible grid before rendering, so line rendering no
+longer hides edge cells behind a render-only inset. `PaneRenderGeometry` now
+uses a bordered outer rect and a content rect without the old half-cell interior
+expansion when split borders are active, paints the pane background across the
+full bordered rect, and paints focused pane borders after unfocused borders so
+shared edges prefer the focused color. Split resize hit targets now use a full
+cell as their minimum thickness when borders are enabled.
+
+Manual GUI verification is still pending for exact edge alignment, `stty size`
+versus visible grid, cross-DPI movement, config reload, drag-selection outside
+pane bounds, browser overlay alignment, and zoom transitions.
+
+#### Conclusion
+
+The implementation now corrects the main render-only inset mistake from
+Experiment 1 and is buildable. The remaining work is runtime verification and
+any follow-up needed if split tree cell coordinates or display-scale changes
+still drift under manual testing.
