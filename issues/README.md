@@ -8,7 +8,6 @@
 | [0774](0774-zoom-webview-overlay/README.md)       | Zooming non-browser pane leaves webview overlay visible                     | 2026-04-11 |
 | [0775](0775-devtools-multi-profile/README.md)     | DevTools gets confused with multiple profiles open                          | 2026-04-11 |
 | [0776](0776-pdf-not-loading/README.md)            | PDF files show blank white screen instead of rendering                      | 2026-04-11 |
-| [0777](0777-split-border-overlap/README.md)       | Split border overlaps pane content and blocks mouse resize                  | 2026-04-11 |
 | [0778](0778-back-nav-title-stale/README.md)       | Back navigation leaves stale title in webtui                                | 2026-04-12 |
 | [0779](0779-date-picker-popup-position/README.md) | Native popups (date picker, select dropdown) render outside webview overlay | 2026-04-15 |
 | [0780](0780-link-drag-freeze/README.md)           | Link drag freezes the browser                                               | 2026-04-17 |
@@ -18,6 +17,7 @@
 | #                                                       | Title                                                                         | Opened     | Closed     |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
 | [0781](0781-chromium-upgrade/README.md)                 | Chromium Upgrade Path                                                         | 2026-05-18 | 2026-05-18 |
+| [0777](0777-split-border-overlap/README.md)             | Split border overlaps pane content and blocks mouse resize                    | 2026-04-11 | 2026-05-19 |
 | [0773](0773-loading-screen/README.md)                   | Loading screen for browser startup                                            | 2026-04-05 | 2026-04-05 |
 | [0772](0772-command-shortcuts/README.md)                | Explicit command shortcuts and rename colorscheme to dark                     | 2026-04-05 | 2026-04-05 |
 | [0771](0771-tab-id-collision/README.md)                 | Tab ID collision across browser profiles                                      | 2026-04-05 | 2026-04-05 |

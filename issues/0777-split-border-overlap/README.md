@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-04-11"
+closed = "2026-05-19"
 +++
 
 # Issue 777: Split border overlaps pane content and blocks mouse resize
@@ -1024,3 +1025,11 @@ Experiment 1, not the mux/PTY/layout-level model attempted in Experiments 2
 and 4. Wezboard's existing split geometry should remain stable; the split border
 feature should shift rendering, overlays, mouse mapping, and hit regions around
 that existing geometry.
+
+## Conclusion
+
+Issue 777 is closed by Experiment 5. The working solution keeps Wezboard's
+existing pane and split layout intact, treats `split_border_width` as a
+presentation inset, and applies that same inset consistently to terminal
+rendering, browser overlay placement, mouse coordinate mapping, border drawing,
+and split resize hit regions.
