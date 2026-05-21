@@ -3428,3 +3428,283 @@ Keep the other findings as separate issues or later experiments:
 - PagePopup widgets remain visible after alt-tab/window deactivation;
 - after dropdown/datalist interactions, native popup activation can stop
   reaching the popup-open paths even though cursor events still arrive.
+
+### Experiment 12: Correct PagePopup Y Anchor
+
+#### Description
+
+Experiment 11 showed that date/time/color-family controls use Blink's PagePopup
+path and that the wrong y value is already present in the PagePopup requested
+rect. The downstream browser/macOS path preserves the requested rect exactly.
+
+For the representative date click:
+
+```text
+anchor_rect = 1916,680 291x43
+requested popup rect = 1916,723 218x281
+```
+
+The requested y is `anchor.y + anchor.height`. That is why the popup appears too
+low by the height of the input control. The x value is not affected because the
+PagePopup path copies `anchor.x` directly:
+
+```text
+popup_x = anchor_x
+popup_y = anchor_y + anchor_height
+```
+
+This experiment changes only the PagePopup y placement for the date/time/color
+family. It must not touch the `<select>` dropdown path, datalist behavior,
+alt-tab visibility, event routing, Shell window placement, Wezboard geometry, or
+the TermSurf protocol.
+
+The hypothesis is:
+
+```text
+For TermSurf's embedded macOS PagePopup path, the popup y should be anchor.y,
+not anchor.y + anchor.height.
+```
+
+The experiment is considered successful if the date/time/color popups appear at
+the correct y position and the trace shows:
+
+```text
+corrected_popup_y = anchor_y
+delta_anchor_to_corrected_y = 0
+```
+
+#### Deferred Issues
+
+The following bugs are real but explicitly out of scope for this experiment:
+
+1. **Dropdown wrong x value.**
+
+   `<select>` uses the AppKit menu path:
+
+   ```text
+   RenderFrameHostImpl::ShowPopupMenu
+   PopupMenuHelper::ShowPopupMenu
+   RenderWidgetHostNSViewBridge::DisplayPopupMenu
+   WebMenuRunner::runMenuInView
+   NSPopUpButtonCell
+   ```
+
+   Experiment 11 showed the dropdown y anchor was correct, while the final
+   visible menu x was wrong. Chromium still does not observe AppKit's final
+   `NSPopUpButtonCell` menu window rect, so this needs a separate experiment.
+
+2. **PagePopup remains visible after alt-tab/window deactivation.**
+
+   Date/time/color popups can remain visible after the TermSurf window loses
+   focus. This is a separate popup lifecycle/window visibility bug. It likely
+   needs deactivation and popup-owner logs before a fix.
+
+3. **Native widgets stop opening after dropdown/datalist interactions.**
+
+   Experiment 11 showed clean PagePopup and `PopupMenuHelper` cleanup, followed
+   by later clicks that still produced `CursorChanged` messages but no longer
+   reached `DateTimeChooserImpl`, `WebPagePopupImpl::SetWindowRect`, or
+   `RenderFrameHostImpl::ShowPopupMenu`. This appears upstream of popup
+   implementations, likely activation/focus/event dispatch/AppKit menu tracking
+   state.
+
+4. **Datalist input does not work.**
+
+   Datalist did not produce a useful popup-open chain in the Experiment 11 logs.
+   It may share the post-dropdown activation problem or use another path. It
+   should not be mixed into the PagePopup y-axis fix.
+
+#### Changes
+
+1. **Keep Experiment 11 trace logs.**
+
+   Do not remove the date/PagePopup chain logs. They are needed to prove that
+   the correction happened at the intended boundary:
+
+   ```text
+   DateTimeChooserImpl
+   WebPagePopupImpl::SetWindowRect
+   WebContentsImpl::ShowCreatedWidget
+   RenderWidgetHostViewMac::InitAsPopup
+   transient webcontents=0 RWHV bounds
+   ```
+
+2. **Add a narrow experimental PagePopup y correction.**
+
+   Modify:
+
+   ```text
+   chromium/src/third_party/blink/renderer/core/exported/web_page_popup_impl.cc
+   ```
+
+   In `WebPagePopupImpl::SetWindowRect`, compute:
+
+   ```text
+   anchor_rect = GetAnchorRectInScreen()
+   corrected_rect = rect_in_screen
+   ```
+
+   When the incoming rect looks like the known bad PagePopup placement:
+
+   ```text
+   rect_in_screen.x == anchor_rect.x
+   rect_in_screen.y == anchor_rect.y + anchor_rect.height()
+   ```
+
+   set:
+
+   ```text
+   corrected_rect.y = anchor_rect.y
+   ```
+
+   Then use `corrected_rect` for the downstream `SetPendingWindowRect`,
+   `SetPopupBounds`, and deferred `initial_rect_` paths.
+
+   Use a small tolerance if exact equality is too brittle, but keep the
+   predicate narrow. Do not apply this correction to arbitrary popup rects that
+   are not anchored at `anchor.bottom()`.
+
+3. **Gate the fix as an experiment.**
+
+   Gate the behavior change behind a new environment variable:
+
+   ```text
+   TERMSURF_ISSUE_779_FIX_PAGE_POPUP_Y=1
+   ```
+
+   Keep `TERMSURF_ISSUE_779_TRACE=1` for logs. This makes it possible to run the
+   same binary with:
+   - trace only, no fix;
+   - trace plus fix.
+
+   Do not reuse `TERMSURF_ISSUE_779_TRACE` to change behavior.
+
+4. **Log the correction decision.**
+
+   Add one trace line in `WebPagePopupImpl::SetWindowRect`:
+
+   ```text
+   page_popup_y_fix
+     enabled=...
+     applied=...
+     reason=...
+     rect_in_screen=...
+     anchor_rect=...
+     corrected_rect=...
+     delta_original_y=...
+     delta_corrected_y=...
+   ```
+
+   Expected fixed date trace:
+
+   ```text
+   rect_in_screen=1916,723 218x281
+   anchor_rect=1916,680 291x43
+   corrected_rect=1916,680 218x281
+   delta_original_y=43
+   delta_corrected_y=0
+   ```
+
+5. **Do not change non-PagePopup code.**
+
+   This experiment must not modify:
+   - `<select>` / `PopupMenuHelper` / `WebMenuRunner` behavior;
+   - datalist behavior;
+   - event dispatch;
+   - focus handling;
+   - window deactivation handling;
+   - `WebContentsImpl::ShowCreatedWidget`;
+   - `RenderWidgetHostViewMac::InitAsPopup`;
+   - Wezboard;
+   - webtui;
+   - protocol structs.
+
+#### Verification
+
+0. Build the same components through the project scripts:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   scripts/build.sh chromium
+   scripts/build.sh roamium
+   scripts/build.sh webtui --release
+   scripts/build.sh wezboard
+   ```
+
+1. Run a trace-only baseline with the new binary and no fix variable:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   mkdir -p logs/issue-779-exp12-baseline-state/termsurf
+
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-779-exp12-baseline-state" \
+   RUST_LOG=info \
+   ./wezboard/target/debug/wezboard-gui \
+   2>&1 | tee logs/issue-779-exp12-baseline-wezboard.log
+   ```
+
+   Click exactly one date control first. Confirm the baseline still reproduces
+   the old trace pattern:
+
+   ```text
+   delta_original_y = anchor.height
+   applied = false
+   ```
+
+2. Run the fixed experiment with both trace and fix variables:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   mkdir -p logs/issue-779-exp12-fixed-state/termsurf
+
+   TERMSURF_ISSUE_779_TRACE=1 \
+   TERMSURF_ISSUE_779_FIX_PAGE_POPUP_Y=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-779-exp12-fixed-state" \
+   RUST_LOG=info \
+   ./wezboard/target/debug/wezboard-gui \
+   2>&1 | tee logs/issue-779-exp12-fixed-wezboard.log
+   ```
+
+3. In Wezboard, launch:
+
+   ```bash
+   /Users/ryan/dev/termsurf/webtui/target/release/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     http://localhost:9616/test-native-popups.html
+   ```
+
+4. Click exactly one date control first. Then, if the date popup closes cleanly,
+   click one time control and one color control. Do not click dropdown or
+   datalist during the primary fixed run.
+
+5. Extract the fixed trace:
+
+   ```bash
+   rg -a "\[issue-779-trace\]|page_popup_y_fix|DateTimeChooserImpl|WebPagePopupImpl|ShowCreatedWidget|InitAsPopup|webcontents=0" \
+     logs/issue-779-exp12-fixed-wezboard.log \
+     logs/issue-779-exp12-fixed-state/termsurf/webtui-trace.log \
+     logs/issue-779-exp12-fixed-state/termsurf/roamium-trace.log \
+     logs/issue-779-exp12-fixed-state/termsurf/chromium-server.log \
+     > logs/issue-779-exp12-fixed-trace.log
+   ```
+
+6. Pass criteria:
+   - date popup appears at the correct y position;
+   - time and color PagePopup-family controls do not regress;
+   - the fixed trace includes `page_popup_y_fix applied=true`;
+   - `corrected_rect.y == anchor_rect.y`;
+   - `delta_corrected_y == 0`;
+   - `ShowCreatedWidget`, `InitAsPopup`, and transient RWHV bounds all receive
+     the corrected y;
+   - dropdown behavior is unchanged, because dropdown is out of scope.
+
+7. Fail criteria:
+   - date popup remains too low;
+   - correction applies to a popup whose incoming rect is not anchored at
+     `anchor.bottom()`;
+   - x changes for PagePopup controls;
+   - `<select>` behavior changes;
+   - PagePopup does not open;
+   - the fix hides the alt-tab persistence or post-dropdown activation bugs
+     instead of leaving them as separate issues.
