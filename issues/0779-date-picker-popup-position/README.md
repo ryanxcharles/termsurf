@@ -2458,3 +2458,82 @@ Shell window origin.
       `OnWindowFrameInScreenChanged` path;
     - two browser panes fight over one Shell window position;
     - Roamium crashes during normal tab close or app shutdown.
+
+**Result:** Partial
+
+Experiment 9 made the fundamental improvement: native widgets no longer opened
+near the old hidden Shell window origin. In the manual run on 2026-05-21, the
+native widgets appeared inside the visible webview instead of outside the
+Wezboard window. However, their y position was still wrong: the widgets appeared
+roughly 100 pixels too low.
+
+The logs show the main coordinate path now works:
+
+- `webtui_first_draw` fired for both runs, and `webtui_chrome_overlap` reported
+  `overlaps_chrome=false`. The `web` TUI did not disappear in this run.
+- Wezboard computed the visible webview at
+  `screen_rect=(1595,373 1106x1056)` in AppKit bottom-left coordinates and
+  `top_left_screen=(1595,371 1106x1056)` in Chromium-style top-left
+  coordinates.
+- Roamium received and forwarded that rect:
+  `roamium_resize_to_ffi ... screen=(1595.0,371.0 1106.0x1056.0) scale=2.00`.
+- The hidden Shell window moved from the old default frame
+  `{{0, 90}, {800, 656}}` to `{{1595, 373}, {1106, 1112}}` while preserving the
+  hidden state: `alphaValue=0`, `isVisible=true`, `ignoresMouseEvents=true`.
+- Chromium's normal window movement path fired. After the move,
+  `OnWindowFrameInScreenChanged` updated `window_frame_in_screen`, and the main
+  webview computed bounds became `1595,371 1106x1056`, matching Wezboard's
+  top-left webview rect.
+
+That means the original root cause was correct: Chromium's hidden Shell window
+was anchored near the wrong screen origin, and moving it makes native widgets
+use the right broad screen region.
+
+The remaining y-axis error is narrower. The logs show the Shell window frame is
+not the same object as the browser content rect:
+
+- target webview frame: `{{1595, 373}, {1106, 1056}}`;
+- target content frame: `{{1595, 373}, {1106, 1080}}`;
+- target Shell window frame: `{{1595, 373}, {1106, 1112}}`;
+- main Chromium webview bounds after the move:
+  `window_frame_in_screen=1595,315 1106x1112` plus
+  `view_bounds_in_window=0,56 1106x1056` produces
+  `computed_view_bounds=1595,371 1106x1056`.
+
+The code correctly accounted for that `56` DIP internal webview offset for the
+main webview, but the visible native widgets were still too low. This suggests
+there is still an inconsistent y correction between at least two of these
+spaces:
+
+- Wezboard's AppKit bottom-left overlay rect;
+- the top-left screen rect sent through `Resize`;
+- the hidden Shell outer window frame;
+- the Shell content view frame;
+- Chromium's webview frame at y `56`;
+- the popup anchor/final native widget window path.
+
+This does not look like the old "wrong screen origin" bug anymore. It also does
+not look like a simple physical-vs-logical pixel bug: the backing size
+`2212x2112` maps cleanly to the logical webview size `1106x1056` at scale `2`.
+The remaining error is an internal y-offset correction, likely involving the
+Shell/content/webview vertical offset or a second top-left/bottom-left
+conversion in the popup path.
+
+The current trace is still missing the exact comparison needed to compute the
+remaining correction mechanically: for the clicked control, it does not log the
+control's anchor rect, Chromium's intended popup rect, and the final native
+popup window rect in the same coordinate space. The popup-like transient
+`chromium_webview_bounds` lines now appear inside the webview region, but they
+do not identify the originating control or expected anchor position.
+
+#### Conclusion
+
+Moving the hidden Shell `NSWindow` is the correct fix direction, but the
+implementation is not complete. Experiment 9 converts a total placement failure
+into an inside-the-webview y-offset bug. The next step should keep the Shell
+window move and add a focused y-coordinate trace at the popup anchor boundary:
+log the control anchor rect, intended popup rect, final popup window rect, Shell
+window frame, content view frame, and webview frame for the same native widget
+open event. That should reveal whether the remaining offset is the Shell
+content/webview y offset, a top-left/bottom-left conversion error, or an
+additional popup-path adjustment.

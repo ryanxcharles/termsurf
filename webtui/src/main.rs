@@ -1,6 +1,9 @@
 mod ipc;
 
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
+use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
@@ -50,6 +53,87 @@ enum Mode {
     Control,
     Edit,
     Command,
+}
+
+impl Mode {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Mode::Browse => "browse",
+            Mode::Control => "control",
+            Mode::Edit => "edit",
+            Mode::Command => "command",
+        }
+    }
+}
+
+fn issue_779_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("TERMSURF_ISSUE_779_TRACE").is_some())
+}
+
+fn issue_779_trace_path() -> Option<PathBuf> {
+    static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+    PATH.get_or_init(|| {
+        let base = std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
+            })?;
+        Some(base.join("termsurf").join("webtui-trace.log"))
+    })
+    .clone()
+}
+
+fn issue_779_trace_log(message: String) {
+    let Some(path) = issue_779_trace_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        static ANNOUNCED: OnceLock<()> = OnceLock::new();
+        if ANNOUNCED.set(()).is_ok() {
+            let _ = writeln!(file, "[issue-779-trace] trace_enabled component=webtui");
+        }
+        let _ = writeln!(file, "[issue-779-trace] {}", message);
+    }
+}
+
+macro_rules! issue_779_trace {
+    ($($arg:tt)*) => {
+        if issue_779_trace_enabled() {
+            issue_779_trace_log(format!($($arg)*));
+        }
+    };
+}
+
+fn rect_desc(rect: Rect) -> String {
+    format!(
+        "x={} y={} width={} height={}",
+        rect.x, rect.y, rect.width, rect.height
+    )
+}
+
+fn webtui_overlap_reason(frame: Rect, viewport: Rect) -> &'static str {
+    if viewport == Rect::default() {
+        return "missing_viewport";
+    }
+    if viewport.x < frame.x {
+        return "viewport_extends_left_of_frame";
+    }
+    if viewport.y < frame.y {
+        return "viewport_extends_above_frame";
+    }
+    if viewport.x.saturating_add(viewport.width) > frame.x.saturating_add(frame.width) {
+        return "viewport_extends_right_of_frame";
+    }
+    // ui() reserves the bottom 4 rows for the URL bar and status line.
+    let chrome_start_y = frame.y.saturating_add(frame.height.saturating_sub(4));
+    if viewport.y.saturating_add(viewport.height) > chrome_start_y {
+        return "viewport_overlaps_bottom_chrome";
+    }
+    "none"
 }
 
 // Loading screen stages (Issue 773).
@@ -346,6 +430,14 @@ fn main() -> io::Result<()> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
+    issue_779_trace!(
+        "webtui_raw_mode_ready pane_id={} url={} profile={} browser={} is_devtools={}",
+        pane_id.as_deref().unwrap_or("<none>"),
+        url,
+        profile,
+        browser,
+        is_devtools
+    );
 
     // Crossterm reader thread — forwards relevant terminal events (Issue 668).
     // Key, Resize, and Paste wake the main loop. Mouse and Focus are dropped
@@ -395,6 +487,8 @@ fn main() -> io::Result<()> {
     let mut page_title = String::new();
     let mut target_url = String::new();
     let mut browser_conn: Option<ipc::BrowserConnection> = None;
+    let mut draw_count: u64 = 0;
+    let mut first_draw_logged = false;
 
     // edtui state (Issue 637, 658).
     let mut editor_state = EditorState::new(Lines::from(url.as_str()));
@@ -418,9 +512,11 @@ fn main() -> io::Result<()> {
     // Event loop.
     loop {
         let mut viewport_rect = Rect::default();
+        let mut frame_area = Rect::default();
         // Extract display name from browser (last path component for absolute paths).
         let browser_label = browser.rsplit('/').next().unwrap_or(&browser);
         terminal.draw(|frame| {
+            frame_area = frame.area();
             viewport_rect = ui(
                 frame,
                 &url,
@@ -439,11 +535,44 @@ fn main() -> io::Result<()> {
                 chromium_wait_start,
             );
         })?;
+        draw_count += 1;
+        if !first_draw_logged {
+            issue_779_trace!(
+                "webtui_first_draw pane_id={} draw_count={} frame=({}) viewport=({}) mode={} url={} browser_ready={}",
+                pane_id.as_deref().unwrap_or("<none>"),
+                draw_count,
+                rect_desc(frame_area),
+                rect_desc(viewport_rect),
+                mode.as_str(),
+                url,
+                browser_ready
+            );
+            first_draw_logged = true;
+        }
 
         // Send overlay coordinates to compositor (only when changed).
         if viewport_rect != last_viewport {
             let first_overlay = last_viewport == Rect::default();
+            issue_779_trace!(
+                "webtui_viewport_changed pane_id={} draw_count={} previous=({}) current=({}) frame=({}) mode={} url={}",
+                pane_id.as_deref().unwrap_or("<none>"),
+                draw_count,
+                rect_desc(last_viewport),
+                rect_desc(viewport_rect),
+                rect_desc(frame_area),
+                mode.as_str(),
+                url
+            );
             if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
+                let reason = webtui_overlap_reason(frame_area, viewport_rect);
+                issue_779_trace!(
+                    "webtui_chrome_overlap pane_id={} overlaps_chrome={} viewport=({}) frame=({}) reason={}",
+                    pid,
+                    reason != "none",
+                    rect_desc(viewport_rect),
+                    rect_desc(frame_area),
+                    reason
+                );
                 if is_devtools {
                     // DevTools pane (Issue 684).
                     conn.send_set_devtools_overlay(
@@ -457,6 +586,15 @@ fn main() -> io::Result<()> {
                         mode == Mode::Browse,
                         &browser,
                     );
+                    issue_779_trace!(
+                        "webtui_send_set_devtools_overlay pane_id={} draw_count={} viewport=({}) mode={} browser={} inspected_tab_id={} sent=true",
+                        pid,
+                        draw_count,
+                        rect_desc(viewport_rect),
+                        mode.as_str(),
+                        browser,
+                        inspected_tab_id
+                    );
                 } else {
                     conn.send_set_overlay(
                         pid,
@@ -469,7 +607,24 @@ fn main() -> io::Result<()> {
                         mode == Mode::Browse,
                         &browser,
                     );
+                    issue_779_trace!(
+                        "webtui_send_set_overlay pane_id={} draw_count={} viewport=({}) mode={} browser={} url={} sent=true",
+                        pid,
+                        draw_count,
+                        rect_desc(viewport_rect),
+                        mode.as_str(),
+                        browser,
+                        url
+                    );
                 }
+            } else {
+                issue_779_trace!(
+                    "webtui_send_overlay_skipped pane_id={} draw_count={} viewport=({}) compositor_present={} reason=missing_compositor_or_pane_id",
+                    pane_id.as_deref().unwrap_or("<none>"),
+                    draw_count,
+                    rect_desc(viewport_rect),
+                    compositor.is_some()
+                );
             }
             last_viewport = viewport_rect;
 
@@ -789,6 +944,13 @@ fn main() -> io::Result<()> {
                         browser_socket,
                         browser: resolved_browser,
                     } => {
+                        issue_779_trace!(
+                            "webtui_browser_ready pane_id={} tab_id={} browser_socket={} browser={}",
+                            pane_id.as_deref().unwrap_or("<none>"),
+                            tab_id,
+                            browser_socket,
+                            resolved_browser
+                        );
                         if !resolved_browser.is_empty() {
                             browser = resolved_browser;
                         }
@@ -857,6 +1019,14 @@ fn main() -> io::Result<()> {
         let _ = write!(stdout, "\x1b]9;4;0\x1b\\");
         let _ = stdout.flush();
     }
+    issue_779_trace!(
+        "webtui_loop_exit pane_id={} draw_count={} loading_bar_active={} browser_ready={} page_loaded={}",
+        pane_id.as_deref().unwrap_or("<none>"),
+        draw_count,
+        loading_bar_active,
+        browser_ready,
+        page_loaded
+    );
 
     // Restore terminal. The compositor connection drops here, which closes
     // the XPC connection and triggers overlay cleanup.

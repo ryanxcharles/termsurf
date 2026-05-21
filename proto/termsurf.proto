@@ -78,6 +78,11 @@ message Resize {
   int64 tab_id = 1;
   uint64 pixel_width = 2;
   uint64 pixel_height = 3;
+  double screen_x = 4;       // Chromium-style screen DIP, top-left origin
+  double screen_y = 5;       // Chromium-style screen DIP, top-left origin
+  double screen_width = 6;   // Chromium-style screen DIP
+  double screen_height = 7;  // Chromium-style screen DIP
+  double screen_scale = 8;   // backing scale for the screen rect
 }
 
 message CloseTab {
@@ -290,4 +295,3 @@ message QueryTabsReply {
   repeated TabInfo tabs = 5;
   string error = 6;
 }
-

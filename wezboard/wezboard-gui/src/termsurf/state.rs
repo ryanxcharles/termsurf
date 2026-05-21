@@ -27,6 +27,11 @@ pub struct Pane {
     pub overlay_origin_x: f64,
     pub overlay_origin_y: f64,
     pub overlay_scale: f64,
+    pub last_resize_screen_x: f64,
+    pub last_resize_screen_y: f64,
+    pub last_resize_screen_width: f64,
+    pub last_resize_screen_height: f64,
+    pub last_resize_screen_scale: f64,
     pub cursor_type: i64,
     pub visible: bool,
 }

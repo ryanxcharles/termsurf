@@ -1,5 +1,5 @@
 use std::ffi::c_void;
-use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_char, c_double, c_int};
 
 pub type TsBrowserContext = *mut c_void;
 pub type TsWebContents = *mut c_void;
@@ -84,7 +84,16 @@ extern "C" {
 
     pub fn ts_set_focus(wc: TsWebContents, focused: bool);
     pub fn ts_set_color_scheme(wc: TsWebContents, dark: bool);
-    pub fn ts_set_view_size(wc: TsWebContents, width: c_int, height: c_int);
+    pub fn ts_set_view_size(
+        wc: TsWebContents,
+        width: c_int,
+        height: c_int,
+        screen_x: c_double,
+        screen_y: c_double,
+        screen_width: c_double,
+        screen_height: c_double,
+        screen_scale: c_double,
+    );
 
     // --- Callbacks ---
 
