@@ -2129,3 +2129,199 @@ Wezboard overlay screen rect. A size-only update is insufficient. The likely fix
 is to either move/resize the hidden content Shell `NSWindow` to the overlay
 screen rect when Roamium receives Wezboard's bounds, or explicitly update the
 relevant `RenderWidgetHostViewMac` `window_frame_in_screen_dip_` from that rect.
+
+### Experiment 9: Move Hidden Shell Window to Overlay Rect
+
+#### Description
+
+Use the coordinate mismatch from Experiment 8 to fix native popup placement.
+
+The root cause is now specific: Wezboard composites the Chromium CALayerHost at
+the actual terminal pane screen rect, but Chromium's hidden content Shell
+`NSWindow` remains at a default screen-origin-ish frame. AppKit native popups
+anchor to Chromium's `NSWindow`/`NSView` coordinate space, not to the
+CALayerHost's composited location in Wezboard.
+
+The fix should make the hidden Shell host window track the Wezboard overlay
+screen rect whenever Roamium receives a resize/screen-rect update. This is
+preferable to only forcing `RenderWidgetHostViewMac` cached bounds because
+native AppKit popup paths ultimately depend on real `NSWindow`/`NSView`
+placement.
+
+This experiment is a narrow behavioral fix:
+
+```text
+Wezboard overlay screen rect
+  -> Resize message screen_x/screen_y/screen_width/screen_height
+  -> Roamium dispatch
+  -> libtermsurf_chromium ResizeTab
+  -> hidden content Shell NSWindow frame
+```
+
+After the fix, Chromium's Shell window frame and Chromium's computed webview
+bounds should match the Wezboard webview screen rect. Native popups should then
+open inside or adjacent to the visible webview instead of near the old hidden
+Shell window origin.
+
+#### Changes
+
+1. **Keep Experiment 8 trace logs in place while implementing.**
+
+   Do not remove the trace logs yet. They are the verification tool for this
+   fix. The logs must still be opt-in behind `TERMSURF_ISSUE_779_TRACE=1`.
+
+2. **Use the existing Resize screen rect as the source of truth.**
+
+   In `roamium/src/dispatch.rs`, keep forwarding the full Resize information
+   from the TermSurf protocol to the Chromium FFI:
+   - pixel width/height;
+   - screen x/y;
+   - screen width/height;
+   - screen scale.
+
+   Do not introduce a second protocol message unless the existing Resize path
+   cannot carry the needed values.
+
+3. **Update the Chromium FFI resize entrypoint.**
+
+   In `roamium/src/ffi.rs` and the matching C API in
+   `chromium/src/content/libtermsurf_chromium/`, make sure the resize function
+   passes both size and screen rect into `TsBrowserMainParts::ResizeTab`.
+
+   The API should distinguish:
+   - backing-pixel size used for rendering;
+   - logical/DIP size used by Chromium;
+   - screen rect used for AppKit window placement.
+
+4. **Move the hidden Shell `NSWindow` from `ResizeTab`.**
+
+   In `chromium/src/content/libtermsurf_chromium/ts_browser_main_parts.*`, when
+   `ResizeTab` receives a non-empty screen rect:
+   - find the `TabState` for the tab;
+   - get the content Shell native window for that tab;
+   - convert the Resize screen rect into the coordinate convention expected by
+     AppKit's `setFrame:display:`;
+   - set the hidden Shell `NSWindow` frame to the overlay screen rect;
+   - keep the window transparent/hidden as before, without ordering it in front
+     of Wezboard;
+   - resize the WebContents view to the content area inside that Shell window.
+
+   The Shell window should move; it should not become visible chrome.
+
+5. **Preserve rendering and webtui behavior.**
+
+   The fix must not:
+   - break the `web` TUI;
+   - cover the terminal chrome;
+   - change CALayerHost compositing;
+   - change input routing;
+   - alter focus behavior beyond what native popup anchoring requires;
+   - make the Shell toolbar visible.
+
+6. **Keep the fallback option explicit.**
+
+   If moving the Shell `NSWindow` is blocked by ownership or lifecycle
+   constraints, the fallback is to add an explicit TermSurf method on the
+   relevant Chromium-side view object that calls the same screen-frame update
+   path Chromium normally receives from AppKit:
+
+   ```text
+   RenderWidgetHostViewMac::OnWindowFrameInScreenChanged(screen_rect)
+   ```
+
+   This fallback should only be used if moving the real Shell window is proven
+   unsafe or ineffective, because it may fix Chromium's cached bounds while
+   leaving AppKit-native menu paths anchored to the wrong host window.
+
+#### Verification
+
+1. Build local components:
+
+   ```bash
+   scripts/build.sh chromium
+   scripts/build.sh roamium
+   scripts/build.sh webtui --release
+   scripts/build.sh wezboard
+   ```
+
+2. Start the reproduction server:
+
+   ```bash
+   bun test-html/server.ts
+   ```
+
+3. Start Wezboard with trace enabled:
+
+   ```bash
+   mkdir -p logs/issue-779-exp9-state/termsurf
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-779-exp9-state" \
+   RUST_LOG=info \
+     ./wezboard/target/debug/wezboard-gui \
+     2>&1 | tee logs/issue-779-exp9-wezboard.log
+   ```
+
+4. Inside Wezboard, run:
+
+   ```bash
+   /Users/ryan/dev/termsurf/webtui/target/release/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     ryanxcharles.com
+   ```
+
+5. Navigate inside the TUI to:
+
+   ```text
+   http://localhost:9616/test-native-popups.html
+   ```
+
+6. Confirm the trace shows the core geometry now agrees:
+
+   ```text
+   wezboard_webview_screen_rect.screen_rect
+   content_shell_window.window_frame
+   chromium_webview_bounds.computed_view_bounds
+   ```
+
+   These should match within normal rounding tolerance. A difference of one DIP
+   is acceptable; a difference of hundreds or thousands of pixels is failure.
+
+7. Click the native controls:
+   - `<select>`;
+   - `date`;
+   - datalist;
+   - `time`;
+   - `datetime-local`.
+
+   Native popups must open inside or adjacent to the visible browser pane, not
+   near the old screen origin and not outside the Wezboard window.
+
+8. Extract trace logs:
+
+   ```bash
+   rg -a "\\[issue-779-trace\\]" \
+     logs/issue-779-exp9-wezboard.log \
+     logs/issue-779-exp9-state/termsurf/webtui-trace.log \
+     logs/issue-779-exp9-state/termsurf/roamium-trace.log \
+     logs/issue-779-exp9-state/termsurf/chromium-server.log
+   ```
+
+9. Pass criteria:
+   - `web` remains visible and usable;
+   - Chromium's hidden Shell `NSWindow` frame tracks the Wezboard overlay
+     screen rect;
+   - Chromium's computed webview bounds track the Wezboard overlay screen rect;
+   - native controls no longer open near the old `x=0` Shell-window origin;
+   - native controls no longer open outside the visible webview/Wezboard window;
+   - the Shell window remains visually hidden/transparent;
+   - no new flicker, focus regression, or overlay disappearance appears.
+
+10. Fail criteria:
+    - `web` breaks or disappears;
+    - the browser overlay covers the TUI chrome incorrectly;
+    - the hidden Shell window remains at the old origin;
+    - Chromium computed bounds still disagree with Wezboard's screen rect by
+      more than rounding tolerance;
+    - native popups still open outside the visible webview;
+    - moving the Shell window makes the hidden Chromium window visible;
+    - Roamium crashes during normal tab close or app shutdown.
