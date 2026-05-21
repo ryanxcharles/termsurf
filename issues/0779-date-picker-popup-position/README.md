@@ -2124,11 +2124,11 @@ lives around `x=0, y=90`. Native popup placement is therefore anchored to
 Chromium's hidden Shell `NSWindow`, not to the CALayerHost's actual on-screen
 location inside Wezboard.
 
-The next fix should make Chromium's host-window/screen bounds match the
-Wezboard overlay screen rect. A size-only update is insufficient. The likely fix
-is to either move/resize the hidden content Shell `NSWindow` to the overlay
-screen rect when Roamium receives Wezboard's bounds, or explicitly update the
-relevant `RenderWidgetHostViewMac` `window_frame_in_screen_dip_` from that rect.
+The next fix should make Chromium's host-window/screen bounds match the Wezboard
+overlay screen rect. A size-only update is insufficient. The likely fix is to
+either move/resize the hidden content Shell `NSWindow` to the overlay screen
+rect when Roamium receives Wezboard's bounds, or explicitly update the relevant
+`RenderWidgetHostViewMac` `window_frame_in_screen_dip_` from that rect.
 
 ### Experiment 9: Move Hidden Shell Window to Overlay Rect
 
@@ -2172,9 +2172,9 @@ Shell window origin.
 
 2. **Document and preserve the Shell window hiding mechanism first.**
 
-   Before changing `ResizeTab`, identify why the content Shell `NSWindow` is
-   not visible today. The trace must log, at Shell window construction and after
-   the first resize:
+   Before changing `ResizeTab`, identify why the content Shell `NSWindow` is not
+   visible today. The trace must log, at Shell window construction and after the
+   first resize:
    - `alphaValue`;
    - `isVisible`;
    - `level`;
@@ -2247,8 +2247,8 @@ Shell window origin.
 
    Order matters: apply the Shell window `setFrame:display:NO` first, then call
    the existing WebContents resize path such as
-   `Shell::ResizeWebContentForTests(logical_size)`. Verify after both calls
-   that the WebContents native view frame has origin `(0, 0)` and size
+   `Shell::ResizeWebContentForTests(logical_size)`. Verify after both calls that
+   the WebContents native view frame has origin `(0, 0)` and size
    `content_width x content_height` inside the moved Shell window.
 
    The Shell window should move; it should not become visible chrome.
@@ -2471,10 +2471,9 @@ The logs show the main coordinate path now works:
 
 - `webtui_first_draw` fired for both runs, and `webtui_chrome_overlap` reported
   `overlaps_chrome=false`. The `web` TUI did not disappear in this run.
-- Wezboard computed the visible webview at
-  `screen_rect=(1595,373 1106x1056)` in AppKit bottom-left coordinates and
-  `top_left_screen=(1595,371 1106x1056)` in Chromium-style top-left
-  coordinates.
+- Wezboard computed the visible webview at `screen_rect=(1595,373 1106x1056)` in
+  AppKit bottom-left coordinates and `top_left_screen=(1595,371 1106x1056)` in
+  Chromium-style top-left coordinates.
 - Roamium received and forwarded that rect:
   `roamium_resize_to_ffi ... screen=(1595.0,371.0 1106.0x1056.0) scale=2.00`.
 - The hidden Shell window moved from the old default frame
@@ -2537,3 +2536,269 @@ window frame, content view frame, and webview frame for the same native widget
 open event. That should reveal whether the remaining offset is the Shell
 content/webview y offset, a top-left/bottom-left conversion error, or an
 additional popup-path adjustment.
+
+### Experiment 10: Trace Popup Anchor Y Offset
+
+#### Description
+
+Experiment 9 proved that moving the hidden Shell `NSWindow` fixes the broad
+screen-origin bug. Native widgets now open inside the visible webview, but they
+are still vertically offset too low. The remaining work is to identify the exact
+y delta between the clicked control's intended popup anchor and the final native
+popup window/menu frame.
+
+This experiment must be logs-only. It must not change Shell window movement,
+popup placement, bounds calculation, protocol semantics, webview sizing, or TUI
+behavior. Its only purpose is to put the expected anchor rect and the actual
+native widget rect in the same coordinate space for one popup-open event.
+
+The success condition is not visual correctness. The success condition is a log
+that makes the next code fix mechanical by answering:
+
+```text
+final_popup_y - expected_anchor_y = ?
+```
+
+and identifying which coordinate conversion introduced that delta.
+
+#### Changes
+
+1. **Keep the existing Experiment 9 trace enabled.**
+
+   Leave the current `TERMSURF_ISSUE_779_TRACE=1` gated logs in place:
+   - `wezboard_webview_screen_rect`;
+   - `roamium_resize_to_ffi`;
+   - `TermSurfMoveShellWindow.before/after`;
+   - `chromium_webview_bounds`;
+   - `content_shell_window` construction and resize logs;
+   - `webtui_first_draw` and `webtui_chrome_overlap`.
+
+   These logs define the baseline webview, Shell, and TUI geometry.
+
+2. **Add a per-popup correlation id.**
+
+   In Chromium, generate a monotonically increasing integer `popup_trace_id` for
+   every native popup-open path that this experiment logs. Every log line
+   emitted for a single popup-open event must include the same `popup_trace_id`,
+   plus the relevant `WebContents*` pointer when available.
+
+   The log prefix remains `[issue-779-trace]`.
+
+3. **Trace `<select>` at the AppKit menu boundary.**
+
+   In the macOS `<select>` path, add a focused log at
+   `WebMenuRunner::runMenuInView` in:
+
+   ```text
+   chromium/src/content/app_shim_remote_cocoa/web_menu_runner_mac.mm
+   ```
+
+   Log:
+   - `popup_trace_id`;
+   - `view` pointer;
+   - `view.frame`;
+   - `view.bounds`;
+   - `view.window.frame`;
+   - `view.window.contentView.frame`;
+   - `view.window.screen.frame`;
+   - the `bounds` / anchor rect passed into `runMenuInView`;
+   - that anchor rect converted with `[view convertRect:toView:nil]`;
+   - that window rect converted with `[view.window convertRectToScreen:]`;
+   - the final frame/rect passed to `NSPopUpButtonCell attachPopUpWithFrame`;
+   - the selected item/control point if available.
+
+   The log must clearly label the coordinate space of every rect:
+
+   ```text
+   view-local
+   window
+   appkit-screen-bottom-left
+   chromium-screen-top-left
+   ```
+
+4. **Trace the RenderWidgetHost popup-menu entry.**
+
+   In the browser/app-shim boundary for popup menus:
+
+   ```text
+   chromium/src/content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.mm
+   chromium/src/content/browser/renderer_host/render_frame_host_impl.cc
+   chromium/src/content/browser/web_contents/web_contents_view_mac.mm
+   ```
+
+   Keep or add logs for:
+   - incoming element/control bounds from Blink/renderer;
+   - `RenderWidgetHostViewMac::GetViewBounds()`;
+   - `RenderWidgetHostViewMac::GetBoundsInRootWindow()` if available at that
+     point;
+   - any bounds passed across Mojo to the app shim;
+   - the same `popup_trace_id` if the id can be propagated cheaply.
+
+   If the id cannot be threaded through without behavior changes, include the
+   `WebContents*`, view pointer, and timestamp so the event can still be joined
+   to the `WebMenuRunner` log.
+
+5. **Trace Views-based native widget popups.**
+
+   For date/time/page-popup/datalist/autofill-style popups, add a final window
+   placement log at:
+
+   ```text
+   chromium/src/components/remote_cocoa/app_shim/native_widget_ns_window_bridge.mm
+   ```
+
+   Specifically log in `NativeWidgetNSWindowBridge::SetBounds` and the
+   visibility/order-front path:
+   - `popup_trace_id` if available, otherwise bridge/window pointer;
+   - `this` pointer;
+   - `window_` pointer;
+   - requested Chromium `new_bounds` / `bounds` rect;
+   - `window_.frame` before and after;
+   - `window_.contentView.frame`;
+   - `window_.parentWindow` pointer and frame;
+   - `window_.screen.frame`;
+   - `window_.level`;
+   - `window_.isVisible`;
+   - `window_.alphaValue`;
+   - whether the window is child/parented to the Shell window.
+
+   These logs are required even if the manual test starts with `<select>`,
+   because Experiment 8 showed that not every native control uses the same path.
+
+6. **Log all rects in both AppKit and Chromium screen conventions.**
+
+   For every final native popup rect, log:
+   - AppKit screen rect, bottom-left origin;
+   - Chromium-style screen rect, top-left origin;
+   - the `NSScreen.frame` used for conversion.
+
+   Use the same conversion formula already used by Wezboard:
+
+   ```text
+   top_left_y = screen_frame.origin.y
+              + screen_frame.height
+              - appkit_rect.origin.y
+              - appkit_rect.height
+   ```
+
+   This avoids another ambiguous "same numbers, different origin" trace.
+
+7. **Add one computed delta line per popup.**
+
+   At the lowest point where both expected anchor and final native rect are
+   known, emit one summary line:
+
+   ```text
+   popup_y_delta popup_trace_id=...
+     expected_anchor_top_left=(x,y w x h)
+     final_popup_top_left=(x,y w x h)
+     delta_x=...
+     delta_y=...
+     shell_window_top_left=...
+     content_view_frame=...
+     web_view_frame=...
+     rwhv_computed_view_bounds=...
+   ```
+
+   If no single function has both expected and final rects, emit the partial
+   values with the same `popup_trace_id` and explicitly state in the result that
+   the delta was computed from joined log lines.
+
+8. **Keep logging opt-in and low volume.**
+
+   All new logs must be gated by `TERMSURF_ISSUE_779_TRACE=1`.
+
+   Do not log from hot getters on every frame. Logging should happen only when a
+   popup is requested, positioned, shown, or dismissed.
+
+9. **Do not modify popup behavior.**
+
+   This experiment must not:
+   - move the Shell window differently;
+   - change `SetBounds`;
+   - change `setFrame:display:`;
+   - change popup anchor math;
+   - change protocol fields;
+   - change Wezboard overlay placement;
+   - change webtui layout.
+
+#### Verification
+
+1. Build the same components as Experiment 9:
+
+   ```bash
+   scripts/build.sh chromium
+   scripts/build.sh roamium
+   scripts/build.sh webtui --release
+   scripts/build.sh wezboard
+   ```
+
+2. Start the reproduction page server:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf/test-html
+   bun run server.ts
+   ```
+
+3. Start Wezboard with tracing enabled:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   mkdir -p logs/issue-779-exp10-state/termsurf
+
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-779-exp10-state" \
+   RUST_LOG=info \
+   ./wezboard/target/debug/wezboard-gui \
+   2>&1 | tee logs/issue-779-exp10-wezboard.log
+   ```
+
+4. Inside Wezboard, launch:
+
+   ```bash
+   /Users/ryan/dev/termsurf/webtui/target/release/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     https://ryanxcharles.com
+   ```
+
+5. Navigate inside `web` to:
+
+   ```text
+   http://localhost:9616/test-native-popups.html
+   ```
+
+6. Click exactly one `<select>` control. Close it. Then click exactly one
+   date/time-style control if available. Avoid clicking every control at once;
+   this experiment needs clean, joinable popup events.
+
+7. Extract the trace:
+
+   ```bash
+   rg -a "\[issue-779-trace\]|popup_y_delta|WebMenuRunner|NativeWidgetNSWindowBridge" \
+     logs/issue-779-exp10-wezboard.log \
+     logs/issue-779-exp10-state/termsurf/webtui-trace.log \
+     logs/issue-779-exp10-state/termsurf/roamium-trace.log \
+     logs/issue-779-exp10-state/termsurf/chromium-server.log \
+     > logs/issue-779-exp10-trace.log
+   ```
+
+8. Pass criteria:
+   - `web` remains visible and usable;
+   - native widgets still appear inside the webview, preserving Experiment 9's
+     improvement;
+   - each clicked popup produces one joinable `popup_trace_id` or equivalent
+     pointer/timestamp chain;
+   - the trace includes expected anchor rect and final native popup rect in the
+     same top-left screen coordinate system;
+   - the trace computes or allows computing `delta_x` and `delta_y`;
+   - the trace shows whether the remaining y offset matches the Shell
+     content/webview offset, the AppKit frame/titlebar offset, or a separate
+     popup-path conversion.
+
+9. Fail criteria:
+   - `web` disappears or the browser covers the TUI chrome;
+   - native widgets return to the old outside-the-window placement;
+   - logs do not include the clicked control anchor rect;
+   - logs do not include the final native popup rect;
+   - logs cannot join expected and actual rects for one popup-open event;
+   - the logs add noise without producing a concrete y delta.
