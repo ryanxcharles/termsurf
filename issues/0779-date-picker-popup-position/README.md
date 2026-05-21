@@ -1187,15 +1187,14 @@ experiments should add similarly narrow logs for those specific subsystems.
    - final host layer frame if available;
    - absolute screen rect from `update_overlay_screen_rect`.
 
-   Add an explicit baseline check log:
+   Add an explicit layer-frame check log:
 
    ```text
-   [issue-779-trace] overlay_chrome_overlap pane_id=... overlaps_chrome=... overlay=... viewport=... reason=...
+   [issue-779-trace] wezboard_layer_frame_check pane_id=... matches_expected=... positioning_frame=... expected_frame=... reason=...
    ```
 
-   `overlaps_chrome` should be `true` if the final overlay frame extends outside
-   the viewport rect sent by `web` or covers the URL/status chrome area. This is
-   what makes a repeated "web TUI disappeared" failure visible in logs.
+   `matches_expected` should be `false` if Cocoa reports a positioning-layer
+   frame that differs from the frame Wezboard just assigned.
 
    Use one of these reason values:
    - `none`;
@@ -1208,6 +1207,10 @@ experiments should add similarly narrow logs for those specific subsystems.
    - `missing_viewport`;
    - `unknown`.
 
+   Because `set_overlay_frame` runs on the paint path, only log placement when a
+   pane's backing frame changes. Do not emit per-frame steady-state placement
+   logs.
+
 3. **Add one Roamium boundary log.**
 
    In `roamium/src/dispatch.rs`, log only when a resize/create message is
@@ -1217,6 +1220,15 @@ experiments should add similarly narrow logs for those specific subsystems.
    - tab id;
    - pixel width and height;
    - whether this is initial create or resize.
+
+   Write Roamium trace lines directly to:
+
+   ```text
+   $XDG_STATE_HOME/termsurf/roamium-trace.log
+   ```
+
+   If `XDG_STATE_HOME` is unset, use
+   `$HOME/.local/state/termsurf/roamium-trace.log`.
 
    Do not add new protocol fields and do not change FFI signatures.
 
@@ -1256,7 +1268,9 @@ experiments should add similarly narrow logs for those specific subsystems.
 
    If the variable is unset, behavior and log volume should be unchanged.
 
-   All log extraction should use only the `[issue-779-trace]` prefix.
+   All log extraction should use only the `[issue-779-trace]` prefix. Each
+   component should emit one `trace_enabled component=...` line the first time
+   its trace gate fires.
 
 6. **No behavior changes.**
 
@@ -1290,8 +1304,9 @@ experiments should add similarly narrow logs for those specific subsystems.
      http://localhost:9616/test-native-popups.html
    ```
 
-   Confirm the `web` TUI is visible and usable. If trace-off is already broken,
-   stop: the failure is not caused by the trace experiment.
+   Confirm the `web` TUI is visible and usable, and that no `[issue-779-trace]`
+   lines appear in any log path. If trace-off is already broken, stop: the
+   failure is not caused by the trace experiment.
 
 4. Start local Wezboard with trace enabled and logs in the repo log directory:
 
@@ -1317,6 +1332,7 @@ experiments should add similarly narrow logs for those specific subsystems.
 
    ```bash
    test -f logs/issue-779-exp6-state/termsurf/webtui-trace.log
+   test -f logs/issue-779-exp6-state/termsurf/roamium-trace.log
    test -f logs/issue-779-exp6-state/termsurf/chromium-server.log
    ```
 
@@ -1327,7 +1343,7 @@ experiments should add similarly narrow logs for those specific subsystems.
    - logs contain `webtui` draw, `webtui_chrome_overlap`, `SetOverlay`, Wezboard
      receive, and Wezboard placement lines;
    - `webtui_chrome_overlap` is `false`;
-   - `overlay_chrome_overlap` is `false`.
+   - `wezboard_layer_frame_check` reports `matches_expected=true`.
 
    If the TUI fails to render or is hidden again, stop before clicking native
    controls. The result must use the logs to classify the failure as one of:
@@ -1346,6 +1362,7 @@ experiments should add similarly narrow logs for those specific subsystems.
    rg "\\[issue-779-trace\\]" \
      logs/issue-779-exp6-wezboard.log \
      logs/issue-779-exp6-state/termsurf/webtui-trace.log \
+     logs/issue-779-exp6-state/termsurf/roamium-trace.log \
      logs/issue-779-exp6-state/termsurf/chromium-server.log
    ```
 
@@ -1367,3 +1384,642 @@ experiments should add similarly narrow logs for those specific subsystems.
   source;
 - any geometry, protocol, FFI, popup, focus, input, or lifecycle behavior is
   changed.
+
+**Result:** Fail
+
+Implemented the opt-in trace points without intentionally changing protocol
+fields, FFI signatures, overlay geometry, Chromium bounds, popup placement,
+focus, input, or lifecycle behavior.
+
+Build verification passed:
+
+```bash
+scripts/build.sh webtui
+scripts/build.sh roamium
+scripts/build.sh wezboard
+scripts/build.sh chromium
+```
+
+Manual trace collection showed that the experiment failed to log the only event
+that mattered: the native popup placement itself. The native popup was rendered
+in the wrong place, but the logs contain no `PopupMenuHelper::ShowPopupMenu`
+line and no equivalent native-popup coordinate line.
+
+#### Conclusion
+
+Experiment 6 proved some surrounding paths but failed its diagnostic goal.
+
+What the logs did show:
+
+- `webtui` drew normally, computed viewport `(1,1 158x66)`, and reported no
+  chrome overlap;
+- Wezboard received the same viewport and computed `2212x2112` backing pixels;
+- CALayerHost creation matched the expected frame;
+- Roamium received only the webview size;
+- Chromium created a `WebContents` and logged its TermSurf tab mapping.
+
+What the logs did not show:
+
+- no `PopupMenuHelper::ShowPopupMenu` line;
+- no date/time picker coordinate line;
+- no datalist/autofill popup coordinate line;
+- no AppKit/native popup window coordinate line.
+
+That means the experiment did not identify the divergent coordinate source. The
+next experiment must trace the actual native popup path that fires for the
+reproduction page controls, not just the surrounding overlay and tab lifecycle
+boundaries.
+
+### Experiment 7: Trace Actual Native Popup Paths
+
+#### Description
+
+Add the Chromium logs Experiment 6 failed to capture: the logs at the exact
+native-popup creation and display paths.
+
+Experiment 6 proved that the `web` TUI, Wezboard overlay placement, Roamium tab
+creation, and Chromium `WebContents` creation can all be correlated. It failed
+because no log fired when the native popup actually opened. That means the
+previous hook was either in the wrong popup path or too high-level to observe
+the control used in the reproduction page.
+
+This experiment should keep the working Experiment 6 boundary logs, but add
+Chromium-only popup-path logs at the places that decide popup bounds and hand
+them to AppKit. It must not change popup geometry, Chromium view bounds,
+protocol fields, FFI signatures, webtui behavior, overlay placement, focus, or
+input behavior.
+
+The goal is not to fix the popup yet. The goal is to produce one trace that
+answers these questions:
+
+1. Which Chromium popup path fires for the reproduction control?
+2. What bounds does Chromium compute before AppKit receives the popup?
+3. What `NSView` / `NSWindow` frame does AppKit use when placing the popup?
+4. Where is the first coordinate mismatch relative to the TermSurf overlay
+   frame?
+
+#### Changes
+
+1. **Keep the existing opt-in trace gate.**
+
+   Reuse `TERMSURF_ISSUE_779_TRACE=1` and the `[issue-779-trace]` prefix. Do not
+   emit any new log line unless the env var is set. Cache the env-var check once
+   per process, as in Experiment 6.
+
+2. **Log the renderer-to-browser `<select>` popup request.**
+
+   In `chromium/src/content/browser/renderer_host/render_frame_host_impl.cc`,
+   add one gated log in `RenderFrameHostImpl::ShowPopupMenu`.
+
+   The log should include:
+   - `RenderFrameHostImpl*`;
+   - `WebContents*`, when available;
+   - original renderer `bounds`;
+   - transformed browser-side bounds;
+   - menu item count;
+   - selected item;
+   - the current `RenderWidgetHostView` bounds, when available.
+
+   This tells us whether Blink sent a native select popup request and whether
+   the first browser-process transform is already wrong.
+
+3. **Log the Mac WebContents popup handoff.**
+
+   In `chromium/src/content/browser/web_contents/web_contents_view_mac.mm`, add
+   one gated log in `WebContentsViewMac::ShowPopupMenu`.
+
+   The log should include:
+   - `WebContents*`;
+   - incoming popup bounds;
+   - menu item count;
+   - selected item.
+
+   This confirms whether the Mac `WebContentsView` path is used before the popup
+   reaches the remote Cocoa bridge.
+
+4. **Log the remote Cocoa popup bridge.**
+
+   In
+   `chromium/src/content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.mm`,
+   add one gated log in `RenderWidgetHostNSViewBridge::DisplayPopupMenu`.
+
+   The log should include:
+   - `menu->bounds`;
+   - `menu->selected_item`;
+   - item count;
+   - `cocoa_view_` pointer;
+   - `cocoa_view_.frame`;
+   - `cocoa_view_.bounds`;
+   - `cocoa_view_.window.frame`;
+   - the result of `flipRectToNSRect(menu->bounds)`.
+
+   This is likely the real display path for native `<select>` menus on macOS. If
+   this fires, it gives us the Cocoa view/window coordinate context used for
+   popup placement.
+
+5. **Log the actual AppKit menu runner placement.**
+
+   In `chromium/src/content/app_shim_remote_cocoa/web_menu_runner_mac.mm`, add
+   one gated log in `-[WebMenuRunner runMenuInView:withBounds:initialIndex:]`.
+
+   The log should include:
+   - the `view` pointer passed to the runner;
+   - input `bounds`;
+   - `view.frame`;
+   - `view.bounds`;
+   - `view.window.frame`;
+   - `bounds` converted to window coordinates;
+   - those window coordinates converted to screen coordinates;
+   - `fakeControlView.frame` after it is added;
+   - `fakeControlView.bounds`;
+   - initial index;
+   - item count.
+
+   This is the key log. It records the native AppKit placement data at the point
+   where Chromium creates the fake control view that anchors the native menu.
+
+6. **Log the generic date/time chooser entry if it fires.**
+
+   In `chromium/src/content/browser/date_time_chooser/date_time_chooser.cc`, add
+   one gated log in `DateTimeChooser::OpenDateTimeDialog`.
+
+   The log should include:
+   - `WebContents*`, when available;
+   - dialog type;
+   - current value;
+   - min;
+   - max;
+   - step;
+   - suggestion count.
+
+   If clicking `date`, `time`, or `datetime-local` produces no line here, the
+   result should explicitly say this Chromium path is not used for the macOS
+   native control in our embedding.
+
+7. **Log the datalist/autofill popup request if it fires.**
+
+   In the Chromium autofill popup path, add one gated log at the point where the
+   popup open arguments are created or sent. Start with
+   `components/autofill/core/browser/ui/autofill_external_delegate.cc` and log
+   `AutofillClient::PopupOpenArgs`.
+
+   The log should include:
+   - element bounds;
+   - suggestion count;
+   - trigger/source if available;
+   - `WebContents*` or another stable pointer that can be joined to the existing
+     `chromium_tab_map` line, when available.
+
+   If the exact platform show controller is easy to identify while implementing,
+   add one more gated log there. Do not broaden this into a large autofill
+   investigation.
+
+8. **Do not add new webtui, Wezboard, Roamium, protocol, or FFI logs.**
+
+   Experiment 6 already logs the surrounding TermSurf boundary state. This
+   experiment is only for the native popup paths that were missing.
+
+9. **Keep color picker out of the pass criteria.**
+
+   `<input type="color">` may use `NSColorPanel`, which is a global AppKit panel
+   with different placement behavior. It can be clicked during manual testing,
+   but this experiment should not require color picker logs to pass.
+
+#### Verification
+
+1. Build Chromium and the local binaries using the normal project scripts.
+
+   ```bash
+   scripts/build.sh chromium
+   scripts/build.sh roamium
+   scripts/build.sh webtui
+   scripts/build.sh wezboard
+   ```
+
+2. Start the reproduction server:
+
+   ```bash
+   bun test-html/server.ts
+   ```
+
+3. Start local Wezboard with trace enabled and logs in the repo log directory:
+
+   ```bash
+   mkdir -p logs/issue-779-exp7-state/termsurf
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-779-exp7-state" \
+   RUST_LOG=info \
+     ./wezboard/target/debug/wezboard-gui \
+     2>&1 | tee logs/issue-779-exp7-wezboard.log
+   ```
+
+4. In local Wezboard, run local `web` with local Roamium. Start from a normal
+   remote page first, then navigate to the reproduction page inside the working
+   `web` TUI:
+
+   ```bash
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-779-exp7-state" \
+   /Users/ryan/dev/termsurf/webtui/target/debug/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     ryanxcharles.com
+   ```
+
+   Then navigate to:
+
+   ```text
+   http://localhost:9616/test-native-popups.html
+   ```
+
+5. Click the native `<select>` control first.
+
+   The trace must include at least one of these lines:
+   - `RenderFrameHostImpl::ShowPopupMenu`;
+   - `WebContentsViewMac::ShowPopupMenu`;
+   - `RenderWidgetHostNSViewBridge::DisplayPopupMenu`;
+   - `WebMenuRunner::runMenuInView`.
+
+   A useful trace should include all four. If only the lower Cocoa/AppKit logs
+   fire, that is still enough to identify the real display path.
+
+6. Click the `date`, `time`, `datetime-local`, and datalist controls.
+
+   For each control, record whether a date/time chooser log, autofill log,
+   select-menu log, or no native-popup log fires.
+
+7. Extract the trace:
+
+   ```bash
+   rg -a "\\[issue-779-trace\\]" \
+     logs/issue-779-exp7-wezboard.log \
+     logs/issue-779-exp7-state/termsurf/webtui-trace.log \
+     logs/issue-779-exp7-state/termsurf/roamium-trace.log \
+     logs/issue-779-exp7-state/termsurf/chromium-server.log
+   ```
+
+8. Pass criteria:
+   - trace remains opt-in;
+   - `web` remains visible and usable;
+   - clicking `<select>` emits native-popup placement logs at the actual AppKit
+     display path;
+   - the logs include both Chromium popup bounds and Cocoa window/screen
+     coordinates;
+   - the result names the first coordinate stage that diverges from the TermSurf
+     overlay frame.
+
+9. Fail criteria:
+   - `web` breaks or disappears;
+   - logs emit when `TERMSURF_ISSUE_779_TRACE` is unset;
+   - a native popup opens but none of the new popup-path logs fire;
+   - logs fire but omit the Cocoa view/window/screen coordinates needed to
+     identify the bad coordinate source;
+   - any behavior changes are introduced.
+
+**Result:** Fail
+
+Implemented the Chromium-only popup-path trace hooks and verified that Chromium
+still builds:
+
+```bash
+scripts/build.sh chromium
+```
+
+The manual run reproduced the native popup placement bug, but none of the new
+native-popup trace points fired.
+
+The trace did show:
+
+- Wezboard received the TUI overlay request for pane `0`;
+- Wezboard computed the browser viewport as cell rect `(1,1 158x66)` and backing
+  size `2212x2112`;
+- Wezboard created the CALayerHost at
+  `positioning_frame=(x=14.0 y=40.0 width=1106.0 height=1056.0)`;
+- Wezboard reported `matches_expected=true` for the layer frame;
+- Roamium created a tab for pane `0`;
+- Chromium mapped `tab_id=1` to `webcontents=0xc66c3a000`;
+- Chromium tracing was enabled.
+
+The trace did not show:
+
+- `RenderFrameHostImpl::ShowPopupMenu`;
+- `WebContentsViewMac::ShowPopupMenu`;
+- `PopupMenuHelper::ShowPopupMenu`;
+- `RenderWidgetHostNSViewBridge::DisplayPopupMenu`;
+- `WebMenuRunner::runMenuInView`;
+- `WebMenuRunner::fakeControlView`;
+- `DateTimeChooser::OpenDateTimeDialog`;
+- `AutofillExternalDelegate::ShowSuggestions`.
+
+The Experiment 7 strings were present in the built Chromium output
+`chromium/src/out/Default/libcontent.dylib`, so the missing popup logs were not
+caused by running a stale Chromium build for the instrumented content hooks.
+
+#### Conclusion
+
+Experiment 7 failed to identify the root cause. It proved that the TermSurf
+overlay path and Chromium tab creation path were active, but it did not capture
+the native popup creation path. The instrumented Chromium popup APIs were not
+the path used by the reproduced native popup, or they were bypassed before those
+hooks could run.
+
+The next diagnostic experiment should instrument lower-level Cocoa/AppKit window
+creation, frame changes, and ordering in the Chromium/Roamium process so that
+any native popup window is logged regardless of which Chromium subsystem creates
+it. It should also log the browser-side click/control activation path closely
+enough to prove that the click that opens the native popup reached Chromium.
+
+### Experiment 8: Trace AppKit Windows and Webview Screen Rects
+
+#### Description
+
+Stop guessing Chromium popup subsystems and log the actual AppKit state when a
+native widget appears.
+
+Experiments 6 and 7 proved that the surrounding TermSurf overlay path is active,
+but they did not capture the native popup path. Experiment 7 also proved that
+hooking expected Chromium popup APIs is not reliable enough: the bug reproduced
+without hitting `PopupMenuHelper`, `WebMenuRunner`, `DateTimeChooser`, or the
+Autofill trace hook.
+
+This experiment should therefore log three authoritative coordinate sources:
+
+1. the **Wezboard webview screen rect** where the CALayerHost is actually
+   visible;
+2. Chromium's **believed webview screen rect** from `RenderWidgetHostViewMac`;
+3. the **actual AppKit windows/menus** owned by the Chromium process before and
+   after the click that opens a native widget.
+
+The output must be enough to answer:
+
+```text
+native_popup_window_frame inside wezboard_webview_screen_rect?
+chromium_view_bounds == wezboard_webview_screen_rect?
+```
+
+This remains a diagnostic experiment. It must not change popup placement,
+Chromium bounds, host-window position, protocol fields, FFI signatures, focus,
+input routing, overlay geometry, or TUI behavior.
+
+#### Changes
+
+1. **Keep the existing opt-in trace gate.**
+
+   Reuse `TERMSURF_ISSUE_779_TRACE=1` and `[issue-779-trace]`. Every new log
+   must be gated. Cache the env-var check once per process.
+
+2. **Log Wezboard's authoritative webview screen rect.**
+
+   In `wezboard/wezboard-gui/src/termsurf/conn.rs`, extend the existing
+   Experiment 6 overlay trace in `create_pending_ca_layer_host` and
+   `set_overlay_frame`.
+
+   Log a line named `wezboard_webview_screen_rect` with:
+   - `pane_id`;
+   - local overlay frame in the Wezboard window;
+   - backing-pixel overlay rect;
+   - root view/window frame;
+   - converted screen rect in Cocoa screen coordinates;
+   - scale/dpi.
+
+   The screen rect should be computed with Cocoa conversion APIs from the actual
+   view/layer host context, not by hand-rolling origin math.
+
+3. **Log Chromium's believed webview rect on changes.**
+
+   In
+   `chromium/src/content/browser/renderer_host/render_widget_host_view_mac.mm`,
+   add gated, change-only logs in:
+   - `SetBounds`;
+   - `OnBoundsInWindowChanged`;
+   - `OnWindowFrameInScreenChanged`.
+
+   Log a line named `chromium_webview_bounds` with:
+   - `RenderWidgetHostViewMac*`;
+   - `WebContents*`, when available;
+   - `input_bounds`;
+   - `view_bounds_in_window_dip_`;
+   - `window_frame_in_screen_dip_`;
+   - computed `GetViewBounds()`;
+   - `IsHeadless()`;
+   - whether the view is attached to an `NSWindow`.
+
+   Do not log from `GetViewBounds()` itself on every call. Logging hot getters
+   caused noise in earlier experiments.
+
+4. **Add a Chromium AppKit trace helper.**
+
+   Add a small macOS-only helper in Chromium, preferably under
+   `content/libtermsurf_chromium/`, that can:
+   - test the trace env var;
+   - log `trace_enabled component=chromium-appkit`;
+   - describe an `NSRect`;
+   - describe an `NSWindow`;
+   - enumerate `[NSApp windows]`;
+   - enumerate `CGWindowListCopyWindowInfo` entries for the current process;
+   - install trace observers exactly once.
+
+   The helper should produce stable, grep-friendly lines with one logical event
+   per line.
+
+5. **Log AppKit windows from `[NSApp windows]`.**
+
+   The helper should emit `appkit_nsapp_window` lines containing:
+   - `reason`;
+   - process id;
+   - pointer;
+   - class name;
+   - title;
+   - `frame`;
+   - `contentView.frame`;
+   - `visible`;
+   - `key`;
+   - `main`;
+   - `level`;
+   - `windowNumber`;
+   - parent pointer;
+   - child count;
+   - alpha;
+   - ordered index if available.
+
+   This catches regular AppKit windows and Chromium `NativeWidgetMacNSWindow`
+   instances.
+
+6. **Log actual on-screen windows with `CGWindowListCopyWindowInfo`.**
+
+   The helper should emit `appkit_cgwindow` lines for windows whose owner PID is
+   the Chromium/Roamium process.
+
+   Log:
+   - `reason`;
+   - `kCGWindowNumber`;
+   - owner PID;
+   - owner name;
+   - window name;
+   - layer;
+   - bounds;
+   - alpha;
+   - sharing state;
+   - store type;
+   - whether the CG window bounds are inside the Wezboard webview rect, if the
+     webview rect is known to Chromium.
+
+   `CGWindowListCopyWindowInfo` is important because native AppKit popup windows
+   may not be represented by the Chromium objects guessed in earlier
+   experiments.
+
+7. **Snapshot AppKit state around mouse events.**
+
+   In the Chromium process, install an opt-in local event monitor for mouse
+   events using `NSEvent addLocalMonitorForEventsMatchingMask`.
+
+   On left mouse down and left mouse up, log:
+   - event type;
+   - event window pointer/class/frame;
+   - `locationInWindow`;
+   - modifier flags;
+   - click count.
+
+   Then take AppKit window snapshots:
+   - immediately on left mouse down;
+   - immediately on left mouse up;
+   - 50ms after left mouse up;
+   - 250ms after left mouse up;
+   - 1000ms after left mouse up.
+
+   Each snapshot should enumerate both `[NSApp windows]` and
+   `CGWindowListCopyWindowInfo`.
+
+8. **Observe native menu tracking.**
+
+   Register observers for:
+   - `NSMenuDidBeginTrackingNotification`;
+   - `NSMenuDidEndTrackingNotification`.
+
+   On each notification, log:
+   - notification name;
+   - menu pointer;
+   - menu class;
+   - menu title;
+   - item count;
+   - current event type/location/window;
+   - an immediate AppKit window snapshot.
+
+   This should catch native menu/dropdown behavior even if Chromium's normal
+   select-menu hooks do not fire.
+
+9. **Install the AppKit trace helper during Chromium startup.**
+
+   In TermSurf's Chromium startup path, call the helper once when
+   `TERMSURF_ISSUE_779_TRACE=1`.
+
+   The likely location is
+   `chromium/src/content/libtermsurf_chromium/ts_browser_main_parts.cc`, after
+   AppKit/Chromium browser initialization is active enough that
+   `[NSApplication sharedApplication]` exists.
+
+   The startup log should include:
+
+   ```text
+   appkit_trace_installed pid=... app=... windows_initial_count=...
+   ```
+
+10. **Keep Experiment 7 popup hooks if they are already present.**
+
+    They are not sufficient, but they are harmless and can still provide useful
+    context if a later control happens to use one of those paths.
+
+#### Verification
+
+1. Build local components:
+
+   ```bash
+   scripts/build.sh chromium
+   scripts/build.sh roamium
+   scripts/build.sh webtui
+   scripts/build.sh wezboard
+   ```
+
+2. Start the reproduction server:
+
+   ```bash
+   bun test-html/server.ts
+   ```
+
+3. Start Wezboard with trace enabled:
+
+   ```bash
+   mkdir -p logs/issue-779-exp8-state/termsurf
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-779-exp8-state" \
+   RUST_LOG=info \
+     ./wezboard/target/debug/wezboard-gui \
+     2>&1 | tee logs/issue-779-exp8-wezboard.log
+   ```
+
+4. Inside Wezboard, run local `web` with local Roamium. Start from a normal
+   remote page first:
+
+   ```bash
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-779-exp8-state" \
+   /Users/ryan/dev/termsurf/webtui/target/debug/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     ryanxcharles.com
+   ```
+
+5. Navigate inside the TUI to:
+
+   ```text
+   http://localhost:9616/test-native-popups.html
+   ```
+
+6. Click the native `<select>` control first.
+
+   Confirm logs include:
+   - `wezboard_webview_screen_rect`;
+   - `chromium_webview_bounds`;
+   - `appkit_event`;
+   - `appkit_nsapp_window_snapshot`;
+   - `appkit_cgwindow_snapshot`;
+   - at least one new or changed `appkit_cgwindow` or `appkit_nsapp_window`
+     after the click.
+
+7. Click `date`, `time`, `datetime-local`, and datalist controls.
+
+   For each control, note whether a new native window/menu appears in the AppKit
+   snapshots and whether it is inside or outside the Wezboard webview screen
+   rect.
+
+8. Extract trace logs:
+
+   ```bash
+   rg -a "\\[issue-779-trace\\]" \
+     logs/issue-779-exp8-wezboard.log \
+     logs/issue-779-exp8-state/termsurf/webtui-trace.log \
+     logs/issue-779-exp8-state/termsurf/roamium-trace.log \
+     logs/issue-779-exp8-state/termsurf/chromium-server.log
+   ```
+
+9. Pass criteria:
+   - trace remains opt-in;
+   - `web` remains visible and usable;
+   - the logs include Wezboard's webview screen rect;
+   - the logs include Chromium's believed webview rect;
+   - the logs include AppKit/CGWindow snapshots before and after the click;
+   - the native popup/widget window is identified by class/name/window number or
+     by appearing as a new/changed window after click;
+   - the result can say whether the native window is outside the webview screen
+     rect;
+   - the result can say whether Chromium's believed webview rect differs from
+     Wezboard's webview screen rect.
+
+10. Fail criteria:
+    - `web` breaks or disappears;
+    - logs emit without `TERMSURF_ISSUE_779_TRACE=1`;
+    - a native popup visibly appears but no AppKit/CGWindow snapshot shows a new
+      or changed window;
+    - logs omit either the Wezboard webview screen rect or Chromium's believed
+      webview rect;
+    - the logs still cannot compare native popup position against the webview
+      position;
+    - behavior changes are introduced.
