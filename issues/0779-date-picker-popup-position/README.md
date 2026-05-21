@@ -2170,7 +2170,29 @@ Shell window origin.
    Do not remove the trace logs yet. They are the verification tool for this
    fix. The logs must still be opt-in behind `TERMSURF_ISSUE_779_TRACE=1`.
 
-2. **Use the existing Resize screen rect as the source of truth.**
+2. **Document and preserve the Shell window hiding mechanism first.**
+
+   Before changing `ResizeTab`, identify why the content Shell `NSWindow` is
+   not visible today. The trace must log, at Shell window construction and after
+   the first resize:
+   - `alphaValue`;
+   - `isVisible`;
+   - `level`;
+   - `styleMask`;
+   - `ignoresMouseEvents`;
+   - `collectionBehavior`;
+   - `screen.frame`;
+   - whether the window is key/main;
+   - whether the hidden mode depends on z-order or screen position.
+
+   The initial Experiment 8 trace already showed `alpha=0`, which suggests the
+   Shell is hidden by transparency rather than merely by being behind Wezboard.
+   Experiment 9 must confirm that moving the Shell window does not make it
+   visible, focusable, or mouse-interactive. If invisibility depends on the
+   window's old position or z-order, the implementation must hide first, then
+   move, and must not ship until the hidden state is stable after the move.
+
+3. **Use the existing Resize screen rect as the source of truth.**
 
    In `roamium/src/dispatch.rs`, keep forwarding the full Resize information
    from the TermSurf protocol to the Chromium FFI:
@@ -2182,7 +2204,7 @@ Shell window origin.
    Do not introduce a second protocol message unless the existing Resize path
    cannot carry the needed values.
 
-3. **Update the Chromium FFI resize entrypoint.**
+4. **Update the Chromium FFI resize entrypoint.**
 
    In `roamium/src/ffi.rs` and the matching C API in
    `chromium/src/content/libtermsurf_chromium/`, make sure the resize function
@@ -2193,7 +2215,7 @@ Shell window origin.
    - logical/DIP size used by Chromium;
    - screen rect used for AppKit window placement.
 
-4. **Move the hidden Shell `NSWindow` from `ResizeTab`.**
+5. **Move the hidden Shell `NSWindow` from `ResizeTab`.**
 
    In `chromium/src/content/libtermsurf_chromium/ts_browser_main_parts.*`, when
    `ResizeTab` receives a non-empty screen rect:
@@ -2201,14 +2223,59 @@ Shell window origin.
    - get the content Shell native window for that tab;
    - convert the Resize screen rect into the coordinate convention expected by
      AppKit's `setFrame:display:`;
-   - set the hidden Shell `NSWindow` frame to the overlay screen rect;
+   - skip the move if the target frame equals the current Shell window frame
+     within `0.5` AppKit points on each axis;
+   - set the hidden Shell `NSWindow` frame to the overlay screen rect with
+     `setFrame:display:NO`;
    - keep the window transparent/hidden as before, without ordering it in front
      of Wezboard;
    - resize the WebContents view to the content area inside that Shell window.
 
+   The Resize message carries top-left screen coordinates in Chromium-style
+   screen DIPs. AppKit `NSWindow` frames use bottom-left screen coordinates in
+   screen points. Convert explicitly:
+
+   ```text
+   appkit_x = screen_x
+   appkit_y = primary_screen_frame.height - screen_y - screen_height
+   appkit_width = screen_width
+   appkit_height = screen_height
+   ```
+
+   Use the primary `NSScreen` frame for this first implementation. Multi-screen
+   support can be refined later, but the conversion must be explicit and logged.
+
+   Order matters: apply the Shell window `setFrame:display:NO` first, then call
+   the existing WebContents resize path such as
+   `Shell::ResizeWebContentForTests(logical_size)`. Verify after both calls
+   that the WebContents native view frame has origin `(0, 0)` and size
+   `content_width x content_height` inside the moved Shell window.
+
    The Shell window should move; it should not become visible chrome.
 
-5. **Preserve rendering and webtui behavior.**
+6. **Confirm Chromium's normal window-move propagation fires.**
+
+   Keep or add an opt-in `RenderWidgetHostViewMac::OnWindowFrameInScreenChanged`
+   trace during this experiment. After moving the Shell `NSWindow`, this trace
+   should fire through Chromium's normal AppKit observer path and update
+   `window_frame_in_screen_dip_`.
+
+   If moving the hidden Shell window does not trigger
+   `OnWindowFrameInScreenChanged`, the implementation must record that in the
+   result before considering any fallback.
+
+7. **Prove popup-side anchoring reads the moved Shell window.**
+
+   Keep the Experiment 7/8 `<select>` traces, especially
+   `WebMenuRunner::runMenuInView` and
+   `RenderWidgetHostNSViewBridge::DisplayPopupMenu`. After the fix,
+   `view.window.frame` in the select-menu path must match the Wezboard overlay
+   screen rect within `1` DIP.
+
+   This is the direct proof that AppKit popup placement is reading the moved
+   Shell host window instead of the old default-origin frame.
+
+8. **Preserve rendering and webtui behavior.**
 
    The fix must not:
    - break the `web` TUI;
@@ -2218,20 +2285,21 @@ Shell window origin.
    - alter focus behavior beyond what native popup anchoring requires;
    - make the Shell toolbar visible.
 
-6. **Keep the fallback option explicit.**
+9. **Avoid repeating the failed synthetic-bounds approach.**
 
-   If moving the Shell `NSWindow` is blocked by ownership or lifecycle
-   constraints, the fallback is to add an explicit TermSurf method on the
-   relevant Chromium-side view object that calls the same screen-frame update
-   path Chromium normally receives from AppKit:
+   Experiment 3 already tried synthetic bounds and broke the webtui. Do not
+   casually retry that path in this experiment.
 
-   ```text
-   RenderWidgetHostViewMac::OnWindowFrameInScreenChanged(screen_rect)
-   ```
+   The specific failure to avoid is double-applying screen coordinates by
+   pushing a screen rect through APIs that also update
+   `view_bounds_in_window_dip_`, which made Chromium's view geometry and the TUI
+   overlay disagree.
 
-   This fallback should only be used if moving the real Shell window is proven
-   unsafe or ineffective, because it may fix Chromium's cached bounds while
-   leaving AppKit-native menu paths anchored to the wrong host window.
+   If moving the Shell `NSWindow` proves unsafe or ineffective, the result
+   should say so and the next experiment should investigate that failure. A
+   synthetic `OnWindowFrameInScreenChanged(screen_rect)` method is only
+   acceptable as a separate, explicitly designed follow-up that explains how it
+   differs from the failed Experiment 3 approach.
 
 #### Verification
 
@@ -2275,7 +2343,22 @@ Shell window origin.
    http://localhost:9616/test-native-popups.html
    ```
 
-6. Confirm the trace shows the core geometry now agrees:
+6. Confirm the Shell hiding mechanism before testing popups:
+
+   ```text
+   content_shell_window alphaValue
+   content_shell_window isVisible
+   content_shell_window level
+   content_shell_window styleMask
+   content_shell_window ignoresMouseEvents
+   content_shell_window screen.frame
+   ```
+
+   The Shell window must remain visually hidden/transparent after the first
+   move. Confirm visually that no duplicate Chromium window flashes or peeks
+   over the Wezboard overlay.
+
+7. Confirm the trace shows the core geometry now agrees:
 
    ```text
    wezboard_webview_screen_rect.screen_rect
@@ -2283,10 +2366,21 @@ Shell window origin.
    chromium_webview_bounds.computed_view_bounds
    ```
 
-   These should match within normal rounding tolerance. A difference of one DIP
-   is acceptable; a difference of hundreds or thousands of pixels is failure.
+   These should match within `1` DIP. A difference of hundreds or thousands of
+   pixels is failure.
 
-7. Click the native controls:
+8. Confirm Chromium's move propagation:
+
+   ```text
+   chromium_webview_bounds event=OnWindowFrameInScreenChanged.after
+   ```
+
+   The logged `window_frame_in_screen` and `computed_view_bounds` should reflect
+   the moved Shell window. If this trace does not fire after `setFrame`, the
+   experiment should be treated as incomplete until that propagation path is
+   understood.
+
+9. Click the native controls:
    - `<select>`;
    - `date`;
    - datalist;
@@ -2296,27 +2390,63 @@ Shell window origin.
    Native popups must open inside or adjacent to the visible browser pane, not
    near the old screen origin and not outside the Wezboard window.
 
-8. Extract trace logs:
+10. For `<select>`, confirm the popup-side AppKit anchor:
 
-   ```bash
-   rg -a "\\[issue-779-trace\\]" \
-     logs/issue-779-exp9-wezboard.log \
-     logs/issue-779-exp9-state/termsurf/webtui-trace.log \
-     logs/issue-779-exp9-state/termsurf/roamium-trace.log \
-     logs/issue-779-exp9-state/termsurf/chromium-server.log
-   ```
+    ```text
+    WebMenuRunner::runMenuInView view.window.frame
+    RenderWidgetHostNSViewBridge::DisplayPopupMenu
+    ```
 
-9. Pass criteria:
-   - `web` remains visible and usable;
-   - Chromium's hidden Shell `NSWindow` frame tracks the Wezboard overlay
-     screen rect;
-   - Chromium's computed webview bounds track the Wezboard overlay screen rect;
-   - native controls no longer open near the old `x=0` Shell-window origin;
-   - native controls no longer open outside the visible webview/Wezboard window;
-   - the Shell window remains visually hidden/transparent;
-   - no new flicker, focus regression, or overlay disappearance appears.
+    The `view.window.frame` must match the Wezboard overlay screen rect within
+    `1` DIP.
 
-10. Fail criteria:
+11. Check multiple panes:
+
+    Open two browser panes in different Wezboard splits. In each pane, navigate
+    to the reproduction page and click `<select>`. Each popup must anchor to its
+    own pane's overlay rect, not the other pane and not the old Shell origin.
+
+12. Check DevTools:
+
+    Open DevTools for a browser pane. Verify that the browser pane still anchors
+    native popups correctly after DevTools opens. If DevTools has its own
+    overlay pane, its Shell window should also track its own overlay rect.
+
+13. Check window movement and resize:
+
+    With trace off, drag or resize the Wezboard window for roughly three
+    seconds. The browser overlay should not flicker, the TUI should remain
+    visible, and CPU/frame behavior should be comparable to the baseline before
+    the fix.
+
+14. Extract trace logs:
+
+    ```bash
+    rg -a "\\[issue-779-trace\\]" \
+      logs/issue-779-exp9-wezboard.log \
+      logs/issue-779-exp9-state/termsurf/webtui-trace.log \
+      logs/issue-779-exp9-state/termsurf/roamium-trace.log \
+      logs/issue-779-exp9-state/termsurf/chromium-server.log
+    ```
+
+15. Pass criteria:
+    - `web` remains visible and usable;
+    - Chromium's hidden Shell `NSWindow` frame tracks the Wezboard overlay
+      screen rect within `1` DIP;
+    - Chromium's computed webview bounds track the Wezboard overlay screen rect;
+    - `OnWindowFrameInScreenChanged` fires after the Shell move;
+    - `WebMenuRunner` / select-menu logs show `view.window.frame` matching the
+      overlay rect;
+    - native controls no longer open near the old `x=0` Shell-window origin;
+    - native controls no longer open outside the visible webview/Wezboard
+      window;
+    - the Shell window remains visually hidden/transparent;
+    - two browser panes at different split positions both anchor popups
+      correctly;
+    - DevTools does not regress browser popup anchoring;
+    - no new flicker, focus regression, or overlay disappearance appears.
+
+16. Fail criteria:
     - `web` breaks or disappears;
     - the browser overlay covers the TUI chrome incorrectly;
     - the hidden Shell window remains at the old origin;
@@ -2324,4 +2454,7 @@ Shell window origin.
       more than rounding tolerance;
     - native popups still open outside the visible webview;
     - moving the Shell window makes the hidden Chromium window visible;
+    - moving the Shell window does not trigger Chromium's normal
+      `OnWindowFrameInScreenChanged` path;
+    - two browser panes fight over one Shell window position;
     - Roamium crashes during normal tab close or app shutdown.
