@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-21"
+closed = "2026-05-22"
 +++
 
 # Issue 782: Remaining native popup bugs
@@ -1960,3 +1961,34 @@ mouse events, still appeared in ordered-window snapshots. They did not block the
 Experiment 6 sequence once the main Shell window ignored mouse events, so they
 are not the cause of this shutdown bug. Keep them deferred unless they explain a
 later symptom such as PagePopup alt-tab visibility.
+
+## Conclusion
+
+Issue 782 isolated and fixed the most disruptive remaining native popup bug:
+after a native `<select>` interaction, all later native widgets stopped opening.
+The final root cause was not Blink popup state, Chromium popup helper lifetime,
+input-router state, or Wezboard's Rust forwarding logic. The real problem was
+that the invisible Chromium Shell window overlapped the visible Wezboard overlay
+while still accepting AppKit mouse events.
+
+The fix made TermSurf-managed Chromium Shell windows consistently
+mouse-transparent by setting and reasserting `ignoresMouseEvents=YES` at Shell
+creation, during Shell positioning, and around native select menu cleanup. The
+successful verification showed date, time, color, and select controls continuing
+to open after a select menu was dismissed.
+
+This issue also preserved the earlier Issue 779 placement work: date-family
+PagePopup controls kept their corrected y-axis behavior while the post-select
+shutdown was fixed.
+
+Remaining work should move to a new issue:
+
+- PagePopup controls can remain visible after alt-tab or app deactivation.
+- `<select>` still has the wrong x position, even though its y position is
+  correct.
+- Datalist behavior still needs a clean isolated investigation.
+- The visible `RenderWidgetPopupWindow` entries observed in traces should be
+  revisited only if they explain one of the remaining symptoms.
+
+Closing this issue keeps the completed shutdown fix separate from the next round
+of focused native popup work.
