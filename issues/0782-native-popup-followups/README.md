@@ -1114,7 +1114,37 @@ window event source lives elsewhere.
 
 #### Changes
 
-1. Add a raw window mouse-event entry log in
+1. Add an AppKit/NSView mouse-event entry log in
+   `wezboard/window/src/os/macos/window.rs`.
+
+   In the registered macOS NSView handlers for `mouseDown:`, `mouseUp:`,
+   `rightMouseDown:`, `rightMouseUp:`, `otherMouseDown:`, `otherMouseUp:`, and
+   the corresponding mouse-move path used by `mouseMoved:`/drag events, log the
+   event before it is converted into a Rust `WindowEvent::MouseEvent`.
+
+   For button down/up, log every event. For move/drag, log only a small sampled
+   or rate-limited comparison signal so the trace can prove that movement still
+   reaches AppKit without flooding the log.
+
+   Include:
+   - selector/path name, event type, button number, click count, pressed mouse
+     buttons, and modifier flags;
+   - event `locationInWindow`, view-local coordinates, backing coordinates, and
+     global mouse location;
+   - `[NSApp isActive]`, `[NSApp modalWindow]`, `[window isKeyWindow]`,
+     `[window isMainWindow]`, and `[window firstResponder]` class name;
+   - whether the event is about to dispatch `WindowEvent::MouseEvent`.
+
+   Use a summary line:
+
+   ```text
+   [issue-779-trace] wezboard_mouse_dispatch boundary=appkit_view outcome=entered ...
+   ```
+
+   This is the boundary that distinguishes AppKit swallowing the failed click
+   from Wezboard receiving it but routing it away from browser forwarding.
+
+2. Add a raw window mouse-event entry log in
    `wezboard/wezboard-gui/src/termwindow/mod.rs`.
 
    In the `WindowEvent::MouseEvent(event)` arm, log only mouse down/up and
@@ -1132,9 +1162,9 @@ window event source lives elsewhere.
    ```
 
    This answers whether the failed click reaches Wezboard's window event handler
-   at all.
+   after the AppKit-to-Rust conversion.
 
-2. Add entry and pre-routing logs in
+3. Add entry and pre-routing logs in
    `wezboard/wezboard-gui/src/termwindow/mouseevent.rs`.
 
    At the top of `TermWindow::mouse_event_impl`, log only mouse down/up and
@@ -1163,7 +1193,7 @@ window event source lives elsewhere.
    [issue-779-trace] wezboard_mouse_dispatch boundary=mouse_event_impl outcome=...
    ```
 
-3. Add terminal-routing decision logs in
+4. Add terminal-routing decision logs in
    `wezboard/wezboard-gui/src/termwindow/mouseevent.rs`.
 
    In `TermWindow::mouse_event_terminal`, log immediately before
@@ -1189,7 +1219,7 @@ window event source lives elsewhere.
    [issue-779-trace] wezboard_mouse_dispatch boundary=after_try_forward_mouse outcome=...
    ```
 
-4. Add focus-swallow and terminal-fallback logs in `mouse_event_terminal`.
+5. Add focus-swallow and terminal-fallback logs in `mouse_event_terminal`.
 
    Log every branch that can consume or redirect a click after
    `try_forward_mouse` returns false:
@@ -1208,17 +1238,21 @@ window event source lives elsewhere.
    click-to-focus state, and capture state fields so the successful and failed
    clicks can be compared mechanically.
 
-5. Keep the existing Experiment 3 logs in place for the run.
+6. Keep the existing Experiment 3 logs in place for the run.
 
    The expected trace for a successful date click still includes:
 
    ```text
-   window_event -> mouse_event_impl -> before_try_forward_mouse -> after_try_forward_mouse(forwarded) -> Roamium -> Chromium -> Blink
+   appkit_view -> window_event -> mouse_event_impl -> before_try_forward_mouse -> after_try_forward_mouse(forwarded) -> Roamium -> Chromium -> Blink
    ```
 
    The failed post-select date click should now show one of:
+   - no `appkit_view` log, meaning AppKit or a native menu/responder object
+     swallowed the click before Wezboard's NSView saw it;
+   - `appkit_view` but no `window_event`, meaning Wezboard's macOS event
+     conversion did not dispatch a Rust `WindowEvent::MouseEvent`;
    - no `window_event` log, meaning AppKit/window delivery swallowed the click
-     before Wezboard;
+     before the Rust term window layer;
    - `window_event` but no `mouse_event_impl`, meaning TermWindow dispatch did
      not run;
    - `mouse_event_impl` but no `before_try_forward_mouse`, meaning UI/capture
@@ -1228,18 +1262,20 @@ window event source lives elsewhere.
    - `after_try_forward_mouse=false` followed by focus, binding, or terminal
      fallback logs naming the consumer.
 
-6. Interpret the logs mechanically:
+7. Interpret the logs mechanically:
 
-   | Trace pattern                                               | Diagnosis                                                        |
-   | ----------------------------------------------------------- | ---------------------------------------------------------------- |
-   | No `window_event` for failed click, but moves still forward | Native/AppKit event delivery is losing button events             |
-   | `window_event` only                                         | Wezboard event dispatch stops before `mouse_event_impl`          |
-   | `mouse_event_impl` routes to UI item                        | Hit testing/capture thinks the click is terminal chrome, not web |
-   | `mouse_event_impl` skips terminal route due capture         | Wezboard mouse capture is stuck after select menu dismissal      |
-   | `try_forward_mouse=false` with overlay miss                 | Overlay hit testing disagrees with rendered browser position     |
-   | `try_forward_mouse=false` with no sender/tab                | Browser overlay state was torn down or no active tab was mapped  |
-   | Focus-swallow outcome                                       | Window/pane focus state changed after AppKit menu dismissal      |
-   | Sent to terminal pane                                       | Wezboard is treating the click as terminal input, not web input  |
+   | Trace pattern                                                        | Diagnosis                                                        |
+   | -------------------------------------------------------------------- | ---------------------------------------------------------------- |
+   | No `appkit_view` for failed click, but move samples continue         | AppKit/native menu responder state is losing button events       |
+   | `appkit_view` fires, but no `window_event`                           | macOS event conversion/dispatch dropped the click                |
+   | `window_event` only                                                  | Wezboard event dispatch stops before `mouse_event_impl`          |
+   | `mouse_event_impl` routes to UI item                                 | Hit testing/capture thinks the click is terminal chrome, not web |
+   | `mouse_event_impl` skips terminal route due capture                  | Wezboard mouse capture is stuck after select menu dismissal      |
+   | `try_forward_mouse=false` with overlay miss                          | Overlay hit testing disagrees with rendered browser position     |
+   | `try_forward_mouse=false` with no sender/tab                         | Browser overlay state was torn down or no active tab was mapped  |
+   | Focus-swallow outcome                                                | Window/pane focus state changed after AppKit menu dismissal      |
+   | Sent to terminal pane                                                | Wezboard is treating the click as terminal input, not web input  |
+   | AppKit click count or first responder changes only after select menu | Native select menu teardown disturbed AppKit responder state     |
 
 #### Verification
 
@@ -1291,7 +1327,7 @@ window event source lives elsewhere.
 6. Extract the trace:
 
    ```bash
-   rg -a "\[issue-779-trace\]|wezboard_mouse_dispatch|mouse_forward_boundary|ts_forward_mouse|ForwardMouseEvent|ForwardMouseMove|HandleMousePressEvent|HandleMouseReleaseEvent|DateTimeChooserImpl|MenuListSelectType|PopupMenuClosed|OnMenuClosed" \
+   rg -a "\[issue-779-trace\]|wezboard_mouse_dispatch|appkit_view|window_event|mouse_event_impl|before_try_forward_mouse|after_try_forward_mouse|mouse_forward_boundary|ts_forward_mouse|ForwardMouseEvent|ForwardMouseMove|HandleMousePressEvent|HandleMouseReleaseEvent|DateTimeChooserImpl|MenuListSelectType|PopupMenuClosed|OnMenuClosed" \
      logs/issue-782-exp4-wezboard.log \
      logs/issue-782-exp4-state/termsurf/webtui-trace.log \
      logs/issue-782-exp4-state/termsurf/roamium-trace.log \
@@ -1302,12 +1338,12 @@ window event source lives elsewhere.
 7. Pass criteria:
    - the trace includes the successful pre-select date click, select open/close,
      and failed post-select date click;
-   - the failed click has at least one `wezboard_mouse_dispatch` line;
+   - the trace shows whether the failed click reaches `appkit_view`;
    - the first missing or consuming boundary is identified by an explicit
      `outcome` and `reason`;
-   - the trace distinguishes AppKit/window delivery loss, Wezboard capture/UI
-     routing, focus swallowing, overlay hit-test failure, browser sender state,
-     and terminal fallback.
+   - the trace distinguishes AppKit/native responder loss, macOS-to-Rust event
+     conversion loss, Wezboard capture/UI routing, focus swallowing, overlay
+     hit-test failure, browser sender state, and terminal fallback.
 
 8. Partial criteria:
    - the failed click produces no `wezboard_mouse_dispatch` down/up logs, but
