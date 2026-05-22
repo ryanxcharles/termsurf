@@ -4,7 +4,7 @@
 use super::nsstring_to_str;
 use super::window::WindowInner;
 use crate::connection::ConnectionOps;
-use crate::os::macos::app::create_app_delegate;
+use crate::os::macos::app::{create_app_delegate, install_issue_779_appkit_trace};
 use crate::screen::{ScreenInfo, Screens};
 use crate::spawn::*;
 use crate::Appearance;
@@ -30,6 +30,8 @@ impl Connection {
         // Ensure that the SPAWN_QUEUE is created; it will have nothing
         // to run right now.
         SPAWN_QUEUE.run();
+
+        install_issue_779_appkit_trace();
 
         let mtm = MainThreadMarker::new().unwrap();
         let ns_app = NSApplication::sharedApplication(mtm);

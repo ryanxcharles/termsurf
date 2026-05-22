@@ -18,6 +18,25 @@ struct MouseState {
 
 static MOUSE_STATE: OnceLock<Mutex<MouseState>> = OnceLock::new();
 
+fn issue_779_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("TERMSURF_ISSUE_779_TRACE").is_some())
+}
+
+fn issue_779_trace_log(message: String) {
+    if issue_779_trace_enabled() {
+        log::info!("[issue-779-trace] {}", message);
+    }
+}
+
+macro_rules! issue_779_trace {
+    ($($arg:tt)*) => {
+        if issue_779_trace_enabled() {
+            issue_779_trace_log(format!($($arg)*));
+        }
+    };
+}
+
 fn mouse_state() -> &'static Mutex<MouseState> {
     MOUSE_STATE.get_or_init(|| {
         Mutex::new(MouseState {
@@ -28,6 +47,23 @@ fn mouse_state() -> &'static Mutex<MouseState> {
             drag_pane: None,
         })
     })
+}
+
+fn trace_mouse_kind(event: &MouseEvent) -> Option<(&'static str, &'static str)> {
+    match event.kind {
+        WMEK::Press(MousePress::Left) => Some(("down", "left")),
+        WMEK::Press(MousePress::Right) => Some(("down", "right")),
+        WMEK::Press(MousePress::Middle) => Some(("down", "middle")),
+        WMEK::Release(MousePress::Left) => Some(("up", "left")),
+        WMEK::Release(MousePress::Right) => Some(("up", "right")),
+        WMEK::Release(MousePress::Middle) => Some(("up", "middle")),
+        WMEK::Move if event.mouse_buttons.contains(MouseButtons::LEFT) => Some(("drag", "left")),
+        WMEK::Move if event.mouse_buttons.contains(MouseButtons::RIGHT) => Some(("drag", "right")),
+        WMEK::Move if event.mouse_buttons.contains(MouseButtons::MIDDLE) => {
+            Some(("drag", "middle"))
+        }
+        _ => None,
+    }
 }
 
 fn compute_click_count(x: f64, y: f64) -> i64 {
@@ -154,7 +190,19 @@ pub fn try_forward_key(
 /// Try to forward mouse/scroll event. Returns true if consumed.
 pub fn try_forward_mouse(pane_id: usize, event: &MouseEvent) -> bool {
     let pane_id_str = pane_id.to_string();
+    let trace_kind = trace_mouse_kind(event);
     let Some(state) = super::shared_state() else {
+        if let Some((event_type, button)) = trace_kind {
+            issue_779_trace!(
+                "mouse_forward_boundary boundary=wezboard outcome=dropped reason=no_shared_state pane_id={} event_type={} button={} cell=({}, {}) modifiers={:?}",
+                pane_id,
+                event_type,
+                button,
+                event.coords.x,
+                event.coords.y,
+                event.modifiers
+            );
+        }
         return false;
     };
 
@@ -167,6 +215,18 @@ pub fn try_forward_mouse(pane_id: usize, event: &MouseEvent) -> bool {
     };
 
     if !has_pane || !has_tab {
+        if let Some((event_type, button)) = trace_kind {
+            issue_779_trace!(
+                "mouse_forward_boundary boundary=wezboard outcome=dropped reason={} pane_id={} event_type={} button={} cell=({}, {}) modifiers={:?}",
+                if has_pane { "no_active_tab" } else { "no_pane" },
+                pane_id,
+                event_type,
+                button,
+                event.coords.x,
+                event.coords.y,
+                event.modifiers
+            );
+        }
         return false;
     }
 
@@ -197,6 +257,17 @@ pub fn try_forward_mouse(pane_id: usize, event: &MouseEvent) -> bool {
                         modifiers: mods,
                     }),
                 );
+                issue_779_trace!(
+                    "mouse_forward_boundary boundary=wezboard outcome=forwarded reason=enter_browse_and_send pane_id={} event_type=down button=left cell=({}, {}) overlay_logical=({:.1},{:.1}) click_count={} modifiers={} was_browsing={}",
+                    pane_id,
+                    event.coords.x,
+                    event.coords.y,
+                    rel_x,
+                    rel_y,
+                    cc,
+                    mods,
+                    was_browsing
+                );
                 mouse_state().lock().unwrap().drag_pane = Some(pane_id_str.clone());
                 return true;
             }
@@ -224,6 +295,19 @@ pub fn try_forward_mouse(pane_id: usize, event: &MouseEvent) -> bool {
                         modifiers: mods,
                     }),
                 );
+                issue_779_trace!(
+                    "mouse_forward_boundary boundary=wezboard outcome=forwarded reason=overlay_hit pane_id={} event_type={} button={} cell=({}, {}) overlay_logical=({:.1},{:.1}) click_count={} modifiers={} was_browsing={}",
+                    pane_id,
+                    event_type,
+                    button_str,
+                    event.coords.x,
+                    event.coords.y,
+                    rel_x,
+                    rel_y,
+                    cc,
+                    mods,
+                    was_browsing
+                );
                 mouse_state().lock().unwrap().drag_pane = Some(pane_id_str.clone());
                 return true;
             }
@@ -245,6 +329,17 @@ pub fn try_forward_mouse(pane_id: usize, event: &MouseEvent) -> bool {
                         click_count: 1,
                         modifiers: mods,
                     }),
+                );
+                issue_779_trace!(
+                    "mouse_forward_boundary boundary=wezboard outcome=forwarded reason=overlay_hit pane_id={} event_type=up button={} cell=({}, {}) overlay_logical=({:.1},{:.1}) click_count=1 modifiers={} was_browsing={}",
+                    pane_id,
+                    button_str,
+                    event.coords.x,
+                    event.coords.y,
+                    rel_x,
+                    rel_y,
+                    mods,
+                    was_browsing
                 );
                 mouse_state().lock().unwrap().drag_pane = None;
                 return true;
@@ -320,6 +415,17 @@ pub fn try_forward_mouse(pane_id: usize, event: &MouseEvent) -> bool {
                                     modifiers: mods,
                                 }),
                             );
+                            issue_779_trace!(
+                                "mouse_forward_boundary boundary=wezboard outcome=forwarded reason=drag_release_clamped pane_id={} event_type=up button={} cell=({}, {}) overlay_logical=({:.1},{:.1}) click_count=1 modifiers={} was_browsing={}",
+                                pane_id,
+                                button_str,
+                                event.coords.x,
+                                event.coords.y,
+                                cx,
+                                cy,
+                                mods,
+                                was_browsing
+                            );
                             mouse_state().lock().unwrap().drag_pane = None;
                             return true;
                         }
@@ -339,6 +445,24 @@ pub fn try_forward_mouse(pane_id: usize, event: &MouseEvent) -> bool {
             }
         }
         send_mode_and_focus(&pane_id_str, false);
+    }
+
+    if let Some((event_type, button)) = trace_kind {
+        issue_779_trace!(
+            "mouse_forward_boundary boundary=wezboard outcome=dropped reason={} pane_id={} event_type={} button={} cell=({}, {}) modifiers={:?} was_browsing={}",
+            if was_browsing {
+                "outside_overlay_exit_browse"
+            } else {
+                "outside_overlay"
+            },
+            pane_id,
+            event_type,
+            button,
+            event.coords.x,
+            event.coords.y,
+            event.modifiers,
+            was_browsing
+        );
     }
 
     false

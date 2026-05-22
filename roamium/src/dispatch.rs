@@ -209,22 +209,72 @@ pub fn handle_message(msg: &TermSurfMessage) {
             }
         }
         Msg::MouseEvent(m) => {
+            let mouse_type_value = mouse_type(&m.r#type);
+            let mouse_button_value = mouse_button(&m.button);
             if let Some(t) = find_by_tab_id(m.tab_id) {
+                issue_779_trace!(
+                    "mouse_forward_boundary boundary=roamium outcome=forwarding tab_id={} pane_id={} event_type={} type_value={} button={} button_value={} xy=({:.1},{:.1}) click_count={} modifiers={} handle={:p}",
+                    m.tab_id,
+                    t.pane_id,
+                    m.r#type,
+                    mouse_type_value,
+                    m.button,
+                    mouse_button_value,
+                    m.x,
+                    m.y,
+                    m.click_count,
+                    m.modifiers,
+                    t.handle
+                );
                 unsafe {
                     ffi::ts_forward_mouse_event(
                         t.handle,
-                        mouse_type(&m.r#type),
-                        mouse_button(&m.button),
+                        mouse_type_value,
+                        mouse_button_value,
                         m.x as i32,
                         m.y as i32,
                         m.click_count as i32,
                         m.modifiers as i32,
                     );
                 }
+                issue_779_trace!(
+                    "mouse_forward_boundary boundary=roamium outcome=forwarded tab_id={} pane_id={} event_type={} button={} xy=({:.1},{:.1}) click_count={} modifiers={} handle={:p}",
+                    m.tab_id,
+                    t.pane_id,
+                    m.r#type,
+                    m.button,
+                    m.x,
+                    m.y,
+                    m.click_count,
+                    m.modifiers,
+                    t.handle
+                );
+            } else {
+                issue_779_trace!(
+                    "mouse_forward_boundary boundary=roamium outcome=dropped reason=no_tab tab_id={} event_type={} type_value={} button={} button_value={} xy=({:.1},{:.1}) click_count={} modifiers={}",
+                    m.tab_id,
+                    m.r#type,
+                    mouse_type_value,
+                    m.button,
+                    mouse_button_value,
+                    m.x,
+                    m.y,
+                    m.click_count,
+                    m.modifiers
+                );
             }
         }
         Msg::MouseMove(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
+                issue_779_trace!(
+                    "mouse_forward_boundary boundary=roamium outcome=forwarding path=move tab_id={} pane_id={} xy=({:.1},{:.1}) modifiers={} handle={:p}",
+                    m.tab_id,
+                    t.pane_id,
+                    m.x,
+                    m.y,
+                    m.modifiers,
+                    t.handle
+                );
                 unsafe {
                     ffi::ts_forward_mouse_move(
                         t.handle,
@@ -233,6 +283,14 @@ pub fn handle_message(msg: &TermSurfMessage) {
                         m.modifiers as i32,
                     );
                 }
+            } else {
+                issue_779_trace!(
+                    "mouse_forward_boundary boundary=roamium outcome=dropped path=move reason=no_tab tab_id={} xy=({:.1},{:.1}) modifiers={}",
+                    m.tab_id,
+                    m.x,
+                    m.y,
+                    m.modifiers
+                );
             }
         }
         Msg::ScrollEvent(m) => {

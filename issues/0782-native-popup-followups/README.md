@@ -1683,5 +1683,62 @@ for Chromium-side trace additions.
 9. Fail criteria:
    - the failure does not reproduce;
    - the local monitor or `sendEvent:` hook changes event behavior;
-   - the logs are too noisy to pair the failed click with the preceding select
-     cleanup.
+
+**Result:** Partial.
+
+The failure reproduced. The successful pre-select date click traversed the full
+expected path: Wezboard's `NSApplication sendEvent`, Wezboard
+`NSWindow sendEvent`, `WezboardWindowView.mouseDown:`, Wezboard mouse
+forwarding, Roamium forwarding, Chromium input handling, and Blink's
+`DateTimeChooserImpl`.
+
+The date close click also reached Wezboard's AppKit view path and closed the
+date popup normally. The select click then reached Wezboard, forwarded to
+Chromium, and opened the native AppKit select menu. Select cleanup itself also
+looked healthy: `PopupMenuHelper::PopupMenuClosed` and
+`WebContentsViewMac::OnMenuClosed` fired, and `popup_menu_helper_` was reset.
+
+After the select menu closed, the failed post-select date click produced no
+button-event trace in Wezboard or Chromium. There was no Wezboard
+`NSApplication sendEvent` mouse down/up, no Wezboard `NSWindow sendEvent`, no
+`WezboardWindowView.mouseDown:`, no Wezboard browser-forwarding call, no Roamium
+`ForwardMouseEvent`, no Chromium input-router event, and no Blink
+`DateTimeChooserImpl`. Mouse moves continued to reach Wezboard after the failure
+window, with the Wezboard window still key/main and the first responder still
+`WezboardWindowView`. That means the app was alive and tracking still worked,
+but button events were being intercepted above Wezboard's view.
+
+The decisive new signal came from the Chromium Shell window snapshots around the
+select menu. The hidden Chromium Shell window overlapped the visible Wezboard
+overlay, was visible to AppKit, had `alpha=0.000`, and had
+`ignoresMouseEvents=false` before the select menu opened. The same state was
+still present after `WebMenuRunner::runMenuInView` returned and after
+`WebContentsViewMac::OnMenuClosed` reset the popup helper. In other words, an
+invisible Chromium window was still mouse-active while sitting over the terminal
+overlay.
+
+The Chromium ordered-window snapshot also showed a `RenderWidgetPopupWindow` at
+level `101`, visible and not ignoring mouse events, still present around select
+menu cleanup. That may be a stale or lingering popup window, or it may be normal
+transient popup state that survives long enough to affect targeting. It is
+suspicious but secondary to the main finding that the Shell window itself is
+mouse-active.
+
+#### Conclusion
+
+Experiment 5 identifies the likely cause of the post-select shutdown: button
+events are lost before Wezboard because an invisible Chromium window, and
+possibly a Chromium popup window, can receive mouse events while overlapping the
+Wezboard overlay. The `<select>` interaction does not necessarily flip
+`ignoresMouseEvents` from true to false; the trace shows it was already false
+before select menu open. The select menu likely changes AppKit ordering or event
+targeting so this latent mouse-active hidden window starts winning button hit
+tests.
+
+The next fix should be narrow: make the hidden Chromium Shell window ignore
+mouse events consistently, and reassert that state around Shell movement and
+native menu close. A follow-up should also verify whether the visible
+`RenderWidgetPopupWindow` is expected or stale after popup cleanup.
+
+- the logs are too noisy to pair the failed click with the preceding select
+  cleanup.

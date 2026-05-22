@@ -129,10 +129,50 @@ impl super::TermWindow {
 
     pub fn mouse_event_impl(&mut self, event: MouseEvent, context: &dyn WindowOps) {
         log::trace!("{:?}", event);
+        let trace_kind = super::issue_779_trace_mouse_kind(&event);
         let pane = match self.get_active_pane_or_overlay() {
             Some(pane) => pane,
-            None => return,
+            None => {
+                if let Some((event_type, button)) = trace_kind {
+                    super::issue_779_trace_log(format!(
+                        "wezboard_mouse_dispatch boundary=mouse_event_impl outcome=dropped reason=no_active_pane event_type={} button={} coords=({}, {}) screen=({}, {}) modifiers={:?} capture={:?} current_buttons={:?} click_to_focus_window={} focused_present={}",
+                        event_type,
+                        button,
+                        event.coords.x,
+                        event.coords.y,
+                        event.screen_coords.x,
+                        event.screen_coords.y,
+                        event.modifiers,
+                        self.current_mouse_capture,
+                        self.current_mouse_buttons,
+                        self.is_click_to_focus_window,
+                        self.focused.is_some()
+                    ));
+                }
+                return;
+            }
         };
+
+        if let Some((event_type, button)) = trace_kind {
+            super::issue_779_trace_log(format!(
+                "wezboard_mouse_dispatch boundary=mouse_event_impl outcome=entered event_type={} button={} coords=({}, {}) screen=({}, {}) modifiers={:?} active_pane={} capture={:?} current_buttons={:?} dragging={} window_drag={} click_to_focus_window={} focused_present={} last_ui_item={:?}",
+                event_type,
+                button,
+                event.coords.x,
+                event.coords.y,
+                event.screen_coords.x,
+                event.screen_coords.y,
+                event.modifiers,
+                pane.pane_id(),
+                self.current_mouse_capture,
+                self.current_mouse_buttons,
+                self.dragging.is_some(),
+                self.window_drag_position.is_some(),
+                self.is_click_to_focus_window,
+                self.focused.is_some(),
+                self.last_ui_item
+            ));
+        }
 
         self.current_mouse_event.replace(event.clone());
 
@@ -163,6 +203,19 @@ impl super::TermWindow {
 
         self.last_mouse_coords = (x, y);
 
+        if let Some((event_type, button)) = trace_kind {
+            super::issue_779_trace_log(format!(
+                "wezboard_mouse_dispatch boundary=mouse_event_impl outcome=positioned event_type={} button={} active_pane={} column={} row={} x_pixel_offset={} y_pixel_offset={}",
+                event_type,
+                button,
+                pane.pane_id(),
+                x,
+                y,
+                x_pixel_offset,
+                y_pixel_offset
+            ));
+        }
+
         let mut capture_mouse = false;
 
         match event.kind {
@@ -171,10 +224,30 @@ impl super::TermWindow {
                 self.current_mouse_buttons.retain(|p| p != press);
                 if press == &MousePress::Left && self.window_drag_position.take().is_some() {
                     // Completed a window drag
+                    if let Some((event_type, button)) = trace_kind {
+                        super::issue_779_trace_log(format!(
+                            "wezboard_mouse_dispatch boundary=mouse_event_impl outcome=dropped reason=completed_window_drag event_type={} button={} active_pane={} coords=({}, {})",
+                            event_type,
+                            button,
+                            pane.pane_id(),
+                            event.coords.x,
+                            event.coords.y
+                        ));
+                    }
                     return;
                 }
                 if press == &MousePress::Left && self.dragging.take().is_some() {
                     // Completed a drag
+                    if let Some((event_type, button)) = trace_kind {
+                        super::issue_779_trace_log(format!(
+                            "wezboard_mouse_dispatch boundary=mouse_event_impl outcome=dropped reason=completed_ui_drag event_type={} button={} active_pane={} coords=({}, {})",
+                            event_type,
+                            button,
+                            pane.pane_id(),
+                            event.coords.x,
+                            event.coords.y
+                        ));
+                    }
                     return;
                 }
             }
@@ -260,9 +333,31 @@ impl super::TermWindow {
             None
         };
 
+        if let Some((event_type, button)) = trace_kind {
+            super::issue_779_trace_log(format!(
+                "wezboard_mouse_dispatch boundary=mouse_event_impl outcome=resolved_route event_type={} button={} active_pane={} ui_item={:?} capture={:?} capture_mouse={}",
+                event_type,
+                button,
+                pane.pane_id(),
+                ui_item,
+                self.current_mouse_capture,
+                capture_mouse
+            ));
+        }
+
         if let Some(item) = ui_item.clone() {
             if capture_mouse {
                 self.current_mouse_capture = Some(MouseCapture::UI);
+            }
+            if let Some((event_type, button)) = trace_kind {
+                super::issue_779_trace_log(format!(
+                    "wezboard_mouse_dispatch boundary=mouse_event_impl outcome=routed_to_ui_item event_type={} button={} active_pane={} ui_item={:?} capture={:?}",
+                    event_type,
+                    button,
+                    pane.pane_id(),
+                    item,
+                    self.current_mouse_capture
+                ));
             }
             self.mouse_event_ui_item(item, pane, y, event, context);
         } else if matches!(
@@ -281,6 +376,14 @@ impl super::TermWindow {
                 context,
                 capture_mouse,
             );
+        } else if let Some((event_type, button)) = trace_kind {
+            super::issue_779_trace_log(format!(
+                "wezboard_mouse_dispatch boundary=mouse_event_impl outcome=dropped reason=capture_not_terminal event_type={} button={} active_pane={} capture={:?}",
+                event_type,
+                button,
+                pane.pane_id(),
+                self.current_mouse_capture
+            ));
         }
 
         if prior_ui_item != ui_item {
@@ -695,6 +798,7 @@ impl super::TermWindow {
         context: &dyn WindowOps,
         capture_mouse: bool,
     ) {
+        let trace_kind = super::issue_779_trace_mouse_kind(&event);
         // Raw scroll already forwarded to browser — suppress duplicate.
         if matches!(event.kind, WMEK::VertWheel(_) | WMEK::HorzWheel(_)) && self.raw_scroll_consumed
         {
@@ -703,7 +807,47 @@ impl super::TermWindow {
         }
 
         // Forward to browser overlay if click hits overlay (TermSurf).
-        if crate::termsurf::input::try_forward_mouse(pane.pane_id(), &event) {
+        if let Some((event_type, button)) = trace_kind {
+            let (global_column, global_row) = self.window_cell_position(&event);
+            super::issue_779_trace_log(format!(
+                "wezboard_mouse_dispatch boundary=before_try_forward_mouse outcome=entered event_type={} button={} pane_id={} column={} row={} x_pixel_offset={} y_pixel_offset={} global_column={} global_row={} coords=({}, {}) screen=({}, {}) capture={:?} current_buttons={:?} click_to_focus_window={} focused_present={} capture_mouse={}",
+                event_type,
+                button,
+                pane.pane_id(),
+                position.column,
+                position.row,
+                position.x_pixel_offset,
+                position.y_pixel_offset,
+                global_column,
+                global_row,
+                event.coords.x,
+                event.coords.y,
+                event.screen_coords.x,
+                event.screen_coords.y,
+                self.current_mouse_capture,
+                self.current_mouse_buttons,
+                self.is_click_to_focus_window,
+                self.focused.is_some(),
+                capture_mouse
+            ));
+        }
+        let forwarded_to_browser =
+            crate::termsurf::input::try_forward_mouse(pane.pane_id(), &event);
+        if let Some((event_type, button)) = trace_kind {
+            super::issue_779_trace_log(format!(
+                "wezboard_mouse_dispatch boundary=after_try_forward_mouse outcome={} event_type={} button={} pane_id={} try_forward_mouse_return={}",
+                if forwarded_to_browser {
+                    "forwarded_to_browser"
+                } else {
+                    "not_forwarded"
+                },
+                event_type,
+                button,
+                pane.pane_id(),
+                forwarded_to_browser
+            ));
+        }
+        if forwarded_to_browser {
             context.set_cursor(Some(crate::termsurf::input::cursor_for_pane(
                 pane.pane_id(),
             )));
@@ -793,6 +937,23 @@ impl super::TermWindow {
             false
         };
 
+        if let Some((event_type, button)) = trace_kind {
+            super::issue_779_trace_log(format!(
+                "wezboard_mouse_dispatch boundary=terminal_focus outcome=checked event_type={} button={} pane_id={} is_focused={} focused_present={} click_to_focus_window={} click_to_focus_pane={} swallow_window_focus={} swallow_pane_focus={} pane_focus_follows_mouse={} capture={:?}",
+                event_type,
+                button,
+                pane.pane_id(),
+                is_focused,
+                self.focused.is_some(),
+                self.is_click_to_focus_window,
+                is_click_to_focus_pane,
+                self.config.swallow_mouse_click_on_window_focus,
+                self.config.swallow_mouse_click_on_pane_focus,
+                self.config.pane_focus_follows_mouse,
+                self.current_mouse_capture
+            ));
+        }
+
         if self.focused.is_some() && !is_focused {
             if matches!(&event.kind, WMEK::Press(_))
                 && self.config.swallow_mouse_click_on_window_focus
@@ -801,6 +962,16 @@ impl super::TermWindow {
                 self.is_click_to_focus_window = true;
                 context.invalidate();
                 log::trace!("enter click to focus");
+                if let Some((event_type, button)) = trace_kind {
+                    super::issue_779_trace_log(format!(
+                        "wezboard_mouse_dispatch boundary=terminal_focus outcome=swallowed_window_focus event_type={} button={} pane_id={} is_focused={} focused_present={}",
+                        event_type,
+                        button,
+                        pane.pane_id(),
+                        is_focused,
+                        self.focused.is_some()
+                    ));
+                }
                 return;
             }
         }
@@ -809,6 +980,14 @@ impl super::TermWindow {
             self.is_click_to_focus_window = false;
             context.invalidate();
             log::trace!("exit click to focus");
+            if let Some((event_type, button)) = trace_kind {
+                super::issue_779_trace_log(format!(
+                    "wezboard_mouse_dispatch boundary=terminal_focus outcome=swallowed_window_focus_release event_type={} button={} pane_id={}",
+                    event_type,
+                    button,
+                    pane.pane_id()
+                ));
+            }
             return;
         }
 
@@ -824,6 +1003,17 @@ impl super::TermWindow {
             allow_action,
             event
         );
+        if let Some((event_type, button)) = trace_kind {
+            super::issue_779_trace_log(format!(
+                "wezboard_mouse_dispatch boundary=terminal_focus outcome=allow_action event_type={} button={} pane_id={} allow_action={} is_focused={} click_to_focus_window={}",
+                event_type,
+                button,
+                pane.pane_id(),
+                allow_action,
+                is_focused,
+                self.is_click_to_focus_window
+            ));
+        }
 
         let dims = pane.get_dimensions();
         let stable_row = self
@@ -1040,6 +1230,15 @@ impl super::TermWindow {
                 };
 
                 if let Some(action) = self.input_map.lookup_mouse(event_trigger_type, mouse_mods) {
+                    if let Some((event_type, button)) = trace_kind {
+                        super::issue_779_trace_log(format!(
+                            "wezboard_mouse_dispatch boundary=terminal_fallback outcome=mouse_binding_action event_type={} button={} pane_id={} action={:?}",
+                            event_type,
+                            button,
+                            pane.pane_id(),
+                            action
+                        ));
+                    }
                     self.perform_key_assignment(&pane, &action).ok();
                     return;
                 }
@@ -1087,10 +1286,39 @@ impl super::TermWindow {
             modifiers: event.modifiers,
         };
 
-        if allow_action
-            && !(self.config.swallow_mouse_click_on_pane_focus && is_click_to_focus_pane)
-        {
+        let swallowed_pane_focus =
+            self.config.swallow_mouse_click_on_pane_focus && is_click_to_focus_pane;
+
+        if allow_action && !swallowed_pane_focus {
+            if let Some((event_type, button)) = trace_kind {
+                super::issue_779_trace_log(format!(
+                    "wezboard_mouse_dispatch boundary=terminal_fallback outcome=sent_to_terminal_pane event_type={} button={} pane_id={} term_kind={:?} term_button={:?} column={} row={} allow_action={}",
+                    event_type,
+                    button,
+                    pane.pane_id(),
+                    mouse_event.kind,
+                    mouse_event.button,
+                    mouse_event.x,
+                    mouse_event.y,
+                    allow_action
+                ));
+            }
             pane.mouse_event(mouse_event).ok();
+        } else if let Some((event_type, button)) = trace_kind {
+            super::issue_779_trace_log(format!(
+                "wezboard_mouse_dispatch boundary=terminal_fallback outcome={} event_type={} button={} pane_id={} allow_action={} is_click_to_focus_pane={} swallow_pane_focus={}",
+                if allow_action {
+                    "dropped_terminal_pane_focus"
+                } else {
+                    "allow_action_false"
+                },
+                event_type,
+                button,
+                pane.pane_id(),
+                allow_action,
+                is_click_to_focus_pane,
+                self.config.swallow_mouse_click_on_pane_focus
+            ));
         }
 
         match event.kind {

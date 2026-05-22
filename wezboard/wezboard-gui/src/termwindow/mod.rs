@@ -58,7 +58,7 @@ use std::collections::{HashMap, HashSet, LinkedList};
 use std::ops::Add;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use termwiz::hyperlink::Hyperlink;
 use termwiz::surface::SequenceNo;
@@ -87,6 +87,38 @@ use crate::spawn::SpawnWhere;
 use prevcursor::PrevCursorPos;
 
 const ATLAS_SIZE: usize = 128;
+
+fn issue_779_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("TERMSURF_ISSUE_779_TRACE").is_some())
+}
+
+fn issue_779_trace_log(message: String) {
+    if issue_779_trace_enabled() {
+        log::info!("[issue-779-trace] {}", message);
+    }
+}
+
+fn issue_779_trace_mouse_kind(event: &MouseEvent) -> Option<(&'static str, &'static str)> {
+    match event.kind {
+        MouseEventKind::Press(MousePress::Left) => Some(("down", "left")),
+        MouseEventKind::Press(MousePress::Right) => Some(("down", "right")),
+        MouseEventKind::Press(MousePress::Middle) => Some(("down", "middle")),
+        MouseEventKind::Release(MousePress::Left) => Some(("up", "left")),
+        MouseEventKind::Release(MousePress::Right) => Some(("up", "right")),
+        MouseEventKind::Release(MousePress::Middle) => Some(("up", "middle")),
+        MouseEventKind::Move if event.mouse_buttons.contains(MouseButtons::LEFT) => {
+            Some(("drag", "left"))
+        }
+        MouseEventKind::Move if event.mouse_buttons.contains(MouseButtons::RIGHT) => {
+            Some(("drag", "right"))
+        }
+        MouseEventKind::Move if event.mouse_buttons.contains(MouseButtons::MIDDLE) => {
+            Some(("drag", "middle"))
+        }
+        _ => None,
+    }
+}
 
 lazy_static::lazy_static! {
     static ref WINDOW_CLASS: Mutex<String> = Mutex::new(wezboard_gui_subcommands::DEFAULT_WINDOW_CLASS.to_owned());
@@ -960,6 +992,22 @@ impl TermWindow {
                 Ok(true)
             }
             WindowEvent::MouseEvent(event) => {
+                if let Some((event_type, button)) = issue_779_trace_mouse_kind(&event) {
+                    issue_779_trace_log(format!(
+                        "wezboard_mouse_dispatch boundary=window_event outcome=entered event_type={} button={} coords=({}, {}) screen=({}, {}) modifiers={:?} active_pane={} click_to_focus_window={}",
+                        event_type,
+                        button,
+                        event.coords.x,
+                        event.coords.y,
+                        event.screen_coords.x,
+                        event.screen_coords.y,
+                        event.modifiers,
+                        self.get_active_pane_or_overlay()
+                            .map(|pane| pane.pane_id().to_string())
+                            .unwrap_or_else(|| "none".to_string()),
+                        self.is_click_to_focus_window
+                    ));
+                }
                 self.mouse_event_impl(event, window);
                 Ok(true)
             }

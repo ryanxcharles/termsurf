@@ -78,6 +78,8 @@ use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
 use std::time::Instant;
 use wezboard_font::FontConfiguration;
 use wezboard_input_types::{is_ascii_control, IntegratedTitleButtonStyle, KeyboardLedStatus};
@@ -1557,6 +1559,172 @@ unsafe fn get_view_class_name(id: id) -> Option<String> {
     }
 }
 
+fn issue_779_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("TERMSURF_ISSUE_779_TRACE").is_some())
+}
+
+fn issue_779_trace_log(message: String) {
+    if issue_779_trace_enabled() {
+        log::info!("[issue-779-trace] {}", message);
+    }
+}
+
+fn issue_779_trace_rect(rect: CGRect) -> String {
+    format!(
+        "{{{{{:.1}, {:.1}}}, {{{:.1}, {:.1}}}}}",
+        rect.origin.x, rect.origin.y, rect.size.width, rect.size.height
+    )
+}
+
+fn issue_779_should_trace_nsevent(event_type: isize) -> bool {
+    matches!(event_type, 1 | 2 | 3 | 4 | 25 | 26) || {
+        static MOVE_SAMPLE: AtomicUsize = AtomicUsize::new(0);
+        matches!(event_type, 5 | 6 | 7 | 27)
+            && MOVE_SAMPLE.fetch_add(1, Ordering::Relaxed) % 20 == 0
+    }
+}
+
+unsafe fn issue_779_window_summary(window: id) -> String {
+    if window.is_null() {
+        return "window=null".to_string();
+    }
+
+    let window_number: isize = objc2::msg_send![window as *const AnyObject, windowNumber];
+    let frame: CGRect = objc2::msg_send![window as *const AnyObject, frame];
+    let level: isize = objc2::msg_send![window as *const AnyObject, level];
+    let is_visible: Bool = objc2::msg_send![window as *const AnyObject, isVisible];
+    let ignores_mouse: Bool = objc2::msg_send![window as *const AnyObject, ignoresMouseEvents];
+    let is_key: Bool = objc2::msg_send![window as *const AnyObject, isKeyWindow];
+    let is_main: Bool = objc2::msg_send![window as *const AnyObject, isMainWindow];
+    let content_view: id = objc2::msg_send![window as *const AnyObject, contentView];
+    let first_responder: id = objc2::msg_send![window as *const AnyObject, firstResponder];
+    let parent_window: id = objc2::msg_send![window as *const AnyObject, parentWindow];
+    let child_windows: id = objc2::msg_send![window as *const AnyObject, childWindows];
+    let child_count: usize = if child_windows.is_null() {
+        0
+    } else {
+        objc2::msg_send![child_windows as *const AnyObject, count]
+    };
+
+    format!(
+        "window={:p} window_class={} window_number={} window_frame={} window_level={} window_is_visible={} window_ignores_mouse={} window_is_key={} window_is_main={} content_view={} first_responder={} parent_window={:p} child_window_count={}",
+        window,
+        get_view_class_name(window).unwrap_or_else(|| "unknown".to_string()),
+        window_number,
+        issue_779_trace_rect(frame),
+        level,
+        is_visible.as_bool(),
+        ignores_mouse.as_bool(),
+        is_key.as_bool(),
+        is_main.as_bool(),
+        get_view_class_name(content_view).unwrap_or_else(|| "none".to_string()),
+        get_view_class_name(first_responder).unwrap_or_else(|| "none".to_string()),
+        parent_window,
+        child_count
+    )
+}
+
+unsafe fn issue_779_ordered_windows_summary(prefix: &str) -> String {
+    let ns_app: id = objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
+    let windows: id = objc2::msg_send![ns_app as *const AnyObject, orderedWindows];
+    if windows.is_null() {
+        return format!("{prefix}=null");
+    }
+    let count: usize = objc2::msg_send![windows as *const AnyObject, count];
+    let limit = count.min(3);
+    let mut parts = Vec::with_capacity(limit);
+    for index in 0..limit {
+        let window: id = objc2::msg_send![windows as *const AnyObject, objectAtIndex: index];
+        let window_number: isize = objc2::msg_send![window as *const AnyObject, windowNumber];
+        let frame: CGRect = objc2::msg_send![window as *const AnyObject, frame];
+        let level: isize = objc2::msg_send![window as *const AnyObject, level];
+        let is_visible: Bool = objc2::msg_send![window as *const AnyObject, isVisible];
+        let ignores_mouse: Bool = objc2::msg_send![window as *const AnyObject, ignoresMouseEvents];
+        parts.push(format!(
+            "{}:{:p}:{}:{}:{}:{}:{}",
+            index,
+            window,
+            get_view_class_name(window).unwrap_or_else(|| "unknown".to_string()),
+            window_number,
+            issue_779_trace_rect(frame),
+            level,
+            is_visible.as_bool() && !ignores_mouse.as_bool()
+        ));
+    }
+    format!("{prefix}_count={} {prefix}_top3={}", count, parts.join("|"))
+}
+
+extern "C" fn window_send_event(this_raw: *mut AnyObject, _sel: Sel, nsevent_ao: *mut AnyObject) {
+    let this = unsafe { &mut *(this_raw as *mut AnyObject) };
+    unsafe {
+        trace_window_send_event("before", this, nsevent_ao);
+        let superclass = superclass(this);
+        let () = objc2::msg_send![
+            super(this as *const _ as *const _ as *const AnyObject, superclass),
+            sendEvent: nsevent_ao
+        ];
+        trace_window_send_event("after", this, nsevent_ao);
+    }
+}
+
+unsafe fn trace_window_send_event(phase: &str, window: &mut AnyObject, nsevent: id) {
+    if !issue_779_trace_enabled() || nsevent.is_null() {
+        return;
+    }
+    let event_type: isize = objc2::msg_send![nsevent as *const AnyObject, type];
+    if !issue_779_should_trace_nsevent(event_type) {
+        return;
+    }
+
+    let window_id = window as *mut AnyObject as id;
+    let event_window: id = objc2::msg_send![nsevent as *const AnyObject, window];
+    let location: CGPoint = objc2::msg_send![nsevent as *const AnyObject, locationInWindow];
+    let button_number: isize = objc2::msg_send![nsevent as *const AnyObject, buttonNumber];
+    let click_count: isize = objc2::msg_send![nsevent as *const AnyObject, clickCount];
+    let pressed_buttons: u64 = objc2::msg_send![objc2::class!(NSEvent), pressedMouseButtons];
+    let modifier_flags: NSEventModifierFlags =
+        objc2::msg_send![nsevent as *const AnyObject, modifierFlags];
+    let timestamp: f64 = objc2::msg_send![nsevent as *const AnyObject, timestamp];
+    let event_number: isize = objc2::msg_send![nsevent as *const AnyObject, eventNumber];
+    let content_view: id = objc2::msg_send![window_id as *const AnyObject, contentView];
+    let (hit_view, hit_point) = if content_view.is_null() {
+        (std::ptr::null_mut(), CGPoint::new(0., 0.))
+    } else {
+        let point: CGPoint = objc2::msg_send![
+            content_view as *const AnyObject,
+            convertPoint: location,
+            fromView: std::ptr::null::<AnyObject>()
+        ];
+        let view: id = objc2::msg_send![content_view as *const AnyObject, hitTest: point];
+        (view, point)
+    };
+
+    issue_779_trace_log(format!(
+        "wezboard_appkit_dispatch boundary=nswindow_send_event phase={} event={:p} event_type={} button_number={} click_count={} pressed_buttons={} modifiers_raw={:?} timestamp={:.6} event_number={} location_in_window=({:.1},{:.1}) hit_point=({:.1},{:.1}) event_window_same={} window_summary=\"{}\" event_window_summary=\"{}\" hit_view={:p} hit_view_class={} hit_view_is_wezboard={} {}",
+        phase,
+        nsevent,
+        event_type,
+        button_number,
+        click_count,
+        pressed_buttons,
+        modifier_flags,
+        timestamp,
+        event_number,
+        location.x,
+        location.y,
+        hit_point.x,
+        hit_point.y,
+        event_window == window_id,
+        issue_779_window_summary(window_id),
+        issue_779_window_summary(event_window),
+        hit_view,
+        get_view_class_name(hit_view).unwrap_or_else(|| "none".to_string()),
+        get_view_class_name(hit_view).is_some_and(|name| name == "WezboardWindowView"),
+        issue_779_ordered_windows_summary("ordered_windows")
+    ));
+}
+
 fn get_titlebar_view_container(window: &Retained<AnyObject>) -> Option<Retained<AnyObject>> {
     // The view container for the titlebar on macos is found next to the primary window view
     // so we need to traverse up to the super view to find it
@@ -2001,6 +2169,10 @@ fn get_window_class() -> &'static AnyClass {
             cls.add_method(
                 objc2::sel!(canBecomeMainWindow),
                 yes as extern "C" fn(*mut AnyObject, Sel) -> Bool,
+            );
+            cls.add_method(
+                objc2::sel!(sendEvent:),
+                window_send_event as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject),
             );
         }
 
@@ -2456,16 +2628,115 @@ impl WindowView {
         }
     }
 
-    fn mouse_common(this: &mut AnyObject, nsevent: id, kind: MouseEventKind) {
+    fn mouse_kind_trace(kind: &MouseEventKind) -> (&'static str, &'static str) {
+        match kind {
+            MouseEventKind::Press(MousePress::Left) => ("down", "left"),
+            MouseEventKind::Press(MousePress::Right) => ("down", "right"),
+            MouseEventKind::Press(MousePress::Middle) => ("down", "middle"),
+            MouseEventKind::Release(MousePress::Left) => ("up", "left"),
+            MouseEventKind::Release(MousePress::Right) => ("up", "right"),
+            MouseEventKind::Release(MousePress::Middle) => ("up", "middle"),
+            MouseEventKind::Move => ("move", "none"),
+            MouseEventKind::VertWheel(_) | MouseEventKind::HorzWheel(_) => ("wheel", "none"),
+        }
+    }
+
+    fn trace_appkit_mouse_event(
+        selector_name: &'static str,
+        this: &mut AnyObject,
+        nsevent: id,
+        kind: &MouseEventKind,
+        view_point: CGPoint,
+        backing_point: CGPoint,
+        screen_point: CGPoint,
+        pressed_buttons: u64,
+        modifier_flags: NSEventModifierFlags,
+        will_dispatch: bool,
+    ) {
+        if !issue_779_trace_enabled() {
+            return;
+        }
+
+        let (event_type, button) = Self::mouse_kind_trace(kind);
+        if event_type == "move" {
+            static MOVE_SAMPLE: AtomicUsize = AtomicUsize::new(0);
+            if MOVE_SAMPLE.fetch_add(1, Ordering::Relaxed) % 20 != 0 {
+                return;
+            }
+        }
+
+        unsafe {
+            let view = this as id;
+            let window: id = objc2::msg_send![view as *const _ as *const AnyObject, window];
+            let location: CGPoint =
+                objc2::msg_send![nsevent as *const _ as *const AnyObject, locationInWindow];
+            let button_number: isize =
+                objc2::msg_send![nsevent as *const _ as *const AnyObject, buttonNumber];
+            let click_count: isize =
+                objc2::msg_send![nsevent as *const _ as *const AnyObject, clickCount];
+            let ns_app: id = objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
+            let app_is_active: Bool =
+                objc2::msg_send![ns_app as *const _ as *const AnyObject, isActive];
+            let modal_window: id =
+                objc2::msg_send![ns_app as *const _ as *const AnyObject, modalWindow];
+            let (window_is_key, window_is_main, first_responder) = if window.is_null() {
+                (false, false, std::ptr::null_mut())
+            } else {
+                let is_key: Bool =
+                    objc2::msg_send![window as *const _ as *const AnyObject, isKeyWindow];
+                let is_main: Bool =
+                    objc2::msg_send![window as *const _ as *const AnyObject, isMainWindow];
+                let responder: id =
+                    objc2::msg_send![window as *const _ as *const AnyObject, firstResponder];
+                (is_key.as_bool(), is_main.as_bool(), responder)
+            };
+
+            issue_779_trace_log(format!(
+                "wezboard_mouse_dispatch boundary=appkit_view outcome=entered selector={} event_type={} button={} button_number={} click_count={} pressed_buttons={} modifiers_raw={:?} location_in_window=({:.1},{:.1}) view_point=({:.1},{:.1}) backing_point=({:.1},{:.1}) screen_point=({:.1},{:.1}) app_is_active={} has_modal_window={} modal_window_class={} window_is_key={} window_is_main={} first_responder={} will_dispatch_window_event={}",
+                selector_name,
+                event_type,
+                button,
+                button_number,
+                click_count,
+                pressed_buttons,
+                modifier_flags,
+                location.x,
+                location.y,
+                view_point.x,
+                view_point.y,
+                backing_point.x,
+                backing_point.y,
+                screen_point.x,
+                screen_point.y,
+                app_is_active.as_bool(),
+                !modal_window.is_null(),
+                get_view_class_name(modal_window).unwrap_or_else(|| "none".to_string()),
+                window_is_key,
+                window_is_main,
+                get_view_class_name(first_responder).unwrap_or_else(|| "none".to_string()),
+                will_dispatch
+            ));
+        }
+    }
+
+    fn mouse_common(
+        selector_name: &'static str,
+        this: &mut AnyObject,
+        nsevent: id,
+        kind: MouseEventKind,
+    ) {
         let view = this as id;
         let coords;
         let mouse_buttons;
         let modifiers;
         let screen_coords;
+        let point: CGPoint;
+        let pressed: u64;
+        let modifier_flags: NSEventModifierFlags;
         unsafe {
             let location: CGPoint =
                 objc2::msg_send![nsevent as *const _ as *const AnyObject, locationInWindow];
-            let point: CGPoint = objc2::msg_send![view as *const _ as *const AnyObject, convertPoint: location, fromView: std::ptr::null::<AnyObject>()];
+            point = objc2::msg_send![view as *const _ as *const AnyObject, convertPoint: location, fromView: std::ptr::null::<AnyObject>()];
             let rect = CGRect::new(CGPoint::new(0., 0.), CGSize::new(point.x, point.y));
             let backing_rect: CGRect =
                 objc2::msg_send![view as *const _ as *const AnyObject, convertRectToBacking: rect];
@@ -2475,14 +2746,26 @@ impl WindowView {
                 f64::copysign(backing_rect.size.width, point.x),
                 f64::copysign(backing_rect.size.height, point.y),
             );
-            let pressed: u64 = objc2::msg_send![objc2::class!(NSEvent), pressedMouseButtons];
+            pressed = objc2::msg_send![objc2::class!(NSEvent), pressedMouseButtons];
             mouse_buttons = decode_mouse_buttons(pressed);
-            let modifier_flags: NSEventModifierFlags =
+            modifier_flags =
                 objc2::msg_send![nsevent as *const _ as *const AnyObject, modifierFlags];
             modifiers = key_modifiers(modifier_flags);
             let mouse_loc: CGPoint = objc2::msg_send![objc2::class!(NSEvent), mouseLocation];
             screen_coords = CGPoint::new(mouse_loc.x, mouse_loc.y);
         }
+        Self::trace_appkit_mouse_event(
+            selector_name,
+            this,
+            nsevent,
+            &kind,
+            point,
+            coords,
+            screen_coords,
+            pressed,
+            modifier_flags,
+            true,
+        );
         let event = MouseEvent {
             kind,
             coords: Point::new(coords.x as isize, coords.y as isize),
@@ -2500,18 +2783,33 @@ impl WindowView {
     extern "C" fn mouse_up(this_raw: *mut AnyObject, _sel: Sel, nsevent_ao: *mut AnyObject) {
         let this = unsafe { &mut *(this_raw as *mut AnyObject) };
         let nsevent = nsevent_ao as id;
-        Self::mouse_common(this, nsevent, MouseEventKind::Release(MousePress::Left));
+        Self::mouse_common(
+            "mouseUp:",
+            this,
+            nsevent,
+            MouseEventKind::Release(MousePress::Left),
+        );
     }
 
     extern "C" fn mouse_down(this_raw: *mut AnyObject, _sel: Sel, nsevent_ao: *mut AnyObject) {
         let this = unsafe { &mut *(this_raw as *mut AnyObject) };
         let nsevent = nsevent_ao as id;
-        Self::mouse_common(this, nsevent, MouseEventKind::Press(MousePress::Left));
+        Self::mouse_common(
+            "mouseDown:",
+            this,
+            nsevent,
+            MouseEventKind::Press(MousePress::Left),
+        );
     }
     extern "C" fn right_mouse_up(this_raw: *mut AnyObject, _sel: Sel, nsevent_ao: *mut AnyObject) {
         let this = unsafe { &mut *(this_raw as *mut AnyObject) };
         let nsevent = nsevent_ao as id;
-        Self::mouse_common(this, nsevent, MouseEventKind::Release(MousePress::Right));
+        Self::mouse_common(
+            "rightMouseUp:",
+            this,
+            nsevent,
+            MouseEventKind::Release(MousePress::Right),
+        );
     }
 
     extern "C" fn other_mouse_up(this_raw: *mut AnyObject, _sel: Sel, nsevent_ao: *mut AnyObject) {
@@ -2524,7 +2822,12 @@ impl WindowView {
             // Button 2 is the middle mouse button (scroll wheel)
             // but is the dedicated middle mouse button on 4 button mouses
             if button_number == 2 {
-                Self::mouse_common(this, nsevent, MouseEventKind::Release(MousePress::Middle));
+                Self::mouse_common(
+                    "otherMouseUp:",
+                    this,
+                    nsevent,
+                    MouseEventKind::Release(MousePress::Middle),
+                );
             }
         }
     }
@@ -2659,7 +2962,7 @@ impl WindowView {
         } else {
             MouseEventKind::HorzWheel(round_away_from_zero(horz_delta))
         };
-        Self::mouse_common(this, nsevent, kind);
+        Self::mouse_common("scrollWheel:", this, nsevent, kind);
     }
 
     extern "C" fn right_mouse_down(
@@ -2669,7 +2972,12 @@ impl WindowView {
     ) {
         let this = unsafe { &mut *(this_raw as *mut AnyObject) };
         let nsevent = nsevent_ao as id;
-        Self::mouse_common(this, nsevent, MouseEventKind::Press(MousePress::Right));
+        Self::mouse_common(
+            "rightMouseDown:",
+            this,
+            nsevent,
+            MouseEventKind::Press(MousePress::Right),
+        );
     }
 
     extern "C" fn other_mouse_down(
@@ -2685,7 +2993,12 @@ impl WindowView {
                 objc2::msg_send![nsevent as *const _ as *const AnyObject, buttonNumber];
             // See `other_mouse_up`
             if button_number == 2 {
-                Self::mouse_common(this, nsevent, MouseEventKind::Press(MousePress::Middle));
+                Self::mouse_common(
+                    "otherMouseDown:",
+                    this,
+                    nsevent,
+                    MouseEventKind::Press(MousePress::Middle),
+                );
             }
         }
     }
@@ -2697,7 +3010,7 @@ impl WindowView {
     ) {
         let this = unsafe { &mut *(this_raw as *mut AnyObject) };
         let nsevent = nsevent_ao as id;
-        Self::mouse_common(this, nsevent, MouseEventKind::Move);
+        Self::mouse_common("mouseMovedOrDragged:", this, nsevent, MouseEventKind::Move);
     }
 
     extern "C" fn mouse_exited(this_raw: *mut AnyObject, _sel: Sel, _nsevent_ao: *mut AnyObject) {
