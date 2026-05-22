@@ -406,3 +406,339 @@ boundary in the second popup-open attempt.
     - the trace cannot distinguish input delivery, Blink activation, Chromium
       popup suppression, and AppKit menu cleanup;
     - the experiment changes popup behavior instead of only adding logs.
+
+**Result:** Partial
+
+The failure reproduced. After opening the `<select>` menu once and clicking away
+to dismiss it, subsequent native widgets stopped opening for the duration of the
+session.
+
+The trace was useful. Before the select interaction, the date/PagePopup path
+opened and cleaned up normally:
+
+- `DateTimeChooserImpl::ctor.before_open`
+- `WebViewImpl::OpenPagePopup`
+- `WebContentsImpl::ShowCreatedWidget`
+- `RenderWidgetHostViewMac::InitAsPopup`
+- `WebViewImpl::CleanupPagePopup.after page_popup_after=0`
+
+The select path also opened and cleaned up normally:
+
+- `MenuListSelectType::ShowPopup`
+- `ExternalPopupMenu::ShowInternal`
+- `RenderFrameHostImpl::ShowPopupMenu`
+- `WebContentsViewMac::ShowPopupMenu`
+- `PopupMenuHelper::PopupMenuClosed`
+- `WebContentsViewMac::OnMenuClosed.after popup_menu_helper_after_reset=0`
+- `SetNativePopupIsVisible native_popup_is_visible_after=0`
+
+This rules out the simplest browser-side cleanup theory: `popup_menu_helper_`
+does not remain alive after the select menu closes. Blink also clears the
+select's native popup visible state.
+
+After the select menu closes, mouse clicks still reach Chromium:
+
+```text
+RouteOrProcessMouseEvent event_type=MouseDown ... has_webcontents=1 should_route=1
+RouteOrProcessMouseEvent event_type=MouseUp ... has_webcontents=1 should_route=1
+```
+
+But those post-select clicks no longer produce any native-control activation
+logs:
+
+- no `DateTimeChooserImpl::ctor.before_open`
+- no `MenuListSelectType::ShowPopup`
+- no `ExternalPopupMenu::ShowInternal`
+- no `RenderFrameHostImpl::ShowPopupMenu`
+- no `WebContentsImpl::ShowCreatedWidget`
+
+The chain therefore stops after Chromium receives the mouse event, but before
+Blink's form-control popup activation paths run. The bug is not missing input
+delivery, not a stuck `popup_menu_helper_`, and not a browser-side popup-open
+suppression. It is somewhere in the renderer-side hit-test/focus/activation path
+after an AppKit select-menu dismissal.
+
+One trace hygiene issue surfaced: the `display_popup_menu_sent` log in
+`PopupMenuHelper::ShowPopupMenu` runs after `DisplayPopupMenu`, even though the
+helper may already have been deleted reentrantly by the menu-close callback.
+That log must be removed or moved before committing the trace patch. It does not
+change the diagnostic conclusion.
+
+#### Conclusion
+
+Experiment 1 narrows the post-select shutdown bug to the renderer activation
+boundary. The next experiment should trace the delivered mouse event through
+Blink hit-testing, focus handling, and form-control activation to find why a
+click that reaches Chromium no longer invokes `DateTimeChooserImpl`,
+`MenuListSelectType::ShowPopup`, or related native popup entry points after the
+select menu is dismissed.
+
+### Experiment 2: Trace Blink activation after select dismissal
+
+Experiment 1 proved that clicks still reach Chromium after the `<select>` menu
+is dismissed, but Blink no longer reaches the native popup entry points. This
+experiment traces the same click inside Blink: event entry, hit testing,
+dispatch/default action, focus state, user activation, and form-control
+activation gates.
+
+The leading hypothesis is a modal-loop input-state imbalance: the AppKit
+`NSMenu` used for `<select>` may consume the mouse-up or dismissal event while
+Blink still believes the original select-opening press is active. If Blink's
+`EventHandler` remains stuck with `mouse_pressed_ = true` and
+`mouse_down_node_ = <select>`, later clicks can reach Chromium but fail to start
+a fresh click sequence or synthesize a normal `click` event for form controls.
+
+This is still a logs-only experiment. Do not change popup behavior. Use the
+existing `TERMSURF_ISSUE_779_TRACE=1` trace gate and the existing
+`148.0.7778.97-issue-782` Chromium branch.
+
+#### Changes
+
+1. **Clean up the Experiment 1 unsafe trace line first.**
+
+   In `content/browser/renderer_host/popup_menu_helper_mac.mm`, remove or move
+   the `display_popup_menu_sent` log that currently runs after
+   `DisplayPopupMenu`. The helper can be destroyed reentrantly by the callback,
+   so no log may read `this` after `DisplayPopupMenu` returns. If this line is
+   still useful, log the intended values before the call instead.
+
+2. **Trace renderer mouse event entry.**
+
+   In Blink's widget input entry path, add click-only trace lines for
+   `MouseDown`, `MouseUp`, and `MouseMove` only if movement is explicitly needed
+   for hit-test state. Prefer no move logs. Candidate hooks:
+   - `third_party/blink/renderer/core/frame/web_frame_widget_impl.cc`
+   - `third_party/blink/renderer/platform/widget/widget_base.cc`
+
+   Log:
+   - event type;
+   - event position in widget/root-frame coordinates;
+   - `WebFrameWidgetImpl*`;
+   - local root frame pointer;
+   - focused frame pointer;
+   - `Page` focus/active state if available;
+   - currently focused element summary.
+
+3. **Trace Blink mouse press/release state and hit testing.**
+
+   In the renderer event handling path, make `EventHandler` the primary trace
+   target. Candidate hook:
+   - `third_party/blink/renderer/core/input/event_handler.cc`
+
+   Add logs at `LocalFrame::EventHandler::HandleMousePressEvent` entry and after
+   it updates mouse state. Log:
+   - event type;
+   - `mouse_pressed_` before and after;
+   - `mouse_down_node_` before and after;
+   - hit-test result for the new press;
+   - whether this is a fresh press or a press while Blink already thinks a press
+     is active.
+
+   Add logs at `LocalFrame::EventHandler::HandleMouseReleaseEvent` entry and
+   around the click-synthesis decision. Log:
+   - `mouse_pressed_` at release entry;
+   - `mouse_down_node_`;
+   - release hit-test target;
+   - whether the release target matches the press target;
+   - whether Blink synthesizes or dispatches a `click`;
+   - the exact reason if click synthesis is skipped.
+
+   The smoking-gun condition is a post-select fresh user click entering
+   `HandleMousePressEvent` with `mouse_pressed_ = true` and `mouse_down_node_`
+   still pointing at the dismissed `<select>`.
+
+4. **Trace Blink hit testing for the click target.**
+
+   Around the same mouse down/up hit-test paths, add a summary line for the
+   target. Log:
+   - event type;
+   - hit node pointer;
+   - hit element pointer;
+   - element tag name;
+   - element id;
+   - input type for `HTMLInputElement`;
+   - whether the element is disabled/read-only;
+   - layout object pointer/type;
+   - document/frame pointer;
+   - local/root coordinates;
+   - whether the target is inside the expected native popup test page.
+
+5. **Trace DOM event dispatch and default action.**
+
+   Add logs at the boundary where Blink dispatches mouse/pointer/click events
+   and decides whether to run a default action. Candidate hooks:
+   - `third_party/blink/renderer/core/input/event_handler.cc`
+   - `third_party/blink/renderer/core/events/event_dispatcher.cc`
+   - `third_party/blink/renderer/core/dom/events/event_target.cc`
+
+   Restrict these logs to events targeting `HTMLInputElement`,
+   `HTMLSelectElement`, and `HTMLOptionElement`. Log for `pointerdown`,
+   `mousedown`, `mouseup`, and `click`:
+   - target element summary;
+   - whether default was prevented;
+   - whether the event is trusted;
+   - whether the event has user gesture/user activation;
+   - whether the event dispatch completed normally;
+   - whether a default action is queued or skipped.
+
+   If `HandleMousePressEvent` and `HandleMouseReleaseEvent` run but no `click`
+   event reaches the form control after select dismissal, the bug is in mouse to
+   click synthesis. If `click` reaches the form control but no popup opens, the
+   bug is in the form-control default handler.
+
+6. **Trace form-control activation gates and default handlers.**
+
+   Add entry and suppression logs immediately before the native popup entry
+   points for:
+   - date/time/datetime/color inputs before `DateTimeChooserImpl` or equivalent
+     picker creation;
+   - `<select>` before `MenuListSelectType::ShowPopup`;
+   - datalist suggestion opening if the hook is easy to locate.
+
+   Also log entry into:
+   - `HTMLInputElement::DefaultEventHandler`;
+   - `HTMLSelectElement::DefaultEventHandler`;
+   - any nearby helper that turns `click`/DOM activation into a picker open.
+
+   Log:
+   - event type;
+   - element pointer/tag/id/type;
+   - disabled/read-only state;
+   - focused/active state;
+   - user activation state;
+   - popup/menu already-open state;
+   - exact reason for any early return.
+
+7. **Trace focus changes around the post-select click.**
+
+   Add logs in the renderer focus path for focus changes caused by mouse
+   activation. Candidate hooks:
+   - `third_party/blink/renderer/core/page/focus_controller.cc`
+   - `third_party/blink/renderer/core/dom/document.cc`
+   - `third_party/blink/renderer/core/html/forms/html_form_control_element.cc`
+
+   Log:
+   - old focused element summary;
+   - new focused element summary;
+   - frame/document;
+   - whether focus was refused or redirected;
+   - whether the page/frame is active.
+
+8. **Do not implement a synthetic mouse-up yet.**
+
+   A likely future fix, if the stuck-press hypothesis is confirmed, is to
+   balance Blink state when the AppKit select menu closes, potentially by
+   sending or simulating the missing mouse-up at `PopupMenuHelper` /
+   `WebMenuRunner` close time. Do not implement that in this experiment. This
+   experiment should only log enough to prove whether that fix is needed.
+
+   It is fine to grep Chromium for existing platform precedent such as
+   `SyntheticMouseEvent`, `mouse up after menu`, `popup_was_hidden_`, or
+   menu-close balancing logic, but do not change behavior yet.
+
+9. **Use explicit comparison labels.**
+
+   Every new summary line should include a comparison phase label when possible:
+
+   ```text
+   phase=pre_select_success
+   phase=select_open_close
+   phase=post_select_failure
+   ```
+
+   If the code cannot know the phase directly, include enough join fields to
+   infer it from time order:
+   - monotonic timestamp if available;
+   - event type;
+   - target element id/type;
+   - widget/frame/document pointer.
+
+10. **Keep logs readable.**
+
+    Do not log cursor movement floods. Do not log every DOM event on the page.
+    Restrict output to mouse/pointer/click/focus/default-action events and only
+    when `TERMSURF_ISSUE_779_TRACE=1` is set.
+
+#### Verification
+
+1. Build through the project scripts:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   scripts/build.sh chromium
+   scripts/build.sh roamium
+   scripts/build.sh webtui
+   scripts/build.sh wezboard
+   ```
+
+2. Start the test page server:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   bun test-html/server.ts
+   ```
+
+3. Start Wezboard with fresh logs:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   mkdir -p logs/issue-782-exp2-state/termsurf
+
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-782-exp2-state" \
+   RUST_LOG=info \
+   ./wezboard/target/debug/wezboard-gui \
+   2>&1 | tee logs/issue-782-exp2-wezboard.log
+   ```
+
+4. Launch the TUI:
+
+   ```bash
+   /Users/ryan/dev/termsurf/webtui/target/debug/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     http://localhost:9616/test-native-popups.html
+   ```
+
+5. Run the minimum comparison sequence:
+   - click the date control and confirm it opens;
+   - close it;
+   - click the `<select>` dropdown and dismiss it by clicking outside;
+   - click the same date control again;
+   - stop immediately after the failed post-select date click.
+
+6. Extract the trace:
+
+   ```bash
+   rg -a "\[issue-779-trace\]|native_popup_attempt|blink_mouse|HandleMousePressEvent|HandleMouseReleaseEvent|mouse_pressed|mouse_down_node|hit_test|dispatch|default_action|DefaultEventHandler|focus|activation|DateTimeChooserImpl|MenuListSelectType|ExternalPopupMenu|ShowPopup|OpenPagePopup|ShowCreatedWidget|InitAsPopup|RouteOrProcessMouseEvent" \
+     logs/issue-782-exp2-wezboard.log \
+     logs/issue-782-exp2-state/termsurf/webtui-trace.log \
+     logs/issue-782-exp2-state/termsurf/roamium-trace.log \
+     logs/issue-782-exp2-state/termsurf/chromium-server.log \
+     > logs/issue-782-exp2-trace.log
+   ```
+
+7. Pass criteria:
+   - the trace includes one successful pre-select date click and one failed
+     post-select date click;
+   - both clicks have renderer mouse-event entry logs;
+   - both clicks have hit-test result logs;
+   - the trace identifies the first divergence between success and failure:
+     wrong hit-test target, missing click dispatch, default action prevented,
+     focus/active-state refusal, user activation missing, or form-control
+     activation suppression;
+   - specifically, the trace proves or disproves the stuck-press hypothesis by
+     showing `mouse_pressed_` and `mouse_down_node_` before and after the
+     select-dismissal boundary;
+   - log volume remains small enough to compare the two clicks by hand.
+
+8. Partial criteria:
+   - the trace narrows the failure to one renderer subsystem but not one exact
+     branch;
+   - the failure does not reproduce, but the trace proves successful repeated
+     date/select/date activation with all expected renderer boundaries.
+
+9. Fail criteria:
+   - the trace again only proves that Chromium receives mouse events;
+   - the trace cannot compare hit test, dispatch, focus, default action, and
+     form-control activation between the successful and failed clicks;
+   - the experiment changes popup behavior instead of only adding logs.
