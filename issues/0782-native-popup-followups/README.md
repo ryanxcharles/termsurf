@@ -792,3 +792,255 @@ forwarding and Chromium's top-level WebView/RenderWidgetHost receipt of
 between a Wezboard forwarding failure, AppKit/RemoteCocoa swallowing click
 events, and Chromium receiving the native click but not routing it to the
 renderer.
+
+### Experiment 3: Trace Mouse Forwarding Above Blink
+
+Experiment 2 proved that the failed post-select date click does not reach
+Blink's `LocalFrame::EventHandler`. It also proved the select cleanup state is
+healthy: `popup_menu_helper_` resets, `native_popup_is_visible_` clears, and
+Blink's mouse pressed state is not stuck.
+
+The next question is whether the failed click is lost before the TermSurf
+protocol, inside Roamium/Chromium FFI forwarding, or inside Chromium's
+RenderWidgetHost input pipeline. The leading Chromium-side hypothesis is stale
+browser-process mouse routing state after AppKit's modal `<select>` menu:
+`RenderWidgetHostInputEventRouter` may retain a stale `mouse_capture_target_`,
+choose a stale popup/page-popup target, or return no target from hit testing.
+This experiment adds logs only. It must not change mouse routing, focus, menu
+cleanup, popup behavior, or event synthesis.
+
+Keep all new logs behind the existing `TERMSURF_ISSUE_779_TRACE=1` trace gate.
+Continue using Chromium branch `148.0.7778.97-issue-782`.
+
+#### Changes
+
+1. Add click-only Wezboard forwarding logs in
+   `wezboard/wezboard-gui/src/termsurf/input.rs`.
+
+   Log from `try_forward_mouse` at each decision point for `Down`, `Up`, and
+   click-like drag termination only:
+   - event kind, button, modifiers, raw terminal-cell position, pane id;
+   - whether `hit_test_overlay`/`clamp_to_overlay` found a browser overlay;
+   - overlay-local logical coordinates and pixel coordinates sent to the
+     browser;
+   - whether the event was sent through the browser channel;
+   - reason when the event is not forwarded, such as no overlay hit, no active
+     tab, no browser sender, outside overlay, drag capture mismatch, or browser
+     mode disabled.
+
+   Use a single summary format:
+
+   ```text
+   [issue-779-trace] mouse_forward_boundary boundary=wezboard outcome=...
+   ```
+
+2. Add Roamium protocol receive logs in `roamium/src/dispatch.rs`.
+
+   For `Msg::MouseEvent`, log before calling `ts_forward_mouse_event` and after
+   returning from it:
+   - tab id, event type, button, x/y, click count, modifiers;
+   - whether the tab id maps to a valid Chromium web contents handle;
+   - whether the event was a move or click;
+   - outcome `forwarded` or `dropped` with a concrete reason.
+
+   This tells whether the failed post-select click makes it across the Unix
+   socket boundary.
+
+3. Add C FFI entry logs in
+   `chromium/src/content/libtermsurf_chromium/libtermsurf_chromium.cc`.
+
+   In `ts_forward_mouse_event` and `ts_forward_mouse_move`, log:
+   - incoming `ts_web_contents_t`;
+   - type, button, x/y, click count, and modifiers;
+   - whether `g_main_parts` exists;
+   - whether the call is forwarded into `TsBrowserMainParts`.
+
+   This separates Roamium dispatch from Chromium library entry.
+
+4. Add Chromium TermSurf input construction logs in
+   `chromium/src/content/libtermsurf_chromium/ts_browser_main_parts.cc`.
+
+   In `TsBrowserMainParts::ForwardMouseEvent`, log before and after building the
+   `blink::WebMouseEvent`:
+   - web contents handle and resolved `WebContents*`;
+   - resolved `RenderWidgetHostView*` and `RenderWidgetHost*`;
+   - input type, button, coordinates, click count, modifiers;
+   - constructed `WebMouseEvent::GetType()`, position in widget, position in
+     screen, and modifier flags;
+   - whether the call reaches `view->GetRenderWidgetHost()->ForwardMouseEvent`.
+
+   Also log `ForwardMouseMove` separately so the trace can compare the known
+   working cursor/move path against the failing click path.
+
+5. Add Chromium browser-process input-router logs in
+   `chromium/src/content/browser/renderer_host/render_widget_host_input_event_router.cc`.
+
+   This is the primary diagnostic hook. In
+   `RenderWidgetHostInputEventRouter::RouteMouseEvent`, log only `MouseDown` and
+   `MouseUp`:
+   - source `RenderWidgetHostViewBase*` and source `RenderWidgetHostImpl*`;
+   - event type, position in widget, position in root/screen if available,
+     button, modifiers, and click count;
+   - current `mouse_capture_target_` pointer before routing;
+   - current hover/last mouse target fields if present in this Chromium version;
+   - whether routing uses capture, a hit-test target, or a root fallback;
+   - chosen target `RenderWidgetHostViewBase*` and target
+     `RenderWidgetHostImpl*`;
+   - whether the chosen target is the original main-page view, a popup/page
+     popup view, null, hidden, destroyed, or otherwise unable to receive input;
+   - final outcome `routed`, `dropped`, `fallback-root`, `captured`, or
+     `suppressed`, with a concrete reason.
+
+   Also log inside the target-selection helpers used by `RouteMouseEvent`,
+   depending on the names in this Chromium version:
+   - `FindMouseEventTarget`;
+   - `FindTargetSynchronously`;
+   - any helper that queries Viz hit-test data for the mouse event.
+
+   For those helpers, log:
+   - input root/screen position;
+   - hit-test result target view/host;
+   - local surface id or frame sink id if readily available;
+   - whether a cached target or fallback root was used;
+   - whether no target was found.
+
+   These logs distinguish stale capture, stale hit-test target, null hit-test,
+   and correct target selection.
+
+6. Add target-side Chromium receipt logs below the router.
+
+   Add click-only logs at the first method that processes the routed event on
+   the chosen target view:
+   - `RenderWidgetHostViewBase::ProcessMouseEvent`, if that is where the target
+     receives routed mouse events; otherwise
+   - the closest target-side `RenderWidgetHostView*` or
+     `RenderWidgetHostImpl::ForwardMouseEvent` method that receives the event
+     after router target selection.
+
+   Log:
+   - target view pointer and class/path name if cheaply available;
+   - target host pointer, routing id, process id if readily available;
+   - event type, position, button, modifiers, click count;
+   - whether the target has a live host/delegate/frame widget;
+   - whether the event is forwarded onward to the renderer or dropped locally.
+
+7. Add renderer widget entry logs in
+   `chromium/src/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc`
+   or the equivalent renderer widget input entry for this Chromium version.
+
+   In `WebFrameWidgetImpl::HandleInputEvent`, log only `MouseDown` and
+   `MouseUp`:
+   - widget pointer and local root frame pointer;
+   - event type, position, button, modifiers, click count;
+   - whether the widget is a main-frame widget or popup/page-popup widget if
+     readily available;
+   - whether the method dispatches to `LocalFrame::EventHandler` or returns
+     early, with reason if there is a visible branch.
+
+   This final hook distinguishes browser-process routing bugs from renderer
+   widget dispatch bugs.
+
+8. Keep the existing Experiment 2 Blink logs in place for the run.
+
+   The expected trace should show either:
+   - a complete Wezboard -> Roamium -> FFI -> TsBrowserMainParts ->
+     RenderWidgetHostInputEventRouter -> target ProcessMouseEvent ->
+     WebFrameWidgetImpl -> Blink chain for the first date click; and
+   - a shorter chain for the failed post-select date click, with the first
+     missing boundary naming the bug.
+
+9. Interpret the router logs mechanically:
+
+   | Trace pattern                                                         | Diagnosis                                                                |
+   | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+   | `RouteMouseEvent` chooses a popup/page-popup target after it closed   | Stale `mouse_capture_target_` or stale hit-test target                   |
+   | `RouteMouseEvent` finds no target                                     | Hit-test query failed or Viz surface data is stale                       |
+   | Router chooses the main-page target, target `ProcessMouseEvent` runs  | Browser routing is healthy; inspect renderer widget dispatch             |
+   | Target processing runs, but no `WebFrameWidgetImpl::HandleInputEvent` | Mojo/InputRouter forwarding issue below the target view                  |
+   | `WebFrameWidgetImpl::HandleInputEvent` runs but bails before Blink    | Renderer widget dispatch issue                                           |
+   | All hooks run and Blink still does not receive it                     | Experiment 2 Blink logs missed a narrower renderer event-dispatch branch |
+
+#### Verification
+
+1. Build through the project scripts:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   scripts/build.sh chromium
+   scripts/build.sh roamium
+   scripts/build.sh webtui
+   scripts/build.sh wezboard
+   ```
+
+2. Start the native popup test page:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   bun test-html/server.ts
+   ```
+
+3. Start Wezboard with fresh Experiment 3 logs:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   mkdir -p logs/issue-782-exp3-state/termsurf
+
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-782-exp3-state" \
+   RUST_LOG=info \
+   ./wezboard/target/debug/wezboard-gui \
+   2>&1 | tee logs/issue-782-exp3-wezboard.log
+   ```
+
+4. Launch the TUI:
+
+   ```bash
+   /Users/ryan/dev/termsurf/webtui/target/debug/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     http://localhost:9616/test-native-popups.html
+   ```
+
+5. Run the same minimum sequence:
+   - click the date control and confirm it opens;
+   - close it;
+   - click the `<select>` dropdown and dismiss it by clicking outside;
+   - click the same date control again;
+   - stop immediately after the failed post-select date click.
+
+6. Extract the trace:
+
+   ```bash
+   rg -a "\[issue-779-trace\]|mouse_forward_boundary|ts_forward_mouse|ForwardMouseEvent|ForwardMouseMove|RouteMouseEvent|FindMouseEventTarget|FindTargetSynchronously|mouse_capture_target|ProcessMouseEvent|RenderWidgetHostInputEventRouter|RenderWidgetHostImpl|RenderInputRouter|WebFrameWidgetImpl|HandleInputEvent|HandleMousePressEvent|HandleMouseReleaseEvent|DefaultEventHandler|DateTimeChooserImpl|MenuListSelectType|PopupMenuClosed|OnMenuClosed|CursorChanged" \
+     logs/issue-782-exp3-wezboard.log \
+     logs/issue-782-exp3-state/termsurf/webtui-trace.log \
+     logs/issue-782-exp3-state/termsurf/roamium-trace.log \
+     logs/issue-782-exp3-state/termsurf/chromium-server.log \
+     > logs/issue-782-exp3-trace.log
+   ```
+
+7. Pass criteria:
+   - the trace includes one successful pre-select date click and one failed
+     post-select date click;
+   - the successful date click has all boundaries:
+     `wezboard -> roamium -> libtermsurf_chromium -> TsBrowserMainParts -> RenderWidgetHostInputEventRouter -> target ProcessMouseEvent -> WebFrameWidgetImpl -> Blink EventHandler -> DateTimeChooser`;
+   - the failed date click has a clearly shorter boundary chain;
+   - the first missing or suppressed boundary is identified by a concrete
+     outcome/reason field;
+   - if `RenderWidgetHostInputEventRouter::RouteMouseEvent` sees the failed
+     click, the trace identifies the selected target and the
+     `mouse_capture_target_` state;
+   - mouse move/cursor activity after select close is captured as a comparison
+     path if it continues to work.
+
+8. Partial criteria:
+   - the trace narrows the failure to either Wezboard forwarding,
+     Roamium/Chromium FFI, Chromium input-router target selection, target view
+     processing, or renderer widget dispatch but not one exact branch;
+   - the failure does not reproduce, but the trace proves repeated
+     date/select/date clicks cross every forwarding boundary.
+
+9. Fail criteria:
+   - the failed post-select date click has no logs above Blink either;
+   - logs are too broad or noisy to compare the successful and failed clicks;
+   - the experiment changes input routing or popup behavior instead of only
+     adding logs.
