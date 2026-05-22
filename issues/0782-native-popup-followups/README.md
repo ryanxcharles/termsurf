@@ -1044,3 +1044,53 @@ Continue using Chromium branch `148.0.7778.97-issue-782`.
    - logs are too broad or noisy to compare the successful and failed clicks;
    - the experiment changes input routing or popup behavior instead of only
      adding logs.
+
+**Result:** Partial.
+
+The experiment narrowed the failure boundary, but not in the expected Chromium
+input-router region. The successful pre-select date click crossed the full
+instrumented path:
+
+```text
+Wezboard -> Roamium -> libtermsurf_chromium -> TsBrowserMainParts -> WebFrameWidgetImpl -> Blink EventHandler -> DateTimeChooser
+```
+
+The date popup opened with the expected `DateTimeChooserImpl` and
+`show_created_widget` logs. The subsequent click used to close that date popup
+also crossed the same forwarding path and reached Blink's event handler.
+
+The select dropdown interaction also crossed the expected path. Blink entered
+`MenuListSelectType::ShowPopup`, the browser entered
+`RenderFrameHostImpl::ShowPopupMenu`, `WebContentsViewMac::ShowPopupMenu`
+created a popup helper, `WebMenuRunner` opened the AppKit menu, and cleanup
+completed. The cleanup logs again showed that `popup_menu_helper_` reset to null
+and Blink's `native_popup_is_visible_` changed from `1` back to `0`.
+
+After the select menu closed, mouse movement continued to flow through Roamium
+and Chromium. The trace contains many `ts_forward_mouse_move` and
+`ForwardMouseMove` lines. However, the failed post-select date click did not
+appear as a click in the instrumented path at all. After select cleanup there
+were no later Wezboard `event_type=down` or `event_type=up` forwarding logs, no
+Roamium mouse down/up logs, no `ts_forward_mouse_event` calls, no
+`TsBrowserMainParts::ForwardMouseEvent` calls, no Chromium input-router click
+logs, and no Blink `HandleMousePressEvent` logs.
+
+This means the failed click did not reach Chromium's input router in this run.
+The stale `RenderWidgetHostInputEventRouter` hypothesis is therefore not
+supported by the Experiment 3 trace. The failure boundary is higher than the
+current hooks: either the click was swallowed before Wezboard called
+`try_forward_mouse`, or Wezboard's top-level mouse dispatch chose a different
+non-browser path for button down/up after the AppKit select menu closed.
+
+#### Conclusion
+
+Experiment 3 showed that the post-select shutdown is not currently explained by
+Chromium input-router target selection. Mouse moves still forward after the
+select closes, but button down/up forwarding stops before Roamium and Chromium
+see the click.
+
+The next experiment should move the first hook above `try_forward_mouse` in
+Wezboard's top-level mouse input pipeline. It should log every raw mouse down/up
+received by the GUI, the pane and overlay hit-test result, browsing and focus
+state, whether `try_forward_mouse` is called, and the concrete reason when the
+click is routed to the terminal/TUI instead of the browser overlay.
