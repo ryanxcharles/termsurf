@@ -1355,3 +1355,51 @@ window event source lives elsewhere.
    - the failure does not reproduce;
    - the logs are too noisy to pair the successful and failed clicks;
    - the experiment changes routing behavior instead of only adding logs.
+
+**Result:** Partial.
+
+The experiment moved the failure boundary above Wezboard's browser forwarding
+path. The successful pre-select date click produced the complete expected chain:
+
+```text
+appkit_view -> window_event -> mouse_event_impl -> before_try_forward_mouse -> after_try_forward_mouse(forwarded) -> Roamium -> Chromium -> Blink -> DateTimeChooserImpl
+```
+
+The date close click also reached the same Wezboard and browser-forwarding path.
+The select click then reached `MenuListSelectType::DefaultEventHandler`,
+`RenderFrameHostImpl::ShowPopupMenu`, `WebContentsViewMac::ShowPopupMenu`, and
+`WebMenuRunner`. Select cleanup completed normally:
+`PopupMenuHelper::PopupMenuClosed` fired, `WebContentsViewMac::OnMenuClosed`
+reset `popup_menu_helper_`, and the helper pointer was null after cleanup.
+
+After the select menu closed, mouse movement still reached Wezboard's AppKit
+view and continued through the browser forwarding path. The post-close move
+samples showed `window_is_key=true`, `first_responder=WezboardWindowView`, and
+no modal AppKit window. Roamium and Chromium also continued to receive forwarded
+mouse moves.
+
+However, the failed post-select date click produced no later AppKit
+`selector=mouseDown:` or `selector=mouseUp:` lines in Wezboard. The only button
+events in the run were the successful pre-select date down/up, the date-close
+down/up, and the select down/up. There were no post-select button events at
+`appkit_view`, `window_event`, `mouse_event_impl`, `before_try_forward_mouse`,
+Roamium, Chromium, or Blink.
+
+This rules out the Wezboard overlay hit-test, focus-swallow, terminal fallback,
+Roamium dispatch, Chromium input router, and renderer event handler as the
+immediate cause of the failed click in this run. The click is lost before
+Wezboard's `WezboardWindowView.mouseDown:` receives it.
+
+#### Conclusion
+
+Experiment 4 showed that the shutdown is not a Wezboard Rust routing decision.
+After the native select menu closes, mouse moves still flow normally, but the
+next button down/up does not reach Wezboard's NSView mouse handlers at all.
+
+The remaining boundary is above the NSView handler: AppKit either does not
+deliver the button event to the Wezboard view, delivers it to a different window
+or view, or consumes it in native menu/modal tracking state left behind by the
+select menu. The next experiment should add an application-level AppKit event
+hook, such as `NSApplication sendEvent:` or a local event monitor, to determine
+whether the missing post-select mouse down reaches the app and where AppKit
+routes or consumes it before `WezboardWindowView.mouseDown:`.
