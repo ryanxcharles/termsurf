@@ -393,13 +393,17 @@ removed or changed log/positioning code was actually part of the fix path, then
 restore the working y-axis behavior before running any further alt-tab
 experiments.
 
-### Experiment 2: Clean Alt-Tab Trace Without Breaking PagePopup Y
+### Experiment 2: Clean Obsolete Logs Without Breaking PagePopup Y
 
 #### Description
 
 Experiment 1 failed because it removed the actual PagePopup y-axis fix while
-removing obsolete logs. This experiment repeats the cleanup and alt-tab trace
-work, but with an explicit hard boundary around the working y-axis solution.
+removing obsolete logs. This experiment repeats only the cleanup work, with an
+explicit hard boundary around the working y-axis solution.
+
+Do not add the new alt-tab activation or PagePopup deactivation logs in this
+experiment. Save those for Experiment 3. The goal here is only to reduce stale
+Issue 782 logging noise while preserving every working behavior.
 
 The working y-axis fix lives in:
 
@@ -439,10 +443,10 @@ initial_rect_ = window_rect
 `WebPagePopupImpl::SetWindowRect` IS AN AUTOMATIC FAILURE UNLESS IT IS ONLY
 ADDING LOG FIELDS AROUND THE EXISTING CORRECTION.**
 
-This experiment is still logs-only except for deleting obsolete trace lines. The
+This experiment is logs-only except for deleting obsolete trace lines. The
 cleanup must be surgical: remove high-volume diagnostics from the solved
-post-select shutdown investigation, preserve the PagePopup y correction, and add
-only focused alt-tab/PagePopup lifecycle logs.
+post-select shutdown investigation and preserve the PagePopup y correction. No
+new diagnostic surface is added here.
 
 #### Changes
 
@@ -473,7 +477,26 @@ only focused alt-tab/PagePopup lifecycle logs.
 
    This code is part of the product behavior now. It is not obsolete logging.
 
-3. **Remove obsolete high-volume Issue 782 shutdown logs only.**
+3. **Freeze the Shell mouse-inert fix before cleanup.**
+
+   Before removing any logs, inspect:
+
+   ```text
+   chromium/src/content/libtermsurf_chromium/ts_shell_window_mac.mm
+   chromium/src/content/app_shim_remote_cocoa/web_menu_runner_mac.mm
+   chromium/src/content/browser/web_contents/web_contents_view_mac.mm
+   ```
+
+   Confirm the Issue 782 fix still reasserts:
+
+   ```text
+   [window setIgnoresMouseEvents:YES]
+   ```
+
+   at the Shell creation/move/menu-close boundaries where it currently exists.
+   This code is also product behavior now. It is not obsolete logging.
+
+4. **Remove obsolete high-volume Issue 782 shutdown logs only.**
 
    Remove logs that fire per input event or were only useful for the solved
    post-select click-loss bug:
@@ -490,7 +513,15 @@ only focused alt-tab/PagePopup lifecycle logs.
    contains the PagePopup y-axis fix. Cleanup must be by reviewed hunks, not by
    mechanical commit revert.
 
-4. **Preserve the useful low-volume popup logs.**
+   Cleanup heuristic:
+   - delete only `LOG`, `log::info!`, trace helper calls, and their
+     immediately-bracketing trace guards;
+   - do not delete field mutations, assignment statements, `set*` calls,
+     geometry arithmetic, or non-trace function calls;
+   - if a hunk mixes trace code and behavior, split it;
+   - if a call is not obviously a trace/log call, leave it.
+
+5. **Preserve the useful low-volume popup logs.**
 
    Keep logs that are useful for PagePopup-family placement or lifecycle:
    - `page_popup_y_fix`;
@@ -503,66 +534,17 @@ only focused alt-tab/PagePopup lifecycle logs.
 
    These are low-frequency popup-open / popup-close logs, not cursor floods.
 
-5. **Add focused Wezboard activation logs.**
+6. **Do not add new alt-tab logs.**
 
-   Add only app/window activation state needed for the alt-tab bug:
-   - `applicationDidResignActive`;
-   - `applicationDidBecomeActive`;
-   - `windowDidResignKey`;
-   - `windowDidBecomeKey`;
-   - `windowDidMiniaturize`;
-   - `windowDidDeminiaturize`.
+   Do not add:
+   - Wezboard activation logs;
+   - Chromium activation/window notification logs;
+   - new `pagepopup_alt_tab` lifecycle logs;
+   - new popup window ownership logs.
 
-   Use:
+   Those belong to Experiment 3 after this cleanup is verified.
 
-   ```text
-   [issue-779-trace] pagepopup_alt_tab boundary=wezboard_activation event=...
-   ```
-
-   Include app active state, key/main window pointers, window frame, visible,
-   key/main state, and first responder if cheap. Do not add mouse logs.
-
-6. **Add focused Chromium activation/window logs.**
-
-   Add Chromium/Roamium-process activation and window state logs:
-   - `NSApplicationDidResignActiveNotification`;
-   - `NSApplicationDidBecomeActiveNotification`;
-   - `NSWindowDidResignKeyNotification`;
-   - `NSWindowDidBecomeKeyNotification`;
-   - `NSWindowDidMiniaturizeNotification`;
-   - `NSWindowDidDeminiaturizeNotification`;
-   - `NSWindowDidChangeOcclusionStateNotification`.
-
-   Use:
-
-   ```text
-   [issue-779-trace] pagepopup_alt_tab boundary=chromium_activation event=...
-   ```
-
-   Include ordered Chromium windows top 5, class, frame, level, visible,
-   key/main, and `ignoresMouseEvents`.
-
-7. **Add PagePopup alt-tab lifecycle logs without changing placement.**
-
-   Add or keep concise `pagepopup_alt_tab` logs around:
-   - `DateTimeChooserImpl` construction/open/close;
-   - `WebViewImpl::OpenPagePopup`, `CancelPagePopup`, `ClosePagePopup`,
-     `CleanupPagePopup`;
-   - `WebPagePopupImpl::ClosePopup`, `Cancel`, destructor;
-   - `WebContentsImpl::ShowCreatedWidget`;
-   - `RenderWidgetHostViewMac::InitAsPopup`.
-
-   These logs may record `rect_in_screen`, `anchor_rect_in_screen`,
-   `corrected_rect`, popup pointers, widget pointers, and window state.
-
-   They must not change:
-   - the y-correction predicate;
-   - which rect is passed downstream;
-   - popup open/close order;
-   - Shell window positioning;
-   - select/dropdown behavior.
-
-8. **Add a hard pre-run diff audit.**
+7. **Add a hard pre-run diff audit.**
 
    Before building, inspect the diff and verify:
    - `WebPagePopupImpl::SetWindowRect` still contains the y correction;
@@ -570,6 +552,8 @@ only focused alt-tab/PagePopup lifecycle logs.
      formatting;
    - no diff changes `window_rect` back to plain `rect_in_screen`;
    - no diff removes `page_popup_y_fix`;
+   - no diff removes or weakens existing `setIgnoresMouseEvents:YES`
+     reassertions;
    - no diff changes `MoveShellWindowToTermSurfScreenRect`;
    - no diff changes `<select>` / `PopupMenuHelper` behavior.
 
@@ -631,20 +615,20 @@ only focused alt-tab/PagePopup lifecycle logs.
    - confirm the date picker y position is correct;
    - if the y value is wrong, stop immediately and mark the experiment failed.
 
-7. If and only if the date y value is correct, test the alt-tab bug:
-   - open the date picker again if needed;
-   - Cmd-Tab to another app while the popup is still open;
-   - observe whether the popup remains visible;
-   - Cmd-Tab back to Wezboard;
-   - stop the run.
+7. Verify the Issue 782 post-select invariant:
+   - close the date picker;
+   - click the select dropdown once;
+   - dismiss it;
+   - click the date input again;
+   - confirm the date picker still opens and its y position remains correct.
 
-   If date does not reproduce the alt-tab visibility bug, repeat once with time,
-   then once with color. Do not test select or datalist.
+   If native widgets stop opening after select, stop immediately and mark the
+   experiment failed.
 
-8. Extract the focused trace:
+8. Extract the cleanup trace:
 
    ```bash
-   rg -a "\[issue-779-trace\]|pagepopup_alt_tab|page_popup_y_fix|DateTimeChooserImpl|WebViewImpl::.*PagePopup|WebPagePopupImpl|ShowCreatedWidget|InitAsPopup|RenderWidgetPopupWindow|NSApplicationDid|NSWindowDid|chromium_activation|wezboard_activation|popup_window|pagepopup_lifecycle" \
+   rg -a "\[issue-779-trace\]|page_popup_y_fix|DateTimeChooserImpl|WebPagePopupImpl|ShowCreatedWidget|InitAsPopup|TermSurfMoveShellWindow|ignoresMouseEvents|PopupMenuHelper|WebMenuRunner" \
      logs/issue-783-exp2-wezboard.log \
      logs/issue-783-exp2-state/termsurf/webtui-trace.log \
      logs/issue-783-exp2-state/termsurf/roamium-trace.log \
@@ -657,17 +641,18 @@ only focused alt-tab/PagePopup lifecycle logs.
    - trace includes `page_popup_y_fix applied=true` for the date popup;
    - `corrected_rect.y == anchor_rect.y`;
    - obsolete input-router/mouse-dispatch flood logs are gone;
-   - alt-tab produces Wezboard activation logs;
-   - trace shows whether Chromium activation/window logs fire during Wezboard
-     alt-tab;
-   - trace shows whether PagePopup close/cancel cleanup fires on deactivation;
-   - result identifies the next fix boundary for the alt-tab persistence bug.
+   - existing low-volume PagePopup placement/lifecycle logs remain;
+   - existing Shell `ignoresMouseEvents` reassertions remain visible in code or
+     trace;
+   - the post-select date picker still opens.
 
 10. Fail criteria:
     - **date y-axis regresses in any way;**
     - `page_popup_y_fix` is missing;
     - `SetWindowRect` no longer passes corrected `window_rect` downstream;
+    - `setIgnoresMouseEvents:YES` reassertions are removed or weakened;
     - the trace is still dominated by old Issue 782 input logs;
-    - no activation boundary is logged;
     - select/dropdown behavior changes during this experiment;
-    - the experiment changes popup behavior beyond logging.
+    - the experiment adds new alt-tab diagnostics instead of only cleaning up
+      obsolete logs;
+    - the experiment changes popup behavior beyond deleting obsolete logs.
