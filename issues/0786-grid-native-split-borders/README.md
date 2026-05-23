@@ -859,19 +859,16 @@ the grid-reserved outer rect rather than the pane content rect.
 
    Expected: Experiment 1's grid reservation is still present.
 
-2. **Stop using shared divider paint as part of the active border.**
+2. **Stop painting shared dividers.**
 
-   In `wezboard/wezboard-gui/src/termwindow/render/split.rs`, remove the idea
-   that `paint_split()` contributes to the active pane outline.
+   In `wezboard/wezboard-gui/src/termwindow/render/split.rs`, make
+   `paint_split()` draw nothing. It should keep only the existing `UIItem` hit
+   region used for split dragging.
 
-   `paint_split()` should only preserve split interaction geometry. For
-   Experiment 3, it may either:
-   - draw nothing and keep only the `UIItem` hit region; or
-   - draw a neutral divider/background aid that is not part of the active
-     highlight.
-
-   The active pane border must not depend on `paint_split()` lining up with
-   `paint_pane_border()`.
+   There is no neutral divider/background aid in this experiment. The active
+   pane is identified only by the one-rectangle border drawn by
+   `paint_pane_border()`. If inactive dividers later need a subtle visual aid,
+   that belongs in a follow-up experiment.
 
 3. **Draw one continuous rectangle from the pane outer rect.**
 
@@ -879,54 +876,76 @@ the grid-reserved outer rect rather than the pane content rect.
    `paint_pane_border()` so it computes one outer pixel rectangle and draws the
    border from that rectangle.
 
+   `paint_pane_border()` continues to return early when `num_panes <= 1`,
+   `pos.is_zoomed`, or `pos.is_active == false`. Experiment 3 draws only the
+   active pane border.
+
    Use the pane's `PositionedPaneBorder` metadata to compute:
    - `outer_x`;
    - `outer_y`;
    - `outer_width`;
    - `outer_height`.
 
+   Concrete derivation:
+   - if `PositionedPaneBorder` exposes `outer_left`, `outer_top`, `outer_width`,
+     and `outer_height`, use those fields directly;
+   - otherwise derive the outer rect from `PositionedPane.left/top/width/height`
+     plus one cell on each side whose border flag is set.
+
+   Convert the outer rect from cell coordinates to pixels using the same
+   padding, tab-bar, and OS-chrome offsets used by pane rendering:
+   `padding_left + os_border.left.get()` for x and
+   `top_bar_height + padding_top + os_border.top.get()` for y. The border must
+   not draw into OS chrome.
+
    Then draw a single coherent border around that rectangle, conceptually the
    same as the old pre-Issue-777 pixel border:
-   - top edge spans the full outer width;
-   - bottom edge spans the full outer width;
-   - left edge spans the full outer height;
-   - right edge spans the full outer height;
-   - corners are owned by this one rectangle and must connect cleanly.
+
+   ```text
+   top:    (outer_x, outer_y, outer_width, thickness)
+   bottom: (outer_x, outer_y + outer_height - thickness,
+            outer_width, thickness)
+   left:   (outer_x, outer_y, thickness, outer_height)
+   right:  (outer_x + outer_width - thickness, outer_y,
+            thickness, outer_height)
+   ```
+
+   The four edges overlap at the corners. Corners are implicit in this geometry
+   and must never be computed separately. This matches the pre-Issue-777
+   `paint_pane_border()` pattern.
 
    Do not draw each edge from separate local content-facing calculations. The
    rectangle is the source of truth.
 
 4. **Use old border visual semantics.**
 
-   The visible border should use:
-   - `focused_split_border_color` for the active pane;
-   - `unfocused_split_border_color` for inactive pane borders only if inactive
-     borders remain useful;
-   - fallback to `palette.split`.
+   The visible active border should use `focused_split_border_color`, falling
+   back to `palette.split`. `unfocused_split_border_color` is unused in
+   Experiment 3 because inactive panes do not draw borders.
 
    `split_border_width` controls pixel thickness, as it did before Issue 777.
-   Clamp thickness so it cannot exceed half of the reserved cell dimension:
+   Negative values are treated as `0`. Clamp positive thickness so it cannot
+   exceed half of the reserved cell dimension:
    - max vertical thickness: `floor(cell_width / 2)`;
    - max horizontal thickness: `floor(cell_height / 2)`.
 
    `split_border_width = 0` means no visible border line.
 
-   Preferred placement: draw the border centered in the reserved outer gutter
-   around the content rect. If that is awkward, draw it on the outer edge of the
-   reserved rect, as long as it remains outside terminal content and connects
-   cleanly.
+   Place the border centered in the reserved outer gutter around the content
+   rect. For thickness `t` and reserved cell dimension `d`, use
+   `floor((d - t) / 2)` as the gutter offset so the line snaps to whole pixels.
+   Do not fall back to outer-edge placement unless centering produces a visible
+   corner-join artifact; if that fallback is used, document why in the result.
 
-5. **Decide inactive border behavior explicitly.**
+5. **Draw active border only.**
 
-   The primary requirement is an active-pane border that goes all the way
-   around. For Experiment 3, prefer one of these two simple behaviors:
-   - draw only the active pane border; or
-   - draw inactive panes with unfocused color using the same one-rectangle
-     painter.
+   Draw only the focused/active pane's border. Inactive panes have no visible
+   border line in Experiment 3.
 
-   Do not mix inactive pane border drawing with split-fragment drawing. If
-   inactive borders are drawn, they must also use the same one-rectangle outer
-   rect model.
+   Rationale: active-only border drawing avoids shared-boundary overpaint
+   between active and inactive pane rectangles. If inactive pane outlines are
+   needed, they should be designed in a later experiment after the active border
+   is correct.
 
 6. **Do not change content positioning.**
 
@@ -950,7 +969,9 @@ the grid-reserved outer rect rather than the pane content rect.
    - repeat with a vertical split.
 
 3. Screenshot regression check:
-   - reproduce the layout from the failed Experiment 2 screenshot;
+   - reproduce the layout from the failed Experiment 2 screenshot
+     (`screenshot.png`): two side-by-side panes with a visible active-pane
+     border failure;
    - confirm there are no broken line intersections;
    - confirm the content is not underneath the border;
    - confirm the active highlight wraps all the way around.
@@ -958,7 +979,7 @@ the grid-reserved outer rect rather than the pane content rect.
 4. Nested split check:
    - create at least three panes with horizontal and vertical nesting;
    - focus each pane;
-   - confirm each active pane gets one connected rectangle;
+   - confirm each active pane gets exactly one connected rectangle;
    - confirm the active border is not assembled from visible split fragments.
 
 5. `split_border_width` behavior:
@@ -984,6 +1005,8 @@ the grid-reserved outer rect rather than the pane content rect.
    - confirm the overlay remains aligned to the content rect;
    - confirm the border is outside the browser content and does not sit under or
      over it.
+   - confirm no part of the browser overlay hides the border, and no part of the
+     border overlaps the overlay.
 
 9. Single-pane and zoomed-pane behavior:
    - confirm no split outline is drawn in a single-pane tab;
@@ -992,17 +1015,21 @@ the grid-reserved outer rect rather than the pane content rect.
 
 #### Pass Criteria
 
-The experiment passes if the active pane border is a single connected pixel
-rectangle around the outside of the pane, content is not underneath the border,
-PTY dimensions remain truthful, split dragging/mouse/browser overlays still
-work, and `scripts/build.sh wezboard` passes.
+The experiment passes if the active pane border is exactly one connected pixel
+rectangle around the outside of the pane, drawn from one
+`outer_x/outer_y/outer_width/outer_height` source of truth. There must be no
+additional decorative rectangles, inner highlights, double borders, or visible
+split-fragment contributions. Content is not underneath the border, PTY
+dimensions remain truthful, split dragging/mouse/browser overlays still work,
+and `scripts/build.sh wezboard` passes.
 
 #### Partial Criteria
 
-The experiment is Partial if the one-rectangle active border works for simple
-two-pane splits but one secondary case remains imperfect, such as inactive
-border coloring or nested split inactive-border overlap. Partial is not
-acceptable if the active border is disconnected or content is under the border.
+The experiment is Partial if the exactly-one-rectangle active border works for
+simple two-pane splits but one secondary case remains imperfect, such as nested
+split placement or a browser-overlay visual edge case. Partial is not acceptable
+if the active border is disconnected, content is under the border, or inactive
+border drawing is introduced.
 
 #### Failure Criteria
 
@@ -1012,5 +1039,6 @@ The experiment fails if:
 - border corners do not connect cleanly;
 - terminal content appears underneath the border;
 - `paint_split()` remains visually responsible for the active-pane border;
+- inactive pane borders are introduced in this experiment;
 - PTY dimensions stop matching visible content cells;
 - browser overlay, mouse mapping, selection, or split dragging regresses.
