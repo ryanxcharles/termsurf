@@ -1464,3 +1464,287 @@ The remaining known bugs are deferred to later experiments:
 
 - the `<select>` dropdown has the wrong x position;
 - the sixth native-widget box on the test page does not appear to work at all.
+
+### Experiment 5: Trace Select Dropdown X Position
+
+#### Description
+
+The next remaining bug is the `<select>` dropdown x-position. After the
+PagePopup fixes, select still has the correct y position but appears at the
+wrong x position. This path is separate from date/time/color PagePopups. It uses
+Chromium's macOS external popup menu path:
+
+```text
+RenderFrameHostImpl::ShowPopupMenu
+WebContentsViewMac::ShowPopupMenu
+PopupMenuHelper::ShowPopupMenu
+RenderWidgetHostNSViewBridge::DisplayPopupMenu
+WebMenuRunner::runMenuInView
+NSPopUpButtonCell / NSMenu
+```
+
+This experiment should identify where the x offset enters. Chromium can log the
+anchor rect and the fake AppKit control view, but AppKit owns the final menu
+placement. Therefore this experiment requires both logs and a screenshot
+measurement while the select menu is open.
+
+This experiment is diagnostic only. It must not change select positioning yet,
+and it must not touch the completed PagePopup y-axis, post-select, or alt-tab
+fixes.
+
+#### Non-Negotiable Invariants
+
+Before and after this experiment:
+
+- date/time/color PagePopup y-axis remains correct;
+- PagePopup controls still open after a select dropdown interaction;
+- PagePopup controls dismiss on Cmd-Tab away from Wezboard;
+- all `setIgnoresMouseEvents:YES` Shell-window reassertions remain intact;
+- `SetGuiActive` behavior from Experiment 4 remains intact.
+
+If any of these regress, stop and mark the experiment failed.
+
+#### Changes
+
+1. **Keep the scope to select x-position.**
+
+   Do not change:
+   - PagePopup placement math;
+   - `WebPagePopupImpl::SetWindowRect`;
+   - `SetGuiActive`;
+   - Shell window frame movement;
+   - Shell `ignoresMouseEvents`;
+   - datalist behavior;
+   - select positioning behavior.
+
+   This experiment adds or preserves low-frequency select-menu logs only.
+
+2. **Log the renderer/browser select anchor.**
+
+   In the select popup-open path, log the select anchor before any AppKit
+   conversion:
+   - `RenderFrameHostImpl::ShowPopupMenu`, if the anchor is available there;
+   - `WebContentsViewMac::ShowPopupMenu`;
+   - `PopupMenuHelper::ShowPopupMenu`.
+
+   Include:
+
+   ```text
+   input_bounds
+   input_bounds_space
+   webcontents view frame/bounds
+   parent RenderWidgetHostViewMac bounds in screen
+   window frame
+   screen frame / visible frame
+   item_count
+   selected_item
+   right_aligned
+   allow_multiple_selection
+   ```
+
+   Use a concise marker:
+
+   ```text
+   [issue-779-trace] select_x_position boundary=browser_anchor event=...
+   ```
+
+3. **Log AppKit bridge conversion.**
+
+   In `RenderWidgetHostNSViewBridge::DisplayPopupMenu`, log the conversion chain
+   that turns the select anchor into AppKit coordinates:
+
+   ```text
+   menu_bounds
+   menu_bounds_space
+   flipped_bounds
+   flipped_bounds_space
+   flipped_bounds_in_window
+   flipped_bounds_in_screen
+   flipped_bounds_top_left_screen
+   cocoa_view frame/bounds
+   window frame/content frame
+   screen frame/visible frame
+   ```
+
+   Use:
+
+   ```text
+   [issue-779-trace] select_x_position boundary=appkit_bridge event=display_popup_menu
+   ```
+
+4. **Log `WebMenuRunner` fake-control geometry.**
+
+   In `WebMenuRunner::runMenuInView` and the fake control setup, log:
+
+   ```text
+   input_bounds
+   bounds_in_window
+   bounds_in_screen
+   bounds_top_left_screen
+   fake_control_view frame/bounds
+   fake_bounds_in_window
+   fake_bounds_in_screen
+   attach_popup_frame
+   view/window/frame summaries
+   ```
+
+   Use:
+
+   ```text
+   [issue-779-trace] select_x_position boundary=web_menu_runner event=...
+   ```
+
+   Do not change `attachPopUpWithFrame`, fake view sizing, or AppKit menu
+   invocation in this experiment.
+
+5. **Capture a screenshot measurement.**
+
+   The logs cannot prove where AppKit finally drew the menu. The verification
+   must include a screenshot while the select menu is open.
+
+   Record:
+
+   ```text
+   logged_anchor_top_left_screen=(x,y)
+   logged_fake_control_top_left_screen=(x,y)
+   measured_menu_top_left_screen=(x,y)
+   measured_delta_x=measured_menu_x - logged_anchor_x
+   measured_delta_y=measured_menu_y - logged_anchor_y
+   ```
+
+   Use macOS Screenshot, a screen recording frame, or any repeatable pixel
+   measurement method. Store the screenshot in:
+
+   ```text
+   logs/issue-783-exp5-select-open.png
+   ```
+
+6. **Keep existing low-frequency popup logs if useful.**
+
+   It is acceptable to keep existing `PopupMenuHelper`, `WebMenuRunner`,
+   `chromium_shell_window_state`, and `ignoresMouseEvents` logs if they are
+   already low-frequency. Do not reintroduce mouse/input-router flood logs.
+
+#### Verification
+
+1. Confirm the Chromium branch:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf/chromium/src
+   git branch --show-current
+   ```
+
+   It must be:
+
+   ```text
+   148.0.7778.97-issue-783
+   ```
+
+2. Build through project scripts:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   scripts/build.sh chromium
+   scripts/build.sh roamium
+   scripts/build.sh wezboard
+   scripts/build.sh webtui
+   ```
+
+3. Start the test page:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   bun test-html/server.ts
+   ```
+
+4. Start Wezboard with fresh Experiment 5 logs:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   mkdir -p logs/issue-783-exp5-state/termsurf
+
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-783-exp5-state" \
+   RUST_LOG=info \
+   ./wezboard/target/debug/wezboard-gui \
+   2>&1 | tee logs/issue-783-exp5-wezboard.log
+   ```
+
+5. Launch the TUI:
+
+   ```bash
+   /Users/ryan/dev/termsurf/webtui/target/debug/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     http://localhost:9616/test-native-popups.html
+   ```
+
+6. Re-check protected invariants:
+   - click the date input and confirm y position is correct;
+   - close it;
+   - open the date input again after one select interaction and confirm it still
+     opens;
+   - open the date picker, Cmd-Tab away, and confirm it dismisses.
+
+   Stop if any prior fix regresses.
+
+7. Run the select measurement:
+   - click the select dropdown;
+   - leave it open;
+   - take a screenshot and save it as `logs/issue-783-exp5-select-open.png`;
+   - visually note whether the menu x position is left or right of the select
+     box;
+   - dismiss the menu;
+   - stop the run.
+
+   Do not test datalist or the sixth box in this experiment.
+
+8. Extract the focused trace:
+
+   ```bash
+   rg -a "\[issue-779-trace\]|select_x_position|ShowPopupMenu|PopupMenuHelper|DisplayPopupMenu|WebMenuRunner|fakeControlView|chromium_shell_window_state|ignoresMouseEvents" \
+     logs/issue-783-exp5-wezboard.log \
+     logs/issue-783-exp5-state/termsurf/webtui-trace.log \
+     logs/issue-783-exp5-state/termsurf/roamium-trace.log \
+     logs/issue-783-exp5-state/termsurf/chromium-server.log \
+     > logs/issue-783-exp5-trace.log
+   ```
+
+9. Add a measurement note after the run:
+
+   ```text
+   logged_anchor_top_left_screen=(x,y)
+   logged_fake_control_top_left_screen=(x,y)
+   measured_menu_top_left_screen=(x,y)
+   measured_delta_x=...
+   measured_delta_y=...
+   ```
+
+10. Pass criteria:
+    - protected PagePopup and Shell invariants hold;
+    - select menu opens and reproduces the wrong x position;
+    - trace contains the select anchor and every coordinate conversion through
+      `WebMenuRunner`;
+    - screenshot measurement records the actual visible menu x position;
+    - result identifies whether the x error is already present before AppKit, is
+      introduced by the AppKit bridge/fake control, or is introduced by AppKit's
+      final menu placement.
+
+11. Fail criteria:
+    - any prior PagePopup fix regresses;
+    - select menu does not open;
+    - trace misses the anchor or fake-control rect;
+    - screenshot measurement is missing;
+    - experiment changes select behavior instead of only observing it;
+    - high-volume input logs return.
+
+#### Expected Interpretations
+
+- If logged anchor x is already wrong, the fix belongs upstream in Chromium's
+  select anchor calculation or TermSurf's webview screen rect.
+- If logged anchor x is correct but fake-control x is wrong, the fix belongs in
+  `RenderWidgetHostNSViewBridge` / `WebMenuRunner` coordinate conversion.
+- If fake-control x is correct but the measured visible menu x is wrong, the fix
+  belongs in how `NSPopUpButtonCell` is attached or constrained by AppKit.
+- If logged and measured x both match but the user still perceives the menu as
+  wrong, the issue may be menu alignment policy rather than coordinate
+  conversion.
