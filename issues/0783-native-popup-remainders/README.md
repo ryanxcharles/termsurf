@@ -1488,6 +1488,13 @@ anchor rect and the fake AppKit control view, but AppKit owns the final menu
 placement. Therefore this experiment requires both logs and a screenshot
 measurement while the select menu is open.
 
+The current Chromium tree already has low-frequency select/AppKit menu logs in
+the `PopupMenuHelper`, `WebMenuRunner`, `WebContentsViewMac::ShowPopupMenu`, and
+`chromium_shell_window_state` paths. This experiment should augment those
+existing log calls with the missing fields rather than adding duplicate parallel
+logs. Add a `select_x_position` marker only for new summary lines where it makes
+the trace easier to extract.
+
 This experiment is diagnostic only. It must not change select positioning yet,
 and it must not touch the completed PagePopup y-axis, post-select, or alt-tab
 fixes.
@@ -1522,8 +1529,8 @@ If any of these regress, stop and mark the experiment failed.
 2. **Log the renderer/browser select anchor.**
 
    In the select popup-open path, log the select anchor before any AppKit
-   conversion:
-   - `RenderFrameHostImpl::ShowPopupMenu`, if the anchor is available there;
+   conversion by extending existing low-frequency logs:
+   - `RenderFrameHostImpl::ShowPopupMenu` with `input_bounds`;
    - `WebContentsViewMac::ShowPopupMenu`;
    - `PopupMenuHelper::ShowPopupMenu`.
 
@@ -1542,6 +1549,9 @@ If any of these regress, stop and mark the experiment failed.
    allow_multiple_selection
    ```
 
+   `right_aligned` is critical because it changes the anchor edge. Log
+   `allow_multiple_selection` for completeness only.
+
    Use a concise marker:
 
    ```text
@@ -1550,8 +1560,9 @@ If any of these regress, stop and mark the experiment failed.
 
 3. **Log AppKit bridge conversion.**
 
-   In `RenderWidgetHostNSViewBridge::DisplayPopupMenu`, log the conversion chain
-   that turns the select anchor into AppKit coordinates:
+   In `RenderWidgetHostNSViewBridge::DisplayPopupMenu`, extend the existing log
+   with the conversion chain that turns the select anchor into AppKit
+   coordinates:
 
    ```text
    menu_bounds
@@ -1574,7 +1585,8 @@ If any of these regress, stop and mark the experiment failed.
 
 4. **Log `WebMenuRunner` fake-control geometry.**
 
-   In `WebMenuRunner::runMenuInView` and the fake control setup, log:
+   In `WebMenuRunner::runMenuInView` and the fake control setup, extend the
+   existing logs with:
 
    ```text
    input_bounds
@@ -1600,11 +1612,20 @@ If any of these regress, stop and mark the experiment failed.
 5. **Capture a screenshot measurement.**
 
    The logs cannot prove where AppKit finally drew the menu. The verification
-   must include a screenshot while the select menu is open.
+   must include screenshots while the select menu is open in two positions:
+   - the default Wezboard/window/pane position;
+   - a clearly offset position, such as the Wezboard window moved to the right
+     half of the screen or the browser pane in a right split.
+
+   The two measurements distinguish a constant coordinate-conversion error from
+   a position-dependent AppKit constraint or visible-frame issue.
 
    Record:
 
    ```text
+   run=default|offset
+   clicked_select=first
+   logged_input_bounds=(x,y widthxheight)
    logged_anchor_top_left_screen=(x,y)
    logged_fake_control_top_left_screen=(x,y)
    measured_menu_top_left_screen=(x,y)
@@ -1612,11 +1633,14 @@ If any of these regress, stop and mark the experiment failed.
    measured_delta_y=measured_menu_y - logged_anchor_y
    ```
 
-   Use macOS Screenshot, a screen recording frame, or any repeatable pixel
-   measurement method. Store the screenshot in:
+   Use macOS Screenshot with `Cmd-Shift-4` region capture, a screen recording
+   frame, or another repeatable pixel measurement method. Measure the menu
+   top-left in Preview or another pixel-coordinate tool. Store the screenshots
+   in:
 
    ```text
-   logs/issue-783-exp5-select-open.png
+   logs/issue-783-exp5-state/select-open-default.png
+   logs/issue-783-exp5-state/select-open-offset.png
    ```
 
 6. **Keep existing low-frequency popup logs if useful.**
@@ -1687,14 +1711,29 @@ If any of these regress, stop and mark the experiment failed.
 
    Stop if any prior fix regresses.
 
-7. Run the select measurement:
-   - click the select dropdown;
+7. Run the select measurement twice:
+   - use the default Wezboard/window/pane position;
+   - click the first `<select>` dropdown on
+     `http://localhost:9616/test-native-popups.html`;
    - leave it open;
-   - take a screenshot and save it as `logs/issue-783-exp5-select-open.png`;
+   - take a screenshot and save it as
+     `logs/issue-783-exp5-state/select-open-default.png`;
+   - record the clicked select's logged `input_bounds.x` and apparent page x
+     position so the screenshot can be tied to the trace;
    - visually note whether the menu x position is left or right of the select
      box;
    - dismiss the menu;
+   - move Wezboard or the browser pane to a clearly offset position;
+   - click the same first `<select>` dropdown again;
+   - leave it open;
+   - take a screenshot and save it as
+     `logs/issue-783-exp5-state/select-open-offset.png`;
+   - record the same measurements for the offset run;
    - stop the run.
+
+   If the first run already proves that the logged anchor or fake-control x is
+   wrong before AppKit's final menu placement, the second run may be skipped.
+   The result must state explicitly why one run was conclusive.
 
    Do not test datalist or the sixth box in this experiment.
 
@@ -1712,6 +1751,18 @@ If any of these regress, stop and mark the experiment failed.
 9. Add a measurement note after the run:
 
    ```text
+   run=default
+   clicked_select=first
+   logged_input_bounds=(x,y widthxheight)
+   logged_anchor_top_left_screen=(x,y)
+   logged_fake_control_top_left_screen=(x,y)
+   measured_menu_top_left_screen=(x,y)
+   measured_delta_x=...
+   measured_delta_y=...
+
+   run=offset
+   clicked_select=first
+   logged_input_bounds=(x,y widthxheight)
    logged_anchor_top_left_screen=(x,y)
    logged_fake_control_top_left_screen=(x,y)
    measured_menu_top_left_screen=(x,y)
@@ -1724,7 +1775,9 @@ If any of these regress, stop and mark the experiment failed.
     - select menu opens and reproduces the wrong x position;
     - trace contains the select anchor and every coordinate conversion through
       `WebMenuRunner`;
-    - screenshot measurement records the actual visible menu x position;
+    - screenshot measurements record the actual visible menu x position in two
+      positions, or the result explains why one conclusive run was enough;
+    - result states whether the x delta is constant or position-dependent;
     - result identifies whether the x error is already present before AppKit, is
       introduced by the AppKit bridge/fake control, or is introduced by AppKit's
       final menu placement.
@@ -1734,8 +1787,14 @@ If any of these regress, stop and mark the experiment failed.
     - select menu does not open;
     - trace misses the anchor or fake-control rect;
     - screenshot measurement is missing;
+    - clicked select is ambiguous or cannot be tied to logged `input_bounds`;
+    - second measurement is missing without explanation;
     - experiment changes select behavior instead of only observing it;
     - high-volume input logs return.
+
+12. After the experiment has a recorded result, commit the docs and any
+    implementation changes. Export Chromium changes to
+    `chromium/patches/issue-783/` before considering the experiment complete.
 
 #### Expected Interpretations
 
@@ -1745,6 +1804,11 @@ If any of these regress, stop and mark the experiment failed.
   `RenderWidgetHostNSViewBridge` / `WebMenuRunner` coordinate conversion.
 - If fake-control x is correct but the measured visible menu x is wrong, the fix
   belongs in how `NSPopUpButtonCell` is attached or constrained by AppKit.
-- If logged and measured x both match but the user still perceives the menu as
-  wrong, the issue may be menu alignment policy rather than coordinate
-  conversion.
+- If default and offset measurements have the same delta, the bug is likely a
+  constant coordinate-conversion offset.
+- If default and offset measurements have different deltas, the bug is likely
+  position-dependent, such as screen-edge behavior or `[NSScreen visibleFrame]`
+  constraints.
+- If logged and measured x both match the anchor but the menu still appears
+  wrong, inspect `right_aligned`, `NSPopUpButtonCell` selected-item-over-button
+  alignment, and `[NSScreen visibleFrame]` constraints separately.
