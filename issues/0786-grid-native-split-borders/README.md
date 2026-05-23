@@ -546,17 +546,31 @@ now has real grid space to live in.
 
    Expected: Experiment 1's grid reservation code remains present.
 
+   Also check the current paint state before editing it:
+
+   ```bash
+   rg "paint_pane_border|paint_split" \
+     wezboard/wezboard-gui/src/termwindow/render
+   ```
+
+   Expected: the current paint code is Experiment 1's full-cell fill behavior
+   that this experiment will replace.
+
 2. **Paint reserved cells as background spacing.**
 
    In `wezboard/wezboard-gui/src/termwindow/render/pane.rs`, update
    `paint_pane_border()` so it does not fill the full reserved cell with border
    color.
 
-   The reserved cell area should either:
-   - be left alone if the existing window/pane background already paints it
-     correctly; or
-   - be explicitly filled with the same background color used for the
-     surrounding terminal/window gap.
+   `paint_pane_border()` must continue to return early when `num_panes <= 1` or
+   `pos.is_zoomed`.
+
+   Reserved cells should use the window background color, not per-pane
+   backgrounds. This creates a consistent gutter regardless of per-pane palette
+   or terminal background changes. The existing window-background paint path
+   should already cover the reserved cells after Experiment 1; verify that
+   first. Only add an explicit fill if the reserved cells appear black,
+   unpainted, or otherwise inconsistent with the surrounding window gutter.
 
    The expected visual result is a normal background-colored gutter around split
    panes, not a one-cell-thick colored block.
@@ -575,14 +589,22 @@ now has real grid space to live in.
    - `unfocused_split_border_color` for inactive panes;
    - fallback to `palette.split`.
 
-   The line thickness may use `split_border_width` as a pixel value. Clamp it so
-   it cannot exceed the reserved cell dimension:
-   - vertical line width `<= cell_width`;
-   - horizontal line height `<= cell_height`.
+   Use
+   `self.config.split_border_width.evaluate_as_pixels(DimensionContext { ... })`
+   to convert the configured `Dimension` to physical pixels. This is the same
+   conversion the pre-Issue-777 pixel border used.
 
-   `split_border_width = 0` should mean "use the existing minimal divider-line
-   thickness" rather than "hide all grid-native borders." A one-pixel or
-   underline-height fallback is acceptable for Experiment 2.
+   `split_border_width = 0` means no visible border line is drawn. The reserved
+   gutter cells still exist structurally, but the border line itself is hidden.
+   Users should not get a surprise fallback line when they explicitly set zero.
+
+   For `split_border_width > 0`, clamp the line thickness so it cannot recreate
+   Experiment 1's full-cell fill:
+   - vertical line width `<= max(1, cell_width - 2px)`;
+   - horizontal line height `<= max(1, cell_height - 2px)`.
+
+   Clamp silently. The clamp must guarantee at least one pixel of visible gutter
+   on each side of the line whenever the cell is large enough to allow it.
 
 4. **Update shared divider rendering to match the new visual model.**
 
@@ -595,6 +617,10 @@ now has real grid space to live in.
    Keep the `UIItem` hit region geometry unchanged. Only the paint rectangle
    should shrink from full-cell fill to thin line.
 
+   Preserve Experiment 1's shared-divider color logic: focused color when the
+   divider is adjacent to the active pane, otherwise unfocused color, with
+   fallback to `palette.split`. Only the paint geometry changes.
+
 5. **Place lines consistently within reserved cells.**
 
    Pick one placement rule and apply it consistently:
@@ -604,6 +630,12 @@ now has real grid space to live in.
 
    Document the chosen rule in the result. Centering is preferred because it
    gives both panes visually equal breathing room around shared dividers.
+
+   The chosen placement rule applies to both perimeter segments in
+   `paint_pane_border()` and shared dividers in `paint_split()`.
+
+   If centering, round the centered offset to whole pixels to avoid fuzzy
+   anti-aliased lines.
 
 6. **Do not change layout, PTY sizing, or input mapping.**
 
@@ -649,11 +681,15 @@ now has real grid space to live in.
 
 6. `split_border_width` behavior:
    - test with `split_border_width = 0`;
+   - confirm no visible border line is drawn while reserved gutter cells remain
+     in place;
    - test with `split_border_width = 4`;
    - test with a larger value such as `8`;
+   - test with an oversized value such as `100`;
    - confirm the value changes only the pixel-line thickness, not the number of
      reserved cells or PTY rows/columns;
-   - confirm large values are clamped within the reserved cell.
+   - confirm oversized values are clamped well below full-cell thickness and
+     visible gutter spacing remains on both sides of the line.
 
 7. PTY truthfulness regression check:
    - run `stty size` in split panes;
@@ -673,6 +709,8 @@ now has real grid space to live in.
    - confirm the browser overlay remains aligned to the content rect;
    - confirm the thin border appears outside the browser content, not underneath
      it.
+   - confirm the browser overlay position is unchanged from Experiment 1; only
+     the gutter/border paint should change.
 
 10. Single-pane and zoomed-pane behavior:
     - confirm no split outline is drawn in a single-pane tab;
