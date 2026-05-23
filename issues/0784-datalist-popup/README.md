@@ -1190,6 +1190,214 @@ Datalist suggestions are fixed for Roamium/content_shell without importing
 Chrome's full Autofill profile, storage, or Views UI stack. The next experiment
 should be the dedicated native-popup log cleanup pass described below.
 
+### Experiment 5: Manually clean obsolete native-popup diagnostics
+
+#### Description
+
+All functional bugs from the native-popup issue series are now fixed. The next
+step is cleanup: remove obsolete diagnostic logs and trace helper code that no
+longer serves the implementation, while preserving every behavioral fix from
+Issues 779, 782, 783, and 784.
+
+This experiment is cleanup-only. It must not change behavior.
+
+#### Non-Negotiable Constraint: No Git Reverts
+
+Do not run `git revert`. Do not revert any historical trace commit. Do not
+cherry-pick reverse patches. Do not use commit boundaries as cleanup boundaries.
+
+The cleanup must be 100% manual and hunk-reviewed:
+
+- remove individual log statements intentionally;
+- remove helper functions only after confirming no live code uses them;
+- remove includes/dependencies only after confirming they are now unused;
+- inspect every changed hunk before committing;
+- leave any mixed trace/behavior hunk untouched until the trace lines can be
+  separated safely.
+
+The reason is historical and important: earlier trace commits also carried
+working behavior fixes. Reverting those commits can silently remove working
+functionality. This experiment must make intentional code edits only.
+
+Claude will review the cleanup diff, as in the previous experiments, and will
+specifically audit for unintended behavior changes.
+
+#### Protected Behavior
+
+The cleanup must preserve all fixes from the issue series:
+
+- Issue 779 PagePopup y-axis correction in `WebPagePopupImpl::SetWindowRect`;
+- corrected `window_rect` flowing into `SetPendingWindowRect`, `SetPopupBounds`,
+  and `initial_rect_`;
+- Issue 782 Shell window `setIgnoresMouseEvents:YES` setup and reassertions;
+- Shell window move/placement behavior used for popup positioning;
+- Issue 783 `SetGuiActive` protocol behavior for app deactivate/reactivate;
+- Issue 783 direct `NSMenu` select placement in `WebMenuRunner`;
+- Issue 784 narrow datalist popup stack: `ShellDatalistAutofillClient`,
+  `ShellDatalistAutofillDriver`, and the `datalist_autofill.mojom` bridge.
+
+If any protected behavior is touched, the hunk must be justified as cleanup-only
+and reviewed explicitly. If that cannot be justified, do not make the change.
+
+#### Changes
+
+Continue on Chromium branch `148.0.7778.97-issue-784`.
+
+1. Inventory current trace code.
+
+   Search Chromium for the remaining native-popup trace labels and helpers:
+
+   ```bash
+   rg "\\[issue-779-trace\\]|Issue779Trace|page_popup_y_fix|native_popup_attempt|pagepopup_alt_tab|select_x_position|datalist_autofill" chromium/src
+   ```
+
+   Classify each result as one of:
+   - obsolete high-volume diagnostic log;
+   - obsolete helper used only by obsolete logs;
+   - low-volume regression log worth keeping;
+   - behavior code that must not be removed.
+
+2. Remove obsolete high-volume diagnostics by hand.
+
+   Target logs that were useful only while localizing earlier failures:
+   - mouse-event router traces;
+   - Blink EventHandler press/release traces;
+   - broad AppKit/NSApplication/window-list snapshots;
+   - per-mouse Wezboard/Roamium forwarding traces;
+   - old failed-stock-Autofill probe logs that are superseded by the working
+     datalist stack.
+
+   Delete only the log statements and immediately-unused trace helpers. Do not
+   delete any line that mutates state, computes popup placement, sends protocol
+   messages, changes focus, calls AppKit popup APIs, or changes an input value.
+
+3. Keep narrowly useful regression logs if they are low-volume.
+
+   It is acceptable to keep a small number of low-volume logs behind
+   `TERMSURF_ISSUE_779_TRACE=1` if they directly protect future regressions:
+   - PagePopup y-fix applied/not-applied at popup-open time;
+   - Shell window move/`ignoresMouseEvents` state around popup placement;
+   - direct select `NSMenu` path entry/return;
+   - datalist popup request/show/accept lifecycle.
+
+   Prefer fewer logs. The final trace surface should be small enough that a
+   single manual popup test produces readable output.
+
+4. Remove unused includes and dependencies.
+
+   After removing logs, clean up unused C++/ObjC includes and any unused GN
+   dependencies that existed only for tracing. Do this only after the compiler
+   confirms they are unused or after direct inspection proves they are no longer
+   referenced.
+
+   Do not remove the Issue 784 datalist Mojo target or its required deps.
+
+5. Audit protected files manually.
+
+   Before building, inspect diffs for every protected file touched by cleanup.
+   Confirm:
+   - `WebPagePopupImpl::SetWindowRect` still has the y-correction block;
+   - `ts_shell_window_mac.mm` still has all `setIgnoresMouseEvents:YES`
+     callsites;
+   - `WebMenuRunner` still uses the direct `NSMenu` path for select;
+   - `SetGuiActive` plumbing is still present;
+   - datalist renderer/browser classes and mojom still exist and still wire
+     through `SetAutofillValue(...)`.
+
+6. Build and verify.
+
+   Build Chromium:
+
+   ```bash
+   scripts/build.sh chromium
+   ```
+
+   Build any other components if needed:
+
+   ```bash
+   scripts/build.sh roamium
+   scripts/build.sh wezboard
+   scripts/build.sh webtui
+   ```
+
+7. Run the native-popup invariant test.
+
+   Use the native popup test page and verify:
+   - date picker y-position is correct;
+   - date picker dismisses on Cmd-Tab and page remains usable after return;
+   - select x-position is correct;
+   - date picker still opens after select dismissal;
+   - datalist typing `S` shows `Surfari` and selection commits the value;
+   - empty datalist input shows the full option set;
+   - datalist popup dismisses on click-away and Cmd-Tab.
+
+8. Capture a reduced trace.
+
+   Run once with `TERMSURF_ISSUE_779_TRACE=1` and confirm the remaining trace
+   output is small and relevant. It should not contain old mouse-router,
+   broad-window-snapshot, or failed-Autofill-probe noise.
+
+9. Claude review.
+
+   Before recording the result, have Claude review:
+   - the Chromium cleanup diff;
+   - the protected behavior checklist;
+   - the manual test results;
+   - the reduced trace output.
+
+   The review must explicitly answer whether the cleanup appears behaviorally
+   neutral. If Claude finds a possible behavior change, treat the experiment as
+   Partial or Fail until the diff is corrected.
+
+10. Commit and archive patches.
+
+    If the experiment passes, commit the Chromium cleanup on
+    `148.0.7778.97-issue-784`, regenerate `chromium/patches/issue-784/`, and
+    commit the patch archive plus issue result in the main repo.
+
+#### Pass Criteria
+
+The experiment passes if:
+
+- obsolete diagnostics are removed manually, without any `git revert`;
+- Chromium builds;
+- all native-popup invariant tests pass;
+- reduced trace output is readable and focused;
+- Claude's review finds no unintended behavior change;
+- Chromium patch archive is regenerated.
+
+#### Partial Criteria
+
+The experiment is Partial if:
+
+- cleanup removes some obsolete logs but leaves known noisy logs for a later
+  pass;
+- manual tests pass but Claude flags a diff hunk that needs follow-up review;
+- trace output is improved but still too noisy;
+- patch archive regeneration is deferred for a concrete blocker.
+
+#### Failure Criteria
+
+The experiment fails if:
+
+- any `git revert` is used;
+- cleanup removes or changes a protected behavioral fix;
+- Chromium does not build;
+- any native-popup invariant regresses;
+- the diff cannot be reviewed hunk-by-hunk because it is too broad or
+  mechanical.
+
+#### Expected Interpretation
+
+If this passes, the native-popup issue series is functionally complete and the
+issue can be closed with a conclusion summarizing the fixes and the cleanup.
+
+If this is Partial, design one more narrow cleanup experiment around only the
+remaining noisy trace surface.
+
+If this fails, restore the cleanup hunks manually by editing the affected files;
+do not use `git revert` to recover.
+
 ## Cleanup Requirement
 
 Do not perform broad log cleanup before the datalist fix. Some remaining
