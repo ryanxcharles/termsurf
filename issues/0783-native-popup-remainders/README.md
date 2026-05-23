@@ -686,3 +686,330 @@ previous post-select fix survived the cleanup. The remaining bugs are still
 deferred to follow-up experiments: PagePopup-family alt-tab persistence, select
 dropdown x-position, datalist behavior, and suspicious lingering
 `RenderWidgetPopupWindow` entries.
+
+### Experiment 3: Trace PagePopup Alt-Tab Persistence
+
+#### Description
+
+This experiment targets exactly one remaining bug: PagePopup-family native
+widgets (`date`, `time`, and `color`) remain visible after the user Cmd-Tabs
+away from Wezboard. Do not investigate or change the select dropdown x-position,
+the datalist input, or select menu behavior in this experiment.
+
+The leading hypothesis is cross-process activation loss. The visible app is
+Wezboard, but PagePopup windows are owned by the separate Roamium/Chromium
+process. When the user Cmd-Tabs away from Wezboard, AppKit sends deactivation
+notifications to the Wezboard process. Chromium may not receive a corresponding
+`NSApplicationDidResignActiveNotification`, so it may not know it should dismiss
+the PagePopup window.
+
+The goal is to identify which boundary fails:
+
+```text
+Wezboard loses app/window focus
+        ↓
+TermSurf / Roamium learns focus changed
+        ↓
+Chromium app/window state changes or receives a protocol signal
+        ↓
+Blink/WebView/PagePopup closes active PagePopup
+        ↓
+RenderWidgetPopupWindow disappears
+```
+
+This is a logs-only experiment. It must not add a dismissal fix yet.
+
+#### Changes
+
+1. **Preserve Experiment 2 invariants.**
+
+   Before adding logs, inspect and preserve:
+   - `WebPagePopupImpl::SetWindowRect` y correction;
+   - `page_popup_y_fix`;
+   - downstream `window_rect` usage;
+   - all existing `setIgnoresMouseEvents:YES` reassertions;
+   - the cleaned-up state where high-volume mouse-dispatch logs are absent.
+
+   Use the deleted Experiment 1 observer code only as a reference for shape:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf/chromium/src
+   git show fb8a64ffe7386 -- content/libtermsurf_chromium/ts_shell_window_mac.mm
+   ```
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   git show fb8a64ffe7386 -- \
+     wezboard/window/src/os/macos/app.rs \
+     wezboard/window/src/os/macos/window.rs
+   ```
+
+   Do not cherry-pick, revert, or resurrect the whole commit. Manually re-add
+   only the activation observer helpers. Do not touch
+   `WebPagePopupImpl::SetWindowRect`, the y-correction predicate, downstream
+   `window_rect` usage, or any `setIgnoresMouseEvents:YES` callsite.
+
+2. **Add Wezboard activation logs.**
+
+   In `wezboard/window/src/os/macos/app.rs`, add low-frequency app activation
+   logs behind `TERMSURF_ISSUE_779_TRACE=1`:
+   - `applicationDidResignActive:`
+   - `applicationDidBecomeActive:`
+
+   In `wezboard/window/src/os/macos/window.rs`, add matching low-frequency
+   window activation logs:
+   - `windowDidResignKey:`
+   - `windowDidBecomeKey:`
+
+   Log:
+   - event name;
+   - `NSApp.isActive`;
+   - key window pointer;
+   - main window pointer;
+   - active window id if cheaply available;
+   - window id for window delegate notifications;
+   - timestamp.
+
+   Use a new marker:
+
+   ```text
+   [issue-779-trace] pagepopup_alt_tab boundary=wezboard_activation ...
+   ```
+
+   These logs should fire only on app activation changes, not per mouse event.
+
+3. **Add Chromium activation logs.**
+
+   In `chromium/src/content/libtermsurf_chromium/ts_shell_window_mac.mm`, add a
+   notification observer installed from `TsBrowserMainParts` startup, behind the
+   existing trace gate, for:
+   - `NSApplicationWillResignActiveNotification`;
+   - `NSApplicationDidResignActiveNotification`;
+   - `NSApplicationDidBecomeActiveNotification`;
+   - `NSWindowDidResignKeyNotification`;
+   - `NSWindowDidBecomeKeyNotification`;
+   - `NSWindowDidChangeOcclusionStateNotification`.
+
+   Log:
+   - notification name;
+   - `NSApp.isActive`;
+   - key window summary;
+   - main window summary;
+   - ordered windows top entries;
+   - each listed window's class, frame, level, `isVisible`,
+     `ignoresMouseEvents`, `isKeyWindow`, and `isMainWindow`.
+
+   Use:
+
+   ```text
+   [issue-779-trace] pagepopup_alt_tab boundary=chromium_activation ...
+   ```
+
+   Anticipated result: Chromium may be silent during Wezboard Cmd-Tab. If so,
+   that silence is a real diagnostic result, not a logging failure.
+
+4. **Add PagePopup lifecycle state logs around deactivation.**
+
+   Keep the existing low-volume PagePopup logs and add only the missing
+   deactivation-oriented fields in:
+   - `third_party/blink/renderer/core/exported/web_view_impl.cc`
+   - `third_party/blink/renderer/core/exported/web_page_popup_impl.cc`
+   - `third_party/blink/renderer/core/html/forms/date_time_chooser_impl.cc`
+
+   Log when:
+   - a PagePopup is open;
+   - `CancelPagePopup`, `ClosePagePopup`, `CleanupPagePopup`, `Cancel`, and
+     `ClosePopup` run;
+   - the PagePopup still has `page_`, `popup_client_`, and `closing_` state.
+
+   Use the existing `native_popup_attempt` / `WebPagePopupImpl::*` lines where
+   possible. Do not create per-frame or per-input logs.
+
+5. **Add RenderWidgetPopupWindow state snapshots.**
+
+   In Chromium's macOS popup/window code, add low-frequency snapshots when:
+   - the PagePopup window is created or initialized as popup;
+   - the PagePopup is closed/cancelled;
+   - Chromium receives any activation/window notification from step 3.
+
+   Snapshot only PagePopup-family transient popup windows, especially
+   `RenderWidgetPopupWindow` or level-101 windows associated with an active
+   PagePopup. Include the top ordered windows only as context. Do not dump every
+   unrelated window in the process.
+
+   Log:
+   - window pointer;
+   - class name;
+   - frame;
+   - level;
+   - visibility;
+   - `ignoresMouseEvents`;
+   - key/main state;
+   - parent/child window summary.
+
+   This should tell us whether the visible leftover widget is a
+   `RenderWidgetPopupWindow` still owned by Chromium and whether it survives
+   after Wezboard deactivation.
+
+6. **Do not add a protocol message or fix.**
+
+   This experiment must not add:
+   - a TermSurf deactivation protobuf;
+   - a Wezboard-to-Roamium deactivation IPC;
+   - forced PagePopup dismissal;
+   - synthetic clicks, key events, or mouse events.
+
+   Those are candidate fixes for the next experiment after this trace names the
+   failing boundary.
+
+#### Verification
+
+1. Confirm the Chromium branch:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf/chromium/src
+   git branch --show-current
+   ```
+
+   It must be:
+
+   ```text
+   148.0.7778.97-issue-783
+   ```
+
+2. Build through project scripts:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   scripts/build.sh chromium
+   scripts/build.sh roamium
+   scripts/build.sh wezboard
+   scripts/build.sh webtui
+   ```
+
+3. Run a trace-off baseline.
+
+   Start the test page:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   bun test-html/server.ts
+   ```
+
+   Start Wezboard without `TERMSURF_ISSUE_779_TRACE`:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   mkdir -p logs/issue-783-exp3-baseline-state/termsurf
+
+   XDG_STATE_HOME="$PWD/logs/issue-783-exp3-baseline-state" \
+   RUST_LOG=info \
+   ./wezboard/target/debug/wezboard-gui \
+   2>&1 | tee logs/issue-783-exp3-baseline-wezboard.log
+   ```
+
+   Launch the TUI with the same command from step 5, then confirm:
+   - date y-axis is correct;
+   - date still opens after a select dismissal;
+   - no `[issue-779-trace]` lines appear in the baseline logs.
+
+   Quit Wezboard and the TUI before continuing.
+
+4. Start Wezboard with fresh Experiment 3 trace logs:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   mkdir -p logs/issue-783-exp3-state/termsurf
+
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-783-exp3-state" \
+   RUST_LOG=info \
+   ./wezboard/target/debug/wezboard-gui \
+   2>&1 | tee logs/issue-783-exp3-wezboard.log
+   ```
+
+5. Launch the TUI:
+
+   ```bash
+   /Users/ryan/dev/termsurf/webtui/target/debug/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     http://localhost:9616/test-native-popups.html
+   ```
+
+6. Re-check the non-negotiable invariants:
+   - click the date input;
+   - confirm the date picker y position is correct;
+   - close it;
+   - click the select dropdown once;
+   - dismiss it;
+   - click the date input again;
+   - confirm it still opens and y remains correct.
+
+   If either invariant regresses, stop and mark the experiment failed.
+
+7. Run the focused alt-tab sequence:
+   - open the date picker;
+   - while it is still open, Cmd-Tab to Finder or another standard windowed app
+     on the same Space;
+   - observe whether the date picker remains visible;
+   - Cmd-Tab back to Wezboard;
+   - close the date picker if it remains.
+
+   Mouse-based deactivation by clicking another app's window is a future
+   follow-up if Cmd-Tab does not explain the bug.
+
+8. Repeat step 7 for `time` and `color` only if the date trace is readable. Stop
+   after the first unreadable or ambiguous trace.
+
+9. Extract the focused trace:
+
+   ```bash
+   rg -a "\[issue-779-trace\]|pagepopup_alt_tab|page_popup_y_fix|DateTimeChooserImpl|WebPagePopupImpl|WebViewImpl::.*PagePopup|ShowCreatedWidget|InitAsPopup|RenderWidgetPopupWindow|chromium_shell_window_state|ignoresMouseEvents" \
+     logs/issue-783-exp3-wezboard.log \
+     logs/issue-783-exp3-state/termsurf/webtui-trace.log \
+     logs/issue-783-exp3-state/termsurf/roamium-trace.log \
+     logs/issue-783-exp3-state/termsurf/chromium-server.log \
+     > logs/issue-783-exp3-trace.log
+   ```
+
+10. Pass criteria:
+    - date y-axis remains correct;
+    - date still opens after select;
+    - Wezboard activation logs fire on Cmd-Tab away;
+    - the trace shows whether Chromium activation logs fire or stay silent;
+    - the trace shows whether PagePopup close/cancel cleanup fires during
+      Cmd-Tab;
+    - the trace shows whether a `RenderWidgetPopupWindow` remains visible after
+      Wezboard deactivation;
+    - no high-volume per-mouse or per-frame logs are reintroduced.
+
+    After a successful implementation and result, export Chromium patches to
+    `chromium/patches/issue-783/` before closing the experiment.
+
+11. Fail criteria:
+    - **date y-axis regresses;**
+    - post-select date opening regresses;
+    - the trace reintroduces the old Issue 782 input flood;
+    - the experiment changes popup behavior instead of logging only;
+    - the trace cannot distinguish:
+      - Wezboard deactivated but Chromium was silent;
+      - Chromium deactivated but PagePopup cleanup did not run;
+      - PagePopup cleanup ran but the popup NSWindow remained visible.
+
+#### Expected Interpretations
+
+- If Wezboard logs `applicationDidResignActive` but Chromium logs nothing, the
+  bug is likely structural cross-process activation loss. The next experiment
+  should design a TermSurf protocol signal from Wezboard to Roamium/Chromium to
+  dismiss active native popups on GUI deactivation.
+- If Chromium logs deactivation but PagePopup cleanup does not run, the fix is
+  likely a Chromium-side activation observer that calls the existing PagePopup
+  cancellation path.
+- If PagePopup cleanup runs but `RenderWidgetPopupWindow` remains visible, the
+  fix is likely in popup window ownership/destruction.
+- If all cleanup runs and the window disappears, the visible persistence may be
+  from a different popup window family and needs a narrower follow-up.
+- If all cleanup runs and the Chromium popup NSWindow disappears, but the popup
+  remains visually present, the persistence is likely at the CALayerHost or
+  Wezboard overlay compositor layer. The next experiment should trace Wezboard's
+  overlay rendering path.
