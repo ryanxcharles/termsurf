@@ -798,20 +798,33 @@ direction for TermSurf. The datalist bug needs a small embedding-level
 implementation, not Chrome profile/UI infrastructure.
 
 This experiment should implement a datalist-only popup for content_shell/Roamium
-using Blink's public datalist APIs:
+using Blink's public datalist APIs and the same narrow renderer/browser split
+Electron uses for datalist Autofill, but with TermSurf's browser-side `NSMenu`
+instead of Electron's Views popup:
 
 ```text
 ChromeClientImpl::OpenTextDataListChooser(...)
   -> WebAutofillClient::OpenTextDataListChooser(...)
+  -> WebAutofillClient::TextFieldValueChanged(...)
+  -> WebAutofillClient::TextFieldDidReceiveKeyDown(...)
   -> WebInputElement::FilteredDataListOptions()
-  -> renderer-to-browser content_shell datalist popup message
+  -> renderer-to-browser content_shell datalist driver message
   -> browser-side content_shell NSMenu popup
-  -> WebFormControlElement::SetValue(..., send_events=true)
+  -> browser-to-renderer accept-suggestion message
+  -> WebInputElement::SetAutofillValue(...)
 ```
 
 This deliberately bypasses Chrome's `ContentAutofillClient` and Chrome Autofill
 Views UI. The goal is one working feature: native `<input list>` suggestions for
 TermSurf's Chromium engine.
+
+Electron is useful precedent for this shape. Its implementation lives in
+`vendor/electron/shell/renderer/electron_autofill_agent.*`,
+`vendor/electron/shell/browser/electron_autofill_driver.*`, and
+`vendor/electron/shell/browser/ui/autofill_popup.*`. TermSurf should copy the
+architecture, not the UI: keep the two-process Mojo bridge and Autofill-specific
+value acceptance, but replace Electron's large Views popup with the small AppKit
+`NSMenu` path already proven by Issue 783.
 
 #### Non-Negotiable Invariants
 
@@ -841,10 +854,12 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    `ShellDatalistAutofillClient`, that:
    - inherits `content::RenderFrameObserver`;
    - inherits `blink::WebAutofillClient`;
+   - implements a small browser-to-renderer Mojo receiver for accepting the
+     chosen datalist value;
    - calls `render_frame->GetWebFrame()->SetAutofillClient(this)` in its
      constructor;
-   - implements only `OpenTextDataListChooser(...)` and
-     `DataListOptionsChanged(...)`;
+   - implements `OpenTextDataListChooser(...)`, `TextFieldValueChanged(...)`,
+     `TextFieldDidReceiveKeyDown(...)`, and `DataListOptionsChanged(...)`;
    - leaves all other `WebAutofillClient` hooks as default no-ops.
 
    `ShellContentRendererClient::RenderFrameCreated(...)` should create this
@@ -853,9 +868,15 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
 
    Follow the normal `RenderFrameObserver` self-owned pattern:
    - allocate with `new ShellDatalistAutofillClient(render_frame)`;
-   - implement `OnDestruct()` as `delete this`;
+   - implement `OnDestruct()` with `Shutdown()` plus
+     `base::SingleThreadTaskRunner::GetCurrentDefault()->DeleteSoon(...)`;
    - do not call `SetAutofillClient(nullptr)` from the destructor or
      `OnDestruct()`, because the `WebFrame` may already be tearing down.
+
+   Typing-triggered popups must be gated on user action. Follow Electron's
+   pattern: show suggestions from `TextFieldValueChanged(...)` only when the
+   frame has transient user activation or the frame is pasting. Script-driven
+   `.value = ...` changes must not open the datalist popup.
 
 2. Extract datalist options and anchor data in the renderer.
 
@@ -880,9 +901,10 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    Also compute and send the input anchor rect. The renderer cannot show AppKit
    UI directly; it should only package:
    - the filtered option display labels and values;
-   - the input bounds in widget/local-root coordinates;
-   - enough frame/widget identity for the browser side to map the anchor to the
-     Shell window or host view.
+   - the input bounds in window DIPs, computed with
+     `render_frame()->ConvertViewportToWindow(element.BoundsInWidget())`.
+
+   Do not compute screen coordinates in the renderer.
 
 3. Add a renderer-to-browser bridge for datalist popups.
 
@@ -890,20 +912,27 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    AppKit API. Add a small content_shell-scoped bridge that sends the extracted
    options and anchor data to the browser process.
 
-   Prefer a narrow new content_shell mojom interface, for example:
+   Prefer Electron's two-interface shape:
 
    ```text
-   ShellDatalistPopupHost.ShowDatalistPopup(
-       array<ShellDatalistOption> options,
-       gfx.mojom.RectF input_bounds_in_widget,
-       ...frame/widget identity...)
-       => (optional<uint32> selected_index)
+   interface ShellDatalistAutofillAgent {
+     AcceptDataListSuggestion(mojo_base.mojom.String16 value);
+   };
+
+   interface ShellDatalistAutofillDriver {
+     ShowDatalistPopup(
+         gfx.mojom.RectF input_bounds_in_window,
+         array<mojo_base.mojom.String16> values,
+         array<mojo_base.mojom.String16> labels,
+         pending_remote<ShellDatalistAutofillAgent> agent);
+     HideDatalistPopup();
+   };
    ```
 
-   A selected index should be reported back to the renderer. The renderer then
-   sets the input value. If a callback is awkward in the chosen IPC shape, use a
-   paired browser-to-renderer reply message, but keep the interface scoped to
-   content_shell.
+   The browser-side driver owns the popup. When the user selects an item, it
+   calls `AcceptDataListSuggestion(value)` on the renderer-side agent. Keep the
+   interface scoped to content_shell. Do not reuse or import Chrome's Autofill
+   driver, Autofill popup controller, or Autofill Views UI.
 
 4. Show a minimal browser-side macOS popup.
 
@@ -922,7 +951,7 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
 
    Anchor placement should reuse the coordinate conventions already proven in
    Issues 779 and 783:
-   - renderer sends input bounds in a clearly-labeled coordinate space;
+   - renderer sends input bounds in window DIPs;
    - browser converts that rect into the host view's coordinate space;
    - place the menu below the input unless AppKit constrains it.
 
@@ -936,16 +965,21 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    Without those three fields, mouse-location placement is a Failure, not a
    Partial. A passing result requires the popup to appear at the datalist input.
 
-5. Accept a suggestion by setting the input value.
+5. Accept a suggestion with the Autofill-specific value path.
 
    When the user selects a menu item:
-   - set the input's value to the chosen option value;
-   - pass `send_events=true` so normal input/change behavior fires;
+   - send the chosen option value back to the renderer through
+     `ShellDatalistAutofillAgent::AcceptDataListSuggestion(...)`;
+   - find the currently-focused element in the renderer frame;
+   - if it is a `blink::WebInputElement`, set the value with
+     `WebInputElement::SetAutofillValue(...)`;
    - keep focus usable after the popup closes.
 
-   Prefer `blink::WebFormControlElement::SetValue(value, true)` if it produces
-   correct DOM behavior. If it does not, record the exact failure and make the
-   result Partial.
+   Use `SetAutofillValue(...)`, not generic
+   `WebFormControlElement::SetValue(value, true)`, for the primary
+   implementation. This is the canonical committed datalist/autofill acceptance
+   path used by Electron and should fire the right Blink-side value-change
+   behavior.
 
    Do not use preview/suggested-value APIs for the final selection. A datalist
    selection is a committed value, not an Autofill preview.
@@ -979,12 +1013,16 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    Keep low-volume `datalist_autofill` logs for:
    - datalist client installed;
    - `OpenTextDataListChooser(...)` fired;
+   - `TextFieldValueChanged(...)` fired and whether it passed the user-gesture
+     gate;
+   - `TextFieldDidReceiveKeyDown(...)` fired for arrow-key popup triggers;
    - number of filtered options;
    - first few option labels/values;
    - renderer-to-browser popup request sent;
    - browser-side popup shown with anchor rect and coordinate space;
    - selected value;
-   - value set success/failure;
+   - `AcceptDataListSuggestion(...)` received;
+   - `SetAutofillValue(...)` success/failure;
    - popup dismissed reason.
 
    Do not reintroduce broad mouse/input/AppKit logs.
@@ -1030,7 +1068,8 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    - click into the datalist field;
    - select the existing `Roamium` text;
    - type `S`;
-   - click the datalist affordance if visible, or press ArrowDown;
+   - confirm typing opens or refreshes the filtered popup;
+   - if the popup is not already open, press ArrowDown;
    - confirm a popup appears with `Surfari`;
    - select `Surfari`;
    - confirm the field value becomes `Surfari`.
@@ -1039,7 +1078,7 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
 
 7. Test full-list behavior:
    - clear the datalist input;
-   - open the datalist suggestions;
+   - open the datalist suggestions with the datalist affordance or ArrowDown;
    - confirm the available browser options appear, including `Roamium`,
      `Surfari`, `Waterwolf`, and `Girlbat`.
 
@@ -1069,6 +1108,7 @@ The experiment passes if:
 
 - the datalist popup appears for `input#browser`;
 - typing `S` filters the options to include `Surfari`;
+- ArrowDown can open the suggestions when the popup is not already visible;
 - selecting `Surfari` sets the input value to `Surfari`;
 - clearing the input can show the full datalist option set;
 - click-away dismissal works;
