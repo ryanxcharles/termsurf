@@ -129,12 +129,15 @@ Rendering must not silently hide rows or columns after the fact.
 
 For Experiment 1, answer these conservatively:
 
-- apply perimeter borders to visible pane exterior edges;
+- apply one outer perimeter around the entire visible split area, not around
+  each split subtree or each leaf pane;
 - collapse interior edges into the existing shared `PositionedSplit` dividers;
 - prefer the active pane's color on shared dividers so the active outline is
   continuous;
 - make grid-native borders one cell thick;
 - reserve those border cells in mux/layout before PTY dimensions are assigned;
+- keep `PositionedPane.left/top/width/height` as the pane content rect and add
+  companion border geometry for the reserved border cells;
 - do not reinterpret `split_border_width` yet.
 
 ## Experiments
@@ -215,6 +218,21 @@ acceptable.
    space. It may reduce the content rows/columns available to PTYs, and that
    reduction must be delivered through the normal pane resize path.
 
+   The reservation belongs in `wezboard/mux/src/tab.rs`, at the layout
+   computation entry point before leaf pane sizes are propagated to PTYs. The
+   expected shape is:
+   - if one pane is visible or the pane is zoomed, keep the existing layout;
+   - if more than one pane is visible, subtract one cell from each side of the
+     visible split area;
+   - run the existing split-tree positioning on the resulting inner rect;
+   - assign leaf pane PTYs the content rects produced by that existing split
+     layout.
+
+   The perimeter wraps the entire visible split area exactly once. Do not add a
+   separate perimeter around each subtree or leaf pane. Leaf pane outlines are
+   composed from the one outer perimeter plus existing shared internal divider
+   cells.
+
    The existing internal split divider cells should remain shared one-cell grid
    regions. Do not create duplicated per-pane borders between adjacent panes.
 
@@ -224,16 +242,22 @@ acceptable.
 
 3. **Extend positioned geometry to expose border/content rects.**
 
-   Extend the data produced by the split layout enough for rendering and input
-   to know:
-   - pane outer rect in cells;
-   - pane content rect in cells;
+   Keep `PositionedPane.left/top/width/height` as the pane content rect. This
+   preserves the existing PTY resize path, mouse mapping, selection, terminal
+   mouse forwarding, and browser overlay positioning as content-cell operations.
+
+   Add companion geometry for the reserved border cells. This can be a new field
+   on `PositionedPane` or a parallel structure returned with positioned panes,
+   but it must be produced by mux/layout, not rediscovered from pixels in the
+   renderer. The companion geometry should expose:
+   - pane outer rect in cells, including adjacent border/divider cells;
    - which edge cells are perimeter border cells;
    - which internal edge cells are existing shared `PositionedSplit` dividers.
 
-   Prefer extending `PositionedPane` or adding a companion geometry structure
-   over duplicating layout math in the renderer. The renderer should consume the
-   mux/layout result, not rediscover it from pixels.
+   After this experiment, `mouseevent.rs` should not need new border-offset
+   arithmetic. If the implementation requires subtracting border cells in mouse
+   mapping, that is evidence that `PositionedPane` stopped representing the
+   content rect and the design should be rechecked.
 
 4. **Define active-pane border ownership in grid cells.**
 
@@ -280,9 +304,9 @@ acceptable.
    `paint_split()` is awkward, pass enough context from `render/paint.rs` to
    choose the color without changing split layout or hit testing.
 
-   Remove the current `split_border_width == 0` gate around `paint_split()` if
-   needed. In the grid-native model, shared dividers are structural grid cells
-   and should be rendered regardless of the legacy pixel-width option.
+   Remove the current `split_border_width == 0` gate around `paint_split()`. In
+   the grid-native model, shared dividers are structural grid cells and must be
+   rendered regardless of the legacy pixel-width option.
 
 7. **Reconcile or replace existing pixel border paths.**
 
@@ -298,6 +322,11 @@ acceptable.
 
    Do not leave both the legacy pixel border and the new grid-native perimeter
    active at the same time.
+
+   If repurposing `paint_pane_border()`, its thickness must come from cell
+   metrics, not `split_border_width`: vertical segments use `cell_width`, and
+   horizontal segments use `cell_height`. It should continue to short-circuit
+   when `num_panes <= 1` or the pane is zoomed.
 
 8. **Wire the render order in `render/paint.rs`.**
 
@@ -351,6 +380,11 @@ acceptable.
      reported by `stty size`;
    - confirm the visible terminal grid matches the reported size.
 
+   Opening the first split is expected to shrink pane content by more than the
+   new pane's share alone: the whole split area also loses two columns and two
+   rows to the outer perimeter, plus one row or column to the internal shared
+   divider.
+
 5. Active pane outline:
    - create a two-pane horizontal split;
    - focus each pane in turn;
@@ -370,24 +404,39 @@ acceptable.
    - confirm the bottom row and rightmost column remain visible;
    - confirm Codex or Neovim bottom status lines are visible.
 
-8. Mouse and split dragging:
+8. TUI resize transitions:
+   - run a TUI such as Codex, Neovim, or htop in a pane;
+   - open a split and confirm the TUI receives the resize and redraws cleanly at
+     the smaller truthful content size;
+   - close the split and confirm the TUI grows back cleanly;
+   - zoom and unzoom a pane and confirm redraws remain clean.
+
+9. Mouse and split dragging:
    - drag shared split dividers;
    - click/select text near pane edges;
    - run a terminal mouse app and confirm mouse forwarding targets visible
      cells;
    - confirm border drawing did not steal terminal-cell clicks.
 
-9. Browser overlays:
-   - open a browser pane with `web`;
-   - verify the overlay still aligns with the terminal pane;
-   - resize splits and verify the overlay follows its pane.
+   Confirm `mouseevent.rs` did not need new border-offset arithmetic for normal
+   pane content clicks. `PositionedPane` should still identify content cells.
 
-10. `split_border_width` compatibility:
+10. Browser overlays:
+    - open a browser pane with `web`;
+    - verify the overlay still aligns with the terminal pane;
+    - resize splits and verify the overlay follows its pane;
+    - open a split next to an existing browser pane and verify the overlay
+      resizes to the new content rect;
+    - close the split and verify the overlay grows back to the original content
+      rect.
+
+11. `split_border_width` compatibility:
     - test with `split_border_width = 0`;
     - test with `split_border_width = 4`;
-    - confirm the one-cell grid-native outline behavior is unchanged except for
-      any old pre-existing divider behavior that still intentionally depends on
-      the option.
+    - confirm the visible grid-native outline is identical for both values.
+
+    Any visible difference between `0` and `4` indicates leftover legacy pixel
+    border behavior and should be fixed before the experiment passes.
 
 #### Pass Criteria
 
