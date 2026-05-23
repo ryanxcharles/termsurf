@@ -11,13 +11,13 @@ Build the Chromium fork for TermSurf. Everything stays inside the repo.
 
 ## Paths
 
-| What         | Path                                        |
-| ------------ | ------------------------------------------- |
-| depot_tools  | `chromium/depot_tools`                      |
-| Source root  | `chromium/src`                              |
-| Build output | `chromium/src/out/Default/`                 |
-| Built app    | `chromium/src/out/Default/One Profile.app/` |
-| GN args      | `chromium/src/out/Default/args.gn`          |
+| What         | Path                               |
+| ------------ | ---------------------------------- |
+| depot_tools  | `chromium/depot_tools`             |
+| Source root  | `chromium/src`                     |
+| Build output | `chromium/src/out/Default/`        |
+| Built target | `chromium/src/out/Default/*.dylib` |
+| GN args      | `chromium/src/out/Default/args.gn` |
 
 All paths are relative to `~/dev/termsurf`.
 
@@ -45,13 +45,13 @@ build cache** and forces a full rebuild (~42,000 steps, ~1.5 hours).
 **Wrong:**
 
 ```bash
-ninja -C out/Default chromium_profile_server    # DO NOT DO THIS
+ninja -C out/Default libtermsurf_chromium    # DO NOT DO THIS
 ```
 
 **Right:**
 
 ```bash
-autoninja -C out/Default chromium_profile_server  # Always use autoninja
+autoninja -C out/Default libtermsurf_chromium  # Always use autoninja
 ```
 
 If the build ever prints "You're still using Ninja", the directory is already
@@ -68,14 +68,31 @@ cd ~/dev/termsurf/chromium/src
 export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
 
 # Generate build files (only needed once, or after changing args.gn)
-gn gen out/Default
+gn gen out/Default --args='is_debug=false symbol_level=0 is_component_build=true'
 
 # Build
-autoninja -C out/Default chromium_profile_server
+autoninja -C out/Default libtermsurf_chromium
 ```
 
-The current build target is `chromium_profile_server`. This builds the
-`Chromium Profile Server.app` bundle in `out/Default/`.
+The current build target is `libtermsurf_chromium`. This builds the TermSurf
+Chromium shared library and its runtime resources in `out/Default/`.
+
+## Fresh Setup
+
+For a new checkout, configure Chromium with gclient, sync the current base
+version, then apply the current TermSurf patch archive:
+
+```bash
+cd ~/dev/termsurf/chromium
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+gclient config --name=src https://chromium.googlesource.com/chromium/src.git
+caffeinate gclient sync --revision src@148.0.7778.97 --no-history
+cd src
+git checkout -b 148.0.7778.97-issue-784 148.0.7778.97
+git am ../../chromium/patches/issue-784/*.patch
+gn gen out/Default --args='is_debug=false symbol_level=0 is_component_build=true'
+autoninja -C out/Default libtermsurf_chromium
+```
 
 ## GN Args
 
@@ -105,7 +122,7 @@ outside the repo without explicit user approval.
 ## Branches
 
 The Chromium fork at `chromium/src` uses branches named `{version}-termsurf` or
-`{version}-issue-{N}` (e.g., `146.0.7650.0-issue-414`). These are built as
+`{version}-issue-{N}` (e.g., `148.0.7778.97-issue-784`). These are built as
 commits on top of the vanilla Chromium version tag.
 
 **ALWAYS create a new branch for every issue.** Never commit to an existing
@@ -121,7 +138,7 @@ its patch set:
 ```bash
 cd ~/dev/termsurf/chromium/src
 rm -rf ../../chromium/patches/issue-{N}/
-git format-patch 146.0.7650.0..HEAD -o ../../chromium/patches/issue-{N}/
+git format-patch 148.0.7778.97..HEAD -o ../../chromium/patches/issue-{N}/
 ```
 
 Then commit the updated patches in the main repo alongside the
@@ -136,15 +153,15 @@ Then commit the updated patches in the main repo alongside the
    ```bash
    cd ~/dev/termsurf/chromium/src
    export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
-   git checkout 146.0.7650.0-issue-{parent}
-   git checkout -b 146.0.7650.0-issue-{N}
+   git checkout 148.0.7778.97-issue-{parent}
+   git checkout -b 148.0.7778.97-issue-{N}
    ```
 4. Make changes, build with `autoninja`, test.
 5. Commit to the issue branch with git-poet.
 6. Generate patches:
    ```bash
    rm -rf ../../chromium/patches/issue-{N}/
-   git format-patch 146.0.7650.0..HEAD -o ../../chromium/patches/issue-{N}/
+   git format-patch 148.0.7778.97..HEAD -o ../../chromium/patches/issue-{N}/
    ```
 7. Return to the main repo.
 8. Update `chromium/README.md` (current branch + Branches table).
@@ -152,7 +169,7 @@ Then commit the updated patches in the main repo alongside the
 
 ## Branch and Version Tracking
 
-`chromium/README.md` tracks the current branch, commit, and a complete list of
-all branches with links to their issue docs. Any time this skill switches
-branches, updates the Chromium version, or creates a new branch, it must also
-update `chromium/README.md` accordingly.
+`chromium/README.md` tracks the current branch, base version, and a complete
+list of all branches with links to their issue docs. Any time this skill
+switches branches, updates the Chromium version, or creates a new branch, it
+must also update `chromium/README.md` accordingly.

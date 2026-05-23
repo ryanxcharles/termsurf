@@ -142,12 +142,15 @@ To upgrade: `brew update && brew upgrade --cask termsurf`
 
 ### Build from Source
 
-For development. Requires the Rust toolchain and a Chromium build. Plan for
-~100 GB of disk space (almost all of it is Chromium).
+For development. Requires the Rust toolchain and a Chromium build. Plan for ~100
+GB of disk space (almost all of it is Chromium).
 
 #### 1. Install prerequisites
 
 ```bash
+# macOS compiler toolchain
+xcode-select --install
+
 # Rust (GUI, TUI, engine binary)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
@@ -164,30 +167,31 @@ first build takes ~1.5 hours. After that, incremental builds take 15–20 second
 cd chromium
 export PATH="$(pwd)/depot_tools:$PATH"
 
-# Shallow clone of the exact version TermSurf uses
-git clone --depth 1 --branch 146.0.7650.0 \
-  https://chromium.googlesource.com/chromium/src.git src
+# Configure gclient to manage Chromium's src/ checkout
+gclient config --name=src https://chromium.googlesource.com/chromium/src.git
 
-# Sync all dependencies for this version
-caffeinate gclient sync --no-history
+# Sync Chromium and its dependencies at the exact version TermSurf uses
+caffeinate gclient sync --revision src@148.0.7778.97 --no-history
 ```
 
-The `git clone --depth 1` fetches only the exact version tag with no history (~9
-GB smaller than a full clone). `gclient sync` then fetches the correct versions
-of all third-party dependencies, build tools, and SDKs to match. `caffeinate`
-prevents macOS from sleeping during the long download.
+`gclient config` creates the `.gclient` file that tells Chromium's tooling where
+`src/` lives. `gclient sync --revision src@148.0.7778.97` checks out the
+Chromium version TermSurf currently tracks and fetches the matching third-party
+dependencies, build tools, and SDKs. `caffeinate` prevents macOS from sleeping
+during the long download.
 
-Configure and prepare the build:
+Apply TermSurf's current Chromium patch archive:
+
+```bash
+cd src
+git checkout -b 148.0.7778.97-issue-784 148.0.7778.97
+git am ../../chromium/patches/issue-784/*.patch
+```
+
+Configure and build Chromium:
 
 ```bash
 gn gen out/Default --args='is_debug=false symbol_level=0 is_component_build=true'
-```
-
-Apply TermSurf patches and build:
-
-```bash
-git checkout -b 146.0.7650.0-termsurf
-git am ../../chromium/patches/termsurf/*.patch
 autoninja -C out/Default libtermsurf_chromium
 ```
 
@@ -199,9 +203,15 @@ management, patch workflow, and recovery from build issues.
 #### 3. Build and run (development)
 
 ```bash
-./scripts/build.sh wezboard
+cd ../..
+./scripts/build.sh all
 ./wezboard/target/debug/wezboard-gui
 ```
+
+`scripts/build.sh all` builds Chromium, Roamium, the `web` TUI, and Wezboard.
+The Roamium build also copies the `roamium` binary into
+`chromium/src/out/Default/`, where Wezboard expects to launch it during
+development.
 
 #### 4. Build and install (release)
 

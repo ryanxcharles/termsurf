@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-23"
+closed = "2026-05-23"
 +++
 
 # Issue 784: Datalist suggestions do not open
@@ -1428,6 +1429,34 @@ remaining noisy trace surface.
 If this fails, restore the cleanup hunks manually by editing the affected files;
 do not use `git revert` to recover.
 
+**Result:** Pass
+
+The cleanup pass removed obsolete native-popup diagnostic scaffolding manually,
+without using `git revert`. The removed code was limited to stale trace logs,
+trace-only helper functions, unused trace dependencies, and small formatting or
+unused-parameter cleanup that resulted from removing those logs.
+
+Claude reviewed the cleanup diff and found no behavioral changes. The review
+confirmed that the protected fixes from Issues 779, 782, 783, and 784 remained
+intact:
+
+- PagePopup y-axis correction in `WebPagePopupImpl::SetWindowRect`;
+- Shell window movement and `setIgnoresMouseEvents:YES` assertions;
+- `SetGuiActive` app deactivate/reactivate handling;
+- direct `NSMenu` placement for `<select>`;
+- the narrow datalist popup stack and `SetAutofillValue` acceptance path.
+
+The cleanup was committed in Chromium as `ae630730d826b Cull stale popup traces`
+and in the main repository as `0b2c35306fffc Sweep popup trace dust`. The
+Chromium patch archive was regenerated through
+`chromium/patches/issue-784/0022-Cull-stale-popup-traces.patch`.
+
+#### Conclusion
+
+The cleanup completed the final non-functional requirement for the native-popup
+series. The remaining trace surface is small and focused on regression smoke
+tests rather than broad exploratory diagnostics. The issue is ready to close.
+
 ## Cleanup Requirement
 
 Do not perform broad log cleanup before the datalist fix. Some remaining
@@ -1446,3 +1475,35 @@ verified, perform a dedicated cleanup pass:
 
 The cleanup must be done by reviewed hunks, not by blanket-reverting historical
 trace commits.
+
+## Conclusion
+
+Issue 784 fixed the final known native-popup failure from the Issue 779-784
+series: `<input list="...">` datalist suggestions now open, filter, accept
+selection, fire the expected value path through `SetAutofillValue`, and dismiss
+correctly on click-away and Cmd-Tab.
+
+The final implementation uses a narrow TermSurf-specific datalist stack instead
+of Chromium's full Autofill profile and Views UI system. A renderer-side
+`ShellDatalistAutofillClient` extracts filtered datalist options, sends them
+through a small Mojo bridge, and a browser-side `ShellDatalistAutofillDriver`
+shows them with AppKit `NSMenu`. Selection is sent back to the renderer and
+committed to the focused input.
+
+The issue also completed the cleanup promised at the end of the native-popup
+series. Obsolete exploratory logs from the date picker, select, Cmd-Tab, and
+failed stock-Autofill investigations were removed by reviewed manual edits. No
+historical commits were reverted, and the behavior fixes introduced during the
+series were preserved.
+
+The completed native-popup series now covers:
+
+- correct PagePopup y-position for date/time-style controls;
+- Shell windows that remain mouse-transparent to AppKit;
+- native widgets continuing to work after `<select>` interactions;
+- PagePopup dismissal and focus restoration across Cmd-Tab;
+- correct `<select>` x-position via direct `NSMenu` placement;
+- working datalist suggestions via the narrow TermSurf datalist popup stack;
+- reduced diagnostic noise after manual trace cleanup.
+
+No known native-popup bugs remain from this issue series.

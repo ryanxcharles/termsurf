@@ -92,7 +92,7 @@ find the most relevant recent branch, create a new branch from it
 | `148.0.7778.97-issue-779`     | [Issue 779](../issues/0779-date-picker-popup-position/README.md) | Native popup position tracing               |
 | `148.0.7778.97-issue-782`     | [Issue 782](../issues/0782-native-popup-followups/README.md)     | Native popup follow-up tracing              |
 | `148.0.7778.97-issue-783`     | [Issue 783](../issues/0783-native-popup-remainders/README.md)    | PagePopup alt-tab fixes                     |
-| `148.0.7778.97-issue-784`     | [Issue 784](../issues/0784-datalist-popup/README.md)             | Datalist popup tracing                      |
+| `148.0.7778.97-issue-784`     | [Issue 784](../issues/0784-datalist-popup/README.md)             | Datalist popup fix and cleanup              |
 | `148.0.7778.97-issue-781`     | [Issue 781](../issues/0781-chromium-upgrade/README.md)           | Chromium 148 migration                      |
 
 ## Patches
@@ -107,7 +107,7 @@ patches/
 ├── issue-411/         — Two profiles experiment 3
 ├── issue-412/         — One profile
 ├── ...
-└── issue-694/         — Replace pane_id with tab_id
+└── issue-784/         — Current Chromium branch patch archive
 ```
 
 Each patch set is cumulative — it contains all commits from the base tag to the
@@ -119,9 +119,16 @@ To reconstruct a branch from a fresh Chromium checkout:
 
 ```bash
 cd chromium/src
-git checkout 146.0.7650.0
-git checkout -b 146.0.7650.0-issue-{N}
+git checkout 148.0.7778.97
+git checkout -b 148.0.7778.97-issue-{N}
 git am ../../chromium/patches/issue-{N}/*.patch
+```
+
+For the current TermSurf Chromium branch, use:
+
+```bash
+git checkout -b 148.0.7778.97-issue-784 148.0.7778.97
+git am ../../chromium/patches/issue-784/*.patch
 ```
 
 ### Generating patches
@@ -131,7 +138,7 @@ After committing to a Chromium branch, regenerate its patch set:
 ```bash
 cd chromium/src
 rm -rf ../../chromium/patches/issue-{N}/
-git format-patch 146.0.7650.0..HEAD -o ../../chromium/patches/issue-{N}/
+git format-patch 148.0.7778.97..HEAD -o ../../chromium/patches/issue-{N}/
 ```
 
 Then commit the updated patches in the main repo.
@@ -141,9 +148,19 @@ Then commit the updated patches in the main repo.
 The `chromium/` directory at the repo root is a Chromium build workspace,
 gitignored from the main repo. The `src/` subdirectory is the Chromium git repo
 (Chromium requires it to be named `src/`). `depot_tools/` lives at
-`chromium/depot_tools/`. To set up from scratch, use `fetch chromium` from
-depot_tools or clone from upstream and apply our patches (patch distribution
-TBD).
+`chromium/depot_tools/`.
+
+To set up from scratch:
+
+```bash
+cd chromium
+export PATH="$(pwd)/depot_tools:$PATH"
+gclient config --name=src https://chromium.googlesource.com/chromium/src.git
+caffeinate gclient sync --revision src@148.0.7778.97 --no-history
+cd src
+git checkout -b 148.0.7778.97-issue-784 148.0.7778.97
+git am ../../chromium/patches/issue-784/*.patch
+```
 
 ```
 chromium/
