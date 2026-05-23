@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-04-11"
+closed = "2026-05-23"
 +++
 
 # Issue 775: DevTools gets confused with multiple profiles open
@@ -315,3 +316,48 @@ The experiment fails if:
 If this passes, Issue 775's core bug is fixed: DevTools targeting becomes an
 explicit part of the protocol instead of a heuristic. The remaining work, if
 any, should be limited to UI polish or closing the issue.
+
+**Result:** Pass
+
+Implemented in commit `c6098bf13621b`.
+
+DevTools targeting now uses an explicit `(browser, profile, tab_id)` tuple
+instead of falling back to `last_browser_pane`. `QueryDevtoolsRequest` carries
+the browser name, `web` sends explicit `devtools://<tab_id>` requests with
+`--browser` and `--profile`, and Wezboard validates the target by scoped
+`tab_to_pane` lookup. Duplicate DevTools detection is also scoped to the same
+tuple.
+
+The `web` TUI now displays pane identity as `browser/profile#tab` for browser
+panes and `DevTools · browser/profile#tab` for DevTools panes. Before
+`BrowserReady`, browser panes show a loading identity instead of `#0`.
+
+Manual testing confirmed:
+
+- two profiles can each open DevTools for their own tab;
+- matching numeric tab ids in different profiles do not collide;
+- duplicate DevTools opens are rejected for the exact target tuple;
+- bare `web devtools` fails clearly instead of opening the last tab;
+- normal browser flows, `web last`, and `web status` remain usable.
+
+Build verification passed:
+
+```bash
+scripts/build.sh webtui
+scripts/build.sh wezboard
+scripts/build.sh roamium
+```
+
+#### Conclusion
+
+Experiment 1 fixed the core issue. DevTools is no longer a heuristic command
+that guesses from global "last browser" state; it is now an explicit protocol
+operation against a browser engine, profile, and tab. The TUI also exposes that
+identity directly, so users can see which tab a browser or DevTools pane refers
+to.
+
+## Conclusion
+
+Issue 775 is closed. DevTools targeting is now unambiguous across multiple
+profiles and browser engine processes, and the UI shows the full target identity
+needed to verify routing behavior at a glance.
