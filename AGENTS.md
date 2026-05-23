@@ -252,6 +252,44 @@ Roamium together.
 The build scripts auto-detect Chromium's `protoc` so you don't need a system
 install.
 
+### Debug Testing Without Installing
+
+For local testing, prefer debug builds and run binaries directly from the repo.
+Do not install over the stable Homebrew/app version unless the user explicitly
+asks.
+
+Build debug components:
+
+```bash
+./scripts/build.sh chromium
+./scripts/build.sh roamium
+./scripts/build.sh wezboard
+./scripts/build.sh webtui
+```
+
+Run Wezboard with the debug GUI binary directly. The binary is `wezboard-gui`
+under `wezboard/target/debug/`; it is not named `wezterm-gui`.
+
+```bash
+./wezboard/target/debug/wezboard-gui
+```
+
+Inside that Wezboard window, run the debug `web` binary directly:
+
+```bash
+/Users/ryan/dev/termsurf/webtui/target/debug/web \
+  --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+  https://example.com
+```
+
+The `--browser` argument is required for testing Chromium/Roamium changes. If it
+is omitted, `web` asks Wezboard to resolve the default browser name, and
+Wezboard may spawn an installed stable Roamium from `/usr/local/roamium` or
+Homebrew instead of the repo-built binary.
+
+This flow uses debug builds only, does not launch the `.app` bundle, and does
+not overwrite the installed reliable version.
+
 ### Homebrew Distribution
 
 TermSurf is distributed via a Homebrew Cask in the `termsurf/homebrew-termsurf`

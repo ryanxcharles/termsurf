@@ -425,3 +425,37 @@ content. Chromium already knows this because Blink has decided to call
 If this passes, Issue 780 can treat native web drag-and-drop as intentionally
 unsupported in Roamium for now. A future issue can design real cross-process
 drag-and-drop if that becomes a product requirement.
+
+**Result:** Pass
+
+Manual debug testing passed after running `web` with an explicit `--browser`
+path to the repo-built Roamium binary:
+
+```bash
+/Users/ryan/dev/termsurf/webtui/target/debug/web \
+  --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+  https://example.com
+```
+
+The earlier failed test was invalid because it likely used the installed stable
+Roamium. Running the repo-built `web` binary alone is not enough to select the
+repo-built browser engine: if `--browser` is omitted, Wezboard may resolve
+`roamium` to `/usr/local/roamium/roamium` or a Homebrew-installed Roamium. That
+would bypass the modified Chromium branch entirely.
+
+With the patched Roamium selected explicitly, dragging a link no longer hangs
+the browser. The suppression in `WebContentsViewMac::StartDragging(...)` is
+sufficient for the reported freeze.
+
+#### Conclusion
+
+Experiment 2 fixes the link-drag freeze by suppressing native macOS drag start
+in Roamium overlay mode. Roamium intentionally does not support native web
+drag-and-drop for now; accidental drags on links should be canceled cleanly
+instead of entering AppKit drag state.
+
+The testing workflow must always pass
+`--browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium` when
+validating Chromium/Roamium changes without installing. Otherwise tests can
+accidentally exercise the installed stable Roamium and produce misleading
+results.

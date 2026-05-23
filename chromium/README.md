@@ -94,6 +94,7 @@ find the most relevant recent branch, create a new branch from it
 | `148.0.7778.97-issue-783`     | [Issue 783](../issues/0783-native-popup-remainders/README.md)    | PagePopup alt-tab fixes                     |
 | `148.0.7778.97-issue-784`     | [Issue 784](../issues/0784-datalist-popup/README.md)             | Datalist popup fix and cleanup              |
 | `148.0.7778.97-issue-781`     | [Issue 781](../issues/0781-chromium-upgrade/README.md)           | Chromium 148 migration                      |
+| `148.0.7778.97-issue-780`     | [Issue 780](../issues/0780-link-drag-freeze/README.md)           | Suppress native link drag in Roamium        |
 
 ## Patches
 
