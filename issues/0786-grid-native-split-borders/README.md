@@ -1503,13 +1503,14 @@ is a diagnosis precise enough to design a small Experiment 7 fix.
    the observed behavior. Do not build Experiment 6 on top of that assumption
    unless runtime evidence proves the fields are still useful.
 
-   For this instrumentation experiment, either:
-   - leave `hit_left` / `hit_top` in place and log both `left/top` and
-     `hit_left/hit_top`; or
-   - remove them if they get in the way of clean logging.
+   For this instrumentation experiment, keep `hit_left` / `hit_top` in place and
+   log both coordinate sets side by side:
+   - `logical_cell=(left=<split.left> top=<split.top>)`;
+   - `hit_cell=(left=<split.hit_left> top=<split.hit_top>)`.
 
-   The important requirement is that the log compares all relevant coordinates
-   instead of assuming any one of them is correct.
+   Removing these fields now would destroy useful evidence. The log should show
+   whether `left/top`, `hit_left/hit_top`, or neither coordinate set corresponds
+   to the registered split `UIItem` rectangle.
 
 2. **Write logs to the repo log directory.**
 
@@ -1525,8 +1526,13 @@ is a diagnosis precise enough to design a small Experiment 7 fix.
      each run starts clean;
    - only write when `TERMSURF_SPLIT_HIT_TRACE=1`;
    - use one-line structured records that are easy to grep;
-   - include a monotonically increasing frame or event counter if one is readily
-     available.
+   - include monotonically increasing frame and event counters.
+
+   The first line after truncation must describe the hit-test rule:
+
+   ```text
+   split-hit meta resolution=<first-match-wins|last-match-wins> item_order=<paint-registration|reverse-paint-registration|other> log=/Users/ryan/dev/termsurf/logs/split-hitbox.log
+   ```
 
    Do not rely on stdout/stderr collection alone. The experiment must write the
    file directly so the log is always in the expected location.
@@ -1546,13 +1552,25 @@ is a diagnosis precise enough to design a small Experiment 7 fix.
    split-hit pane frame=<n> pane_id=<id> active=<true|false> content_cell=(left=<l> top=<t> width=<w> height=<h>) content_px=(x=<x> y=<y> w=<w> h=<h>) border_cell=(left=<l> top=<t> width=<w> height=<h>) border_px=(x=<x> y=<y> w=<w> h=<h>)
    ```
 
+   Also log the actual thin border lines that `paint_pane_border()` paints. The
+   visible border is the line inside the reserved gutter, not merely the gutter
+   rectangle:
+
+   ```text
+   split-hit pane-border-edge frame=<n> pane_id=<id> active=<true|false> edge=<top|bottom|left|right> rect_px=(x=<x> y=<y> w=<w> h=<h>)
+   ```
+
+   This per-edge log is load-bearing. The split `UIItem` must ultimately be
+   compared to the edge rectangle on the shared boundary, not just to the outer
+   reserved `border_px` rectangle.
+
    For every split `UIItem` registered:
 
    ```text
    split-hit split-ui frame=<n> index=<i> direction=<Horizontal|Vertical> logical_cell=(left=<l> top=<t>) hit_cell=(left=<l> top=<t>) rect_px=(x=<x> y=<y> w=<w> h=<h>)
    ```
 
-   This must include enough data to compare the visible border rectangle and the
+   This must include enough data to compare the visible border line and the
    actual split hit rectangle in pixel space.
 
 4. **Log hit-test resolution for only the relevant mouse moves.**
@@ -1564,23 +1582,32 @@ is a diagnosis precise enough to design a small Experiment 7 fix.
    For each relevant move, write:
 
    ```text
-   split-hit mouse event=<n> px=(x=<x> y=<y>) cell=(col=<c> row=<r>) near_split=<index-or-none>
+   split-hit mouse event=<n> frame=<latest-frame> px=(x=<x> y=<y>) cell=(col=<c> row=<r>) near_split=<index-or-none>
    ```
 
    Then log every candidate item tested near that mouse point:
 
    ```text
-   split-hit candidate event=<n> order=<o> item=<debug> rect_px=(x=<x> y=<y> w=<w> h=<h>) contains=<true|false>
+   split-hit candidate event=<n> frame=<latest-frame> order=<o> item=<stable-item> rect_px=(x=<x> y=<y> w=<w> h=<h>) contains=<true|false>
    ```
 
    Finally log the winner:
 
    ```text
-   split-hit winner event=<n> item=<debug-or-none> rect_px=(x=<x> y=<y> w=<w> h=<h>)
+   split-hit winner event=<n> frame=<latest-frame> item=<stable-item-or-none> rect_px=(x=<x> y=<y> w=<w> h=<h>)
    ```
 
    This is the load-bearing part of the experiment. The log must show why the
    visible-border location does or does not resolve to `UIItemType::Split`.
+
+   Use a stable item formatter instead of raw Rust `Debug`, for example:
+   - `Split[index=0,direction=Horizontal]`;
+   - `Pane[id=5]`;
+   - `ScrollThumb`;
+   - `None`.
+
+   Log `Move`, `Enter`, and `Leave` events that pass through this hit-test path.
+   If the OS coalesces mouse moves, log the coalesced events actually processed.
 
 5. **Add explicit user-sample markers.**
 
@@ -1588,7 +1615,7 @@ is a diagnosis precise enough to design a small Experiment 7 fix.
    acceptable version is to log a marker whenever the hover winner changes:
 
    ```text
-   split-hit hover-change event=<n> from=<old-debug-or-none> to=<new-debug-or-none> px=(x=<x> y=<y>) cell=(col=<c> row=<r>)
+   split-hit hover-change event=<n> frame=<latest-frame> from=<old-stable-item-or-none> to=<new-stable-item-or-none> px=(x=<x> y=<y>) cell=(col=<c> row=<r>)
    ```
 
    If feasible, also add a keyboard-triggered or command-triggered marker, but
@@ -1643,19 +1670,30 @@ is a diagnosis precise enough to design a small Experiment 7 fix.
 
 5. Required experiment result summary.
 
+   In the table, "before" has a precise meaning:
+   - right split: one cell content-ward to the left of the visible border;
+   - down split: one cell content-ward above the visible border.
+
+   "On border" means the center pixel of the visible thin border line, using the
+   matching `pane-border-edge` rectangle.
+
    The result section must include a short table:
 
-   | Case        | Visible border px | Split UIItem px | Winner before | Winner on border | Diagnosis |
-   | ----------- | ----------------- | --------------- | ------------- | ---------------- | --------- |
-   | Right split | ...               | ...             | ...           | ...              | ...       |
-   | Down split  | ...               | ...             | ...           | ...              | ...       |
+   | Case        | Visible edge px | Split UIItem px | Winner before | Winner on border | Diagnosis |
+   | ----------- | --------------- | --------------- | ------------- | ---------------- | --------- |
+   | Right split | ...             | ...             | ...           | ...              | ...       |
+   | Down split  | ...             | ...             | ...           | ...              | ...       |
 
    The diagnosis must be concrete enough to choose one of:
    - split `UIItem` rectangle is registered in the wrong pixel location;
    - split `UIItem` rectangle is correct but loses hit testing to another item;
    - mouse pixel-to-cell conversion is wrong;
-   - visible border rectangle is not where the painter thinks it is;
+   - visible border edge is not where the painter thinks it is;
    - another specific cause supported by log lines.
+
+   If the diagnosis uses "another specific cause," it must cite concrete log
+   line patterns or line numbers that support it. The diagnosis must be
+   falsifiable by rereading `logs/split-hitbox.log`.
 
 6. Visual and behavior smoke check:
    - confirm borders still render as before Experiment 6;
@@ -1665,17 +1703,18 @@ is a diagnosis precise enough to design a small Experiment 7 fix.
 #### Pass Criteria
 
 The experiment passes if `logs/split-hitbox.log` is produced in one run, the log
-contains frame geometry, pane border rectangles, split `UIItem` rectangles,
+contains frame geometry, pane border edge rectangles, split `UIItem` rectangles,
 candidate hit-test records, and hover winners for both right and down split
-reproductions, the result summary identifies the exact mismatch, no behavior fix
-is attempted, and `scripts/build.sh wezboard` passes.
+reproductions, mouse events can be cross-referenced to the active frame, the
+result summary identifies the exact mismatch, no behavior fix is attempted, and
+`scripts/build.sh wezboard` passes.
 
 #### Partial Criteria
 
 The experiment is Partial if the log captures only one of the two required cases
 or identifies the winning `UIItem` but not enough rectangle geometry to design a
 fix. Partial is not acceptable if the log is vague, too noisy to use, or missing
-the visible border rectangle.
+the visible border edge rectangle.
 
 #### Failure Criteria
 
@@ -1683,8 +1722,9 @@ The experiment fails if:
 
 - any behavior-changing fix is attempted;
 - no `logs/split-hitbox.log` file is produced;
-- the log does not include both visible border rectangles and split `UIItem`
-  rectangles;
+- the log does not include both visible border edge rectangles and split
+  `UIItem` rectangles;
+- mouse event lines cannot be cross-referenced to the active frame geometry;
 - the log does not show hit-test candidates and the winning item;
 - the result does not identify a concrete mismatch;
 - active/inactive pane borders regress;
