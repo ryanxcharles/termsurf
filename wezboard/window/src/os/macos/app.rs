@@ -8,51 +8,6 @@ use config::WindowCloseConfirmation;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2_app_kit::NSApplicationTerminateReply;
-use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-#[allow(non_camel_case_types)]
-type id = *mut AnyObject;
-
-fn issue_779_trace_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("TERMSURF_ISSUE_779_TRACE").is_some())
-}
-
-fn trace_timestamp_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default()
-}
-
-fn trace_pagepopup_alt_tab_app_activation(event: &str, notification: *mut AnyObject) {
-    if !issue_779_trace_enabled() {
-        return;
-    }
-
-    unsafe {
-        let ns_app: id = objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
-        let object: id = if notification.is_null() {
-            std::ptr::null_mut()
-        } else {
-            objc2::msg_send![notification as *const AnyObject, object]
-        };
-        let key_window: id = objc2::msg_send![ns_app as *const AnyObject, keyWindow];
-        let main_window: id = objc2::msg_send![ns_app as *const AnyObject, mainWindow];
-        let app_is_active: Bool = objc2::msg_send![ns_app as *const AnyObject, isActive];
-        log::info!(
-            "[issue-779-trace] pagepopup_alt_tab boundary=wezboard_activation event={} notification={:?} object={:?} app_is_active={} key_window={:?} main_window={:?} active_window_id=unavailable timestamp_ms={}",
-            event,
-            notification,
-            object,
-            app_is_active.as_bool(),
-            key_window,
-            main_window,
-            trace_timestamp_ms(),
-        );
-    }
-}
 
 extern "C" fn application_should_terminate(
     _self: *mut AnyObject,
@@ -123,9 +78,8 @@ extern "C" fn application_did_finish_launching(
 extern "C" fn application_did_resign_active(
     _self: *mut AnyObject,
     _sel: Sel,
-    notification: *mut AnyObject,
+    _notification: *mut AnyObject,
 ) {
-    trace_pagepopup_alt_tab_app_activation("applicationDidResignActive", notification);
     if let Some(conn) = Connection::get() {
         conn.dispatch_app_event(ApplicationEvent::ApplicationDeactivated);
     }
@@ -134,9 +88,8 @@ extern "C" fn application_did_resign_active(
 extern "C" fn application_did_become_active(
     _self: *mut AnyObject,
     _sel: Sel,
-    notification: *mut AnyObject,
+    _notification: *mut AnyObject,
 ) {
-    trace_pagepopup_alt_tab_app_activation("applicationDidBecomeActive", notification);
     if let Some(conn) = Connection::get() {
         conn.dispatch_app_event(ApplicationEvent::ApplicationActivated);
     }

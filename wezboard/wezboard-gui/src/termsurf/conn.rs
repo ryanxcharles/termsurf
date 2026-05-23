@@ -1,13 +1,13 @@
 use super::proto;
-use super::proto::term_surf_message::Msg;
 use super::proto::TermSurfMessage;
+use super::proto::term_surf_message::Msg;
 use super::state::{Pane, Server, SharedState, TermSurfState};
 use anyhow::Context;
 use prost::Message;
 use sha2::{Digest, Sha256};
+use smol::Async;
 use smol::channel::Sender;
 use smol::io::{AsyncReadExt, AsyncWriteExt};
-use smol::Async;
 use std::collections::HashSet;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, OnceLock};
@@ -22,24 +22,6 @@ enum ConnType {
 fn issue_779_trace_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var_os("TERMSURF_ISSUE_779_TRACE").is_some())
-}
-
-fn issue_779_trace_log(message: String) {
-    if issue_779_trace_enabled() {
-        static ANNOUNCED: OnceLock<()> = OnceLock::new();
-        if ANNOUNCED.set(()).is_ok() {
-            log::info!("[issue-779-trace] trace_enabled component=wezboard");
-        }
-        log::info!("[issue-779-trace] {}", message);
-    }
-}
-
-macro_rules! issue_779_trace {
-    ($($arg:tt)*) => {
-        if issue_779_trace_enabled() {
-            issue_779_trace_log(format!($($arg)*));
-        }
-    };
 }
 
 pub async fn handle_connection(stream: UnixStream, state: SharedState) -> anyhow::Result<()> {
@@ -465,28 +447,23 @@ pub fn set_gui_active(active: bool, reason: &str) {
     };
 
     let mut targets = Vec::new();
-    let mut server_count = 0usize;
-    let mut selected_tab_id = 0i64;
     {
         let st = state.lock().unwrap();
         if active {
             if let Some(pane_id) = st.focused_pane.as_ref() {
                 if let Some(pane) = st.panes.get(pane_id) {
-                    selected_tab_id = pane.tab_id;
                     if pane.tab_id != 0 {
                         let key = TermSurfState::server_key(&pane.profile, &pane.browser);
                         if let Some(server_tx) =
                             st.servers.get(&key).and_then(|server| server.tx.clone())
                         {
                             targets.push((server_tx, pane.tab_id));
-                            server_count = 1;
                         }
                     }
                 }
             }
         } else {
             for server in st.servers.values() {
-                server_count += 1;
                 if let Some(server_tx) = server.tx.clone() {
                     targets.push((server_tx, 0));
                 }
@@ -494,7 +471,6 @@ pub fn set_gui_active(active: bool, reason: &str) {
         }
     }
 
-    let messages_sent = targets.len();
     for (server_tx, tab_id) in targets {
         let msg = TermSurfMessage {
             msg: Some(Msg::SetGuiActive(proto::SetGuiActive {
@@ -504,17 +480,6 @@ pub fn set_gui_active(active: bool, reason: &str) {
             })),
         };
         let _ = server_tx.try_send(msg.encode_to_vec());
-    }
-
-    if issue_779_trace_enabled() {
-        issue_779_trace_log(format!(
-            "pagepopup_alt_tab boundary=wezboard_protocol event=set_gui_active active={} reason={} servers={} messages_sent={} tab_id={}",
-            active,
-            reason,
-            server_count,
-            messages_sent,
-            selected_tab_id
-        ));
     }
 }
 
@@ -548,22 +513,6 @@ fn handle_set_overlay(
     };
 
     let is_new = !st.panes.contains_key(&overlay.pane_id);
-    issue_779_trace!(
-        "wezboard_receive_set_overlay pane_id={} is_new={} cell_rect=({},{} {}x{}) cell_width_px={} cell_height_px={} pixel_size={}x{} browsing={} browser={} url={}",
-        overlay.pane_id,
-        is_new,
-        overlay.col,
-        overlay.row,
-        overlay.width,
-        overlay.height,
-        cell_w,
-        cell_h,
-        pixel_w,
-        pixel_h,
-        overlay.browsing,
-        browser,
-        overlay.url
-    );
     log::info!(
         "SetOverlay: pane_id={} is_new={} pixel={}x{}",
         overlay.pane_id,
@@ -713,23 +662,6 @@ fn handle_set_devtools_overlay(
     };
 
     let is_new = !st.panes.contains_key(&overlay.pane_id);
-    issue_779_trace!(
-        "wezboard_receive_set_devtools_overlay pane_id={} is_new={} inspected_tab_id={} cell_rect=({},{} {}x{}) cell_width_px={} cell_height_px={} pixel_size={}x{} browsing={} browser={}",
-        overlay.pane_id,
-        is_new,
-        overlay.inspected_tab_id,
-        overlay.col,
-        overlay.row,
-        overlay.width,
-        overlay.height,
-        cell_w,
-        cell_h,
-        pixel_w,
-        pixel_h,
-        overlay.browsing,
-        browser
-    );
-
     if !is_new {
         // Resize path — same as SetOverlay
         let (tab_id, profile, browser_name) = {
@@ -1461,43 +1393,7 @@ fn get_pane_mux_window(pane_id: &str) -> Option<mux::window::WindowId> {
 }
 
 #[cfg(target_os = "macos")]
-fn cgrect_desc(rect: objc2_core_foundation::CGRect) -> String {
-    format!(
-        "x={:.1} y={:.1} width={:.1} height={:.1}",
-        rect.origin.x, rect.origin.y, rect.size.width, rect.size.height
-    )
-}
-
-#[cfg(target_os = "macos")]
-fn rect_reason(
-    expected: objc2_core_foundation::CGRect,
-    actual: objc2_core_foundation::CGRect,
-) -> &'static str {
-    let epsilon = 0.5;
-    if actual.size.width > expected.size.width + epsilon {
-        return "frame_wider_than_viewport";
-    }
-    if actual.size.height > expected.size.height + epsilon {
-        return "frame_taller_than_viewport";
-    }
-    if actual.origin.x < expected.origin.x - epsilon {
-        return "frame_extends_left_of_viewport";
-    }
-    if actual.origin.y < expected.origin.y - epsilon {
-        return "frame_extends_above_viewport";
-    }
-    if actual.origin.x + actual.size.width > expected.origin.x + expected.size.width + epsilon {
-        return "frame_extends_right_of_viewport";
-    }
-    if actual.origin.y + actual.size.height > expected.origin.y + expected.size.height + epsilon {
-        return "frame_extends_below_viewport";
-    }
-    "none"
-}
-
-#[cfg(target_os = "macos")]
 struct WebviewScreenRect {
-    desc: String,
     screen_x: f64,
     screen_y: f64,
     screen_width: f64,
@@ -1510,12 +1406,12 @@ fn webview_screen_rect_desc(
     state: &TermSurfState,
     mux_window_id: mux::window::WindowId,
     local_frame: objc2_core_foundation::CGRect,
-    x_backing: f64,
-    y_backing: f64,
-    w_backing: f64,
-    h_backing: f64,
+    _x_backing: f64,
+    _y_backing: f64,
+    _w_backing: f64,
+    _h_backing: f64,
     scale: f64,
-    dpi: usize,
+    _dpi: usize,
 ) -> Option<WebviewScreenRect> {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
@@ -1533,9 +1429,6 @@ fn webview_screen_rect_desc(
             return None;
         }
 
-        let view_frame: CGRect = msg_send![view, frame];
-        let view_bounds: CGRect = msg_send![view, bounds];
-        let window_frame: CGRect = msg_send![window, frame];
         let screen: *mut AnyObject = msg_send![window, screen];
         if screen.is_null() {
             return None;
@@ -1549,26 +1442,6 @@ fn webview_screen_rect_desc(
             - screen_rect.size.height;
 
         Some(WebviewScreenRect {
-            desc: format!(
-            "local=({}) window_rect=({}) screen_rect=({}) screen_frame=({}) top_left_screen=(x={:.1} y={:.1} width={:.1} height={:.1}) backing=(x={:.1} y={:.1} width={:.1} height={:.1}) view_frame=({}) view_bounds=({}) window_frame=({}) scale={:.2} dpi={}",
-            cgrect_desc(local_frame),
-            cgrect_desc(window_rect),
-            cgrect_desc(screen_rect),
-            cgrect_desc(screen_frame),
-            screen_rect.origin.x,
-            top_left_screen_y,
-            screen_rect.size.width,
-            screen_rect.size.height,
-            x_backing,
-            y_backing,
-            w_backing,
-            h_backing,
-            cgrect_desc(view_frame),
-            cgrect_desc(view_bounds),
-            cgrect_desc(window_frame),
-            scale,
-            dpi
-            ),
             screen_x: screen_rect.origin.x,
             screen_y: top_left_screen_y,
             screen_width: screen_rect.size.width,
@@ -1698,11 +1571,6 @@ pub fn set_overlay_frame(
             scale,
             dpi,
         ) {
-            issue_779_trace!(
-                "wezboard_webview_screen_rect pane_id={} {}",
-                pane_id,
-                rect.desc
-            );
             send_resize_with_screen_rect(&mut st, &id, &rect);
         }
     }
@@ -1797,11 +1665,6 @@ pub fn create_pending_ca_layer_host(
         pane.ca_layer_flipped = flipped as usize;
         pane.ca_layer_positioning = positioning as usize;
         pane.ca_layer_host = host as usize;
-        let pane_tab_id = pane.tab_id;
-        let pane_col = pane.col;
-        let pane_row = pane.row;
-        let pane_pixel_width = pane.pixel_width;
-        let pane_pixel_height = pane.pixel_height;
         let pane_ca_layer_flipped = pane.ca_layer_flipped;
         let pane_ca_layer_host = pane.ca_layer_host;
 
@@ -1819,40 +1682,7 @@ pub fn create_pending_ca_layer_host(
         let _ = pane;
 
         if issue_779_trace_enabled() {
-            let root_bounds: CGRect = msg_send![root_layer, bounds];
-            let flipped_frame: CGRect = msg_send![flipped, frame];
-            let positioning_frame: CGRect = msg_send![positioning, frame];
-            let host_frame: CGRect = msg_send![host, frame];
             let expected_frame = CGRect::new(CGPoint::new(x, y), CGSize::new(w, h));
-            let reason = rect_reason(expected_frame, positioning_frame);
-            issue_779_trace!(
-                "wezboard_create_ca_layer_host pane_id={} tab_id={} context_id={} cell_rect=({},{} pixel={}x{}) backing=(x={:.1} y={:.1} width={:.1} height={:.1}) scale={:.2} root_bounds=({}) flipped_frame=({}) positioning_frame=({}) host_frame=({}) dpi={}",
-                pane_id,
-                pane_tab_id,
-                context_id,
-                pane_col,
-                pane_row,
-                pane_pixel_width,
-                pane_pixel_height,
-                x_backing,
-                y_backing,
-                w_backing,
-                h_backing,
-                scale,
-                cgrect_desc(root_bounds),
-                cgrect_desc(flipped_frame),
-                cgrect_desc(positioning_frame),
-                cgrect_desc(host_frame),
-                dpi
-            );
-            issue_779_trace!(
-                "wezboard_layer_frame_check pane_id={} matches_expected={} positioning_frame=({}) expected_frame=({}) reason={}",
-                pane_id,
-                reason == "none",
-                cgrect_desc(positioning_frame),
-                cgrect_desc(expected_frame),
-                reason
-            );
             if let Some(rect) = webview_screen_rect_desc(
                 &st,
                 mux_window_id,
@@ -1864,11 +1694,6 @@ pub fn create_pending_ca_layer_host(
                 scale,
                 dpi,
             ) {
-                issue_779_trace!(
-                    "wezboard_webview_screen_rect pane_id={} {}",
-                    pane_id,
-                    rect.desc
-                );
                 send_resize_with_screen_rect(&mut st, &id, &rect);
             }
         }

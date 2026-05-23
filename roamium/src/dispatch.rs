@@ -1,8 +1,4 @@
 use std::ffi::{c_void, CString};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::path::PathBuf;
-use std::sync::OnceLock;
 
 use crate::ffi::{self, TsWebContents};
 use crate::proto::{self, Msg, TermSurfMessage};
@@ -33,51 +29,6 @@ fn find_by_handle(wc: TsWebContents) -> Option<&'static mut TabEntry> {
 
 fn find_by_tab_id(tab_id: i64) -> Option<&'static mut TabEntry> {
     tabs().iter_mut().find(|t| t.tab_id == tab_id)
-}
-
-fn issue_779_trace_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("TERMSURF_ISSUE_779_TRACE").is_some())
-}
-
-fn issue_779_trace_path() -> Option<PathBuf> {
-    static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
-    PATH.get_or_init(|| {
-        let base = std::env::var_os("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
-            })?;
-        Some(base.join("termsurf").join("roamium-trace.log"))
-    })
-    .clone()
-}
-
-fn issue_779_trace_log(message: String) {
-    if !issue_779_trace_enabled() {
-        return;
-    }
-    let Some(path) = issue_779_trace_path() else {
-        return;
-    };
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
-        static ANNOUNCED: OnceLock<()> = OnceLock::new();
-        if ANNOUNCED.set(()).is_ok() {
-            let _ = writeln!(file, "[issue-779-trace] trace_enabled component=roamium");
-        }
-        let _ = writeln!(file, "[issue-779-trace] {}", message);
-    }
-}
-
-macro_rules! issue_779_trace {
-    ($($arg:tt)*) => {
-        if issue_779_trace_enabled() {
-            issue_779_trace_log(format!($($arg)*));
-        }
-    };
 }
 
 // --- String-to-int mappings ---
@@ -114,13 +65,6 @@ pub fn handle_message(msg: &TermSurfMessage) {
     let Some(ref inner) = msg.msg else { return };
     match inner {
         Msg::CreateTab(m) => {
-            issue_779_trace!(
-                "roamium_create_tab_request pane_id={} pixel_size={}x{} dark={}",
-                m.pane_id,
-                m.pixel_width,
-                m.pixel_height,
-                m.dark
-            );
             let url = CString::new(m.url.as_str()).unwrap();
             tabs().push(TabEntry {
                 handle: std::ptr::null_mut(),
@@ -141,14 +85,6 @@ pub fn handle_message(msg: &TermSurfMessage) {
             };
         }
         Msg::CreateDevtoolsTab(m) => {
-            issue_779_trace!(
-                "roamium_create_devtools_tab_request pane_id={} inspected_tab_id={} pixel_size={}x{} dark={}",
-                m.pane_id,
-                m.inspected_tab_id,
-                m.pixel_width,
-                m.pixel_height,
-                m.dark
-            );
             tabs().push(TabEntry {
                 handle: std::ptr::null_mut(),
                 tab_id: 0,
@@ -169,18 +105,6 @@ pub fn handle_message(msg: &TermSurfMessage) {
         }
         Msg::Resize(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
-                issue_779_trace!(
-                    "roamium_resize_to_ffi tab_id={} pane_id={} pixel_size={}x{} screen=({:.1},{:.1} {:.1}x{:.1}) scale={:.2}",
-                    m.tab_id,
-                    t.pane_id,
-                    m.pixel_width,
-                    m.pixel_height,
-                    m.screen_x,
-                    m.screen_y,
-                    m.screen_width,
-                    m.screen_height,
-                    m.screen_scale
-                );
                 unsafe {
                     ffi::ts_set_view_size(
                         t.handle,
@@ -272,29 +196,19 @@ pub fn handle_message(msg: &TermSurfMessage) {
             }
         }
         Msg::SetGuiActive(m) => {
-            let mut target_count = 0usize;
             let reason =
                 CString::new(m.reason.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
             if m.tab_id == 0 {
                 for t in tabs().iter() {
                     if !t.handle.is_null() {
-                        target_count += 1;
                         unsafe { ffi::ts_set_gui_active(t.handle, m.active, reason.as_ptr()) };
                     }
                 }
             } else if let Some(t) = find_by_tab_id(m.tab_id) {
                 if !t.handle.is_null() {
-                    target_count = 1;
                     unsafe { ffi::ts_set_gui_active(t.handle, m.active, reason.as_ptr()) };
                 }
             }
-            issue_779_trace!(
-                "pagepopup_alt_tab boundary=roamium_protocol event=set_gui_active active={} reason={} tab_id={} target_count={}",
-                m.active,
-                m.reason,
-                m.tab_id,
-                target_count
-            );
         }
         Msg::SetColorScheme(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
@@ -346,12 +260,6 @@ pub unsafe extern "C" fn on_tab_ready(wc: TsWebContents, tab_id: i32, _user_data
     });
     let Some(t) = t else { return };
     t.tab_id = tab_id as i64;
-    issue_779_trace!(
-        "roamium_tab_ready pane_id={} tab_id={} handle={:p}",
-        t.pane_id,
-        t.tab_id,
-        wc
-    );
 
     let msg = TermSurfMessage {
         msg: Some(Msg::TabReady(proto::termsurf::TabReady {
