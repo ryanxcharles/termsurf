@@ -487,3 +487,223 @@ truthful PTY/content sizing from this experiment, but change the paint model so
 reserved border cells are background-colored spacing and the visible border is a
 thin pixel line drawn within that spacing. Full-cell border fills are the wrong
 visual treatment.
+
+### Experiment 2: Pixel Lines in Reserved Cells
+
+#### Description
+
+Keep the grid-reserved layout from Experiment 1, but fix the visual rendering.
+
+Experiment 1 proved the correct sizing model: border space must be reserved in
+the mux/grid layout before PTY dimensions are assigned. Its mistake was treating
+the reserved cells themselves as the visible border by filling entire cells with
+focused/unfocused border colors.
+
+The intended model is:
+
+- reserved border cells are real layout space;
+- pane content never renders into those cells;
+- reserved border cells visually read as normal background spacing;
+- the visible border is a thin pixel line drawn inside or along that reserved
+  spacing;
+- `split_border_width` may control the pixel thickness of that line, but it must
+  not control the number of reserved cells.
+
+This restores the visual feel of the old pixel border while keeping the
+architecture fixed: the border no longer overlays terminal content because it
+now has real grid space to live in.
+
+#### Non-Negotiable Invariants
+
+- Preserve Experiment 1's truthful PTY/content sizing.
+- Do not remove the one-cell mux/layout reservation.
+- Do not reintroduce paint-time `RenderableDimensions` shrinkage.
+- Do not draw full-cell focused/unfocused border fills.
+- Do not draw border pixels over terminal content cells.
+- Do not change mouse mapping, selection, terminal mouse forwarding, or browser
+  overlay content coordinates.
+- Keep shared split divider hit regions and dragging behavior unchanged.
+- Single-pane and zoomed-pane behavior remain unchanged: no split outline is
+  drawn.
+
+#### Changes
+
+1. **Preserve the Experiment 1 layout model.**
+
+   Do not change the mux/layout reservation unless a bug is discovered while
+   implementing the paint fix.
+
+   `PositionedPane.left/top/width/height` must continue to mean the pane content
+   rect. `PositionedPaneBorder` or its equivalent companion geometry continues
+   to describe reserved border cells.
+
+   The first implementation check is:
+
+   ```bash
+   rg "PositionedPaneBorder|grid_border|first_split_layout|split_layout_size" \
+     wezboard/mux/src/tab.rs
+   ```
+
+   Expected: Experiment 1's grid reservation code remains present.
+
+2. **Paint reserved cells as background spacing.**
+
+   In `wezboard/wezboard-gui/src/termwindow/render/pane.rs`, update
+   `paint_pane_border()` so it does not fill the full reserved cell with border
+   color.
+
+   The reserved cell area should either:
+   - be left alone if the existing window/pane background already paints it
+     correctly; or
+   - be explicitly filled with the same background color used for the
+     surrounding terminal/window gap.
+
+   The expected visual result is a normal background-colored gutter around split
+   panes, not a one-cell-thick colored block.
+
+3. **Draw a thin pixel border inside the reserved spacing.**
+
+   Still in `paint_pane_border()`, draw the actual visible outline as thin pixel
+   rectangles positioned within the reserved border cells:
+   - top edge: a horizontal pixel line inside the top reserved cell;
+   - bottom edge: a horizontal pixel line inside the bottom reserved cell;
+   - left edge: a vertical pixel line inside the left reserved cell;
+   - right edge: a vertical pixel line inside the right reserved cell.
+
+   The line color should remain:
+   - `focused_split_border_color` for the active pane;
+   - `unfocused_split_border_color` for inactive panes;
+   - fallback to `palette.split`.
+
+   The line thickness may use `split_border_width` as a pixel value. Clamp it so
+   it cannot exceed the reserved cell dimension:
+   - vertical line width `<= cell_width`;
+   - horizontal line height `<= cell_height`.
+
+   `split_border_width = 0` should mean "use the existing minimal divider-line
+   thickness" rather than "hide all grid-native borders." A one-pixel or
+   underline-height fallback is acceptable for Experiment 2.
+
+4. **Update shared divider rendering to match the new visual model.**
+
+   In `wezboard/wezboard-gui/src/termwindow/render/split.rs`, stop filling the
+   whole shared divider cell with focused/unfocused border color.
+
+   Shared divider cells are also reserved layout space. They should visually be
+   background-colored spacing with a thin pixel line drawn through them.
+
+   Keep the `UIItem` hit region geometry unchanged. Only the paint rectangle
+   should shrink from full-cell fill to thin line.
+
+5. **Place lines consistently within reserved cells.**
+
+   Pick one placement rule and apply it consistently:
+   - preferred: center each thin line in its reserved cell;
+   - acceptable: place each line against the content-facing side of the reserved
+     cell.
+
+   Document the chosen rule in the result. Centering is preferred because it
+   gives both panes visually equal breathing room around shared dividers.
+
+6. **Do not change layout, PTY sizing, or input mapping.**
+
+   This experiment is paint-only unless a direct paint bug requires a tiny
+   geometry metadata adjustment. In particular:
+   - no changes to `mouseevent.rs` should be necessary;
+   - browser overlay coordinates should continue to use pane content positions;
+   - `PositionedPane.left/top/width/height` should remain the content rect.
+
+#### Verification
+
+1. Build Wezboard:
+
+   ```bash
+   scripts/build.sh wezboard
+   ```
+
+2. Use visible split-border config:
+
+   ```lua
+   config.focused_split_border_color = "#7dcfff"
+   config.unfocused_split_border_color = "#565f89"
+   config.split_border_width = 4
+   ```
+
+3. Two-pane visual check:
+   - open a horizontal split;
+   - focus each pane;
+   - confirm the active pane is outlined by a thin pixel line, not a full-cell
+     colored block;
+   - repeat with a vertical split.
+
+4. Reserved-cell spacing check:
+   - inspect the area between pane content and the border line;
+   - confirm reserved cells visually read as normal background spacing;
+   - confirm pane text does not touch or sit under the border line.
+
+5. Nested split visual check:
+   - create at least three panes with horizontal and vertical nesting;
+   - focus each pane;
+   - confirm shared dividers are thin lines and not full-cell fills;
+   - confirm the active pane remains easy to identify.
+
+6. `split_border_width` behavior:
+   - test with `split_border_width = 0`;
+   - test with `split_border_width = 4`;
+   - test with a larger value such as `8`;
+   - confirm the value changes only the pixel-line thickness, not the number of
+     reserved cells or PTY rows/columns;
+   - confirm large values are clamped within the reserved cell.
+
+7. PTY truthfulness regression check:
+   - run `stty size` in split panes;
+   - print content on the last visible row and rightmost column;
+   - confirm the bottom row and rightmost column remain visible.
+
+8. Mouse and split dragging:
+   - drag shared split dividers;
+   - click/select text near pane edges;
+   - run a terminal mouse app and confirm mouse forwarding targets visible
+     content cells;
+   - confirm the thin border paint does not steal terminal-cell clicks.
+
+9. Browser overlays:
+   - open a browser pane with `web`;
+   - open a split next to it;
+   - confirm the browser overlay remains aligned to the content rect;
+   - confirm the thin border appears outside the browser content, not underneath
+     it.
+
+10. Single-pane and zoomed-pane behavior:
+    - confirm no split outline is drawn in a single-pane tab;
+    - zoom a split pane and confirm the split outline disappears;
+    - unzoom and confirm the thin-line outline returns.
+
+#### Pass Criteria
+
+The experiment passes if the grid-reserved layout remains intact, PTY dimensions
+truthfully match visible content cells, reserved cells look like background
+spacing, visible borders are thin pixel lines, `split_border_width` affects only
+line thickness, and `scripts/build.sh wezboard` passes.
+
+#### Partial Criteria
+
+The experiment is Partial if the full-cell fill is removed and the thin-line
+model works for simple splits, but one secondary visual issue remains, such as
+line centering in nested splits or an imperfect clamp for very large
+`split_border_width` values. Partial is not acceptable if terminal content is
+hidden again.
+
+#### Failure Criteria
+
+The experiment fails if:
+
+- full reserved cells are still filled with border color;
+- terminal rows or columns are hidden;
+- PTY dimensions stop matching visible content cells;
+- `RenderableDimensions` shrinkage is reintroduced;
+- browser overlays overlap or hide borders;
+- split dragging, mouse mapping, selection, or terminal mouse forwarding
+  regresses;
+- `split_border_width` changes reserved-cell count instead of only pixel-line
+  thickness.
