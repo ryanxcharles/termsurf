@@ -804,7 +804,8 @@ using Blink's public datalist APIs:
 ChromeClientImpl::OpenTextDataListChooser(...)
   -> WebAutofillClient::OpenTextDataListChooser(...)
   -> WebInputElement::FilteredDataListOptions()
-  -> content_shell-owned popup UI
+  -> renderer-to-browser content_shell datalist popup message
+  -> browser-side content_shell NSMenu popup
   -> WebFormControlElement::SetValue(..., send_events=true)
 ```
 
@@ -842,7 +843,6 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    - inherits `blink::WebAutofillClient`;
    - calls `render_frame->GetWebFrame()->SetAutofillClient(this)` in its
      constructor;
-   - clears the frame's Autofill client on destruction if still appropriate;
    - implements only `OpenTextDataListChooser(...)` and
      `DataListOptionsChanged(...)`;
    - leaves all other `WebAutofillClient` hooks as default no-ops.
@@ -851,7 +851,13 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    class instead of constructing `autofill::AutofillAgent`,
    `PasswordAutofillAgent`, or `PasswordGenerationAgent`.
 
-2. Extract datalist options directly.
+   Follow the normal `RenderFrameObserver` self-owned pattern:
+   - allocate with `new ShellDatalistAutofillClient(render_frame)`;
+   - implement `OnDestruct()` as `delete this`;
+   - do not call `SetAutofillClient(nullptr)` from the destructor or
+     `OnDestruct()`, because the `WebFrame` may already be tearing down.
+
+2. Extract datalist options and anchor data in the renderer.
 
    In `OpenTextDataListChooser(...)`, use:
 
@@ -866,27 +872,71 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    Keep only enabled options with non-empty values. Preserve both display text
    and value. The value is what should be inserted into the input.
 
-3. Show a minimal macOS popup.
+   Before relying on the empty-input full-list behavior, verify
+   `FilteredDataListOptions()` returns all enabled options when the input value
+   is empty. If it does not, record that boundary and use the datalist's
+   unfiltered option list explicitly in this client.
 
-   On macOS, present the extracted options with a small AppKit `NSMenu` anchored
-   to the input element's bounds.
+   Also compute and send the input anchor rect. The renderer cannot show AppKit
+   UI directly; it should only package:
+   - the filtered option display labels and values;
+   - the input bounds in widget/local-root coordinates;
+   - enough frame/widget identity for the browser side to map the anchor to the
+     Shell window or host view.
 
-   The first implementation may live in a `.mm` helper under
-   `content/shell/renderer/` or `content/shell/browser/renderer_host/`, but it
-   must stay content_shell-scoped. Do not use Chrome Autofill popup UI.
+3. Add a renderer-to-browser bridge for datalist popups.
+
+   The renderer-side `ShellDatalistAutofillClient` must not call `NSMenu` or any
+   AppKit API. Add a small content_shell-scoped bridge that sends the extracted
+   options and anchor data to the browser process.
+
+   Prefer a narrow new content_shell mojom interface, for example:
+
+   ```text
+   ShellDatalistPopupHost.ShowDatalistPopup(
+       array<ShellDatalistOption> options,
+       gfx.mojom.RectF input_bounds_in_widget,
+       ...frame/widget identity...)
+       => (optional<uint32> selected_index)
+   ```
+
+   A selected index should be reported back to the renderer. The renderer then
+   sets the input value. If a callback is awkward in the chosen IPC shape, use a
+   paired browser-to-renderer reply message, but keep the interface scoped to
+   content_shell.
+
+4. Show a minimal browser-side macOS popup.
+
+   On macOS, the browser/app-shim side should present the extracted options with
+   a small AppKit `NSMenu` anchored to the input element's bounds. The AppKit
+   helper must live on the browser side, not under `content/shell/renderer/`. Do
+   not use Chrome Autofill popup UI.
+
+   Use the menu API already proven by Issue 783's select fix:
+
+   ```objc
+   [menu popUpMenuPositioningItem:nil
+                       atLocation:location_in_host_view
+                           inView:host_view]
+   ```
 
    Anchor placement should reuse the coordinate conventions already proven in
    Issues 779 and 783:
-   - get the input bounds in the renderer frame;
-   - convert to screen coordinates using the same webview/screen origin logic
-     used by the existing popup traces;
+   - renderer sends input bounds in a clearly-labeled coordinate space;
+   - browser converts that rect into the host view's coordinate space;
    - place the menu below the input unless AppKit constrains it.
 
    If it is much simpler and safer to present the `NSMenu` at the current mouse
-   location for this experiment, that is acceptable as a Partial result only. A
-   passing result requires the popup to appear at the datalist input.
+   location for this experiment, that is acceptable as a Partial result only
+   when the result records:
+   - what input-bounds conversion was attempted;
+   - the specific blocker that prevented input-anchored placement;
+   - the exact next step required to fix placement.
 
-4. Accept a suggestion by setting the input value.
+   Without those three fields, mouse-location placement is a Failure, not a
+   Partial. A passing result requires the popup to appear at the datalist input.
+
+5. Accept a suggestion by setting the input value.
 
    When the user selects a menu item:
    - set the input's value to the chosen option value;
@@ -897,18 +947,22 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    correct DOM behavior. If it does not, record the exact failure and make the
    result Partial.
 
-5. Dismissal and lifecycle.
+   Do not use preview/suggested-value APIs for the final selection. A datalist
+   selection is a committed value, not an Autofill preview.
+
+6. Dismissal and lifecycle.
 
    The datalist popup must dismiss when:
    - the user selects an item;
    - the user clicks away;
    - the Wezboard app deactivates through Cmd-Tab.
 
-   If Cmd-Tab dismissal does not come for free from the menu's modal AppKit
-   behavior, wire it to the existing `SetGuiActive(false)` path or record that
-   as a Partial boundary.
+   Expected Cmd-Tab behavior: AppKit's `NSMenu` modal loop should dismiss
+   automatically when the app deactivates. Verify this first. Only if AppKit
+   does not dismiss the menu should the fix wire `SetGuiActive(false)` into the
+   datalist popup lifecycle.
 
-6. Build wiring.
+7. Build wiring.
 
    Remove any Experiment 3 dependency additions that are no longer needed, such
    as `//components/autofill/content/renderer`, if the new datalist-only client
@@ -920,14 +974,15 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    - AppKit is allowed on macOS;
    - Chrome browser/UI/profile dependencies are not allowed.
 
-7. Trace only the new datalist path.
+8. Trace only the new datalist path.
 
    Keep low-volume `datalist_autofill` logs for:
    - datalist client installed;
    - `OpenTextDataListChooser(...)` fired;
    - number of filtered options;
    - first few option labels/values;
-   - popup shown with anchor rect;
+   - renderer-to-browser popup request sent;
+   - browser-side popup shown with anchor rect and coordinate space;
    - selected value;
    - value set success/failure;
    - popup dismissed reason.
@@ -979,6 +1034,8 @@ Continue on the Issue 784 Chromium branch, `148.0.7778.97-issue-784`.
    - confirm a popup appears with `Surfari`;
    - select `Surfari`;
    - confirm the field value becomes `Surfari`.
+   - confirm the on-page event log records an `input` or `change` event for the
+     datalist field.
 
 7. Test full-list behavior:
    - clear the datalist input;
