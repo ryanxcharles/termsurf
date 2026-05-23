@@ -1074,3 +1074,307 @@ the GUI app deactivates, and have Chromium dismiss any active PagePopup-family
 native widget on receipt. Do not chase popup window ownership or compositor
 staleness first; the trace shows the cleanup path is correct when it is actually
 invoked.
+
+### Experiment 4: Dismiss PagePopups on GUI Deactivation
+
+#### Description
+
+Experiment 3 found the actual boundary: Wezboard deactivates, but Chromium does
+not. PagePopup windows are owned by the separate Roamium/Chromium process, so
+AppKit does not naturally tell Chromium to dismiss the active PagePopup when the
+visible Wezboard app loses focus.
+
+This experiment implements the narrow fix for that boundary. On Wezboard
+application deactivation, send a TermSurf protocol message to Roamium/Chromium
+for each connected browser process. Roamium forwards the request through
+`libtermsurf_chromium`, and Chromium dismisses active PagePopup-family widgets
+by using the existing PagePopup cleanup path.
+
+This experiment targets only PagePopup-family controls: `date`, `time`,
+`datetime-local`, and `color`. It must not change select dropdown positioning,
+datalist behavior, Shell window placement, Shell mouse transparency, or the
+PagePopup y-axis correction.
+
+#### Non-Negotiable Invariants
+
+Before and after this experiment:
+
+- `WebPagePopupImpl::SetWindowRect` must keep the Issue 779 y correction.
+- `page_popup_y_fix` must still log when the correction runs.
+- Corrected `window_rect`, not raw `rect_in_screen`, must still flow into
+  `SetPendingWindowRect`, `SetPopupBounds`, and `initial_rect_`.
+- All Issue 782 `[window setIgnoresMouseEvents:YES]` Shell-window reassertions
+  must remain intact.
+- Opening and dismissing a `<select>` must not stop later PagePopup controls
+  from opening.
+
+If any of these regress, the experiment fails immediately, even if the alt-tab
+bug improves.
+
+#### Changes
+
+1. **Add a focused protocol message.**
+
+   In `proto/termsurf.proto`, add a GUI-to-Chromium state message:
+
+   ```proto
+   message DismissNativePopups {
+     int64 tab_id = 1;
+     string reason = 2;
+   }
+   ```
+
+   Add it to `TermSurfMessage` as the next available field:
+
+   ```proto
+   DismissNativePopups dismiss_native_popups = 33;
+   ```
+
+   Semantics:
+   - `tab_id > 0`: dismiss popups for that tab.
+   - `tab_id == 0`: dismiss popups for every tab in the receiving browser
+     process.
+   - `reason` should be `"gui_deactivated"` for this experiment.
+
+   Use a new message instead of overloading `FocusChanged`; this keeps the fix
+   explicit and makes future non-focus popup dismissal cases possible.
+
+2. **Send the message from Wezboard when the app deactivates.**
+
+   In `wezboard/window/src/connection.rs`, add an application event such as:
+
+   ```rust
+   ApplicationDeactivated
+   ```
+
+   In `wezboard/window/src/os/macos/app.rs`, update
+   `application_did_resign_active` so it still logs the Experiment 3 activation
+   trace, then dispatches `ApplicationEvent::ApplicationDeactivated`.
+
+   In `wezboard/wezboard-gui/src/frontend.rs`, handle the new application event
+   by asking the TermSurf connection/state layer to dismiss native popups.
+
+   In `wezboard/wezboard-gui/src/termsurf/conn.rs`, add a small helper that
+   broadcasts:
+
+   ```rust
+   TermSurfMessage {
+       msg: Some(Msg::DismissNativePopups(proto::DismissNativePopups {
+           tab_id: 0,
+           reason: "gui_deactivated".to_string(),
+       })),
+   }
+   ```
+
+   to each connected Chromium server with a live `server.tx`.
+
+   Log one low-frequency summary:
+
+   ```text
+   [issue-779-trace] pagepopup_alt_tab boundary=wezboard_protocol event=dismiss_native_popups reason=gui_deactivated servers=N messages_sent=M
+   ```
+
+   Do not send per-pane mouse or focus logs.
+
+3. **Forward the message in Roamium.**
+
+   In `roamium/src/dispatch.rs`, handle `Msg::DismissNativePopups`.
+   - If `tab_id == 0`, iterate all known tabs and call a new FFI function for
+     each tab handle.
+   - If `tab_id > 0`, find that tab and call the same FFI function once.
+   - If the tab is missing, log the miss and do nothing else.
+
+   In `roamium/src/ffi.rs`, add the new C binding:
+
+   ```rust
+   pub fn ts_dismiss_native_popups(wc: TsWebContents);
+   ```
+
+   Add a trace summary:
+
+   ```text
+   [issue-779-trace] pagepopup_alt_tab boundary=roamium_protocol event=dismiss_native_popups reason=gui_deactivated tab_id=... target_count=N
+   ```
+
+4. **Dismiss PagePopups inside Chromium.**
+
+   In `chromium/src/content/libtermsurf_chromium/libtermsurf_chromium.h` and
+   `.cc`, add:
+
+   ```c++
+   TS_EXPORT void ts_dismiss_native_popups(ts_web_contents_t wc);
+   ```
+
+   In `chromium/src/content/libtermsurf_chromium/ts_browser_main_parts.h` and
+   `.cc`, add a matching method.
+
+   The implementation must run on Chromium's UI thread, find the tab for the
+   supplied `WebContents`, and trigger the existing PagePopup close path. The
+   preferred implementation is to send renderer page focus loss through the main
+   frame widget, because Blink's existing `WebViewImpl::SetPageFocus(false)`
+   calls `CancelPagePopup()`.
+
+   Concretely, use the tab's main `RenderWidgetHostImpl` and call
+   `SetPageFocus(false)` or the closest existing Chromium API that produces the
+   same renderer-side `WebViewImpl::SetPageFocus(false)` path. Do not destroy
+   `NSWindow` objects directly, and do not synthesize mouse, keyboard, or click
+   events.
+
+   Keep the existing Experiment 3 PagePopup cleanup logs. The successful path
+   should show:
+
+   ```text
+   WebViewImpl::CancelPagePopup
+   WebPagePopupImpl::Cancel
+   WebPagePopupImpl::ClosePopup
+   WebViewImpl::CleanupPagePopup
+   ```
+
+   Add one low-frequency entry before the request is sent:
+
+   ```text
+   [issue-779-trace] pagepopup_alt_tab boundary=chromium_protocol event=dismiss_native_popups webcontents=... reason=gui_deactivated
+   ```
+
+5. **Regenerate protocol bindings through the normal build.**
+
+   Use the project scripts. Do not run one-off protobuf commands unless the
+   build scripts fail and the failure proves a manual regeneration step is
+   required.
+
+6. **Do not broaden scope.**
+
+   This experiment must not:
+   - change PagePopup placement math;
+   - change `<select>` menu positioning;
+   - change datalist behavior;
+   - change Shell window frame movement;
+   - remove or weaken `ignoresMouseEvents`;
+   - reintroduce high-volume mouse/input-router logs;
+   - add runtime experiment flags.
+
+#### Verification
+
+1. Confirm the Chromium branch:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf/chromium/src
+   git branch --show-current
+   ```
+
+   It must be:
+
+   ```text
+   148.0.7778.97-issue-783
+   ```
+
+2. Build through project scripts:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   scripts/build.sh chromium
+   scripts/build.sh roamium
+   scripts/build.sh wezboard
+   scripts/build.sh webtui
+   ```
+
+3. Start the test page:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   bun test-html/server.ts
+   ```
+
+4. Start Wezboard with fresh Experiment 4 logs:
+
+   ```bash
+   cd /Users/ryan/dev/termsurf
+   mkdir -p logs/issue-783-exp4-state/termsurf
+
+   TERMSURF_ISSUE_779_TRACE=1 \
+   XDG_STATE_HOME="$PWD/logs/issue-783-exp4-state" \
+   RUST_LOG=info \
+   ./wezboard/target/debug/wezboard-gui \
+   2>&1 | tee logs/issue-783-exp4-wezboard.log
+   ```
+
+5. Launch the TUI:
+
+   ```bash
+   /Users/ryan/dev/termsurf/webtui/target/debug/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     http://localhost:9616/test-native-popups.html
+   ```
+
+6. Re-check protected invariants first:
+   - click the date input;
+   - confirm the date picker y position is correct;
+   - close it;
+   - click the select dropdown once;
+   - dismiss it;
+   - click the date input again;
+   - confirm it still opens and y remains correct.
+
+   Stop immediately if either invariant fails.
+
+7. Test the PagePopup deactivation fix:
+   - open the date picker;
+   - while it is open, Cmd-Tab to Finder or another standard windowed app on the
+     same Space;
+   - confirm the date picker disappears when Wezboard deactivates;
+   - Cmd-Tab back to Wezboard;
+   - confirm the page is still usable and the date picker can open again.
+
+8. Repeat step 7 for:
+   - `time`;
+   - `datetime-local`, if present on the test page;
+   - `color`.
+
+   Do not test select x-position or datalist in this experiment.
+
+9. Extract the focused trace:
+
+   ```bash
+   rg -a "\[issue-779-trace\]|pagepopup_alt_tab|DismissNativePopups|dismiss_native_popups|ts_dismiss_native_popups|page_popup_y_fix|DateTimeChooserImpl|WebPagePopupImpl|WebViewImpl::.*PagePopup|RenderWidgetPopupWindow|chromium_protocol|roamium_protocol|wezboard_protocol" \
+     logs/issue-783-exp4-wezboard.log \
+     logs/issue-783-exp4-state/termsurf/webtui-trace.log \
+     logs/issue-783-exp4-state/termsurf/roamium-trace.log \
+     logs/issue-783-exp4-state/termsurf/chromium-server.log \
+     > logs/issue-783-exp4-trace.log
+   ```
+
+10. Pass criteria:
+    - date y-axis remains correct;
+    - date still opens after select;
+    - Wezboard logs `ApplicationDeactivated` and sends `DismissNativePopups`;
+    - Roamium receives the message and calls `ts_dismiss_native_popups`;
+    - Chromium receives the dismiss request;
+    - existing PagePopup cleanup logs run on Cmd-Tab away;
+    - the visible PagePopup disappears for date, time, and color when Wezboard
+      deactivates;
+    - returning to Wezboard leaves the page usable;
+    - no high-volume input logs are reintroduced.
+
+11. Fail criteria:
+    - **date y-axis regresses;**
+    - post-select date opening regresses;
+    - any `setIgnoresMouseEvents:YES` reassertion is removed or weakened;
+    - Wezboard deactivation does not send the protocol message;
+    - Roamium receives the message but Chromium does not;
+    - Chromium receives the message but no PagePopup cleanup runs;
+    - cleanup runs but the popup window remains visible;
+    - the fix closes or navigates the tab;
+    - select dropdown x-position, datalist behavior, or unrelated popup paths
+      change.
+
+#### Expected Interpretations
+
+- If all pass criteria hold, the PagePopup alt-tab bug is fixed. The next issue
+  783 experiment should move to the select dropdown x-position bug.
+- If the protocol reaches Chromium but no cleanup runs, the C API is not
+  reaching the renderer page-focus-loss path; inspect the `RenderWidgetHostImpl`
+  focus call and the renderer `WebViewImpl::SetPageFocus(false)` delivery.
+- If cleanup runs but the popup remains visible, the next experiment should
+  target popup `NSWindow` ownership/destruction, not the protocol boundary.
+- If date is fixed but time or color remains visible, split the PagePopup-family
+  paths and add control-type-specific cleanup tracing.
