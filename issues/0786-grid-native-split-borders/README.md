@@ -1729,3 +1729,243 @@ The experiment fails if:
 - the result does not identify a concrete mismatch;
 - active/inactive pane borders regress;
 - terminal content, browser overlays, or terminal mouse forwarding regress.
+
+**Result:** Pass
+
+The diagnostic log was collected in `logs/split-hitbox.log` and identified the
+split resize mismatch precisely.
+
+| Case        | Visible edge px | Split UIItem px | Winner before                         | Winner on border | Diagnosis                                   |
+| ----------- | --------------- | --------------- | ------------------------------------- | ---------------- | ------------------------------------------- |
+| Right split | `x=1126..1128`  | `x=1106..1120`  | `Split[index=0,direction=Horizontal]` | `None`           | Split UIItem is one reserved cell too left. |
+| Down split  | `y=1183..1185`  | `y=1136..1168`  | `Split[index=1,direction=Vertical]`   | `None`           | Split UIItem is one reserved cell too high. |
+
+For the right split, the visible vertical border line is drawn at
+`x=1126..1128`, centered inside the reserved border cell that starts at
+`x=1120`. The registered split hit rectangle is the previous cell,
+`x=1106..1120`. Mouse events on the visible border resolve to `None`, while
+mouse events in the previous cell resolve to
+`Split[index=0,direction=Horizontal]`.
+
+For the down split, the visible horizontal border line is drawn at
+`y=1183..1185`, centered inside the reserved border cell that starts at
+`y=1168`. The registered split hit rectangle is the previous row,
+`y=1136..1168`. Mouse events on the visible border resolve to `None`, while
+mouse events in the previous row resolve to `Split[index=1,direction=Vertical]`.
+
+The log does not support the hit-test-priority theory. No other `UIItem` is
+stealing hover at the visible border; the winner there is `None`. The split
+`UIItem` is simply registered in the wrong pixel location.
+
+The log also shows that Experiment 5's `hit_left` / `hit_top` fields did not
+move the runtime hit rectangle. The logged `logical_cell` and `hit_cell` values
+are identical for the affected splits, so the failed offset did not reach the
+geometry that the user actually hits.
+
+#### Conclusion
+
+The split resize slider is off by one grid cell because split hit regions still
+come from the old logical split divider coordinate, while the visible border is
+drawn from the newer reserved pane-border geometry.
+
+The correct fix is not another blind coordinate nudge. The split hit rectangle
+must be derived from the same reserved border cell that contains the visible
+border line. The hit region should cover the whole reserved border cell; the
+thin visible border line remains centered inside that cell.
+
+### Experiment 7: Align Split Hitboxes to Reserved Border Cells
+
+#### Description
+
+Move split resize hit regions onto the reserved border cells that contain the
+visible split border lines.
+
+Experiment 6 proved the mismatch:
+
+- the visible right-split border is inside the cell at `x=1120..1134`, with the
+  line at `x=1126..1128`;
+- the split `UIItem` is instead registered at `x=1106..1120`;
+- the visible down-split border is inside the row at `y=1168..1200`, with the
+  line at `y=1183..1185`;
+- the split `UIItem` is instead registered at `y=1136..1168`.
+
+Experiment 7 should make the draggable split area match the visible border cell:
+
+- right split: hitbox cell moves from the previous content-side cell onto the
+  reserved vertical border cell;
+- down split: hitbox row moves from the previous content-side row onto the
+  reserved horizontal border row.
+
+The visible line itself should not become the entire hitbox. The hitbox should
+remain one full reserved grid cell wide/tall so it is easy to grab with the
+mouse. The visible pixel line remains centered inside that grid cell.
+
+#### Non-Negotiable Invariants
+
+- Preserve Experiment 1's grid-reserved layout and truthful PTY sizing.
+- Preserve Experiments 3 and 4's one-rectangle active/inactive pane borders.
+- Preserve Experiment 6's trace gate and log file unless this experiment
+  deliberately removes the temporary diagnostics after verification.
+- Keep `paint_split()` visually non-visual.
+- Do not paint over terminal content cells.
+- Do not change browser overlay content coordinates.
+- Do not change terminal mouse forwarding for content cells.
+- Do not use UIItem priority as the primary fix. The log shows the visible
+  border currently resolves to `None`, not to the wrong item.
+- Do not make the thin visible line itself the only draggable area.
+- Single-pane and zoomed-pane behavior remain unchanged.
+
+#### Changes
+
+1. **Keep the paint model unchanged.**
+
+   Do not change `paint_pane_border()`'s one-rectangle border drawing. The
+   visible active and inactive borders are working well after Experiments 3
+   and 4. Experiment 7 is about hitbox geometry only.
+
+2. **Identify the current split hitbox registration source.**
+
+   Inspect the code path that creates the split `UIItem` rectangle, currently
+   logged by Experiment 6 as:
+
+   ```text
+   split-hit split-ui ... logical_cell=(...) hit_cell=(...) rect_px=(...)
+   ```
+
+   Identify whether the registered rectangle is created in `paint_split()`,
+   `get_splits()`, `iter_splits()`, or another helper. The result should name
+   the exact source of truth after the fix.
+
+3. **Derive the hit rectangle from the reserved border cell.**
+
+   The split hit rectangle should cover the reserved border cell that contains
+   the visible line:
+   - for `SplitDirection::Horizontal`, the hit rectangle is one full cell wide
+     and spans the visible split height. Its `x` coordinate must be the reserved
+     vertical border-cell start, not the previous logical split cell;
+   - for `SplitDirection::Vertical`, the hit rectangle is one full cell tall and
+     spans the visible split width. Its `y` coordinate must be the reserved
+     horizontal border-cell start, not the previous logical split row.
+
+   Prefer deriving this from the pane border geometry or the same layout
+   metadata used by `paint_pane_border()`. Avoid reintroducing a bare `+ 1`
+   arithmetic guess unless the surrounding code proves that the next cell is
+   exactly the reserved border cell for every split orientation and nested
+   layout.
+
+4. **Keep resize math logically separate from hitbox placement.**
+
+   Moving the hit rectangle must not break dragging.
+
+   If `resize_split_by()` expects the original logical split coordinate, keep
+   that logical coordinate for resize math and carry a separate visual/hit
+   coordinate for the `UIItem` rectangle and drag-anchor calculation.
+
+   If drag delta is currently computed from the hit rectangle, update the anchor
+   consistently so dragging starts from the visible border cell and resizing
+   remains stable. Do not make the pane jump by one cell at drag start.
+
+5. **Remove or repair Experiment 5's failed fields.**
+
+   Experiment 6 showed `hit_left` / `hit_top` were equal to `left` / `top` at
+   runtime and did not fix the bug.
+
+   Choose one explicit resolution:
+   - repair `hit_left` / `hit_top` so they are the actual reserved border-cell
+     coordinates and are used by the split `UIItem`; or
+   - remove them and introduce a clearer structure or helper name that expresses
+     the two coordinate roles: logical resize coordinate vs. visual hitbox
+     coordinate.
+
+   Do not leave misleading fields in place if they still duplicate the logical
+   coordinates after the fix.
+
+6. **Use Experiment 6 logging to prove the new alignment.**
+
+   Keep the trace available during verification. With
+   `TERMSURF_SPLIT_HIT_TRACE=1`, the corrected geometry should show:
+   - right split: visible border `x=1126..1128` is inside split UIItem
+     `x=1120..1134` or the equivalent one-cell reserved border rect for the
+     current window size;
+   - down split: visible border `y=1183..1185` is inside split UIItem
+     `y=1168..1200` or the equivalent one-cell reserved border rect for the
+     current window size;
+   - winner on the visible border is the matching `Split[...]`, not `None`.
+
+   The exact numbers may differ with window size and font metrics. The invariant
+   is that the visible line lies inside the split `UIItem` rectangle.
+
+#### Verification
+
+1. Build Wezboard:
+
+   ```bash
+   scripts/build.sh wezboard
+   ```
+
+2. Run with tracing enabled:
+
+   ```bash
+   TERMSURF_SPLIT_HIT_TRACE=1 wezboard
+   ```
+
+3. Right split:
+   - open a split pane to the right;
+   - move the mouse over the visible vertical border;
+   - verify the cursor changes on the visible border, not one cell left of it;
+   - drag the visible border and verify the panes resize without an initial
+     one-cell jump;
+   - inspect `logs/split-hitbox.log` and confirm the visible vertical
+     `pane-border-edge` is inside the split `UIItem` rectangle.
+
+4. Down split:
+   - open a split pane down;
+   - move the mouse over the visible horizontal border;
+   - verify the cursor changes on the visible border, not one row above it;
+   - drag the visible border and verify the panes resize without an initial
+     one-cell jump;
+   - inspect `logs/split-hitbox.log` and confirm the visible horizontal
+     `pane-border-edge` is inside the split `UIItem` rectangle.
+
+5. Nested split:
+   - create a three-pane layout with one vertical split and one horizontal
+     split;
+   - verify every internal visible border has its draggable area on the visible
+     border cell;
+   - verify active and inactive borders remain visually connected.
+
+6. Regression checks:
+   - terminal content remains visible and is not covered by borders;
+   - browser overlays remain aligned to content cells;
+   - content-cell mouse forwarding still works away from split borders;
+   - single-pane and zoomed-pane behavior are unchanged.
+
+#### Pass Criteria
+
+The experiment passes if the resize cursor appears on the visible right-split
+and down-split borders, dragging from the visible borders resizes panes without
+a one-cell jump, the trace log shows the visible border edge lies inside the
+split `UIItem` rectangle for both orientations, active and inactive border
+painting does not regress, browser overlays and terminal content remain aligned,
+and `scripts/build.sh wezboard` passes.
+
+#### Partial Criteria
+
+The experiment is Partial if one orientation is fixed but the other remains
+offset, or if hover alignment is fixed but dragging starts with a one-cell jump.
+Partial is not acceptable for closing the issue.
+
+#### Failure Criteria
+
+The experiment fails if:
+
+- the resize cursor is still one grid cell away from the visible border;
+- the hitbox is moved onto the thin 2px line only instead of the full reserved
+  border cell;
+- dragging the border jumps panes by one cell at drag start;
+- the fix relies only on UIItem priority while the split rectangle remains in
+  the wrong location;
+- active or inactive pane borders visually regress;
+- terminal content, browser overlays, or content mouse forwarding regress;
+- single-pane or zoomed-pane behavior changes;
+- `scripts/build.sh wezboard` fails.
