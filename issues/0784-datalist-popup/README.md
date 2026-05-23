@@ -1232,6 +1232,11 @@ The cleanup must preserve all fixes from the issue series:
 - Issue 782 Shell window `setIgnoresMouseEvents:YES` setup and reassertions;
 - Shell window move/placement behavior used for popup positioning;
 - Issue 783 `SetGuiActive` protocol behavior for app deactivate/reactivate;
+- Wezboard `application_did_resign_active` and `application_did_become_active`
+  delegate methods, including their `dispatch_app_event(ApplicationDeactivated)`
+  and `dispatch_app_event(ApplicationActivated)` calls;
+- the Wezboard `applicationDidResignActive:` and `applicationDidBecomeActive:`
+  selector registrations;
 - Issue 783 direct `NSMenu` select placement in `WebMenuRunner`;
 - Issue 784 narrow datalist popup stack: `ShellDatalistAutofillClient`,
   `ShellDatalistAutofillDriver`, and the `datalist_autofill.mojom` bridge.
@@ -1245,10 +1250,15 @@ Continue on Chromium branch `148.0.7778.97-issue-784`.
 
 1. Inventory current trace code.
 
-   Search Chromium for the remaining native-popup trace labels and helpers:
+   Search Chromium, Wezboard, Roamium, and webtui for remaining native-popup
+   trace labels and helpers:
 
    ```bash
-   rg "\\[issue-779-trace\\]|Issue779Trace|page_popup_y_fix|native_popup_attempt|pagepopup_alt_tab|select_x_position|datalist_autofill" chromium/src
+   rg "\\[issue-779-trace\\]|Issue779|issue_779_trace|page_popup_y_fix|native_popup_attempt|pagepopup_alt_tab|select_x_position|datalist_autofill|trace_pagepopup_alt_tab" \
+     chromium/src \
+     wezboard \
+     roamium \
+     webtui
    ```
 
    Classify each result as one of:
@@ -1271,6 +1281,18 @@ Continue on Chromium branch `148.0.7778.97-issue-784`.
    delete any line that mutates state, computes popup placement, sends protocol
    messages, changes focus, calls AppKit popup APIs, or changes an input value.
 
+   Logs added to upstream-shared Chromium files should generally be removed
+   unless they still serve a reachable TermSurf regression diagnostic. This
+   applies especially to files outside `content/shell/`,
+   `content/libtermsurf_chromium/`, and TermSurf-added files. TermSurf-specific
+   trace code in upstream-shared files creates rebase pain on every Chromium
+   upgrade.
+
+   After removing logs from a file, search that same file for
+   `Issue779TraceEnabled`, `Issue779TraceAnnounce`, `Issue779*`,
+   `issue_779_trace*`, or other trace-only helpers. If the only remaining
+   references are unused helper definitions, remove those helpers too.
+
 3. Keep narrowly useful regression logs if they are low-volume.
 
    It is acceptable to keep a small number of low-volume logs behind
@@ -1281,7 +1303,9 @@ Continue on Chromium branch `148.0.7778.97-issue-784`.
    - datalist popup request/show/accept lifecycle.
 
    Prefer fewer logs. The final trace surface should be small enough that a
-   single manual popup test produces readable output.
+   single manual popup test produces readable output. Keep the historical
+   `TERMSURF_ISSUE_779_TRACE` gate and `[issue-779-trace]` prefix for any
+   preserved logs; do not rename them as part of this cleanup.
 
 4. Remove unused includes and dependencies.
 
@@ -1329,7 +1353,11 @@ Continue on Chromium branch `148.0.7778.97-issue-784`.
    - date picker still opens after select dismissal;
    - datalist typing `S` shows `Surfari` and selection commits the value;
    - empty datalist input shows the full option set;
-   - datalist popup dismisses on click-away and Cmd-Tab.
+   - datalist popup dismisses on click-away;
+   - datalist popup dismisses on Cmd-Tab.
+
+   If time permits, also test a non-default pane layout, such as a right split,
+   to confirm popup positioning still works away from the default pane location.
 
 8. Capture a reduced trace.
 
@@ -1349,11 +1377,13 @@ Continue on Chromium branch `148.0.7778.97-issue-784`.
    neutral. If Claude finds a possible behavior change, treat the experiment as
    Partial or Fail until the diff is corrected.
 
-10. Commit and archive patches.
+10. Commit and archive patches only after review passes.
 
-    If the experiment passes, commit the Chromium cleanup on
-    `148.0.7778.97-issue-784`, regenerate `chromium/patches/issue-784/`, and
-    commit the patch archive plus issue result in the main repo.
+    Do not commit the cleanup before build, manual testing, reduced-trace
+    inspection, and Claude review pass. If the experiment passes, commit the
+    Chromium cleanup on `148.0.7778.97-issue-784`, regenerate
+    `chromium/patches/issue-784/`, and commit the patch archive plus issue
+    result in the main repo.
 
 #### Pass Criteria
 
