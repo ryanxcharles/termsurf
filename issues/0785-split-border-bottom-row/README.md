@@ -389,3 +389,30 @@ The experiment fails if:
 - browser overlays, mouse mapping, selection, or split resizing regress;
 - the implementation requires unsafe layout churn that is worse than rolling
   back Issue 777.
+
+**Result:** Won't implement
+
+Experiment 1 was cancelled before implementation.
+
+The analysis surfaced the real root cause: Wezboard's mux split tree uses
+terminal cell dimensions as its layout currency, while the desired split-border
+model requires a pixel-first border-box contract. A correct implementation would
+need to distinguish pane outer rectangles from pane content rectangles before
+PTY/grid sizing, and then thread that distinction through split layout, resize
+events, zoom/unzoom, config reload, DPI changes, browser overlays, mouse
+mapping, and split hit regions.
+
+That is broader than an urgent regression fix. Attempting to patch the behavior
+in the GUI layer would risk preserving the same architectural mismatch in a
+different form: the mux would still allocate panes in grid cells first, while
+the renderer would retrofit pixel border space afterward.
+
+#### Conclusion
+
+Do not implement Experiment 1 as a narrow fix. The root cause is architectural:
+split layout is grid-first, while true margin-style split borders require a
+pixel-first content-rect sizing model.
+
+For this issue, the safer path is rollback of the Issue 777 split-border
+implementation. A future border-box implementation should be designed as a
+larger layout architecture change, not as an urgent regression patch.
