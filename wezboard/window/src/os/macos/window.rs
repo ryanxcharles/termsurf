@@ -78,7 +78,7 @@ use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::str::FromStr;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use wezboard_font::FontConfiguration;
 use wezboard_input_types::{is_ascii_control, IntegratedTitleButtonStyle, KeyboardLedStatus};
 
@@ -2376,10 +2376,95 @@ impl WindowView {
         }
     }
 
-    extern "C" fn did_become_key(this_raw: *mut AnyObject, _sel: Sel, _id_ao: *mut AnyObject) {
+    fn trace_timestamp_ms() -> u128 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or_default()
+    }
+
+    fn trace_pagepopup_alt_tab_window_activation(
+        event: &str,
+        window_id: usize,
+        view: *mut AnyObject,
+        notification: *mut AnyObject,
+    ) {
+        if std::env::var_os("TERMSURF_ISSUE_779_TRACE").is_none() {
+            return;
+        }
+
+        unsafe {
+            let ns_app: id = objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
+            let notification_window: id = if notification.is_null() {
+                std::ptr::null_mut()
+            } else {
+                objc2::msg_send![notification as *const AnyObject, object]
+            };
+            let window: id = objc2::msg_send![view as *const AnyObject, window];
+            let key_window: id = objc2::msg_send![ns_app as *const AnyObject, keyWindow];
+            let main_window: id = objc2::msg_send![ns_app as *const AnyObject, mainWindow];
+            let app_is_active: Bool = objc2::msg_send![ns_app as *const AnyObject, isActive];
+            let frame: CGRect = if window.is_null() {
+                CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(0.0, 0.0))
+            } else {
+                objc2::msg_send![window as *const AnyObject, frame]
+            };
+            let is_key: Bool = if window.is_null() {
+                Bool::NO
+            } else {
+                objc2::msg_send![window as *const AnyObject, isKeyWindow]
+            };
+            let is_main: Bool = if window.is_null() {
+                Bool::NO
+            } else {
+                objc2::msg_send![window as *const AnyObject, isMainWindow]
+            };
+            let is_visible: Bool = if window.is_null() {
+                Bool::NO
+            } else {
+                objc2::msg_send![window as *const AnyObject, isVisible]
+            };
+            let first_responder: id = if window.is_null() {
+                std::ptr::null_mut()
+            } else {
+                objc2::msg_send![window as *const AnyObject, firstResponder]
+            };
+            log::info!(
+                "[issue-779-trace] pagepopup_alt_tab boundary=wezboard_activation event={} window_id={} view={:?} notification={:?} notification_window={:?} window={:?} frame={:?} app_is_active={} is_key={} is_main={} is_visible={} first_responder={:?} key_window={:?} main_window={:?} timestamp_ms={}",
+                event,
+                window_id,
+                view,
+                notification,
+                notification_window,
+                window,
+                frame,
+                app_is_active.as_bool(),
+                is_key.as_bool(),
+                is_main.as_bool(),
+                is_visible.as_bool(),
+                first_responder,
+                key_window,
+                main_window,
+                Self::trace_timestamp_ms(),
+            );
+        }
+    }
+
+    extern "C" fn did_become_key(
+        this_raw: *mut AnyObject,
+        _sel: Sel,
+        notification: *mut AnyObject,
+    ) {
         let this = unsafe { &mut *(this_raw as *mut AnyObject) };
-        let _id = _id_ao as id;
+        let _id = notification as id;
         if let Some(this) = Self::get_this(this) {
+            let window_id = this.inner.borrow().window_id;
+            Self::trace_pagepopup_alt_tab_window_activation(
+                "windowDidBecomeKey",
+                window_id,
+                this_raw,
+                notification,
+            );
             this.inner
                 .borrow_mut()
                 .events
@@ -2388,10 +2473,21 @@ impl WindowView {
         }
     }
 
-    extern "C" fn did_resign_key(this_raw: *mut AnyObject, _sel: Sel, _id_ao: *mut AnyObject) {
+    extern "C" fn did_resign_key(
+        this_raw: *mut AnyObject,
+        _sel: Sel,
+        notification: *mut AnyObject,
+    ) {
         let this = unsafe { &mut *(this_raw as *mut AnyObject) };
-        let _id = _id_ao as id;
+        let _id = notification as id;
         if let Some(this) = Self::get_this(this) {
+            let window_id = this.inner.borrow().window_id;
+            Self::trace_pagepopup_alt_tab_window_activation(
+                "windowDidResignKey",
+                window_id,
+                this_raw,
+                notification,
+            );
             this.inner
                 .borrow_mut()
                 .events

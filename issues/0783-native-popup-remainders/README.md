@@ -1013,3 +1013,64 @@ This is a logs-only experiment. It must not add a dismissal fix yet.
   remains visually present, the persistence is likely at the CALayerHost or
   Wezboard overlay compositor layer. The next experiment should trace Wezboard's
   overlay rendering path.
+
+**Result:** Pass
+
+The user ran the trace and confirmed the bug still reproduces: PagePopup-family
+widgets remain visible when Cmd-Tabbing away from Wezboard. The trace also
+confirmed that the protected invariants survived this experiment:
+
+- `page_popup_y_fix applied=1` fired on PagePopup opens, with corrected y
+  matching the anchor y. The date/time/color y-axis fix remains intact.
+- Post-select date opening remained usable before the alt-tab test.
+- The new logs were low-frequency activation and popup lifecycle logs, not a
+  return of the Issue 782 per-mouse input flood.
+
+The decisive signal is at the activation boundary. On each focused Cmd-Tab
+sequence, Wezboard logged:
+
+```text
+pagepopup_alt_tab boundary=wezboard_activation event=windowDidResignKey app_is_active=false
+pagepopup_alt_tab boundary=wezboard_activation event=applicationDidResignActive app_is_active=false
+```
+
+At the same boundary, Chromium did not log
+`NSApplicationWillResignActiveNotification` or
+`NSApplicationDidResignActiveNotification`. Chromium activation logs did fire
+for its own window/occlusion events, so the observer was installed and working,
+but Chromium never learned that the visible GUI app had deactivated. In
+Chromium's process, `app_is_active` stayed true.
+
+The popup-window snapshots showed the visible leftovers are real Chromium popup
+windows, not just stale Wezboard compositor images. The trace repeatedly showed
+visible `RenderWidgetPopupWindow` instances at level 101 with
+`ignoresMouseEvents=false`, for example:
+
+```text
+pagepopup_window_count=4
+class=RenderWidgetPopupWindow level=101 visible=true ignoresMouseEvents=false
+```
+
+Cleanup did not run at Cmd-Tab time. It ran only after returning to Wezboard and
+closing/dismissing the picker:
+
+```text
+WebViewImpl::CleanupPagePopup page_popup_before=...
+WebViewImpl::CleanupPagePopup.after page_popup_after=0
+WebPagePopupImpl::ClosePopup.after has_page=0 closing=1
+```
+
+#### Conclusion
+
+The bug is structural cross-process activation loss. Wezboard is the foreground
+AppKit app, but PagePopup windows live in the separate Roamium/Chromium process.
+When Wezboard deactivates, AppKit notifies Wezboard, but Chromium does not
+receive a corresponding app deactivation notification, so Chromium has no native
+signal telling it to dismiss the active PagePopup.
+
+The next experiment should implement the narrow fix boundary named by this
+trace: send a TermSurf protocol signal from Wezboard to Roamium/Chromium when
+the GUI app deactivates, and have Chromium dismiss any active PagePopup-family
+native widget on receipt. Do not chase popup window ownership or compositor
+staleness first; the trace shows the cleanup path is correct when it is actually
+invoked.
