@@ -171,11 +171,13 @@ impl CompositorConnection {
         pane_id: &str,
         inspected_tab_id: i64,
         profile: &str,
+        browser: &str,
     ) -> Result<(i64, String, String), String> {
         self.send(Msg::QueryDevtoolsRequest(proto::QueryDevtoolsRequest {
             pane_id: pane_id.into(),
             inspected_tab_id,
             profile: profile.into(),
+            browser: browser.into(),
         }));
 
         let reply = self

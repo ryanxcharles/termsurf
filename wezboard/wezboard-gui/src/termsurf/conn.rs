@@ -298,60 +298,68 @@ async fn handle_message(
         }
         Some(Msg::QueryDevtoolsRequest(q)) => {
             log::info!(
-                "QueryDevtoolsRequest: pane_id={} inspected_tab_id={} profile={}",
+                "QueryDevtoolsRequest: pane_id={} inspected_tab_id={} profile={} browser={}",
                 q.pane_id,
                 q.inspected_tab_id,
-                q.profile
+                q.profile,
+                q.browser
             );
             let reply = {
                 let st = state.lock().unwrap();
 
-                // Resolve inspected_tab_id (0 means auto-target to last browser pane)
-                let resolved_tab_id = if q.inspected_tab_id != 0 {
-                    q.inspected_tab_id
-                } else if let Some(ref last_id) = st.last_browser_pane {
-                    st.panes.get(last_id).map(|p| p.tab_id).unwrap_or(0)
-                } else {
-                    0
-                };
-
-                if resolved_tab_id == 0 {
+                if q.browser.is_empty() {
                     proto::QueryDevtoolsReply {
-                        error: "No browser tab found".into(),
+                        error: "DevTools target browser is required".into(),
+                        ..Default::default()
+                    }
+                } else if q.profile.is_empty() {
+                    proto::QueryDevtoolsReply {
+                        error: "DevTools target profile is required".into(),
+                        ..Default::default()
+                    }
+                } else if q.inspected_tab_id == 0 {
+                    proto::QueryDevtoolsReply {
+                        error: "DevTools target tab id is required".into(),
                         ..Default::default()
                     }
                 } else {
-                    // Check for duplicate DevTools
-                    let already_open = st
-                        .panes
-                        .values()
-                        .any(|p| p.inspected_tab_id == resolved_tab_id);
+                    let server_key = TermSurfState::server_key(&q.profile, &q.browser);
+                    let lookup = (server_key.clone(), q.inspected_tab_id);
+                    let inspected_pane_id = st.tab_to_pane.get(&lookup);
+                    let already_open = st.panes.values().any(|p| {
+                        p.inspected_tab_id == q.inspected_tab_id
+                            && TermSurfState::server_key(&p.profile, &p.browser) == server_key
+                    });
+
                     if already_open {
                         proto::QueryDevtoolsReply {
-                            error: format!("Tab {} already has DevTools open", resolved_tab_id),
+                            error: format!(
+                                "Tab {} in {}/{} already has DevTools open",
+                                q.inspected_tab_id, q.browser, q.profile
+                            ),
                             ..Default::default()
                         }
-                    } else if let Some(inspected_pane_id) = {
-                        // Find the pane with this tab_id to get its profile/browser
-                        st.panes
-                            .values()
-                            .find(|p| p.tab_id == resolved_tab_id)
-                            .map(|p| {
-                                let skey = TermSurfState::server_key(&p.profile, &p.browser);
-                                st.tab_to_pane.get(&(skey, resolved_tab_id))
-                            })
-                            .flatten()
-                    } {
+                    } else if let Some(inspected_pane_id) = inspected_pane_id {
                         let inspected_pane = st.panes.get(inspected_pane_id).unwrap();
-                        proto::QueryDevtoolsReply {
-                            tab_id: resolved_tab_id,
-                            browser: inspected_pane.browser.clone(),
-                            profile: inspected_pane.profile.clone(),
-                            error: String::new(),
+                        if inspected_pane.inspected_tab_id != 0 {
+                            proto::QueryDevtoolsReply {
+                                error: "Cannot open DevTools for a DevTools pane".into(),
+                                ..Default::default()
+                            }
+                        } else {
+                            proto::QueryDevtoolsReply {
+                                tab_id: q.inspected_tab_id,
+                                browser: inspected_pane.browser.clone(),
+                                profile: inspected_pane.profile.clone(),
+                                error: String::new(),
+                            }
                         }
                     } else {
                         proto::QueryDevtoolsReply {
-                            error: "Inspected tab not found".into(),
+                            error: format!(
+                                "Inspected tab {} not found in {}/{}",
+                                q.inspected_tab_id, q.browser, q.profile
+                            ),
                             ..Default::default()
                         }
                     }

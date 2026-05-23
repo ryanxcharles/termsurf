@@ -299,16 +299,19 @@ fn main() -> io::Result<()> {
                 .unwrap_or_else(|| "https://termsurf.com/welcome".to_string())
         }),
     };
-    let mut inspected_tab_id: i64 = if raw_url.starts_with("devtools://") {
-        raw_url["devtools://".len()..].parse::<i64>().unwrap_or(0)
+    let mut inspected_tab_id: i64 = if let Some(id) = raw_url.strip_prefix("devtools://") {
+        id.parse::<i64>().unwrap_or(0)
     } else if raw_url == "devtools" {
-        0 // Auto-target: GUI resolves to most recent browser tab (Issue 684 Exp 3).
+        eprintln!(
+            "Error: DevTools requires opening from a browser pane or an explicit devtools://<tab_id> target with --browser and --profile"
+        );
+        return Ok(());
     } else {
         -1 // Not a DevTools request.
     };
     let is_devtools = inspected_tab_id >= 0;
     let mut url = if is_devtools {
-        raw_url // Keep devtools://N or bare "devtools" as-is.
+        raw_url // Keep devtools://N as-is.
     } else {
         match resolve_input(&raw_url) {
             Some(resolved) => resolved,
@@ -323,7 +326,7 @@ fn main() -> io::Result<()> {
     // The reply includes the inspected tab's browser and profile (Issue 705 Exp 10).
     if is_devtools {
         if let (Some(ref conn), Some(ref pid)) = (&compositor, &pane_id) {
-            match conn.send_query_devtools(pid, inspected_tab_id, &profile) {
+            match conn.send_query_devtools(pid, inspected_tab_id, &profile, &browser) {
                 Ok((resolved_tab_id, resolved_browser, resolved_profile)) => {
                     inspected_tab_id = resolved_tab_id;
                     if !resolved_browser.is_empty() {
@@ -374,6 +377,7 @@ fn main() -> io::Result<()> {
     let mut is_dark = true;
     let mut command_error: Option<String> = None; // Command bar error (Issue 690).
     let mut browser_ready = false;
+    let mut current_tab_id: i64 = 0;
     let mut page_loaded = false;
     let mut page_loaded_at: Option<Instant> = None;
     let mut loading_log: Vec<(LoadingStage, StageStatus)> = Vec::new();
@@ -432,6 +436,7 @@ fn main() -> io::Result<()> {
                 &page_title,
                 is_devtools,
                 inspected_tab_id,
+                current_tab_id,
                 &command_error,
                 browser_label,
                 &target_url,
@@ -697,12 +702,30 @@ fn main() -> io::Result<()> {
                                     } else if let (Some(ref conn), Some(ref pid)) =
                                         (&compositor, &pane_id)
                                     {
-                                        match conn.send_query_devtools(pid, 0, &profile) {
+                                        if !browser_ready || current_tab_id == 0 {
+                                            command_error = Some(
+                                                "Browser is still loading; try again in a moment"
+                                                    .into(),
+                                            );
+                                            continue;
+                                        }
+                                        match conn.send_query_devtools(
+                                            pid,
+                                            current_tab_id,
+                                            &profile,
+                                            &browser,
+                                        ) {
                                             Err(msg) => {
                                                 command_error = Some(msg);
                                             }
                                             Ok(_) => {
-                                                let cmd = format!("{} devtools", current_exe);
+                                                let cmd = format!(
+                                                    "{} --browser {} --profile {} devtools://{}",
+                                                    current_exe,
+                                                    shell_quote_arg(&browser),
+                                                    shell_quote_arg(&profile),
+                                                    current_tab_id
+                                                );
                                                 conn.send_open_split(pid, &direction, &cmd);
                                             }
                                         }
@@ -790,6 +813,7 @@ fn main() -> io::Result<()> {
                         browser_socket,
                         browser: resolved_browser,
                     } => {
+                        current_tab_id = tab_id;
                         if !resolved_browser.is_empty() {
                             browser = resolved_browser;
                         }
@@ -915,6 +939,17 @@ fn resolve_input(input: &str) -> Option<String> {
     None
 }
 
+fn shell_quote_arg(value: &str) -> String {
+    if value
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b'/' | b':'))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
 /// Render the UI and return the viewport inner rect (grid coordinates).
 fn ui(
     frame: &mut Frame,
@@ -926,6 +961,7 @@ fn ui(
     page_title: &str,
     is_devtools: bool,
     inspected_tab_id: i64,
+    current_tab_id: i64,
     command_error: &Option<String>,
     browser_label: &str,
     target_url: &str,
@@ -1049,8 +1085,16 @@ fn ui(
     }
 
     // Viewport.
+    let identity_label = if is_devtools {
+        format!("{}/{}#{}", browser_label, profile, inspected_tab_id)
+    } else if current_tab_id > 0 {
+        format!("{}/{}#{}", browser_label, profile, current_tab_id)
+    } else {
+        format!("{}/{}#loading", browser_label, profile)
+    };
+
     let viewport_title = if is_devtools {
-        format!("DevTools \u{00B7} {}/{}", profile, inspected_tab_id) // Issue 687.
+        format!("DevTools \u{00B7} {}", identity_label)
     } else if page_title.is_empty() {
         "Viewport".to_string()
     } else {
@@ -1058,7 +1102,7 @@ fn ui(
     };
     let engine_label = Line::from(vec![
         Span::raw("\u{F007} ").style(Style::default().fg(COMMENT)),
-        Span::raw(format!("{}/{}", profile, browser_label)).style(Style::default().fg(DIM)),
+        Span::raw(identity_label).style(Style::default().fg(DIM)),
     ]);
     let mut viewport_block = Block::default()
         .borders(Borders::ALL)

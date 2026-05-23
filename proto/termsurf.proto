@@ -273,6 +273,7 @@ message QueryDevtoolsRequest {
   string pane_id = 1;
   int64 inspected_tab_id = 2;
   string profile = 3;
+  string browser = 4;
 }
 
 message QueryDevtoolsReply {
