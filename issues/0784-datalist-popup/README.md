@@ -1151,6 +1151,45 @@ If option extraction and UI placement work but value acceptance is wrong, the
 next experiment should focus only on setting the input value and dispatching the
 right DOM events.
 
+**Result:** Pass
+
+Manual testing confirmed the datalist popup works end-to-end:
+
+- typing `S` in `input#browser` opened the filtered popup with `Surfari`;
+- selecting `Surfari` changed the field value to `Surfari`;
+- clearing the input and opening suggestions showed the full option set;
+- selecting from the full set worked;
+- click-away and Cmd-Tab dismissal behaved correctly;
+- the prior date-picker, select-menu, post-select-date, and Cmd-Tab PagePopup
+  invariants still worked.
+
+The trace confirms the implementation path:
+
+- `ShellContentRendererClient::RenderFrameCreated` installed the
+  `ShellDatalistAutofillClient`;
+- `ChromeClientImpl::OpenTextDataListChooser` now logs
+  `autofill_client_present=1`, where Experiment 2 logged `0`;
+- the explicit datalist trigger extracted options and sent `show_popup_request`
+  with `bounds_in_window=745,385 291x41`;
+- the browser-side driver opened the AppKit `NSMenu` at
+  `input_rect_host_view={x=745.000 y=630.000 w=291.000 h=41.000}`;
+- selecting an item produced `popup_dismissed selected_index=0 reason=accepted`
+  followed by `accept_suggestion is_form_control=1 can_accept=1 value=Surfari`;
+- empty-input full-list behavior worked: the trace showed `option_count=4` with
+  `preview_values=Roamium,Surfari,Waterwolf`, and selecting from that popup
+  delivered `value=Waterwolf`.
+
+The result confirms the Electron-style narrow datalist stack is the right fix:
+renderer-side `WebAutofillClient` extracts suggestions, content_shell Mojo
+bridges to the browser process, AppKit `NSMenu` displays the choices, and
+`WebInputElement::SetAutofillValue(...)` commits the selection.
+
+#### Conclusion
+
+Datalist suggestions are fixed for Roamium/content_shell without importing
+Chrome's full Autofill profile, storage, or Views UI stack. The next experiment
+should be the dedicated native-popup log cleanup pass described below.
+
 ## Cleanup Requirement
 
 Do not perform broad log cleanup before the datalist fix. Some remaining
