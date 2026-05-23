@@ -90,6 +90,12 @@ code still performs a render-time layout shrink by constructing a smaller
 Adopt the border-box model directly: the split border consumes real pixel space,
 and the terminal grid is derived from the remaining content area.
 
+"Border-box model" means the border is part of the pane's allocated visual area:
+the border consumes space first, and the terminal content grid is computed from
+what remains. This is different from the failed Issue 777 presentation model,
+where the terminal grid kept the full pane size and the border tried to shift
+painted pixels afterward.
+
 The previous Issue 777 implementation tried to keep the mux/PTY grid unchanged
 while shifting rendered pixels inward. That creates an impossible contract: the
 terminal still believes it owns `N` rows, while the bordered content rect only
@@ -164,12 +170,32 @@ a hidden 30th row.
    PTY resize dimensions. The border reservation belongs in that sizing
    contract, not as a late `RenderableDimensions` shrink inside `paint_pane()`.
 
+   The likely sizing pipeline to inspect is:
+
+   ```text
+   termwindow resize/layout event
+     -> mux::tab::Tab::resize(...)
+     -> split tree computes each PositionedPane
+     -> pane resize / renderable dimensions are assigned
+     -> PTY receives rows/cols through the normal resize path
+   ```
+
+   Insert the border reservation between "pane visual pixels are known" and
+   "rows/cols are derived from those pixels." Do not insert it inside paint.
+
 2. **Define one bordered content rect.**
 
    When `split_border_width > 0`, more than one pane is visible, and the pane is
    not zoomed:
    - convert `split_border_width` from logical pixels to physical pixels using
-     the current DPI;
+     the current DPI:
+
+     ```text
+     border_width_physical = (split_border_width * dpi / 96.0).round()
+     ```
+
+   - use physical pixels throughout this calculation. `cell_width` and
+     `cell_height` are already physical pixels for the current DPI;
    - reserve that physical width on all four sides of the pane's outer visual
      area;
    - compute `content_rect = outer_rect.inset(border_width)`;
@@ -184,6 +210,17 @@ a hidden 30th row.
    Ensure the pane's effective terminal dimensions use `visible_cols` and
    `visible_rows` from the bordered content rect. The PTY should receive those
    dimensions through the normal pane resize/layout path, not from paint.
+
+   The PTY/grid recompute must happen on every transition that changes the
+   bordered content rect:
+   - window resize;
+   - split add/remove;
+   - zoom/unzoom;
+   - config reload that changes `split_border_width` or border enablement;
+   - DPI/display-scale change.
+
+   Each transition that changes whether border space is reserved must trigger a
+   fresh content-rect calculation and normal PTY resize.
 
    Remove the current paint-time workaround that creates a smaller temporary
    `RenderableDimensions` from `content_pixel_width` and `content_pixel_height`.
@@ -201,6 +238,13 @@ a hidden 30th row.
    dimensions. Any row/column reduction must happen before the pane dimensions
    reach paint.
 
+   After this change, `pane_render_geometry()` should not own grid sizing.
+   Either delete it if the new sizing path subsumes it, or simplify it so it
+   only returns the content origin / border drawing geometry needed by paint.
+   Remove `content_pixel_width` and `content_pixel_height` from its return value
+   unless they are purely descriptive and never used to derive temporary
+   `RenderableDimensions`.
+
 5. **Keep border, overlay, mouse, and split hit regions on the same geometry.**
 
    Use the same bordered content rect for:
@@ -213,6 +257,13 @@ a hidden 30th row.
 
    Avoid duplicated math that could make the visible content, mouse coordinates,
    and overlay origin drift apart.
+
+   Pay particular attention to browser overlays. The render pass currently feeds
+   pane pixel coordinates into `set_overlay_frame()` and
+   `create_pending_ca_layer_host()` through
+   `wezboard/wezboard-gui/src/termsurf/conn.rs`. Those calls must receive the
+   bordered content origin, not the outer border rect, so CALayerHost browser
+   overlays align with terminal content.
 
 6. **Do not accept a hidden-row workaround.**
 
@@ -233,6 +284,11 @@ a hidden 30th row.
    The rollback target is the behavior before commit
    `61ff8e625d0f0 Restore presentation split borders`: split borders may lose
    their real-margin behavior, but terminal content must remain fully visible.
+
+   Rollback procedure if needed: revert `61ff8e625d0f0` and any later commits
+   that only build on that split-border implementation, then verify split
+   borders no longer hide terminal rows. Do not keep a known row-clipping fix in
+   the tree while searching for a better border model.
 
 #### Verification
 
@@ -257,6 +313,8 @@ a hidden 30th row.
 
 4. Split pane bottom row:
    - open a split pane;
+   - verify the existing pane receives a resize and `stty size` changes if the
+     border reduces its visible grid;
    - run a shell prompt on the last visible row;
    - the prompt remains visible;
    - `stty size` reports the visible row/column count, not the pre-border count;
@@ -286,10 +344,27 @@ a hidden 30th row.
 
 9. Zoom, window modes, and small panes:
    - zooming a pane hides borders and restores the full-pane grid;
+   - `stty size` grows when zoom removes the border reservation;
    - unzooming restores borders and the bordered content grid;
+   - `stty size` shrinks back to the bordered visible grid;
    - test in both windowed and fullscreen modes;
    - test a small split pane, around 3-5 rows tall, and confirm it still has a
      coherent visible grid.
+
+10. Split and config transitions:
+    - start with one pane, record `stty size`, then open a split and verify the
+      original pane resizes to the bordered visible grid;
+    - close the split and verify the remaining pane returns to the single-pane
+      grid;
+    - with splits active, reload config after changing `split_border_width` from
+      `4` to `8`, then back to `4`; all visible panes should resize their grid
+      and repaint without requiring a restart.
+
+11. DPI/display-scale transition:
+    - if multiple displays are available, move the window between displays with
+      different scale factors;
+    - verify the physical border width, visible grid, overlay position, and
+      mouse mapping recompute together.
 
 #### Pass Criteria
 
