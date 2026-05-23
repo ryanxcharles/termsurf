@@ -24,8 +24,8 @@ impl crate::TermWindow {
 
         let (padding_left, padding_top) = self.padding_left_top();
 
-        if split.direction == SplitDirection::Horizontal {
-            self.ui_items.push(UIItem {
+        let item = if split.direction == SplitDirection::Horizontal {
+            UIItem {
                 x: border.left.get() as usize
                     + padding_left as usize
                     + (split.hit_left * cell_width as usize),
@@ -35,9 +35,9 @@ impl crate::TermWindow {
                     + split.hit_top * cell_height as usize,
                 height: split.size * cell_height as usize,
                 item_type: UIItemType::Split(split.clone()),
-            });
+            }
         } else {
-            self.ui_items.push(UIItem {
+            UIItem {
                 x: border.left.get() as usize
                     + padding_left as usize
                     + (split.hit_left * cell_width as usize),
@@ -47,8 +47,10 @@ impl crate::TermWindow {
                     + split.hit_top * cell_height as usize,
                 height: cell_height as usize,
                 item_type: UIItemType::Split(split.clone()),
-            });
-        }
+            }
+        };
+        self.split_hit_trace_split_ui(split, &item);
+        self.ui_items.push(item);
 
         Ok(())
     }

@@ -12,6 +12,10 @@ leaving the terminal. No alt+tab, no context switch.
 Do exactly what your user says. No more, no less. NEVER assume they want
 something they didn't ask for. NEVER change code unless explicitly asked.
 
+When editing Rust code, always run `cargo fmt`. Accept the formatter output as
+the source of truth. Do not manually undo, minimize, or selectively revert
+`cargo fmt` formatting changes, including import ordering or wrapping changes.
+
 ## Vision
 
 TermSurf is a protocol, not just an app. It is a network of interchangeable

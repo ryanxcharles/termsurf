@@ -2,12 +2,12 @@ use crate::quad::{HeapQuadAllocator, QuadTrait, TripleLayerQuadAllocator};
 use crate::selection::SelectionRange;
 use crate::termwindow::box_model::*;
 use crate::termwindow::render::{
-    CursorProperties, LineQuadCacheKey, LineQuadCacheValue, LineToEleShapeCacheKey,
-    RenderScreenLineParams, same_hyperlink,
+    same_hyperlink, CursorProperties, LineQuadCacheKey, LineQuadCacheValue, LineToEleShapeCacheKey,
+    RenderScreenLineParams,
 };
 use crate::termwindow::{ScrollHit, UIItem, UIItemType};
-use ::window::DeadKeyStatus;
 use ::window::bitmaps::TextureRect;
+use ::window::DeadKeyStatus;
 use anyhow::Context;
 use config::VisualBellTarget;
 use mux::pane::{PaneId, WithPaneLines};
@@ -655,6 +655,24 @@ impl crate::TermWindow {
         let rect_y = outer_y + y_offset;
         let rect_width = outer_width - 2.0 * x_offset;
         let rect_height = outer_height - 2.0 * y_offset;
+        self.split_hit_trace_pane_border_edge(pos, "top", rect_x, rect_y, rect_width, thickness);
+        self.split_hit_trace_pane_border_edge(
+            pos,
+            "bottom",
+            rect_x,
+            rect_y + rect_height - thickness,
+            rect_width,
+            thickness,
+        );
+        self.split_hit_trace_pane_border_edge(pos, "left", rect_x, rect_y, thickness, rect_height);
+        self.split_hit_trace_pane_border_edge(
+            pos,
+            "right",
+            rect_x + rect_width - thickness,
+            rect_y,
+            thickness,
+            rect_height,
+        );
 
         self.filled_rectangle(
             layers,

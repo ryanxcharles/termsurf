@@ -1,16 +1,16 @@
 use crate::tabbar::TabBarItem;
 use crate::termwindow::{
-    GuiWin, MouseCapture, PositionedSplit, ScrollHit, TMB, TermWindowNotif, UIItem, UIItemType,
+    GuiWin, MouseCapture, PositionedSplit, ScrollHit, TermWindowNotif, UIItem, UIItemType, TMB,
 };
 use ::window::{
     MouseButtons as WMB, MouseCursor, MouseEvent, MouseEventKind as WMEK, MousePress,
     WindowDecorations, WindowOps, WindowState,
 };
-use config::MouseEventAltScreen;
 use config::keyassignment::{KeyAssignment, MouseEventTrigger, SpawnTabDomain};
-use mux::Mux;
+use config::MouseEventAltScreen;
 use mux::pane::{Pane, WithPaneLines};
 use mux::tab::SplitDirection;
+use mux::Mux;
 use mux_lua::MuxPane;
 use std::convert::TryInto;
 use std::ops::Sub;
@@ -25,13 +25,7 @@ use wezboard_term::{ClickPosition, LastMouseClick, StableRowIndex};
 
 impl super::TermWindow {
     fn resolve_ui_item(&self, event: &MouseEvent) -> Option<UIItem> {
-        let x = event.coords.x;
-        let y = event.coords.y;
-        self.ui_items
-            .iter()
-            .rev()
-            .find(|item| item.hit_test(x, y))
-            .cloned()
+        self.split_hit_trace_resolve_ui_item(event)
     }
 
     fn leave_ui_item(&mut self, item: &UIItem) {
@@ -191,20 +185,28 @@ impl super::TermWindow {
 
         let ui_item = if matches!(self.current_mouse_capture, None | Some(MouseCapture::UI)) {
             let ui_item = self.resolve_ui_item(&event);
+            let prior_for_trace = self.last_ui_item.clone();
 
             match (self.last_ui_item.take(), &ui_item) {
                 (Some(prior), Some(item)) => {
                     if prior != *item || !self.config.use_fancy_tab_bar {
+                        self.split_hit_trace_hover_change(
+                            &event,
+                            prior_for_trace.as_ref(),
+                            Some(item),
+                        );
                         self.leave_ui_item(&prior);
                         self.enter_ui_item(item);
                         context.invalidate();
                     }
                 }
                 (Some(prior), None) => {
+                    self.split_hit_trace_hover_change(&event, prior_for_trace.as_ref(), None);
                     self.leave_ui_item(&prior);
                     context.invalidate();
                 }
                 (None, Some(item)) => {
+                    self.split_hit_trace_hover_change(&event, None, Some(item));
                     self.enter_ui_item(item);
                     context.invalidate();
                 }
