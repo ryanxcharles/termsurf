@@ -91,7 +91,7 @@ find the most relevant recent branch, create a new branch from it
 | `146.0.7650.0-issue-762`      | [Issue 762](../issues/0762-persistent-cookies/README.md)         | Persist cookies via NetworkContextFilePaths |
 | `148.0.7778.97-issue-779`     | [Issue 779](../issues/0779-date-picker-popup-position/README.md) | Native popup position tracing               |
 | `148.0.7778.97-issue-782`     | [Issue 782](../issues/0782-native-popup-followups/README.md)     | Native popup follow-up tracing              |
-| `148.0.7778.97-issue-783`     | [Issue 783](../issues/0783-native-popup-remainders/README.md)    | PagePopup alt-tab tracing                   |
+| `148.0.7778.97-issue-783`     | [Issue 783](../issues/0783-native-popup-remainders/README.md)    | PagePopup alt-tab fixes                     |
 | `148.0.7778.97-issue-781`     | [Issue 781](../issues/0781-chromium-upgrade/README.md)           | Chromium 148 migration                      |
 
 ## Patches

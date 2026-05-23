@@ -317,6 +317,12 @@ impl GuiFrontEnd {
                     }
                 }
             }
+            ApplicationEvent::ApplicationDeactivated => {
+                crate::termsurf::conn::set_gui_active(false, "gui_deactivated");
+            }
+            ApplicationEvent::ApplicationActivated => {
+                crate::termsurf::conn::set_gui_active(true, "gui_activated");
+            }
         }
     }
 

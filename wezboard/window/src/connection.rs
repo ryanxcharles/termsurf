@@ -24,6 +24,8 @@ pub enum ApplicationEvent {
     /// The system wants to open a command in the terminal
     OpenCommandScript(String),
     PerformKeyAssignment(KeyAssignment),
+    ApplicationDeactivated,
+    ApplicationActivated,
 }
 
 pub trait ConnectionOps {

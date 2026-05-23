@@ -1214,7 +1214,7 @@ bug improves.
    In `roamium/src/ffi.rs`, add the new C binding:
 
    ```rust
-   pub fn ts_set_gui_active(wc: TsWebContents, active: bool);
+   pub fn ts_set_gui_active(wc: TsWebContents, active: bool, reason: *const c_char);
    ```
 
    Add a trace summary:
@@ -1233,7 +1233,9 @@ bug improves.
    `.cc`, add:
 
    ```c++
-   TS_EXPORT void ts_set_gui_active(ts_web_contents_t wc, bool active);
+   TS_EXPORT void ts_set_gui_active(ts_web_contents_t wc,
+                                    bool active,
+                                    const char* reason);
    ```
 
    In `chromium/src/content/libtermsurf_chromium/ts_browser_main_parts.h` and
@@ -1436,3 +1438,29 @@ bug improves.
 
 After a passing Chromium implementation, export the Chromium changes to
 `chromium/patches/issue-783/` before considering the experiment complete.
+
+**Result:** Pass
+
+Manual testing confirmed the PagePopup alt-tab bug is fixed. Date, time,
+datetime-local, and color popups no longer remain visible after Cmd-Tabbing away
+from Wezboard. Returning to Wezboard left the page usable, and no focus or
+keyboard-input regression was observed.
+
+The protected invariants also held: the date picker y-axis remained correct, and
+PagePopup controls still opened after a select dropdown interaction. The
+Experiment 4 implementation therefore preserved the Issue 779 y-axis fix and the
+Issue 782 Shell mouse-transparency fix while fixing PagePopup-family
+deactivation behavior.
+
+#### Conclusion
+
+Experiment 4 fixed the PagePopup-family alt-tab persistence bug by syncing
+Wezboard's GUI active state to Roamium/Chromium. Chromium now receives an
+explicit app-active signal from the visible GUI process, so active PagePopup
+widgets are dismissed when Wezboard deactivates and page focus is restored when
+Wezboard reactivates.
+
+The remaining known bugs are deferred to later experiments:
+
+- the `<select>` dropdown has the wrong x position;
+- the sixth native-widget box on the test page does not appear to work at all.

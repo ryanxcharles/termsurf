@@ -126,6 +126,9 @@ extern "C" fn application_did_resign_active(
     notification: *mut AnyObject,
 ) {
     trace_pagepopup_alt_tab_app_activation("applicationDidResignActive", notification);
+    if let Some(conn) = Connection::get() {
+        conn.dispatch_app_event(ApplicationEvent::ApplicationDeactivated);
+    }
 }
 
 extern "C" fn application_did_become_active(
@@ -134,6 +137,9 @@ extern "C" fn application_did_become_active(
     notification: *mut AnyObject,
 ) {
     trace_pagepopup_alt_tab_app_activation("applicationDidBecomeActive", notification);
+    if let Some(conn) = Connection::get() {
+        conn.dispatch_app_event(ApplicationEvent::ApplicationActivated);
+    }
 }
 
 extern "C" fn application_open_untitled_file(

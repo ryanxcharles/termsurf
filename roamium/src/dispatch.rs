@@ -271,6 +271,31 @@ pub fn handle_message(msg: &TermSurfMessage) {
                 unsafe { ffi::ts_set_focus(t.handle, m.focused) };
             }
         }
+        Msg::SetGuiActive(m) => {
+            let mut target_count = 0usize;
+            let reason =
+                CString::new(m.reason.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
+            if m.tab_id == 0 {
+                for t in tabs().iter() {
+                    if !t.handle.is_null() {
+                        target_count += 1;
+                        unsafe { ffi::ts_set_gui_active(t.handle, m.active, reason.as_ptr()) };
+                    }
+                }
+            } else if let Some(t) = find_by_tab_id(m.tab_id) {
+                if !t.handle.is_null() {
+                    target_count = 1;
+                    unsafe { ffi::ts_set_gui_active(t.handle, m.active, reason.as_ptr()) };
+                }
+            }
+            issue_779_trace!(
+                "pagepopup_alt_tab boundary=roamium_protocol event=set_gui_active active={} reason={} tab_id={} target_count={}",
+                m.active,
+                m.reason,
+                m.tab_id,
+                target_count
+            );
+        }
         Msg::SetColorScheme(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
                 unsafe { ffi::ts_set_color_scheme(t.handle, m.dark) };

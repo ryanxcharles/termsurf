@@ -22,6 +22,7 @@ message TermSurfMessage {
     // State (GUI → Chromium)
     FocusChanged focus_changed = 10;
     SetColorScheme set_color_scheme = 11;
+    SetGuiActive set_gui_active = 33;
 
     // Chromium → GUI
     ServerRegister server_register = 12;
@@ -147,6 +148,12 @@ message SetColorScheme {
   int64 tab_id = 1;      // nonzero when GUI → Chromium
   string pane_id = 2;    // nonempty when TUI → GUI
   bool dark = 3;
+}
+
+message SetGuiActive {
+  int64 tab_id = 1;      // 0 = all tabs in receiving browser process
+  bool active = 2;
+  string reason = 3;
 }
 
 // --- Chromium → GUI ---

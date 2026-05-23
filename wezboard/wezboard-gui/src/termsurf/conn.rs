@@ -459,6 +459,65 @@ fn forward_to_chromium(pane_id: &str, build_msg: impl FnOnce(i64) -> Msg, state:
     let _ = server_tx.try_send(msg.encode_to_vec());
 }
 
+pub fn set_gui_active(active: bool, reason: &str) {
+    let Some(state) = super::shared_state() else {
+        return;
+    };
+
+    let mut targets = Vec::new();
+    let mut server_count = 0usize;
+    let mut selected_tab_id = 0i64;
+    {
+        let st = state.lock().unwrap();
+        if active {
+            if let Some(pane_id) = st.focused_pane.as_ref() {
+                if let Some(pane) = st.panes.get(pane_id) {
+                    selected_tab_id = pane.tab_id;
+                    if pane.tab_id != 0 {
+                        let key = TermSurfState::server_key(&pane.profile, &pane.browser);
+                        if let Some(server_tx) =
+                            st.servers.get(&key).and_then(|server| server.tx.clone())
+                        {
+                            targets.push((server_tx, pane.tab_id));
+                            server_count = 1;
+                        }
+                    }
+                }
+            }
+        } else {
+            for server in st.servers.values() {
+                server_count += 1;
+                if let Some(server_tx) = server.tx.clone() {
+                    targets.push((server_tx, 0));
+                }
+            }
+        }
+    }
+
+    let messages_sent = targets.len();
+    for (server_tx, tab_id) in targets {
+        let msg = TermSurfMessage {
+            msg: Some(Msg::SetGuiActive(proto::SetGuiActive {
+                tab_id,
+                active,
+                reason: reason.to_string(),
+            })),
+        };
+        let _ = server_tx.try_send(msg.encode_to_vec());
+    }
+
+    if issue_779_trace_enabled() {
+        issue_779_trace_log(format!(
+            "pagepopup_alt_tab boundary=wezboard_protocol event=set_gui_active active={} reason={} servers={} messages_sent={} tab_id={}",
+            active,
+            reason,
+            server_count,
+            messages_sent,
+            selected_tab_id
+        ));
+    }
+}
+
 fn handle_set_overlay(
     overlay: proto::SetOverlay,
     tui_tx: Sender<Vec<u8>>,
