@@ -247,7 +247,7 @@ bottom-anchored sliding.
 - In `updateCALayerHostFrame`: Set the frame on `positioning_layer` instead of
   `flipped_layer`. Use top-origin Y directly
   (`y = grid_row * cell_height /
-  scale + padding_top / scale`). Remove the
+scale + padding_top / scale`). Remove the
   Y-flip formula and the `parent_bounds` read.
 - In `removeCALayerHost`: Also remove and release `positioning_layer`.
 - Store the `positioning_layer` pointer.

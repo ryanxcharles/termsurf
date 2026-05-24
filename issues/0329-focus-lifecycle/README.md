@@ -279,6 +279,7 @@ returning to Browse mode will refocus the browser, resuming the caret.
    in `handle_webview_overlay_key`)
 
    In the `WebviewMode::Browse` branch, after setting `overlay.mode`:
+
    ```rust
    if is_ctrl_c {
        log::info!("[Webview] Ctrl+C in Browse mode → Control mode");
@@ -296,6 +297,7 @@ returning to Browse mode will refocus the browser, resuming the caret.
    ```
 
    In the `WebviewMode::Control` branch, after setting `overlay.mode`:
+
    ```rust
    if is_enter {
        log::info!("[Webview] Enter in Control mode → Browse mode");

@@ -265,13 +265,13 @@ Examples:
 Request:
 
 ```json
-{"id": "uuid", "action": "ping"}
+{ "id": "uuid", "action": "ping" }
 ```
 
 Response:
 
 ```json
-{"id": "uuid", "status": "ok", "data": {"pong": true}}
+{ "id": "uuid", "status": "ok", "data": { "pong": true } }
 ```
 
 **Test flow:**
@@ -368,7 +368,6 @@ use, we need:
 **Implementation changes:**
 
 1. **Subprocess (long-lived)**:
-
    - Accept multiple connections concurrently
    - Run CEF message pump in main thread
    - Handle socket connections in separate thread
@@ -376,7 +375,6 @@ use, we need:
    - Exit when browser count reaches zero
 
 2. **Coordinator (non-blocking)**:
-
    - Check if socket exists and is connectable before spawning
    - If connected, reuse existing subprocess
    - If not, spawn new subprocess and wait for socket
@@ -384,6 +382,7 @@ use, we need:
    - Don't block waiting for subprocess to exit
 
 3. **Protocol extensions**:
+
    ```json
    {"id": "uuid", "action": "open_browser", "data": {"url": "https://..."}}
    {"id": "uuid", "status": "ok", "data": {"browser_id": 1}}
@@ -780,7 +779,7 @@ Request (coordinator sends):
 {
   "id": "uuid",
   "action": "open",
-  "data": {"url": "https://google.com", "width": 800, "height": 600}
+  "data": { "url": "https://google.com", "width": 800, "height": 600 }
 }
 ```
 
@@ -790,7 +789,7 @@ Response (profile server returns):
 {
   "id": "uuid",
   "status": "ok",
-  "data": {"texture_handle": 12345, "width": 800, "height": 600}
+  "data": { "texture_handle": 12345, "width": 800, "height": 600 }
 }
 ```
 
@@ -811,20 +810,17 @@ Same socket protocol as ts2 (newline-delimited JSON):
 **Implementation steps:**
 
 1. **GUI: Create socket server**
-
    - Create Unix socket at `/tmp/termsurf-{pid}.sock`
    - Set `TERMSURF_SOCKET` env var for child processes
    - Handle `display_webview` and `hide_webview` actions
    - Port relevant code from `ts2/wezterm-gui/src/termsurf_socket/`
 
 2. **Profile server: Render to IOSurface**
-
    - Use cef-rs OSR to create browser at requested size
    - Render to IOSurface (already validated in cef-rs examples)
    - Return IOSurfaceID in `open` response
 
 3. **Coordinator: Bridge profile server and GUI**
-
    - Read `TERMSURF_SOCKET` and `WEZTERM_PANE` from environment
    - Connect to profile server, send `open` with URL and pane dimensions
    - Receive texture handle from profile server

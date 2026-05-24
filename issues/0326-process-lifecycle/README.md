@@ -177,6 +177,7 @@ and trigger shutdown using the existing `quit_flag` pattern from Issue 325.
    modify the event handler's error case:
 
    Before:
+
    ```rust
    Err(e) => {
        eprintln!("Profile: GUI connection error: {}", e);
@@ -184,6 +185,7 @@ and trigger shutdown using the existing `quit_flag` pattern from Issue 325.
    ```
 
    After:
+
    ```rust
    Err(e) => {
        match e {
@@ -247,7 +249,7 @@ one pane, kills the entire profile server — leaving the second pane unresponsi
 **What broke:**
 
 - **Multi-pane support is completely broken**
-- Profile server exits on *any* disconnect, not just *last* disconnect
+- Profile server exits on _any_ disconnect, not just _last_ disconnect
 - A profile can serve multiple browsers (one per webview pane), each with its
   own GUI connection
 - Closing one pane disconnects that connection → profile exits → other panes die
@@ -260,6 +262,7 @@ count and only exiting when all connections are closed.
 **Next steps:**
 
 Both profile server and launcher need **connection counting**:
+
 1. Increment count when connection established
 2. Decrement count on disconnect
 3. Only exit when count reaches 0

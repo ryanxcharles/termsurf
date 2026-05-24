@@ -16,17 +16,17 @@ Project page for TermSurf showing commit history and project info.
 
 ## Dependencies
 
-| Package                  | Version  | Purpose                                 |
-| ------------------------ | -------- | --------------------------------------- |
-| `@tanstack/react-start`  | ^1.147.0 | Full-stack React framework              |
-| `@tanstack/react-router` | ^1.147.0 | Type-safe routing                       |
-| `vite`                   | ^6.0.0   | Build tool                              |
-| `react`                  | ^19.0.0  | UI library                              |
-| `react-dom`              | ^19.0.0  | React DOM bindings                      |
-| `tailwindcss`            | ^4.0.0   | Utility-first CSS framework             |
-| `@tailwindcss/vite`      | ^4.0.0   | Tailwind Vite plugin                    |
-| `clsx`                   | ^2.1.0   | Class name utility                      |
-| `tailwind-merge`         | ^2.6.0   | Merge Tailwind classes                  |
+| Package                  | Version  | Purpose                     |
+| ------------------------ | -------- | --------------------------- |
+| `@tanstack/react-start`  | ^1.147.0 | Full-stack React framework  |
+| `@tanstack/react-router` | ^1.147.0 | Type-safe routing           |
+| `vite`                   | ^6.0.0   | Build tool                  |
+| `react`                  | ^19.0.0  | UI library                  |
+| `react-dom`              | ^19.0.0  | React DOM bindings          |
+| `tailwindcss`            | ^4.0.0   | Utility-first CSS framework |
+| `@tailwindcss/vite`      | ^4.0.0   | Tailwind Vite plugin        |
+| `clsx`                   | ^2.1.0   | Class name utility          |
+| `tailwind-merge`         | ^2.6.0   | Merge Tailwind classes      |
 
 Note: shadcn/ui components are installed on-demand via CLI, not as a package dependency.
 
@@ -60,12 +60,12 @@ website/
 
 ## Scripts
 
-| Command                 | Description                                              |
-| ----------------------- | -------------------------------------------------------- |
-| `bun run dev`           | Start development server with hot reload                 |
-| `bun run build`         | Production build                                         |
-| `bun run start`         | Start production server                                  |
-| `bun run build:commits` | Fetch commits from git and write to data/commits.json    |
+| Command                 | Description                                           |
+| ----------------------- | ----------------------------------------------------- |
+| `bun run dev`           | Start development server with hot reload              |
+| `bun run build`         | Production build                                      |
+| `bun run start`         | Start production server                               |
+| `bun run build:commits` | Fetch commits from git and write to data/commits.json |
 
 ## MVP Checklist
 
@@ -143,13 +143,13 @@ Dark mode only. Colors defined in `src/globals.css` using Tailwind v4 `@theme` d
   --color-background-highlight: #292e42;
   --color-foreground: #c0caf5;
   --color-foreground-dark: #a9b1d6;
-  --color-primary: #7aa2f7;      /* blue */
-  --color-secondary: #bb9af7;    /* magenta */
-  --color-accent: #7dcfff;       /* cyan */
-  --color-success: #9ece6a;      /* green */
-  --color-warning: #e0af68;      /* yellow */
-  --color-danger: #f7768e;       /* red */
-  --color-muted: #565f89;        /* comment */
+  --color-primary: #7aa2f7; /* blue */
+  --color-secondary: #bb9af7; /* magenta */
+  --color-accent: #7dcfff; /* cyan */
+  --color-success: #9ece6a; /* green */
+  --color-warning: #e0af68; /* yellow */
+  --color-danger: #f7768e; /* red */
+  --color-muted: #565f89; /* comment */
   --color-border: #3b4261;
 }
 ```

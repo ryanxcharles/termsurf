@@ -106,6 +106,7 @@ web google.com     # Should still look normal
 ```
 
 Test pages:
+
 - A page with no background CSS → should be white
 - A page with explicit dark background → should show dark
 - A page with transparent elements → should blend over white
@@ -121,9 +122,9 @@ dark background bleeding through.
 
 ### Implementation Summary
 
-| Component         | Change                                            |
-| ----------------- | ------------------------------------------------- |
-| BrowserSettings   | Set `background_color: 0xFFFFFFFF` (opaque white) |
+| Component       | Change                                            |
+| --------------- | ------------------------------------------------- |
+| BrowserSettings | Set `background_color: 0xFFFFFFFF` (opaque white) |
 
 ### Technical Note
 

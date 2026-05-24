@@ -74,7 +74,7 @@ ts4 proved in-process Chromium rendering at 60fps. Key lessons:
 
 - **Metal IOSurface textures are zero-copy.**
   `device.makeTexture(descriptor:
-  iosurface: plane:)` creates an MTLTexture
+iosurface: plane:)` creates an MTLTexture
   that directly references IOSurface GPU memory. No pixel copying.
 - **Retina requires three coordinated fixes (Issue 414).** All three must work
   together for crisp output:
@@ -345,7 +345,7 @@ was learned the hard way.
    coordinates to normalized device coordinates. All existing shaders
    (cell_text, image) follow the pattern:
    `position = projection × float4(pixel_x, pixel_y,
-   0, 1)`. The pink overlay
+0, 1)`. The pink overlay
    must do the same.
 
 3. **Grid → pixel conversion is simple.** Ghostty uses one formula everywhere:
@@ -495,6 +495,7 @@ shaders, add a new step:
 1. Check if an overlay rect is set (non-zero). If not, skip this step.
 
 2. Convert the stored grid coordinates to physical pixel coordinates:
+
    ```
    x = overlay_col × cell_width + padding_left
    y = overlay_row × cell_height + padding_top

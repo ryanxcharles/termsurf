@@ -224,10 +224,10 @@ Run each 3 times and compare.
 
 Release build dramatically improves cef-test performance:
 
-| Build   | FPS        | p50    | p95    | p99    | 60fps% | Streak |
-| ------- | ---------- | ------ | ------ | ------ | ------ | ------ |
-| Debug   | 37.8–39.5  | 16.8ms | 50.0ms | 83.3ms | 51–59% | 59–67  |
-| Release | 50.3–51.6  | 16.7ms | 33.6ms | 33.9ms | 81–85% | 69–109 |
+| Build   | FPS       | p50    | p95    | p99    | 60fps% | Streak |
+| ------- | --------- | ------ | ------ | ------ | ------ | ------ |
+| Debug   | 37.8–39.5 | 16.8ms | 50.0ms | 83.3ms | 51–59% | 59–67  |
+| Release | 50.3–51.6 | 16.7ms | 33.6ms | 33.9ms | 81–85% | 69–109 |
 
 **Findings:**
 
@@ -285,11 +285,11 @@ TermSurf pipeline adds no overhead beyond CEF OSR itself.
 
 ts3 release improves over debug but falls short of cef-test release:
 
-| Source   | Build   | FPS        | p50    | p95    | 60fps% | Streak |
-| -------- | ------- | ---------- | ------ | ------ | ------ | ------ |
-| cef-test | Release | 50.3–51.6  | 16.7ms | 33.6ms | 81–85% | 69–109 |
-| ts3      | Release | 45.8–51.8  | 18.9ms | 34.1ms | 47–55% | 20–43  |
-| ts3      | Debug   | 33.7–46.6  | 16.9ms | 49.7ms | —      | —      |
+| Source   | Build   | FPS       | p50    | p95    | 60fps% | Streak |
+| -------- | ------- | --------- | ------ | ------ | ------ | ------ |
+| cef-test | Release | 50.3–51.6 | 16.7ms | 33.6ms | 81–85% | 69–109 |
+| ts3      | Release | 45.8–51.8 | 18.9ms | 34.1ms | 47–55% | 20–43  |
+| ts3      | Debug   | 33.7–46.6 | 16.9ms | 49.7ms | —      | —      |
 
 **Findings:**
 

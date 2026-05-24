@@ -89,7 +89,7 @@ CADisplayLinkMac / CVDisplayLinkMac (macOS vsync driver)
 | BeginFrameTracker::ShouldStop     | begin_frame_tracker.cc           | outstanding >= 100   | Never triggered          |
 | kUndrawnFrameLimit                | compositor_frame_sink_support.cc | undrawn > 3          | Never triggered          |
 | SetIsGpuBusy                      | display_scheduler.cc:644         | pending_swaps >= max | Not investigated         |
-| client_needs_begin_frame_         | compositor_frame_sink_support.cc | client stopped       | 9 events (init only)     |
+| client*needs_begin_frame*         | compositor_frame_sink_support.cc | client stopped       | 9 events (init only)     |
 
 ### The observer–renderer deadlock (found and partially fixed)
 
@@ -125,7 +125,7 @@ at ~3fps for complex pages. Lightweight pages are unaffected.
 | begin_frame_tracker.cc             | Tracks outstanding BeginFrames for throttle/stop             |
 | root_compositor_frame_sink_impl.cc | Creates ExternalBeginFrameSourceMac per profile              |
 | layer_tree_host_impl.cc            | Renderer-side compositor, WillBeginImplFrame, damage check   |
-| scheduler_state_machine.h          | Renderer scheduler state, throttle_frame_rate_               |
+| scheduler_state_machine.h          | Renderer scheduler state, throttle*frame_rate*               |
 | shared_image_manager.h             | GPU process SharedImageManager, serializes GPU access        |
 | render_process_host_impl.cc        | Process allocation, process-per-site logic                   |
 | page_scheduler_impl.cc             | Blink page scheduler, visibility/background throttling       |
@@ -166,8 +166,8 @@ delivery. If one renderer's scheduler enters throttled mode due to contention,
 it would produce fewer frames.
 
 **4. `SetIsGpuBusy` backpressure.** When `pending_swaps_ >= MaxPendingSwaps()`
-(display_scheduler.cc:644), the DisplayScheduler calls
-`begin_frame_source_->SetIsGpuBusy(true)`, which can throttle BeginFrame
+(display*scheduler.cc:644), the DisplayScheduler calls
+`begin_frame_source*->SetIsGpuBusy(true)`, which can throttle BeginFrame
 delivery at the source level. With two profiles sharing the GPU, swap buffers
 may back up past the threshold.
 
@@ -278,9 +278,9 @@ contention. Look at `GpuProcessHost::EstablishGpuChannel()` in
 
 ### 9. Adjust MaxPendingSwaps threshold
 
-`DisplayScheduler::MaxPendingSwaps()` (display_scheduler.cc:357) returns
+`DisplayScheduler::MaxPendingSwaps()` (display*scheduler.cc:357) returns
 different values based on display refresh rate. If
-`pending_swaps_ >=
+`pending_swaps* >=
 MaxPendingSwaps()`, the GPU is marked busy and BeginFrame
 delivery throttles. Increasing the threshold might prevent premature GPU busy
 signals when two profiles share the same GPU.
@@ -336,7 +336,6 @@ external_begin_frame_source_mac.cc).
 
 2. Copy the `content/zig_content_shell/` directory from Issue 620's Experiment
    10 commit. The directory contains 7 files:
-
    - `BUILD.gn` — GN build target (app bundle + framework + helpers)
    - `content_api_shim.h` — C header exporting `ContentMain`
    - `content_api_shim.mm` — C++ shim with three subclasses
@@ -633,31 +632,49 @@ bottleneck is JavaScript-driven.
 ```html
 <!DOCTYPE html>
 <html>
-<head>
-<style>
-body { margin: 0; overflow: hidden; background: #111; }
-@keyframes spin {
-  from { transform: rotate(0deg) }
-  to { transform: rotate(360deg) }
-}
-@keyframes pulse {
-  0% { background: #e44 }
-  33% { background: #4e4 }
-  66% { background: #44e }
-  100% { background: #e44 }
-}
-.box {
-  width: 200px;
-  height: 200px;
-  margin: 100px auto;
-  animation: spin 2s linear infinite, pulse 3s linear infinite;
-  border-radius: 20px;
-}
-</style>
-</head>
-<body>
-<div class="box"></div>
-</body>
+  <head>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #111;
+      }
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes pulse {
+        0% {
+          background: #e44;
+        }
+        33% {
+          background: #4e4;
+        }
+        66% {
+          background: #44e;
+        }
+        100% {
+          background: #e44;
+        }
+      }
+      .box {
+        width: 200px;
+        height: 200px;
+        margin: 100px auto;
+        animation:
+          spin 2s linear infinite,
+          pulse 3s linear infinite;
+        border-radius: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="box"></div>
+  </body>
 </html>
 ```
 

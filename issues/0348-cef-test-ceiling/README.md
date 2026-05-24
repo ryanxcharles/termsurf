@@ -171,12 +171,14 @@ back under the deadline.
 Two lines, one in each process:
 
 1. **Profile server** — `cef-test-profile/src/main.rs:249`:
+
    ```rust
    // Before:
    cfrunloop::run_for(0.001);  // 1ms sleep
    // After:
    cfrunloop::run_for(0.0);    // no sleep, return immediately
    ```
+
    We keep the `cfrunloop::run_for` call (with 0 duration) rather than removing
    it entirely, because CEF on macOS needs the CFRunLoop to be serviced for
    internal event delivery. A zero-duration call still processes any pending
@@ -217,12 +219,12 @@ pending).
 
 **Result:**
 
-| Condition       | FPS  | 60fps% | Streak | p50    | p95    | p99    |
-| --------------- | ---- | ------ | ------ | ------ | ------ | ------ |
-| Baseline LEFT   | ~51  | 81–85% | 69–109 | 16.7ms | 33.6ms | 33.9ms |
-| Baseline RIGHT  | ~51  | 81–85% | 69–109 | 16.7ms | 33.6ms | 33.9ms |
-| No sleep LEFT   | 55.7 | 93.2%  | 196    | 16.7ms | 33.3ms | 33.8ms |
-| No sleep RIGHT  | 53.2 | 87.9%  | 54     | 16.7ms | 33.6ms | 33.9ms |
+| Condition      | FPS  | 60fps% | Streak | p50    | p95    | p99    |
+| -------------- | ---- | ------ | ------ | ------ | ------ | ------ |
+| Baseline LEFT  | ~51  | 81–85% | 69–109 | 16.7ms | 33.6ms | 33.9ms |
+| Baseline RIGHT | ~51  | 81–85% | 69–109 | 16.7ms | 33.6ms | 33.9ms |
+| No sleep LEFT  | 55.7 | 93.2%  | 196    | 16.7ms | 33.3ms | 33.8ms |
+| No sleep RIGHT | 53.2 | 87.9%  | 54     | 16.7ms | 33.6ms | 33.9ms |
 
 **Findings:**
 
@@ -344,6 +346,7 @@ likely a "cold" first run before thermal effects accumulated.
 Revert the two sleep changes from Experiment 1:
 
 1. **Profile server** — `cef-test-profile/src/main.rs`:
+
    ```rust
    // Revert to:
    cfrunloop::run_for(0.001);  // 1ms sleep
@@ -382,11 +385,11 @@ experiment has 1ms sleeps but NO hot-path logs. Comparing:
 After letting the machine cool, tested 1ms sleep (no hot-path logs), then
 reverted to 0ms sleep (no hot-path logs):
 
-| Condition                    | FPS  | 60fps% | Streak | p50    | p95    | p99    |
-| ---------------------------- | ---- | ------ | ------ | ------ | ------ | ------ |
-| 1ms sleep + logs (baseline)  | ~51  | 81–85% | 69–109 | 16.7ms | 33.6ms | 33.9ms |
-| 1ms sleep, no logs (cooled)  | 24.9 | 19.1%  | 16     | 33.4ms | 83.3ms | 83.8ms |
-| 0ms sleep, no logs           | 49.4 | 79.2%  | 166    | 16.7ms | 33.6ms | 33.9ms |
+| Condition                   | FPS  | 60fps% | Streak | p50    | p95    | p99    |
+| --------------------------- | ---- | ------ | ------ | ------ | ------ | ------ |
+| 1ms sleep + logs (baseline) | ~51  | 81–85% | 69–109 | 16.7ms | 33.6ms | 33.9ms |
+| 1ms sleep, no logs (cooled) | 24.9 | 19.1%  | 16     | 33.4ms | 83.3ms | 83.8ms |
+| 0ms sleep, no logs          | 49.4 | 79.2%  | 166    | 16.7ms | 33.6ms | 33.9ms |
 
 The 1ms sleep result (24.9fps) was dramatically worse than the original 1ms
 baseline (51fps), despite having fewer logs. The machine had been cooling but
@@ -422,12 +425,12 @@ may have still been thermally throttled from the earlier 0ms runs. Restoring
 
 Three experiments investigated the cef-test performance ceiling:
 
-| Change                         | Best FPS | 60fps% | Stable? |
-| ------------------------------ | -------- | ------ | ------- |
-| Baseline (1ms sleep + logs)    | 51.6     | 85%    | Yes     |
-| 0ms sleep + logs (Exp 1)       | 55.7     | 93%    | No (thermal decay) |
-| 0ms sleep, no logs (Exp 3)     | 49.4     | 79%    | Unknown |
-| 1ms sleep, no logs (Exp 3)     | 24.9     | 19%    | Anomalous |
+| Change                      | Best FPS | 60fps% | Stable?            |
+| --------------------------- | -------- | ------ | ------------------ |
+| Baseline (1ms sleep + logs) | 51.6     | 85%    | Yes                |
+| 0ms sleep + logs (Exp 1)    | 55.7     | 93%    | No (thermal decay) |
+| 0ms sleep, no logs (Exp 3)  | 49.4     | 79%    | Unknown            |
+| 1ms sleep, no logs (Exp 3)  | 24.9     | 19%    | Anomalous          |
 
 **What we learned:**
 

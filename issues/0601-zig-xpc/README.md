@@ -127,6 +127,7 @@ pub fn deinit() void  // Clean up connections
 `init()` does:
 
 1. Create a named XPC connection to `com.termsurf.xpc-gateway`:
+
    ```zig
    const gateway = xpc.xpc_connection_create_mach_service(
        "com.termsurf.xpc-gateway", null, 0);
@@ -134,15 +135,18 @@ pub fn deinit() void  // Clean up connections
 
 2. Set an event handler on the gateway using `objc.Block`. The block type needs
    no captures and one argument (`xpc.xpc_object_t`):
+
    ```zig
    const EventBlock = objc.Block(struct {}, .{xpc.xpc_object_t}, void);
    var block = EventBlock.init(.{}, gatewayEventHandler);
    ```
+
    The handler just logs errors.
 
 3. Resume the gateway connection.
 
 4. Create an anonymous listener:
+
    ```zig
    const listener = xpc.xpc_connection_create(null, null);
    ```

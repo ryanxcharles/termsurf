@@ -82,13 +82,13 @@ rm -rf ~/Library/Caches/org.swift.swiftpm
 
 ## What Each Cache Contains
 
-| Cache           | Location                                           | Contents                                 |
-| --------------- | -------------------------------------------------- | ---------------------------------------- |
-| Zig build       | `zig-out`, `zig-cache`, `.zig-cache`               | Compiled Zig objects, libghostty         |
-| Release build   | `build/`                                           | Release script output (predictable path) |
-| DerivedData     | `~/Library/Developer/Xcode/DerivedData/TermSurf-*` | Debug builds from Xcode                  |
-| SPM artifacts   | `~/Library/Caches/org.swift.swiftpm/artifacts/`    | Downloaded binary dependencies (Sparkle) |
-| SPM packages    | `termsurf-macos/.build`                            | Resolved package versions                |
+| Cache         | Location                                           | Contents                                 |
+| ------------- | -------------------------------------------------- | ---------------------------------------- |
+| Zig build     | `zig-out`, `zig-cache`, `.zig-cache`               | Compiled Zig objects, libghostty         |
+| Release build | `build/`                                           | Release script output (predictable path) |
+| DerivedData   | `~/Library/Developer/Xcode/DerivedData/TermSurf-*` | Debug builds from Xcode                  |
+| SPM artifacts | `~/Library/Caches/org.swift.swiftpm/artifacts/`    | Downloaded binary dependencies (Sparkle) |
+| SPM packages  | `termsurf-macos/.build`                            | Resolved package versions                |
 
 ## CLI Access
 
@@ -102,11 +102,11 @@ After building, the app bundle contains two executables:
 - `termsurf` - Main binary
 - `web` - Symlink to termsurf (multi-call binary for web commands)
 
-| Build Type              | Location                                                                                                     |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Debug (Xcode cmd+r)     | `~/Library/Developer/Xcode/DerivedData/TermSurf-*/Build/Products/Debug/TermSurf.app/Contents/MacOS/termsurf` |
-| Release (build script)  | `<project>/build/Build/Products/Release/TermSurf.app/Contents/MacOS/termsurf`                                |
-| Installed               | `/Applications/TermSurf.app/Contents/MacOS/termsurf`                                                         |
+| Build Type             | Location                                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Debug (Xcode cmd+r)    | `~/Library/Developer/Xcode/DerivedData/TermSurf-*/Build/Products/Debug/TermSurf.app/Contents/MacOS/termsurf` |
+| Release (build script) | `<project>/build/Build/Products/Release/TermSurf.app/Contents/MacOS/termsurf`                                |
+| Installed              | `/Applications/TermSurf.app/Contents/MacOS/termsurf`                                                         |
 
 The release build script uses a predictable output path (`build/`) so you can
 add it to your PATH.

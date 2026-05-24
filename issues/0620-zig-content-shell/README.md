@@ -427,6 +427,7 @@ it works through the C shim boundary.
    - Profile B: `~/.config/termsurf/zig-content-shell/profile-b/`
 4. Add `browser_context_b_` member to `TsBrowserMainParts`
 5. Override `InitializeBrowserContexts()`:
+
    ```cpp
    void InitializeBrowserContexts() override {
      // Profile A
@@ -446,6 +447,7 @@ it works through the C shim boundary.
      browser_context_b_.reset(new content::ShellBrowserContext(false));
    }
    ```
+
 6. Modify `InitializeMessageLoopContext()` to create two windows:
    ```cpp
    void InitializeMessageLoopContext() override {
@@ -1726,10 +1728,9 @@ diagnostic logs. The analysis below traces the complete root cause.
 
 Both `DisplayScheduler` and `CompositorFrameSinkSupport` are **observers** of
 the same `ExternalBeginFrameSourceMac`. The `ExternalBeginFrameSource` base
-class (begin_frame_source.cc:510–540) tracks all observers. When the first
-observer is added, it calls `client_->OnNeedsBeginFrames(true)` which registers
-the vsync callback. When the last observer is removed, it calls
-`client_->OnNeedsBeginFrames(false)` which unregisters it.
+class (begin*frame_source.cc:510–540) tracks all observers. When the first
+observer is added, it calls `client*->OnNeedsBeginFrames(true)`which registers
+the vsync callback. When the last observer is removed, it calls`client\_->OnNeedsBeginFrames(false)` which unregisters it.
 
 **The deadlock mechanism.** After drawing a frame:
 
@@ -2328,7 +2329,7 @@ CADisplayLinkMac / CVDisplayLinkMac (macOS vsync driver)
 | BeginFrameTracker::ShouldStopBeginFrame     | begin_frame_tracker.cc           | outstanding >= 100        | Never triggered                |
 | kUndrawnFrameLimit                          | compositor_frame_sink_support.cc | undrawn > 3               | Never triggered                |
 | SetIsGpuBusy                                | begin_frame_source.cc:152        | pending_swaps >= max      | Not investigated               |
-| client_needs_begin_frame_                   | compositor_frame_sink_support.cc | client stopped requesting | 9 events (init only)           |
+| client*needs_begin_frame*                   | compositor_frame_sink_support.cc | client stopped requesting | 9 events (init only)           |
 
 **Key source files:**
 

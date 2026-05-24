@@ -15,8 +15,7 @@ the exact cause of the rendering degradation.
 
 ## Background
 
-Content Shell runs at 60fps with a single profile. The Two Profiles app (Issue
-407) runs at 2fps — both panes, including Shell A which uses the same
+Content Shell runs at 60fps with a single profile. The Two Profiles app (Issue 407) runs at 2fps — both panes, including Shell A which uses the same
 `Shell::CreateNewWindow` code path. Issues 410 and 411 spent five experiments
 targeting throttling and visibility code paths that turned out to be irrelevant.
 The actual cause remains unknown.

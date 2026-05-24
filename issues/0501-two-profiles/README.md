@@ -89,7 +89,7 @@ Messages from chromium-profile-server to compositor:
 
 - **`display_surface`** —
   `{ action: "display_surface", session_id: "<id>",
-  iosurface_port: <mach_send>, width: <int64>, height: <int64> }`
+iosurface_port: <mach_send>, width: <int64>, height: <int64> }`
 - **`register`** — `{ action: "register", session_id: "<id>" }`
 
 The compositor maps `session_id` to a pane: `"profile-b"` goes right, everything

@@ -172,13 +172,13 @@ Libraries provide:
 
 ### Risk assessment
 
-| Component                  | Risk          | Reason                                                    |
-| -------------------------- | ------------- | --------------------------------------------------------- |
-| Own window + wgpu          | Low           | winit + wgpu is well-documented Rust                      |
-| Terminal embedding         | Low           | `alacritty_terminal` is a clean library crate             |
-| GPU text rendering         | Medium        | Non-trivial but solved by Alacritty/WezTerm               |
-| Chromium embedding         | **Very high** | CEF exists because this is hard. Unstable C++ API, massive build system |
-| Multi-process + XPC        | Low           | Already proven in ts3                                     |
+| Component           | Risk          | Reason                                                                  |
+| ------------------- | ------------- | ----------------------------------------------------------------------- |
+| Own window + wgpu   | Low           | winit + wgpu is well-documented Rust                                    |
+| Terminal embedding  | Low           | `alacritty_terminal` is a clean library crate                           |
+| GPU text rendering  | Medium        | Non-trivial but solved by Alacritty/WezTerm                             |
+| Chromium embedding  | **Very high** | CEF exists because this is hard. Unstable C++ API, massive build system |
+| Multi-process + XPC | Low           | Already proven in ts3                                                   |
 
 Chromium embedding is the existential risk. If it turns out to be infeasible
 without CEF, everything else is wasted. But it also has the longest lead time —

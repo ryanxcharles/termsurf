@@ -44,16 +44,16 @@ cef-rs was imported into the TermSurf monorepo at `cef-rs/` because:
 
 The OSR example (`cef-rs/examples/osr/`) serves as our validation testbed:
 
-| Feature                              | Status     | Commit      |
-| ------------------------------------ | ---------- | ----------- |
-| IOSurface texture import (macOS)     | Working    | `d8b58edea` |
-| Purple flash fix                     | Working    | `e6f8a2e4c` |
-| Input handling (keyboard, mouse)     | Working    | `88ab04355` |
-| Multi-browser instances              | Working    | `40f2a55cc` |
-| Context menu suppression             | Working    | `25def7592` |
-| Resize handling                      | Working    | —           |
-| Performance (event-driven rendering) | Working    | `150cb7775` |
-| Fullscreen                           | Broken     | winit issue |
+| Feature                              | Status  | Commit      |
+| ------------------------------------ | ------- | ----------- |
+| IOSurface texture import (macOS)     | Working | `d8b58edea` |
+| Purple flash fix                     | Working | `e6f8a2e4c` |
+| Input handling (keyboard, mouse)     | Working | `88ab04355` |
+| Multi-browser instances              | Working | `40f2a55cc` |
+| Context menu suppression             | Working | `25def7592` |
+| Resize handling                      | Working | —           |
+| Performance (event-driven rendering) | Working | `150cb7775` |
+| Fullscreen                           | Broken  | winit issue |
 
 **Key validation:** Multiple CEF browser instances run successfully in a single
 process with independent texture storage and event routing. This is critical for
@@ -161,7 +161,6 @@ non-interactive.
    ```
 
 2. **Platform-specific native key codes:**
-
    - macOS: Uses native key codes (0x00-0x7E range)
    - Windows/Linux: Uses Windows Virtual Key codes (0x08-0x5A range)
 
@@ -433,11 +432,11 @@ process sandbox issues on macOS.
 
 ## Files Modified
 
-| File                                     | Lines Changed | Purpose                                        |
-| ---------------------------------------- | ------------- | ---------------------------------------------- |
-| `cef/src/osr_texture_import/iosurface.rs`| ~66           | Metal API type fix, IOSurface validation       |
-| `examples/osr/src/main.rs`               | ~650          | Input, multi-browser, event-driven rendering   |
-| `examples/osr/src/webrender.rs`          | ~100          | Per-browser textures, context menu, signaling  |
+| File                                      | Lines Changed | Purpose                                       |
+| ----------------------------------------- | ------------- | --------------------------------------------- |
+| `cef/src/osr_texture_import/iosurface.rs` | ~66           | Metal API type fix, IOSurface validation      |
+| `examples/osr/src/main.rs`                | ~650          | Input, multi-browser, event-driven rendering  |
+| `examples/osr/src/webrender.rs`           | ~100          | Per-browser textures, context menu, signaling |
 
 ## Files NOT Modified
 

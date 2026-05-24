@@ -894,7 +894,7 @@ If `parent_ui_layer_` is non-null, `UseParentLayerCompositor` is always chosen.
 The layer is set via `BrowserCompositorMac::SetParentUiLayer()` (line 363),
 which has a DCHECK that the layer must already have a `ui::Compositor` attached.
 
-#### Answer 2: What is parent_ui_layer_?
+#### Answer 2: What is parent*ui_layer*?
 
 Ownership chain traced from top to bottom:
 
@@ -908,8 +908,8 @@ Ownership chain traced from top to bottom:
 4. This layer is part of the window's `ui::Layer` tree, whose root has a
    `ui::Compositor` attached.
 
-**In content_shell, `views_host_` is always null, so `parent_ui_layer_` is never
-set, and `HasOwnCompositor` is always used.**
+**In content*shell, `views_host*`is always null, so`parent*ui_layer*`is never
+set, and`HasOwnCompositor` is always used.**
 
 #### Answer 3: Chrome's persistent compositor
 
@@ -934,7 +934,7 @@ The structure is:
 - Navigation only changes which surfaces are embedded within the compositor,
   never the compositor itself
 
-#### Answer 4: Can we create a minimal parent_ui_layer_?
+#### Answer 4: Can we create a minimal parent*ui_layer*?
 
 **Yes.** All required types are in `ui/compositor` and
 `ui/accelerated_widget_mac` — not in `ui/views`. The `content` layer already

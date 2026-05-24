@@ -655,14 +655,14 @@ webviews close.
 **Background:** During the issue 330 review, we found that `close_webview_for_pane()`
 cleans up most per-pane state but misses `webview_cursors`:
 
-| Map | Cleaned on close? |
-|-----|-------------------|
-| `peer_connections` | ✅ via `remove_connection()` |
-| `received_surfaces` | ✅ via `remove_surface()` |
-| `pending_sessions` | ✅ via `remove_surface()` |
+| Map                    | Cleaned on close?                     |
+| ---------------------- | ------------------------------------- |
+| `peer_connections`     | ✅ via `remove_connection()`          |
+| `received_surfaces`    | ✅ via `remove_surface()`             |
+| `pending_sessions`     | ✅ via `remove_surface()`             |
 | `invalidate_callbacks` | ✅ via `remove_invalidate_callback()` |
-| `webview_cursors` | ❌ Never cleaned |
-| `listeners` | ❌ Known limitation (experiment 2) |
+| `webview_cursors`      | ❌ Never cleaned                      |
+| `listeners`            | ❌ Known limitation (experiment 2)    |
 
 Each closed webview leaves one stale `i64` in `webview_cursors`. Minor leak but
 should be fixed for completeness.
@@ -693,8 +693,8 @@ should be fixed for completeness.
 
 **Files to modify:**
 
-| File | Changes |
-|------|---------|
+| File                                            | Changes                                     |
+| ----------------------------------------------- | ------------------------------------------- |
 | `ts3/wezterm-gui/src/termwindow/webview_xpc.rs` | Add cursor cleanup to `remove_connection()` |
 
 **Verification:**
@@ -737,6 +737,7 @@ xpc_connection_set_event_handler(conn.as_raw(), block_ptr as *mut _);
 ```
 
 This creates two references:
+
 1. Our leaked reference (via `into_raw`)
 2. XPC's copy (via `Block_copy`)
 
@@ -744,11 +745,11 @@ When the connection is canceled, XPC releases its copy, but our leaked copy pers
 
 **Research findings:**
 
-| Finding | Source |
-|---------|--------|
-| XPC copies blocks via `Block_copy` | [libxpc source](https://github.com/jceel/libxpc/blob/master/xpc_connection.c) |
-| `xpc_connection_cancel` releases handler blocks | [xpc_object man page](https://keith.github.io/xcode-man-pages/xpc_hash.3.html) |
-| RcBlock is ref-counted; safe to drop after passing to copying API | [block2 docs](https://docs.rs/block2/latest/block2/) |
+| Finding                                                           | Source                                                                         |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| XPC copies blocks via `Block_copy`                                | [libxpc source](https://github.com/jceel/libxpc/blob/master/xpc_connection.c)  |
+| `xpc_connection_cancel` releases handler blocks                   | [xpc_object man page](https://keith.github.io/xcode-man-pages/xpc_hash.3.html) |
+| RcBlock is ref-counted; safe to drop after passing to copying API | [block2 docs](https://docs.rs/block2/latest/block2/)                           |
 
 **Fix:** Pass a reference to the block, then let it drop normally. XPC has its own copy.
 
@@ -805,8 +806,8 @@ When the connection is canceled, XPC releases its copy, but our leaked copy pers
 
 **Files to modify:**
 
-| File | Changes |
-|------|---------|
+| File                            | Changes                                          |
+| ------------------------------- | ------------------------------------------------ |
 | `ts3/termsurf-xpc/src/block.rs` | Remove `into_raw()` leaks, pass block references |
 
 **Verification:**
@@ -857,13 +858,13 @@ done
 **Core bug fixed.** Multiple webviews in the same profile now work correctly.
 Closing one webview no longer kills the profile server or affects other webviews.
 
-| Experiment | Outcome | Impact |
-|------------|---------|--------|
+| Experiment            | Outcome    | Impact                                                                     |
+| --------------------- | ---------- | -------------------------------------------------------------------------- |
 | 1: Diagnostic logging | ✅ Success | Identified root cause: XPC fires multiple disconnect events per connection |
-| 2: Listener cleanup | ❌ Failed | Proved listeners can't be dropped (invalidates all connections) |
-| 3: Idempotent handler | ✅ Success | **Fixed the core bug** — HashSet tracks connections by ID |
-| 4: Cursor cleanup | ✅ Success | Fixed minor memory leak (~8 bytes/webview) |
-| 5: Block leak fix | ✅ Success | Fixed block leak (~128 bytes/webview) |
+| 2: Listener cleanup   | ❌ Failed  | Proved listeners can't be dropped (invalidates all connections)            |
+| 3: Idempotent handler | ✅ Success | **Fixed the core bug** — HashSet tracks connections by ID                  |
+| 4: Cursor cleanup     | ✅ Success | Fixed minor memory leak (~8 bytes/webview)                                 |
+| 5: Block leak fix     | ✅ Success | Fixed block leak (~128 bytes/webview)                                      |
 
 ### Key Learnings About XPC
 
@@ -893,15 +894,15 @@ invalidates all connections through their endpoints (experiment 2). This is
 acceptable for typical usage but would matter for long-running sessions with
 hundreds of webview open/close cycles.
 
-| Resource | Leak per webview | Status |
-|----------|------------------|--------|
-| `XpcListener` | ~1-2 KB | **Known limitation** (can't fix without XPC changes) |
-| `webview_cursors` | 8 bytes | ✅ Fixed (experiment 4) |
-| Objective-C blocks | ~128 bytes | ✅ Fixed (experiment 5) |
-| `peer_connections` | 0 | ✅ Already cleaned |
-| `received_surfaces` | 0 | ✅ Already cleaned |
-| `pending_sessions` | 0 | ✅ Already cleaned |
-| `invalidate_callbacks` | 0 | ✅ Already cleaned |
+| Resource               | Leak per webview | Status                                               |
+| ---------------------- | ---------------- | ---------------------------------------------------- |
+| `XpcListener`          | ~1-2 KB          | **Known limitation** (can't fix without XPC changes) |
+| `webview_cursors`      | 8 bytes          | ✅ Fixed (experiment 4)                              |
+| Objective-C blocks     | ~128 bytes       | ✅ Fixed (experiment 5)                              |
+| `peer_connections`     | 0                | ✅ Already cleaned                                   |
+| `received_surfaces`    | 0                | ✅ Already cleaned                                   |
+| `pending_sessions`     | 0                | ✅ Already cleaned                                   |
+| `invalidate_callbacks` | 0                | ✅ Already cleaned                                   |
 
 ### What's Next
 

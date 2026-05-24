@@ -750,10 +750,10 @@ compared to the Objective-C++ implementation from Issue 414.
 
 ### Experiment summary
 
-| # | Name                       | Result |
-| - | -------------------------- | ------ |
-| 1 | Single-pane Swift receiver | PASSED |
-| 2 | Two-pane Swift receiver    | PASSED |
+| #   | Name                       | Result |
+| --- | -------------------------- | ------ |
+| 1   | Single-pane Swift receiver | PASSED |
+| 2   | Two-pane Swift receiver    | PASSED |
 
 ### Key findings
 

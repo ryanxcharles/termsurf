@@ -49,11 +49,11 @@ TermSurf's own modifications are regular commits on top.
 
 Each Chromium version produces three references:
 
-| Reference                   | Type   | Purpose                                    |
-| --------------------------- | ------ | ------------------------------------------ |
-| `146.0.7650.0`              | tag    | Vanilla Chromium (from upstream)            |
-| `146.0.7650.0-electron`     | branch | Electron's patches applied on top           |
-| `146.0.7650.0-termsurf`     | branch | TermSurf's commits on top of Electron       |
+| Reference               | Type   | Purpose                               |
+| ----------------------- | ------ | ------------------------------------- |
+| `146.0.7650.0`          | tag    | Vanilla Chromium (from upstream)      |
+| `146.0.7650.0-electron` | branch | Electron's patches applied on top     |
+| `146.0.7650.0-termsurf` | branch | TermSurf's commits on top of Electron |
 
 The submodule points to the `-termsurf` branch. This makes it easy to diff
 between layers:

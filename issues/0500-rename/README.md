@@ -232,7 +232,7 @@ In `ts5/macos/Sources/`:
 
 1. `Ghostty/Ghostty.Config.swift` — Use
    `ghostty_config_load_files(cfg,
-   "termsurf", "com.termsurf")` instead of
+"termsurf", "com.termsurf")` instead of
    `ghostty_config_load_default_files`
 2. `Ghostty/Ghostty.Config.swift` — Icon path →
    `~/.config/termsurf/TermSurf.icns`

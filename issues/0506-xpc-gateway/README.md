@@ -468,7 +468,7 @@ Replace `CompositorConnection::connect()` with a two-step flow:
    `xpc_connection_send_message_with_reply_sync` to get a reply.
 3. Extract the endpoint from the reply with
    `xpc_dictionary_get_value(reply,
-   "endpoint")`.
+"endpoint")`.
 4. Create a new connection from the endpoint with
    `xpc_connection_create_from_endpoint(endpoint)`.
 5. Resume the endpoint connection.
@@ -558,7 +558,7 @@ needed.
 
 2. **`open` works.** The app launches normally via `open` instead of
    `launchctl
-   kickstart`. The gateway handles Mach service ownership, freeing
+kickstart`. The gateway handles Mach service ownership, freeing
    the app from launchd identity constraints.
 
 3. **Anonymous XPC listeners work for direct connections.** The app creates an
@@ -578,7 +578,7 @@ needed.
   (macOS 13+) can automate this — the plist ships inside the app bundle at
   `Contents/Library/LaunchAgents/` and the app calls
   `SMAppService.agent
-  (plistName:).register()` on first launch.
+(plistName:).register()` on first launch.
 
 - **Chromium texture swap.** The pink overlay will be replaced with a real
   IOSurface texture from Chromium. The direct connection established here is the

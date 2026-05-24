@@ -242,13 +242,13 @@ and what Chromium APIs it uses.
 
 Electron's OSR implementation lives in `/electron/shell/browser/osr/`:
 
-| File | Purpose |
-| ---- | ------- |
-| `osr_video_consumer.cc` | Implements `viz::mojom::FrameSinkVideoConsumer`, receives captured frames |
-| `osr_render_widget_host_view.cc` | Creates the video capturer, manages the render widget |
-| `osr_paint_event.h` | Defines `OffscreenSharedTextureValue` struct for frame data |
-| `osr_host_display_client_mac.mm` | macOS-specific IOSurface handling |
-| `README.md` | Excellent documentation of the entire architecture |
+| File                             | Purpose                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------- |
+| `osr_video_consumer.cc`          | Implements `viz::mojom::FrameSinkVideoConsumer`, receives captured frames |
+| `osr_render_widget_host_view.cc` | Creates the video capturer, manages the render widget                     |
+| `osr_paint_event.h`              | Defines `OffscreenSharedTextureValue` struct for frame data               |
+| `osr_host_display_client_mac.mm` | macOS-specific IOSurface handling                                         |
+| `README.md`                      | Excellent documentation of the entire architecture                        |
 
 ##### How Electron Creates the Capturer
 
@@ -269,6 +269,7 @@ video_capturer_(view->CreateVideoCapturer()) {
 ```
 
 Key configuration:
+
 - `SetAutoThrottlingEnabled(false)` — Disables frame rate throttling
 - `SetAnimationFpsLockIn(false, 1)` — Prevents animation-based frame dropping
 - No resolution constraints — Adapts to any window size
@@ -329,21 +330,21 @@ From `README.md`: The capturer uses a pool of **10 frames**
 
 ##### Key Chromium Dependencies
 
-| Component | Header | Purpose |
-| --------- | ------ | ------- |
-| `viz::ClientFrameSinkVideoCapturer` | `components/viz/host/client_frame_sink_video_capturer.h` | Creates and manages the capturer |
-| `viz::mojom::FrameSinkVideoConsumer` | `services/viz/privileged/mojom/compositing/frame_sink_video_capture.mojom` | Interface for receiving frames |
-| `gfx::GpuMemoryBufferHandle` | `ui/gfx/gpu_memory_buffer.h` | Cross-process texture handle |
-| `media::VideoFrame` | `media/base/video_frame.h` | Frame container |
+| Component                            | Header                                                                     | Purpose                          |
+| ------------------------------------ | -------------------------------------------------------------------------- | -------------------------------- |
+| `viz::ClientFrameSinkVideoCapturer`  | `components/viz/host/client_frame_sink_video_capturer.h`                   | Creates and manages the capturer |
+| `viz::mojom::FrameSinkVideoConsumer` | `services/viz/privileged/mojom/compositing/frame_sink_video_capture.mojom` | Interface for receiving frames   |
+| `gfx::GpuMemoryBufferHandle`         | `ui/gfx/gpu_memory_buffer.h`                                               | Cross-process texture handle     |
+| `media::VideoFrame`                  | `media/base/video_frame.h`                                                 | Frame container                  |
 
 ##### Why This Works (and CEF Doesn't)
 
-| Aspect | CEF | Electron |
-| ------ | --- | -------- |
-| Capture point | `CefCopyFrameGenerator` | `FrameSinkVideoCapturerImpl` |
-| Frame dropping | `if (frame_in_progress_) return;` | 10-frame pool, no dropping |
-| Throttling | Hard-coded in OSR code | `SetAutoThrottlingEnabled(false)` |
-| API level | CEF abstraction layer | Direct Chromium viz API |
+| Aspect         | CEF                               | Electron                          |
+| -------------- | --------------------------------- | --------------------------------- |
+| Capture point  | `CefCopyFrameGenerator`           | `FrameSinkVideoCapturerImpl`      |
+| Frame dropping | `if (frame_in_progress_) return;` | 10-frame pool, no dropping        |
+| Throttling     | Hard-coded in OSR code            | `SetAutoThrottlingEnabled(false)` |
+| API level      | CEF abstraction layer             | Direct Chromium viz API           |
 
 ##### Minimum Requirements
 
@@ -384,7 +385,7 @@ The evidence is now conclusive:
    in `CefCopyFrameGenerator::GenerateCopyFrame()`. No configuration can bypass it.
 
 2. **Experiment 1** — Electron achieves 240fps by using Chromium's
-   `FrameSinkVideoCapturer` API directly. This API is *internal to Chromium* and
+   `FrameSinkVideoCapturer` API directly. This API is _internal to Chromium_ and
    not exposed by CEF.
 
 3. **Steam's trajectory** — Valve hit the same wall and spent years migrating
@@ -406,8 +407,8 @@ CEF itself.
 
 Steam's migration away from CEF is instructive:
 
-> *"Use CEF until you are forced not to. The day CEF blocks your vision is the
-> day you earn the pain."*
+> _"Use CEF until you are forced not to. The day CEF blocks your vision is the
+> day you earn the pain."_
 
 Steam used CEF to ship fast (2010–2017), then gradually replaced it with direct
 Chromium embedding (2017–2020) once their UI became mission-critical. Today,
@@ -418,18 +419,19 @@ wall: browser-quality smoothness is core to the product, and CEF cannot deliver 
 
 ### Paths Forward
 
-| Path | Effort | Risk | Maintenance |
-| ---- | ------ | ---- | ----------- |
-| **Patch CEF** | High | Medium | Fork forever |
-| **Use OBS's CEF fork** | Medium | Unknown | Depends on OBS |
-| **Embed Electron** | Medium | Low | Electron updates |
-| **Embed Chromium directly** | Very High | High | Chromium updates |
+| Path                        | Effort    | Risk    | Maintenance      |
+| --------------------------- | --------- | ------- | ---------------- |
+| **Patch CEF**               | High      | Medium  | Fork forever     |
+| **Use OBS's CEF fork**      | Medium    | Unknown | Depends on OBS   |
+| **Embed Electron**          | Medium    | Low     | Electron updates |
+| **Embed Chromium directly** | Very High | High    | Chromium updates |
 
 ### Recommendation
 
 **Embed Electron** is the recommended path forward.
 
 Rationale:
+
 - Proven 240fps GPU-accelerated OSR in production
 - Active maintenance by a large team
 - Well-documented APIs (`webPreferences.offscreen`)

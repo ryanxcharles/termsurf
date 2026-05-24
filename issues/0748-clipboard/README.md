@@ -168,19 +168,19 @@ scripts/install.sh wezboard
 Launch Wezboard, open a web page with `web`, click a text field to enter browse
 mode.
 
-| #  | Test                      | Steps                                             | Expected                      |
-| -- | ------------------------- | ------------------------------------------------- | ----------------------------- |
-| 1  | Cmd+C copies browser text | Select text on page, Cmd+C, paste in terminal     | Browser selection pasted      |
-| 2  | Cmd+V pastes into browser | Copy text in terminal, click browser field, Cmd+V | Text appears in browser field |
-| 3  | Cmd+X cuts browser text   | Select text in browser field, Cmd+X               | Text removed, on clipboard    |
-| 4  | Cmd+A selects all         | Click browser field with text, Cmd+A, type "X"    | All text replaced with "X"    |
-| 5  | Cmd+Z undoes              | Type "hello", Cmd+A, type "X", Cmd+Z              | "hello" restored              |
-| 6  | Regular typing works      | Type "hello" in browser field                     | "hello" appears               |
-| 7  | Esc exits browse mode     | Press Esc                                         | Returns to control mode       |
-| 8  | Cmd+C in control mode     | Exit browse mode, Cmd+C                           | Copies terminal selection     |
-| 9  | Cmd+V in control mode     | Exit browse mode, Cmd+V                           | Pastes into terminal          |
-| 10 | Cmd+T still works         | Press Cmd+T                                       | Opens new tab                 |
-| 11 | Cmd+W still works         | Press Cmd+W                                       | Closes current tab            |
+| #   | Test                      | Steps                                             | Expected                      |
+| --- | ------------------------- | ------------------------------------------------- | ----------------------------- |
+| 1   | Cmd+C copies browser text | Select text on page, Cmd+C, paste in terminal     | Browser selection pasted      |
+| 2   | Cmd+V pastes into browser | Copy text in terminal, click browser field, Cmd+V | Text appears in browser field |
+| 3   | Cmd+X cuts browser text   | Select text in browser field, Cmd+X               | Text removed, on clipboard    |
+| 4   | Cmd+A selects all         | Click browser field with text, Cmd+A, type "X"    | All text replaced with "X"    |
+| 5   | Cmd+Z undoes              | Type "hello", Cmd+A, type "X", Cmd+Z              | "hello" restored              |
+| 6   | Regular typing works      | Type "hello" in browser field                     | "hello" appears               |
+| 7   | Esc exits browse mode     | Press Esc                                         | Returns to control mode       |
+| 8   | Cmd+C in control mode     | Exit browse mode, Cmd+C                           | Copies terminal selection     |
+| 9   | Cmd+V in control mode     | Exit browse mode, Cmd+V                           | Pastes into terminal          |
+| 10  | Cmd+T still works         | Press Cmd+T                                       | Opens new tab                 |
+| 11  | Cmd+W still works         | Press Cmd+W                                       | Closes current tab            |
 
 Tests 8-9 verify terminal clipboard still works in control mode. Tests 10-11
 verify that non-clipboard Cmd+key shortcuts still route through the menu system.

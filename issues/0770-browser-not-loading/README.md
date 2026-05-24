@@ -29,24 +29,30 @@ Run Roamium with the same arguments the GUI passes to it and capture its output.
    `ServerRegister` was never received.
 
 2. **Kernel logs** (`log show --predicate 'process == "kernel"'`) showed:
+
    ```
    proc XXXXX: load code signature error 2 for file "roamium"
    ```
+
    macOS was killing the binary before it could start due to an invalid code
    signature. The `install.sh` script copies binaries with `cp` under `sudo`,
    which strips the code signature.
 
 3. **Re-signing** with `codesign --force --sign -` fixed the `Killed: 9` error.
    The main Roamium process then started successfully:
+
    ```
    [libtermsurf_chromium] Initialized, firing callback
    [Roamium] connect failed: No such file or directory (os error 2)
    ```
+
    But all Chromium **child processes** (GPU, network, renderer) crashed:
+
    ```
    FATAL:content/app/content_main_runner_impl.cc:1002]
    Check failed: sandbox::Seatbelt::IsSandboxed().
    ```
+
    This happened even with `--no-sandbox`.
 
 4. **Same crash from the Chromium build directory** — not an install issue.
@@ -85,7 +91,7 @@ fresh unsigned copy that exposed the incompatibility.
   re-signing).
 - After re-signing: child processes crash with
   `FATAL:content/app/content_main_runner_impl.cc:1002]
-  Check failed: sandbox::Seatbelt::IsSandboxed()`.
+Check failed: sandbox::Seatbelt::IsSandboxed()`.
 
 ### Diagnostic commands
 

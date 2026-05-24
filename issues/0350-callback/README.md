@@ -443,11 +443,11 @@ leak is fixed (fallback back to 0-7/sec), but performance got worse, not better.
 
 **Comparison across experiments:**
 
-| Experiment | Approach      | work/sec  | fps  | p50   |
-| ---------- | ------------- | --------- | ---- | ----- |
-| 1          | Timer-only    | ~100      | ~29  | 25ms  |
-| 2          | Source (buggy)| ~30,000+  | ~22  | 50ms  |
-| 3          | Source (fixed)| ~100-180  | ~22  | 44ms  |
+| Experiment | Approach       | work/sec | fps | p50  |
+| ---------- | -------------- | -------- | --- | ---- |
+| 1          | Timer-only     | ~100     | ~29 | 25ms |
+| 2          | Source (buggy) | ~30,000+ | ~22 | 50ms |
+| 3          | Source (fixed) | ~100-180 | ~22 | 44ms |
 
 **Conclusion:** CFRunLoopSource didn't help. Timer supersession (Experiment 1's
 callbacks > fires gap) was not the bottleneck — the timer-only approach was
@@ -493,13 +493,13 @@ CFRunLoop signaling with a mutex.
 
 **Comparison:**
 
-| Aspect            | Reference (50fps)              | TermSurf (~22-29fps)        |
-| ----------------- | ------------------------------ | --------------------------- |
-| Main loop         | `NSApp().run()`                | `CFRunLoopRun()`            |
-| Timer modes       | CommonModes + EventTracking    | CommonModes only            |
-| Timer API         | NSTimer                        | CFRunLoopTimer              |
-| Thread marshaling | performSelector:onThread:      | Direct CFRunLoop + mutex    |
-| NSApplication     | Yes (SimpleApplication)        | No                          |
+| Aspect            | Reference (50fps)           | TermSurf (~22-29fps)     |
+| ----------------- | --------------------------- | ------------------------ |
+| Main loop         | `NSApp().run()`             | `CFRunLoopRun()`         |
+| Timer modes       | CommonModes + EventTracking | CommonModes only         |
+| Timer API         | NSTimer                     | CFRunLoopTimer           |
+| Thread marshaling | performSelector:onThread:   | Direct CFRunLoop + mutex |
+| NSApplication     | Yes (SimpleApplication)     | No                       |
 
 ### Experiment 4: Match reference architecture
 
@@ -519,11 +519,13 @@ CFRunLoop signaling with a mutex.
    requires importing the `NSEventTrackingRunLoopMode` constant — it lives in
    AppKit, not CoreFoundation. Since we use raw FFI, we need the
    `CFStringRef` for this mode. It can be obtained via:
+
    ```rust
    extern "C" {
        static NSEventTrackingRunLoopMode: CFStringRef;
    }
    ```
+
    Then add a second `CFRunLoopAddTimer` call for each timer.
 
 3. **Replace CFRunLoopRun() with NSApp().run().** Create an NSApplication with
@@ -949,14 +951,14 @@ Profile log confirms clean shutdown: "Shutting down... Done."
 
 **Comparison across all experiments:**
 
-| Experiment | Approach                          | fps   | p50   | p95   |
-| ---------- | --------------------------------- | ----- | ----- | ----- |
-| 1          | Timer-only, CFRunLoopRun          | ~29   | 25ms  | 87ms  |
-| 2          | Source (buggy)                    | ~22   | 50ms  | —     |
-| 3          | Source (fixed)                    | ~22   | 44ms  | —     |
-| 4-6        | Failed (race conditions)          | —     | —     | —     |
-| 7          | Timer-only, NSApp, dual-mode      | ~31.5 | 22ms  | 91ms  |
-| Reference  | Busy-wait (100% CPU)              | ~50   | 17ms  | —     |
+| Experiment | Approach                     | fps   | p50  | p95  |
+| ---------- | ---------------------------- | ----- | ---- | ---- |
+| 1          | Timer-only, CFRunLoopRun     | ~29   | 25ms | 87ms |
+| 2          | Source (buggy)               | ~22   | 50ms | —    |
+| 3          | Source (fixed)               | ~22   | 44ms | —    |
+| 4-6        | Failed (race conditions)     | —     | —    | —    |
+| 7          | Timer-only, NSApp, dual-mode | ~31.5 | 22ms | 91ms |
+| Reference  | Busy-wait (100% CPU)         | ~50   | 17ms | —    |
 
 **Conclusion:** The dual-mode timer registration and NSApp provided a small but
 real improvement (~2.5fps). The infrastructure fixes (early unregister, CEF retry,
@@ -1099,13 +1101,13 @@ timer, reducing input to CEF.
 
 **Comparison across all experiments:**
 
-| Experiment | Approach                          | fps   | p50   | work/sec |
-| ---------- | --------------------------------- | ----- | ----- | -------- |
-| 1          | Timer-only, CFRunLoopRun          | ~29   | 25ms  | ~100     |
-| 3          | Source (fixed)                    | ~22   | 44ms  | ~100-180 |
-| 7          | Timer-only, NSApp, dual-mode      | ~31.5 | 22ms  | ~100     |
-| 8          | 1ms repeating, 1000Hz             | ~26   | 15ms  | ~470     |
-| Reference  | Busy-wait (100% CPU)              | ~50   | 17ms  | ~∞       |
+| Experiment | Approach                     | fps   | p50  | work/sec |
+| ---------- | ---------------------------- | ----- | ---- | -------- |
+| 1          | Timer-only, CFRunLoopRun     | ~29   | 25ms | ~100     |
+| 3          | Source (fixed)               | ~22   | 44ms | ~100-180 |
+| 7          | Timer-only, NSApp, dual-mode | ~31.5 | 22ms | ~100     |
+| 8          | 1ms repeating, 1000Hz        | ~26   | 15ms | ~470     |
+| Reference  | Busy-wait (100% CPU)         | ~50   | 17ms | ~∞       |
 
 **Conclusion:** Timer scheduling overhead is NOT the bottleneck. The on-demand
 approach (Experiment 7) was already optimal for pump timing — CEF's callback tells
@@ -1277,14 +1279,14 @@ Average: ~24fps, p50 ~42ms. Worse than every previous experiment.
 
 **Comparison across all experiments:**
 
-| Experiment | Approach                          | fps   | p50   | work/sec  |
-| ---------- | --------------------------------- | ----- | ----- | --------- |
-| 1          | Timer-only, CFRunLoopRun          | ~29   | 25ms  | ~100      |
-| 3          | Source (fixed)                    | ~22   | 44ms  | ~100-180  |
-| 7          | Timer-only, NSApp, dual-mode      | ~31.5 | 22ms  | ~100      |
-| 8          | 1ms repeating, 1000Hz             | ~26   | 15ms  | ~470      |
-| 9          | Re-pump loop + fallback cascade   | ~24   | 42ms  | ~9k-35k   |
-| Reference  | Busy-wait (100% CPU)              | ~50   | 17ms  | ~∞        |
+| Experiment | Approach                        | fps   | p50  | work/sec |
+| ---------- | ------------------------------- | ----- | ---- | -------- |
+| 1          | Timer-only, CFRunLoopRun        | ~29   | 25ms | ~100     |
+| 3          | Source (fixed)                  | ~22   | 44ms | ~100-180 |
+| 7          | Timer-only, NSApp, dual-mode    | ~31.5 | 22ms | ~100     |
+| 8          | 1ms repeating, 1000Hz           | ~26   | 15ms | ~470     |
+| 9          | Re-pump loop + fallback cascade | ~24   | 42ms | ~9k-35k  |
+| Reference  | Busy-wait (100% CPU)            | ~50   | 17ms | ~∞       |
 
 **Conclusion:** The hypothesis is disproven. The ~31fps cap is NOT caused by
 timer round-trip overhead between CEF pipeline stages. CEF does not call
@@ -1424,8 +1426,8 @@ scheduling is not the bottleneck — more pumping only starves the scroll timer.
    multi-trial benchmarking across profile process restarts.
 
 5. **Multi-process architecture validated.** cef-test proved the XPC + Mach port
-   + IOSurface pipeline is sound. The architecture supports multiple profiles,
-   each in its own process, with near-reference-level performance.
+   - IOSurface pipeline is sound. The architecture supports multiple profiles,
+     each in its own process, with near-reference-level performance.
 
 ### What was learned
 

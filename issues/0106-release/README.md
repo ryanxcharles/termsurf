@@ -37,11 +37,13 @@ Edit `build.zig.zon` and update the version field:
 Update `MARKETING_VERSION` in the Xcode project. This controls the version shown in the About box.
 
 **Option 1 - In Xcode:**
+
 1. Open `termsurf-macos/TermSurf.xcodeproj`
 2. Select the TermSurf target → Build Settings → Search for "marketing"
 3. Update `MARKETING_VERSION` to `X.Y.Z`
 
 **Option 2 - Via command line:**
+
 ```bash
 sed -i '' 's/MARKETING_VERSION = [0-9]*\.[0-9]*\.[0-9]*/MARKETING_VERSION = X.Y.Z/g' \
   termsurf-macos/TermSurf.xcodeproj/project.pbxproj

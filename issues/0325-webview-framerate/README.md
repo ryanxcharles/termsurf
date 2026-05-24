@@ -238,6 +238,7 @@ Expected: Many PAINT logs, few invalidate logs (confirming dedup is blocking).
    the dedup check:
 
    Before:
+
    ```rust
    let handle = info.shared_texture_io_surface as *mut c_void;
    let prev = self.inner.state.last_handle.swap(handle, Ordering::Relaxed);
@@ -247,6 +248,7 @@ Expected: Many PAINT logs, few invalidate logs (confirming dedup is blocking).
    ```
 
    After:
+
    ```rust
    let handle = info.shared_texture_io_surface as *mut c_void;
    // Send every frame — GUI needs to know when content changes,
@@ -574,6 +576,7 @@ calls `do_message_loop_work()` with short sleeps between iterations.
 1. **`ts3/termsurf-profile/src/main.rs`** — Replace message loop:
 
    Before:
+
    ```rust
    // 10. Run CEF message loop (blocks until quit_message_loop)
    println!("Profile: Running message loop...");
@@ -581,6 +584,7 @@ calls `do_message_loop_work()` with short sleeps between iterations.
    ```
 
    After:
+
    ```rust
    // 10. Run CEF message loop with high-frequency polling
    println!("Profile: Running message loop (polling mode)...");
@@ -622,11 +626,11 @@ web google.com
 
 **Expected outcome:**
 
-| Metric | Before (Exp 2) | Expected (Exp 3) |
-|--------|----------------|------------------|
-| Frame interval | 9-588ms | ~16ms |
-| Effective FPS | 12-20 | ~60 |
-| CPU usage | Low | Higher (polling) |
+| Metric         | Before (Exp 2) | Expected (Exp 3) |
+| -------------- | -------------- | ---------------- |
+| Frame interval | 9-588ms        | ~16ms            |
+| Effective FPS  | 12-20          | ~60              |
+| CPU usage      | Low            | Higher (polling) |
 
 **Risks:**
 
@@ -773,6 +777,7 @@ extern "C" fn timer_callback(...) {
 3. **Replace polling loop with CFRunLoop**:
 
    Before (polling):
+
    ```rust
    while !quit_flag.load(...) {
        cef::do_message_loop_work();
@@ -781,6 +786,7 @@ extern "C" fn timer_callback(...) {
    ```
 
    After (CFRunLoop):
+
    ```rust
    // Run the CFRunLoop - timers will fire and call do_message_loop_work()
    println!("Profile: Running CFRunLoop...");
@@ -825,12 +831,12 @@ web google.com
 
 **Expected outcome:**
 
-| Metric | Polling (Exp 3) | CFRunLoop (Exp 4) |
-|--------|-----------------|-------------------|
-| FPS during scroll | ~60 | ~60 |
-| CPU when idle | ~5-10% | ~0% |
-| CPU during scroll | ~5-10% | ~1-2% |
-| Wakeups when idle | ~1000/sec | ~0/sec |
+| Metric            | Polling (Exp 3) | CFRunLoop (Exp 4) |
+| ----------------- | --------------- | ----------------- |
+| FPS during scroll | ~60             | ~60               |
+| CPU when idle     | ~5-10%          | ~0%               |
+| CPU during scroll | ~5-10%          | ~1-2%             |
+| Wakeups when idle | ~1000/sec       | ~0/sec            |
 
 **Status:** Failed.
 
@@ -838,6 +844,7 @@ web google.com
 from XPC" — no frames were ever received.
 
 **Analysis:** The profile server started correctly:
+
 - CEF initialized
 - Browser created
 - CFRunLoop running
@@ -899,6 +906,7 @@ and we'll achieve 60fps with minimal CPU usage.
    settings (around line 239):
 
    Before:
+
    ```rust
    let settings = cef::Settings {
        windowless_rendering_enabled: 1,
@@ -911,6 +919,7 @@ and we'll achieve 60fps with minimal CPU usage.
    ```
 
    After:
+
    ```rust
    let settings = cef::Settings {
        windowless_rendering_enabled: 1,
@@ -951,12 +960,12 @@ top -pid $(pgrep -f termsurf-profile)
 
 **Expected outcome:**
 
-| Metric | Polling (Exp 3) | CFRunLoop (Exp 5) |
-|--------|-----------------|-------------------|
-| Webview opens | Yes | Yes |
-| FPS during scroll | ~60 | ~60 |
-| CPU when idle | ~5-10% | ~0% |
-| CPU during scroll | ~5-10% | ~1-2% |
+| Metric            | Polling (Exp 3) | CFRunLoop (Exp 5) |
+| ----------------- | --------------- | ----------------- |
+| Webview opens     | Yes             | Yes               |
+| FPS during scroll | ~60             | ~60               |
+| CPU when idle     | ~5-10%          | ~0%               |
+| CPU during scroll | ~5-10%          | ~1-2%             |
 
 **Status:** Failed.
 

@@ -2015,8 +2015,7 @@ reads this and passes it to `WebMouseEvent`. For double-click word selection
 Chromium needs `click_count=2`; for triple-click line selection,
 `click_count=3`.
 
-Ghostty already tracks multi-click state in `mouse.left_click_count` (1, 2, or
-3) with timing and distance checks. But the overlay block in
+Ghostty already tracks multi-click state in `mouse.left_click_count` (1, 2, or 3) with timing and distance checks. But the overlay block in
 `mouseButtonCallback` returns early at line 4050 (`return true`), so Ghostty's
 click count computation at line 4258+ never runs for overlay clicks.
 

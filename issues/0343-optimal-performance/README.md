@@ -50,26 +50,26 @@ environment, not CEF itself.
 [Issue 341](./341-performance.md) ran 18 systematic experiments to close the gap
 between the cef-rs example (60fps) and the profile server (~20fps):
 
-| #  | Experiment                               | Result  | 60fps% | Streak |
-| -- | ---------------------------------------- | ------- | ------ | ------ |
-| 1  | Document process architecture            | Diag    | —      | —      |
-| 2  | Add winit event loop (no window)         | Failed  | 3%     | —      |
-| 3  | Measure cef-rs example frame rate        | Diag    | ~90%   | —      |
-| 4  | Enable `external_message_pump`           | Partial | 52%    | 5      |
-| 5  | `NSApplicationActivationPolicyRegular`   | Failed  | 42%    | —      |
-| 6  | Use `run_message_loop()`                 | Failed  | 24%    | 5      |
-| 7  | Hidden 1x1 window                        | Success | 78%    | 57     |
-| 8  | CVDisplayLink without window             | Failed  | 30%    | 4      |
-| 9  | Restore hidden window baseline           | Success | 61%    | 35     |
-| 10 | `NSApplicationActivationPolicyAccessory` | Failed  | —      | —      |
-| 11 | Native NSWindow, `canBecomeKey: NO`      | Partial | 34%    | 4      |
-| 12 | `orderFront` instead of `orderBack`      | Partial | 34%    | 4      |
-| 13 | Layer-backed content view                | Failed  | 36%    | 3      |
-| 14 | NSApplication event pumping              | Failed  | 33%    | 4      |
-| 15 | Swizzle `canBecomeKey` on winit          | Failed  | —      | —      |
-| 16 | GUI-side focus reclaim                   | Partial | 20%    | 16     |
-| 17 | External begin frame at 60Hz             | Failed  | 10%    | 2      |
-| 18 | Revert to baseline                       | Diag    | 40%    | 11     |
+| #   | Experiment                               | Result  | 60fps% | Streak |
+| --- | ---------------------------------------- | ------- | ------ | ------ |
+| 1   | Document process architecture            | Diag    | —      | —      |
+| 2   | Add winit event loop (no window)         | Failed  | 3%     | —      |
+| 3   | Measure cef-rs example frame rate        | Diag    | ~90%   | —      |
+| 4   | Enable `external_message_pump`           | Partial | 52%    | 5      |
+| 5   | `NSApplicationActivationPolicyRegular`   | Failed  | 42%    | —      |
+| 6   | Use `run_message_loop()`                 | Failed  | 24%    | 5      |
+| 7   | Hidden 1x1 window                        | Success | 78%    | 57     |
+| 8   | CVDisplayLink without window             | Failed  | 30%    | 4      |
+| 9   | Restore hidden window baseline           | Success | 61%    | 35     |
+| 10  | `NSApplicationActivationPolicyAccessory` | Failed  | —      | —      |
+| 11  | Native NSWindow, `canBecomeKey: NO`      | Partial | 34%    | 4      |
+| 12  | `orderFront` instead of `orderBack`      | Partial | 34%    | 4      |
+| 13  | Layer-backed content view                | Failed  | 36%    | 3      |
+| 14  | NSApplication event pumping              | Failed  | 33%    | 4      |
+| 15  | Swizzle `canBecomeKey` on winit          | Failed  | —      | —      |
+| 16  | GUI-side focus reclaim                   | Partial | 20%    | 16     |
+| 17  | External begin frame at 60Hz             | Failed  | 10%    | 2      |
+| 18  | Revert to baseline                       | Diag    | 40%    | 11     |
 
 The only approach that worked was a hidden 1x1 window (Exp 7: 78% at 60fps), but
 it steals focus from the GUI. Every attempt to fix focus stealing destroyed the
@@ -82,13 +82,13 @@ end — focus and vsync are fundamentally coupled through the macOS window serve
 providing CEF with an external vsync signal, understand why its internal frame
 scheduling was failing. Five experiments:
 
-| # | Experiment                | Result  | FPS  | 60fps% | Streak |
-| - | ------------------------- | ------- | ---- | ------ | ------ |
-| 1 | CEF debug logging         | Diag    | —    | —      | —      |
-| 2 | NSApplication init        | Failed  | 28.5 | 40%    | 11     |
-| 3 | `run_message_loop()`      | Failed  | 19.2 | —      | —      |
-| 4 | CFRunLoop + external pump | Failed  | 0    | 0%     | 0      |
-| 5 | `CFRunLoopRunInMode` swap | Success | 38.2 | 71%    | 424    |
+| #   | Experiment                | Result  | FPS  | 60fps% | Streak |
+| --- | ------------------------- | ------- | ---- | ------ | ------ |
+| 1   | CEF debug logging         | Diag    | —    | —      | —      |
+| 2   | NSApplication init        | Failed  | 28.5 | 40%    | 11     |
+| 3   | `run_message_loop()`      | Failed  | 19.2 | —      | —      |
+| 4   | CFRunLoop + external pump | Failed  | 0    | 0%     | 0      |
+| 5   | `CFRunLoopRunInMode` swap | Success | 38.2 | 71%    | 424    |
 
 **Root cause found:** CEF's `SyntheticBeginFrameSource` — the timer-based frame
 scheduler for windowless mode — schedules work via CFRunLoop timer sources.

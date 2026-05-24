@@ -1015,12 +1015,12 @@ a performance summary. The numbers tell us which path to take:
 **Result:** Something in between. 65-second run with continuous scrolling (final
 run, with background XPC dispatch queue fix):
 
-   | Source                  | fps  | 60fps % | Max streak | p50    | p95    |
-   | ----------------------- | ---- | ------- | ---------- | ------ | ------ |
-   | cef-rs OSR (in-process) | ~60  | ~95%    | ~400+      | ~16ms  | ~17ms  |
-   | ts3 profile server      | 38.2 | 71%     | 424        | —      | —      |
-   | cef-test left profile   | 50.0 | 80.8%   | 139        | 16.7ms | 33.6ms |
-   | cef-test right profile  | 49.7 | 80.8%   | 80         | 16.7ms | 33.6ms |
+| Source                  | fps  | 60fps % | Max streak | p50    | p95    |
+| ----------------------- | ---- | ------- | ---------- | ------ | ------ |
+| cef-rs OSR (in-process) | ~60  | ~95%    | ~400+      | ~16ms  | ~17ms  |
+| ts3 profile server      | 38.2 | 71%     | 424        | —      | —      |
+| cef-test left profile   | 50.0 | 80.8%   | 139        | 16.7ms | 33.6ms |
+| cef-test right profile  | 49.7 | 80.8%   | 80         | 16.7ms | 33.6ms |
 
 Key observations:
 

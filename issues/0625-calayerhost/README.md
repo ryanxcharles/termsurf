@@ -595,13 +595,16 @@ texture.
 **In `Metal.zig` or a new `CALayerHost.zig`:**
 
 8. Create the `CALayerHost` via Objective-C runtime calls:
+
    ```
    objc_getClass("CALayerHost")
    objc_msgSend(class, "alloc")
    objc_msgSend(instance, "init")
    objc_msgSend(instance, "setContextId:", context_id)
    ```
+
    Add it as a sublayer of the IOSurfaceLayer:
+
    ```
    objc_msgSend(iosurface_layer, "addSublayer:", ca_layer_host)
    ```
@@ -657,7 +660,7 @@ texture.
 
 1. Build Chromium Profile Server
    (`autoninja -C out/Default
-   chromium_profile_server`).
+chromium_profile_server`).
 2. Build TermSurf GUI (`cd gui && zig build`).
 3. Launch the app, open a terminal, type `web google.com`.
 4. **Pass criteria:**
@@ -727,7 +730,7 @@ Two options:
   increases downward). Only affects sublayer geometry, not the layer's own
   `contents` rendering. No Y math needed —
   `frame.origin.y = grid_row *
-  cell_height` works as-is.
+cell_height` works as-is.
 
 Option B is cleaner (one property, no math), but it could have side effects on
 terminal rendering if any other code assumes the default bottom-left geometry.
@@ -913,7 +916,7 @@ CALayerHost frame readback: x=50.0 y=50.0 w=400.0 h=300.0
   with valid grid coordinates `(1, 4, 120, 35)` and non-null host pointer. The
   first `updateCALayerHostFrame` call (from `set_overlay`) has
   `ca_layer_host=
-  null` because `ca_context_id` hasn't arrived yet, but the
+null` because `ca_context_id` hasn't arrived yet, but the
   second call (from `setCALayerHostContextId`) succeeds with valid data.
 
 **Key finding: the frame DOES control positioning, but there's a ~400px

@@ -13,12 +13,12 @@ TermSurf while preserving our modifications.
 
 TermSurf integrates upstream projects:
 
-| Project | Directory | Upstream | Remote | Branch | Purpose |
-|---------|-----------|----------|--------|--------|---------|
-| Ghostty | `ts1/` | [ghostty-org/ghostty](https://github.com/ghostty-org/ghostty) | `upstream` | main | Terminal emulator (TermSurf 1.x) |
-| WezTerm | `ts2/` | [wezterm/wezterm](https://github.com/wezterm/wezterm) | `wezterm` | main | Terminal emulator (TermSurf 2.0) |
-| WezTerm | `ts3/` | [wezterm/wezterm](https://github.com/wezterm/wezterm) | `wezterm` | main | Terminal emulator (TermSurf 3.0) |
-| cef-rs | `cef-rs/` | [tauri-apps/cef-rs](https://github.com/tauri-apps/cef-rs) | `cef-rs-upstream` | dev | CEF Rust bindings |
+| Project | Directory | Upstream                                                      | Remote            | Branch | Purpose                          |
+| ------- | --------- | ------------------------------------------------------------- | ----------------- | ------ | -------------------------------- |
+| Ghostty | `ts1/`    | [ghostty-org/ghostty](https://github.com/ghostty-org/ghostty) | `upstream`        | main   | Terminal emulator (TermSurf 1.x) |
+| WezTerm | `ts2/`    | [wezterm/wezterm](https://github.com/wezterm/wezterm)         | `wezterm`         | main   | Terminal emulator (TermSurf 2.0) |
+| WezTerm | `ts3/`    | [wezterm/wezterm](https://github.com/wezterm/wezterm)         | `wezterm`         | main   | Terminal emulator (TermSurf 3.0) |
+| cef-rs  | `cef-rs/` | [tauri-apps/cef-rs](https://github.com/tauri-apps/cef-rs)     | `cef-rs-upstream` | dev    | CEF Rust bindings                |
 
 Each upstream is tracked via a git remote and merged periodically to get bug
 fixes, performance improvements, and new features.
@@ -113,39 +113,39 @@ See [libghostty.md](libghostty.md) for detailed documentation of our changes.
 
 These are additive changes that don't modify existing Ghostty code paths:
 
-| File | Change | Notes |
-|------|--------|-------|
-| `ts1/include/ghostty.h` | Added `ghostty_config_load_files` declaration | End of file |
-| `ts1/src/config/Config.zig` | Added `loadFiles` method | New public method |
-| `ts1/src/config/CApi.zig` | Added C API wrapper | New function |
-| `ts1/src/os/macos.zig` | Added `appSupportDirWithBundleId` helper | New function |
+| File                        | Change                                        | Notes             |
+| --------------------------- | --------------------------------------------- | ----------------- |
+| `ts1/include/ghostty.h`     | Added `ghostty_config_load_files` declaration | End of file       |
+| `ts1/src/config/Config.zig` | Added `loadFiles` method                      | New public method |
+| `ts1/src/config/CApi.zig`   | Added C API wrapper                           | New function      |
+| `ts1/src/os/macos.zig`      | Added `appSupportDirWithBundleId` helper      | New function      |
 
 #### TermSurf-Specific (Branding)
 
 Simple string replacements, easy to re-apply if conflicts occur:
 
-| File | Change |
-|------|--------|
-| `ts1/src/cli/help.zig` | "ghostty" -> "termsurf", app name references |
-| `ts1/src/cli/version.zig` | "Ghostty" -> "TermSurf" in version banner |
+| File                          | Change                                       |
+| ----------------------------- | -------------------------------------------- |
+| `ts1/src/cli/help.zig`        | "ghostty" -> "termsurf", app name references |
+| `ts1/src/cli/version.zig`     | "Ghostty" -> "TermSurf" in version banner    |
 | `ts1/src/cli/list_themes.zig` | Ghost emoji -> surfer emoji in preview title |
 
 #### TermSurf-Specific (Functional)
 
 These modify existing Ghostty code and have higher conflict risk:
 
-| File | Change | Conflict Risk |
-|------|--------|---------------|
-| `ts1/src/cli/ghostty.zig` | Added `web` action, `detectMultiCall` | **High** |
-| `ts1/src/cli/action.zig` | Multi-call binary detection via `argv[0]` | **High** |
-| `ts1/src/cli/web.zig` | **New file** (no conflict) | None |
+| File                      | Change                                    | Conflict Risk |
+| ------------------------- | ----------------------------------------- | ------------- |
+| `ts1/src/cli/ghostty.zig` | Added `web` action, `detectMultiCall`     | **High**      |
+| `ts1/src/cli/action.zig`  | Multi-call binary detection via `argv[0]` | **High**      |
+| `ts1/src/cli/web.zig`     | **New file** (no conflict)                | None          |
 
 #### Build System
 
-| File | Change |
-|------|--------|
-| `ts1/build.zig` | XCFramework output to both `macos/` and `termsurf-macos/` |
-| `ts1/src/build/GhosttyXCFramework.zig` | Dual output paths |
+| File                                   | Change                                                    |
+| -------------------------------------- | --------------------------------------------------------- |
+| `ts1/build.zig`                        | XCFramework output to both `macos/` and `termsurf-macos/` |
+| `ts1/src/build/GhosttyXCFramework.zig` | Dual output paths                                         |
 
 ### Merge Commands
 
@@ -266,7 +266,7 @@ limitations (see `docs/301-architecture.md`).
 
 ### Modified Files Inventory
 
-*To be documented as modifications are made.*
+_To be documented as modifications are made._
 
 ### Merge Commands
 
@@ -283,7 +283,7 @@ git merge -X subtree=ts2 wezterm/main -m "Merge upstream WezTerm into ts2"
 
 ### Conflict Resolution Guide
 
-*To be documented as modifications are made.*
+_To be documented as modifications are made._
 
 ### WezTerm (ts2) Test Commands
 
@@ -307,20 +307,21 @@ subprocesses (one per profile).
 
 ### Modified Files Inventory
 
-*To be documented as modifications are made.*
+_To be documented as modifications are made._
 
 ### Submodules
 
 ts3 uses the following submodules (defined in root `.gitmodules`):
 
-| Submodule | Path |
-|-----------|------|
-| harfbuzz | `ts3/deps/harfbuzz/harfbuzz` |
+| Submodule | Path                          |
+| --------- | ----------------------------- |
+| harfbuzz  | `ts3/deps/harfbuzz/harfbuzz`  |
 | freetype2 | `ts3/deps/freetype/freetype2` |
-| libpng | `ts3/deps/freetype/libpng` |
-| zlib | `ts3/deps/freetype/zlib` |
+| libpng    | `ts3/deps/freetype/libpng`    |
+| zlib      | `ts3/deps/freetype/zlib`      |
 
 After cloning, initialize with:
+
 ```bash
 git submodule update --init ts3/deps/harfbuzz/harfbuzz ts3/deps/freetype/libpng ts3/deps/freetype/zlib ts3/deps/freetype/freetype2
 ```
@@ -340,7 +341,7 @@ git merge -X subtree=ts3 wezterm/main -m "Merge upstream WezTerm into ts3"
 
 ### Conflict Resolution Guide
 
-*To be documented as modifications are made.*
+_To be documented as modifications are made._
 
 ### WezTerm (ts3) Test Commands
 
@@ -361,8 +362,8 @@ modifications are minimal and mostly additive.
 
 #### Modified Files
 
-| File | Change | Notes |
-|------|--------|-------|
+| File                                             | Change                               | Notes              |
+| ------------------------------------------------ | ------------------------------------ | ------------------ |
 | `cef-rs/cef/src/osr_texture_import/iosurface.rs` | Fixed macOS IOSurface texture import | Metal API type fix |
 
 ### Merge Commands
@@ -385,6 +386,7 @@ git merge -X subtree=cef-rs cef-rs-upstream/dev -m "Merge upstream cef-rs"
 We fixed a Metal API type issue for macOS IOSurface texture import.
 
 **Our fix:**
+
 ```rust
 // Use proper Ref types that implement Message trait
 let device_ref: &metal::DeviceRef = raw_device;
@@ -398,6 +400,7 @@ let texture: metal::Texture = objc::msg_send![
 ```
 
 **Resolution strategy:**
+
 1. Check if upstream has fixed this differently
 2. If not, re-apply our fix after accepting their changes
 

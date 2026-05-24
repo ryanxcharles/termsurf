@@ -40,7 +40,7 @@ Track progress on WKWebView API coverage. Check off items as they're implemented
 
 ### WKUIDelegate
 
-- [x] `createWebViewWith:for:windowFeatures:` - target="_blank" handling
+- [x] `createWebViewWith:for:windowFeatures:` - target="\_blank" handling
 - [ ] `webViewDidClose:` - window.close() handling
 - [x] `runJavaScriptAlertPanelWithMessage:` - alert() dialogs
 - [x] `runJavaScriptConfirmPanelWithMessage:` - confirm() dialogs
@@ -167,7 +167,7 @@ WKWebView supports session isolation via `WKWebsiteDataStore`:
 - **Profiles:** `WKWebsiteDataStore(forIdentifier: UUID)` (macOS 14+) - isolated
   storage per profile
 
-### target="_blank" Links
+### target="\_blank" Links
 
 WKWebView ignores `target="_blank"` links by default. We implement
 `WKUIDelegate.webView(_:createWebViewWith:for:windowFeatures:)` to load these

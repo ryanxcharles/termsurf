@@ -485,7 +485,7 @@ The initial mode is explicit in the `set_overlay` message:
 
 - `web` sends `browsing: true` in `set_overlay` (derived from
   `mode ==
-  Mode::Browse`)
+Mode::Browse`)
 - CompositorXPC reads `browsing` from the message and sets `paneBrowsing[uuid]`
 
 No separate sync message needed. The initial state is part of the same message

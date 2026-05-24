@@ -240,6 +240,7 @@ The root causes are architectural, not configurable:
 
 - **`do_message_loop_work()` costs ~2ms even idle.** In a headless process, all
   system-level work accumulates in CEF's internal task queue. The function takes
+
   > 1ms on 100% of calls (vs 5.7% in a windowed process). Pumping faster starves
   > other timers and makes performance worse (Issue 350, Experiments 8–9).
 

@@ -33,6 +33,7 @@ dynamically resize to match the new pane dimensions. The resized content should:
    back.
 
 3. **Resize command pathway** — The full command flow works:
+
    ```
    GUI detects resize → sends resize_browser via XPC →
    profile calls was_resized() + invalidate() → CEF re-renders →
@@ -234,16 +235,16 @@ attempting fixes, we need visibility into what's actually happening.
 
 Add logging at 8 key points in the resize pipeline:
 
-| # | Location               | Purpose                            |
-| - | ---------------------- | ---------------------------------- |
-| 1 | Initial spawn          | Capture baseline dimensions        |
-| 2 | Render loop layout     | See pane dimensions from layout    |
-| 3 | Debounce logic         | See when resize is sent vs blocked |
-| 4 | Profile resize handler | Confirm receipt of resize command  |
-| 5 | CEF view_rect          | What dimensions CEF thinks it has  |
-| 6 | Texture sending        | Actual IOSurface dimensions        |
-| 7 | Texture receiving      | What GUI receives via XPC          |
-| 8 | Texture rendering      | Compare texture vs viewport        |
+| #   | Location               | Purpose                            |
+| --- | ---------------------- | ---------------------------------- |
+| 1   | Initial spawn          | Capture baseline dimensions        |
+| 2   | Render loop layout     | See pane dimensions from layout    |
+| 3   | Debounce logic         | See when resize is sent vs blocked |
+| 4   | Profile resize handler | Confirm receipt of resize command  |
+| 5   | CEF view_rect          | What dimensions CEF thinks it has  |
+| 6   | Texture sending        | Actual IOSurface dimensions        |
+| 7   | Texture receiving      | What GUI receives via XPC          |
+| 8   | Texture rendering      | Compare texture vs viewport        |
 
 #### Changes
 

@@ -4,7 +4,7 @@ opened = "2026-01-06"
 closed = "2026-01-06"
 +++
 
-# Handling target="_blank" Links (TermSurf 1.x)
+# Handling target="\_blank" Links (TermSurf 1.x)
 
 > **Scope:** This document applies to TermSurf 1.x (Ghostty + WKWebView).
 > TermSurf 2.0 will handle this via CEF's native popup handling.
@@ -121,6 +121,7 @@ webViewOverlay.onNewWindowRequested = { [weak self] url in
 ### Security Considerations
 
 **URL escaping is critical.** A malicious website could craft a URL like:
+
 ```
 https://example.com'; rm -rf /; echo '
 ```
@@ -145,4 +146,4 @@ Option 3 is safest but requires changes to how new tabs are spawned.
 ## References
 
 - [WKUIDelegate - Apple Developer](https://developer.apple.com/documentation/webkit/wkuidelegate)
-- [How to open target="_blank" links in WKWebView](https://nemecek.be/blog/1/how-to-open-target_blank-links-in-wkwebview-in-ios)
+- [How to open target="\_blank" links in WKWebView](https://nemecek.be/blog/1/how-to-open-target_blank-links-in-wkwebview-in-ios)

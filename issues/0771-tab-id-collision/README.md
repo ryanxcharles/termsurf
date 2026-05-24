@@ -158,6 +158,7 @@ restructure the message loop.
    `ServerRegister`, which returns the key from `handle_server_register`.
 
    In the connection loop, capture the return:
+
    ```rust
    match handle_message(msg, &stream, &tx, &server_key, &state).await {
        Ok(Some(key)) => server_key = Some(key),
@@ -172,6 +173,7 @@ restructure the message loop.
 
 6. **Insert** (`handle_tab_ready`, line 731): Build composite key from the
    pane's profile/browser (already available from `st.panes`):
+
    ```rust
    let pane = st.panes.get(&ready.pane_id).unwrap();
    let skey = TermSurfState::server_key(&pane.profile, &pane.browser);
@@ -180,6 +182,7 @@ restructure the message loop.
 
 7. **CaContext lookup** (line 228): Pass `server_key` to `handle_ca_context`.
    Inside, build composite key:
+
    ```rust
    let skey = server_key.as_deref().unwrap_or("");
    let lookup = (skey.to_string(), ca_context.tab_id);
@@ -191,6 +194,7 @@ restructure the message loop.
 
 9. **DevTools lookup** (line 323): This comes from a TUI connection where
    `server_key` is `None`. Use the resolved pane's profile/browser instead:
+
    ```rust
    let resolved_pane = st.panes.values().find(|p| p.tab_id == resolved_tab_id);
    if let Some(rp) = resolved_pane {

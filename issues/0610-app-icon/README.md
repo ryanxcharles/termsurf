@@ -217,20 +217,20 @@ document:
 
 ```json
 {
-  "groups" : [
+  "groups": [
     {
-      "layers" : [
+      "layers": [
         {
-          "hidden" : false,
-          "image-name" : "termsurf-ghost.png",
-          "name" : "TermSurf Ghost"
+          "hidden": false,
+          "image-name": "termsurf-ghost.png",
+          "name": "TermSurf Ghost"
         }
       ],
-      "name" : "Icon"
+      "name": "Icon"
     }
   ],
-  "supported-platforms" : {
-    "squares" : "shared"
+  "supported-platforms": {
+    "squares": "shared"
   }
 }
 ```
@@ -331,17 +331,14 @@ Before:
 
 ```json
 {
-  "blend-mode" : "normal",
-  "fill" : "automatic",
-  "hidden" : false,
-  "image-name" : "Ghostty.png",
-  "name" : "Ghostty",
-  "position" : {
-    "scale" : 1,
-    "translation-in-points" : [
-      -185.015625,
-      -143.8359375
-    ]
+  "blend-mode": "normal",
+  "fill": "automatic",
+  "hidden": false,
+  "image-name": "Ghostty.png",
+  "name": "Ghostty",
+  "position": {
+    "scale": 1,
+    "translation-in-points": [-185.015625, -143.8359375]
   }
 }
 ```
@@ -350,11 +347,11 @@ After:
 
 ```json
 {
-  "blend-mode" : "normal",
-  "fill" : "automatic",
-  "hidden" : false,
-  "image-name" : "surfing-ghost.png",
-  "name" : "Ghostty"
+  "blend-mode": "normal",
+  "fill": "automatic",
+  "hidden": false,
+  "image-name": "surfing-ghost.png",
+  "name": "Ghostty"
 }
 ```
 
@@ -364,20 +361,17 @@ Before:
 
 ```json
 {
-  "blend-mode" : "normal",
-  "fill" : {
-    "solid" : "extended-srgb:0.00000,0.47843,1.00000,1.00000"
+  "blend-mode": "normal",
+  "fill": {
+    "solid": "extended-srgb:0.00000,0.47843,1.00000,1.00000"
   },
-  "glass" : true,
-  "hidden" : false,
-  "image-name" : "Ghostty.png",
-  "name" : "GhosttyBlur",
-  "position" : {
-    "scale" : 1,
-    "translation-in-points" : [
-      -186.59375,
-      -143.8359375
-    ]
+  "glass": true,
+  "hidden": false,
+  "image-name": "Ghostty.png",
+  "name": "GhosttyBlur",
+  "position": {
+    "scale": 1,
+    "translation-in-points": [-186.59375, -143.8359375]
   }
 }
 ```
@@ -386,14 +380,14 @@ After:
 
 ```json
 {
-  "blend-mode" : "normal",
-  "fill" : {
-    "solid" : "extended-srgb:0.00000,0.47843,1.00000,1.00000"
+  "blend-mode": "normal",
+  "fill": {
+    "solid": "extended-srgb:0.00000,0.47843,1.00000,1.00000"
   },
-  "glass" : true,
-  "hidden" : false,
-  "image-name" : "surfing-ghost.png",
-  "name" : "GhosttyBlur"
+  "glass": true,
+  "hidden": false,
+  "image-name": "surfing-ghost.png",
+  "name": "GhosttyBlur"
 }
 ```
 

@@ -102,13 +102,13 @@ remain untouched.
 scripts/build.sh wezboard
 ```
 
-| # | Test                    | Steps                                          | Expected                              |
-| - | ----------------------- | ---------------------------------------------- | ------------------------------------- |
-| 1 | No flash in right split | Split pane, run `web google.com` in right pane | Webview appears on right, no flash    |
-| 2 | No flash in left split  | Split pane, run `web google.com` in left pane  | Webview appears on left, no flash     |
-| 3 | No flash without split  | Single pane, run `web google.com`              | Webview appears normally              |
-| 4 | Resize after split      | Open webview in right split, resize window     | Webview repositions correctly         |
-| 5 | Split after webview     | Open webview, then split pane                  | Webview resizes/repositions correctly |
+| #   | Test                    | Steps                                          | Expected                              |
+| --- | ----------------------- | ---------------------------------------------- | ------------------------------------- |
+| 1   | No flash in right split | Split pane, run `web google.com` in right pane | Webview appears on right, no flash    |
+| 2   | No flash in left split  | Split pane, run `web google.com` in left pane  | Webview appears on left, no flash     |
+| 3   | No flash without split  | Single pane, run `web google.com`              | Webview appears normally              |
+| 4   | Resize after split      | Open webview in right split, resize window     | Webview repositions correctly         |
+| 5   | Split after webview     | Open webview, then split pane                  | Webview resizes/repositions correctly |
 
 **Result:** Fail
 
@@ -187,13 +187,13 @@ This is the right approach because:
 scripts/build.sh wezboard
 ```
 
-| # | Test                    | Steps                                          | Expected                              |
-| - | ----------------------- | ---------------------------------------------- | ------------------------------------- |
-| 1 | No flash in right split | Split pane, run `web google.com` in right pane | Webview appears on right, no flash    |
-| 2 | No flash in left split  | Split pane, run `web google.com` in left pane  | Webview appears on left, no flash     |
-| 3 | No flash without split  | Single pane, run `web google.com`              | Webview appears normally              |
-| 4 | Resize after split      | Open webview in right split, resize window     | Webview repositions correctly         |
-| 5 | Split after webview     | Open webview, then split pane                  | Webview resizes/repositions correctly |
+| #   | Test                    | Steps                                          | Expected                              |
+| --- | ----------------------- | ---------------------------------------------- | ------------------------------------- |
+| 1   | No flash in right split | Split pane, run `web google.com` in right pane | Webview appears on right, no flash    |
+| 2   | No flash in left split  | Split pane, run `web google.com` in left pane  | Webview appears on left, no flash     |
+| 3   | No flash without split  | Single pane, run `web google.com`              | Webview appears normally              |
+| 4   | Resize after split      | Open webview in right split, resize window     | Webview repositions correctly         |
+| 5   | Split after webview     | Open webview, then split pane                  | Webview resizes/repositions correctly |
 
 **Result:** Pass
 

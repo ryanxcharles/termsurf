@@ -319,12 +319,14 @@ private func sendFocusChanged(paneUUID: UUID, focused: Bool) {
 Call it from three places:
 
 1. **`handleModeChanged`** — after updating `paneBrowsing[uuid]`:
+
    ```swift
    sendFocusChanged(paneUUID: uuid, focused: browsing)
    ```
 
 2. **Ctrl+Esc handler** — inside the `xpcQueue.sync` block, after setting
    `paneBrowsing[uuid] = false`:
+
    ```swift
    self.sendFocusChanged(paneUUID: uuid, focused: false)
    ```
@@ -1091,7 +1093,7 @@ The experiment required fixing two independent bugs:
    used incorrect values: `32` for `kLeftButtonDown` and `512` for
    `kRightButtonDown`. The actual Blink values are
    `kLeftButtonDown = 1 << 6 =
-   64` and `kRightButtonDown = 1 << 8 = 256`. The
+64` and `kRightButtonDown = 1 << 8 = 256`. The
    old values mapped to `kIsAutoRepeat` and `kCapsLockOn`, so Chromium treated
    every drag as a plain mouse move with no button held — never initiating
    selection.
@@ -1136,14 +1138,14 @@ Chromium treated every drag as a plain move.
 
 ### Experiments
 
-| # | Description                              | Result                              |
-| - | ---------------------------------------- | ----------------------------------- |
-| 1 | Focus + SetActive on tab creation        | Partial (never unfocuses)           |
-| 2 | Focus lifecycle tied to mode changes     | Partial (pane switches not tracked) |
-| 3 | Pane focus via NSNotification            | Pass                                |
-| 4 | Deferred focus after create_tab          | Partial (only first tab)            |
-| 5 | Fix focus after create_tab (both paths)  | Pass                                |
-| 6 | Drag via flag suppression + modifier fix | Pass                                |
+| #   | Description                              | Result                              |
+| --- | ---------------------------------------- | ----------------------------------- |
+| 1   | Focus + SetActive on tab creation        | Partial (never unfocuses)           |
+| 2   | Focus lifecycle tied to mode changes     | Partial (pane switches not tracked) |
+| 3   | Pane focus via NSNotification            | Pass                                |
+| 4   | Deferred focus after create_tab          | Partial (only first tab)            |
+| 5   | Fix focus after create_tab (both paths)  | Pass                                |
+| 6   | Drag via flag suppression + modifier fix | Pass                                |
 
 ### Files changed
 

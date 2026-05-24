@@ -311,7 +311,7 @@ and `has_damage = false`. This flows through:
 3. `ProcessSurfaceDamage` (line 88-124) stores `last_ack = ack` for the surface
 4. `HasPendingSurfaces` (line 135-170) checks
    `last_ack.frame_id ==
-   begin_frame_args.frame_id` — match — surface is **not
+begin_frame_args.frame_id` — match — surface is **not
    counted as pending**
 
 Additionally, there is a second escape hatch at line 154-157:

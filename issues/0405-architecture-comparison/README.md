@@ -36,8 +36,7 @@ TermSurf has prior art with both approaches:
   out-of-process (CEF in a separate `termsurf-profile` process). This worked but
   WezTerm's rendering pipeline made IOSurface compositing difficult.
 
-Both ts1 and ts3 kept the terminal in-process. Only the ts4 prototype (Issue
-403) moved the terminal out-of-process — and that was to prove the IPC
+Both ts1 and ts3 kept the terminal in-process. Only the ts4 prototype (Issue 403) moved the terminal out-of-process — and that was to prove the IPC
 mechanism, not because out-of-process terminal was a goal.
 
 ## Option A: Everything Out-of-Process (ts4 current plan)

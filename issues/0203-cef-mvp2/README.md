@@ -11,6 +11,7 @@ This document details the implementation plan for MVP2 - adding a `web-open` CLI
 ## Implementation Status
 
 **Completed:**
+
 1. MuxNotification variants (`WebOpen`, `WebClosed`) added to `mux/src/lib.rs`
 2. Session handler updated to publish `WebOpen` notification
 3. Pattern matching updated in `dispatch.rs`, `frontend.rs`, `termwindow/mod.rs`
@@ -23,6 +24,7 @@ This document details the implementation plan for MVP2 - adding a `web-open` CLI
 10. Browser overlay placeholder rendering in `paint_browser_overlay()`
 
 **Remaining:**
+
 1. ~~Actual CEF texture rendering~~ - DONE (commit `247ba3b1c`)
 2. Fix macOS terminal launch issue - see [Known Issues in cef.md](cef.md#macos-multiple-browsers-fail-when-launched-from-terminal)
 3. Fix HiDPI/Retina resolution (content appears small on high-DPI displays)
@@ -138,6 +140,7 @@ impl BrowserState {
 ```
 
 **Key differences from reverted code:**
+
 - Remove `init_cef()` - already handled in `main.rs`
 - Remove `set_message_pump_hook` - we use `BrowserProcessHandler` callback
 - Keep `BrowserState`, `RenderHandler`, key event conversion
@@ -322,18 +325,18 @@ MuxNotification::WebClosed { pane_id } => {
 
 ## File Summary
 
-| File | Changes |
-|------|---------|
-| `mux/src/lib.rs` | Add `WebOpen`, `WebClosed` to `MuxNotification` |
-| `wezterm-mux-server-impl/src/sessionhandler.rs` | Publish `WebOpen` notification |
-| `wezterm-gui/src/cef_browser/mod.rs` | New file - browser state, render handler |
-| `wezterm-gui/src/cef_integration.rs` | Existing - no changes needed |
-| `wezterm-gui/src/termwindow/mod.rs` | Add browser state fields, handle methods |
-| `wezterm-gui/src/termwindow/keyevent.rs` | Add Ctrl+C handling, key routing |
-| `wezterm-gui/src/termwindow/render/pane.rs` | Check for browser overlay |
-| `wezterm-gui/src/termwindow/render/draw.rs` | Add browser texture rendering |
-| `wezterm-gui/src/main.rs` | Add `mod cef_browser;` |
-| `wezterm-gui/src/termwindow/render/pane.rs` | Add `paint_browser_overlay()` method |
+| File                                            | Changes                                         |
+| ----------------------------------------------- | ----------------------------------------------- |
+| `mux/src/lib.rs`                                | Add `WebOpen`, `WebClosed` to `MuxNotification` |
+| `wezterm-mux-server-impl/src/sessionhandler.rs` | Publish `WebOpen` notification                  |
+| `wezterm-gui/src/cef_browser/mod.rs`            | New file - browser state, render handler        |
+| `wezterm-gui/src/cef_integration.rs`            | Existing - no changes needed                    |
+| `wezterm-gui/src/termwindow/mod.rs`             | Add browser state fields, handle methods        |
+| `wezterm-gui/src/termwindow/keyevent.rs`        | Add Ctrl+C handling, key routing                |
+| `wezterm-gui/src/termwindow/render/pane.rs`     | Check for browser overlay                       |
+| `wezterm-gui/src/termwindow/render/draw.rs`     | Add browser texture rendering                   |
+| `wezterm-gui/src/main.rs`                       | Add `mod cef_browser;`                          |
+| `wezterm-gui/src/termwindow/render/pane.rs`     | Add `paint_browser_overlay()` method            |
 
 ## Estimated Lines of Code
 

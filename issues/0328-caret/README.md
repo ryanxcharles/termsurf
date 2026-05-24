@@ -229,6 +229,7 @@ CEF's internal focus state will be properly initialized, enabling caret renderin
 3. **Remove early set_focus call** (`create_browser_on_ui_thread`, lines ~1060-1064)
 
    Delete or comment out:
+
    ```rust
    // Ensure browser has focus for clipboard operations (experiment 4)
    if let Some(host) = b.host() {
@@ -240,6 +241,7 @@ CEF's internal focus state will be properly initialized, enabling caret renderin
 4. **Add focus toggle in on_accelerated_paint** (`ProfileRenderHandler`, line ~463)
 
    Insert after the `PET_VIEW` check, before sending the frame:
+
    ```rust
    fn on_accelerated_paint(
        &self,
@@ -278,8 +280,8 @@ CEF's internal focus state will be properly initialized, enabling caret renderin
 
 **Files to modify:**
 
-| File | Changes |
-|------|---------|
+| File                               | Changes                                                                               |
+| ---------------------------------- | ------------------------------------------------------------------------------------- |
 | `ts3/termsurf-profile/src/main.rs` | Add field to BrowserState, remove early set_focus, add toggle in on_accelerated_paint |
 
 **Verification:**
@@ -332,7 +334,7 @@ cat /tmp/termsurf-profile-*.log | grep "FOCUS"
 
 1. **Clipboard operations** — Issue 317 experiment 4 added `set_focus(1)` before
    clipboard operations. This should still work since we're only removing the
-   *initial* focus call, not the clipboard-related ones.
+   _initial_ focus call, not the clipboard-related ones.
 
 2. **Multiple browsers** — Each browser has its own `BrowserState` with its own
    `initial_focus_set` flag, so multiple webviews should work correctly.

@@ -148,10 +148,12 @@ workflows.
 async function runTests() {
   const results = await myTestRunner.run();
 
-  results.failures.forEach(f => console.error("FAIL:", f));
-  results.passes.forEach(p => console.log("PASS:", p));
+  results.failures.forEach((f) => console.error("FAIL:", f));
+  results.passes.forEach((p) => console.log("PASS:", p));
 
-  console.log(`${results.passes.length} passed, ${results.failures.length} failed`);
+  console.log(
+    `${results.passes.length} passed, ${results.failures.length} failed`,
+  );
 
   window.termsurf.exit(results.failures.length > 0 ? 1 : 0);
 }
@@ -186,8 +188,8 @@ echo "All tests passed"
 
 ```javascript
 // health-check.html
-fetch('/api/health')
-  .then(r => r.ok ? window.termsurf.exit(0) : window.termsurf.exit(1))
+fetch("/api/health")
+  .then((r) => (r.ok ? window.termsurf.exit(0) : window.termsurf.exit(1)))
   .catch(() => window.termsurf.exit(1));
 ```
 
@@ -212,7 +214,7 @@ const nodeEnv = window.termsurf.env.NODE_ENV;
 
 ```javascript
 // Write directly to stdout/stderr with more control
-window.termsurf.stdout.write("Progress: 50%\r");  // Overwrite line
+window.termsurf.stdout.write("Progress: 50%\r"); // Overwrite line
 window.termsurf.stderr.write("Warning: slow query\n");
 ```
 
@@ -228,12 +230,12 @@ const sessionId = window.termsurf.sessionId;
 
 ```javascript
 // React to terminal events
-window.termsurf.on('resize', ({ cols, rows }) => {
+window.termsurf.on("resize", ({ cols, rows }) => {
   console.log(`Terminal resized to ${cols}x${rows}`);
 });
 
-window.termsurf.on('focus', () => {
-  console.log('Pane focused');
+window.termsurf.on("focus", () => {
+  console.log("Pane focused");
 });
 ```
 
@@ -266,14 +268,14 @@ TermSurf is uniquely positioned because it already lives in the terminal:
 // Potential future API (not implemented)
 
 // Execute shell command and get output
-const result = await window.termsurf.exec('ls -la');
+const result = await window.termsurf.exec("ls -la");
 console.log(result.stdout);
 
 // Read a file
-const content = await window.termsurf.fs.readFile('/path/to/file');
+const content = await window.termsurf.fs.readFile("/path/to/file");
 
 // Write a file
-await window.termsurf.fs.writeFile('/tmp/output.json', JSON.stringify(data));
+await window.termsurf.fs.writeFile("/tmp/output.json", JSON.stringify(data));
 
 // Get system info
 const info = window.termsurf.system;
@@ -282,13 +284,13 @@ console.log(info.platform, info.arch, info.hostname);
 
 ### Key Differences from Tauri
 
-| Aspect           | Tauri                  | TermSurf (potential)          |
-| ---------------- | ---------------------- | ----------------------------- |
-| **Context**      | Standalone desktop app | Inside terminal emulator      |
-| **Packaging**    | Bundled application    | Opens any URL                 |
-| **Use case**     | Ship desktop apps      | Dev tools, local automation   |
-| **Shell access** | Via command API        | Native (already in terminal)  |
-| **Distribution** | App stores, installers | Just a URL + `web` command    |
+| Aspect           | Tauri                  | TermSurf (potential)         |
+| ---------------- | ---------------------- | ---------------------------- |
+| **Context**      | Standalone desktop app | Inside terminal emulator     |
+| **Packaging**    | Bundled application    | Opens any URL                |
+| **Use case**     | Ship desktop apps      | Dev tools, local automation  |
+| **Shell access** | Via command API        | Native (already in terminal) |
+| **Distribution** | App stores, installers | Just a URL + `web` command   |
 
 ### Security Model for OS Access
 
@@ -333,12 +335,12 @@ Console output is captured via JavaScript injection at document start:
 
 ```javascript
 // Injected into every page
-(function() {
+(function () {
   const originalLog = console.log;
-  console.log = function(...args) {
+  console.log = function (...args) {
     window.webkit.messageHandlers.consoleLog.postMessage({
-      level: 'log',
-      message: args.map(formatArg).join(' ')
+      level: "log",
+      message: args.map(formatArg).join(" "),
     });
     originalLog.apply(console, args);
   };
@@ -353,6 +355,7 @@ CLI writes to its stdout/stderr, which appears in the terminal. This approach
 avoids direct PTY access while still routing output to the correct terminal.
 
 Flow:
+
 1. WebView console.log() → Swift WKScriptMessageHandler
 2. Swift sends `{"event":"console","data":{"level":"log","message":"..."}}` via socket
 3. CLI receives event, writes to stdout (or stderr for warn/error)

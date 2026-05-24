@@ -112,7 +112,7 @@ must be mirrored in AGENTS.md.
 
 2. **Launch command (lines 70–71):** `open ts5/zig-out/TermSurf.app` →
    `open
-   gui/zig-out/TermSurf.app`.
+gui/zig-out/TermSurf.app`.
 
 3. **Status section (lines 99–123):** Says "five generations (ts1 through ts5).
    The current generation (ts5)..." — gui/ is the sixth generation and the

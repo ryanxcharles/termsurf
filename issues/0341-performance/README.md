@@ -282,14 +282,14 @@ loop {
 
 **Status: FAILED** — The winit event loop did NOT improve frame rate.
 
-| Metric                     | Value       |
-| -------------------------- | ----------- |
-| **Average FPS**            | **17.0**    |
-| Frames at ~30fps (21-40ms) | 443 (80%)   |
-| Frames at ~15fps (41-70ms) | 35 (6%)     |
-| Frames at ~10fps (71-110ms)| 21 (4%)     |
-| Stalls (>110ms)            | 37 (7%)     |
-| Fast frames (0-20ms)       | 17 (3%)     |
+| Metric                      | Value     |
+| --------------------------- | --------- |
+| **Average FPS**             | **17.0**  |
+| Frames at ~30fps (21-40ms)  | 443 (80%) |
+| Frames at ~15fps (41-70ms)  | 35 (6%)   |
+| Frames at ~10fps (71-110ms) | 21 (4%)   |
+| Stalls (>110ms)             | 37 (7%)   |
+| Fast frames (0-20ms)        | 17 (3%)   |
 
 Frame interval distribution shows CEF is producing frames at roughly **30fps**
 when active (most intervals are 33-34ms), but frequent stalls bring the overall
@@ -321,7 +321,7 @@ more complex experiments, we should verify this assumption.
 
 | Result                      | Implication                                                                                                      |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| **cef-rs achieves ~60fps**  | CEF *can* do 60fps. Something about ts3's configuration or environment is different. Continue investigating ts3. |
+| **cef-rs achieves ~60fps**  | CEF _can_ do 60fps. Something about ts3's configuration or environment is different. Continue investigating ts3. |
 | **cef-rs also gets ~30fps** | The "smoothness" isn't frame rate—it's latency or frame pacing. The 30fps cap may be fundamental to CEF's OSR.   |
 
 #### Implementation Steps
@@ -393,11 +393,11 @@ throttling frame production.
 
 #### Configuration Comparison
 
-| Setting                  | cef-rs example (60fps) | ts3 (17fps)            |
-| ------------------------ | ---------------------- | ---------------------- |
-| `external_message_pump`  | `true`                 | **not set (false)**    |
-| `windowless_rendering`   | `true`                 | `true`                 |
-| Message loop             | `do_message_loop_work` | `do_message_loop_work` |
+| Setting                 | cef-rs example (60fps) | ts3 (17fps)            |
+| ----------------------- | ---------------------- | ---------------------- |
+| `external_message_pump` | `true`                 | **not set (false)**    |
+| `windowless_rendering`  | `true`                 | `true`                 |
+| Message loop            | `do_message_loop_work` | `do_message_loop_work` |
 
 #### Why Previous Attempts Failed
 
@@ -444,14 +444,14 @@ while !QUIT_FLAG.load(Ordering::Relaxed) {
 
 **Sustained rendering (frames 20-180, excluding page load):**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| 6-20ms (~60fps)      | 79    | **52%**    |
-| 21-40ms (~30fps)     | 28    | 19%        |
-| 41-70ms (~15fps)     | 12    | 8%         |
-| 71-110ms (~10fps)    | 11    | 7%         |
-| >110ms (stall)       | 16    | 11%        |
-| 0-5ms (burst)        | 5     | 3%         |
+| Interval          | Count | Percentage |
+| ----------------- | ----- | ---------- |
+| 6-20ms (~60fps)   | 79    | **52%**    |
+| 21-40ms (~30fps)  | 28    | 19%        |
+| 41-70ms (~15fps)  | 12    | 8%         |
+| 71-110ms (~10fps) | 11    | 7%         |
+| >110ms (stall)    | 16    | 11%        |
+| 0-5ms (burst)     | 5     | 3%         |
 
 **Most common intervals:** 17ms (59 occurrences), 16ms (30 occurrences) — both
 are 60fps.
@@ -459,17 +459,17 @@ are 60fps.
 #### Comparison Across All Experiments
 
 | Metric               | Exp 2 (no change) | Exp 4 (ext pump) | cef-rs example |
-| -------------------- | ----------------- | ----------------- | -------------- |
-| Average FPS          | 17.0              | **22.0**          | 60.9           |
-| Frames at ~60fps     | 3%                | **52%**           | ~90%           |
-| Frames at ~30fps     | 80%               | 19%               | ~5%            |
-| Frames >110ms        | 7%                | 11%               | rare           |
-| Most common interval | 33ms              | **17ms**          | 16ms           |
+| -------------------- | ----------------- | ---------------- | -------------- |
+| Average FPS          | 17.0              | **22.0**         | 60.9           |
+| Frames at ~60fps     | 3%                | **52%**          | ~90%           |
+| Frames at ~30fps     | 80%               | 19%              | ~5%            |
+| Frames >110ms        | 7%                | 11%              | rare           |
+| Most common interval | 33ms              | **17ms**         | 16ms           |
 
 #### Conclusion
 
 `external_message_pump` made a significant difference — the most common frame
-interval flipped from 33ms to **17ms**. CEF is now *trying* to run at 60fps,
+interval flipped from 33ms to **17ms**. CEF is now _trying_ to run at 60fps,
 but something still causes it to drop frames and stall.
 
 The bimodal distribution (sometimes 16ms, sometimes 33ms+) suggests CEF is
@@ -519,25 +519,25 @@ Added `cocoa = { workspace = true }` to `termsurf-profile/Cargo.toml`.
 
 **Overall stats:** 270 frames over 14.1s = **19.1 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| 0ms (burst/double)   | 32    | 12%        |
-| 6-20ms (~60fps)      | 113   | **42%**    |
-| 21-40ms (~30fps)     | 17    | 6%         |
-| 41-70ms (~15fps)     | 50    | 19%        |
-| 71-110ms (~10fps)    | 39    | 15%        |
-| >110ms (stall)       | 18    | 7%         |
+| Interval           | Count | Percentage |
+| ------------------ | ----- | ---------- |
+| 0ms (burst/double) | 32    | 12%        |
+| 6-20ms (~60fps)    | 113   | **42%**    |
+| 21-40ms (~30fps)   | 17    | 6%         |
+| 41-70ms (~15fps)   | 50    | 19%        |
+| 71-110ms (~10fps)  | 39    | 15%        |
+| >110ms (stall)     | 18    | 7%         |
 
 **Most common intervals:** 17ms (70), 16ms (37), 0ms (32)
 
 #### Comparison Across All Experiments
 
-| Metric               | Exp 2  | Exp 4 (+ext pump) | Exp 5 (+activation) | cef-rs |
-| -------------------- | ------ | ------------------ | -------------------- | ------ |
-| Average FPS          | 17.0   | 22.0               | **19.1**             | 60.9   |
-| Frames at ~60fps     | 3%     | 52%                | 42%                  | ~90%   |
-| Most common interval | 33ms   | 17ms               | 17ms                 | 16ms   |
-| Avg interval         | 59ms   | 45ms               | **52ms**             | ~16ms  |
+| Metric               | Exp 2 | Exp 4 (+ext pump) | Exp 5 (+activation) | cef-rs |
+| -------------------- | ----- | ----------------- | ------------------- | ------ |
+| Average FPS          | 17.0  | 22.0              | **19.1**            | 60.9   |
+| Frames at ~60fps     | 3%    | 52%               | 42%                 | ~90%   |
+| Most common interval | 33ms  | 17ms              | 17ms                | 16ms   |
+| Avg interval         | 59ms  | 45ms              | **52ms**            | ~16ms  |
 
 #### Conclusion
 
@@ -570,15 +570,15 @@ our manual polling loop as the cause.
 **Rationale:** After Experiments 2-5, the ts3 profile server now has identical
 CEF settings to the cef-rs example:
 
-| Setting                            | cef-rs example | ts3 (after Exp 5) |
-| ---------------------------------- | -------------- | ----------------- |
-| `external_message_pump`            | `true`         | `true`            |
-| `windowless_rendering_enabled`     | `true`         | `true`            |
-| `no_sandbox`                       | `true`         | `true`            |
-| `NSApplicationActivationPolicy`    | Regular        | Regular           |
-| winit event loop                   | Yes            | Yes               |
-| `on_schedule_message_pump_work`    | Not impl'd     | Not impl'd        |
-| `ControlFlow::Poll`               | Yes            | Yes               |
+| Setting                         | cef-rs example | ts3 (after Exp 5) |
+| ------------------------------- | -------------- | ----------------- |
+| `external_message_pump`         | `true`         | `true`            |
+| `windowless_rendering_enabled`  | `true`         | `true`            |
+| `no_sandbox`                    | `true`         | `true`            |
+| `NSApplicationActivationPolicy` | Regular        | Regular           |
+| winit event loop                | Yes            | Yes               |
+| `on_schedule_message_pump_work` | Not impl'd     | Not impl'd        |
+| `ControlFlow::Poll`             | Yes            | Yes               |
 
 The only remaining difference is that the cef-rs example has **real windows**
 with wgpu surfaces connected to the display. These provide a CVDisplayLink — a
@@ -627,22 +627,22 @@ cef::quit_message_loop();
 
 #### Success Criteria
 
-| Result       | Conclusion                                                               |
-| ------------ | ------------------------------------------------------------------------ |
-| ~60fps       | Our manual pump was the problem. Keep `run_message_loop()`.              |
-| Still ~20fps | CEF's own loop can't do 60fps here either. The process needs a window.   |
+| Result       | Conclusion                                                             |
+| ------------ | ---------------------------------------------------------------------- |
+| ~60fps       | Our manual pump was the problem. Keep `run_message_loop()`.            |
+| Still ~20fps | CEF's own loop can't do 60fps here either. The process needs a window. |
 
 #### Results
 
 **Overall stats:** 298 frames over 16.4s = **18.1 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| Burst (0-5ms)        | 36    | 12%        |
-| 60fps (6-20ms)       | 70    | **24%**    |
-| 30fps (21-40ms)      | 14    | 5%         |
-| Mid (41-70ms)        | 75    | 25%        |
-| Low (>70ms)          | 102   | **34%**    |
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 36    | 12%        |
+| 60fps (6-20ms)  | 70    | **24%**    |
+| 30fps (21-40ms) | 14    | 5%         |
+| Mid (41-70ms)   | 75    | 25%        |
+| Low (>70ms)     | 102   | **34%**    |
 
 **Most common long intervals:** 78ms (12), 75ms (11), 74ms (11), 76ms (10) —
 clustered around **~75ms** (roughly 5 vsync beats at 16.7ms each).
@@ -656,13 +656,13 @@ were isolated singles (53 occurrences of a lone 60fps frame).
 
 #### Comparison Across All Experiments
 
-| Metric               | Exp 4 (ext pump) | Exp 5 (+activation) | Exp 6 (run_msg_loop) | cef-rs |
-| -------------------- | ---------------- | -------------------- | -------------------- | ------ |
-| Average FPS          | 22.0             | 19.1                 | **18.1**             | 60.9   |
-| Frames at ~60fps     | 52%              | 42%                  | **24%**              | ~90%   |
-| Avg interval         | 45ms             | 52ms                 | **55ms**             | ~16ms  |
-| Low (>70ms)          | —                | 15%                  | **34%**              | rare   |
-| Dominant pattern     | bimodal 17/33ms  | bimodal 17/50-83ms   | **~75ms gaps**       | 16ms   |
+| Metric           | Exp 4 (ext pump) | Exp 5 (+activation) | Exp 6 (run_msg_loop) | cef-rs |
+| ---------------- | ---------------- | ------------------- | -------------------- | ------ |
+| Average FPS      | 22.0             | 19.1                | **18.1**             | 60.9   |
+| Frames at ~60fps | 52%              | 42%                 | **24%**              | ~90%   |
+| Avg interval     | 45ms             | 52ms                | **55ms**             | ~16ms  |
+| Low (>70ms)      | —                | 15%                 | **34%**              | rare   |
+| Dominant pattern | bimodal 17/33ms  | bimodal 17/50-83ms  | **~75ms gaps**       | 16ms   |
 
 #### Conclusion
 
@@ -671,7 +671,7 @@ were isolated singles (53 occurrences of a lone 60fps frame).
 completely:
 
 - **Experiment 4** had a bimodal distribution with the majority of frames at
-  16-17ms — CEF was *trying* to hit 60fps but dropping some beats
+  16-17ms — CEF was _trying_ to hit 60fps but dropping some beats
 - **Experiment 6** has a dominant **~75ms** interval — CEF's own loop produces
   frames at roughly **13fps** when active, with occasional bursts
 
@@ -693,12 +693,12 @@ closing the last remaining gap between ts3 and the cef-rs example.
 
 **Rationale:** Six experiments have eliminated every other variable:
 
-| Experiment | What it tested                  | Result  |
-| ---------- | ------------------------------- | ------- |
-| Exp 2      | winit event loop (no window)    | No help |
+| Experiment | What it tested                  | Result                 |
+| ---------- | ------------------------------- | ---------------------- |
+| Exp 2      | winit event loop (no window)    | No help                |
 | Exp 4      | `external_message_pump`         | Partial (52% at 60fps) |
-| Exp 5      | `NSApplicationActivationPolicy` | No help |
-| Exp 6      | `run_message_loop()`            | Worse   |
+| Exp 5      | `NSApplicationActivationPolicy` | No help                |
+| Exp 6      | `run_message_loop()`            | Worse                  |
 
 CEF settings are now identical to the cef-rs example. The only remaining
 difference: the cef-rs example has **real windows** connected to the display
@@ -741,22 +741,22 @@ impl ApplicationHandler for MinimalApp {
 
 #### Success Criteria
 
-| Result       | Conclusion                                                                |
-| ------------ | ------------------------------------------------------------------------- |
-| ~60fps       | The display link was the missing piece. Keep the hidden window.           |
-| Still ~22fps | It's not the display link. Try adding a wgpu surface on the window next.  |
+| Result       | Conclusion                                                               |
+| ------------ | ------------------------------------------------------------------------ |
+| ~60fps       | The display link was the missing piece. Keep the hidden window.          |
+| Still ~22fps | It's not the display link. Try adding a wgpu surface on the window next. |
 
 #### Results
 
 **Overall stats:** 647 frames over 25.2s = **25.7 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| Burst (0-5ms)        | 23    | 4%         |
-| 60fps (6-20ms)       | 503   | **78%**    |
-| 30fps (21-40ms)      | 39    | 6%         |
-| Mid (41-70ms)        | 17    | 3%         |
-| Low (>70ms)          | 64    | 10%        |
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 23    | 4%         |
+| 60fps (6-20ms)  | 503   | **78%**    |
+| 30fps (21-40ms) | 39    | 6%         |
+| Mid (41-70ms)   | 17    | 3%         |
+| Low (>70ms)     | 64    | 10%        |
 
 **Most common intervals:** 17ms (327), 16ms (174) — overwhelmingly **60fps**.
 
@@ -770,14 +770,14 @@ throttling.
 
 #### Comparison Across All Experiments
 
-| Metric               | Exp 4  | Exp 5  | Exp 6  | **Exp 7**  | cef-rs |
-| -------------------- | ------ | ------ | ------ | ---------- | ------ |
-| Average FPS          | 22.0   | 19.1   | 18.1   | **25.7**   | 60.9   |
-| Frames at ~60fps     | 52%    | 42%    | 24%    | **78%**    | ~90%   |
-| Avg interval         | 45ms   | 52ms   | 55ms   | **39ms**   | ~16ms  |
-| Low (>70ms)          | —      | 15%    | 34%    | **10%**    | rare   |
-| Max consecutive 60fps| 5      | —      | 5      | **57**     | —      |
-| Dominant pattern     | bimodal| bimodal| ~75ms  | **steady** | steady |
+| Metric                | Exp 4   | Exp 5   | Exp 6 | **Exp 7**  | cef-rs |
+| --------------------- | ------- | ------- | ----- | ---------- | ------ |
+| Average FPS           | 22.0    | 19.1    | 18.1  | **25.7**   | 60.9   |
+| Frames at ~60fps      | 52%     | 42%     | 24%   | **78%**    | ~90%   |
+| Avg interval          | 45ms    | 52ms    | 55ms  | **39ms**   | ~16ms  |
+| Low (>70ms)           | —       | 15%     | 34%   | **10%**    | rare   |
+| Max consecutive 60fps | 5       | —       | 5     | **57**     | —      |
+| Dominant pattern      | bimodal | bimodal | ~75ms | **steady** | steady |
 
 #### Conclusion
 
@@ -907,22 +907,22 @@ display timing, the bare CVDisplayLink won't help.
 
 #### Success Criteria
 
-| Result       | Conclusion                                                               |
-| ------------ | ------------------------------------------------------------------------ |
+| Result         | Conclusion                                                             |
+| -------------- | ---------------------------------------------------------------------- |
 | ~78%+ at 60fps | CVDisplayLink alone provides the timing. Clean solution, no window.    |
-| Back to ~52% | The window itself matters, not just the display link. Need window fix. |
+| Back to ~52%   | The window itself matters, not just the display link. Need window fix. |
 
 #### Results
 
 **Overall stats:** 230 frames over 12.6s = **18.2 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| Burst (0-5ms)        | 9     | 4%         |
-| 60fps (6-20ms)       | 69    | **30%**    |
-| 30fps (21-40ms)      | 47    | 21%        |
-| Mid (41-70ms)        | 37    | 16%        |
-| Low (>70ms)          | 67    | **29%**    |
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 9     | 4%         |
+| 60fps (6-20ms)  | 69    | **30%**    |
+| 30fps (21-40ms) | 47    | 21%        |
+| Mid (41-70ms)   | 37    | 16%        |
+| Low (>70ms)     | 67    | **29%**    |
 
 **Most common intervals:** 10ms (19), 9ms (9), 11ms (9) — no dominant 16-17ms
 peak. The intervals are scattered rather than clustered at vsync boundaries.
@@ -931,12 +931,12 @@ peak. The intervals are scattered rather than clustered at vsync boundaries.
 
 #### Comparison Across Key Experiments
 
-| Metric               | Exp 4 (ext pump) | **Exp 7 (window)** | **Exp 8 (CVDisplayLink)** | cef-rs |
-| -------------------- | ---------------- | ------------------ | ------------------------- | ------ |
-| Average FPS          | 22.0             | **25.7**           | **18.2**                  | 60.9   |
-| Frames at ~60fps     | 52%              | **78%**            | **30%**                   | ~90%   |
-| Avg interval         | 45ms             | **39ms**           | **55ms**                  | ~16ms  |
-| Max consecutive 60fps| 5                | **57**             | **4**                     | —      |
+| Metric                | Exp 4 (ext pump) | **Exp 7 (window)** | **Exp 8 (CVDisplayLink)** | cef-rs |
+| --------------------- | ---------------- | ------------------ | ------------------------- | ------ |
+| Average FPS           | 22.0             | **25.7**           | **18.2**                  | 60.9   |
+| Frames at ~60fps      | 52%              | **78%**            | **30%**                   | ~90%   |
+| Avg interval          | 45ms             | **39ms**           | **55ms**                  | ~16ms  |
+| Max consecutive 60fps | 5                | **57**             | **4**                     | —      |
 
 #### Conclusion
 
@@ -999,13 +999,13 @@ subsequent experiment.
 
 **Overall stats:** 514 frames over 23.0s = **22.3 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| Burst (0-5ms)        | 33    | 6%         |
-| 60fps (6-20ms)       | 314   | **61%**    |
-| 30fps (21-40ms)      | 31    | 6%         |
-| Mid (41-70ms)        | 75    | 14%        |
-| Low (>70ms)          | 60    | 11%        |
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 33    | 6%         |
+| 60fps (6-20ms)  | 314   | **61%**    |
+| 30fps (21-40ms) | 31    | 6%         |
+| Mid (41-70ms)   | 75    | 14%        |
+| Low (>70ms)     | 60    | 11%        |
 
 **Dominant intervals:** 17ms (167 times), 16ms (98 times) — a strong
 vsync-aligned peak at 16-17ms, exactly what a 60Hz display produces.
@@ -1081,11 +1081,11 @@ unsafe {
 
 #### Expected Outcome
 
-| Result                    | Meaning                                                    |
-| ------------------------- | ---------------------------------------------------------- |
-| Focus stays on WezTerm    | Fix works. Hidden window provides vsync without side effects. |
-| Focus still stolen        | Accessory policy doesn't prevent winit's window activation. Need native NSWindow approach. |
-| Performance regression    | Accessory policy interferes with vsync notifications. Unlikely but possible. |
+| Result                 | Meaning                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------ |
+| Focus stays on WezTerm | Fix works. Hidden window provides vsync without side effects.                              |
+| Focus still stolen     | Accessory policy doesn't prevent winit's window activation. Need native NSWindow approach. |
+| Performance regression | Accessory policy interferes with vsync notifications. Unlikely but possible.               |
 
 #### Why This Should Work
 
@@ -1173,11 +1173,11 @@ let window: id = unsafe {
 
 #### Expected Outcome
 
-| Result                    | Meaning                                                       |
-| ------------------------- | ------------------------------------------------------------- |
-| Focus stays on WezTerm    | Fix works. Native window provides vsync without focus issues. |
-| Focus still stolen        | Something else is activating the process. Investigate further. |
-| Performance regression    | Custom NSWindow doesn't get vsync. Unlikely — it's still an NSWindow. |
+| Result                 | Meaning                                                               |
+| ---------------------- | --------------------------------------------------------------------- |
+| Focus stays on WezTerm | Fix works. Native window provides vsync without focus issues.         |
+| Focus still stolen     | Something else is activating the process. Investigate further.        |
+| Performance regression | Custom NSWindow doesn't get vsync. Unlikely — it's still an NSWindow. |
 
 #### Why This Should Work
 
@@ -1198,13 +1198,13 @@ focus stealing.
 
 **Overall stats:** 407 frames over 21.2s = **19.1 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| Burst (0-5ms)        | 20    | 4%         |
-| 60fps (6-20ms)       | 140   | **34%**    |
-| 30fps (21-40ms)      | 50    | 12%        |
-| Mid (41-70ms)        | 90    | 22%        |
-| Low (>70ms)          | 106   | 26%        |
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 20    | 4%         |
+| 60fps (6-20ms)  | 140   | **34%**    |
+| 30fps (21-40ms) | 50    | 12%        |
+| Mid (41-70ms)   | 90    | 22%        |
+| Low (>70ms)     | 106   | 26%        |
 
 **Dominant intervals:** Scattered (10ms, 13ms, 12ms) — no 16-17ms vsync peak.
 
@@ -1264,11 +1264,11 @@ compositor), while `orderFront:` ensures the window is actively composited.
 
 #### Expected Outcome
 
-| Result                       | Meaning                                                          |
-| ---------------------------- | ---------------------------------------------------------------- |
-| Focus stays + vsync restored | Both problems solved. Ship it.                                   |
+| Result                       | Meaning                                                                                               |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Focus stays + vsync restored | Both problems solved. Ship it.                                                                        |
 | Focus stolen                 | `orderFront:` activates the app despite Accessory policy and canBecomeKey: NO. Need another approach. |
-| Vsync still missing          | The issue isn't orderBack vs orderFront. Winit does something else (CALayer, content view, etc.). |
+| Vsync still missing          | The issue isn't orderBack vs orderFront. Winit does something else (CALayer, content view, etc.).     |
 
 #### Why This Should Work
 
@@ -1291,13 +1291,13 @@ work in macOS — they're visible and rendered but don't steal the text cursor.
 
 **Overall stats:** 415 frames over 20.0s = **20.7 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| Burst (0-5ms)        | 13    | 3%         |
-| 60fps (6-20ms)       | 141   | **34%**    |
-| 30fps (21-40ms)      | 58    | 14%        |
-| Mid (41-70ms)        | 103   | 24%        |
-| Low (>70ms)          | 99    | 23%        |
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 13    | 3%         |
+| 60fps (6-20ms)  | 141   | **34%**    |
+| 30fps (21-40ms) | 58    | 14%        |
+| Mid (41-70ms)   | 103   | 24%        |
+| Low (>70ms)     | 99    | 23%        |
 
 **Dominant intervals:** Scattered (11ms, 10ms, 13ms) — no 16-17ms vsync peak.
 
@@ -1306,11 +1306,11 @@ work in macOS — they're visible and rendered but don't steal the text cursor.
 #### Comparison
 
 | Metric                | Exp 9 (winit window) | Exp 11 (orderBack) | **Exp 12 (orderFront)** |
-| --------------------- | -------------------- | ------------------- | ----------------------- |
-| Average FPS           | 22.3                 | 19.1                | **20.7**                |
-| Frames at ~60fps      | 61%                  | 34%                 | **34%**                 |
-| Max consecutive 60fps | 35                   | 4                   | **4**                   |
-| Dominant interval     | 16-17ms              | scattered           | **scattered**           |
+| --------------------- | -------------------- | ------------------ | ----------------------- |
+| Average FPS           | 22.3                 | 19.1               | **20.7**                |
+| Frames at ~60fps      | 61%                  | 34%                | **34%**                 |
+| Max consecutive 60fps | 35                   | 4                  | **4**                   |
+| Dominant interval     | 16-17ms              | scattered          | **scattered**           |
 
 #### Conclusion
 
@@ -1376,11 +1376,11 @@ let _: () = msg_send![window, setContentView:view];
 
 #### Expected Outcome
 
-| Result                       | Meaning                                                          |
-| ---------------------------- | ---------------------------------------------------------------- |
-| Vsync restored + no focus    | CALayer was the missing piece. Problem fully solved.             |
-| Vsync still missing          | CALayer is not sufficient. Need to investigate winit's source code for other setup (e.g., display link, NSOpenGLContext). |
-| Focus stolen                 | The content view somehow triggers activation. Unlikely since canBecomeKey is still NO. |
+| Result                    | Meaning                                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Vsync restored + no focus | CALayer was the missing piece. Problem fully solved.                                                                      |
+| Vsync still missing       | CALayer is not sufficient. Need to investigate winit's source code for other setup (e.g., display link, NSOpenGLContext). |
+| Focus stolen              | The content view somehow triggers activation. Unlikely since canBecomeKey is still NO.                                    |
 
 #### Why This Should Work
 
@@ -1404,13 +1404,13 @@ vsync cycle.
 
 **Overall stats:** 194 frames over 9.0s = **21.5 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| Burst (0-5ms)        | 11    | 5%         |
-| 60fps (6-20ms)       | 70    | **36%**    |
-| 30fps (21-40ms)      | 9     | 4%         |
-| Mid (41-70ms)        | 48    | 24%        |
-| Low (>70ms)          | 55    | 28%        |
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 11    | 5%         |
+| 60fps (6-20ms)  | 70    | **36%**    |
+| 30fps (21-40ms) | 9     | 4%         |
+| Mid (41-70ms)   | 48    | 24%        |
+| Low (>70ms)     | 55    | 28%        |
 
 **Dominant intervals:** Scattered (10ms, 11ms, 5ms, 76ms) — no 16-17ms vsync
 peak.
@@ -1420,15 +1420,14 @@ peak.
 #### Comparison Across Native Window Experiments
 
 | Metric                | Exp 9 (winit) | Exp 11 (orderBack) | Exp 12 (orderFront) | **Exp 13 (CALayer)** |
-| --------------------- | ------------- | ------------------- | -------------------- | -------------------- |
-| Frames at ~60fps      | 61%           | 34%                 | 34%                  | **36%**              |
-| Max consecutive 60fps | 35            | 4                   | 4                    | **3**                |
-| Dominant interval     | 16-17ms       | scattered           | scattered            | **scattered**        |
+| --------------------- | ------------- | ------------------ | ------------------- | -------------------- |
+| Frames at ~60fps      | 61%           | 34%                | 34%                 | **36%**              |
+| Max consecutive 60fps | 35            | 4                  | 4                   | **3**                |
+| Dominant interval     | 16-17ms       | scattered          | scattered           | **scattered**        |
 
 #### Conclusion
 
-The CALayer hypothesis was wrong. All three native NSWindow experiments (11, 12,
-13) produce the same ~34-36% at 60fps with max streak of 3-4, regardless of
+The CALayer hypothesis was wrong. All three native NSWindow experiments (11, 12, 13) produce the same ~34-36% at 60fps with max streak of 3-4, regardless of
 ordering method or layer backing. Winit's window produces 61-78% with streaks
 of 35-57.
 
@@ -1471,15 +1470,15 @@ get the timing signal it needs.
 
 Evidence supporting this:
 
-| Configuration                     | Event loop          | 60fps %  | Max streak |
-| --------------------------------- | ------------------- | -------- | ---------- |
-| No window, sleep+pump             | None                | 52%      | 5          |
-| Native window, sleep+pump         | None                | 34-36%   | 3-4        |
-| Winit window, `pump_app_events`   | NSApp event pump    | 61-78%   | 35-57      |
-| CEF `run_message_loop`            | CEF's own loop      | 24%      | —          |
+| Configuration                   | Event loop       | 60fps % | Max streak |
+| ------------------------------- | ---------------- | ------- | ---------- |
+| No window, sleep+pump           | None             | 52%     | 5          |
+| Native window, sleep+pump       | None             | 34-36%  | 3-4        |
+| Winit window, `pump_app_events` | NSApp event pump | 61-78%  | 35-57      |
+| CEF `run_message_loop`          | CEF's own loop   | 24%     | —          |
 
 The only configuration that achieves vsync is the one that pumps NSApplication
-events. The window alone actually makes things *worse* (34% vs 52%).
+events. The window alone actually makes things _worse_ (34% vs 52%).
 
 #### Changes
 
@@ -1521,11 +1520,11 @@ loop {
 
 #### Expected Outcome
 
-| Result                       | Meaning                                                          |
-| ---------------------------- | ---------------------------------------------------------------- |
-| Vsync restored + no focus    | Event pumping was the missing piece. Problem fully solved.       |
-| Vsync still missing          | NSApp event pumping alone isn't enough. Winit does something else (CFRunLoop integration, timer sources, etc.). |
-| Focus stolen                 | Event pumping triggers app activation. Unlikely with Accessory policy + canBecomeKey: NO. |
+| Result                    | Meaning                                                                                                         |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Vsync restored + no focus | Event pumping was the missing piece. Problem fully solved.                                                      |
+| Vsync still missing       | NSApp event pumping alone isn't enough. Winit does something else (CFRunLoop integration, timer sources, etc.). |
+| Focus stolen              | Event pumping triggers app activation. Unlikely with Accessory policy + canBecomeKey: NO.                       |
 
 #### Why This Should Work
 
@@ -1550,13 +1549,13 @@ processes the vsync events the window server sends to it.
 
 **Overall stats:** 278 frames over 11.4s = **24.3 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| Burst (0-5ms)        | 19    | 6%         |
-| 60fps (6-20ms)       | 92    | **33%**    |
-| 30fps (21-40ms)      | 55    | 19%        |
-| Mid (41-70ms)        | 54    | 19%        |
-| Low (>70ms)          | 57    | 20%        |
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 19    | 6%         |
+| 60fps (6-20ms)  | 92    | **33%**    |
+| 30fps (21-40ms) | 55    | 19%        |
+| Mid (41-70ms)   | 54    | 19%        |
+| Low (>70ms)     | 57    | 20%        |
 
 **Dominant intervals:** Scattered (10ms, 11ms, 14ms, 31ms) — no 16-17ms vsync
 peak.
@@ -1566,10 +1565,10 @@ peak.
 #### Comparison Across All Native Window Experiments
 
 | Metric                | Exp 11 (orderBack) | Exp 12 (orderFront) | Exp 13 (CALayer) | **Exp 14 (NSApp pump)** |
-| --------------------- | ------------------- | -------------------- | ---------------- | ----------------------- |
-| Frames at ~60fps      | 34%                 | 34%                  | 36%              | **33%**                 |
-| Max consecutive 60fps | 4                   | 4                    | 3                | **4**                   |
-| Dominant interval     | scattered           | scattered            | scattered        | **scattered**           |
+| --------------------- | ------------------ | ------------------- | ---------------- | ----------------------- |
+| Frames at ~60fps      | 34%                | 34%                 | 36%              | **33%**                 |
+| Max consecutive 60fps | 4                  | 4                   | 3                | **4**                   |
+| Dominant interval     | scattered          | scattered           | scattered        | **scattered**           |
 
 #### Conclusion
 
@@ -1602,6 +1601,7 @@ setup — whatever it is — cannot be replicated by creating an NSWindow manual
 Meanwhile, winit produces 61-78% at 60fps but steals focus.
 
 Previous focus-fix attempts with winit:
+
 - `with_active(false)` — didn't work
 - `NSApplicationActivationPolicyAccessory` (Exp 10) — didn't work
 
@@ -1609,9 +1609,9 @@ Both failed because winit internally calls `makeKeyAndOrderFront:`, which makes
 the window key and activates the application regardless of these settings.
 
 **Hypothesis:** If we swizzle `canBecomeKey` on the `NSWindow` class itself
-(via the ObjC runtime) *before* winit creates its EventLoop and window, then
+(via the ObjC runtime) _before_ winit creates its EventLoop and window, then
 when winit calls `makeKeyAndOrderFront:`, the window will be ordered front
-(preserving vsync registration) but *cannot* become key (preserving focus).
+(preserving vsync registration) but _cannot_ become key (preserving focus).
 
 This is the reverse of Experiment 11's approach: instead of building a focus-safe
 window and trying to add vsync, we take winit's vsync-capable window and remove
@@ -1654,19 +1654,20 @@ or similar. The exact implementation will be determined at build time.
 
 #### Expected Outcome
 
-| Result                       | Meaning                                                          |
-| ---------------------------- | ---------------------------------------------------------------- |
-| Vsync + no focus steal       | Problem fully solved. Winit provides vsync, swizzle prevents focus. |
-| Vsync but focus still stolen | Winit calls `[NSApp activateIgnoringOtherApps:]` separately. Need to swizzle that too. |
+| Result                       | Meaning                                                                                                                           |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Vsync + no focus steal       | Problem fully solved. Winit provides vsync, swizzle prevents focus.                                                               |
+| Vsync but focus still stolen | Winit calls `[NSApp activateIgnoringOtherApps:]` separately. Need to swizzle that too.                                            |
 | Vsync lost                   | `canBecomeKey: NO` prevents winit from fully setting up the window. Unlikely — key status and window registration are orthogonal. |
 
 #### Why This Should Work
 
 Method swizzling replaces the implementation of an Objective-C method at runtime.
-By replacing `canBecomeKey` on the `NSWindow` class *before* winit creates any
+By replacing `canBecomeKey` on the `NSWindow` class _before_ winit creates any
 windows, every NSWindow in this process will return `NO` from `canBecomeKey`.
 
 When winit calls `makeKeyAndOrderFront:`:
+
 1. The window is ordered front (**vsync registration preserved**)
 2. The runtime checks `canBecomeKey` → returns `NO`
 3. The window is **not** made key (**no focus stealing**)
@@ -1680,7 +1681,7 @@ this process, not the system.
 - `with_active(false)` — winit window attribute, but winit may ignore it or
   call `makeKeyAndOrderFront:` regardless
 - `NSApplicationActivationPolicyAccessory` — prevents app-level activation, but
-  `makeKeyAndOrderFront:` can still make the window key *within* the app,
+  `makeKeyAndOrderFront:` can still make the window key _within_ the app,
   triggering macOS to switch focus to the process
 - Swizzling `canBecomeKey` works at a deeper level — it prevents the window from
   ever becoming key, which is the root cause of focus stealing
@@ -1701,7 +1702,7 @@ this process, not the system.
 **FAILED** — The webview did not open at all. The global `canBecomeKey` swizzle
 on the `NSWindow` class broke CEF entirely.
 
-Swizzling at the class level affects *every* NSWindow instance in the process —
+Swizzling at the class level affects _every_ NSWindow instance in the process —
 including internal windows that CEF/Chromium creates during initialization. Even
 in off-screen rendering mode, CEF creates hidden helper windows that require
 `canBecomeKey` to return `YES` to function properly. The global override
@@ -1728,14 +1729,14 @@ the WezTerm GUI immediately reclaim it.
 **Problem:** Eight experiments (10-15) tried to prevent the profile server from
 stealing focus:
 
-| Experiment | Approach                            | Result                        |
-| ---------- | ----------------------------------- | ----------------------------- |
-| Exp 10     | NSApplicationActivationPolicyAccessory | Focus still stolen         |
-| Exp 11     | Native NSWindow, canBecomeKey: NO   | Focus fixed, lost vsync       |
-| Exp 12     | orderFront instead of orderBack     | Focus fixed, lost vsync       |
-| Exp 13     | Layer-backed content view           | Focus fixed, lost vsync       |
-| Exp 14     | NSApp event pumping                 | Focus fixed, lost vsync       |
-| Exp 15     | Global canBecomeKey swizzle + winit | Broke CEF entirely            |
+| Experiment | Approach                               | Result                  |
+| ---------- | -------------------------------------- | ----------------------- |
+| Exp 10     | NSApplicationActivationPolicyAccessory | Focus still stolen      |
+| Exp 11     | Native NSWindow, canBecomeKey: NO      | Focus fixed, lost vsync |
+| Exp 12     | orderFront instead of orderBack        | Focus fixed, lost vsync |
+| Exp 13     | Layer-backed content view              | Focus fixed, lost vsync |
+| Exp 14     | NSApp event pumping                    | Focus fixed, lost vsync |
+| Exp 15     | Global canBecomeKey swizzle + winit    | Broke CEF entirely      |
 
 The fundamental conflict: winit's window is needed for vsync (Exp 7/9 proved
 this), but winit's window creation steals focus. Every attempt to prevent focus
@@ -1793,12 +1794,12 @@ unsafe {
 
 #### Expected Outcome
 
-| Result                              | Meaning                                                  |
-| ----------------------------------- | -------------------------------------------------------- |
-| Brief flicker, then focus returns   | Fix works. The focus steal is imperceptible to the user.  |
-| No flicker at all                   | Even better — the reclaim happens before the user notices. |
-| Focus doesn't return                | The timing is wrong. May need a longer delay or different trigger point. |
-| Performance regression              | Unlikely — no changes to the profile server's event loop. |
+| Result                            | Meaning                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------ |
+| Brief flicker, then focus returns | Fix works. The focus steal is imperceptible to the user.                 |
+| No flicker at all                 | Even better — the reclaim happens before the user notices.               |
+| Focus doesn't return              | The timing is wrong. May need a longer delay or different trigger point. |
+| Performance regression            | Unlikely — no changes to the profile server's event loop.                |
 
 #### Why This Should Work
 
@@ -1808,6 +1809,7 @@ pattern is: let the subprocess do what it needs to do, then the main app
 reclaims focus when it's ready.
 
 The XPC connection event is the ideal trigger because:
+
 - It fires after the profile server has fully initialized (window created, CEF
   running)
 - It fires in the GUI process on a dispatch queue thread
@@ -1834,13 +1836,13 @@ on XPC connection and the user never lost keyboard focus.
 
 **Overall stats:** 721 frames over 33.9s = **21.3 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| Burst (0-5ms)        | 38    | 5%         |
-| 60fps (6-20ms)       | 148   | **20%**    |
-| 30fps (21-40ms)      | 316   | **43%**    |
-| Mid (41-70ms)        | 110   | 15%        |
-| Low (>70ms)          | 108   | 15%        |
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 38    | 5%         |
+| 60fps (6-20ms)  | 148   | **20%**    |
+| 30fps (21-40ms) | 316   | **43%**    |
+| Mid (41-70ms)   | 110   | 15%        |
+| Low (>70ms)     | 108   | 15%        |
 
 **Dominant intervals:** 33ms (131), 34ms (98) — back to 30fps, identical to the
 pre-hidden-window experiments.
@@ -1865,7 +1867,7 @@ hidden window was providing.
 
 The root cause is a timing problem: the GUI's XPC connection handler fires
 **before** the profile server creates its winit window. The profile server's
-startup sequence is: (1) connect to GUI via XPC → *GUI reclaims focus here* →
+startup sequence is: (1) connect to GUI via XPC → _GUI reclaims focus here_ →
 (2) initialize CEF → (3) create winit window. The window is created while the
 process is already deactivated, so it never establishes a proper display link.
 
@@ -1921,7 +1923,7 @@ Timer fires at 60Hz → send_external_begin_frame() → compositor runs → on_a
 ```
 
 We replace CEF's internal frame scheduling with our own timer. CEF still does
-all the rendering work — we just tell it *when*.
+all the rendering work — we just tell it _when_.
 
 #### API Details
 
@@ -1989,13 +1991,13 @@ The conversion ratio from nanoseconds to ticks is obtained from
 
 This approach is fundamentally different from all 16 previous experiments:
 
-| Previous experiments (1-16)         | Experiment 17                     |
-| ----------------------------------- | --------------------------------- |
-| CEF decides when to render          | **We** decide when to render      |
-| Tried to influence CEF's scheduling | Replaced CEF's scheduling         |
-| Needed vsync signal from OS         | Timer provides the signal         |
-| Required window/event loop          | No window, no event loop          |
-| Inconsistent frame timing           | Deterministic frame timing        |
+| Previous experiments (1-16)         | Experiment 17                |
+| ----------------------------------- | ---------------------------- |
+| CEF decides when to render          | **We** decide when to render |
+| Tried to influence CEF's scheduling | Replaced CEF's scheduling    |
+| Needed vsync signal from OS         | Timer provides the signal    |
+| Required window/event loop          | No window, no event loop     |
+| Inconsistent frame timing           | Deterministic frame timing   |
 
 CEF's `external_begin_frame` is designed for embedders who have their own
 rendering pipeline and need CEF to synchronize with it. This is exactly our
@@ -2004,11 +2006,11 @@ produce frames on our schedule, not its own.
 
 #### Expected Outcome
 
-| Result                     | Meaning                                                      |
-| -------------------------- | ------------------------------------------------------------ |
-| ~100% at 60fps             | Perfect solution. No window, no vsync, deterministic frames. |
-| 60fps but frames are empty | CEF needs `do_message_loop_work` called more frequently or with different timing relative to `send_external_begin_frame`. |
-| No frames at all           | The binding may need additional setup (e.g., frame time argument). Check CEF source. |
+| Result                     | Meaning                                                                                                                                            |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~100% at 60fps             | Perfect solution. No window, no vsync, deterministic frames.                                                                                       |
+| 60fps but frames are empty | CEF needs `do_message_loop_work` called more frequently or with different timing relative to `send_external_begin_frame`.                          |
+| No frames at all           | The binding may need additional setup (e.g., frame time argument). Check CEF source.                                                               |
 | Still ~30fps               | CEF's compositor has additional internal throttling that `external_begin_frame` doesn't override. Investigate `windowless_frame_rate` interaction. |
 
 #### Baseline (Pre-Exp 17, Hidden Window with Focus Stealing)
@@ -2019,13 +2021,13 @@ This establishes the performance target to beat.
 
 **Overall stats:** 660 frames over 27.0s = **24.5 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| Burst (0-5ms)        | 18    | 2%         |
-| 60fps (6-20ms)       | 463   | **70%**    |
-| 30fps (21-40ms)      | 38    | 5%         |
-| Mid (41-70ms)        | 61    | 9%         |
-| Low (>70ms)          | 79    | 11%        |
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 18    | 2%         |
+| 60fps (6-20ms)  | 463   | **70%**    |
+| 30fps (21-40ms) | 38    | 5%         |
+| Mid (41-70ms)   | 61    | 9%         |
+| Low (>70ms)     | 79    | 11%        |
 
 **Dominant intervals:** 17ms (195), 16ms (120) — strong vsync-aligned peak.
 
@@ -2040,8 +2042,8 @@ window.
 We assumed CEF needed environmental signals (vsync, display link, window server
 notifications) to produce frames. Experiments 1-16 tried to provide those
 signals. But the real answer was always available — CEF has an API to bypass its
-internal scheduling entirely. We were so focused on what the process *environment*
-needed that we missed what the CEF *API* offered.
+internal scheduling entirely. We were so focused on what the process _environment_
+needed that we missed what the CEF _API_ offered.
 
 #### Notes
 
@@ -2060,13 +2062,13 @@ needed that we missed what the CEF *API* offered.
 
 **Overall stats:** 218 frames over 14.8s = **14.8 fps average**
 
-| Interval             | Count | Percentage |
-| -------------------- | ----- | ---------- |
-| Burst (0-5ms)        | 4     | 1%         |
-| 60fps (6-20ms)       | 23    | **10%**    |
-| 30fps (21-40ms)      | 46    | 21%        |
-| Mid (41-70ms)        | 68    | 31%        |
-| Low (>70ms)          | 76    | **35%**    |
+| Interval        | Count | Percentage |
+| --------------- | ----- | ---------- |
+| Burst (0-5ms)   | 4     | 1%         |
+| 60fps (6-20ms)  | 23    | **10%**    |
+| 30fps (21-40ms) | 46    | 21%        |
+| Mid (41-70ms)   | 68    | 31%        |
+| Low (>70ms)     | 76    | **35%**    |
 
 **Dominant intervals:** None — completely scattered (23ms, 62ms, 44ms, 65ms,
 41ms). No vsync-aligned peak, no consistent cadence at all.
@@ -2075,13 +2077,13 @@ needed that we missed what the CEF *API* offered.
 
 #### Comparison
 
-| Metric                | Baseline (Exp 9) | **Exp 17**  |
-| --------------------- | ---------------- | ----------- |
-| Average FPS           | 24.5             | **14.8**    |
-| Frames at ~60fps      | 70%              | **10%**     |
-| Low (>70ms)           | 11%              | **35%**     |
-| Max consecutive 60fps | 40               | **2**       |
-| Dominant interval     | 16-17ms          | **none**    |
+| Metric                | Baseline (Exp 9) | **Exp 17** |
+| --------------------- | ---------------- | ---------- |
+| Average FPS           | 24.5             | **14.8**   |
+| Frames at ~60fps      | 70%              | **10%**    |
+| Low (>70ms)           | 11%              | **35%**    |
+| Max consecutive 60fps | 40               | **2**      |
+| Dominant interval     | 16-17ms          | **none**   |
 
 #### Conclusion
 
@@ -2118,6 +2120,7 @@ changes accumulated in the profile server are:
 3. Various comment updates
 
 None of these changes produced an acceptable solution:
+
 - The hidden window achieves 60-70% at 60fps but **steals focus** (Exp 7/9)
 - Every attempt to fix focus stealing either broke vsync (Exp 11-14), broke
   CEF (Exp 15), or caused a performance regression (Exp 16)
@@ -2157,6 +2160,7 @@ approach entirely.
 #### What This Preserves
 
 All non-performance changes made during Issues 325-337 remain intact:
+
 - Ctrl+C graceful shutdown via `QUIT_FLAG`
 - XPC communication and Mach port transfer
 - Multi-browser support
@@ -2170,12 +2174,12 @@ Only the message loop implementation and CEF settings revert.
 
 314 frames in 11.0 seconds = **28.5 fps** average.
 
-| Interval Bucket | Count | Percentage | Meaning |
-|-----------------|-------|------------|---------|
-| 0-5ms (duplicates) | 37 | 12% | Same-timestamp double frames |
-| 14-20ms (60fps) | 126 | 40% | Good frames |
-| 30-36ms (30fps) | 72 | 23% | Half-rate frames |
-| >50ms (drops) | 56 | 18% | Missed frames / gaps |
+| Interval Bucket    | Count | Percentage | Meaning                      |
+| ------------------ | ----- | ---------- | ---------------------------- |
+| 0-5ms (duplicates) | 37    | 12%        | Same-timestamp double frames |
+| 14-20ms (60fps)    | 126   | 40%        | Good frames                  |
+| 30-36ms (30fps)    | 72    | 23%        | Half-rate frames             |
+| >50ms (drops)      | 56    | 18%        | Missed frames / gaps         |
 
 Max consecutive 60fps streak: **11 frames**.
 
@@ -2197,26 +2201,26 @@ unstable timing. Any future experiments start from this foundation.
 
 ## Summary of All Experiments
 
-| # | Experiment | Result | Key Metric |
-|---|-----------|--------|------------|
-| 1 | Document Process Architecture | PARTIAL | Identified extra IPC hop, but hop wasn't the bottleneck |
-| 2 | Add Event Loop to Profile Server | FAILED | 17fps — winit event loop alone didn't help |
-| 3 | Measure cef-rs Example Frame Rate | SUCCESS | 60.9fps — proved CEF can deliver 60fps |
-| 4 | Enable `external_message_pump` | PARTIAL | 22fps, 52% at 60fps — config mismatch was real |
-| 5 | `NSApplicationActivationPolicyRegular` | FAILED | 19fps — App Nap not the cause |
-| 6 | Use `run_message_loop()` | FAILED | 18fps — CEF's own loop was worse |
-| 7 | Add Hidden 1x1 Window | SUCCESS | 78% at 60fps, streak of 57 — window provides vsync |
-| 8 | Replace Window with CVDisplayLink | FAILED | 30% at 60fps — bare display link insufficient |
-| 9 | Restore Hidden Window Baseline | SUCCESS | 61% at 60fps — confirmed window is the key |
-| 10 | `NSApplicationActivationPolicyAccessory` | FAILED | Focus still stolen — winit calls `makeKeyAndOrderFront:` |
-| 11 | Native NSWindow with `canBecomeKey: NO` | PARTIAL | 20.7fps — no focus steal, but lost vsync |
-| 12 | `orderFront` instead of `orderBack` | PARTIAL | 34% at 60fps — still no vsync recovery |
-| 13 | Add Layer-Backed Content View | FAILED | 34-36% at 60fps — CALayer didn't restore vsync |
-| 14 | NSApplication Event Pumping | FAILED | 34-36% at 60fps — NSApp pumping couldn't replicate winit |
-| 15 | Swizzle `canBecomeKey` on Winit's Window | FAILED | Broke CEF — global swizzle hit CEF's internal windows |
-| 16 | GUI-Side Focus Reclaim | PARTIAL | Focus reclaimed, but vsync destroyed (20% at 60fps) |
-| 17 | External Begin Frame at 60Hz | FAILED | 14.8fps — worst result, API doesn't work as expected |
-| 18 | Revert to Baseline | COMPLETE | 28.5fps, 40% at 60fps — clean foundation restored |
+| #   | Experiment                               | Result   | Key Metric                                               |
+| --- | ---------------------------------------- | -------- | -------------------------------------------------------- |
+| 1   | Document Process Architecture            | PARTIAL  | Identified extra IPC hop, but hop wasn't the bottleneck  |
+| 2   | Add Event Loop to Profile Server         | FAILED   | 17fps — winit event loop alone didn't help               |
+| 3   | Measure cef-rs Example Frame Rate        | SUCCESS  | 60.9fps — proved CEF can deliver 60fps                   |
+| 4   | Enable `external_message_pump`           | PARTIAL  | 22fps, 52% at 60fps — config mismatch was real           |
+| 5   | `NSApplicationActivationPolicyRegular`   | FAILED   | 19fps — App Nap not the cause                            |
+| 6   | Use `run_message_loop()`                 | FAILED   | 18fps — CEF's own loop was worse                         |
+| 7   | Add Hidden 1x1 Window                    | SUCCESS  | 78% at 60fps, streak of 57 — window provides vsync       |
+| 8   | Replace Window with CVDisplayLink        | FAILED   | 30% at 60fps — bare display link insufficient            |
+| 9   | Restore Hidden Window Baseline           | SUCCESS  | 61% at 60fps — confirmed window is the key               |
+| 10  | `NSApplicationActivationPolicyAccessory` | FAILED   | Focus still stolen — winit calls `makeKeyAndOrderFront:` |
+| 11  | Native NSWindow with `canBecomeKey: NO`  | PARTIAL  | 20.7fps — no focus steal, but lost vsync                 |
+| 12  | `orderFront` instead of `orderBack`      | PARTIAL  | 34% at 60fps — still no vsync recovery                   |
+| 13  | Add Layer-Backed Content View            | FAILED   | 34-36% at 60fps — CALayer didn't restore vsync           |
+| 14  | NSApplication Event Pumping              | FAILED   | 34-36% at 60fps — NSApp pumping couldn't replicate winit |
+| 15  | Swizzle `canBecomeKey` on Winit's Window | FAILED   | Broke CEF — global swizzle hit CEF's internal windows    |
+| 16  | GUI-Side Focus Reclaim                   | PARTIAL  | Focus reclaimed, but vsync destroyed (20% at 60fps)      |
+| 17  | External Begin Frame at 60Hz             | FAILED   | 14.8fps — worst result, API doesn't work as expected     |
+| 18  | Revert to Baseline                       | COMPLETE | 28.5fps, 40% at 60fps — clean foundation restored        |
 
 ## Conclusions
 

@@ -27,16 +27,16 @@ missing, fix them.
 
 #### All XDG path usages
 
-| # | File                                  | Line    | XDG variable      | Subdir                                 | Resulting path                                               |
-| - | ------------------------------------- | ------- | ----------------- | -------------------------------------- | ------------------------------------------------------------ |
-| 1 | `gui/src/config/file_load.zig`        | 12      | `XDG_CONFIG_HOME` | `termsurf/config.ghostty`              | `~/.config/termsurf/config.ghostty`                          |
-| 2 | `gui/src/config/file_load.zig`        | 21      | `XDG_CONFIG_HOME` | `termsurf/config`                      | `~/.config/termsurf/config`                                  |
-| 3 | `gui/src/config/theme.zig`            | 33      | `XDG_CONFIG_HOME` | `termsurf/themes`                      | `~/.config/termsurf/themes/`                                 |
-| 4 | `gui/src/apprt/xpc.zig`               | 707–736 | `XDG_DATA_HOME`   | `termsurf/chromium-profiles/{profile}` | `~/.local/share/termsurf/chromium-profiles/{profile}`        |
-| 5 | `gui/src/crash/dir.zig`               | 9       | `XDG_STATE_HOME`  | `ghostty/crash`                        | `~/.local/state/ghostty/crash/`                              |
-| 6 | `gui/src/cli/ssh-cache/DiskCache.zig` | 37      | `XDG_STATE_HOME`  | `ghostty/ssh_cache`                    | `~/.local/state/ghostty/ssh_cache`                           |
-| 7 | `gui/src/cli/ssh_cache.zig`           | 88      | —                 | —                                      | Calls `DiskCache.defaultPath(alloc, "ghostty")` (same as #6) |
-| 8 | `gui/src/crash/sentry.zig`            | 128     | `XDG_CACHE_HOME`  | `ghostty/sentry`                       | `~/.cache/ghostty/sentry/`                                   |
+| #   | File                                  | Line    | XDG variable      | Subdir                                 | Resulting path                                               |
+| --- | ------------------------------------- | ------- | ----------------- | -------------------------------------- | ------------------------------------------------------------ |
+| 1   | `gui/src/config/file_load.zig`        | 12      | `XDG_CONFIG_HOME` | `termsurf/config.ghostty`              | `~/.config/termsurf/config.ghostty`                          |
+| 2   | `gui/src/config/file_load.zig`        | 21      | `XDG_CONFIG_HOME` | `termsurf/config`                      | `~/.config/termsurf/config`                                  |
+| 3   | `gui/src/config/theme.zig`            | 33      | `XDG_CONFIG_HOME` | `termsurf/themes`                      | `~/.config/termsurf/themes/`                                 |
+| 4   | `gui/src/apprt/xpc.zig`               | 707–736 | `XDG_DATA_HOME`   | `termsurf/chromium-profiles/{profile}` | `~/.local/share/termsurf/chromium-profiles/{profile}`        |
+| 5   | `gui/src/crash/dir.zig`               | 9       | `XDG_STATE_HOME`  | `ghostty/crash`                        | `~/.local/state/ghostty/crash/`                              |
+| 6   | `gui/src/cli/ssh-cache/DiskCache.zig` | 37      | `XDG_STATE_HOME`  | `ghostty/ssh_cache`                    | `~/.local/state/ghostty/ssh_cache`                           |
+| 7   | `gui/src/cli/ssh_cache.zig`           | 88      | —                 | —                                      | Calls `DiskCache.defaultPath(alloc, "ghostty")` (same as #6) |
+| 8   | `gui/src/crash/sentry.zig`            | 128     | `XDG_CACHE_HOME`  | `ghostty/sentry`                       | `~/.cache/ghostty/sentry/`                                   |
 
 Note: sentry.zig line 120–126 has a macOS-specific path using
 `NSCachesDirectory` when `XDG_CACHE_HOME` is not set. The XDG path on line 128

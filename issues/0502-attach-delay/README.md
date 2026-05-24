@@ -61,6 +61,7 @@ lifecycle:
 
 2. **RWHV constructor creates the capturer immediately**
    (`osr_render_widget_host_view.cc:225-231`):
+
    ```cpp
    video_consumer_ = std::make_unique<OffScreenVideoConsumer>(
        this, base::BindRepeating(&OffScreenRenderWidgetHostView::OnPaint,

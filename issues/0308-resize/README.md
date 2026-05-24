@@ -950,6 +950,7 @@ produces wrong dimensions and only works once.
 1. **Wrong dimensions sent — physical instead of logical pixels**
 
    The resize code in `draw.rs` sends viewport dimensions directly:
+
    ```rust
    xpc_manager.check_and_send_resize(*pane_id, viewport_w as u32, viewport_h as u32);
    ```
@@ -963,6 +964,7 @@ produces wrong dimensions and only works once.
    - CEF applies 2× scale → IOSurface becomes 4134×4200 ✗
 
    The initial spawn in `webview_socket.rs` correctly divides by scale:
+
    ```rust
    let scale = dims.dpi as f32 / 72.0;
    let lw = (physical_width / scale) as u32;

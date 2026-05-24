@@ -164,15 +164,18 @@ Thread the server_key through the connection reader loop and use a composite
 
 6. **Insert (line 731):** In `handle_tab_ready`, the pane already has `profile`
    and `browser` fields. Build the composite key:
+
    ```rust
    let key = TermSurfState::server_key(&pane.profile, &pane.browser);
    st.tab_to_pane.insert((key, ready.tab_id), ready.pane_id.clone());
    ```
+
    `handle_tab_ready` doesn't need `server_key` from the connection — the pane
    struct already has the profile/browser.
 
 7. **CaContext lookup (line 1200):** `handle_ca_context` receives a bare
    `tab_id`. Pass `server_key` to it. Use it to build the composite key:
+
    ```rust
    fn handle_ca_context(ca_context: proto::CaContext, server_key: &str, state: &SharedState) {
        let key = (server_key.to_string(), ca_context.tab_id);
@@ -185,6 +188,7 @@ Thread the server_key through the connection reader loop and use a composite
 9. **DevTools lookup (line 323):** The `QueryDevtoolsRequest` comes from a TUI,
    not a browser, so `server_key` is `None`. Instead, look up the requesting
    pane's profile/browser to build the key:
+
    ```rust
    let inspected_key = TermSurfState::server_key(&pane.profile, &pane.browser);
    st.tab_to_pane.get(&(inspected_key, resolved_tab_id))
@@ -192,6 +196,7 @@ Thread the server_key through the connection reader loop and use a composite
 
 10. **Remove on disconnect (line 882):** The pane being removed has `profile`
     and `browser`. Build the composite key for removal:
+
     ```rust
     let key = TermSurfState::server_key(&pane.profile, &pane.browser);
     st.tab_to_pane.remove(&(key, pane.tab_id));
@@ -287,11 +292,13 @@ breaks.
 **`wezboard/wezboard-gui/src/termsurf/conn.rs`**
 
 1. After `handle_server_register` returns in the connection loop (line 103):
+
    ```rust
    log::info!("ServerRegister: captured server_key={:?}", server_key);
    ```
 
 2. In `handle_tab_ready`, after inserting the composite key (line 773):
+
    ```rust
    log::info!(
        "TabReady: inserted tab_to_pane key=({:?}, {}) -> pane_id={}",
@@ -300,6 +307,7 @@ breaks.
    ```
 
 3. In `handle_ca_context`, before the lookup (line 1248):
+
    ```rust
    log::info!(
        "handle_ca_context: looking up key=({:?}, {}), tab_to_pane has {} entries: {:?}",
@@ -349,6 +357,7 @@ recover a working browser.
 #### Changes
 
 One command:
+
 ```
 git checkout 3aeb2b2 -- wezboard/wezboard-gui/src/termsurf/conn.rs wezboard/wezboard-gui/src/termsurf/state.rs
 ```

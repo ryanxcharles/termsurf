@@ -109,6 +109,7 @@ dark with toggle, update docs.
    `names: &'static [&'static str]`.
 
 2. Replace `COMMANDS` array with new command table:
+
    ```rust
    Command {
        names: &["quit", "q"],
@@ -137,6 +138,7 @@ dark with toggle, update docs.
    ```
 
 3. Add `DarkAction` enum:
+
    ```rust
    enum DarkAction { Toggle, On, Off, System }
    ```
@@ -146,6 +148,7 @@ dark with toggle, update docs.
 5. Delete `is_subsequence()` function.
 
 6. Rewrite `dispatch()` — exact match against all names:
+
    ```rust
    fn dispatch(input: &str) -> CommandResult {
        let mut parts = input.trim().splitn(2, ' ');
@@ -190,6 +193,7 @@ dark with toggle, update docs.
 **`docs/keybindings.md`**
 
 9. Update the Commands section:
+
    ```markdown
    ## Commands
 

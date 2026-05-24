@@ -257,26 +257,29 @@ merging upstream changes in the future.
 
 These dependencies were upgraded to align with cef-rs versions:
 
-| Dependency | Original | Updated | Reason |
-| ---------- | -------- | ------- | ------ |
-| wgpu | 25.0.2 | 28 | Match cef-rs for GPU texture sharing |
-| thiserror | 1.0 | 2 | Match cef-rs |
-| libloading | 0.8 | 0.9 | Match cef-rs |
-| objc2 | 0.6 | 0.6.3 | Match cef-rs |
-| objc2-foundation | 0.3 | 0.3.2 | Match cef-rs |
+| Dependency       | Original | Updated | Reason                               |
+| ---------------- | -------- | ------- | ------------------------------------ |
+| wgpu             | 25.0.2   | 28      | Match cef-rs for GPU texture sharing |
+| thiserror        | 1.0      | 2       | Match cef-rs                         |
+| libloading       | 0.8      | 0.9     | Match cef-rs                         |
+| objc2            | 0.6      | 0.6.3   | Match cef-rs                         |
+| objc2-foundation | 0.3      | 0.3.2   | Match cef-rs                         |
 
 #### wgpu Upgrade Details
 
 The wgpu upgrade required code changes across multiple files:
 
 **25 → 26:**
+
 - Added `depth_slice: None` to `RenderPassColorAttachment` in `draw.rs`
 
 **26 → 27:**
+
 - Removed lifetime from `BufferViewMut` in `renderstate.rs`
 - Added `experimental_features` field to `DeviceDescriptor` in `webgpu.rs`
 
 **27 → 28:**
+
 - Made `enumerate_adapters` calls async (now returns a future)
 - Made `compute_compatibility_list` function async in `webgpu.rs`
 - Wrapped `enumerate_adapters` in `smol::block_on` for Lua `enumerate_gpus` function
@@ -290,14 +293,15 @@ The wgpu upgrade required code changes across multiple files:
 
 These dependencies have version mismatches but are deferred:
 
-| Dependency | WezTerm | cef-rs | Reason for Deferral |
-| ---------- | ------- | ------ | ------------------- |
-| syn | 1.0 | 2 | Major API changes in proc-macros; doesn't affect runtime |
-| windows | 0.33.0 | 0.62 | Windows-only; cannot test on macOS |
+| Dependency | WezTerm | cef-rs | Reason for Deferral                                      |
+| ---------- | ------- | ------ | -------------------------------------------------------- |
+| syn        | 1.0     | 2      | Major API changes in proc-macros; doesn't affect runtime |
+| windows    | 0.33.0  | 0.62   | Windows-only; cannot test on macOS                       |
 
 ### Feature Additions
 
 **`web-open` CLI command:**
+
 - Added PDU (Protocol Data Unit) plumbing for browser pane creation
 - Preparatory work for CEF integration
 
@@ -305,13 +309,13 @@ These dependencies have version mismatches but are deferred:
 
 Key files changed from upstream WezTerm:
 
-| File | Changes |
-| ---- | ------- |
-| `Cargo.toml` | Dependency version updates |
-| `wezterm-gui/src/termwindow/webgpu.rs` | wgpu 28 API changes |
-| `wezterm-gui/src/termwindow/render/draw.rs` | wgpu 26+ API changes |
-| `wezterm-gui/src/renderstate.rs` | wgpu 27 buffer lifetime changes |
-| `wezterm-gui/src/scripting/mod.rs` | Async enumerate_adapters wrapper |
+| File                                        | Changes                          |
+| ------------------------------------------- | -------------------------------- |
+| `Cargo.toml`                                | Dependency version updates       |
+| `wezterm-gui/src/termwindow/webgpu.rs`      | wgpu 28 API changes              |
+| `wezterm-gui/src/termwindow/render/draw.rs` | wgpu 26+ API changes             |
+| `wezterm-gui/src/renderstate.rs`            | wgpu 27 buffer lifetime changes  |
+| `wezterm-gui/src/scripting/mod.rs`          | Async enumerate_adapters wrapper |
 
 ## Code Changes Required
 
@@ -397,13 +401,13 @@ loop {
 
 ### Technical Risks
 
-| Risk                       | Likelihood | Impact | Mitigation                                |
-| -------------------------- | ---------- | ------ | ----------------------------------------- |
-| ~~wgpu version mismatch~~  | ~~Medium~~ | ~~Medium~~ | ✓ Resolved - both now use wgpu 28     |
-| CEF message pump conflicts | Medium     | High   | Study WezTerm event loop, prototype early |
-| Performance overhead       | Low        | Medium | CEF OSR is hardware-accelerated           |
-| CEF binary size (~100MB)   | Certain    | Low    | Accept as tradeoff for full browser       |
-| Cross-platform CEF quirks  | Medium     | Medium | Test on all platforms early               |
+| Risk                       | Likelihood | Impact     | Mitigation                                |
+| -------------------------- | ---------- | ---------- | ----------------------------------------- |
+| ~~wgpu version mismatch~~  | ~~Medium~~ | ~~Medium~~ | ✓ Resolved - both now use wgpu 28         |
+| CEF message pump conflicts | Medium     | High       | Study WezTerm event loop, prototype early |
+| Performance overhead       | Low        | Medium     | CEF OSR is hardware-accelerated           |
+| CEF binary size (~100MB)   | Certain    | Low        | Accept as tradeoff for full browser       |
+| Cross-platform CEF quirks  | Medium     | Medium     | Test on all platforms early               |
 
 ### Project Risks
 
@@ -415,16 +419,16 @@ loop {
 
 ## Comparison: 1.x vs 2.0
 
-| Aspect                 | TermSurf 1.x (Ghostty) | TermSurf 2.0 (WezTerm) |
-| ---------------------- | ---------------------- | ---------------------- |
-| **Languages**          | Zig + Swift + ObjC     | Rust                   |
-| **Platforms**          | macOS only             | Linux, Windows, macOS  |
-| **Browser API**        | Limited (WKWebView)    | Full Chromium (CEF)    |
-| **Terminal quality**   | Excellent              | Excellent              |
-| **GPU rendering**      | Metal only             | wgpu (all backends)    |
-| **Codebase size**      | ~246k lines            | ~410k lines            |
-| **Binary size**        | ~20MB                  | ~150MB+ (with CEF)     |
-| **Community**          | Ghostty growing        | WezTerm established    |
+| Aspect               | TermSurf 1.x (Ghostty) | TermSurf 2.0 (WezTerm) |
+| -------------------- | ---------------------- | ---------------------- |
+| **Languages**        | Zig + Swift + ObjC     | Rust                   |
+| **Platforms**        | macOS only             | Linux, Windows, macOS  |
+| **Browser API**      | Limited (WKWebView)    | Full Chromium (CEF)    |
+| **Terminal quality** | Excellent              | Excellent              |
+| **GPU rendering**    | Metal only             | wgpu (all backends)    |
+| **Codebase size**    | ~246k lines            | ~410k lines            |
+| **Binary size**      | ~20MB                  | ~150MB+ (with CEF)     |
+| **Community**        | Ghostty growing        | WezTerm established    |
 
 ## References
 
@@ -471,14 +475,14 @@ Zig doesn't have Swift's marshalling problems:
 
 For reference, CEF requires implementing these handler structs:
 
-| Handler                    | Purpose                       |
-| -------------------------- | ----------------------------- |
-| `cef_app_t`                | Application lifecycle         |
-| `cef_client_t`             | Browser event routing         |
-| `cef_life_span_handler_t`  | Browser creation/destruction  |
-| `cef_render_handler_t`     | Off-screen rendering          |
-| `cef_display_handler_t`    | Console messages, title       |
-| `cef_request_handler_t`    | Navigation, downloads         |
-| `cef_context_menu_handler` | Context menu (suppress/custom)|
+| Handler                    | Purpose                        |
+| -------------------------- | ------------------------------ |
+| `cef_app_t`                | Application lifecycle          |
+| `cef_client_t`             | Browser event routing          |
+| `cef_life_span_handler_t`  | Browser creation/destruction   |
+| `cef_render_handler_t`     | Off-screen rendering           |
+| `cef_display_handler_t`    | Console messages, title        |
+| `cef_request_handler_t`    | Navigation, downloads          |
+| `cef_context_menu_handler` | Context menu (suppress/custom) |
 
 These are implemented in Rust via cef-rs rather than manually in Zig.

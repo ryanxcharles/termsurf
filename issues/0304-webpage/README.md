@@ -1168,13 +1168,13 @@ GUI ← IOSurfaceLookupFromMachPort ← XPC ────────────
 
 ### What Each Experiment Solved
 
-| # | Experiment                         | Status  | What it fixed                                     |
-| - | ---------------------------------- | ------- | ------------------------------------------------- |
-| 1 | CEF Profile Server                 | FAILED  | Wrote the profile server; couldn't test (no logs) |
-| 2 | Fix Stale XPC Service Cache        | FAILED  | Added launchctl bootout; still no logs            |
-| 3 | Add Debug Logging                  | SUCCESS | `/tmp/` log files for all three processes         |
-| 4 | Restore launchd Mach Registration  | FAILED  | XPC pipeline works; CEF crashes at init           |
-| 5 | Fix CEF API Version Initialization | SUCCESS | `api_hash()` call; google.com renders             |
+| #   | Experiment                         | Status  | What it fixed                                     |
+| --- | ---------------------------------- | ------- | ------------------------------------------------- |
+| 1   | CEF Profile Server                 | FAILED  | Wrote the profile server; couldn't test (no logs) |
+| 2   | Fix Stale XPC Service Cache        | FAILED  | Added launchctl bootout; still no logs            |
+| 3   | Add Debug Logging                  | SUCCESS | `/tmp/` log files for all three processes         |
+| 4   | Restore launchd Mach Registration  | FAILED  | XPC pipeline works; CEF crashes at init           |
+| 5   | Fix CEF API Version Initialization | SUCCESS | `api_hash()` call; google.com renders             |
 
 Experiments 1-2 failed silently because there was no logging. Experiment 3 added
 logging, which revealed the launcher never started (XPC connection invalid).

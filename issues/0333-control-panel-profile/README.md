@@ -166,12 +166,12 @@ easy to identify which profile is active for each webview.
 
 ### Implementation Summary
 
-| Component | Change |
-|-----------|--------|
-| `WebviewOverlay` struct | Added `profile: String` field |
-| Overlay creation | Profile name captured from `web` command (defaults to "default") |
-| URL rendering | Truncated with `...` when space is limited |
-| Profile rendering | Separate element positioned at right edge |
+| Component               | Change                                                           |
+| ----------------------- | ---------------------------------------------------------------- |
+| `WebviewOverlay` struct | Added `profile: String` field                                    |
+| Overlay creation        | Profile name captured from `web` command (defaults to "default") |
+| URL rendering           | Truncated with `...` when space is limited                       |
+| Profile rendering       | Separate element positioned at right edge                        |
 
 ### Key Design Decisions
 

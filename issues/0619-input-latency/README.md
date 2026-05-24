@@ -423,7 +423,7 @@ Total TermSurf-specific code: about 1,050 lines. Everything else — the other
 
 **Needed for TODO items:**
 
-- `WebContentsDelegate::AddNewContents()` — target="_blank"
+- `WebContentsDelegate::AddNewContents()` — target="\_blank"
 - `JavaScriptDialogManager` — alert/confirm/prompt
 - `DownloadManager` / `DownloadManagerDelegate` — downloads
 - `FileSelectHelper` / `RunFileChooser()` — file uploads

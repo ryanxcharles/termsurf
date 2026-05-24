@@ -299,15 +299,14 @@ Get `content_shell` building and running on macOS.
 
 - [x] Exclude `ts4/termsurf-chromium/src/` from Spotlight indexing
 - [x] Configure GN:
-      ```
-      cd ts4/termsurf-chromium/src
-      gn gen out/Default --args='
-        is_debug = false
-        symbol_level = 0
-        enable_nacl = false
-        is_component_build = true
-      '
-      ```
+      `     cd ts4/termsurf-chromium/src
+    gn gen out/Default --args='
+      is_debug = false
+      symbol_level = 0
+      enable_nacl = false
+      is_component_build = true
+    '
+    `
 - [x] Build content_shell: `autoninja -C out/Default content_shell` (1h31m,
       42,918 steps at 7.83/s)
 - [x] Add `ts4/termsurf-chromium/src/out/` to `.gitignore`
@@ -329,7 +328,7 @@ adds the minimal code needed for dual-profile behavior and side-by-side layout.
 
 **`BUILD.gn`** — Build target for the Two Profiles app:
 
-- `two_profiles` target (mac\_app\_bundle on macOS, executable elsewhere)
+- `two_profiles` target (mac_app_bundle on macOS, executable elsewhere)
 - Depends on `//content/shell:content_shell_lib` and
   `//content/shell:content_shell_app`
 - Sources: the new files listed below

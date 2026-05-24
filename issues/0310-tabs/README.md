@@ -148,10 +148,10 @@ stale overlays from accumulating.
 
 ### Files to Modify
 
-| File | Changes |
-|------|---------|
+| File                                               | Changes                                                                |
+| -------------------------------------------------- | ---------------------------------------------------------------------- |
 | `ts3/wezterm-gui/src/termwindow/webview_socket.rs` | Add `tab_id` field to `WebviewOverlay`, populate when creating overlay |
-| `ts3/wezterm-gui/src/termwindow/render/draw.rs` | Filter overlay iteration by active tab_id |
+| `ts3/wezterm-gui/src/termwindow/render/draw.rs`    | Filter overlay iteration by active tab_id                              |
 
 ### Verification
 

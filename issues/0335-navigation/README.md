@@ -308,6 +308,7 @@ web google.com                    # Opens webview
 ```
 
 Check logs:
+
 ```bash
 tail -f /tmp/termsurf-gui.log | grep NAV
 tail -f /tmp/termsurf-profile-*.log | grep NAV
@@ -323,11 +324,11 @@ established XPC pattern used for clipboard operations (issue 318).
 
 ### Implementation Summary
 
-| Component       | Change                                                    |
-| --------------- | --------------------------------------------------------- |
-| webview_xpc.rs  | Added `send_go_back()` and `send_go_forward()` methods    |
-| keyevent.rs     | Intercept Cmd+[/] in Browse and Control modes             |
-| termsurf-profile| Added `GoBackTask`, `GoForwardTask`, and XPC handlers     |
+| Component        | Change                                                 |
+| ---------------- | ------------------------------------------------------ |
+| webview_xpc.rs   | Added `send_go_back()` and `send_go_forward()` methods |
+| keyevent.rs      | Intercept Cmd+[/] in Browse and Control modes          |
+| termsurf-profile | Added `GoBackTask`, `GoForwardTask`, and XPC handlers  |
 
 ### User Experience
 

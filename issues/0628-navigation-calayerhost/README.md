@@ -494,9 +494,9 @@ size.
 
 The fix is to resize the hidden NSWindow in `ResizeTab()` instead of calling
 `view->SetSize()` directly. When the NSWindow resizes, the autoresizing chain
-propagates naturally: contentView → web_view → RWHV Cocoa view → `setFrameSize:`
+propagates naturally: contentView → web*view → RWHV Cocoa view → `setFrameSize:`
 → `sendViewBoundsInWindowToHost` → `OnBoundsInWindowChanged` →
-`UpdateScreenInfo` → `UpdateSurfaceFromNSView`. This updates `dfh_size_dip_`
+`UpdateScreenInfo` → `UpdateSurfaceFromNSView`. This updates `dfh_size_dip*`
 through the standard Chromium path, and the size survives navigation because the
 NSWindow stays at the correct size.
 
@@ -524,9 +524,9 @@ just `contentView.frame`), then use `ResizeWebContentForTests` from both
 `CreateTab()` and `ResizeTab()`.
 
 The autoresizing chain handles the rest: window resize → contentView resize →
-web_view autoresize → RWHV Cocoa view `setFrameSize:` →
+web*view autoresize → RWHV Cocoa view `setFrameSize:` →
 `sendViewBoundsInWindowToHost` → `OnBoundsInWindowChanged` → `UpdateScreenInfo`
-→ `UpdateSurfaceFromNSView` → `dfh_size_dip_` updated.
+→ `UpdateSurfaceFromNSView` → `dfh_size_dip*` updated.
 
 #### Changes
 

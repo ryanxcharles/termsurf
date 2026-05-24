@@ -95,7 +95,7 @@ NOT reimplement the Chromium-specific pieces:
 - **The full pipeline runs at 60fps.** Before the crash,
   `FrameSinkVideoCapturer` sustained 58-60fps with 1600x1200 Retina frames
   streaming over XPC.
-- __`freopen` only redirects C FILE_ stderr._* Zig writes to fd 2 directly via
+- \__`freopen` only redirects C FILE_ stderr.\_\* Zig writes to fd 2 directly via
   `std.debug.print`, bypassing the C FILE layer. `open --stderr <path>`
   redirects fd 2 at the OS level, capturing everything.
 

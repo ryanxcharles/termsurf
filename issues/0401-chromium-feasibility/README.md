@@ -53,15 +53,15 @@ int main(int argc, const char** argv) {
 
 **What the delegate must provide** (`content/public/app/content_main_delegate.h`):
 
-| Method | Purpose |
-| --- | --- |
-| `BasicStartupComplete()` | Early init, singletons |
-| `PreSandboxStartup()` | Pre-sandbox resource loading |
-| `CreateContentClient()` | Resource/string provider |
-| `CreateContentBrowserClient()` | Browser process customization |
-| `CreateContentGpuClient()` | GPU process customization |
+| Method                          | Purpose                        |
+| ------------------------------- | ------------------------------ |
+| `BasicStartupComplete()`        | Early init, singletons         |
+| `PreSandboxStartup()`           | Pre-sandbox resource loading   |
+| `CreateContentClient()`         | Resource/string provider       |
+| `CreateContentBrowserClient()`  | Browser process customization  |
+| `CreateContentGpuClient()`      | GPU process customization      |
 | `CreateContentRendererClient()` | Renderer process customization |
-| `CreateContentUtilityClient()` | Utility process customization |
+| `CreateContentUtilityClient()`  | Utility process customization  |
 
 **Browser process lifecycle** (`content/shell/browser/shell_browser_main_parts.h`):
 
@@ -127,12 +127,12 @@ Keyboard input goes through `RenderWidgetHost::ForwardKeyboardEvent()`.
 
 ### Summary: Minimal API Surface
 
-| Task | Content API | Lines of glue |
-| --- | --- | --- |
-| Initialize | `ContentMainRunner::Create()` + `ContentMain()` | ~200 (delegate + main parts) |
-| Create browser | `WebContents::Create(params)` | ~50 |
-| Receive frames | Custom `RenderWidgetHostView` subclass | ~2000 (the hard part) |
-| Send input | `ProcessMouseEvent()`, `ForwardKeyboardEvent()` | ~100 |
+| Task           | Content API                                     | Lines of glue                |
+| -------------- | ----------------------------------------------- | ---------------------------- |
+| Initialize     | `ContentMainRunner::Create()` + `ContentMain()` | ~200 (delegate + main parts) |
+| Create browser | `WebContents::Create(params)`                   | ~50                          |
+| Receive frames | Custom `RenderWidgetHostView` subclass          | ~2000 (the hard part)        |
+| Send input     | `ProcessMouseEvent()`, `ForwardKeyboardEvent()` | ~100                         |
 
 The `RenderWidgetHostView` subclass is the bulk of the work. The public
 interface has **60 virtual methods** (`render_widget_host_view.h`, 343 lines).
@@ -172,12 +172,12 @@ CEF's `libcef/` directory is ~500 files. Most of it is API surface (C bindings,
 ref counting, settings) and platform abstractions. The OSR-specific code is
 concentrated in `libcef/browser/osr/` (~10 files, ~5000 lines total):
 
-| File | Lines | Purpose |
-| --- | --- | --- |
-| `render_widget_host_view_osr.h/cc` | ~1500 | RenderWidgetHostViewBase subclass |
-| `host_display_client_osr.h/cc` | ~150 | Software frame delivery (LayeredWindowUpdater) |
-| `video_consumer_osr.h/cc` | ~250 | GPU frame delivery (FrameSinkVideoCapturer) |
-| `web_contents_view_osr.h/cc` | ~150 | WebContentsView for off-screen |
+| File                               | Lines | Purpose                                        |
+| ---------------------------------- | ----- | ---------------------------------------------- |
+| `render_widget_host_view_osr.h/cc` | ~1500 | RenderWidgetHostViewBase subclass              |
+| `host_display_client_osr.h/cc`     | ~150  | Software frame delivery (LayeredWindowUpdater) |
+| `video_consumer_osr.h/cc`          | ~250  | GPU frame delivery (FrameSinkVideoCapturer)    |
+| `web_contents_view_osr.h/cc`       | ~150  | WebContentsView for off-screen                 |
 
 **~2000 lines of core OSR logic.** The rest of CEF's 500 files are API
 wrappers, platform code, and Chrome integration — not needed for direct
@@ -190,6 +190,7 @@ embedding.
 CEF has two paths:
 
 **Software path** (CPU):
+
 ```
 Chromium compositor → viz::HostDisplayClient
   → CreateLayeredWindowUpdater() → CefLayeredWindowUpdaterOSR
@@ -198,6 +199,7 @@ Chromium compositor → viz::HostDisplayClient
 ```
 
 **GPU path** (IOSurface/DXGI):
+
 ```
 Chromium compositor → viz::ClientFrameSinkVideoCapturer
   → CefVideoConsumerOSR::OnFrameCaptured()
@@ -240,12 +242,12 @@ frames). As long as we release frames promptly, the pool won't block.
 Electron's OSR code lives in `shell/browser/osr/` and mirrors CEF's structure
 closely:
 
-| Electron | CEF | Purpose |
-| --- | --- | --- |
+| Electron                        | CEF                          | Purpose                           |
+| ------------------------------- | ---------------------------- | --------------------------------- |
 | `OffScreenRenderWidgetHostView` | `CefRenderWidgetHostViewOSR` | RenderWidgetHostViewBase subclass |
-| `OffScreenVideoConsumer` | `CefVideoConsumerOSR` | FrameSinkVideoCapturer wrapper |
-| `OffScreenHostDisplayClient` | `CefHostDisplayClientOSR` | Software frame path |
-| `OffScreenWebContentsView` | `CefWebContentsViewOSR` | WebContentsView for off-screen |
+| `OffScreenVideoConsumer`        | `CefVideoConsumerOSR`        | FrameSinkVideoCapturer wrapper    |
+| `OffScreenHostDisplayClient`    | `CefHostDisplayClientOSR`    | Software frame path               |
+| `OffScreenWebContentsView`      | `CefWebContentsViewOSR`      | WebContentsView for off-screen    |
 
 Both extend `content::RenderWidgetHostViewBase`. Both use
 `viz::ClientFrameSinkVideoCapturer`. The architecture is nearly identical.
@@ -253,16 +255,20 @@ Both extend `content::RenderWidgetHostViewBase`. Both use
 ### What Electron does differently
 
 1. **Frame rate cap** (`osr_render_widget_host_view.cc`, line 919):
+
    ```cpp
    if (!offscreen_use_shared_texture_ && frame_rate > 240)
        frame_rate = 240;
    ```
+
    Without shared textures: capped at 240fps. With shared textures: **no cap**.
 
 2. **Buffer format preference** (`osr_video_consumer.cc`, line 82):
+
    ```cpp
    SetBufferFormatPreference(kPreferMappableSharedImage)
    ```
+
    When using shared textures, Electron requests `kPreferMappableSharedImage`,
    which gives direct GPU buffer handles (IOSurface on macOS, DXGI on Windows).
 
@@ -464,6 +470,7 @@ same view Chrome uses). We need to understand what it does so we can write an
 off-screen equivalent.
 
 Key files to study:
+
 - `content/browser/renderer_host/render_widget_host_view_mac.h/mm`
 - `content/browser/renderer_host/render_widget_host_view_base.h/cc`
 - `content/browser/renderer_host/delegated_frame_host.h/cc`
@@ -473,6 +480,7 @@ Key files to study:
 **Goal:** Create the smallest possible off-screen view that receives frames.
 
 Start with CEF's `CefRenderWidgetHostViewOSR` as a reference. Strip it down to:
+
 - Constructor that sets up `DelegatedFrameHost` + `ui::Compositor`
 - `ShowWithVisibility()` that creates the `FrameSinkVideoCapturer`
 - `OnFrameCaptured()` that prints frame dimensions (proof of life)
@@ -486,6 +494,7 @@ stubbed version should be ~500 lines.
 **Goal:** Prove we can add custom code to the Chromium build.
 
 Create a `BUILD.gn` file that:
+
 1. Depends on `//content/public/browser`, `//content/public/app`
 2. Compiles our OSR view + a simple `main()` that loads a URL
 3. Produces a binary that opens a headless browser and prints frame info
@@ -495,6 +504,7 @@ Create a `BUILD.gn` file that:
 **Goal:** Create the FFI boundary between Chromium (C++) and TermSurf (Rust).
 
 Write the C API shim:
+
 - `ts_init()`, `ts_create_browser()`, `ts_set_frame_callback()`
 - Build as `libtermsurf_chromium.dylib`
 - Write a Rust test that loads the library and receives one frame
@@ -530,6 +540,7 @@ content::RenderWidgetHostView              (60 virtual methods)
 ```
 
 Both CEF and Electron's OSR views:
+
 - Extend `RenderWidgetHostViewBase`
 - Implement `RenderFrameMetadataProvider::Observer`
 - Implement `ui::CompositorDelegate`
@@ -569,38 +580,38 @@ the callback mechanism and frame lifecycle management.
 
 ### CEF (`/cef/`)
 
-| File | Purpose |
-| --- | --- |
-| `libcef/browser/osr/render_widget_host_view_osr.h/cc` | OSR view (~1500 lines) |
-| `libcef/browser/osr/host_display_client_osr.h/cc` | Software frame path |
-| `libcef/browser/osr/video_consumer_osr.h/cc` | GPU frame capture |
-| `libcef/browser/osr/web_contents_view_osr.h/cc` | WebContentsView for OSR |
-| `libcef/browser/alloy/alloy_browser_host_impl.cc` | Browser creation |
-| `libcef/browser/main_runner.cc` | Chromium initialization |
+| File                                                  | Purpose                 |
+| ----------------------------------------------------- | ----------------------- |
+| `libcef/browser/osr/render_widget_host_view_osr.h/cc` | OSR view (~1500 lines)  |
+| `libcef/browser/osr/host_display_client_osr.h/cc`     | Software frame path     |
+| `libcef/browser/osr/video_consumer_osr.h/cc`          | GPU frame capture       |
+| `libcef/browser/osr/web_contents_view_osr.h/cc`       | WebContentsView for OSR |
+| `libcef/browser/alloy/alloy_browser_host_impl.cc`     | Browser creation        |
+| `libcef/browser/main_runner.cc`                       | Chromium initialization |
 
 ### Electron (`/electron/`)
 
-| File | Purpose |
-| --- | --- |
-| `shell/browser/osr/osr_render_widget_host_view.h/cc` | OSR view |
-| `shell/browser/osr/osr_video_consumer.h/cc` | GPU frame capture |
-| `shell/browser/osr/osr_host_display_client.h/cc` | Software frame path |
-| `shell/browser/osr/osr_web_contents_view.h/cc` | WebContentsView for OSR |
-| `shell/browser/osr/osr_paint_event.h` | Frame metadata struct |
-| `shell/app/electron_main_delegate.h` | ContentMainDelegate |
+| File                                                 | Purpose                 |
+| ---------------------------------------------------- | ----------------------- |
+| `shell/browser/osr/osr_render_widget_host_view.h/cc` | OSR view                |
+| `shell/browser/osr/osr_video_consumer.h/cc`          | GPU frame capture       |
+| `shell/browser/osr/osr_host_display_client.h/cc`     | Software frame path     |
+| `shell/browser/osr/osr_web_contents_view.h/cc`       | WebContentsView for OSR |
+| `shell/browser/osr/osr_paint_event.h`                | Frame metadata struct   |
+| `shell/app/electron_main_delegate.h`                 | ContentMainDelegate     |
 
 ### Chromium (`/chromium/`)
 
-| File | Purpose |
-| --- | --- |
-| `content/public/app/content_main.h` | Entry point |
-| `content/public/app/content_main_delegate.h` | Embedder delegate interface |
-| `content/public/browser/web_contents.h` | WebContents factory (1049 lines) |
-| `content/public/browser/browser_context.h` | Profile/storage context |
-| `content/public/browser/render_widget_host_view.h` | View interface (60 methods) |
-| `content/browser/renderer_host/render_widget_host_view_base.h` | Base class (706 lines) |
-| `content/browser/renderer_host/delegated_frame_host.h` | Frame compositing bridge |
-| `content/shell/app/shell_main.cc` | Minimal embedder entry point |
-| `content/shell/browser/shell.h` | Minimal browser window |
-| `content/shell/browser/shell_content_browser_client.h` | Minimal browser client |
-| `content/shell/browser/shell_browser_main_parts.h` | Minimal lifecycle hooks |
+| File                                                           | Purpose                          |
+| -------------------------------------------------------------- | -------------------------------- |
+| `content/public/app/content_main.h`                            | Entry point                      |
+| `content/public/app/content_main_delegate.h`                   | Embedder delegate interface      |
+| `content/public/browser/web_contents.h`                        | WebContents factory (1049 lines) |
+| `content/public/browser/browser_context.h`                     | Profile/storage context          |
+| `content/public/browser/render_widget_host_view.h`             | View interface (60 methods)      |
+| `content/browser/renderer_host/render_widget_host_view_base.h` | Base class (706 lines)           |
+| `content/browser/renderer_host/delegated_frame_host.h`         | Frame compositing bridge         |
+| `content/shell/app/shell_main.cc`                              | Minimal embedder entry point     |
+| `content/shell/browser/shell.h`                                | Minimal browser window           |
+| `content/shell/browser/shell_content_browser_client.h`         | Minimal browser client           |
+| `content/shell/browser/shell_browser_main_parts.h`             | Minimal lifecycle hooks          |

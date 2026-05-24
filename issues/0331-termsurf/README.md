@@ -66,8 +66,8 @@ Rename `wezterm-gui.app` to `termsurf-gui.app`.
 
 ### Changes
 
-| File                           | Change                                                  |
-| ------------------------------ | ------------------------------------------------------- |
+| File                           | Change                                                    |
+| ------------------------------ | --------------------------------------------------------- |
 | `ts3/scripts/build-debug.sh`   | `APP_BUNDLE=.../wezterm-gui.app` → `.../termsurf-gui.app` |
 | `ts3/scripts/build-release.sh` | `APP_BUNDLE=.../wezterm-gui.app` → `.../termsurf-gui.app` |
 
@@ -120,8 +120,8 @@ Rename `CFBundleName` from "WezTerm" to "TermSurf" so the main menu bar shows "T
 
 ### Changes
 
-| File                           | Change                                      |
-| ------------------------------ | ------------------------------------------- |
+| File                           | Change                                                   |
+| ------------------------------ | -------------------------------------------------------- |
 | `ts3/scripts/build-debug.sh`   | `<string>WezTerm</string>` → `<string>TermSurf</string>` |
 | `ts3/scripts/build-release.sh` | `<string>WezTerm</string>` → `<string>TermSurf</string>` |
 
@@ -170,18 +170,18 @@ Rename `WEZTERM_CONFIG_FILE` → `TERMSURF_CONFIG_FILE` and `WEZTERM_CONFIG_DIR`
 
 ### Changes
 
-| File | Line | Change |
-|------|------|--------|
-| `ts3/config/src/config.rs` | 1029 | GET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
-| `ts3/config/src/config.rs` | 1030 | log message update |
-| `ts3/config/src/config.rs` | 1061 | REMOVE: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
-| `ts3/config/src/config.rs` | 1062 | REMOVE: `"WEZTERM_CONFIG_DIR"` → `"TERMSURF_CONFIG_DIR"` |
-| `ts3/config/src/config.rs` | 1133 | SET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
-| `ts3/config/src/config.rs` | 1135 | SET: `"WEZTERM_CONFIG_DIR"` → `"TERMSURF_CONFIG_DIR"` |
-| `ts3/wezterm-mux-server-impl/src/sessionhandler.rs` | 862 | GET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
-| `ts3/wezterm-gui/src/main.rs` | 564 | GET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
-| `ts3/env-bootstrap/src/lib.rs` | 89 | REMOVE: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
-| `ts3/env-bootstrap/src/lib.rs` | 90 | REMOVE: `"WEZTERM_CONFIG_DIR"` → `"TERMSURF_CONFIG_DIR"` |
+| File                                                | Line | Change                                                     |
+| --------------------------------------------------- | ---- | ---------------------------------------------------------- |
+| `ts3/config/src/config.rs`                          | 1029 | GET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"`    |
+| `ts3/config/src/config.rs`                          | 1030 | log message update                                         |
+| `ts3/config/src/config.rs`                          | 1061 | REMOVE: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
+| `ts3/config/src/config.rs`                          | 1062 | REMOVE: `"WEZTERM_CONFIG_DIR"` → `"TERMSURF_CONFIG_DIR"`   |
+| `ts3/config/src/config.rs`                          | 1133 | SET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"`    |
+| `ts3/config/src/config.rs`                          | 1135 | SET: `"WEZTERM_CONFIG_DIR"` → `"TERMSURF_CONFIG_DIR"`      |
+| `ts3/wezterm-mux-server-impl/src/sessionhandler.rs` | 862  | GET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"`    |
+| `ts3/wezterm-gui/src/main.rs`                       | 564  | GET: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"`    |
+| `ts3/env-bootstrap/src/lib.rs`                      | 89   | REMOVE: `"WEZTERM_CONFIG_FILE"` → `"TERMSURF_CONFIG_FILE"` |
+| `ts3/env-bootstrap/src/lib.rs`                      | 90   | REMOVE: `"WEZTERM_CONFIG_DIR"` → `"TERMSURF_CONFIG_DIR"`   |
 
 ### Verification
 
@@ -201,20 +201,20 @@ Rename "WezTerm Helper" to "TermSurf Helper" in build scripts and source code.
 
 ### Changes
 
-| File | Line | Change |
-|------|------|--------|
-| `ts3/scripts/build-debug.sh` | 90 | `WezTerm Helper` → `TermSurf Helper` (dst path) |
-| `ts3/scripts/build-debug.sh` | 93 | Comment: `WezTerm` → `TermSurf` |
-| `ts3/scripts/build-debug.sh` | 94 | sed: `WezTerm` → `TermSurf` |
-| `ts3/scripts/build-debug.sh` | 96 | `WezTerm Helper` → `TermSurf Helper` (mv) |
-| `ts3/scripts/build-release.sh` | 90 | `WezTerm Helper` → `TermSurf Helper` (dst path) |
-| `ts3/scripts/build-release.sh` | 93 | Comment: `WezTerm` → `TermSurf` |
-| `ts3/scripts/build-release.sh` | 94 | sed: `WezTerm` → `TermSurf` |
-| `ts3/scripts/build-release.sh` | 96 | `WezTerm Helper` → `TermSurf Helper` (mv) |
-| `ts3/termsurf-profile/src/main.rs` | 203 | `WezTerm Helper.app` → `TermSurf Helper.app` |
-| `ts3/termsurf-profile/src/main.rs` | 204 | `WezTerm Helper` → `TermSurf Helper` |
-| `ts3/termsurf-web/src/main.rs` | 298 | `WezTerm Helper.app` → `TermSurf Helper.app` |
-| `ts3/termsurf-web/src/main.rs` | 301 | `WezTerm Helper` → `TermSurf Helper` |
+| File                               | Line | Change                                          |
+| ---------------------------------- | ---- | ----------------------------------------------- |
+| `ts3/scripts/build-debug.sh`       | 90   | `WezTerm Helper` → `TermSurf Helper` (dst path) |
+| `ts3/scripts/build-debug.sh`       | 93   | Comment: `WezTerm` → `TermSurf`                 |
+| `ts3/scripts/build-debug.sh`       | 94   | sed: `WezTerm` → `TermSurf`                     |
+| `ts3/scripts/build-debug.sh`       | 96   | `WezTerm Helper` → `TermSurf Helper` (mv)       |
+| `ts3/scripts/build-release.sh`     | 90   | `WezTerm Helper` → `TermSurf Helper` (dst path) |
+| `ts3/scripts/build-release.sh`     | 93   | Comment: `WezTerm` → `TermSurf`                 |
+| `ts3/scripts/build-release.sh`     | 94   | sed: `WezTerm` → `TermSurf`                     |
+| `ts3/scripts/build-release.sh`     | 96   | `WezTerm Helper` → `TermSurf Helper` (mv)       |
+| `ts3/termsurf-profile/src/main.rs` | 203  | `WezTerm Helper.app` → `TermSurf Helper.app`    |
+| `ts3/termsurf-profile/src/main.rs` | 204  | `WezTerm Helper` → `TermSurf Helper`            |
+| `ts3/termsurf-web/src/main.rs`     | 298  | `WezTerm Helper.app` → `TermSurf Helper.app`    |
+| `ts3/termsurf-web/src/main.rs`     | 301  | `WezTerm Helper` → `TermSurf Helper`            |
 
 ### Verification
 

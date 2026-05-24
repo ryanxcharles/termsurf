@@ -40,10 +40,10 @@ feel.
 
 **File:** `ts3/wezterm-gui/src/termwindow/mouseevent.rs`
 
-| Handler | Before | After |
-|---------|--------|-------|
-| `VertWheel` (line 1318) | `* 2` | `* 5` |
-| `HorzWheel` (line 1328) | `* 2` | `* 5` |
+| Handler                 | Before | After |
+| ----------------------- | ------ | ----- |
+| `VertWheel` (line 1318) | `* 2`  | `* 5` |
+| `HorzWheel` (line 1328) | `* 2`  | `* 5` |
 
 ```rust
 // Vertical scroll

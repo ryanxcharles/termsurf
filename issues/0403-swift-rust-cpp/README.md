@@ -603,14 +603,14 @@ textures and deallocates the old Mach ports to prevent kernel resource leaks.
 
 ### What we proved
 
-| Question                                            | Result                                |
-| --------------------------------------------------- | ------------------------------------- |
-| Can Swift composite IOSurface from Rust and C++?    | Yes — zero-copy, same render pass     |
-| Does XPC Mach port transfer work across languages?  | Yes — libxpc is language-agnostic     |
-| Can wgpu (Rust) and Metal (C++) both target IOSurface? | Yes — both produce valid textures  |
-| Is 60fps achievable with cross-process compositing? | Yes — composite time ~0.04–0.12ms     |
-| Can SwiftPM, Cargo, and Make coexist?               | Yes — no cross-dependencies           |
-| Does resize work without leaking resources?         | Yes — Mach ports deallocated, IOSurfaces released |
+| Question                                               | Result                                            |
+| ------------------------------------------------------ | ------------------------------------------------- |
+| Can Swift composite IOSurface from Rust and C++?       | Yes — zero-copy, same render pass                 |
+| Does XPC Mach port transfer work across languages?     | Yes — libxpc is language-agnostic                 |
+| Can wgpu (Rust) and Metal (C++) both target IOSurface? | Yes — both produce valid textures                 |
+| Is 60fps achievable with cross-process compositing?    | Yes — composite time ~0.04–0.12ms                 |
+| Can SwiftPM, Cargo, and Make coexist?                  | Yes — no cross-dependencies                       |
+| Does resize work without leaking resources?            | Yes — Mach ports deallocated, IOSurfaces released |
 
 Composite time measured at 0.04–0.12ms per frame, well under the 2ms budget.
 The bottleneck is not IPC or compositing — it's the child render time, which

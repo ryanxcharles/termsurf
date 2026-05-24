@@ -1031,7 +1031,7 @@ Chromium.**
 | Fork modifications   | 8 patches, 24 files       | Potentially zero        | 5-20 files                             |
 | C library complexity | ~2,000 lines              | ~500 lines est.         | ~1,000-1,500 lines est.                |
 | GPU compositing      | CAContext + CALayerHost   | NSView (native)         | IOSurface mach ports or NSView overlay |
-| Input handling       | Manual injection          | NSView first responder  | SynthesizeNative*Event()               |
+| Input handling       | Manual injection          | NSView first responder  | SynthesizeNative\*Event()              |
 | DevTools             | Had to expose constructor | `_inspector` (public)   | RDP over WebSocket                     |
 | Multi-profile        | One per process           | Multiple in one process | One per process                        |
 | Build system         | GN/Ninja                  | CMake                   | moz.build/mach                         |
@@ -1520,20 +1520,20 @@ library would need minimal platform ifdefs.
 cleanest embedding API, the smallest codebase, and already exposes IOSurfaces on
 macOS.
 
-| Aspect               | Chromium                | WebKit                  | Gecko                    | Ladybird                  |
-| -------------------- | ----------------------- | ----------------------- | ------------------------ | ------------------------- |
-| Embedding API        | Content API (C++)       | WKWebView (Obj-C)       | libxul + XPCOM (C++)     | ViewImplementation (C++)  |
-| Official support     | Yes                     | Yes                     | No                       | Yes (it's the API)        |
-| Fork modifications   | 8 patches, 24 files     | Potentially zero        | 5-20 files               | 0-3 files                 |
-| C library complexity | ~2,000 lines            | ~500 lines est.         | ~1,000-1,500 lines est.  | ~300-500 lines est.       |
-| GPU compositing      | CAContext + CALayerHost | NSView (native)         | IOSurface mach ports     | IOSurface + Metal         |
-| Input handling       | Manual injection        | NSView first responder  | SynthesizeNative*Event() | enqueue_input_event()     |
-| DevTools             | Custom (forked)         | `_inspector` (public)   | RDP over WebSocket       | Firefox DevTools Protocol |
-| Multi-profile        | One per process         | Multiple in one process | One per process          | One per process           |
-| Build system         | GN/Ninja                | CMake                   | moz.build/mach           | CMake                     |
-| Init complexity      | Low                     | Very low                | High (XPCOM)             | Very low                  |
-| Codebase size        | ~40 GB                  | ~7.4 GB                 | ~9.1 GB                  | ~495 MB                   |
-| Web compat           | Production-grade        | Production-grade        | Production-grade         | Early stage               |
+| Aspect               | Chromium                | WebKit                  | Gecko                     | Ladybird                  |
+| -------------------- | ----------------------- | ----------------------- | ------------------------- | ------------------------- |
+| Embedding API        | Content API (C++)       | WKWebView (Obj-C)       | libxul + XPCOM (C++)      | ViewImplementation (C++)  |
+| Official support     | Yes                     | Yes                     | No                        | Yes (it's the API)        |
+| Fork modifications   | 8 patches, 24 files     | Potentially zero        | 5-20 files                | 0-3 files                 |
+| C library complexity | ~2,000 lines            | ~500 lines est.         | ~1,000-1,500 lines est.   | ~300-500 lines est.       |
+| GPU compositing      | CAContext + CALayerHost | NSView (native)         | IOSurface mach ports      | IOSurface + Metal         |
+| Input handling       | Manual injection        | NSView first responder  | SynthesizeNative\*Event() | enqueue_input_event()     |
+| DevTools             | Custom (forked)         | `_inspector` (public)   | RDP over WebSocket        | Firefox DevTools Protocol |
+| Multi-profile        | One per process         | Multiple in one process | One per process           | One per process           |
+| Build system         | GN/Ninja                | CMake                   | moz.build/mach            | CMake                     |
+| Init complexity      | Low                     | Very low                | High (XPCOM)              | Very low                  |
+| Codebase size        | ~40 GB                  | ~7.4 GB                 | ~9.1 GB                   | ~495 MB                   |
+| Web compat           | Production-grade        | Production-grade        | Production-grade          | Early stage               |
 
 **Key advantages:**
 

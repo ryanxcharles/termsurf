@@ -631,14 +631,14 @@ This requires adding the `objc` crate to `Cargo.toml`.
 
 355 frames, **28.2 fps** average. Max consecutive 60fps streak: 19.
 
-| Metric | Exp 1 (no NSApp) | Exp 2 (NSApp init) |
-|--------|-----------------|-------------------|
-| `DisplayLink` samples | 3 | **3** (no change) |
-| `BeginFrameSource.Interval` samples | 12 | 9 (no change) |
-| `MissedVsyncs.PerFrame` | 1,012,184 | 698,623 (still astronomical) |
-| `PercentDroppedFrames3` | 28% | 27% (no change) |
-| Average FPS | 32.6 | 28.2 (no change) |
-| Frames at 60fps | 58% | 45% (no change) |
+| Metric                              | Exp 1 (no NSApp) | Exp 2 (NSApp init)           |
+| ----------------------------------- | ---------------- | ---------------------------- |
+| `DisplayLink` samples               | 3                | **3** (no change)            |
+| `BeginFrameSource.Interval` samples | 12               | 9 (no change)                |
+| `MissedVsyncs.PerFrame`             | 1,012,184        | 698,623 (still astronomical) |
+| `PercentDroppedFrames3`             | 28%              | 27% (no change)              |
+| Average FPS                         | 32.6             | 28.2 (no change)             |
+| Frames at 60fps                     | 58%              | 45% (no change)              |
 
 #### Conclusion
 
@@ -716,28 +716,28 @@ owns the loop entirely.
 265 frames over ~13s. **19.2fps** — a significant regression from the 28.5fps
 polling baseline.
 
-| Metric                  | Exp 3 (run_message_loop) | Baseline (polling) |
-| ----------------------- | ------------------------ | ------------------ |
-| Frames                  | 265                      | 314                |
-| Duration                | ~13s                     | ~11s               |
-| Mean interval           | 52.2ms                   | 35.1ms             |
-| Effective fps           | 19.2                     | 28.5               |
-| At 60fps (14-19ms)      | 4%                       | 40%                |
-| Max 60fps streak        | 11                       | 11                 |
+| Metric             | Exp 3 (run_message_loop) | Baseline (polling) |
+| ------------------ | ------------------------ | ------------------ |
+| Frames             | 265                      | 314                |
+| Duration           | ~13s                     | ~11s               |
+| Mean interval      | 52.2ms                   | 35.1ms             |
+| Effective fps      | 19.2                     | 28.5               |
+| At 60fps (14-19ms) | 4%                       | 40%                |
+| Max 60fps streak   | 11                       | 11                 |
 
 Interval distribution:
 
-| Bucket   | Count |
-| -------- | ----- |
-| 0-9ms    | 33    |
-| 10-19ms  | 46    |
-| 20-29ms  | 13    |
-| 30-39ms  | 31    |
-| 40-49ms  | 32    |
-| 50-59ms  | 50    |
-| 60-79ms  | 28    |
-| 80-99ms  | 16    |
-| 100+ms   | 15    |
+| Bucket  | Count |
+| ------- | ----- |
+| 0-9ms   | 33    |
+| 10-19ms | 46    |
+| 20-29ms | 13    |
+| 30-39ms | 31    |
+| 40-49ms | 32    |
+| 50-59ms | 50    |
+| 60-79ms | 28    |
+| 80-99ms | 16    |
+| 100+ms  | 15    |
 
 The 50-59ms bucket is dominant, suggesting CEF's internal loop is throttling to
 ~20fps without a functioning display link.
@@ -880,11 +880,13 @@ The pump state machine (adapted from the reference implementation):
 - `pending_timer: Option<*mut c_void>` — current CFRunLoopTimer, if any
 
 When `on_schedule_message_pump_work(delay)` fires:
+
 - If `delay <= 0`: post immediate work (timer with fire date = now)
 - If `delay > 0`: post delayed work (timer with fire date = now + delay/1000)
 - Cap delay at 33ms (30fps floor, matching reference implementation)
 
 When the timer fires:
+
 - Invalidate the timer
 - Call `do_message_loop_work()`
 - If reentrancy was detected, reschedule immediately
@@ -1079,30 +1081,30 @@ while !QUIT_FLAG.load(Ordering::Relaxed) {
 
 593 frames over ~15s. **38.2fps** — a 34% improvement over the 28.5fps baseline.
 
-| Metric                  | Exp 5 (CFRunLoop) | Baseline (sleep) | Change  |
-| ----------------------- | ----------------- | ---------------- | ------- |
-| Frames                  | 593               | 314              | +89%    |
-| Duration                | ~15s              | ~11s             | longer  |
-| Mean interval           | 26.1ms            | 35.1ms           | -26%    |
-| Effective fps           | 38.2              | 28.5             | **+34%** |
-| At 60fps (14-19ms)      | 71%               | 40%              | **+31pp** |
-| At 30fps (30-36ms)      | 11%               | 23%              | -12pp   |
-| Slow (>50ms)            | 6%                | 18%              | **-12pp** |
-| Max 60fps streak        | 424               | 11               | **38x** |
+| Metric             | Exp 5 (CFRunLoop) | Baseline (sleep) | Change    |
+| ------------------ | ----------------- | ---------------- | --------- |
+| Frames             | 593               | 314              | +89%      |
+| Duration           | ~15s              | ~11s             | longer    |
+| Mean interval      | 26.1ms            | 35.1ms           | -26%      |
+| Effective fps      | 38.2              | 28.5             | **+34%**  |
+| At 60fps (14-19ms) | 71%               | 40%              | **+31pp** |
+| At 30fps (30-36ms) | 11%               | 23%              | -12pp     |
+| Slow (>50ms)       | 6%                | 18%              | **-12pp** |
+| Max 60fps streak   | 424               | 11               | **38x**   |
 
 Interval distribution:
 
-| Bucket   | Count |
-| -------- | ----- |
-| 0-9ms    | 53    |
-| 10-19ms  | 426   |
-| 20-29ms  | 1     |
-| 30-39ms  | 67    |
-| 40-49ms  | 0     |
-| 50-59ms  | 7     |
-| 60-79ms  | 9     |
-| 80-99ms  | 19    |
-| 100+ms   | 10    |
+| Bucket  | Count |
+| ------- | ----- |
+| 0-9ms   | 53    |
+| 10-19ms | 426   |
+| 20-29ms | 1     |
+| 30-39ms | 67    |
+| 40-49ms | 0     |
+| 50-59ms | 7     |
+| 60-79ms | 9     |
+| 80-99ms | 19    |
+| 100+ms  | 10    |
 
 The 10-19ms bucket dominates with 426 intervals (72%). The old bimodal 16ms/33ms
 distribution is nearly gone — replaced by a strong 16ms peak with a small 33ms
@@ -1159,13 +1161,13 @@ creating any window.
 Issue 342 set out to answer a single question: can we achieve 60fps from a
 windowless CEF process? Five experiments tested four distinct approaches:
 
-| Exp | Approach                    | Result  | FPS   | 60fps% | Streak |
-| --- | --------------------------- | ------- | ----- | ------ | ------ |
-| 1   | CEF debug logging           | Diag    | —     | —      | —      |
-| 2   | NSApplication init          | Failed  | 28.5  | 40%    | 11     |
-| 3   | `run_message_loop()`        | Failed  | 19.2  | —      | —      |
-| 4   | CFRunLoop + external pump   | Failed  | 0     | 0%     | 0      |
-| 5   | `CFRunLoopRunInMode` swap   | Success | 38.2  | 71%    | 424    |
+| Exp | Approach                  | Result  | FPS  | 60fps% | Streak |
+| --- | ------------------------- | ------- | ---- | ------ | ------ |
+| 1   | CEF debug logging         | Diag    | —    | —      | —      |
+| 2   | NSApplication init        | Failed  | 28.5 | 40%    | 11     |
+| 3   | `run_message_loop()`      | Failed  | 19.2 | —      | —      |
+| 4   | CFRunLoop + external pump | Failed  | 0    | 0%     | 0      |
+| 5   | `CFRunLoopRunInMode` swap | Success | 38.2 | 71%    | 424    |
 
 ### Root Cause
 

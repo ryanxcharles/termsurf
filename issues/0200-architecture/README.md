@@ -14,6 +14,7 @@ the evolution from 1.x to 2.0.
 ### TermSurf 1.x (Stable, macOS-only)
 
 TermSurf 1.x is built on **Ghostty + WKWebView**:
+
 - **Terminal:** Ghostty (Zig core + Swift macOS app)
 - **Browser:** Apple's WKWebView (WebKit)
 - **Platform:** macOS only
@@ -24,6 +25,7 @@ to the 2.0 redesign.
 ### TermSurf 2.0 (In Development, Cross-platform)
 
 TermSurf 2.0 is built on **WezTerm + cef-rs**:
+
 - **Terminal:** WezTerm (Rust)
 - **Browser:** CEF via cef-rs (Chromium)
 - **Platforms:** macOS, Linux, Windows
@@ -71,14 +73,14 @@ WezTerm provides:
 
 ## Architecture Comparison
 
-| Aspect | 1.x (Ghostty + WKWebView) | 2.0 (WezTerm + cef-rs) |
-|--------|---------------------------|------------------------|
-| Languages | Zig + Swift + Objective-C | Rust |
-| Platforms | macOS only | macOS, Linux, Windows |
-| Browser API | Limited (WKWebView) | Complete (Chromium) |
-| DevTools | Safari Web Inspector | Chrome DevTools |
-| GPU | Metal only | wgpu (Metal/Vulkan/DX12) |
-| Binary size | ~20MB | ~150MB (includes CEF) |
+| Aspect      | 1.x (Ghostty + WKWebView) | 2.0 (WezTerm + cef-rs)   |
+| ----------- | ------------------------- | ------------------------ |
+| Languages   | Zig + Swift + Objective-C | Rust                     |
+| Platforms   | macOS only                | macOS, Linux, Windows    |
+| Browser API | Limited (WKWebView)       | Complete (Chromium)      |
+| DevTools    | Safari Web Inspector      | Chrome DevTools          |
+| GPU         | Metal only                | wgpu (Metal/Vulkan/DX12) |
+| Binary size | ~20MB                     | ~150MB (includes CEF)    |
 
 ---
 
@@ -114,6 +116,7 @@ TermSurf has two primary requirements:
 For 1.x, we use Apple's native WKWebView:
 
 **Why WKWebView for 1.x?**
+
 - **Zero dependencies**: Built into macOS, no additional frameworks
 - **Native Swift integration**: Seamless API, no C marshalling
 - **Profile isolation**: `WKWebsiteDataStore(forIdentifier:)` on macOS 14+
@@ -121,6 +124,7 @@ For 1.x, we use Apple's native WKWebView:
 - **DevTools**: Safari Web Inspector available
 
 **Trade-offs accepted**:
+
 - WebKit only (not Chromium)
 - No Chrome DevTools (Safari Web Inspector instead)
 - Console capture requires JS injection (not native callback)
@@ -163,13 +167,13 @@ We use Unix domain sockets for CLI-to-app communication:
 We considered OSC escape sequences (like iTerm2 and Kitty use) but chose Unix
 domain sockets for these reasons:
 
-| Aspect | OSC Escape Sequences | Unix Domain Sockets |
-|--------|---------------------|---------------------|
-| **libghostty changes** | Required (fork) | **None** |
-| **Bidirectional** | No | **Yes** |
-| **Protocol** | String parsing | **Structured JSON** |
-| **Robustness** | Broken by pipes | **Always works** |
-| **Blocking** | Not possible | **By default** |
+| Aspect                 | OSC Escape Sequences | Unix Domain Sockets |
+| ---------------------- | -------------------- | ------------------- |
+| **libghostty changes** | Required (fork)      | **None**            |
+| **Bidirectional**      | No                   | **Yes**             |
+| **Protocol**           | String parsing       | **Structured JSON** |
+| **Robustness**         | Broken by pipes      | **Always works**    |
+| **Blocking**           | Not possible         | **By default**      |
 
 **Key advantages:**
 
@@ -194,6 +198,7 @@ domain sockets for these reasons:
 ### Environment Variables
 
 When TermSurf spawns a shell, it sets:
+
 - `TERMSURF_SOCKET` - Path to the Unix domain socket
 - `TERMSURF_PANE_ID` - Unique identifier for this pane
 
@@ -237,6 +242,7 @@ indirect enum Node: Codable {
 ```
 
 This allows:
+
 - Same SplitTree logic for layout
 - Same focus navigation (ctrl+h/j/k/l)
 - Terminal and browser panes are peers
@@ -266,9 +272,9 @@ This approach avoids direct PTY access and leverages the existing socket infrast
 With the `--js-api` flag, pages can programmatically control the webview:
 
 ```javascript
-window.termsurf.webviewId  // Unique webview ID
-window.termsurf.exit(0)    // Close with exit code 0
-window.termsurf.exit(1)    // Close with exit code 1
+window.termsurf.webviewId; // Unique webview ID
+window.termsurf.exit(0); // Close with exit code 0
+window.termsurf.exit(1); // Close with exit code 1
 ```
 
 The exit code is passed through the socket to the CLI, which exits with that code.
@@ -298,11 +304,13 @@ termsurf/
 ## Related Documentation
 
 ### TermSurf 1.x
+
 - [console.md](console.md) - Console bridging and JS API
 - [keybindings.md](keybindings.md) - Keyboard shortcuts
 - [webview.md](webview.md) - WKWebView implementation details
 - [libghostty.md](libghostty.md) - Changes to libghostty
 
 ### TermSurf 2.0
+
 - [termsurf2-wezterm-analysis.md](termsurf2-wezterm-analysis.md) - Architecture analysis
 - [cef-rs.md](cef-rs.md) - Our cef-rs modifications

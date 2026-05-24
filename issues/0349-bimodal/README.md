@@ -130,6 +130,7 @@ differences from cef-test that could explain the bimodal pattern.
 **Findings:**
 
 Reviewed the following files:
+
 - `wezterm-gui/src/frontend.rs` — event loop
 - `wezterm-gui/src/termwindow/mod.rs` — window event dispatch
 - `wezterm-gui/src/termwindow/render/paint.rs` — paint scheduling
@@ -140,10 +141,10 @@ Reviewed the following files:
 
 **Key discovery: PresentMode differs.**
 
-| Setting        | cef-test                    | ts3 (WezTerm)          |
-| -------------- | --------------------------- | ---------------------- |
-| Present mode   | `PresentMode::AutoVsync`    | `PresentMode::Fifo`    |
-| Frame latency  | `desired_maximum_frame_latency: 2` | Not set (default) |
+| Setting       | cef-test                           | ts3 (WezTerm)       |
+| ------------- | ---------------------------------- | ------------------- |
+| Present mode  | `PresentMode::AutoVsync`           | `PresentMode::Fifo` |
+| Frame latency | `desired_maximum_frame_latency: 2` | Not set (default)   |
 
 This is the most likely cause of the bimodal pattern:
 
@@ -161,6 +162,7 @@ This is the most likely cause of the bimodal pattern:
   it. A single late frame is absorbed gracefully — it doesn't cascade.
 
 This explains every observation:
+
 - Why ts3 is bimodal but cef-test is not (different present modes)
 - Why the mode is stable within a run (once the Fifo queue desynchronizes, it
   stays desynchronized)
@@ -378,11 +380,11 @@ can sleep — no busy-waiting.
 
 This was tried three times before, each with identifiable mistakes:
 
-| Attempt       | Missing piece                                          |
-| ------------- | ------------------------------------------------------ |
-| Issue 325 E4  | Forgot `external_message_pump: 1` — callback never fired |
-| Issue 325 E5  | No fallback timer, no reentrancy guard — pump died after 3 frames |
-| Issue 342 E4  | Init deadlock — `CFRunLoopRun()` starts after `cef::initialize()`, but init needs the pump |
+| Attempt      | Missing piece                                                                              |
+| ------------ | ------------------------------------------------------------------------------------------ |
+| Issue 325 E4 | Forgot `external_message_pump: 1` — callback never fired                                   |
+| Issue 325 E5 | No fallback timer, no reentrancy guard — pump died after 3 frames                          |
+| Issue 342 E4 | Init deadlock — `CFRunLoopRun()` starts after `cef::initialize()`, but init needs the pump |
 
 None of these replicated the **working reference implementation** in
 `cef-rs/examples/tests_shared/src/browser/main_message_loop_external_pump/`,
@@ -487,12 +489,12 @@ Summary: 0/7 good mode, 7/7 bad mode (bimodal: NO)
 
 The event-driven pump is significantly worse than the busy-wait loop:
 
-| Metric     | Busy-wait (Exp 2 run 1) | Event-driven (Exp 3) |
-| ---------- | ----------------------- | -------------------- |
-| Avg fps    | ~50                     | ~29                  |
-| @60fps     | 75–85%                  | 10–17%               |
-| p50        | 17–19ms                 | 25ms                 |
-| p95        | 33ms                    | 83–91ms              |
+| Metric  | Busy-wait (Exp 2 run 1) | Event-driven (Exp 3) |
+| ------- | ----------------------- | -------------------- |
+| Avg fps | ~50                     | ~29                  |
+| @60fps  | 75–85%                  | 10–17%               |
+| p50     | 17–19ms                 | 25ms                 |
+| p95     | 33ms                    | 83–91ms              |
 
 Key findings:
 

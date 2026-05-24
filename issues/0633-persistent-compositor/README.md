@@ -36,8 +36,7 @@ embedders.
 
 ## How it works in Chrome
 
-`BrowserCompositorMac::UpdateState()` (`browser_compositor_view_mac.mm` line
-191) checks `parent_ui_layer_`:
+`BrowserCompositorMac::UpdateState()` (`browser_compositor_view_mac.mm` line 191) checks `parent_ui_layer_`:
 
 ```cpp
 if (parent_ui_layer_) {
@@ -108,7 +107,7 @@ class PersistentCompositorBridge : public ui::AcceleratedWidgetMacNSView {
 Register with `widget_mac->SetNSView(bridge)`. The `ca_context_id` is stable —
 it only changes if the GPU process crashes and restarts.
 
-### Step 3: Set parent_ui_layer_ on each RenderWidgetHostViewMac
+### Step 3: Set parent*ui_layer* on each RenderWidgetHostViewMac
 
 At tab creation and on every `RenderViewHostChanged` (navigation), call:
 
@@ -173,7 +172,7 @@ Navigation between pages has no visible blank flash. The `ca_context_id` remains
 constant across navigations (verified via logging). The GUI's `CALayerHost` is
 created once at startup and never swapped.
 
-## Experiment 1: Create persistent compositor and set parent_ui_layer_
+## Experiment 1: Create persistent compositor and set parent*ui_layer*
 
 ### Hypothesis
 
@@ -200,7 +199,7 @@ Add to the deps list:
 "//ui/accelerated_widget_mac",
 ```
 
-#### 2. Add a bridge function to set parent_ui_layer_
+#### 2. Add a bridge function to set parent*ui_layer*
 
 `SetParentUiLayer` is on `RenderWidgetHostViewMac` (not the public
 `RenderWidgetHostView` interface), so it needs an Obj-C++ bridge — same pattern
@@ -330,7 +329,7 @@ before the tab observer and callback setup, add:
   }
 ```
 
-#### 4. Set parent_ui_layer_ on view swap in ShellTabObserver
+#### 4. Set parent*ui_layer* on view swap in ShellTabObserver
 
 **File:** `content/chromium_profile_server/browser/shell_tab_observer.h`
 
@@ -446,8 +445,8 @@ compositor. If the per-view callback doesn't fire, we'll need to implement
 7. Click a link — observe whether the flicker is gone
 8. Check logs for:
    - "Created persistent compositor" — confirms setup
-   - "Set parent_ui_layer_ on initial view" — confirms mode switch
-   - "Set parent_ui_layer_ on new view" — confirms re-registration on nav
+   - "Set parent*ui_layer* on initial view" — confirms mode switch
+   - "Set parent*ui_layer* on new view" — confirms re-registration on nav
    - "Sent ca_context_id=..." — check if it fires once or per-navigation
 9. Navigate multiple times — verify `ca_context_id` stays the same in logs
 

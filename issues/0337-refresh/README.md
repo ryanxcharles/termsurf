@@ -270,6 +270,7 @@ web example.com
 ```
 
 Check logs:
+
 ```bash
 tail -f /tmp/termsurf-gui.log | grep NAV
 tail -f /tmp/termsurf-profile-*.log | grep NAV
@@ -326,7 +327,7 @@ The menu item remains in the TermSurf menu but without a keyboard shortcut.
 Remove the Cmd+R line from `ts3/docs/config/default-keys.md` (line 67):
 
 ```markdown
-| `SUPER`          | `r`    | `ReloadConfiguration` |
+| `SUPER` | `r` | `ReloadConfiguration` |
 ```
 
 #### Verification
@@ -341,6 +342,7 @@ web example.com
 ```
 
 Check logs:
+
 ```bash
 tail -f /tmp/termsurf-gui.log | grep NAV
 tail -f /tmp/termsurf-profile-*.log | grep NAV
@@ -349,11 +351,13 @@ tail -f /tmp/termsurf-profile-*.log | grep NAV
 #### Conclusion
 
 **What works:**
+
 - Cmd+R successfully reloads the browser page
 - Removing the default keybinding allowed our handler in `key_event_impl` to
   receive the key
 
 **What doesn't work:**
+
 - Cmd+Shift+R (hard reload) does not trigger
 - The Ctrl+Shift+R binding for ReloadConfiguration still exists in WezTerm's
   defaults (see `default-keys.md` line 68), but Cmd+Shift+R is a different
@@ -362,6 +366,7 @@ tail -f /tmp/termsurf-profile-*.log | grep NAV
   that Cmd+Shift+R produces uppercase `'R'` due to the Shift modifier
 
 **Next steps:**
+
 - Investigate why Cmd+Shift+R is not being detected
 - Check if the key arrives as `KeyCode::Char('R')` (uppercase) vs
   `KeyCode::Char('r')` (lowercase) when Shift is held
@@ -434,6 +439,7 @@ web example.com
 ```
 
 Check logs:
+
 ```bash
 tail -f /tmp/termsurf-gui.log | grep NAV
 tail -f /tmp/termsurf-profile-*.log | grep NAV
@@ -452,6 +458,7 @@ to `key_event_impl`. This matches ts2's working approach exactly.
 #### Rationale
 
 ts2 handles browser shortcuts in `raw_key_event_impl` (lines 466-520):
+
 1. Checks if pane has a browser in Browse mode
 2. Matches Cmd+R → `browser.reload()`
 3. Matches Cmd+Shift+R (uppercase 'R') → `browser.reload_ignore_cache()`
@@ -540,6 +547,7 @@ web example.com
 ```
 
 Check logs:
+
 ```bash
 tail -f /tmp/termsurf-gui.log | grep NAV
 # Expected: "[NAV] Cmd+R in raw_key_event" or "[NAV] Cmd+Shift+R in raw_key_event"

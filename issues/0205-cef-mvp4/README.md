@@ -26,7 +26,6 @@ the terminal or browser.
 ### Modes
 
 1. **Control Mode** (default when switching to browser pane)
-
    - Terminal keybindings work (pane navigation, splits, etc.)
    - Browser is visually dimmed
    - No input goes to the browser
@@ -36,7 +35,6 @@ the terminal or browser.
    - Control bar displays: "Enter to browse. Ctrl+C to exit."
 
 2. **Browse Mode**
-
    - Browser receives all input (keys, mouse, touch)
    - If browser doesn't use a keybinding, it passes through to WezTerm
    - Control bar displays: current URL only

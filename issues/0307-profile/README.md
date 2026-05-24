@@ -489,7 +489,7 @@ Remove the entire `ts3/termsurf-launcher/` directory and remove it from
 | Modify | `ts3/scripts/build-release.sh`                  |
 | Modify | `ts3/Cargo.toml`                                |
 | Modify | `CLAUDE.md`                                     |
-| Modify | `docs/303-xpc.md`                             |
+| Modify | `docs/303-xpc.md`                               |
 | Delete | `ts3/termsurf-launcher/` (entire directory)     |
 
 #### Verification

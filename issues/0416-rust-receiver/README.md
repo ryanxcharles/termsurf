@@ -1131,7 +1131,7 @@ The three untested unknowns from Experiment 1:
 2. **IOSurface → Metal → wgpu texture** — The five-step unsafe pipeline:
    `device.as_hal::<Metal>()` → Metal texture descriptor →
    `msg_send!
-   [device, newTextureWithDescriptor:iosurface:plane:]` →
+[device, newTextureWithDescriptor:iosurface:plane:]` →
    `Device::texture_from_raw()` → `device.create_texture_from_hal()`.
 
 3. **Cross-thread IOSurface handoff** — `SendPtr` wrapper with
@@ -1241,15 +1241,15 @@ command line.
 
 All seven unknowns from the Experiment 1 hypothesis:
 
-| # | Unknown                          | Status     | Notes                                                         |
-| - | -------------------------------- | ---------- | ------------------------------------------------------------- |
-| 1 | Cargo workspace integration      | **PASSED** | Builds with `cargo build -p two-profiles-rust`                |
-| 2 | XPC Mach service listener        | **PASSED** | `XpcListener::new_mach_service()` works, connections accepted |
-| 3 | IOSurface reconstruction         | **PASSED** | `lookup_from_mach_port()` returns valid 1600x1200 surface     |
-| 4 | IOSurface → Metal → wgpu texture | **PASSED** | Five-step unsafe pipeline works correctly                     |
-| 5 | winit + wgpu rendering           | **PASSED** | Window creates, pipeline initializes, frames render           |
-| 6 | WGSL shader                      | **PASSED** | Fullscreen quad renders correctly                             |
-| 7 | Cross-thread handoff             | **PASSED** | `Mutex<Option<SendPtr>>` + `EventLoopProxy` wake works        |
+| #   | Unknown                          | Status     | Notes                                                         |
+| --- | -------------------------------- | ---------- | ------------------------------------------------------------- |
+| 1   | Cargo workspace integration      | **PASSED** | Builds with `cargo build -p two-profiles-rust`                |
+| 2   | XPC Mach service listener        | **PASSED** | `XpcListener::new_mach_service()` works, connections accepted |
+| 3   | IOSurface reconstruction         | **PASSED** | `lookup_from_mach_port()` returns valid 1600x1200 surface     |
+| 4   | IOSurface → Metal → wgpu texture | **PASSED** | Five-step unsafe pipeline works correctly                     |
+| 5   | winit + wgpu rendering           | **PASSED** | Window creates, pipeline initializes, frames render           |
+| 6   | WGSL shader                      | **PASSED** | Fullscreen quad renders correctly                             |
+| 7   | Cross-thread handoff             | **PASSED** | `Mutex<Option<SendPtr>>` + `EventLoopProxy` wake works        |
 
 ##### Success criteria checklist
 
@@ -1291,8 +1291,7 @@ All seven unknowns from the Experiment 1 hypothesis:
 
 #### Hypothesis
 
-Adding a second pane to the Experiment 2 receiver is mechanical. The C++ (Issue
-414) and Swift (Issue 415) receivers both use the same pattern: two texture
+Adding a second pane to the Experiment 2 receiver is mechanical. The C++ (Issue 414) and Swift (Issue 415) receivers both use the same pattern: two texture
 slots, a `session_id → pane index` mapping, and two `setViewport` + draw calls
 per frame. The Rust/wgpu equivalent is `RenderPass::set_viewport()` — same
 concept, different API. No new unknowns; this is purely a code change.
@@ -1585,11 +1584,11 @@ zero performance overhead compared to the Objective-C++ (Issue 414) and Swift
 
 ### Experiment summary
 
-| # | Name                       | Result |
-| - | -------------------------- | ------ |
-| 1 | Single-pane Rust receiver  | FAILED |
-| 2 | Fix invocation and re-test | PASSED |
-| 3 | Two-pane side-by-side      | PASSED |
+| #   | Name                       | Result |
+| --- | -------------------------- | ------ |
+| 1   | Single-pane Rust receiver  | FAILED |
+| 2   | Fix invocation and re-test | PASSED |
+| 3   | Two-pane side-by-side      | PASSED |
 
 Experiment 1 failed due to two issues: a critical FFI bug in `termsurf-xpc`
 (`mach_task_self_` declared as a function instead of a static variable) and an
@@ -1614,7 +1613,7 @@ Experiment 3 with no additional issues.
 3. **IOSurface → wgpu texture works via the Metal HAL.** The five-step pipeline
    (`device.as_hal::<Metal>()` → Metal descriptor →
    `msg_send!
-   [newTextureWithDescriptor:iosurface:plane:]` →
+[newTextureWithDescriptor:iosurface:plane:]` →
    `Device::texture_from_raw()` → `device.create_texture_from_hal()`) produces
    valid textures at 60fps. This is the cef-rs pattern, proven to work with
    wgpu 28.

@@ -601,16 +601,16 @@ modern terminal from a basic one.
 
 ### Ghostty vs WezTerm: the real decision
 
-| Factor                    | Ghostty                          | WezTerm                          |
-| ------------------------- | -------------------------------- | -------------------------------- |
-| Renderer reuse            | Metal + IOSurface — nearly free   | Must build offscreen renderer    |
-| Terminal state maturity   | Mature, full featured            | Mature, most features            |
-| Font pipeline             | CoreText/HarfBuzz, self-contained | HarfBuzz/FreeType, needs `config` |
-| Feature coverage          | Good (no Sixel)                  | Best (Sixel + all image protocols) |
-| Language                  | Zig (new for the project)        | Rust (proven in ts3/ts4)         |
-| Existing codebase knowledge | ts1 is a Ghostty fork          | ts3 is a WezTerm fork            |
-| IOSurface integration     | Already done internally          | Possible via wgpu HAL            |
-| Modification surface      | ~3 functions in Metal.zig        | New renderer + HAL interop       |
+| Factor                      | Ghostty                           | WezTerm                            |
+| --------------------------- | --------------------------------- | ---------------------------------- |
+| Renderer reuse              | Metal + IOSurface — nearly free   | Must build offscreen renderer      |
+| Terminal state maturity     | Mature, full featured             | Mature, most features              |
+| Font pipeline               | CoreText/HarfBuzz, self-contained | HarfBuzz/FreeType, needs `config`  |
+| Feature coverage            | Good (no Sixel)                   | Best (Sixel + all image protocols) |
+| Language                    | Zig (new for the project)         | Rust (proven in ts3/ts4)           |
+| Existing codebase knowledge | ts1 is a Ghostty fork             | ts3 is a WezTerm fork              |
+| IOSurface integration       | Already done internally           | Possible via wgpu HAL              |
+| Modification surface        | ~3 functions in Metal.zig         | New renderer + HAL interop         |
 
 Ghostty's Metal renderer already does what ts4 needs — render terminal text to
 an IOSurface. The delta between what Ghostty does today and what ts4 requires

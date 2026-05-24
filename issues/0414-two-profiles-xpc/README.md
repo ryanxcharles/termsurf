@@ -123,7 +123,7 @@ the PoC with a single window, the simpler approach should work.
 1. GUI registers as Mach service `com.termsurf.two-profiles` (via launchd plist)
 2. GUI spawns profile-a server with args:
    `--service com.termsurf.two-profiles
-   --session-id profile-a --profile profile-a --url <url>`
+--session-id profile-a --profile profile-a --url <url>`
 3. Profile-a server connects to `com.termsurf.two-profiles` by name
 4. Profile-a server sends `register` message with its session ID
 5. GUI maps the connection to the left pane
@@ -1279,7 +1279,7 @@ timing overlap.
 
 1. **Store the peer connection in a global.** Assign the peer to a
    `static
-   xpc_connection_t` (or `__strong` Objective-C variable) so ARC
+xpc_connection_t` (or `__strong` Objective-C variable) so ARC
    doesn't release it when the event handler block returns.
 2. **Start the XPC listener before `[NSApp run]`.** Move `start_xpc_listener()`
    to `main()` before entering the NSApplication event loop. The XPC listener
@@ -1581,8 +1581,8 @@ specified resolution. The physical dimensions come from the `WebContents` view
 size multiplied by the device scale factor.
 
 Note: Chromium also has a `SetScaleOverrideForCapture()` mechanism on
-`RenderWidgetHostViewBase` that multiplies the device_scale_factor for HiDPI
-capture mode. This is designed for capturing at _higher_ than native resolution.
+`RenderWidgetHostViewBase` that multiplies the device*scale_factor for HiDPI
+capture mode. This is designed for capturing at \_higher* than native resolution.
 Since we just want native Retina resolution (not super-resolution), setting
 explicit resolution constraints is the simpler and more direct fix.
 
@@ -1663,6 +1663,7 @@ Same procedure as Experiment 4:
 
 1. `cd ts4/box-demo && bun run server.ts`
 2. Rebuild both binaries:
+
    ```bash
    cd ~/dev/termsurf/ts4/termsurf-chromium/src
    export PATH="$(cd ../depot_tools && pwd):$PATH"
@@ -1670,6 +1671,7 @@ Same procedure as Experiment 4:
 
    cd ~/dev/termsurf/ts4/two-profiles-receiver && make
    ```
+
 3. Reload the launchd plist:
    ```bash
    launchctl unload ~/dev/termsurf/ts4/two-profiles-receiver/com.termsurf.two-profiles.plist
@@ -2470,15 +2472,15 @@ restarts.
 
 ### Experiment summary
 
-| # | Goal                            | Result | Key finding                                                 |
-| - | ------------------------------- | ------ | ----------------------------------------------------------- |
-| 1 | Capture frames as IOSurfaces    | PASS   | `FrameSinkVideoCapturer` delivers 60fps IOSurfaces          |
-| 2 | XPC transfer to another process | PASS   | `IOSurfaceCreateMachPort` works on Chromium's IOSurfaces    |
-| 3 | Hidden sender, visible receiver | FAIL   | ARC released XPC connections; `orderOut:nil` works at 60fps |
-| 4 | Fix XPC retention               | PASS   | Static globals + listener before `[NSApp run]`              |
-| 5 | Fix Retina capture resolution   | FAIL   | `SetResolutionConstraints` works; size mismatch still blurs |
-| 6 | Match window sizes + sRGB       | PASS   | 1:1 pixel mapping + `MTLPixelFormatBGRA8Unorm_sRGB`         |
-| 7 | Two profiles side by side       | PASS   | Two processes, two profiles, one window, both 60fps         |
+| #   | Goal                            | Result | Key finding                                                 |
+| --- | ------------------------------- | ------ | ----------------------------------------------------------- |
+| 1   | Capture frames as IOSurfaces    | PASS   | `FrameSinkVideoCapturer` delivers 60fps IOSurfaces          |
+| 2   | XPC transfer to another process | PASS   | `IOSurfaceCreateMachPort` works on Chromium's IOSurfaces    |
+| 3   | Hidden sender, visible receiver | FAIL   | ARC released XPC connections; `orderOut:nil` works at 60fps |
+| 4   | Fix XPC retention               | PASS   | Static globals + listener before `[NSApp run]`              |
+| 5   | Fix Retina capture resolution   | FAIL   | `SetResolutionConstraints` works; size mismatch still blurs |
+| 6   | Match window sizes + sRGB       | PASS   | 1:1 pixel mapping + `MTLPixelFormatBGRA8Unorm_sRGB`         |
+| 7   | Two profiles side by side       | PASS   | Two processes, two profiles, one window, both 60fps         |
 
 The two failures (Experiments 3 and 5) were instructive, not blocking. Each
 failure isolated a specific problem — ARC lifetime semantics for XPC objects,

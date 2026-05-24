@@ -177,7 +177,6 @@ flat commands (`web-open`).
    ```
 
 2. Update `wezterm/src/cli/mod.rs`:
-
    - Add `mod web;`
    - Replace `WebOpen` variant with `Web(web::WebCommand)`
    - Update dispatch match arm
@@ -361,7 +360,6 @@ CLI ◄──────────────────────► Soc
    ```
 
 5. Remove RPC-based web open:
-
    - Remove `Web` variant from `CliSubCommand` enum in `mod.rs`
    - Remove `WebOpen`/`WebOpenResponse` handling from `sessionhandler.rs`
    - Keep `MuxNotification::WebOpen` for internal use (or remove if unused)
@@ -396,19 +394,28 @@ CLI ◄──────────────────────► Soc
 Request (CLI → Server):
 
 ```json
-{"id":"abc123","command":"open","pane_id":1,"params":{"url":"https://example.com"}}
+{
+  "id": "abc123",
+  "command": "open",
+  "pane_id": 1,
+  "params": { "url": "https://example.com" }
+}
 ```
 
 Response (Server → CLI):
 
 ```json
-{"id":"abc123","success":true,"message":"Opening https://example.com"}
+{ "id": "abc123", "success": true, "message": "Opening https://example.com" }
 ```
 
 Event (Server → CLI, future):
 
 ```json
-{"id":"abc123","event":"console","data":{"level":"log","message":"Hello"}}
+{
+  "id": "abc123",
+  "event": "console",
+  "data": { "level": "log", "message": "Hello" }
+}
 ```
 
 **Files changed:**
@@ -529,7 +536,6 @@ TS1's routing approach (to support multiple simultaneous browser panes):
    ```
 
 3. Create DisplayHandler for console capture:
-
    - File: `wezterm-gui/src/cef_render/display_handler.rs` (new)
    - Implement `DisplayHandler` trait with `on_console_message`
    - Convert CEF log levels:
@@ -1459,7 +1465,6 @@ newline-delimited JSON.
    ```
 
 2. Move CEF initialization from `main.rs` to `termsurf-browser`:
-
    - Move `init_cef()` function
    - Move `BrowserState` and handlers
    - Keep texture import code in main process (receives handles via IPC)
@@ -1707,6 +1712,7 @@ Key differences from Experiment 7:
 - Natural lifecycle: profile process lives while any tab uses it
 
 This architecture will be implemented as TermSurf 3.0, a fresh fork of WezTerm
-+ cef-rs with the correct architecture from day one. ts2 will be preserved as
-reference code for CEF integration patterns (texture import, input handling,
-etc.).
+
+- cef-rs with the correct architecture from day one. ts2 will be preserved as
+  reference code for CEF integration patterns (texture import, input handling,
+  etc.).

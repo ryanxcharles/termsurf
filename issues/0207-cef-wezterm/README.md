@@ -15,6 +15,7 @@ WezTerm fork for TermSurf 2.0.
 terminal panes and browser panes in the same window.
 
 **Why:**
+
 - Cross-platform (Linux, Windows, macOS) vs TermSurf 1.x's macOS-only WKWebView
 - Full Chromium API (DevTools, extensions, proper cookie handling)
 - Single language (Rust) vs Zig + Swift + Objective-C
@@ -54,13 +55,13 @@ composited with terminal content:
 
 ## Key Components
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `wezterm-gui` | `wezterm-gui/` | Main application, CEF init/shutdown |
-| `wezterm-cef-helper` | `wezterm-gui/src/bin/` | CEF subprocess handler |
-| `build-debug.sh` | `scripts/` | Build debug bundle with CEF |
-| `build-release.sh` | `scripts/` | Build release bundle with CEF |
-| `cef-rs` | `../cef-rs/` | Rust bindings for CEF |
+| Component            | Location               | Purpose                             |
+| -------------------- | ---------------------- | ----------------------------------- |
+| `wezterm-gui`        | `wezterm-gui/`         | Main application, CEF init/shutdown |
+| `wezterm-cef-helper` | `wezterm-gui/src/bin/` | CEF subprocess handler              |
+| `build-debug.sh`     | `scripts/`             | Build debug bundle with CEF         |
+| `build-release.sh`   | `scripts/`             | Build release bundle with CEF       |
+| `cef-rs`             | `../cef-rs/`           | Rust bindings for CEF               |
 
 ## WezTerm Integration Code
 
@@ -194,16 +195,19 @@ required-features = ["cef"]
 ### Build with CEF
 
 **Debug build:**
+
 ```bash
 ./scripts/build-debug.sh [--clean] [--open]
 ```
 
 **Release build:**
+
 ```bash
 ./scripts/build-release.sh [--clean] [--open]
 ```
 
 Both scripts:
+
 1. Build `wezterm-gui` and `wezterm-cef-helper` with `--features cef`
 2. Create bundle from `assets/macos/WezTerm.app` template
 3. Copy CEF framework (~200MB) from cef-osr.app
@@ -212,6 +216,7 @@ Both scripts:
 6. Sign the bundle with ad-hoc signature
 
 Flags:
+
 - `--clean` - Clear build caches before building
 - `--open` - Open the app after building
 
@@ -226,6 +231,7 @@ Flags:
 ```
 
 Expected output:
+
 ```
 [CEF] Framework loaded
 [0117/...WARNING:resource_util.cc:83] Please customize CefSettings.root_cache_path...
@@ -257,13 +263,13 @@ WezTerm.app/
 
 CEF uses a multi-process architecture. Each process type runs as a separate app:
 
-| Helper | Purpose |
-|--------|---------|
-| Helper | General subprocess |
-| Helper (GPU) | GPU compositing |
-| Helper (Renderer) | Web page rendering |
-| Helper (Plugin) | Browser plugins |
-| Helper (Alerts) | System notifications |
+| Helper            | Purpose              |
+| ----------------- | -------------------- |
+| Helper            | General subprocess   |
+| Helper (GPU)      | GPU compositing      |
+| Helper (Renderer) | Web page rendering   |
+| Helper (Plugin)   | Browser plugins      |
+| Helper (Alerts)   | System notifications |
 
 All helpers use the same `wezterm-cef-helper` binary - only the bundle name differs.
 
@@ -271,20 +277,21 @@ All helpers use the same `wezterm-cef-helper` binary - only the bundle name diff
 
 Our cef-rs fork includes fixes required for proper operation. Summary:
 
-| Fix | Issue | Solution |
-|-----|-------|----------|
-| IOSurface texture import | Metal API type crash | Proper typed references instead of transmute |
-| Purple flash | Uninitialized GPU memory | Clear to black before first CEF paint |
-| Input handling | No keyboard/mouse | Added event translation to CEF format |
-| Multi-browser | Global texture holder | Per-browser texture storage with HashMap |
-| Context menu crash | winit NSApplication conflict | Suppress native context menu |
-| Event-driven rendering | Continuous polling | Render only when CEF signals new frame |
+| Fix                      | Issue                        | Solution                                     |
+| ------------------------ | ---------------------------- | -------------------------------------------- |
+| IOSurface texture import | Metal API type crash         | Proper typed references instead of transmute |
+| Purple flash             | Uninitialized GPU memory     | Clear to black before first CEF paint        |
+| Input handling           | No keyboard/mouse            | Added event translation to CEF format        |
+| Multi-browser            | Global texture holder        | Per-browser texture storage with HashMap     |
+| Context menu crash       | winit NSApplication conflict | Suppress native context menu                 |
+| Event-driven rendering   | Continuous polling           | Render only when CEF signals new frame       |
 
 See `201-cef.md` for detailed documentation of each fix.
 
 ## Known Issues
 
 ### Working
+
 - CEF framework loads successfully
 - CEF initializes with OSR settings
 - Clean shutdown on app exit
@@ -292,11 +299,13 @@ See `201-cef.md` for detailed documentation of each fix.
 - Message pump integration via `BrowserProcessHandler` callback
 
 ### Not Yet Implemented
+
 - No browser pane creation
 - No texture import into WezTerm's render pipeline
 - No input routing to CEF browsers
 
 ### Platform Support
+
 - **macOS:** Working (current focus)
 - **Linux:** Not tested (should work with DMA-BUF path)
 - **Windows:** Not tested (needs D3D11 texture sharing)
