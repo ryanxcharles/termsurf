@@ -499,3 +499,22 @@ path and design the next experiment around that code path.
 - Left/right still show the extra half-cell gap in multi-pane mode.
 - Split hitboxes drift away from visible dividers.
 - Single-pane or zoomed-pane padding changes unexpectedly.
+
+**Result:** Fail
+
+Experiment 3 did not find the correct model. Restoring the full grid border
+reservation brought back the original oversized outer gutter. Moving the visible
+border line inside that reserved cell only changed the failure mode: when the
+line was placed on the content-facing side, it looked too close to pane content;
+when it was centered, the huge top/bottom spacing returned.
+
+The experiment confirmed that this cannot be fixed by simple paint placement
+inside the existing one-cell outer reservation. The model itself remains wrong
+for the desired appearance.
+
+#### Conclusion
+
+The code changes from Experiment 3 should be reverted. Future work needs a new
+design that starts from Wezboard's existing `window_padding` behavior and the
+grid-based split architecture, rather than trying to tune the line placement
+inside a full extra outer grid cell.
