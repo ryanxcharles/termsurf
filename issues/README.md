@@ -2,16 +2,16 @@
 
 ## Open
 
-| #                                                | Title                                                  | Opened     |
-| ------------------------------------------------ | ------------------------------------------------------ | ---------- |
-| [0756](0756-surfari/README.md)                   | Surfari — WebKit engine for TermSurf                   | 2026-03-16 |
-| [0776](0776-pdf-not-loading/README.md)           | PDF files show blank white screen instead of rendering | 2026-04-11 |
-| [0787](0787-split-border-outer-margin/README.md) | Split border has extra outer margin                    | 2026-05-23 |
+| #                                      | Title                                                  | Opened     |
+| -------------------------------------- | ------------------------------------------------------ | ---------- |
+| [0756](0756-surfari/README.md)         | Surfari — WebKit engine for TermSurf                   | 2026-03-16 |
+| [0776](0776-pdf-not-loading/README.md) | PDF files show blank white screen instead of rendering | 2026-04-11 |
 
 ## Closed
 
 | #                                                       | Title                                                                         | Opened     | Closed     |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
+| [0787](0787-split-border-outer-margin/README.md)        | Split border has extra outer margin                                           | 2026-05-23 | 2026-05-23 |
 | [0786](0786-grid-native-split-borders/README.md)        | Grid-Native Split Borders                                                     | 2026-05-23 | 2026-05-23 |
 | [0785](0785-split-border-bottom-row/README.md)          | Split border hides bottom pane row                                            | 2026-05-23 | 2026-05-23 |
 | [0784](0784-datalist-popup/README.md)                   | Datalist suggestions do not open                                              | 2026-05-23 | 2026-05-23 |

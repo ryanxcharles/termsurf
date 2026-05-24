@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-23"
+closed = "2026-05-23"
 +++
 
 # Issue 787: Split border has extra outer margin
@@ -518,3 +519,42 @@ The code changes from Experiment 3 should be reverted. Future work needs a new
 design that starts from Wezboard's existing `window_padding` behavior and the
 grid-based split architecture, rather than trying to tune the line placement
 inside a full extra outer grid cell.
+
+## Conclusion
+
+This issue is closed without a code fix. The desired behavior cannot be achieved
+as a local adjustment to the current Issue 786 border model.
+
+The architectural conflict is that Wezboard's terminal layout is fundamentally
+grid-based. A pane's PTY size is expressed in whole rows and columns, and the
+safe way to keep borders from covering terminal content is to reserve whole grid
+cells before assigning the pane content grid. That works for correctness, but it
+means an outer border row is a full terminal row high. Terminal rows are much
+taller than border pixels, so a full reserved top or bottom row creates the
+large vertical gutter seen in the screenshots.
+
+Moving the pixel border within that full row does not solve the problem. If the
+line is centered, the gutter looks too large. If it is moved toward content, it
+looks like the border is on top of the pane. If it is moved toward the outside,
+the pane content is still a full grid row away because the reserved row remains.
+The same basic problem exists horizontally, but it is less visually severe
+because terminal cells are much narrower than they are tall.
+
+The other obvious approach, removing the outer reserved grid cell, also fails:
+without real reserved space, the border returns to the pre-777 problem of
+overlapping or nearly overlapping terminal content and browser overlays.
+
+Therefore the requested appearance is architecturally impossible within the
+current model of "outer borders are represented as extra whole grid cells." A
+correct future solution would need a different layout architecture that can
+separate these concepts:
+
+- PTY content dimensions, still truthful and whole-cell based;
+- internal split dividers, still grid-native and draggable;
+- outer window padding or chrome gutters, which may be fractional-cell or
+  pixel-sized;
+- border painting, which should live in those outer gutters without consuming a
+  whole content row or column.
+
+That is larger than a polish fix. It should be tracked as a new architecture
+issue rather than continued here.
