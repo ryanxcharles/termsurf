@@ -365,3 +365,137 @@ experiment around that exact geometry source.
 - PTY size disagrees with the visible content grid.
 - Internal split dragging regresses.
 - Single-pane or zoomed-pane padding changes unexpectedly.
+
+**Result:** Fail
+
+Experiment 2 used the wrong model. Removing the outer grid-cell reservation made
+the border land on top of, or too close to, pane content. That regressed the
+core Issue 786 invariant: borders need real reserved grid space so they never
+overlap text, browser overlays, or terminal cells.
+
+The correct next step is not to eliminate the border grid cell. The border cell
+must remain. The problem is the extra half-cell rendering expansion that
+Wezboard adds around panes on top of the reserved border cell.
+
+#### Conclusion
+
+Keep the grid-native border reservation. Fix the visual excess by removing the
+legacy half-cell pane expansion in multi-pane border mode. The top edge needs
+special handling: it should retain only the intended half-cell relationship to
+the tab/chrome area, while the other edges should avoid the additional half-cell
+gap that makes the border feel inflated.
+
+### Experiment 3: Keep Border Cells, Remove Extra Half-Cell Expansion
+
+#### Description
+
+The correct model is:
+
+```text
+window/tab chrome
+reserved border grid cell
+pane content grid
+```
+
+The reserved border cell is required. It is the real space that prevents borders
+from being painted over terminal text. What is wrong is that Wezboard's older
+rendering code also expands pane backgrounds and border geometry by half a cell
+around pane edges. That old half-cell behavior made sense for the previous
+split-edge rendering model, but it stacks badly with explicit grid-native border
+cells.
+
+This experiment restores the Issue 786 grid-cell border reservation and removes
+the extra half-cell rendering expansion when a pane has `pos.border.is_some()`.
+Single-pane and zoomed-pane rendering should keep the existing behavior.
+
+Top is special. The desired top outer spacing is half a grid cell relative to
+the tab/chrome area, not a full border cell plus an additional half-cell. Other
+edges should use the reserved border cell as the sole gap between border and
+content.
+
+#### Changes
+
+1. Revert the Experiment 2 implementation changes that removed the mux's outer
+   grid-cell reservation:
+   - restore `grid_border_inset_for_size()` returning `1` when split layout has
+     enough room;
+   - restore `split_layout_size_for_size()` subtracting two rows/cols when the
+     border inset is active;
+   - restore `first_split_layout_size()` using the reduced split layout size;
+   - restore `left += inset` and `top += inset` for positioned panes;
+   - restore `PositionedPaneBorder` as the content rect plus one reserved cell
+     on each side;
+   - restore split hitbox offsets from Issue 786 so draggable dividers align
+     with visible divider cells.
+2. Audit `wezboard/wezboard-gui/src/termwindow/render/pane.rs` for all
+   `cell_width / 2.0` and `cell_height / 2.0` adjustments. Categorize each one:
+   - background expansion;
+   - content rect expansion;
+   - border placement;
+   - browser overlay or hitbox related.
+3. For panes with `pos.border.is_some()`, remove the legacy half-cell expansion
+   from pane background/content/border calculations where the reserved border
+   cell already provides the gap.
+4. Keep the legacy half-cell behavior for panes without `pos.border`, including
+   single-pane and zoomed-pane layouts.
+5. For the top outer edge, keep only the intended half-cell relationship to the
+   tab/chrome area. Do not add a full border cell plus another half-cell before
+   content.
+6. Keep bottom/left/right edges from receiving any extra half-cell gap beyond
+   the reserved border cell.
+7. Keep split hitboxes and internal divider drawing aligned with the reserved
+   divider cells. Do not move split hitboxes independently of the visible
+   dividers.
+8. Run `cargo fmt` after Rust edits and accept formatter output.
+
+#### Non-Negotiable Invariants
+
+- The reserved grid border cell remains in the mux layout.
+- Borders never overlap terminal text, browser overlays, or pane content.
+- PTY rows/cols remain truthful and match the visible content grid.
+- Single-pane and zoomed-pane behavior remain unchanged.
+- Split hitboxes remain aligned with visible divider cells.
+- Browser overlays remain aligned with pane content.
+- No Chromium, Roamium, webtui, or protocol changes.
+
+#### Verification
+
+1. Build and run debug Wezboard.
+2. Open a horizontal split with default `window_padding`. Verify there is no
+   enormous top or bottom gap between border and pane content.
+3. Open a vertical split. Verify there is no extra left/right half-cell gap
+   beyond the reserved border cell.
+4. Confirm border lines do not overlap the first row, last row, first column, or
+   last column of pane content.
+5. Run `stty size` in each pane and confirm the reported grid matches visible
+   content.
+6. Verify single-pane mode still has normal Wezboard padding.
+7. Verify zoomed-pane mode still has normal Wezboard padding and no split
+   border.
+8. Drag internal dividers. The resize cursor and hitbox must line up with the
+   visible divider.
+9. Open a browser pane in a split. Verify the overlay aligns with pane content
+   and does not overlap borders.
+10. Test both horizontal and vertical nested splits.
+
+#### Pass Criteria
+
+The border uses real reserved grid space and never overlaps pane content, but
+the extra half-cell visual inflation is gone. Top spacing is about half a grid
+cell relative to chrome; bottom/left/right do not show an additional half-cell
+gap beyond the reserved border cell.
+
+#### Partial Criteria
+
+The huge top/bottom gap is reduced and borders do not overlap content, but one
+edge or coordinate-dependent behavior remains wrong. Record the exact edge or
+path and design the next experiment around that code path.
+
+#### Failure Criteria
+
+- The border overlaps terminal text or browser content.
+- The full-cell border reservation is removed again.
+- Huge top/bottom padding remains.
+- Left/right still show the extra half-cell gap in multi-pane mode.
+- Split hitboxes drift away from visible dividers.
+- Single-pane or zoomed-pane padding changes unexpectedly.
