@@ -224,3 +224,144 @@ the reserved border geometry, avoiding the stacked appearance of normal
 `window_padding` plus a centered split-border gutter.
 
 The issue remains open for any follow-up polish or additional verification.
+
+### Experiment 2: Use Pixel Gutters For Outer Borders
+
+#### Description
+
+Experiment 1 proved that the visible border should own the outside edge of the
+multi-pane area, but it also exposed the deeper mismatch: Issue 786 reserves a
+full terminal cell on every outer side for a border that is only a few pixels
+thick. That is real non-overlap space, so it prevents the original
+border-over-content bug, but it is visually excessive. The problem is most
+obvious vertically because terminal cells are much taller than they are wide.
+
+The correct model is:
+
+```text
+window/tab chrome
+pixel-sized outer border gutter
+pane content grid
+```
+
+not:
+
+```text
+window/tab chrome
+full terminal-cell outer border gutter
+pane content grid
+```
+
+This experiment should replace the full-cell **outer perimeter** reservation
+with a pixel-sized outer gutter. Pane content must still never render under the
+border. The PTY/grid dimensions must remain truthful by deriving the content
+grid from the pixel area left after the outer gutter is subtracted.
+
+Internal split dividers are different. They are part of the cell-native split
+architecture, provide mouse resize hit targets, and should remain grid-native
+one-cell divider cells for this experiment.
+
+#### Changes
+
+1. Revert or supersede the Experiment 1 paint-only expansion if it conflicts
+   with the new geometry. The result of Experiment 2 should not depend on
+   drawing a border over a full reserved outer cell.
+2. Split the border model into two concepts:
+   - **outer perimeter gutter:** pixel-sized space around the full visible split
+     layout;
+   - **internal split divider cells:** existing grid-native one-cell separators
+     between panes.
+3. Compute the outer perimeter gutter size from pixel values, not terminal
+   cells:
+   - start with `split_border_width`;
+   - clamp to at least 1 pixel when borders are enabled;
+   - add a small fixed pixel breathing room only if needed for visual polish;
+   - do not convert this gutter into a full grid row or column.
+4. In the resize/layout path, derive the terminal content grid from the pixel
+   area that remains after subtracting:
+   - normal window chrome/padding;
+   - the pixel outer perimeter gutter on all four sides;
+   - internal one-cell split dividers.
+5. Update `wezboard/mux/src/tab.rs` so outer split layout reservation no longer
+   subtracts two full rows and two full columns solely for the outer perimeter.
+   The mux should still allocate internal split divider cells and should still
+   produce truthful pane content dimensions.
+6. Extend the positioned geometry exposed to the renderer so each pane can
+   distinguish:
+   - content rect in grid cells;
+   - internal divider adjacency;
+   - outer perimeter pixel rect for pane edges that touch the outside of the
+     split layout.
+7. Paint outer border lines in the pixel gutter outside pane content. Paint
+   internal divider-facing borders using the existing grid-native divider
+   geometry.
+8. Update browser overlay positioning and mouse mapping only as required to use
+   the new content rect. Do not add offsets by guesswork; every coordinate path
+   must share the same content-rect source of truth.
+9. Preserve single-pane and zoomed-pane behavior. No outer split-border gutter
+   should be applied when there is no visible split layout.
+10. Run `cargo fmt` after Rust edits and accept the formatter output.
+
+#### Non-Negotiable Invariants
+
+- Borders must never overlap terminal text, browser overlays, or pane content.
+- PTY rows/cols must match the visible content grid.
+- Outer top/bottom borders must not consume a full terminal row.
+- Outer left/right borders must not consume a full terminal column.
+- Internal split dividers remain grid-native and draggable.
+- Split-drag hitboxes must remain aligned with visible internal dividers.
+- Browser overlays must align with pane content after every split, resize, zoom,
+  and unzoom transition.
+- Single-pane and zoomed-pane layouts retain their normal padding behavior.
+- No Chromium, Roamium, webtui, or protocol changes.
+
+#### Verification
+
+1. Build and run debug Wezboard.
+2. With default `window_padding`, open a horizontal split. Verify the outer top
+   and bottom borders no longer have a full-row-looking gap between the border
+   and pane content.
+3. Open a vertical split. Verify the outer left and right borders no longer have
+   a full-column-looking gap between the border and pane content.
+4. Verify the border still does not cover the first or last visible text cell in
+   any pane.
+5. Run `stty size` in each pane and visually confirm the reported row/column
+   count matches the visible content grid. There must be no hidden rows or
+   hidden columns.
+6. Resize the window. The outer pixel gutter should remain pixel-sized; it must
+   not snap back to a full grid row or column.
+7. Drag internal split dividers. The resize cursor and hitbox should remain
+   aligned with the visible divider.
+8. Open a browser pane in a split. Verify the browser overlay aligns with pane
+   content and does not overlap the border.
+9. Toggle zoom on a pane. Zoomed mode should remove split borders and restore
+   normal single-pane padding; unzooming should restore the pixel-gutter outer
+   border and internal dividers.
+10. Test `window_padding = 0`. The outer pixel gutter should still provide real
+    non-overlap border space without shifting content outside the window.
+11. Test larger-than-default `window_padding`. Additional configured padding
+    should remain outside the pixel border gutter without becoming a second
+    full-cell border margin.
+
+#### Pass Criteria
+
+The multi-pane border appears as a normal thin border around the pane area:
+there is real non-overlap space for the border, but no full terminal-cell gutter
+on any outer side. PTY size, visible content grid, mouse hitboxes, split resize,
+and browser overlays all agree.
+
+#### Partial Criteria
+
+The outer full-cell gutter is removed visually, but one coordinate-dependent
+path still needs follow-up, such as browser overlay placement, split-drag
+hitboxes, or a resize transition. Record the failing path and design the next
+experiment around that exact geometry source.
+
+#### Failure Criteria
+
+- The border overlaps terminal text or browser content.
+- The outer top/bottom border still consumes a full terminal row.
+- The outer left/right border still consumes a full terminal column.
+- PTY size disagrees with the visible content grid.
+- Internal split dragging regresses.
+- Single-pane or zoomed-pane padding changes unexpectedly.
