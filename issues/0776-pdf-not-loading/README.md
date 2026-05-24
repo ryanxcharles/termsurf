@@ -44,7 +44,7 @@ Possible areas to investigate:
 
 ## Experiments
 
-### Experiment 1: Wire Chromium's PDF Viewer Into Roamium
+### Experiment 1: Probe Chromium PDF Viewer Plumbing
 
 #### Description
 
@@ -65,31 +65,54 @@ provide a TermSurf renderer client, and `libtermsurf_chromium/BUILD.gn` has no
 PDF deps. Therefore the PDF navigation can succeed while no viewer exists to
 render the document.
 
-This experiment should wire the smallest Chromium PDF viewer pipeline required
-for `web file.pdf` to render local PDFs in Roamium. Do not add webtui-side PDF
-special cases unless the Chromium viewer path proves impossible.
+This experiment is a scoped plumbing probe, not a full PDF-viewer port. It
+should add the smallest TermSurf `ContentClient` / renderer-client hooks needed
+to register PDF plugin metadata, observe whether Chromium calls the relevant PDF
+hooks, and identify the next missing layer. The expected outcome is **Partial**:
+PDFs may still not render after this experiment, but the result should precisely
+identify whether the next layer is plugin registration, renderer plugin
+creation, `IsPluginHandledExternally()`, MimeHandlerView/extension
+infrastructure, or stream routing.
+
+This experiment commits to the expensive product direction: in-pane PDF viewing
+inside the TermSurf browser overlay. A simpler fallback would be to hand PDFs to
+macOS Preview or another external viewer, but that breaks the in-terminal
+experience. If the Chromium pipeline proves far larger than expected in later
+experiments, that product trade-off can be revisited explicitly.
 
 #### Changes
 
-1. Create a new Chromium branch for this issue:
+1. Precondition checks:
+   - Verify the current Chromium GN args do not disable PDF/plugin/extension
+     support:
+     ```bash
+     cd chromium/src
+     gn args out/Default --list | rg 'enable_pdf|enable_extensions|enable_plugins'
+     ```
+     Expected: `enable_pdf`, `enable_extensions`, and `enable_plugins` are
+     enabled under defaults or are not overridden to `false`.
+   - Check whether `libtermsurf_chromium`'s `testonly = true` blocks the
+     proposed deps. Run `gn check out/Default //content/libtermsurf_chromium`.
+     If a needed PDF dep is rejected because it is not test-only-compatible,
+     stop and record that as the result; do not silently remove
+     `testonly = true` without a separate design.
+2. Create a new Chromium branch for this issue:
    - start from the most relevant current branch, currently
      `148.0.7778.97-issue-778`;
    - create `148.0.7778.97-issue-776`;
    - add it to the Branches table in `chromium/README.md`.
-2. Update `chromium/src/content/libtermsurf_chromium/BUILD.gn` to include the
-   minimal PDF viewer deps. Start with the Electron/Chrome set that is directly
-   needed by the embedder:
+3. Update `chromium/src/content/libtermsurf_chromium/BUILD.gn` to include only
+   the minimal PDF deps needed for this plumbing probe:
    - `//pdf`;
    - `//pdf:features`;
-   - `//pdf:content_restriction`;
    - `//components/pdf/common:constants`;
    - `//components/pdf/common:util`;
-   - `//components/pdf/renderer`;
-   - `//components/pdf/browser`;
-   - `//components/pdf/browser:interceptors`;
-   - `//chrome/browser/resources/pdf:resources` if the component-extension
-     viewer path is required.
-3. Add a TermSurf content client, for example `ts_content_client.{cc,h}`,
+   - `//components/pdf/renderer`. Do not add
+     `//chrome/browser/resources/pdf:resources`, `//components/pdf/browser`,
+     extension, MimeHandlerView, or stream-manager deps in this experiment
+     unless a compile error proves one of them is needed by the plumbing probe
+     itself.
+4. Add a TermSurf content client, for example `ts_content_client.{cc,h}`,
    derived from `ShellContentClient`.
    - Override `AddPlugins()`.
    - Register the internal PDF plugin using the Chrome/Electron pattern:
@@ -97,9 +120,10 @@ special cases unless the Chromium viewer path proves impossible.
      `"Portable Document Format"`, and
      `content::WebPluginInfo::PLUGIN_TYPE_BROWSER_INTERNAL_PLUGIN`.
    - Keep all existing `ShellContentClient` behavior by inheriting from it.
-4. Update `TsMainDelegate` to override `CreateContentClient()` and return the
+   - Add a temporary `LOG(INFO)` line confirming PDF plugin registration.
+5. Update `TsMainDelegate` to override `CreateContentClient()` and return the
    new TermSurf content client.
-5. Add a TermSurf renderer client, for example `ts_renderer_client.{cc,h}`,
+6. Add a TermSurf renderer client, for example `ts_renderer_client.{cc,h}`,
    derived from `ShellContentRendererClient`.
    - Override `OverrideCreatePlugin()`.
    - First preserve the existing Shell behavior, including surface-embed plugin
@@ -109,26 +133,39 @@ special cases unless the Chromium viewer path proves impossible.
    - Return `true` only when a plugin was actually created. If PDF creation
      returns `nullptr`, let the normal Shell fallback continue or fail visibly;
      do not silently synthesize a blank page.
-6. Update `TsMainDelegate` to override `CreateContentRendererClient()` and
+   - Add temporary `LOG(INFO)` lines that report each PDF MIME type seen by
+     `OverrideCreatePlugin()` and whether `pdf::CreateInternalPlugin()` returned
+     a plugin or `nullptr`.
+7. Also override `IsPluginHandledExternally()` in the TermSurf renderer client
+   if it is available on the Chromium 148 `ContentRendererClient` interface.
+   - Log when `mime_type == pdf::kPDFMimeType` or
+     `pdf::kInternalPluginMimeType`.
+   - Do not try to implement MimeHandlerView in this experiment.
+   - If the method is not available or cannot be implemented without pulling in
+     extensions infrastructure, record that explicitly in the result.
+8. Update `TsMainDelegate` to override `CreateContentRendererClient()` and
    return the new TermSurf renderer client.
-7. Wire the PDF component-extension path if the internal plugin alone is not
-   sufficient:
-   - register/load the PDF component extension manifest using
-     `pdf_extension_util::GetManifest()`;
-   - register PDF resources (`kPdfResources`) and template replacements;
-   - ensure PDF streams are routed through `pdf::PdfViewerStreamManager` when
-     `chrome_pdf::features::kPdfOopif` / the Chromium 148 equivalent is enabled.
-     This step should follow Electron's implementation in:
+9. Do not wire the PDF component-extension, MimeHandlerView, GuestView, or
+   streams-private path in this experiment. Instead, document them as the likely
+   next layer if plugin registration succeeds but PDFs still do not render. The
+   future implementation should be based on Electron's:
    - `shell/browser/extensions/electron_extension_system.cc`;
    - `shell/browser/extensions/electron_component_extension_resource_manager.cc`;
-   - `shell/browser/extensions/api/streams_private/streams_private_api.cc`.
-8. Do not change:
-   - `webtui`;
-   - Roamium's Rust IPC;
-   - `termsurf.proto`;
-   - Wezboard overlay positioning or input forwarding.
-9. Build `libtermsurf_chromium` with `autoninja`, rebuild Roamium against the
-   new library, and regenerate the Issue 776 Chromium patch archive.
+   - `shell/browser/extensions/api/streams_private/streams_private_api.cc`;
+   - Chromium patch equivalent for redirecting
+     `plugin_response_interceptor_url_loader_throttle.cc` to the embedder's
+     streams-private implementation.
+10. Do not change:
+    - `webtui`;
+    - Roamium's Rust IPC;
+    - `termsurf.proto`;
+    - Wezboard overlay positioning or input forwarding.
+
+11. Build `libtermsurf_chromium` with `autoninja`, rebuild Roamium against the
+    new library, and run the diagnostic verification. Only regenerate and commit
+    the Issue 776 Chromium patch archive if this experiment produces a coherent
+    branch state worth preserving. On Partial or Fail, record the branch state
+    and the next required layer before deciding whether to archive.
 
 #### Non-Negotiable Invariants
 
@@ -140,71 +177,100 @@ special cases unless the Chromium viewer path proves impossible.
   window for PDFs; PDFs should render in the existing browser overlay.
 - The PDF viewer must not require changes to the TermSurf protobuf protocol.
 - The implementation must preserve Content Shell behavior unrelated to PDFs.
+- Experiment 1 must not quietly grow into an extensions/MimeHandlerView port. If
+  that layer is required, stop with a Partial result and design Experiment 2
+  around it.
 - The Chromium changes must live on the `148.0.7778.97-issue-776` branch and be
   archived under `chromium/patches/issue-776/`.
 
 #### Verification
 
-1. Build Chromium:
+1. Record the precondition results:
+   - `enable_pdf`, `enable_extensions`, and `enable_plugins` state;
+   - whether `testonly = true` blocks the minimal PDF deps;
+   - whether `gn check out/Default //content/libtermsurf_chromium` passes after
+     the minimal deps are added.
+2. Build Chromium:
    ```bash
    cd chromium/src
    export PATH="$(cd ../depot_tools && pwd):$PATH"
    autoninja -C out/Default libtermsurf_chromium
    ```
-2. Build Roamium and webtui in debug mode:
+3. Build Roamium and webtui in debug mode:
    ```bash
    cd /Users/ryan/dev/termsurf
    ./scripts/build.sh roamium
    ./scripts/build.sh webtui
    ```
-3. Run debug Wezboard and debug Roamium together using the existing local test
+4. Run debug Wezboard and debug Roamium together using the existing local test
    workflow. The Roamium process must load the newly built
    `libtermsurf_chromium`; testing an older installed Roamium invalidates the
    result.
-4. Open a local PDF:
+5. Open a local PDF:
    ```bash
    web /absolute/path/to/file.pdf
    ```
-   Expected: the PDF viewer renders visible document pages, not a blank white
-   page.
-5. Test a relative local PDF path from a shell working directory:
+   Expected for this experiment: the page may still be blank, but the log should
+   answer whether PDF plugin registration happened, whether
+   `OverrideCreatePlugin()` saw `pdf::kInternalPluginMimeType`, whether
+   `pdf::CreateInternalPlugin()` returned a plugin or `nullptr`, and whether
+   `IsPluginHandledExternally()` saw the PDF MIME type.
+6. Test a relative local PDF path from a shell working directory:
    ```bash
    web ./file.pdf
    ```
-   Expected: it resolves to `file://...` and renders.
-6. Test a remote PDF URL. Expected: the PDF viewer renders the PDF inline in the
-   same overlay.
-7. Scroll the PDF with mouse wheel/trackpad and keyboard. Expected: pages move
-   and the overlay remains aligned with the pane.
-8. Click normal links and open ordinary HTML pages after viewing a PDF.
-   Expected: non-PDF navigation still works in the same tab.
-9. Open DevTools on the PDF tab if supported. Expected: DevTools does not crash
-   Roamium. It is acceptable if PDF internals are limited.
-10. Regression smoke tests:
-    - normal HTML page loads;
-    - local HTML file loads;
-    - text selection still works;
-    - recent native popup fixes still behave as before.
+   Expected: it resolves to `file://...` and reaches the same PDF diagnostic
+   path.
+7. Test a remote PDF URL. Expected: it reaches the same PDF diagnostic path.
+8. Click normal links and open ordinary HTML pages after trying a PDF. Expected:
+   non-PDF navigation still works in the same tab.
+9. Regression smoke tests:
+   - normal HTML page loads;
+   - local HTML file loads;
+   - text selection still works;
+   - recent native popup fixes still behave as before.
+10. Record a failure-layer table:
+
+    | Layer                                                 | Result                 |
+    | ----------------------------------------------------- | ---------------------- |
+    | PDF build flags enabled                               | yes/no                 |
+    | Minimal PDF deps compile                              | yes/no                 |
+    | PDF plugin registered in `AddPlugins()`               | yes/no                 |
+    | `OverrideCreatePlugin()` sees internal PDF MIME type  | yes/no                 |
+    | `CreateInternalPlugin()` returns a plugin             | yes/no/null-not-called |
+    | `IsPluginHandledExternally()` sees top-level PDF      | yes/no/not-available   |
+    | Evidence that MimeHandlerView/extension layer is next | yes/no                 |
 
 #### Pass Criteria
 
-Local and remote PDFs render visibly inside the existing TermSurf browser
-overlay. Scrolling works, normal navigation still works, and no protocol,
-webtui, or Wezboard changes are required.
+PDFs render visibly inside the existing TermSurf browser overlay using only the
+minimal content-client / renderer-client wiring. This is unlikely, but if it
+happens, verify scrolling, normal navigation, and local/remote PDFs before
+closing the issue.
 
 #### Partial Criteria
 
-The Chromium PDF viewer pipeline starts but one supporting piece is still
-missing, such as component-extension resources, OOPIF stream routing, or PDF
-renderer process setup. Record the exact failing layer and design Experiment 2
-around that layer.
+The expected outcome is Partial. The experiment succeeds as a diagnostic if it
+builds and identifies the first missing layer in dependency order:
+
+1. PDF build flags/deps;
+2. plugin registration;
+3. renderer plugin creation;
+4. top-level PDF external plugin handling;
+5. MimeHandlerView/extension infrastructure;
+6. PDF stream routing.
+
+If multiple layers are missing, the next experiment should target the earliest
+missing layer in this list.
 
 #### Failure Criteria
 
-- PDFs still show a blank white page.
+- The experiment makes PDFs blank or crashes without producing enough logs to
+  identify the first missing layer.
 - The fix only handles PDFs by opening an external app or native window.
 - The fix adds PDF-specific behavior to `webtui` while the Chromium viewer
   remains unwired.
 - Normal HTML or local file navigation regresses.
 - Roamium crashes when opening a PDF.
-- The implementation cannot be archived as a clean Issue 776 Chromium branch.
+- The experiment quietly starts porting the extension/MimeHandlerView stack
+  instead of stopping at the scoped plumbing probe.
