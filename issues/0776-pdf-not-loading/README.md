@@ -2382,3 +2382,318 @@ path around `PluginResponseInterceptorURLLoaderThrottle` and `streams_private`.
 If Chromium refuses to serve the PDF viewer URL without an
 `ExtensionsBrowserClient` component-resource manager hook, that exact object
 should become the next experiment's scope.
+
+### Experiment 7: Serve PDF Viewer Resources
+
+#### Description
+
+Experiment 6 proved that TermSurf can register and resolve the PDF viewer
+component resources. The next missing layer is runtime delivery: Chromium must
+be able to request the PDF viewer shell and receive real `pdf/index.html`,
+`pdf/index.css`, and JavaScript bytes from TermSurf-owned code.
+
+This experiment should prove only that viewer resources can be served through a
+runtime URL path. It should not yet wire the original PDF byte stream into the
+viewer, should not implement `streams_private`, and should not attempt to make a
+PDF visibly render. A successful result means a navigation to a controlled
+TermSurf PDF viewer resource URL displays a recognizable PDF viewer shell or
+diagnostic sentinel loaded from the registered resources.
+
+The preferred path is the narrowest one Chromium will accept:
+
+1. Try a minimal `chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/...`
+   serving path for the PDF extension id, backed by
+   `TsPdfComponentExtensionResourceManager`.
+2. If Chromium requires
+   `ExtensionsBrowserClient::GetComponentExtensionResourceManager()` before it
+   will route that URL, add the smallest PDF-only browser-client bridge that
+   returns the Experiment 6 resource manager.
+3. If Chromium requires broader `ExtensionSystem`, `ExtensionRegistry`,
+   GuestView, MimeHandlerView, or extension renderer machinery merely to serve a
+   static PDF viewer resource, stop and mark the experiment Partial. Do not
+   silently grow this experiment into the full Electron PDF stack.
+
+This experiment is about the PDF viewer shell URL, not the PDF document stream.
+If the viewer shell loads but reports that no PDF stream is available, that is a
+Pass for Experiment 7.
+
+#### Changes
+
+1. Create a new Chromium branch.
+
+   Branch from the current Issue 776 branch:
+
+   ```bash
+   git -C chromium/src checkout 148.0.7778.97-issue-776-exp6
+   git -C chromium/src checkout -b 148.0.7778.97-issue-776-exp7
+   ```
+
+   Add the branch to `chromium/README.md`:
+
+   > Issue 776 Experiment 7: serve PDF viewer resources.
+
+2. Audit Chromium's static extension-resource serving path.
+
+   Before implementation, inspect the resource-serving code that normally maps
+   component-extension URLs to resource ids:
+
+   ```bash
+   rg "ComponentExtensionResourceManager|GetComponentExtensionResourceManager|chrome-extension" \
+     chromium/src/extensions chromium/src/chrome chromium/src/content -n
+   rg "URLLoaderFactory|URLDataSource|ExtensionURLLoaderFactory|ResourceRequestPolicy" \
+     chromium/src/extensions chromium/src/chrome chromium/src/content -n
+   ```
+
+   Record in the result which hook actually owns static `chrome-extension://...`
+   resource delivery in Chromium 148.
+
+3. Add a runtime serving probe backed by the Experiment 6 resource manager.
+
+   The serving path should:
+   - recognize only `extension_misc::kPdfExtensionId`;
+   - serve only paths present in `TsPdfComponentExtensionResourceManager`;
+   - load bytes from `ui::ResourceBundle` using the resolved resource id;
+   - apply the Experiment 6 template replacements where the resource is an HTML
+     template that requires them;
+   - return the correct MIME type for at least `.html`, `.css`, `.js`, and
+     `.wasm`;
+   - reject all other extension ids and unknown paths.
+
+   Prefer implementing this through Chromium's existing extension-resource
+   machinery. If that is too broad, implement a TermSurf-owned temporary URL
+   handler whose URL shape makes the experiment explicit, for example:
+
+   ```text
+   termsurf-pdf-viewer://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf/index.html
+   ```
+
+   The temporary scheme is acceptable only if the result explains why the native
+   `chrome-extension://` path requires broader extension infrastructure. The
+   temporary scheme must be treated as a probe, not the final product design.
+
+4. Add a direct debug navigation target for the viewer shell.
+
+   Add a narrow way to navigate Roamium to the viewer shell URL without first
+   loading a PDF document. Acceptable options:
+   - a debug-only command-line switch such as `--termsurf-pdf-viewer-probe`;
+   - a hard-coded probe URL used only by the existing
+     `scripts/test-issue-776-pdf.sh` automation when an env var is set;
+   - or a documented local URL typed by the automation.
+
+   The loaded page should make success easy to classify. If raw `pdf/index.html`
+   is visually blank until stream wiring exists, inject a small diagnostic
+   sentinel outside the viewer bundle, such as:
+
+   ```text
+   TermSurf PDF viewer resources loaded
+   ```
+
+   The sentinel must prove the viewer resource delivery path ran. It must not be
+   a fake PDF rendering page that bypasses the viewer resources.
+
+5. Add low-volume diagnostics.
+
+   Use a distinct prefix such as `[issue-776-exp7]`. Log:
+   - requested resource URL;
+   - resolved extension id;
+   - resolved resource path;
+   - resource id;
+   - byte count served;
+   - MIME type;
+   - whether template replacements were applied;
+   - whether the request was rejected and why.
+
+   The logs may be unconditional for the experiment or gated by
+   `TERMSURF_PDF_TRACE=1`.
+
+6. Keep Experiment 7 scoped to static viewer resources.
+
+   Do not implement:
+   - `streams_private`;
+   - `pdf_viewer_private`;
+   - `PluginResponseInterceptorURLLoaderThrottle` redirect changes;
+   - MimeHandlerView;
+   - GuestView;
+   - `PdfHost`;
+   - PDF renderer process routing changes;
+   - weakening or bypassing `CHECK(IsPdfRenderer())`;
+   - fake HTML that merely says "PDF loaded" without fetching registered viewer
+     resources.
+
+   If any of those layers are required just to serve `pdf/index.html`, stop and
+   record the exact missing layer.
+
+7. Build Chromium and Roamium.
+
+   ```bash
+   autoninja -C chromium/src/out/Default libtermsurf_chromium
+   ./scripts/build.sh roamium
+   ```
+
+8. Extend the automation only as much as needed to capture the viewer-resource
+   probe.
+
+   Reuse the existing screenshot automation from the PDF experiments. Add a
+   probe mode if needed, for example:
+
+   ```bash
+   TERMSURF_PDF_TRACE=1 \
+   TERMSURF_PDF_VIEWER_RESOURCE_PROBE=1 \
+   LOG_DIR="$PWD/logs/issue-776-exp7-viewer-$(date +%Y%m%d-%H%M%S)" \
+   ./scripts/test-issue-776-pdf.sh
+   ```
+
+   The screenshot should include either the actual PDF viewer shell or the
+   diagnostic sentinel proving the viewer resource-serving path ran.
+
+9. Regenerate the Chromium patch archive if the experiment passes or produces a
+   coherent Partial worth preserving.
+
+   Use `chromium/patches/issue-776-exp7/`.
+
+10. Record the result directly under this experiment.
+
+    Include:
+    - exact Chromium files changed;
+    - exact BUILD.gn deps added;
+    - whether the final probe used `chrome-extension://` or a temporary TermSurf
+      scheme;
+    - the resource-serving hook identified in step 2;
+    - `[issue-776-exp7]` log lines for at least `pdf/index.html`;
+    - screenshot artifact path;
+    - whether the viewer shell loaded, displayed a no-stream error, or failed
+      before rendering;
+    - whether Experiment 8 should proceed to stream routing or to a missing
+      extension-resource object.
+
+11. Format this issue document:
+
+    ```bash
+    prettier --write --prose-wrap always --print-width 80 \
+      issues/0776-pdf-not-loading/README.md
+    ```
+
+#### Non-Negotiable Invariants
+
+- Experiment 6's resource manager remains the source of truth for PDF viewer
+  resource path resolution.
+- Unknown extension ids and unknown resource paths must not be served.
+- Serving static viewer resources must not enable general user extension
+  support.
+- This experiment must not claim PDF rendering success unless an actual PDF page
+  visibly renders in the screenshot.
+- This experiment must not wire `streams_private`, MimeHandlerView, GuestView,
+  or `PdfHost`.
+- This experiment must not change the TermSurf protocol.
+- This experiment must not close Issue 776.
+
+#### Verification
+
+1. Confirm branch and files:
+
+   ```bash
+   git -C chromium/src branch --show-current
+   git -C chromium/src diff --name-only
+   git diff --name-only
+   ```
+
+   Expected:
+   - Chromium branch is `148.0.7778.97-issue-776-exp7`;
+   - Chromium changes are limited to static PDF viewer resource serving and
+     required BUILD.gn edits;
+   - main repo changes are limited to `chromium/README.md`, this issue document,
+     any automation update, and the regenerated patch archive.
+
+2. Build:
+
+   ```bash
+   autoninja -C chromium/src/out/Default libtermsurf_chromium
+   ./scripts/build.sh roamium
+   ```
+
+3. Run the viewer-resource probe with screenshots enabled.
+
+   Capture:
+   - screenshot artifact;
+   - `wezboard-gui.log`;
+   - Roamium/Chromium logs if separate.
+
+   The screenshot must show either:
+   - a visible PDF viewer shell loaded from the registered viewer resources; or
+   - the explicit diagnostic sentinel proving the resource-serving path ran.
+
+4. Confirm logs contain a successful resource delivery for at least:
+   - `pdf/index.html`;
+   - one stylesheet or JavaScript resource, if the viewer shell requested one.
+
+   Expected log shape:
+
+   ```text
+   [issue-776-exp7] request url=...
+   [issue-776-exp7] served extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai path=pdf/index.html id=... bytes=... mime=text/html
+   ```
+
+5. Confirm rejection behavior.
+
+   Attempt one unknown resource path and one wrong extension id through the same
+   serving path. The log must show rejection, and the browser must not receive a
+   successful resource response.
+
+6. Confirm normal browsing still works.
+
+   Re-run the HTML smoke test against `https://example.com`.
+
+7. Confirm ordinary PDF navigation behavior is not claimed as fixed.
+
+   Load the vendored Bitcoin PDF through the existing automation. It may still
+   show the current pre-rendering failure. Record the result, but do not treat
+   this as a failure of Experiment 7 unless the new resource-serving code
+   regresses the behavior from Experiment 6.
+
+#### Pass Criteria
+
+Pass if:
+
+- Chromium builds;
+- Roamium builds;
+- the probe serves `pdf/index.html` from registered Experiment 6 resources;
+- at least one screenshot proves the viewer-resource path reached the browser;
+- logs show the PDF extension id, resource path, resource id, byte count, and
+  MIME type;
+- unknown extension ids and unknown paths are rejected;
+- no stream routing, MimeHandlerView, GuestView, `PdfHost`, or general extension
+  support is added.
+
+This Pass does not require a PDF document to render. A viewer shell that loads
+and then reports "missing stream" is a successful Experiment 7 outcome.
+
+#### Partial Criteria
+
+Partial if:
+
+- TermSurf can serve resources only through a temporary `termsurf-pdf-viewer://`
+  probe scheme, and Chromium refuses the native `chrome-extension://` route
+  without broader extension infrastructure;
+- Chromium requires an `ExtensionsBrowserClient` component-resource hook before
+  static PDF viewer resources can be served;
+- the viewer shell requests additional resources or security context that the
+  PDF-only resource manager does not yet provide;
+- resource serving works for `pdf/index.html` but not for dependent CSS/JS
+  resources.
+
+The result must name the exact missing object or hook and make that the next
+experiment's scope.
+
+#### Failure Criteria
+
+- The experiment fakes success with a page that does not load registered PDF
+  viewer resources.
+- The experiment starts implementing the PDF stream path instead of static
+  viewer resource delivery.
+- The experiment broadens into general extension support without proving that a
+  smaller PDF-only serving hook is impossible.
+- The experiment weakens PDF renderer checks or globally marks ordinary
+  renderers as PDF renderers.
+- Unknown extension ids or unknown paths are served successfully.
+- The result claims PDF rendering success from a static viewer-shell or
+  diagnostic-sentinel screenshot.
