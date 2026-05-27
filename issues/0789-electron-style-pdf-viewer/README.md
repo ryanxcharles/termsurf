@@ -1310,3 +1310,337 @@ Experiment 3 should decide how to provide that layer without recreating the
 Issue 776 Experiment 8 dependency explosion: split the upstream target, fork the
 stream manager into TermSurf-owned code, or prove that a carefully bounded
 Chrome PDF dependency can link safely.
+
+### Experiment 3: Resolve Captured PDF Streams
+
+#### Description
+
+Connect the Experiment 2 captured PDF stream to the lookup path used by
+Chromium's PDF viewer.
+
+Experiment 2 proved that TermSurf can intercept an `application/pdf` response,
+emit the PDF viewer template payload, preserve the original PDF body as a
+`blink::mojom::TransferrableURLLoader`, and store it as an
+`extensions::StreamContainer`. The remaining gap is ownership: Chromium's normal
+OOPIF PDF path stores and resolves these streams through
+`PdfViewerStreamManager`, but in this checkout that implementation is owned by
+the broad `//chrome/browser/pdf:pdf` target.
+
+This experiment should add the narrowest TermSurf-owned stream manager layer
+that can resolve the `internal_id` emitted by the viewer-template response and
+return the captured stream to the PDF viewer path. The primary Pass criterion is
+not "PDF visibly renders" yet. A Pass means the viewer-side stream request
+reaches TermSurf's stream manager and successfully claims the captured
+`StreamContainer` without importing the failed broad Chrome dependency set from
+Issue 776 Experiment 8.
+
+Visible PDF rendering is a stretch outcome. If it happens, record it. If it does
+not, the result must name the next missing layer after successful stream
+resolution.
+
+#### Changes
+
+1. Create a new Chromium branch from Experiment 2.
+
+   ```bash
+   cd chromium/src
+   git checkout 148.0.7778.97-issue-789-exp2
+   git checkout -b 148.0.7778.97-issue-789-exp3
+   ```
+
+   Update `chromium/README.md` in the main repo to list the new branch.
+
+2. Audit Chromium's stream-manager call sites before changing code.
+
+   Run:
+
+   ```bash
+   cd chromium/src
+   rg "PdfViewerStreamManager|GetStreamContainer|AddStreamContainer|StreamContainer" \
+     chrome/browser/pdf \
+     chrome/browser/extensions \
+     extensions/browser \
+     components/pdf \
+     pdf \
+     content/libtermsurf_chromium
+   gn desc out/Default //chrome/browser/pdf:pdf deps
+   gn desc out/Default //extensions/browser/mime_handler:stream_container deps
+   ```
+
+   Record in the experiment result:
+   - which function the PDF viewer uses to claim a stream by `internal_id`;
+   - whether that claim path is browser-side, renderer-side, or extension API
+     driven;
+   - which smallest source files are required for lookup/claim;
+   - whether any of those files require `//chrome/browser/pdf:pdf`,
+     `//chrome/browser/plugins:impl`, `//chrome/browser/extensions:extensions`,
+     `//components/guest_view/browser`, Chrome media permission code, Chrome
+     WebRTC capture code, or prerender browser delegates.
+
+3. Choose one narrow stream-manager strategy.
+
+   Use this order:
+   1. **Split upstream target if clean.** If `PdfViewerStreamManager` and its
+      direct helpers can be moved into a smaller GN target without dragging
+      unrelated Chrome browser infrastructure, create a target such as:
+
+      ```text
+      //chrome/browser/pdf:pdf_viewer_stream_manager
+      ```
+
+      Then depend on that target from `content/libtermsurf_chromium`.
+
+   2. **Fork the manager into TermSurf-owned code.** If the upstream file is
+      small but its owning target is too broad, copy only the required stream
+      manager behavior into:
+
+      ```text
+      content/libtermsurf_chromium/ts_pdf_stream_manager.h
+      content/libtermsurf_chromium/ts_pdf_stream_manager.cc
+      ```
+
+      The fork should manage only:
+      - storing an `extensions::StreamContainer` by `internal_id`;
+      - claiming/removing that stream by `internal_id`;
+      - lifecycle cleanup when the owning `WebContents` goes away.
+
+      It must not copy unrelated Chrome PDF viewer UI, preferences, metrics,
+      download, permission, or extension registry behavior.
+
+   3. **Prove a bounded Chrome dependency.** Only use `//chrome/browser/pdf:pdf`
+      if `gn desc` and a successful link prove it does not reintroduce the Issue
+      776 Experiment 8 dependency explosion. This is expected to fail and should
+      not be the first implementation choice.
+
+   If none of the three choices can build cleanly, mark the experiment Partial
+   and record the smallest unbuildable dependency boundary.
+
+4. Replace the Experiment 2 static map with the chosen stream manager.
+
+   Update:
+
+   ```text
+   content/libtermsurf_chromium/ts_pdf_stream_dispatch.cc
+   content/libtermsurf_chromium/ts_pdf_stream_dispatch.h
+   ```
+
+   so `TsDispatchPdfStream(...)` stores the captured `StreamContainer` in the
+   chosen stream manager rather than a standalone static map.
+
+   Required logs:
+
+   ```text
+   [issue-789-exp3] stream-manager-created ...
+   [issue-789-exp3] stream-container-added internal_id=<id> ...
+   ```
+
+   Preserve the Experiment 2 logs long enough to compare old and new behavior.
+
+5. Wire the viewer-side claim path to TermSurf's stream manager.
+
+   The exact file depends on the audit in step 2. The implementation must be
+   driven by the actual `internal_id` lookup path, not by another guessed
+   wrapper or navigation redirect.
+
+   Acceptable outcomes:
+   - the existing PDF viewer request path can call the new TermSurf manager;
+   - a narrow copied/forked lookup helper can call the new TermSurf manager;
+   - a bounded Chromium target split exposes the existing manager without broad
+     Chrome infrastructure.
+
+   Required logs:
+
+   ```text
+   [issue-789-exp3] stream-container-claim-request internal_id=<id> ...
+   [issue-789-exp3] stream-container-claimed internal_id=<id> ...
+   ```
+
+   If the viewer never asks for the stream, do not synthesize success. Record
+   which layer failed to issue the claim.
+
+6. Keep the dependency gate strict.
+
+   `content/libtermsurf_chromium` must not add:
+
+   ```text
+   //chrome/browser/plugins:impl
+   //chrome/browser/extensions:extensions
+   //components/guest_view/browser
+   ```
+
+   It also must not pull in the unresolved Issue 776 Experiment 8 link failures:
+   - `ChromeNoStatePrefetchContentsDelegate`;
+   - macOS ScreenCaptureKit symbols from Chrome WebRTC capture;
+   - Chrome media permission symbols.
+
+   Any new `chrome/browser/...` dependency must be listed in the result with its
+   reason and `gn desc` evidence.
+
+7. Preserve non-PDF behavior.
+
+   Do not modify:
+   - Wezboard;
+   - Roamium Rust code;
+   - `webtui`;
+   - `termsurf.proto`;
+   - the old data-wrapper navigation path except to keep it disabled;
+   - normal HTML navigation;
+   - non-PDF binary download behavior.
+
+8. Format and archive.
+
+   Run Chromium formatting on modified C++/GN files:
+
+   ```bash
+   cd chromium/src
+   ../depot_tools/clang-format -i <modified .cc/.h files>
+   export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+   gn format content/libtermsurf_chromium/BUILD.gn
+   ```
+
+   Build before committing the Chromium branch. After the branch commit,
+   regenerate the patch archive:
+
+   ```bash
+   rm -rf ../../chromium/patches/issue-789
+   git format-patch 148.0.7778.97-issue-776-exp7..HEAD \
+     -o ../../chromium/patches/issue-789/
+   ```
+
+   The archive should include Experiment 2 and Experiment 3 commits as the
+   current Issue 789 patch stack.
+
+#### Verification
+
+1. Build `libtermsurf_chromium`.
+
+   ```bash
+   cd chromium/src
+   export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+   autoninja -C out/Default libtermsurf_chromium
+   ```
+
+   Pass requires a clean link. A build that reaches compile but fails at the
+   final dylib link with the Issue 776 Experiment 8 symbol set is a Failure, not
+   a Partial, unless the result identifies a smaller target split that would
+   remove those symbols.
+
+2. Inspect the dependency surface.
+
+   ```bash
+   gn desc out/Default //content/libtermsurf_chromium deps
+   rg "//chrome/browser/plugins:impl|//chrome/browser/extensions:extensions|//components/guest_view/browser" \
+     content/libtermsurf_chromium chrome/browser/pdf chrome/browser/plugins
+   ```
+
+   The forbidden targets must not appear as TermSurf dependencies.
+
+3. Run the existing automated Bitcoin PDF smoke test.
+
+   ```bash
+   LOG_DIR="$PWD/logs/issue-789-exp3-$(date +%Y%m%d-%H%M%S)" \
+   TERMSURF_PDF_SETTLE_SECONDS=8 \
+   ./scripts/test-issue-776-pdf.sh http://localhost:9616/bitcoin.pdf
+   ```
+
+   Required log sequence:
+
+   ```text
+   [issue-789-exp2] pdf-response ...
+   [issue-789-exp2] viewer-template-emitted internal_id=<id> ...
+   [issue-789-exp3] stream-manager-created ...
+   [issue-789-exp3] stream-container-added internal_id=<same id> ...
+   [issue-789-exp3] stream-container-claim-request internal_id=<same id> ...
+   [issue-789-exp3] stream-container-claimed internal_id=<same id> ...
+   ```
+
+   The exact `internal_id` must match from template emission through claim.
+
+4. Capture screenshot output.
+
+   The screenshot does not define Pass for this experiment, but it should be
+   archived with the logs. Classify the visual result as one of:
+   - PDF visibly rendered;
+   - viewer shell loaded but PDF body not displayed;
+   - blank/white surface;
+   - download/error page;
+   - renderer crash;
+   - automation failure.
+
+   If PDF visibly renders, mark that as a stretch success and record whether
+   scrolling the first page works.
+
+5. Run normal HTML smoke.
+
+   ```bash
+   LOG_DIR="$PWD/logs/issue-789-exp3-html-$(date +%Y%m%d-%H%M%S)" \
+   TERMSURF_PDF_SETTLE_SECONDS=4 \
+   ./scripts/test-issue-776-pdf.sh http://localhost:9616/index.html
+   ```
+
+   The PDF response and stream-manager logs must not appear.
+
+6. Run non-PDF binary smoke.
+
+   ```bash
+   LOG_DIR="$PWD/logs/issue-789-exp3-bin-$(date +%Y%m%d-%H%M%S)" \
+   TERMSURF_PDF_SETTLE_SECONDS=4 \
+   ./scripts/test-issue-776-pdf.sh http://localhost:9616/test.bin
+   ```
+
+   The PDF response and stream-manager logs must not appear. Existing download
+   behavior is acceptable.
+
+7. Record the known teardown crash separately.
+
+   The Issue 776 teardown crash is still out of scope unless it prevents logs or
+   screenshots from being captured. If it recurs after evidence collection, note
+   it but do not treat it as an Experiment 3 failure.
+
+#### Pass Criteria
+
+- `libtermsurf_chromium` builds and links.
+- The implementation avoids the forbidden broad Chrome dependency set.
+- The PDF response reaches the Experiment 2 response throttle.
+- The emitted viewer-template `internal_id` is stored in the Experiment 3 stream
+  manager.
+- The viewer-side claim path requests the same `internal_id`.
+- The stream manager returns the captured `StreamContainer` for that
+  `internal_id`.
+- Normal HTML and non-PDF binary smoke tests do not trigger PDF stream-manager
+  behavior.
+- The patch archive is regenerated under `chromium/patches/issue-789/`.
+
+#### Partial Criteria
+
+Partial if the implementation builds and stores streams in the new manager, but
+one downstream layer still prevents a successful claim. Valid Partial outcomes
+include:
+
+- the viewer never requests the `internal_id`;
+- the viewer requests a different `internal_id`;
+- the request path is gated by a missing extension API or PDF viewer private
+  API;
+- the stream is claimed but the viewer still cannot render because `PdfHost`,
+  PDF process routing, or viewer-private bindings are missing;
+- the upstream manager can be split cleanly but requires a separate Chromium
+  target refactor to keep the experiment reviewable.
+
+The result must name the next exact missing layer and include the relevant logs.
+
+#### Failure Criteria
+
+- The implementation imports `//chrome/browser/plugins:impl`.
+- The implementation imports broad Chrome extension/browser or guest-view
+  infrastructure to make the stream lookup work.
+- The build reproduces the Issue 776 Experiment 8 final-link failures without a
+  smaller target-split explanation.
+- The implementation weakens PDF origin, process, or renderer checks to force a
+  claim.
+- The implementation reintroduces the data-wrapper fake PDF path as the primary
+  solution.
+- The implementation claims Pass from screenshot differences without a matching
+  `stream-container-claimed` log.
+- The PDF `internal_id` does not match from template emission through stream
+  claim.
+- Normal HTML or non-PDF binary behavior regresses.
