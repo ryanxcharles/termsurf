@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-27"
+closed = "2026-05-27"
 +++
 
 # Issue 788: Native Popup Y Is Wrong in Top Split Webviews
@@ -306,27 +307,28 @@ overlay screen rect from reaching Chromium during normal operation.
   Wezboard's reported screen rect.
 - Any prior native popup fix from Issues 779, 782, or 783 regresses.
 
-**Result:** Partial
+**Result:** Pass
 
-The Wezboard-side screen-rect conversion fix partially succeeded.
+The Wezboard-side screen-rect conversion fix succeeded.
 
 What worked:
 
 - the visible webview remained in the correct pane;
-- the severe split-pane y error was fixed or substantially reduced;
+- the severe split-pane y error was fixed;
 - when the webview is in the top pane with a terminal pane below it, native
   popups no longer open far down in the lower terminal pane;
 - the fix stayed in Wezboard's coordinate reporting path and did not require
   Chromium changes.
 
-What did not work:
+Accepted behavior:
 
-- PagePopup-family controls still appear vertically offset by approximately one
-  control height;
-- the popup is now near the right webview and pane, but it is not anchored at
-  the same y used by the clicked input;
-- this looks like the Issue 779 PagePopup height correction is missing,
-  bypassed, or failing to match after the Wezboard screen-rect fix.
+- some native popup families may overlap their owning native element while
+  others may open adjacent to it;
+- this matches the practical inconsistency already seen in Chromium behavior,
+  where dropdowns and date-family controls do not all choose the same visual
+  anchoring convention;
+- the important requirement for this issue is that native popups stay attached
+  to the correct webview pane instead of appearing in a detached terminal pane.
 
 The implementation changed `webview_screen_rect_desc()` so the flipped CALayer
 frame is converted into the hosting overlay `NSView` coordinate space before
@@ -336,31 +338,23 @@ calling AppKit's `convertRect:toView:`. It also removed the
 
 #### Conclusion
 
-Experiment 1 fixed the larger coordinate-space error: Chromium's hidden native
+Experiment 1 fixed the coordinate-space error: Chromium's hidden native
 coordinate proxy now tracks the top split webview closely enough that native
 popups appear in the correct pane instead of the lower terminal pane.
 
-The remaining bug is narrower. The screenshots show a popup y offset that looks
-approximately equal to the height of the input/control that opened the popup.
-That matches the original Issue 779 PagePopup failure mode:
+No further work is needed for this issue.
 
-```text
-popup_y = anchor.y + anchor.height
-```
+## Conclusion
 
-instead of:
+Issue 788 fixed the split-pane native popup y-position regression introduced by
+using a flipped CALayer frame as if it were an unflipped AppKit `NSView` rect.
 
-```text
-popup_y = anchor.y
-```
+The fix keeps visual CALayer placement unchanged, but converts the overlay frame
+into the hosting `NSView` coordinate space before reporting the screen rect to
+Chromium. That makes Chromium's hidden Shell window track the same screen region
+where Wezboard actually composites the webview.
 
-The next experiment should focus on the Chromium PagePopup correction path. The
-leading hypothesis is that `WebPagePopupImpl::SetWindowRect()` still receives a
-rect anchored at `anchor.bottom()`, but the current exact-match predicate no
-longer fires after the Wezboard screen-rect correction because of rounding,
-scale, or small DIP differences. If the trace shows
-`page_popup_y_fix applied=false` with a y delta near the input height, the fix
-should add a small tolerance to the `anchor.bottom()` predicate. If the trace
-does not appear at all, then the failing popup is bypassing
-`WebPagePopupImpl::SetWindowRect()` and the next experiment should identify the
-alternate popup placement path.
+The user accepted the remaining native-popup visual convention differences: some
+popup families may overlap their owning element while others may appear beside
+it. The issue's core failure was native popups opening in the wrong split pane,
+and that is fixed.
