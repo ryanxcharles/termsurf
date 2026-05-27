@@ -1817,3 +1817,147 @@ routing.
 - The result proposes another wrapper-only experiment without addressing the
   `--pdf-renderer` / `is_pdf` process-routing requirement.
 - The experiment modifies implementation code.
+
+**Result:** Pass
+
+Electron is the right guide, but the useful lesson is not "copy one function."
+Electron's PDF support is a small browser feature stack layered on top of
+content shell: component extension loading, PDF viewer resources, intercepted
+PDF streams, MimeHandlerView / GuestView plumbing, renderer plugin creation, and
+PDF renderer process routing.
+
+Experiment 4 failed because TermSurf tried to jump from "PDF response detected"
+directly to "internal plugin exists." Electron shows the missing middle: the PDF
+response is first converted into a PDF viewer document, the PDF bytes are stored
+in a stream manager, the viewer creates a PDF content frame, and that content
+frame is navigated with `is_pdf = true`. Chromium then handles the PDF renderer
+process routing itself. TermSurf does not need to manually spawn or manage a PDF
+process, but it does need to enter Chromium's normal PDF viewer path.
+
+Electron component map:
+
+| Electron component/file                                                               | Role in PDF loading                                                                                                         | TermSurf equivalent                                                                            | Port classification                    |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `shell/app/electron_content_client.cc`                                                | Registers the internal browser PDF plugin for `application/x-google-chrome-pdf`.                                            | `content/libtermsurf_chromium/ts_content_client.cc` already registers the internal plugin.     | adapt to TermSurf                      |
+| `shell/common/plugin_info.cc`                                                         | Registers the PDF extension plugin metadata for `application/pdf` and maps it to the PDF extension id.                      | No TermSurf equivalent. Current branch only registers the internal plugin.                     | adapt to TermSurf                      |
+| `shell/app/electron_main_delegate.cc`                                                 | Installs Electron content, browser, renderer, and utility clients.                                                          | `TsMainDelegate` already installs TermSurf browser and renderer clients.                       | adapt to TermSurf                      |
+| `shell/renderer/renderer_client_base.cc::RenderFrameCreated()`                        | Binds `MimeHandlerViewContainerManager` in every render frame.                                                              | No equivalent binder in `ts_renderer_client.cc`.                                               | adapt to TermSurf                      |
+| `shell/renderer/renderer_client_base.cc::OverrideCreatePlugin()`                      | Calls `pdf::CreateInternalPlugin()` for the internal PDF plugin MIME type.                                                  | Present in `ts_renderer_client.cc`, but it currently reaches the wrong renderer process model. | adapt to TermSurf                      |
+| `shell/renderer/renderer_client_base.cc::IsPluginHandledExternally()`                 | Routes `application/pdf` through `MimeHandlerViewContainerManager::CreateFrameContainer()`.                                 | Present only as logging / shell delegation; no real container creation.                        | adapt to TermSurf                      |
+| `shell/browser/electron_browser_client.cc::CreateThrottlesForNavigation()`            | Adds `PDFIFrameNavigationThrottle` and `pdf::PdfNavigationThrottle`.                                                        | TermSurf has a custom `TsPdfNavigationThrottle` wrapper path instead.                          | adapt to TermSurf                      |
+| `shell/browser/electron_browser_client.cc::WillCreateURLLoaderRequestInterceptors()`  | Adds `pdf::PdfURLLoaderRequestInterceptor`.                                                                                 | Absent.                                                                                        | adapt to TermSurf                      |
+| `shell/browser/electron_browser_client.cc::CreateURLLoaderThrottles()`                | Adds `PluginResponseInterceptorURLLoaderThrottle`, which replaces PDF response bodies with viewer payloads.                 | Absent.                                                                                        | adapt to TermSurf                      |
+| `shell/browser/electron_browser_client.cc::RegisterBrowserInterfaceBindersForFrame()` | Binds `GuestViewHost`, `GuestView`, and `pdf::mojom::PdfHost`.                                                              | Absent.                                                                                        | adapt to TermSurf                      |
+| `shell/browser/extensions/electron_component_extension_resource_manager.cc`           | Registers PDF viewer resources and template replacements.                                                                   | Absent.                                                                                        | copy mostly as-is                      |
+| `shell/browser/extensions/electron_extension_system.cc`                               | Creates the PDF component extension from Chrome's generated manifest.                                                       | Absent.                                                                                        | replace with smaller TermSurf stub     |
+| `shell/browser/extensions/electron_extensions_browser_client.cc`                      | Provides extension resource loading and extension browser-client glue.                                                      | Absent.                                                                                        | blocker / requires larger architecture |
+| `shell/browser/extensions/electron_extensions_api_client.cc`                          | Provides GuestView and MimeHandlerView delegates.                                                                           | Absent.                                                                                        | replace with smaller TermSurf stub     |
+| `shell/browser/extensions/api/streams_private/streams_private_api.cc`                 | Receives the intercepted PDF stream and stores it in `PdfViewerStreamManager`.                                              | Absent.                                                                                        | adapt to TermSurf                      |
+| `shell/browser/extensions/api/pdf_viewer_private/pdf_viewer_private_api.cc`           | Provides viewer JS APIs such as stream info, document title, plugin attributes, and local file access checks.               | Absent.                                                                                        | replace with smaller TermSurf stub     |
+| `shell/browser/electron_pdf_document_helper_client.cc`                                | Implements `PDFDocumentHelperClient` callbacks for save / print / restrictions.                                             | Absent.                                                                                        | replace with smaller TermSurf stub     |
+| `patches/chromium/hack_plugin_response_interceptor_to_point_to_electron.patch`        | Redirects Chrome's plugin response interceptor from Chrome's `streams_private` implementation to Electron's implementation. | No TermSurf equivalent patch yet.                                                              | adapt to TermSurf                      |
+
+Chrome / Chromium substrate map:
+
+| Chrome/Chromium layer                                       | Why PDF needs it                                                                                            | Electron usage                                                                                                      | TermSurf status                                                                                 |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Internal PDF plugin registration                            | Lets the renderer instantiate the PDFium-backed internal plugin for `application/x-google-chrome-pdf`.      | `ElectronContentClient::AddPlugins()`.                                                                              | Present but not sufficient.                                                                     |
+| Renderer-side `OverrideCreatePlugin()`                      | Creates the internal PDF plugin once the viewer document reaches the plugin MIME type.                      | `RendererClientBase::OverrideCreatePlugin()`.                                                                       | Present but fails because the renderer is not a PDF renderer.                                   |
+| Renderer-side `IsPluginHandledExternally()`                 | Converts `application/pdf` into a MimeHandlerView container instead of a normal plugin load.                | `RendererClientBase::IsPluginHandledExternally()`.                                                                  | Present only as diagnostic logging; no real external handling.                                  |
+| `MimeHandlerViewContainerManager`                           | Renderer-side manager that creates and owns plugin container frames.                                        | Bound in `RenderFrameCreated()`.                                                                                    | Absent.                                                                                         |
+| `MimeHandlerViewAttachHelper`                               | Produces the viewer HTML payload and coordinates full-page MimeHandlerView attachment.                      | Used by `PluginResponseInterceptorURLLoaderThrottle`.                                                               | Chromium class exists; TermSurf does not wire it.                                               |
+| `MimeHandlerViewEmbedder`                                   | Tracks the outer frame that will host the MIME handler view.                                                | Created by `MimeHandlerViewAttachHelper`.                                                                           | Chromium class exists; TermSurf does not wire it.                                               |
+| `MimeHandlerViewGuest`                                      | Guest WebContents used for non-PDF MIME handlers and part of the shared MimeHandlerView substrate.          | Electron supplies delegates and bindings.                                                                           | Absent.                                                                                         |
+| `GuestViewManager`                                          | Owns GuestView lifecycle and attachment.                                                                    | Electron supplies `GuestViewHost` / `GuestView` binders and delegates.                                              | Absent.                                                                                         |
+| Component extension resource manager / PDF viewer resources | Serves the PDF viewer extension HTML, JS, CSS, and i18n templates.                                          | `ElectronComponentExtensionResourceManager` registers `kPdfResources`.                                              | Absent.                                                                                         |
+| `streams_private`                                           | Receives intercepted PDF streams from the network path and exposes them to the viewer.                      | Electron implements a custom API and redirects Chrome's interceptor to it.                                          | Absent.                                                                                         |
+| `pdf_viewer_private`                                        | Viewer JS API for stream info, title, attributes, save, and local-file checks.                              | Electron implements the Chrome-compatible API subset.                                                               | Absent.                                                                                         |
+| `PluginResponseInterceptorURLLoaderThrottle`                | Intercepts `application/pdf`, emits PDF viewer payload, and hands the original stream to `streams_private`. | Added from `ElectronBrowserClient::CreateURLLoaderThrottles()`.                                                     | Not wired.                                                                                      |
+| `PDFIFrameNavigationThrottle`                               | Protects PDF iframe navigation behavior.                                                                    | Added by Electron when the PDF viewer is enabled.                                                                   | Not wired.                                                                                      |
+| `pdf::PdfNavigationThrottle`                                | Redirects PDF stream URLs back to original PDF URLs with `params.is_pdf = true`.                            | Added by Electron with `ChromePdfStreamDelegate`.                                                                   | Not wired; TermSurf has a custom wrapper throttle instead.                                      |
+| `pdf::PdfURLLoaderRequestInterceptor`                       | Replaces PDF content-frame requests with the intercepted PDF stream.                                        | Added by Electron in `WillCreateURLLoaderRequestInterceptors()`.                                                    | Absent.                                                                                         |
+| `pdf::PdfViewerStreamManager`                               | Stores and claims PDF stream containers across viewer, extension, and content frames.                       | Created through the `streams_private` path.                                                                         | Chromium class exists; TermSurf never creates or feeds it.                                      |
+| `pdf::PDFDocumentHelper` / `pdf::mojom::PdfHost`            | Browser-side helper and Mojo host for PDF plugin interactions.                                              | Electron binds `PdfHost` with `ElectronPDFDocumentHelperClient`.                                                    | Absent.                                                                                         |
+| `is_pdf` navigation path causing `--pdf-renderer`           | Marks the PDF content frame so Chromium creates a PDF SiteInstance and launches a renderer with PDF flags.  | `pdf::PdfNavigationThrottle` sets `OpenURLParams::is_pdf = true`; Chromium's renderer launch path handles the rest. | Available in Chromium, but TermSurf never reaches it through the proper stream/navigation path. |
+
+TermSurf gap classification:
+
+| Required layer                             | TermSurf status on `148.0.7778.97-issue-776-exp4`              | Gap classification                                           |
+| ------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------ |
+| Internal plugin registration               | Implemented.                                                   | Present but incomplete.                                      |
+| Internal plugin creation                   | Implemented.                                                   | Present but incomplete because it runs in a normal renderer. |
+| PDF component extension metadata           | Missing.                                                       | Absent but copyable from Electron.                           |
+| PDF viewer resources                       | Missing.                                                       | Absent but copyable from Electron.                           |
+| Extension resource loading                 | Missing.                                                       | Absent and dependent on broader extension infrastructure.    |
+| `streams_private`                          | Missing.                                                       | Absent and likely better stubbed for a first rendering pass. |
+| `pdf_viewer_private`                       | Missing.                                                       | Absent and likely better stubbed for a first rendering pass. |
+| MimeHandlerView container / attach / guest | Missing.                                                       | Absent and dependent on broader extension infrastructure.    |
+| PDF stream manager usage                   | Class exists in Chromium but is unused by TermSurf.            | Absent but copyable from Electron.                           |
+| PDF content-frame `is_pdf` navigation      | Chromium supports it, but TermSurf's wrapper never invokes it. | Present in Chromium but unreachable.                         |
+| `PdfHost` / `PDFDocumentHelper`            | Missing.                                                       | Absent and likely better stubbed for a first rendering pass. |
+
+Recommended implementation sequence:
+
+1. **Experiment 6: register the PDF viewer component extension resources.** Port
+   the smallest TermSurf equivalent of Electron's component extension resource
+   manager and PDF component-extension registration. Do not switch navigation to
+   the Chrome PDF path yet. Verification signal: the Chromium branch builds,
+   `kPdfResources` are registered, PDF viewer template replacements for
+   `extension_misc::kPdfExtensionId` are present, and a targeted log/probe
+   proves the PDF viewer extension URL can resolve bundled resources.
+2. **Experiment 7: add TermSurf `streams_private` and the interceptor
+   redirect.** Port Electron's `streams_private` shape narrowly enough to
+   receive `SendExecuteMimeTypeHandlerEvent()` and create/feed
+   `PdfViewerStreamManager`. Apply the Electron-style Chromium patch that
+   redirects `PluginResponseInterceptorURLLoaderThrottle` to the TermSurf API.
+   Verification signal: loading `bitcoin.pdf` logs the interceptor, the TermSurf
+   `streams_private` handler, and
+   `PdfViewerStreamManager::AddStreamContainer()`.
+3. **Experiment 8: wire the browser-side PDF throttles and URL loader
+   interceptor.** Replace TermSurf's wrapper-only `TsPdfNavigationThrottle` with
+   Electron's `PDFIFrameNavigationThrottle`, `pdf::PdfNavigationThrottle`, and
+   `pdf::PdfURLLoaderRequestInterceptor` sequence. Verification signal: the PDF
+   stream URL is mapped back to the original URL and a PDF content-frame
+   navigation is created with `is_pdf = true`.
+4. **Experiment 9: wire the renderer MimeHandlerView container path.** Bind
+   `MimeHandlerViewContainerManager`, implement the smallest TermSurf GuestView
+   / MimeHandlerView delegates needed for the PDF viewer, and make
+   `IsPluginHandledExternally()` create the frame container. Verification
+   signal: logs show `CreateFrameContainer()` and the PDF extension frame exists
+   under the embedder.
+5. **Experiment 10: bind `pdf::mojom::PdfHost`.** Add a small
+   `PDFDocumentHelperClient` equivalent. Verification signal:
+   `pdf::CreateInternalPlugin()` runs in a renderer launched with
+   `--pdf-renderer`, passes `CHECK(IsPdfRenderer())`, and the `PdfHost` binder
+   is reached.
+6. **Experiment 11: visual render and local-file verification.** Run the
+   automated screenshot test against the vendored Bitcoin PDF over HTTP and then
+   `file://`. Verification signal: the first page visibly renders in the pane;
+   local-file behavior is either working or recorded as a focused follow-up.
+
+Cost / risk assessment:
+
+| Risk                                          | Evidence                                                                                                                                                                                       | Mitigation                                                                                                                                               |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Binary size / dependency expansion            | Electron pulls in `extensions/browser`, `extensions/renderer`, PDF viewer resources, Chrome PDF browser code, and generated API bindings.                                                      | Add dependencies one experiment at a time and record `libtermsurf_chromium.dylib` size before/after each implementation experiment.                      |
+| Extension-system coupling                     | Electron's solution depends on `ExtensionSystem`, `ExtensionRegistry`, component extension resource loading, API providers, GuestView, and MimeHandlerView.                                    | Port the minimum PDF-only subset first; do not enable general user extensions. Treat full extension support as out of scope.                             |
+| Security model for trusted PDF origins        | Earlier TermSurf probes tried to bypass `IsPdfInternalPluginAllowedOrigin()`; Electron avoids this by using Chrome's trusted PDF extension origin.                                             | Use the PDF component extension origin instead of adding arbitrary allowed origins. Do not weaken PDF origin checks.                                     |
+| Local `file://` PDF access                    | `pdf_viewer_private::IsAllowedLocalFileAccess()` participates in local file embedding decisions, and `file://` is the original user-facing goal.                                               | Defer full local-file policy until the HTTP PDF path renders, then test `file://` explicitly and add only the narrow file-access behavior needed.        |
+| Teardown crash already seen in PDF automation | Experiments 1 and 2 captured screenshots but also saw a Roamium teardown crash.                                                                                                                | Keep screenshot artifacts valid if captured before teardown, but track the crash as a separate bug once PDF rendering starts passing.                    |
+| Future Chromium upgrade maintenance           | Electron carries a Chromium patch redirecting `PluginResponseInterceptorURLLoaderThrottle` to its own `streams_private` implementation. TermSurf will likely need the same kind of fork patch. | Keep all Chromium changes on issue branches, document modified upstream files in `chromium/README.md`, and prefer small patches that mirror Electron.    |
+| External fallback option                      | The Electron/Chrome path is large. Opening PDFs externally would be much smaller but would not satisfy in-pane viewing.                                                                        | Continue the in-pane port for now, but keep external fallback as a product escape hatch if the extension/MimeHandlerView substrate becomes too invasive. |
+
+#### Conclusion
+
+The next experiment should not try another wrapper. The smallest useful next
+milestone is **Experiment 6: register and serve the PDF viewer component
+extension resources in TermSurf's Chromium embedder**. That milestone is
+buildable and verifiable without yet switching the navigation path, and it
+establishes the trusted PDF viewer origin/resource substrate that later
+experiments need.
+
+After that, the critical path is Electron's stream path:
+`PluginResponseInterceptorURLLoaderThrottle` -> TermSurf `streams_private` ->
+`PdfViewerStreamManager` -> `pdf::PdfNavigationThrottle` with `is_pdf = true` ->
+Chromium launches the PDF renderer. Chromium handles the PDF process once
+TermSurf enters that path.
