@@ -494,3 +494,235 @@ than adding more renderer-only hooks. The likely missing layer is the
 Chrome/Electron PDF navigation stack: PDF navigation interception,
 MimeHandlerView/component-extension infrastructure, and eventually PDF stream
 routing. Do not continue Experiment 2 as another renderer-client-only patch.
+
+### Experiment 2: Route Top-Level PDFs to a PDF Wrapper
+
+#### Description
+
+Experiment 1 proved that renderer-side plugin registration is not reached for a
+top-level PDF navigation. The important log line was:
+
+```text
+Not implemented reached in content::ShellDownloadManagerDelegate::ChooseDownloadPath(...)
+```
+
+That means Content Shell classifies the top-level PDF as a download before Blink
+creates a plugin element and before `TsRendererClient` can call
+`pdf::CreateInternalPlugin()`.
+
+This experiment should add the smallest browser-side top-level PDF route in
+TermSurf's Chromium embedder:
+
+1. Detect a main-frame `application/pdf` response in
+   `TsBrowserClient::CreateThrottlesForNavigation()`.
+2. Cancel that navigation before it becomes a download.
+3. Navigate the same tab to a small generated HTML wrapper that embeds the
+   original PDF URL with Chromium's internal PDF plugin MIME type.
+
+The wrapper approach is deliberately a probe, not a full Chrome PDF viewer port.
+It tests whether TermSurf can reach the already-added renderer plugin path
+without first porting MimeHandlerView, GuestView, the PDF component extension,
+or streams-private. If this works, it may be enough for basic in-pane PDF
+viewing. If it fails, the logs should prove exactly which PDF viewer substrate
+is still missing.
+
+The generated wrapper should be minimal and visible only for top-level PDF
+documents. A representative wrapper is:
+
+```html
+<!doctype html>
+<meta charset="utf-8" />
+<style>
+  html,
+  body,
+  embed {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: white;
+  }
+</style>
+<embed src="{original_pdf_url}" type="application/x-google-chrome-pdf" />
+```
+
+The experiment passes only if the automated screenshot shows recognizable
+Bitcoin PDF content. Reaching `OverrideCreatePlugin()` or
+`CreateInternalPlugin()` is useful evidence, but it is only a Partial result if
+the screenshot remains blank.
+
+#### Changes
+
+1. Create a new Chromium experiment branch from the current issue branch:
+   `148.0.7778.97-issue-776-exp2`.
+   - Do not commit directly to `148.0.7778.97-issue-776`.
+   - Add the new branch to the Branches table in `chromium/README.md`.
+   - Archive the branch under `chromium/patches/issue-776-exp2/` on Pass or
+     Partial.
+
+2. Add a browser-side PDF navigation throttle in `content/libtermsurf_chromium`,
+   for example `ts_pdf_navigation_throttle.{cc,h}`.
+   - Derive from `content::NavigationThrottle`.
+   - Implement `WillProcessResponse()`.
+   - Inspect `navigation_handle()->GetResponseHeaders()` and read the MIME type.
+   - Only act when all of these are true:
+     - the response MIME type is `pdf::kPDFMimeType` (`application/pdf`);
+     - `navigation_handle()->IsInPrimaryMainFrame()` is true;
+     - the target URL is not already the generated wrapper URL;
+     - the URL scheme is ordinary browser content (`http`, `https`, or `file`)
+       for this experiment.
+   - Log every PDF decision with an `[issue-776-exp2]` prefix: URL, MIME type,
+     main-frame status, and action.
+
+3. When the throttle sees a top-level PDF response, cancel the current
+   navigation and schedule a same-tab navigation to the generated wrapper.
+   - Use `content::WebContents` from the navigation handle.
+   - Preserve the existing tab; do not create a new window.
+   - Use a `data:text/html;charset=utf-8,...` URL for the wrapper unless the
+     implementation reveals that `data:` origin blocks plugin loading.
+   - Store the original PDF URL in the wrapper's `<embed src=...>`.
+   - Set the `<embed>` type to `pdf::kInternalPluginMimeType`.
+   - Return `CANCEL_AND_IGNORE` or the closest correct throttle result after the
+     wrapper navigation has been posted.
+
+4. Wire the throttle from `TsBrowserClient`.
+   - Add a `CreateThrottlesForNavigation()` override to
+     `ts_browser_client.{cc,h}`.
+   - Call `ShellContentBrowserClient::CreateThrottlesForNavigation(registry)`
+     first to preserve Content Shell behavior.
+   - Then add the TermSurf PDF throttle.
+   - Do not patch `content/shell/browser/shell_download_manager_delegate.cc` as
+     the primary fix. That file should only be used as a diagnostic reference.
+
+5. Keep Experiment 1's PDF plugin registration and renderer-client hooks.
+   - Do not remove `TsContentClient`.
+   - Do not remove `TsRendererClient`.
+   - Keep the `[issue-776]` renderer/plugin logs for this experiment because
+     they prove whether the wrapper reaches plugin creation.
+
+6. Do not implement MimeHandlerView, GuestView, component-extension loading, or
+   streams-private in this experiment.
+   - If the wrapper reaches `CreateInternalPlugin()` but the screenshot is still
+     blank, record Partial and design Experiment 3 around the missing substrate.
+   - Do not silently widen this experiment into a partial Chrome PDF viewer
+     port.
+
+7. Harden the screenshot automation enough to trust the artifact.
+   - Extend `scripts/test-issue-776-pdf.sh` so the log records the launched
+     Wezboard PID and the command used for debug `web`.
+   - Keep launching debug Wezboard, debug `web`, and repo-built Roamium only.
+   - After foregrounding the process, capture the screenshot as before.
+   - Record in the result whether the screenshot visibly shows the target URL
+     `http://localhost:9616/bitcoin.pdf` or a generated PDF wrapper URL in the
+     `web` URL bar. This does not replace the visual PDF-content check; it only
+     proves the screenshot belongs to the intended run.
+
+8. Build and run:
+   - `autoninja -C out/Default libtermsurf_chromium`;
+   - `./scripts/build.sh roamium`;
+   - `./scripts/build.sh wezboard`;
+   - `./scripts/build.sh webtui`;
+   - `./scripts/test-issue-776-pdf.sh`.
+
+#### Non-Negotiable Invariants
+
+- The fix remains Chromium/Roamium-side. Do not add PDF-specific logic to
+  `webtui`.
+- The existing browser pane is used. Do not open a native PDF window or an
+  external app.
+- The TermSurf protobuf protocol is unchanged.
+- Normal HTML navigation, link clicks, scrolling, keyboard input, and local file
+  navigation remain unchanged.
+- The throttle only intercepts main-frame PDF responses. It must not hijack
+  images, downloads, HTML pages, JavaScript resources, CSS, or arbitrary binary
+  downloads.
+- The implementation must not create a second tab or a second Chromium window.
+- The generated wrapper must not recurse on itself.
+- Experiment 2 must not quietly turn into a MimeHandlerView/component-extension
+  port.
+
+#### Verification
+
+1. Confirm the branch and patch target:
+   - Chromium branch: `148.0.7778.97-issue-776-exp2`;
+   - eventual patch archive: `chromium/patches/issue-776-exp2/`.
+
+2. Build the Chromium and Rust debug targets listed in the Changes section.
+
+3. Run the automated PDF smoke test:
+
+   ```bash
+   ./scripts/test-issue-776-pdf.sh
+   ```
+
+4. Inspect the screenshot artifact.
+   - Pass visual state: recognizable Bitcoin whitepaper content appears in the
+     TermSurf browser pane.
+   - Partial visual state: the page is still blank/white, but logs identify the
+     next missing layer.
+   - Fail visual state: the automation captured the wrong app/window, launched
+     installed binaries, crashed before a screenshot, or regressed normal
+     navigation.
+
+5. Inspect logs and record these values in the result:
+
+   | Layer                                                            | Result |
+   | ---------------------------------------------------------------- | ------ |
+   | `TsPdfNavigationThrottle` sees `application/pdf` main-frame URL  | yes/no |
+   | Throttle cancels top-level PDF before download path              | yes/no |
+   | `ShellDownloadManagerDelegate::ChooseDownloadPath` no longer hit | yes/no |
+   | Generated wrapper navigation starts in the same tab              | yes/no |
+   | `OverrideCreatePlugin()` sees internal PDF MIME type             | yes/no |
+   | `CreateInternalPlugin()` returns a plugin                        | yes/no |
+   | Screenshot shows recognizable PDF content                        | yes/no |
+
+6. If the HTTP fixture passes, run the same automation against the local file
+   URL:
+
+   ```bash
+   ./scripts/test-issue-776-pdf.sh \
+     file:///Users/ryan/dev/termsurf/test-html/public/bitcoin.pdf
+   ```
+
+7. Run a normal HTML smoke test after the PDF test:
+   - open `https://example.com`;
+   - click a link if available;
+   - type in a text field on a simple test page;
+   - confirm no download prompt, blank page, or navigation loop occurs.
+
+#### Pass Criteria
+
+The automated screenshot for `http://localhost:9616/bitcoin.pdf` shows
+recognizable Bitcoin PDF content rendered inside the existing TermSurf browser
+overlay, and normal HTML navigation still works.
+
+If the HTTP fixture passes but the `file://` fixture fails, record Pass for
+browser PDF rendering and open a follow-up experiment specifically for local
+file URL permissions or MIME/path handling.
+
+#### Partial Criteria
+
+The throttle prevents the Content Shell download path and reaches a later PDF
+layer, but the screenshot still does not show PDF content. The result must name
+the first missing layer, such as:
+
+- wrapper navigation starts but `<embed>` does not create a plugin;
+- `CreateInternalPlugin()` returns `nullptr`;
+- plugin is created but the viewer surface is blank;
+- plugin is created but PDF resource fetching is blocked by origin or file
+  access;
+- plugin is created but MimeHandlerView/component-extension/streams-private is
+  required after all.
+
+#### Failure Criteria
+
+- The screenshot automation is not trustworthy enough to identify the visible
+  app state.
+- The implementation does not intercept top-level PDF navigation before the
+  Content Shell download path.
+- The implementation intercepts non-PDF resources or normal HTML pages.
+- The implementation creates a second tab/window or opens an external PDF app.
+- The implementation adds PDF-specific behavior to `webtui`.
+- The generated wrapper loops indefinitely.
+- Roamium crashes while loading the PDF, before teardown.
+- Normal HTML navigation regresses.
