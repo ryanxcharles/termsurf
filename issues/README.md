@@ -2,10 +2,11 @@
 
 ## Open
 
-| #                                      | Title                                                  | Opened     |
-| -------------------------------------- | ------------------------------------------------------ | ---------- |
-| [0756](0756-surfari/README.md)         | Surfari — WebKit engine for TermSurf                   | 2026-03-16 |
-| [0776](0776-pdf-not-loading/README.md) | PDF files show blank white screen instead of rendering | 2026-04-11 |
+| #                                                | Title                                                  | Opened     |
+| ------------------------------------------------ | ------------------------------------------------------ | ---------- |
+| [0756](0756-surfari/README.md)                   | Surfari — WebKit engine for TermSurf                   | 2026-03-16 |
+| [0776](0776-pdf-not-loading/README.md)           | PDF files show blank white screen instead of rendering | 2026-04-11 |
+| [0788](0788-native-popup-split-pane-y/README.md) | Native Popup Y Is Wrong in Top Split Webviews          | 2026-05-27 |
 
 ## Closed
 
