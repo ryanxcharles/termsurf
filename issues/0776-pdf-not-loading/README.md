@@ -1627,3 +1627,193 @@ larger directions:
    setup, stream tracking, and PDF `is_pdf` content-frame navigation; or
 2. choose a product fallback for PDFs, such as opening an external viewer, if
    the Chrome viewer substrate is too large for TermSurf right now.
+
+### Experiment 5: Map Electron's PDF Viewer Port
+
+#### Description
+
+Experiment 4 proved that TermSurf cannot make PDFs render by only wrapping the
+URL in HTML or registering the internal PDF plugin. The missing piece is the
+Chrome PDF viewer substrate that creates a trusted viewer frame, routes the PDF
+stream, and starts the PDF content frame as an `is_pdf` navigation so Chromium
+launches a renderer with `--pdf-renderer`.
+
+Electron already solved this problem for a content-shell-derived embedder. It is
+therefore the best implementation guide. This experiment should map Electron's
+PDF viewer integration against TermSurf/Roamium and decide the smallest
+copy/adapt sequence that can plausibly make in-pane PDF viewing work.
+
+This is a design and port-planning experiment. It should not implement the port
+yet. Its output must be recorded directly in this experiment's Result section,
+not in separate files.
+
+#### Changes
+
+1. Research Electron's local PDF viewer implementation from `vendor/electron/`.
+   Use local source only.
+
+   Required search targets:
+
+   ```bash
+   rg "ENABLE_PDF_VIEWER|AddPlugins|OverrideCreatePlugin|IsPluginHandledExternally" vendor/electron/shell
+   rg "PdfNavigationThrottle|PdfURLLoaderRequestInterceptor|PluginResponseInterceptor" vendor/electron/shell vendor/electron/patches
+   rg "streams_private|pdf_viewer_private|PdfViewerStreamManager" vendor/electron/shell vendor/electron/patches
+   rg "MimeHandlerView|GuestView|ComponentExtensionResourceManager" vendor/electron/shell vendor/electron/patches
+   rg "PDFDocumentHelper|PdfHost|CreateContent.*Client" vendor/electron/shell
+   ```
+
+2. Record an Electron component map directly in the Result section using this
+   table:
+
+   | Electron component/file | Role in PDF loading | TermSurf equivalent | Port classification |
+   | ----------------------- | ------------------- | ------------------- | ------------------- |
+
+   `Port classification` must be one of:
+   - copy mostly as-is;
+   - adapt to TermSurf;
+   - replace with smaller TermSurf stub;
+   - unnecessary for first rendering pass;
+   - blocker / requires larger architecture.
+
+3. Record the Chromium/Chrome substrate map directly in the Result section using
+   this table:
+
+   | Chrome/Chromium layer | Why PDF needs it | Electron usage | TermSurf status |
+   | --------------------- | ---------------- | -------------- | --------------- |
+
+   The map must cover at least:
+   - internal PDF plugin registration;
+   - renderer-side `OverrideCreatePlugin()`;
+   - renderer-side `IsPluginHandledExternally()`;
+   - `MimeHandlerViewContainerManager`;
+   - `MimeHandlerViewAttachHelper`;
+   - `MimeHandlerViewEmbedder`;
+   - `MimeHandlerViewGuest`;
+   - `GuestViewManager`;
+   - component extension resource manager / PDF viewer resources;
+   - `streams_private`;
+   - `pdf_viewer_private`;
+   - `PluginResponseInterceptorURLLoaderThrottle`;
+   - `PDFIFrameNavigationThrottle`;
+   - `pdf::PdfNavigationThrottle`;
+   - `pdf::PdfURLLoaderRequestInterceptor`;
+   - `pdf::PdfViewerStreamManager`;
+   - `pdf::PDFDocumentHelper` / `pdf::mojom::PdfHost`;
+   - the `is_pdf` navigation path that causes `--pdf-renderer`.
+
+4. Compare Electron's architecture to TermSurf's current branch
+   `148.0.7778.97-issue-776-exp4`.
+
+   For each required layer, answer:
+   - already present in TermSurf?
+   - present but incomplete?
+   - absent but copyable from Electron?
+   - absent and dependent on broader extension infrastructure?
+   - absent and likely better stubbed for a first rendering pass?
+
+5. Decide the smallest viable port sequence.
+
+   The result must include an ordered implementation plan for Experiment 6 and
+   later experiments. Each step must be small enough to build and verify
+   independently.
+
+   The sequence should prefer Electron's proven path, but it must not blindly
+   copy unrelated Electron features. The first implementation experiment should
+   aim for the first observable milestone, not the complete final PDF feature.
+
+   Candidate milestones:
+   - PDF viewer component resources are registered and can be resolved;
+   - `streams_private` equivalent stores a PDF stream in
+     `PdfViewerStreamManager`;
+   - `PluginResponseInterceptorURLLoaderThrottle` feeds the PDF viewer payload;
+   - `MimeHandlerViewContainerManager` creates the container frame;
+   - the PDF content frame navigation is marked `is_pdf`;
+   - a renderer process is launched with `--pdf-renderer`;
+   - `pdf::CreateInternalPlugin()` passes `CHECK(IsPdfRenderer())`;
+   - `pdf::mojom::PdfHost` binding is reached;
+   - the Bitcoin PDF visibly renders.
+
+6. Record a cost/risk assessment directly in the Result section.
+
+   Required table:
+
+   | Risk | Evidence | Mitigation |
+   | ---- | -------- | ---------- |
+
+   Include at least:
+   - binary size / dependency expansion;
+   - extension-system coupling;
+   - security model for trusted PDF origins;
+   - local `file://` PDF access;
+   - teardown crash already seen in PDF automation;
+   - future Chromium upgrade maintenance;
+   - whether external fallback should remain an option.
+
+7. Do not make Chromium, Rust, protocol, or script changes in this experiment.
+   This experiment is complete when the Result section contains a concrete port
+   map and a recommended next implementation experiment.
+
+#### Non-Negotiable Invariants
+
+- Do not implement the PDF viewer port in Experiment 5.
+- Do not create separate result files. The mapping tables, conclusions, and
+  next-step recommendation must be written directly under Experiment 5.
+- Use `vendor/electron/` and `chromium/src/` local source only.
+- Do not weaken `CHECK(IsPdfRenderer())`.
+- Do not propose globally adding `--pdf-renderer` to ordinary renderers.
+- Do not choose a wrapper-only approach unless the result explicitly explains
+  why Electron's architecture is unnecessary despite Experiment 4 proving the
+  opposite.
+- Do not close Issue 776.
+
+#### Verification
+
+1. Confirm no implementation files changed:
+
+   ```bash
+   git diff --name-only
+   git -C chromium/src diff --name-only
+   ```
+
+   Expected: only `issues/0776-pdf-not-loading/README.md` changes in the main
+   repo; no Chromium source changes.
+
+2. Confirm the Result section contains:
+   - Electron component map;
+   - Chrome/Chromium substrate map;
+   - TermSurf gap classification;
+   - ordered implementation sequence for Experiment 6+;
+   - cost/risk table;
+   - explicit recommendation: port path, fallback path, or stop.
+
+3. Confirm the recommendation names the first implementation milestone and its
+   verification signal.
+
+4. Format this issue document with:
+
+   ```bash
+   prettier --write --prose-wrap always --print-width 80 \
+     issues/0776-pdf-not-loading/README.md
+   ```
+
+#### Pass Criteria
+
+Pass if the experiment produces a concrete, source-backed port plan showing how
+Electron's PDF viewer integration maps onto TermSurf, and identifies the next
+small implementation experiment.
+
+#### Partial Criteria
+
+Partial if the experiment identifies most of the Electron/Chromium components
+but cannot yet determine whether the first implementation step should target
+component resources, `streams_private`, `MimeHandlerView`, or PDF process
+routing.
+
+#### Failure Criteria
+
+- The result is vague and only says "copy Electron."
+- The result omits the dependency order.
+- The result is written to separate files instead of this experiment.
+- The result proposes another wrapper-only experiment without addressing the
+  `--pdf-renderer` / `is_pdf` process-routing requirement.
+- The experiment modifies implementation code.
