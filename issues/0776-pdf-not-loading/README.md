@@ -66,7 +66,7 @@ PDF deps. Therefore the PDF navigation can succeed while no viewer exists to
 render the document.
 
 This experiment is a scoped PDF-rendering probe with automated screenshot
-capture and agent visual classification. It should add the smallest TermSurf
+capture and agent visual triage. It should add the smallest TermSurf
 `ContentClient` / renderer-client hooks needed to make Chromium's built-in PDF
 path available, then run TermSurf end-to-end and take a screenshot of a real PDF
 loaded in the browser pane.
@@ -79,9 +79,11 @@ Does the PDF visibly render in the TermSurf browser pane?
 
 The experiment should not require manual app interaction for verification. It
 will capture screenshots automatically, then the agent will inspect those
-artifacts. If a screenshot shows recognizable PDF content, the experiment
-passes. If the screenshot is still blank or white, the result should record the
-artifact and only then use logs to decide the next experiment.
+artifacts visually. The screenshot script does not need to implement OCR or
+image classification; it only needs to produce deterministic artifacts. If a
+screenshot shows recognizable PDF content, the experiment passes. If the
+screenshot is still blank or white, the result should record the artifact and
+only then use logs to decide the next experiment.
 
 Use the vendored Bitcoin whitepaper fixture:
 
@@ -120,11 +122,11 @@ experiments, that product trade-off can be revisited explicitly.
      ```
      Expected: `enable_pdf`, `enable_extensions`, and `enable_plugins` are
      enabled under defaults or are not overridden to `false`.
-   - Check whether `libtermsurf_chromium`'s `testonly = true` blocks the
-     proposed deps. Run `gn check out/Default //content/libtermsurf_chromium`.
-     If a needed PDF dep is rejected because it is not test-only-compatible,
-     stop and record that as the result; do not silently remove
-     `testonly = true` without a separate design.
+   - After adding the minimal PDF deps, run
+     `gn check out/Default //content/libtermsurf_chromium`. `testonly = true` is
+     not expected to block the listed deps; if GN proves otherwise, stop and
+     record the exact dependency error instead of silently changing the target's
+     test-only status.
 2. Create a new Chromium branch for this issue:
    - start from the most relevant current branch, currently
      `148.0.7778.97-issue-778`;
@@ -175,8 +177,10 @@ experiments, that product trade-off can be revisited explicitly.
    - Log when `mime_type == pdf::kPDFMimeType` or
      `pdf::kInternalPluginMimeType`.
    - Do not try to implement MimeHandlerView in this experiment.
-   - If implementing the override requires broad extensions infrastructure,
-     record that explicitly in the result instead of silently widening scope.
+   - The method exists on Chromium 148's `ContentRendererClient`; implement the
+     override directly. If the implementation reveals that useful behavior
+     requires broad extensions infrastructure, record that explicitly in the
+     result instead of silently widening scope.
 8. Update `TsMainDelegate` to override `CreateContentRendererClient()` and
    return the new TermSurf renderer client.
 9. Do not wire the PDF component-extension, MimeHandlerView, GuestView, or
@@ -226,10 +230,12 @@ experiments, that product trade-off can be revisited explicitly.
     - save the screenshot under `logs/issue-776-exp1-*`;
     - print the screenshot path and any relevant log paths.
 
-    The automation may use macOS GUI automation, such as AppleScript/System
-    Events, to type the debug `web` command into the newly launched Wezboard
-    window. This is acceptable for this experiment because the target is an
-    end-to-end visual smoke test of the actual GUI path.
+    Prefer a direct startup-command or command-line launch path if Wezboard
+    exposes one, because it avoids keyboard focus flakiness. If no reliable
+    direct launch path exists, the automation may use macOS GUI automation, such
+    as AppleScript/System Events, to type the debug `web` command into the newly
+    launched Wezboard window. This is acceptable for this experiment because the
+    target is an end-to-end visual smoke test of the actual GUI path.
 
     If AppleScript/System Events are used, Accessibility permission is also a
     precondition. Screen Recording permission is required for `screencapture`;
@@ -251,14 +257,16 @@ experiments, that product trade-off can be revisited explicitly.
 - Experiment 1 must not quietly grow into an extensions/MimeHandlerView port. If
   that layer is required, stop with a Partial result and design Experiment 2
   around it.
-- The Chromium changes must live on the `148.0.7778.97-issue-776` branch and be
-  archived under `chromium/patches/issue-776/`.
+- The Chromium changes must live on the `148.0.7778.97-issue-776` branch. On
+  Pass or Partial, they must be archived under `chromium/patches/issue-776/`. On
+  an incoherent Fail, the result must explain why archiving was skipped.
 
 #### Verification
 
-This experiment's verification uses automated capture plus agent visual
-classification. Manual inspection by the user is not required to decide whether
-the experiment passes.
+This experiment's verification uses automated capture plus agent visual triage.
+Manual inspection by the user is not required to decide whether the experiment
+passes. The automation produces screenshots and logs; the agent classifies the
+artifact by visual inspection.
 
 1. Confirm screenshot capture is available before running the full test:
 
@@ -278,7 +286,6 @@ the experiment passes.
 
 2. Record the precondition results:
    - `enable_pdf`, `enable_extensions`, and `enable_plugins` state;
-   - whether `testonly = true` blocks the minimal PDF deps;
    - whether `gn check out/Default //content/libtermsurf_chromium` passes after
      the minimal deps are added.
 
@@ -355,11 +362,15 @@ the experiment passes.
    | PDF plugin registered in `AddPlugins()`                     | yes/no                 |
    | `OverrideCreatePlugin()` sees internal PDF MIME type        | yes/no                 |
    | `CreateInternalPlugin()` returns a plugin                   | yes/no/null-not-called |
-   | `IsPluginHandledExternally()` sees top-level PDF            | yes/no/not-available   |
+   | `IsPluginHandledExternally()` sees top-level PDF            | yes/no                 |
    | Plugin created but viewer resources/MimeHandlerView missing | yes/no                 |
    | Evidence that MimeHandlerView/extension layer is next       | yes/no                 |
    | Evidence that PDF stream routing is next                    | yes/no                 |
    | Evidence that plugin/utility sandboxing is next             | yes/no                 |
+
+   Copy this table into the result with concrete `yes`, `no`, or
+   `null-not-called` values instead of reconstructing the diagnosis from memory
+   after the run.
 
 #### Pass Criteria
 
