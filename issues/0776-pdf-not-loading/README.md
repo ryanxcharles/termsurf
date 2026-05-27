@@ -416,3 +416,81 @@ missing layer in this list.
 - Roamium crashes when opening a PDF.
 - The experiment quietly starts porting the extension/MimeHandlerView stack
   instead of stopping at the scoped plumbing probe.
+
+**Result:** Partial
+
+Experiment 1 implemented the scoped Chromium PDF plumbing probe and automated
+visual smoke test. The Chromium branch `148.0.7778.97-issue-776` now adds a
+TermSurf `ContentClient`, registers the internal Chromium PDF plugin, adds a
+TermSurf renderer client, and logs PDF-related renderer hooks. The automation
+script `scripts/test-issue-776-pdf.sh` launches debug Wezboard, debug `web`, and
+the repo-built Roamium binary, then captures a screenshot of the vendored
+Bitcoin PDF served by the local test server.
+
+The automated run succeeded, but the PDF did not render. Screenshot artifact:
+
+```text
+/Users/ryan/dev/termsurf/logs/issue-776-exp1-20260527-075821/pdf-smoke.png
+```
+
+Visual classification: `blank/white`. The browser pane reached
+`http://localhost:9616/bitcoin.pdf`, but no recognizable Bitcoin whitepaper
+content appeared.
+
+Build and verification notes:
+
+- `autoninja -C out/Default libtermsurf_chromium` succeeded after adding the
+  minimal PDF deps.
+- `./scripts/build.sh wezboard`, `./scripts/build.sh roamium`, and
+  `./scripts/build.sh webtui` succeeded in debug mode.
+- The GN PDF/plugin/extension precondition did not show an override disabling
+  PDF, plugins, or extensions.
+- `gn check out/Default //content/libtermsurf_chromium` is not usable as a clean
+  PDF-dependency signal yet because the target already has private-header
+  dependency errors unrelated to this experiment.
+
+Failure-layer table:
+
+| Layer                                                       | Result          |
+| ----------------------------------------------------------- | --------------- |
+| PDF build flags enabled                                     | yes             |
+| Minimal PDF deps compile                                    | yes             |
+| PDF plugin registered in `AddPlugins()`                     | yes             |
+| `OverrideCreatePlugin()` sees internal PDF MIME type        | no              |
+| `CreateInternalPlugin()` returns a plugin                   | null-not-called |
+| `IsPluginHandledExternally()` sees top-level PDF            | no              |
+| Plugin created but viewer resources/MimeHandlerView missing | no              |
+| Evidence that MimeHandlerView/extension layer is next       | likely          |
+| Evidence that PDF stream routing is next                    | unknown         |
+| Evidence that plugin/utility sandboxing is next             | no              |
+
+Key log evidence:
+
+```text
+[issue-776] registered internal PDF plugin mime=application/x-google-chrome-pdf
+Not implemented reached in content::ShellDownloadManagerDelegate::ChooseDownloadPath(...)
+```
+
+No `OverrideCreatePlugin()` or `IsPluginHandledExternally()` PDF log lines were
+emitted. That means the top-level PDF navigation never reached the renderer
+plugin creation path. Content Shell treated the PDF as a download before the
+minimal renderer hook could create the internal PDF plugin.
+
+The automation cleanup also produced a Roamium crash after the screenshot was
+captured and the test process was torn down. That is a residual cleanup risk,
+not the first PDF-rendering failure layer, because the screenshot and relevant
+logs were already captured.
+
+#### Conclusion
+
+Experiment 1 proved that minimal renderer-side PDF plugin plumbing is
+insufficient for top-level PDF navigation in TermSurf's Content Shell-based
+embedder. Registering the internal PDF plugin works, but loading
+`http://localhost:9616/bitcoin.pdf` goes through Content Shell's download path
+and never reaches `IsPluginHandledExternally()` or `OverrideCreatePlugin()`.
+
+The next experiment should target browser-side top-level PDF handling rather
+than adding more renderer-only hooks. The likely missing layer is the
+Chrome/Electron PDF navigation stack: PDF navigation interception,
+MimeHandlerView/component-extension infrastructure, and eventually PDF stream
+routing. Do not continue Experiment 2 as another renderer-client-only patch.
