@@ -65,14 +65,22 @@ provide a TermSurf renderer client, and `libtermsurf_chromium/BUILD.gn` has no
 PDF deps. Therefore the PDF navigation can succeed while no viewer exists to
 render the document.
 
-This experiment is a scoped plumbing probe, not a full PDF-viewer port. It
-should add the smallest TermSurf `ContentClient` / renderer-client hooks needed
-to register PDF plugin metadata, observe whether Chromium calls the relevant PDF
-hooks, and identify the next missing layer. The expected outcome is **Partial**:
-PDFs may still not render after this experiment, but the result should precisely
-identify whether the next layer is plugin registration, renderer plugin
-creation, `IsPluginHandledExternally()`, MimeHandlerView/extension
-infrastructure, or stream routing.
+This experiment is a scoped PDF-rendering probe with an automated visual
+acceptance test. It should add the smallest TermSurf `ContentClient` /
+renderer-client hooks needed to make Chromium's built-in PDF path available,
+then run TermSurf end-to-end and take a screenshot of a real PDF loaded in the
+browser pane.
+
+The primary question for this experiment is user-visible:
+
+```text
+Does the PDF visibly render in the TermSurf browser pane?
+```
+
+The experiment should not require manual app interaction for verification. If
+the automated screenshot shows recognizable PDF content, the experiment passes.
+If the screenshot is still blank or white, the result should record the
+automated artifact and only then use logs to decide the next experiment.
 
 This experiment commits to the expensive product direction: in-pane PDF viewing
 inside the TermSurf browser overlay. A simpler fallback would be to hand PDFs to
@@ -167,6 +175,37 @@ experiments, that product trade-off can be revisited explicitly.
     branch state worth preserving. On Partial or Fail, record the branch state
     and the next required layer before deciding whether to archive.
 
+12. Add an automated visual PDF smoke-test command or script.
+
+    The automation should:
+    - create an isolated log/state directory under `logs/issue-776-exp1-*`;
+    - launch debug Wezboard directly from `wezboard/target/debug/wezboard-gui`;
+    - launch debug `webtui/target/debug/web` inside that Wezboard session using
+      the repo-built Roamium binary:
+
+      ```text
+      /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium
+      ```
+
+    - open:
+
+      ```text
+      https://bitcoin.org/bitcoin.pdf
+      ```
+
+    - wait for the browser pane to settle;
+    - capture a macOS screenshot with `screencapture`;
+    - save the screenshot under `logs/issue-776-exp1-*`;
+    - print the screenshot path and any relevant log paths.
+
+    The automation may use macOS GUI automation, such as AppleScript/System
+    Events, to type the debug `web` command into the newly launched Wezboard
+    window. This is acceptable for this experiment because the target is an
+    end-to-end visual smoke test of the actual GUI path.
+
+    The automation must not rely on installed stable TermSurf binaries. It must
+    use debug Wezboard, debug `web`, and the repo-built Roamium/Chromium path.
+
 #### Non-Negotiable Invariants
 
 - Local PDF rendering is fixed in Chromium/Roamium, not by special-casing PDF
@@ -185,73 +224,97 @@ experiments, that product trade-off can be revisited explicitly.
 
 #### Verification
 
-1. Record the precondition results:
+This experiment's verification is automated. Manual inspection by the user is
+not required to decide whether the experiment passes.
+
+1. Confirm screenshot capture is available before running the full test:
+
+   ```bash
+   screencapture -x /private/tmp/termsurf-screenshot-permission-test.png
+   test -s /private/tmp/termsurf-screenshot-permission-test.png
+   ```
+
+   If this fails, stop and record the permission problem. The experiment cannot
+   be visually verified until macOS Screen Recording permission is granted to
+   the process running the test.
+
+2. Record the precondition results:
    - `enable_pdf`, `enable_extensions`, and `enable_plugins` state;
    - whether `testonly = true` blocks the minimal PDF deps;
    - whether `gn check out/Default //content/libtermsurf_chromium` passes after
      the minimal deps are added.
-2. Build Chromium:
+
+3. Build Chromium:
+
    ```bash
    cd chromium/src
    export PATH="$(cd ../depot_tools && pwd):$PATH"
    autoninja -C out/Default libtermsurf_chromium
    ```
-3. Build Roamium and webtui in debug mode:
+
+4. Build Wezboard, Roamium, and webtui in debug mode:
+
    ```bash
    cd /Users/ryan/dev/termsurf
+   ./scripts/build.sh wezboard
    ./scripts/build.sh roamium
    ./scripts/build.sh webtui
    ```
-4. Run debug Wezboard and debug Roamium together using the existing local test
-   workflow. The Roamium process must load the newly built
-   `libtermsurf_chromium`; testing an older installed Roamium invalidates the
-   result.
-5. Open a local PDF:
-   ```bash
-   web /absolute/path/to/file.pdf
-   ```
-   Expected for this experiment: the page may still be blank, but the log should
-   answer whether PDF plugin registration happened, whether
-   `OverrideCreatePlugin()` saw `pdf::kInternalPluginMimeType`, whether
-   `pdf::CreateInternalPlugin()` returned a plugin or `nullptr`, and whether
-   `IsPluginHandledExternally()` saw the PDF MIME type.
-6. Test a relative local PDF path from a shell working directory:
-   ```bash
-   web ./file.pdf
-   ```
-   Expected: it resolves to `file://...` and reaches the same PDF diagnostic
-   path.
-7. Test a remote PDF URL. Expected: it reaches the same PDF diagnostic path.
-8. Click normal links and open ordinary HTML pages after trying a PDF. Expected:
-   non-PDF navigation still works in the same tab.
-9. Regression smoke tests:
-   - normal HTML page loads;
-   - local HTML file loads;
-   - text selection still works;
-   - recent native popup fixes still behave as before.
-10. Record a failure-layer table:
 
-    | Layer                                                 | Result                 |
-    | ----------------------------------------------------- | ---------------------- |
-    | PDF build flags enabled                               | yes/no                 |
-    | Minimal PDF deps compile                              | yes/no                 |
-    | PDF plugin registered in `AddPlugins()`               | yes/no                 |
-    | `OverrideCreatePlugin()` sees internal PDF MIME type  | yes/no                 |
-    | `CreateInternalPlugin()` returns a plugin             | yes/no/null-not-called |
-    | `IsPluginHandledExternally()` sees top-level PDF      | yes/no/not-available   |
-    | Evidence that MimeHandlerView/extension layer is next | yes/no                 |
+5. Run the automated visual PDF smoke test.
+
+   The test must launch debug Wezboard and debug `web`, explicitly passing the
+   repo-built Roamium binary:
+
+   ```bash
+   /Users/ryan/dev/termsurf/webtui/target/debug/web \
+     --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
+     https://bitcoin.org/bitcoin.pdf
+   ```
+
+   The test then waits for load and captures a screenshot.
+
+6. Inspect the screenshot artifact.
+
+   The automated result should classify the screenshot as one of:
+   - **rendered PDF** — visible Bitcoin whitepaper content is present, such as
+     the title `Bitcoin: A Peer-to-Peer Electronic Cash System`, author text, or
+     body paragraphs;
+   - **blank/white** — the browser pane is blank or shows a white PDF surface
+     without recognizable document content;
+   - **navigation/error page** — TermSurf reached an error page, network error,
+     or non-PDF page instead of the PDF;
+   - **automation failure** — Wezboard, `web`, Roamium, network access, or
+     screenshot capture failed before the visual state could be determined.
+
+   A human-readable screenshot path must be recorded in the experiment result.
+
+7. If and only if the screenshot is blank/white or an error page, collect the
+   logs and record a failure-layer table:
+
+   | Layer                                                 | Result                 |
+   | ----------------------------------------------------- | ---------------------- |
+   | PDF build flags enabled                               | yes/no                 |
+   | Minimal PDF deps compile                              | yes/no                 |
+   | PDF plugin registered in `AddPlugins()`               | yes/no                 |
+   | `OverrideCreatePlugin()` sees internal PDF MIME type  | yes/no                 |
+   | `CreateInternalPlugin()` returns a plugin             | yes/no/null-not-called |
+   | `IsPluginHandledExternally()` sees top-level PDF      | yes/no/not-available   |
+   | Evidence that MimeHandlerView/extension layer is next | yes/no                 |
 
 #### Pass Criteria
 
-PDFs render visibly inside the existing TermSurf browser overlay using only the
-minimal content-client / renderer-client wiring. This is unlikely, but if it
-happens, verify scrolling, normal navigation, and local/remote PDFs before
-closing the issue.
+The automated screenshot shows recognizable Bitcoin PDF content rendered inside
+the existing TermSurf browser overlay.
+
+The pass decision is visual. It does not require proving every PDF plumbing
+layer, and it does not require manual interaction beyond granting screenshot
+permission before the run.
 
 #### Partial Criteria
 
-The expected outcome is Partial. The experiment succeeds as a diagnostic if it
-builds and identifies the first missing layer in dependency order:
+The screenshot is still blank/white or reaches an error page, but the automated
+run succeeds and logs identify the first missing layer in dependency order:
 
 1. PDF build flags/deps;
 2. plugin registration;
@@ -265,8 +328,13 @@ missing layer in this list.
 
 #### Failure Criteria
 
-- The experiment makes PDFs blank or crashes without producing enough logs to
-  identify the first missing layer.
+- The automated test cannot launch the correct debug Wezboard/debug `web`/repo
+  Roamium path.
+- The automated test uses installed stable TermSurf binaries instead of repo
+  debug binaries.
+- Screenshot capture fails after permission has been granted.
+- The experiment makes PDFs blank or crashes without producing a screenshot or
+  enough logs to identify the first missing layer.
 - The fix only handles PDFs by opening an external app or native window.
 - The fix adds PDF-specific behavior to `webtui` while the Chromium viewer
   remains unwired.
