@@ -924,15 +924,20 @@ Experiment 3 should prove which branch returns `nullptr` and then run the
 smallest targeted probe:
 
 1. Add diagnostic logging around the exact parent-frame/origin checks.
-2. If the parent origin is the blocker, pass the wrapper's origin as an
-   `additional_allowed_origins` probe to `pdf::CreateInternalPlugin()`.
-3. Run the same automated screenshot test.
+2. If the plugin frame has no parent frame, reshape the wrapper so the PDF
+   `<embed>` lives inside a child frame and re-run the probe.
+3. If a parent frame exists but the parent origin is not allowed, pass that
+   exact parent origin as an `additional_allowed_origins` probe to
+   `pdf::CreateInternalPlugin()`.
+4. Run the same automated screenshot test.
 
 This is still a probe, not the final security model. If allowing the wrapper
 origin gets past the `nullptr` branch but hits `CHECK(IsPdfRenderer())`, that is
 valuable evidence: the plugin must run in a PDF renderer process, which points
 toward the real Chrome/MimeHandlerView/component-extension flow. If it creates a
-plugin but remains blank, the next missing layer is resource/stream plumbing.
+plugin but remains blank, the next missing layer is resource/stream plumbing. If
+the child-frame wrapper gets past the missing-parent branch, that is also
+diagnostic only; the real fix still needs a principled wrapper/process model.
 
 #### Changes
 
@@ -966,22 +971,51 @@ plugin but remains blank, the next missing layer is resource/stream plumbing.
      Instead, log the parent origin and infer the allowed-origin result from
      whether `CreateInternalPlugin()` returns `nullptr`.
 
-4. If the parent origin is not allowed, run a minimal allowance probe:
+4. Branch the probe based on the logged parent-frame state.
+   - If `parent_frame == nullptr`, reshape the generated wrapper in
+     `ts_pdf_navigation_throttle.cc` so the top-level wrapper contains a child
+     frame, and the child frame contains the internal PDF `<embed>`.
+   - Prefer the smallest shape first, such as:
+
+     ```html
+     <iframe
+       srcdoc="...<embed src='{original_pdf_url}' type='application/x-google-chrome-pdf'>..."
+     ></iframe>
+     ```
+
+   - Keep the diagnostic wrapper marker/background so the screenshot still
+     distinguishes wrapper rendering from plugin rendering.
+   - Log this as an `[issue-776-exp3] nested-wrapper probe`.
+   - Re-run the automated PDF smoke test after this reshape.
+   - Do not add a new wrapper scheme in this experiment.
+
+5. If the parent frame exists but the parent origin is not allowed, run a
+   minimal allowance probe:
    - call
      `pdf::CreateInternalPlugin(params, render_frame, base::span<const url::Origin>(&parent_origin, 1))`
      or the clean Chromium equivalent;
    - only do this for the Experiment 2 wrapper URL / internal PDF MIME path;
    - log that this is an `[issue-776-exp3] additional_allowed_origins probe`;
+   - when the parent origin is opaque, pass the exact `url::Origin` value copied
+     from `parent_frame->GetSecurityOrigin()`. Do not reconstruct it from the
+     wrapper URL; a reconstructed opaque origin gets a different nonce and will
+     not compare equal;
    - do not treat this as a final security model.
 
-5. Do not change the Experiment 2 top-level PDF throttle except for any logging
-   needed to correlate wrapper URL and plugin URL.
+6. If `pdf::IsPdfInternalPluginAllowedOrigin()` is not callable from
+   `libtermsurf_chromium`, also inspect the allowed-origin implementation in
+   `components/pdf/common/pdf_util.*` or the relevant Chromium file and record
+   the hardcoded allow-list in the result. Do not add broad exports just for
+   logging.
+
+7. Do not change the Experiment 2 top-level PDF throttle except for wrapper
+   shape/logging needed by the parent-frame probe to correlate wrapper URL and
+   plugin URL.
    - The throttle already proved it can bypass the download path.
-   - Do not add a new wrapper scheme in this experiment.
    - Do not implement MimeHandlerView, GuestView, component-extension loading,
      or streams-private in this experiment.
 
-6. Build and run:
+8. Build and run:
    - `autoninja -C out/Default libtermsurf_chromium`;
    - `./scripts/build.sh roamium`;
    - `./scripts/build.sh wezboard`;
@@ -999,6 +1033,9 @@ plugin but remains blank, the next missing layer is resource/stream plumbing.
 - Do not turn this into a MimeHandlerView/component-extension port.
 - The `additional_allowed_origins` path is diagnostic only. If it works, the
   result must explicitly say that a real security model is still required.
+- The nested-wrapper path is diagnostic only. If it works, the result must
+  explicitly say that the final architecture still needs a stable wrapper and
+  process model.
 - Normal HTML navigation must continue to work.
 - Non-PDF binary downloads must not be intercepted as PDFs.
 
@@ -1026,6 +1063,8 @@ plugin but remains blank, the next missing layer is resource/stream plumbing.
    | parent frame is remote                                        | yes/no |
    | parent origin logged                                          | yes/no |
    | parent origin allowed without extra origins                   | yes/no |
+   | nested-wrapper probe attempted                                | yes/no |
+   | nested-wrapper probe creates a parent frame                   | yes/no |
    | `additional_allowed_origins` probe attempted                  | yes/no |
    | `CreateInternalPlugin()` returns plugin after allowance probe | yes/no |
    | process hits `CHECK(IsPdfRenderer())` after allowance probe   | yes/no |
@@ -1036,9 +1075,16 @@ plugin but remains blank, the next missing layer is resource/stream plumbing.
      browser pane.
    - Partial visual state: logs identify the exact null-return cause or the next
      post-null blocker, but PDF content still does not render.
+   - Partial visual state: a sad-tab / renderer-crashed view appears after an
+     allowance or nested-wrapper probe. This is valid evidence if the logs show
+     the crash happened at `CHECK(IsPdfRenderer())`.
    - Fail visual state: the experiment no longer reaches
      `OverrideCreatePlugin()`, breaks the wrapper route, regresses normal HTML,
      or crashes before producing useful logs.
+
+   If `CHECK(IsPdfRenderer())` fires, the renderer process may crash before any
+   later logs can run. Treat the screenshot and pre-crash log lines as the
+   authoritative evidence for that branch.
 
 6. Re-run the normal HTML smoke test from Experiment 2:
 
@@ -1053,6 +1099,15 @@ plugin but remains blank, the next missing layer is resource/stream plumbing.
    TERMSURF_PDF_SETTLE_SECONDS=8 ./scripts/test-issue-776-pdf.sh \
      http://localhost:9616/test.bin
    ```
+
+   `TERMSURF_PDF_SETTLE_SECONDS` is provided by the existing
+   `scripts/test-issue-776-pdf.sh` automation. Experiment 3 does not need to
+   change the automation unless the nested-wrapper probe needs a longer settle
+   time.
+
+8. The teardown crash seen in Experiments 1 and 2 is expected to recur. The
+   experiment is still valid if screenshots and logs are captured before the
+   teardown crash. A crash before useful logs or screenshots is a Failure.
 
 #### Pass Criteria
 
@@ -1071,6 +1126,7 @@ The screenshot still does not show PDF content, but the logs identify the exact
 post-Experiment-2 blocker. Valid Partial outcomes include:
 
 - parent frame is missing;
+- nested-wrapper probe creates a parent frame but exposes a later blocker;
 - parent origin is not allowed;
 - allowing the wrapper origin gets past the `nullptr` branch but hits
   `CHECK(IsPdfRenderer())`;
@@ -1078,6 +1134,11 @@ post-Experiment-2 blocker. Valid Partial outcomes include:
 - plugin creation succeeds but PDF bytes/stream routing is missing;
 - the evidence proves MimeHandlerView/component-extension infrastructure is
   required.
+
+If `CHECK(IsPdfRenderer())` fires, the result must explicitly conclude that the
+missing layer is the PDF renderer process model: browser-side renderer spawning
+with PDF flags plus MimeHandlerView-style routing. Experiment 4 must address
+that layer rather than continuing to adjust wrapper markup.
 
 #### Failure Criteria
 
