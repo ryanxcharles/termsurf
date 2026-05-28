@@ -3484,3 +3484,210 @@ scheme-registry / origin-access grant scoped to the PDF extension origin and the
 `base_fetch_context.cc:233` are permitted and reach the browser factory this
 experiment installed. This must stay as narrow as the browser-side gate: only
 the PDF viewer extension origin, only `chrome://resources`.
+
+### Experiment 7: Grant the PDF Viewer Renderer-Side chrome://resources Access
+
+#### Description
+
+Experiment 6 installed and correctly gated the browser-side WebUI resource
+factory, but `chrome://resources` subresources still fail in the renderer at
+`SecurityOrigin::CanDisplay` before any browser factory is consulted. This
+experiment adds the missing renderer-side half so the two layers line up: the
+browser serves the bytes (Exp 6) and the renderer permits the PDF viewer
+document to display them (Exp 7).
+
+The decision path was traced in the Chromium source:
+
+```text
+BaseFetchContext::CanRequest          third_party/blink/renderer/core/loader/base_fetch_context.cc:233
+  resource_request.CanDisplay(url)
+    SecurityOrigin::CanDisplay         third_party/blink/renderer/platform/weborigin/security_origin.cc
+      SchemeRegistry::ShouldTreatURLSchemeAsDisplayIsolated("chrome") == true
+        return protocol_ == "chrome"                       // false: doc is chrome-extension
+            || SecurityPolicy::IsOriginAccessToURLAllowed(this, url)   // <- the lever
+```
+
+`chrome` is registered display-isolated in the renderer
+(`content/renderer/render_thread_impl.cc:860`,
+`RegisterURLSchemeAsDisplayIsolated`), so for a `chrome-extension://` document
+`CanDisplay(chrome://resources/...)` returns true only if an entry in the
+renderer's origin-access allowlist permits it. That allowlist is populated by
+`blink::WebSecurityPolicy::AddOriginAccessAllowListEntry`
+(`third_party/blink/public/web/web_security_policy.h`). In stock Chromium the
+extensions renderer `Dispatcher::UpdateOriginPermissions`
+(`extensions/renderer/dispatcher.cc`) calls exactly this lever per extension.
+
+TermSurf is content-shell based and does **not** run the extensions renderer
+`Dispatcher`, so no code adds that entry today. This experiment adds it directly
+for the one PDF viewer extension origin, scoped to the `chrome://resources`
+host.
+
+Reconciliation of the two research threads, recorded so it is not re-litigated:
+a survey of Electron concluded the browser-side
+`RegisterNonNetworkSubresourceURLLoaderFactories` factory is the "whole
+mechanism, no patch needed." That is contradicted by this issue's own Exp 6
+runtime evidence — with the browser factory in place, `chrome://resources` still
+failed at `CanDisplay`. The most likely explanation is that Electron runs the
+full extensions renderer `Dispatcher` for its component PDF extension, so it
+receives the origin-access grant via the extension system and never has to add
+it by hand. The underlying lever is the same origin-access allowlist either way.
+There is residual uncertainty about exactly how the grant arises in stock
+Chrome/Electron (the `chrome://resources` host specifically); Experiment 7 is
+the empirical test of the lever, not of that backstory.
+
+This stays strictly within the Electron-style strategy: one narrow renderer
+grant, no extensions browser/renderer stack, no GuestView, no MimeHandlerView.
+
+#### Changes
+
+1. Create a new Chromium branch from Experiment 6.
+
+   ```bash
+   cd chromium/src
+   git checkout 148.0.7778.97-issue-789-exp6
+   git checkout -b 148.0.7778.97-issue-789-exp7
+   ```
+
+   Update `chromium/README.md` in the main repo to list the new branch.
+
+2. Register the origin-access allowlist entry at renderer startup.
+
+   In `content/libtermsurf_chromium/ts_renderer_client.{h,cc}`, override
+   `RenderThreadStarted()`. Call the base implementation first, then add one
+   entry permitting the PDF viewer extension origin to display
+   `chrome://resources`:
+
+   ```cpp
+   void TsRendererClient::RenderThreadStarted() {
+     ShellContentRendererClient::RenderThreadStarted();
+
+     const GURL pdf_extension_origin(
+         std::string("chrome-extension://") + extension_misc::kPdfExtensionId +
+         "/");
+     blink::WebSecurityPolicy::AddOriginAccessAllowListEntry(
+         pdf_extension_origin,
+         blink::WebString::FromASCII(content::kChromeUIScheme),    // "chrome"
+         blink::WebString::FromASCII(content::kChromeUIResourcesHost),  // "resources"
+         /*destination_port=*/0,
+         network::mojom::CorsDomainMatchMode::kDisallowSubdomains,
+         network::mojom::CorsPortMatchMode::kAllowAnyPort,
+         network::mojom::CorsOriginAccessMatchPriority::kDefaultPriority);
+
+     LOG(INFO) << "[issue-789-exp7] origin-access-granted source="
+               << pdf_extension_origin.spec() << " dest=chrome://resources";
+   }
+   ```
+
+   The origin-access list is process-global, so registering once at thread start
+   covers every frame in the renderer process. The entry is scoped to exactly
+   one source origin, one destination scheme, and one destination host
+   (`kDisallowSubdomains`), so no other origin gains `chrome://resources` access
+   and the PDF viewer gains nothing beyond that host.
+
+3. Do not register the entry per-frame and do not broaden it. Do not grant any
+   host other than `chrome://resources`. Do not grant the entry to any origin
+   other than the PDF viewer extension origin. Do not touch
+   `RegisterURLSchemeAs...` flags — `chrome` must stay display-isolated.
+
+4. Preserve Experiment 6. The browser-side WebUI factory and its three-part gate
+   are unchanged. Experiment 7 only adds the renderer-side display permission.
+
+5. Preserve dependency boundaries. `content/libtermsurf_chromium` must still
+   avoid `//chrome/browser/plugins:impl`,
+   `//chrome/browser/extensions:extensions`, `//components/guest_view/browser`,
+   and the broad extensions renderer stack. `blink::WebSecurityPolicy` is a
+   `third_party/blink/public` API already available to the renderer client.
+
+6. Format, build, archive.
+
+   ```bash
+   cd chromium/src
+   ../depot_tools/clang-format -i content/libtermsurf_chromium/ts_renderer_client.cc \
+     content/libtermsurf_chromium/ts_renderer_client.h
+   export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+   autoninja -C out/Default libtermsurf_chromium
+   ```
+
+   After committing the Chromium branch, regenerate the patch archive:
+
+   ```bash
+   tmp_dir="$(mktemp -d ../../chromium/patches/issue-789.XXXXXX)"
+   git format-patch 148.0.7778.97-issue-776-exp7..HEAD -o "$tmp_dir"
+   rm -rf ../../chromium/patches/issue-789
+   mv "$tmp_dir" ../../chromium/patches/issue-789
+   ```
+
+#### Verification
+
+1. Build `libtermsurf_chromium`; confirm the forbidden Chrome dependency set is
+   still absent (`gn desc out/Default //content/libtermsurf_chromium deps`).
+
+2. Run the Bitcoin PDF smoke test.
+
+   ```bash
+   LOG_DIR="$PWD/logs/issue-789-exp7-$(date +%Y%m%d-%H%M%S)" \
+   TERMSURF_PDF_SETTLE_SECONDS=10 \
+   ./scripts/test-issue-776-pdf.sh http://localhost:9616/bitcoin.pdf
+   ```
+
+   Required for Pass:
+   - `[issue-789-exp7] origin-access-granted source=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/ dest=chrome://resources`
+   - `[issue-789-exp6] webui-factory-registered ... host=resources`
+   - The six `chrome://resources` paths that failed in Exp 6
+     (`css/text_defaults_md.css`, `js/assert.js`, `lit/v3_0/lit.rollup.js`,
+     `js/load_time_data.js`, `mojo/mojo/public/js/bindings.js`,
+     `cr_elements/cr_a11y_announcer/cr_a11y_announcer.css`) **no longer** log
+     `Not allowed to load local resource`. List each path served or failed,
+     backed by renderer console / network evidence as in Exp 6.
+
+   Stretch: the viewer modules execute far enough to call the Exp 5
+   `mimeHandlerPrivate.getStreamInfo()` shim
+   (`[issue-789-exp5] viewer-api-call ... method=getStreamInfo`).
+
+3. Capture and classify the screenshot (same buckets as Exp 6). If the PDF
+   renders, also test first-page scroll.
+
+4. Run HTML and non-PDF binary smoke (`index.html`, `test.bin`). The
+   origin-access entry targets only the PDF extension origin, so normal pages
+   must be unaffected: no `[issue-789-exp7]`-attributable behavior change, and
+   no Exp 4/5/6 PDF-path logs.
+
+5. Negative leak test. From a normal HTML page, attempt
+   `fetch('chrome://resources/js/assert.js')` (or an `import`). It must still
+   fail with `Not allowed to load local resource` — the grant must not extend to
+   non-PDF-viewer origins. (This is the explicit assertion Exp 6 left as future
+   hardening; do it here now that a real grant exists.)
+
+#### Pass Criteria
+
+- `libtermsurf_chromium` builds and links; forbidden deps still absent.
+- The `[issue-789-exp7] origin-access-granted` log appears once per renderer.
+- The previously failing `chrome://resources` loads succeed (no
+  `CanDisplay`/"Not allowed to load local resource" for the PDF viewer frame),
+  proven per path by console/network evidence.
+- The grant is scoped to the PDF viewer extension origin and the
+  `chrome://resources` host only.
+- A normal web page still cannot load `chrome://resources/...` (negative test).
+- HTML and non-PDF binary smoke show no PDF-path behavior change.
+
+Stretch Pass: the viewer reaches the Exp 5 `mimeHandlerPrivate.getStreamInfo()`
+shim.
+
+#### Partial Criteria
+
+Partial if the build succeeds and `chrome://resources` now loads, but the viewer
+fails at a later, precisely named layer — for example the viewer JS runs but
+does not reach `getStreamInfo()`, `getStreamInfo()` is reached but the inner PDF
+plugin/content navigation is not created, or a renderer/plugin layer stays
+blank. Name the exact next failure and cite log lines.
+
+#### Failure Criteria
+
+- The origin-access grant is too broad: any origin other than the PDF viewer
+  extension origin, or any host other than `chrome://resources`, gains access
+  (the negative test fails).
+- The experiment registers the entry per-frame or repeatedly instead of once at
+  renderer startup, or flips `chrome` off display-isolated.
+- The implementation imports the extensions renderer/browser stack, GuestView,
+  or MimeHandlerView instead of the single `WebSecurityPolicy` call.
+- The implementation changes normal HTML or non-PDF binary behavior.
