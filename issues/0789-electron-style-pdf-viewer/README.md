@@ -2938,16 +2938,35 @@ content-shell-based embedder currently only serves the PDF extension resources
 from `chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/...`. It does not
 provide the `chrome://resources/...` loader that Chrome's WebUI stack provides.
 
-This experiment adds the smallest TermSurf-owned `chrome://resources` serving
-path needed by the PDF viewer's module graph. The goal is not to make PDFs
-render completely yet. The goal is to advance the viewer past the missing
-WebUI-resource failures so it can call the Experiment 5
-`chrome.mimeHandlerPrivate.getStreamInfo(...)` shim.
+This experiment adds the smallest `chrome://resources` serving path needed by
+the PDF viewer's module graph. Electron already solves this layer by registering
+Chromium's embedder-facing WebUI resource factory for component-extension
+frames:
+
+```cpp
+content::CreateWebUIURLLoaderFactory(
+    frame_host,
+    content::kChromeUIScheme,
+    {content::kChromeUIResourcesHost})
+```
+
+That helper serves shared `chrome://resources/...` files through Chromium's
+existing URL data source machinery. It already owns resource-ID lookup, MIME
+types, path normalization, and host-level allowlisting for `chrome://resources`.
+TermSurf should copy that shape instead of hand-writing a per-path resource
+manager.
+
+The goal is not to make PDFs render completely yet. The goal is to advance the
+viewer past the missing WebUI-resource failures and identify the next missing
+layer. If the viewer reaches Experiment 5's
+`chrome.mimeHandlerPrivate.getStreamInfo(...)` shim, that is an especially good
+outcome, but this experiment should not drift into later PDF plugin,
+`pdfViewerPrivate`, or MimeHandlerView-equivalent work.
 
 This is still the Electron-style strategy: mirror only the narrow pieces the PDF
-viewer needs, backed by TermSurf-owned resource serving. Do not import Chrome's
-full WebUI controller stack, Chrome extension browser stack, GuestView, or
-MimeHandlerView.
+viewer needs, backed by Chromium's existing embeddable resource-serving helper.
+Do not import Chrome's full WebUI controller stack, Chrome extension browser
+stack, GuestView, or MimeHandlerView.
 
 #### Changes
 
@@ -2967,13 +2986,17 @@ MimeHandlerView.
    viewer JavaScript to enumerate likely follow-up imports:
 
    ```bash
-   rg "chrome://resources" \
-     out/Default/gen/chrome/browser/resources/pdf/tsc \
-     chrome/browser/resources/pdf
+   rg "chrome://resources" out/Default/gen/chrome/browser/resources/pdf
+   rg "chrome://resources" chrome/browser/resources/pdf
    ```
 
-   Record the initial allowlist in the result section. The expected first set
-   includes:
+   Also record the runtime-observed failures from Experiment 5:
+
+   ```bash
+   rg "chrome://resources|Not allowed to load local resource" logs/issue-789-exp5*
+   ```
+
+   The expected first set includes:
 
    ```text
    chrome://resources/css/text_defaults_md.css
@@ -2981,42 +3004,64 @@ MimeHandlerView.
    chrome://resources/lit/v3_0/lit.rollup.js
    ```
 
-   If the first implementation reveals additional PDF-viewer imports, add them
-   only if they are direct `chrome://resources` dependencies of the existing PDF
-   viewer graph. Do not generalize into a broad WebUI resource server.
+   Do not use this audit to build a per-path allowlist. The audit is for result
+   interpretation only. Chromium's `CreateWebUIURLLoaderFactory(...)` remains
+   responsible for resolving valid `chrome://resources` paths.
 
-3. Add a TermSurf WebUI resource manager for the narrow allowlist.
+3. Verify or register the `chrome` scheme.
 
-   Add a small resource manager in `content/libtermsurf_chromium`, or extend the
-   existing PDF resource manager if that keeps the code simpler. It should:
-   - map allowlisted `chrome://resources/...` paths to Chromium resource IDs;
-   - load the needed resource packs if they are not already loaded;
-   - return the correct MIME type for CSS and JavaScript modules;
-   - log every served and rejected resource.
+   Confirm whether TermSurf's content client already has `chrome` registered as
+   a non-network scheme that can reach
+   `RegisterNonNetworkSubresourceURLLoaderFactories(...)`. If it is missing, add
+   the minimal scheme registration in `TsContentClient::AddAdditionalSchemes`.
 
-   Required logs:
+   Add a startup log so the result records what happened:
 
    ```text
-   [issue-789-exp6] webui-resource-allowlist count=<n> paths=<comma-separated>
-   [issue-789-exp6] webui-resource-served path=<path> resource_id=<id> mime=<mime> bytes=<n>
-   [issue-789-exp6] webui-resource-rejected path=<path> reason=<not-allowlisted|not-found|wrong-scheme>
+   [issue-789-exp6] scheme-check chrome=<registered|added|missing>
    ```
 
-   The resource path must be normalized before lookup so `../` and other path
-   tricks cannot escape the allowlist.
+4. Route `chrome://resources` through Chromium's WebUI resource factory.
 
-4. Route `chrome://resources` through the narrow TermSurf factory.
+   In `TsBrowserClient::RegisterNonNetworkSubresourceURLLoaderFactories(...)`,
+   register Chromium's existing WebUI resource factory for `chrome://resources`:
 
-   In `TsBrowserClient`, add the smallest scheme handling needed for
-   `chrome://resources/...`:
-   - `CreateNonNetworkNavigationURLLoaderFactory(...)` if top-level navigation
-     asks for the scheme;
-   - `RegisterNonNetworkSubresourceURLLoaderFactories(...)` for subresource and
-     module imports from the PDF extension viewer.
+   ```cpp
+   factories->emplace(
+       content::kChromeUIScheme,
+       content::CreateWebUIURLLoaderFactory(
+           frame_host,
+           content::kChromeUIScheme,
+           {content::kChromeUIResourcesHost}));
+   ```
+
+   Scope this factory to the PDF extension viewer frame only. TermSurf does not
+   have Chrome's full `ExtensionRegistry`, so use the committed frame origin:
+
+   ```text
+   chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai
+   ```
+
+   If the frame origin is not the PDF viewer extension origin, do not register
+   the factory. Normal web pages must not gain access to
+   `chrome://resources/...`.
+
+   Do not add a top-level `CreateNonNetworkNavigationURLLoaderFactory(...)` path
+   for `chrome://resources`. The PDF viewer uses these URLs as module/CSS
+   subresources, not as navigations.
+
+   Add concise logs around the registration decision:
+
+   ```text
+   [issue-789-exp6] webui-factory-registered frame_origin=<origin> host=resources
+   [issue-789-exp6] webui-factory-skipped frame_origin=<origin> reason=<not-pdf-viewer-origin>
+   ```
 
    Preserve the existing PDF extension resource factory. Do not replace the
    generic `chrome-extension://` factory with `chrome://resources` handling, and
-   do not make `chrome://resources` serve arbitrary paths.
+   do not serve arbitrary `chrome://...` hosts. The allowlist boundary is the
+   `content::kChromeUIResourcesHost` host-level allowlist passed to
+   `CreateWebUIURLLoaderFactory(...)`.
 
 5. Preserve Experiment 5's stream-info shim.
 
@@ -3029,15 +3074,21 @@ MimeHandlerView.
    ```text
    [issue-789-exp5] viewer-template pdf_oopif_enabled=absent ...
    [issue-789-exp5] viewer-api-installed ... api=mimeHandlerPrivate result=ok
-   [issue-789-exp6] webui-resource-served path=resources/js/assert.js ...
-   [issue-789-exp6] webui-resource-served path=resources/lit/v3_0/lit.rollup.js ...
+   [issue-789-exp6] scheme-check chrome=<registered|added>
+   [issue-789-exp6] webui-factory-registered frame_origin=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai host=resources
+   ```
+
+   Stretch flow:
+
+   ```text
    [issue-789-exp5] viewer-api-call ... api=mimeHandlerPrivate method=getStreamInfo
    [issue-789-exp5] get-stream-info ... result=ok
    ```
 
-   If the viewer reaches `getStreamInfo()` and then fails on a later PDF plugin
-   or renderer layer, that is a valid Pass or Partial depending on how far it
-   gets. Do not expand Experiment 6 into that later layer.
+   If the viewer reaches `getStreamInfo()` and then fails on a later PDF plugin,
+   `pdfViewerPrivate`, or renderer layer, that is a valid Partial or Stretch
+   Pass depending on how far it gets. Do not expand Experiment 6 into that later
+   layer.
 
 6. Preserve dependency boundaries.
 
@@ -3051,7 +3102,9 @@ MimeHandlerView.
 
    Also avoid Chrome's full WebUI controller/browser stack unless this
    experiment records Failure and redesigns around a deliberate product
-   decision. A narrow resource factory is the intended implementation.
+   decision. `content::CreateWebUIURLLoaderFactory(...)` is acceptable because
+   it is the narrow embedder-facing helper Electron uses for this exact class of
+   subresource load.
 
 7. Format, build, archive.
 
@@ -3115,17 +3168,22 @@ MimeHandlerView.
    [issue-789-exp4] attach-handler-committed ...
    [issue-789-exp5] viewer-template pdf_oopif_enabled=absent ...
    [issue-789-exp5] viewer-api-installed ... result=ok
-   [issue-789-exp6] webui-resource-served path=resources/js/assert.js ...
-   [issue-789-exp6] webui-resource-served path=resources/lit/v3_0/lit.rollup.js ...
-   [issue-789-exp5] viewer-api-call ... method=getStreamInfo
-   [issue-789-exp5] get-stream-info ... result=ok
+   [issue-789-exp6] scheme-check chrome=<registered|added>
+   [issue-789-exp6] webui-factory-registered frame_origin=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai host=resources
    ```
 
    The log must not contain new
    `Not allowed to load local resource: chrome://resources/...` failures for
-   allowlisted resources. If new non-allowlisted PDF-viewer resources appear,
-   record them and decide whether they belong in this experiment's narrow
-   allowlist.
+   resources requested by the PDF viewer. If resource loading succeeds and the
+   next failure is a missing `pdfViewerPrivate` or plugin-layer API, record that
+   exact next failure instead of expanding this experiment.
+
+   Stretch log sequence:
+
+   ```text
+   [issue-789-exp5] viewer-api-call ... method=getStreamInfo
+   [issue-789-exp5] get-stream-info ... result=ok
+   ```
 
 4. Capture screenshot output.
 
@@ -3170,30 +3228,33 @@ MimeHandlerView.
 
 - `libtermsurf_chromium` builds and links.
 - The forbidden broad Chrome dependency set is still absent.
-- The PDF viewer's allowlisted `chrome://resources` imports are served by a
-  narrow TermSurf-owned resource factory.
+- `chrome://resources` is routed through Chromium's
+  `content::CreateWebUIURLLoaderFactory(...)`, scoped to the PDF viewer
+  extension frame only.
 - The run no longer fails before `createBrowserApi()` due to missing
   `chrome://resources` dependencies.
-- The viewer calls the Experiment 5 `mimeHandlerPrivate.getStreamInfo(...)`
-  shim, and the shim returns stream metadata with the same `internal_id`,
-  `streamUrl`, and `originalUrl` lineage from Exp 2-5.
+- If the viewer still fails before calling
+  `mimeHandlerPrivate.getStreamInfo(...)`, the new failure is named precisely
+  and is not another missing `chrome://resources` load.
 - HTML and non-PDF binary smoke tests do not bind or call the PDF resource,
   stream, attach, or shim paths.
 - The patch archive is regenerated under `chromium/patches/issue-789/`.
 
-Stretch Pass: Experiment 3's delegate/interceptor path reaches `stream-served`,
-and the screenshot visibly renders the first page of the PDF.
+Stretch Pass: the viewer calls the Experiment 5
+`mimeHandlerPrivate.getStreamInfo(...)` shim, the shim returns stream metadata
+with the same `internal_id`, `streamUrl`, and `originalUrl` lineage from Exp
+2-5, Experiment 3's delegate/interceptor path reaches `stream-served`, and the
+screenshot visibly renders the first page of the PDF.
 
 #### Partial Criteria
 
 Partial if the build succeeds and the viewer gets farther, but a narrower next
 layer remains. Valid Partial outcomes include:
 
-- additional direct `chrome://resources` imports appear and are clearly part of
-  the PDF viewer graph, but the allowlist was intentionally kept smaller for
-  this run;
-- all allowlisted resources load, but a non-WebUI viewer API is missing before
-  `getStreamInfo()`;
+- the `chrome` scheme is not routed through the non-network subresource factory
+  path and needs a lower-level scheme-registration follow-up;
+- the WebUI resource factory loads successfully, but a non-WebUI viewer API is
+  missing before `getStreamInfo()`;
 - `getStreamInfo()` succeeds, but the viewer does not create the inner PDF
   plugin/content navigation;
 - the stream URL navigation starts, but `MapToOriginalUrl(...)` cannot match the
@@ -3207,10 +3268,10 @@ The result must name the exact next missing piece and cite log lines.
 - The experiment imports Chrome's broad WebUI controller stack, broad extension
   browser stack, GuestView, or MimeHandlerView instead of a narrow resource
   serving path.
-- The implementation serves arbitrary `chrome://resources` paths without an
-  allowlist.
+- The implementation serves arbitrary `chrome://...` hosts instead of limiting
+  the WebUI resource factory to `content::kChromeUIResourcesHost`.
 - The implementation changes normal HTML or non-PDF binary behavior.
 - The implementation removes or bypasses Experiment 5's `mimeHandlerPrivate`
   shim instead of making the viewer module graph reach it.
-- The implementation claims Pass without a `[issue-789-exp5] viewer-api-call`
-  log for `mimeHandlerPrivate.getStreamInfo(...)`.
+- The implementation claims Pass while `chrome://resources` loads are still the
+  first failing layer.
