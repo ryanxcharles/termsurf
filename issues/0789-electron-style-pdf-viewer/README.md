@@ -2431,7 +2431,7 @@ Experiment 4 proved that TermSurf can attach the `pdf_embedder.html` child
 iframe to the PDF extension viewer frame. The next missing boundary is the
 viewer-private API call that Chrome normally provides to that extension frame.
 
-The PDF viewer JS starts by calling:
+The PDF viewer JS has two possible private API paths. It calls:
 
 ```text
 chrome.pdfViewerPrivate.getStreamInfo(callback)
@@ -2444,16 +2444,35 @@ chrome.mimeHandlerPrivate.getStreamInfo(callback)
 ```
 
 when OOPIF PDF is not enabled. TermSurf currently serves the viewer resources
-but does not provide either API surface to the extension frame. As a result, the
-viewer frame commits, but the viewer cannot obtain the stored `streamUrl`,
-`originalUrl`, `tabId`, or `embedded` values, so it cannot create the inner PDF
-content/plugin frame that should navigate to the stream URL.
+but does not provide either JavaScript API surface to the extension frame. A
+browser-side Mojo binder alone is not enough: the PDF viewer can only call the
+API if the renderer environment creates the `chrome.mimeHandlerPrivate` or
+`chrome.pdfViewerPrivate` namespace first.
 
-This experiment adds the smallest TermSurf-owned stream-info API shim needed for
-the viewer JS to receive `TsPdfStreamStore` data and attempt the inner PDF
-content/plugin navigation. The expected proof point is that the logs advance
-past Experiment 4's `attach-handler-committed` and reach Experiment 3's
-`stream-served` path, or identify the next missing PDF plugin/renderer layer.
+For Experiment 5, prefer the `mimeHandlerPrivate` path. Audit the PDF viewer
+template replacements and keep `pdfOopifEnabled` absent or false unless the code
+proves that the current viewer requires the `pdfViewerPrivate` path. The
+existing Chrome `pdfViewerPrivate` implementation lives under broad
+`chrome/browser/extensions` infrastructure and is not an acceptable first
+implementation for TermSurf.
+
+As a result, the viewer frame currently commits, but the viewer cannot obtain
+the stored `streamUrl`, `originalUrl`, `tabId`, or `embedded` values, so it
+cannot create or drive the inner PDF content/plugin frame that should navigate
+to the stream URL.
+
+This experiment adds the smallest TermSurf-owned renderer-plus-browser
+stream-info API shim needed for the viewer JS to receive `TsPdfStreamStore` data
+and attempt the inner PDF content/plugin navigation. The expected proof point is
+that the logs advance past Experiment 4's `attach-handler-committed`, show a
+renderer-side viewer API call, return stream info from the browser-side TermSurf
+provider, and either show the viewer attempting the next stream/plugin step or
+identify the next missing PDF plugin/renderer layer.
+
+Reaching Experiment 3's `stream-served` path is a stretch outcome for Experiment
+5, not the required Pass line. If stream info is returned correctly and the
+viewer advances to a later PDF/plugin step, the experiment can Pass or Partial
+depending on the remaining missing layer.
 
 The implementation should copy Electron's strategy, not Chrome's whole stack:
 mirror only the pieces the PDF viewer needs, backed by TermSurf's existing
@@ -2481,29 +2500,38 @@ store/delegate/interceptor path. Do not import Chrome's full
    extensions/common/api/mime_handler_private.idl
    chrome/common/extensions/api/pdf_viewer_private.idl
    extensions/renderer/resources/mime_handler_private_custom_bindings.js
+   chrome/browser/resources/pdf/pdf_viewer.ts
    chrome/browser/resources/pdf/browser_api.ts
+   chrome/browser/resources/pdf/pdf_viewer_wrapper.ts
    content/libtermsurf_chromium/ts_browser_client.cc
    content/libtermsurf_chromium/ts_pdf_stream_store.{h,cc}
    ```
 
    Preferred implementation order:
-   - first try to bind `extensions::mime_handler::MimeHandlerService` for the
-     PDF extension frame through
-     `TsBrowserClient::RegisterBrowserInterfaceBindersForFrame(...)`, because
-     the Mojo type already has `GetStreamInfo()` and
-     `SetPdfPluginAttributes(...)`;
-   - if `pdfOopifEnabled` makes the viewer call `pdfViewerPrivate` instead of
-     `mimeHandlerPrivate`, add the smallest TermSurf-owned bridge that exposes
-     equivalent `getStreamInfo(...)` data to the viewer frame;
-   - if neither can be done without broad Chrome extension API infrastructure,
-     record Partial and identify the exact missing binding/generation layer.
+   - audit the viewer resource/template state and confirm whether
+     `pdfOopifEnabled` is present. Prefer making it absent/false so the viewer
+     calls `chrome.mimeHandlerPrivate.getStreamInfo(...)`;
+   - add a renderer-side TermSurf shim/custom binding that creates
+     `chrome.mimeHandlerPrivate.getStreamInfo(...)` and, if needed,
+     `setPdfPluginAttributes(...)` for the PDF extension viewer frame;
+   - back that renderer shim with the smallest browser-side TermSurf service
+     bound through
+     `TsBrowserClient::RegisterBrowserInterfaceBindersForFrame(...)` or the
+     closest narrow per-frame binder available in Chromium 148;
+   - call the shell/content-shell base binder registration first, then gate the
+     TermSurf binder to the PDF extension origin;
+   - do not try to use Chrome's generated `pdfViewerPrivate` implementation as
+     the first path. If the viewer cannot be kept on `mimeHandlerPrivate`,
+     record Partial and design a deliberate renderer API-generation experiment.
 
 3. Add a TermSurf stream-info provider backed by `TsPdfStreamStore`.
 
    The provider must return the stream attached to the PDF extension frame that
-   committed in Experiment 4. It should derive the owning embedder frame from
-   the extension frame's parent and call into `TsPdfStreamStore` rather than
-   storing duplicate stream state.
+   committed in Experiment 4. It must not copy Chrome's
+   `MimeHandlerViewGuest`-based service shape. TermSurf deliberately has no
+   GuestView, so the provider should derive the owning embedder frame from the
+   extension frame's parent `RenderFrameHost` and call into `TsPdfStreamStore`
+   rather than storing duplicate stream state.
 
    Required data returned to the viewer:
    - `streamUrl`: `extensions::StreamContainer::stream_url()`;
@@ -2514,6 +2542,11 @@ store/delegate/interceptor path. Do not import Chrome's full
    - `responseHeaders`: best-effort header map for the `mimeHandlerPrivate`
      shape. Empty is acceptable for Experiment 5 if headers are unavailable.
 
+   `tabId` must be `-1`. Do not return a real tab id unless the experiment also
+   wires the viewer's follow-up `chrome.tabs.get(...)` expectations. A real tab
+   id risks sending the viewer down a Chrome tabs API path TermSurf does not
+   provide.
+
    Plugin attributes must also be accepted if the viewer calls
    `setPdfPluginAttributes(...)`. Store them on the existing `StreamContainer`,
    matching the behavior of
@@ -2522,10 +2555,17 @@ store/delegate/interceptor path. Do not import Chrome's full
    Required logs:
 
    ```text
+   [issue-789-exp5] viewer-template pdf_oopif_enabled=<true|false|absent>
+   [issue-789-exp5] viewer-api-installed frame_tree_node_id=<extension_frame> api=<mimeHandlerPrivate|pdfViewerPrivate|none> result=<ok|wrong-origin|unsupported>
+   [issue-789-exp5] viewer-api-call frame_tree_node_id=<extension_frame> api=<mimeHandlerPrivate|pdfViewerPrivate> method=<getStreamInfo|setPdfPluginAttributes>
    [issue-789-exp5] stream-info-service-bound frame_tree_node_id=<extension_frame> embedder_frame_tree_node_id=<embedder_frame>
    [issue-789-exp5] get-stream-info frame_tree_node_id=<extension_frame> internal_id=<id> stream_url=<url> original_url=<url> result=<ok|no-store|no-stream>
    [issue-789-exp5] set-pdf-plugin-attributes frame_tree_node_id=<extension_frame> internal_id=<id> result=<ok|no-stream|invalid>
    ```
+
+   The renderer-side `viewer-api-call` log is required. Without it, the result
+   cannot distinguish "the viewer did not call a private API" from "the
+   browser-side stream-info service failed."
 
 4. Preserve Experiment 3 and 4 ownership boundaries.
 
@@ -2539,8 +2579,17 @@ store/delegate/interceptor path. Do not import Chrome's full
    [issue-789-exp2] viewer-template-emitted internal_id=<id> ...
    [issue-789-exp3] stream-container-added ... internal_id=<same id> ...
    [issue-789-exp4] attach-handler-committed ... origin=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai ...
+   [issue-789-exp5] viewer-template pdf_oopif_enabled=<false|absent>
+   [issue-789-exp5] viewer-api-installed ... api=mimeHandlerPrivate result=ok
+   [issue-789-exp5] viewer-api-call ... api=mimeHandlerPrivate method=getStreamInfo
    [issue-789-exp5] stream-info-service-bound ...
    [issue-789-exp5] get-stream-info ... internal_id=<same id> result=ok
+   [issue-789-exp5] viewer-attempted-stream-navigation ...
+   ```
+
+   Stretch flow if the next layer is already present:
+
+   ```text
    [issue-789-exp3] map-to-original-url ... internal_id=<same id> ...
    [issue-789-exp3] stream-container-claimed ... internal_id=<same id> ...
    [issue-789-exp3] get-stream-info ...
@@ -2550,8 +2599,12 @@ store/delegate/interceptor path. Do not import Chrome's full
 5. Add focused failure logging for the viewer API choice.
 
    The result must answer:
-   - Did the PDF viewer call `chrome.pdfViewerPrivate.getStreamInfo(...)` or
-     `chrome.mimeHandlerPrivate.getStreamInfo(...)`?
+   - Is `pdfOopifEnabled` present, true, false, or absent in the emitted viewer
+     template?
+   - Did the renderer install a usable `chrome.mimeHandlerPrivate` shim for the
+     PDF extension frame?
+   - Did the PDF viewer call `chrome.mimeHandlerPrivate.getStreamInfo(...)` or
+     `chrome.pdfViewerPrivate.getStreamInfo(...)`?
    - Did the browser-side binder run for the PDF extension frame?
    - Did the stream-info provider find the claimed stream from Experiment 4?
    - Did the viewer create a later navigation to the stored stream URL?
@@ -2559,8 +2612,10 @@ store/delegate/interceptor path. Do not import Chrome's full
    - Did `stream-served` run?
 
    If the viewer never calls either API, the likely missing piece is renderer
-   API exposure/custom bindings rather than browser stream data. Record that
-   exactly.
+   API exposure/custom bindings rather than browser stream data. If the viewer
+   calls `pdfViewerPrivate`, the likely missing piece is the OOPIF template mode
+   or a deliberate TermSurf-owned `pdfViewerPrivate` shim. Record the exact
+   branch taken.
 
 6. Preserve dependency boundaries.
 
@@ -2573,9 +2628,10 @@ store/delegate/interceptor path. Do not import Chrome's full
    ```
 
    Also avoid importing Chrome's generated `pdfViewerPrivate` extension function
-   implementation unless the experiment records Partial and redesigns around a
-   deliberate API-generation step. The first implementation should be a
-   TermSurf-owned shim.
+   implementation. That implementation pulls broad Chrome extension browser
+   infrastructure. If the viewer cannot be made to use `mimeHandlerPrivate`,
+   record Partial and redesign around a deliberate TermSurf-owned
+   `pdfViewerPrivate` shim or renderer API-generation step.
 
 7. Preserve non-PDF behavior.
 
@@ -2642,8 +2698,16 @@ store/delegate/interceptor path. Do not import Chrome's full
 
    ```text
    [issue-789-exp4] attach-handler-committed ... origin=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai ...
+   [issue-789-exp5] viewer-template pdf_oopif_enabled=<false|absent>
+   [issue-789-exp5] viewer-api-installed ... api=mimeHandlerPrivate result=ok
+   [issue-789-exp5] viewer-api-call ... api=mimeHandlerPrivate method=getStreamInfo
    [issue-789-exp5] stream-info-service-bound ...
    [issue-789-exp5] get-stream-info ... result=ok
+   ```
+
+   Stretch log sequence if the next PDF/plugin layer is already present:
+
+   ```text
    [issue-789-exp3] map-to-original-url ... internal_id=<same id> ...
    [issue-789-exp3] stream-container-claimed ... internal_id=<same id> ...
    [issue-789-exp3] get-stream-info ...
@@ -2657,6 +2721,8 @@ store/delegate/interceptor path. Do not import Chrome's full
    - PDF plugin/content frame loaded but page still blank;
    - viewer private API returned stream info, but no stream navigation occurred;
    - viewer private API never fired;
+   - viewer API shim missing from the renderer;
+   - viewer called the unexpected `pdfViewerPrivate` path;
    - renderer crash;
    - automation failure.
 
@@ -2693,14 +2759,18 @@ store/delegate/interceptor path. Do not import Chrome's full
 
 - `libtermsurf_chromium` builds and links.
 - The forbidden broad Chrome dependency set is still absent.
-- The PDF extension viewer frame receives stream info from a TermSurf-owned API
-  shim backed by `TsPdfStreamStore`.
+- The PDF extension viewer frame receives stream info through a renderer-visible
+  TermSurf-owned `mimeHandlerPrivate` shim backed by `TsPdfStreamStore`.
 - The returned stream info has the same `internal_id` lineage and the stored
   `streamUrl` / `originalUrl` from the Exp 2-4 flow.
-- The viewer triggers a later PDF content/plugin navigation to the stream URL.
-- Experiment 3's delegate/interceptor path reaches `stream-served`.
+- The result logs prove what the viewer does next: either it attempts a later
+  PDF content/plugin navigation to the stream URL, or it reaches a named next
+  missing layer such as `IsPluginHandledExternally` / frame-container creation.
 - HTML and non-PDF binary smoke tests do not bind or call the stream-info shim.
 - The patch archive is regenerated under `chromium/patches/issue-789/`.
+
+Stretch Pass: Experiment 3's delegate/interceptor path reaches `stream-served`,
+and the screenshot visibly advances beyond the current blank viewer state.
 
 #### Partial Criteria
 
@@ -2708,13 +2778,16 @@ Partial if the build succeeds and the logs identify a narrower missing layer,
 but the run does not reach `stream-served`. Valid Partial outcomes include:
 
 - the viewer calls `pdfViewerPrivate.getStreamInfo(...)`, but no browser binding
-  exists for that API without generated Chrome extension functions;
+  exists for that API without a deliberate TermSurf-owned renderer shim;
 - the viewer calls `mimeHandlerPrivate.getStreamInfo(...)`, but the custom
   bindings are not installed in TermSurf's renderer environment;
+- the renderer installs `chrome.mimeHandlerPrivate`, but the call cannot reach
+  the browser-side TermSurf service;
 - the browser-side stream-info provider binds, but cannot map the extension
   frame back to the claimed stream;
 - `getStreamInfo(...)` returns successfully, but the viewer does not create a
-  stream URL navigation;
+  stream URL navigation, identifying `IsPluginHandledExternally` or frame
+  container creation as the likely next layer;
 - the stream URL navigation starts, but `MapToOriginalUrl(...)` cannot match the
   claimed stream;
 - `stream-served` runs, but the renderer/plugin still stays blank.
@@ -2729,7 +2802,10 @@ The result must name the exact next missing piece and cite the log lines.
   state elsewhere.
 - The implementation reintroduces the old data-wrapper fake PDF path.
 - The implementation changes normal HTML or non-PDF binary behavior.
-- The implementation claims Pass without a `[issue-789-exp5] get-stream-info`
-  success log and a `[issue-789-exp3] stream-served` log.
+- The implementation claims Pass without a renderer-side
+  `[issue-789-exp5] viewer-api-call` log and a browser-side
+  `[issue-789-exp5] get-stream-info` success log.
+- The implementation claims `stream-served` as required for Pass instead of
+  treating it as a stretch outcome or next-layer discovery.
 - The implementation reaches `stream-served` with a mismatched `internal_id`,
   `streamUrl`, or `originalUrl`.
