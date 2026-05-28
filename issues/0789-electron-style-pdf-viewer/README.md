@@ -3014,6 +3014,8 @@ stack, GuestView, or MimeHandlerView.
    a non-network scheme that can reach
    `RegisterNonNetworkSubresourceURLLoaderFactories(...)`. If it is missing, add
    the minimal scheme registration in `TsContentClient::AddAdditionalSchemes`.
+   `chrome=registered` is the expected result; `added` or `missing` is
+   surprising and should be called out in the result before proceeding.
 
    Add a startup log so the result records what happened:
 
@@ -3027,6 +3029,12 @@ stack, GuestView, or MimeHandlerView.
    register Chromium's existing WebUI resource factory for `chrome://resources`:
 
    ```cpp
+   content::RenderFrameHost* frame_host =
+       content::RenderFrameHost::FromID(render_process_id, render_frame_id);
+   if (!frame_host) {
+     return;
+   }
+
    factories->emplace(
        content::kChromeUIScheme,
        content::CreateWebUIURLLoaderFactory(
@@ -3036,15 +3044,18 @@ stack, GuestView, or MimeHandlerView.
    ```
 
    Scope this factory to the PDF extension viewer frame only. TermSurf does not
-   have Chrome's full `ExtensionRegistry`, so use the committed frame origin:
+   have Chrome's full `ExtensionRegistry`, so use the hook's
+   `request_initiator_origin` as the primary gate:
 
    ```text
    chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai
    ```
 
-   If the frame origin is not the PDF viewer extension origin, do not register
-   the factory. Normal web pages must not gain access to
-   `chrome://resources/...`.
+   `request_initiator_origin` is optional. If it is absent, do not register the
+   factory. If it is present but is not the PDF viewer extension origin, do not
+   register the factory. Normal web pages must not gain access to
+   `chrome://resources/...`. `frame_host->GetLastCommittedOrigin()` may be
+   logged as supporting context, but it is not the primary gate for this hook.
 
    Do not add a top-level `CreateNonNetworkNavigationURLLoaderFactory(...)` path
    for `chrome://resources`. The PDF viewer uses these URLs as module/CSS
@@ -3053,8 +3064,10 @@ stack, GuestView, or MimeHandlerView.
    Add concise logs around the registration decision:
 
    ```text
-   [issue-789-exp6] webui-factory-registered frame_origin=<origin> host=resources
-   [issue-789-exp6] webui-factory-skipped frame_origin=<origin> reason=<not-pdf-viewer-origin>
+   [issue-789-exp6] webui-factory-registered initiator_origin=<origin> frame_origin=<origin> host=resources
+   [issue-789-exp6] webui-factory-skipped initiator_origin=<none> frame_origin=<origin> reason=no-initiator-origin
+   [issue-789-exp6] webui-factory-skipped initiator_origin=<origin> frame_origin=<origin> reason=not-pdf-viewer-origin
+   [issue-789-exp6] webui-factory-registered-count web_contents=<id> count=<n>
    ```
 
    Preserve the existing PDF extension resource factory. Do not replace the
@@ -3075,7 +3088,7 @@ stack, GuestView, or MimeHandlerView.
    [issue-789-exp5] viewer-template pdf_oopif_enabled=absent ...
    [issue-789-exp5] viewer-api-installed ... api=mimeHandlerPrivate result=ok
    [issue-789-exp6] scheme-check chrome=<registered|added>
-   [issue-789-exp6] webui-factory-registered frame_origin=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai host=resources
+   [issue-789-exp6] webui-factory-registered initiator_origin=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai frame_origin=<origin> host=resources
    ```
 
    Stretch flow:
@@ -3169,7 +3182,7 @@ stack, GuestView, or MimeHandlerView.
    [issue-789-exp5] viewer-template pdf_oopif_enabled=absent ...
    [issue-789-exp5] viewer-api-installed ... result=ok
    [issue-789-exp6] scheme-check chrome=<registered|added>
-   [issue-789-exp6] webui-factory-registered frame_origin=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai host=resources
+   [issue-789-exp6] webui-factory-registered initiator_origin=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai frame_origin=<origin> host=resources
    ```
 
    The log must not contain new
@@ -3177,6 +3190,10 @@ stack, GuestView, or MimeHandlerView.
    resources requested by the PDF viewer. If resource loading succeeds and the
    next failure is a missing `pdfViewerPrivate` or plugin-layer API, record that
    exact next failure instead of expanding this experiment.
+
+   The result must list the `chrome://resources` paths the viewer requested
+   during the smoke run, using renderer console output or runtime logs where
+   available. Mark each path as served or failed.
 
    Stretch log sequence:
 
@@ -3206,7 +3223,8 @@ stack, GuestView, or MimeHandlerView.
    ```
 
    No Exp 3 stream-store logs, Exp 4 attach logs, Exp 5 shim logs, or Exp 6
-   PDF-viewer WebUI resource logs should appear.
+   PDF-viewer WebUI resource logs should appear. If
+   `webui-factory-registered-count` is logged, the count must be 0.
 
 6. Run non-PDF binary smoke.
 
@@ -3217,7 +3235,8 @@ stack, GuestView, or MimeHandlerView.
    ```
 
    No Exp 3 stream-store logs, Exp 4 attach logs, Exp 5 shim logs, or Exp 6
-   PDF-viewer WebUI resource logs should appear.
+   PDF-viewer WebUI resource logs should appear. If
+   `webui-factory-registered-count` is logged, the count must be 0.
 
 7. Record the known teardown crash separately.
 
@@ -3241,10 +3260,9 @@ stack, GuestView, or MimeHandlerView.
 - The patch archive is regenerated under `chromium/patches/issue-789/`.
 
 Stretch Pass: the viewer calls the Experiment 5
-`mimeHandlerPrivate.getStreamInfo(...)` shim, the shim returns stream metadata
-with the same `internal_id`, `streamUrl`, and `originalUrl` lineage from Exp
-2-5, Experiment 3's delegate/interceptor path reaches `stream-served`, and the
-screenshot visibly renders the first page of the PDF.
+`mimeHandlerPrivate.getStreamInfo(...)` shim, and the shim returns stream
+metadata with the same `internal_id`, `streamUrl`, and `originalUrl` lineage
+from Exp 2-5.
 
 #### Partial Criteria
 
@@ -3255,6 +3273,8 @@ layer remains. Valid Partial outcomes include:
   path and needs a lower-level scheme-registration follow-up;
 - the WebUI resource factory loads successfully, but a non-WebUI viewer API is
   missing before `getStreamInfo()`;
+- the WebUI resource factory loads successfully, but `loadTimeData` is missing
+  strings or feature values requested by the viewer;
 - `getStreamInfo()` succeeds, but the viewer does not create the inner PDF
   plugin/content navigation;
 - the stream URL navigation starts, but `MapToOriginalUrl(...)` cannot match the
@@ -3262,6 +3282,12 @@ layer remains. Valid Partial outcomes include:
 - `stream-served` runs, but the renderer/plugin still stays blank.
 
 The result must name the exact next missing piece and cite log lines.
+
+If a later experiment sees `chrome://resources` failures from the inner PDF
+plugin/content frame, do not widen this experiment's PDF-viewer-frame gate
+retroactively. The correct follow-up would be a separate per-frame registration
+decision for the plugin/content frame, gated to that frame's actual origin and
+needs.
 
 #### Failure Criteria
 
