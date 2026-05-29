@@ -309,3 +309,90 @@ Partial if:
   renderer IPC crash.
 - The experiment proceeds without Claude design review or ignores real Claude
   findings.
+
+## Result
+
+**Result:** Pass
+
+Chromium branch `148.0.7778.97-issue-792-exp7` builds `libtermsurf_chromium`
+successfully after `git cl format`:
+
+```text
+Build Succeeded: 3 steps
+```
+
+The direct PDF-extension smoke advanced past the `chrome://resources` blocker.
+Artifacts:
+
+```text
+logs/issue-792-exp7-extension-20260529-104251/
+```
+
+Required evidence from the log:
+
+```text
+[issue-792-exp6] process-map-insert extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai process_id=5 site_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/
+[issue-792-exp7] chrome-resources-grant extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai process_id=5
+[issue-792-exp7] chrome-resources-factory extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai process_id=5 frame_id=1
+[issue-792-exp7] chrome-resources-renderer-origin extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai
+```
+
+The old Experiment 6 blocker is gone. The direct extension smoke no longer
+prints:
+
+```text
+Not allowed to load local resource: chrome://resources/...
+```
+
+The implementation needed four pieces:
+
+1. browser-side request access for the PDF extension process;
+2. browser-side `chrome://resources` WebUI subresource factory registration for
+   the PDF extension frame;
+3. browser-side extension-origin access metadata for the PDF component
+   extension;
+4. renderer-side `WebSecurityPolicy` origin access from the PDF extension origin
+   to `chrome://resources`.
+
+The original two-hook design was necessary but incomplete: request access and
+the URL-loader factory routed the requests, but Blink still rejected the URLs in
+`SecurityOrigin::CanDisplay()` until the PDF extension origin was allowed to
+access `chrome://resources` at the renderer security-policy layer. The renderer
+allowlist is process-wide setup, but the rule is keyed to
+`chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai`, so ordinary pages and
+non-PDF extensions cannot use it. This is still scoped to the PDF extension id
+and `chrome://resources`; it does not grant general `chrome://` access.
+
+The new first blocker is later and different:
+
+```text
+Uncaught TypeError: Cannot read properties of undefined (reading 'SaveRequestType')
+source: chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf_viewer_wrapper.js
+```
+
+That points at the PDF viewer API surface, likely the missing
+`mimeHandlerPrivate`/PDF viewer private constants and bindings.
+
+Regression smokes:
+
+```text
+logs/issue-792-exp7-html-20260529-103646/
+logs/issue-792-exp7-pdf-20260529-103659/
+```
+
+Normal HTML reached `UrlChanged`, `TitleChanged`, and `LoadingState`. Loading
+`bitcoin.pdf` reached `TabReady` and `LoadingState`; it still does not render,
+as expected, because this experiment did not wire PDF navigation or stream
+handoff. The known teardown `SEGV_ACCERR` still occurs after artifact capture;
+that crash predates this experiment and remains out of scope.
+
+## Conclusion
+
+Experiment 7 completed the `chrome://resources` layer for the direct PDF viewer
+extension. The PDF viewer shell now loads past shared WebUI resources and fails
+at the next missing embedder API surface. The next experiment should wire the
+minimal PDF viewer private API constants/bindings needed by
+`pdf_viewer_wrapper.js`, starting with the missing `SaveRequestType` value,
+while staying out of PDF navigation, stream handoff, guest-view, and
+MimeHandlerView unless that API work proves they are the next necessary
+dependency.
