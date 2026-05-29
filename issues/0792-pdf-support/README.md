@@ -195,4 +195,4 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   — **Partial** (help-bubble binder fixed; `mimeHandlerPrivate` module resource
   missing)
 - [Experiment 11: Load extension renderer resources](11-load-extension-renderer-resources.md)
-  — **Designed**
+  — **Pass**

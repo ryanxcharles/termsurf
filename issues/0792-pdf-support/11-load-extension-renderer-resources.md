@@ -280,3 +280,83 @@ The experiment fails if:
 - ordinary HTML pages crash, hang, or lose normal lifecycle messages;
 - direct PDF navigation regresses into a crash, hang, or renderer IPC failure;
 - the build cannot complete.
+
+## Result
+
+**Result:** Pass
+
+Experiment 11 loaded the extension renderer resource pack and crossed the
+`mimeHandlerPrivate` module-resource gate.
+
+Direct PDF extension smoke:
+
+```text
+logs/issue-792-exp11-extension-20260529-115559/
+```
+
+The new resource-pack log proves the generated pack exists and both required
+resources are readable:
+
+```text
+[issue-792-exp11] extensions-renderer-pak path=/Users/ryan/dev/termsurf/chromium/src/out/Default/gen/extensions/extensions_renderer_resources.pak found=1 loaded=1 mimeHandlerPrivate_bytes=3766 mime_handler_mojom_bytes=27053
+```
+
+Experiment 9 activation and API availability remained intact:
+
+```text
+[issue-792-exp9] renderer-activate-extension extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai active=1
+[issue-792-exp9] pdf-script-context url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html context=BLESSED_EXTENSION effective_context=BLESSED_EXTENSION has_extension=1 active=1 is_webview=0 pdfViewerPrivate_available=1 result=0 message=
+[issue-792-exp8] schema-request name=pdfViewerPrivate found=1
+```
+
+Experiment 10's help-bubble binder remained intact:
+
+```text
+[issue-792-exp10] pdf-help-bubble-binder frame_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html site_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/
+[issue-792-exp10] pdf-help-bubble-create-handler frame_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html site_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/
+```
+
+The previous fatal did not recur:
+
+```text
+Module resource registered as "mimeHandlerPrivate" not found
+```
+
+The next gate is now a missing browser-side binder:
+
+```text
+Terminating render process for bad Mojo message: Received bad user message: No binder found for interface extensions.mime_handler.MimeHandlerService for the frame/document scope
+```
+
+Regression checks:
+
+- `logs/issue-792-exp11-html-20260529-115624/`: normal HTML reached
+  `UrlChanged`, `TitleChanged`, and `LoadingState`.
+- `logs/issue-792-exp11-pdf-20260529-115634/`: direct PDF navigation still
+  followed the content_shell download path.
+
+The known teardown `SEGV_ACCERR` after artifact capture still recurred in all
+smokes. That is the pre-existing cleanup crash from earlier PDF experiments and
+did not prevent the required artifacts from being captured.
+
+Bookkeeping status: Chromium branch commit, patch archive refresh,
+`chromium/README.md` branch row, and main-repo commit are deferred until Claude
+after-review accepts this result. Claude accepted the result on 2026-05-29, with
+only a low-severity documentation note.
+
+## Conclusion
+
+The `mimeHandlerPrivate` JavaScript module resource problem is solved. The
+module name was already registered by `CoreExtensionsRendererAPIProvider`; the
+missing layer was the generated `extensions_renderer_resources.pak` data pack.
+
+The next missing layer is the browser-side
+`extensions.mime_handler.MimeHandlerService` binder. Experiment 12 should follow
+Electron's pattern for registering only the MIME-handler service binders needed
+by the PDF viewer, without implementing stream handoff or
+`PdfViewerStreamManager` until the binder gate is crossed and the logs prove the
+next failure.
+
+Experiment 12 should also re-check whether `pdf-host-binder` fires after
+`MimeHandlerService` is bound. It still did not fire in Experiment 11 because
+the renderer died before reaching the PDF plugin host path.
