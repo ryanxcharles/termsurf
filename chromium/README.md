@@ -14,13 +14,13 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `148.0.7778.97-issue-792-exp19`
+- Branch: `148.0.7778.97-issue-792-exp20`
 - Base version: `148.0.7778.97` (tracking Electron's Chromium version)
 
 > **Note:** The `…-issue-789-exp*` and `…-issue-790-exp*` branches are
 > experimental inline-PDF work, **parked** (Issue 790 Exp 7). They are preserved
 > as history. The current active/buildable inline-PDF foundation branch is
-> `148.0.7778.97-issue-792-exp19`, forked from the protected
+> `148.0.7778.97-issue-792-exp20`, forked from the protected
 > `148.0.7778.97-issue-784` baseline. See
 > [Issue 792](../issues/0792-pdf-support/README.md).
 
@@ -119,6 +119,7 @@ find the most relevant recent branch, create a new branch from it
 | `148.0.7778.97-issue-792-exp17` | [Issue 792](../issues/0792-pdf-support/README.md)                | Mark PDF wrapper responses                  |
 | `148.0.7778.97-issue-792-exp18` | [Issue 792](../issues/0792-pdf-support/README.md)                | Wire PDF stream-info probes                 |
 | `148.0.7778.97-issue-792-exp19` | [Issue 792](../issues/0792-pdf-support/README.md)                | Trace PDF wrapper startup                   |
+| `148.0.7778.97-issue-792-exp20` | [Issue 792](../issues/0792-pdf-support/README.md)                | Load PDF wrapper resource pak               |
 | `148.0.7778.97-issue-781`       | [Issue 781](../issues/0781-chromium-upgrade/README.md)           | Chromium 148 migration                      |
 | `148.0.7778.97-issue-780`       | [Issue 780](../issues/0780-link-drag-freeze/README.md)           | Suppress native link drag in Roamium        |
 | `148.0.7778.97-issue-778`       | [Issue 778](../issues/0778-back-nav-title-stale/README.md)       | Re-emit titles on navigation commit         |

@@ -192,8 +192,80 @@ before any next experiment is designed.
 
 ## Result
 
-Not run yet.
+**Result:** Partial
+
+Chromium branch: `148.0.7778.97-issue-792-exp20`
+
+Build:
+
+```bash
+cd chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default libtermsurf_chromium
+```
+
+The build passed in 2 steps.
+
+PDF smoke log:
+
+```text
+logs/issue-792-exp20-pdf-20260529-150045
+```
+
+The new resource pak load worked:
+
+```text
+[issue-792-exp20] components-resource-pak path=/Users/ryan/dev/termsurf/chromium/src/out/Default/gen/components/components_resources.pak found=1 loaded=1 pdf_embedder_bytes=463 has_iframe=1 has_about_blank=1
+```
+
+Experiment 19's wrapper fingerprint also flipped from empty to non-empty:
+
+```text
+[issue-792-exp19] wrapper-payload frame_tree_node_id=1 internal_id=39D71882D3E7F44F0257D541D89A5E51 bytes=536 has_template=1 has_iframe=1 has_embed=0 has_about_blank=1 has_internal_id=1 has_pdf_extension_url=1
+```
+
+The prior download and stream-claim chain remained intact:
+
+```text
+[issue-792-exp17] navigation-download-classification ... is_download=0
+[issue-792-exp16] pvs-claim frame_tree_node_id=1 claimed=1 original_url=http://127.0.0.1:9787/bitcoin.pdf
+```
+
+The pipeline still did not advance to child-frame startup. The only `pvs-finish`
+event was the top-level wrapper navigation:
+
+```text
+[issue-792-exp19] pvs-finish frame_tree_node_id=1 url=http://127.0.0.1:9787/bitcoin.pdf has_committed=1 is_error_page=0 is_pdf=0 has_parent=0 parent_frame_tree_node_id=none stream_count=1
+[issue-792-exp19] pvs-finish-no-parent frame_tree_node_id=1 url=http://127.0.0.1:9787/bitcoin.pdf
+```
+
+No child `about:blank` navigation appeared. Therefore there was still no
+`pdf-extension-about-blank`, no `pdf-extension-navigate`, and no stream-info
+request.
+
+HTML smoke log:
+
+```text
+logs/issue-792-exp20-html-20260529-150116
+```
+
+The HTML smoke emitted the process-start resource-pak log, as expected, but no
+PDF transition logs (`wrapper-payload`, `pvs-claim`,
+`plugin-response-intercept`, or `navigation-download-classification`).
 
 ## Conclusion
 
-Pending implementation.
+Experiment 20 fixed the missing-resource blocker from Experiment 19. TermSurf
+now loads `components_resources.pak`, `IDR_PDF_EMBEDDER_HTML` is available, and
+the intercepted PDF response receives the expected OOPIF wrapper HTML.
+
+The remaining blocker is later: the non-empty wrapper commits, but Blink does
+not produce a child `about:blank` frame that `PdfViewerStreamManager` can
+observe. The next experiment should target wrapper parsing and child-frame
+creation. It should determine whether the wrapper document is being parsed as
+HTML despite the response head still carrying `Content-Type: application/pdf`,
+whether the declarative shadow-root iframe is instantiated, and whether
+TermSurf's shortcut around Chrome's `SendExecuteMimeTypeHandlerEvent(...)` is
+missing a setup step needed before child-frame creation. The content-type/body
+mismatch is the leading next hypothesis; the event shortcut is a secondary
+setup-path hypothesis.
