@@ -251,8 +251,78 @@ before any next experiment is designed.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Build:
+
+```text
+autoninja -C out/Default libtermsurf_chromium
+Build Succeeded: 3 steps
+```
+
+The first PDF run showed no Experiment 21 Blink logs even though the markers
+were present in `libblink_core.dylib`. That proved the original log gate was too
+narrow: the wrapper document does not arrive at `DocumentLoader` as an
+`application/pdf` / external-handler document. The diagnostic was broadened to
+also log the original `bitcoin.pdf` URL and the PDF extension ID. That is still
+trace-only; it does not change navigation, MIME handling, response bodies, or
+frame creation.
+
+Final PDF log:
+
+```text
+logs/issue-792-exp21-pdf-20260529-152702
+```
+
+HTML control log:
+
+```text
+logs/issue-792-exp21-html-20260529-152725
+```
+
+Important PDF trace lines:
+
+```text
+[issue-792-exp20] components-resource-pak ... loaded=1 pdf_embedder_bytes=463 has_iframe=1 has_about_blank=1
+[issue-792-exp19] wrapper-payload ... bytes=536 has_template=1 has_iframe=1 has_about_blank=1 has_internal_id=1 has_pdf_extension_url=1
+[issue-792-exp21] document-commit url=http://127.0.0.1:9787/bitcoin.pdf mime_type=text/html document_class=html is_for_external_handler=0 child_count=0
+[issue-792-exp21] document-parser-open url=http://127.0.0.1:9787/bitcoin.pdf mime_type=text/html parser=html
+[issue-792-exp19] pvs-finish frame_tree_node_id=1 url=http://127.0.0.1:9787/bitcoin.pdf has_committed=1 is_error_page=0 is_pdf=0 has_parent=0 parent_frame_tree_node_id=none stream_count=1
+[issue-792-exp19] pvs-finish-no-parent frame_tree_node_id=1 url=http://127.0.0.1:9787/bitcoin.pdf
+```
+
+Absent from the PDF log:
+
+```text
+[issue-792-exp21] document-type-selected ...
+[issue-792-exp21] declarative-shadow-root ...
+[issue-792-exp21] frame-owner-inserted ...
+[issue-792-exp21] load-or-redirect-subframe ...
+```
+
+The HTML control emitted no PDF wrapper logs.
 
 ## Conclusion
 
-Pending implementation.
+Experiment 21 proved that Experiment 20 got past the missing-resource problem:
+the wrapper payload is non-empty, and Blink commits the original PDF navigation
+as an HTML document with an HTML parser.
+
+The MIME transition is important. At the browser-side throttle, the response is
+still classified as `application/pdf`; by the time `DocumentLoader` commits the
+same original PDF URL, Blink reports `mime_type=text/html`. That is a positive
+signal: the wrapper body is being recognized as HTML, so the next layer is not
+PDF MIME classification or `DocumentInit::ComputeDocumentType`.
+
+The first missing transition is after `document-parser-open` and before
+`declarative-shadow-root`. The wrapper response has an HTML parser, but the
+`<template shadowrootmode="closed">` branch is never reached, so no shadow root
+attaches, no iframe frame owner is inserted, no `about:blank` child frame is
+created, and `PdfViewerStreamManager::DidFinishNavigation` still sees only the
+top-level original PDF frame.
+
+The next experiment should inspect why the generated wrapper body is not
+reaching the normal HTML tree-builder path despite being delivered as the body
+for an HTML document. The likely gates are the substituted data pipe/body-loader
+handoff and the MIME-handler wrapper response completion ordering, not PDF
+extension startup or resource loading.

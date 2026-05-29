@@ -220,4 +220,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
 - [Experiment 20: Load components resource pak](20-load-components-resource-pak.md)
   — **Partial** (wrapper HTML now loads; child about:blank frame still absent)
 - [Experiment 21: Trace wrapper HTML parsing](21-trace-wrapper-html-parsing.md)
-  — **Designed**
+  — **Pass** (wrapper commits as HTML and opens an HTML parser; wrapper body
+  does not reach declarative shadow-root parsing)
