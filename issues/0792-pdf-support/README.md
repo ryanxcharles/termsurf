@@ -237,4 +237,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
 - [Experiment 26: Route internal PDF plugin](26-route-internal-pdf-plugin.md) —
   **Partial** (internal plugin route reached; renderer lacks PDF process model)
 - [Experiment 27: Externalize internal PDF plugin](27-externalize-internal-pdf-plugin.md)
-  — **Designed**
+  — **Partial** (PDF renderer and plugin now start; metadata string resource is
+  missing)

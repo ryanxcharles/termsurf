@@ -72,7 +72,7 @@ closure, or next experiment.
 
 2. Update `content/libtermsurf_chromium/ts_content_renderer_client.cc`.
 
-   Add the include needed for `pdf::IsPdfInternalPluginAllowedOrigin()`:
+   Add the include needed for `IsPdfInternalPluginAllowedOrigin()`:
 
    ```cpp
    #include "components/pdf/common/pdf_util.h"
@@ -84,7 +84,7 @@ closure, or next experiment.
 
    Required behavior:
    - compute whether the current frame origin is allowed with
-     `pdf::IsPdfInternalPluginAllowedOrigin(render_frame->GetWebFrame()->GetSecurityOrigin(), {})`;
+     `IsPdfInternalPluginAllowedOrigin(render_frame->GetWebFrame()->GetSecurityOrigin(), {})`;
    - log `[issue-792-exp27] internal-plugin-external-check` with:
      - document URL;
      - original URL;
@@ -257,8 +257,99 @@ Experiment 27 fails if:
 
 ## Result
 
-Not run yet.
+**Result:** Partial
+
+Chromium branch: `148.0.7778.97-issue-792-exp27`
+
+Chromium commit: `d3608ed6f5e6d` (`Externalize PDF plugin embeds`)
+
+Patch archive: regenerated at `chromium/patches/issue-792/`.
+
+Build:
+
+```bash
+cd chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default libtermsurf_chromium
+```
+
+Result: success after correcting the design/API name from
+`pdf::IsPdfInternalPluginAllowedOrigin()` to the actual Chromium 148 symbol,
+`IsPdfInternalPluginAllowedOrigin()`.
+
+Fake-GUI preflight:
+
+- Log directory: `logs/issue-792-exp27-fakegui-20260529-165715`
+- Result: pass for all plumbing gates.
+
+Relevant log:
+
+```text
+[issue-792-exp18] real-mime-handler-get-stream-info has_stream=1 ... original_url=http://127.0.0.1:9787/bitcoin.pdf
+[issue-792-exp27] internal-plugin-external-check document_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html ... mime_type=application/x-google-chrome-pdf allowed_origin=1
+[issue-792-exp27] internal-plugin-externalized handled=1
+[issue-792-exp14] pdf-map-to-original stream_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/a96d36d6-1bd7-430c-b16a-d946735021f4 original_url=http://127.0.0.1:9787/bitcoin.pdf success=1
+[issue-792-exp16] pvs-start frame_tree_node_id=3 url=http://127.0.0.1:9787/bitcoin.pdf is_pdf=1 ...
+[issue-792-exp26] internal-plugin-create-check document_url=http://127.0.0.1:9787/bitcoin.pdf mime_type=application/x-google-chrome-pdf ... has_pdf_renderer=1
+[issue-792-exp26] internal-plugin-create-result created=1
+```
+
+HTML DevTools sanity:
+
+- Log directory: `logs/issue-792-exp27-html-devtools-20260529-165747`
+- Screenshot:
+  `logs/issue-792-exp27-html-devtools-20260529-165747/devtools-smoke.png`
+- Result: pass. The screenshot showed the rendered Example Domain page.
+
+PDF DevTools capture:
+
+- Log directory: `logs/issue-792-exp27-pdf-devtools-20260529-165800`
+- Screenshot:
+  `logs/issue-792-exp27-pdf-devtools-20260529-165800/devtools-smoke.png`
+- Result: PDF renderer crash / gray plugin rectangle. The screenshot no longer
+  showed `Couldn't load plugin`, but it did not show recognizable Bitcoin PDF
+  content.
+
+Relevant PDF logs:
+
+```text
+[issue-792-exp27] internal-plugin-external-check document_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html ... allowed_origin=1
+[issue-792-exp27] internal-plugin-externalized handled=1
+[issue-792-exp14] pdf-map-to-original stream_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/0e4641dc-c998-4b74-83a8-53b6464f3c61 original_url=http://localhost:9616/bitcoin.pdf success=1
+[issue-792-exp16] pvs-start frame_tree_node_id=3 url=http://localhost:9616/bitcoin.pdf is_pdf=1 ...
+[issue-792-exp26] internal-plugin-create-check document_url=http://localhost:9616/bitcoin.pdf mime_type=application/x-google-chrome-pdf ... has_pdf_renderer=1
+[issue-792-exp26] internal-plugin-create-result created=1
+```
+
+Then the PDF renderer crashed after the PDF document finished loading:
+
+```text
+FATAL:ui/base/resource/resource_bundle.cc:1284] Check failed: !data->empty(). Unable to find resource: 38115.
+...
+chrome_pdf::FormatPageSize(...)
+chrome_pdf::PdfViewWebPlugin::SendMetadata()
+chrome_pdf::PdfViewWebPlugin::DocumentLoadComplete()
+chrome_pdf::PDFiumEngine::FinishLoadingDocument()
+...
+Received signal 6
+```
+
+The original Experiment 26 terminal failure,
+`internal-plugin-create-skipped reason=missing-pdf-renderer`, is gone. The
+renderer process is now a PDF renderer (`has_pdf_renderer=1`), the internal PDF
+plugin is created (`created=1`), and PDFium reaches document-load completion.
+The remaining failure is a downstream missing localized resource used while
+sending PDF metadata, specifically the page-size string path in
+`pdf/ui/document_properties.cc`.
 
 ## Conclusion
 
-Pending verification.
+Experiment 27 successfully reproduced the core Electron/Chrome PDF flow:
+externalize the trusted internal PDF MIME, map the stream URL to the original
+PDF URL, create a PDF renderer process, and instantiate the internal PDF plugin
+inside that process.
+
+The issue is now past the plugin/process-model gate. The next experiment should
+load or otherwise provide the PDF localized strings needed by
+`chrome_pdf::FormatPageSize()`, starting with the missing resource `38115` from
+the `IDS_PDF_PROPERTIES_PAGE_SIZE_*` family in `components/pdf_strings.grdp`.
