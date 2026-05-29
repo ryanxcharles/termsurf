@@ -210,3 +210,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
 - [Experiment 16: Trace PDF stream claim lifecycle](16-trace-pdf-stream-claim-lifecycle.md)
   — **Partial** (content_shell downloads the PDF before the wrapper navigation
   reaches `PdfViewerStreamManager`)
+- [Experiment 17: Mark the PDF wrapper response as intercepted](17-mark-pdf-wrapper-response-intercepted.md)
+  — **Designed**
