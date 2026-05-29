@@ -349,3 +349,114 @@ The experiment fails if:
 - ordinary HTML pages crash, hang, or lose normal lifecycle messages;
 - direct PDF navigation regresses into a crash, hang, or renderer IPC failure;
 - the build cannot complete.
+
+## Result
+
+**Result:** Pass
+
+Experiment 9 identified the first broken gate, applied the single allowed
+canonical fix for that gate, and exposed the next missing layer.
+
+Before the fix, the direct PDF extension smoke against:
+
+```text
+chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html
+```
+
+produced these decisive logs in:
+
+```text
+logs/issue-792-exp9-extension-20260529-112609/
+```
+
+```text
+[issue-792-exp9] feature-map api_pdfViewerPrivate=1 permission_pdfViewerPrivate=1 schema_pdfViewerPrivate=1
+[issue-792-exp9] pdf-extension-load-broadcast helper=1 called=1
+[issue-792-exp9] renderer-startup-on-loaded extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai process_count=0
+[issue-792-exp9] pdf-process-map-helper extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai process_id=5 helper=1
+[issue-792-exp9] renderer-load-extension extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai
+[issue-792-exp9] pdf-script-context url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html context=UNBLESSED_EXTENSION effective_context=UNBLESSED_EXTENSION has_extension=1 active=0 is_webview=0 pdfViewerPrivate_available=0 result=4 message='pdfViewerPrivate' is only allowed to run in privileged pages, but this is a extension iframe
+Uncaught TypeError: Cannot read properties of undefined (reading 'SaveRequestType')
+```
+
+That proved the feature map and generated schema were present, and the renderer
+had loaded the PDF extension, but the PDF extension renderer process had not
+been activated. Because `SiteInstanceGotProcessAndSite()` already inserted the
+PDF extension into `ProcessMap`, the canonical missing call was
+`RendererStartupHelper::ActivateExtensionInProcess(*extension, process)` at that
+same point.
+
+After adding that call, the direct PDF extension smoke in:
+
+```text
+logs/issue-792-exp9-extension-after-20260529-112706/
+```
+
+advanced through the previously broken gate:
+
+```text
+[issue-792-exp9] renderer-startup-activate extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai process_id=5 remote=1 pending=0
+[issue-792-exp9] pdf-activate-request extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai process_id=5 called=1
+[issue-792-exp9] renderer-activate-extension extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai active=1
+[issue-792-exp9] pdf-script-context url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html context=BLESSED_EXTENSION effective_context=BLESSED_EXTENSION has_extension=1 active=1 is_webview=0 pdfViewerPrivate_available=1 result=0 message=
+[issue-792-exp8] schema-request name=pdfViewerPrivate found=1
+```
+
+The original `SaveRequestType` error disappeared. The smoke then hit the next
+missing browser-side PDF viewer layer:
+
+```text
+Terminating render process for bad Mojo message: Received bad user message: No binder found for interface help_bubble.mojom.PdfHelpBubbleHandlerFactory for the frame/document scope
+```
+
+Regression checks:
+
+- `logs/issue-792-exp9-html-after-20260529-112752/`: normal HTML reached
+  `UrlChanged`, `TitleChanged`, and `LoadingState`.
+- `logs/issue-792-exp9-pdf-after-20260529-112802/`: direct PDF navigation still
+  followed the content_shell download path.
+
+The known teardown `SEGV_ACCERR` after artifact capture still recurred in all
+smokes. That is the pre-existing cleanup crash from earlier PDF experiments and
+did not prevent the required artifacts from being captured.
+
+Bookkeeping status: Chromium branch commit, patch archive refresh,
+`chromium/README.md` branch row, and main-repo commit are deferred until Claude
+after-review accepts this result. Claude accepted the result on 2026-05-29, with
+only low-severity documentation notes.
+
+## Conclusion
+
+The API availability gate is solved. TermSurf now registers the PDF extension in
+the renderer process map and also activates it in the extension renderer startup
+path. That is enough for the PDF extension page to become a `BLESSED_EXTENSION`
+context and bind `chrome.pdfViewerPrivate`.
+
+The activation call is intentionally PDF-extension-only in this slice. A future
+cleanup can generalize it to all extension site instances if TermSurf registers
+additional component extensions.
+
+The next missing layer is not API schema exposure. It is browser-side Mojo
+binder support for PDF viewer UI services, starting with
+`help_bubble.mojom.PdfHelpBubbleHandlerFactory`. Experiment 10 should follow
+Electron/Chrome's embedder pattern for registering the minimal PDF viewer Mojo
+binders needed by the component extension, beginning with a diagnostic map of
+which binders the viewer requests before it can continue.
+
+The following diagnostics are worth keeping until the PDF viewer reaches a
+stable render path:
+
+- `pdf-process-map-helper`
+- `pdf-activate-request`
+- `renderer-startup-activate`
+- `renderer-activate-extension`
+- `pdf-script-context`
+
+The feature-map and load-broadcast diagnostics are useful for this experiment's
+archive but can be removed in a later cleanup slice once the extension system is
+stable.
+
+The Chromium patch archive for this slice will also include harmless
+`git cl format --full` style churn in files that received diagnostics. Any later
+diagnostic-cleanup slice should distinguish formatter churn from the diagnostic
+lines themselves.

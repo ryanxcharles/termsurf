@@ -190,4 +190,4 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   — **Partial** (API provider and permissions wired; renderer activation still
   missing)
 - [Experiment 9: Diagnose PDF API availability gates](09-diagnose-pdf-api-availability.md)
-  — **Designed**
+  — **Pass**
