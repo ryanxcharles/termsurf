@@ -229,4 +229,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   — **Pass** (renderer plugin data now supports `application/pdf`; wrapper and
   stream-info path reaches the PDF extension)
 - [Experiment 24: Verify visible PDF rendering](24-verify-visible-pdf-rendering.md)
-  — **Designed**
+  — **Fail** (real-GUI `screencapture` produced black images; no PDF-rendering
+  conclusion)

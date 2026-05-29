@@ -166,8 +166,72 @@ Experiment 24 fails if:
 
 ## Result
 
-Not run yet.
+**Result:** Fail
+
+Experiment 24 did not produce valid visual evidence. This is an automation
+failure, not a PDF-rendering conclusion.
+
+Runs:
+
+- HTML sanity, first attempt: `logs/issue-792-exp24-html-sanity-20260529-160850`
+- HTML sanity, after harness log-path repair:
+  `logs/issue-792-exp24-html-sanity-20260529-161036`
+- Fake-GUI plumbing cross-check: `logs/issue-792-exp24-fakegui-20260529-161150`
+
+The first HTML sanity run produced a black screenshot and no `run-web.log`.
+`wezboard-gui.log` showed only the TermSurf listener and `pane_count=0`, so the
+pane launcher had not produced usable evidence.
+
+The harness was repaired to canonicalize `LOG_DIR` to an absolute path before it
+generates `run-web.sh`. After that repair, the second HTML sanity run proved the
+launcher and debug binaries were correct:
+
+```text
+using TERMSURF_SOCKET=/var/folders/.../termsurf/wezboard-79585.sock
+exec /Users/ryan/dev/termsurf/webtui/target/debug/web --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium https://example.com
+SetOverlay: pane_id=0 profile=default browser=/Users/ryan/dev/termsurf/chromium/src/out/Default/roamium url=https://example.com
+CALayerHost created at (14.0,40.0,1106.0,1056.0): pane_id=0 contextId=2935611265 ...
+```
+
+That repaired run still produced an all-black screenshot:
+
+- `logs/issue-792-exp24-html-sanity-20260529-161036/pdf-smoke.png`
+
+The initial permission test image from the same run was also all black:
+
+- `logs/issue-792-exp24-html-sanity-20260529-161036/screenshot-permission-test.png`
+
+Visual classification: **Blank/black capture**. Experiment classification:
+**Automation failure**. Because the HTML sanity screenshot failed, the PDF
+screenshot was not run or classified.
+
+The fake-GUI plumbing cross-check also did not reproduce the Experiment 23
+stream-info chain in this run. It navigated to
+`http://127.0.0.1:9787/bitcoin.pdf`, but the log reached a `chrome-error`
+document and did not contain:
+
+```text
+real-mime-handler-get-stream-info has_stream=1
+```
+
+No HTTP fixture request was logged, so this fake-GUI run is not valid evidence
+about the Experiment 23 plumbing either.
 
 ## Conclusion
 
-Pending verification.
+Experiment 24 failed because the visual automation was not trustworthy:
+
+1. the real-GUI screenshot path captures black images even for its permission
+   test;
+2. the first harness version hid the pane-launcher failure because relative log
+   paths prevented `run-web.log` from being written;
+3. after the log-path repair, the app and Roamium did launch correctly, but
+   `screencapture` still captured black;
+4. the fake-GUI backup run also failed to reproduce the known-good stream-info
+   chain.
+
+The next experiment should replace the visual evidence path. The likely shape is
+to capture renderer output through the running debug Roamium DevTools endpoint,
+while separately using the existing TermSurf logs to prove the debug real-GUI
+path created the overlay and used the repo-built Roamium binary. Do not treat
+the black screenshots as PDF-rendering evidence.
