@@ -2,9 +2,10 @@
 
 ## Open
 
-| #                              | Title                                | Opened     |
-| ------------------------------ | ------------------------------------ | ---------- |
-| [0756](0756-surfari/README.md) | Surfari — WebKit engine for TermSurf | 2026-03-16 |
+| #                                           | Title                                                        | Opened     |
+| ------------------------------------------- | ------------------------------------------------------------ | ---------- |
+| [0756](0756-surfari/README.md)              | Surfari — WebKit engine for TermSurf                         | 2026-03-16 |
+| [0791](0791-app-shell-foundation/README.md) | Evaluate re-basing TermSurf's Chromium embedder on app_shell | 2026-05-29 |
 
 ## Closed
 
