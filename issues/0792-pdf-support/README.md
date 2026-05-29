@@ -186,3 +186,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   — **Pass**
 - [Experiment 7: Serve Chrome resources to the PDF viewer](07-serve-chrome-resources.md)
   — **Pass**
+- [Experiment 8: Expose the PDF viewer private API surface](08-expose-pdf-viewer-private-api.md)
+  — **Designed**
