@@ -189,3 +189,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
 - [Experiment 8: Expose the PDF viewer private API surface](08-expose-pdf-viewer-private-api.md)
   — **Partial** (API provider and permissions wired; renderer activation still
   missing)
+- [Experiment 9: Diagnose PDF API availability gates](09-diagnose-pdf-api-availability.md)
+  — **Designed**
