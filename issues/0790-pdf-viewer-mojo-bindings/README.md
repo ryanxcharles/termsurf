@@ -576,3 +576,156 @@ must confirm where the viewer reads `pdfOopifEnabled` and where TermSurf serves
 the viewer template (`ts_pdf_viewer_url_loader_factory.cc` /
 `ts_pdf_component_extension_resource_manager.cc`), and whether the OOPIF attach
 needs the Issue 789 `mimeHandlerPrivate` hooks adjusted.
+
+### Experiment 3: Flip the viewer to OOPIF mode and shim pdfViewerPrivate
+
+#### Description
+
+Make the viewer run in OOPIF mode and observe whether TermSurf's custom
+`TsPdfStreamStore` stack can drive the OOPIF content-frame flow (so the PDF
+content frame gets a `--pdf-renderer` process and `CreateInternalPlugin`
+succeeds), or whether OOPIF requires `//chrome/browser/pdf`'s
+`PdfViewerStreamManager`. This is a deliberately cheap, high-information probe
+at an architectural fork.
+
+Research (verified in source) established the mechanics:
+
+- The viewer chooses its mode from an HTML attribute: `pdf_viewer_base.ts:159`
+  reads `document.documentElement.hasAttribute('pdfOopifEnabled')`, set by the
+  `$i18n{pdfOopifEnabled}` template replacement in the viewer `index.html`.
+- TermSurf hardcodes that replacement to empty
+  (`ts_pdf_component_extension_resource_manager.cc:168`
+  `replacements["pdfOopifEnabled"] = ""`), forcing non-OOPIF. Chrome/Electron
+  set it from `IsOopifPdfEnabled()` (`pdf_extension_util.cc:86`).
+- **In OOPIF mode the viewer calls `chrome.pdfViewerPrivate.getStreamInfo()`,
+  not `chrome.mimeHandlerPrivate.getStreamInfo()`** (`browser_api.ts:182`), plus
+  `pdfViewerPrivate` for `onSave`, `setPdfPluginAttributes`,
+  `setPdfDocumentTitle`. The Exp 5 shim
+  (`ts_pdf_viewer_url_loader_factory.cc:81`) **already defines
+  `chrome.pdfViewerPrivate.getStreamInfo` plus event/stub members** (Codex), so
+  this experiment audits/logs the existing shim rather than adding a duplicate.
+- Chrome/Electron's OOPIF browser side uses `//chrome/browser/pdf`
+  `PdfViewerStreamManager`, but that is Chrome's stream store / frame
+  bookkeeping, **not** the unavoidable creator of the PDF content frame (Codex).
+  The content frame is created by the viewer's external-plugin handling
+  (`IsPluginHandledExternally`) and navigated to the stream URL, which
+  TermSurf's `PdfNavigationThrottle` + `TsPdfStreamDelegate::MapToOriginalUrl`
+  already intercept. So the custom `TsPdfStreamStore` stack can in principle
+  drive OOPIF without `//chrome/browser/pdf` — this experiment tests that.
+- **The decisive missing piece (Codex):** in OOPIF mode the PDF content frame is
+  created only if `TsRendererClient::IsPluginHandledExternally()` routes the
+  `application/pdf` embed externally (the Electron
+  `RendererClientBase::IsPluginHandledExternally` →
+  `MimeHandlerViewContainerManager::CreateFrameContainer()` model). TermSurf's
+  `IsPluginHandledExternally` currently returns the base value (false), so the
+  plugin is created in-frame and crashes. Flipping `pdfOopifEnabled` and
+  shimming `pdfViewerPrivate` alone would reproduce the same in-frame crash.
+  This experiment must also address external plugin handling, or explicitly
+  treat "content frame not created" as the expected Partial.
+
+This is the right architectural direction (the internal-plugin `IsPdfRenderer()`
+CHECK is part of the OOPIF model; the non-OOPIF MimeHandlerView path is legacy).
+But rather than commit up front to adopting `PdfViewerStreamManager`, the
+experiment flips the flag and extends the shim, then reads the logs to see how
+far the custom stack carries OOPIF — turning the open question ("can our stack
+do OOPIF, or must we adopt chrome/browser/pdf?") into evidence.
+
+#### Changes
+
+1. New Chromium branch `148.0.7778.97-issue-790-exp2` →
+   `148.0.7778.97-issue-790-exp3`. Add it to `chromium/README.md`.
+
+2. Set the viewer template's `pdfOopifEnabled` from the real feature state
+   instead of hardcoded empty
+   (`ts_pdf_component_extension_resource_manager.cc:168`):
+   `replacements["pdfOopifEnabled"] = chrome_pdf::features::IsOopifPdfEnabled() ? "pdfOopifEnabled" : ""`.
+   (Mirrors `pdf_extension_util.cc:86`; with OOPIF on, the attribute is present
+   and the viewer takes the OOPIF path.)
+
+3. Audit/extend TermSurf's existing viewer-API shim
+   (`ts_pdf_viewer_url_loader_factory.cc`). It already defines
+   `chrome.pdfViewerPrivate.getStreamInfo` plus stubs; confirm it returns the
+   same stream metadata as the `mimeHandlerPrivate` path (Codex notes
+   `pdfViewerPrivate.StreamInfo` omits `mimeType`/`responseHeaders` but extra
+   fields are harmless, and `tabId: -1` avoids a `chrome.tabs` follow-up), and
+   that `onSave`/`setPdfPluginAttributes`/`setPdfDocumentTitle`/
+   `onShouldUpdateViewport`/`isAllowedLocalFileAccess` are present as no-ops.
+   Ensure it logs
+   `[issue-790-exp3] viewer-api-call api=pdfViewerPrivate method=...`.
+
+4. **Route the PDF embed externally so the OOPIF content frame is created
+   (Codex).** Make `TsRendererClient::IsPluginHandledExternally()` return true
+   for the PDF mime (`application/pdf` / the internal plugin mime) on the PDF
+   viewer frame, mirroring Electron's
+   `RendererClientBase::IsPluginHandledExternally` →
+   `MimeHandlerViewContainerManager::CreateFrameContainer()`, so the viewer
+   creates an out-of-process content frame that navigates to the stream URL
+   (which the existing throttle marks `is_pdf`) instead of instantiating the
+   plugin in the extension frame. Keep this scoped to the PDF viewer frame. If
+   the narrow external-handling hook proves larger than one experiment, split it
+   out — but then this experiment's expected result is the Partial where the
+   content frame is not yet created.
+
+5. Preserve the Issue 789/Exp 1 hooks (stream store, attach bookkeeping,
+   `chrome://resources` factory, Mojo enable). Observe whether they still fire
+   under OOPIF.
+
+6. Preserve dependency boundaries. This experiment must NOT add
+   `//chrome/browser/pdf` or any forbidden subsystem — its purpose is to learn
+   whether the custom stack suffices. If the result shows
+   `PdfViewerStreamManager` is required, that adoption is a separate,
+   explicitly-decided later experiment.
+
+7. Format, build, regenerate patches.
+
+#### Verification
+
+1. Build; forbidden deps absent.
+2. Bitcoin PDF smoke. Record:
+   - `viewer-template pdf_oopif_enabled=true` now (attribute present);
+   - which API path the viewer uses (`pdfViewerPrivate` calls now, not
+     `mimeHandlerPrivate`);
+   - whether a separate PDF content frame is created and navigates to the stream
+     (a new child frame distinct from the extension viewer frame);
+   - whether `PdfNavigationThrottle::WillStartRequest` marks it `is_pdf`
+     (`MapToOriginalUrl`), and `host_is_pdf=true has_pdf_renderer=true` appears
+     for the content process;
+   - whether the `Check failed: IsPdfRenderer()` crash is gone and whether the
+     plugin instantiates / the PDF renders;
+   - name the exact next failure precisely. **Anticipated next layer (Codex):**
+     even once the content process is PDF-designated, rendering may fail because
+     TermSurf sets an empty `injected_script` in
+     `TsPdfStreamStore::BuildStreamInfo` (`ts_pdf_stream_store.cc:77`), whereas
+     Chrome injects `IDR_PDF_PDF_INTERNAL_PLUGIN_WRAPPER_ROLLUP_JS` next to the
+     internal plugin (`chrome_pdf_stream_delegate.cc:196`, placed by
+     `plugin_response_writer.cc`). If the plugin loads but stays blank, this is
+     the likely cause and the next experiment.
+3. Screenshot: classify (PDF rendered / advanced-but-blank / new crash).
+4. HTML and non-PDF binary smoke: no regression.
+
+#### Pass Criteria
+
+- Builds; forbidden deps absent; no `//chrome/browser/pdf`.
+- Viewer runs OOPIF: uses `pdfViewerPrivate`, creates the PDF content frame, the
+  content process is PDF-designated, and the `IsPdfRenderer()` crash is gone.
+- The viewer advances to a new precisely named layer (or the PDF renders).
+- HTML and non-PDF binary smoke show no regression.
+
+Stretch Pass: the PDF visibly renders.
+
+#### Partial Criteria
+
+Partial if OOPIF mode engages (pdfViewerPrivate path, attribute present) and the
+crash changes, but the PDF does not yet render — e.g. the content frame is not
+created because the custom stack does not drive the OOPIF content navigation the
+way `PdfViewerStreamManager` would, or `getStreamInfo` via `pdfViewerPrivate`
+needs more fields. Name the exact gap; if it points to needing
+`PdfViewerStreamManager`, record that as the decision point for the next
+experiment.
+
+#### Failure Criteria
+
+- OOPIF mode regresses the viewer to before Exp 1 (no `getStreamInfo`, no
+  attach) with no clear next step.
+- Normal HTML or non-PDF binary behavior regresses.
+- Achieving OOPIF required pulling in a forbidden subsystem.
