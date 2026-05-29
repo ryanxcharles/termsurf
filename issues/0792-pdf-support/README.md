@@ -201,3 +201,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   `extensions.KeepAlive`)
 - [Experiment 13: Register PDF KeepAlive binder](13-register-pdf-keepalive-binder.md)
   — **Pass**
+- [Experiment 14: Wire PDF stream entry hooks](14-wire-pdf-stream-entry-hooks.md)
+  — **Designed**
