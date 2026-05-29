@@ -264,8 +264,100 @@ Experiment 28 fails if:
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Chromium branch: `148.0.7778.97-issue-792-exp28`
+
+Chromium commit: `a40294c71f32d469f07cee437d763cc371c7e491`
+(`Load PDF localized strings`)
+
+Patch archive: regenerated at `chromium/patches/issue-792/`.
+
+Build:
+
+```bash
+cd chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default libtermsurf_chromium
+```
+
+Result:
+
+```text
+Build Succeeded: 0 steps
+```
+
+The fake-GUI preflight passed:
+
+```text
+logs/issue-792-exp28-fakegui-20260529-170907
+```
+
+Important lines:
+
+```text
+[issue-792-exp28] components-strings-pak path=/Users/ryan/dev/termsurf/chromium/src/out/Default/gen/components/strings/components_strings_en-US.pak found=1 loaded=1 portrait_bytes=8
+[issue-792-exp18] real-mime-handler-get-stream-info has_stream=1 ... original_url=http://127.0.0.1:9787/bitcoin.pdf
+[issue-792-exp27] internal-plugin-externalized handled=1
+[issue-792-exp16] pvs-start ... url=http://127.0.0.1:9787/bitcoin.pdf is_pdf=1 ...
+[issue-792-exp26] internal-plugin-create-result created=1
+```
+
+The run did not contain:
+
+```text
+Unable to find resource
+FATAL
+Received signal
+```
+
+The real-GUI HTML DevTools sanity check passed:
+
+```text
+logs/issue-792-exp28-html-devtools-20260529-170938/devtools-smoke.png
+```
+
+Classification: rendered `example.com`.
+
+The real-GUI PDF DevTools capture passed:
+
+```text
+logs/issue-792-exp28-pdf-devtools-20260529-171104/devtools-smoke.png
+```
+
+Classification: rendered PDF. The screenshot shows recognizable Bitcoin paper
+content: title, author block, abstract heading, and body text.
+
+The PDF run used the repo-built debug path:
+
+```text
+web_command=/Users/ryan/dev/termsurf/webtui/target/debug/web --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium http://localhost:9616/bitcoin.pdf
+```
+
+The PDF run's Chromium log confirmed the localized strings pak loaded:
+
+```text
+[issue-792-exp28] components-strings-pak path=/Users/ryan/dev/termsurf/chromium/src/out/Default/gen/components/strings/components_strings_en-US.pak found=1 loaded=1 portrait_bytes=8
+```
+
+The PDF run did not contain:
+
+```text
+Unable to find resource
+FATAL
+Received signal
+```
 
 ## Conclusion
 
-Pending verification.
+Loading `components_strings_en-US.pak` fixed the PDF metadata crash introduced
+by the first successful plugin-renderer path. Resource `38115`
+(`IDS_PDF_PROPERTIES_PAGE_SIZE_PORTRAIT`) now resolves, `FormatPageSize()` no
+longer aborts, and the PDF plugin renders visible PDF content in the DevTools
+capture.
+
+Experiment 28 is the first experiment in this issue to prove recognizable inline
+PDF rendering in Roamium. Claude reviewed the completed experiment and agreed
+that Pass is correct. The issue can now close after the README conclusion
+records the current remaining limitations separately from the core rendering
+success.

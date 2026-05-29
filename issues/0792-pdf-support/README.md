@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-29"
+closed = "2026-05-29"
 +++
 
 # Issue 792: Inline PDF support via a separable extensions browser system
@@ -240,4 +241,44 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   — **Partial** (PDF renderer and plugin now start; metadata string resource is
   missing)
 - [Experiment 28: Load PDF localized strings](28-load-pdf-localized-strings.md)
-  — **Designed**
+  — **Pass** (components strings load; Bitcoin PDF renders visibly in DevTools
+  capture)
+
+## Conclusion
+
+Issue 792 is closed as solved. Roamium now renders PDFs inline through the
+TermSurf overlay instead of showing a blank page, downloading the file, or
+falling back to a missing-plugin surface.
+
+The decisive proof is Experiment 28:
+
+- Chromium branch `148.0.7778.97-issue-792-exp28`
+- Chromium commit `a40294c71f32d469f07cee437d763cc371c7e491`
+  (`Load PDF localized strings`)
+- Patch archive regenerated at `chromium/patches/issue-792/`
+- Automated PDF capture:
+  `logs/issue-792-exp28-pdf-devtools-20260529-171104/devtools-smoke.png`
+
+That capture shows recognizable Bitcoin paper content rendered inside Roamium:
+the title, author block, abstract heading, and body text. The run used the
+repo-built debug `web` binary with
+`--browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium`; it did
+not use an installed stable Roamium. Logs confirmed the PDF stream path,
+externalized internal plugin path, PDF renderer path, and localized string
+resource bundle all worked, with no `Unable to find resource`, `FATAL`, or
+`Received signal` crash.
+
+Architecturally, this issue proved the direction chosen by Issues 790 and 791:
+stay on `content_shell`, do not re-base on `extensions/shell`, and add the
+Electron-shaped extensions/PDF layer directly to the TermSurf embedder. The
+resulting stack now includes the TermSurf extension foundation, the PDF
+component extension, extension and Chrome resource loading, private API and Mojo
+binders, stream claim plumbing, PDF MIME/plugin routing, PDF renderer
+externalization, and the localized strings needed by PDFium metadata.
+
+Some PDF-viewer polish remains outside this issue's core goal. Full locale
+selection is not implemented; Experiment 28 deliberately loads `en-US` only.
+PDF-specific UI affordances such as print, save, find, accessibility, and any
+multi-page interaction refinements should be tracked as separate follow-up
+issues if they matter. Those are product-completeness items on top of working
+inline rendering, not blockers for closing this issue.

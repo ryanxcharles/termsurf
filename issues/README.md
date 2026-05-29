@@ -2,15 +2,15 @@
 
 ## Open
 
-| #                                  | Title                                                        | Opened     |
-| ---------------------------------- | ------------------------------------------------------------ | ---------- |
-| [0756](0756-surfari/README.md)     | Surfari — WebKit engine for TermSurf                         | 2026-03-16 |
-| [0792](0792-pdf-support/README.md) | Inline PDF support via a separable extensions browser system | 2026-05-29 |
+| #                              | Title                                | Opened     |
+| ------------------------------ | ------------------------------------ | ---------- |
+| [0756](0756-surfari/README.md) | Surfari — WebKit engine for TermSurf | 2026-03-16 |
 
 ## Closed
 
 | #                                                       | Title                                                                         | Opened     | Closed     |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
+| [0792](0792-pdf-support/README.md)                      | Inline PDF support via a separable extensions browser system                  | 2026-05-29 | 2026-05-29 |
 | [0791](0791-app-shell-foundation/README.md)             | Evaluate re-basing TermSurf's Chromium embedder on app_shell                  | 2026-05-29 | 2026-05-29 |
 | [0790](0790-pdf-viewer-mojo-bindings/README.md)         | Expose Mojo JS Bindings to the PDF Viewer Frame                               | 2026-05-28 | 2026-05-29 |
 | [0789](0789-electron-style-pdf-viewer/README.md)        | Electron-Style PDF Viewer Infrastructure                                      | 2026-05-27 | 2026-05-28 |
