@@ -12,8 +12,35 @@ the overlay, not a blank white page or a download — with clean, contained code
 that does not regress any existing functionality. We do this by staying on
 **content_shell** and adding Chromium's **extensions + guest-view +
 `PdfViewerStreamManager`** browser system as a **separable layer** on the
-current embedder, using `extensions/shell` (app_shell) as the reference
-implementation rather than the base.
+current embedder, modeled on how **Electron** wires that layer onto its own
+content-embedder.
+
+## Principles
+
+Two principles govern every decision in this issue:
+
+1. **We are using content_shell.** TermSurf stays on `content/shell`. We do
+   **not** re-base or rewrite on app_shell (`extensions/shell`) — Issue 791
+   settled that. The extensions/guest-view/`PdfViewerStreamManager` system is
+   added as a **separable layer** on TermSurf's existing `Ts*` classes and
+   per-tab CALayerHost window model.
+
+2. **When in doubt, do it like Electron.** Electron is the primary reference,
+   and it reinforces principle 1: Electron is itself a content-embedder (not
+   app_shell) that bolts on its **own** extensions glue
+   (`ElectronExtensionSystem`, `ElectronExtensionsBrowserClient`, its
+   `streams_private` PDF stream handoff, its component-extension resource
+   manager) and patches Chromium's PDF stream path to call that glue. That is
+   exactly the shape this issue needs — embedder-owned extension wiring on a
+   minimal content base, not Chrome's full browser stack. Chromium's
+   `extensions/shell` (app_shell) is a useful Chromium-maintained
+   cross-reference, but where the two disagree or Electron is clearer, **follow
+   Electron**.
+
+3. **If doing it like Electron is hard and takes a lot of work, do not complain.
+   Do it.** This is a real port, not a hook — Issues 789/790 proved the cheap
+   shortcuts do not work. The amount of work is not a reason to deviate. Put in
+   the work, follow Electron, ship inline PDF.
 
 ## Background
 
@@ -53,7 +80,9 @@ From Issue 791's conclusion, the path to inline PDF is:
 > `extensions/shell` as the reference. A separate issue should pick that up when
 > PDF work resumes.
 
-This is that issue.
+This is that issue. Per the principles above, the primary reference for *how* to
+add that layer is **Electron** (a content-embedder with its own extensions
+glue); `extensions/shell` is a secondary, Chromium-maintained cross-reference.
 
 ### Why the extensions system is the gating prerequisite
 
@@ -82,10 +111,10 @@ embedder without re-basing.
 ### What "add the extensions browser system as a layer" means
 
 On top of the Issue 784 `libtermsurf_chromium` (which is
-`TsBrowserClient : content::ShellContentBrowserClient`, etc.), cherry-pick the
-extensions integration that `extensions/shell` performs — but onto TermSurf's
-existing `Ts*` classes and per-tab CALayerHost window model, **not** app_shell's
-`AppWindow`/`DesktopController`:
+`TsBrowserClient : content::ShellContentBrowserClient`, etc.), add the extensions
+integration the way **Electron** does — embedder-owned glue on a content base —
+onto TermSurf's existing `Ts*` classes and per-tab CALayerHost window model,
+**not** app_shell's `AppWindow`/`DesktopController`:
 
 - `ShellExtensionsBrowserClient` / `ShellExtensionsClient` equivalents —
   register the extensions system with the browser process.
@@ -111,7 +140,8 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   multi-profile, the badge stub) must keep working. The baseline to protect is
   `148.0.7778.97-issue-784`.
 - **Stay on content_shell.** Do not re-base/rewrite on app_shell (Issue 791
-  decision). Use `extensions/shell` only as a source-level reference.
+  decision). Model the extensions layer on **Electron**; use `extensions/shell`
+  only as a secondary source-level cross-reference.
 - **Contained code.** The extensions layer should be added as cleanly separable
   `Ts*`/`ts_*` additions, not smeared across the embedder.
 - **Chromium branch discipline.** Every Chromium-modifying experiment forks the
@@ -124,8 +154,9 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
 
 ### Open questions the experiments must resolve
 
-- How much of the `extensions/shell` browser wiring is the **minimum** needed to
-  make `application/pdf` externally handled (the cheapest decisive spike)?
+- How much of Electron's extensions glue (cross-referenced against
+  `extensions/shell`) is the **minimum** needed to make `application/pdf`
+  externally handled (the cheapest decisive spike)?
 - Does standing up the extensions system on the existing per-tab window model
   introduce any conflict with the CALayerHost overlay path (the riskiest
   interaction)?
