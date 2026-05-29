@@ -338,3 +338,147 @@ before any next experiment is designed.
 6. After recording the result, ask Claude to review the implementation,
    verification artifacts, and result language. Fix real issues before
    proceeding to Experiment 15.
+
+## Result
+
+**Result:** Partial
+
+The branch builds and the new browser-side PDF stream entry hooks fire. Build
+verification:
+
+```bash
+cd chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default libtermsurf_chromium
+```
+
+Result: `Build Succeeded: 0 steps`.
+
+The old screenshot smoke script was not reliable for this slice because it
+created a Wezboard process with no pane, so the `web` TUI did not get a real
+terminal environment and Roamium did not start. For this experiment, the useful
+proof is the browser-side stream ladder, so I used a minimal fake-GUI Unix
+socket harness that launches repo-built Roamium directly, sends `CreateTab`,
+serves `bitcoin.pdf` with `Content-Type: application/pdf`, and records Roamium's
+logs. After this result, that harness was committed as
+`scripts/test-issue-792-fake-gui.py` so future PDF stream experiments can re-run
+the same browser-side proof without depending on screenshot automation. The
+committed harness was smoke-tested with the same PDF URL and reproduced the same
+`stream-container-added` / download-delegate sequence in
+`logs/issue-792-exp14-script-pdf-20260529-130937`.
+
+PDF artifact:
+
+```text
+logs/issue-792-exp14-fakegui-20260529-130155
+```
+
+The fake GUI saw Roamium register, accepted a tab, and served the PDF:
+
+```text
+t=0.000 top_field=12 size=11
+sent CreateTab
+t=0.123 top_field=13 size=15
+tab_ready id=1
+sent Resize
+t=0.396 top_field=16 size=13
+t=0.480 top_field=14 size=16
+"GET /bitcoin.pdf HTTP/1.1" 200 -
+```
+
+The Experiment 14 stream-entry ladder reached the intended new browser-side
+state:
+
+```text
+[issue-792-exp14] navigation-throttles frame_tree_node_id=1 url=http://127.0.0.1:9787/bitcoin.pdf pdf_throttle=1 iframe_throttle=0
+[issue-792-exp14] pdf-request-interceptor frame_tree_node_id=1 created=1
+[issue-792-exp14] pdf-get-stream-info frame_url= has_stream=0
+[issue-792-exp14] url-loader-throttle destination=3 frame_tree_node_id=1 plugin_interceptor=1
+[issue-792-exp14] plugin-mime-map mime_type=application/pdf extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai
+[issue-792-exp14] plugin-response-intercept mime_type=application/pdf extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai frame_tree_node_id=1
+[issue-792-exp14] stream-container-added frame_tree_node_id=1 internal_id=BCB00BFB6DB2A370E2A49E4090446BA1 original_url=http://127.0.0.1:9787/bitcoin.pdf handler_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html
+```
+
+After the stream container was added, the navigation still reached
+content_shell's download delegate:
+
+```text
+ShellDownloadManagerDelegate::ChooseDownloadPath(...)
+```
+
+That means Experiment 14 succeeded at wiring the response-interception and
+stream-container creation half, but the stream is not yet claimed by a
+viewer-side guest/MimeHandlerView container. This is the next missing layer.
+
+HTML smoke artifact:
+
+```text
+logs/issue-792-exp14-fakegui-html-20260529-130300
+```
+
+The same harness loaded `http://localhost:9616/index.html`. It produced normal
+tab, URL, title, and loading messages:
+
+```text
+t=0.000 top=12
+sent CreateTab
+t=0.129 top=13
+t=0.446 top=14
+t=0.621 top=15
+t=0.621 top=32
+t=0.623 top=16
+t=0.634 top=17
+t=0.672 top=16
+```
+
+The HTML smoke did not log `plugin-response-intercept` or
+`stream-container-added`, so ordinary HTML was not converted into the PDF stream
+path.
+
+One designed log did not fire in either smoke:
+`[issue-792-exp14] external-plugin-mime-types ...`. The override is present, but
+content_shell does not appear to query
+`GetPluginMimeTypesWithExternalHandlers()` without the MimeHandlerView/guest
+layer. That log should become useful once the next experiment wires the
+viewer-side claim path.
+
+### Design Exception: `PdfViewerStreamManager`
+
+This experiment intentionally compiles two narrow Chrome source files into
+`libtermsurf_chromium`:
+
+```text
+//chrome/browser/pdf/pdf_viewer_stream_manager.cc
+//chrome/browser/pdf/pdf_viewer_stream_manager.h
+```
+
+This is a contained exception to the usual "do not pull Chrome browser code"
+rule. The reason is structural: the allowed canonical component
+`pdf::PdfNavigationThrottle` hard-couples to
+`pdf::PdfViewerStreamManager::FromWebContents()`. To use Chromium's standard PDF
+navigation throttle, the linker needs `PdfViewerStreamManager`'s implementation.
+
+The alternative would have been to fork both `pdf::PdfNavigationThrottle` and
+`PdfViewerStreamManager` into TermSurf-owned `Ts*` copies. That would create a
+larger code surface and a higher upgrade burden, because both copies would need
+to be kept in sync with Chromium's PDF navigation semantics. The narrow source
+inclusion keeps the exception to one class and preserves Chromium's canonical
+stream-entry path.
+
+Longer term, keep this narrow inclusion unless Chromium's PDF stream
+architecture changes or a later experiment proves a TermSurf-owned manager is
+necessary.
+
+## Conclusion
+
+Experiment 14 added the correct stream-entry hooks to `TsBrowserClient` and
+proved the direct `application/pdf` response can now be intercepted and stored
+as a `StreamContainer` for the PDF extension. The experiment did not make PDFs
+render yet, and that is expected for this slice.
+
+The next experiment should wire the viewer-side claim path: the PDF extension
+wrapper/guest side needs to claim the `PdfViewerStreamManager` stream by
+`frame_tree_node_id`/internal id, then connect that claimed stream to the
+existing `mimeHandlerPrivate.getStreamInfo()` path. Until that exists,
+content_shell still treats the top-level PDF as a download even though TermSurf
+has created the stream container.
