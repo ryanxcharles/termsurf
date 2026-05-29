@@ -1162,31 +1162,48 @@ history**, then (separately) assess re-basing on app_shell.
 - **Preserve (do not delete):** the Issue 789/790 docs, the Chromium fork
   branches `…-issue-789-exp*` and `…-issue-790-exp*`, and the
   `chromium/patches/issue-789/` archive — these are the durable record of the
-  PDF attempt.
+  PDF attempt. Note (Codex): despite its name, `chromium/patches/issue-789/`
+  holds **both** the Issue 789 and Issue 790 PDF patches (through Exp 5); it is
+  the preserved PDF patch history for the whole effort.
 
 #### Changes
 
-1. Chromium fork (`chromium/src`, gitignored):
+1. Chromium fork (`chromium/src`, gitignored): first confirm a clean worktree
+   (`git -C chromium/src status --short` — stop if anything is uncommitted, so
+   no stray edit blocks the checkout or travels across branches), then
    `git checkout 148.0.7778.97-issue-784`; rebuild `libtermsurf_chromium`. No
    new commits on the fork; the PDF branches remain as history. (The dylib
    reverts to pre-PDF; `roamium` loads it via `@rpath`, so no `roamium` rebuild
-   is strictly needed, but rebuild it to be safe.)
+   is strictly needed, but rebuild it to be safe. No `gn clean` needed;
+   `autoninja -C out/Default libtermsurf_chromium` suffices — run `gn gen` only
+   if GN reports stale build files.)
 2. Main repo:
    - `chromium/README.md` "Current State" branch → `148.0.7778.97-issue-784`.
      Keep the Branches table rows for the `789-exp*` / `790-exp*` branches but
      annotate them as experimental PDF work (parked).
-   - Remove `test-html/public/test-chrome-resources-leak.html`.
+   - Remove `test-html/public/test-chrome-resources-leak.html`. (Codex: this
+     leaves a historical reference in closed Issue 789 — that is fine; do
+     **not** edit Issue 789; record the removal here in Issue 790's closure.)
    - Keep the Issue 789/790 docs and `chromium/patches/issue-789/` (history).
 
 #### Verification
 
-1. `libtermsurf_chromium` builds and links on `148.0.7778.97-issue-784`.
-2. HTML smoke (`index.html`) renders — no regression.
-3. PDF smoke (`bitcoin.pdf`) shows the **pre-PDF** behavior (whatever 784 did —
+1. **Source/branch proof (Codex), not just a build:** confirm
+   `git -C chromium/src rev-parse HEAD` == `ae630730d826b`, and
+   `git -C chromium/src log 148.0.7778.97-issue-784..HEAD` is empty (no PDF
+   commits on top); `rg` the active `content/libtermsurf_chromium` tree for
+   `issue-789`, `issue-790`, `TsPdf`, `PdfViewerStreamManager`, `guest_view`
+   (expect none of the experimental artifacts); and
+   `gn desc out/Default //content/libtermsurf_chromium deps --all` shows
+   `//chrome/browser/pdf`, `//components/guest_view`, and the extensions deps
+   are **absent**.
+2. `libtermsurf_chromium` builds and links on `148.0.7778.97-issue-784`.
+3. HTML smoke (`index.html`) renders — no regression.
+4. PDF smoke (`bitcoin.pdf`) shows the **pre-PDF** behavior (whatever 784 did —
    e.g. download/blank, no inline viewer), with **no `IsPdfRenderer` crash** and
    **no `[issue-789-*]` / `[issue-790-*]` experimental logs** in the output.
-4. The app launches and behaves as the known-good 784 build.
-5. Preservation check: the `789-exp*` / `790-exp*` fork branches and
+5. The app launches and behaves as the known-good 784 build.
+6. Preservation check: the `789-exp*` / `790-exp*` fork branches and
    `chromium/patches/issue-789/` still exist.
 
 #### Pass Criteria
