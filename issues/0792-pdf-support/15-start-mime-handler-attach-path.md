@@ -396,3 +396,112 @@ before any next experiment is designed.
 
 8. Ask Claude to review the implementation, verification artifacts, and result
    language. Fix real issues before proceeding to Experiment 16.
+
+## Result
+
+**Result:** Partial
+
+The branch builds:
+
+```bash
+cd chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default libtermsurf_chromium
+```
+
+Result: `Build Succeeded: 6 steps`.
+
+PDF smoke artifact:
+
+```text
+logs/issue-792-exp15-pdf-20260529-133019
+```
+
+The run proved several new rungs:
+
+```text
+[issue-792-exp15] internal-pdf-plugin-registered mime_type=application/x-google-chrome-pdf path=internal-pdf-viewer
+[issue-792-exp15] override-body-start frame_tree_node_id=1 internal_id=FBB655FEF32483A8442F0BBBD35C7588 stream_id=90c20293-edfd-46a5-ba0a-be65ef4cb013 original_url=http://127.0.0.1:9787/bitcoin.pdf
+[issue-792-exp15] stream-container-added-before-resume frame_tree_node_id=1 internal_id=FBB655FEF32483A8442F0BBBD35C7588
+[issue-792-exp15] mhv-embedder-create frame_tree_node_id=1 resource_url=http://127.0.0.1:9787/bitcoin.pdf stream_id=90c20293-edfd-46a5-ba0a-be65ef4cb013 internal_id=FBB655FEF32483A8442F0BBBD35C7588
+[issue-792-exp15] override-body-resume frame_tree_node_id=1
+[issue-792-exp15] mime-handler-container-manager-bound render_frame=0x744d7c000
+```
+
+The single-resume invariant passed:
+
+```bash
+rg --no-filename -c 'override-body-resume' logs/issue-792-exp15-pdf-20260529-133019 | awk '{sum += $1} END {print sum + 0}'
+```
+
+Result: `1`.
+
+The failure point is equally clear. The run did **not** log:
+
+```text
+[issue-792-exp15] mhv-ready-to-commit ...
+[issue-792-exp15] is-plugin-handled-externally ...
+[issue-792-exp15] mhv-render-frame-created ...
+[issue-792-exp15] pdf-stream-claim ...
+```
+
+Instead, the same download delegate still fired after the stream container was
+added:
+
+```text
+ShellDownloadManagerDelegate::ChooseDownloadPath(...)
+```
+
+That means the Experiment 15 attach helper starts, but it starts too late or on
+the wrong path for the top-level PDF navigation. Creating
+`MimeHandlerViewEmbedder` from the URL-loader response callback does not make it
+observe the already-in-progress wrapper commit, so it never calls
+`ReadyToCommitNavigation()`, never sets the renderer-side internal id at the
+right time, and never reaches the renderer external-plugin hook.
+
+HTML smoke artifact:
+
+```text
+logs/issue-792-exp15-html-20260529-133037
+```
+
+Ordinary HTML still loaded. The only Experiment 15 logs in that smoke were
+process/frame setup logs:
+
+```text
+[issue-792-exp15] internal-pdf-plugin-registered ...
+[issue-792-exp15] mime-handler-container-manager-bound ...
+```
+
+No PDF response interception, attach helper, or stream-container logs fired for
+HTML.
+
+## Conclusion
+
+Experiment 15 proves that, for OOPIF PDF, the
+`OverrideBodyForInterceptedResponse(...)` branch of
+`MimeHandlerViewAttachHelper` is not the missing top-level PDF claim mechanism.
+The helper can create `MimeHandlerViewEmbedder`, but by that point the
+main-frame navigation is too far along for the embedder to observe the wrapper
+`ReadyToCommitNavigation()` event and claim the stream.
+
+This also explains why the Chrome source does not call
+`OverrideBodyForInterceptedResponse(...)` for OOPIF PDF. Chrome uses
+`CreateTemplateMimeHandlerPage(...)` for OOPIF PDFs and relies on
+`PdfViewerStreamManager` to claim the stream during the wrapper navigation
+lifecycle. TermSurf's next experiment should return to that canonical OOPIF PDF
+path and identify why `PdfViewerStreamManager::ReadyToCommitNavigation()` is not
+claiming the unclaimed stream after Experiment 14's `stream-container-added`
+event.
+
+The most likely next target is lifecycle ordering: either the stream manager is
+created after the relevant `ReadyToCommitNavigation()` notification has already
+passed, or the wrapper navigation observed by `PdfViewerStreamManager` is not
+the same frame tree node used in `AddStreamContainer(...)`. Experiment 16 should
+revert this experiment's `OverrideBodyForInterceptedResponse(...)` change in
+`ts_plugin_response_interceptor_url_loader_throttle.cc`, return to
+`CreateTemplateMimeHandlerPage(...)` to match Chrome's OOPIF PDF branch, and
+instrument `PdfViewerStreamManager`'s `DidStartNavigation()`,
+`ReadyToCommitNavigation()`, `AddStreamContainer()`, and `RenderFrameDeleted()`
+around the frame tree node and committed URL, without trying another
+attach-helper route.

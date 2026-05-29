@@ -205,4 +205,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   — **Partial** (PDF response creates a stream container; no viewer-side claim
   yet)
 - [Experiment 15: Start the MIME-handler attach path](15-start-mime-handler-attach-path.md)
-  — **Designed**
+  — **Partial** (attach helper starts, but it is too late to claim the PDF
+  stream)
