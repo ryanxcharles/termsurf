@@ -729,3 +729,57 @@ experiment.
   attach) with no clear next step.
 - Normal HTML or non-PDF binary behavior regresses.
 - Achieving OOPIF required pulling in a forbidden subsystem.
+
+#### Result
+
+**Result:** Partial (as anticipated)
+
+OOPIF viewer mode now engages, but the PDF embed is still created in-frame
+because TermSurf does not yet route the plugin externally — exactly the Partial
+the design and Codex predicted. The next layer is `IsPluginHandledExternally`.
+
+Chromium branch `148.0.7778.97-issue-790-exp3` (from `-exp2`). Change: one line
+in `ts_pdf_component_extension_resource_manager.cc` — set the viewer template's
+`pdfOopifEnabled` from `chrome_pdf::features::IsOopifPdfEnabled()` instead of
+hardcoded empty. The Exp 5 shim already provided `chrome.pdfViewerPrivate`
+(getStreamInfo + stubs), so no shim change was needed (Codex was right).
+
+Verification:
+
+- **OOPIF mode engaged.** `viewer-template pdf_oopif_enabled=true` (was
+  `absent`), and the viewer now calls
+  `api=pdfViewerPrivate method=getStreamInfo` instead of `mimeHandlerPrivate` —
+  the viewer JS took the OOPIF branch.
+- **But the crash persists, in-frame.** `Check failed: IsPdfRenderer()` still
+  fires, all renderers remain `host_is_pdf=false`, and the `plugin-context` log
+  is unchanged: the internal plugin is created in the **extension viewer frame**
+  (`frame_origin=chrome-extension://…mhjfbmdgcf…`,
+  `parent_origin=http://localhost`), not in a separate out-of-process PDF
+  content frame. The viewer's `IsPluginHandledExternally` hook still returns the
+  base value, so the `application/pdf` embed is handled in-frame.
+- **No regression.** `index.html` and `test.bin` smoke: 0 FATAL/crash, 0
+  `viewer-template` logs (the PDF viewer path does not engage for non-PDF
+  content; normal pages are unaffected by the template change).
+- **Screenshot:** grey/blank overlay (renderer crashed at the CHECK), same as
+  Exp 1.
+
+#### Conclusion
+
+Experiment 3 confirmed the viewer-mode layer: a single template flag flips the
+viewer from the legacy `mimeHandlerPrivate`/in-frame path to the OOPIF
+`pdfViewerPrivate` path, and the existing shim already supports it. But OOPIF
+mode alone does not relocate the plugin — the embed is still created in-frame
+until the renderer routes it externally. This cleanly isolates the next layer.
+
+Next layer (Experiment 4): implement external plugin handling —
+`TsRendererClient::IsPluginHandledExternally()` returns true for the PDF mime on
+the PDF viewer frame and routes the embed through the Electron-style
+`MimeHandlerViewContainerManager::CreateFrameContainer()` path (binding the
+container manager in renderer frames, per the Electron model), so the viewer
+creates an out-of-process PDF content frame. That frame navigates to the stream
+URL, the existing `PdfNavigationThrottle` marks it `is_pdf`, it gets a
+`--pdf-renderer` process, and `CreateInternalPlugin` runs there with
+`IsPdfRenderer()` satisfied. Research must confirm the renderer-side container
+manager is reachable **without** `//components/guest_view/browser` or the
+forbidden extensions stacks; if it is not, find the narrowest external-routing
+mechanism that is.

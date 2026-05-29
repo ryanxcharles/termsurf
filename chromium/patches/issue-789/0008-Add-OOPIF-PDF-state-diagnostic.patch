@@ -1,7 +1,7 @@
 From 9177d5384ff57f287afc52e27c7bcdd766a8537b Mon Sep 17 00:00:00 2001
 From: "Ryan X. Charles" <ryan@ryanxcharles.com>
 Date: Thu, 28 May 2026 20:09:29 -0500
-Subject: [PATCH 8/8] Add OOPIF PDF state diagnostic
+Subject: [PATCH 8/9] Add OOPIF PDF state diagnostic
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

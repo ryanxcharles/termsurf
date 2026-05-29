@@ -1,0 +1,48 @@
+From 581891135ffa507872fe272ac1c0f83854d6b664 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Thu, 28 May 2026 20:23:07 -0500
+Subject: [PATCH 9/9] Flip PDF viewer to OOPIF mode
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+One template flag, and the viewer changed its tongue:
+from mimeHandler to pdfViewerPrivate it swung.
+OOPIF mode engaged, the right path now in sight—
+yet the plugin builds in-frame, still wrong, still trite.
+The embed needs routing out before it's whole:
+external handling is the next patrol.
+---
+ .../ts_pdf_component_extension_resource_manager.cc       | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/content/libtermsurf_chromium/ts_pdf_component_extension_resource_manager.cc b/content/libtermsurf_chromium/ts_pdf_component_extension_resource_manager.cc
+index ac6de4e2e1afc..325927c28cadd 100644
+--- a/content/libtermsurf_chromium/ts_pdf_component_extension_resource_manager.cc
++++ b/content/libtermsurf_chromium/ts_pdf_component_extension_resource_manager.cc
+@@ -20,6 +20,7 @@
+ #include "chrome/grit/pdf_resources_map.h"
+ #include "components/pdf/common/constants.h"
+ #include "extensions/common/constants.h"
++#include "pdf/pdf_features.h"
+ #include "ui/base/resource/resource_bundle.h"
+ #include "ui/base/webui/resource_path.h"
+ 
+@@ -165,7 +166,13 @@ void TsPdfComponentExtensionResourceManager::RegisterTemplateReplacements() {
+   ui::TemplateReplacements replacements;
+   replacements["textdirection"] = "ltr";
+   replacements["language"] = "en-US";
+-  replacements["pdfOopifEnabled"] = "";
++  // Issue 790 Exp 3: drive the viewer's OOPIF mode from the real feature state,
++  // mirroring chrome/browser/pdf/pdf_extension_util.cc. With OOPIF enabled the
++  // viewer index.html gets the `pdfOopifEnabled` attribute and the viewer JS
++  // takes the OOPIF path (chrome.pdfViewerPrivate, out-of-process content
++  // frame) instead of the legacy in-frame plugin path.
++  replacements["pdfOopifEnabled"] =
++      chrome_pdf::features::IsOopifPdfEnabled() ? "pdfOopifEnabled" : "";
+   replacements["name"] = "Chromium PDF Viewer";
+   replacements["errorDialogTitle"] = "Couldn't load PDF";
+   replacements["pageLoading"] = "Loading...";
+-- 
+2.50.1 (Apple Git-155)
+
