@@ -219,3 +219,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   — **Pass**
 - [Experiment 20: Load components resource pak](20-load-components-resource-pak.md)
   — **Partial** (wrapper HTML now loads; child about:blank frame still absent)
+- [Experiment 21: Trace wrapper HTML parsing](21-trace-wrapper-html-parsing.md)
+  — **Designed**
