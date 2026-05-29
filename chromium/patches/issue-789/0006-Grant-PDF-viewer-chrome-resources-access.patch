@@ -1,7 +1,7 @@
 From 0379d395b75a03ea2160c09e56e85ff62c2171b0 Mon Sep 17 00:00:00 2001
 From: "Ryan X. Charles" <ryan@ryanxcharles.com>
 Date: Thu, 28 May 2026 19:05:58 -0500
-Subject: [PATCH 6/9] Grant PDF viewer chrome://resources access
+Subject: [PATCH 06/10] Grant PDF viewer chrome://resources access
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

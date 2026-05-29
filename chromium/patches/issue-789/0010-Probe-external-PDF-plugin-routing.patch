@@ -1,0 +1,58 @@
+From e8d5109f2603d5bfdac06bb960fc5ff993f0b985 Mon Sep 17 00:00:00 2001
+From: "Ryan X. Charles" <ryan@ryanxcharles.com>
+Date: Thu, 28 May 2026 20:44:59 -0500
+Subject: [PATCH 10/10] Probe external PDF plugin routing
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We asked the renderer to hand the plugin out,
+but Blink never called the hook, no doubt:
+the internal mime reads in-process, plain,
+so return-true alone is built in vain.
+The lesson's clear, the verdict unambiguous—
+the full guest-view stack is now incumbent on us.
+---
+ .../ts_renderer_client.cc                     | 26 +++++++++++++++++--
+ 1 file changed, 24 insertions(+), 2 deletions(-)
+
+diff --git a/content/libtermsurf_chromium/ts_renderer_client.cc b/content/libtermsurf_chromium/ts_renderer_client.cc
+index 917c52984d8a9..bc8e6ab1a1a7e 100644
+--- a/content/libtermsurf_chromium/ts_renderer_client.cc
++++ b/content/libtermsurf_chromium/ts_renderer_client.cc
+@@ -94,8 +94,30 @@ bool TsRendererClient::IsPluginHandledExternally(
+ #if BUILDFLAG(ENABLE_PDF)
+   if (original_mime_type == pdf::kPDFMimeType ||
+       original_mime_type == pdf::kInternalPluginMimeType) {
+-    LOG(INFO) << "[issue-776] IsPluginHandledExternally mime="
+-              << original_mime_type << " url=" << original_url;
++    // Issue 790 Exp 4: route the OOPIF PDF plugin externally. When the OOPIF
++    // PDF viewer creates its <embed type=application/x-google-chrome-pdf> for
++    // the stream, returning true here makes Blink create a child content frame
++    // and navigate it to the stream URL (instead of instantiating the internal
++    // plugin in the extension viewer frame). TermSurf's existing
++    // PdfNavigationThrottle then intercepts that child navigation, marks it
++    // is_pdf, and it lands in a --pdf-renderer process where
++    // CreateInternalPlugin runs with IsPdfRenderer() satisfied. This mirrors
++    // Electron's PDF branch in RendererClientBase::IsPluginHandledExternally
++    // (which returns true for the internal-plugin mime on an allowed origin).
++    // Gate to the PDF viewer extension frame via the same origin check used for
++    // plugin creation.
++    blink::WebLocalFrame* web_frame =
++        embedder_frame ? embedder_frame->GetWebFrame() : nullptr;
++    const bool allowed_origin =
++        web_frame &&
++        IsPdfInternalPluginAllowedOrigin(web_frame->GetSecurityOrigin(), {});
++    LOG(INFO) << "[issue-790-exp4] is-plugin-handled-externally mime="
++              << original_mime_type
++              << " allowed_origin=" << (allowed_origin ? "true" : "false")
++              << " url=" << original_url.possibly_invalid_spec();
++    if (original_mime_type == pdf::kInternalPluginMimeType && allowed_origin) {
++      return true;
++    }
+   }
+ #endif
+   return ShellContentRendererClient::IsPluginHandledExternally(
+-- 
+2.50.1 (Apple Git-155)
+

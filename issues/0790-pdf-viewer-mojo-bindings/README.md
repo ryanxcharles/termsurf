@@ -957,3 +957,49 @@ Experiment 5.
 - The canonical stack cannot function without effectively rebuilding the full
   Chrome browser (i.e. the adoption is not viable) — would force reconsidering
   the custom-attach path.
+
+#### Result
+
+**Result:** Partial (scoped to a cheap probe)
+
+Before pulling the full `//chrome/browser/pdf` footprint, I tested the cheapest
+hypothesis: have `TsRendererClient::IsPluginHandledExternally()` return true for
+the internal PDF plugin mime (Electron's PDF branch), which — if it worked —
+would make Blink create the OOPIF content frame using TermSurf's _existing_
+throttle, with no new deps. It does **not** work, for a precise reason that
+sharpens the next experiment.
+
+Chromium branch `148.0.7778.97-issue-790-exp4` (from `-exp3`). Change: the
+return-true + diagnostic in `ts_renderer_client.cc IsPluginHandledExternally`
+(no new deps).
+
+- **`IsPluginHandledExternally` is never invoked for the PDF plugin mime.** The
+  `[issue-790-exp4] is-plugin-handled-externally` log never fired. Blink only
+  calls `IsPluginHandledExternally` when the object's content type is
+  `kExternalPlugin` (`html_plugin_element.cc`); the internal PDF plugin
+  (`application/x-google-chrome-pdf`, `PLUGIN_TYPE_BROWSER_INTERNAL_PLUGIN`) is
+  treated as an **in-process** plugin, so Blink goes straight to
+  `OverrideCreatePlugin` and instantiates it in the extension viewer frame.
+- **Crash unchanged.** `Check failed: IsPdfRenderer()` still fires;
+  `plugin-context` still shows in-frame creation; `host_is_pdf=false`.
+- **No regression.** HTML/binary smokes unaffected (the change only adds a
+  return path that is never reached without the external object type).
+
+#### Conclusion
+
+The minimal renderer-only routing is conclusively insufficient: the external
+object type that triggers OOPIF frame creation only exists when the plugin is
+registered/handled through the guest-view (MimeHandlerView) machinery — which is
+exactly the canonical stack the decision above approved adopting. This cheaply
+rules out the no-deps path and confirms Experiment 5 must do the real
+integration.
+
+Next layer (Experiment 5): the full canonical OOPIF PDF adoption — add
+`//chrome/browser/pdf` + the guest-view renderer/browser deps, register the PDF
+internal plugin so its object type is external (guest-view handled), drive
+`PdfViewerStreamManager` with a content-shell-safe `PdfStreamDelegate`, swap out
+the custom throttle/interceptor, and rewire the `chrome://resources`/Mojo gates
+onto canonical PDF-frame identity (all per the Experiment 4 design's Changes,
+now executed as Experiment 5). Expect this to be large and possibly itself
+iterative; the most likely first outcome is identifying the content-shell
+extensions/guest-view wiring `PdfViewerStreamManager` still needs.

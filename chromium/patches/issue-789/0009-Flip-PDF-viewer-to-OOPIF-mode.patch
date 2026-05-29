@@ -1,7 +1,7 @@
 From 581891135ffa507872fe272ac1c0f83854d6b664 Mon Sep 17 00:00:00 2001
 From: "Ryan X. Charles" <ryan@ryanxcharles.com>
 Date: Thu, 28 May 2026 20:23:07 -0500
-Subject: [PATCH 9/9] Flip PDF viewer to OOPIF mode
+Subject: [PATCH 09/10] Flip PDF viewer to OOPIF mode
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
