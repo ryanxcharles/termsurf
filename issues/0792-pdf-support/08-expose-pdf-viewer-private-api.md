@@ -378,3 +378,115 @@ The experiment fails if:
 - direct PDF navigation regresses from the unchanged content_shell download path
   into a crash, hang, or renderer IPC failure;
 - the build cannot complete.
+
+## Result
+
+**Result:** Partial
+
+The branch `148.0.7778.97-issue-792-exp8` builds `libtermsurf_chromium`, loads
+the Chrome common resource pak, composes `ChromeExtensionsAPIProvider`, and
+keeps the PDF viewer's two narrow private permissions. That proved the intended
+API-provider and manifest-permission substrate can be added without breaking the
+build or the existing HTML/PDF smoke paths.
+
+Verification artifacts:
+
+- Direct PDF extension smoke: `logs/issue-792-exp8-extension-20260529-110318/`
+- Normal HTML smoke: `logs/issue-792-exp8-html-20260529-110513/`
+- Unchanged PDF navigation smoke: `logs/issue-792-exp8-pdf-20260529-110523/`
+
+Build:
+
+```text
+autoninja -C out/Default libtermsurf_chromium
+Build Succeeded: 14 steps
+```
+
+Required Experiment 8 evidence appeared:
+
+```text
+[issue-792-exp8] chrome-common-pak path=/Users/ryan/dev/termsurf/chromium/src/out/Default/gen/chrome/common_resources.pak found=1 loaded=1
+[issue-792-exp8] chrome-api-provider-enabled provider=ChromeExtensionsAPIProvider
+[issue-792-exp8] pdf-permissions-kept values=pdfViewerPrivate,resourcesPrivate
+[issue-792-exp8] pdf-permissions-stripped values=chrome://resources/,chrome://webui-test/,contentSettings,metricsPrivate,tabs,fileSystem.write
+```
+
+Experiment 7's resource-serving evidence also still appeared in the direct
+extension smoke:
+
+```text
+[issue-792-exp7] chrome-resources-grant extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai process_id=5
+[issue-792-exp7] chrome-resources-factory extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai process_id=5 frame_id=1
+```
+
+However, the direct extension smoke did **not** advance past the previous
+blocker:
+
+```text
+Uncaught TypeError: Cannot read properties of undefined (reading 'SaveRequestType')
+source: chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf_viewer_wrapper.js
+```
+
+No `[issue-792-exp8] schema-request name=pdfViewerPrivate ...` line appeared.
+That means the renderer binding system never tried to fetch the
+`pdfViewerPrivate` schema, even though the pak was loaded, the provider was
+present, and the manifest kept the permission.
+
+The regression smokes were acceptable:
+
+- Normal HTML reached `UrlChanged`, `TitleChanged`, and `LoadingState`.
+- Direct PDF navigation still followed the unchanged content_shell download path
+  and did not hang before artifact capture.
+
+The known teardown `SEGV_ACCERR` recurred after screenshot/log capture. This is
+the same residual automation cleanup crash seen in prior PDF experiments and did
+not block evidence collection.
+
+Bookkeeping status before final commit:
+
+- Chromium branch: `148.0.7778.97-issue-792-exp8`
+- Chromium build: passed
+- Main issue README status: updated to `Partial`
+- Patch archive: regenerated in `chromium/patches/issue-792/`
+- `chromium/README.md`: updated to current branch
+
+## Conclusion
+
+Experiment 8 ruled out the next obvious wrong layer. The missing
+`SaveRequestType` is not simply because TermSurf lacked Chrome's generated
+schemas, Chrome's API feature JSON pak, or the PDF viewer's private permissions.
+Those are now wired.
+
+The next break is somewhere between "Chrome API provider is present" and
+"renderer binding system asks for the `pdfViewerPrivate` schema." Renderer
+activation is the leading hypothesis because Experiment 6 inserted the PDF
+extension into the browser-side `ProcessMap`, but the renderer may still not
+activate that extension before the PDF viewer script context is created. If the
+renderer context is classified as an unprivileged extension context instead of
+`privileged_extension`, APIs gated to `"contexts": ["privileged_extension"]`
+will not be exposed, and the binding system will never ask for the
+`pdfViewerPrivate` schema.
+
+That is plausible, but not yet proven. Other gates could still explain the same
+symptom: Chrome API feature JSON could load but not parse into the feature map,
+the PDF extension might not be broadcast to the renderer, the renderer might
+receive but not activate it, the script context might be classified incorrectly,
+or `pdfViewerPrivate` might fail an extension-type, manifest-version, location,
+or allowlist gate.
+
+The next experiment should therefore diagnose the full chain before fixing one
+link. It should add targeted logs for:
+
+- Chrome API feature JSON parse / feature count;
+- browser-side PDF extension load broadcast;
+- browser-side `RendererStartupHelper::ActivateExtensionInProcess()`;
+- renderer-side extension load and activation receipt;
+- PDF viewer script-context classification;
+- `pdfViewerPrivate` feature availability result and reason.
+
+After that diagnostic identifies the first broken gate, the experiment should
+fix only that gate and re-run the direct extension smoke. Success for the next
+slice means `schema-request name=pdfViewerPrivate found=1` appears and the
+`SaveRequestType` error disappears. The next blocker after that may be a missing
+browser-side implementation of `chrome.resourcesPrivate.*`,
+`chrome.pdfViewerPrivate.*`, or `chrome.metricsPrivate.*`.
