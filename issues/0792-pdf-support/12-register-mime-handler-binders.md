@@ -307,3 +307,99 @@ The experiment fails if:
 - ordinary HTML pages crash, hang, or lose normal lifecycle messages;
 - direct PDF navigation regresses into a crash, hang, or renderer IPC failure;
 - the build cannot complete.
+
+## Result
+
+**Result:** Partial
+
+Experiment 12 built and registered both MIME-handler browser-side binders, but
+the direct PDF extension smoke stopped at a newly exposed binder gate before
+`GetStreamInfo()` could run.
+
+Build:
+
+```text
+autoninja -C out/Default libtermsurf_chromium
+Build Succeeded: 3 steps
+```
+
+Direct PDF extension smoke:
+
+```text
+logs/issue-792-exp12-extension-20260529-121137/
+```
+
+Experiment 9 activation and API availability remained intact:
+
+```text
+[issue-792-exp9] renderer-activate-extension extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai active=1
+[issue-792-exp9] pdf-script-context url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html context=BLESSED_EXTENSION effective_context=BLESSED_EXTENSION has_extension=1 active=1 is_webview=0 pdfViewerPrivate_available=1 result=0 message=
+[issue-792-exp8] schema-request name=pdfViewerPrivate found=1
+```
+
+Experiment 10's help-bubble binder remained intact:
+
+```text
+[issue-792-exp10] pdf-help-bubble-binder frame_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html site_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/
+[issue-792-exp10] pdf-help-bubble-create-handler frame_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html site_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/
+```
+
+Experiment 11's renderer resource pack remained loaded:
+
+```text
+[issue-792-exp11] extensions-renderer-pak path=/Users/ryan/dev/termsurf/chromium/src/out/Default/gen/extensions/extensions_renderer_resources.pak found=1 loaded=1 mimeHandlerPrivate_bytes=3766 mime_handler_mojom_bytes=27053
+```
+
+The new Experiment 12 binders fired:
+
+```text
+[issue-792-exp12] mime-handler-service-binder frame_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html site_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/
+[issue-792-exp12] before-unload-control-binder frame_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html site_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/
+```
+
+The previous missing `MimeHandlerService` bad-Mojo kill did not recur. The next
+gate is now `extensions.KeepAlive`:
+
+```text
+Terminating render process for bad Mojo message: Received bad user message: No binder found for interface extensions.KeepAlive for the frame/document scope
+```
+
+Because the renderer died at `extensions.KeepAlive`, the expected diagnostic
+line did not appear:
+
+```text
+[issue-792-exp12] mime-handler-get-stream-info ... stream_info=null
+```
+
+`pdf-host-binder` also still did not fire. The viewer is not yet far enough
+through startup to create the PDF plugin host path.
+
+Regression checks:
+
+- `logs/issue-792-exp12-html-20260529-121206/`: normal HTML reached
+  `UrlChanged`, `TitleChanged`, and `LoadingState`.
+- `logs/issue-792-exp12-pdf-20260529-121220/`: direct PDF navigation still
+  followed the content_shell download path via
+  `ShellDownloadManagerDelegate::ChooseDownloadPath`.
+
+The known teardown `SEGV_ACCERR` after artifact capture still recurred. It did
+not prevent the required artifacts from being captured.
+
+Bookkeeping status: Chromium branch commit, patch archive refresh,
+`chromium/README.md` branch row, and main-repo commit are deferred until Claude
+after-review accepts this result.
+
+## Conclusion
+
+The MIME-handler binder gate is solved. The PDF viewer can now request both
+`extensions.mime_handler.MimeHandlerService` and
+`extensions.mime_handler.BeforeUnloadControl` without triggering the previous
+bad-Mojo termination.
+
+The next missing layer is the frame-scoped `extensions.KeepAlive` binder used by
+extension API promise plumbing. Experiment 13 should follow the Chromium and
+Electron extension binder patterns for `extensions.KeepAlive`, but should stay
+narrow: register only the required keepalive binder, keep the PDF-extension gate
+discipline, and do not implement stream handoff, guest-view,
+`PdfViewerStreamManager`, or PDF renderer process-model changes until the viewer
+reaches `GetStreamInfo()`.

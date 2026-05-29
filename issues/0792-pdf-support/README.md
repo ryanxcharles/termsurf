@@ -197,4 +197,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
 - [Experiment 11: Load extension renderer resources](11-load-extension-renderer-resources.md)
   — **Pass**
 - [Experiment 12: Register MIME-handler binders](12-register-mime-handler-binders.md)
-  — **Designed**
+  — **Partial** (MIME-handler binders registered; next gate is
+  `extensions.KeepAlive`)
