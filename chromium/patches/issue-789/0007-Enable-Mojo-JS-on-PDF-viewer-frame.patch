@@ -1,7 +1,7 @@
 From 5d3d9dfee75efd1163150705818d735cad837525 Mon Sep 17 00:00:00 2001
 From: "Ryan X. Charles" <ryan@ryanxcharles.com>
 Date: Thu, 28 May 2026 19:51:12 -0500
-Subject: [PATCH 7/7] Enable Mojo JS on PDF viewer frame
+Subject: [PATCH 7/8] Enable Mojo JS on PDF viewer frame
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

@@ -513,3 +513,66 @@ rendering. Name the exact next failure and whether it is an OOPIF-attach gap.
 - Normal HTML or non-PDF binary behavior regresses.
 - The crash persists despite `IsOopifPdfEnabled()` being true (mechanism wrong;
   re-investigate where `is_pdf` is lost).
+
+#### Result
+
+**Result:** Partial
+
+The diagnostic disproved the experiment's own hypothesis — OOPIF PDF is
+**already enabled** — and pinpointed the real blocker: the viewer is running in
+non-OOPIF mode despite the feature being on.
+
+Chromium branch `148.0.7778.97-issue-790-exp2` (from `-exp1`). Change: a
+diagnostic log in `TsBrowserClient::CreateThrottlesForNavigation`
+(`ts_browser_client.cc`) recording `IsOopifPdfEnabled()` and
+`FeatureList::IsEnabled(kPdfOopif)`. No functional change (log only, inside the
+existing `HasStreams` PDF branch), so no regression possible.
+
+Findings:
+
+- **OOPIF is already on.** `[issue-790-exp2] oopif-state combined=1 feature=1`.
+  Verified in source: `kPdfOopif` is `ENABLED_BY_DEFAULT` on non-ChromeOS
+  (`pdf/pdf_features.cc:30`), and `g_is_oopif_pdf_policy_enabled` defaults to
+  `true` (`pdf/pdf_features.cc:15`), so `IsOopifPdfEnabled()` is true with no
+  action. The Exp 2 premise (turn the feature on) was wrong.
+- **But the process is still not designated.** All renderers remain
+  `host_is_pdf=false has_pdf_renderer=false`, and the
+  `Check failed: IsPdfRenderer()` crash is unchanged.
+- **Root cause reframed.** The Exp 1 `plugin-context` log shows the internal
+  plugin being created in the **PDF extension viewer frame itself**
+  (`frame_origin=chrome-extension://…mhjfbmdgcf…`,
+  `parent_origin=http://localhost`), not in a separate PDF content OOPIF. That
+  is the **non-OOPIF** plugin-creation path. Combined with the Issue 789
+  `viewer-template pdf_oopif_enabled=absent` (the served viewer HTML lacks the
+  `pdfOopifEnabled` flag), the conclusion is: even though the Chromium _feature_
+  is on, the **viewer JS runs in non-OOPIF mode** because TermSurf serves the
+  PDF viewer resources without injecting the `pdfOopifEnabled` loadTimeData that
+  Chrome's PDF WebUI normally provides. So the viewer never creates the separate
+  PDF content frame that the `PdfNavigationThrottle` would mark `is_pdf` (and
+  that would get a `--pdf-renderer` process); instead it makes the plugin
+  in-frame and crashes the `IsPdfRenderer()` CHECK.
+- **Pivot understood (Codex's warning realized).** The mismatch Codex flagged —
+  Issue 789's non-OOPIF `mimeHandlerPrivate` attach vs. the OOPIF process model
+  — is exactly what bites here. The fix is not a feature flip; it is making the
+  viewer actually run in OOPIF mode.
+
+#### Conclusion
+
+Experiment 2 was a cheap, high-value probe: one log line eliminated the "enable
+the feature" dead-end and converted a vague "process model" problem into a
+specific one — **the viewer runs non-OOPIF, so no PDF content process is ever
+created.** The internal-plugin `IsPdfRenderer()` CHECK is fundamentally part of
+the OOPIF process model, so the viewer must take the OOPIF path for the plugin
+to live in a PDF-designated process.
+
+Next layer (Experiment 3): make the PDF viewer run in OOPIF mode — inject the
+`pdfOopifEnabled` loadTimeData (and any companion flags Chrome's PDF WebUI sets)
+into the viewer HTML TermSurf serves, so the viewer JS takes the OOPIF
+content-frame path: it creates a child PDF content frame that navigates to the
+stream, `PdfNavigationThrottle::WillStartRequest` marks that navigation
+`is_pdf=true`, the content frame gets a `--pdf-renderer` process, and
+`CreateInternalPlugin` runs there with `IsPdfRenderer()` satisfied. Research
+must confirm where the viewer reads `pdfOopifEnabled` and where TermSurf serves
+the viewer template (`ts_pdf_viewer_url_loader_factory.cc` /
+`ts_pdf_component_extension_resource_manager.cc`), and whether the OOPIF attach
+needs the Issue 789 `mimeHandlerPrivate` hooks adjusted.
