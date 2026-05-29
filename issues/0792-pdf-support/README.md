@@ -207,3 +207,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
 - [Experiment 15: Start the MIME-handler attach path](15-start-mime-handler-attach-path.md)
   — **Partial** (attach helper starts, but it is too late to claim the PDF
   stream)
+- [Experiment 16: Trace PDF stream claim lifecycle](16-trace-pdf-stream-claim-lifecycle.md)
+  — **Designed**
