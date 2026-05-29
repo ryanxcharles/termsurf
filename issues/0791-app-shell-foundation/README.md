@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-29"
+closed = "2026-05-29"
 +++
 
 # Issue 791: Evaluate re-basing TermSurf's Chromium embedder on app_shell
