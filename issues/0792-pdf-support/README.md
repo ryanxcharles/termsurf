@@ -217,3 +217,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   claim)
 - [Experiment 19: Trace wrapper-to-extension startup](19-trace-wrapper-extension-startup.md)
   — **Pass**
+- [Experiment 20: Load components resource pak](20-load-components-resource-pak.md)
+  — **Designed**
