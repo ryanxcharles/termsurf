@@ -277,8 +277,83 @@ before any next experiment is designed.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Chromium branch: `148.0.7778.97-issue-792-exp19`
+
+Build:
+
+```bash
+cd chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default libtermsurf_chromium
+```
+
+The build passed in 5 steps.
+
+PDF smoke log:
+
+```text
+logs/issue-792-exp19-pdf-20260529-145032
+```
+
+The PDF run preserved the Experiment 17/18 success chain through download
+suppression and stream claim:
+
+```text
+[issue-792-exp17] navigation-download-classification ... is_download=0
+[issue-792-exp16] pvs-claim frame_tree_node_id=1 claimed=1 original_url=http://127.0.0.1:9787/bitcoin.pdf
+```
+
+Experiment 19 then found the first missing transition:
+
+```text
+[issue-792-exp19] wrapper-payload frame_tree_node_id=1 internal_id=C6E28BE60AAB7E159B240EF68348DF05 bytes=0 has_template=0 has_iframe=0 has_embed=0 has_about_blank=0 has_internal_id=0 has_pdf_extension_url=0
+```
+
+The wrapper payload is empty. That means Chromium never serves
+`components/pdf/resources/pdf_embedder.html` into the intercepted PDF response,
+so the wrapper cannot create the expected child `about:blank` iframe. With no
+iframe, `PdfViewerStreamManager::DidFinishNavigation()` has no child navigation
+to observe and cannot call `NavigateToPdfExtensionUrl(...)`.
+
+The later lifecycle logs are consistent with that diagnosis:
+
+```text
+[issue-792-exp19] pvs-finish frame_tree_node_id=1 url=http://127.0.0.1:9787/bitcoin.pdf has_committed=1 is_error_page=0 is_pdf=0 has_parent=0 parent_frame_tree_node_id=none stream_count=1
+[issue-792-exp19] pvs-finish-no-parent frame_tree_node_id=1 url=http://127.0.0.1:9787/bitcoin.pdf
+```
+
+Only the top-level wrapper navigation finishes. No child `about:blank` frame
+appears, no `pdf-extension-about-blank` log appears, no `pdf-extension-navigate`
+log appears, and no stream-info API is requested.
+
+HTML smoke log:
+
+```text
+logs/issue-792-exp19-html-20260529-145106
+```
+
+The HTML smoke emitted no `wrapper-payload`, `pvs-claim`,
+`plugin-response-intercept`, `navigation-download-classification`, or other
+Experiment 19 PDF transition logs.
 
 ## Conclusion
 
-Pending implementation.
+Experiment 19 proved the current blocker precisely: the OOPIF PDF wrapper body
+is empty because `IDR_PDF_EMBEDDER_HTML` is not available from the resource paks
+TermSurf loads.
+
+The source audit in the design explains why:
+
+- `IDR_PDF_EMBEDDER_HTML` comes from `components/resources/pdf_resources.grdp`;
+- that resource is aggregated into `components_resources.pak`;
+- TermSurf currently loads `pdf_resources.pak`, `common_resources.pak`, and
+  `extensions_renderer_resources.pak`;
+- TermSurf does not load `components_resources.pak`.
+
+The next experiment should load `components_resources.pak` in TermSurf's PDF
+resource-bundle setup, verify
+`wrapper-payload bytes>0 has_template=1 has_iframe=1 has_about_blank=1 has_internal_id=1 has_pdf_extension_url=1`,
+and then re-check whether the child `about:blank` frame advances to
+`pdf-extension-navigate`.

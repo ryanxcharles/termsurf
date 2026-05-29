@@ -216,4 +216,4 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   — **Partial** (viewer never requests either stream-info API after stream
   claim)
 - [Experiment 19: Trace wrapper-to-extension startup](19-trace-wrapper-extension-startup.md)
-  — **Designed**
+  — **Pass**
