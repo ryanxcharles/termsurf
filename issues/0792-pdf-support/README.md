@@ -194,3 +194,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
 - [Experiment 10: Register PDF viewer Mojo binders](10-register-pdf-viewer-binders.md)
   — **Partial** (help-bubble binder fixed; `mimeHandlerPrivate` module resource
   missing)
+- [Experiment 11: Load extension renderer resources](11-load-extension-renderer-resources.md)
+  — **Designed**
