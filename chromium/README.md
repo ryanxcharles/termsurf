@@ -14,13 +14,13 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `148.0.7778.97-issue-792-exp28`
+- Branch: `148.0.7778.97-issue-793-exp1`
 - Base version: `148.0.7778.97` (tracking Electron's Chromium version)
 
 > **Note:** The `…-issue-789-exp*` and `…-issue-790-exp*` branches are
 > experimental inline-PDF work, **parked** (Issue 790 Exp 7). They are preserved
 > as history. The current active/buildable inline-PDF foundation branch is
-> `148.0.7778.97-issue-792-exp28`, forked from the protected
+> `148.0.7778.97-issue-793-exp1`, forked from the protected
 > `148.0.7778.97-issue-784` baseline. See
 > [Issue 792](../issues/0792-pdf-support/README.md).
 
@@ -126,6 +126,7 @@ find the most relevant recent branch, create a new branch from it
 | `148.0.7778.97-issue-792-exp26` | [Issue 792](../issues/0792-pdf-support/README.md)                | Route internal PDF plugin gate              |
 | `148.0.7778.97-issue-792-exp27` | [Issue 792](../issues/0792-pdf-support/README.md)                | Externalize internal PDF plugin embeds      |
 | `148.0.7778.97-issue-792-exp28` | [Issue 792](../issues/0792-pdf-support/README.md)                | Load PDF localized strings                  |
+| `148.0.7778.97-issue-793-exp1`  | [Issue 793](../issues/0793-pdf-iframe-size/README.md)            | Restore PDF embedder CSS access             |
 | `148.0.7778.97-issue-781`       | [Issue 781](../issues/0781-chromium-upgrade/README.md)           | Chromium 148 migration                      |
 | `148.0.7778.97-issue-780`       | [Issue 780](../issues/0780-link-drag-freeze/README.md)           | Suppress native link drag in Roamium        |
 | `148.0.7778.97-issue-778`       | [Issue 778](../issues/0778-back-nav-title-stale/README.md)       | Re-emit titles on navigation commit         |
@@ -180,8 +181,8 @@ git am ../../chromium/patches/issue-{N}/*.patch
 For the current TermSurf Chromium branch, use:
 
 ```bash
-git checkout -b 148.0.7778.97-issue-792-exp28 148.0.7778.97
-git am ../../chromium/patches/issue-792/*.patch
+git checkout -b 148.0.7778.97-issue-793-exp1 148.0.7778.97
+git am ../../chromium/patches/issue-793/*.patch
 ```
 
 ### Generating patches

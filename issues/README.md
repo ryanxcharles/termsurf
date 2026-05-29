@@ -10,6 +10,7 @@
 
 | #                                                       | Title                                                                         | Opened     | Closed     |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
+| [0793](0793-pdf-iframe-size/README.md)                  | PDF viewer iframe renders at default size                                     | 2026-05-29 | 2026-05-29 |
 | [0792](0792-pdf-support/README.md)                      | Inline PDF support via a separable extensions browser system                  | 2026-05-29 | 2026-05-29 |
 | [0791](0791-app-shell-foundation/README.md)             | Evaluate re-basing TermSurf's Chromium embedder on app_shell                  | 2026-05-29 | 2026-05-29 |
 | [0790](0790-pdf-viewer-mojo-bindings/README.md)         | Expose Mojo JS Bindings to the PDF Viewer Frame                               | 2026-05-28 | 2026-05-29 |
