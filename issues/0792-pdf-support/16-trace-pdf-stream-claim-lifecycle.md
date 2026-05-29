@@ -339,3 +339,97 @@ before any next experiment is designed.
 
 8. Ask Claude to review the implementation, verification artifacts, and result
    language. Fix real issues before proceeding to Experiment 17.
+
+## Result
+
+**Result:** Partial
+
+The branch builds:
+
+```bash
+cd chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default libtermsurf_chromium
+```
+
+Result: `Build Succeeded: 3 steps`.
+
+PDF smoke artifact:
+
+```text
+logs/issue-792-exp16-pdf-20260529-134725
+```
+
+The ordered lifecycle is decisive:
+
+```text
+[issue-792-exp14] navigation-throttles frame_tree_node_id=1 url=http://127.0.0.1:9787/bitcoin.pdf pdf_throttle=1 iframe_throttle=0
+[issue-792-exp14] pdf-request-interceptor frame_tree_node_id=1 created=1
+[issue-792-exp14] pdf-get-stream-info frame_url= has_stream=0
+[issue-792-exp14] url-loader-throttle destination=3 frame_tree_node_id=1 plugin_interceptor=1
+[issue-792-exp14] plugin-response-intercept mime_type=application/pdf extension_id=mhjfbmdgcfjbbpaeojofohoefgiehjai frame_tree_node_id=1
+[issue-792-exp16] oopif-template-body frame_tree_node_id=1 internal_id=2A4FCB8529D4A4841D15E73C501E5114 original_url=http://127.0.0.1:9787/bitcoin.pdf
+[issue-792-exp16] interceptor-template-created frame_tree_node_id=1 internal_id=2A4FCB8529D4A4841D15E73C501E5114
+[issue-792-exp16] interceptor-response-swapped frame_tree_node_id=1
+[issue-792-exp16] interceptor-manager-created frame_tree_node_id=1
+[issue-792-exp16] pvs-add frame_tree_node_id=1 internal_id=2A4FCB8529D4A4841D15E73C501E5114 original_url=http://127.0.0.1:9787/bitcoin.pdf handler_url=chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html count_before=0 count_after=1 replacing_unclaimed=0
+[issue-792-exp16] interceptor-stream-added frame_tree_node_id=1 internal_id=2A4FCB8529D4A4841D15E73C501E5114
+[issue-792-exp16] interceptor-resume frame_tree_node_id=1
+ShellDownloadManagerDelegate::ChooseDownloadPath(...)
+```
+
+The single-resume invariant passed:
+
+```bash
+rg --no-filename -c 'interceptor-resume' logs/issue-792-exp16-pdf-20260529-134725 | awk '{sum += $1} END {print sum + 0}'
+```
+
+Result: `1`.
+
+The crucial missing logs are:
+
+```text
+[issue-792-exp16] pvs-start ...
+[issue-792-exp16] pvs-ready ...
+[issue-792-exp16] pvs-claim ...
+```
+
+That means `PdfViewerStreamManager` is created and receives the unclaimed
+stream, but the wrapper response never reaches the manager's navigation observer
+lifecycle. The main-frame load is classified as a download immediately after the
+response interceptor resumes the deferred load, so the synthetic wrapper
+document never starts/commits as a normal navigation that
+`PdfViewerStreamManager` can claim.
+
+HTML smoke artifact:
+
+```text
+logs/issue-792-exp16-html-20260529-134750
+```
+
+Ordinary HTML still loaded. The HTML smoke produced no Experiment 16 PDF
+interceptor, stream-manager, or download-delegate logs.
+
+## Conclusion
+
+Experiment 16 identifies the real next gate: `content_shell`'s download
+classification. TermSurf's response interceptor successfully swaps in the OOPIF
+PDF wrapper body, creates `PdfViewerStreamManager`, and adds the unclaimed PDF
+stream. But after `delegate_->Resume()`, `content_shell` still treats the
+main-frame `application/pdf` navigation as a download and sends it to
+`ShellDownloadManagerDelegate::ChooseDownloadPath(...)` before the wrapper
+navigation reaches `PdfViewerStreamManager::DidStartNavigation()` or
+`ReadyToCommitNavigation()`.
+
+The issue is not a missing `MimeHandlerView` attach path, and it is not a
+frame-tree-node mismatch inside `PdfViewerStreamManager`. The manager never gets
+the chance to compare frame tree node ids because the navigation is converted to
+a download before the wrapper document starts committing.
+
+Experiment 17 should target the browser-client download decision. It should
+identify the content-shell hook that classifies `application/pdf` main-frame
+navigations as downloads after the response interceptor has claimed the
+response, then suppress that download only when TermSurf's PDF stream path has
+successfully created the wrapper body and registered the unclaimed stream for
+the navigating frame. The fix must not disable ordinary downloads, non-PDF
+downloads, or PDFs that fail the stream-interceptor path.

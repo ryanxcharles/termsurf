@@ -208,4 +208,5 @@ stream/extension portion and should be mined rather than rebuilt from scratch.
   — **Partial** (attach helper starts, but it is too late to claim the PDF
   stream)
 - [Experiment 16: Trace PDF stream claim lifecycle](16-trace-pdf-stream-claim-lifecycle.md)
-  — **Designed**
+  — **Partial** (content_shell downloads the PDF before the wrapper navigation
+  reaches `PdfViewerStreamManager`)
