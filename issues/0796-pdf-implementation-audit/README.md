@@ -158,6 +158,7 @@ it to the `## Experiments` index.
   **Pass**
 - [Experiment 3: Security audit](03-security-audit.md) — **Pass**
 - [Experiment 4: Security cleanup](04-security-cleanup.md) — **Pass**
+- [Experiment 5: Completeness audit](05-completeness-audit.md) — **Designed**
 
 ## Experiment Rules
 
