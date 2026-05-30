@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-30"
+closed = "2026-05-30"
 +++
 
 # Issue 796: PDF Implementation Audit
@@ -159,8 +160,7 @@ it to the `## Experiments` index.
 - [Experiment 3: Security audit](03-security-audit.md) — **Pass**
 - [Experiment 4: Security cleanup](04-security-cleanup.md) — **Pass**
 - [Experiment 5: Completeness audit](05-completeness-audit.md) — **Pass**
-- [Experiment 6: Completeness cleanup](06-completeness-cleanup.md) —
-  **Designed**
+- [Experiment 6: Completeness cleanup](06-completeness-cleanup.md) — **Pass**
 
 ## Experiment Rules
 
@@ -197,3 +197,26 @@ Every experiment in this issue must follow these process rules:
   documents why they are obsolete.
 - Do not combine audit and cleanup in one experiment. The audit result must
   drive the cleanup design.
+
+## Conclusion
+
+Issue 796 completed all three required audit tracks.
+
+The organization track split the PDF implementation into clearer helper files,
+stabilized diagnostic labels, and kept behavior unchanged. The security track
+hardened the PDF extension boundary: TermSurf now limits extension process
+policy and PDF private APIs to Chromium's fixed PDF component extension, records
+the process-scoped `chrome://resources` grant invariant, and avoids crashing on
+PDF wrapper data-pipe failures. The completeness track made the current
+non-print viewer boundary explicit: core rendering, scroll, resize, selection,
+copy, save/download, title propagation, current toolbar events, security, and
+normal HTML smoke are covered by automation.
+
+Native PDF printing remains intentionally out of scope in Issue 795. Remaining
+non-print workflow coverage is tracked by concrete follow-up issues:
+
+- Issue 797: PDF Core Workflow Coverage;
+- Issue 798: PDF Advanced Features.
+
+The audited PDF implementation is now organized, hardened, and honestly scoped
+for the current non-print viewer. No further work remains in this audit issue.

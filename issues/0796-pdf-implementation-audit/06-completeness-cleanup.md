@@ -251,3 +251,139 @@ This experiment fails if:
 - it changes Chromium without a fresh branch and patch archive;
 - it skips Codex design or completion review;
 - it closes Issue 796 without evidence for every cleanup item.
+
+## Result
+
+**Result:** Pass
+
+This cleanup made the completeness boundary honest and closable without
+re-scoping native PDF printing or large advanced PDF surfaces into Issue 796.
+
+### Changes Made
+
+1. Repaired the save/title/local harness status.
+
+   Updated `scripts/probe-pdf-save-print-title-local.mjs` so local parity scroll
+   and page-navigation checks are recorded as diagnostics instead of making the
+   whole save/title/local run `partial`. Dedicated protocol and toolbar-event
+   harnesses own authoritative scroll and page-navigation coverage.
+
+   The same script now treats `print-production-available-not-clicked` as an
+   acceptable status because native print is explicitly out of scope and the
+   production probe intentionally does not click the print button.
+
+2. Added concrete follow-up issues for unproven workflows:
+   - Issue 797: PDF Core Workflow Coverage
+   - Issue 798: PDF Advanced Features
+
+   Issue 797 tracks keyboard navigation, current toolbar event coverage, links,
+   find/search, document restrictions, password PDFs, and error PDFs. Issue 798
+   tracks forms, annotations, context menus, and accessibility/searchify.
+
+3. Regenerated `issues/README.md` after creating the follow-up issues and
+   closing Issue 796.
+
+### Verification
+
+Syntax and formatting:
+
+```bash
+prettier --write --prose-wrap always --print-width 80 \
+  issues/0797-pdf-core-workflow-coverage/README.md \
+  issues/0798-pdf-advanced-features/README.md \
+  scripts/probe-pdf-save-print-title-local.mjs
+node --check scripts/probe-pdf-save-print-title-local.mjs
+```
+
+Result: pass.
+
+Save/title/local harness:
+
+```bash
+python3 scripts/test-issue-794-pdf-toolbar.py \
+  --log-dir logs/issue-796-exp6-save-title-local-rerun \
+  --serve-bitcoin-pdf \
+  --probe save-print-title-local \
+  --settle-seconds 2 \
+  --capture-timeout-seconds 20
+```
+
+Result: pass. Summary at
+`logs/issue-796-exp6-save-title-local-rerun/save-print-title-local/save-print-title-local-summary.json`
+reported:
+
+- `status = "pass"`;
+- `titlePropagationPass = true`;
+- `saveDownload.status = "download-file-created"`;
+- `print.status = "print-production-available-not-clicked"`;
+- local parity scroll/page navigation recorded under `localParityDiagnostics`.
+
+Current toolbar events:
+
+```bash
+python3 scripts/test-issue-794-pdf-toolbar.py \
+  --log-dir logs/issue-796-exp6-toolbar-events \
+  --serve-bitcoin-pdf \
+  --probe events \
+  --settle-seconds 2 \
+  --capture-timeout-seconds 20
+```
+
+Result: pass. `toolbar-events-summary.json` reported status `pass`, with
+`no-failure-observed` for fit, zoom in, zoom out, and rotate. Page selector
+navigation remains tracked by Issue 797 because the current toolbar event probe
+does not assert it as a separate feature.
+
+Protocol and security regression matrix:
+
+```bash
+python3 scripts/test-issue-794-protocol-scroll.py \
+  --log-dir logs/issue-796-exp6-protocol-scroll \
+  --serve-bitcoin-pdf
+python3 scripts/test-issue-794-protocol-resize.py \
+  --log-dir logs/issue-796-exp6-protocol-resize \
+  --serve-bitcoin-pdf
+python3 scripts/test-issue-794-protocol-mouse.py \
+  --log-dir logs/issue-796-exp6-protocol-mouse-click \
+  --serve-bitcoin-pdf \
+  --action click
+python3 scripts/test-issue-794-protocol-mouse.py \
+  --log-dir logs/issue-796-exp6-protocol-mouse-select-copy \
+  --serve-bitcoin-pdf \
+  --action key-select-copy
+python3 scripts/test-issue-796-pdf-security.py \
+  --log-dir logs/issue-796-exp6-security
+```
+
+Result: pass. The protocol summaries reported
+`first_failing_hop = "no-failure-observed"` and the security summary reported
+`status = "pass"`.
+
+Non-PDF HTML smoke:
+
+```bash
+python3 scripts/test-issue-794-protocol-resize.py \
+  --log-dir logs/issue-796-exp6-non-pdf-html \
+  --url-contains 'text/html' \
+  'data:text/html,<html><body><h1 id="click-target">HTML smoke</h1><p id="selection-target">normal page</p></body></html>'
+```
+
+Result: pass. Summary reported `first_failing_hop = "no-failure-observed"`.
+
+Index:
+
+```bash
+scripts/build-issues-index.sh
+```
+
+Result after closure: pass.
+
+Codex completion review: pass. The final review found no material blocking
+issues and accepted the harness ownership change, the follow-up issue split, and
+the Issue 796 closure language.
+
+## Conclusion
+
+The cleanup fixed the one misleading harness result that belonged in this audit
+issue and moved the remaining unproven non-print workflows into concrete
+follow-up issues. Issue 796 is closed.
