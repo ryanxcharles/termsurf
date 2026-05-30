@@ -14,7 +14,7 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `148.0.7778.97-issue-794-exp20`
+- Branch: `148.0.7778.97-issue-796-exp2`
 - Base version: `148.0.7778.97` (tracking Electron's Chromium version)
 
 > **Note:** The `…-issue-789-exp*` and `…-issue-790-exp*` branches are
@@ -140,6 +140,7 @@ find the most relevant recent branch, create a new branch from it
 | `148.0.7778.97-issue-794-exp18` | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Probe PDF print intercept guard             |
 | `148.0.7778.97-issue-794-exp19` | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Enable PDF print control                    |
 | `148.0.7778.97-issue-794-exp20` | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Install renderer print helper               |
+| `148.0.7778.97-issue-796-exp2`  | [Issue 796](../issues/0796-pdf-implementation-audit/README.md)   | PDF organization cleanup                    |
 | `148.0.7778.97-issue-781`       | [Issue 781](../issues/0781-chromium-upgrade/README.md)           | Chromium 148 migration                      |
 | `148.0.7778.97-issue-780`       | [Issue 780](../issues/0780-link-drag-freeze/README.md)           | Suppress native link drag in Roamium        |
 | `148.0.7778.97-issue-778`       | [Issue 778](../issues/0778-back-nav-title-stale/README.md)       | Re-emit titles on navigation commit         |

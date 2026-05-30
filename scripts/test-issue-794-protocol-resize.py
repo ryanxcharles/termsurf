@@ -25,98 +25,23 @@ import time
 from dataclasses import dataclass, field as dataclass_field
 from typing import Any
 
+from termsurf_pdf_protocol_harness import (
+    bool_field,
+    create_tab_payload,
+    double_field,
+    inner_payload,
+    send_message,
+    string_field,
+    tab_ready_id,
+    varint_field,
+)
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ROAMIUM = ROOT / "chromium/src/out/Default/roamium"
 BITCOIN_PDF = ROOT / "test-html/public/bitcoin.pdf"
 CAPTURE_SCRIPT = ROOT / "scripts/capture-pdf-interactions.mjs"
 DEVTOOLS_RE = re.compile(r"DevTools listening on ws://127\.0\.0\.1:(\d+)/")
-
-
-def varint(value: int) -> bytes:
-    out = bytearray()
-    while value >= 0x80:
-        out.append((value & 0x7F) | 0x80)
-        value >>= 7
-    out.append(value)
-    return bytes(out)
-
-
-def read_varint(buf: bytes, index: int) -> tuple[int, int]:
-    shift = 0
-    value = 0
-    while index < len(buf):
-        byte = buf[index]
-        index += 1
-        value |= (byte & 0x7F) << shift
-        if not byte & 0x80:
-            return value, index
-        shift += 7
-    return 0, index
-
-
-def field(number: int, wire_type: int) -> bytes:
-    return varint((number << 3) | wire_type)
-
-
-def string_field(number: int, value: str) -> bytes:
-    data = value.encode("utf-8")
-    return field(number, 2) + varint(len(data)) + data
-
-
-def varint_field(number: int, value: int) -> bytes:
-    return field(number, 0) + varint(value)
-
-
-def bool_field(number: int, value: bool) -> bytes:
-    return field(number, 0) + varint(1 if value else 0)
-
-
-def double_field(number: int, value: float) -> bytes:
-    return field(number, 1) + struct.pack("<d", value)
-
-
-def wrap(inner_field: int, payload: bytes) -> bytes:
-    return field(inner_field, 2) + varint(len(payload)) + payload
-
-
-def send_message(conn: socket.socket, inner_field: int, payload: bytes) -> None:
-    message = wrap(inner_field, payload)
-    conn.sendall(struct.pack("<I", len(message)) + message)
-
-
-def inner_payload(payload: bytes) -> tuple[int, bytes]:
-    key, index = read_varint(payload, 0)
-    length, index = read_varint(payload, index)
-    return key >> 3, payload[index : index + length]
-
-
-def tab_ready_id(payload: bytes) -> int | None:
-    index = 0
-    while index < len(payload):
-        key, index = read_varint(payload, index)
-        field_number = key >> 3
-        wire_type = key & 7
-        if wire_type == 0:
-            value, index = read_varint(payload, index)
-            if field_number == 2:
-                return value
-        elif wire_type == 2:
-            length, index = read_varint(payload, index)
-            index += length
-        else:
-            return None
-    return None
-
-
-def create_tab_payload(url: str, width: int, height: int) -> bytes:
-    return (
-        string_field(1, url)
-        + string_field(2, "fake-pane")
-        + varint_field(3, width)
-        + varint_field(4, height)
-        + bool_field(5, False)
-    )
 
 
 def resize_payload(tab_id: int, width: int, height: int) -> bytes:
@@ -596,15 +521,15 @@ def classify(state: HarnessState, trace_file: pathlib.Path, stderr_file: pathlib
     state.roamium_trace_init = "trace-init" in trace
     state.roamium_resize_line = "resize tab_id=" in trace
     state.roamium_resize_ffi_line = "ffi=ts_set_view_size" in trace
-    state.chromium_resize_line = "[issue-794-exp8] resize-tab" in stderr
+    state.chromium_resize_line = "[termsurf-pdf-resize] resize-tab" in stderr
     state.pdf_plugin_update_geometry_line = (
-        "[issue-794-exp8] plugin-update-geometry" in stderr
+        "[termsurf-pdf-resize] plugin-update-geometry" in stderr
     )
     state.pdf_plugin_geometry_changed_line = (
-        "[issue-794-exp8] plugin-geometry-changed" in stderr
+        "[termsurf-pdf-resize] plugin-geometry-changed" in stderr
     )
     state.pdfium_plugin_size_updated_line = (
-        "[issue-794-exp8] pdfium-plugin-size-updated" in stderr
+        "[termsurf-pdf-resize] pdfium-plugin-size-updated" in stderr
     )
 
     if not state.server_register_received:

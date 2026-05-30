@@ -155,7 +155,7 @@ it to the `## Experiments` index.
 - [Experiment 1: Code organization audit](01-code-organization-audit.md) —
   **Pass**
 - [Experiment 2: Code organization cleanup](02-code-organization-cleanup.md) —
-  **Designed**
+  **Pass**
 
 ## Experiment Rules
 

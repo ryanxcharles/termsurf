@@ -369,3 +369,95 @@ This experiment fails if:
 - Chromium changes are made on an existing issue branch instead of the fresh
   Issue 796 experiment branch;
 - verification is too narrow to prove behavior was preserved.
+
+## Result
+
+**Result:** Pass
+
+The behavior-preserving cleanup was implemented on a fresh Chromium branch,
+`148.0.7778.97-issue-796-exp2`, forked from `148.0.7778.97-issue-794-exp20`. The
+Chromium branch was committed as `f9dbeb9e62722` and archived in
+`chromium/patches/issue-796-exp2/`.
+
+What changed:
+
+- Durable PDF diagnostics now use stable prefixes such as `[termsurf-pdf]`,
+  `[termsurf-pdf-input]`, `[termsurf-pdf-resize]`, `[termsurf-pdf-title]`, and
+  `[termsurf-pdf-print]` instead of historical issue/experiment labels.
+- `TsContentRendererClient` now delegates PDF-specific renderer behavior to
+  `ts_pdf_renderer_support.{h,cc}`.
+- `TsBrowserClient` now delegates PDF-specific browser behavior to
+  `ts_pdf_browser_support.{h,cc}`.
+- PDF load-time data now lives in `extensions/ts_pdf_load_time_data.{h,cc}`,
+  with adapters for both template replacements and dictionary responses.
+- The protocol scroll, resize, and mouse scripts now share protobuf/socket
+  helpers from `scripts/termsurf_pdf_protocol_harness.py` while preserving the
+  old script filenames and command lines.
+
+Deferred cleanup:
+
+- A cross-target C++ trace helper shared by `content/libtermsurf_chromium`,
+  `components/pdf`, `components/printing`, and `pdf` was not forced because it
+  would require broader BUILD dependency churn than this behavior-preserving
+  cleanup needs.
+- Rust trace-helper deduplication was not done because this experiment did not
+  touch Rust code; existing Wezboard truncation behavior, Roamium append
+  behavior, and `pdf-input.log` prefixes were preserved.
+- JavaScript DevTools probe consolidation remains optional follow-up
+  organization work and is not required before the security audit.
+
+Static checks:
+
+- `rg -n "\\[issue-79[234].*pdf|\\[issue-794-exp[45678]|\\[issue-792-exp" chromium/src/content/libtermsurf_chromium chromium/src/pdf chromium/src/components/pdf chromium/src/components/printing scripts`
+  returned no matches.
+- The load-time-data string scan now finds the checked values only in
+  `ts_pdf_load_time_data.cc`.
+- `python3 -m py_compile` passed for the new shared protocol harness and the
+  migrated protocol scroll, resize, and mouse scripts.
+- `git -C chromium/src diff --check` and `git diff --check` passed.
+
+Build verification:
+
+- `autoninja -C out/Default libtermsurf_chromium` passed.
+- `./scripts/build.sh roamium` passed with the repo Rust toolchain.
+- No Rust source files were edited, so `cargo fmt` was not required.
+
+Behavior verification:
+
+- `scripts/test-issue-794-pdf-toolbar.py --log-dir logs/issue-796-exp2-toolbar --serve-bitcoin-pdf --probe toolbar`
+  passed with `toolbar_probe_status: ok`.
+- `scripts/test-issue-794-pdf-toolbar.py --log-dir logs/issue-796-exp2-title-save-local --serve-bitcoin-pdf --pdf-port 9801 --probe save-print-title-local`
+  passed. The default production print path reported
+  `print-production-available-not-clicked`, and no print intercept logs were
+  created.
+- `scripts/test-issue-794-pdf-toolbar.py --log-dir logs/issue-796-exp2-title-save-local-intercept --serve-bitcoin-pdf --pdf-port 9802 --probe save-print-title-local --enable-pdf-print-intercept`
+  passed with `print-contained-callback` and
+  `print-reaches-contained-intercept`.
+- `scripts/test-issue-794-protocol-scroll.py --log-dir logs/issue-796-exp2-scroll --serve-bitcoin-pdf --pdf-port 9811`
+  passed with `first_failing_hop: no-failure-observed`.
+- `scripts/test-issue-794-protocol-resize.py --log-dir logs/issue-796-exp2-resize --serve-bitcoin-pdf --pdf-port 9812`
+  passed with `first_failing_hop: no-failure-observed`.
+- `scripts/test-issue-794-protocol-mouse.py --log-dir logs/issue-796-exp2-mouse --serve-bitcoin-pdf --pdf-port 9813 --action drag`
+  passed with `first_failing_hop: no-failure-observed`.
+- A deterministic non-PDF smoke test against
+  `test-html/public/test-interactions.html` passed through Roamium and DevTools:
+  render, wheel scroll, keyboard scroll, click focus, drag selection, resize
+  state, toolbar probe, and title probe all reported `pass`.
+
+The toolbar summaries still report `toolbar-control-partial` as their aggregate
+inventory classification because print/download controls are intentionally
+treated as partial in the probe taxonomy. The specific required outcomes above
+matched the known good behavior.
+
+Codex reviewed the completed cleanup and agreed it is behavior-preserving and
+sufficient to proceed to the security audit.
+
+## Conclusion
+
+The code organization/readability cleanup is complete. The PDF implementation
+now has clearer browser/renderer helper boundaries, one source for PDF load-time
+data, stable diagnostic labels, and less duplicated Python protocol harness
+plumbing. The remaining deferred organization work is not a blocker for the next
+track.
+
+Next experiment: run the security audit.

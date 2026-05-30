@@ -20,6 +20,17 @@ import time
 from dataclasses import dataclass, field as dataclass_field
 from typing import Any
 
+from termsurf_pdf_protocol_harness import (
+    bool_field,
+    create_tab_payload,
+    double_field,
+    inner_payload,
+    send_message,
+    string_field,
+    tab_ready_id,
+    varint_field,
+)
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ROAMIUM = ROOT / "chromium/src/out/Default/roamium"
@@ -30,92 +41,6 @@ LEFT_BUTTON_DOWN = 64
 META_MODIFIER = 8
 VKEY_A = 65
 VKEY_C = 67
-
-
-def varint(value: int) -> bytes:
-    out = bytearray()
-    while value >= 0x80:
-        out.append((value & 0x7F) | 0x80)
-        value >>= 7
-    out.append(value)
-    return bytes(out)
-
-
-def read_varint(buf: bytes, index: int) -> tuple[int, int]:
-    shift = 0
-    value = 0
-    while index < len(buf):
-        byte = buf[index]
-        index += 1
-        value |= (byte & 0x7F) << shift
-        if not byte & 0x80:
-            return value, index
-        shift += 7
-    return 0, index
-
-
-def field(number: int, wire_type: int) -> bytes:
-    return varint((number << 3) | wire_type)
-
-
-def string_field(number: int, value: str) -> bytes:
-    data = value.encode("utf-8")
-    return field(number, 2) + varint(len(data)) + data
-
-
-def varint_field(number: int, value: int) -> bytes:
-    return field(number, 0) + varint(value)
-
-
-def bool_field(number: int, value: bool) -> bytes:
-    return field(number, 0) + varint(1 if value else 0)
-
-
-def double_field(number: int, value: float) -> bytes:
-    return field(number, 1) + struct.pack("<d", value)
-
-
-def wrap(inner_field: int, payload: bytes) -> bytes:
-    return field(inner_field, 2) + varint(len(payload)) + payload
-
-
-def send_message(conn: socket.socket, inner_field: int, payload: bytes) -> None:
-    message = wrap(inner_field, payload)
-    conn.sendall(struct.pack("<I", len(message)) + message)
-
-
-def inner_payload(payload: bytes) -> tuple[int, bytes]:
-    key, index = read_varint(payload, 0)
-    length, index = read_varint(payload, index)
-    return key >> 3, payload[index : index + length]
-
-
-def tab_ready_id(payload: bytes) -> int | None:
-    index = 0
-    while index < len(payload):
-        key, index = read_varint(payload, index)
-        field_number = key >> 3
-        wire_type = key & 7
-        if wire_type == 0:
-            value, index = read_varint(payload, index)
-            if field_number == 2:
-                return value
-        elif wire_type == 2:
-            length, index = read_varint(payload, index)
-            index += length
-        else:
-            return None
-    return None
-
-
-def create_tab_payload(url: str, width: int, height: int) -> bytes:
-    return (
-        string_field(1, url)
-        + string_field(2, "fake-pane")
-        + varint_field(3, width)
-        + varint_field(4, height)
-        + bool_field(5, False)
-    )
 
 
 def resize_payload(tab_id: int, width: int, height: int) -> bytes:
@@ -848,34 +773,34 @@ def classify(state: HarnessState, trace_file: pathlib.Path, stderr_file: pathlib
         or "ffi=ts_forward_mouse_move" in trace
         or state.roamium_key_ffi_line
     )
-    state.chromium_focus_line = "[issue-794-exp6] focus" in stderr
-    state.chromium_key_route_line = "[issue-794-exp6] key-route" in stderr
+    state.chromium_focus_line = "[termsurf-pdf-input] focus" in stderr
+    state.chromium_key_route_line = "[termsurf-pdf-input] key-route" in stderr
     state.chromium_key_focused_widget_line = "key-route route_mode=focused-widget" in stderr
     state.chromium_key_root_direct_line = "key-route route_mode=root-direct" in stderr
-    target_match = re.search(r"\[issue-794-exp6\] key-target .*classification=([^ ]+)", stderr)
+    target_match = re.search(r"\[termsurf-pdf-input\] key-target .*classification=([^ ]+)", stderr)
     if target_match:
         state.chromium_key_target_classification = target_match.group(1)
-    state.chromium_route_line = "[issue-794-exp5] mouse-route" in stderr
+    state.chromium_route_line = "[termsurf-pdf-input] mouse-route" in stderr
     state.chromium_input_router_line = "route_mode=input-router" in stderr
     state.chromium_direct_fallback_line = "route_mode=direct-fallback" in stderr
-    state.pdf_plugin_input_line = "[issue-794-exp7] plugin-input" in stderr
-    state.pdfium_mousedown_line = "[issue-794-exp7] pdfium-mouse event=left-down" in stderr
+    state.pdf_plugin_input_line = "[termsurf-pdf-input] plugin-input" in stderr
+    state.pdfium_mousedown_line = "[termsurf-pdf-input] pdfium-mouse event=left-down" in stderr
     state.pdfium_mousedown_text_area_line = bool(
         re.search(
-            r"\[issue-794-exp7\] pdfium-mouse event=left-down .*area_label=text",
+            r"\[termsurf-pdf-input\] pdfium-mouse event=left-down .*area_label=text",
             stderr,
         )
     )
     state.pdfium_mousedown_selecting_true_line = bool(
         re.search(
-            r"\[issue-794-exp7\] pdfium-mouse event=left-down .*selecting_after=(1|true)",
+            r"\[termsurf-pdf-input\] pdfium-mouse event=left-down .*selecting_after=(1|true)",
             stderr,
         )
     )
-    state.pdfium_mousemove_line = "[issue-794-exp7] pdfium-mouse event=mouse-move" in stderr
+    state.pdfium_mousemove_line = "[termsurf-pdf-input] pdfium-mouse event=mouse-move" in stderr
     state.pdfium_mousemove_extend_line = bool(
         re.search(
-            r"\[issue-794-exp7\] pdfium-mouse event=mouse-move .*outcome=extend-selection",
+            r"\[termsurf-pdf-input\] pdfium-mouse event=mouse-move .*outcome=extend-selection",
             stderr,
         )
     )
@@ -884,7 +809,7 @@ def classify(state: HarnessState, trace_file: pathlib.Path, stderr_file: pathlib
         "extend_return=1" in stderr or "extend_return=true" in stderr
     )
     state.pdfium_selection_nonempty_line = bool(
-        re.search(r"\[issue-794-exp7\] pdfium-selection-changed length=[1-9]", stderr)
+        re.search(r"\[termsurf-pdf-input\] pdfium-selection-changed length=[1-9]", stderr)
     )
 
     is_key_action = state.action == "key-select-copy"
