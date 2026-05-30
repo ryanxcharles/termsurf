@@ -170,3 +170,5 @@ and reviewed.
   — **Pass**
 - [Experiment 4: Enable contained generic downloads](04-contained-downloads.md)
   — **Pass**
+- [Experiment 5: Add protocol-mediated JavaScript dialogs](05-javascript-dialogs.md)
+  — **Designed**
