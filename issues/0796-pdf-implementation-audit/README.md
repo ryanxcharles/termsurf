@@ -152,7 +152,8 @@ it to the `## Experiments` index.
 
 ## Experiments
 
-No experiments designed yet.
+- [Experiment 1: Code organization audit](01-code-organization-audit.md) —
+  **Designed**
 
 ## Experiment Rules
 
