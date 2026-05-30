@@ -163,4 +163,4 @@ and reviewed.
 ## Experiments
 
 - [Experiment 1: Inventory and classify missing browser APIs](01-inventory-and-classify.md)
-  — **Designed**
+  — **Pass**
