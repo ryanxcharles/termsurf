@@ -137,6 +137,18 @@ pub fn handle_message(msg: &TermSurfMessage) {
         }
         Msg::Resize(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
+                trace_pdf_input(format!(
+                    "resize tab_id={} pane_id={} pixel_width={} pixel_height={} screen_x={} screen_y={} screen_width={} screen_height={} screen_scale={} ffi=ts_set_view_size",
+                    m.tab_id,
+                    t.pane_id,
+                    m.pixel_width,
+                    m.pixel_height,
+                    m.screen_x,
+                    m.screen_y,
+                    m.screen_width,
+                    m.screen_height,
+                    m.screen_scale
+                ));
                 unsafe {
                     ffi::ts_set_view_size(
                         t.handle,
@@ -149,6 +161,11 @@ pub fn handle_message(msg: &TermSurfMessage) {
                         m.screen_scale,
                     );
                 }
+            } else {
+                trace_pdf_input(format!(
+                    "resize tab_id={} result=no-tab pixel_width={} pixel_height={}",
+                    m.tab_id, m.pixel_width, m.pixel_height
+                ));
             }
         }
         Msg::CloseTab(m) => {
@@ -166,6 +183,17 @@ pub fn handle_message(msg: &TermSurfMessage) {
         }
         Msg::MouseEvent(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
+                trace_pdf_input(format!(
+                    "mouse-event tab={} pane={} ffi=ts_forward_mouse_event type={} button={} coords=({:.2}, {:.2}) click_count={} modifiers={}",
+                    m.tab_id,
+                    t.pane_id,
+                    m.r#type,
+                    m.button,
+                    m.x,
+                    m.y,
+                    m.click_count,
+                    m.modifiers
+                ));
                 unsafe {
                     ffi::ts_forward_mouse_event(
                         t.handle,
@@ -177,10 +205,25 @@ pub fn handle_message(msg: &TermSurfMessage) {
                         m.modifiers as i32,
                     );
                 }
+            } else {
+                trace_pdf_input(format!(
+                    "mouse-event tab={} result=no-tab type={} button={} coords=({:.2}, {:.2}) click_count={} modifiers={}",
+                    m.tab_id,
+                    m.r#type,
+                    m.button,
+                    m.x,
+                    m.y,
+                    m.click_count,
+                    m.modifiers
+                ));
             }
         }
         Msg::MouseMove(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
+                trace_pdf_input(format!(
+                    "mouse-move tab={} pane={} ffi=ts_forward_mouse_move coords=({:.2}, {:.2}) modifiers={}",
+                    m.tab_id, t.pane_id, m.x, m.y, m.modifiers
+                ));
                 unsafe {
                     ffi::ts_forward_mouse_move(
                         t.handle,
@@ -189,6 +232,11 @@ pub fn handle_message(msg: &TermSurfMessage) {
                         m.modifiers as i32,
                     );
                 }
+            } else {
+                trace_pdf_input(format!(
+                    "mouse-move tab={} result=no-tab coords=({:.2}, {:.2}) modifiers={}",
+                    m.tab_id, m.x, m.y, m.modifiers
+                ));
             }
         }
         Msg::ScrollEvent(m) => {
@@ -228,6 +276,15 @@ pub fn handle_message(msg: &TermSurfMessage) {
         }
         Msg::KeyEvent(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
+                trace_pdf_input(format!(
+                    "key-event tab={} pane={} ffi=ts_forward_key_event type={} windows_key_code={} utf8_len={} modifiers={}",
+                    m.tab_id,
+                    t.pane_id,
+                    m.r#type,
+                    m.windows_key_code,
+                    m.utf8.len(),
+                    m.modifiers
+                ));
                 let utf8 = CString::new(m.utf8.as_str()).unwrap();
                 unsafe {
                     ffi::ts_forward_key_event(
@@ -238,11 +295,29 @@ pub fn handle_message(msg: &TermSurfMessage) {
                         m.modifiers as i32,
                     );
                 }
+            } else {
+                trace_pdf_input(format!(
+                    "key-event tab={} result=no-tab type={} windows_key_code={} utf8_len={} modifiers={}",
+                    m.tab_id,
+                    m.r#type,
+                    m.windows_key_code,
+                    m.utf8.len(),
+                    m.modifiers
+                ));
             }
         }
         Msg::FocusChanged(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
+                trace_pdf_input(format!(
+                    "focus-changed tab={} pane={} ffi=ts_set_focus focused={}",
+                    m.tab_id, t.pane_id, m.focused
+                ));
                 unsafe { ffi::ts_set_focus(t.handle, m.focused) };
+            } else {
+                trace_pdf_input(format!(
+                    "focus-changed tab={} result=no-tab focused={}",
+                    m.tab_id, m.focused
+                ));
             }
         }
         Msg::SetGuiActive(m) => {
@@ -387,6 +462,10 @@ pub unsafe extern "C" fn on_title_changed(
     let title_str = unsafe { std::ffi::CStr::from_ptr(title) }
         .to_string_lossy()
         .into_owned();
+    trace_pdf_input(format!(
+        "title-changed tab={} pane={} title={}",
+        t.tab_id, t.pane_id, title_str
+    ));
     let msg = TermSurfMessage {
         msg: Some(Msg::TitleChanged(proto::termsurf::TitleChanged {
             tab_id: t.tab_id,

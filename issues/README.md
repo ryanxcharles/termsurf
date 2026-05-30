@@ -2,15 +2,16 @@
 
 ## Open
 
-| #                                              | Title                                | Opened     |
-| ---------------------------------------------- | ------------------------------------ | ---------- |
-| [0756](0756-surfari/README.md)                 | Surfari — WebKit engine for TermSurf | 2026-03-16 |
-| [0794](0794-pdf-viewer-interactions/README.md) | Complete PDF Viewer Interactions     | 2026-05-29 |
+| #                                       | Title                                | Opened     |
+| --------------------------------------- | ------------------------------------ | ---------- |
+| [0756](0756-surfari/README.md)          | Surfari — WebKit engine for TermSurf | 2026-03-16 |
+| [0795](0795-pdf-native-print/README.md) | PDF Native Print                     | 2026-05-30 |
 
 ## Closed
 
 | #                                                       | Title                                                                         | Opened     | Closed     |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
+| [0794](0794-pdf-viewer-interactions/README.md)          | Complete PDF Viewer Interactions                                              | 2026-05-29 | 2026-05-30 |
 | [0793](0793-pdf-iframe-size/README.md)                  | PDF viewer iframe renders at default size                                     | 2026-05-29 | 2026-05-29 |
 | [0792](0792-pdf-support/README.md)                      | Inline PDF support via a separable extensions browser system                  | 2026-05-29 | 2026-05-29 |
 | [0791](0791-app-shell-foundation/README.md)             | Evaluate re-basing TermSurf's Chromium embedder on app_shell                  | 2026-05-29 | 2026-05-29 |

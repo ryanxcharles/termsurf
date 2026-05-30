@@ -14,7 +14,7 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `148.0.7778.97-issue-793-exp1`
+- Branch: `148.0.7778.97-issue-794-exp20`
 - Base version: `148.0.7778.97` (tracking Electron's Chromium version)
 
 > **Note:** The `…-issue-789-exp*` and `…-issue-790-exp*` branches are
@@ -127,6 +127,19 @@ find the most relevant recent branch, create a new branch from it
 | `148.0.7778.97-issue-792-exp27` | [Issue 792](../issues/0792-pdf-support/README.md)                | Externalize internal PDF plugin embeds      |
 | `148.0.7778.97-issue-792-exp28` | [Issue 792](../issues/0792-pdf-support/README.md)                | Load PDF localized strings                  |
 | `148.0.7778.97-issue-793-exp1`  | [Issue 793](../issues/0793-pdf-iframe-size/README.md)            | Restore PDF embedder CSS access             |
+| `148.0.7778.97-issue-794-exp4`  | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Route PDF wheel input through Chromium      |
+| `148.0.7778.97-issue-794-exp5`  | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Route PDF mouse input through Chromium      |
+| `148.0.7778.97-issue-794-exp6`  | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Route PDF keyboard input through Chromium   |
+| `148.0.7778.97-issue-794-exp7`  | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Trace PDF drag selection                    |
+| `148.0.7778.97-issue-794-exp8`  | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Trace PDF resize and reflow                 |
+| `148.0.7778.97-issue-794-exp12` | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Wire PDF resourcesPrivate strings for zoom  |
+| `148.0.7778.97-issue-794-exp14` | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Complete PDF viewer strings                 |
+| `148.0.7778.97-issue-794-exp15` | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Wire PDF title propagation                  |
+| `148.0.7778.97-issue-794-exp16` | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Probe contained PDF print activation        |
+| `148.0.7778.97-issue-794-exp17` | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Trace PDF print message bridge              |
+| `148.0.7778.97-issue-794-exp18` | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Probe PDF print intercept guard             |
+| `148.0.7778.97-issue-794-exp19` | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Enable PDF print control                    |
+| `148.0.7778.97-issue-794-exp20` | [Issue 794](../issues/0794-pdf-viewer-interactions/README.md)    | Install renderer print helper               |
 | `148.0.7778.97-issue-781`       | [Issue 781](../issues/0781-chromium-upgrade/README.md)           | Chromium 148 migration                      |
 | `148.0.7778.97-issue-780`       | [Issue 780](../issues/0780-link-drag-freeze/README.md)           | Suppress native link drag in Roamium        |
 | `148.0.7778.97-issue-778`       | [Issue 778](../issues/0778-back-nav-title-stale/README.md)       | Re-emit titles on navigation commit         |
@@ -181,8 +194,8 @@ git am ../../chromium/patches/issue-{N}/*.patch
 For the current TermSurf Chromium branch, use:
 
 ```bash
-git checkout -b 148.0.7778.97-issue-793-exp1 148.0.7778.97
-git am ../../chromium/patches/issue-793/*.patch
+git checkout -b 148.0.7778.97-issue-794-exp19 148.0.7778.97
+git am ../../chromium/patches/issue-794-exp19/*.patch
 ```
 
 ### Generating patches

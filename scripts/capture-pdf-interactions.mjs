@@ -227,6 +227,7 @@ const STATE_EXPRESSION = `(() => {
   const query = [
     "embed",
     "iframe",
+    "canvas",
     "pdf-viewer",
     "viewer-toolbar",
     "viewer-page-indicator",
@@ -238,8 +239,15 @@ const STATE_EXPRESSION = `(() => {
     "#plugin",
     "#sizer",
     "#container",
+    "#page-container",
     "#click-target",
     "#selection-target",
+    ".page",
+    ".page-container",
+    "body",
+    "main",
+    "section",
+    "article",
     "button",
     "input",
     "p",
@@ -303,12 +311,15 @@ function pickInteractiveRect(state) {
       ["EMBED", "IFRAME", "PDF-VIEWER"].includes(el.tag),
   );
   if (candidates.length > 0) {
-    return candidates.sort((a, b) => b.width * b.height - a.width * a.height)[0];
+    return candidates.sort(
+      (a, b) => b.width * b.height - a.width * a.height,
+    )[0];
   }
-  const viewport = state?.value?.viewport || state?.viewport || {
-    innerWidth: 1024,
-    innerHeight: 768,
-  };
+  const viewport = state?.value?.viewport ||
+    state?.viewport || {
+      innerWidth: 1024,
+      innerHeight: 768,
+    };
   return {
     x: 0,
     y: 0,
@@ -350,10 +361,19 @@ function pickDragRect(state, interactiveRect) {
 }
 
 function dragPoints(rect) {
-  const x1 = Math.max(5, Math.round(rect.left + Math.min(80, rect.width * 0.12)));
+  const x1 = Math.max(
+    5,
+    Math.round(rect.left + Math.min(80, rect.width * 0.12)),
+  );
   const x2 = Math.max(x1 + 20, Math.round(rect.left + rect.width * 0.85));
-  const y1 = Math.max(5, Math.round(rect.top + Math.min(180, rect.height * 0.22)));
-  const y2 = Math.max(y1 + 20, Math.round(rect.top + Math.min(360, rect.height * 0.42)));
+  const y1 = Math.max(
+    5,
+    Math.round(rect.top + Math.min(180, rect.height * 0.22)),
+  );
+  const y2 = Math.max(
+    y1 + 20,
+    Math.round(rect.top + Math.min(360, rect.height * 0.42)),
+  );
   return { x1, y1, x2, y2 };
 }
 
@@ -389,11 +409,13 @@ function stateDiff(before, after) {
   return {
     scrollTopDelta: (a.scroll?.top ?? 0) - (b.scroll?.top ?? 0),
     scrollYDelta: (a.scroll?.y ?? 0) - (b.scroll?.y ?? 0),
-    innerWidthDelta: (a.viewport?.innerWidth ?? 0) - (b.viewport?.innerWidth ?? 0),
+    innerWidthDelta:
+      (a.viewport?.innerWidth ?? 0) - (b.viewport?.innerWidth ?? 0),
     innerHeightDelta:
       (a.viewport?.innerHeight ?? 0) - (b.viewport?.innerHeight ?? 0),
     largestElementWidthDelta: (aLargest?.width ?? 0) - (bLargest?.width ?? 0),
-    largestElementHeightDelta: (aLargest?.height ?? 0) - (bLargest?.height ?? 0),
+    largestElementHeightDelta:
+      (aLargest?.height ?? 0) - (bLargest?.height ?? 0),
     selectionChanged: (a.selection || "") !== (b.selection || ""),
     selectionLength: (a.selection || "").length,
   };
@@ -403,7 +425,9 @@ function largestElement(elements) {
   if (!elements.length) {
     return null;
   }
-  return [...elements].sort((a, b) => b.width * b.height - a.width * a.height)[0];
+  return [...elements].sort(
+    (a, b) => b.width * b.height - a.width * a.height,
+  )[0];
 }
 
 function resultStatusFromChange(diff) {
@@ -607,7 +631,12 @@ async function runChecks(client, args, summary) {
   }
 
   {
-    const before = await snapshot(client, args, "keyboard-before", childSessions);
+    const before = await snapshot(
+      client,
+      args,
+      "keyboard-before",
+      childSessions,
+    );
     await dispatchKey(client, "PageDown");
     await sleep(args.inputSettleMs);
     const after = await snapshot(client, args, "keyboard-after", childSessions);
@@ -646,8 +675,18 @@ async function runChecks(client, args, summary) {
     const currentRect = pickInteractiveRect(before.state);
     const currentClickRect = pickClickRect(before.state, currentRect);
     const currentCenter = centerOf(currentClickRect);
-    await dispatchMouse(client, "mousePressed", currentCenter.x, currentCenter.y);
-    await dispatchMouse(client, "mouseReleased", currentCenter.x, currentCenter.y);
+    await dispatchMouse(
+      client,
+      "mousePressed",
+      currentCenter.x,
+      currentCenter.y,
+    );
+    await dispatchMouse(
+      client,
+      "mouseReleased",
+      currentCenter.x,
+      currentCenter.y,
+    );
     await sleep(100);
     const after = await snapshot(client, args, "click-after", childSessions);
     const diff = stateDiff(before.state, after.state);
@@ -751,12 +790,16 @@ async function runChecks(client, args, summary) {
       innerHeight: 768,
       devicePixelRatio: 1,
     };
-    const resize = await safeSend(client, "Emulation.setDeviceMetricsOverride", {
-      width: Math.max(600, Math.round(viewport.innerWidth * 0.75)),
-      height: Math.max(500, Math.round(viewport.innerHeight * 0.75)),
-      deviceScaleFactor: viewport.devicePixelRatio || 1,
-      mobile: false,
-    });
+    const resize = await safeSend(
+      client,
+      "Emulation.setDeviceMetricsOverride",
+      {
+        width: Math.max(600, Math.round(viewport.innerWidth * 0.75)),
+        height: Math.max(500, Math.round(viewport.innerHeight * 0.75)),
+        deviceScaleFactor: viewport.devicePixelRatio || 1,
+        mobile: false,
+      },
+    );
     await sleep(args.resizeSettleMs);
     const after = await snapshot(client, args, "resize-after", childSessions);
     await safeSend(client, "Emulation.clearDeviceMetricsOverride");
@@ -834,7 +877,11 @@ async function runChecks(client, args, summary) {
       childControlStates.push({
         sessionId: child.sessionId,
         targetInfo: child.targetInfo,
-        state: await evaluate(client, collectControlsExpression, child.sessionId),
+        state: await evaluate(
+          client,
+          collectControlsExpression,
+          child.sessionId,
+        ),
       });
     }
     const controlCount =
@@ -847,9 +894,7 @@ async function runChecks(client, args, summary) {
       await writeResult(
         args,
         "toolbar-probe",
-        controlCount > 0
-          ? "pass"
-          : "unsupported-by-harness",
+        controlCount > 0 ? "pass" : "unsupported-by-harness",
         {
           before: {},
           after: { state, childControlStates },

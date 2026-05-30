@@ -267,3 +267,91 @@ Experiment 3 fails if:
 - it asks the user to inspect raw logs without producing an analyzer summary;
 - it modifies Chromium without creating a fresh Issue 794 Chromium branch;
 - it omits required formatting, syntax, or build checks.
+
+## Result
+
+**Result:** Pass
+
+The direct protocol harness was implemented as
+`scripts/test-issue-794-protocol-scroll.py`. It launches repo-built Roamium
+against a fake GUI Unix socket, serves the vendored Bitcoin PDF fixture, creates
+a PDF tab, captures before/after DevTools probe artifacts, sends hand-encoded
+TermSurf `ScrollEvent` messages, and writes `protocol-scroll-summary.json`.
+
+The primary run wrote artifacts to:
+
+```text
+logs/issue-794-exp3-protocol-scroll-20260530-080842
+```
+
+Key analyzer output:
+
+- tab id: `1`
+- DevTools port: `51405`
+- scroll coordinate source: `plugin-bounds`
+- scroll coordinates: `x=450.5`, `y=253.0`, plugin bounds `width=299.0`,
+  `height=394.0`
+- scroll events sent: `6`
+- scroll deltas: five events with `delta_y=600.0`, followed by one phase-ended
+  event with `delta_y=0.0`
+- phases: `1` (`kPhaseBegan`), four `4` (`kPhaseChanged`), then `8`
+  (`kPhaseEnded`)
+- `roamium_trace_init`: `true`
+- `roamium_scroll_event_line`: `true`
+- `roamium_ffi_line`: `true`
+- before/after screenshot changed: `false`
+- before/after state changed: `false`
+- `first_failing_hop`: `chromium-or-pdf-routing`
+
+The trace file confirms the protocol message reached Roamium and was forwarded
+to Chromium:
+
+```text
+roamium scroll-event tab=1 pane=fake-pane ffi=ts_forward_scroll_event coords=(450.50, 253.00) delta=(0.00, 600.00) phase=1 momentum_phase=0 precise=true modifiers=0
+```
+
+The before and after screenshots had the same SHA-256:
+
+```text
+927e13124bc9738175b456c22c3aa03c59a35fc916a050678bbc40499dffecac
+```
+
+I also ran an opposite-sign check:
+
+```text
+logs/issue-794-exp3-protocol-scroll-negative-20260530-080532
+```
+
+That run sent five `delta_y=-600.0` events plus a phase-ended event. It produced
+the same result: Roamium received the scroll, called `ts_forward_scroll_event`,
+and the PDF state/screenshot did not change. This rules out a simple
+positive-vs-negative wheel sign mistake at this layer.
+
+One harness correction happened during implementation. An initial run sent wheel
+events with both `phase=0` and `momentum_phase=0`. Chromium DCHECKed in
+`MouseWheelEventQueue` because wheel events must carry a real phase or momentum
+phase. The harness now sends a realistic began/changed/ended phase sequence.
+
+Syntax check:
+
+```bash
+python3 -m py_compile scripts/test-issue-794-protocol-scroll.py
+```
+
+The final positive-delta verification command exited `0`; diagnostic outcomes
+such as `chromium-or-pdf-routing` are successful harness classifications, not
+shell failures.
+
+## Conclusion
+
+Experiment 3 successfully automated the protocol-level PDF scroll check. The
+failure is past the TermSurf socket and Roamium dispatch layers: Roamium
+receives `ScrollEvent`, finds the tab, and calls Chromium's
+`ts_forward_scroll_event`, but Chromium/PDF does not scroll.
+
+The next experiment should instrument Chromium's wheel routing on a fresh Issue
+794 Chromium branch. The immediate question is whether
+`TsBrowserMainParts::ForwardScrollEvent()` is forwarding the wheel to the wrong
+`RenderWidgetHost` for the PDF viewer's out-of-process extension frame/plugin,
+or whether the event reaches the correct renderer and is ignored inside the PDF
+viewer/plugin stack.

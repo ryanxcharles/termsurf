@@ -2,6 +2,7 @@ use super::proto;
 use super::proto::term_surf_message::Msg;
 use super::proto::TermSurfMessage;
 use super::state::{Pane, Server, SharedState, TermSurfState};
+use crate::termsurf::input::trace_pdf_input;
 use anyhow::Context;
 use prost::Message;
 use sha2::{Digest, Sha256};
@@ -1402,6 +1403,15 @@ struct WebviewScreenRect {
     screen_width: f64,
     screen_height: f64,
     screen_scale: f64,
+    local_x: f64,
+    local_y: f64,
+    local_width: f64,
+    local_height: f64,
+    backing_x: f64,
+    backing_y: f64,
+    backing_width: f64,
+    backing_height: f64,
+    dpi: usize,
 }
 
 #[cfg(target_os = "macos")]
@@ -1409,12 +1419,12 @@ fn webview_screen_rect_desc(
     state: &TermSurfState,
     mux_window_id: mux::window::WindowId,
     local_frame: objc2_core_foundation::CGRect,
-    _x_backing: f64,
-    _y_backing: f64,
-    _w_backing: f64,
-    _h_backing: f64,
+    x_backing: f64,
+    y_backing: f64,
+    w_backing: f64,
+    h_backing: f64,
     scale: f64,
-    _dpi: usize,
+    dpi: usize,
 ) -> Option<WebviewScreenRect> {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
@@ -1460,6 +1470,15 @@ fn webview_screen_rect_desc(
             screen_width: screen_rect.size.width,
             screen_height: screen_rect.size.height,
             screen_scale: scale,
+            local_x: local_frame.origin.x,
+            local_y: local_frame.origin.y,
+            local_width: local_frame.size.width,
+            local_height: local_frame.size.height,
+            backing_x: x_backing,
+            backing_y: y_backing,
+            backing_width: w_backing,
+            backing_height: h_backing,
+            dpi,
         })
     }
 }
@@ -1467,8 +1486,17 @@ fn webview_screen_rect_desc(
 #[cfg(target_os = "macos")]
 fn send_resize_with_screen_rect(st: &mut TermSurfState, pane_id: &str, rect: &WebviewScreenRect) {
     let epsilon = 0.5;
-    let (tab_id, pixel_width, pixel_height, profile, browser, should_send) = {
+    let (tab_id, pixel_width, pixel_height, profile, browser, changed, should_send) = {
         let Some(pane) = st.panes.get_mut(pane_id) else {
+            trace_pdf_input(format!(
+                "wezboard-resize pane_id={} result=no-pane screen_x={} screen_y={} screen_width={} screen_height={} scale={}",
+                pane_id,
+                rect.screen_x,
+                rect.screen_y,
+                rect.screen_width,
+                rect.screen_height,
+                rect.screen_scale
+            ));
             return;
         };
         let changed = (pane.last_resize_screen_x - rect.screen_x).abs() > epsilon
@@ -1491,16 +1519,53 @@ fn send_resize_with_screen_rect(st: &mut TermSurfState, pane_id: &str, rect: &We
             pane.pixel_height,
             pane.profile.clone(),
             pane.browser.clone(),
+            changed,
             changed && pane.tab_id != 0,
         )
     };
 
     if !should_send {
+        if changed {
+            trace_pdf_input(format!(
+                "wezboard-resize pane_id={} tab_id={} changed=true result=skip-no-tab pixel_width={} pixel_height={} local_x={} local_y={} local_width={} local_height={} backing_x={} backing_y={} backing_width={} backing_height={} dpi={} screen_x={} screen_y={} screen_width={} screen_height={} scale={}",
+                pane_id,
+                tab_id,
+                pixel_width,
+                pixel_height,
+                rect.local_x,
+                rect.local_y,
+                rect.local_width,
+                rect.local_height,
+                rect.backing_x,
+                rect.backing_y,
+                rect.backing_width,
+                rect.backing_height,
+                rect.dpi,
+                rect.screen_x,
+                rect.screen_y,
+                rect.screen_width,
+                rect.screen_height,
+                rect.screen_scale
+            ));
+        }
         return;
     }
 
     let key = TermSurfState::server_key(&profile, &browser);
     let Some(server_tx) = st.servers.get(&key).and_then(|server| server.tx.clone()) else {
+        trace_pdf_input(format!(
+            "wezboard-resize pane_id={} tab_id={} changed={} result=no-server pixel_width={} pixel_height={} screen_x={} screen_y={} screen_width={} screen_height={} scale={}",
+            pane_id,
+            tab_id,
+            changed,
+            pixel_width,
+            pixel_height,
+            rect.screen_x,
+            rect.screen_y,
+            rect.screen_width,
+            rect.screen_height,
+            rect.screen_scale
+        ));
         return;
     };
 
@@ -1517,6 +1582,28 @@ fn send_resize_with_screen_rect(st: &mut TermSurfState, pane_id: &str, rect: &We
         })),
     };
     let _ = server_tx.try_send(msg.encode_to_vec());
+    trace_pdf_input(format!(
+        "wezboard-resize pane_id={} tab_id={} changed={} result=sent pixel_width={} pixel_height={} local_x={} local_y={} local_width={} local_height={} backing_x={} backing_y={} backing_width={} backing_height={} dpi={} screen_x={} screen_y={} screen_width={} screen_height={} scale={}",
+        pane_id,
+        tab_id,
+        changed,
+        pixel_width,
+        pixel_height,
+        rect.local_x,
+        rect.local_y,
+        rect.local_width,
+        rect.local_height,
+        rect.backing_x,
+        rect.backing_y,
+        rect.backing_width,
+        rect.backing_height,
+        rect.dpi,
+        rect.screen_x,
+        rect.screen_y,
+        rect.screen_width,
+        rect.screen_height,
+        rect.screen_scale
+    ));
 }
 
 #[cfg(target_os = "macos")]

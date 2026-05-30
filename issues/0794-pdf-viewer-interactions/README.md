@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-29"
+closed = "2026-05-30"
 +++
 
 # Issue 794: Complete PDF Viewer Interactions
@@ -10,7 +11,8 @@ opened = "2026-05-29"
 Make TermSurf's Chromium PDF support behave like a usable in-pane PDF viewer,
 not just a first-page renderer. A PDF must scroll, respond to resize, accept
 clicks, allow text selection and copy, and expose the normal PDF viewer controls
-that Chromium/Electron users expect.
+that Chromium/Electron users expect, except native PDF printing, which is
+explicitly deferred to a separate follow-up issue.
 
 ## Background
 
@@ -70,11 +72,11 @@ Chromium's PDF tests show the feature surface that a complete viewer needs:
 - Wheel scrolling and keyboard navigation.
 - Resize and viewport updates.
 - Toolbar controls for page navigation, zoom, fit modes, rotation, save, and
-  print.
+  non-print actions.
 - Correct document title for titled and untitled PDFs.
 - Local `file://` PDFs and extensionless local PDFs.
 - Link navigation and PDF permissions.
-- Print, save/download, and content restriction behavior.
+- Save/download and content restriction behavior.
 - Form focus, context menus, accessibility/searchify, and XFA where enabled.
 
 ## Current TermSurf Gaps
@@ -131,18 +133,22 @@ Text selection needs more than the page bitmap:
 Chromium's PDF tests cover selected text replies and direct `GetSelectedText()`
 checks. TermSurf needs equivalent verification.
 
-### Save, Print, and Toolbar State
+### Save and Toolbar State
 
 TermSurf's `TsPDFDocumentHelperClient` currently logs callbacks such as
 `UpdateContentRestrictions()`, `OnSaveURL()`, and `SetPluginCanSave()`. Electron
 turns these into behavior:
 
 - `SetPluginCanSave()` updates `PdfViewerStreamManager`.
-- Content restriction changes produce a print-ready signal.
-- Save/download and print actions route through browser-side helpers.
+- Save/download actions route through browser-side helpers.
 
 These may not block scrolling, but they are part of a complete PDF viewer and
 must be tracked.
+
+Native PDF printing is deliberately out of scope for this issue. Experiment 20
+proved the print button can be clicked without making the PDF viewport gray, but
+it still does not open native print UI. That remaining print-specific work is
+deferred to Issue 795.
 
 ### Document Metadata and Local File Behavior
 
@@ -188,8 +194,6 @@ The first diagnostic harness should cover:
   change viewer state.
 - **Save/download:** Save/download actions fire the expected browser-side path
   or produce an output file in a controlled test directory.
-- **Print:** Print actions reach the print pathway. The automated test should
-  stop before invoking a real printer.
 - **Title:** The tab/title state reflects the PDF title or the expected URL
   fallback for untitled PDFs.
 - **Local file:** `file://` PDFs behave the same as the local HTTP fixture.
@@ -197,9 +201,10 @@ The first diagnostic harness should cover:
   accepts text selection normally.
 
 Some checks will be inherently easier to automate than others. Native print
-dialogs, OS save panels, and subjective visual quality can remain screenshot or
-log triage points. The core question, "does PDF support work as an interactive
-viewer," should be automated with state checks, screenshots, and targeted logs.
+dialogs are deferred to a follow-up issue. OS save panels and subjective visual
+quality can remain screenshot or log triage points. The core question, "does PDF
+support work as an interactive viewer," should be automated with state checks,
+screenshots, and targeted logs.
 
 ## Proposed Direction
 
@@ -209,8 +214,7 @@ completion:
 
 1. First, build an interaction diagnostic harness for the current PDF viewer. It
    must distinguish rendering, wheel scroll, resize/reflow, click focus,
-   drag-select text, selected-text copy, toolbar save/print state, and title
-   updates.
+   drag-select text, selected-text copy, toolbar save state, and title updates.
 2. Then fix the first measured broken layer. If input never reaches Chromium,
    fix the TermSurf input path. If input reaches Chromium but not the PDF
    plugin, fix the PDF frame/focus/hit-test layer. If resize reaches the webview
@@ -228,7 +232,75 @@ PDF tests remain the feature checklist.
 - [Experiment 2: Trace real wheel input](02-trace-real-wheel-input.md) —
   **Partial** (agent-side macOS wheel injection did not reach Wezboard)
 - [Experiment 3: Direct protocol scroll injection](03-direct-protocol-scroll-injection.md)
-  — **Designed**
+  — **Pass** (protocol scroll reaches Roamium and Chromium FFI; PDF does not
+  scroll)
+- [Experiment 4: Route wheel events through Chromium's input router](04-route-wheel-through-input-router.md)
+  — **Pass** (PDF wheel scrolling works through Chromium's input router)
+- [Experiment 5: Route mouse events through Chromium's input router](05-route-mouse-through-input-router.md)
+  — **Pass** (mouse routing works through Chromium's input router; PDF drag
+  selection still needs deeper focus/selection work)
+- [Experiment 6: Route keyboard selection to the focused PDF widget](06-route-keyboard-selection.md)
+  — **Pass** (PDF keyboard select-all/copy works; mouse drag selection remains)
+- [Experiment 7: Trace PDF drag selection inside PDFium](07-trace-pdf-drag-selection.md)
+  — **Pass** (PDF drag selection works when the protocol drag starts on PDF
+  text)
+- [Experiment 8: Trace protocol resize and PDF reflow](08-trace-protocol-resize-reflow.md)
+  — **Pass** (direct protocol resize reaches Roamium, Chromium, PDF plugin
+  geometry, and PDFium plugin size)
+- [Experiment 9: Trace real Wezboard pane resize](09-trace-real-wezboard-pane-resize.md)
+  — **Pass** (real Wezboard split-pane resize reaches Roamium, Chromium, PDF
+  plugin geometry, and PDFium plugin size)
+- [Experiment 10: Prove safe PDF toolbar controls](10-toolbar-controls.md) —
+  **Partial** (fit and page selector work; zoom in/out and rotate receive
+  activation but do not change viewer state)
+- [Experiment 11: Trace toolbar zoom and rotate events](11-trace-toolbar-zoom-rotate-events.md)
+  — **Pass** (zoom reaches `Viewport.zoomIn/zoomOut` and throws
+  `Viewport.mightZoom_`; fit and rotate work)
+- [Experiment 12: Wire PDF resourcesPrivate strings for zoom](12-wire-pdf-resources-private-strings.md)
+  — **Pass** (`resourcesPrivate.getStrings(PDF)` now returns PDF strings and 17
+  preset zoom factors; toolbar zoom, fit, and rotate work)
+- [Experiment 13: Probe save, print, title, and local-file parity](13-probe-save-print-title-local.md)
+  — **Partial** (save/download creates a contained PDF file; local and
+  extensionless PDFs render; PDF UI strings/title propagation/print containment
+  remain incomplete)
+- [Experiment 14: Complete PDF viewer strings and load-time data](14-complete-pdf-strings.md)
+  — **Pass** (PDF viewer strings and template replacements are complete enough
+  for the current viewer path; title propagation and print remain separate
+  follow-ups)
+- [Experiment 15: Wire PDF title propagation](15-wire-pdf-title-propagation.md)
+  — **Pass** (full-page PDF titles now propagate through the top-level TermSurf
+  title path while embedded PDFs preserve their host page title)
+- [Experiment 16: Prove contained PDF print activation](16-contained-print-activation.md)
+  — **Partial** (print can be safely exposed only under the intercept guard, but
+  viewer-to-plugin `print` messages do not reach the PDF plugin print handler)
+- [Experiment 17: Trace the PDF print message bridge](17-trace-pdf-print-message-bridge.md)
+  — **Partial** (print reaches `PdfViewWebPlugin::HandlePrintMessage()`, but the
+  contained renderer print intercept does not fire)
+- [Experiment 18: Probe the PDF print intercept guard](18-probe-pdf-print-intercept-guard.md)
+  — **Pass** (contained print intercept reaches `PdfViewWebPlugin::Print()` and
+  writes `pdf-print.log`; default print remains disabled)
+- [Experiment 19: Enable the production PDF print control](19-enable-production-print-control.md)
+  — **Partial** (default print control is visible and contained print still
+  works; manual production print smoke turns the PDF viewport gray instead of
+  opening native print UI)
+- [Experiment 20: Install the renderer print helper](20-install-renderer-print-helper.md)
+  — **Pass** (print still does not open native UI, but the gray-viewport failure
+  is fixed; native PDF printing is deferred to Issue 795)
+
+## Conclusion
+
+Issue 794 is complete under the revised scope. PDF viewing is now a usable
+in-pane viewer experience: PDFs render at normal size, scroll, respond to real
+and protocol resize, accept mouse and keyboard input, support text selection and
+copy, expose working toolbar controls for page navigation, fit, zoom, rotate,
+and save/download, propagate titles, and preserve local-file parity.
+
+Native PDF printing is intentionally not solved here. Experiment 19 made the
+print button visible but clicking it made the PDF viewport gray. Experiment 20
+installed Chromium's renderer print helper and removed that gray-viewport
+failure, but native print UI still does not appear. That print-specific
+remaining work is deferred to Issue 795 so this issue can close around the
+interactive viewer features that now work.
 
 ## Constraints
 
