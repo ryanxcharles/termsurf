@@ -150,6 +150,10 @@ Do not list experiment files in this README until each experiment is actually
 designed. When an experiment is designed, create its own numbered file and add
 it to the `## Experiments` index.
 
+## Experiments
+
+No experiments designed yet.
+
 ## Experiment Rules
 
 Every experiment in this issue must follow these process rules:
