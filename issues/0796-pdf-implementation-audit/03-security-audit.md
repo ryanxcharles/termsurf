@@ -317,3 +317,292 @@ This experiment fails if:
   extension API, file access, automation gates, and C++ lifetime surfaces;
 - it omits Codex design or completion review;
 - it produces a cleanup backlog too vague to implement safely.
+
+## Result
+
+**Result:** Pass
+
+This audit reviewed the current post-cleanup PDF implementation on Chromium
+branch `148.0.7778.97-issue-796-exp2`. No runtime code was changed.
+
+### Trust-boundary map
+
+The PDF viewer path has these security boundaries:
+
+1. **Untrusted PDF URL to browser interception.** Main-frame and subframe
+   navigations enter TermSurf's browser client in
+   `chromium/src/content/libtermsurf_chromium/ts_browser_client.cc:59` and
+   `chromium/src/content/libtermsurf_chromium/ts_browser_client.cc:80`.
+   `AddTsPdfNavigationThrottles()` installs Chromium's
+   `pdf::PdfNavigationThrottle` with `TsPdfStreamDelegate` in
+   `ts_pdf_browser_support.cc:125`. The response interceptor only proceeds for
+   non-download `application/pdf` responses mapped to the fixed Chromium PDF
+   extension id in `ts_plugin_response_interceptor_url_loader_throttle.cc:169`,
+   `ts_plugin_response_interceptor_url_loader_throttle.cc:175`, and
+   `ts_plugin_response_interceptor_url_loader_throttle.cc:181`.
+2. **Browser stream ownership.** PDF bytes become a
+   `extensions::StreamContainer` owned by `PdfViewerStreamManager` for one
+   `WebContents` and one frame-tree node in
+   `ts_plugin_response_interceptor_url_loader_throttle.cc:93` and
+   `ts_plugin_response_interceptor_url_loader_throttle.cc:126`. The generated
+   stream URL is unguessable and extension-scoped in
+   `ts_plugin_response_interceptor_url_loader_throttle.cc:257`.
+3. **PDF extension and resource loading.** TermSurf registers one component
+   extension with the canonical Chromium PDF extension id in
+   `extensions/ts_pdf_component_extension.cc:115` and strips the manifest
+   permissions down to `pdfViewerPrivate` and `resourcesPrivate` in
+   `extensions/ts_pdf_component_extension.cc:87`. Extension resources are served
+   from `kPdfResources`, not from disk paths, through
+   `extensions/ts_component_extension_resource_manager.cc:23` and
+   `extensions/ts_extension_resource_loader.cc:65`.
+4. **Renderer plugin creation.** The renderer grants the fixed PDF extension
+   origin access to `chrome://resources` in `ts_pdf_renderer_support.cc:62`. It
+   externalizes only the internal PDF MIME when
+   `IsPdfInternalPluginAllowedOrigin()` accepts the frame origin in
+   `ts_pdf_renderer_support.cc:95`, and creates the internal plugin only when
+   Chromium says this is a PDF renderer in `ts_pdf_renderer_support.cc:138`.
+5. **Extension API surface.** TermSurf registers only
+   `pdfViewerPrivate.setPdfDocumentTitle` and `resourcesPrivate.getStrings` in
+   `extensions/ts_extensions_browser_client.cc:64`. It does not implement the
+   broader Chrome/Electron PDF private API set in this issue.
+6. **Input, resize, and print traces.** Browser-to-renderer print intercept and
+   trace switches are appended only from local environment variables in
+   `ts_pdf_browser_support.cc:261`. Input traces in Roamium/Wezboard are gated
+   by local `TERMSURF_PDF_INPUT_TRACE` environment variables in
+   `roamium/src/dispatch.rs:28` and
+   `wezboard/wezboard-gui/src/termsurf/input.rs:43`.
+
+Trusted actors are the TermSurf browser process, Chromium's PDF extension
+renderer for `mhjfbmdgcfjbbpaeojofohoefgiehjai`, and Chromium's internal PDF
+plugin renderer path. Untrusted actors are the original PDF document, arbitrary
+web pages embedding PDFs, and any future non-PDF extension page if TermSurf ever
+loads more component extensions.
+
+### Chrome and Electron comparison
+
+TermSurf intentionally follows Electron's approach: it implements an
+embedder-owned subset of the Chrome PDF extension stack instead of linking all
+of Chrome's browser feature code.
+
+Relevant reference points:
+
+- Chromium's canonical internal PDF plugin guard allows only the PDF extension
+  origin or explicit additional origins in
+  `chromium/src/components/pdf/common/pdf_util.cc:43`. The renderer helper also
+  requires a parent frame with an allowed origin and a PDF renderer process in
+  `chromium/src/components/pdf/renderer/internal_plugin_renderer_helpers.cc:50`.
+  TermSurf uses that same helper from `ts_pdf_renderer_support.cc:160`.
+- Chrome externalizes the internal PDF plugin only for allowed origins in
+  `chromium/src/chrome/renderer/chrome_content_renderer_client.cc:846`. Electron
+  mirrors that check in
+  `vendor/electron/shell/renderer/renderer_client_base.cc:406`; TermSurf mirrors
+  it in `ts_pdf_renderer_support.cc:100`.
+- Electron stores PDF stream containers in `PdfViewerStreamManager` for OOPIF
+  PDF loads in
+  `vendor/electron/shell/browser/extensions/api/streams_private/streams_private_api.cc:72`.
+  TermSurf does the same in
+  `ts_plugin_response_interceptor_url_loader_throttle.cc:126`.
+- Electron registers the PDF component extension from Chromium's PDF manifest in
+  `vendor/electron/shell/browser/extensions/electron_extension_system.cc:109`
+  and serves resource-bundle entries through
+  `vendor/electron/shell/browser/extensions/electron_component_extension_resource_manager.cc:24`.
+  TermSurf uses a static manifest snapshot and `kPdfResources`, but strips the
+  manifest permissions more aggressively in
+  `extensions/ts_pdf_component_extension.cc:87`.
+- Electron exposes a broader `pdfViewerPrivate` backend, including
+  `getStreamInfo`, in
+  `vendor/electron/shell/browser/extensions/api/pdf_viewer_private/pdf_viewer_private_api.cc:113`.
+  TermSurf currently exposes only title propagation, which is a smaller
+  privilege surface.
+
+### Findings
+
+#### 1. Extension-scheme handling is broader than the PDF extension
+
+- **Severity:** Medium.
+- **Confidence:** High.
+- **Files:**
+  `chromium/src/content/libtermsurf_chromium/ts_pdf_browser_support.cc:361`,
+  `ts_pdf_browser_support.cc:387`, `ts_pdf_browser_support.cc:401`.
+- **Threat:** If TermSurf later loads any non-PDF extension, or if an unexpected
+  extension URL reaches these hooks, the browser client treats the whole
+  `chrome-extension://` scheme as handled and may apply process-per-site or
+  process-map behavior beyond the PDF viewer.
+- **Current guard:** `MaybeUseTsPdfProcessPerSite()` requires the site URL to be
+  an extension scheme and checks the enabled extension registry.
+  `MaybeActivateTsPdfSiteInstance()` also requires an enabled extension before
+  process-map insertion.
+- **Gap:** These checks are not restricted to the fixed PDF component extension.
+  `MaybeHandleTsPdfExtensionURL()` handles every extension-scheme URL without
+  checking host at all in `ts_pdf_browser_support.cc:387`. The implementation is
+  safe under today's single-extension world, but the code is broader than the
+  PDF security model says it should be.
+- **Recommended cleanup:** Restrict all three helpers to
+  `extension_misc::kPdfExtensionId` and component-extension identity. Non-PDF
+  extension URLs should fall through to `ShellContentBrowserClient`.
+- **Verification needed:** Add a negative automated or unit-style check that a
+  URL such as `chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/index.html`
+  does not produce TermSurf PDF handled-url/process-map logs, while the real PDF
+  extension URL still loads.
+
+#### 2. PDF extension API functions rely on permission wiring more than sender identity
+
+- **Severity:** Medium.
+- **Confidence:** Medium.
+- **Files:**
+  `chromium/src/content/libtermsurf_chromium/extensions/ts_extensions_browser_client.cc:64`,
+  `extensions/ts_resources_private_api.cc:29`,
+  `extensions/ts_pdf_viewer_private_api.cc:32`.
+- **Threat:** If another extension ever gets `pdfViewerPrivate` or
+  `resourcesPrivate`, the browser functions do not independently verify that the
+  sender is the fixed PDF component extension before returning PDF strings or
+  changing the PDF tab title.
+- **Current guard:** The current manifest strips permissions to only
+  `pdfViewerPrivate` and `resourcesPrivate`, and TermSurf currently registers
+  only the PDF component extension. The title function additionally checks that
+  the `WebContents` MIME type is `application/pdf` in
+  `extensions/ts_pdf_viewer_private_api.cc:41`.
+- **Gap:** The security boundary is implicit in extension registration and
+  permission features. For a small embedder-owned extension stack, the API
+  implementation should make the sender check explicit.
+- **Recommended cleanup:** Add a small helper that verifies the sender extension
+  id is `extension_misc::kPdfExtensionId` and the sender URL is the PDF
+  component extension. Use it in both PDF extension API functions. Keep the
+  existing MIME guard for title updates.
+- **Verification needed:** Add a negative test/probe that attempts to call the
+  APIs from a non-PDF context and confirms rejection or absence, plus a positive
+  PDF viewer probe confirming strings and title propagation still work.
+
+#### 3. Chrome resources access is granted at process scope
+
+- **Severity:** Defense-in-depth.
+- **Confidence:** High.
+- **Files:**
+  `chromium/src/content/libtermsurf_chromium/ts_pdf_renderer_support.cc:62`,
+  `chromium/src/content/libtermsurf_chromium/ts_pdf_browser_support.cc:448`.
+- **Threat:** The PDF extension process receives access to `chrome://resources`.
+  If a non-PDF extension ever shares that process, it could inherit the grant.
+- **Current guard:** `ShouldUseProcessPerSite()` currently forces extension
+  process-per-site behavior in `ts_pdf_browser_support.cc:361`, and the grant is
+  only issued inside the `IsTsPdfComponentExtension()` branch in
+  `ts_pdf_browser_support.cc:434`.
+- **Gap:** This is acceptable today, but it depends on the process policy
+  remaining PDF-only. Finding 1's cleanup should make that invariant explicit.
+- **Recommended cleanup:** Fold this into Finding 1. Add a comment at the grant
+  site explaining that the grant is intentionally process-scoped and therefore
+  depends on the PDF-extension-only process-per-site guard.
+- **Verification needed:** Same negative non-PDF extension URL/process-map test
+  as Finding 1.
+
+#### 4. The PDF response interceptor uses CHECK for data-pipe failures
+
+- **Severity:** Defense-in-depth.
+- **Confidence:** Medium.
+- **Files:**
+  `chromium/src/content/libtermsurf_chromium/ts_plugin_response_interceptor_url_loader_throttle.cc:229`.
+- **Threat:** An intercepted PDF response causes TermSurf to create and fill a
+  Mojo data pipe for a small wrapper payload. The payload is generated by
+  Chromium, not by the untrusted PDF, so this is not an exploitable input-size
+  issue. However, resource exhaustion or unexpected Mojo failure would crash the
+  process rather than fail the PDF load.
+- **Current guard:** The payload size is small and fixed by
+  `MimeHandlerViewAttachHelper::CreateTemplateMimeHandlerPage()` in
+  `ts_plugin_response_interceptor_url_loader_throttle.cc:204`.
+- **Gap:** Browser-process `CHECK_EQ` on an I/O primitive is harsher than needed
+  for untrusted document loading.
+- **Recommended cleanup:** Replace the two `CHECK_EQ` calls with graceful
+  failure: log a stable `[termsurf-pdf]` error, do not mark the response as
+  intercepted, and let the load fail without crashing.
+- **Verification needed:** Static review is probably enough for the code path.
+  If practical, add a narrow unit-style seam or forced-failure test; otherwise
+  build and run the standard PDF render/scroll/title/save regression matrix.
+
+### Non-findings
+
+- **Internal plugin origin checks are aligned with Chromium/Electron.** TermSurf
+  delegates final plugin creation to Chromium's `pdf::CreateInternalPlugin()`,
+  which requires an allowed parent origin and PDF renderer process. TermSurf's
+  externalization check mirrors Chrome and Electron.
+- **Stream lookup is tied to Chromium's `PdfViewerStreamManager`.**
+  `TsPdfStreamDelegate` looks up the stream from the parent or grandparent frame
+  and verifies the stream URL, extension id, and plugin attributes before
+  handing out stream info in `ts_pdf_stream_delegate.cc:84`. That is the same
+  ownership model Electron uses for OOPIF PDF streams.
+- **Resource serving is closed-world.** PDF extension resource bodies come from
+  `kPdfResources` and `ResourceBundle`, not path-derived disk reads.
+  `GetBundleResourcePath()` rejects non-PDF extension hosts in
+  `extensions/ts_extensions_browser_client.cc:301`.
+- **The manifest is narrower than Chrome's snapshot.** Although the static
+  fallback begins from Chrome's PDF manifest shape, TermSurf strips all
+  permissions except `pdfViewerPrivate` and `resourcesPrivate` before creating
+  the component extension.
+- **Trace file paths are local-environment controlled.** The trace and intercept
+  paths are read from local process environment or renderer command-line
+  switches. Web content cannot set them directly. Logs can include URLs and
+  local paths, but only when explicit debug tracing is enabled.
+- **`PdfHost` binding for all frames matches Chrome's shape.** TermSurf
+  registers `pdf::mojom::PdfHost` for render frames in
+  `ts_pdf_browser_support.cc:248`, and Chrome does the same in
+  `chrome_content_browser_client_receiver_bindings.cc:543`.
+- **Local `file://` and extensionless PDFs do not add a TermSurf file-access
+  grant.** The local and extensionless path is still the normal Chromium PDF
+  MIME path: TermSurf registers the internal PDF plugin for `application/pdf`
+  and the `pdf` extension in `ts_content_client.cc:32`, then the PDF response
+  path checks the committed response MIME in
+  `ts_plugin_response_interceptor_url_loader_throttle.cc:169` and
+  `ts_plugin_response_interceptor_url_loader_throttle.cc:181`. The stream
+  delegate carries the original URL through `StreamInfo` in
+  `ts_pdf_stream_delegate.cc:115`, but it does not grant file-system read/write
+  privileges. The PDF component manifest starts from Chrome's snapshot with a
+  `fileSystem.write` entry, but TermSurf strips that permission before extension
+  creation in `extensions/ts_pdf_component_extension.cc:87`. Prior Issue 794
+  verification explicitly tested `file://` PDF and `file://` extensionless
+  rendering in
+  `issues/0794-pdf-viewer-interactions/13-probe-save-print-title-local.md:399`
+  and `issues/0794-pdf-viewer-interactions/14-complete-pdf-strings.md:372`.
+  Security conclusion: the local-file surface is acceptable for this audit
+  because TermSurf does not introduce a separate local-file grant; it relies on
+  Chromium's normal local navigation/MIME handling plus the same PDF stream
+  container path as HTTP PDFs. Experiment 4 does not need a local-file-specific
+  fix, but its regression matrix should continue to include `file://` and
+  extensionless local PDFs.
+
+### Experiment 4 backlog
+
+Required cleanup:
+
+1. Restrict extension-scheme handling, process-per-site, and process-map
+   activation to the fixed PDF component extension only.
+2. Add explicit sender-extension checks to TermSurf's
+   `resourcesPrivate.getStrings(PDF)` and `pdfViewerPrivate.setPdfDocumentTitle`
+   implementations.
+
+Defense-in-depth cleanup:
+
+1. Add a short comment at the `chrome://resources` grant explaining the
+   process-scoped grant and its dependency on PDF-only process policy.
+2. Replace data-pipe `CHECK_EQ` calls in the PDF response interceptor with
+   graceful load failure if the change is small and low-risk.
+
+Minimum verification matrix for Experiment 4:
+
+- Build `libtermsurf_chromium` on a fresh Chromium branch.
+- Run the existing PDF toolbar/save/title/local harness.
+- Run the protocol scroll, resize, and mouse harnesses.
+- Run the deterministic non-PDF HTML smoke test.
+- Add or extend a negative probe showing that a non-PDF extension URL/context
+  cannot receive PDF extension handling, process-map activation, or PDF private
+  API success.
+- Confirm default production print remains not-clicked and print intercept
+  remains env/switch-gated.
+
+No separate follow-up issue is required from this audit. Native print remains
+tracked by Issue 795 and was not re-scoped here.
+
+## Conclusion
+
+The current PDF implementation has no obvious critical or high-severity security
+flaw in the TermSurf-owned PDF path. The important cleanup is to make the
+single-PDF-extension assumption explicit in code rather than implicit in today's
+extension registry contents. Experiment 4 should harden those boundaries and add
+negative tests before the issue moves to the completeness audit track.

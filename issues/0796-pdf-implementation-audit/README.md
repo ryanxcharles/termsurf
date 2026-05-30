@@ -156,7 +156,7 @@ it to the `## Experiments` index.
   **Pass**
 - [Experiment 2: Code organization cleanup](02-code-organization-cleanup.md) —
   **Pass**
-- [Experiment 3: Security audit](03-security-audit.md) — **Designed**
+- [Experiment 3: Security audit](03-security-audit.md) — **Pass**
 
 ## Experiment Rules
 
