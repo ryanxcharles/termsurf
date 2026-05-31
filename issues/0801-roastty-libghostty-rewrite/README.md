@@ -136,7 +136,7 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 3: Port Terminal Tabstops](03-port-tabstops.md) — **Pass**
 - [Experiment 4: Port Terminal Size Offsets](04-port-terminal-size.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 

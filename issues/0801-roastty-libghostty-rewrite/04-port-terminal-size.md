@@ -149,3 +149,90 @@ The experiment fails if:
 
 This experiment design must be reviewed by Codex before implementation. Any real
 design issues must be fixed before committing the plan or implementing the port.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a `terminal::size` module ported from Ghostty's
+`terminal/size.zig`.
+
+Implemented files:
+
+- `roastty/src/terminal/size.rs`
+- `roastty/src/terminal/mod.rs` module wiring
+
+The port preserves the upstream support model needed by later page/grid work:
+
+- terminal page size and integer-width aliases;
+- `Offset<T>` as transparent `u32` offset storage with `PhantomData<T>`;
+- `OffsetSlice<T>` as the Rust equivalent of Zig's nested `Offset(T).Slice`;
+- `OffsetBuf` with `init`, `init_offset`, `start`, `member`, `add`, and
+  `rebase`;
+- `get_offset` from a base pointer and typed pointer;
+- checked `usize -> u32` conversion for offset creation;
+- alignment assertions before typed pointer conversion.
+
+The unsafe boundary is intentionally narrow. The module returns raw typed
+pointers from offset conversion and requires an unsafe call only when turning an
+`OffsetSlice<T>` into a Rust slice reference. The safety invariant is documented
+at that conversion point: callers must ensure the derived pointer is valid for
+the requested length and lifetime.
+
+All upstream tests from `size.zig` were ported or matched with direct Rust
+equivalents:
+
+- `Offset` -> `offset`
+- `Offset ptr u8` -> `offset_ptr_u8`
+- `Offset ptr structural` -> `offset_ptr_structural`
+- `getOffset bytes` -> `get_offset_bytes`
+- `getOffset structs` -> `get_offset_structs`
+
+Additional Rust-specific tests were added for the boundary that Rust makes
+explicit:
+
+- `Offset<T>` size/alignment parity with `u32`;
+- `OffsetSlice<T>` address/range behavior;
+- `OffsetBuf::member`;
+- `OffsetBuf::add`;
+- `OffsetBuf::rebase`;
+- misaligned typed pointer panic behavior;
+- pointer-before-base rejection;
+- offset-too-large rejection.
+
+No public C ABI or header files changed.
+
+### Verification
+
+Ran `cargo fmt` after Rust edits and accepted the output.
+
+Ran:
+
+```bash
+cargo test -p roastty terminal::size
+cargo test -p roastty
+```
+
+Both commands passed. The targeted command ran 12 `terminal::size` tests. The
+full Roastty test suite ran 22 Rust unit tests, 1 C ABI harness integration
+test, and doc tests.
+
+### Completion Review
+
+Codex reviewed the completed implementation and result and found no blocking
+correctness, style, integration, or documentation issues. It confirmed the port
+preserves the upstream `size.zig` behavior, keeps the unsafe boundary narrow,
+covers layout/range/offset-buffer/slice behavior with tests, and accurately
+records the result.
+
+## Conclusion
+
+Experiment 4 succeeds. Roastty now has the offset and size primitives needed by
+future page/grid storage work, with the first deliberate unsafe terminal-core
+boundary kept small and tested.
+
+The next experiment can either port another small terminal support module, or
+begin designing the first page-storage slice that uses `terminal::size`. Because
+page storage is pointer-heavy and substantially riskier, the next step should
+probably be a design-only experiment that decomposes `page.zig` into smaller
+safe/unsafe implementation slices before porting it.
