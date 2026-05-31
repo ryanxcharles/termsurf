@@ -255,3 +255,119 @@ The experiment fails if:
 This experiment design must be reviewed by Codex before implementation. Any real
 design issues must be fixed before committing the plan or implementing the
 slice.
+
+## Result
+
+**Result:** Pass
+
+Experiment 9 ported the layout-only page capacity layer into
+`roastty/src/terminal/page.rs`.
+
+The implementation added:
+
+- `Size`
+- `Capacity`
+- `CapacityAdjustment`
+- `CapacityAdjustError`
+- `STD_CAPACITY`
+- `PageLayout`
+- layout-only `StyleSetLayout`
+- layout-only `GraphemeMapLayout`
+- layout-only `HyperlinkMapLayout`
+- layout-only `HyperlinkSetLayout`
+
+The experiment also made `BitmapAllocator::Layout` fields visible within the
+terminal module so page layout can compose allocator layout data without
+duplicating it.
+
+No real `Page` allocation, page backing memory, row/cell pointer access,
+hash-map behavior, ref-counted-set behavior, grapheme/style/hyperlink behavior,
+clone, move, integrity, or exact-row-capacity behavior was added.
+
+### Layout Constants
+
+The implementation uses upstream-equivalent layout constants rather than
+assuming Roastty's safe Rust types match Zig's in-memory layout.
+
+Temporary local Zig probes confirmed:
+
+| Value                               | Size | Align |
+| ----------------------------------- | ---: | ----: |
+| `std.heap.page_size_min`            |      | 16384 |
+| Zig `RGB` packed value              |    4 |     4 |
+| Zig `Style.Color`                   |    8 |     4 |
+| Zig `Style.Flags`                   |    2 |     2 |
+| Zig `Style`                         |   28 |     4 |
+| Zig `Offset(u8).Slice` equivalent   |   16 |     8 |
+| Zig `hyperlink.PageEntry.Id`        |   24 |     8 |
+| Zig `hyperlink.PageEntry`           |   40 |     8 |
+| Zig `RefCountedSet.Item<Style>`     |   36 |     4 |
+| Zig `RefCountedSet.Item<PageEntry>` |   48 |     8 |
+| Zig hash-map header                 |   16 |     4 |
+| Zig hash-map metadata byte          |    1 |     1 |
+
+`PAGE_SIZE_MIN` is encoded as `16_384`, matching Zig `std.heap.page_size_min`.
+The implementation intentionally does not query the runtime macOS page size.
+
+### Upstream Tests Ported
+
+The following upstream page layout/capacity tests were ported:
+
+- `Page.layout can take a maxed capacity`
+- `Page capacity adjust cols down`
+- `Page capacity adjust cols down to 1`
+- `Page capacity adjust cols up`
+- `Page capacity adjust cols sweep`
+- `Page capacity adjust cols too high`
+- `Capacity maxCols basic`
+- `Capacity maxCols preserves total size`
+- `Capacity maxCols with 1 row exactly`
+
+Additional direct tests cover:
+
+- upstream surrogate size/alignment constants
+- representative and zero-capacity style-set layouts
+- representative and zero-capacity grapheme-map layouts
+- representative and zero-capacity hyperlink-map layouts
+- representative and zero-capacity hyperlink-set layouts
+- bitmap allocator layout values used by page layout
+- `STD_CAPACITY` full layout offsets and total size
+- layout field ordering and final page-size alignment
+
+The test-mode `STD_CAPACITY` layout total is `458_752` bytes with the current
+upstream bitmap allocator sizing formula and the probed Zig layout constants.
+
+### Deferred Upstream Tests
+
+The following upstream tests remain intentionally deferred:
+
+| Deferred area                                  | Reason                                                    |
+| ---------------------------------------------- | --------------------------------------------------------- |
+| `Page init` / `Page read and write cells`      | Requires page allocation and row/cell pointer access.     |
+| Grapheme tests                                 | Require offset hash maps and grapheme storage behavior.   |
+| Style tests inside `Page`                      | Require `StyleSet` / `RefCountedSet` behavior.            |
+| Hyperlink tests                                | Require hyperlink set/map behavior and string allocation. |
+| Clone/copy/move/integrity/exact-capacity tests | Require full page storage and metadata mutation behavior. |
+
+### Verification
+
+Ran and passed:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+The targeted page run passed 28 tests. The full `cargo test -p roastty` run
+passed 91 Rust unit tests, the C ABI harness, and doc tests.
+
+## Conclusion
+
+Experiment 9 succeeds. Roastty now has `Capacity`, `STD_CAPACITY`, layout-only
+metadata sizing, and `PageLayout` arithmetic sufficient to pass the upstream
+page layout/capacity tests without allocating a real page.
+
+The next experiment should port basic `Page` allocation and row/cell access:
+page-aligned zeroed backing memory, row initialization, `Page::init`/drop, and
+the upstream `Page init` plus `Page read and write cells` tests.

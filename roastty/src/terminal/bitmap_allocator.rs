@@ -9,10 +9,10 @@ pub(super) enum BitmapAllocError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Layout {
-    total_size: usize,
-    bitmap_count: usize,
-    bitmap_start: usize,
-    chunks_start: usize,
+    pub(super) total_size: usize,
+    pub(super) bitmap_count: usize,
+    pub(super) bitmap_start: usize,
+    pub(super) chunks_start: usize,
 }
 
 #[derive(Debug, Clone, Copy)]

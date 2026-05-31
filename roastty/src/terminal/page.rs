@@ -1,6 +1,514 @@
+use std::mem::{align_of, size_of};
+
+use super::bitmap_allocator::{BitmapAllocator, Layout as BitmapAllocatorLayout};
 use super::color::Rgb;
-use super::size::Offset;
+use super::size::{CellCountInt, GraphemeBytesInt, HyperlinkCountInt, Offset, StringBytesInt};
 use super::style;
+
+const PAGE_SIZE_MIN: usize = 16_384;
+const CODEPOINT_STORAGE_SIZE: usize = 4;
+const GRAPHEME_CHUNK_LEN: usize = 4;
+const GRAPHEME_CHUNK: usize = GRAPHEME_CHUNK_LEN * CODEPOINT_STORAGE_SIZE;
+type GraphemeAlloc = BitmapAllocator<GRAPHEME_CHUNK>;
+const GRAPHEME_COUNT_DEFAULT: usize = GraphemeAlloc::BITMAP_BIT_SIZE;
+pub(super) const GRAPHEME_BYTES_DEFAULT: GraphemeBytesInt =
+    (GRAPHEME_COUNT_DEFAULT * GRAPHEME_CHUNK) as GraphemeBytesInt;
+
+const STRING_CHUNK_LEN: usize = 32;
+const STRING_CHUNK: usize = STRING_CHUNK_LEN * size_of::<u8>();
+type StringAlloc = BitmapAllocator<STRING_CHUNK>;
+const STRING_COUNT_DEFAULT: usize = StringAlloc::BITMAP_BIT_SIZE;
+pub(super) const STRING_BYTES_DEFAULT: StringBytesInt =
+    (STRING_COUNT_DEFAULT * STRING_CHUNK) as StringBytesInt;
+
+const HYPERLINK_COUNT_DEFAULT: usize = 4;
+const HYPERLINK_CELL_MULTIPLIER: usize = 16;
+pub(super) const HYPERLINK_BYTES_DEFAULT: HyperlinkCountInt =
+    (HYPERLINK_COUNT_DEFAULT * HYPERLINK_SET_ITEM_SIZE) as HyperlinkCountInt;
+
+const STYLE_VALUE_SIZE: usize = 28;
+const STYLE_VALUE_ALIGN: usize = 4;
+const STYLE_SET_ITEM_SIZE: usize = 36;
+const STYLE_SET_ITEM_ALIGN: usize = 4;
+const HYPERLINK_PAGE_ENTRY_SIZE: usize = 40;
+const HYPERLINK_PAGE_ENTRY_ALIGN: usize = 8;
+const HYPERLINK_SET_ITEM_SIZE: usize = 48;
+const HYPERLINK_SET_ITEM_ALIGN: usize = 8;
+const REF_COUNTED_SET_ID_SIZE: usize = size_of::<u16>();
+const REF_COUNTED_SET_ID_ALIGN: usize = align_of::<u16>();
+const HASH_MAP_HEADER_SIZE: usize = 16;
+const HASH_MAP_HEADER_ALIGN: usize = 4;
+const HASH_MAP_METADATA_SIZE: usize = 1;
+const HASH_MAP_METADATA_ALIGN: usize = 1;
+const OFFSET_CELL_SIZE: usize = size_of::<Offset<Cell>>();
+const OFFSET_CELL_ALIGN: usize = align_of::<Offset<Cell>>();
+const OFFSET_U21_SLICE_SIZE: usize = 16;
+const OFFSET_U21_SLICE_ALIGN: usize = 8;
+const HYPERLINK_ID_SIZE: usize = size_of::<HyperlinkId>();
+const HYPERLINK_ID_ALIGN: usize = align_of::<HyperlinkId>();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Size {
+    cols: CellCountInt,
+    rows: CellCountInt,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Capacity {
+    cols: CellCountInt,
+    rows: CellCountInt,
+    styles: CellCountInt,
+    hyperlink_bytes: HyperlinkCountInt,
+    grapheme_bytes: GraphemeBytesInt,
+    string_bytes: StringBytesInt,
+}
+
+impl Capacity {
+    pub(super) const fn new(cols: CellCountInt, rows: CellCountInt) -> Self {
+        Self {
+            cols,
+            rows,
+            styles: 16,
+            hyperlink_bytes: HYPERLINK_BYTES_DEFAULT,
+            grapheme_bytes: GRAPHEME_BYTES_DEFAULT,
+            string_bytes: STRING_BYTES_DEFAULT,
+        }
+    }
+
+    pub(super) const fn with_metadata(
+        cols: CellCountInt,
+        rows: CellCountInt,
+        styles: CellCountInt,
+        hyperlink_bytes: HyperlinkCountInt,
+        grapheme_bytes: GraphemeBytesInt,
+        string_bytes: StringBytesInt,
+    ) -> Self {
+        Self {
+            cols,
+            rows,
+            styles,
+            hyperlink_bytes,
+            grapheme_bytes,
+            string_bytes,
+        }
+    }
+
+    pub(super) fn max_cols(self) -> Option<CellCountInt> {
+        let available_bits = self.available_bits_for_grid();
+        let row_bits = row_bits();
+        if available_bits <= row_bits {
+            return None;
+        }
+
+        let remaining_bits = available_bits - row_bits;
+        let max_cols = remaining_bits / cell_bits();
+        Some(max_cols.min(CellCountInt::MAX as usize) as CellCountInt)
+    }
+
+    pub(super) fn adjust(
+        self,
+        adjustment: CapacityAdjustment,
+    ) -> Result<Self, CapacityAdjustError> {
+        let mut adjusted = self;
+        if let Some(cols) = adjustment.cols {
+            let available_bits = self.available_bits_for_grid();
+            let bits_per_row = row_bits() + cell_bits() * cols as usize;
+            let new_rows = available_bits / bits_per_row;
+            if new_rows == 0 {
+                return Err(CapacityAdjustError::OutOfMemory);
+            }
+
+            adjusted.cols = cols;
+            adjusted.rows =
+                CellCountInt::try_from(new_rows).expect("adjusted row count must fit u16");
+        }
+
+        Ok(adjusted)
+    }
+
+    fn available_bits_for_grid(self) -> usize {
+        assert_eq!(size_of::<Row>() % align_of::<Cell>(), 0);
+
+        let layout = page_layout(self);
+        let hyperlink_map_start = align_backward(
+            layout.total_size - layout.hyperlink_map_layout.total_size,
+            HyperlinkMapLayout::BASE_ALIGN,
+        );
+        let hyperlink_set_start = align_backward(
+            hyperlink_map_start - layout.hyperlink_set_layout.total_size,
+            HyperlinkSetLayout::BASE_ALIGN,
+        );
+        let string_alloc_start = align_backward(
+            hyperlink_set_start - layout.string_alloc_layout.total_size,
+            StringAlloc::BASE_ALIGN,
+        );
+        let grapheme_map_start = align_backward(
+            string_alloc_start - layout.grapheme_map_layout.total_size,
+            GraphemeMapLayout::BASE_ALIGN,
+        );
+        let grapheme_alloc_start = align_backward(
+            grapheme_map_start - layout.grapheme_alloc_layout.total_size,
+            GraphemeAlloc::BASE_ALIGN,
+        );
+        let styles_start = align_backward(
+            grapheme_alloc_start - layout.styles_layout.total_size,
+            StyleSetLayout::BASE_ALIGN,
+        );
+
+        styles_start * u8::BITS as usize
+    }
+}
+
+pub(super) const STD_CAPACITY: Capacity = Capacity {
+    cols: 215,
+    rows: 215,
+    styles: 128,
+    hyperlink_bytes: HYPERLINK_BYTES_DEFAULT,
+    grapheme_bytes: 512,
+    string_bytes: STRING_BYTES_DEFAULT,
+};
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct CapacityAdjustment {
+    cols: Option<CellCountInt>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CapacityAdjustError {
+    OutOfMemory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct PageLayout {
+    total_size: usize,
+    rows_start: usize,
+    rows_size: usize,
+    cells_start: usize,
+    cells_size: usize,
+    styles_start: usize,
+    styles_layout: StyleSetLayout,
+    grapheme_alloc_start: usize,
+    grapheme_alloc_layout: BitmapAllocatorLayout,
+    grapheme_map_start: usize,
+    grapheme_map_layout: GraphemeMapLayout,
+    string_alloc_start: usize,
+    string_alloc_layout: BitmapAllocatorLayout,
+    hyperlink_map_start: usize,
+    hyperlink_map_layout: HyperlinkMapLayout,
+    hyperlink_set_start: usize,
+    hyperlink_set_layout: HyperlinkSetLayout,
+    capacity: Capacity,
+}
+
+pub(super) fn page_layout(capacity: Capacity) -> PageLayout {
+    let rows_count = capacity.rows as usize;
+    let rows_start = 0;
+    let rows_end = rows_start + rows_count * size_of::<Row>();
+
+    let cells_count = capacity.cols as usize * capacity.rows as usize;
+    let cells_start = align_forward(rows_end, align_of::<Cell>());
+    let cells_end = cells_start + cells_count * size_of::<Cell>();
+
+    let styles_layout = StyleSetLayout::init(capacity.styles as usize);
+    let styles_start = align_forward(cells_end, StyleSetLayout::BASE_ALIGN);
+    let styles_end = styles_start + styles_layout.total_size;
+
+    let grapheme_alloc_layout = GraphemeAlloc::layout(capacity.grapheme_bytes as usize);
+    let grapheme_alloc_start = align_forward(styles_end, GraphemeAlloc::BASE_ALIGN);
+    let grapheme_alloc_end = grapheme_alloc_start + grapheme_alloc_layout.total_size;
+
+    let grapheme_count = if capacity.grapheme_bytes == 0 {
+        0
+    } else {
+        div_ceil(capacity.grapheme_bytes as usize, GRAPHEME_CHUNK).next_power_of_two()
+    };
+    let grapheme_map_layout = GraphemeMapLayout::layout(grapheme_count as u32);
+    let grapheme_map_start = align_forward(grapheme_alloc_end, GraphemeMapLayout::BASE_ALIGN);
+    let grapheme_map_end = grapheme_map_start + grapheme_map_layout.total_size;
+
+    let string_alloc_layout = StringAlloc::layout(capacity.string_bytes as usize);
+    let string_alloc_start = align_forward(grapheme_map_end, StringAlloc::BASE_ALIGN);
+    let string_alloc_end = string_alloc_start + string_alloc_layout.total_size;
+
+    let hyperlink_count = capacity.hyperlink_bytes as usize / HYPERLINK_SET_ITEM_SIZE;
+    let hyperlink_set_layout = HyperlinkSetLayout::init(hyperlink_count);
+    let hyperlink_set_start = align_forward(string_alloc_end, HyperlinkSetLayout::BASE_ALIGN);
+    let hyperlink_set_end = hyperlink_set_start + hyperlink_set_layout.total_size;
+
+    let hyperlink_map_count = if hyperlink_count == 0 {
+        0
+    } else {
+        hyperlink_count
+            .checked_mul(HYPERLINK_CELL_MULTIPLIER)
+            .and_then(|count| u32::try_from(count).ok())
+            .unwrap_or(u32::MAX)
+            .next_power_of_two()
+    };
+    let hyperlink_map_layout = HyperlinkMapLayout::layout(hyperlink_map_count);
+    let hyperlink_map_start = align_forward(hyperlink_set_end, HyperlinkMapLayout::BASE_ALIGN);
+    let hyperlink_map_end = hyperlink_map_start + hyperlink_map_layout.total_size;
+
+    let total_size = align_forward(hyperlink_map_end, PAGE_SIZE_MIN);
+
+    PageLayout {
+        total_size,
+        rows_start,
+        rows_size: rows_end - rows_start,
+        cells_start,
+        cells_size: cells_end - cells_start,
+        styles_start,
+        styles_layout,
+        grapheme_alloc_start,
+        grapheme_alloc_layout,
+        grapheme_map_start,
+        grapheme_map_layout,
+        string_alloc_start,
+        string_alloc_layout,
+        hyperlink_map_start,
+        hyperlink_map_layout,
+        hyperlink_set_start,
+        hyperlink_set_layout,
+        capacity,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct StyleSetLayout {
+    cap: usize,
+    table_cap: usize,
+    table_mask: u16,
+    table_start: usize,
+    items_start: usize,
+    total_size: usize,
+}
+
+impl StyleSetLayout {
+    const BASE_ALIGN: usize = 8;
+
+    fn init(capacity: usize) -> Self {
+        ref_counted_set_layout(capacity, STYLE_SET_ITEM_SIZE, STYLE_SET_ITEM_ALIGN).into()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct HyperlinkSetLayout {
+    cap: usize,
+    table_cap: usize,
+    table_mask: u16,
+    table_start: usize,
+    items_start: usize,
+    total_size: usize,
+}
+
+impl HyperlinkSetLayout {
+    const BASE_ALIGN: usize = 8;
+
+    fn init(capacity: usize) -> Self {
+        ref_counted_set_layout(capacity, HYPERLINK_SET_ITEM_SIZE, HYPERLINK_SET_ITEM_ALIGN).into()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RefCountedSetLayout {
+    cap: usize,
+    table_cap: usize,
+    table_mask: u16,
+    table_start: usize,
+    items_start: usize,
+    total_size: usize,
+}
+
+impl From<RefCountedSetLayout> for StyleSetLayout {
+    fn from(value: RefCountedSetLayout) -> Self {
+        Self {
+            cap: value.cap,
+            table_cap: value.table_cap,
+            table_mask: value.table_mask,
+            table_start: value.table_start,
+            items_start: value.items_start,
+            total_size: value.total_size,
+        }
+    }
+}
+
+impl From<RefCountedSetLayout> for HyperlinkSetLayout {
+    fn from(value: RefCountedSetLayout) -> Self {
+        Self {
+            cap: value.cap,
+            table_cap: value.table_cap,
+            table_mask: value.table_mask,
+            table_start: value.table_start,
+            items_start: value.items_start,
+            total_size: value.total_size,
+        }
+    }
+}
+
+fn ref_counted_set_layout(
+    capacity: usize,
+    item_size: usize,
+    item_align: usize,
+) -> RefCountedSetLayout {
+    assert!(capacity <= u16::MAX as usize + 1);
+
+    if capacity == 0 {
+        return RefCountedSetLayout {
+            cap: 0,
+            table_cap: 0,
+            table_mask: 0,
+            table_start: 0,
+            items_start: 0,
+            total_size: 0,
+        };
+    }
+
+    let table_cap = capacity.next_power_of_two();
+    let items_cap = ((table_cap as f64) * 0.8125).floor() as usize;
+    let table_mask = (table_cap - 1) as u16;
+    let table_start = 0;
+    let table_end = table_start + table_cap * REF_COUNTED_SET_ID_SIZE;
+    let items_start = align_forward(table_end, item_align);
+    let items_end = items_start + items_cap * item_size;
+    let total_size = items_end;
+
+    RefCountedSetLayout {
+        cap: items_cap,
+        table_cap,
+        table_mask,
+        table_start,
+        items_start,
+        total_size,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct GraphemeMapLayout {
+    total_size: usize,
+    keys_start: usize,
+    vals_start: usize,
+    capacity: u32,
+}
+
+impl GraphemeMapLayout {
+    const BASE_ALIGN: usize = 8;
+
+    fn layout(capacity: u32) -> Self {
+        hash_map_layout(
+            capacity,
+            OFFSET_CELL_SIZE,
+            OFFSET_CELL_ALIGN,
+            OFFSET_U21_SLICE_SIZE,
+            OFFSET_U21_SLICE_ALIGN,
+            Self::BASE_ALIGN,
+        )
+        .into()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct HyperlinkMapLayout {
+    total_size: usize,
+    keys_start: usize,
+    vals_start: usize,
+    capacity: u32,
+}
+
+impl HyperlinkMapLayout {
+    const BASE_ALIGN: usize = 4;
+
+    fn layout(capacity: u32) -> Self {
+        hash_map_layout(
+            capacity,
+            OFFSET_CELL_SIZE,
+            OFFSET_CELL_ALIGN,
+            HYPERLINK_ID_SIZE,
+            HYPERLINK_ID_ALIGN,
+            Self::BASE_ALIGN,
+        )
+        .into()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HashMapLayout {
+    total_size: usize,
+    keys_start: usize,
+    vals_start: usize,
+    capacity: u32,
+}
+
+impl From<HashMapLayout> for GraphemeMapLayout {
+    fn from(value: HashMapLayout) -> Self {
+        Self {
+            total_size: value.total_size,
+            keys_start: value.keys_start,
+            vals_start: value.vals_start,
+            capacity: value.capacity,
+        }
+    }
+}
+
+impl From<HashMapLayout> for HyperlinkMapLayout {
+    fn from(value: HashMapLayout) -> Self {
+        Self {
+            total_size: value.total_size,
+            keys_start: value.keys_start,
+            vals_start: value.vals_start,
+            capacity: value.capacity,
+        }
+    }
+}
+
+fn hash_map_layout(
+    capacity: u32,
+    key_size: usize,
+    key_align: usize,
+    value_size: usize,
+    value_align: usize,
+    base_align: usize,
+) -> HashMapLayout {
+    assert!(capacity == 0 || capacity.is_power_of_two());
+
+    let cap = capacity as usize;
+    let meta_start = HASH_MAP_HEADER_SIZE;
+    let meta_end = meta_start + cap * HASH_MAP_METADATA_SIZE;
+    let keys_start = align_forward(meta_end, key_align);
+    let keys_end = keys_start + cap * key_size;
+    let vals_start = align_forward(keys_end, value_align);
+    let vals_end = vals_start + cap * value_size;
+    let total_size = align_forward(vals_end, base_align);
+
+    HashMapLayout {
+        total_size,
+        keys_start: keys_start - meta_start,
+        vals_start: vals_start - meta_start,
+        capacity,
+    }
+}
+
+type HyperlinkId = u16;
+
+const fn row_bits() -> usize {
+    size_of::<Row>() * u8::BITS as usize
+}
+
+const fn cell_bits() -> usize {
+    size_of::<Cell>() * u8::BITS as usize
+}
+
+fn div_ceil(value: usize, divisor: usize) -> usize {
+    value.div_ceil(divisor)
+}
+
+fn align_forward(value: usize, align: usize) -> usize {
+    debug_assert!(align.is_power_of_two());
+    (value + align - 1) & !(align - 1)
+}
+
+fn align_backward(value: usize, align: usize) -> usize {
+    debug_assert!(align.is_power_of_two());
+    value & !(align - 1)
+}
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -397,6 +905,287 @@ const fn bits_to_rgb(bits: u64) -> Rgb {
 mod tests {
     use super::*;
     use std::mem::{align_of, size_of};
+
+    #[test]
+    fn upstream_layout_surrogate_sizes() {
+        assert_eq!(PAGE_SIZE_MIN, 16_384);
+        assert_eq!(CODEPOINT_STORAGE_SIZE, 4);
+        assert_eq!(STYLE_VALUE_SIZE, 28);
+        assert_eq!(STYLE_VALUE_ALIGN, 4);
+        assert_eq!(STYLE_SET_ITEM_SIZE, 36);
+        assert_eq!(STYLE_SET_ITEM_ALIGN, 4);
+        assert_eq!(HYPERLINK_PAGE_ENTRY_SIZE, 40);
+        assert_eq!(HYPERLINK_PAGE_ENTRY_ALIGN, 8);
+        assert_eq!(HYPERLINK_SET_ITEM_SIZE, 48);
+        assert_eq!(HYPERLINK_SET_ITEM_ALIGN, 8);
+        assert_eq!(REF_COUNTED_SET_ID_SIZE, 2);
+        assert_eq!(REF_COUNTED_SET_ID_ALIGN, 2);
+        assert_eq!(HASH_MAP_HEADER_SIZE, 16);
+        assert_eq!(HASH_MAP_HEADER_ALIGN, 4);
+        assert_eq!(HASH_MAP_METADATA_SIZE, 1);
+        assert_eq!(HASH_MAP_METADATA_ALIGN, 1);
+        assert_eq!(OFFSET_CELL_SIZE, 4);
+        assert_eq!(OFFSET_CELL_ALIGN, 4);
+        assert_eq!(OFFSET_U21_SLICE_SIZE, 16);
+        assert_eq!(OFFSET_U21_SLICE_ALIGN, 8);
+        assert_eq!(HYPERLINK_ID_SIZE, 2);
+        assert_eq!(HYPERLINK_ID_ALIGN, 2);
+    }
+
+    #[test]
+    fn dependency_layout_parity() {
+        assert_eq!(
+            StyleSetLayout::init(0),
+            StyleSetLayout {
+                cap: 0,
+                table_cap: 0,
+                table_mask: 0,
+                table_start: 0,
+                items_start: 0,
+                total_size: 0,
+            }
+        );
+        assert_eq!(
+            StyleSetLayout::init(16),
+            StyleSetLayout {
+                cap: 13,
+                table_cap: 16,
+                table_mask: 15,
+                table_start: 0,
+                items_start: 32,
+                total_size: 500,
+            }
+        );
+
+        assert_eq!(
+            GraphemeMapLayout::layout(0),
+            GraphemeMapLayout {
+                total_size: 16,
+                keys_start: 0,
+                vals_start: 0,
+                capacity: 0,
+            }
+        );
+        assert_eq!(
+            GraphemeMapLayout::layout(32),
+            GraphemeMapLayout {
+                total_size: 688,
+                keys_start: 32,
+                vals_start: 160,
+                capacity: 32,
+            }
+        );
+
+        assert_eq!(
+            HyperlinkMapLayout::layout(0),
+            HyperlinkMapLayout {
+                total_size: 16,
+                keys_start: 0,
+                vals_start: 0,
+                capacity: 0,
+            }
+        );
+        assert_eq!(
+            HyperlinkMapLayout::layout(64),
+            HyperlinkMapLayout {
+                total_size: 464,
+                keys_start: 64,
+                vals_start: 320,
+                capacity: 64,
+            }
+        );
+
+        assert_eq!(
+            HyperlinkSetLayout::init(0),
+            HyperlinkSetLayout {
+                cap: 0,
+                table_cap: 0,
+                table_mask: 0,
+                table_start: 0,
+                items_start: 0,
+                total_size: 0,
+            }
+        );
+        assert_eq!(
+            HyperlinkSetLayout::init(4),
+            HyperlinkSetLayout {
+                cap: 3,
+                table_cap: 4,
+                table_mask: 3,
+                table_start: 0,
+                items_start: 8,
+                total_size: 152,
+            }
+        );
+    }
+
+    #[test]
+    fn bitmap_layout_values_used_by_page_layout() {
+        assert_eq!(GraphemeAlloc::layout(512).total_size, 8200);
+        assert_eq!(
+            StringAlloc::layout(STRING_BYTES_DEFAULT as usize).total_size,
+            65_544
+        );
+    }
+
+    #[test]
+    fn page_layout_std_capacity() {
+        let layout = page_layout(STD_CAPACITY);
+
+        assert_eq!(layout.total_size, 458_752);
+        assert_eq!(layout.rows_start, 0);
+        assert_eq!(layout.rows_size, 1_720);
+        assert_eq!(layout.cells_start, 1_720);
+        assert_eq!(layout.cells_size, 369_800);
+        assert_eq!(layout.styles_start, 371_520);
+        assert_eq!(layout.styles_layout.total_size, 4_000);
+        assert_eq!(layout.grapheme_alloc_start, 375_520);
+        assert_eq!(layout.grapheme_alloc_layout.total_size, 8_200);
+        assert_eq!(layout.grapheme_map_start, 383_720);
+        assert_eq!(layout.grapheme_map_layout.total_size, 688);
+        assert_eq!(layout.string_alloc_start, 384_408);
+        assert_eq!(layout.string_alloc_layout.total_size, 65_544);
+        assert_eq!(layout.hyperlink_set_start, 449_952);
+        assert_eq!(layout.hyperlink_set_layout.total_size, 152);
+        assert_eq!(layout.hyperlink_map_start, 450_104);
+        assert_eq!(layout.hyperlink_map_layout.total_size, 464);
+    }
+
+    #[test]
+    fn page_layout_ordering() {
+        let layout = page_layout(STD_CAPACITY);
+
+        assert!(layout.rows_start < layout.cells_start);
+        assert!(layout.cells_start < layout.styles_start);
+        assert!(layout.styles_start < layout.grapheme_alloc_start);
+        assert!(layout.grapheme_alloc_start < layout.grapheme_map_start);
+        assert!(layout.grapheme_map_start < layout.string_alloc_start);
+        assert!(layout.string_alloc_start < layout.hyperlink_set_start);
+        assert!(layout.hyperlink_set_start < layout.hyperlink_map_start);
+        assert_eq!(layout.total_size % PAGE_SIZE_MIN, 0);
+    }
+
+    #[test]
+    fn page_layout_can_take_a_maxed_capacity() {
+        let cap = Capacity::with_metadata(
+            CellCountInt::MAX,
+            CellCountInt::MAX,
+            CellCountInt::MAX,
+            HyperlinkCountInt::MAX,
+            GraphemeBytesInt::MAX,
+            StringBytesInt::MAX,
+        );
+
+        let _ = page_layout(cap);
+    }
+
+    #[test]
+    fn page_capacity_adjust_cols_down() {
+        let original = STD_CAPACITY;
+        let original_size = page_layout(original).total_size;
+        let adjusted = original
+            .adjust(CapacityAdjustment {
+                cols: Some(original.cols / 2),
+            })
+            .unwrap();
+        let adjusted_size = page_layout(adjusted).total_size;
+        assert_eq!(original_size, adjusted_size);
+
+        let mut bigger = adjusted;
+        bigger.rows += 1;
+        assert!(page_layout(bigger).total_size > original_size);
+    }
+
+    #[test]
+    fn page_capacity_adjust_cols_down_to_one() {
+        let original = STD_CAPACITY;
+        let original_size = page_layout(original).total_size;
+        let adjusted = original
+            .adjust(CapacityAdjustment { cols: Some(1) })
+            .unwrap();
+        let adjusted_size = page_layout(adjusted).total_size;
+        assert_eq!(original_size, adjusted_size);
+
+        let mut bigger = adjusted;
+        bigger.rows += 1;
+        assert!(page_layout(bigger).total_size > original_size);
+    }
+
+    #[test]
+    fn page_capacity_adjust_cols_up() {
+        let original = STD_CAPACITY;
+        let original_size = page_layout(original).total_size;
+        let adjusted = original
+            .adjust(CapacityAdjustment {
+                cols: Some(original.cols * 2),
+            })
+            .unwrap();
+        let adjusted_size = page_layout(adjusted).total_size;
+        assert_eq!(original_size, adjusted_size);
+
+        let mut bigger = adjusted;
+        bigger.rows += 1;
+        assert!(page_layout(bigger).total_size > original_size);
+    }
+
+    #[test]
+    fn page_capacity_adjust_cols_sweep() {
+        let mut cap = STD_CAPACITY;
+        let original_cols = cap.cols;
+        let original_size = page_layout(cap).total_size;
+
+        for cols in 1..original_cols * 2 {
+            cap = cap.adjust(CapacityAdjustment { cols: Some(cols) }).unwrap();
+            assert_eq!(page_layout(cap).total_size, original_size);
+
+            let mut bigger = cap;
+            bigger.rows += 1;
+            assert!(page_layout(bigger).total_size > original_size);
+        }
+    }
+
+    #[test]
+    fn page_capacity_adjust_cols_too_high() {
+        let result = STD_CAPACITY.adjust(CapacityAdjustment {
+            cols: Some(CellCountInt::MAX),
+        });
+        assert_eq!(result, Err(CapacityAdjustError::OutOfMemory));
+    }
+
+    #[test]
+    fn capacity_max_cols_basic() {
+        let cap = STD_CAPACITY;
+        let max = cap.max_cols().unwrap();
+
+        assert!(max >= cap.cols);
+        let adjusted = cap.adjust(CapacityAdjustment { cols: Some(max) }).unwrap();
+        assert!(adjusted.rows >= 1);
+        assert_eq!(
+            cap.adjust(CapacityAdjustment {
+                cols: Some(max + 1),
+            }),
+            Err(CapacityAdjustError::OutOfMemory)
+        );
+    }
+
+    #[test]
+    fn capacity_max_cols_preserves_total_size() {
+        let cap = STD_CAPACITY;
+        let original_size = page_layout(cap).total_size;
+        let max = cap.max_cols().unwrap();
+        let adjusted = cap.adjust(CapacityAdjustment { cols: Some(max) }).unwrap();
+
+        assert_eq!(page_layout(adjusted).total_size, original_size);
+    }
+
+    #[test]
+    fn capacity_max_cols_with_one_row_exactly() {
+        let cap = STD_CAPACITY;
+        let max = cap.max_cols().unwrap();
+        let adjusted = cap.adjust(CapacityAdjustment { cols: Some(max) }).unwrap();
+
+        assert_eq!(adjusted.rows, 1);
+    }
 
     #[test]
     fn row_layout() {
