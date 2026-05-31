@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "webtui",
+    "roamium",
+]
+exclude = [
+    "wezboard",
+    "vendor",
+    "chromium",
+    "proto/test-rust",
+]
+resolver = "2"

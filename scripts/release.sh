@@ -19,10 +19,10 @@ echo "==> Packaging TermSurf v${VERSION} for ${ARCH}..."
 
 # Check release builds exist
 for f in \
-  "$REPO_DIR/webtui/target/release/web" \
+  "$REPO_DIR/target/release/web" \
   "$REPO_DIR/wezboard/target/release/wezboard" \
   "$REPO_DIR/wezboard/target/release/wezboard-gui" \
-  "$REPO_DIR/roamium/target/release/roamium"; do
+  "$REPO_DIR/target/release/roamium"; do
   if [ ! -f "$f" ]; then
     echo "Error: Release build not found: $f"
     echo "Run: scripts/build.sh all --release"
@@ -36,9 +36,9 @@ mkdir -p "$STAGING_DIR/roamium"
 
 # Copy binaries
 echo "==> Copying binaries..."
-cp "$REPO_DIR/webtui/target/release/web" "$STAGING_DIR/"
+cp "$REPO_DIR/target/release/web" "$STAGING_DIR/"
 cp "$REPO_DIR/wezboard/target/release/wezboard" "$STAGING_DIR/"
-cp "$REPO_DIR/roamium/target/release/roamium" "$STAGING_DIR/roamium/"
+cp "$REPO_DIR/target/release/roamium" "$STAGING_DIR/roamium/"
 
 # Copy Chromium dylibs and resources
 echo "==> Copying Chromium dylibs and resources..."

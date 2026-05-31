@@ -197,7 +197,7 @@ Roastty and TermSurf-owned shared Rust crates while keeping Wezboard separate.
 ## Experiments
 
 - [Experiment 1: Create the TermSurf Rust workspace](01-termsurf-rust-workspace.md)
-  — **Designed**
+  — **Pass**
 
 ## Original Expected ABI Experiment
 

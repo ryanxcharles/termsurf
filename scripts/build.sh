@@ -62,36 +62,36 @@ build_chromium() {
 }
 
 build_webtui() {
-  cd "$REPO_DIR/webtui"
+  cd "$REPO_DIR"
   if $CLEAN; then
     echo "==> Cleaning webtui..."
-    cargo clean
+    cargo clean -p webtui
   fi
   if $RELEASE; then
     echo "==> Building webtui (release)..."
-    cargo build --release
-    echo "  webtui: $REPO_DIR/webtui/target/release/web"
+    cargo build --release -p webtui
+    echo "  webtui: $REPO_DIR/target/release/web"
   else
     echo "==> Building webtui (debug)..."
-    cargo build
-    echo "  webtui: $REPO_DIR/webtui/target/debug/web"
+    cargo build -p webtui
+    echo "  webtui: $REPO_DIR/target/debug/web"
   fi
 }
 
 build_roamium() {
-  cd "$REPO_DIR/roamium"
+  cd "$REPO_DIR"
   if $CLEAN; then
     echo "==> Cleaning Roamium..."
-    cargo clean
+    cargo clean -p roamium
   fi
   if $RELEASE; then
     echo "==> Building Roamium (release)..."
-    cargo build --release
-    cp "$REPO_DIR/roamium/target/release/roamium" "$CHROMIUM_OUT/roamium"
+    cargo build --release -p roamium
+    cp "$REPO_DIR/target/release/roamium" "$CHROMIUM_OUT/roamium"
   else
     echo "==> Building Roamium (debug)..."
-    cargo build
-    cp "$REPO_DIR/roamium/target/debug/roamium" "$CHROMIUM_OUT/roamium"
+    cargo build -p roamium
+    cp "$REPO_DIR/target/debug/roamium" "$CHROMIUM_OUT/roamium"
   fi
   echo "  Roamium: $CHROMIUM_OUT/roamium"
 }

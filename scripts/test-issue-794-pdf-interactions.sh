@@ -9,7 +9,7 @@ LOG_DIR="$(cd "$LOG_DIR" && pwd)"
 URL="${1:-http://localhost:9616/bitcoin.pdf}"
 
 WEZBOARD_BIN="$ROOT/wezboard/target/debug/wezboard-gui"
-WEB_BIN="$ROOT/webtui/target/debug/web"
+WEB_BIN="$ROOT/target/debug/web"
 ROAMIUM_BIN="$ROOT/chromium/src/out/Default/roamium"
 INTERACTION_HELPER="$ROOT/scripts/capture-pdf-interactions.mjs"
 SERVER_LOG="$LOG_DIR/test-server.log"
@@ -178,4 +178,3 @@ Issue 794 PDF interaction artifacts:
   test server log: $SERVER_LOG
   run info: $RUN_INFO
 EOF
-

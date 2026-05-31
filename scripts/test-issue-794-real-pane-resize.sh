@@ -12,7 +12,7 @@ CLASS="${CLASS:-com.termsurf.issue-794-exp9-$$}"
 
 WEZBOARD="$ROOT/wezboard/target/debug/wezboard-gui"
 WEZBOARD_CLI="$ROOT/wezboard/target/debug/wezboard"
-WEB="$ROOT/webtui/target/debug/web"
+WEB="$ROOT/target/debug/web"
 ROAMIUM="$ROOT/chromium/src/out/Default/roamium"
 PDF_DIR="$ROOT/test-html/public"
 PDF_URL="http://127.0.0.1:$PORT/bitcoin.pdf"

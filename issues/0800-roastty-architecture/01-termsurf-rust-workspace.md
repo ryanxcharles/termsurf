@@ -134,3 +134,108 @@ Roastty ABI skeleton. The likely order is:
 
 The choice should be made after seeing whether the workspace setup causes any
 build-script or lockfile friction.
+
+## Result
+
+**Result:** Pass
+
+Implemented the top-level TermSurf Rust workspace with `webtui` and `roamium` as
+the only members. Wezboard remains outside the workspace.
+
+Changes made:
+
+- Added top-level `Cargo.toml` with workspace members `webtui` and `roamium`.
+- Added explicit workspace excludes for `wezboard`, `vendor`, `chromium`, and
+  `proto/test-rust`.
+- Generated top-level `Cargo.lock`.
+- Removed per-crate lockfiles:
+  - `webtui/Cargo.lock`
+  - `roamium/Cargo.lock`
+- Updated `scripts/build.sh` to build `webtui` and `roamium` from the repo root
+  using `cargo build -p webtui` and `cargo build -p roamium`.
+- Updated `scripts/install.sh` and `scripts/release.sh` to use top-level
+  workspace binary paths under `target/release/`.
+- Updated active PDF/browser helper scripts to use the top-level debug `web`
+  path under `target/debug/web`.
+- Updated `AGENTS.md` debug testing instructions to use
+  `/Users/ryan/dev/termsurf/target/debug/web`.
+
+Build-script and documentation audit:
+
+- The canonical Cargo flow for TermSurf-owned Rust crates is now repo-root
+  package selection: `cargo build -p webtui`, `cargo build -p roamium`, and
+  corresponding `cargo check -p ...` commands.
+- Wezboard keeps its independent workspace and target directory under
+  `wezboard/`.
+- Closed historical issue documents were intentionally not rewritten. Active
+  scripts and current agent instructions were updated.
+- No Rust source files were edited, so `cargo fmt` was not required.
+
+Verification:
+
+```bash
+cargo metadata --format-version 1 --no-deps
+```
+
+Result: pass. Workspace members were exactly:
+
+```text
+webtui /Users/ryan/dev/termsurf/webtui/Cargo.toml
+roamium /Users/ryan/dev/termsurf/roamium/Cargo.toml
+```
+
+No Wezboard packages were listed as workspace members.
+
+```bash
+cargo check -p webtui
+```
+
+Result: pass.
+
+```bash
+cargo check -p roamium
+```
+
+Result: pass.
+
+```bash
+./scripts/build.sh webtui
+```
+
+Result: pass. Built:
+
+```text
+/Users/ryan/dev/termsurf/target/debug/web
+```
+
+```bash
+./scripts/build.sh roamium
+```
+
+Result: pass. Built:
+
+```text
+/Users/ryan/dev/termsurf/target/debug/roamium
+```
+
+and copied it to:
+
+```text
+/Users/ryan/dev/termsurf/chromium/src/out/Default/roamium
+```
+
+The top-level `Cargo.lock` exists. The old per-crate lockfiles are removed.
+
+## Conclusion
+
+The TermSurf-owned Rust crates now have a shared top-level Cargo workspace
+without absorbing Wezboard. This gives Roastty a clean future home and creates a
+place for shared TermSurf Rust crates such as `termsurf-proto` or
+`termsurf-ipc`.
+
+The next experiment should choose between:
+
+1. adding `crates/termsurf-proto` and moving shared protobuf generation out of
+   `webtui` and `roamium`; or
+2. adding the initial `roastty/` ABI skeleton crate as the next workspace
+   member.

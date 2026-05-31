@@ -446,7 +446,7 @@ def assert_report(
 
 
 def run_webtui_cli_checks(run_dir: pathlib.Path) -> dict[str, Any]:
-    web = ROOT / "webtui/target/debug/web"
+    web = ROOT / "target/debug/web"
     if not web.exists():
         return {"status": "skipped", "reason": f"missing web binary: {web}"}
     help_proc = subprocess.run(

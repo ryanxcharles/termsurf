@@ -277,7 +277,7 @@ under `wezboard/target/debug/`; it is not named `wezterm-gui`.
 Inside that Wezboard window, run the debug `web` binary directly:
 
 ```bash
-/Users/ryan/dev/termsurf/webtui/target/debug/web \
+/Users/ryan/dev/termsurf/target/debug/web \
   --browser /Users/ryan/dev/termsurf/chromium/src/out/Default/roamium \
   https://example.com
 ```

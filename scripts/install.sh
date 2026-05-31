@@ -20,7 +20,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 install_roamium() {
-  local ROAMIUM_SRC="$REPO_DIR/roamium/target/release/roamium"
+  local ROAMIUM_SRC="$REPO_DIR/target/release/roamium"
   local INSTALL_DIR="/usr/local/roamium"
 
   if [ ! -f "$ROAMIUM_SRC" ]; then
@@ -84,7 +84,7 @@ install_wezboard() {
 }
 
 install_webtui() {
-  local WEB="$REPO_DIR/webtui/target/release/web"
+  local WEB="$REPO_DIR/target/release/web"
 
   if [ ! -f "$WEB" ]; then
     echo "Error: Release build not found at $WEB"
