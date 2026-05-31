@@ -4,7 +4,10 @@ use std::ptr::NonNull;
 
 use super::bitmap_allocator::{BitmapAllocator, Layout as BitmapAllocatorLayout};
 use super::color::Rgb;
-use super::size::{CellCountInt, GraphemeBytesInt, HyperlinkCountInt, Offset, StringBytesInt};
+use super::offset_hash_map;
+use super::size::{
+    CellCountInt, GraphemeBytesInt, HyperlinkCountInt, Offset, OffsetSlice, StringBytesInt,
+};
 use super::style;
 
 const PAGE_SIZE_MIN: usize = 16_384;
@@ -648,18 +651,11 @@ pub(super) struct GraphemeMapLayout {
 }
 
 impl GraphemeMapLayout {
-    const BASE_ALIGN: usize = 8;
+    const BASE_ALIGN: usize =
+        offset_hash_map::OffsetHashMap::<Offset<Cell>, OffsetSlice<u32>>::BASE_ALIGN;
 
     fn layout(capacity: u32) -> Self {
-        hash_map_layout(
-            capacity,
-            OFFSET_CELL_SIZE,
-            OFFSET_CELL_ALIGN,
-            OFFSET_U21_SLICE_SIZE,
-            OFFSET_U21_SLICE_ALIGN,
-            Self::BASE_ALIGN,
-        )
-        .into()
+        offset_hash_map::layout_for_capacity::<Offset<Cell>, OffsetSlice<u32>>(capacity).into()
     }
 }
 
@@ -672,18 +668,11 @@ pub(super) struct HyperlinkMapLayout {
 }
 
 impl HyperlinkMapLayout {
-    const BASE_ALIGN: usize = 4;
+    const BASE_ALIGN: usize =
+        offset_hash_map::OffsetHashMap::<Offset<Cell>, HyperlinkId>::BASE_ALIGN;
 
     fn layout(capacity: u32) -> Self {
-        hash_map_layout(
-            capacity,
-            OFFSET_CELL_SIZE,
-            OFFSET_CELL_ALIGN,
-            HYPERLINK_ID_SIZE,
-            HYPERLINK_ID_ALIGN,
-            Self::BASE_ALIGN,
-        )
-        .into()
+        offset_hash_map::layout_for_capacity::<Offset<Cell>, HyperlinkId>(capacity).into()
     }
 }
 
@@ -695,8 +684,8 @@ struct HashMapLayout {
     capacity: u32,
 }
 
-impl From<HashMapLayout> for GraphemeMapLayout {
-    fn from(value: HashMapLayout) -> Self {
+impl From<offset_hash_map::Layout> for GraphemeMapLayout {
+    fn from(value: offset_hash_map::Layout) -> Self {
         Self {
             total_size: value.total_size,
             keys_start: value.keys_start,
@@ -706,41 +695,14 @@ impl From<HashMapLayout> for GraphemeMapLayout {
     }
 }
 
-impl From<HashMapLayout> for HyperlinkMapLayout {
-    fn from(value: HashMapLayout) -> Self {
+impl From<offset_hash_map::Layout> for HyperlinkMapLayout {
+    fn from(value: offset_hash_map::Layout) -> Self {
         Self {
             total_size: value.total_size,
             keys_start: value.keys_start,
             vals_start: value.vals_start,
             capacity: value.capacity,
         }
-    }
-}
-
-fn hash_map_layout(
-    capacity: u32,
-    key_size: usize,
-    key_align: usize,
-    value_size: usize,
-    value_align: usize,
-    base_align: usize,
-) -> HashMapLayout {
-    assert!(capacity == 0 || capacity.is_power_of_two());
-
-    let cap = capacity as usize;
-    let meta_start = HASH_MAP_HEADER_SIZE;
-    let meta_end = meta_start + cap * HASH_MAP_METADATA_SIZE;
-    let keys_start = align_forward(meta_end, key_align);
-    let keys_end = keys_start + cap * key_size;
-    let vals_start = align_forward(keys_end, value_align);
-    let vals_end = vals_start + cap * value_size;
-    let total_size = align_forward(vals_end, base_align);
-
-    HashMapLayout {
-        total_size,
-        keys_start: keys_start - meta_start,
-        vals_start: vals_start - meta_start,
-        capacity,
     }
 }
 

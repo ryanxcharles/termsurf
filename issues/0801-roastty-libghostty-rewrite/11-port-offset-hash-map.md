@@ -255,3 +255,128 @@ The experiment fails if:
 This experiment design must be reviewed by Codex before implementation. Any real
 design issues must be fixed before committing the plan or implementing the
 slice.
+
+## Result
+
+**Result:** Pass
+
+Experiment 11 ported Ghostty's offset-backed terminal hash map substrate into
+Roastty.
+
+The implementation added:
+
+- `roastty/src/terminal/offset_hash_map.rs`
+- `terminal::offset_hash_map::OffsetHashMap`
+- `terminal::offset_hash_map::Map`
+- fixed-capacity map layout, initialization, lookup, insertion, mutation,
+  removal, tombstones, iteration, and rebasing behavior
+- `Hash` support for `Offset<T>`
+- `Default` support for `OffsetSlice<T>`
+- shared Page map layout calculation through the new offset-map layout helper
+
+### Hash and Layout Strategy
+
+The map stores all metadata, keys, and values inside caller-provided backing
+memory. `OffsetHashMap` stores only an offset to the metadata region. `Map`
+derives the header, metadata, key, and value pointers from the current base
+pointer each time it is used, so copied Page storage can be rebased at a new
+address.
+
+The layout preserves the upstream convention:
+
+- header immediately before metadata
+- metadata as one byte per slot
+- `keys_start` and `vals_start` relative to the metadata pointer
+- fixed-capacity, power-of-two slot count
+
+The implementation uses a deterministic, non-random 64-bit FNV-style hasher and
+stores the high seven hash bits in metadata fingerprints. This is intentionally
+not a byte-for-byte Wyhash slot-placement port yet. Page behavior does not
+observe slot placement. If future serialization or byte-for-byte layout parity
+requires exact Ghostty/Wyhash placement, that should be a focused follow-up.
+
+### Unsafe Boundaries
+
+Unsafe code is contained in `offset_hash_map.rs` and is used for:
+
+- deriving the header pointer from the metadata pointer
+- converting metadata-relative offsets into `MaybeUninit<K>` / `MaybeUninit<V>`
+  slots
+- converting used slots into safe key/value references
+- initializing map metadata inside caller-owned backing storage
+
+Key and value storage uses `MaybeUninit`. Safe methods only create references
+for slots whose metadata is marked used. New slots initialize keys immediately
+and initialize values with `V::default()` before returning safe mutable
+references. The initial implementation requires `K: Copy + Eq + Hash` and
+`V: Copy + Default`, which matches the Page map consumers planned next.
+
+Completion review found and fixed three safety issues before this result was
+committed:
+
+- `Map` views are now tied to an exclusive mutable backing slice instead of a
+  safely duplicable raw-pointer view.
+- insertion writes key/value slots before marking metadata used, so a panicking
+  `Default` cannot leave a used slot with an uninitialized value;
+- zero-sized keys are explicitly rejected because Page's offset-key maps do not
+  need them and the upstream zero-sized-key `removeByPtr` behavior requires
+  special pointer/index semantics.
+
+### Tests Ported
+
+The Roastty test suite now covers the relevant upstream hash-map behavior:
+
+- basic insertion, lookup, and iteration
+- `ensure_total_capacity`
+- `ensure_unused_capacity`
+- tombstone reuse
+- clear retaining capacity
+- existing-element capacity checks
+- remove
+- reverse removes
+- repeated removes on the same metadata slot
+- random-order put/remove loop
+- replacement puts
+- full-load insertion failure
+- assume-capacity insertion/replacement
+- repeated assume-capacity put/remove cycles
+- `get_or_put`
+- `get_or_put_value`
+- `remove_by_ptr`
+- repeated `fetch_remove`
+- offset map remake from the same backing memory
+- offset map rebase after copying backing bytes to a new address
+- large layout overflow protection
+- panicking value defaults do not mark a slot used
+- zero-sized keys are rejected explicitly
+- Page layout parity through the shared layout helper
+
+The upstream zero-sized-key `removeByPtr` test is deferred. Page's grapheme and
+hyperlink maps use non-zero-sized offset keys, and supporting zero-sized keys
+would require special pointer/index semantics that are not needed for the
+current Page storage path.
+
+### Verification
+
+The required verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::offset_hash_map
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+Observed results:
+
+- `terminal::offset_hash_map`: 23 passed
+- `terminal::page`: 37 passed
+- full `roastty` suite: 123 Rust unit tests passed, C ABI harness passed, doc
+  tests passed
+
+## Conclusion
+
+Roastty now has the Page-local offset hash map substrate needed for managed
+memory sections. The next experiment can use this map to port the first real
+managed Page behavior: grapheme append, lookup, clear, row flag updates, and the
+corresponding upstream grapheme tests.

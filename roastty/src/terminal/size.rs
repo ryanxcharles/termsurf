@@ -54,13 +54,19 @@ impl<T> Clone for Offset<T> {
 
 impl<T> Copy for Offset<T> {}
 
+impl<T> std::hash::Hash for Offset<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.offset.hash(state);
+    }
+}
+
 impl<T> Default for Offset<T> {
     fn default() -> Self {
         Self::new(0)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Hash, PartialEq, Eq)]
 pub(super) struct OffsetSlice<T> {
     offset: Offset<T>,
     len: usize,

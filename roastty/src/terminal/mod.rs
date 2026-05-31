@@ -5,6 +5,9 @@ mod bitmap_allocator;
 mod color;
 
 #[allow(dead_code)]
+mod offset_hash_map;
+
+#[allow(dead_code)]
 mod page;
 
 #[allow(dead_code)]
