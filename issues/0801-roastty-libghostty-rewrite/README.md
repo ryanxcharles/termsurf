@@ -244,6 +244,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 64: Port Tracked Highlight](64-port-tracked-highlight.md) —
   **Pass**
+- [Experiment 65: Port Selection Codepoints](65-port-selection-codepoints.md) —
+  **Designed**
 
 ## Non-Goals
 
