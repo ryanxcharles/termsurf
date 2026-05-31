@@ -142,6 +142,8 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 6: Port Bitmap Allocator](06-port-bitmap-allocator.md) — **Pass**
 - [Experiment 7: Port Terminal Style Value Types](07-port-style-value-types.md)
   — **Pass**
+- [Experiment 8: Port Packed Row and Cell Values](08-port-row-cell-values.md) —
+  **Designed**
 
 ## Non-Goals
 
