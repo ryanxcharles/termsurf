@@ -316,3 +316,141 @@ This experiment fails if:
 - it adds broad browser UI, Chrome zoom bubble UI, or a product settings stack;
 - it consumes ordinary key input that should still reach the page;
 - it cannot prove Cmd+=, Cmd+-, and Cmd+0 through automated verification.
+
+## Result
+
+**Result:** Pass
+
+Experiment 6 added standard browser page zoom shortcuts through Chromium's
+existing `components/zoom` machinery and verified them with the Issue 799
+automation harness.
+
+Implemented changes:
+
+- created Chromium branch `148.0.7778.97-issue-799-exp6` from
+  `148.0.7778.97-issue-799-exp5`;
+- updated `TsBrowserMainParts::ForwardKeyEvent()` to handle Meta/Cmd zoom
+  shortcuts before raw key forwarding;
+- ensured a `zoom::ZoomController` exists before calling
+  `zoom::PageZoom::Zoom(...)`;
+- handled primary and keypad zoom keys:
+  - `VKEY_OEM_PLUS` and `VKEY_ADD` for zoom in;
+  - `VKEY_OEM_MINUS` and `VKEY_SUBTRACT` for zoom out;
+  - `VKEY_0` and `VKEY_NUMPAD0` for reset;
+- consumed zoom shortcut key-up events without applying a second zoom or
+  forwarding them to the page;
+- extended `scripts/test-issue-799-browser-api-audit.py` so fake-GUI `KeyEvent`
+  messages encode field 5 `modifiers`;
+- added the `page-zoom-shortcuts` probe and `page_zoom_completed` /
+  `page_zoom_failed` classifications.
+
+Build and syntax checks:
+
+```bash
+cd chromium/src
+export PATH="$HOME/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default libtermsurf_chromium
+```
+
+Result: build succeeded.
+
+```bash
+PATH="/Users/ryan/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin:$PATH" \
+  ./scripts/build.sh roamium
+```
+
+Result: build succeeded.
+
+```bash
+python3 -m py_compile scripts/test-issue-799-browser-api-audit.py
+```
+
+Result: passed.
+
+Focused page zoom run:
+
+```bash
+python3 scripts/test-issue-799-browser-api-audit.py \
+  --probe page-zoom-shortcuts \
+  --seconds 10
+```
+
+Run directory:
+
+```text
+logs/issue-799-browser-api-audit/20260531-003720-873404
+```
+
+Classification:
+
+```text
+page-zoom-shortcuts: page_zoom_completed
+```
+
+Metric evidence from `probes/page-zoom-shortcuts/probe-result.json`:
+
+| Snapshot |               DPR | Viewport width |
+| -------- | ----------------: | -------------: |
+| baseline |               2.0 |            600 |
+| zoom in  | 2.200000047683716 |            545 |
+| zoom out |               2.0 |            600 |
+| reset    |               2.0 |            600 |
+
+Key routing evidence:
+
+- the page did not receive the Meta+zoom shortcut keydown/keyup events;
+- the page did receive normal `a` keydown and keyup after reset.
+
+Full Issue 799 harness run:
+
+```bash
+python3 scripts/test-issue-799-browser-api-audit.py --seconds 10
+```
+
+Run directory:
+
+```text
+logs/issue-799-browser-api-audit/20260531-003743-310061
+```
+
+The full run completed 20 probes:
+
+- `page-zoom-shortcuts`: `page_zoom_completed`;
+- `download-attachment` and `download-blob`: `download_completed`;
+- all JavaScript dialog probes: `dialog_completed`;
+- `missing_interfaces`: empty;
+- known deferred classifications remained unchanged:
+  - `file-system-access`: `blocked_user_activation`;
+  - `webauthn-create`: `blocked_needs_virtual_authenticator`.
+
+`empty_interfaces` still included ambient/non-blocking interfaces such as
+`blink.mojom.LCPCriticalPathPredictorHost`, and the full run also reported
+`blink.mojom.AnchorElementMetricsHost` and `blink.mojom.CredentialManager` as
+empty. They did not produce bad Mojo, crashes, or missing binder failures, and
+they are not part of the page zoom feature.
+
+### Codex Completion Review
+
+Codex reviewed the implementation diff, the focused page zoom run, and the full
+Issue 799 run. It reported no blocking findings and said the implementation
+satisfies the experiment design:
+
+- `ZoomController` is ensured before `PageZoom::Zoom()`;
+- zoom shortcuts are handled before raw forwarding;
+- zoom action happens only for key down/repeat;
+- key-up is consumed without a second zoom;
+- the harness proves real browser zoom with DPR and viewport metrics;
+- the harness proves shortcut keys do not leak while ordinary `a` input still
+  reaches the page.
+
+## Conclusion
+
+TermSurf now supports normal browser page zoom shortcuts through the real
+Chromium page zoom stack. The automated proof exercises the real TermSurf key
+protocol path, not a fake resize or screenshot-only approximation.
+
+The next Issue 799 target should be the next automatable queue item from
+Experiment 1, likely console capture or HTTP Basic Auth. The full harness also
+continues to expose lower-priority permission/binder hardening candidates, but
+those should stay in their own experiments rather than being bundled with page
+zoom.

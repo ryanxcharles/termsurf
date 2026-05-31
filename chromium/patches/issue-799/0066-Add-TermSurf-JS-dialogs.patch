@@ -1,7 +1,7 @@
 From 7b059b5a06a9dd1103d2b720c15c4073565b0e8b Mon Sep 17 00:00:00 2001
 From: "Ryan X. Charles" <ryan@ryanxcharles.com>
 Date: Sat, 30 May 2026 19:21:47 -0500
-Subject: [PATCH 66/66] Add TermSurf JS dialogs
+Subject: [PATCH 66/67] Add TermSurf JS dialogs
 
 Alerts tried to leave by door,
 Native bells rang out no more.

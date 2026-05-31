@@ -61,6 +61,11 @@ EXPECTED_DOWNLOADS = {
         BLOB_DOWNLOAD_BYTES,
     ),
 }
+TERMSURF_META_MODIFIER = 1 << 3
+VK_OEM_PLUS = 187
+VK_OEM_MINUS = 189
+VK_0 = 48
+VK_A = 65
 
 
 @dataclass(frozen=True)
@@ -310,6 +315,68 @@ link.textContent = 'download blob';
 document.body.appendChild(link);
 setTimeout(() => link.click(), 250);
 return {{status: 'download_triggered', expectedFile: 'termsurf-blob-download.txt'}};
+""",
+    ),
+    Probe(
+        name="page-zoom-shortcuts",
+        feature="Page zoom",
+        expected_surface="Chromium page zoom controller and TermSurf Meta-key command routing",
+        reference_evidence="Chrome routes Cmd+=/-/0 to components/zoom PageZoom.",
+        termsurf_evidence="Experiment 6 adds Chromium-side page zoom shortcut handling.",
+        requires_user_activation=False,
+        script="""
+const keyEvents = [];
+function keySnapshot(event) {
+  return {
+    type: event.type,
+    key: event.key,
+    code: event.code,
+    keyCode: event.keyCode,
+    metaKey: event.metaKey
+  };
+}
+document.addEventListener('keydown', (event) => {
+  const snapshot = keySnapshot(event);
+  keyEvents.push(snapshot);
+  sendReport({status: 'key_event', event: snapshot});
+});
+document.addEventListener('keyup', (event) => {
+  const snapshot = keySnapshot(event);
+  keyEvents.push(snapshot);
+  sendReport({status: 'key_event', event: snapshot});
+});
+const marker = document.createElement('div');
+marker.textContent = 'TermSurf page zoom marker';
+marker.style.cssText = 'width: 240px; height: 40px; padding: 10px; font-size: 20px;';
+document.body.appendChild(marker);
+function collectMetrics(label) {
+  const rect = marker.getBoundingClientRect();
+  return {
+    status: 'page_zoom_metrics',
+    label,
+    devicePixelRatio: window.devicePixelRatio,
+    innerWidth: window.innerWidth,
+    clientWidth: document.documentElement.clientWidth,
+    visualViewportWidth: window.visualViewport ? window.visualViewport.width : null,
+    boxWidth: rect.width,
+    keyEvents: keyEvents.slice()
+  };
+}
+let metricTimer = null;
+function scheduleMetrics(label) {
+  if (metricTimer !== null) clearTimeout(metricTimer);
+  metricTimer = setTimeout(() => sendReport(collectMetrics(label)), 120);
+}
+window.addEventListener('resize', () => scheduleMetrics('window-resize'));
+window.visualViewport?.addEventListener('resize', () => scheduleMetrics('visual-viewport-resize'));
+setTimeout(() => sendReport(collectMetrics('baseline')), 150);
+let metricPollCount = 0;
+const metricPoll = setInterval(() => {
+  metricPollCount += 1;
+  sendReport(collectMetrics('poll-' + metricPollCount));
+  if (metricPollCount >= 30) clearInterval(metricPoll);
+}, 250);
+return {status: 'ready'};
 """,
     ),
     Probe(
@@ -655,6 +722,183 @@ def verify_javascript_dialog_probe(
     return {"status": status, "reasons": reasons, "expected": expected}
 
 
+def numeric_metric(report: dict[str, Any], key: str) -> float | None:
+    value = report.get(key)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def viewport_metric(report: dict[str, Any]) -> float | None:
+    for key in ("visualViewportWidth", "innerWidth", "clientWidth"):
+        value = numeric_metric(report, key)
+        if value is not None:
+            return value
+    return None
+
+
+def first_metric_after(
+    metrics: list[dict[str, Any]],
+    sent_at: float,
+) -> dict[str, Any] | None:
+    for report in metrics:
+        received_at = numeric_metric(report, "_received_at")
+        if received_at is not None and received_at > sent_at:
+            return report
+    return None
+
+
+def closer_to_baseline(value: float, baseline: float, previous: float) -> bool:
+    return abs(value - baseline) < abs(previous - baseline)
+
+
+def key_code_value(event: dict[str, Any]) -> int:
+    try:
+        return int(event.get("keyCode", -1))
+    except (TypeError, ValueError):
+        return -1
+
+
+def verify_page_zoom_probe(
+    probe_name: str,
+    reports: list[dict[str, Any]],
+    zoom_events: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if probe_name != "page-zoom-shortcuts":
+        return None
+
+    status = "completed"
+    reasons: list[str] = []
+    metrics = [
+        report for report in reports if report.get("status") == "page_zoom_metrics"
+    ]
+    baseline = next(
+        (report for report in metrics if report.get("label") == "baseline"),
+        metrics[0] if metrics else None,
+    )
+    by_name = {event["name"]: event for event in zoom_events}
+
+    if not baseline:
+        status = "failed"
+        reasons.append("missing baseline metrics")
+    for name in ("zoom-in", "zoom-out", "reset", "normal-a"):
+        if name not in by_name:
+            status = "failed"
+            reasons.append(f"missing sent event {name}")
+
+    zoom_in = (
+        first_metric_after(metrics, by_name["zoom-in"]["sent_at"])
+        if "zoom-in" in by_name
+        else None
+    )
+    zoom_out = (
+        first_metric_after(metrics, by_name["zoom-out"]["sent_at"])
+        if "zoom-out" in by_name
+        else None
+    )
+    reset = (
+        first_metric_after(metrics, by_name["reset"]["sent_at"])
+        if "reset" in by_name
+        else None
+    )
+
+    snapshots = {
+        "baseline": baseline,
+        "zoom_in": zoom_in,
+        "zoom_out": zoom_out,
+        "reset": reset,
+    }
+
+    if baseline and zoom_in and zoom_out and reset:
+        baseline_dpr = numeric_metric(baseline, "devicePixelRatio")
+        zoom_in_dpr = numeric_metric(zoom_in, "devicePixelRatio")
+        zoom_out_dpr = numeric_metric(zoom_out, "devicePixelRatio")
+        reset_dpr = numeric_metric(reset, "devicePixelRatio")
+        baseline_viewport = viewport_metric(baseline)
+        zoom_in_viewport = viewport_metric(zoom_in)
+        zoom_out_viewport = viewport_metric(zoom_out)
+        reset_viewport = viewport_metric(reset)
+        if (
+            baseline_dpr is None
+            or zoom_in_dpr is None
+            or zoom_out_dpr is None
+            or reset_dpr is None
+        ):
+            status = "failed"
+            reasons.append("missing devicePixelRatio metric")
+        elif zoom_in_dpr <= baseline_dpr + 0.01:
+            status = "failed"
+            reasons.append("devicePixelRatio did not increase after Cmd+=")
+        elif not closer_to_baseline(zoom_out_dpr, baseline_dpr, zoom_in_dpr):
+            status = "failed"
+            reasons.append("devicePixelRatio did not move back after Cmd+-")
+        elif abs(reset_dpr - baseline_dpr) > 0.02:
+            status = "failed"
+            reasons.append("devicePixelRatio did not reset to baseline")
+
+        if (
+            baseline_viewport is None
+            or zoom_in_viewport is None
+            or zoom_out_viewport is None
+            or reset_viewport is None
+        ):
+            status = "failed"
+            reasons.append("missing CSS viewport metric")
+        elif zoom_in_viewport >= baseline_viewport - 1:
+            status = "failed"
+            reasons.append("CSS viewport metric did not shrink after Cmd+=")
+        elif not closer_to_baseline(
+            zoom_out_viewport, baseline_viewport, zoom_in_viewport
+        ):
+            status = "failed"
+            reasons.append("CSS viewport metric did not move back after Cmd+-")
+        elif abs(reset_viewport - baseline_viewport) > max(
+            2.0, baseline_viewport * 0.02
+        ):
+            status = "failed"
+            reasons.append("CSS viewport metric did not reset to baseline")
+    else:
+        status = "failed"
+        missing = [
+            name for name, report in snapshots.items() if report is None
+        ]
+        reasons.append(f"missing metric snapshots: {', '.join(missing)}")
+
+    key_reports = [report for report in reports if report.get("status") == "key_event"]
+    key_events = [
+        report.get("event", {})
+        for report in key_reports
+        if isinstance(report.get("event"), dict)
+    ]
+    leaked_zoom_events = [
+        event
+        for event in key_events
+        if event.get("metaKey")
+        and key_code_value(event) in (VK_OEM_PLUS, VK_OEM_MINUS, VK_0)
+    ]
+    saw_normal_a = any(
+        not event.get("metaKey") and key_code_value(event) == VK_A
+        for event in key_events
+    )
+    if leaked_zoom_events:
+        status = "failed"
+        reasons.append("zoom shortcut key events reached the page")
+    if not saw_normal_a:
+        status = "failed"
+        reasons.append("normal a key did not reach the page")
+
+    return {
+        "status": status,
+        "reasons": reasons,
+        "sent_events": zoom_events,
+        "snapshots": snapshots,
+        "key_events": key_events,
+    }
+
+
 def create_tab_payload(url: str, width: int, height: int) -> bytes:
     return (
         string_field(1, url)
@@ -692,13 +936,31 @@ def mouse_event_payload(tab_id: int, event_type: str, x: int, y: int) -> bytes:
     )
 
 
-def key_event_payload(tab_id: int, event_type: str, keycode: int, utf8: str = "") -> bytes:
+def key_event_payload(
+    tab_id: int,
+    event_type: str,
+    keycode: int,
+    utf8: str = "",
+    modifiers: int = 0,
+) -> bytes:
     return (
         varint_field(1, tab_id)
         + string_field(2, event_type)
         + varint_field(3, keycode)
         + string_field(4, utf8)
+        + varint_field(5, modifiers)
     )
+
+
+def send_key_pair(
+    conn: socket.socket,
+    tab_id: int,
+    keycode: int,
+    utf8: str = "",
+    modifiers: int = 0,
+) -> None:
+    send_message(conn, 9, key_event_payload(tab_id, "down", keycode, utf8, modifiers))
+    send_message(conn, 9, key_event_payload(tab_id, "up", keycode, "", modifiers))
 
 
 class ProbeState:
@@ -709,6 +971,7 @@ class ProbeState:
 
     def add_report(self, report: dict[str, Any]) -> None:
         with self.lock:
+            report["_received_at"] = time.time()
             self.reports.append(report)
             with (self.run_dir / "reports.jsonl").open("a", encoding="utf-8") as out:
                 out.write(json.dumps(report, sort_keys=True) + "\n")
@@ -1064,6 +1327,8 @@ def run_probe(
     activation_sent_at: float | None = None
     activation_observed_at: float | None = None
     navigation_sent = False
+    page_zoom_events: list[dict[str, Any]] = []
+    page_zoom_next_step = 0
     start = time.time()
 
     try:
@@ -1109,6 +1374,60 @@ def run_probe(
                         navigation_sent = True
                         messages.write(f"sent beforeunload Navigate url={destination}\n")
                         messages.flush()
+                if probe.name == "page-zoom-shortcuts" and tab_id:
+                    reports = state_reports_for_probe(run_dir, probe.name)
+                    metric_reports = [
+                        report
+                        for report in reports
+                        if report.get("status") == "page_zoom_metrics"
+                    ]
+                    has_baseline = any(
+                        report.get("label") == "baseline" for report in metric_reports
+                    )
+
+                    def send_zoom_key(name: str, keycode: int, modifiers: int) -> None:
+                        nonlocal page_zoom_next_step
+                        send_key_pair(conn, tab_id or 0, keycode, modifiers=modifiers)
+                        sent_at = time.time()
+                        page_zoom_events.append(
+                            {
+                                "name": name,
+                                "keycode": keycode,
+                                "modifiers": modifiers,
+                                "sent_at": sent_at,
+                                "elapsed": sent_at - start,
+                            }
+                        )
+                        page_zoom_next_step += 1
+                        messages.write(
+                            f"sent page zoom key name={name} "
+                            f"keycode={keycode} modifiers={modifiers}\n"
+                        )
+                        messages.flush()
+
+                    if page_zoom_next_step == 0 and has_baseline:
+                        send_zoom_key(
+                            "zoom-in", VK_OEM_PLUS, TERMSURF_META_MODIFIER
+                        )
+                    elif page_zoom_next_step == 1:
+                        sent_at = page_zoom_events[-1]["sent_at"]
+                        metric_after = first_metric_after(metric_reports, sent_at)
+                        if metric_after or time.time() - sent_at > 1.2:
+                            send_zoom_key(
+                                "zoom-out",
+                                VK_OEM_MINUS,
+                                TERMSURF_META_MODIFIER,
+                            )
+                    elif page_zoom_next_step == 2:
+                        sent_at = page_zoom_events[-1]["sent_at"]
+                        metric_after = first_metric_after(metric_reports, sent_at)
+                        if metric_after or time.time() - sent_at > 1.2:
+                            send_zoom_key("reset", VK_0, TERMSURF_META_MODIFIER)
+                    elif page_zoom_next_step == 3:
+                        sent_at = page_zoom_events[-1]["sent_at"]
+                        metric_after = first_metric_after(metric_reports, sent_at)
+                        if metric_after or time.time() - sent_at > 1.2:
+                            send_zoom_key("normal-a", VK_A, 0)
                 try:
                     header = conn.recv(4)
                     if not header:
@@ -1247,6 +1566,25 @@ def run_probe(
             classification = "dialog_completed"
         elif classification == "exercised":
             classification = "dialog_failed"
+    page_zoom_result = verify_page_zoom_probe(
+        probe.name,
+        reports,
+        page_zoom_events,
+    )
+    if page_zoom_result:
+        if (
+            classification
+            not in (
+                "missing_binder",
+                "bad_mojo",
+                "renderer_or_browser_crash",
+                "process_exit",
+            )
+            and page_zoom_result["status"] == "completed"
+        ):
+            classification = "page_zoom_completed"
+        elif classification in ("exercised", "reported"):
+            classification = "page_zoom_failed"
     result = {
         "probe": probe.name,
         "feature": probe.feature,
@@ -1266,6 +1604,7 @@ def run_probe(
         "download": download_result,
         "javascript_dialogs": javascript_dialogs,
         "javascript_dialog_result": javascript_dialog_result,
+        "page_zoom_result": page_zoom_result,
         "beforeunload_activation": (
             {
                 "ready": activation_ready_at is not None,
@@ -1363,6 +1702,10 @@ def write_coverage_map(path: pathlib.Path, results: list[dict[str, Any]]) -> Non
             next_action = "JavaScript dialog completed through request/reply protocol."
         elif classification == "dialog_failed":
             next_action = "Inspect JavaScript dialog request/reply evidence."
+        elif classification == "page_zoom_completed":
+            next_action = "Page zoom shortcuts completed with verified browser zoom metrics."
+        elif classification == "page_zoom_failed":
+            next_action = "Inspect page zoom shortcut routing and metric snapshots."
         elif classification == "unsupported":
             next_action = "No runtime surface exposed in this build."
         else:
@@ -1403,6 +1746,10 @@ def write_reference_coverage_map(path: pathlib.Path, results: list[dict[str, Any
             next_action = "Add contained DevTools virtual-authenticator coverage before claiming coverage."
         elif classification == "download_completed":
             next_action = "No immediate action; verified generic download completion."
+        elif classification == "page_zoom_completed":
+            next_action = "No immediate action; verified page zoom shortcuts."
+        elif classification == "page_zoom_failed":
+            next_action = "Inspect page zoom shortcut routing and metric snapshots."
         elif classification in ("exercised", "unsupported"):
             next_action = "No immediate binder fix from this probe."
         else:
