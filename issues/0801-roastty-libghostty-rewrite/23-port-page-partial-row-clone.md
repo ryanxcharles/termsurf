@@ -288,3 +288,77 @@ The experiment fails if:
 - hyperlink/style/grapheme refcounts become inconsistent;
 - the implementation expands into reflow, parser/screen integration, public ABI,
   or unrelated terminal behavior.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has internal partial-row clone support for Page storage.
+
+Implementation details:
+
+- `clone_row_from` now routes through `clone_partial_row_from` with a full-row
+  column range, so full-row and partial-row clones share one implementation
+  path.
+- `clone_partial_row_from` supports cross-page row-range copying with
+  `x_start..x_end_req` bounds matching upstream's min-with-source/destination
+  width behavior.
+- `clone_partial_row_within_page` provides the Rust-safe same-page copy shape
+  that upstream gets from `other == self`. It snapshots source cells before
+  mutation and temporarily holds same-page style/hyperlink refs so overlapping
+  copies cannot drop an ID before it is reused.
+- copied destination cells clear existing grapheme, hyperlink, and style state
+  only inside the copied range;
+- destination cells outside the copied range remain untouched, including their
+  managed-memory refs;
+- copied cells reset style IDs, hyperlink bits, and grapheme tags before
+  fallible managed-memory migration, so error returns cannot leave source-page
+  IDs or flags in destination cells;
+- row-level `grapheme`, `hyperlink`, and `styled` flags are recomputed on both
+  success and partial-copy error paths;
+- spacer-head cleanup remains limited to the growing-columns case and only runs
+  when the copied range includes the source-edge cell.
+
+Tests added:
+
+- plain partial row copy;
+- source graphemes outside the copied range are omitted;
+- destination graphemes outside the copied range survive;
+- same-page partial hyperlink copy and omit cases;
+- same-page partial style reuse/refcount case;
+- cross-page partial style copy with destination style preservation and
+  alternate-ID behavior;
+- grapheme-map OOM leaves copied cells valid and preserves outside cells;
+- style-set OOM leaves copied cells valid and preserves outside cells;
+- hyperlink-map OOM preserves out-of-range destination links and refs;
+- hyperlink-string OOM leaves copied cells valid and rolls back link state;
+- hyperlink-set OOM frees duplicated strings and leaves copied cells valid.
+
+The experiment did not implement terminal reflow, screen splitting,
+parser/screen integration, scrollback behavior, public ABI, or app-facing APIs.
+Those remain later Issue 801 slices.
+
+Verification run:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo test -p roastty terminal::page`: 105 passed.
+- `cargo test -p roastty`: 214 unit tests passed; ABI harness passed; doc tests
+  passed.
+
+## Conclusion
+
+Experiment 23 successfully ports upstream Page partial-row clone semantics into
+Roastty's current storage model. Full-row clone now shares the partial-row
+implementation, and the new same-page helper covers the upstream `other == self`
+refcount behavior without unsafe aliasing.
+
+The next experiment can move to the next upstream Page operation that depends on
+exact capacity and partial row clone, likely page splitting/reflow support, but
+that should be designed only after re-reading the upstream call sites.

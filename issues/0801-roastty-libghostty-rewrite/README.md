@@ -173,7 +173,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 22: Port Page Exact Row Capacity](22-port-page-exact-row-capacity.md)
   — **Pass**
 - [Experiment 23: Port Page Partial Row Clone](23-port-page-partial-row-clone.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

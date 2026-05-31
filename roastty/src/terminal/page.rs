@@ -607,57 +607,78 @@ impl Page {
         dst_y: usize,
         src_y: usize,
     ) -> Result<(), CloneFromError> {
-        let src_row = *other.get_row(src_y);
-        let dst_row = *self.get_row(dst_y);
+        self.clone_partial_row_from(other, dst_y, src_y, 0, self.size.cols as usize)
+    }
 
-        let copy_len = (self.size.cols as usize).min(other.size.cols as usize);
-        let dst_cell_offsets = (0..copy_len)
+    fn clone_partial_row_from(
+        &mut self,
+        other: &Page,
+        dst_y: usize,
+        src_y: usize,
+        x_start: usize,
+        x_end_req: usize,
+    ) -> Result<(), CloneFromError> {
+        assert!(dst_y < self.size.rows as usize);
+        assert!(src_y < other.size.rows as usize);
+        let cell_len = (self.size.cols as usize).min(other.size.cols as usize);
+        let x_end = x_end_req.min(cell_len);
+        assert!(x_start <= x_end);
+
+        let snapshots = other.source_cell_snapshots(src_y, x_start, x_end);
+        self.clone_partial_row_from_snapshots(
+            Some(other),
+            snapshots.as_slice(),
+            dst_y,
+            *other.get_row(src_y),
+            x_start,
+            x_end,
+            other.size.cols as usize,
+        )
+    }
+
+    fn clone_partial_row_within_page(
+        &mut self,
+        dst_y: usize,
+        src_y: usize,
+        x_start: usize,
+        x_end_req: usize,
+    ) -> Result<(), CloneFromError> {
+        assert!(dst_y < self.size.rows as usize);
+        assert!(src_y < self.size.rows as usize);
+        let cell_len = self.size.cols as usize;
+        let x_end = x_end_req.min(cell_len);
+        assert!(x_start <= x_end);
+
+        let snapshots = self.source_cell_snapshots(src_y, x_start, x_end);
+        self.hold_same_page_snapshot_refs(&snapshots);
+        let result = self.clone_partial_row_from_snapshots(
+            None,
+            snapshots.as_slice(),
+            dst_y,
+            *self.get_row(src_y),
+            x_start,
+            x_end,
+            self.size.cols as usize,
+        );
+        self.release_same_page_snapshot_refs(&snapshots);
+        result
+    }
+
+    fn clone_partial_row_from_snapshots(
+        &mut self,
+        source: Option<&Page>,
+        snapshots: &[SourceCellSnapshot],
+        dst_y: usize,
+        src_row: Row,
+        x_start: usize,
+        x_end: usize,
+        source_cols: usize,
+    ) -> Result<(), CloneFromError> {
+        debug_assert_eq!(snapshots.len(), x_end - x_start);
+        let dst_row = *self.get_row(dst_y);
+        let dst_cell_offsets = (x_start..x_end)
             .map(|x| self.cell_offset_from_row_cells(dst_row.cells(), x))
             .collect::<Vec<_>>();
-        let source_graphemes = {
-            let src_cells = other.get_cells(other.get_row(src_y));
-            src_cells[..copy_len]
-                .iter()
-                .enumerate()
-                .map(|(x, cell)| {
-                    if cell.has_grapheme() {
-                        let offset = other.cell_offset_from_row_cells(src_row.cells(), x);
-                        other
-                            .lookup_grapheme_at_offset(offset)
-                            .expect("grapheme cell must have map data")
-                    } else {
-                        Vec::new()
-                    }
-                })
-                .collect::<Vec<_>>()
-        };
-        let source_hyperlinks = {
-            let src_cells = other.get_cells(other.get_row(src_y));
-            src_cells[..copy_len]
-                .iter()
-                .enumerate()
-                .map(|(x, cell)| {
-                    if cell.hyperlink() {
-                        let offset = other.cell_offset_from_row_cells(src_row.cells(), x);
-                        other
-                            .lookup_hyperlink_at_offset(offset)
-                            .expect("hyperlink cell must have map data")
-                    } else {
-                        0
-                    }
-                })
-                .collect::<Vec<_>>()
-        };
-        let source_styles = {
-            let src_cells = other.get_cells(other.get_row(src_y));
-            src_cells[..copy_len]
-                .iter()
-                .map(|cell| {
-                    let id = cell.style_id();
-                    (id != style::DEFAULT_ID).then(|| (id, other.get_style(id)))
-                })
-                .collect::<Vec<_>>()
-        };
 
         for offset in dst_cell_offsets.iter().copied() {
             if unsafe { (*offset.ptr(self.memory.as_ptr())).has_grapheme() } {
@@ -679,7 +700,7 @@ impl Page {
         let mut row_copy = src_row;
         row_copy.set_cells(dst_row.cells());
 
-        if copy_len < self.size.cols as usize {
+        if snapshots.len() < self.size.cols as usize {
             row_copy.set_wrap(dst_row.wrap());
             row_copy.set_wrap_continuation(dst_row.wrap_continuation());
             row_copy.set_grapheme(dst_row.grapheme());
@@ -690,12 +711,15 @@ impl Page {
 
         *self.get_row_mut(dst_y) = row_copy;
 
-        let should_clear_spacer_head = self.size.cols > other.size.cols && copy_len > 0;
+        let should_clear_spacer_head = self.size.cols as usize > source_cols
+            && source_cols > 0
+            && x_start <= source_cols - 1
+            && source_cols - 1 < x_end;
         {
-            let src_cells = other.get_cells(other.get_row(src_y));
             let cells = self.get_cells_mut(dst_y);
-            cells[..copy_len].copy_from_slice(&src_cells[..copy_len]);
-            for cell in &mut cells[..copy_len] {
+            for (x, snapshot) in (x_start..x_end).zip(snapshots) {
+                cells[x] = snapshot.cell;
+                let cell = &mut cells[x];
                 cell.set_style_id(style::DEFAULT_ID);
                 cell.set_hyperlink(false);
                 if cell.has_grapheme() {
@@ -704,58 +728,83 @@ impl Page {
             }
 
             if should_clear_spacer_head {
-                let last = &mut cells[copy_len - 1];
+                let last = &mut cells[source_cols - 1];
                 if last.wide() == Wide::SpacerHead {
                     last.set_wide(Wide::Narrow);
                 }
             }
         }
 
-        for (offset, cps) in dst_cell_offsets.iter().copied().zip(source_graphemes) {
-            if !cps.is_empty() {
+        for (offset, snapshot) in dst_cell_offsets.iter().copied().zip(snapshots) {
+            if !snapshot.graphemes.is_empty() {
                 unsafe {
                     // Safety: offset came from this row's valid cell range.
                     (*offset.ptr_mut(self.memory.as_mut_ptr()))
                         .set_content_tag(ContentTag::Codepoint);
                 }
-                for cp in cps {
-                    self.append_grapheme_at_offset(offset, cp)?;
+                for cp in snapshot.graphemes.iter().copied() {
+                    if let Err(err) = self.append_grapheme_at_offset(offset, cp) {
+                        self.update_row_grapheme_flag(dst_y);
+                        self.update_row_hyperlink_flag(dst_y);
+                        self.update_row_styled_flag(dst_y);
+                        return Err(err.into());
+                    }
                 }
             }
         }
 
-        for (offset, source_id) in dst_cell_offsets.iter().copied().zip(source_hyperlinks) {
-            if source_id == 0 {
-                continue;
-            }
-            let dst_id = self.prepare_cloned_hyperlink(other, source_id)?;
-            if let Err(HyperlinkError::HyperlinkMapOutOfMemory) =
-                self.set_hyperlink_at_offset(dst_y, offset, dst_id)
-            {
-                self.release_hyperlink(dst_id);
-                self.update_row_grapheme_flag(dst_y);
-                self.update_row_hyperlink_flag(dst_y);
-                self.update_row_styled_flag(dst_y);
-                return Err(CloneFromError::HyperlinkMapOutOfMemory);
-            }
-        }
-
-        for (offset, source_style) in dst_cell_offsets.iter().copied().zip(source_styles) {
-            let Some((source_id, source_style)) = source_style else {
-                continue;
-            };
-            let dst_id = match self.add_style_with_id(source_style, source_id) {
-                Ok(id) => id,
-                Err(err) => {
+        for (offset, snapshot) in dst_cell_offsets.iter().copied().zip(snapshots) {
+            if let Some(source_id) = snapshot.hyperlink {
+                let dst_id = match source {
+                    Some(source) => match self.prepare_cloned_hyperlink(source, source_id) {
+                        Ok(id) => id,
+                        Err(err) => {
+                            self.update_row_grapheme_flag(dst_y);
+                            self.update_row_hyperlink_flag(dst_y);
+                            self.update_row_styled_flag(dst_y);
+                            return Err(err);
+                        }
+                    },
+                    None => {
+                        self.use_hyperlink(source_id);
+                        source_id
+                    }
+                };
+                if let Err(HyperlinkError::HyperlinkMapOutOfMemory) =
+                    self.set_hyperlink_at_offset(dst_y, offset, dst_id)
+                {
+                    self.release_hyperlink(dst_id);
                     self.update_row_grapheme_flag(dst_y);
                     self.update_row_hyperlink_flag(dst_y);
                     self.update_row_styled_flag(dst_y);
-                    return Err(err.into());
+                    return Err(CloneFromError::HyperlinkMapOutOfMemory);
                 }
-            };
-            unsafe {
-                // Safety: offset came from this row's valid cell range.
-                (*offset.ptr_mut(self.memory.as_mut_ptr())).set_style_id(dst_id);
+            }
+        }
+
+        for (offset, snapshot) in dst_cell_offsets.iter().copied().zip(snapshots) {
+            if let Some(source_id) = snapshot.style {
+                let dst_id = match source {
+                    Some(source) => {
+                        match self.add_style_with_id(source.get_style(source_id), source_id) {
+                            Ok(id) => id,
+                            Err(err) => {
+                                self.update_row_grapheme_flag(dst_y);
+                                self.update_row_hyperlink_flag(dst_y);
+                                self.update_row_styled_flag(dst_y);
+                                return Err(err.into());
+                            }
+                        }
+                    }
+                    None => {
+                        self.use_style(source_id);
+                        source_id
+                    }
+                };
+                unsafe {
+                    // Safety: offset came from this row's valid cell range.
+                    (*offset.ptr_mut(self.memory.as_mut_ptr())).set_style_id(dst_id);
+                }
             }
         }
 
@@ -763,6 +812,64 @@ impl Page {
         self.update_row_hyperlink_flag(dst_y);
         self.update_row_styled_flag(dst_y);
         Ok(())
+    }
+
+    fn source_cell_snapshots(
+        &self,
+        src_y: usize,
+        x_start: usize,
+        x_end: usize,
+    ) -> Vec<SourceCellSnapshot> {
+        assert!(src_y < self.size.rows as usize);
+        assert!(x_end <= self.size.cols as usize);
+        let src_row = self.get_row(src_y);
+        let src_cells = self.get_cells(src_row);
+
+        src_cells[x_start..x_end]
+            .iter()
+            .enumerate()
+            .map(|(index, cell)| {
+                let x = x_start + index;
+                let offset = self.cell_offset_from_row_cells(src_row.cells(), x);
+                SourceCellSnapshot {
+                    cell: *cell,
+                    graphemes: cell
+                        .has_grapheme()
+                        .then(|| {
+                            self.lookup_grapheme_at_offset(offset)
+                                .expect("grapheme cell must have map data")
+                        })
+                        .unwrap_or_default(),
+                    hyperlink: cell.hyperlink().then(|| {
+                        self.lookup_hyperlink_at_offset(offset)
+                            .expect("hyperlink cell must have map data")
+                    }),
+                    style: (cell.style_id() != style::DEFAULT_ID).then(|| cell.style_id()),
+                }
+            })
+            .collect()
+    }
+
+    fn hold_same_page_snapshot_refs(&self, snapshots: &[SourceCellSnapshot]) {
+        for snapshot in snapshots {
+            if let Some(id) = snapshot.hyperlink {
+                self.use_hyperlink(id);
+            }
+            if let Some(id) = snapshot.style {
+                self.use_style(id);
+            }
+        }
+    }
+
+    fn release_same_page_snapshot_refs(&mut self, snapshots: &[SourceCellSnapshot]) {
+        for snapshot in snapshots {
+            if let Some(id) = snapshot.hyperlink {
+                self.release_hyperlink(id);
+            }
+            if let Some(id) = snapshot.style {
+                self.release_style(id);
+            }
+        }
     }
 
     fn clone_rows_within_page(
@@ -1568,6 +1675,14 @@ impl Page {
 pub(super) struct RowAndCellMut<'a> {
     pub(super) row: &'a mut Row,
     pub(super) cell: &'a mut Cell,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SourceCellSnapshot {
+    cell: Cell,
+    graphemes: Vec<u32>,
+    hyperlink: Option<hyperlink::Id>,
+    style: Option<style::Id>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3549,6 +3664,407 @@ mod tests {
         for y in 5..page2.size.rows as usize {
             assert_eq!(page2.get_cells(page2.get_row(y))[1].codepoint(), 0);
         }
+    }
+
+    #[test]
+    fn page_clone_partial_row_plain_cells() {
+        let mut page = Page::init(Capacity::new(10, 1)).unwrap();
+        for x in 0..page.size.cols as usize {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init((x + 1) as u32);
+        }
+
+        let mut page2 = Page::init(Capacity::new(10, 1)).unwrap();
+        for x in 0..page2.size.cols as usize {
+            *page2.get_row_and_cell_mut(x, 0).cell = Cell::init(0xbb);
+        }
+
+        page2.clone_partial_row_from(&page, 0, 0, 2, 8).unwrap();
+
+        for x in 0..page2.size.cols as usize {
+            let expected = if (2..8).contains(&x) {
+                (x + 1) as u32
+            } else {
+                0xbb
+            };
+            assert_eq!(page2.cell_copy_at(x, 0).codepoint(), expected);
+        }
+    }
+
+    #[test]
+    fn page_clone_partial_row_omits_source_graphemes_outside_range() {
+        let mut page = Page::init(Capacity::new(10, 1)).unwrap();
+        for x in 0..page.size.cols as usize {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init((x + 1) as u32);
+        }
+        page.append_grapheme_at(0, 0, 0x0301).unwrap();
+        page.append_grapheme_at(9, 0, 0x0302).unwrap();
+
+        let mut page2 = Page::init(Capacity::new(10, 1)).unwrap();
+        page2.clone_partial_row_from(&page, 0, 0, 2, 8).unwrap();
+
+        for x in 0..page2.size.cols as usize {
+            assert!(!page2.cell_copy_at(x, 0).has_grapheme());
+        }
+        assert!(!page2.get_row(0).grapheme());
+        assert_eq!(page2.grapheme_count(), 0);
+    }
+
+    #[test]
+    fn page_clone_partial_row_preserves_destination_graphemes_outside_range() {
+        let mut page = Page::init(Capacity::new(10, 1)).unwrap();
+        for x in 0..page.size.cols as usize {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init((x + 1) as u32);
+        }
+
+        let mut page2 = Page::init(Capacity::new(10, 1)).unwrap();
+        for x in 0..page2.size.cols as usize {
+            *page2.get_row_and_cell_mut(x, 0).cell = Cell::init(0xbb);
+        }
+        page2.append_grapheme_at(0, 0, 0x0301).unwrap();
+        page2.append_grapheme_at(9, 0, 0x0302).unwrap();
+
+        page2.clone_partial_row_from(&page, 0, 0, 2, 8).unwrap();
+
+        assert_eq!(page2.lookup_grapheme_at(0, 0), Some(vec![0x0301]));
+        assert_eq!(page2.lookup_grapheme_at(9, 0), Some(vec![0x0302]));
+        assert!(page2.get_row(0).grapheme());
+        assert_eq!(page2.grapheme_count(), 2);
+    }
+
+    #[test]
+    fn page_clone_partial_row_within_page_copies_hyperlink_in_range() {
+        let mut page = Page::init(Capacity::new(10, 2)).unwrap();
+        for x in 0..page.size.cols as usize {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init((x + 1) as u32);
+        }
+        let id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(1),
+                uri: b"https://example.com",
+            })
+            .unwrap();
+        page.set_hyperlink(7, 0, id).unwrap();
+        assert_eq!(page.hyperlink_ref_count(id), 1);
+
+        page.clone_partial_row_within_page(1, 0, 2, 8).unwrap();
+
+        assert_eq!(page.lookup_hyperlink_at(7, 1), Some(id));
+        assert_eq!(page.hyperlink_ref_count(id), 2);
+        assert_eq!(page.hyperlink_count(), 2);
+        assert!(page.get_row(1).hyperlink());
+    }
+
+    #[test]
+    fn page_clone_partial_row_within_page_omits_hyperlink_outside_range() {
+        let mut page = Page::init(Capacity::new(10, 2)).unwrap();
+        for x in 0..page.size.cols as usize {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init((x + 1) as u32);
+        }
+        let id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(1),
+                uri: b"https://example.com",
+            })
+            .unwrap();
+        page.set_hyperlink(7, 0, id).unwrap();
+
+        page.clone_partial_row_within_page(1, 0, 2, 6).unwrap();
+
+        assert_eq!(page.lookup_hyperlink_at(7, 1), None);
+        assert_eq!(page.hyperlink_ref_count(id), 1);
+        assert_eq!(page.hyperlink_count(), 1);
+        assert!(!page.get_row(1).hyperlink());
+    }
+
+    #[test]
+    fn page_clone_partial_row_within_page_reuses_style_id() {
+        let mut page = Page::init(Capacity {
+            cols: 10,
+            rows: 2,
+            styles: 8,
+            ..Capacity::new(10, 2)
+        })
+        .unwrap();
+        for x in 0..page.size.cols as usize {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init((x + 1) as u32);
+        }
+        let bold = style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+        let id = page.add_style(bold).unwrap();
+        let rac = page.get_row_and_cell_mut(4, 0);
+        rac.row.set_styled(true);
+        rac.cell.set_style_id(id);
+        assert_eq!(page.style_ref_count(id), 1);
+
+        page.clone_partial_row_within_page(1, 0, 2, 8).unwrap();
+
+        assert_eq!(page.cell_copy_at(4, 1).style_id(), id);
+        assert_eq!(page.style_ref_count(id), 2);
+        assert_eq!(page.style_count(), 1);
+        assert!(page.get_row(1).styled());
+    }
+
+    #[test]
+    fn page_clone_partial_row_copies_and_preserves_styles() {
+        let mut page = Page::init(Capacity {
+            cols: 10,
+            rows: 1,
+            styles: 8,
+            ..Capacity::new(10, 1)
+        })
+        .unwrap();
+        for x in 0..page.size.cols as usize {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init((x + 1) as u32);
+        }
+        let bold = style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+        let source_id = page.add_style(bold).unwrap();
+        for x in [1, 4] {
+            let rac = page.get_row_and_cell_mut(x, 0);
+            rac.row.set_styled(true);
+            rac.cell.set_style_id(source_id);
+            page.use_style(source_id);
+        }
+        page.release_style(source_id);
+
+        let mut page2 = Page::init(Capacity {
+            cols: 10,
+            rows: 1,
+            styles: 8,
+            ..Capacity::new(10, 1)
+        })
+        .unwrap();
+        let underline = style::Style {
+            flags: style::Flags {
+                underline: Underline::Single,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+        let destination_id = page2.add_style(underline).unwrap();
+        let rac = page2.get_row_and_cell_mut(9, 0);
+        *rac.cell = Cell::init('z' as u32);
+        rac.row.set_styled(true);
+        rac.cell.set_style_id(destination_id);
+
+        page2.clone_partial_row_from(&page, 0, 0, 2, 8).unwrap();
+
+        let copied_id = page2.cell_copy_at(4, 0).style_id();
+        assert_eq!(page2.cell_copy_at(1, 0).style_id(), style::DEFAULT_ID);
+        assert_ne!(copied_id, style::DEFAULT_ID);
+        assert_eq!(page2.cell_copy_at(9, 0).style_id(), destination_id);
+        assert_eq!(page2.get_style(copied_id), bold);
+        assert_eq!(page2.get_style(destination_id), underline);
+        assert!(page2.get_row(0).styled());
+    }
+
+    #[test]
+    fn page_clone_partial_row_grapheme_map_oom_leaves_valid_cells() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(2, 0).cell = Cell::init('g' as u32);
+        page.append_grapheme_at(2, 0, 0x0301).unwrap();
+
+        let mut page2 = Page::init(Capacity::with_metadata(
+            5,
+            1,
+            8,
+            HYPERLINK_BYTES_DEFAULT,
+            0,
+            STRING_BYTES_DEFAULT,
+        ))
+        .unwrap();
+        *page2.get_row_and_cell_mut(4, 0).cell = Cell::init('z' as u32);
+
+        assert_eq!(
+            page2.clone_partial_row_from(&page, 0, 0, 2, 3),
+            Err(CloneFromError::Grapheme(
+                GraphemeError::GraphemeMapOutOfMemory
+            ))
+        );
+
+        assert_eq!(page2.cell_copy_at(2, 0).codepoint(), 'g' as u32);
+        assert!(!page2.cell_copy_at(2, 0).has_grapheme());
+        assert_eq!(page2.cell_copy_at(4, 0).codepoint(), 'z' as u32);
+        assert!(!page2.get_row(0).grapheme());
+        assert_eq!(page2.grapheme_count(), 0);
+    }
+
+    #[test]
+    fn page_clone_partial_row_style_oom_leaves_valid_cells() {
+        let mut page = Page::init(Capacity {
+            cols: 5,
+            rows: 1,
+            styles: 8,
+            ..Capacity::new(5, 1)
+        })
+        .unwrap();
+        let bold = style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+        let source_id = page.add_style(bold).unwrap();
+        let rac = page.get_row_and_cell_mut(2, 0);
+        *rac.cell = Cell::init('s' as u32);
+        rac.row.set_styled(true);
+        rac.cell.set_style_id(source_id);
+
+        let mut page2 = Page::init(Capacity::with_metadata(
+            5,
+            1,
+            0,
+            HYPERLINK_BYTES_DEFAULT,
+            GRAPHEME_BYTES_DEFAULT,
+            STRING_BYTES_DEFAULT,
+        ))
+        .unwrap();
+        *page2.get_row_and_cell_mut(4, 0).cell = Cell::init('z' as u32);
+
+        assert_eq!(
+            page2.clone_partial_row_from(&page, 0, 0, 2, 3),
+            Err(CloneFromError::Style(
+                super::super::ref_counted_set::AddError::OutOfMemory
+            ))
+        );
+        assert_eq!(page2.cell_copy_at(2, 0).codepoint(), 's' as u32);
+        assert_eq!(page2.cell_copy_at(2, 0).style_id(), style::DEFAULT_ID);
+        assert_eq!(page2.cell_copy_at(4, 0).codepoint(), 'z' as u32);
+        assert!(!page2.get_row(0).styled());
+    }
+
+    #[test]
+    fn page_clone_partial_row_hyperlink_map_oom_preserves_outside_range() {
+        let mut source = Page::init(Capacity::new(80, 1)).unwrap();
+        *source.get_row_and_cell_mut(0, 0).cell = Cell::init('s' as u32);
+        let source_id = source
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(1),
+                uri: b"https://example.com/source",
+            })
+            .unwrap();
+        source.set_hyperlink(0, 0, source_id).unwrap();
+
+        let mut destination = Page::init(Capacity::new(80, 1)).unwrap();
+        let destination_id = destination
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(2),
+                uri: b"https://example.com/destination",
+            })
+            .unwrap();
+        let capacity = destination.hyperlink_capacity();
+        for x in 1..=capacity {
+            if x > 1 {
+                destination.use_hyperlink(destination_id);
+            }
+            *destination.get_row_and_cell_mut(x, 0).cell = Cell::init('d' as u32);
+            destination.set_hyperlink(x, 0, destination_id).unwrap();
+        }
+        let ref_count_before = destination.hyperlink_ref_count(destination_id);
+
+        assert_eq!(
+            destination.clone_partial_row_from(&source, 0, 0, 0, 1),
+            Err(CloneFromError::HyperlinkMapOutOfMemory)
+        );
+
+        assert_eq!(destination.lookup_hyperlink_at(0, 0), None);
+        assert!(!destination.cell_copy_at(0, 0).hyperlink());
+        assert_eq!(destination.lookup_hyperlink_at(1, 0), Some(destination_id));
+        assert_eq!(
+            destination.hyperlink_ref_count(destination_id),
+            ref_count_before
+        );
+    }
+
+    #[test]
+    fn page_clone_partial_row_hyperlink_string_oom_leaves_valid_cells() {
+        let mut source = Page::init(Capacity::new(5, 1)).unwrap();
+        *source.get_row_and_cell_mut(2, 0).cell = Cell::init('s' as u32);
+        let source_id = source
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Explicit(b"id"),
+                uri: b"https://example.com/source",
+            })
+            .unwrap();
+        source.set_hyperlink(2, 0, source_id).unwrap();
+
+        let mut destination = Page::init(Capacity::with_metadata(
+            5,
+            1,
+            8,
+            HYPERLINK_BYTES_DEFAULT,
+            GRAPHEME_BYTES_DEFAULT,
+            0,
+        ))
+        .unwrap();
+        *destination.get_row_and_cell_mut(4, 0).cell = Cell::init('z' as u32);
+
+        assert_eq!(
+            destination.clone_partial_row_from(&source, 0, 0, 2, 3),
+            Err(CloneFromError::StringAllocOutOfMemory)
+        );
+
+        assert_eq!(destination.lookup_hyperlink_at(2, 0), None);
+        assert!(!destination.cell_copy_at(2, 0).hyperlink());
+        assert_eq!(destination.cell_copy_at(4, 0).codepoint(), 'z' as u32);
+        assert!(!destination.get_row(0).hyperlink());
+        assert_eq!(destination.hyperlink_count(), 0);
+        assert_eq!(destination.hyperlink_set_count(), 0);
+        assert_eq!(destination.string_used_bytes(), 0);
+    }
+
+    #[test]
+    fn page_clone_partial_row_hyperlink_set_oom_frees_strings() {
+        let mut source = Page::init(Capacity::new(5, 1)).unwrap();
+        *source.get_row_and_cell_mut(2, 0).cell = Cell::init('s' as u32);
+        let source_id = source
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(100),
+                uri: b"https://example.com/source",
+            })
+            .unwrap();
+        source.set_hyperlink(2, 0, source_id).unwrap();
+
+        let mut destination = Page::init(Capacity::new(5, 1)).unwrap();
+        *destination.get_row_and_cell_mut(4, 0).cell = Cell::init('z' as u32);
+        let mut inserted = Vec::new();
+        for i in 0.. {
+            match destination.insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(i),
+                uri: b"https://example.com/destination",
+            }) {
+                Ok(id) => inserted.push(id),
+                Err(InsertHyperlinkError::SetOutOfMemory) => break,
+                Err(err) => panic!("unexpected insert error: {err:?}"),
+            }
+        }
+        assert!(!inserted.is_empty());
+        let set_count_before = destination.hyperlink_set_count();
+        let string_used_before = destination.string_used_bytes();
+
+        assert_eq!(
+            destination.clone_partial_row_from(&source, 0, 0, 2, 3),
+            Err(CloneFromError::HyperlinkSetOutOfMemory)
+        );
+
+        assert_eq!(destination.lookup_hyperlink_at(2, 0), None);
+        assert!(!destination.cell_copy_at(2, 0).hyperlink());
+        assert_eq!(destination.cell_copy_at(4, 0).codepoint(), 'z' as u32);
+        assert!(!destination.get_row(0).hyperlink());
+        assert_eq!(destination.hyperlink_count(), 0);
+        assert_eq!(destination.hyperlink_set_count(), set_count_before);
+        assert_eq!(destination.string_used_bytes(), string_used_before);
     }
 
     #[test]
