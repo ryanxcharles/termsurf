@@ -143,7 +143,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 7: Port Terminal Style Value Types](07-port-style-value-types.md)
   — **Pass**
 - [Experiment 8: Port Packed Row and Cell Values](08-port-row-cell-values.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 

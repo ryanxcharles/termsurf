@@ -5,6 +5,9 @@ mod bitmap_allocator;
 mod color;
 
 #[allow(dead_code)]
+mod page;
+
+#[allow(dead_code)]
 mod sgr;
 
 #[allow(dead_code)]

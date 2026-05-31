@@ -229,3 +229,128 @@ The experiment fails if:
 This experiment design must be reviewed by Codex before implementation. Any real
 design issues must be fixed before committing the plan or implementing the
 slice.
+
+## Result
+
+**Result:** Pass
+
+Experiment 8 ported the packed `Row` and `Cell` value layer from upstream
+`page.zig`.
+
+The implementation added `roastty/src/terminal/page.rs` and wired it from
+`roastty/src/terminal/mod.rs`. The module intentionally contains only the value
+types and helpers. It does not define `Page`, allocate backing memory, compute
+page layout, or introduce grapheme/style/hyperlink metadata maps.
+
+### Implementation Shape
+
+Both values use explicit raw-bit storage:
+
+```rust
+#[repr(transparent)]
+struct Row(u64);
+
+#[repr(transparent)]
+struct Cell(u64);
+```
+
+This matches the upstream `packed struct(u64)` behavior without relying on Rust
+field layout. All field mutation goes through safe mask/setter helpers. No
+`unsafe` code was needed.
+
+`Row` now includes:
+
+- `cells: Offset<Cell>`
+- wrap and wrap-continuation flags
+- grapheme/style/hyperlink optimization flags
+- semantic prompt state
+- Kitty virtual-placeholder flag
+- dirty flag
+- `cval`
+- `managed_memory`
+
+`Cell` now includes:
+
+- content tag and content storage
+- codepoint cells
+- palette-background cells
+- RGB-background cells
+- style ID
+- wide/spacer state
+- protected and hyperlink flags
+- semantic content state
+- `cval`
+- `is_zero`
+- `has_text`
+- `codepoint`
+- `grid_width`
+- `has_styling`
+- `is_empty`
+- `has_grapheme`
+- `has_text_any`
+
+Invalid codepoints above `0x10FFFF` are rejected with an assertion rather than
+silently truncated.
+
+### Upstream Tests Ported
+
+The upstream `Cell is zero by default` behavior is ported directly:
+
+- `Cell::init(0).cval() == 0`
+- zero cell reports `SemanticContent::Output`
+
+Additional direct tests prove the helper and raw layout behavior that later
+`Page` work depends on:
+
+- `Row` and `Cell` size/alignment are 8 bytes / `u64` aligned
+- `Row::default().cval() == 0`
+- row cell-offset field raw value
+- every row boolean flag bit
+- every `SemanticPrompt` raw value
+- `Row::managed_memory`
+- `Cell::init('A')` raw value
+- palette and RGB background raw values
+- non-zero style ID raw value
+- protected and hyperlink raw flag values
+- every `Wide` raw value
+- every `ContentTag` raw value
+- every `SemanticContent` raw value
+- `Cell` helper behavior
+- `Cell::has_text_any`
+- invalid codepoint rejection
+
+### Deferred Upstream Tests
+
+The following upstream tests remain intentionally deferred:
+
+| Deferred area                                  | Reason                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------------- |
+| `Page.layout can take a maxed capacity`        | Requires `Capacity`, layout math, and metadata layout placeholders. |
+| `Page capacity ...` / `Capacity maxCols ...`   | Requires `Capacity` and `Page.layout`.                              |
+| `Page init` / `Page read and write cells`      | Requires page backing allocation and row/cell pointer access.       |
+| Grapheme tests                                 | Require offset hash maps and grapheme storage.                      |
+| Style tests inside `Page`                      | Require `StyleSet` / `RefCountedSet`.                               |
+| Hyperlink tests                                | Require hyperlink set/map and string allocation.                    |
+| Clone/copy/move/integrity/exact-capacity tests | Require full `Page` storage and metadata behavior.                  |
+
+### Verification
+
+Ran and passed:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+The targeted page-value run passed 14 tests. The full `cargo test -p roastty`
+run passed 77 Rust unit tests, the C ABI harness, and doc tests.
+
+## Conclusion
+
+Experiment 8 succeeds. Roastty now has the raw packed `Row` and `Cell` value
+model needed before `Page.layout` and basic page storage can be ported.
+
+The next experiment should port `Capacity`, `std_capacity`, and the minimal
+`Page.layout` arithmetic needed to run the upstream layout/capacity tests,
+without allocating a real `Page` yet.
