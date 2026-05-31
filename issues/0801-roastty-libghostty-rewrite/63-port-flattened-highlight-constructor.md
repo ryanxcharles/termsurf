@@ -162,3 +162,61 @@ The experiment fails if:
   is added prematurely;
 - semantic highlight behavior regresses;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Experiment 63 added a private PageList-owned flattened highlight constructor:
+`PageList::flatten_highlight(start, end) -> Option<highlight::Flattened>`. The
+helper validates both pins, rejects garbage pins, rejects missing nodes, rejects
+out-of-bounds rows and columns, rejects reversed ranges before iteration, and
+then uses the existing `PageIterator` in `Direction::RightDown` to collect
+nonempty flattened chunks.
+
+Each produced `highlight::Chunk` stores the page node pointer, current page
+serial, start row, and exclusive end row. The flattened highlight keeps `top_x`
+from the start pin and `bot_x` from the end pin.
+
+The tests added coverage for:
+
+- same-page flattening, including same-row endpoint inclusion through an
+  exclusive `end = end.y + 1` chunk bound;
+- cross-page flattening after `PageList::split`;
+- `start_pin`, `end_pin`, and `untracked` mapping back to the original range;
+- same-page reversed ranges, including same-row x reversal and prior-row
+  reversal;
+- cross-page reversed ranges;
+- garbage pins;
+- missing-node pins;
+- out-of-bounds row pins;
+- out-of-bounds column pins.
+
+Verification:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo fmt` passed.
+- `cargo test -p roastty terminal::page_list` passed: 277 tests, 0 failed.
+- `cargo test -p roastty` passed: 558 unit tests plus 1 ABI harness test, 0
+  failed.
+
+Independent result review approved the experiment with no blocking findings. The
+reviewer confirmed the constructor matches the experiment design and upstream
+intent, that invalid/reversed pin handling is covered, and that no tracked
+highlight, search, renderer, app/public API, selection, parser, resize/reflow,
+or semantic behavior changes were introduced.
+
+## Conclusion
+
+Roastty now has the flattened-highlight construction behavior needed to convert
+ordered PageList pins into serial-stamped page chunks. The highlight subsystem
+has the untracked shape, flattened shape, and constructor shape in place. The
+next experiment can build on this by porting the next upstream highlight layer
+without widening visibility or touching renderer/app behavior prematurely.

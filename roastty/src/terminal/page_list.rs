@@ -1406,6 +1406,58 @@ impl PageList {
         }
     }
 
+    fn highlight_pin_order_key(&self, pin: Pin) -> Option<(usize, CellCountInt, CellCountInt)> {
+        if pin.garbage {
+            return None;
+        }
+
+        let index = self.node_index(pin.node)?;
+        let node = &self.pages[index];
+        if pin.y >= node.page.size_rows() {
+            return None;
+        }
+        if pin.x >= self.cols || pin.x >= node.page.size_cols() {
+            return None;
+        }
+
+        Some((index, pin.y, pin.x))
+    }
+
+    fn flatten_highlight(&self, start: Pin, end: Pin) -> Option<highlight::Flattened> {
+        let start_key = self.highlight_pin_order_key(start)?;
+        let end_key = self.highlight_pin_order_key(end)?;
+        if end_key < start_key {
+            return None;
+        }
+
+        let page_it = PageIterator {
+            list: self,
+            row: Some(start),
+            limit: Some(end),
+            direction: Direction::RightDown,
+        };
+        let mut chunks = Vec::new();
+        for chunk in page_it {
+            let node = self.node_for_ptr(chunk.node)?;
+            chunks.push(highlight::Chunk {
+                node: chunk.node,
+                serial: node.serial,
+                start: chunk.start,
+                end: chunk.end,
+            });
+        }
+
+        if chunks.is_empty() {
+            return None;
+        }
+
+        Some(highlight::Flattened {
+            chunks,
+            top_x: start.x,
+            bot_x: end.x,
+        })
+    }
+
     fn clone_region(&self, mut opts: CloneOptions<'_>) -> Result<Self, CloneRegionError> {
         let chunks = self
             .page_iterator(Direction::RightDown, opts.top, opts.bottom)
@@ -2850,6 +2902,24 @@ mod tests {
         iterator: CellIterator<'_>,
     ) -> Vec<(usize, CellCountInt, CellCountInt)> {
         iterator.map(|pin| row_tuple(list, pin)).collect()
+    }
+
+    fn flattened_chunk_tuples(
+        list: &PageList,
+        flattened: &highlight::Flattened,
+    ) -> Vec<(usize, u64, CellCountInt, CellCountInt)> {
+        flattened
+            .chunks
+            .iter()
+            .map(|chunk| {
+                (
+                    list.node_index(chunk.node).expect("chunk node must exist"),
+                    chunk.serial,
+                    chunk.start,
+                    chunk.end,
+                )
+            })
+            .collect()
     }
 
     fn clone_options(top: point::Point) -> CloneOptions<'static> {
@@ -6481,6 +6551,160 @@ mod tests {
     #[should_panic(expected = "flattened highlight must contain at least one chunk")]
     fn flattened_highlight_empty_untracked_panics() {
         let _ = highlight::Flattened::empty().untracked();
+    }
+
+    #[test]
+    fn page_list_flatten_highlight_single_page() {
+        let list = PageList::init(10, 20, None).unwrap();
+        let start = list
+            .pin(point::Point::screen(Coordinate::new(2, 5)))
+            .unwrap();
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(7, 5)))
+            .unwrap();
+        let node = list.first_node_ptr();
+        let serial = list.node_for_ptr(node).unwrap().serial;
+
+        let flattened = list.flatten_highlight(start, end).unwrap();
+
+        assert_eq!(
+            flattened_chunk_tuples(&list, &flattened),
+            vec![(0, serial, 5, 6)]
+        );
+        assert_eq!(flattened.top_x, 2);
+        assert_eq!(flattened.bot_x, 7);
+        assert_eq!(flattened.start_pin(), start);
+        assert_eq!(flattened.end_pin(), end);
+        assert_eq!(flattened.untracked(), highlight::Untracked { start, end });
+    }
+
+    #[test]
+    fn page_list_flatten_highlight_cross_page() {
+        let mut list = PageList::init(4, 4, None).unwrap();
+        let split = list
+            .pin(point::Point::screen(Coordinate::new(0, 2)))
+            .unwrap();
+        list.split(split).unwrap();
+        let start = list
+            .pin(point::Point::screen(Coordinate::new(1, 1)))
+            .unwrap();
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(3, 2)))
+            .unwrap();
+        let first_serial = list.node_for_ptr(list.first_node_ptr()).unwrap().serial;
+        let last_serial = list.node_for_ptr(list.last_node_ptr()).unwrap().serial;
+
+        let flattened = list.flatten_highlight(start, end).unwrap();
+
+        assert_eq!(
+            flattened_chunk_tuples(&list, &flattened),
+            vec![(0, first_serial, 1, 2), (1, last_serial, 0, 1)]
+        );
+        assert_eq!(flattened.top_x, 1);
+        assert_eq!(flattened.bot_x, 3);
+        assert_eq!(
+            list.point_from_pin(point::Tag::Screen, flattened.start_pin())
+                .unwrap()
+                .coord(),
+            Coordinate::new(1, 1)
+        );
+        assert_eq!(
+            list.point_from_pin(point::Tag::Screen, flattened.end_pin())
+                .unwrap()
+                .coord(),
+            Coordinate::new(3, 2)
+        );
+        assert_eq!(flattened.untracked(), highlight::Untracked { start, end });
+    }
+
+    #[test]
+    fn page_list_flatten_highlight_same_page_reversed_returns_none() {
+        let list = PageList::init(10, 20, None).unwrap();
+        let start = list
+            .pin(point::Point::screen(Coordinate::new(2, 5)))
+            .unwrap();
+        let same_row_end = list
+            .pin(point::Point::screen(Coordinate::new(1, 5)))
+            .unwrap();
+        let prior_row_end = list
+            .pin(point::Point::screen(Coordinate::new(9, 4)))
+            .unwrap();
+
+        assert!(list.flatten_highlight(start, same_row_end).is_none());
+        assert!(list.flatten_highlight(start, prior_row_end).is_none());
+    }
+
+    #[test]
+    fn page_list_flatten_highlight_cross_page_reversed_returns_none() {
+        let mut list = PageList::init(4, 4, None).unwrap();
+        let split = list
+            .pin(point::Point::screen(Coordinate::new(0, 2)))
+            .unwrap();
+        list.split(split).unwrap();
+        let start = list
+            .pin(point::Point::screen(Coordinate::new(0, 2)))
+            .unwrap();
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(3, 1)))
+            .unwrap();
+
+        assert!(list.flatten_highlight(start, end).is_none());
+    }
+
+    #[test]
+    fn page_list_flatten_highlight_garbage_pin_returns_none() {
+        let list = PageList::init(10, 20, None).unwrap();
+        let mut start = list
+            .pin(point::Point::screen(Coordinate::new(2, 5)))
+            .unwrap();
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(7, 5)))
+            .unwrap();
+
+        start.garbage = true;
+
+        assert!(list.flatten_highlight(start, end).is_none());
+        assert!(list.flatten_highlight(end, start).is_none());
+    }
+
+    #[test]
+    fn page_list_flatten_highlight_missing_node_returns_none() {
+        let list = PageList::init(10, 20, None).unwrap();
+        let other = PageList::init(10, 20, None).unwrap();
+        let start = Pin::new(other.first_node_ptr(), 0, 0);
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(7, 5)))
+            .unwrap();
+
+        assert!(list.flatten_highlight(start, end).is_none());
+        assert!(list.flatten_highlight(end, start).is_none());
+    }
+
+    #[test]
+    fn page_list_flatten_highlight_out_of_bounds_row_returns_none() {
+        let list = PageList::init(10, 20, None).unwrap();
+        let node = list.first_node_ptr();
+        let rows = list.node_for_ptr(node).unwrap().page.size_rows();
+        let start = Pin::new(node, rows, 0);
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(7, 5)))
+            .unwrap();
+
+        assert!(list.flatten_highlight(start, end).is_none());
+        assert!(list.flatten_highlight(end, start).is_none());
+    }
+
+    #[test]
+    fn page_list_flatten_highlight_out_of_bounds_column_returns_none() {
+        let list = PageList::init(10, 20, None).unwrap();
+        let node = list.first_node_ptr();
+        let start = Pin::new(node, 0, list.cols);
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(7, 5)))
+            .unwrap();
+
+        assert!(list.flatten_highlight(start, end).is_none());
+        assert!(list.flatten_highlight(end, start).is_none());
     }
 
     #[test]
