@@ -184,6 +184,8 @@ No experiment may proceed to the next stage until the required review passes.
   **Pass**
 - [Experiment 30: Port Page Move Grapheme](30-port-page-move-grapheme.md) —
   **Pass**
+- [Experiment 31: Port Terminal Points](31-port-terminal-points.md) —
+  **Designed**
 
 ## Non-Goals
 
