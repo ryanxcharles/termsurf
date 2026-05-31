@@ -153,6 +153,12 @@ enum IncreaseCapacityError {
     CloneFrom(CloneFromError),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SplitError {
+    OutOfMemory,
+    OutOfSpace,
+}
+
 impl From<PageAllocError> for CloneRegionError {
     fn from(_: PageAllocError) -> Self {
         Self::PageAlloc
@@ -176,6 +182,12 @@ impl From<GrowError> for CloneRegionError {
 impl From<PageAllocError> for IncreaseCapacityError {
     fn from(_: PageAllocError) -> Self {
         Self::PageAlloc
+    }
+}
+
+impl From<PageAllocError> for SplitError {
+    fn from(_: PageAllocError) -> Self {
+        Self::OutOfMemory
     }
 }
 
@@ -1323,6 +1335,73 @@ impl PageList {
         Ok(Some(replacement_ptr))
     }
 
+    fn split(&mut self, pin: Pin) -> Result<(), SplitError> {
+        if !self.pin_is_valid(&pin) {
+            return Err(SplitError::OutOfSpace);
+        }
+
+        let original_node = pin.node;
+        let Some(index) = self.node_index(original_node) else {
+            return Err(SplitError::OutOfSpace);
+        };
+
+        let old_rows = self.pages[index].page.size_rows();
+        if old_rows <= 1 {
+            return Err(SplitError::OutOfSpace);
+        }
+        if pin.y == 0 {
+            return Ok(());
+        }
+
+        let old_cols = self.pages[index].page.size_cols();
+        let old_capacity = self.pages[index].page.capacity();
+        let page_size_before = self.page_size;
+        let page_serial_before = self.page_serial;
+        let new_rows = old_rows - pin.y;
+        let mut target = self.create_page(old_capacity)?;
+        target.page.set_size_rows(new_rows);
+        target.page.set_size_cols(old_cols);
+
+        if target
+            .page
+            .clone_rows_from(&self.pages[index].page, pin.y as usize, old_rows as usize)
+            .is_err()
+        {
+            self.page_size = page_size_before;
+            self.page_serial = page_serial_before;
+            return Err(SplitError::OutOfSpace);
+        }
+
+        let target_ptr = NonNull::from(target.as_ref());
+        for tracked in &mut self.tracked_pins {
+            let tracked_pin = unsafe {
+                // Safety: tracked pins are owned by this PageList and remain
+                // allocated while we update their target node.
+                tracked.as_mut()
+            };
+            if tracked_pin.node == original_node && tracked_pin.y >= pin.y {
+                tracked_pin.node = target_ptr;
+                tracked_pin.y -= pin.y;
+            }
+        }
+        if self.viewport_pin.node == original_node && self.viewport_pin.y >= pin.y {
+            self.viewport_pin.node = target_ptr;
+            self.viewport_pin.y -= pin.y;
+        }
+
+        for row in pin.y as usize..old_rows as usize {
+            self.pages[index]
+                .page
+                .clear_cells(row, 0, old_cols as usize);
+        }
+        self.pages[index].page.set_size_rows(pin.y);
+        self.pages.insert(index + 1, target);
+
+        self.verify_integrity()
+            .expect("split result must preserve PageList integrity");
+        Ok(())
+    }
+
     fn grow(&mut self) -> Result<Option<NonNull<Node>>, GrowError> {
         let last = self
             .pages
@@ -2181,6 +2260,437 @@ mod tests {
         assert_eq!(list.pages[1].page.backing_len(), second_backing);
         assert_eq!(list.pages[1].serial, second_serial);
         assert_visible_cells(&list.pages[1].page, list.cols, second_rows);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_at_middle_row() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        fill_visible_cells(&mut list.pages[0].page, 10, 10);
+        let node = list.first_node_ptr();
+
+        list.split(Pin {
+            node,
+            y: 5,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert_eq!(list.pages.len(), 2);
+        assert_eq!(list.pages[0].page.size_rows(), 5);
+        assert_eq!(list.pages[1].page.size_rows(), 5);
+        assert_visible_cells(&list.pages[0].page, 10, 5);
+        for y in 0..5 {
+            for x in 0..10 {
+                assert_eq!(
+                    page_cell(&list.pages[1].page, x, y).codepoint(),
+                    (x + (y + 5) * 10) as u32
+                );
+            }
+        }
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_at_row_zero_is_noop() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        fill_visible_cells(&mut list.pages[0].page, 10, 10);
+        let node = list.first_node_ptr();
+        let page_size = list.page_size;
+        let page_serial = list.page_serial;
+        let backing = list.pages[0].page.backing_len();
+
+        list.split(Pin {
+            node,
+            y: 0,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert_eq!(list.pages.len(), 1);
+        assert_eq!(list.first_node_ptr(), node);
+        assert_eq!(list.page_size, page_size);
+        assert_eq!(list.page_serial, page_serial);
+        assert_eq!(list.pages[0].page.backing_len(), backing);
+        assert_eq!(list.pages[0].page.size_rows(), 10);
+        assert_visible_cells(&list.pages[0].page, 10, 10);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_at_last_row() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        fill_visible_cells(&mut list.pages[0].page, 10, 10);
+        let node = list.first_node_ptr();
+
+        list.split(Pin {
+            node,
+            y: 9,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert_eq!(list.pages.len(), 2);
+        assert_eq!(list.pages[0].page.size_rows(), 9);
+        assert_eq!(list.pages[1].page.size_rows(), 1);
+        assert_eq!(page_cell(&list.pages[1].page, 0, 0).codepoint(), 90);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_single_row_returns_out_of_space() {
+        let mut list = PageList::init(10, 1, Some(0)).unwrap();
+        let node = list.first_node_ptr();
+        let result = list.split(Pin {
+            node,
+            y: 0,
+            x: 0,
+            garbage: false,
+        });
+
+        assert_eq!(result, Err(SplitError::OutOfSpace));
+        assert_eq!(list.pages.len(), 1);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_moves_tracked_pins() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        let node = list.first_node_ptr();
+        let pin_before = list
+            .track_pin(Pin {
+                node,
+                y: 1,
+                x: 0,
+                garbage: false,
+            })
+            .unwrap();
+        let pin_at = list
+            .track_pin(Pin {
+                node,
+                y: 5,
+                x: 2,
+                garbage: false,
+            })
+            .unwrap();
+        let pin_after = list
+            .track_pin(Pin {
+                node,
+                y: 7,
+                x: 3,
+                garbage: false,
+            })
+            .unwrap();
+
+        list.split(Pin {
+            node,
+            y: 5,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        let first = list.first_node_ptr();
+        let second = NonNull::from(list.pages[1].as_ref());
+        let before = unsafe { pin_before.as_ref() };
+        let at = unsafe { pin_at.as_ref() };
+        let after = unsafe { pin_after.as_ref() };
+        assert_eq!(before.node, first);
+        assert_eq!(before.y, 1);
+        assert_eq!(before.x, 0);
+        assert_eq!(at.node, second);
+        assert_eq!(at.y, 0);
+        assert_eq!(at.x, 2);
+        assert_eq!(after.node, second);
+        assert_eq!(after.y, 2);
+        assert_eq!(after.x, 3);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_remaps_viewport_pin() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        let node = list.first_node_ptr();
+        list.viewport_pin.node = node;
+        list.viewport_pin.y = 7;
+        list.viewport_pin.x = 6;
+
+        list.split(Pin {
+            node,
+            y: 5,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert_eq!(
+            list.viewport_pin.node,
+            NonNull::from(list.pages[1].as_ref())
+        );
+        assert_eq!(list.viewport_pin.y, 2);
+        assert_eq!(list.viewport_pin.x, 6);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_middle_page_preserves_order() {
+        let mut list = PageList::init(10, 12, Some(0)).unwrap();
+        let first = list.first_node_ptr();
+        list.split(Pin {
+            node: first,
+            y: 4,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+        let middle = NonNull::from(list.pages[1].as_ref());
+
+        list.split(Pin {
+            node: middle,
+            y: 4,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert_eq!(list.pages.len(), 3);
+        assert_eq!(list.first_node_ptr(), first);
+        assert_eq!(NonNull::from(list.pages[1].as_ref()), middle);
+        assert_eq!(list.pages[0].page.size_rows(), 4);
+        assert_eq!(list.pages[1].page.size_rows(), 4);
+        assert_eq!(list.pages[2].page.size_rows(), 4);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_last_page_makes_new_page_last() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        let first = list.first_node_ptr();
+        list.split(Pin {
+            node: first,
+            y: 5,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+        let last_before = NonNull::from(list.pages[1].as_ref());
+
+        list.split(Pin {
+            node: last_before,
+            y: 2,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert_eq!(list.pages.len(), 3);
+        assert_eq!(NonNull::from(list.pages[1].as_ref()), last_before);
+        assert_eq!(list.pages[1].page.size_rows(), 2);
+        assert_eq!(list.pages[2].page.size_rows(), 3);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_first_page_keeps_original_first() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        let first = list.first_node_ptr();
+        list.split(Pin {
+            node: first,
+            y: 5,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+        let second = NonNull::from(list.pages[1].as_ref());
+
+        list.split(Pin {
+            node: first,
+            y: 2,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert_eq!(list.first_node_ptr(), first);
+        assert_ne!(NonNull::from(list.pages[1].as_ref()), second);
+        assert_eq!(NonNull::from(list.pages[2].as_ref()), second);
+        assert_eq!(list.pages[0].page.size_rows(), 2);
+        assert_eq!(list.pages[1].page.size_rows(), 3);
+        assert_eq!(list.pages[2].page.size_rows(), 5);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_preserves_wrap_and_dirty_flags() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        let node = list.first_node_ptr();
+        list.pages[0].page.set_dirty(true);
+        list.pages[0].page.get_row_mut(2).set_dirty(true);
+        list.pages[0].page.get_row_mut(5).set_dirty(true);
+        list.pages[0].page.get_row_mut(5).set_wrap(true);
+        list.pages[0]
+            .page
+            .get_row_mut(6)
+            .set_wrap_continuation(true);
+        list.pages[0].page.get_row_mut(7).set_wrap(true);
+        list.pages[0]
+            .page
+            .get_row_mut(7)
+            .set_wrap_continuation(true);
+
+        list.split(Pin {
+            node,
+            y: 5,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert!(list.pages[0].page.is_dirty());
+        assert!(!list.pages[1].page.is_dirty());
+        assert!(list.pages[0].page.get_row(2).dirty());
+        assert!(list.pages[1].page.get_row(0).dirty());
+        assert!(list.pages[1].page.get_row(0).wrap());
+        assert!(!list.pages[1].page.get_row(0).wrap_continuation());
+        assert!(!list.pages[1].page.get_row(1).wrap());
+        assert!(list.pages[1].page.get_row(1).wrap_continuation());
+        assert!(list.pages[1].page.get_row(2).wrap());
+        assert!(list.pages[1].page.get_row(2).wrap_continuation());
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_preserves_styled_cells() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        let node = list.first_node_ptr();
+        let bold = style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+        let style_id = list.pages[0].page.add_style(bold).unwrap();
+        for y in 5..8 {
+            let rac = list.pages[0].page.get_row_and_cell_mut(0, y);
+            rac.row.set_styled(true);
+            let mut cell = Cell::init('S' as u32);
+            cell.set_style_id(style_id);
+            *rac.cell = cell;
+            list.pages[0].page.use_style(style_id);
+        }
+        list.pages[0].page.release_style(style_id);
+
+        list.split(Pin {
+            node,
+            y: 5,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert_eq!(list.pages[0].page.style_count(), 0);
+        assert_eq!(list.pages[1].page.style_count(), 1);
+        for y in 0..3 {
+            let cell = page_cell(&list.pages[1].page, 0, y);
+            assert_eq!(cell.codepoint(), 'S' as u32);
+            assert_eq!(list.pages[1].page.get_style(cell.style_id()), bold);
+            assert!(list.pages[1].page.get_row(y).styled());
+        }
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_preserves_graphemes() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        let node = list.first_node_ptr();
+        *list.pages[0].page.get_row_and_cell_mut(0, 6).cell = Cell::init(0x1f468);
+        list.pages[0].page.append_grapheme_at(0, 6, 0x200d).unwrap();
+        list.pages[0]
+            .page
+            .append_grapheme_at(0, 6, 0x1f469)
+            .unwrap();
+
+        list.split(Pin {
+            node,
+            y: 5,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert_eq!(list.pages[0].page.grapheme_count(), 0);
+        assert_eq!(list.pages[1].page.grapheme_count(), 1);
+        assert_eq!(
+            list.pages[1].page.lookup_grapheme_at(0, 1).unwrap(),
+            vec![0x200d, 0x1f469]
+        );
+        assert!(list.pages[1].page.get_row(1).grapheme());
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_preserves_hyperlinks() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        let node = list.first_node_ptr();
+        let link_id = list.pages[0]
+            .page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(0),
+                uri: b"https://example.com",
+            })
+            .unwrap();
+        *list.pages[0].page.get_row_and_cell_mut(0, 7).cell = Cell::init('L' as u32);
+        list.pages[0].page.set_hyperlink(0, 7, link_id).unwrap();
+
+        list.split(Pin {
+            node,
+            y: 5,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert_eq!(list.pages[0].page.hyperlink_count(), 0);
+        assert_eq!(list.pages[1].page.hyperlink_count(), 1);
+        let cloned_link = list.pages[1].page.lookup_hyperlink_at(0, 2).unwrap();
+        assert_eq!(
+            list.pages[1].page.get_hyperlink(cloned_link),
+            HyperlinkSnapshot {
+                id: HyperlinkSnapshotId::Implicit(0),
+                uri: b"https://example.com".to_vec(),
+            }
+        );
+        assert!(list.pages[1].page.get_row(2).hyperlink());
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_split_preserves_accounting() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        let node = list.first_node_ptr();
+        let page_size = list.page_size;
+        let page_serial = list.page_serial;
+        let backing = list.pages[0].page.backing_len();
+        let capacity = list.pages[0].page.capacity();
+        let total_rows = list.total_rows();
+
+        list.split(Pin {
+            node,
+            y: 5,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        assert_eq!(list.page_size, page_size + backing);
+        assert_eq!(list.page_serial, page_serial + 1);
+        assert_eq!(list.total_rows(), total_rows);
+        assert_eq!(list.pages[0].page.backing_len(), backing);
+        assert_eq!(list.pages[1].page.capacity(), capacity);
         list.verify_integrity().unwrap();
     }
 

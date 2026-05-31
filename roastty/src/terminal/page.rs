@@ -1179,7 +1179,7 @@ impl Page {
         }
     }
 
-    fn clear_cells(&mut self, row_index: usize, left: usize, end: usize) {
+    pub(super) fn clear_cells(&mut self, row_index: usize, left: usize, end: usize) {
         assert!(row_index < self.size.rows as usize);
         assert!(left <= end);
         assert!(end <= self.size.cols as usize);

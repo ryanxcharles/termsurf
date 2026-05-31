@@ -173,3 +173,61 @@ The experiment fails if:
 - single-row split succeeds instead of returning `OutOfSpace`;
 - the implementation expands into unrelated PageList operations;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Implemented `PageList::split` in `roastty/src/terminal/page_list.rs` and widened
+`Page::clear_cells` to `pub(super)` in `roastty/src/terminal/page.rs` so
+PageList can reuse Page's existing managed-memory cleanup path.
+
+Split now:
+
+- returns `OutOfSpace` for invalid pins and single-row pages;
+- treats row-0 split as a no-op;
+- allocates a same-capacity replacement page for rows at and after the split
+  point;
+- clones moved rows into the new page;
+- restores `page_size` and `page_serial` if cloning unexpectedly fails before
+  insertion;
+- remaps tracked pins and `viewport_pin` whose rows move to the new page;
+- clears moved rows from the original page before shrinking it, releasing
+  styles, graphemes, hyperlinks, and string-backed data from the original page;
+- inserts the new page immediately after the original page; and
+- preserves total rows, page order, serial accounting, and PageList integrity.
+
+The tests ported the upstream split coverage in Rust form, including middle,
+row-0, last-row, and single-row behavior; tracked-pin and viewport-pin
+remapping; first/middle/last page-order cases; wrap flags; row-level and
+page-level dirty semantics; style, grapheme, and hyperlink preservation/release;
+and accounting checks.
+
+Verification:
+
+```bash
+cargo fmt && cargo test -p roastty terminal::page_list
+```
+
+Result: 143 PageList tests passed.
+
+```bash
+cargo test -p roastty
+```
+
+Result: 424 unit tests passed, plus the ABI harness passed.
+
+Independent result review: Codex reviewer approved recording Experiment 46 as
+Pass with no findings. The reviewer specifically confirmed the split semantics,
+clone-failure rollback, dirty-state coverage, managed-memory coverage, page
+order coverage, and the narrow `Page::clear_cells` visibility change.
+
+## Conclusion
+
+PageList splitting is now ported for the currently implemented PageList surface.
+This fills another core PageList mutation path needed by later erase,
+resize/reflow, and parser retry behavior while staying scoped to internal
+terminal data structures.
+
+The next experiment should continue with the next upstream PageList operation in
+source order.

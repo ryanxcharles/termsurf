@@ -207,7 +207,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 44: Port PageList Increase Capacity](44-port-pagelist-increase-capacity.md)
   — **Pass**
 - [Experiment 45: Port PageList Compact](45-port-pagelist-compact.md) — **Pass**
-- [Experiment 46: Port PageList Split](46-port-pagelist-split.md) — **Designed**
+- [Experiment 46: Port PageList Split](46-port-pagelist-split.md) — **Pass**
 
 ## Non-Goals
 
