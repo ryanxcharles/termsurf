@@ -1089,7 +1089,7 @@ impl Page {
             let cell = self.cell_copy_at_offset(src_offset);
 
             if cell.has_grapheme() {
-                self.move_grapheme_entry(src_offset, dst_offset);
+                self.move_grapheme_at_offset(src_offset, dst_offset);
             }
             if cell.hyperlink() {
                 self.move_hyperlink_entry(src_offset, dst_offset);
@@ -1140,7 +1140,16 @@ impl Page {
         self.update_row_styled_flag(row_index);
     }
 
-    fn move_grapheme_entry(&mut self, src_offset: Offset<Cell>, dst_offset: Offset<Cell>) {
+    fn move_grapheme_at(&mut self, src_x: usize, src_y: usize, dst_x: usize, dst_y: usize) {
+        let src_offset = self.cell_offset_at(src_x, src_y);
+        let dst_offset = self.cell_offset_at(dst_x, dst_y);
+        self.move_grapheme_at_offset(src_offset, dst_offset);
+    }
+
+    fn move_grapheme_at_offset(&mut self, src_offset: Offset<Cell>, dst_offset: Offset<Cell>) {
+        assert!(self.cell_copy_at_offset(src_offset).has_grapheme());
+        assert!(!self.cell_copy_at_offset(dst_offset).has_grapheme());
+
         let Some(mut map) = self.grapheme_map_mut() else {
             panic!("grapheme cell must have map storage");
         };
@@ -1200,8 +1209,8 @@ impl Page {
     ) {
         match (src_cell.has_grapheme(), dst_cell.has_grapheme()) {
             (false, false) => {}
-            (true, false) => self.move_grapheme_entry(src_offset, dst_offset),
-            (false, true) => self.move_grapheme_entry(dst_offset, src_offset),
+            (true, false) => self.move_grapheme_at_offset(src_offset, dst_offset),
+            (false, true) => self.move_grapheme_at_offset(dst_offset, src_offset),
             (true, true) => {
                 let Some(mut map) = self.grapheme_map_mut() else {
                     panic!("grapheme cell must have map storage");
@@ -3917,6 +3926,106 @@ mod tests {
         assert_eq!(page.grapheme_used_bytes(), 0);
         assert_eq!(page.grapheme_count(), 0);
         assert!(!page.cell_copy_at(0, 0).has_grapheme());
+        assert!(!page.get_row(0).grapheme());
+        assert_eq!(page.verify_integrity(), Ok(()));
+    }
+
+    #[test]
+    fn page_move_grapheme_moves_map_entry_without_allocating() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(3, 0).cell = Cell::init('b' as u32);
+        page.set_graphemes_at(1, 0, &[0x0301, 0x0300]).unwrap();
+        let count_before = page.grapheme_count();
+        let used_before = page.grapheme_used_bytes();
+
+        page.move_grapheme_at(1, 0, 3, 0);
+
+        assert_eq!(page.lookup_grapheme_at(1, 0), None);
+        assert_eq!(page.lookup_grapheme_at(3, 0), Some(vec![0x0301, 0x0300]));
+        assert_eq!(page.grapheme_count(), count_before);
+        assert_eq!(page.grapheme_used_bytes(), used_before);
+    }
+
+    #[test]
+    fn page_move_grapheme_leaves_cell_tags_for_caller() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(3, 0).cell = Cell::init('b' as u32);
+        page.set_graphemes_at(1, 0, &[0x0301]).unwrap();
+
+        page.move_grapheme_at(1, 0, 3, 0);
+
+        assert!(page.cell_copy_at(1, 0).has_grapheme());
+        assert!(!page.cell_copy_at(3, 0).has_grapheme());
+        assert_eq!(
+            page.verify_integrity(),
+            Err(IntegrityError::MissingGraphemeData)
+        );
+
+        page.get_row_and_cell_mut(1, 0)
+            .cell
+            .set_content_tag(ContentTag::Codepoint);
+        assert_eq!(
+            page.verify_integrity(),
+            Err(IntegrityError::UnmarkedGraphemeCell)
+        );
+
+        page.get_row_and_cell_mut(3, 0)
+            .cell
+            .set_content_tag(ContentTag::CodepointGrapheme);
+        page.update_row_grapheme_flag(0);
+        assert_eq!(page.verify_integrity(), Ok(()));
+    }
+
+    #[test]
+    #[should_panic]
+    fn page_move_grapheme_rejects_source_without_grapheme() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(3, 0).cell = Cell::init('b' as u32);
+
+        page.move_grapheme_at(1, 0, 3, 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn page_move_grapheme_rejects_destination_with_grapheme() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(3, 0).cell = Cell::init('b' as u32);
+        page.set_graphemes_at(1, 0, &[0x0301]).unwrap();
+        page.set_graphemes_at(3, 0, &[0x0300]).unwrap();
+
+        page.move_grapheme_at(1, 0, 3, 0);
+    }
+
+    #[test]
+    fn page_move_grapheme_cross_row_requires_destination_row_flag() {
+        let mut page = Page::init(Capacity::new(5, 2)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(3, 1).cell = Cell::init('b' as u32);
+        page.set_graphemes_at(1, 0, &[0x0301]).unwrap();
+
+        page.move_grapheme_at(1, 0, 3, 1);
+        page.get_row_and_cell_mut(1, 0)
+            .cell
+            .set_content_tag(ContentTag::Codepoint);
+        page.get_row_and_cell_mut(3, 1)
+            .cell
+            .set_content_tag(ContentTag::CodepointGrapheme);
+
+        assert!(page.get_row(0).grapheme());
+        assert!(!page.get_row(1).grapheme());
+        assert_eq!(
+            page.verify_integrity(),
+            Err(IntegrityError::UnmarkedGraphemeRow)
+        );
+
+        page.get_row_mut(1).set_grapheme(true);
+        assert_eq!(page.verify_integrity(), Ok(()));
+
+        page.update_row_grapheme_flag(0);
         assert!(!page.get_row(0).grapheme());
         assert_eq!(page.verify_integrity(), Ok(()));
     }

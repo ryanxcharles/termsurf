@@ -183,7 +183,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 29: Port Page Set Graphemes](29-port-page-set-graphemes.md) —
   **Pass**
 - [Experiment 30: Port Page Move Grapheme](30-port-page-move-grapheme.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 

@@ -161,3 +161,48 @@ The experiment fails if:
 - existing `move_cells` or `swap_cells` behavior regresses;
 - the implementation expands into parser/screen lifecycle, public ABI, or
   unrelated behavior.
+
+## Result
+
+**Result:** Pass
+
+Implemented explicit internal `Page::move_grapheme_at` and
+`Page::move_grapheme_at_offset` in `roastty/src/terminal/page.rs`.
+
+The implementation moves only the grapheme map entry from source cell offset to
+destination cell offset. It does not allocate, free, or copy grapheme codepoint
+storage, and it does not change either cell's content tag or either row's
+grapheme flag. Existing `move_cells` and one-sided `swap_cells` grapheme paths
+now route through the explicit offset helper with unchanged behavior.
+
+Added focused tests covering:
+
+- direct map movement without allocation;
+- unchanged grapheme count and used bytes;
+- source and destination content tags intentionally left unchanged;
+- concrete integrity failure sequence after raw movement: `MissingGraphemeData`,
+  then `UnmarkedGraphemeCell`, then success after caller repairs tags and row
+  flags;
+- source-without-grapheme and destination-with-grapheme precondition panics;
+- cross-row movement requiring the destination row grapheme flag for integrity;
+- stale source row grapheme flags being tolerated by integrity, matching
+  upstream's lower-bound row-flag semantics.
+
+Verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+The targeted Page suite reported 166 passing tests. The full `roastty` suite
+reported 275 unit tests, the ABI harness, and doc tests passing.
+
+## Conclusion
+
+Roastty now has the upstream explicit Page primitive for moving grapheme data
+between cells without touching visible cell tags or row metadata. The tests
+capture the deliberately sharp edge from upstream: callers own the tag/flag
+repair, and integrity detects the important invalid states while tolerating
+stale source row grapheme flags.
