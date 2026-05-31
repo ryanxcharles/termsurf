@@ -196,6 +196,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 38: Port PageList Basic Growth](38-port-pagelist-grow.md) —
   **Pass**
+- [Experiment 39: Port PageList Prune Growth](39-port-pagelist-prune.md) —
+  **Designed**
 
 ## Non-Goals
 
