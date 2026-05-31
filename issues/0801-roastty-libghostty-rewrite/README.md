@@ -148,6 +148,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 10: Port Basic Page Allocation and Access](10-port-page-init-access.md)
   — **Pass**
+- [Experiment 11: Port Offset Hash Map Storage](11-port-offset-hash-map.md) —
+  **Designed**
 
 ## Non-Goals
 
