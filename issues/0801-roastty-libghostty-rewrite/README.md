@@ -176,6 +176,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 24: Port Page Move Cells](24-port-page-move-cells.md) — **Pass**
 - [Experiment 25: Port Page Swap Cells](25-port-page-swap-cells.md) — **Pass**
+- [Experiment 26: Port Page Clear Cells](26-port-page-clear-cells.md) —
+  **Designed**
 
 ## Non-Goals
 
