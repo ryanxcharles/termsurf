@@ -162,6 +162,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 17: Port Page CloneFrom Plain Rows](17-port-page-clone-from-plain.md)
   — **Pass**
+- [Experiment 18: Port Page CloneFrom Graphemes](18-port-page-clone-from-graphemes.md)
+  — **Designed**
 
 ## Non-Goals
 
