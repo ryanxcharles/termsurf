@@ -259,3 +259,115 @@ The experiment fails if:
 - Do not use `ninja`; Chromium builds must use `autoninja` if Chromium is
   touched.
 - Run `cargo fmt` after Rust edits and accept its output if Rust is touched.
+
+## Result
+
+**Result:** Pass
+
+Experiment 11 added contained, fully automated WebAuthn virtual-authenticator
+coverage to the Issue 799 harness. It did not change Chromium product behavior,
+add native UI, add protocol messages, or claim real passkey/security-key
+support.
+
+Changes made:
+
+- Added `scripts/issue-799-webauthn-virtual-authenticator.mjs`, a small DevTools
+  Protocol helper that:
+  - polls `/json/list` for the `webauthn-create` page target;
+  - requires a `page` target whose URL contains `/probe/webauthn-create.html`;
+  - sends `WebAuthn.enable`;
+  - sends `WebAuthn.addVirtualAuthenticator`;
+  - records target evidence and `authenticatorId`;
+  - keeps the DevTools session alive long enough for the page to use the virtual
+    authenticator.
+- Updated the `webauthn-create` probe so it waits for synthetic activation
+  before calling `navigator.credentials.create()`.
+- Added WebAuthn-specific harness setup and verification.
+- Added the classification:
+
+```text
+webauthn_virtual_authenticator_completed
+```
+
+The WebAuthn verifier now requires concrete `PublicKeyCredential` evidence:
+
+```text
+credential.type == "public-key"
+credential.id is nonempty
+credential.rawId.byteLength > 0
+credential.response.attestationObject.byteLength > 0
+credential.response.clientDataJSON.byteLength > 0
+```
+
+Verification:
+
+```text
+node --check scripts/issue-799-webauthn-virtual-authenticator.mjs
+python3 -m py_compile scripts/test-issue-799-browser-api-audit.py
+git diff --check
+```
+
+Focused WebAuthn run:
+
+```text
+logs/issue-799-browser-api-audit/20260531-030916-942921
+status: completed
+webauthn-create: webauthn_virtual_authenticator_completed
+missing_interfaces: []
+empty_interfaces: []
+```
+
+Credential evidence from the focused run:
+
+```text
+type: public-key
+id: nonempty
+rawIdByteLength: 32
+attestationObjectByteLength: 759
+clientDataJSONByteLength: 117
+```
+
+Experiment 10 regression run:
+
+```text
+logs/issue-799-browser-api-audit/20260531-030936-546652
+status: completed
+permissions-query: default_denied
+geolocation-deny: default_denied
+notification-permission: default_denied
+file-system-access: file_system_access_denied
+service-worker-basic: exercised
+missing_interfaces: []
+empty_interfaces: []
+```
+
+Full Issue 799 harness run:
+
+```text
+logs/issue-799-browser-api-audit/20260531-031020-809396
+status: completed
+probe_count: 24
+missing_interfaces: []
+empty_interfaces: []
+webauthn-create: webauthn_virtual_authenticator_completed
+renderer-crash-recovery: renderer_crash_recovered
+```
+
+Codex reviewed the design, identified a real design gap around credential
+evidence, and approved the revised design. Codex then reviewed the
+implementation and verification evidence and found no blocking findings.
+
+## Conclusion
+
+The remaining `blocked_needs_virtual_authenticator` classification is gone.
+Issue 799's automated harness now covers WebAuthn's crash-safe virtual
+authenticator path with real credential material and without manual interaction.
+
+This still does not mean TermSurf supports real WebAuthn/passkeys as a product
+feature. Native authenticator UX, credential storage, platform passkey flows,
+and security-key user experience remain deferred to a separate product issue if
+TermSurf decides to support them.
+
+With Experiment 11 complete, the current Issue 799 harness has no missing
+interfaces, no empty interfaces, no unexpected crashes, and no remaining
+`blocked_*` classifications in the full run.

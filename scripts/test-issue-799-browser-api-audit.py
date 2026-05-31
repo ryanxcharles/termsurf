@@ -71,6 +71,7 @@ VK_OEM_PLUS = 187
 VK_OEM_MINUS = 189
 VK_0 = 48
 VK_A = 65
+DEVTOOLS_RE = re.compile(r"DevTools listening on ws://127\.0\.0\.1:(\d+)/")
 
 
 @dataclass(frozen=True)
@@ -179,24 +180,83 @@ try {
 if (!navigator.credentials?.create || !window.PublicKeyCredential) return {status: 'unsupported'};
 const challenge = new Uint8Array(16);
 const userId = new Uint8Array(16);
-try {
-  return await Promise.race([
-    navigator.credentials.create({
-      publicKey: {
-        challenge,
-        rp: {name: 'TermSurf Test'},
-        user: {id: userId, name: 'test@example.test', displayName: 'Test User'},
-        pubKeyCredParams: [{type: 'public-key', alg: -7}],
-        timeout: 1000,
-        attestation: 'none'
-      }
-    }).then(() => ({status: 'resolved'})),
-    new Promise((resolve) => setTimeout(() => resolve({status: 'blocked_needs_virtual_authenticator'}), 1500))
-  ]);
-} catch (error) {
-  const blocked = error?.name === 'NotAllowedError';
-  return {status: blocked ? 'blocked_user_activation' : 'rejected', error: String(error), errorName: error?.name || null};
+const button = document.createElement('button');
+button.textContent = 'create WebAuthn credential';
+button.style.position = 'absolute';
+button.style.left = '8px';
+button.style.top = '8px';
+button.style.width = '220px';
+button.style.height = '48px';
+document.body.appendChild(button);
+let activationObserved = false;
+button.onpointerdown = () => sendReport({status: 'pointerdown'});
+button.onmousedown = () => sendReport({status: 'mousedown'});
+function credentialEvidence(credential) {
+  return {
+    type: credential?.type || null,
+    id: credential?.id || null,
+    rawIdByteLength: credential?.rawId?.byteLength || 0,
+    attestationObjectByteLength:
+      credential?.response?.attestationObject?.byteLength || 0,
+    clientDataJSONByteLength:
+      credential?.response?.clientDataJSON?.byteLength || 0
+  };
 }
+return await new Promise((resolve) => {
+  button.onclick = async () => {
+    activationObserved = true;
+    sendReport({status: 'activated'});
+    try {
+      const result = await Promise.race([
+        navigator.credentials.create({
+          publicKey: {
+            challenge,
+            rp: {name: 'TermSurf Test'},
+            user: {
+              id: userId,
+              name: 'test@example.test',
+              displayName: 'Test User'
+            },
+            pubKeyCredParams: [{type: 'public-key', alg: -7}],
+            timeout: 2000,
+            attestation: 'direct',
+            authenticatorSelection: {
+              residentKey: 'preferred',
+              userVerification: 'preferred'
+            }
+          }
+        }),
+        new Promise((resolveTimeout) => setTimeout(
+          () => resolveTimeout(null),
+          2500
+        ))
+      ]);
+      if (!result) {
+        resolve({
+          status: 'blocked_needs_virtual_authenticator',
+          activationObserved
+        });
+        return;
+      }
+      resolve({
+        status: 'webauthn_virtual_authenticator_created',
+        activationObserved,
+        credential: credentialEvidence(result)
+      });
+    } catch (error) {
+      const blocked = error?.name === 'NotAllowedError' &&
+        /user activation|gesture/i.test(String(error?.message || error));
+      resolve({
+        status: blocked ? 'blocked_user_activation' : 'rejected',
+        activationObserved,
+        error: String(error),
+        errorName: error?.name || null,
+        message: error?.message || null
+      });
+    }
+  };
+  sendReport({status: 'ready'});
+});
 """,
     ),
     Probe(
@@ -936,6 +996,69 @@ def verify_file_system_access_probe(
         "picker_call_started_after_activation": picker_call_started_at is not None,
         "errorName": (report or {}).get("errorName"),
         "message": (report or {}).get("message"),
+    }
+
+
+def verify_webauthn_probe(
+    probe_name: str,
+    report: dict[str, Any] | None,
+    activation_ready_at: float | None,
+    activation_sent: bool,
+    activation_observed_at: float | None,
+    devtools_setup: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if probe_name != "webauthn-create":
+        return None
+    reasons: list[str] = []
+    artifact = (devtools_setup or {}).get("artifact") or {}
+    target = artifact.get("target") or {}
+    credential = (report or {}).get("credential") or {}
+    if not devtools_setup:
+        reasons.append("DevTools setup did not run")
+    elif devtools_setup.get("status") != "completed":
+        reasons.append(f"DevTools setup failed: {devtools_setup.get('status')}")
+    if not (devtools_setup or {}).get("devtools_port"):
+        reasons.append("DevTools port was not discovered")
+    if not artifact.get("webAuthnEnable", {}).get("ok"):
+        reasons.append("WebAuthn.enable did not succeed")
+    if not artifact.get("authenticatorId"):
+        reasons.append("WebAuthn.addVirtualAuthenticator returned no id")
+    if target.get("type") != "page":
+        reasons.append(f"DevTools target type was {target.get('type')!r}")
+    if "/probe/webauthn-create.html" not in str(target.get("url", "")):
+        reasons.append("DevTools target URL was not the WebAuthn probe page")
+    if activation_ready_at is None:
+        reasons.append("page never reported ready")
+    if not activation_sent:
+        reasons.append("harness did not send activation input")
+    if activation_observed_at is None:
+        reasons.append("page did not observe activation")
+    if not report:
+        reasons.append("page did not report final WebAuthn result")
+    elif report.get("status") != "webauthn_virtual_authenticator_created":
+        reasons.append(
+            "expected webauthn_virtual_authenticator_created, "
+            f"got {report.get('status')!r}"
+        )
+    if credential.get("type") != "public-key":
+        reasons.append(f"credential type was {credential.get('type')!r}")
+    if not credential.get("id"):
+        reasons.append("credential id was empty")
+    if int(credential.get("rawIdByteLength") or 0) <= 0:
+        reasons.append("credential rawId was empty")
+    if int(credential.get("attestationObjectByteLength") or 0) <= 0:
+        reasons.append("credential attestationObject was empty")
+    if int(credential.get("clientDataJSONByteLength") or 0) <= 0:
+        reasons.append("credential clientDataJSON was empty")
+    return {
+        "status": "completed" if not reasons else "failed",
+        "reasons": reasons,
+        "devtools_port": (devtools_setup or {}).get("devtools_port"),
+        "authenticatorId": artifact.get("authenticatorId"),
+        "target": target,
+        "activation_sent": activation_sent,
+        "activation_observed": activation_observed_at is not None,
+        "credential": credential,
     }
 
 
@@ -1706,6 +1829,7 @@ destination
 
 def render_probe_page(probe: Probe) -> bytes:
     title = html.escape(probe.name)
+    timeout_ms = 12000 if probe.name == "webauthn-create" else 5000
     script = f"""
 const probeName = {json.dumps(probe.name)};
 async function sendReport(report) {{
@@ -1747,7 +1871,7 @@ async function runProbe() {{
     }});
   }}
 }}
-timeoutId = setTimeout(() => finalReport({{ok: false, status: 'page_timeout'}}), 5000);
+timeoutId = setTimeout(() => finalReport({{ok: false, status: 'page_timeout'}}), {timeout_ms});
 runProbe();
 """
     return f"""<!doctype html>
@@ -1780,6 +1904,91 @@ def read_text(path: pathlib.Path) -> str:
         return path.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
         return ""
+
+
+def devtools_port_from_log(path: pathlib.Path) -> int | None:
+    matches = DEVTOOLS_RE.findall(read_text(path))
+    if not matches:
+        return None
+    return int(matches[-1])
+
+
+def start_webauthn_devtools_setup(
+    probe_name: str,
+    probe_dir: pathlib.Path,
+    stderr_path: pathlib.Path,
+) -> tuple[dict[str, Any], subprocess.Popen[str] | None]:
+    out_path = probe_dir / "webauthn-devtools.json"
+    stdout_path = probe_dir / "webauthn-devtools.stdout"
+    stderr_helper_path = probe_dir / "webauthn-devtools.stderr"
+    port = devtools_port_from_log(stderr_path)
+    result: dict[str, Any] = {
+        "status": "missing_devtools_port",
+        "devtools_port": port,
+        "artifact_path": str(out_path),
+        "stdout_path": str(stdout_path),
+        "stderr_path": str(stderr_helper_path),
+    }
+    if port is None:
+        write_json(out_path, result)
+        return result, None
+
+    helper = ROOT / "scripts/issue-799-webauthn-virtual-authenticator.mjs"
+    command = [
+        "node",
+        str(helper),
+        "--devtools-port",
+        str(port),
+        "--url-contains",
+        f"/probe/{probe_name}.html",
+        "--out",
+        str(out_path),
+        "--timeout-seconds",
+        "6",
+        "--hold-seconds",
+        "20",
+    ]
+    stdout = stdout_path.open("w", encoding="utf-8")
+    stderr = stderr_helper_path.open("w", encoding="utf-8")
+    proc = subprocess.Popen(
+        command,
+        cwd=str(ROOT),
+        stdout=stdout,
+        stderr=stderr,
+        text=True,
+    )
+    deadline = time.time() + 8
+    artifact: dict[str, Any] = {}
+    while time.time() < deadline:
+        artifact = json.loads(read_text(out_path) or "{}")
+        if artifact.get("status") in ("completed", "failed"):
+            break
+        if proc.poll() is not None:
+            break
+        time.sleep(0.1)
+    stdout.close()
+    stderr.close()
+    artifact = json.loads(read_text(out_path) or "{}")
+    if not artifact:
+        result.update(
+            {
+                "status": "timeout",
+                "devtools_port": port,
+            }
+        )
+        write_json(out_path, result)
+        return result, proc
+    result.update(
+        {
+            "status": artifact.get("status", "failed"),
+            "returncode": proc.poll(),
+            "stdout": read_text(stdout_path),
+            "stderr": read_text(stderr_helper_path),
+            "artifact": artifact,
+            "devtools_port": port,
+        }
+    )
+    return result, proc
 
 
 def scan_logs(text: str, *, expect_renderer_crash: bool = False) -> dict[str, Any]:
@@ -1919,6 +2128,8 @@ def run_probe(
     width: int,
     height: int,
 ) -> dict[str, Any]:
+    if probe.name == "webauthn-create":
+        seconds = max(seconds, 16.0)
     probe_dir = run_dir / "probes" / probe.name
     probe_dir.mkdir(parents=True, exist_ok=True)
     socket_path = (
@@ -1993,6 +2204,8 @@ def run_probe(
     post_cancel_navigation_sent = False
     crash_navigation_sent = False
     post_crash_navigation_sent = False
+    webauthn_devtools_setup: dict[str, Any] | None = None
+    webauthn_devtools_process: subprocess.Popen[str] | None = None
     start = time.time()
 
     try:
@@ -2062,6 +2275,40 @@ def run_probe(
                         activation_sent = True
                         activation_sent_at = time.time()
                         messages.write("sent file-system-access activation input\n")
+                        messages.flush()
+                if probe.name == "webauthn-create" and tab_id:
+                    reports = state_reports_for_probe(run_dir, probe.name)
+                    statuses = {str(report.get("status")) for report in reports}
+                    if "ready" in statuses and activation_ready_at is None:
+                        activation_ready_at = time.time()
+                    if "activated" in statuses and activation_observed_at is None:
+                        activation_observed_at = time.time()
+                    if activation_ready_at is not None and webauthn_devtools_setup is None:
+                        if devtools_port_from_log(stderr_path) is not None:
+                            (
+                                webauthn_devtools_setup,
+                                webauthn_devtools_process,
+                            ) = start_webauthn_devtools_setup(
+                                probe.name, probe_dir, stderr_path
+                            )
+                            messages.write(
+                                "webauthn devtools setup "
+                                f"status={webauthn_devtools_setup.get('status')} "
+                                f"port={webauthn_devtools_setup.get('devtools_port')}\n"
+                            )
+                            messages.flush()
+                    if (
+                        webauthn_devtools_setup is not None
+                        and webauthn_devtools_setup.get("status") == "completed"
+                        and not activation_sent
+                    ):
+                        send_message(conn, 10, focus_changed_payload(tab_id, True))
+                        send_message(conn, 7, mouse_move_payload(tab_id, 20, 20))
+                        send_message(conn, 6, mouse_event_payload(tab_id, "down", 20, 20))
+                        send_message(conn, 6, mouse_event_payload(tab_id, "up", 20, 20))
+                        activation_sent = True
+                        activation_sent_at = time.time()
+                        messages.write("sent webauthn activation input\n")
                         messages.flush()
                 if probe.name == "page-zoom-shortcuts" and tab_id:
                     reports = state_reports_for_probe(run_dir, probe.name)
@@ -2322,6 +2569,13 @@ def run_probe(
                 except socket.timeout:
                     pass
     finally:
+        if webauthn_devtools_process is not None:
+            try:
+                webauthn_devtools_process.terminate()
+                webauthn_devtools_process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                webauthn_devtools_process.kill()
+                webauthn_devtools_process.wait(timeout=2)
         proc.terminate()
         try:
             proc.wait(timeout=5)
@@ -2433,6 +2687,35 @@ def run_probe(
             "page_timeout",
         ):
             classification = "file_system_access_failed"
+    webauthn_result = verify_webauthn_probe(
+        probe.name,
+        report,
+        activation_ready_at,
+        activation_sent,
+        activation_observed_at,
+        webauthn_devtools_setup,
+    )
+    if webauthn_result:
+        if (
+            classification
+            not in (
+                "missing_binder",
+                "bad_mojo",
+                "renderer_or_browser_crash",
+                "process_exit",
+            )
+            and webauthn_result["status"] == "completed"
+        ):
+            classification = "webauthn_virtual_authenticator_completed"
+        elif classification in (
+            "exercised",
+            "reported",
+            "blocked_user_activation",
+            "blocked_needs_virtual_authenticator",
+            "page_timeout",
+            "probe_timeout",
+        ):
+            classification = "webauthn_virtual_authenticator_failed"
     page_zoom_result = verify_page_zoom_probe(
         probe.name,
         reports,
@@ -2545,6 +2828,8 @@ def run_probe(
         "javascript_dialog_result": javascript_dialog_result,
         "default_deny_result": default_deny_result,
         "file_system_access_result": file_system_access_result,
+        "webauthn_result": webauthn_result,
+        "webauthn_devtools_setup": webauthn_devtools_setup,
         "page_zoom_result": page_zoom_result,
         "console_messages": console_messages,
         "console_capture_result": console_capture_result,
@@ -2576,6 +2861,15 @@ def run_probe(
                 ),
             }
             if probe.name == "file-system-access"
+            else None
+        ),
+        "webauthn_activation": (
+            {
+                "ready": activation_ready_at is not None,
+                "activation_sent": activation_sent,
+                "activation_observed": activation_observed_at is not None,
+            }
+            if probe.name == "webauthn-create"
             else None
         ),
         "log_dir": str(probe_dir),
@@ -2661,6 +2955,10 @@ def write_coverage_map(path: pathlib.Path, results: list[dict[str, Any]]) -> Non
             next_action = "File System Access reached post-activation TermSurf denial."
         elif classification == "file_system_access_failed":
             next_action = "Inspect activation routing and file picker denial evidence."
+        elif classification == "webauthn_virtual_authenticator_completed":
+            next_action = "WebAuthn completed against a DevTools virtual authenticator."
+        elif classification == "webauthn_virtual_authenticator_failed":
+            next_action = "Inspect DevTools virtual-authenticator setup and credential evidence."
         elif classification == "browser_service_unavailable":
             next_action = "Browser service unavailable; inspect logs and reference binders."
         elif classification == "exercised":
@@ -2737,6 +3035,10 @@ def write_reference_coverage_map(path: pathlib.Path, results: list[dict[str, Any
             next_action = "No immediate action; verified post-activation file picker denial."
         elif classification == "file_system_access_failed":
             next_action = "Inspect activation routing and file picker denial evidence."
+        elif classification == "webauthn_virtual_authenticator_completed":
+            next_action = "No immediate action; verified contained virtual-authenticator coverage."
+        elif classification == "webauthn_virtual_authenticator_failed":
+            next_action = "Inspect DevTools virtual-authenticator setup and credential evidence."
         elif classification == "download_completed":
             next_action = "No immediate action; verified generic download completion."
         elif classification == "page_zoom_completed":
