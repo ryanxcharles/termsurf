@@ -176,6 +176,35 @@ next layer is designed.
     browser/terminal surface composition only after Roastty is a credible
     Ghostty-compatible terminal on macOS.
 
+## Test Parity Requirement
+
+Roastty must reimplement Ghostty behavior and Ghostty's relevant tests, not just
+the library shape.
+
+For every subsystem rewritten from Zig to Rust, the corresponding experiment
+must identify the Ghostty tests, fixtures, examples, and reference behavior that
+prove the subsystem. The experiment must then do one of the following:
+
+- port the relevant Ghostty tests to Rust;
+- run the existing Ghostty tests or fixtures against Roastty through a
+  compatibility harness;
+- create an equivalent Rust test when the original test cannot be reused
+  directly;
+- explicitly document why a Ghostty test is not applicable to Roastty.
+
+A subsystem is not complete merely because it compiles, links, exposes matching
+C ABI symbols, or appears to work manually. It is complete only when the Roastty
+implementation is backed by equivalent automated tests for the behavior being
+claimed.
+
+This applies to terminal parsing, screen/grid state, scrollback, selection,
+input encoding, PTY/IO behavior, render-state extraction, renderer behavior,
+font/text handling, config parsing, keybindings, mouse handling, clipboard,
+IME/preedit, and native app integration.
+
+The long-term goal is an equivalent terminal implementation named Roastty, not a
+thin ABI-compatible shell around unrelated behavior.
+
 ## Non-Goals
 
 - Do not add TermSurf browser overlays before terminal parity work has a stable
@@ -188,6 +217,33 @@ next layer is designed.
   linking and lifecycle shape, not terminal behavior.
 - Do not target Linux, Windows, or a full cross-platform story during the first
   Roastty phase. This issue is macOS-first.
+
+## Experiment Review Gate
+
+Every remaining experiment in this issue must pass Codex review before the work
+moves forward.
+
+For each experiment:
+
+1. **Design review before implementation**
+   - After the experiment file is written, run Codex review on the experiment
+     design.
+   - Fix all real issues found by the review.
+   - Do not implement the experiment until Codex agrees the design is good.
+   - Record the review result in the experiment file.
+
+2. **Completion review after implementation**
+   - After implementation, verification, and result recording, run Codex review
+     on the completed experiment.
+   - Fix all real issues found by the review.
+   - Do not design or implement the next experiment until Codex agrees the
+     completed output is good.
+   - Record the completion-review result in the experiment file.
+
+The review gate applies starting with Experiment 2. Experiment 1 was designed,
+implemented, verified, and committed before this gate was added. A retrospective
+review can be added later if needed, but it is not required before proceeding to
+Experiment 2.
 
 ## Expected First Experiment
 
