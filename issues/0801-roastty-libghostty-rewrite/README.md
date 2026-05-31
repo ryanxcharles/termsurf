@@ -220,6 +220,8 @@ No experiment may proceed to the next stage until the required review passes.
   **Pass**
 - [Experiment 52: Port PageList Scroll Clear](52-port-pagelist-scroll-clear.md)
   — **Pass**
+- [Experiment 53: Port PageList Cell Lookup](53-port-pagelist-cell-lookup.md) —
+  **Designed**
 
 ## Non-Goals
 
