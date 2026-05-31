@@ -73,7 +73,6 @@ impl From<PageAllocError> for PageListAllocError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GrowError {
     PageAlloc,
-    WouldPrune,
 }
 
 impl From<PageAllocError> for GrowError {
@@ -669,14 +668,8 @@ impl PageList {
         }
 
         if self.pages.len() > 1 && self.page_size + standard_page_size() > self.max_size() {
-            let first_rows = self
-                .pages
-                .first()
-                .expect("PageList must contain at least one page")
-                .page
-                .size_rows() as usize;
-            if self.total_rows as usize - first_rows + 1 >= self.rows as usize {
-                return Err(GrowError::WouldPrune);
+            if let Some(reused) = self.prune_for_growth()? {
+                return Ok(Some(reused));
             }
         }
 
@@ -689,6 +682,66 @@ impl PageList {
         self.verify_integrity()
             .expect("append grow result must preserve PageList integrity");
         Ok(Some(node_ptr))
+    }
+
+    fn prune_for_growth(&mut self) -> Result<Option<NonNull<Node>>, GrowError> {
+        let mut first = self.pages.remove(0);
+        let first_rows = first.page.size_rows() as usize;
+        let first_serial = first.serial;
+        let first_ptr = NonNull::from(first.as_ref());
+        self.total_rows -= first.page.size_rows();
+
+        if self.total_rows as usize + 1 < self.rows as usize {
+            self.total_rows += first.page.size_rows();
+            self.pages.insert(0, first);
+            return Ok(None);
+        }
+
+        if self.viewport == Viewport::Pin {
+            if let Some(offset) = &mut self.viewport_pin_row_offset {
+                if *offset < first_rows {
+                    self.viewport = Viewport::Top;
+                } else {
+                    *offset -= first_rows;
+                }
+            }
+        }
+
+        let new_first = self.first_node_ptr();
+        for tracked in &mut self.tracked_pins {
+            let pin = unsafe {
+                // Safety: tracked pins are owned by this PageList. We are only
+                // mutating pins that remain tracked.
+                tracked.as_mut()
+            };
+            if pin.node != first_ptr {
+                continue;
+            }
+
+            pin.node = new_first;
+            pin.x = 0;
+            pin.y = 0;
+            pin.garbage = true;
+        }
+        self.viewport_pin.garbage = false;
+
+        if first.page.backing_len() > standard_page_size() {
+            self.page_size -= first.page.backing_len();
+            drop(first);
+            return Ok(None);
+        }
+
+        first.page.reinit_with_capacity(initial_capacity(self.cols));
+        first.page.set_size_rows(1);
+        self.page_serial_min = first_serial + 1;
+        first.serial = self.page_serial;
+        self.page_serial += 1;
+        let reused = NonNull::from(first.as_ref());
+        self.pages.push(first);
+        self.total_rows += 1;
+        self.verify_integrity()
+            .expect("prune grow result must preserve PageList integrity");
+        Ok(Some(reused))
     }
 
     fn grow_rows(&mut self, rows: usize) -> Result<(), GrowError> {
@@ -1094,18 +1147,199 @@ mod tests {
     }
 
     #[test]
-    fn page_list_grow_reports_would_prune_when_prune_path_is_required() {
+    fn page_list_grow_prunes_and_reuses_standard_page() {
         let cols = STD_CAPACITY
             .max_cols()
             .expect("standard capacity should fit at least one row");
-        let mut list = PageList::init(cols, 1, Some(0)).unwrap();
-        list.grow().unwrap();
+        let mut list = PageList::init(cols, 1, Some(standard_page_size())).unwrap();
+        let page1 = list.first_node_ptr();
+        let page1_backing = list.pages[0].page.backing_ptr();
+        let page1_serial = list.pages[0].serial;
+
+        let tracked = list
+            .track_pin(Pin {
+                node: page1,
+                y: 0,
+                x: 0,
+                garbage: false,
+            })
+            .unwrap();
+
+        let page2 = list.grow().unwrap().unwrap();
+        let old_page_size = list.page_size;
+        let old_page_serial = list.page_serial;
 
         assert_eq!(list.pages.len(), 2);
         assert!(list.page_size + standard_page_size() > list.max_size());
-        assert_eq!(list.grow(), Err(GrowError::WouldPrune));
+        let reused = list.grow().unwrap().unwrap();
+
         assert_eq!(list.pages.len(), 2);
+        assert_eq!(list.first_node_ptr(), page2);
+        assert_eq!(list.last_node_ptr(), page1);
+        assert_eq!(reused, page1);
+        assert_eq!(list.pages[1].page.backing_ptr(), page1_backing);
+        assert_eq!(list.page_size, old_page_size);
+        assert_eq!(list.page_serial_min, page1_serial + 1);
+        assert_eq!(list.pages[1].serial, old_page_serial);
+        assert_eq!(list.page_serial, old_page_serial + 1);
         assert_eq!(list.total_rows, 2);
+
+        let tracked_pin = unsafe {
+            // Safety: tracked remains owned by list.tracked_pin_storage.
+            tracked.as_ref()
+        };
+        assert_eq!(tracked_pin.node, list.first_node_ptr());
+        assert_eq!(tracked_pin.x, 0);
+        assert_eq!(tracked_pin.y, 0);
+        assert!(tracked_pin.garbage);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_grow_prune_cached_viewport_inside_pruned_page_moves_top() {
+        let cols = STD_CAPACITY
+            .max_cols()
+            .expect("standard capacity should fit at least one row");
+        let mut list = PageList::init(cols, 1, Some(standard_page_size())).unwrap();
+        list.grow().unwrap();
+        let page1 = list.first_node_ptr();
+
+        list.viewport = Viewport::Pin;
+        list.set_viewport_pin(Pin {
+            node: page1,
+            y: 0,
+            x: 0,
+            garbage: false,
+        });
+        assert_eq!(list.scrollbar().offset, 0);
+
+        list.grow().unwrap();
+
+        assert_eq!(list.viewport, Viewport::Top);
+        assert_eq!(list.scrollbar().offset, 0);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_grow_prune_cached_viewport_after_pruned_page_decrements_offset() {
+        let cols = STD_CAPACITY
+            .max_cols()
+            .expect("standard capacity should fit at least one row");
+        let mut list = PageList::init(cols, 1, Some(standard_page_size())).unwrap();
+        let page1 = list.first_node_ptr();
+        let page2 = list.grow().unwrap().unwrap();
+        assert_eq!(list.first_node_ptr(), page1);
+
+        list.viewport = Viewport::Pin;
+        list.set_viewport_pin(Pin {
+            node: page2,
+            y: 0,
+            x: 0,
+            garbage: false,
+        });
+        assert_eq!(list.scrollbar().offset, 1);
+
+        list.grow().unwrap();
+
+        assert_eq!(list.viewport, Viewport::Pin);
+        assert_eq!(list.viewport_pin.node, page2);
+        assert_eq!(list.scrollbar().offset, 0);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_grow_prune_backs_out_to_preserve_active_area() {
+        let cols = STD_CAPACITY
+            .max_cols()
+            .expect("standard capacity should fit at least one row")
+            + 1;
+        let capacity_rows = initial_capacity(cols).rows();
+        let rows = capacity_rows + 2;
+        let mut list = PageList::init(cols, rows, Some(standard_page_size())).unwrap();
+        let page1 = list.first_node_ptr();
+
+        assert_eq!(list.pages.len(), 2);
+        while {
+            let last = list.pages.last().unwrap();
+            last.page.size_rows() < last.page.capacity().rows()
+        } {
+            assert_eq!(list.grow(), Ok(None));
+        }
+
+        let old_page_size = list.page_size;
+        let old_total_rows = list.total_rows;
+
+        assert_eq!(list.pages.len(), 2);
+        assert!(list.page_size + standard_page_size() > list.max_size());
+        assert!(
+            list.total_rows as usize - list.pages[0].page.size_rows() as usize + 1
+                < list.rows as usize
+        );
+        let appended = list.grow().unwrap().unwrap();
+
+        assert_eq!(list.pages.len(), 3);
+        assert_eq!(list.first_node_ptr(), page1);
+        assert_eq!(list.last_node_ptr(), appended);
+        assert_eq!(list.total_rows, old_total_rows + 1);
+        assert_eq!(
+            list.page_size,
+            old_page_size + list.pages.last().unwrap().page.backing_len()
+        );
+        assert!(list.total_rows >= list.rows);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_grow_prune_drops_non_standard_page_and_allocates_fresh() {
+        let cols = STD_CAPACITY
+            .max_cols()
+            .expect("standard capacity should fit at least one row")
+            + 1;
+        let rows = STD_CAPACITY.rows();
+        let mut list = PageList::init(cols, rows, Some(0)).unwrap();
+        let page1 = list.first_node_ptr();
+        let page1_len = list.pages[0].page.backing_len();
+        let tracked = list
+            .track_pin(Pin {
+                node: page1,
+                y: 0,
+                x: 0,
+                garbage: false,
+            })
+            .unwrap();
+        let page2 = list.grow().unwrap().unwrap();
+        let page2_len = list.pages[1].page.backing_len();
+
+        while {
+            let last = list.pages.last().unwrap();
+            last.page.size_rows() < last.page.capacity().rows()
+        } {
+            assert_eq!(list.grow(), Ok(None));
+        }
+
+        let old_page_size = list.page_size;
+        let old_page_serial = list.page_serial;
+
+        assert!(page1_len > standard_page_size());
+        assert!(list.page_size + standard_page_size() > list.max_size());
+        let fresh = list.grow().unwrap().unwrap();
+
+        assert_eq!(list.first_node_ptr(), page2);
+        assert_eq!(list.last_node_ptr(), fresh);
+        assert_eq!(
+            list.page_size,
+            old_page_size - page1_len + list.pages.last().unwrap().page.backing_len()
+        );
+        assert_eq!(list.pages[0].page.backing_len(), page2_len);
+        assert_eq!(list.pages.last().unwrap().serial, old_page_serial);
+        assert_eq!(list.page_serial, old_page_serial + 1);
+
+        let tracked_pin = unsafe {
+            // Safety: tracked remains owned by list.tracked_pin_storage.
+            tracked.as_ref()
+        };
+        assert_eq!(tracked_pin.node, list.first_node_ptr());
+        assert!(tracked_pin.garbage);
         list.verify_integrity().unwrap();
     }
 

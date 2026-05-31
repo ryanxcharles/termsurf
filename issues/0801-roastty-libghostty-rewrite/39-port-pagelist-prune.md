@@ -95,8 +95,10 @@ integration, or public ABI.
    - If the pruned page's backing length is greater than `standard_page_size()`,
      subtract its backing length from `page_size` and drop the node.
    - Then fall through to the existing append-new-page allocation path.
-   - Verify that the new last page does not reuse the dropped non-standard page
-     pointer.
+   - Verify that the new last page took the fresh allocation path using page
+     size and serial accounting. Do not use raw pointer inequality as proof:
+     after the non-standard node is dropped, the allocator is allowed to reuse
+     the same address for the fresh node.
 
 9. Preserve integrity.
    - `verify_integrity` must continue to validate:
@@ -136,8 +138,7 @@ integration, or public ABI.
       - prune it under max-size pressure;
       - `page_size` decreases for the dropped page and then increases for the
         fresh page;
-      - the new last page is not the same node/pointer as the dropped
-        non-standard page;
+      - the new last page has fresh-allocation size and serial accounting;
       - tracked pins from the dropped page remap to the new first page and are
         marked garbage.
 
@@ -208,3 +209,57 @@ The experiment fails if:
 - page size or serial accounting becomes inconsistent;
 - the implementation expands beyond PageList prune growth;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Experiment 39 implemented the PageList prune-growth path and removed the
+temporary `GrowError::WouldPrune` branch from Experiment 38.
+
+The implementation adds PageList-local pruning when max-size pressure requires
+it and the list has more than one page. It removes the first page, preserves the
+active area by backing out if pruning would leave too few rows, updates viewport
+pin cache offsets, remaps tracked pins from the pruned page to the new first
+page with `garbage = true`, and keeps the viewport pin itself non-garbage to
+match upstream behavior.
+
+Standard pages are now reset in place and appended as the new last page. The
+reset path preserves the existing backing pointer, rebuilds the page regions
+over the same memory, resets managed-memory maps and dirty state, sets the page
+to one row, updates `page_serial_min`, assigns the reused node a fresh serial,
+and leaves `page_size` unchanged. Non-standard pruned pages are dropped instead:
+their backing length is subtracted from `page_size`, and growth falls through to
+the existing fresh-page allocation path.
+
+Tests now cover:
+
+- standard page prune/reuse with stable node and backing pointers;
+- tracked-pin remapping from the pruned page;
+- cached viewport pins inside the pruned page moving to `Viewport::Top`;
+- cached viewport pins after the pruned page decrementing by the pruned row
+  count;
+- active-area preservation backing out of prune and appending a fresh page;
+- non-standard first-page drop and fresh appended page allocation.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/terminal/page.rs roastty/src/terminal/page_list.rs
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+The focused PageList suite passed with 77 tests. The full `roastty` package
+passed with 358 unit tests plus the ABI harness test.
+
+## Conclusion
+
+PageList growth now covers both basic page append behavior and scrollback prune
+behavior. This closes the deferred prune branch from Experiment 38 and brings
+the current Rust PageList growth model closer to upstream Ghostty while keeping
+the work scoped to PageList internals.
+
+The next experiment should move to the next missing PageList behavior informed
+by upstream ordering, likely reset/clear, resize, or another PageList-local
+operation before screen/parser integration begins.

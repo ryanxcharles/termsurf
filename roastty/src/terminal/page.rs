@@ -431,8 +431,11 @@ impl Page {
 
     fn reinit(&mut self) {
         let capacity = self.capacity;
+        self.reinit_with_capacity(capacity);
+    }
+
+    pub(super) fn reinit_with_capacity(&mut self, capacity: Capacity) {
         let layout = page_layout(capacity);
-        assert_eq!(layout, self.layout);
         assert_eq!(layout.total_size, self.memory.len());
 
         self.memory.as_mut_slice().fill(0);
