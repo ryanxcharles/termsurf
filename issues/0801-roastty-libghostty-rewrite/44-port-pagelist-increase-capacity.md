@@ -211,3 +211,88 @@ The experiment fails if:
 - out-of-space mutates the PageList;
 - the implementation expands into unrelated PageList operations;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Experiment 44 ported the PageList capacity-growth replacement path:
+
+- private `IncreaseCapacity` variants for styles, grapheme bytes, hyperlink
+  bytes, and string bytes;
+- private `IncreaseCapacityError`;
+- checked doubling with the upstream final overflow-to-max behavior;
+- max page-size guard using Roastty's existing `MAX_PAGE_SIZE`;
+- `PageList::increase_capacity`, which replaces a target node with a cloned
+  replacement page.
+
+The replacement path preserves:
+
+- page row/column size;
+- text cells;
+- style, grapheme, hyperlink, and string-backed managed memory;
+- page-level dirty state;
+- row-level dirty state;
+- page order;
+- page-size accounting;
+- serial accounting;
+- tracked pins;
+- viewport pin state.
+
+The clone-failure path rolls back temporary `page_size` and `page_serial`
+accounting before returning an error, and it does not install the replacement
+node. Out-of-space errors are detected before mutation and leave the PageList
+unchanged.
+
+Tests added:
+
+- increase styles capacity and preserve visible cells;
+- increase grapheme bytes capacity and preserve visible cells;
+- increase hyperlink bytes capacity and preserve visible cells;
+- increase string bytes capacity and preserve visible cells;
+- reclone with no adjustment and unchanged capacity;
+- preserve style/grapheme/hyperlink managed memory;
+- remap tracked pins;
+- remap the viewport pin;
+- return `OutOfSpace` without mutation when the adjusted field is already maxed;
+- perform the final overflow-to-max successful increase before `OutOfSpace`;
+- preserve multi-page order and leave non-target pages unchanged;
+- preserve page-level and row-level dirty flags.
+
+The upstream `PageList increaseCapacity after col shrink` test remains deferred
+because resize/column-shrink behavior is explicitly out of scope for this
+experiment.
+
+Verification:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Observed result:
+
+- `cargo test -p roastty terminal::page_list`: 123 passed;
+- `cargo test -p roastty`: 404 unit tests passed, plus 1 ABI harness test
+  passed.
+
+Independent review:
+
+- Design review required explicit rollback/accounting behavior for pre-install
+  clone failures and a final overflow-to-max test; both were added before the
+  design commit.
+- Result review found no correctness issues and approved Experiment 44 as ready
+  to record as `Pass`.
+
+## Conclusion
+
+PageList can now grow a page's managed-memory capacity by replacing the page
+node with a larger cloned node while preserving data, dirty state, pins,
+viewport state, accounting, and page order. This unlocks later PageList work
+that needs capacity recovery, especially compact/split and future parser retry
+paths for managed-memory exhaustion.
+
+The next experiment should continue with the next PageList-local operation that
+depends on this replacement path, without pulling in full resize/reflow unless
+that dependency becomes unavoidable.

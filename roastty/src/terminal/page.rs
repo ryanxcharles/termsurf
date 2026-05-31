@@ -122,6 +122,22 @@ impl Capacity {
         self.rows
     }
 
+    pub(super) const fn styles(self) -> CellCountInt {
+        self.styles
+    }
+
+    pub(super) const fn hyperlink_bytes(self) -> HyperlinkCountInt {
+        self.hyperlink_bytes
+    }
+
+    pub(super) const fn grapheme_bytes(self) -> GraphemeBytesInt {
+        self.grapheme_bytes
+    }
+
+    pub(super) const fn string_bytes(self) -> StringBytesInt {
+        self.string_bytes
+    }
+
     pub(super) const fn with_cols(mut self, cols: CellCountInt) -> Self {
         self.cols = cols;
         self
@@ -699,6 +715,11 @@ impl Page {
     pub(super) fn set_size_rows(&mut self, rows: CellCountInt) {
         assert!(rows <= self.capacity.rows);
         self.size.rows = rows;
+    }
+
+    pub(super) fn set_size_cols(&mut self, cols: CellCountInt) {
+        assert!(cols <= self.capacity.cols);
+        self.size.cols = cols;
     }
 
     pub(super) fn exact_row_capacity(&self, y_start: usize, y_end: usize) -> Capacity {

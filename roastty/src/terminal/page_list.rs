@@ -4,7 +4,9 @@ use super::page::{
     page_layout, Capacity, CapacityAdjustment, CloneFromError, Page, PageAllocError, STD_CAPACITY,
 };
 use super::point::{self, Coordinate};
-use super::size::CellCountInt;
+use super::size::{
+    CellCountInt, GraphemeBytesInt, HyperlinkCountInt, StringBytesInt, StyleCountInt, MAX_PAGE_SIZE,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Viewport {
@@ -136,6 +138,21 @@ enum CloneRegionError {
     CloneFrom(CloneFromError),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IncreaseCapacity {
+    Styles,
+    GraphemeBytes,
+    HyperlinkBytes,
+    StringBytes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IncreaseCapacityError {
+    PageAlloc,
+    OutOfSpace,
+    CloneFrom(CloneFromError),
+}
+
 impl From<PageAllocError> for CloneRegionError {
     fn from(_: PageAllocError) -> Self {
         Self::PageAlloc
@@ -153,6 +170,18 @@ impl From<GrowError> for CloneRegionError {
         match err {
             GrowError::PageAlloc => Self::PageAlloc,
         }
+    }
+}
+
+impl From<PageAllocError> for IncreaseCapacityError {
+    fn from(_: PageAllocError) -> Self {
+        Self::PageAlloc
+    }
+}
+
+impl From<CloneFromError> for IncreaseCapacityError {
+    fn from(err: CloneFromError) -> Self {
+        Self::CloneFrom(err)
     }
 }
 
@@ -346,6 +375,72 @@ fn min_max_size(cols: CellCountInt, rows: CellCountInt) -> usize {
     debug_assert!(pages >= 2);
 
     standard_page_size() * pages
+}
+
+fn double_capacity_u16(value: u16) -> Result<u16, IncreaseCapacityError> {
+    if value == u16::MAX {
+        return Err(IncreaseCapacityError::OutOfSpace);
+    }
+
+    Ok(value.checked_mul(2).unwrap_or(u16::MAX))
+}
+
+fn double_capacity_u32(value: u32) -> Result<u32, IncreaseCapacityError> {
+    if value == u32::MAX {
+        return Err(IncreaseCapacityError::OutOfSpace);
+    }
+
+    Ok(value.checked_mul(2).unwrap_or(u32::MAX))
+}
+
+fn increase_capacity_value(
+    capacity: Capacity,
+    adjustment: Option<IncreaseCapacity>,
+) -> Result<Capacity, IncreaseCapacityError> {
+    let Some(adjustment) = adjustment else {
+        return Ok(capacity);
+    };
+
+    let capacity = match adjustment {
+        IncreaseCapacity::Styles => Capacity::with_metadata(
+            capacity.cols(),
+            capacity.rows(),
+            double_capacity_u16(capacity.styles())? as StyleCountInt,
+            capacity.hyperlink_bytes(),
+            capacity.grapheme_bytes(),
+            capacity.string_bytes(),
+        ),
+        IncreaseCapacity::GraphemeBytes => Capacity::with_metadata(
+            capacity.cols(),
+            capacity.rows(),
+            capacity.styles(),
+            capacity.hyperlink_bytes(),
+            double_capacity_u32(capacity.grapheme_bytes())? as GraphemeBytesInt,
+            capacity.string_bytes(),
+        ),
+        IncreaseCapacity::HyperlinkBytes => Capacity::with_metadata(
+            capacity.cols(),
+            capacity.rows(),
+            capacity.styles(),
+            double_capacity_u16(capacity.hyperlink_bytes())? as HyperlinkCountInt,
+            capacity.grapheme_bytes(),
+            capacity.string_bytes(),
+        ),
+        IncreaseCapacity::StringBytes => Capacity::with_metadata(
+            capacity.cols(),
+            capacity.rows(),
+            capacity.styles(),
+            capacity.hyperlink_bytes(),
+            capacity.grapheme_bytes(),
+            double_capacity_u32(capacity.string_bytes())? as StringBytesInt,
+        ),
+    };
+
+    if page_layout(capacity).total_size() > MAX_PAGE_SIZE as usize {
+        return Err(IncreaseCapacityError::OutOfSpace);
+    }
+
+    Ok(capacity)
 }
 
 impl PageList {
@@ -1109,6 +1204,63 @@ impl PageList {
         Ok(node)
     }
 
+    fn increase_capacity(
+        &mut self,
+        target: NonNull<Node>,
+        adjustment: Option<IncreaseCapacity>,
+    ) -> Result<NonNull<Node>, IncreaseCapacityError> {
+        let Some(index) = self.node_index(target) else {
+            return Err(IncreaseCapacityError::OutOfSpace);
+        };
+
+        let old_capacity = self.pages[index].page.capacity();
+        let new_capacity = increase_capacity_value(old_capacity, adjustment)?;
+        let old_rows = self.pages[index].page.size_rows();
+        let old_cols = self.pages[index].page.size_cols();
+        let old_dirty = self.pages[index].page.is_dirty();
+        let old_backing_len = self.pages[index].page.backing_len();
+        let page_size_before = self.page_size;
+        let page_serial_before = self.page_serial;
+
+        let mut replacement = self.create_page(new_capacity)?;
+        replacement.page.set_size_rows(old_rows);
+        replacement.page.set_size_cols(old_cols);
+        if let Err(err) =
+            replacement
+                .page
+                .clone_rows_from(&self.pages[index].page, 0, old_rows as usize)
+        {
+            self.page_size = page_size_before;
+            self.page_serial = page_serial_before;
+            return Err(IncreaseCapacityError::CloneFrom(err));
+        }
+        replacement.page.set_dirty(old_dirty);
+
+        let replacement_ptr = NonNull::from(replacement.as_ref());
+        self.pages.insert(index, replacement);
+        let old = self.pages.remove(index + 1);
+        self.page_size -= old_backing_len;
+        drop(old);
+
+        for tracked in &mut self.tracked_pins {
+            let pin = unsafe {
+                // Safety: tracked pins are owned by this PageList and remain
+                // allocated while we update their target node.
+                tracked.as_mut()
+            };
+            if pin.node == target {
+                pin.node = replacement_ptr;
+            }
+        }
+        if self.viewport_pin.node == target {
+            self.viewport_pin.node = replacement_ptr;
+        }
+
+        self.verify_integrity()
+            .expect("increase_capacity result must preserve PageList integrity");
+        Ok(replacement_ptr)
+    }
+
     fn grow(&mut self) -> Result<Option<NonNull<Node>>, GrowError> {
         let last = self
             .pages
@@ -1376,6 +1528,34 @@ mod tests {
         (list, capacity.rows())
     }
 
+    fn fill_visible_cells(page: &mut Page, cols: CellCountInt, rows: CellCountInt) {
+        for y in 0..rows as usize {
+            for x in 0..cols as usize {
+                *page.get_row_and_cell_mut(x, y).cell = Cell::init((x + y * cols as usize) as u32);
+            }
+        }
+    }
+
+    fn assert_visible_cells(page: &Page, cols: CellCountInt, rows: CellCountInt) {
+        for y in 0..rows as usize {
+            for x in 0..cols as usize {
+                assert_eq!(
+                    page_cell(page, x, y).codepoint(),
+                    (x + y * cols as usize) as u32
+                );
+            }
+        }
+    }
+
+    fn replace_first_page_capacity(list: &mut PageList, capacity: Capacity) {
+        let old_len = list.pages[0].page.backing_len();
+        let mut page = Page::init(capacity).unwrap();
+        page.set_size_rows(list.rows);
+        list.pages[0].page = page;
+        list.page_size = list.page_size - old_len + list.pages[0].page.backing_len();
+        list.verify_integrity().unwrap();
+    }
+
     #[test]
     fn viewport_variants_compare_as_expected() {
         assert_eq!(Viewport::Active, Viewport::Active);
@@ -1480,6 +1660,286 @@ mod tests {
         assert_eq!(node.serial, serial);
         assert_eq!(list.page_serial, serial + 1);
         assert_eq!(list.page_size, page_size + node.page.backing_len());
+    }
+
+    #[test]
+    fn page_list_increase_capacity_styles_preserves_cells() {
+        let mut list = PageList::init(2, 2, Some(0)).unwrap();
+        fill_visible_cells(&mut list.pages[0].page, 2, 2);
+        let old_capacity = list.pages[0].page.capacity();
+
+        let new_node = list
+            .increase_capacity(list.first_node_ptr(), Some(IncreaseCapacity::Styles))
+            .unwrap();
+        let new_page = &list.node_for_ptr(new_node).unwrap().page;
+
+        assert_eq!(new_page.capacity().styles(), old_capacity.styles() * 2);
+        assert_visible_cells(new_page, 2, 2);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_increase_capacity_grapheme_bytes_preserves_cells() {
+        let mut list = PageList::init(2, 2, Some(0)).unwrap();
+        fill_visible_cells(&mut list.pages[0].page, 2, 2);
+        let old_capacity = list.pages[0].page.capacity();
+
+        let new_node = list
+            .increase_capacity(list.first_node_ptr(), Some(IncreaseCapacity::GraphemeBytes))
+            .unwrap();
+        let new_page = &list.node_for_ptr(new_node).unwrap().page;
+
+        assert_eq!(
+            new_page.capacity().grapheme_bytes(),
+            old_capacity.grapheme_bytes() * 2
+        );
+        assert_visible_cells(new_page, 2, 2);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_increase_capacity_hyperlink_bytes_preserves_cells() {
+        let mut list = PageList::init(2, 2, Some(0)).unwrap();
+        fill_visible_cells(&mut list.pages[0].page, 2, 2);
+        let old_capacity = list.pages[0].page.capacity();
+
+        let new_node = list
+            .increase_capacity(
+                list.first_node_ptr(),
+                Some(IncreaseCapacity::HyperlinkBytes),
+            )
+            .unwrap();
+        let new_page = &list.node_for_ptr(new_node).unwrap().page;
+
+        assert_eq!(
+            new_page.capacity().hyperlink_bytes(),
+            old_capacity.hyperlink_bytes() * 2
+        );
+        assert_visible_cells(new_page, 2, 2);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_increase_capacity_string_bytes_preserves_cells() {
+        let mut list = PageList::init(2, 2, Some(0)).unwrap();
+        fill_visible_cells(&mut list.pages[0].page, 2, 2);
+        let old_capacity = list.pages[0].page.capacity();
+
+        let new_node = list
+            .increase_capacity(list.first_node_ptr(), Some(IncreaseCapacity::StringBytes))
+            .unwrap();
+        let new_page = &list.node_for_ptr(new_node).unwrap().page;
+
+        assert_eq!(
+            new_page.capacity().string_bytes(),
+            old_capacity.string_bytes() * 2
+        );
+        assert_visible_cells(new_page, 2, 2);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_increase_capacity_none_reclones_same_capacity() {
+        let mut list = PageList::init(2, 2, Some(0)).unwrap();
+        fill_visible_cells(&mut list.pages[0].page, 2, 2);
+        let old_node = list.first_node_ptr();
+        let old_capacity = list.pages[0].page.capacity();
+
+        let new_node = list.increase_capacity(old_node, None).unwrap();
+        let new_page = &list.node_for_ptr(new_node).unwrap().page;
+
+        assert_ne!(new_node, old_node);
+        assert_eq!(new_page.capacity(), old_capacity);
+        assert_visible_cells(new_page, 2, 2);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_increase_capacity_preserves_managed_memory() {
+        let mut list = PageList::init(3, 2, Some(0)).unwrap();
+        let page = &mut list.pages[0].page;
+        let bold = style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+        let style_id = page.add_style(bold).unwrap();
+        let link_id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Explicit(b"cap"),
+                uri: b"https://example.com/cap",
+            })
+            .unwrap();
+
+        {
+            let rac = page.get_row_and_cell_mut(0, 0);
+            rac.row.set_styled(true);
+            let mut cell = Cell::init('s' as u32);
+            cell.set_style_id(style_id);
+            *rac.cell = cell;
+        }
+        page.use_style(style_id);
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('g' as u32);
+        page.append_grapheme_at(1, 0, 0x0301).unwrap();
+        *page.get_row_and_cell_mut(2, 0).cell = Cell::init('h' as u32);
+        page.set_hyperlink(2, 0, link_id).unwrap();
+
+        let new_node = list
+            .increase_capacity(list.first_node_ptr(), Some(IncreaseCapacity::Styles))
+            .unwrap();
+        let new_page = &list.node_for_ptr(new_node).unwrap().page;
+        let cloned_style_id = page_cell(new_page, 0, 0).style_id();
+        let cloned_link_id = new_page.lookup_hyperlink_at(2, 0).unwrap();
+
+        assert_eq!(new_page.style_count(), 1);
+        assert_eq!(new_page.get_style(cloned_style_id), bold);
+        assert_eq!(new_page.lookup_grapheme_at(1, 0).unwrap(), vec![0x0301]);
+        assert_eq!(
+            new_page.get_hyperlink(cloned_link_id),
+            HyperlinkSnapshot {
+                id: HyperlinkSnapshotId::Explicit(b"cap".to_vec()),
+                uri: b"https://example.com/cap".to_vec(),
+            }
+        );
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_increase_capacity_remaps_tracked_pins() {
+        let mut list = PageList::init(2, 2, Some(0)).unwrap();
+        let tracked = list
+            .track_pin(
+                list.pin(point::Point::active(Coordinate::new(1, 1)))
+                    .unwrap(),
+            )
+            .unwrap();
+        let old_node = list.first_node_ptr();
+
+        let new_node = list
+            .increase_capacity(old_node, Some(IncreaseCapacity::Styles))
+            .unwrap();
+        let pin = unsafe {
+            // Safety: tracked remains owned by list and remains tracked.
+            tracked.as_ref()
+        };
+
+        assert_eq!(pin.node, new_node);
+        assert_eq!(pin.x, 1);
+        assert_eq!(pin.y, 1);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_increase_capacity_remaps_viewport_pin() {
+        let mut list = PageList::init(2, 2, Some(0)).unwrap();
+        let old_node = list.viewport_pin.node;
+
+        let new_node = list
+            .increase_capacity(old_node, Some(IncreaseCapacity::Styles))
+            .unwrap();
+
+        assert_eq!(list.viewport_pin.node, new_node);
+        assert_eq!(list.tracked_pins[0], NonNull::from(&*list.viewport_pin));
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_increase_capacity_out_of_space_preserves_list() {
+        let mut list = PageList::init(2, 2, Some(0)).unwrap();
+        let cap = Capacity::with_metadata(
+            2,
+            2,
+            StyleCountInt::MAX,
+            list.pages[0].page.capacity().hyperlink_bytes(),
+            list.pages[0].page.capacity().grapheme_bytes(),
+            list.pages[0].page.capacity().string_bytes(),
+        );
+        replace_first_page_capacity(&mut list, cap);
+        let page_size = list.page_size;
+        let page_serial = list.page_serial;
+        let node = list.first_node_ptr();
+        let node_serial = list.pages[0].serial;
+
+        assert_eq!(
+            list.increase_capacity(node, Some(IncreaseCapacity::Styles)),
+            Err(IncreaseCapacityError::OutOfSpace)
+        );
+
+        assert_eq!(list.first_node_ptr(), node);
+        assert_eq!(list.pages[0].serial, node_serial);
+        assert_eq!(list.page_size, page_size);
+        assert_eq!(list.page_serial, page_serial);
+        assert_eq!(list.pages[0].page.capacity(), cap);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_increase_capacity_saturates_final_overflow_then_reports_out_of_space() {
+        let mut list = PageList::init(2, 2, Some(0)).unwrap();
+
+        loop {
+            let node = list.first_node_ptr();
+            let before = list.pages[0].page.capacity().styles();
+            let result = list.increase_capacity(node, Some(IncreaseCapacity::Styles));
+            if before == StyleCountInt::MAX {
+                assert_eq!(result, Err(IncreaseCapacityError::OutOfSpace));
+                break;
+            }
+
+            let new_node = result.unwrap();
+            let after = list
+                .node_for_ptr(new_node)
+                .unwrap()
+                .page
+                .capacity()
+                .styles();
+            let expected = before.checked_mul(2).unwrap_or(StyleCountInt::MAX);
+            assert_eq!(after, expected);
+        }
+
+        assert_eq!(list.pages[0].page.capacity().styles(), StyleCountInt::MAX);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_increase_capacity_multi_page_preserves_order() {
+        let (mut list, _) = multi_page_list(100);
+        let first = list.first_node_ptr();
+        let second = NonNull::from(list.pages[1].as_ref());
+        let second_capacity = list.pages[1].page.capacity();
+        let first_styles = list.pages[0].page.capacity().styles();
+
+        let new_first = list
+            .increase_capacity(first, Some(IncreaseCapacity::Styles))
+            .unwrap();
+
+        assert_eq!(list.first_node_ptr(), new_first);
+        assert_eq!(NonNull::from(list.pages[1].as_ref()), second);
+        assert_eq!(list.pages[0].page.capacity().styles(), first_styles * 2);
+        assert_eq!(list.pages[1].page.capacity(), second_capacity);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_increase_capacity_preserves_dirty_flags() {
+        let mut list = PageList::init(2, 4, Some(0)).unwrap();
+        list.pages[0].page.set_dirty(true);
+        list.pages[0].page.get_row_mut(0).set_dirty(true);
+        list.pages[0].page.get_row_mut(2).set_dirty(true);
+
+        let new_node = list
+            .increase_capacity(list.first_node_ptr(), Some(IncreaseCapacity::Styles))
+            .unwrap();
+        let page = &list.node_for_ptr(new_node).unwrap().page;
+
+        assert!(page.is_dirty());
+        assert!(page.get_row(0).dirty());
+        assert!(!page.get_row(1).dirty());
+        assert!(page.get_row(2).dirty());
+        assert!(!page.get_row(3).dirty());
+        list.verify_integrity().unwrap();
     }
 
     #[test]
