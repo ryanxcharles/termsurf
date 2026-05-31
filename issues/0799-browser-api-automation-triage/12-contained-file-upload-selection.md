@@ -79,11 +79,16 @@ product/UI issue.
    - `blink::mojom::FileChooserParams::Mode::kOpenMultiple`, by returning the
      same single selected fixture file.
 
-   It should only handle those modes when all of these fields are safe for a
-   normal `<input type=file>` upload:
-   - `params.need_local_path == true`;
+   It should only handle those modes when the request is safe for a normal
+   read-only `<input type=file>` upload:
    - `params.use_media_capture == false`;
    - `params.open_writable == false`.
+
+   Do not require `params.need_local_path == true`. Chromium 148 can send
+   ordinary file input chooser requests with `need_local_path == false`, and
+   returning `NativeFileInfo` for the selected fixture is still the normal
+   selected-file shape. The helper must log the observed `need_local_path` value
+   so verification can prove which request shape was exercised.
 
    It should cancel and log unsupported or unsafe combinations, especially:
    - `kUploadFolder`;
@@ -204,8 +209,8 @@ product/UI issue.
      fixture;
    - Roamium stderr contains `[termsurf-file-upload] selected ...`;
    - Roamium stderr shows the chooser was safe: `mode=kOpen` or
-     `mode=kOpenMultiple`, `need_local_path=1`, `use_media_capture=0`, and
-     `open_writable=0`;
+     `mode=kOpenMultiple`, the observed `need_local_path` value,
+     `use_media_capture=0`, and `open_writable=0`;
    - no bad Mojo, missing binder, renderer crash, or process exit.
 
 2. Run the focused no-auto-select negative check.
@@ -262,3 +267,131 @@ product/UI issue.
 - Any previous Issue 799 probe regresses.
 - The implementation broadens into drag-and-drop, directory upload, or a full
   user-facing upload UX.
+
+## Result
+
+**Result:** Pass
+
+Experiment 12 added a TermSurf-owned Chromium file chooser helper behind an
+explicit automation switch:
+
+```text
+--termsurf-file-upload-auto-select=/absolute/path/to/file
+```
+
+The helper is wired through `TsShellPlatformDelegate::RunFileChooser()`. When
+the switch is absent, TermSurf preserves the existing cancellation behavior.
+When the switch is present, it only handles ordinary read-only upload chooser
+requests:
+
+- `mode == kOpen` or `mode == kOpenMultiple`;
+- `use_media_capture == false`;
+- `open_writable == false`;
+- selected path is absolute, existing, non-directory, non-symlink, and a regular
+  file.
+
+The first focused run exposed one important Chromium detail: ordinary
+`<input type=file>` requests in Chromium 148 can arrive with
+`need_local_path=0`. Codex reviewed the design adjustment and agreed that
+`need_local_path` is a result-shape hint rather than a safety boundary. The
+helper now logs the observed value instead of requiring it to be true.
+
+The harness now includes:
+
+- `file-upload-input`, which creates a deterministic fixture file, launches
+  Roamium with the auto-select switch, clicks a real file input, reports
+  `input.files`, submits `new FormData(form)`, parses the multipart upload on
+  the local server, and verifies filename, byte length, and SHA-256;
+- `file-upload-input-cancel`, which omits the switch and verifies that the
+  chooser cancels cleanly without native UI, upload bytes, or selected-file log
+  evidence.
+
+Verification artifacts:
+
+- Focused positive upload:
+  `logs/issue-799-browser-api-audit/20260531-033553-888049`
+  - `file-upload-input`: `file_upload_completed`
+  - page saw `input.files.length == 1`;
+  - page saw `termsurf-upload-fixture.txt` with 83 bytes;
+  - server received `multipart/form-data`;
+  - server file part had field name `termsurf_upload`;
+  - server SHA-256 matched
+    `f3d82fd98b3c73fc6db960e1f333e48f97dd0604003943ccfcf9457ef6738c1b`;
+  - no missing binder, bad Mojo, crash, or process exit.
+- Focused no-switch cancellation:
+  `logs/issue-799-browser-api-audit/20260531-033609-577889`
+  - `file-upload-input-cancel`: `file_upload_cancelled`
+  - no upload events;
+  - no selected-file log evidence;
+  - no crash.
+- Full Issue 799 harness:
+  `logs/issue-799-browser-api-audit/20260531-033624-059410`
+  - status: `completed`;
+  - probe count: 26;
+  - `missing_interfaces`: empty;
+  - `empty_interfaces`: empty;
+  - `file-upload-input`: `file_upload_completed`;
+  - `file-upload-input-cancel`: `file_upload_cancelled`;
+  - `file-system-access`: `file_system_access_denied`;
+  - `webauthn-create`: `webauthn_virtual_authenticator_completed`;
+  - all previous Issue 799 feature classifications remained stable.
+
+Checks run:
+
+```bash
+chromium/src/buildtools/mac_arm64-format/clang-format -i \
+  chromium/src/content/libtermsurf_chromium/ts_file_select_helper.cc \
+  chromium/src/content/libtermsurf_chromium/ts_file_select_helper.h \
+  chromium/src/content/libtermsurf_chromium/ts_javascript_dialog_manager.cc \
+  chromium/src/content/libtermsurf_chromium/ts_javascript_dialog_manager.h
+python3 -m py_compile scripts/test-issue-799-browser-api-audit.py
+git diff --check
+git -C chromium/src diff --check
+autoninja -C out/Default libtermsurf_chromium
+python3 scripts/test-issue-799-browser-api-audit.py \
+  --probe file-upload-input \
+  --seconds 10
+python3 scripts/test-issue-799-browser-api-audit.py \
+  --probe file-upload-input-cancel \
+  --seconds 10
+python3 scripts/test-issue-799-browser-api-audit.py --seconds 8
+```
+
+Chromium branch:
+
+```text
+148.0.7778.97-issue-799-exp12
+```
+
+Chromium commit:
+
+```text
+99fe3d9409c4e Auto-select upload fixtures
+```
+
+Patch archive:
+
+```text
+chromium/patches/issue-799/0072-Auto-select-upload-fixtures.patch
+```
+
+Codex reviews:
+
+- Planning review initially found real blockers around chooser-field guards,
+  path validation, multipart evidence, and `FileSelectListener` call details.
+  The design was tightened and re-reviewed with no blocking findings.
+- After the first focused run showed `need_local_path=0` for ordinary file
+  input, Codex reviewed the design adjustment and reported no blocking findings.
+- Completion review found only one commit-readiness issue: the new Chromium
+  helper files were untracked. They were added before the Chromium commit.
+
+## Conclusion
+
+File upload plumbing is now covered by the automated Issue 799 harness without
+introducing native picker UI. TermSurf can prove that a real Chromium file input
+chooser can receive an explicit local fixture file, populate `input.files`, and
+upload the exact bytes through multipart form submission.
+
+The user-facing native/protocol picker remains intentionally out of scope for
+Issue 799. This experiment only establishes the contained automation path that
+Experiment 1 required before file uploads could stay in scope.

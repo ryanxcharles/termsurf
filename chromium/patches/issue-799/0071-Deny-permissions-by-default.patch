@@ -1,7 +1,7 @@
 From 4806a3457d9cec05786f97cfdb53529fa9685434 Mon Sep 17 00:00:00 2001
 From: "Ryan X. Charles" <ryan@ryanxcharles.com>
 Date: Sat, 30 May 2026 21:48:49 -0500
-Subject: [PATCH 71/71] Deny permissions by default
+Subject: [PATCH 71/72] Deny permissions by default
 
 A shell once handed out keys,
 To every bright API breeze.

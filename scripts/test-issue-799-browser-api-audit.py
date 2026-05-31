@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
+from email import policy
+from email.parser import BytesParser
 import hashlib
 import html
 import http.server
@@ -56,6 +58,12 @@ EMPTY_BINDER_RE = re.compile(r"Empty binder for interface ([^\s]+)")
 ATTACHMENT_DOWNLOAD_BYTES = b"TermSurf generic attachment download fixture.\n"
 BLOB_DOWNLOAD_TEXT = "TermSurf generic blob download fixture.\n"
 BLOB_DOWNLOAD_BYTES = BLOB_DOWNLOAD_TEXT.encode("utf-8")
+FILE_UPLOAD_BYTES = (
+    b"TermSurf contained file upload fixture.\n"
+    b"This file must travel through input.files.\n"
+)
+FILE_UPLOAD_NAME = "termsurf-upload-fixture.txt"
+FILE_UPLOAD_FIELD = "termsurf_upload"
 EXPECTED_DOWNLOADS = {
     "download-attachment": (
         "termsurf-download.txt",
@@ -306,6 +314,134 @@ return await new Promise((resolve) => {
   };
   sendReport({status: 'ready'});
 });
+""",
+    ),
+    Probe(
+        name="file-upload-input",
+        feature="File upload input",
+        expected_surface="WebContents file chooser delegate and upload file plumbing",
+        reference_evidence="Content Shell exposes RunFileChooser for input[type=file].",
+        termsurf_evidence="Experiment 12 adds an explicit auto-select fixture switch.",
+        requires_user_activation=True,
+        script=f"""
+const form = document.createElement('form');
+form.enctype = 'multipart/form-data';
+const input = document.createElement('input');
+input.type = 'file';
+input.name = {json.dumps(FILE_UPLOAD_FIELD)};
+input.style.position = 'absolute';
+input.style.left = '8px';
+input.style.top = '8px';
+input.style.width = '260px';
+input.style.height = '48px';
+form.appendChild(input);
+document.body.appendChild(form);
+let activationObserved = false;
+let uploadStarted = false;
+input.onpointerdown = () => sendReport({{status: 'pointerdown'}});
+input.onmousedown = () => sendReport({{status: 'mousedown'}});
+input.onclick = () => {{
+  activationObserved = true;
+  sendReport({{status: 'activated'}});
+}};
+return await new Promise((resolve) => {{
+  const finishCancelled = setTimeout(() => {{
+    resolve({{
+      status: 'file_upload_cancelled',
+      activationObserved,
+      uploadStarted
+    }});
+  }}, 2500);
+  input.onchange = async () => {{
+    const file = input.files && input.files[0];
+    sendReport({{
+      status: 'file_selected',
+      activationObserved,
+      fileCount: input.files ? input.files.length : 0,
+      fileName: file ? file.name : null,
+      fileSize: file ? file.size : null,
+      fileType: file ? file.type : null
+    }});
+    if (!file) return;
+    uploadStarted = true;
+    const data = new FormData(form);
+    try {{
+      const response = await fetch('/upload?probe=' + encodeURIComponent(probeName), {{
+        method: 'POST',
+        body: data
+      }});
+      const detail = await response.json();
+      clearTimeout(finishCancelled);
+      resolve({{
+        status: 'file_upload_submitted',
+        activationObserved,
+        uploadStarted,
+        fileCount: input.files ? input.files.length : 0,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        server: detail
+      }});
+    }} catch (error) {{
+      clearTimeout(finishCancelled);
+      resolve({{
+        status: 'rejected',
+        activationObserved,
+        uploadStarted,
+        error: String(error),
+        errorName: error?.name || null
+      }});
+    }}
+  }};
+  sendReport({{status: 'ready'}});
+}});
+""",
+    ),
+    Probe(
+        name="file-upload-input-cancel",
+        feature="File upload input default cancellation",
+        expected_surface="WebContents file chooser delegate without auto-select",
+        reference_evidence="Content Shell can cancel chooser requests without native UI.",
+        termsurf_evidence="Experiment 12 keeps auto-select strictly opt-in.",
+        requires_user_activation=True,
+        script=f"""
+const form = document.createElement('form');
+form.enctype = 'multipart/form-data';
+const input = document.createElement('input');
+input.type = 'file';
+input.name = {json.dumps(FILE_UPLOAD_FIELD)};
+input.style.position = 'absolute';
+input.style.left = '8px';
+input.style.top = '8px';
+input.style.width = '260px';
+input.style.height = '48px';
+form.appendChild(input);
+document.body.appendChild(form);
+let activationObserved = false;
+input.onpointerdown = () => sendReport({{status: 'pointerdown'}});
+input.onmousedown = () => sendReport({{status: 'mousedown'}});
+input.onclick = () => {{
+  activationObserved = true;
+  sendReport({{status: 'activated'}});
+}};
+return await new Promise((resolve) => {{
+  input.onchange = () => {{
+    resolve({{
+      status: 'file_upload_unexpected_selection',
+      activationObserved,
+      fileCount: input.files ? input.files.length : 0,
+      fileName: input.files && input.files[0] ? input.files[0].name : null
+    }});
+  }};
+  setTimeout(() => {{
+    resolve({{
+      status: 'file_upload_cancelled',
+      activationObserved,
+      fileCount: input.files ? input.files.length : 0
+    }});
+  }}, 2500);
+  sendReport({{status: 'ready'}});
+}});
 """,
     ),
     Probe(
@@ -999,6 +1135,122 @@ def verify_file_system_access_probe(
     }
 
 
+def verify_file_upload_probe(
+    probe_name: str,
+    report: dict[str, Any] | None,
+    reports: list[dict[str, Any]],
+    upload_events: list[dict[str, Any]],
+    activation_ready_at: float | None,
+    activation_sent: bool,
+    activation_observed_at: float | None,
+    stderr_text: str,
+) -> dict[str, Any] | None:
+    if not probe_name.startswith("file-upload-input"):
+        return None
+    expected_hash = hashlib.sha256(FILE_UPLOAD_BYTES).hexdigest()
+    reasons: list[str] = []
+    statuses = {str(candidate.get("status")) for candidate in reports}
+    if activation_ready_at is None:
+        reasons.append("page never reported ready")
+    if not activation_sent:
+        reasons.append("harness did not send activation input")
+    if activation_observed_at is None:
+        reasons.append("page did not observe activation")
+    if probe_name == "file-upload-input-cancel":
+        if not report:
+            reasons.append("page did not report final cancellation result")
+        elif report.get("status") != "file_upload_cancelled":
+            reasons.append(
+                f"expected file_upload_cancelled, got {report.get('status')!r}"
+            )
+        if "file_selected" in statuses:
+            reasons.append("page unexpectedly observed file selection")
+        if upload_events:
+            reasons.append("server unexpectedly received upload bytes")
+        if "[termsurf-file-upload] selected" in stderr_text:
+            reasons.append("Chromium selected a file without auto-select switch")
+        return {
+            "status": "completed" if not reasons else "failed",
+            "reasons": reasons,
+            "expected": "cancelled",
+            "activation_sent": activation_sent,
+            "activation_observed": activation_observed_at is not None,
+            "upload_events": upload_events,
+        }
+
+    selected_report = next(
+        (candidate for candidate in reports if candidate.get("status") == "file_selected"),
+        None,
+    )
+    upload_event = upload_events[-1] if upload_events else None
+    parts = (upload_event or {}).get("parts") or []
+    file_part = next(
+        (
+            part
+            for part in parts
+            if part.get("field_name") == FILE_UPLOAD_FIELD
+            and part.get("filename") == FILE_UPLOAD_NAME
+        ),
+        None,
+    )
+    if not report:
+        reasons.append("page did not report final upload result")
+    elif report.get("status") != "file_upload_submitted":
+        reasons.append(
+            f"expected file_upload_submitted, got {report.get('status')!r}"
+        )
+    if not selected_report:
+        reasons.append("page did not report file_selected")
+    else:
+        if selected_report.get("fileCount") != 1:
+            reasons.append(f"page fileCount was {selected_report.get('fileCount')!r}")
+        if selected_report.get("fileName") != FILE_UPLOAD_NAME:
+            reasons.append(
+                f"page filename was {selected_report.get('fileName')!r}"
+            )
+        if selected_report.get("fileSize") != len(FILE_UPLOAD_BYTES):
+            reasons.append(f"page file size was {selected_report.get('fileSize')!r}")
+    if not upload_event:
+        reasons.append("server did not record upload event")
+    else:
+        if not upload_event.get("is_multipart"):
+            reasons.append("upload was not multipart/form-data")
+        if not upload_event.get("has_boundary"):
+            reasons.append("upload Content-Type had no boundary")
+    if not file_part:
+        reasons.append("server did not find expected file part")
+    else:
+        disposition = str(file_part.get("content_disposition") or "")
+        if "form-data" not in disposition:
+            reasons.append("file part Content-Disposition did not include form-data")
+        if file_part.get("byte_length") != len(FILE_UPLOAD_BYTES):
+            reasons.append(f"server byte length was {file_part.get('byte_length')!r}")
+        if file_part.get("sha256") != expected_hash:
+            reasons.append(f"server sha256 was {file_part.get('sha256')!r}")
+    required_log_fragments = [
+        "[termsurf-file-upload] request",
+        "mode=kOpen",
+        "need_local_path=",
+        "use_media_capture=0",
+        "open_writable=0",
+        "[termsurf-file-upload] selected",
+        f"basename={FILE_UPLOAD_NAME}",
+    ]
+    for fragment in required_log_fragments:
+        if fragment not in stderr_text:
+            reasons.append(f"missing Chromium log fragment {fragment!r}")
+    return {
+        "status": "completed" if not reasons else "failed",
+        "reasons": reasons,
+        "expected_hash": expected_hash,
+        "activation_sent": activation_sent,
+        "activation_observed": activation_observed_at is not None,
+        "selected_report": selected_report,
+        "upload_event": upload_event,
+        "file_part": file_part,
+    }
+
+
 def verify_webauthn_probe(
     probe_name: str,
     report: dict[str, Any] | None,
@@ -1585,6 +1837,7 @@ class ProbeState:
         self.lock = threading.Lock()
         self.reports: list[dict[str, Any]] = []
         self.auth_events: list[dict[str, Any]] = []
+        self.upload_events: list[dict[str, Any]] = []
 
     def add_report(self, report: dict[str, Any]) -> None:
         with self.lock:
@@ -1608,10 +1861,56 @@ class ProbeState:
         with self.lock:
             return [event for event in self.auth_events if event.get("probe") == probe]
 
+    def add_upload_event(self, event: dict[str, Any]) -> None:
+        with self.lock:
+            event["_received_at"] = time.time()
+            self.upload_events.append(event)
+            with (self.run_dir / "upload-events.jsonl").open("a", encoding="utf-8") as out:
+                out.write(json.dumps(event, sort_keys=True) + "\n")
+
+    def upload_events_for(self, probe: str) -> list[dict[str, Any]]:
+        with self.lock:
+            return [event for event in self.upload_events if event.get("probe") == probe]
+
 
 class ReusableThreadingTcpServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
+
+
+def parse_multipart_upload(content_type: str, data: bytes) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "content_type": content_type,
+        "is_multipart": content_type.lower().startswith("multipart/form-data"),
+        "has_boundary": "boundary=" in content_type.lower(),
+        "parts": [],
+    }
+    if not event["is_multipart"] or not event["has_boundary"]:
+        return event
+
+    message = BytesParser(policy=policy.default).parsebytes(
+        b"Content-Type: "
+        + content_type.encode("utf-8", errors="replace")
+        + b"\r\nMIME-Version: 1.0\r\n\r\n"
+        + data
+    )
+    for part in message.iter_parts():
+        payload = part.get_payload(decode=True) or b""
+        disposition = part.get("Content-Disposition", "")
+        event["parts"].append(
+            {
+                "content_disposition": disposition,
+                "field_name": part.get_param(
+                    "name", header="content-disposition"
+                ),
+                "filename": part.get_filename(),
+                "content_type": part.get_content_type(),
+                "byte_length": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "preview": payload[:120].decode("utf-8", errors="replace"),
+            }
+        )
+    return event
 
 
 def make_handler(state: ProbeState) -> type[http.server.BaseHTTPRequestHandler]:
@@ -1805,6 +2104,23 @@ destination
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
+            if parsed.path == "/upload":
+                query = parse_qs(parsed.query)
+                probe = query.get("probe", ["unknown"])[-1]
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                data = self.rfile.read(length)
+                event = parse_multipart_upload(
+                    self.headers.get("Content-Type", ""), data
+                )
+                event["probe"] = probe
+                event["path"] = parsed.path
+                event["content_length"] = length
+                state.add_upload_event(event)
+                self.send_bytes(
+                    json.dumps(event, sort_keys=True).encode("utf-8"),
+                    "application/json; charset=utf-8",
+                )
+                return
             if parsed.path != "/report":
                 self.send_error(404)
                 return
@@ -2165,6 +2481,10 @@ def run_probe(
         expected_path.with_name(expected_path.name + ".crdownload").unlink(
             missing_ok=True
         )
+    file_upload_fixture = None
+    if probe.name == "file-upload-input":
+        file_upload_fixture = probe_dir / FILE_UPLOAD_NAME
+        file_upload_fixture.write_bytes(FILE_UPLOAD_BYTES)
     command = [
         str(roamium),
         f"--ipc-socket={socket_path}",
@@ -2173,6 +2493,8 @@ def run_probe(
         "--no-sandbox",
         "--enable-logging=stderr",
     ]
+    if file_upload_fixture is not None:
+        command.append(f"--termsurf-file-upload-auto-select={file_upload_fixture}")
     env = os.environ.copy()
     env["TERMSURF_PDF_INPUT_TRACE"] = "1"
     env["TERMSURF_PDF_INPUT_TRACE_FILE"] = str(probe_dir / "input-trace.log")
@@ -2275,6 +2597,26 @@ def run_probe(
                         activation_sent = True
                         activation_sent_at = time.time()
                         messages.write("sent file-system-access activation input\n")
+                        messages.flush()
+                if probe.name.startswith("file-upload-input") and tab_id:
+                    reports = state_reports_for_probe(run_dir, probe.name)
+                    statuses = {str(report.get("status")) for report in reports}
+                    if "ready" in statuses and activation_ready_at is None:
+                        activation_ready_at = time.time()
+                    if "activated" in statuses and activation_observed_at is None:
+                        activation_observed_at = time.time()
+                    if (
+                        activation_ready_at is not None
+                        and time.time() - activation_ready_at >= 0.5
+                        and not activation_sent
+                    ):
+                        send_message(conn, 10, focus_changed_payload(tab_id, True))
+                        send_message(conn, 7, mouse_move_payload(tab_id, 20, 20))
+                        send_message(conn, 6, mouse_event_payload(tab_id, "down", 20, 20))
+                        send_message(conn, 6, mouse_event_payload(tab_id, "up", 20, 20))
+                        activation_sent = True
+                        activation_sent_at = time.time()
+                        messages.write("sent file-upload activation input\n")
                         messages.flush()
                 if probe.name == "webauthn-create" and tab_id:
                     reports = state_reports_for_probe(run_dir, probe.name)
@@ -2598,6 +2940,7 @@ def run_probe(
     )
     reports = state_reports_for_probe(run_dir, probe.name)
     auth_events = state.auth_events_for(probe.name)
+    upload_events = state.upload_events_for(probe.name)
     non_timeout_reports = [
         candidate for candidate in reports if candidate.get("status") != "page_timeout"
     ]
@@ -2687,6 +3030,39 @@ def run_probe(
             "page_timeout",
         ):
             classification = "file_system_access_failed"
+    file_upload_result = verify_file_upload_probe(
+        probe.name,
+        report,
+        reports,
+        upload_events,
+        activation_ready_at,
+        activation_sent,
+        activation_observed_at,
+        stderr_text,
+    )
+    if file_upload_result:
+        if (
+            classification
+            not in (
+                "missing_binder",
+                "bad_mojo",
+                "renderer_or_browser_crash",
+                "process_exit",
+            )
+            and file_upload_result["status"] == "completed"
+        ):
+            classification = (
+                "file_upload_cancelled"
+                if probe.name == "file-upload-input-cancel"
+                else "file_upload_completed"
+            )
+        elif classification in (
+            "exercised",
+            "reported",
+            "page_timeout",
+            "probe_timeout",
+        ):
+            classification = "file_upload_failed"
     webauthn_result = verify_webauthn_probe(
         probe.name,
         report,
@@ -2828,6 +3204,19 @@ def run_probe(
         "javascript_dialog_result": javascript_dialog_result,
         "default_deny_result": default_deny_result,
         "file_system_access_result": file_system_access_result,
+        "file_upload_result": file_upload_result,
+        "file_upload_server_events": upload_events,
+        "file_upload_fixture": (
+            {
+                "path": str(file_upload_fixture),
+                "filename": FILE_UPLOAD_NAME,
+                "byte_length": len(FILE_UPLOAD_BYTES),
+                "sha256": hashlib.sha256(FILE_UPLOAD_BYTES).hexdigest(),
+                "field_name": FILE_UPLOAD_FIELD,
+            }
+            if file_upload_fixture is not None
+            else None
+        ),
         "webauthn_result": webauthn_result,
         "webauthn_devtools_setup": webauthn_devtools_setup,
         "page_zoom_result": page_zoom_result,
@@ -2861,6 +3250,15 @@ def run_probe(
                 ),
             }
             if probe.name == "file-system-access"
+            else None
+        ),
+        "file_upload_activation": (
+            {
+                "ready": activation_ready_at is not None,
+                "activation_sent": activation_sent,
+                "activation_observed": activation_observed_at is not None,
+            }
+            if probe.name.startswith("file-upload-input")
             else None
         ),
         "webauthn_activation": (
@@ -2955,6 +3353,12 @@ def write_coverage_map(path: pathlib.Path, results: list[dict[str, Any]]) -> Non
             next_action = "File System Access reached post-activation TermSurf denial."
         elif classification == "file_system_access_failed":
             next_action = "Inspect activation routing and file picker denial evidence."
+        elif classification == "file_upload_completed":
+            next_action = "File upload completed with verified multipart fixture bytes."
+        elif classification == "file_upload_cancelled":
+            next_action = "File upload chooser cancelled cleanly without auto-select."
+        elif classification == "file_upload_failed":
+            next_action = "Inspect file chooser auto-select and multipart upload evidence."
         elif classification == "webauthn_virtual_authenticator_completed":
             next_action = "WebAuthn completed against a DevTools virtual authenticator."
         elif classification == "webauthn_virtual_authenticator_failed":
@@ -3035,6 +3439,12 @@ def write_reference_coverage_map(path: pathlib.Path, results: list[dict[str, Any
             next_action = "No immediate action; verified post-activation file picker denial."
         elif classification == "file_system_access_failed":
             next_action = "Inspect activation routing and file picker denial evidence."
+        elif classification == "file_upload_completed":
+            next_action = "No immediate action; verified contained file upload selection."
+        elif classification == "file_upload_cancelled":
+            next_action = "No immediate action; verified chooser cancellation without auto-select."
+        elif classification == "file_upload_failed":
+            next_action = "Inspect file chooser auto-select and multipart upload evidence."
         elif classification == "webauthn_virtual_authenticator_completed":
             next_action = "No immediate action; verified contained virtual-authenticator coverage."
         elif classification == "webauthn_virtual_authenticator_failed":
