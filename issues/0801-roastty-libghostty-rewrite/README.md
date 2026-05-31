@@ -246,6 +246,8 @@ No experiment may proceed to the next stage until the required review passes.
   **Pass**
 - [Experiment 65: Port Selection Codepoints](65-port-selection-codepoints.md) —
   **Pass**
+- [Experiment 66: Port Selection Value Shape](66-port-selection-value-shape.md)
+  — **Designed**
 
 ## Non-Goals
 
