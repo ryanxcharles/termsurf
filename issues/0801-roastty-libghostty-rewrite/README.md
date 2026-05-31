@@ -240,6 +240,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 62: Port Highlight Flattened Shape](62-port-highlight-flattened-shape.md)
   — **Pass**
+- [Experiment 63: Port Flattened Highlight Constructor](63-port-flattened-highlight-constructor.md)
+  — **Designed**
 
 ## Non-Goals
 
