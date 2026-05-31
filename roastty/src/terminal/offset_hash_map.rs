@@ -75,6 +75,15 @@ where
             _marker: PhantomData,
         }
     }
+
+    pub(super) fn map_ref<'a>(&self, backing: &'a [u8]) -> MapRef<'a, K, V> {
+        assert!(backing.len() > self.metadata.offset() as usize);
+        assert_eq!(backing.as_ptr() as usize % Self::BASE_ALIGN, 0);
+        MapRef {
+            metadata: self.metadata.ptr(backing),
+            _marker: PhantomData,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -412,6 +421,98 @@ where
     }
 }
 
+#[derive(Debug)]
+pub(super) struct MapRef<'a, K, V> {
+    metadata: *const Metadata,
+    _marker: PhantomData<&'a (K, V)>,
+}
+
+impl<K, V> MapRef<'_, K, V>
+where
+    K: Copy + Eq + Hash,
+    V: Copy + Default,
+{
+    pub(super) fn count(&self) -> u32 {
+        self.header().size
+    }
+
+    pub(super) fn capacity(&self) -> u32 {
+        self.header().capacity
+    }
+
+    pub(super) fn contains(&self, key: K) -> bool {
+        self.index(key).is_some()
+    }
+
+    pub(super) fn get(&self, key: K) -> Option<V> {
+        let idx = self.index(key)?;
+        Some(unsafe {
+            // Safety: `idx` is used, so the value slot is initialized.
+            self.values().add(idx).read().assume_init()
+        })
+    }
+
+    pub(super) fn iter(&self) -> IterRef<'_, '_, K, V> {
+        IterRef {
+            map: self,
+            index: 0,
+        }
+    }
+
+    fn index(&self, key: K) -> Option<usize> {
+        if self.count() == 0 {
+            return None;
+        }
+
+        let hash = hash_key(&key);
+        let mask = self.capacity() as usize - 1;
+        let fp = fingerprint(hash);
+        let mut limit = self.capacity();
+        let mut idx = hash as usize & mask;
+
+        while !self.metadata_at(idx).is_free() && limit != 0 {
+            let metadata = self.metadata_at(idx);
+            if metadata.is_used() && metadata.fingerprint() == fp {
+                let test_key = unsafe {
+                    // Safety: metadata says this key slot is initialized.
+                    self.keys().add(idx).read().assume_init()
+                };
+                if test_key == key {
+                    return Some(idx);
+                }
+            }
+
+            limit -= 1;
+            idx = (idx + 1) & mask;
+        }
+
+        None
+    }
+
+    fn header(&self) -> &Header<K, V> {
+        unsafe {
+            // Safety: metadata points immediately after the initialized header.
+            &*header_from_metadata::<K, V>(self.metadata.cast_mut())
+        }
+    }
+
+    fn metadata_at(&self, idx: usize) -> Metadata {
+        assert!(idx < self.capacity() as usize);
+        unsafe {
+            // Safety: idx is within the metadata array.
+            *self.metadata.add(idx)
+        }
+    }
+
+    fn keys(&self) -> *const MaybeUninit<K> {
+        self.header().keys.ptr(self.metadata)
+    }
+
+    fn values(&self) -> *const MaybeUninit<V> {
+        self.header().values.ptr(self.metadata)
+    }
+}
+
 pub(super) struct Entry<'a, K, V> {
     pub(super) key: &'a mut K,
     pub(super) value: &'a mut V,
@@ -429,6 +530,36 @@ pub(super) struct Iter<'a, 'b, K, V> {
 }
 
 impl<K, V> Iterator for Iter<'_, '_, K, V>
+where
+    K: Copy + Eq + Hash,
+    V: Copy + Default,
+{
+    type Item = (K, V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.index < self.map.capacity() {
+            let idx = self.index as usize;
+            self.index += 1;
+            if self.map.metadata_at(idx).is_used() {
+                return Some(unsafe {
+                    // Safety: metadata says both slots are initialized.
+                    (
+                        self.map.keys().add(idx).read().assume_init(),
+                        self.map.values().add(idx).read().assume_init(),
+                    )
+                });
+            }
+        }
+        None
+    }
+}
+
+pub(super) struct IterRef<'a, 'b, K, V> {
+    map: &'a MapRef<'b, K, V>,
+    index: u32,
+}
+
+impl<K, V> Iterator for IterRef<'_, '_, K, V>
 where
     K: Copy + Eq + Hash,
     V: Copy + Default,

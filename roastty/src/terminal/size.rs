@@ -77,6 +77,14 @@ impl<T> OffsetSlice<T> {
         Self { offset, len }
     }
 
+    pub(super) const fn offset(self) -> Offset<T> {
+        self.offset
+    }
+
+    pub(super) const fn len(self) -> usize {
+        self.len
+    }
+
     pub(super) unsafe fn slice<'a, B>(self, base: B) -> &'a [T]
     where
         B: BaseAddress,
@@ -84,6 +92,15 @@ impl<T> OffsetSlice<T> {
         // Safety: callers must ensure the derived pointer is valid for `len`
         // contiguous instances of `T` for the returned lifetime.
         unsafe { std::slice::from_raw_parts(self.offset.ptr(base), self.len) }
+    }
+
+    pub(super) unsafe fn slice_mut<'a, B>(self, base: B) -> &'a mut [T]
+    where
+        B: BaseAddress,
+    {
+        // Safety: callers must ensure the derived pointer is valid and
+        // uniquely borrowed for `len` contiguous instances of `T`.
+        unsafe { std::slice::from_raw_parts_mut(self.offset.ptr_mut(base), self.len) }
     }
 }
 

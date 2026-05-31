@@ -6,7 +6,8 @@ use super::bitmap_allocator::{BitmapAllocator, Layout as BitmapAllocatorLayout};
 use super::color::Rgb;
 use super::offset_hash_map;
 use super::size::{
-    CellCountInt, GraphemeBytesInt, HyperlinkCountInt, Offset, OffsetSlice, StringBytesInt,
+    get_offset, CellCountInt, GraphemeBytesInt, HyperlinkCountInt, Offset, OffsetSlice,
+    StringBytesInt,
 };
 use super::style;
 
@@ -286,6 +287,14 @@ pub(super) struct Page {
     size: Size,
     capacity: Capacity,
     layout: PageLayout,
+    grapheme_alloc: GraphemeAlloc,
+    grapheme_map: Option<offset_hash_map::OffsetHashMap<Offset<Cell>, OffsetSlice<u32>>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GraphemeError {
+    GraphemeMapOutOfMemory,
+    GraphemeAllocOutOfMemory,
 }
 
 impl Page {
@@ -297,6 +306,32 @@ impl Page {
         let buf = super::size::OffsetBuf::init(memory.as_mut_ptr());
         let rows = buf.member::<Row>(layout.rows_start);
         let cells = buf.member::<Cell>(layout.cells_start);
+        let grapheme_alloc = unsafe {
+            // Safety: PageMemory is live for the lifetime of Page, and the
+            // layout range is inside the page backing allocation.
+            GraphemeAlloc::init(
+                super::size::OffsetBuf::init_offset(
+                    memory.as_mut_ptr(),
+                    layout.grapheme_alloc_start,
+                ),
+                layout.grapheme_alloc_layout,
+            )
+        };
+        let grapheme_map = if layout.grapheme_map_layout.capacity == 0 {
+            None
+        } else {
+            Some(unsafe {
+                // Safety: PageMemory is live for the lifetime of Page, and the
+                // layout range is inside the page backing allocation.
+                offset_hash_map::OffsetHashMap::init(
+                    super::size::OffsetBuf::init_offset(
+                        memory.as_mut_ptr(),
+                        layout.grapheme_map_start,
+                    ),
+                    layout.grapheme_map_layout.into(),
+                )
+            })
+        };
 
         let cells_len = capacity.cols as usize * capacity.rows as usize;
         let cells_ptr = cells.ptr(memory.as_ptr());
@@ -333,6 +368,8 @@ impl Page {
             },
             capacity,
             layout,
+            grapheme_alloc,
+            grapheme_map,
         })
     }
 
@@ -410,6 +447,225 @@ impl Page {
             Self::assert_cells_range_for_layout(self.layout, self.size, row.cells());
             let cell = &mut *row.cells().ptr_mut(self.memory.as_mut_ptr()).add(x);
             RowAndCellMut { row, cell }
+        }
+    }
+
+    pub(super) fn append_grapheme_at(
+        &mut self,
+        x: usize,
+        y: usize,
+        cp: u32,
+    ) -> Result<(), GraphemeError> {
+        assert!(cp <= 0x10ffff);
+        let cell = self.cell_copy_at(x, y);
+        assert!(cell.codepoint() != 0);
+
+        if !cell.has_grapheme() {
+            return self.append_first_grapheme_at(x, y, cp);
+        }
+
+        let cell_offset = self.cell_offset_at(x, y);
+        let slice = self
+            .grapheme_map_ref()
+            .and_then(|map| map.get(cell_offset))
+            .expect("grapheme cell must have map data");
+
+        if slice.len() % GRAPHEME_CHUNK_LEN != 0 {
+            unsafe {
+                // Safety: `slice` came from this page's grapheme map and has
+                // spare capacity inside its allocated chunk.
+                *slice
+                    .offset()
+                    .ptr_mut(self.memory.as_mut_ptr())
+                    .add(slice.len()) = cp;
+            }
+            let updated = OffsetSlice::new(slice.offset(), slice.len() + 1);
+            {
+                let mut map = self.grapheme_map_mut().expect("grapheme map must exist");
+                *map.get_mut(cell_offset)
+                    .expect("grapheme cell must have map data") = updated;
+            }
+            return Ok(());
+        }
+
+        let old_values = unsafe {
+            // Safety: `slice` came from this page's grapheme map.
+            slice.slice(self.memory.as_ptr()).to_vec()
+        };
+        let new_slice = self.alloc_grapheme_slice(slice.len() + 1)?;
+        unsafe {
+            // Safety: `new_slice` was just allocated from this page and is
+            // uniquely owned until inserted into the map below.
+            let cps = new_slice.slice_mut(self.memory.as_mut_ptr());
+            cps[..old_values.len()].copy_from_slice(&old_values);
+            cps[old_values.len()] = cp;
+        }
+
+        {
+            let mut map = self.grapheme_map_mut().expect("grapheme map must exist");
+            *map.get_mut(cell_offset)
+                .expect("grapheme cell must have map data") = new_slice;
+        }
+
+        self.free_grapheme_slice(slice);
+        Ok(())
+    }
+
+    pub(super) fn lookup_grapheme_at(&self, x: usize, y: usize) -> Option<Vec<u32>> {
+        let cell_offset = self.cell_offset_at(x, y);
+        let slice = self.grapheme_map_ref()?.get(cell_offset)?;
+        Some(unsafe {
+            // Safety: `slice` came from this page's grapheme map.
+            slice.slice(self.memory.as_ptr()).to_vec()
+        })
+    }
+
+    pub(super) fn clear_grapheme_at(&mut self, x: usize, y: usize) {
+        assert!(self.cell_copy_at(x, y).has_grapheme());
+        let cell_offset = self.cell_offset_at(x, y);
+        let slice = {
+            let mut map = self
+                .grapheme_map_mut()
+                .expect("grapheme cell must have map storage");
+            let (_, slice) = map
+                .fetch_remove(cell_offset)
+                .expect("grapheme cell must have map data");
+            slice
+        };
+
+        self.free_grapheme_slice(slice);
+        self.cell_mut_at(x, y)
+            .set_content_tag(ContentTag::Codepoint);
+    }
+
+    pub(super) fn update_row_grapheme_flag(&mut self, row_index: usize) {
+        let has_grapheme = self
+            .get_cells(self.get_row(row_index))
+            .iter()
+            .any(|cell| cell.has_grapheme());
+        if !has_grapheme {
+            self.get_row_mut(row_index).set_grapheme(false);
+        }
+    }
+
+    pub(super) fn grapheme_count(&self) -> usize {
+        self.grapheme_map_ref()
+            .map(|map| map.count() as usize)
+            .unwrap_or(0)
+    }
+
+    pub(super) fn grapheme_capacity(&self) -> usize {
+        self.grapheme_map_ref()
+            .map(|map| map.capacity() as usize)
+            .unwrap_or(0)
+    }
+
+    #[cfg(test)]
+    fn grapheme_used_bytes(&self) -> usize {
+        unsafe {
+            // Safety: this page initialized grapheme_alloc with its backing
+            // memory and the allocation is still live.
+            self.grapheme_alloc.used_bytes(self.memory.as_ptr())
+        }
+    }
+
+    fn append_first_grapheme_at(
+        &mut self,
+        x: usize,
+        y: usize,
+        cp: u32,
+    ) -> Result<(), GraphemeError> {
+        let Some(_) = self.grapheme_map else {
+            return Err(GraphemeError::GraphemeMapOutOfMemory);
+        };
+
+        let cell_offset = self.cell_offset_at(x, y);
+        let slice = self.alloc_grapheme_slice(1)?;
+        unsafe {
+            // Safety: `slice` was just allocated from this page and is uniquely
+            // owned until inserted into the map below.
+            slice.offset().ptr_mut(self.memory.as_mut_ptr()).write(cp);
+        }
+
+        let inserted = {
+            let mut map = self.grapheme_map_mut().expect("grapheme map must exist");
+            map.put_no_clobber(cell_offset, slice)
+        };
+
+        if inserted.is_err() {
+            self.free_grapheme_slice(slice);
+            return Err(GraphemeError::GraphemeMapOutOfMemory);
+        }
+
+        self.cell_mut_at(x, y)
+            .set_content_tag(ContentTag::CodepointGrapheme);
+        self.get_row_mut(y).set_grapheme(true);
+        Ok(())
+    }
+
+    fn alloc_grapheme_slice(&mut self, len: usize) -> Result<OffsetSlice<u32>, GraphemeError> {
+        let slice = unsafe {
+            // Safety: this page initialized grapheme_alloc with its backing
+            // memory and the allocation is uniquely borrowed through &mut self.
+            self.grapheme_alloc
+                .alloc::<u32, _>(self.memory.as_mut_ptr(), len)
+        }
+        .map_err(|_| GraphemeError::GraphemeAllocOutOfMemory)?;
+        let offset = get_offset(self.memory.as_ptr(), slice.as_ptr());
+        Ok(OffsetSlice::new(offset, slice.len()))
+    }
+
+    fn free_grapheme_slice(&mut self, slice: OffsetSlice<u32>) {
+        let slice = unsafe {
+            // Safety: `slice` came from this page's grapheme allocator and is
+            // no longer referenced by the grapheme map at call sites.
+            slice.slice_mut(self.memory.as_mut_ptr())
+        };
+        unsafe {
+            // Safety: the slice was allocated by this allocator from this page
+            // backing memory and is being freed exactly once.
+            self.grapheme_alloc.free(self.memory.as_mut_ptr(), slice);
+        }
+    }
+
+    fn grapheme_map_ref(
+        &self,
+    ) -> Option<offset_hash_map::MapRef<'_, Offset<Cell>, OffsetSlice<u32>>> {
+        self.grapheme_map
+            .as_ref()
+            .map(|map| map.map_ref(self.memory.as_slice()))
+    }
+
+    fn grapheme_map_mut(
+        &mut self,
+    ) -> Option<offset_hash_map::Map<'_, Offset<Cell>, OffsetSlice<u32>>> {
+        let map = self.grapheme_map?;
+        Some(map.map(self.memory.as_mut_slice()))
+    }
+
+    fn cell_offset_at(&self, x: usize, y: usize) -> Offset<Cell> {
+        assert!(y < self.size.rows as usize);
+        assert!(x < self.size.cols as usize);
+        let index = y * self.size.cols as usize + x;
+        Offset::new(
+            (self.layout.cells_start + index * size_of::<Cell>())
+                .try_into()
+                .expect("cell offset must fit OffsetInt"),
+        )
+    }
+
+    fn cell_copy_at(&self, x: usize, y: usize) -> Cell {
+        unsafe {
+            // Safety: bounds are checked by cell_offset_at.
+            *self.cell_offset_at(x, y).ptr(self.memory.as_ptr())
+        }
+    }
+
+    fn cell_mut_at(&mut self, x: usize, y: usize) -> &mut Cell {
+        unsafe {
+            // Safety: bounds are checked by cell_offset_at, and &mut self
+            // guarantees exclusive access.
+            &mut *self.cell_offset_at(x, y).ptr_mut(self.memory.as_mut_ptr())
         }
     }
 
@@ -508,11 +764,18 @@ impl PageMemory {
         self.len
     }
 
-    #[cfg(test)]
     fn as_slice(&self) -> &[u8] {
         unsafe {
             // Safety: PageMemory owns a live mmap allocation for `len` bytes.
             std::slice::from_raw_parts(self.as_ptr(), self.len)
+        }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe {
+            // Safety: PageMemory owns a live mmap allocation for `len` bytes
+            // and &mut self guarantees unique access to it.
+            std::slice::from_raw_parts_mut(self.as_mut_ptr(), self.len)
         }
     }
 }
@@ -695,8 +958,30 @@ impl From<offset_hash_map::Layout> for GraphemeMapLayout {
     }
 }
 
+impl From<GraphemeMapLayout> for offset_hash_map::Layout {
+    fn from(value: GraphemeMapLayout) -> Self {
+        Self {
+            total_size: value.total_size,
+            keys_start: value.keys_start,
+            vals_start: value.vals_start,
+            capacity: value.capacity,
+        }
+    }
+}
+
 impl From<offset_hash_map::Layout> for HyperlinkMapLayout {
     fn from(value: offset_hash_map::Layout) -> Self {
+        Self {
+            total_size: value.total_size,
+            keys_start: value.keys_start,
+            vals_start: value.vals_start,
+            capacity: value.capacity,
+        }
+    }
+}
+
+impl From<HyperlinkMapLayout> for offset_hash_map::Layout {
+    fn from(value: HyperlinkMapLayout) -> Self {
         Self {
             total_size: value.total_size,
             keys_start: value.keys_start,
@@ -1362,6 +1647,212 @@ mod tests {
         cells[2] = Cell::init('z' as u32);
 
         assert_eq!(page.get_row_and_cell_mut(2, 1).cell.codepoint(), 'z' as u32);
+    }
+
+    #[test]
+    fn page_append_grapheme_small() {
+        let mut page = Page::init(Capacity {
+            cols: 10,
+            rows: 10,
+            styles: 8,
+            ..Capacity::new(10, 10)
+        })
+        .unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init(0x09);
+
+        page.append_grapheme_at(0, 0, 0x0a).unwrap();
+        assert!(page.get_row(0).grapheme());
+        assert!(page.cell_copy_at(0, 0).has_grapheme());
+        assert_eq!(page.lookup_grapheme_at(0, 0).unwrap(), vec![0x0a]);
+        assert_eq!(page.grapheme_count(), 1);
+
+        page.append_grapheme_at(0, 0, 0x0b).unwrap();
+        assert!(page.get_row(0).grapheme());
+        assert!(page.cell_copy_at(0, 0).has_grapheme());
+        assert_eq!(page.lookup_grapheme_at(0, 0).unwrap(), vec![0x0a, 0x0b]);
+
+        page.clear_grapheme_at(0, 0);
+        page.update_row_grapheme_flag(0);
+        assert!(!page.get_row(0).grapheme());
+        assert!(!page.cell_copy_at(0, 0).has_grapheme());
+        assert_eq!(page.lookup_grapheme_at(0, 0), None);
+        assert_eq!(page.grapheme_count(), 0);
+    }
+
+    #[test]
+    fn page_append_grapheme_larger_than_chunk() {
+        let mut page = Page::init(Capacity {
+            cols: 10,
+            rows: 10,
+            styles: 8,
+            ..Capacity::new(10, 10)
+        })
+        .unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init(0x09);
+
+        let count = GRAPHEME_CHUNK_LEN * 10;
+        for i in 0..count {
+            page.append_grapheme_at(0, 0, 0x0a + i as u32).unwrap();
+        }
+
+        let cps = page.lookup_grapheme_at(0, 0).unwrap();
+        assert_eq!(cps.len(), count);
+        for (i, cp) in cps.iter().enumerate() {
+            assert_eq!(*cp, 0x0a + i as u32);
+        }
+    }
+
+    #[test]
+    fn page_clear_grapheme_not_all_cells() {
+        let mut page = Page::init(Capacity {
+            cols: 10,
+            rows: 10,
+            styles: 8,
+            ..Capacity::new(10, 10)
+        })
+        .unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init(0x09);
+        page.append_grapheme_at(0, 0, 0x0a).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init(0x09);
+        page.append_grapheme_at(1, 0, 0x0a).unwrap();
+
+        page.clear_grapheme_at(0, 0);
+        page.update_row_grapheme_flag(0);
+        assert!(page.get_row(0).grapheme());
+        assert!(!page.cell_copy_at(0, 0).has_grapheme());
+        assert!(page.cell_copy_at(1, 0).has_grapheme());
+    }
+
+    #[test]
+    fn page_grapheme_lookup_excludes_cell_codepoint() {
+        let mut page = Page::init(Capacity::new(5, 5)).unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+
+        page.append_grapheme_at(0, 0, 0x0301).unwrap();
+
+        assert_eq!(page.cell_copy_at(0, 0).codepoint(), 'a' as u32);
+        assert_eq!(page.lookup_grapheme_at(0, 0), Some(vec![0x0301]));
+    }
+
+    #[test]
+    fn page_grapheme_count_and_capacity() {
+        let mut page = Page::init(Capacity::new(5, 5)).unwrap();
+        assert_eq!(page.grapheme_count(), 0);
+        assert!(page.grapheme_capacity() > 0);
+
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+        page.append_grapheme_at(0, 0, 0x0301).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('b' as u32);
+        page.append_grapheme_at(1, 0, 0x0300).unwrap();
+
+        assert_eq!(page.grapheme_count(), 2);
+        assert!(page.grapheme_capacity() >= 2);
+    }
+
+    #[test]
+    fn page_zero_capacity_grapheme_map_fails_without_flags() {
+        let mut page = Page::init(Capacity::with_metadata(
+            5,
+            5,
+            8,
+            HYPERLINK_BYTES_DEFAULT,
+            0,
+            STRING_BYTES_DEFAULT,
+        ))
+        .unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+
+        let before_used = page.grapheme_used_bytes();
+        assert_eq!(
+            page.append_grapheme_at(0, 0, 0x0301),
+            Err(GraphemeError::GraphemeMapOutOfMemory)
+        );
+
+        assert_eq!(page.lookup_grapheme_at(0, 0), None);
+        assert_eq!(page.grapheme_count(), 0);
+        assert_eq!(page.grapheme_capacity(), 0);
+        assert_eq!(page.grapheme_used_bytes(), before_used);
+        assert!(!page.cell_copy_at(0, 0).has_grapheme());
+        assert!(!page.get_row(0).grapheme());
+    }
+
+    #[test]
+    fn page_grapheme_map_oom_rolls_back_allocation_and_flags() {
+        let mut page = Page::init(Capacity::with_metadata(
+            5,
+            5,
+            8,
+            HYPERLINK_BYTES_DEFAULT,
+            GraphemeAlloc::BITMAP_BIT_SIZE as GraphemeBytesInt,
+            STRING_BYTES_DEFAULT,
+        ))
+        .unwrap();
+        assert_eq!(page.grapheme_capacity(), 4);
+
+        for x in 0..page.grapheme_capacity() {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init('a' as u32 + x as u32);
+            page.append_grapheme_at(x, 0, 0x0301 + x as u32).unwrap();
+        }
+        let used_after_filling_map = page.grapheme_used_bytes();
+
+        *page.get_row_and_cell_mut(4, 0).cell = Cell::init('z' as u32);
+        assert_eq!(
+            page.append_grapheme_at(4, 0, 0x0300),
+            Err(GraphemeError::GraphemeMapOutOfMemory)
+        );
+
+        assert_eq!(page.grapheme_count(), 4);
+        assert_eq!(page.grapheme_used_bytes(), used_after_filling_map);
+        assert!(!page.cell_copy_at(4, 0).has_grapheme());
+        assert_eq!(page.lookup_grapheme_at(4, 0), None);
+    }
+
+    #[test]
+    fn page_grapheme_allocator_oom_preserves_existing_data() {
+        let mut page = Page::init(Capacity::with_metadata(
+            5,
+            5,
+            8,
+            HYPERLINK_BYTES_DEFAULT,
+            GraphemeAlloc::BITMAP_BIT_SIZE as GraphemeBytesInt,
+            STRING_BYTES_DEFAULT,
+        ))
+        .unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+
+        let mut expected = Vec::new();
+        for i in 0.. {
+            let cp = 0x0300 + i;
+            match page.append_grapheme_at(0, 0, cp) {
+                Ok(()) => expected.push(cp),
+                Err(GraphemeError::GraphemeAllocOutOfMemory) => break,
+                Err(err) => panic!("unexpected grapheme error: {err:?}"),
+            }
+        }
+        assert!(expected.len() > GRAPHEME_CHUNK_LEN);
+
+        assert_eq!(page.lookup_grapheme_at(0, 0).unwrap(), expected);
+        assert!(page.cell_copy_at(0, 0).has_grapheme());
+        assert!(page.get_row(0).grapheme());
+    }
+
+    #[test]
+    fn page_clear_after_growth_removes_active_allocation() {
+        let mut page = Page::init(Capacity::new(5, 5)).unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+        for i in 0..=GRAPHEME_CHUNK_LEN {
+            page.append_grapheme_at(0, 0, 0x0300 + i as u32).unwrap();
+        }
+        assert!(page.grapheme_used_bytes() > 0);
+
+        page.clear_grapheme_at(0, 0);
+        page.update_row_grapheme_flag(0);
+
+        assert_eq!(page.grapheme_count(), 0);
+        assert_eq!(page.lookup_grapheme_at(0, 0), None);
+        assert_eq!(page.grapheme_used_bytes(), 0);
+        assert!(!page.cell_copy_at(0, 0).has_grapheme());
+        assert!(!page.get_row(0).grapheme());
     }
 
     #[test]

@@ -260,3 +260,109 @@ The experiment fails if:
 This experiment design must be reviewed by Codex before implementation. Any real
 design issues must be fixed before committing the plan or implementing the
 slice.
+
+## Result
+
+**Result:** Pass
+
+Experiment 12 ported Page grapheme storage into Roastty.
+
+The implementation added:
+
+- real `grapheme_alloc` initialization inside `Page`
+- real optional `grapheme_map` initialization inside `Page`
+- `GraphemeError`
+- `append_grapheme_at`
+- `lookup_grapheme_at`
+- `clear_grapheme_at`
+- `update_row_grapheme_flag`
+- `grapheme_count`
+- `grapheme_capacity`
+- a read-only `OffsetHashMap::map_ref` / `MapRef` view
+- `OffsetSlice::offset`, `OffsetSlice::len`, and `OffsetSlice::slice_mut`
+
+### Borrowing Shape
+
+The Rust API intentionally uses coordinates instead of upstream Zig's
+`Page*`/`Row*`/`Cell*` pointer shape:
+
+- `append_grapheme_at(x, y, cp)`
+- `lookup_grapheme_at(x, y)`
+- `clear_grapheme_at(x, y)`
+- `update_row_grapheme_flag(row_index)`
+
+This keeps the map, allocator, row, and cell mutations under one `&mut Page`
+borrow. The implementation avoids holding a full-Page mutable map view while
+mutating row/cell bytes or bitmap allocator storage.
+
+Lookup uses the new read-only offset-map view and returns an owned `Vec<u32>`.
+That is a small API-shape divergence from upstream's borrowed slice, but the
+internal storage remains faithful: appended codepoints live in Page-managed
+bitmap-allocated storage and are indexed by cell offset in the grapheme map.
+
+### Storage and Rollback
+
+`Page::init` now initializes grapheme storage from the existing `PageLayout`:
+
+- `layout.grapheme_alloc_start`
+- `layout.grapheme_alloc_layout`
+- `layout.grapheme_map_start`
+- `layout.grapheme_map_layout`
+
+If the grapheme map capacity is zero, `Page` stores `None`. In that state,
+append returns `GraphemeMapOutOfMemory` before allocating codepoint storage,
+lookup returns `None`, and count/capacity return `0`.
+
+The append paths preserve rollback:
+
+- map out-of-memory after allocation frees the newly allocated slice and leaves
+  cell/row flags unchanged;
+- allocator out-of-memory during growth leaves the old mapped slice intact;
+- growth updates the map to the new slice before freeing the old slice, so the
+  map never points at freed storage.
+
+### Tests Ported
+
+The upstream tests ported are:
+
+- `Page appendGrapheme small`
+- `Page appendGrapheme larger than chunk`
+- `Page clearGrapheme not all cells`
+
+Additional Roastty tests cover:
+
+- lookup excludes the cell's first codepoint;
+- grapheme count and capacity;
+- zero-capacity grapheme map behavior;
+- map out-of-memory rollback;
+- allocator out-of-memory preserving existing data;
+- clear-after-growth freeing the active allocation and removing the map entry.
+
+Deferred upstream grapheme tests are the later clone, move, scroll/reflow, and
+integrity tests. Those depend on Page operations that are intentionally outside
+this experiment's scope.
+
+### Verification
+
+The required verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page
+cargo test -p roastty terminal::offset_hash_map
+cargo test -p roastty
+```
+
+Observed results:
+
+- `terminal::page`: 46 passed
+- `terminal::offset_hash_map`: 23 passed
+- full `roastty` suite: 132 Rust unit tests passed, C ABI harness passed, doc
+  tests passed
+
+## Conclusion
+
+Roastty now has the first real managed-memory behavior in `Page`: grapheme
+storage. The next experiment can build on this by porting the next Page
+operation that depends on managed cell data, likely grapheme movement or the
+next scoped Page mutation needed before clone/reflow/integrity can be ported.
