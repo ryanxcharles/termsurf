@@ -132,6 +132,7 @@ fn msg_type_name(msg: &TermSurfMessage) -> &'static str {
         Some(Msg::CursorChanged(_)) => "CursorChanged",
         Some(Msg::JavascriptDialogRequest(_)) => "JavaScriptDialogRequest",
         Some(Msg::JavascriptDialogReply(_)) => "JavaScriptDialogReply",
+        Some(Msg::ConsoleMessage(_)) => "ConsoleMessage",
         Some(Msg::OpenSplit(_)) => "OpenSplit",
         Some(Msg::SetDevtoolsOverlay(_)) => "SetDevtoolsOverlay",
         Some(_) => "Other",
@@ -273,6 +274,32 @@ async fn handle_message(
                 let _ = tui_tx.try_send(msg.encode_to_vec());
             } else {
                 log::warn!("JavaScriptDialogRequest: no pane for tab_id={}", r.tab_id);
+            }
+        }
+        Some(Msg::ConsoleMessage(c)) => {
+            log::debug!(
+                "ConsoleMessage: tab_id={} level={} source={} line={}",
+                c.tab_id,
+                c.level,
+                c.source_id,
+                c.line_no
+            );
+            let target = {
+                let st = state.lock().unwrap();
+                let skey = server_key.as_deref().unwrap_or("");
+                let lookup = (skey.to_string(), c.tab_id);
+                st.tab_to_pane
+                    .get(&lookup)
+                    .and_then(|pane_id| st.panes.get(pane_id))
+                    .map(|pane| pane.tui_tx.clone())
+            };
+            if let Some(tui_tx) = target {
+                let msg = TermSurfMessage {
+                    msg: Some(Msg::ConsoleMessage(c)),
+                };
+                let _ = tui_tx.try_send(msg.encode_to_vec());
+            } else {
+                log::debug!("ConsoleMessage: no pane for tab_id={}", c.tab_id);
             }
         }
         Some(Msg::JavascriptDialogReply(r)) => {

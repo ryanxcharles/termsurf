@@ -51,6 +51,13 @@ pub enum CompositorMessage {
         message: String,
         default_prompt_text: String,
     },
+    ConsoleMessage {
+        tab_id: i64,
+        level: String,
+        message: String,
+        line_no: i32,
+        source_id: String,
+    },
 }
 
 /// A direct connection to the TermSurf app via Unix domain socket.
@@ -496,6 +503,18 @@ fn dispatch_message(
                     default_prompt_text: m.default_prompt_text.clone(),
                 },
             ));
+        }
+        Some(Msg::ConsoleMessage(m)) => {
+            if tab_id != 0 && m.tab_id != 0 && m.tab_id != tab_id {
+                return;
+            }
+            let _ = event_tx.send(super::LoopEvent::Ipc(CompositorMessage::ConsoleMessage {
+                tab_id: m.tab_id,
+                level: m.level.clone(),
+                message: m.message.clone(),
+                line_no: m.line_no,
+                source_id: m.source_id.clone(),
+            }));
         }
 
         _ => {} // Ignore unexpected messages.

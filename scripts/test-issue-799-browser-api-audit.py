@@ -380,6 +380,29 @@ return {status: 'ready'};
 """,
     ),
     Probe(
+        name="console-capture-basic",
+        feature="Console capture",
+        expected_surface="WebContentsObserver console event routed through TermSurf protocol",
+        reference_evidence="Chromium exposes WebContentsObserver::OnDidAddMessageToConsole.",
+        termsurf_evidence="Experiment 7 adds one-way ConsoleMessage protocol events.",
+        requires_user_activation=False,
+        script="""
+const nonce = 'issue799';
+console.log('ts-console-top-log-' + nonce);
+console.info('ts-console-top-info-' + nonce);
+console.warn('ts-console-top-warn-' + nonce);
+console.error('ts-console-top-error-' + nonce);
+const iframe = document.createElement('iframe');
+iframe.src = '/probe/console-capture-basic-frame.html?nonce=' + encodeURIComponent(nonce);
+document.body.appendChild(iframe);
+setTimeout(() => {
+  throw new Error('ts-console-throw-' + nonce);
+}, 100);
+await new Promise((resolve) => setTimeout(resolve, 500));
+return {status: 'console_emitted', nonce};
+""",
+    ),
+    Probe(
         name="javascript-alert",
         feature="JavaScript dialogs",
         expected_surface="TermSurf JavaScript dialog request/reply protocol",
@@ -899,6 +922,101 @@ def verify_page_zoom_probe(
     }
 
 
+def verify_console_capture_probe(
+    probe_name: str,
+    tab_id: int | None,
+    report: dict[str, Any] | None,
+    console_messages: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if probe_name != "console-capture-basic":
+        return None
+
+    status = "completed"
+    reasons: list[str] = []
+    expected = [
+        {
+            "name": "top-log",
+            "message": "ts-console-top-log-issue799",
+            "level": "info",
+            "source": "/probe/console-capture-basic.html",
+        },
+        {
+            "name": "top-info",
+            "message": "ts-console-top-info-issue799",
+            "level": "info",
+            "source": "/probe/console-capture-basic.html",
+        },
+        {
+            "name": "top-warn",
+            "message": "ts-console-top-warn-issue799",
+            "level": "warning",
+            "source": "/probe/console-capture-basic.html",
+        },
+        {
+            "name": "top-error",
+            "message": "ts-console-top-error-issue799",
+            "level": "error",
+            "source": "/probe/console-capture-basic.html",
+        },
+        {
+            "name": "frame-warn",
+            "message": "ts-console-frame-warn-issue799",
+            "level": "warning",
+            "source": "/probe/console-capture-basic-frame.html",
+        },
+        {
+            "name": "uncaught-error",
+            "message": "ts-console-throw-issue799",
+            "level": "error",
+            "source": "/probe/console-capture-basic.html",
+        },
+    ]
+    matches: dict[str, dict[str, Any]] = {}
+    for item in expected:
+        found = next(
+            (
+                message
+                for message in console_messages
+                if item["message"] in str(message.get("message", ""))
+            ),
+            None,
+        )
+        if not found:
+            status = "failed"
+            reasons.append(f"missing console message {item['name']}")
+            continue
+        matches[item["name"]] = found
+        if found.get("level") != item["level"]:
+            status = "failed"
+            reasons.append(
+                f"wrong level for {item['name']}: {found.get('level')}"
+            )
+        if tab_id is not None and found.get("tab_id") != tab_id:
+            status = "failed"
+            reasons.append(
+                f"wrong tab_id for {item['name']}: {found.get('tab_id')}"
+            )
+        if item["source"] not in str(found.get("source_id", "")):
+            status = "failed"
+            reasons.append(
+                f"wrong source for {item['name']}: {found.get('source_id')}"
+            )
+        if int(found.get("line_no", 0) or 0) <= 0:
+            status = "failed"
+            reasons.append(f"missing positive line_no for {item['name']}")
+
+    if not report or report.get("status") != "console_emitted":
+        status = "failed"
+        reasons.append("page did not report console_emitted")
+
+    return {
+        "status": status,
+        "reasons": reasons,
+        "expected": expected,
+        "matches": matches,
+    }
+
+
 def create_tab_payload(url: str, width: int, height: int) -> bytes:
     return (
         string_field(1, url)
@@ -996,6 +1114,19 @@ def make_handler(state: ProbeState) -> type[http.server.BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
+            if parsed.path == "/probe/console-capture-basic-frame.html":
+                query = parse_qs(parsed.query)
+                nonce = query.get("nonce", ["issue799"])[-1]
+                body = f"""<!doctype html>
+<meta charset="utf-8">
+<title>console frame</title>
+<script>
+console.warn({json.dumps("ts-console-frame-warn-" + nonce)});
+</script>
+frame
+""".encode("utf-8")
+                self.send_bytes(body, "text/html; charset=utf-8")
+                return
             if parsed.path.startswith("/probe/") and parsed.path.endswith(".html"):
                 name = pathlib.PurePosixPath(parsed.path).stem
                 probe = probe_by_name.get(name)
@@ -1322,6 +1453,7 @@ def run_probe(
     tab_id: int | None = None
     socket_disconnect = False
     javascript_dialogs: list[dict[str, Any]] = []
+    console_messages: list[dict[str, Any]] = []
     activation_sent = False
     activation_ready_at: float | None = None
     activation_sent_at: float | None = None
@@ -1498,6 +1630,24 @@ def run_probe(
                             f"accepted={accepted}\n"
                         )
                         messages.flush()
+                    elif top == 36:
+                        fields = parse_message_fields(body)
+                        evidence = {
+                            "received_time": time.time() - start,
+                            "tab_id": int(fields.get(1, 0) or 0),
+                            "level": str(fields.get(2, "")),
+                            "message": str(fields.get(3, "")),
+                            "line_no": int(fields.get(4, 0) or 0),
+                            "source_id": str(fields.get(5, "")),
+                        }
+                        console_messages.append(evidence)
+                        messages.write(
+                            "console_message "
+                            f"level={evidence['level']} "
+                            f"line_no={evidence['line_no']} "
+                            f"source={evidence['source_id']}\n"
+                        )
+                        messages.flush()
                 except socket.timeout:
                     pass
     finally:
@@ -1585,6 +1735,26 @@ def run_probe(
             classification = "page_zoom_completed"
         elif classification in ("exercised", "reported"):
             classification = "page_zoom_failed"
+    console_capture_result = verify_console_capture_probe(
+        probe.name,
+        tab_id,
+        report,
+        console_messages,
+    )
+    if console_capture_result:
+        if (
+            classification
+            not in (
+                "missing_binder",
+                "bad_mojo",
+                "renderer_or_browser_crash",
+                "process_exit",
+            )
+            and console_capture_result["status"] == "completed"
+        ):
+            classification = "console_capture_completed"
+        elif classification in ("exercised", "reported"):
+            classification = "console_capture_failed"
     result = {
         "probe": probe.name,
         "feature": probe.feature,
@@ -1605,6 +1775,8 @@ def run_probe(
         "javascript_dialogs": javascript_dialogs,
         "javascript_dialog_result": javascript_dialog_result,
         "page_zoom_result": page_zoom_result,
+        "console_messages": console_messages,
+        "console_capture_result": console_capture_result,
         "beforeunload_activation": (
             {
                 "ready": activation_ready_at is not None,
@@ -1706,6 +1878,10 @@ def write_coverage_map(path: pathlib.Path, results: list[dict[str, Any]]) -> Non
             next_action = "Page zoom shortcuts completed with verified browser zoom metrics."
         elif classification == "page_zoom_failed":
             next_action = "Inspect page zoom shortcut routing and metric snapshots."
+        elif classification == "console_capture_completed":
+            next_action = "Console messages completed through protocol capture."
+        elif classification == "console_capture_failed":
+            next_action = "Inspect console protocol messages and source/level evidence."
         elif classification == "unsupported":
             next_action = "No runtime surface exposed in this build."
         else:
@@ -1750,6 +1926,10 @@ def write_reference_coverage_map(path: pathlib.Path, results: list[dict[str, Any
             next_action = "No immediate action; verified page zoom shortcuts."
         elif classification == "page_zoom_failed":
             next_action = "Inspect page zoom shortcut routing and metric snapshots."
+        elif classification == "console_capture_completed":
+            next_action = "No immediate action; verified protocol console capture."
+        elif classification == "console_capture_failed":
+            next_action = "Inspect console protocol messages and source/level evidence."
         elif classification in ("exercised", "unsupported"):
             next_action = "No immediate binder fix from this probe."
         else:

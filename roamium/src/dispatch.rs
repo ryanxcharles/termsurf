@@ -577,3 +577,40 @@ pub unsafe extern "C" fn on_javascript_dialog_request(
     };
     crate::ipc::send(&msg);
 }
+
+pub unsafe extern "C" fn on_console_message(
+    wc: TsWebContents,
+    level: *const std::os::raw::c_char,
+    message: *const std::os::raw::c_char,
+    line_no: i32,
+    source_id: *const std::os::raw::c_char,
+    _user_data: *mut c_void,
+) {
+    let Some(t) = find_by_handle(wc) else {
+        eprintln!("[termsurf-console] message-missing-tab line_no={}", line_no);
+        return;
+    };
+    let level = unsafe { std::ffi::CStr::from_ptr(level) }
+        .to_string_lossy()
+        .into_owned();
+    let message = unsafe { std::ffi::CStr::from_ptr(message) }
+        .to_string_lossy()
+        .into_owned();
+    let source_id = unsafe { std::ffi::CStr::from_ptr(source_id) }
+        .to_string_lossy()
+        .into_owned();
+    eprintln!(
+        "[termsurf-console] message tab_id={} level={} line_no={} source={}",
+        t.tab_id, level, line_no, source_id
+    );
+    let msg = TermSurfMessage {
+        msg: Some(Msg::ConsoleMessage(proto::termsurf::ConsoleMessage {
+            tab_id: t.tab_id,
+            level,
+            message,
+            line_no,
+            source_id,
+        })),
+    };
+    crate::ipc::send(&msg);
+}

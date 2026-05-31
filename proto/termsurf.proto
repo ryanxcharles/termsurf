@@ -58,6 +58,9 @@ message TermSurfMessage {
     // JavaScript dialogs (Chromium ↔ TUI / automation harness)
     JavaScriptDialogRequest javascript_dialog_request = 34;
     JavaScriptDialogReply javascript_dialog_reply = 35;
+
+    // Console capture (Chromium → TUI / automation harness)
+    ConsoleMessage console_message = 36;
   }
 }
 
@@ -218,6 +221,14 @@ message JavaScriptDialogReply {
   uint64 request_id = 2;
   bool accepted = 3;
   string prompt_text = 4;
+}
+
+message ConsoleMessage {
+  int64 tab_id = 1;
+  string level = 2;
+  string message = 3;
+  int32 line_no = 4;
+  string source_id = 5;
 }
 
 // --- TUI → GUI ---

@@ -65,6 +65,15 @@ struct PendingJsDialog {
     previous_mode: Mode,
 }
 
+#[derive(Clone)]
+struct ConsoleLogEntry {
+    tab_id: i64,
+    level: String,
+    message: String,
+    line_no: i32,
+    source_id: String,
+}
+
 // Loading screen stages (Issue 773).
 #[derive(Clone)]
 enum LoadingStage {
@@ -394,6 +403,7 @@ fn main() -> io::Result<()> {
     let mut page_loaded = false;
     let mut page_loaded_at: Option<Instant> = None;
     let mut loading_log: Vec<(LoadingStage, StageStatus)> = Vec::new();
+    let mut console_log: Vec<ConsoleLogEntry> = Vec::new();
     let mut chromium_wait_start: Option<Instant> = None;
 
     // Populate initial loading stages (Issue 773).
@@ -457,6 +467,7 @@ fn main() -> io::Result<()> {
                 &target_url,
                 &pending_dialog,
                 &loading_log,
+                &console_log,
                 browser_ready,
                 chromium_wait_start,
             );
@@ -892,6 +903,25 @@ fn main() -> io::Result<()> {
                     ipc::CompositorMessage::TargetUrlChanged { url: new_target } => {
                         target_url = new_target;
                     }
+                    ipc::CompositorMessage::ConsoleMessage {
+                        tab_id,
+                        level,
+                        message,
+                        line_no,
+                        source_id,
+                    } => {
+                        console_log.push(ConsoleLogEntry {
+                            tab_id,
+                            level,
+                            message,
+                            line_no,
+                            source_id,
+                        });
+                        if console_log.len() > 100 {
+                            let drain_count = console_log.len() - 100;
+                            console_log.drain(0..drain_count);
+                        }
+                    }
                     ipc::CompositorMessage::BrowserReady {
                         tab_id,
                         browser_socket,
@@ -1081,6 +1111,7 @@ fn ui(
     target_url: &str,
     pending_dialog: &Option<PendingJsDialog>,
     loading_log: &[(LoadingStage, StageStatus)],
+    console_log: &[ConsoleLogEntry],
     browser_ready: bool,
     chromium_wait_start: Option<Instant>,
 ) -> Rect {
@@ -1343,56 +1374,84 @@ fn ui(
 
     let d = Style::default().fg(DIM).bg(BG);
     let f = Style::default().fg(FG).bg(BG);
+    let latest_console = console_log
+        .iter()
+        .rev()
+        .find(|entry| matches!(entry.level.as_str(), "warning" | "error"));
 
-    let hints = match mode {
-        Mode::Browse => Line::from(vec![
-            Span::styled("\u{2318}[ ", f),
-            Span::styled("back  ", d),
-            Span::styled("\u{2318}] ", f),
-            Span::styled("fwd  ", d),
-            Span::styled("\u{2318}r ", f),
-            Span::styled("reload  ", d),
-            Span::styled("esc ", f),
-            Span::styled("control", d),
-        ]),
-        Mode::Control => {
-            if is_devtools {
-                // DevTools: no edit keys (Issue 687).
-                Line::from(vec![
-                    Span::styled(":q\u{23CE} ", f),
-                    Span::styled("quit  ", d),
-                    Span::styled("\u{23CE} ", f),
-                    Span::styled("browse", d),
-                ])
-            } else {
-                Line::from(vec![
-                    Span::styled(":q\u{23CE} ", f),
-                    Span::styled("quit  ", d),
-                    Span::styled("i ", f),
-                    Span::styled("edit url  ", d),
-                    Span::styled("\u{23CE} ", f),
-                    Span::styled("browse", d),
-                ])
+    let hints = if let Some(entry) = latest_console {
+        let color = if entry.level == "error" { RED } else { YELLOW };
+        Line::from(vec![
+            Span::styled(
+                format!("console {} ", entry.level),
+                Style::default().fg(color).bg(BG),
+            ),
+            Span::styled(
+                format!(
+                    "{}:{} #{} {}",
+                    entry
+                        .source_id
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(&entry.source_id),
+                    entry.line_no,
+                    entry.tab_id,
+                    entry.message
+                ),
+                d,
+            ),
+        ])
+    } else {
+        match mode {
+            Mode::Browse => Line::from(vec![
+                Span::styled("\u{2318}[ ", f),
+                Span::styled("back  ", d),
+                Span::styled("\u{2318}] ", f),
+                Span::styled("fwd  ", d),
+                Span::styled("\u{2318}r ", f),
+                Span::styled("reload  ", d),
+                Span::styled("esc ", f),
+                Span::styled("control", d),
+            ]),
+            Mode::Control => {
+                if is_devtools {
+                    // DevTools: no edit keys (Issue 687).
+                    Line::from(vec![
+                        Span::styled(":q\u{23CE} ", f),
+                        Span::styled("quit  ", d),
+                        Span::styled("\u{23CE} ", f),
+                        Span::styled("browse", d),
+                    ])
+                } else {
+                    Line::from(vec![
+                        Span::styled(":q\u{23CE} ", f),
+                        Span::styled("quit  ", d),
+                        Span::styled("i ", f),
+                        Span::styled("edit url  ", d),
+                        Span::styled("\u{23CE} ", f),
+                        Span::styled("browse", d),
+                    ])
+                }
             }
+            Mode::Edit => Line::from(vec![
+                Span::styled("\u{23CE} ", f),
+                Span::styled("navigate  ", d),
+                Span::styled("esc ", f),
+                Span::styled("control", d),
+            ]),
+            Mode::Command => Line::from(vec![
+                Span::styled("\u{23CE} ", f),
+                Span::styled("execute  ", d),
+                Span::styled("esc ", f),
+                Span::styled("control", d),
+            ]),
+            Mode::Dialog => Line::from(vec![
+                Span::styled("\u{23CE}/y ", f),
+                Span::styled("accept  ", d),
+                Span::styled("n/esc ", f),
+                Span::styled("cancel", d),
+            ]),
         }
-        Mode::Edit => Line::from(vec![
-            Span::styled("\u{23CE} ", f),
-            Span::styled("navigate  ", d),
-            Span::styled("esc ", f),
-            Span::styled("control", d),
-        ]),
-        Mode::Command => Line::from(vec![
-            Span::styled("\u{23CE} ", f),
-            Span::styled("execute  ", d),
-            Span::styled("esc ", f),
-            Span::styled("control", d),
-        ]),
-        Mode::Dialog => Line::from(vec![
-            Span::styled("\u{23CE}/y ", f),
-            Span::styled("accept  ", d),
-            Span::styled("n/esc ", f),
-            Span::styled("cancel", d),
-        ]),
     };
 
     let label = match mode {

@@ -361,3 +361,73 @@ This experiment fails if:
 - it drops messages silently when a TUI client exists;
 - it changes page behavior, navigation, dialogs, downloads, page zoom, or PDF
   behavior while adding console capture.
+
+## Result
+
+**Result:** Pass
+
+Experiment 7 added one-way protocol console capture from Chromium to TermSurf
+clients.
+
+Implemented behavior:
+
+- `termsurf.proto` now includes `ConsoleMessage console_message = 36` with
+  `tab_id`, `level`, `message`, `line_no`, and `source_id`.
+- Chromium emits console events from
+  `TsTabObserver::OnDidAddMessageToConsole(...)` through a new
+  `ts_set_on_console_message(...)` callback.
+- Roamium converts the callback into `Msg::ConsoleMessage` and logs
+  `[termsurf-console]` diagnostics.
+- Wezboard routes console messages from the browser process to the pane's TUI
+  connection and safely drops messages when no pane is available.
+- webtui receives console messages, keeps the latest 100 in memory, and exposes
+  the latest warning/error in the existing footer/status area.
+- The Issue 799 harness now includes `console-capture-basic`, which verifies
+  top-frame `log`/`info`/`warn`/`error`, same-origin iframe warning, and an
+  uncaught thrown error over the protocol.
+
+Formatting and build evidence:
+
+- Ran `cargo fmt` for edited Rust crates and accepted formatter output.
+- Ran Chromium `clang-format` on the edited C++ files.
+- `python3 -m py_compile scripts/test-issue-799-browser-api-audit.py` passed.
+- `git diff --check` passed for the main repo.
+- `git -C chromium/src diff --check` passed for Chromium.
+- `PATH="/Users/ryan/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin:$PATH" ./scripts/build.sh roamium`
+  passed.
+- `PATH="/Users/ryan/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin:$PATH" ./scripts/build.sh webtui`
+  passed.
+- `PATH="/Users/ryan/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin:$PATH" ./scripts/build.sh wezboard`
+  passed.
+- `autoninja -C out/Default libtermsurf_chromium` passed with no work to do
+  after the implementation build.
+
+Automated verification:
+
+- Focused console probe:
+  `logs/issue-799-browser-api-audit/20260531-005837-353576`
+  - `console-capture-basic`: `console_capture_completed`
+  - `missing_interfaces`: `[]`
+- Full Issue 799 harness:
+  `logs/issue-799-browser-api-audit/20260531-005850-754131`
+  - 21 probes completed.
+  - `console-capture-basic`: `console_capture_completed`
+  - `download-attachment`: `download_completed`
+  - `download-blob`: `download_completed`
+  - JavaScript dialog probes: `dialog_completed`
+  - `page-zoom-shortcuts`: `page_zoom_completed`
+  - `missing_interfaces`: `[]`
+
+Codex reviewed the implementation and found no blocking issues. Its only process
+note was to include the current build evidence above before recording the pass.
+
+## Conclusion
+
+Console capture is now an automated, protocol-level TermSurf feature. It does
+not depend on DevTools, stderr scraping, remote debugging, JavaScript injection,
+or manual testing. The verifier proves top-frame messages, subframe messages,
+and browser-generated uncaught errors reach the fake GUI with stable level,
+source, line, and tab metadata.
+
+The next Issue 799 experiment should continue through the remaining automatable
+browser API queue rather than revisiting console capture.

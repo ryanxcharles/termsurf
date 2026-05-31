@@ -94,6 +94,7 @@ fn main() {
             Some(dispatch::on_javascript_dialog_request),
             ptr::null_mut(),
         );
+        ffi::ts_set_on_console_message(Some(dispatch::on_console_message), ptr::null_mut());
     }
 
     // Enter Chromium's message loop (blocks until shutdown).
