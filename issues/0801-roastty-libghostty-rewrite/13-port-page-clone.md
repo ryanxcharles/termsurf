@@ -158,3 +158,94 @@ The experiment fails if:
 This experiment design must be reviewed by Codex before implementation. Any real
 design issues must be fixed before committing the plan or implementing the
 slice.
+
+## Result
+
+**Result:** Pass
+
+Experiment 13 ported owned whole-Page cloning for the Page storage implemented
+so far: rows, cells, and graphemes.
+
+The implementation added:
+
+- `Page::clone_page(&self) -> Result<Page, PageAllocError>`
+
+### Clone Strategy
+
+`clone_page` follows Ghostty's offset-copy invariant:
+
+1. allocate a fresh `PageMemory` with the same byte length as the source;
+2. copy the source backing memory byte-for-byte into the new mapping;
+3. copy offset-valued Page metadata by value:
+   - `rows`
+   - `cells`
+   - `dirty`
+   - `size`
+   - `capacity`
+   - `layout`
+   - `grapheme_alloc`
+   - `grapheme_map`
+
+No offsets are rewritten. They remain valid because they are relative to the new
+Page backing pointer.
+
+The clone owns a separate mmap allocation and frees it independently.
+
+### Clone Buffer
+
+The upstream `cloneBuf` API was not ported in this experiment. No current
+Roastty caller needs caller-provided clone buffers, and the upstream tests
+selected for this slice are satisfied by owned `clone_page`.
+
+### Tests Ported
+
+The upstream tests ported are:
+
+- `Page clone`
+- `Page clone graphemes`
+
+Additional Roastty tests cover:
+
+- clone backing pointer differs from source backing pointer;
+- clone backing length and capacity match the source;
+- mutating source text after clone does not affect clone;
+- clearing/freeing source graphemes after clone does not affect clone;
+- dropping the source before reading the clone leaves the clone readable;
+- dropping the clone does not affect the source.
+
+Deferred upstream clone tests are:
+
+- `Page clone styles`
+- `Page cloneFrom`
+- `Page cloneFrom shrink columns`
+- `Page cloneFrom partial`
+- `Page cloneFrom hyperlinks exact capacity`
+- `Page cloneFrom graphemes`
+- `Page cloneFrom frees dst graphemes`
+- `Page cloneRowFrom ...`
+
+Those require style storage, hyperlink storage, `cloneFrom`, partial row copy,
+or exact-capacity behavior that is intentionally outside this experiment.
+
+### Verification
+
+The required verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+Observed results:
+
+- `terminal::page`: 50 passed
+- full `roastty` suite: 136 Rust unit tests passed, C ABI harness passed, doc
+  tests passed
+
+## Conclusion
+
+Roastty now preserves Ghostty's whole-Page offset-copy invariant for rows,
+cells, and graphemes. The next Page work can move to either the next managed
+storage dependency, such as styles, or the next clone-related operation that can
+be scoped without styles/hyperlinks.

@@ -153,7 +153,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 12: Port Page Grapheme Storage](12-port-page-graphemes.md) —
   **Pass**
 - [Experiment 13: Port Page Clone for Text and Graphemes](13-port-page-clone.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

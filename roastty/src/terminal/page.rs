@@ -389,6 +389,25 @@ impl Page {
         self.capacity
     }
 
+    pub(super) fn clone_page(&self) -> Result<Self, PageAllocError> {
+        let mut memory = PageMemory::new(self.memory.len())?;
+        memory
+            .as_mut_slice()
+            .copy_from_slice(self.memory.as_slice());
+
+        Ok(Self {
+            memory,
+            rows: self.rows,
+            cells: self.cells,
+            dirty: self.dirty,
+            size: self.size,
+            capacity: self.capacity,
+            layout: self.layout,
+            grapheme_alloc: self.grapheme_alloc,
+            grapheme_map: self.grapheme_map,
+        })
+    }
+
     pub(super) fn get_row(&self, y: usize) -> &Row {
         assert!(y < self.size.rows as usize);
         unsafe {
@@ -1853,6 +1872,95 @@ mod tests {
         assert_eq!(page.grapheme_used_bytes(), 0);
         assert!(!page.cell_copy_at(0, 0).has_grapheme());
         assert!(!page.get_row(0).grapheme());
+    }
+
+    #[test]
+    fn page_clone() {
+        let mut page = Page::init(Capacity {
+            cols: 10,
+            rows: 10,
+            styles: 8,
+            ..Capacity::new(10, 10)
+        })
+        .unwrap();
+
+        for y in 0..page.capacity.rows as usize {
+            *page.get_row_and_cell_mut(1, y).cell = Cell::init(y as u32);
+        }
+
+        let page2 = page.clone_page().unwrap();
+        assert_eq!(page2.capacity, page.capacity);
+        assert_eq!(page2.backing_len(), page.backing_len());
+        assert_ne!(page2.backing_ptr(), page.backing_ptr());
+
+        for y in 0..page2.capacity.rows as usize {
+            assert_eq!(page2.get_cells(page2.get_row(y))[1].codepoint(), y as u32);
+        }
+
+        for y in 0..page.capacity.rows as usize {
+            *page.get_row_and_cell_mut(1, y).cell = Cell::init(0);
+        }
+
+        for y in 0..page2.capacity.rows as usize {
+            assert_eq!(page2.get_cells(page2.get_row(y))[1].codepoint(), y as u32);
+        }
+        for y in 0..page.capacity.rows as usize {
+            assert_eq!(page.get_cells(page.get_row(y))[1].codepoint(), 0);
+        }
+    }
+
+    #[test]
+    fn page_clone_graphemes() {
+        let mut page = Page::init(Capacity {
+            cols: 10,
+            rows: 10,
+            styles: 8,
+            ..Capacity::new(10, 10)
+        })
+        .unwrap();
+
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init(0x09);
+        page.append_grapheme_at(0, 0, 0x0a).unwrap();
+        page.append_grapheme_at(0, 0, 0x0b).unwrap();
+
+        let page2 = page.clone_page().unwrap();
+        assert!(page2.get_row(0).grapheme());
+        assert!(page2.cell_copy_at(0, 0).has_grapheme());
+        assert_eq!(page2.lookup_grapheme_at(0, 0).unwrap(), vec![0x0a, 0x0b]);
+    }
+
+    #[test]
+    fn page_clone_graphemes_survive_source_clear_and_drop() {
+        let page2 = {
+            let mut page = Page::init(Capacity::new(5, 5)).unwrap();
+            *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+            page.append_grapheme_at(0, 0, 0x0301).unwrap();
+
+            let page2 = page.clone_page().unwrap();
+            page.clear_grapheme_at(0, 0);
+            page.update_row_grapheme_flag(0);
+            assert_eq!(page.lookup_grapheme_at(0, 0), None);
+            page2
+        };
+
+        assert!(page2.get_row(0).grapheme());
+        assert!(page2.cell_copy_at(0, 0).has_grapheme());
+        assert_eq!(page2.lookup_grapheme_at(0, 0), Some(vec![0x0301]));
+    }
+
+    #[test]
+    fn page_clone_drop_does_not_affect_source() {
+        let mut page = Page::init(Capacity::new(5, 5)).unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+        page.append_grapheme_at(0, 0, 0x0301).unwrap();
+
+        {
+            let page2 = page.clone_page().unwrap();
+            assert_eq!(page2.lookup_grapheme_at(0, 0), Some(vec![0x0301]));
+        }
+
+        assert_eq!(page.lookup_grapheme_at(0, 0), Some(vec![0x0301]));
+        assert!(page.cell_copy_at(0, 0).has_grapheme());
     }
 
     #[test]
