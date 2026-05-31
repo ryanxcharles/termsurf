@@ -255,3 +255,110 @@ The experiment fails if:
   insufficient.
 - Do not use `ninja`; Chromium builds must use `autoninja`.
 - Run `cargo fmt` after Rust edits and accept its output.
+
+## Result
+
+**Result:** Pass
+
+Experiment 10 implemented a TermSurf-owned default-deny permission layer in
+Chromium and extended the automated Issue 799 harness to prove the relevant
+denials.
+
+Chromium branch:
+
+```text
+148.0.7778.97-issue-799-exp10
+4806a3457d9ce Deny permissions by default
+```
+
+Changes made:
+
+- Added `TsBrowserContext`, a `ShellBrowserContext` subclass that installs a
+  TermSurf permission delegate for both regular and off-the-record browser
+  contexts.
+- Added `TsPermissionManager`, a `PermissionControllerDelegate` implementation
+  that returns `DENIED` for permission queries and requests instead of
+  inheriting Content Shell's test allowlist.
+- Overrode `TsBrowserClient::IsFileSystemAccessApiFilePickerAllowed()` to deny
+  native File System Access pickers before any native UI opens.
+- Extended the Issue 799 harness so File System Access waits for synthetic user
+  activation, then proves the TermSurf picker-policy denial rather than
+  accepting a generic activation failure.
+- Regenerated the Chromium patch archive:
+
+```text
+chromium/patches/issue-799/0071-Deny-permissions-by-default.patch
+```
+
+Verification:
+
+```text
+./buildtools/mac_arm64-format/clang-format -i content/libtermsurf_chromium/ts_permission_manager.h content/libtermsurf_chromium/ts_permission_manager.cc content/libtermsurf_chromium/ts_browser_context.h content/libtermsurf_chromium/ts_browser_context.cc content/libtermsurf_chromium/ts_browser_client.h content/libtermsurf_chromium/ts_browser_client.cc content/libtermsurf_chromium/ts_browser_main_parts.cc
+python3 -m py_compile scripts/test-issue-799-browser-api-audit.py
+autoninja -C out/Default libtermsurf_chromium
+PATH="/Users/ryan/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin:$PATH" ./scripts/build.sh roamium
+```
+
+Focused harness run:
+
+```text
+logs/issue-799-browser-api-audit/20260531-025031-426617
+status: completed
+permissions-query: default_denied
+geolocation-deny: default_denied
+notification-permission: default_denied
+file-system-access: file_system_access_denied
+service-worker-basic: exercised
+missing_interfaces: []
+empty_interfaces: []
+```
+
+The focused run proved:
+
+- `permissions-query` reports `denied` for geolocation, notifications, camera,
+  and microphone.
+- `geolocation-deny` rejects with code `1` / permission denied, not timeout.
+- `notification-permission` returns `denied`.
+- `file-system-access` reached the picker call after synthetic activation and
+  rejected with the TermSurf browser policy message:
+
+```text
+File Picker for file system access APIs not allowed at this time.
+```
+
+Full harness run:
+
+```text
+logs/issue-799-browser-api-audit/20260531-025116-412177
+status: completed
+probe_count: 24
+missing_interfaces: []
+empty_interfaces: []
+renderer-crash-recovery: renderer_crash_recovered
+file-system-access: file_system_access_denied
+permissions-query: default_denied
+geolocation-deny: default_denied
+notification-permission: default_denied
+webauthn-create: blocked_needs_virtual_authenticator
+```
+
+`webauthn-create` remains deliberately deferred to the next experiment, as
+designed.
+
+Codex reviewed the design before implementation, reviewed the implementation,
+found a real File System Access verifier weakness, and then re-reviewed the
+fixed implementation plus fresh verification. Final Codex review result:
+
+```text
+No blockers found.
+```
+
+## Conclusion
+
+TermSurf now owns its permission posture instead of inheriting Content Shell's
+test-friendly allowlist. Geolocation, notifications, camera, microphone, and
+File System Access picker access now fail closed in a deterministic,
+automatically verified way. The next experiment should handle the remaining
+`webauthn-create` classification by adding contained DevTools virtual
+authenticator coverage, or explicitly defer WebAuthn if that setup proves too
+large for this issue.

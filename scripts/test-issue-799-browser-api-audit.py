@@ -208,13 +208,44 @@ try {
         requires_user_activation=True,
         script="""
 if (!window.showOpenFilePicker) return {status: 'unsupported'};
-try {
-  await window.showOpenFilePicker({multiple: false});
-  return {status: 'resolved'};
-} catch (error) {
-  const blocked = error?.name === 'SecurityError' || error?.name === 'NotAllowedError' || /user activation/i.test(String(error));
-  return {status: blocked ? 'blocked_user_activation' : 'rejected', error: String(error), errorName: error?.name || null};
-}
+const button = document.createElement('button');
+button.textContent = 'open file picker';
+button.style.position = 'absolute';
+button.style.left = '8px';
+button.style.top = '8px';
+button.style.width = '180px';
+button.style.height = '48px';
+document.body.appendChild(button);
+let activationObserved = false;
+let pickerCallStartedAfterActivation = false;
+button.onpointerdown = () => sendReport({status: 'pointerdown'});
+button.onmousedown = () => sendReport({status: 'mousedown'});
+return await new Promise((resolve) => {
+  button.onclick = async () => {
+    activationObserved = true;
+    sendReport({status: 'activated'});
+    pickerCallStartedAfterActivation = true;
+    sendReport({status: 'picker_call_started_after_activation'});
+    try {
+      await window.showOpenFilePicker({multiple: false});
+      resolve({
+        status: 'resolved',
+        activationObserved,
+        pickerCallStartedAfterActivation
+      });
+    } catch (error) {
+      resolve({
+        status: 'file_system_access_denied',
+        activationObserved,
+        pickerCallStartedAfterActivation,
+        error: String(error),
+        errorName: error?.name || null,
+        message: error?.message || null
+      });
+    }
+  };
+  sendReport({status: 'ready'});
+});
 """,
     ),
     Probe(
@@ -797,6 +828,115 @@ def verify_javascript_dialog_probe(
         status = "failed"
         reasons.append(f"wrong page value {report.get('value')!r}")
     return {"status": status, "reasons": reasons, "expected": expected}
+
+
+def verify_default_deny_probe(
+    probe_name: str,
+    report: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if probe_name == "permissions-query":
+        expected_states = {
+            "geolocation": "denied",
+            "notifications": "denied",
+            "camera": "denied",
+            "microphone": "denied",
+        }
+        reasons: list[str] = []
+        actual: dict[str, str | None] = {}
+        if not report or report.get("status") != "resolved":
+            reasons.append("permissions query did not resolve")
+        for entry in (report or {}).get("results", []):
+            name = str(entry.get("name", ""))
+            if name in expected_states:
+                actual[name] = entry.get("state")
+        for name, expected_state in expected_states.items():
+            if actual.get(name) != expected_state:
+                reasons.append(
+                    f"{name} expected {expected_state}, got {actual.get(name)!r}"
+                )
+        return {
+            "status": "completed" if not reasons else "failed",
+            "reasons": reasons,
+            "expected_states": expected_states,
+            "actual_states": actual,
+        }
+    if probe_name == "geolocation-deny":
+        reasons = []
+        if not report or report.get("status") != "rejected":
+            reasons.append("geolocation did not reject")
+        if (report or {}).get("code") != 1:
+            reasons.append(
+                "expected PERMISSION_DENIED code 1, "
+                f"got {(report or {}).get('code')!r}"
+            )
+        return {
+            "status": "completed" if not reasons else "failed",
+            "reasons": reasons,
+            "expected_code": 1,
+        }
+    if probe_name == "notification-permission":
+        reasons = []
+        if not report or report.get("status") != "resolved":
+            reasons.append("notification permission request did not resolve")
+        if (report or {}).get("permission") != "denied":
+            reasons.append(
+                f"expected denied, got {(report or {}).get('permission')!r}"
+            )
+        return {
+            "status": "completed" if not reasons else "failed",
+            "reasons": reasons,
+            "expected_permission": "denied",
+        }
+    return None
+
+
+def verify_file_system_access_probe(
+    probe_name: str,
+    report: dict[str, Any] | None,
+    activation_ready_at: float | None,
+    activation_sent: bool,
+    activation_observed_at: float | None,
+    picker_call_started_at: float | None,
+) -> dict[str, Any] | None:
+    if probe_name != "file-system-access":
+        return None
+    reasons: list[str] = []
+    if activation_ready_at is None:
+        reasons.append("page never reported ready")
+    if not activation_sent:
+        reasons.append("harness did not send activation input")
+    if activation_observed_at is None:
+        reasons.append("page did not observe activation")
+    if picker_call_started_at is None:
+        reasons.append("page did not start picker call after activation")
+    if not report:
+        reasons.append("page did not report final picker result")
+    elif report.get("status") != "file_system_access_denied":
+        reasons.append(
+            f"expected file_system_access_denied, got {report.get('status')!r}"
+        )
+    if report and not report.get("activationObserved"):
+        reasons.append("final report did not record activationObserved=true")
+    if report and not report.get("pickerCallStartedAfterActivation"):
+        reasons.append(
+            "final report did not record pickerCallStartedAfterActivation=true"
+        )
+    message = str(
+        (report or {}).get("message") or (report or {}).get("error") or ""
+    )
+    if report and "not allowed at this time" not in message:
+        reasons.append("rejection did not include TermSurf file-picker policy denial")
+    if report and re.search(r"user gesture|user activation", message, re.I):
+        reasons.append("rejection still looks like a user-activation failure")
+    return {
+        "status": "completed" if not reasons else "failed",
+        "reasons": reasons,
+        "activation_sent": activation_sent,
+        "activation_observed": activation_observed_at is not None,
+        "picker_call_started_after_activation": picker_call_started_at is not None,
+        "errorName": (report or {}).get("errorName"),
+        "message": (report or {}).get("message"),
+    }
 
 
 def numeric_metric(report: dict[str, Any], key: str) -> float | None:
@@ -1845,6 +1985,7 @@ def run_probe(
     activation_ready_at: float | None = None
     activation_sent_at: float | None = None
     activation_observed_at: float | None = None
+    picker_call_started_at: float | None = None
     navigation_sent = False
     page_zoom_events: list[dict[str, Any]] = []
     page_zoom_next_step = 0
@@ -1896,6 +2037,31 @@ def run_probe(
                         send_message(conn, 5, navigate_payload(tab_id, destination))
                         navigation_sent = True
                         messages.write(f"sent beforeunload Navigate url={destination}\n")
+                        messages.flush()
+                if probe.name == "file-system-access" and tab_id:
+                    reports = state_reports_for_probe(run_dir, probe.name)
+                    statuses = {str(report.get("status")) for report in reports}
+                    if "ready" in statuses and activation_ready_at is None:
+                        activation_ready_at = time.time()
+                    if "activated" in statuses and activation_observed_at is None:
+                        activation_observed_at = time.time()
+                    if (
+                        "picker_call_started_after_activation" in statuses
+                        and picker_call_started_at is None
+                    ):
+                        picker_call_started_at = time.time()
+                    if (
+                        activation_ready_at is not None
+                        and time.time() - activation_ready_at >= 0.5
+                        and not activation_sent
+                    ):
+                        send_message(conn, 10, focus_changed_payload(tab_id, True))
+                        send_message(conn, 7, mouse_move_payload(tab_id, 20, 20))
+                        send_message(conn, 6, mouse_event_payload(tab_id, "down", 20, 20))
+                        send_message(conn, 6, mouse_event_payload(tab_id, "up", 20, 20))
+                        activation_sent = True
+                        activation_sent_at = time.time()
+                        messages.write("sent file-system-access activation input\n")
                         messages.flush()
                 if probe.name == "page-zoom-shortcuts" and tab_id:
                     reports = state_reports_for_probe(run_dir, probe.name)
@@ -2225,6 +2391,48 @@ def run_probe(
             classification = "dialog_completed"
         elif classification == "exercised":
             classification = "dialog_failed"
+    default_deny_result = verify_default_deny_probe(probe.name, report)
+    if default_deny_result:
+        if (
+            classification
+            not in (
+                "missing_binder",
+                "bad_mojo",
+                "renderer_or_browser_crash",
+                "process_exit",
+            )
+            and default_deny_result["status"] == "completed"
+        ):
+            classification = "default_denied"
+        elif classification in ("exercised", "reported"):
+            classification = "default_deny_failed"
+    file_system_access_result = verify_file_system_access_probe(
+        probe.name,
+        report,
+        activation_ready_at,
+        activation_sent,
+        activation_observed_at,
+        picker_call_started_at,
+    )
+    if file_system_access_result:
+        if (
+            classification
+            not in (
+                "missing_binder",
+                "bad_mojo",
+                "renderer_or_browser_crash",
+                "process_exit",
+            )
+            and file_system_access_result["status"] == "completed"
+        ):
+            classification = "file_system_access_denied"
+        elif classification in (
+            "exercised",
+            "reported",
+            "blocked_user_activation",
+            "page_timeout",
+        ):
+            classification = "file_system_access_failed"
     page_zoom_result = verify_page_zoom_probe(
         probe.name,
         reports,
@@ -2335,6 +2543,8 @@ def run_probe(
         "download": download_result,
         "javascript_dialogs": javascript_dialogs,
         "javascript_dialog_result": javascript_dialog_result,
+        "default_deny_result": default_deny_result,
+        "file_system_access_result": file_system_access_result,
         "page_zoom_result": page_zoom_result,
         "console_messages": console_messages,
         "console_capture_result": console_capture_result,
@@ -2354,6 +2564,18 @@ def run_probe(
                 "navigation_sent": navigation_sent,
             }
             if probe.name.startswith("javascript-beforeunload-")
+            else None
+        ),
+        "file_system_access_activation": (
+            {
+                "ready": activation_ready_at is not None,
+                "activation_sent": activation_sent,
+                "activation_observed": activation_observed_at is not None,
+                "picker_call_started_after_activation": (
+                    picker_call_started_at is not None
+                ),
+            }
+            if probe.name == "file-system-access"
             else None
         ),
         "log_dir": str(probe_dir),
@@ -2431,6 +2653,14 @@ def write_coverage_map(path: pathlib.Path, results: list[dict[str, Any]]) -> Non
             next_action = "Needs synthetic activation coverage before claiming binder safety."
         elif classification == "blocked_needs_virtual_authenticator":
             next_action = "Needs DevTools virtual authenticator coverage before claiming WebAuthn safety."
+        elif classification == "default_denied":
+            next_action = "Permission API request/query path returned TermSurf default denial."
+        elif classification == "default_deny_failed":
+            next_action = "Inspect TermSurf permission manager routing and denial evidence."
+        elif classification == "file_system_access_denied":
+            next_action = "File System Access reached post-activation TermSurf denial."
+        elif classification == "file_system_access_failed":
+            next_action = "Inspect activation routing and file picker denial evidence."
         elif classification == "browser_service_unavailable":
             next_action = "Browser service unavailable; inspect logs and reference binders."
         elif classification == "exercised":
@@ -2499,6 +2729,14 @@ def write_reference_coverage_map(path: pathlib.Path, results: list[dict[str, Any
             next_action = "Add contained user-activation probe before claiming coverage."
         elif classification == "blocked_needs_virtual_authenticator":
             next_action = "Add contained DevTools virtual-authenticator coverage before claiming coverage."
+        elif classification == "default_denied":
+            next_action = "No immediate action; verified TermSurf default-deny permission policy."
+        elif classification == "default_deny_failed":
+            next_action = "Inspect TermSurf permission manager routing and denial evidence."
+        elif classification == "file_system_access_denied":
+            next_action = "No immediate action; verified post-activation file picker denial."
+        elif classification == "file_system_access_failed":
+            next_action = "Inspect activation routing and file picker denial evidence."
         elif classification == "download_completed":
             next_action = "No immediate action; verified generic download completion."
         elif classification == "page_zoom_completed":
