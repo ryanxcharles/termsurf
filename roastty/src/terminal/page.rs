@@ -681,6 +681,19 @@ impl Page {
         self.capacity
     }
 
+    pub(super) fn size_cols(&self) -> CellCountInt {
+        self.size.cols
+    }
+
+    pub(super) fn size_rows(&self) -> CellCountInt {
+        self.size.rows
+    }
+
+    pub(super) fn set_size_rows(&mut self, rows: CellCountInt) {
+        assert!(rows <= self.capacity.rows);
+        self.size.rows = rows;
+    }
+
     fn exact_row_capacity(&self, y_start: usize, y_end: usize) -> Capacity {
         assert!(y_start < y_end);
         assert!(y_end <= self.size.rows as usize);

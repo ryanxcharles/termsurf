@@ -192,3 +192,69 @@ The experiment fails if:
 - linked-list mutation, scrolling, resize, grow, reset, screen/parser behavior,
   or public ABI is introduced prematurely;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Implemented the first usable PageList lifecycle slice in
+`roastty/src/terminal/page_list.rs`.
+
+The storage shape is:
+
+- `PageList` owns `Vec<Box<Node>>`;
+- each `Node` owns one `Page` and a monotonically assigned serial;
+- boxed nodes provide stable node addresses for later pin work;
+- `Pin` stores a stable `NonNull<Node>` plus x/y coordinates and a garbage flag;
+- the viewport pin is itself boxed, and `tracked_pins` stores the stable pin
+  address, avoiding references to a movable inline field.
+
+Implemented:
+
+- `PageList::init(cols, rows, max_size)`;
+- `init_pages`;
+- active viewport metadata;
+- cached page size, min/max size, explicit max size, total rows, and page
+  serials;
+- a pre-tracked viewport pin pointing at the first page;
+- basic PageList integrity checks for serials, cached total rows, live tracked
+  pins, in-bounds pin coordinates, and garbage viewport pins.
+
+Added narrow internal Page helpers:
+
+- `Page::size_cols()`;
+- `Page::size_rows()`;
+- `Page::set_size_rows()`.
+
+No scrolling, viewport pin offsets, scrollbar, reset, grow, resize, split,
+compact, erase, iterators, screen/parser behavior, or public C ABI was added.
+
+Added tests for:
+
+- normal `PageList::init(80, 24, None)`;
+- explicit max-size metadata;
+- initialization across multiple pages;
+- initialization with more columns than fit in the standard page capacity;
+- integrity rejection for cached total-row mismatch;
+- integrity rejection for stale serials;
+- integrity rejection for a garbage viewport pin;
+- integrity rejection for out-of-bounds viewport pin x/y coordinates.
+
+Verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+The targeted PageList suite reported 16 passing tests. The full `roastty` suite
+reported 297 unit tests, the ABI harness, and doc tests passing.
+
+## Conclusion
+
+Roastty now has a real PageList initialization foundation. It can allocate the
+active area across one or more pages, handle non-standard-width initial pages,
+track the active viewport pin in a stable Rust-owned shape, and reject the basic
+corrupt states that upstream checks before higher-level scrolling and mutation
+logic starts building on the list.
