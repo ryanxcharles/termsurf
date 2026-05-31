@@ -19,6 +19,19 @@ pub(super) struct Untracked {
     pub(super) end: Pin,
 }
 
+/// A tracked highlight stores its highlighted area as tracked screen pins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Tracked {
+    pub(super) start: NonNull<Pin>,
+    pub(super) end: NonNull<Pin>,
+}
+
+impl Tracked {
+    pub(super) fn init_assume(start: NonNull<Pin>, end: NonNull<Pin>) -> Self {
+        Self { start, end }
+    }
+}
+
 /// A flattened highlight stores the highlighted area as serial-stamped page
 /// chunks so callers can traverse a highlight without re-reading page-list
 /// bounds.

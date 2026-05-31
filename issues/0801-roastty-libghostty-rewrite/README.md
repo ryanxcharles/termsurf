@@ -243,7 +243,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 63: Port Flattened Highlight Constructor](63-port-flattened-highlight-constructor.md)
   — **Pass**
 - [Experiment 64: Port Tracked Highlight](64-port-tracked-highlight.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 

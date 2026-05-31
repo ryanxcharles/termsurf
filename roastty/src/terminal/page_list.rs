@@ -1458,6 +1458,27 @@ impl PageList {
         })
     }
 
+    fn track_highlight(&mut self, highlight: highlight::Untracked) -> Option<highlight::Tracked> {
+        let start_key = self.highlight_pin_order_key(highlight.start)?;
+        let end_key = self.highlight_pin_order_key(highlight.end)?;
+        if end_key < start_key {
+            return None;
+        }
+
+        let start = self.track_pin(highlight.start)?;
+        let Some(end) = self.track_pin(highlight.end) else {
+            self.untrack_pin(start);
+            return None;
+        };
+
+        Some(highlight::Tracked { start, end })
+    }
+
+    fn untrack_highlight(&mut self, highlight: highlight::Tracked) {
+        self.untrack_pin(highlight.start);
+        self.untrack_pin(highlight.end);
+    }
+
     fn clone_region(&self, mut opts: CloneOptions<'_>) -> Result<Self, CloneRegionError> {
         let chunks = self
             .page_iterator(Direction::RightDown, opts.top, opts.bottom)
@@ -2920,6 +2941,14 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    fn tracked_pin_value(pin: NonNull<Pin>) -> Pin {
+        unsafe {
+            // Safety: tests call this only while the tracked pin is still
+            // owned by the PageList that allocated it.
+            *pin.as_ref()
+        }
     }
 
     fn clone_options(top: point::Point) -> CloneOptions<'static> {
@@ -6705,6 +6734,158 @@ mod tests {
 
         assert!(list.flatten_highlight(start, end).is_none());
         assert!(list.flatten_highlight(end, start).is_none());
+    }
+
+    #[test]
+    fn tracked_highlight_init_assume_wraps_pointer_identity() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let start = list
+            .pin(point::Point::screen(Coordinate::new(2, 5)))
+            .unwrap();
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(7, 5)))
+            .unwrap();
+        let start_ptr = list.track_pin(start).unwrap();
+        let end_ptr = list.track_pin(end).unwrap();
+        let count = list.count_tracked_pins();
+
+        let tracked = highlight::Tracked::init_assume(start_ptr, end_ptr);
+
+        assert_eq!(tracked.start, start_ptr);
+        assert_eq!(tracked.end, end_ptr);
+        assert_eq!(list.count_tracked_pins(), count);
+
+        list.untrack_pin(start_ptr);
+        list.untrack_pin(end_ptr);
+    }
+
+    #[test]
+    fn page_list_track_highlight_tracks_and_untracks_owned_pins() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let start = list
+            .pin(point::Point::screen(Coordinate::new(2, 5)))
+            .unwrap();
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(7, 5)))
+            .unwrap();
+        let count = list.count_tracked_pins();
+
+        let tracked = list
+            .track_highlight(highlight::Untracked { start, end })
+            .unwrap();
+
+        assert_eq!(list.count_tracked_pins(), count + 2);
+        assert!(list.tracked_pins().contains(&tracked.start));
+        assert!(list.tracked_pins().contains(&tracked.end));
+        assert_eq!(tracked_pin_value(tracked.start), start);
+        assert_eq!(tracked_pin_value(tracked.end), end);
+
+        list.untrack_highlight(tracked);
+
+        assert_eq!(list.count_tracked_pins(), count);
+        assert!(!list.tracked_pins().contains(&tracked.start));
+        assert!(!list.tracked_pins().contains(&tracked.end));
+    }
+
+    #[test]
+    fn page_list_track_highlight_invalid_start_returns_none_without_leak() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let node = list.first_node_ptr();
+        let start = Pin::new(node, 0, list.cols);
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(7, 5)))
+            .unwrap();
+        let count = list.count_tracked_pins();
+
+        assert!(list
+            .track_highlight(highlight::Untracked { start, end })
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+    }
+
+    #[test]
+    fn page_list_track_highlight_invalid_end_returns_none_without_leak() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let start = list
+            .pin(point::Point::screen(Coordinate::new(2, 5)))
+            .unwrap();
+        let node = list.first_node_ptr();
+        let end = Pin::new(node, list.node_for_ptr(node).unwrap().page.size_rows(), 0);
+        let count = list.count_tracked_pins();
+
+        assert!(list
+            .track_highlight(highlight::Untracked { start, end })
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+    }
+
+    #[test]
+    fn page_list_track_highlight_garbage_pins_return_none_without_leak() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let start = list
+            .pin(point::Point::screen(Coordinate::new(2, 5)))
+            .unwrap();
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(7, 5)))
+            .unwrap();
+        let count = list.count_tracked_pins();
+        let mut garbage_start = start;
+        garbage_start.garbage = true;
+        let mut garbage_end = end;
+        garbage_end.garbage = true;
+
+        assert!(list
+            .track_highlight(highlight::Untracked {
+                start: garbage_start,
+                end,
+            })
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+        assert!(list
+            .track_highlight(highlight::Untracked {
+                start,
+                end: garbage_end,
+            })
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+    }
+
+    #[test]
+    fn page_list_track_highlight_same_page_reversed_returns_none_without_leak() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let start = list
+            .pin(point::Point::screen(Coordinate::new(2, 5)))
+            .unwrap();
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(1, 5)))
+            .unwrap();
+        let count = list.count_tracked_pins();
+
+        assert!(list
+            .track_highlight(highlight::Untracked { start, end })
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+    }
+
+    #[test]
+    fn page_list_track_highlight_cross_page_reversed_returns_none_without_leak() {
+        let mut list = PageList::init(4, 4, None).unwrap();
+        let split = list
+            .pin(point::Point::screen(Coordinate::new(0, 2)))
+            .unwrap();
+        list.split(split).unwrap();
+        let start = list
+            .pin(point::Point::screen(Coordinate::new(0, 2)))
+            .unwrap();
+        let end = list
+            .pin(point::Point::screen(Coordinate::new(3, 1)))
+            .unwrap();
+        let count = list.count_tracked_pins();
+
+        assert!(list
+            .track_highlight(highlight::Untracked { start, end })
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
     }
 
     #[test]

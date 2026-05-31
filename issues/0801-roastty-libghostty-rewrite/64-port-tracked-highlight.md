@@ -193,3 +193,73 @@ The experiment fails if:
 - existing tracked pin reset/remap behavior regresses;
 - semantic or flattened highlight behavior regresses;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Experiment 64 added the tracked highlight shape and PageList-owned tracking
+helpers without introducing Screen, selection, search, renderer, app, public
+ABI, parser, resize/reflow, or semantic behavior.
+
+The implementation added `highlight::Tracked` as two tracked pin pointers:
+`start: NonNull<Pin>` and `end: NonNull<Pin>`. It also added
+`Tracked::init_assume(start, end)`, matching upstream's non-owning wrapper
+semantics: it stores pointer identity only and does not allocate, untrack, or
+mutate PageList state.
+
+PageList now has private tracked-highlight helpers:
+
+- `track_highlight(Untracked) -> Option<Tracked>` validates both endpoints,
+  rejects garbage pins, rejects invalid pins, rejects same-page and cross-page
+  reversed ranges, tracks the start pin, tracks the end pin, and unwinds the
+  start pin if end tracking fails.
+- `untrack_highlight(Tracked)` untracks both pointers through `untrack_pin`
+  without dereferencing them. Per the design, it is only for owned tracked
+  highlights returned by `track_highlight`, not for non-owning `init_assume`
+  values.
+
+The tests added coverage for:
+
+- `Tracked::init_assume` preserving pointer identity without changing tracked
+  pin counts;
+- valid owned highlight tracking increasing the tracked pin count by exactly
+  two;
+- tracked pointers appearing in `PageList::tracked_pins`;
+- tracked pointer values dereferencing to the original start/end pins while
+  still owned by PageList;
+- owned highlight untracking removing both tracked pins and restoring the prior
+  count;
+- invalid start pins returning `None` without changing the count;
+- invalid end pins returning `None` without leaking a partially tracked start;
+- garbage pins returning `None` without changing the count;
+- same-page reversed ranges returning `None`;
+- cross-page reversed ranges returning `None`.
+
+Verification:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo fmt` passed.
+- `cargo test -p roastty terminal::page_list` passed: 284 tests, 0 failed.
+- `cargo test -p roastty` passed: 565 unit tests plus 1 ABI harness test, 0
+  failed.
+
+Independent result review approved the experiment with no blocking findings. The
+reviewer confirmed the ownership model matches upstream, `init_assume` is
+non-owning, `track_highlight` uses the Experiment 63 validity/order basis,
+`untrack_highlight` does not dereference pointers, and there was no scope drift.
+
+## Conclusion
+
+Roastty now has the full core highlight shape set from upstream `highlight.zig`:
+untracked, tracked, flattened, and PageList-owned construction for tracked and
+flattened highlights. The next experiment can move beyond the standalone
+highlight shapes and choose the next terminal-core subsystem slice that depends
+on them.
