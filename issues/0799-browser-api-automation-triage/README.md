@@ -181,3 +181,5 @@ and reviewed.
   — **Pass**
 - [Experiment 11: Add WebAuthn virtual-authenticator coverage](11-webauthn-virtual-authenticator.md)
   — **Pass**
+- [Experiment 12: Add contained file-upload selection](12-contained-file-upload-selection.md)
+  — **Designed**
