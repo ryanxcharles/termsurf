@@ -14,7 +14,7 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `148.0.7778.97-issue-799-exp7`
+- Branch: `148.0.7778.97-issue-799-exp8`
 - Base version: `148.0.7778.97` (tracking Electron's Chromium version)
 
 > **Note:** The `…-issue-789-exp*` and `…-issue-790-exp*` branches are
@@ -147,6 +147,7 @@ find the most relevant recent branch, create a new branch from it
 | `148.0.7778.97-issue-799-exp5`  | [Issue 799](../issues/0799-browser-api-automation-triage/README.md) | Add protocol-mediated JavaScript dialogs    |
 | `148.0.7778.97-issue-799-exp6`  | [Issue 799](../issues/0799-browser-api-automation-triage/README.md) | Add automated page zoom shortcuts           |
 | `148.0.7778.97-issue-799-exp7`  | [Issue 799](../issues/0799-browser-api-automation-triage/README.md) | Add protocol console capture                |
+| `148.0.7778.97-issue-799-exp8`  | [Issue 799](../issues/0799-browser-api-automation-triage/README.md) | Add protocol HTTP Basic Auth                |
 | `148.0.7778.97-issue-781`       | [Issue 781](../issues/0781-chromium-upgrade/README.md)              | Chromium 148 migration                      |
 | `148.0.7778.97-issue-780`       | [Issue 780](../issues/0780-link-drag-freeze/README.md)              | Suppress native link drag in Roamium        |
 | `148.0.7778.97-issue-778`       | [Issue 778](../issues/0778-back-nav-title-stale/README.md)          | Re-emit titles on navigation commit         |

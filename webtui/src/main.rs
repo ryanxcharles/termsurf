@@ -51,6 +51,7 @@ enum Mode {
     Edit,
     Command,
     Dialog,
+    Auth,
 }
 
 #[derive(Clone)]
@@ -62,6 +63,28 @@ struct PendingJsDialog {
     message: String,
     default_prompt_text: String,
     input: String,
+    previous_mode: Mode,
+}
+
+#[derive(Clone, PartialEq)]
+enum AuthField {
+    Username,
+    Password,
+}
+
+#[derive(Clone)]
+struct PendingHttpAuth {
+    tab_id: i64,
+    request_id: u64,
+    url: String,
+    auth_scheme: String,
+    challenger: String,
+    realm: String,
+    is_proxy: bool,
+    first_auth_attempt: bool,
+    username: String,
+    password: String,
+    field: AuthField,
     previous_mode: Mode,
 }
 
@@ -423,7 +446,9 @@ fn main() -> io::Result<()> {
     let mut target_url = String::new();
     let mut browser_conn: Option<ipc::BrowserConnection> = None;
     let mut pending_dialog: Option<PendingJsDialog> = None;
+    let mut pending_auth: Option<PendingHttpAuth> = None;
     let mut handled_dialogs: Vec<(i64, u64)> = Vec::new();
+    let mut handled_auth: Vec<(i64, u64)> = Vec::new();
     // edtui state (Issue 637, 658).
     let mut editor_state = EditorState::new(Lines::from(url.as_str()));
     editor_state.set_clipboard(UrlClipboard::new());
@@ -466,6 +491,7 @@ fn main() -> io::Result<()> {
                 browser_label,
                 &target_url,
                 &pending_dialog,
+                &pending_auth,
                 &loading_log,
                 &console_log,
                 browser_ready,
@@ -611,6 +637,75 @@ fn main() -> io::Result<()> {
                         handled_dialogs.push((tab_id, request_id));
                         if handled_dialogs.len() > 32 {
                             handled_dialogs.remove(0);
+                        }
+                        mode = previous_mode;
+                    }
+                    continue;
+                }
+
+                if let Some(auth) = pending_auth.as_mut() {
+                    let mut reply: Option<bool> = None;
+                    match key.code {
+                        KeyCode::Esc => reply = Some(false),
+                        KeyCode::Enter => {
+                            if auth.field == AuthField::Username {
+                                auth.field = AuthField::Password;
+                            } else {
+                                reply = Some(true);
+                            }
+                        }
+                        KeyCode::Tab => {
+                            auth.field = if auth.field == AuthField::Username {
+                                AuthField::Password
+                            } else {
+                                AuthField::Username
+                            };
+                        }
+                        KeyCode::Backspace => {
+                            if auth.field == AuthField::Username {
+                                auth.username.pop();
+                            } else {
+                                auth.password.pop();
+                            }
+                        }
+                        KeyCode::Char(ch) => {
+                            if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT {
+                                if auth.field == AuthField::Username {
+                                    auth.username.push(ch);
+                                } else {
+                                    auth.password.push(ch);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    if let Some(accepted) = reply {
+                        let tab_id = auth.tab_id;
+                        let request_id = auth.request_id;
+                        let previous_mode = auth.previous_mode.clone();
+                        let username = if accepted {
+                            auth.username.clone()
+                        } else {
+                            String::new()
+                        };
+                        let password = if accepted {
+                            auth.password.clone()
+                        } else {
+                            String::new()
+                        };
+                        if let Some(ref bc) = browser_conn {
+                            bc.send_http_auth_reply(request_id, accepted, &username, &password);
+                        }
+                        if let Some(ref conn) = compositor {
+                            conn.send_http_auth_reply(
+                                tab_id, request_id, accepted, &username, &password,
+                            );
+                        }
+                        pending_auth = None;
+                        handled_auth.push((tab_id, request_id));
+                        if handled_auth.len() > 32 {
+                            handled_auth.remove(0);
                         }
                         mode = previous_mode;
                     }
@@ -840,7 +935,7 @@ fn main() -> io::Result<()> {
                             cmd_handler.on_key_event(key, &mut cmd_state);
                         }
                     }
-                    Mode::Dialog => {}
+                    Mode::Dialog | Mode::Auth => {}
                 }
             }
             Ok(LoopEvent::Terminal(_)) => {
@@ -982,6 +1077,40 @@ fn main() -> io::Result<()> {
                             });
                         }
                     }
+                    ipc::CompositorMessage::HttpAuthRequest {
+                        tab_id,
+                        request_id,
+                        url,
+                        auth_scheme,
+                        challenger,
+                        realm,
+                        is_proxy,
+                        first_auth_attempt,
+                    } => {
+                        let duplicate = pending_auth
+                            .as_ref()
+                            .map(|auth| auth.tab_id == tab_id && auth.request_id == request_id)
+                            .unwrap_or(false)
+                            || handled_auth.contains(&(tab_id, request_id));
+                        if !duplicate {
+                            let previous_mode = mode.clone();
+                            mode = Mode::Auth;
+                            pending_auth = Some(PendingHttpAuth {
+                                tab_id,
+                                request_id,
+                                url,
+                                auth_scheme,
+                                challenger,
+                                realm,
+                                is_proxy,
+                                first_auth_attempt,
+                                username: String::new(),
+                                password: String::new(),
+                                field: AuthField::Username,
+                                previous_mode,
+                            });
+                        }
+                    }
                 }
             }
             Err(_) => break,
@@ -1110,6 +1239,7 @@ fn ui(
     browser_label: &str,
     target_url: &str,
     pending_dialog: &Option<PendingJsDialog>,
+    pending_auth: &Option<PendingHttpAuth>,
     loading_log: &[(LoadingStage, StageStatus)],
     console_log: &[ConsoleLogEntry],
     browser_ready: bool,
@@ -1135,6 +1265,7 @@ fn ui(
         Mode::Edit => (PURPLE, BORDER),
         Mode::Command => (YELLOW, BORDER),
         Mode::Dialog => (YELLOW, YELLOW),
+        Mode::Auth => (YELLOW, YELLOW),
     };
 
     // URL bar / Command bar (Issue 659).
@@ -1298,6 +1429,54 @@ fn ui(
             .style(Style::default().fg(FG).bg(BG))
             .block(viewport_block);
         frame.render_widget(dialog_widget, layout[0]);
+    } else if let Some(auth) = pending_auth {
+        let password_mask = "*".repeat(auth.password.chars().count());
+        let username_style = if auth.field == AuthField::Username {
+            Style::default().fg(CYAN).bg(BG)
+        } else {
+            Style::default().fg(FG).bg(BG)
+        };
+        let password_style = if auth.field == AuthField::Password {
+            Style::default().fg(CYAN).bg(BG)
+        } else {
+            Style::default().fg(FG).bg(BG)
+        };
+        let retry = if auth.first_auth_attempt {
+            ""
+        } else {
+            " retry"
+        };
+        let target = if auth.is_proxy { "proxy" } else { "origin" };
+        let lines = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("  HTTP Auth").style(Style::default().fg(YELLOW).bg(BG)),
+                Span::raw(retry).style(Style::default().fg(RED).bg(BG)),
+            ]),
+            Line::from(Span::raw(format!("  {}", auth.url)).style(Style::default().fg(DIM).bg(BG))),
+            Line::from(Span::raw(format!(
+                "  {} {} {} realm={}",
+                target, auth.auth_scheme, auth.challenger, auth.realm
+            ))),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("  Username: ").style(Style::default().fg(COMMENT).bg(BG)),
+                Span::raw(auth.username.as_str()).style(username_style),
+            ]),
+            Line::from(vec![
+                Span::raw("  Password: ").style(Style::default().fg(COMMENT).bg(BG)),
+                Span::raw(password_mask).style(password_style),
+            ]),
+            Line::from(""),
+            Line::from(
+                Span::raw("  Enter advances/submits, Tab switches fields, Esc cancels")
+                    .style(Style::default().fg(COMMENT).bg(BG)),
+            ),
+        ];
+        let auth_widget = Paragraph::new(lines)
+            .style(Style::default().fg(FG).bg(BG))
+            .block(viewport_block);
+        frame.render_widget(auth_widget, layout[0]);
     } else if !browser_ready && !loading_log.is_empty() {
         // Render loading log (Issue 773).
         const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -1451,6 +1630,14 @@ fn ui(
                 Span::styled("n/esc ", f),
                 Span::styled("cancel", d),
             ]),
+            Mode::Auth => Line::from(vec![
+                Span::styled("\u{23CE} ", f),
+                Span::styled("next/submit  ", d),
+                Span::styled("tab ", f),
+                Span::styled("field  ", d),
+                Span::styled("esc ", f),
+                Span::styled("cancel", d),
+            ]),
         }
     };
 
@@ -1460,6 +1647,7 @@ fn ui(
         Mode::Edit => "\u{F044} EDIT".to_string(),
         Mode::Command => "\u{F120} COMMAND".to_string(),
         Mode::Dialog => "\u{F27A} DIALOG".to_string(),
+        Mode::Auth => "\u{F023} AUTH".to_string(),
     };
 
     let hints_widget = Paragraph::new(hints);

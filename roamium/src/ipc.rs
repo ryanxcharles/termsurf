@@ -28,10 +28,12 @@ pub fn connect(path: &str) -> Option<UnixStream> {
 }
 
 /// Send a protobuf message to all connected writers (4-byte LE length prefix).
-/// Disconnected writers are silently removed.
-pub fn send(msg: &TermSurfMessage) {
+/// Disconnected writers are silently removed. Returns the number of writers
+/// that received the message.
+pub fn send(msg: &TermSurfMessage) -> usize {
     let payload = msg.encode_to_vec();
     let len = (payload.len() as u32).to_le_bytes();
+    let mut sent = 0;
     WRITERS.lock().unwrap().retain_mut(|stream| {
         if stream.write_all(&len).is_err() {
             return false;
@@ -39,8 +41,10 @@ pub fn send(msg: &TermSurfMessage) {
         if stream.write_all(&payload).is_err() {
             return false;
         }
+        sent += 1;
         true
     });
+    sent
 }
 
 /// Start a listener on the given Unix socket path. Accepts connections in a

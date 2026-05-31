@@ -61,6 +61,10 @@ message TermSurfMessage {
 
     // Console capture (Chromium → TUI / automation harness)
     ConsoleMessage console_message = 36;
+
+    // HTTP auth (Chromium ↔ TUI / automation harness)
+    HttpAuthRequest http_auth_request = 37;
+    HttpAuthReply http_auth_reply = 38;
   }
 }
 
@@ -229,6 +233,27 @@ message ConsoleMessage {
   string message = 3;
   int32 line_no = 4;
   string source_id = 5;
+}
+
+message HttpAuthRequest {
+  int64 tab_id = 1;
+  uint64 request_id = 2;
+  string url = 3;
+  string auth_scheme = 4;
+  string challenger = 5;
+  string realm = 6;
+  bool is_proxy = 7;
+  bool first_auth_attempt = 8;
+  bool is_primary_main_frame_navigation = 9;
+  bool is_navigation = 10;
+}
+
+message HttpAuthReply {
+  int64 tab_id = 1;
+  uint64 request_id = 2;
+  bool accepted = 3;
+  string username = 4;
+  string password = 5;
 }
 
 // --- TUI → GUI ---

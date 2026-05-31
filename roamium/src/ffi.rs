@@ -103,6 +103,14 @@ extern "C" {
         prompt_text: *const c_char,
     ) -> bool;
 
+    pub fn ts_reply_http_auth(
+        wc: TsWebContents,
+        request_id: c_ulonglong,
+        accepted: bool,
+        username: *const c_char,
+        password: *const c_char,
+    ) -> bool;
+
     // --- Callbacks ---
 
     pub fn ts_set_on_tab_ready(
@@ -163,6 +171,25 @@ extern "C" {
                 *const c_char,
                 c_int,
                 *const c_char,
+                *mut c_void,
+            ),
+        >,
+        user_data: *mut c_void,
+    );
+
+    pub fn ts_set_on_http_auth_request(
+        cb: Option<
+            unsafe extern "C" fn(
+                TsWebContents,
+                c_ulonglong,
+                *const c_char,
+                *const c_char,
+                *const c_char,
+                *const c_char,
+                bool,
+                bool,
+                bool,
+                bool,
                 *mut c_void,
             ),
         >,

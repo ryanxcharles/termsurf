@@ -452,3 +452,102 @@ This experiment fails if:
   request/reply;
 - it changes downloads, JavaScript dialogs, page zoom, console capture, PDF
   behavior, or normal unauthenticated navigation while adding HTTP auth.
+
+## Result
+
+**Result:** Pass
+
+Experiment 8 added protocol-mediated HTTP Basic Auth for origin-server Basic
+auth challenges.
+
+Implemented behavior:
+
+- `termsurf.proto` now includes `HttpAuthRequest http_auth_request = 37` and
+  `HttpAuthReply http_auth_reply = 38`.
+- Chromium overrides `TsBrowserClient::CreateLoginDelegate(...)` and returns a
+  TermSurf `LoginDelegate` for non-proxy Basic auth challenges with a non-null
+  `WebContents`.
+- Chromium stores the auth callback by `WebContents`/`request_id`, emits a
+  protocol request, and runs the callback exactly once on accepted/canceled
+  protocol replies.
+- Delegate destruction and `WebContentsDestroyed` invalidate the pending request
+  without running the callback, matching Chromium's `LoginDelegate` contract.
+- Roamium routes auth requests/replies and defers no-client/missing-tab
+  cancellation through `ts_post_task`, avoiding reentrant callbacks from inside
+  `CreateLoginDelegate(...)`.
+- Wezboard forwards auth requests to the pane TUI and sends a cancel reply back
+  toward Roamium if no pane/server route exists.
+- webtui displays a minimal inline auth prompt, masks password input, and sends
+  accepted/canceled replies.
+- The Issue 799 harness now serves a local Basic Auth fixture and verifies both
+  success and cancellation.
+
+Security/logging fixes:
+
+- The harness no longer runs Roamium with `--v=1`; that verbose Chromium flag
+  exposed HTTP request headers, including `Authorization: Basic ...`, in
+  `roamium.stderr`.
+- The auth verifier now fails if stderr/stdout/messages contain the fixture
+  password, `username:password`, the base64 Basic credential, or
+  `Authorization: Basic`.
+- An explicit grep across the new focused/full auth log directories found no
+  credential material.
+
+Formatting and build evidence:
+
+- Ran `cargo fmt` for edited Rust crates and accepted formatter output.
+- Ran Chromium `clang-format` on the edited C++ files.
+- `python3 -m py_compile scripts/test-issue-799-browser-api-audit.py` passed.
+- `git diff --check` passed for the main repo.
+- `git -C chromium/src diff --check` passed for Chromium.
+- `autoninja -C out/Default libtermsurf_chromium` passed.
+- `PATH="/Users/ryan/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin:$PATH" ./scripts/build.sh roamium`
+  passed.
+- `PATH="/Users/ryan/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin:$PATH" ./scripts/build.sh webtui`
+  passed.
+- `PATH="/Users/ryan/.rustup/toolchains/1.92.0-aarch64-apple-darwin/bin:$PATH" ./scripts/build.sh wezboard`
+  passed.
+
+Automated verification:
+
+- Focused success probe:
+  `logs/issue-799-browser-api-audit/20260531-013830-175631`
+  - `http-basic-auth-success`: `http_auth_completed`
+  - `missing_interfaces`: `[]`
+- Focused cancel probe:
+  `logs/issue-799-browser-api-audit/20260531-013844-558097`
+  - `http-basic-auth-cancel`: `http_auth_cancelled`
+  - `missing_interfaces`: `[]`
+- Full Issue 799 harness:
+  `logs/issue-799-browser-api-audit/20260531-013858-852868`
+  - 23 probes completed.
+  - `http-basic-auth-success`: `http_auth_completed`
+  - `http-basic-auth-cancel`: `http_auth_cancelled`
+  - `download-attachment`: `download_completed`
+  - `download-blob`: `download_completed`
+  - JavaScript dialog probes: `dialog_completed`
+  - `page-zoom-shortcuts`: `page_zoom_completed`
+  - `console-capture-basic`: `console_capture_completed`
+  - `missing_interfaces`: `[]`
+
+Codex reviewed the first implementation and found real blockers: credential
+leakage through verbose Chromium logs, possible reentrant no-client
+cancellation, a missing-tab drop path, and weak ordering verification. Those
+were fixed. Codex re-reviewed the updated implementation and found no blocking
+findings remaining.
+
+## Conclusion
+
+HTTP Basic Auth is now a contained, automatable TermSurf browser feature for
+origin-server Basic auth challenges. It uses the same request/reply protocol
+pattern as JavaScript dialogs, avoids native UI, does not persist credentials,
+does not integrate a password manager, and proves both success and cancellation
+without manual testing.
+
+Out of scope remains explicit: proxy auth, Negotiate/NTLM, saved credentials,
+autofill, OS keychain integration, retry UI polish, and Chrome's full
+`HttpAuthCoordinator` product stack.
+
+The next Issue 799 experiment should continue with the remaining automatable
+queue, most likely renderer crash recovery UX or default-deny permission/API
+hardening.

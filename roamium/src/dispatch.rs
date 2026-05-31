@@ -19,6 +19,42 @@ struct TabEntry {
 
 static PDF_INPUT_TRACE_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
+struct DeferredHttpAuthCancel {
+    wc: usize,
+    request_id: u64,
+}
+
+unsafe extern "C" fn deferred_http_auth_cancel_task(data: *mut c_void) {
+    let task = unsafe { Box::from_raw(data as *mut DeferredHttpAuthCancel) };
+    let empty = CString::new("").unwrap();
+    let ok = unsafe {
+        ffi::ts_reply_http_auth(
+            task.wc as TsWebContents,
+            task.request_id,
+            false,
+            empty.as_ptr(),
+            empty.as_ptr(),
+        )
+    };
+    eprintln!(
+        "[termsurf-http-auth] deferred-cancel request_id={} ok={}",
+        task.request_id, ok
+    );
+}
+
+fn defer_http_auth_cancel(wc: TsWebContents, request_id: u64) {
+    let task = Box::new(DeferredHttpAuthCancel {
+        wc: wc as usize,
+        request_id,
+    });
+    unsafe {
+        ffi::ts_post_task(
+            Some(deferred_http_auth_cancel_task),
+            Box::into_raw(task) as *mut c_void,
+        );
+    }
+}
+
 pub fn init_pdf_input_trace() {
     trace_pdf_input(format!("trace-init pid={}", std::process::id()));
 }
@@ -358,6 +394,32 @@ pub fn handle_message(msg: &TermSurfMessage) {
                 );
             }
         }
+        Msg::HttpAuthReply(m) => {
+            if let Some(t) = find_by_tab_id(m.tab_id) {
+                let username =
+                    CString::new(m.username.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
+                let password =
+                    CString::new(m.password.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
+                let ok = unsafe {
+                    ffi::ts_reply_http_auth(
+                        t.handle,
+                        m.request_id,
+                        m.accepted,
+                        username.as_ptr(),
+                        password.as_ptr(),
+                    )
+                };
+                eprintln!(
+                    "[termsurf-http-auth] reply tab_id={} request_id={} accepted={} ok={}",
+                    m.tab_id, m.request_id, m.accepted, ok
+                );
+            } else {
+                eprintln!(
+                    "[termsurf-http-auth] reply-missing-tab tab_id={} request_id={}",
+                    m.tab_id, m.request_id
+                );
+            }
+        }
         Msg::SetColorScheme(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
                 unsafe { ffi::ts_set_color_scheme(t.handle, m.dark) };
@@ -613,4 +675,64 @@ pub unsafe extern "C" fn on_console_message(
         })),
     };
     crate::ipc::send(&msg);
+}
+
+pub unsafe extern "C" fn on_http_auth_request(
+    wc: TsWebContents,
+    request_id: u64,
+    url: *const std::os::raw::c_char,
+    auth_scheme: *const std::os::raw::c_char,
+    challenger: *const std::os::raw::c_char,
+    realm: *const std::os::raw::c_char,
+    is_proxy: bool,
+    first_auth_attempt: bool,
+    is_primary_main_frame_navigation: bool,
+    is_navigation: bool,
+    _user_data: *mut c_void,
+) {
+    let Some(t) = find_by_handle(wc) else {
+        eprintln!(
+            "[termsurf-http-auth] request-missing-tab request_id={}",
+            request_id
+        );
+        defer_http_auth_cancel(wc, request_id);
+        return;
+    };
+    let url = unsafe { std::ffi::CStr::from_ptr(url) }
+        .to_string_lossy()
+        .into_owned();
+    let auth_scheme = unsafe { std::ffi::CStr::from_ptr(auth_scheme) }
+        .to_string_lossy()
+        .into_owned();
+    let challenger = unsafe { std::ffi::CStr::from_ptr(challenger) }
+        .to_string_lossy()
+        .into_owned();
+    let realm = unsafe { std::ffi::CStr::from_ptr(realm) }
+        .to_string_lossy()
+        .into_owned();
+    eprintln!(
+        "[termsurf-http-auth] request tab_id={} request_id={} scheme={} challenger={} realm={} proxy={} first_attempt={}",
+        t.tab_id, request_id, auth_scheme, challenger, realm, is_proxy, first_auth_attempt
+    );
+    let msg = TermSurfMessage {
+        msg: Some(Msg::HttpAuthRequest(proto::termsurf::HttpAuthRequest {
+            tab_id: t.tab_id,
+            request_id,
+            url,
+            auth_scheme,
+            challenger,
+            realm,
+            is_proxy,
+            first_auth_attempt,
+            is_primary_main_frame_navigation,
+            is_navigation,
+        })),
+    };
+    if crate::ipc::send(&msg) == 0 {
+        defer_http_auth_cancel(wc, request_id);
+        eprintln!(
+            "[termsurf-http-auth] request-no-client-cancel request_id={}",
+            request_id
+        );
+    }
 }

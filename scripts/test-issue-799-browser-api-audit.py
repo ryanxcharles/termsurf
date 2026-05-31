@@ -9,6 +9,7 @@ for missing Mojo binder and renderer-crash signatures.
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import hashlib
 import html
@@ -33,6 +34,10 @@ from urllib.parse import parse_qs, urlparse
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_ROAMIUM = ROOT / "chromium/src/out/Default/roamium"
 DEFAULT_LOG_ROOT = ROOT / "logs/issue-799-browser-api-audit"
+HTTP_AUTH_USERNAME = "termsurf"
+HTTP_AUTH_PASSWORD = "correct horse battery staple"
+HTTP_AUTH_REALM = "TermSurf Issue 799"
+HTTP_AUTH_NONCE = "issue799"
 
 BAD_MOJO_PATTERNS = [
     "Terminating render process for bad Mojo message",
@@ -403,6 +408,28 @@ return {status: 'console_emitted', nonce};
 """,
     ),
     Probe(
+        name="http-basic-auth-success",
+        feature="HTTP Basic Auth",
+        expected_surface="TermSurf HTTP auth request/reply protocol",
+        reference_evidence="Chromium embedders implement ContentBrowserClient::CreateLoginDelegate.",
+        termsurf_evidence="Experiment 8 adds protocol-mediated HTTP Basic Auth.",
+        requires_user_activation=False,
+        script="""
+return {status: 'unused'};
+""",
+    ),
+    Probe(
+        name="http-basic-auth-cancel",
+        feature="HTTP Basic Auth",
+        expected_surface="TermSurf HTTP auth request/reply protocol",
+        reference_evidence="Chromium embedders implement ContentBrowserClient::CreateLoginDelegate.",
+        termsurf_evidence="Experiment 8 adds protocol-mediated HTTP Basic Auth.",
+        requires_user_activation=False,
+        script="""
+return {status: 'unused'};
+""",
+    ),
+    Probe(
         name="javascript-alert",
         feature="JavaScript dialogs",
         expected_surface="TermSurf JavaScript dialog request/reply protocol",
@@ -652,6 +679,22 @@ def javascript_dialog_reply_payload(
         + varint_field(2, request_id)
         + bool_field(3, accepted)
         + string_field(4, prompt_text)
+    )
+
+
+def http_auth_reply_payload(
+    tab_id: int,
+    request_id: int,
+    accepted: bool,
+    username: str,
+    password: str,
+) -> bytes:
+    return (
+        varint_field(1, tab_id)
+        + varint_field(2, request_id)
+        + bool_field(3, accepted)
+        + string_field(4, username)
+        + string_field(5, password)
     )
 
 
@@ -1017,6 +1060,111 @@ def verify_console_capture_probe(
     }
 
 
+def verify_http_auth_probe(
+    probe_name: str,
+    tab_id: int | None,
+    report: dict[str, Any] | None,
+    reports: list[dict[str, Any]],
+    http_auth: list[dict[str, Any]],
+    auth_events: list[dict[str, Any]],
+    log_text: str,
+) -> dict[str, Any] | None:
+    if probe_name not in ("http-basic-auth-success", "http-basic-auth-cancel"):
+        return None
+
+    status = "completed"
+    reasons: list[str] = []
+    request = http_auth[0] if http_auth else None
+    if not request:
+        status = "failed"
+        reasons.append("missing HttpAuthRequest")
+    else:
+        if tab_id is not None and request.get("tab_id") != tab_id:
+            status = "failed"
+            reasons.append(f"wrong tab_id: {request.get('tab_id')}")
+        if request.get("auth_scheme") != "basic":
+            status = "failed"
+            reasons.append(f"wrong auth_scheme: {request.get('auth_scheme')}")
+        if HTTP_AUTH_REALM != request.get("realm"):
+            status = "failed"
+            reasons.append(f"wrong realm: {request.get('realm')}")
+        if request.get("is_proxy"):
+            status = "failed"
+            reasons.append("request unexpectedly marked proxy")
+        if not str(request.get("challenger", "")).startswith("http://"):
+            status = "failed"
+            reasons.append(f"challenger missing serialized origin: {request.get('challenger')}")
+        if request.get("reply_request_id") != request.get("request_id"):
+            status = "failed"
+            reasons.append("reply request_id did not match request")
+
+    event_statuses = [event.get("status") for event in auth_events]
+    credential_pair = f"{HTTP_AUTH_USERNAME}:{HTTP_AUTH_PASSWORD}"
+    encoded_credential = base64.b64encode(credential_pair.encode("utf-8")).decode("ascii")
+    leaked = [
+        needle
+        for needle in (
+            HTTP_AUTH_PASSWORD,
+            credential_pair,
+            encoded_credential,
+            "Authorization: Basic",
+        )
+        if needle in log_text
+    ]
+    if leaked:
+        status = "failed"
+        reasons.append(f"credential material leaked to logs: {leaked}")
+
+    if "challenge" not in event_statuses:
+        status = "failed"
+        reasons.append("server did not record 401 challenge")
+
+    if probe_name == "http-basic-auth-success":
+        if not report or report.get("status") != "auth_success":
+            status = "failed"
+            reasons.append("protected page did not report auth_success")
+        if "authorized" not in event_statuses:
+            status = "failed"
+            reasons.append("server did not record authorized request")
+        if request:
+            challenge_event = next(
+                (event for event in auth_events if event.get("status") == "challenge"),
+                None,
+            )
+            authorized_event = next(
+                (event for event in auth_events if event.get("status") == "authorized"),
+                None,
+            )
+            reply_at = request.get("reply_received_at")
+            if not (challenge_event and authorized_event and reply_at):
+                status = "failed"
+                reasons.append("missing auth sequence timing evidence")
+            elif not (
+                challenge_event.get("_received_at", 0)
+                <= float(reply_at)
+                <= authorized_event.get("_received_at", 0)
+            ):
+                status = "failed"
+                reasons.append("auth server/protocol sequence was not ordered")
+    else:
+        if report and report.get("status") == "auth_success":
+            status = "failed"
+            reasons.append("cancel probe reached protected auth_success page")
+        if not any(r.get("status") == "post_cancel_navigation" for r in reports):
+            status = "failed"
+            reasons.append("post-cancel navigation did not report completion")
+        if "authorized" in event_statuses:
+            status = "failed"
+            reasons.append("cancel probe unexpectedly sent valid credentials")
+
+    return {
+        "status": status,
+        "reasons": reasons,
+        "messages": http_auth,
+        "server_events": auth_events,
+    }
+
+
 def create_tab_payload(url: str, width: int, height: int) -> bytes:
     return (
         string_field(1, url)
@@ -1086,6 +1234,7 @@ class ProbeState:
         self.run_dir = run_dir
         self.lock = threading.Lock()
         self.reports: list[dict[str, Any]] = []
+        self.auth_events: list[dict[str, Any]] = []
 
     def add_report(self, report: dict[str, Any]) -> None:
         with self.lock:
@@ -1097,6 +1246,17 @@ class ProbeState:
     def reports_for(self, probe: str) -> list[dict[str, Any]]:
         with self.lock:
             return [report for report in self.reports if report.get("probe") == probe]
+
+    def add_auth_event(self, event: dict[str, Any]) -> None:
+        with self.lock:
+            event["_received_at"] = time.time()
+            self.auth_events.append(event)
+            with (self.run_dir / "auth-events.jsonl").open("a", encoding="utf-8") as out:
+                out.write(json.dumps(event, sort_keys=True) + "\n")
+
+    def auth_events_for(self, probe: str) -> list[dict[str, Any]]:
+        with self.lock:
+            return [event for event in self.auth_events if event.get("probe") == probe]
 
 
 class ReusableThreadingTcpServer(socketserver.ThreadingTCPServer):
@@ -1114,6 +1274,88 @@ def make_handler(state: ProbeState) -> type[http.server.BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
+            if parsed.path == "/auth/basic/success.html":
+                query = parse_qs(parsed.query)
+                probe = query.get("probe", ["unknown"])[-1]
+                nonce = query.get("nonce", [HTTP_AUTH_NONCE])[-1]
+                expected = "Basic " + base64.b64encode(
+                    f"{HTTP_AUTH_USERNAME}:{HTTP_AUTH_PASSWORD}".encode("utf-8")
+                ).decode("ascii")
+                if self.headers.get("Authorization") != expected:
+                    state.add_auth_event(
+                        {
+                            "probe": probe,
+                            "status": "challenge",
+                            "path": parsed.path,
+                            "has_authorization": bool(self.headers.get("Authorization")),
+                        }
+                    )
+                    self.send_response(401)
+                    self.send_header(
+                        "WWW-Authenticate",
+                        f'Basic realm="{HTTP_AUTH_REALM}"',
+                    )
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(b"authentication required")
+                    return
+
+                state.add_auth_event(
+                    {
+                        "probe": probe,
+                        "status": "authorized",
+                        "path": parsed.path,
+                    }
+                )
+                body = f"""<!doctype html>
+<meta charset="utf-8">
+<title>auth success</title>
+<script>
+fetch('/report', {{
+  method: 'POST',
+  headers: {{'Content-Type': 'application/json'}},
+  body: JSON.stringify({{
+    probe: {json.dumps(probe)},
+    status: 'auth_success',
+    nonce: {json.dumps(nonce)},
+    reportedAt: new Date().toISOString()
+  }}),
+  keepalive: true
+}});
+</script>
+authenticated
+""".encode("utf-8")
+                self.send_bytes(body, "text/html; charset=utf-8")
+                return
+            if parsed.path == "/auth/post-cancel.html":
+                query = parse_qs(parsed.query)
+                probe = query.get("probe", ["unknown"])[-1]
+                state.add_auth_event(
+                    {
+                        "probe": probe,
+                        "status": "post_cancel_navigation",
+                        "path": parsed.path,
+                    }
+                )
+                body = f"""<!doctype html>
+<meta charset="utf-8">
+<title>post cancel</title>
+<script>
+fetch('/report', {{
+  method: 'POST',
+  headers: {{'Content-Type': 'application/json'}},
+  body: JSON.stringify({{
+    probe: {json.dumps(probe)},
+    status: 'post_cancel_navigation',
+    reportedAt: new Date().toISOString()
+  }}),
+  keepalive: true
+}});
+</script>
+post cancel
+""".encode("utf-8")
+                self.send_bytes(body, "text/html; charset=utf-8")
+                return
             if parsed.path == "/probe/console-capture-basic-frame.html":
                 query = parse_qs(parsed.query)
                 nonce = query.get("nonce", ["issue799"])[-1]
@@ -1393,6 +1635,7 @@ def verify_download(
 def run_probe(
     probe: Probe,
     base_url: str,
+    state: ProbeState,
     run_dir: pathlib.Path,
     roamium: pathlib.Path,
     download_dir: pathlib.Path,
@@ -1421,7 +1664,13 @@ def run_probe(
     messages_path = probe_dir / "messages.log"
     stdout = stdout_path.open("wb")
     stderr = stderr_path.open("wb")
-    url = f"{base_url}/probe/{probe.name}.html"
+    if probe.name.startswith("http-basic-auth-"):
+        url = (
+            f"{base_url}/auth/basic/success.html?"
+            f"probe={probe.name}&nonce={HTTP_AUTH_NONCE}"
+        )
+    else:
+        url = f"{base_url}/probe/{probe.name}.html"
     expected_download = EXPECTED_DOWNLOADS.get(probe.name)
     if expected_download:
         expected_path = download_dir / expected_download[0]
@@ -1436,7 +1685,6 @@ def run_probe(
         f"--termsurf-download-dir={download_dir}",
         "--no-sandbox",
         "--enable-logging=stderr",
-        "--v=1",
     ]
     env = os.environ.copy()
     env["TERMSURF_PDF_INPUT_TRACE"] = "1"
@@ -1454,6 +1702,7 @@ def run_probe(
     socket_disconnect = False
     javascript_dialogs: list[dict[str, Any]] = []
     console_messages: list[dict[str, Any]] = []
+    http_auth: list[dict[str, Any]] = []
     activation_sent = False
     activation_ready_at: float | None = None
     activation_sent_at: float | None = None
@@ -1461,6 +1710,8 @@ def run_probe(
     navigation_sent = False
     page_zoom_events: list[dict[str, Any]] = []
     page_zoom_next_step = 0
+    http_auth_cancel_sent_at: float | None = None
+    post_cancel_navigation_sent = False
     start = time.time()
 
     try:
@@ -1560,6 +1811,18 @@ def run_probe(
                         metric_after = first_metric_after(metric_reports, sent_at)
                         if metric_after or time.time() - sent_at > 1.2:
                             send_zoom_key("normal-a", VK_A, 0)
+                if (
+                    probe.name == "http-basic-auth-cancel"
+                    and tab_id
+                    and http_auth_cancel_sent_at is not None
+                    and not post_cancel_navigation_sent
+                    and time.time() - http_auth_cancel_sent_at >= 0.5
+                ):
+                    destination = f"{base_url}/auth/post-cancel.html?probe={probe.name}"
+                    send_message(conn, 5, navigate_payload(tab_id, destination))
+                    post_cancel_navigation_sent = True
+                    messages.write(f"sent post-cancel Navigate url={destination}\n")
+                    messages.flush()
                 try:
                     header = conn.recv(4)
                     if not header:
@@ -1648,6 +1911,55 @@ def run_probe(
                             f"source={evidence['source_id']}\n"
                         )
                         messages.flush()
+                    elif top == 37:
+                        fields = parse_message_fields(body)
+                        request_tab_id = int(fields.get(1, 0) or 0)
+                        request_id = int(fields.get(2, 0) or 0)
+                        url_value = str(fields.get(3, ""))
+                        auth_scheme = str(fields.get(4, ""))
+                        challenger = str(fields.get(5, ""))
+                        realm = str(fields.get(6, ""))
+                        is_proxy = bool(fields.get(7, False))
+                        first_auth_attempt = bool(fields.get(8, False))
+                        accepted = probe.name != "http-basic-auth-cancel"
+                        username = HTTP_AUTH_USERNAME if accepted else ""
+                        password = HTTP_AUTH_PASSWORD if accepted else ""
+                        send_message(
+                            conn,
+                            38,
+                            http_auth_reply_payload(
+                                request_tab_id,
+                                request_id,
+                                accepted,
+                                username,
+                                password,
+                            ),
+                        )
+                        if not accepted:
+                            http_auth_cancel_sent_at = time.time()
+                        reply_received_at = time.time()
+                        evidence = {
+                            "request_time": time.time() - start,
+                            "reply_received_at": reply_received_at,
+                            "tab_id": request_tab_id,
+                            "request_id": request_id,
+                            "url": url_value,
+                            "auth_scheme": auth_scheme,
+                            "challenger": challenger,
+                            "realm": realm,
+                            "is_proxy": is_proxy,
+                            "first_auth_attempt": first_auth_attempt,
+                            "accepted": accepted,
+                            "reply_request_id": request_id,
+                            "reply_time": time.time() - start,
+                        }
+                        http_auth.append(evidence)
+                        messages.write(
+                            "http_auth "
+                            f"request_id={request_id} scheme={auth_scheme} "
+                            f"realm={realm} accepted={accepted}\n"
+                        )
+                        messages.flush()
                 except socket.timeout:
                     pass
     finally:
@@ -1669,6 +1981,7 @@ def run_probe(
     stdout_text = read_text(stdout_path)
     log_scan = scan_logs(stderr_text + "\n" + stdout_text)
     reports = state_reports_for_probe(run_dir, probe.name)
+    auth_events = state.auth_events_for(probe.name)
     non_timeout_reports = [
         candidate for candidate in reports if candidate.get("status") != "page_timeout"
     ]
@@ -1755,6 +2068,33 @@ def run_probe(
             classification = "console_capture_completed"
         elif classification in ("exercised", "reported"):
             classification = "console_capture_failed"
+    http_auth_result = verify_http_auth_probe(
+        probe.name,
+        tab_id,
+        report,
+        reports,
+        http_auth,
+        auth_events,
+        stderr_text + "\n" + stdout_text + "\n" + read_text(messages_path),
+    )
+    if http_auth_result:
+        if (
+            classification
+            not in (
+                "missing_binder",
+                "bad_mojo",
+                "renderer_or_browser_crash",
+                "process_exit",
+            )
+            and http_auth_result["status"] == "completed"
+        ):
+            classification = (
+                "http_auth_cancelled"
+                if probe.name == "http-basic-auth-cancel"
+                else "http_auth_completed"
+            )
+        elif classification in ("exercised", "reported"):
+            classification = "http_auth_failed"
     result = {
         "probe": probe.name,
         "feature": probe.feature,
@@ -1777,6 +2117,9 @@ def run_probe(
         "page_zoom_result": page_zoom_result,
         "console_messages": console_messages,
         "console_capture_result": console_capture_result,
+        "http_auth": http_auth,
+        "http_auth_server_events": auth_events,
+        "http_auth_result": http_auth_result,
         "beforeunload_activation": (
             {
                 "ready": activation_ready_at is not None,
@@ -1882,6 +2225,12 @@ def write_coverage_map(path: pathlib.Path, results: list[dict[str, Any]]) -> Non
             next_action = "Console messages completed through protocol capture."
         elif classification == "console_capture_failed":
             next_action = "Inspect console protocol messages and source/level evidence."
+        elif classification == "http_auth_completed":
+            next_action = "HTTP Basic Auth completed through request/reply protocol."
+        elif classification == "http_auth_cancelled":
+            next_action = "HTTP Basic Auth cancellation completed and tab stayed usable."
+        elif classification == "http_auth_failed":
+            next_action = "Inspect HTTP auth request/reply and server sequence evidence."
         elif classification == "unsupported":
             next_action = "No runtime surface exposed in this build."
         else:
@@ -1930,6 +2279,12 @@ def write_reference_coverage_map(path: pathlib.Path, results: list[dict[str, Any
             next_action = "No immediate action; verified protocol console capture."
         elif classification == "console_capture_failed":
             next_action = "Inspect console protocol messages and source/level evidence."
+        elif classification == "http_auth_completed":
+            next_action = "No immediate action; verified HTTP Basic Auth success."
+        elif classification == "http_auth_cancelled":
+            next_action = "No immediate action; verified HTTP Basic Auth cancellation."
+        elif classification == "http_auth_failed":
+            next_action = "Inspect HTTP auth request/reply and server sequence evidence."
         elif classification in ("exercised", "unsupported"):
             next_action = "No immediate binder fix from this probe."
         else:
@@ -2004,7 +2359,7 @@ def main() -> int:
         "started_at": start.isoformat(),
         "probe_count": len(selected),
         "logging": {
-            "flags": ["--enable-logging=stderr", "--v=1"],
+            "flags": ["--enable-logging=stderr"],
             "stderr": str(run_dir / "roamium.stderr"),
             "stdout": str(run_dir / "roamium.stdout"),
             "bad_mojo_patterns": BAD_MOJO_PATTERNS,
@@ -2017,6 +2372,7 @@ def main() -> int:
             run_probe(
                 probe,
                 base_url,
+                state,
                 run_dir,
                 roamium,
                 download_dir,

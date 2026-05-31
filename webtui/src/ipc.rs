@@ -58,6 +58,16 @@ pub enum CompositorMessage {
         line_no: i32,
         source_id: String,
     },
+    HttpAuthRequest {
+        tab_id: i64,
+        request_id: u64,
+        url: String,
+        auth_scheme: String,
+        challenger: String,
+        realm: String,
+        is_proxy: bool,
+        first_auth_attempt: bool,
+    },
 }
 
 /// A direct connection to the TermSurf app via Unix domain socket.
@@ -293,6 +303,23 @@ impl CompositorConnection {
         }));
     }
 
+    pub fn send_http_auth_reply(
+        &self,
+        tab_id: i64,
+        request_id: u64,
+        accepted: bool,
+        username: &str,
+        password: &str,
+    ) {
+        self.send(Msg::HttpAuthReply(proto::HttpAuthReply {
+            tab_id,
+            request_id,
+            accepted,
+            username: username.into(),
+            password: password.into(),
+        }));
+    }
+
     /// Notify the compositor of a mode change.
     pub fn send_mode_changed(&self, pane_id: &str, browsing: bool) {
         self.send(Msg::ModeChanged(proto::ModeChanged {
@@ -414,6 +441,22 @@ impl BrowserConnection {
         }));
     }
 
+    pub fn send_http_auth_reply(
+        &self,
+        request_id: u64,
+        accepted: bool,
+        username: &str,
+        password: &str,
+    ) {
+        self.send(Msg::HttpAuthReply(proto::HttpAuthReply {
+            tab_id: self.tab_id,
+            request_id,
+            accepted,
+            username: username.into(),
+            password: password.into(),
+        }));
+    }
+
     fn send(&self, msg: Msg) {
         let wrapper = TermSurfMessage { msg: Some(msg) };
         let payload = wrapper.encode_to_vec();
@@ -514,6 +557,21 @@ fn dispatch_message(
                 message: m.message.clone(),
                 line_no: m.line_no,
                 source_id: m.source_id.clone(),
+            }));
+        }
+        Some(Msg::HttpAuthRequest(m)) => {
+            if tab_id != 0 && m.tab_id != 0 && m.tab_id != tab_id {
+                return;
+            }
+            let _ = event_tx.send(super::LoopEvent::Ipc(CompositorMessage::HttpAuthRequest {
+                tab_id: m.tab_id,
+                request_id: m.request_id,
+                url: m.url.clone(),
+                auth_scheme: m.auth_scheme.clone(),
+                challenger: m.challenger.clone(),
+                realm: m.realm.clone(),
+                is_proxy: m.is_proxy,
+                first_auth_attempt: m.first_auth_attempt,
             }));
         }
 

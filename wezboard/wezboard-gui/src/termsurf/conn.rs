@@ -133,11 +133,30 @@ fn msg_type_name(msg: &TermSurfMessage) -> &'static str {
         Some(Msg::JavascriptDialogRequest(_)) => "JavaScriptDialogRequest",
         Some(Msg::JavascriptDialogReply(_)) => "JavaScriptDialogReply",
         Some(Msg::ConsoleMessage(_)) => "ConsoleMessage",
+        Some(Msg::HttpAuthRequest(_)) => "HttpAuthRequest",
+        Some(Msg::HttpAuthReply(_)) => "HttpAuthReply",
         Some(Msg::OpenSplit(_)) => "OpenSplit",
         Some(Msg::SetDevtoolsOverlay(_)) => "SetDevtoolsOverlay",
         Some(_) => "Other",
         None => "None",
     }
+}
+
+fn send_http_auth_cancel(
+    tx: &Sender<Vec<u8>>,
+    request: &proto::HttpAuthRequest,
+) -> anyhow::Result<()> {
+    let reply = TermSurfMessage {
+        msg: Some(Msg::HttpAuthReply(proto::HttpAuthReply {
+            tab_id: request.tab_id,
+            request_id: request.request_id,
+            accepted: false,
+            username: String::new(),
+            password: String::new(),
+        })),
+    };
+    tx.try_send(reply.encode_to_vec())?;
+    Ok(())
 }
 
 async fn handle_message(
@@ -302,6 +321,45 @@ async fn handle_message(
                 log::debug!("ConsoleMessage: no pane for tab_id={}", c.tab_id);
             }
         }
+        Some(Msg::HttpAuthRequest(r)) => {
+            log::info!(
+                "HttpAuthRequest: tab_id={} request_id={} scheme={} challenger={} realm={}",
+                r.tab_id,
+                r.request_id,
+                r.auth_scheme,
+                r.challenger,
+                r.realm
+            );
+            let target = {
+                let st = state.lock().unwrap();
+                let skey = server_key.as_deref().unwrap_or("");
+                let lookup = (skey.to_string(), r.tab_id);
+                st.tab_to_pane
+                    .get(&lookup)
+                    .and_then(|pane_id| st.panes.get(pane_id))
+                    .map(|pane| pane.tui_tx.clone())
+            };
+            if let Some(tui_tx) = target {
+                let msg = TermSurfMessage {
+                    msg: Some(Msg::HttpAuthRequest(r.clone())),
+                };
+                if tui_tx.try_send(msg.encode_to_vec()).is_err() {
+                    log::warn!(
+                        "HttpAuthRequest: TUI send failed for tab_id={} request_id={}; canceling",
+                        r.tab_id,
+                        r.request_id
+                    );
+                    send_http_auth_cancel(tx, &r)?;
+                }
+            } else {
+                log::warn!(
+                    "HttpAuthRequest: no pane for tab_id={} request_id={}; canceling",
+                    r.tab_id,
+                    r.request_id
+                );
+                send_http_auth_cancel(tx, &r)?;
+            }
+        }
         Some(Msg::JavascriptDialogReply(r)) => {
             log::info!(
                 "JavaScriptDialogReply: tab_id={} request_id={} accepted={}",
@@ -328,6 +386,34 @@ async fn handle_message(
                 let _ = server_tx.try_send(msg.encode_to_vec());
             } else {
                 log::warn!("JavaScriptDialogReply: no server for tab_id={}", r.tab_id);
+            }
+        }
+        Some(Msg::HttpAuthReply(r)) => {
+            log::info!(
+                "HttpAuthReply: tab_id={} request_id={} accepted={}",
+                r.tab_id,
+                r.request_id,
+                r.accepted
+            );
+            let target = {
+                let st = state.lock().unwrap();
+                st.panes
+                    .values()
+                    .find(|pane| pane.tab_id == r.tab_id)
+                    .and_then(|pane| {
+                        let key = TermSurfState::server_key(&pane.profile, &pane.browser);
+                        st.servers
+                            .get(&key)
+                            .and_then(|server| server.tx.as_ref().cloned())
+                    })
+            };
+            if let Some(server_tx) = target {
+                let msg = TermSurfMessage {
+                    msg: Some(Msg::HttpAuthReply(r)),
+                };
+                let _ = server_tx.try_send(msg.encode_to_vec());
+            } else {
+                log::warn!("HttpAuthReply: no server for tab_id={}", r.tab_id);
             }
         }
         Some(Msg::QueryLastRequest(q)) => {
