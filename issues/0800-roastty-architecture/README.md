@@ -1,0 +1,210 @@
++++
+status = "open"
+opened = "2026-05-31"
++++
+
+# Issue 800: Roastty Architecture and ABI Skeleton
+
+## Goal
+
+Document the planned architecture for Roastty, implement the first Rust ABI
+skeleton that can eventually replace Ghostty's `libghostty`, and set the stage
+for the remaining Ghostty-to-Rust rewrite.
+
+Roastty is a macOS-first Rust reimplementation of Ghostty. The initial target is
+feature parity with Ghostty as a terminal emulator, before adding TermSurf's
+browser-overlay features.
+
+## Background
+
+TermSurf currently uses Wezboard, a WezTerm fork, as the active GUI. Wezboard
+works, but recent work exposed architectural friction in areas that matter to
+TermSurf: grid-native borders, pane geometry, browser overlays, and split
+presentation all required careful changes inside a terminal architecture that
+was not designed around TermSurf's browser-overlay model.
+
+Ghostty has a more promising shape for a future TermSurf GUI:
+
+- a native macOS frontend written in Swift/AppKit/SwiftUI;
+- a reusable terminal core exposed through `libghostty`;
+- a C ABI boundary between the native app and the terminal engine;
+- a surface model where the app runtime decides whether a terminal surface is a
+  window, tab, split, preview pane, or something else;
+- a Metal renderer on macOS;
+- a clean separation between terminal state, PTY/IO, rendering, fonts, config,
+  and native application UI.
+
+The vendored Ghostty repository is tracked under `vendor/ghostty/`. As of the
+start of this issue, it has been updated to upstream main at:
+
+`2c62d182c gtk: fix context menu hiding quick-terminal (#12843)`
+
+## Planned Architecture
+
+Roastty should not begin as a from-scratch macOS application rewrite. The
+practical path is to keep Ghostty's Swift macOS app as the reference frontend
+and gradually replace the Zig `libghostty` implementation with a Rust
+`libroastty` implementation behind a C ABI.
+
+The target architecture is:
+
+```text
+┌────────────────────────────────────────────────────────────┐
+│ Ghostty-derived Swift macOS app                            │
+│ windows, tabs, splits, menus, settings, native events      │
+└─────────────────────────────┬──────────────────────────────┘
+                              │ C ABI
+┌─────────────────────────────┴──────────────────────────────┐
+│ libroastty                                                 │
+│ Rust replacement for the parts of libghostty used by macOS │
+├────────────────────────────────────────────────────────────┤
+│ App / Surface handles                                      │
+│ Config, actions, callbacks, lifecycle                      │
+├────────────────────────────────────────────────────────────┤
+│ Terminal core                                              │
+│ parser, screen/grid, scrollback, selection, input encoding │
+├────────────────────────────────────────────────────────────┤
+│ PTY / terminal IO                                          │
+│ shell spawn, read/write threads, resize, child lifecycle   │
+├────────────────────────────────────────────────────────────┤
+│ Render state and renderer                                  │
+│ terminal-to-render rows, Metal layer, glyph atlas, cursor  │
+├────────────────────────────────────────────────────────────┤
+│ Font and text stack                                        │
+│ CoreText discovery, fallback, shaping, metrics, emoji      │
+└────────────────────────────────────────────────────────────┘
+```
+
+The first milestone is not a working terminal. It is an ABI skeleton: a Rust
+library that exposes enough `ghostty_*`-shaped C symbols for the Swift app, or a
+small compatibility harness, to load and exercise app/config/surface lifecycle
+without linking Zig `libghostty`.
+
+## Ghostty Reference Layers
+
+The relevant Ghostty layers are:
+
+- `vendor/ghostty/include/ghostty.h` — full C ABI used by the Swift app:
+  `ghostty_app_t`, `ghostty_surface_t`, config handles, input, mouse, clipboard,
+  actions, lifecycle, and rendering-related callbacks.
+- `vendor/ghostty/include/ghostty/vt.h` — lower-level virtual terminal library
+  API. This is the best reference for Roastty's terminal-core boundary.
+- `vendor/ghostty/src/App.zig` — core app state, surface list, focus, config
+  propagation, and mailbox tick loop.
+- `vendor/ghostty/src/Surface.zig` — the central terminal surface abstraction:
+  PTY, renderer, renderer state, terminal IO, input, mouse, search, inspector,
+  focus, config, and child process lifecycle.
+- `vendor/ghostty/src/apprt.zig` and `vendor/ghostty/src/apprt/embedded.zig` —
+  application-runtime abstraction. On macOS, Ghostty builds as an embedded
+  library and the Swift app supplies runtime callbacks.
+- `vendor/ghostty/src/terminal/` — terminal emulator state: parser, screens,
+  scrollback, selection, OSC/CSI/DCS handling, mouse/key encoding, Kitty
+  graphics, and render-state extraction.
+- `vendor/ghostty/src/termio/` — PTY/subprocess/IO threads.
+- `vendor/ghostty/src/renderer/` — renderer abstraction and Metal backend.
+- `vendor/ghostty/src/font/` — font discovery, CoreText backend, shaping,
+  fallback, glyph atlas, metrics, emoji, and sprite handling.
+- `vendor/ghostty/macos/Sources/` — Swift native macOS app, including tabs,
+  splits, terminal views, settings, menus, quick terminal, AppleScript,
+  AppIntents, native input, pasteboard, and platform integration.
+
+## Rewrite Order
+
+The rewrite should proceed in layers. Each layer should be verified before the
+next layer is designed.
+
+1. **ABI inventory and skeleton**
+
+   Identify the minimum `ghostty_*` API surface the macOS app needs to create an
+   app, create a surface, resize it, focus it, tick the event loop, and destroy
+   it. Implement no-op or stubbed Rust versions behind a C ABI.
+
+2. **Config and lifecycle**
+
+   Implement enough config loading, diagnostics, cloning, and cleanup for the
+   Swift app to launch without depending on Zig config internals.
+
+3. **Terminal core**
+
+   Reimplement the virtual terminal state: parser, screen/grid, scrollback,
+   cursor, style, SGR/OSC/CSI/DCS handling, selection, resize/reflow, and
+   terminal input encoding.
+
+4. **PTY and IO**
+
+   Spawn the shell, manage the PTY, resize it, read output, write input, track
+   foreground process information, and report child exit.
+
+5. **Render state**
+
+   Convert terminal state into a renderer-friendly row/cell/cursor/selection
+   model. This should be validated independently before full Metal parity.
+
+6. **Minimal macOS renderer**
+
+   Render a basic text grid into the Ghostty-derived surface. The first renderer
+   can be plain; the goal is correctness and ABI integration, not final
+   performance.
+
+7. **Metal renderer parity**
+
+   Port the production renderer pieces: Metal layer setup, command queues,
+   textures, glyph atlas, cursor rendering, selections, decorations, and redraw
+   scheduling.
+
+8. **Font and text parity**
+
+   Implement CoreText discovery, font fallback, shaping, ligatures, emoji, Nerd
+   Font glyphs, cell metrics, and glyph caching.
+
+9. **Input, keybindings, mouse, and clipboard**
+
+   Match Ghostty's keyboard layout handling, keybinding action model, mouse
+   modes, scroll behavior, paste behavior, OSC 52, IME/preedit, and clipboard
+   confirmation flow.
+
+10. **Native app feature parity**
+
+    Bring the Swift frontend back to parity with Ghostty behavior: tabs, splits,
+    zoom, quick terminal, settings, menus, command palette, AppleScript,
+    AppIntents, notifications, secure input, inspector, and update-adjacent
+    behavior where relevant.
+
+11. **TermSurf integration**
+
+    Add TermSurf browser overlays, protocol routing, Roamium integration, and
+    browser/terminal surface composition only after Roastty is a credible
+    Ghostty-compatible terminal on macOS.
+
+## Non-Goals
+
+- Do not add TermSurf browser overlays before terminal parity work has a stable
+  surface model.
+- Do not rewrite the Swift app first. The Swift app is valuable reference UI and
+  should initially be reused or lightly adapted.
+- Do not attempt a big-bang full Ghostty rewrite. Each subsystem needs an
+  experiment, verification, and result.
+- Do not claim compatibility from symbol presence alone. A stub ABI only proves
+  linking and lifecycle shape, not terminal behavior.
+- Do not target Linux, Windows, or a full cross-platform story during the first
+  Roastty phase. This issue is macOS-first.
+
+## Expected First Experiment
+
+The first experiment should implement the ABI skeleton.
+
+It should:
+
+- create the initial `roastty/` Rust crate layout;
+- choose the C ABI compatibility strategy;
+- inventory the `ghostty_*` symbols used by the macOS Swift app;
+- implement opaque Rust handles for app, config, and surface lifecycle;
+- expose a minimal set of C symbols with stable ownership rules;
+- add a tiny C or Rust integration test that loads the library, creates config,
+  app, and surface handles, calls the tick/focus/resize lifecycle, and frees
+  everything cleanly;
+- avoid implementing real terminal emulation, PTY, rendering, or font logic.
+
+The result should leave the repo ready for the next experiment: either wiring
+the Swift app to the stub library, or expanding the skeleton to cover the next
+required API group discovered during symbol inventory.

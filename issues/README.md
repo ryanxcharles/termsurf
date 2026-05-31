@@ -2,12 +2,13 @@
 
 ## Open
 
-| #                                                 | Title                                | Opened     |
-| ------------------------------------------------- | ------------------------------------ | ---------- |
-| [0756](0756-surfari/README.md)                    | Surfari — WebKit engine for TermSurf | 2026-03-16 |
-| [0795](0795-pdf-native-print/README.md)           | PDF Native Print                     | 2026-05-30 |
-| [0797](0797-pdf-core-workflow-coverage/README.md) | PDF Core Workflow Coverage           | 2026-05-30 |
-| [0798](0798-pdf-advanced-features/README.md)      | PDF Advanced Features                | 2026-05-30 |
+| #                                                 | Title                                 | Opened     |
+| ------------------------------------------------- | ------------------------------------- | ---------- |
+| [0756](0756-surfari/README.md)                    | Surfari — WebKit engine for TermSurf  | 2026-03-16 |
+| [0795](0795-pdf-native-print/README.md)           | PDF Native Print                      | 2026-05-30 |
+| [0797](0797-pdf-core-workflow-coverage/README.md) | PDF Core Workflow Coverage            | 2026-05-30 |
+| [0798](0798-pdf-advanced-features/README.md)      | PDF Advanced Features                 | 2026-05-30 |
+| [0800](0800-roastty-architecture/README.md)       | Roastty Architecture and ABI Skeleton | 2026-05-31 |
 
 ## Closed
 
