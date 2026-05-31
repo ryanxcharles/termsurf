@@ -210,6 +210,8 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 46: Port PageList Split](46-port-pagelist-split.md) — **Pass**
 - [Experiment 47: Port PageList Viewport Fixup](47-port-pagelist-viewport-fixup.md)
   — **Pass**
+- [Experiment 48: Port PageList Erase Row](48-port-pagelist-erase-row.md) —
+  **Designed**
 
 ## Non-Goals
 
