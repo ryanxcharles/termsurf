@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-31"
+closed = "2026-05-31"
 +++
 
 # Issue 800: Roastty Architecture and ABI Skeleton
@@ -314,3 +315,34 @@ It should:
 The result should leave the repo ready for the next experiment: either wiring
 the Swift app to the stub library, or expanding the skeleton to cover the next
 required API group discovered during symbol inventory.
+
+## Conclusion
+
+Issue 800 established the Roastty direction and the first working foundation for
+the rewrite.
+
+The key outcomes:
+
+- Documented the Roastty architecture: a macOS-first Rust adaptation of Ghostty,
+  with a renamed Roastty Swift app eventually talking to `libroastty` over a C
+  ABI.
+- Created the top-level TermSurf Rust workspace for `webtui`, `roamium`, and
+  `roastty`, while keeping Wezboard separate.
+- Added explicit naming rules: Roastty-owned public ABI, app calls, types,
+  files, product names, tests, and user-facing text use `roastty` / `Roastty`;
+  upstream names appear only as citations, vendored paths, or attribution.
+- Recorded Experiment 2 as a real failure because the first skeleton used
+  `ghostty_*` compatibility symbols.
+- Corrected that failure in Experiment 3 with a Roastty-owned `roastty_*` ABI,
+  public `roastty/include/roastty.h`, external C harness, symbol checks, and ABI
+  inventory.
+- Added the first small non-inert config behavior in Experiment 4:
+  `roastty_config_get` with a tested default-value subset.
+
+The issue intentionally did not implement terminal emulation, PTY IO, rendering,
+font/text handling, Swift app integration, or TermSurf browser overlays. Those
+belong in follow-up work after this foundation.
+
+Next work should continue from this base: expand config/lifecycle behavior, then
+move into terminal core, PTY/IO, render state, renderer, font/text, input,
+renamed Swift integration, and only then TermSurf browser-overlay integration.

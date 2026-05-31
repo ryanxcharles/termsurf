@@ -2,18 +2,18 @@
 
 ## Open
 
-| #                                                 | Title                                 | Opened     |
-| ------------------------------------------------- | ------------------------------------- | ---------- |
-| [0756](0756-surfari/README.md)                    | Surfari — WebKit engine for TermSurf  | 2026-03-16 |
-| [0795](0795-pdf-native-print/README.md)           | PDF Native Print                      | 2026-05-30 |
-| [0797](0797-pdf-core-workflow-coverage/README.md) | PDF Core Workflow Coverage            | 2026-05-30 |
-| [0798](0798-pdf-advanced-features/README.md)      | PDF Advanced Features                 | 2026-05-30 |
-| [0800](0800-roastty-architecture/README.md)       | Roastty Architecture and ABI Skeleton | 2026-05-31 |
+| #                                                 | Title                                | Opened     |
+| ------------------------------------------------- | ------------------------------------ | ---------- |
+| [0756](0756-surfari/README.md)                    | Surfari — WebKit engine for TermSurf | 2026-03-16 |
+| [0795](0795-pdf-native-print/README.md)           | PDF Native Print                     | 2026-05-30 |
+| [0797](0797-pdf-core-workflow-coverage/README.md) | PDF Core Workflow Coverage           | 2026-05-30 |
+| [0798](0798-pdf-advanced-features/README.md)      | PDF Advanced Features                | 2026-05-30 |
 
 ## Closed
 
 | #                                                       | Title                                                                         | Opened     | Closed     |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
+| [0800](0800-roastty-architecture/README.md)             | Roastty Architecture and ABI Skeleton                                         | 2026-05-31 | 2026-05-31 |
 | [0799](0799-browser-api-automation-triage/README.md)    | Browser API Automation Triage                                                 | 2026-05-30 | 2026-05-31 |
 | [0796](0796-pdf-implementation-audit/README.md)         | PDF Implementation Audit                                                      | 2026-05-30 | 2026-05-30 |
 | [0794](0794-pdf-viewer-interactions/README.md)          | Complete PDF Viewer Interactions                                              | 2026-05-29 | 2026-05-30 |
