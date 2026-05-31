@@ -164,6 +164,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 18: Port Page CloneFrom Graphemes](18-port-page-clone-from-graphemes.md)
   — **Pass**
+- [Experiment 19: Port Page CloneFrom Styles](19-port-page-clone-from-styles.md)
+  — **Designed**
 
 ## Non-Goals
 
