@@ -1,8 +1,9 @@
 use std::fmt;
 
 use super::color::{Palette, Rgb};
+use super::ref_counted_set::{self, AddError, Context, RefCountedSet};
 use super::sgr::Underline;
-use super::size::StyleCountInt;
+use super::size::{BaseAddress, StyleCountInt};
 
 pub(super) type Id = StyleCountInt;
 pub(super) const DEFAULT_ID: Id = 0;
@@ -91,11 +92,265 @@ impl Style {
             palette: None,
         }
     }
+
+    pub(super) fn hash(self) -> u64 {
+        StorageStyle::from_style(self).hash()
+    }
 }
 
 impl Default for Style {
     fn default() -> Self {
         Self::default_style()
+    }
+}
+
+#[repr(C, align(4))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct StorageStyle {
+    bytes: [u8; 28],
+}
+
+impl StorageStyle {
+    const FG_TAG: usize = 0;
+    const BG_TAG: usize = 1;
+    const UNDERLINE_TAG: usize = 2;
+    const FG_DATA: usize = 4;
+    const BG_DATA: usize = 8;
+    const UNDERLINE_DATA: usize = 12;
+    const FLAGS: usize = 16;
+
+    fn from_style(style: Style) -> Self {
+        let mut storage = Self::default();
+        storage.write_color(Self::FG_TAG, Self::FG_DATA, style.fg_color);
+        storage.write_color(Self::BG_TAG, Self::BG_DATA, style.bg_color);
+        storage.write_color(
+            Self::UNDERLINE_TAG,
+            Self::UNDERLINE_DATA,
+            style.underline_color,
+        );
+        storage.bytes[Self::FLAGS..Self::FLAGS + 2]
+            .copy_from_slice(&flags_bits(style.flags).to_le_bytes());
+        storage
+    }
+
+    fn to_style(self) -> Style {
+        Style {
+            fg_color: self.read_color(Self::FG_TAG, Self::FG_DATA),
+            bg_color: self.read_color(Self::BG_TAG, Self::BG_DATA),
+            underline_color: self.read_color(Self::UNDERLINE_TAG, Self::UNDERLINE_DATA),
+            flags: flags_from_bits(u16::from_le_bytes([
+                self.bytes[Self::FLAGS],
+                self.bytes[Self::FLAGS + 1],
+            ])),
+        }
+    }
+
+    fn hash(self) -> u64 {
+        fnv1a64(&self.bytes)
+    }
+
+    fn write_color(&mut self, tag_offset: usize, data_offset: usize, color: Color) {
+        match color {
+            Color::None => {
+                self.bytes[tag_offset] = 0;
+            }
+            Color::Palette(idx) => {
+                self.bytes[tag_offset] = 1;
+                self.bytes[data_offset] = idx;
+            }
+            Color::Rgb(rgb) => {
+                self.bytes[tag_offset] = 2;
+                self.bytes[data_offset] = rgb.r;
+                self.bytes[data_offset + 1] = rgb.g;
+                self.bytes[data_offset + 2] = rgb.b;
+            }
+        }
+    }
+
+    fn read_color(self, tag_offset: usize, data_offset: usize) -> Color {
+        match self.bytes[tag_offset] {
+            0 => Color::None,
+            1 => Color::Palette(self.bytes[data_offset]),
+            2 => Color::Rgb(Rgb::new(
+                self.bytes[data_offset],
+                self.bytes[data_offset + 1],
+                self.bytes[data_offset + 2],
+            )),
+            tag => panic!("invalid stored style color tag {tag}"),
+        }
+    }
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn flags_bits(flags: Flags) -> u16 {
+    let mut bits = 0_u16;
+    bits |= u16::from(flags.bold);
+    bits |= u16::from(flags.italic) << 1;
+    bits |= u16::from(flags.faint) << 2;
+    bits |= u16::from(flags.blink) << 3;
+    bits |= u16::from(flags.inverse) << 4;
+    bits |= u16::from(flags.invisible) << 5;
+    bits |= u16::from(flags.strikethrough) << 6;
+    bits |= u16::from(flags.overline) << 7;
+    bits | (underline_bits(flags.underline) << 8)
+}
+
+fn flags_from_bits(bits: u16) -> Flags {
+    Flags {
+        bold: bits & 1 != 0,
+        italic: bits & (1 << 1) != 0,
+        faint: bits & (1 << 2) != 0,
+        blink: bits & (1 << 3) != 0,
+        inverse: bits & (1 << 4) != 0,
+        invisible: bits & (1 << 5) != 0,
+        strikethrough: bits & (1 << 6) != 0,
+        overline: bits & (1 << 7) != 0,
+        underline: underline_from_bits((bits >> 8) & 0b111),
+    }
+}
+
+fn underline_bits(underline: Underline) -> u16 {
+    match underline {
+        Underline::None => 0,
+        Underline::Single => 1,
+        Underline::Double => 2,
+        Underline::Curly => 3,
+        Underline::Dotted => 4,
+        Underline::Dashed => 5,
+    }
+}
+
+fn underline_from_bits(bits: u16) -> Underline {
+    match bits {
+        0 => Underline::None,
+        1 => Underline::Single,
+        2 => Underline::Double,
+        3 => Underline::Curly,
+        4 => Underline::Dotted,
+        5 => Underline::Dashed,
+        value => panic!("invalid stored style underline value {value}"),
+    }
+}
+
+#[derive(Debug, Default)]
+struct StyleContext;
+
+impl Context<StorageStyle> for StyleContext {
+    fn hash(&self, value: StorageStyle) -> u64 {
+        value.hash()
+    }
+
+    fn eql(&self, candidate: StorageStyle, resident: StorageStyle) -> bool {
+        candidate == resident
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Set {
+    inner: RefCountedSet<StorageStyle>,
+}
+
+impl Set {
+    pub(super) const BASE_ALIGN: usize = RefCountedSet::<StorageStyle>::BASE_ALIGN;
+
+    pub(super) fn capacity_for_count(count: usize) -> usize {
+        RefCountedSet::<StorageStyle>::capacity_for_count(count)
+    }
+
+    pub(super) fn layout(capacity: usize) -> ref_counted_set::Layout {
+        RefCountedSet::<StorageStyle>::layout(capacity)
+    }
+
+    pub(super) fn init<B>(base: B, layout: ref_counted_set::Layout) -> Self
+    where
+        B: BaseAddress + Copy,
+    {
+        Self {
+            inner: RefCountedSet::init(base, layout),
+        }
+    }
+
+    pub(super) fn add<B>(&mut self, base: B, style: Style) -> Result<Id, AddError>
+    where
+        B: BaseAddress + Copy,
+    {
+        self.inner
+            .add(base, StorageStyle::from_style(style), &mut StyleContext)
+    }
+
+    pub(super) fn add_with_id<B>(
+        &mut self,
+        base: B,
+        style: Style,
+        id: Id,
+    ) -> Result<Option<Id>, AddError>
+    where
+        B: BaseAddress + Copy,
+    {
+        self.inner
+            .add_with_id(base, StorageStyle::from_style(style), id, &mut StyleContext)
+    }
+
+    pub(super) fn lookup<B>(&self, base: B, style: Style) -> Option<Id>
+    where
+        B: BaseAddress + Copy,
+    {
+        self.inner
+            .lookup(base, StorageStyle::from_style(style), &StyleContext)
+    }
+
+    pub(super) fn get<B>(&self, base: B, id: Id) -> Style
+    where
+        B: BaseAddress + Copy,
+    {
+        self.inner.get(base, id).to_style()
+    }
+
+    pub(super) fn use_one<B>(&self, base: B, id: Id)
+    where
+        B: BaseAddress + Copy,
+    {
+        self.inner.use_one(base, id);
+    }
+
+    pub(super) fn use_multiple<B>(&self, base: B, id: Id, count: Id)
+    where
+        B: BaseAddress + Copy,
+    {
+        self.inner.use_multiple(base, id, count);
+    }
+
+    pub(super) fn release<B>(&mut self, base: B, id: Id)
+    where
+        B: BaseAddress + Copy,
+    {
+        self.inner.release(base, id);
+    }
+
+    pub(super) fn release_multiple<B>(&mut self, base: B, id: Id, count: Id)
+    where
+        B: BaseAddress + Copy,
+    {
+        self.inner.release_multiple(base, id, count);
+    }
+
+    pub(super) fn ref_count<B>(&self, base: B, id: Id) -> Id
+    where
+        B: BaseAddress + Copy,
+    {
+        self.inner.ref_count(base, id)
+    }
+
+    pub(super) fn count(&self) -> usize {
+        self.inner.count()
     }
 }
 
@@ -315,7 +570,10 @@ impl fmt::Display for HtmlFormatter<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::mem::{align_of, size_of};
+
     use super::super::color::{Rgb, DEFAULT_PALETTE};
+    use super::super::ref_counted_set;
     use super::*;
 
     fn style_with_flags(flags: Flags) -> Style {
@@ -323,6 +581,44 @@ mod tests {
             flags,
             ..Style::default()
         }
+    }
+
+    fn palette_style(index: u8) -> Style {
+        Style {
+            fg_color: Color::Palette(index),
+            ..Style::default()
+        }
+    }
+
+    fn rgb_style(r: u8, g: u8, b: u8) -> Style {
+        Style {
+            fg_color: Color::Rgb(Rgb::new(r, g, b)),
+            ..Style::default()
+        }
+    }
+
+    fn init_set(capacity: usize) -> (Vec<u64>, Set) {
+        let layout = Set::layout(capacity);
+        let mut backing = vec![0_u64; layout.total_size.div_ceil(size_of::<u64>())];
+        let set = Set::init(backing.as_mut_ptr().cast::<u8>(), layout);
+        (backing, set)
+    }
+
+    fn backing_ptr(backing: &mut [u64]) -> *mut u8 {
+        backing.as_mut_ptr().cast::<u8>()
+    }
+
+    fn same_bucket_styles(count: usize, mask: u16) -> Vec<Style> {
+        let mut buckets: Vec<Vec<Style>> = vec![Vec::new(); mask as usize + 1];
+        for index in 0..=u8::MAX {
+            let style = palette_style(index);
+            let bucket = (style.hash() as u16 & mask) as usize;
+            buckets[bucket].push(style);
+            if buckets[bucket].len() == count {
+                return buckets[bucket].clone();
+            }
+        }
+        panic!("unable to find {count} style values in the same bucket");
     }
 
     #[test]
@@ -336,6 +632,75 @@ mod tests {
         });
         assert!(!style.is_default());
         assert_eq!(DEFAULT_ID, 0);
+    }
+
+    #[test]
+    fn style_storage_layout() {
+        assert_eq!(size_of::<Style>(), 21);
+        assert_eq!(align_of::<Style>(), 1);
+        assert_eq!(size_of::<StorageStyle>(), 28);
+        assert_eq!(align_of::<StorageStyle>(), 4);
+        assert_eq!(size_of::<ref_counted_set::Item<StorageStyle>>(), 36);
+        assert_eq!(align_of::<ref_counted_set::Item<StorageStyle>>(), 4);
+
+        let layout = Set::layout(16);
+        assert_eq!(Set::BASE_ALIGN, 8);
+        assert_eq!(layout.cap, 13);
+        assert_eq!(layout.table_cap, 16);
+        assert_eq!(layout.items_start, 32);
+        assert_eq!(layout.total_size, 500);
+    }
+
+    #[test]
+    fn style_storage_round_trip() {
+        let style = Style {
+            fg_color: Color::Palette(42),
+            bg_color: Color::Rgb(Rgb::new(1, 2, 3)),
+            underline_color: Color::Rgb(Rgb::new(4, 5, 6)),
+            flags: Flags {
+                bold: true,
+                italic: true,
+                underline: Underline::Curly,
+                ..Flags::default()
+            },
+        };
+
+        assert_eq!(StorageStyle::from_style(style).to_style(), style);
+    }
+
+    #[test]
+    fn style_hash_known_vectors() {
+        assert_eq!(Style::default().hash(), 0x17d9_c152_39d0_81d5);
+        assert_eq!(
+            style_with_flags(Flags {
+                bold: true,
+                ..Flags::default()
+            })
+            .hash(),
+            0x2296_3db1_df02_4924
+        );
+        assert_eq!(
+            style_with_flags(Flags {
+                italic: true,
+                ..Flags::default()
+            })
+            .hash(),
+            0x0260_c892_ef6c_f337
+        );
+        assert_eq!(palette_style(42).hash(), 0x6eb0_318d_c584_608e);
+        assert_eq!(rgb_style(255, 128, 64).hash(), 0xde06_3d18_a320_c0a8);
+        assert_eq!(
+            style_with_flags(Flags {
+                bold: true,
+                ..Flags::default()
+            })
+            .hash(),
+            style_with_flags(Flags {
+                bold: true,
+                ..Flags::default()
+            })
+            .hash()
+        );
     }
 
     #[test]
@@ -404,6 +769,89 @@ mod tests {
             style.underline_color(&DEFAULT_PALETTE),
             Some(Rgb::new(8, 9, 10))
         );
+    }
+
+    #[test]
+    fn style_set_basic_usage() {
+        let (mut backing, mut set) = init_set(16);
+        let base = backing_ptr(&mut backing);
+        let style = style_with_flags(Flags {
+            bold: true,
+            ..Flags::default()
+        });
+        let style2 = style_with_flags(Flags {
+            italic: true,
+            ..Flags::default()
+        });
+
+        let id = set.add(base, style).unwrap();
+        assert!(id > 0);
+
+        let id_again = set.add(base, style).unwrap();
+        assert_eq!(id, id_again);
+        assert_eq!(set.lookup(base, style), Some(id));
+
+        let found = set.get(base, id);
+        assert!(found.flags.bold);
+        assert_eq!(found, set.get(base, id));
+
+        let id2 = set.add(base, style2).unwrap();
+        assert!(set.get(base, id2).flags.italic);
+        assert_eq!(set.count(), 2);
+        assert_eq!(set.ref_count(base, id), 2);
+        assert_eq!(set.ref_count(base, id2), 1);
+
+        set.use_one(base, id2);
+        set.use_multiple(base, id2, 2);
+        assert_eq!(set.ref_count(base, id2), 4);
+        set.release_multiple(base, id2, 3);
+        assert_eq!(set.ref_count(base, id2), 1);
+
+        set.release(base, id);
+        assert_eq!(set.ref_count(base, id), 1);
+        set.release(base, id2);
+        assert_eq!(set.ref_count(base, id2), 0);
+        set.release(base, id);
+        assert_eq!(set.ref_count(base, id), 0);
+    }
+
+    #[test]
+    fn style_set_capacities() {
+        let layout = Set::layout(16_384);
+
+        assert_eq!(Set::capacity_for_count(0), 0);
+        assert!(layout.total_size > 0);
+    }
+
+    #[test]
+    fn style_set_add_with_id_uses_requested_id() {
+        let (mut backing, mut set) = init_set(16);
+        let base = backing_ptr(&mut backing);
+        let style = palette_style(1);
+        let id = set.add(base, style).unwrap();
+        set.release(base, id);
+
+        let result = set.add_with_id(base, palette_style(2), id).unwrap();
+
+        assert_eq!(result, None);
+        assert_eq!(set.get(base, id), palette_style(2));
+    }
+
+    #[test]
+    fn style_set_add_with_id_returns_alternate_id() {
+        let (mut backing, mut set) = init_set(16);
+        let base = backing_ptr(&mut backing);
+        let styles = same_bucket_styles(4, Set::layout(16).table_mask);
+        let id1 = set.add(base, styles[0]).unwrap();
+        let _id2 = set.add(base, styles[1]).unwrap();
+        let id3 = set.add(base, styles[2]).unwrap();
+        set.release(base, id1);
+        set.release(base, id3);
+
+        let result = set.add_with_id(base, styles[3], id3).unwrap();
+
+        assert_eq!(result, Some(id1));
+        assert_eq!(set.get(base, id1), styles[3]);
     }
 
     #[test]

@@ -157,7 +157,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 14: Port Ref-Counted Set Storage](14-port-ref-counted-set.md) —
   **Pass**
 - [Experiment 15: Port Style Hashing and Set Storage](15-port-style-set.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 

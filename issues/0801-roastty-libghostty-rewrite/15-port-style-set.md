@@ -191,3 +191,141 @@ The experiment fails if:
 This experiment design must be reviewed by Codex before implementation. Any real
 design issues must be fixed before committing the plan or implementing the
 slice.
+
+## Result
+
+**Result:** Pass
+
+Experiment 15 added deterministic style hashing and a real offset-backed
+`style::Set` wrapper on top of Experiment 14's `RefCountedSet`.
+
+### Hashing
+
+The implementation added `Style::hash()` through a dedicated storage
+representation:
+
+- `StorageStyle`
+- `StorageStyle::from_style`
+- `StorageStyle::to_style`
+- `StorageStyle::hash`
+
+`StorageStyle` serializes the ergonomic Rust `Style` into a deterministic
+28-byte page-compatible storage value and hashes those bytes with FNV-1a 64.
+
+This is a Roastty deterministic equivalent, not a claim of numeric parity with
+Ghostty's Zig `std.hash.int`. Exact numeric hash parity is not required for
+`RefCountedSet` correctness because the hash only determines table placement,
+but the chosen algorithm is stable and covered by known-vector tests.
+
+Known vectors were added for:
+
+- default style;
+- bold style;
+- italic style;
+- palette foreground style;
+- RGB foreground style.
+
+### Layout
+
+The experiment measured the existing ergonomic Rust `Style` layout:
+
+- `size_of::<Style>() = 21`
+- `align_of::<Style>() = 1`
+
+That is not Page-compatible by itself, so the implementation uses `StorageStyle`
+for set storage:
+
+- `size_of::<StorageStyle>() = 28`
+- `align_of::<StorageStyle>() = 4`
+- `size_of::<ref_counted_set::Item<StorageStyle>>() = 36`
+- `align_of::<ref_counted_set::Item<StorageStyle>>() = 4`
+
+`style::Set::layout(16)` matches the current Page-compatible style layout:
+
+- `base_align = 8`
+- `cap = 13`
+- `table_cap = 16`
+- `items_start = 32`
+- `total_size = 500`
+
+Page's existing style layout helper was not replaced in this experiment. That
+kept the slice limited to `style::Set`, and all existing Page layout tests
+remained green.
+
+### API Added
+
+`terminal::style` now exposes:
+
+- `Set`
+- `Set::BASE_ALIGN`
+- `Set::capacity_for_count`
+- `Set::layout`
+- `Set::init`
+- `Set::add`
+- `Set::add_with_id`
+- `Set::lookup`
+- `Set::get`
+- `Set::use_one`
+- `Set::use_multiple`
+- `Set::release`
+- `Set::release_multiple`
+- `Set::ref_count`
+- `Set::count`
+
+`Set::add_with_id` preserves Experiment 14's nullable return semantics:
+
+- `Ok(None)` means the requested ID was used;
+- `Ok(Some(id))` means an alternate ID was chosen.
+
+### Tests Added
+
+The upstream tests ported are:
+
+- `style.zig` `Set basic usage`
+- `style.zig` `Set capacities`
+
+Additional tests cover:
+
+- storage layout compatibility;
+- storage round-trip conversion;
+- deterministic hash known vectors;
+- requested-ID `add_with_id`;
+- alternate-ID `add_with_id`.
+
+### Deferred
+
+This experiment intentionally did not add:
+
+- Page `styles` field wiring;
+- Page `clone styles`;
+- Page `setStyle`;
+- Page style integrity checks;
+- Page style exact-capacity behavior;
+- `cloneFrom` / `cloneRowFrom` style handling.
+
+### Verification
+
+The required verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::style
+cargo test -p roastty terminal::ref_counted_set
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+Observed results:
+
+- `terminal::style`: 21 passed
+- `terminal::ref_counted_set`: 16 passed
+- `terminal::page`: 50 passed
+- full `roastty` suite: 159 Rust unit tests passed, C ABI harness passed, doc
+  tests passed
+
+## Conclusion
+
+Roastty now has the style-specific set layer needed by Page style metadata. The
+next Page experiment can wire `style::Set` into `Page` and port the first
+style-backed Page test, `Page clone styles`, without also having to solve style
+hashing, storage layout, or set wrapper semantics.
