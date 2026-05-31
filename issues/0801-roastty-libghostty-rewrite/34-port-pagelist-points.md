@@ -188,3 +188,69 @@ The experiment fails if:
 - the implementation expands into scrolling, arbitrary tracked pins, resize,
   grow, erase, screen/parser behavior, or public ABI;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Implemented PageList point/pin conversion in
+`roastty/src/terminal/page_list.rs`.
+
+The node traversal shape stays aligned with the Rust storage chosen in
+Experiment 33:
+
+- pages remain `Vec<Box<Node>>`;
+- pins keep stable `NonNull<Node>` handles;
+- traversal maps a node pointer back to its vector index when walking across
+  pages;
+- no intrusive `prev` / `next` links were added in this slice.
+
+Added PageList methods for:
+
+- first/last node lookup;
+- node-index lookup from a `NonNull<Node>`;
+- `get_top_left`;
+- `get_bottom_right`;
+- `pin`;
+- `point_from_pin`;
+- `pin_down`;
+- `pin_up`.
+
+The implementation preserves upstream `pointFromPin` traversal semantics:
+conversion starts at the requested tag's top-left and walks forward until the
+pin's node is found. It rejects pins before that top-left or on unreachable
+nodes, and it does not add a bottom-bound check with `get_bottom_right`. This
+keeps upstream's initialized no-history behavior where `history` top-left is the
+first page even though `get_bottom_right(history)` is `None`.
+
+Added tests for:
+
+- upstream `PageList pointFromPin active no history`;
+- `pin(Point::active(...))`;
+- out-of-bounds x and y returning `None`;
+- viewport point/pin conversion preserving viewport tags;
+- history point/pin conversion preserving upstream initialized no-history
+  traversal semantics;
+- active top-left on a multi-page initialized list;
+- screen point conversion accumulating rows across pages;
+- active bottom-right returning the last active cell;
+- rejecting a pin before the active top-left.
+
+Verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+The targeted PageList suite reported 26 passing tests. The full `roastty` suite
+reported 307 unit tests, the ABI harness, and doc tests passing.
+
+## Conclusion
+
+Roastty PageList can now translate initialized terminal points into page pins
+and page pins back into tagged points across active, viewport, screen, and
+history coordinate spaces. This is the first read-only coordinate layer needed
+before viewport scrolling, rendering iteration, selection, and later mutable
+PageList operations.

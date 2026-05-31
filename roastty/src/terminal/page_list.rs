@@ -1,6 +1,7 @@
 use std::ptr::NonNull;
 
 use super::page::{page_layout, Capacity, CapacityAdjustment, Page, PageAllocError, STD_CAPACITY};
+use super::point::{self, Coordinate};
 use super::size::CellCountInt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +33,7 @@ struct Node {
     serial: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Pin {
     node: NonNull<Node>,
     y: CellCountInt,
@@ -175,6 +176,196 @@ impl PageList {
             .iter()
             .map(Box::as_ref)
             .find(|node| NonNull::from(*node) == pin.node)
+    }
+
+    fn node_index(&self, node_ptr: NonNull<Node>) -> Option<usize> {
+        self.pages
+            .iter()
+            .position(|node| NonNull::from(node.as_ref()) == node_ptr)
+    }
+
+    fn first_node_ptr(&self) -> NonNull<Node> {
+        NonNull::from(
+            self.pages
+                .first()
+                .expect("PageList must contain at least one page")
+                .as_ref(),
+        )
+    }
+
+    fn last_node_ptr(&self) -> NonNull<Node> {
+        NonNull::from(
+            self.pages
+                .last()
+                .expect("PageList must contain at least one page")
+                .as_ref(),
+        )
+    }
+
+    fn get_top_left(&self, tag: point::Tag) -> Pin {
+        match tag {
+            point::Tag::Screen | point::Tag::History => Pin {
+                node: self.first_node_ptr(),
+                y: 0,
+                x: 0,
+                garbage: false,
+            },
+            point::Tag::Viewport => match self.viewport {
+                Viewport::Active => self.get_top_left(point::Tag::Active),
+                Viewport::Top => self.get_top_left(point::Tag::Screen),
+                Viewport::Pin => *self.viewport_pin,
+            },
+            point::Tag::Active => {
+                let mut remaining = self.rows as usize;
+                for node in self.pages.iter().rev() {
+                    let node_rows = node.page.size_rows() as usize;
+                    if remaining <= node_rows {
+                        return Pin {
+                            node: NonNull::from(node.as_ref()),
+                            y: (node_rows - remaining)
+                                .try_into()
+                                .expect("active top-left row must fit CellCountInt"),
+                            x: 0,
+                            garbage: false,
+                        };
+                    }
+
+                    remaining -= node_rows;
+                }
+
+                unreachable!("PageList must contain enough rows for active area");
+            }
+        }
+    }
+
+    fn get_bottom_right(&self, tag: point::Tag) -> Option<Pin> {
+        match tag {
+            point::Tag::Screen | point::Tag::Active => {
+                let node = self.pages.last()?;
+                Some(Pin {
+                    node: NonNull::from(node.as_ref()),
+                    y: node.page.size_rows() - 1,
+                    x: node.page.size_cols() - 1,
+                    garbage: false,
+                })
+            }
+            point::Tag::Viewport => {
+                let mut bottom_right = self.get_top_left(point::Tag::Viewport);
+                bottom_right = self.pin_down(bottom_right, self.rows as usize - 1)?;
+                let node = self.node_for_pin(&bottom_right)?;
+                bottom_right.x = node.page.size_cols() - 1;
+                Some(bottom_right)
+            }
+            point::Tag::History => {
+                let mut bottom_right = self.get_top_left(point::Tag::Active);
+                bottom_right = self.pin_up(bottom_right, 1)?;
+                let node = self.node_for_pin(&bottom_right)?;
+                bottom_right.x = node.page.size_cols() - 1;
+                Some(bottom_right)
+            }
+        }
+    }
+
+    fn pin(&self, point: point::Point) -> Option<Pin> {
+        let coord = point.coord();
+        if coord.x >= self.cols {
+            return None;
+        }
+
+        let mut pin = self.pin_down(self.get_top_left(point.tag()), coord.y as usize)?;
+        pin.x = coord.x;
+        Some(pin)
+    }
+
+    fn point_from_pin(&self, tag: point::Tag, pin: Pin) -> Option<point::Point> {
+        let top_left = self.get_top_left(tag);
+        let top_left_index = self.node_index(top_left.node)?;
+        let pin_index = self.node_index(pin.node)?;
+
+        let mut coord = Coordinate::new(pin.x, 0);
+        if pin_index == top_left_index {
+            if top_left.y > pin.y {
+                return None;
+            }
+            coord.y = (pin.y - top_left.y) as u32;
+        } else {
+            if pin_index < top_left_index {
+                return None;
+            }
+
+            coord.y += (self.pages[top_left_index].page.size_rows() - top_left.y) as u32;
+            for node in &self.pages[top_left_index + 1..pin_index] {
+                coord.y += node.page.size_rows() as u32;
+            }
+            coord.y += pin.y as u32;
+        }
+
+        Some(match tag {
+            point::Tag::Active => point::Point::active(coord),
+            point::Tag::Viewport => point::Point::viewport(coord),
+            point::Tag::Screen => point::Point::screen(coord),
+            point::Tag::History => point::Point::history(coord),
+        })
+    }
+
+    fn pin_down(&self, pin: Pin, rows: usize) -> Option<Pin> {
+        let index = self.node_index(pin.node)?;
+        let node_rows = self.pages[index].page.size_rows() as usize;
+        let remaining_in_row = node_rows - (pin.y as usize + 1);
+        if rows <= remaining_in_row {
+            let mut result = pin;
+            result.y = (pin.y as usize + rows)
+                .try_into()
+                .expect("pin row must fit CellCountInt");
+            return Some(result);
+        }
+
+        let mut rows_left = rows - remaining_in_row;
+        for node in &self.pages[index + 1..] {
+            let page_rows = node.page.size_rows() as usize;
+            if rows_left <= page_rows {
+                return Some(Pin {
+                    node: NonNull::from(node.as_ref()),
+                    y: (rows_left - 1)
+                        .try_into()
+                        .expect("pin row must fit CellCountInt"),
+                    x: pin.x,
+                    garbage: pin.garbage,
+                });
+            }
+            rows_left -= page_rows;
+        }
+
+        None
+    }
+
+    fn pin_up(&self, pin: Pin, rows: usize) -> Option<Pin> {
+        let index = self.node_index(pin.node)?;
+        if rows <= pin.y as usize {
+            let mut result = pin;
+            result.y = (pin.y as usize - rows)
+                .try_into()
+                .expect("pin row must fit CellCountInt");
+            return Some(result);
+        }
+
+        let mut rows_left = rows - pin.y as usize;
+        for node in self.pages[..index].iter().rev() {
+            let page_rows = node.page.size_rows() as usize;
+            if rows_left <= page_rows {
+                return Some(Pin {
+                    node: NonNull::from(node.as_ref()),
+                    y: (page_rows - rows_left)
+                        .try_into()
+                        .expect("pin row must fit CellCountInt"),
+                    x: pin.x,
+                    garbage: pin.garbage,
+                });
+            }
+            rows_left -= page_rows;
+        }
+
+        None
     }
 
     fn total_rows(&self) -> usize {
@@ -428,5 +619,166 @@ mod tests {
             list.verify_integrity(),
             Err(IntegrityError::TrackedPinInvalid)
         );
+    }
+
+    #[test]
+    fn page_list_point_from_pin_active_no_history() {
+        let list = PageList::init(80, 24, None).unwrap();
+
+        assert_eq!(
+            list.point_from_pin(
+                point::Tag::Active,
+                Pin {
+                    node: NonNull::from(list.pages[0].as_ref()),
+                    y: 0,
+                    x: 0,
+                    garbage: false,
+                },
+            ),
+            Some(point::Point::active(Coordinate::new(0, 0)))
+        );
+        assert_eq!(
+            list.point_from_pin(
+                point::Tag::Active,
+                Pin {
+                    node: NonNull::from(list.pages[0].as_ref()),
+                    y: 2,
+                    x: 4,
+                    garbage: false,
+                },
+            ),
+            Some(point::Point::active(Coordinate::new(4, 2)))
+        );
+    }
+
+    #[test]
+    fn page_list_pin_active_point() {
+        let list = PageList::init(80, 24, None).unwrap();
+        let pin = list
+            .pin(point::Point::active(Coordinate::new(4, 2)))
+            .unwrap();
+
+        assert_eq!(pin.node, NonNull::from(list.pages[0].as_ref()));
+        assert_eq!(pin.x, 4);
+        assert_eq!(pin.y, 2);
+    }
+
+    #[test]
+    fn page_list_pin_rejects_out_of_bounds_x() {
+        let list = PageList::init(80, 24, None).unwrap();
+
+        assert_eq!(list.pin(point::Point::active(Coordinate::new(80, 0))), None);
+    }
+
+    #[test]
+    fn page_list_pin_rejects_out_of_bounds_y() {
+        let list = PageList::init(80, 24, None).unwrap();
+
+        assert_eq!(list.pin(point::Point::active(Coordinate::new(0, 24))), None);
+    }
+
+    #[test]
+    fn page_list_viewport_point_conversion_preserves_tag() {
+        let list = PageList::init(80, 24, None).unwrap();
+        let pin = list
+            .pin(point::Point::viewport(Coordinate::new(3, 5)))
+            .unwrap();
+
+        assert_eq!(pin.node, NonNull::from(list.pages[0].as_ref()));
+        assert_eq!(pin.x, 3);
+        assert_eq!(pin.y, 5);
+        assert_eq!(
+            list.point_from_pin(point::Tag::Viewport, pin),
+            Some(point::Point::viewport(Coordinate::new(3, 5)))
+        );
+    }
+
+    #[test]
+    fn page_list_history_point_conversion_preserves_upstream_no_history_semantics() {
+        let list = PageList::init(80, 24, None).unwrap();
+        let pin = list
+            .pin(point::Point::history(Coordinate::new(2, 4)))
+            .unwrap();
+
+        assert_eq!(pin.node, NonNull::from(list.pages[0].as_ref()));
+        assert_eq!(pin.x, 2);
+        assert_eq!(pin.y, 4);
+        assert_eq!(
+            list.point_from_pin(point::Tag::History, pin),
+            Some(point::Point::history(Coordinate::new(2, 4)))
+        );
+        assert_eq!(list.get_bottom_right(point::Tag::History), None);
+    }
+
+    #[test]
+    fn page_list_get_top_left_active_multi_page_initialized_list() {
+        let rows = 100;
+        let mut capacity = STD_CAPACITY.adjust(CapacityAdjustment::cols(50)).unwrap();
+        while capacity.rows() >= rows {
+            capacity = STD_CAPACITY
+                .adjust(CapacityAdjustment::cols(capacity.cols() + 50))
+                .unwrap();
+        }
+        let list = PageList::init(capacity.cols(), rows, None).unwrap();
+        let top_left = list.get_top_left(point::Tag::Active);
+
+        assert_eq!(top_left.node, NonNull::from(list.pages[0].as_ref()));
+        assert_eq!(top_left.y, 0);
+        assert_eq!(top_left.x, 0);
+    }
+
+    #[test]
+    fn page_list_point_from_pin_screen_accumulates_rows_across_pages() {
+        let rows = 100;
+        let mut capacity = STD_CAPACITY.adjust(CapacityAdjustment::cols(50)).unwrap();
+        while capacity.rows() >= rows {
+            capacity = STD_CAPACITY
+                .adjust(CapacityAdjustment::cols(capacity.cols() + 50))
+                .unwrap();
+        }
+        let list = PageList::init(capacity.cols(), rows, None).unwrap();
+        assert!(list.pages.len() > 1);
+
+        let pin = Pin {
+            node: NonNull::from(list.pages[1].as_ref()),
+            y: 5,
+            x: 2,
+            garbage: false,
+        };
+        assert_eq!(
+            list.point_from_pin(point::Tag::Screen, pin),
+            Some(point::Point::screen(Coordinate::new(
+                2,
+                capacity.rows() as u32 + 5
+            )))
+        );
+    }
+
+    #[test]
+    fn page_list_get_bottom_right_active_returns_last_active_cell() {
+        let list = PageList::init(80, 24, None).unwrap();
+        let bottom_right = list.get_bottom_right(point::Tag::Active).unwrap();
+
+        assert_eq!(bottom_right.node, NonNull::from(list.pages[0].as_ref()));
+        assert_eq!(bottom_right.x, 79);
+        assert_eq!(bottom_right.y, 23);
+    }
+
+    #[test]
+    fn page_list_point_from_pin_rejects_pin_before_active_top_left() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.pages[0].page.set_size_rows(30);
+        list.total_rows = 30;
+        list.rows = 24;
+        let active_top_left = list.get_top_left(point::Tag::Active);
+        assert_eq!(active_top_left.y, 6);
+
+        let before_active = Pin {
+            node: NonNull::from(list.pages[0].as_ref()),
+            y: 5,
+            x: 0,
+            garbage: false,
+        };
+        assert_eq!(list.point_from_pin(point::Tag::Active, before_active), None);
     }
 }
