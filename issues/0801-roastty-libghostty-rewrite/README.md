@@ -202,6 +202,8 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 41: Port PageList Page Iterator](41-port-pagelist-page-iterator.md)
   — **Pass**
 - [Experiment 42: Port PageList Clone](42-port-pagelist-clone.md) — **Pass**
+- [Experiment 43: Port PageList Dirty Helpers](43-port-pagelist-dirty-helpers.md)
+  — **Designed**
 
 ## Non-Goals
 
