@@ -228,6 +228,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 56: Port PageList Prompt Iterator](56-port-pagelist-prompt-iterator.md)
   — **Pass**
+- [Experiment 57: Port Semantic Prompt Highlight](57-port-semantic-prompt-highlight.md)
+  — **Designed**
 
 ## Non-Goals
 
