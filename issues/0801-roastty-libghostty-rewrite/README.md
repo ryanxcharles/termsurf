@@ -209,7 +209,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 45: Port PageList Compact](45-port-pagelist-compact.md) — **Pass**
 - [Experiment 46: Port PageList Split](46-port-pagelist-split.md) — **Pass**
 - [Experiment 47: Port PageList Viewport Fixup](47-port-pagelist-viewport-fixup.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

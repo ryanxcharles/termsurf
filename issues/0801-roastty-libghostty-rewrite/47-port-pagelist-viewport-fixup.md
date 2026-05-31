@@ -146,3 +146,51 @@ The experiment fails if:
 - fixup mutates pins, page order, row counts, or unrelated PageList state;
 - the implementation expands into erase or row deletion;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Implemented `PageList::fixup_viewport` in `roastty/src/terminal/page_list.rs`.
+
+The helper now matches upstream `fixupViewport` behavior:
+
+- active viewports are unchanged;
+- pinned viewports move to active if their pin is now in the active area;
+- pinned viewports with cached offsets decrement the cache by removed rows;
+- cached offsets equal to the removed row count remain pinned at offset 0;
+- cached offsets below the removed row count move the viewport to top;
+- pinned viewports without cached offsets remain pinned unless active; and
+- top viewports move to active only when the first page is in the active area.
+
+Tests cover active no-op behavior, pinned active precedence over cached offset
+handling, cached decrement/equality/below-removed cases, no-cache pinned
+behavior, top-to-active behavior, and top no-op behavior.
+
+Verification:
+
+```bash
+cargo fmt && cargo test -p roastty terminal::page_list
+```
+
+Result: 152 PageList tests passed.
+
+```bash
+cargo test -p roastty
+```
+
+Result: 433 unit tests passed, plus the ABI harness passed.
+
+Independent result review: Codex reviewer approved recording Experiment 47 as
+Pass after two branch-coverage tests were added. The reviewer specifically
+confirmed strict `< removed` behavior, active precedence over cached offset
+handling, top no-op coverage, and clean scope.
+
+## Conclusion
+
+PageList viewport fixup is now ported and tested. This gives the upcoming erase
+operations the upstream viewport state transition helper they expect, without
+mixing row deletion or erase behavior into this experiment.
+
+The next experiment should continue with the next upstream PageList operation,
+starting the erase-row path on top of this helper.

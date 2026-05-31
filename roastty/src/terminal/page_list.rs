@@ -1019,6 +1019,34 @@ impl PageList {
         }
     }
 
+    fn fixup_viewport(&mut self, removed: usize) {
+        match self.viewport {
+            Viewport::Active => {}
+            Viewport::Pin => {
+                if self.pin_is_active(*self.viewport_pin) {
+                    self.viewport = Viewport::Active;
+                } else if let Some(offset) = &mut self.viewport_pin_row_offset {
+                    if *offset < removed {
+                        self.viewport = Viewport::Top;
+                    } else {
+                        *offset -= removed;
+                    }
+                }
+            }
+            Viewport::Top => {
+                let first = Pin {
+                    node: self.first_node_ptr(),
+                    y: 0,
+                    x: 0,
+                    garbage: false,
+                };
+                if self.pin_is_active(first) {
+                    self.viewport = Viewport::Active;
+                }
+            }
+        }
+    }
+
     fn scrollbar(&mut self) -> Scrollbar {
         if self.explicit_max_size == 0 {
             return Scrollbar {
@@ -3930,6 +3958,137 @@ mod tests {
         assert_eq!(list.viewport_pin_row_offset, Some(4));
         assert_eq!(list.scrollbar().offset, 4);
         assert_eq!(list.viewport_pin_row_offset, Some(4));
+    }
+
+    #[test]
+    fn page_list_fixup_viewport_active_is_noop() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.viewport = Viewport::Active;
+        list.viewport_pin_row_offset = Some(7);
+
+        list.fixup_viewport(3);
+
+        assert_eq!(list.viewport, Viewport::Active);
+        assert_eq!(list.viewport_pin_row_offset, Some(7));
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_fixup_viewport_pin_becomes_active() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.pages[0].page.set_size_rows(30);
+        list.total_rows = 30;
+        list.viewport = Viewport::Pin;
+        list.viewport_pin.y = 6;
+
+        list.fixup_viewport(1);
+
+        assert_eq!(list.viewport, Viewport::Active);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_fixup_viewport_pin_active_takes_precedence_over_cache() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.pages[0].page.set_size_rows(30);
+        list.total_rows = 30;
+        list.viewport = Viewport::Pin;
+        list.viewport_pin.y = 6;
+        list.viewport_pin_row_offset = Some(0);
+
+        list.fixup_viewport(3);
+
+        assert_eq!(list.viewport, Viewport::Active);
+        assert_eq!(list.viewport_pin_row_offset, Some(0));
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_fixup_viewport_pin_cached_offset_decrements() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.pages[0].page.set_size_rows(30);
+        list.total_rows = 30;
+        list.viewport = Viewport::Pin;
+        list.viewport_pin.y = 2;
+        list.viewport_pin_row_offset = Some(5);
+
+        list.fixup_viewport(3);
+
+        assert_eq!(list.viewport, Viewport::Pin);
+        assert_eq!(list.viewport_pin_row_offset, Some(2));
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_fixup_viewport_pin_cached_offset_equal_removed_stays_pinned() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.pages[0].page.set_size_rows(30);
+        list.total_rows = 30;
+        list.viewport = Viewport::Pin;
+        list.viewport_pin.y = 0;
+        list.viewport_pin_row_offset = Some(3);
+
+        list.fixup_viewport(3);
+
+        assert_eq!(list.viewport, Viewport::Pin);
+        assert_eq!(list.viewport_pin_row_offset, Some(0));
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_fixup_viewport_pin_cached_offset_below_removed_moves_top() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.pages[0].page.set_size_rows(30);
+        list.total_rows = 30;
+        list.viewport = Viewport::Pin;
+        list.viewport_pin.y = 0;
+        list.viewport_pin_row_offset = Some(2);
+
+        list.fixup_viewport(3);
+
+        assert_eq!(list.viewport, Viewport::Top);
+        assert_eq!(list.viewport_pin_row_offset, Some(2));
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_fixup_viewport_pin_without_cache_stays_pinned() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.pages[0].page.set_size_rows(30);
+        list.total_rows = 30;
+        list.viewport = Viewport::Pin;
+        list.viewport_pin.y = 4;
+        list.viewport_pin_row_offset = None;
+
+        list.fixup_viewport(1);
+
+        assert_eq!(list.viewport, Viewport::Pin);
+        assert_eq!(list.viewport_pin_row_offset, None);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_fixup_viewport_top_becomes_active_when_first_page_is_active() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.viewport = Viewport::Top;
+
+        list.fixup_viewport(1);
+
+        assert_eq!(list.viewport, Viewport::Active);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_fixup_viewport_top_remains_top_when_first_page_is_not_active() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.pages[0].page.set_size_rows(30);
+        list.total_rows = 30;
+        list.viewport = Viewport::Top;
+
+        list.fixup_viewport(1);
+
+        assert_eq!(list.viewport, Viewport::Top);
+        list.verify_integrity().unwrap();
     }
 
     #[test]
