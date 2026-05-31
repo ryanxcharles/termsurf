@@ -196,3 +196,53 @@ The experiment fails if:
 - the implementation expands into range erase, history/active erase, active
   regrowth, parser, renderer, app, or ABI work;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+`PageList::erase_page` is implemented as an internal helper for front/back page
+deletion. It accepts a `NonNull<Node>` target and returns a narrow
+`ErasePageError` for invalid, middle-page, or only-page requests. Middle-page
+and only-page rejection paths leave the list unchanged and remain fully
+integrity-checkable.
+
+Front-page deletion removes the first page, updates `page_serial_min` to the
+former second page serial, remaps pins that pointed into the removed page to the
+replacement page at `(0, 0)`, subtracts the removed backing length from
+`page_size`, and preserves `total_rows` for the future caller to account.
+Last-page deletion removes the last page, remaps removed-page pins to the
+previous page at `(0, 0)`, preserves `page_serial_min`, subtracts the removed
+backing length from `page_size`, and likewise leaves `total_rows` unchanged.
+
+The viewport pin is covered by the same tracked-pin remapping path. If the
+viewport is pinned, `viewport_pin_row_offset` is cleared because page removal
+invalidates the cached absolute offset. Successful deletion intentionally does
+not run full `verify_integrity` inside the helper because current integrity
+checks require `total_rows` to already match the remaining page row sum, while
+upstream `erasePage` leaves row accounting to `eraseRows`. Tests temporarily
+apply the caller's expected row accounting to prove the remaining structure is
+sound after deletion.
+
+Verification:
+
+- `cargo fmt -- roastty/src/terminal/page_list.rs`
+- `cargo test -p roastty terminal::page_list` — 174 PageList tests passed, ABI
+  harness filtered out
+- `cargo test -p roastty` — 455 unit tests passed, ABI harness passed, doc-tests
+  passed
+
+Independent result review approved the experiment as a Pass with no required
+findings. The review specifically accepted the caller-accounted `total_rows`
+behavior, adjusted integrity proof, pin remapping before dropping the removed
+`Box<Node>`, viewport cache invalidation, front/back/reject behavior,
+`page_serial_min`/`page_size` accounting, and the clean scope boundary.
+
+## Conclusion
+
+Experiment 50 completed the full-page deletion primitive needed by the future
+`eraseRows` port. The helper now has the same important side effects as
+upstream's `erasePage` without expanding into range erase or public terminal
+behavior. The next experiment can build on this by designing the higher-level
+row-range erase path that decides when to erase whole pages, when to shift rows,
+and when to perform caller row accounting and viewport fixup.

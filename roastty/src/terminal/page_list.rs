@@ -165,6 +165,13 @@ enum EraseRowError {
     CloneFrom(CloneFromError),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ErasePageError {
+    InvalidPage,
+    MiddlePage,
+    OnlyPage,
+}
+
 impl From<PageAllocError> for CloneRegionError {
     fn from(_: PageAllocError) -> Self {
         Self::PageAlloc
@@ -657,6 +664,14 @@ impl PageList {
         }
 
         None
+    }
+
+    fn pins_reference_node(&self, node: NonNull<Node>) -> bool {
+        self.tracked_pins.iter().any(|tracked| unsafe {
+            // Safety: tracked pins are created from stable Box<Pin>
+            // allocations owned by this PageList.
+            tracked.as_ref().node == node
+        }) || self.viewport_pin.node == node
     }
 
     fn first_node_ptr(&self) -> NonNull<Node> {
@@ -1692,6 +1707,53 @@ impl PageList {
         Ok(())
     }
 
+    fn erase_page(&mut self, node: NonNull<Node>) -> Result<(), ErasePageError> {
+        let Some(index) = self.node_index(node) else {
+            return Err(ErasePageError::InvalidPage);
+        };
+        if self.pages.len() == 1 {
+            return Err(ErasePageError::OnlyPage);
+        }
+        if index != 0 && index + 1 != self.pages.len() {
+            return Err(ErasePageError::MiddlePage);
+        }
+
+        let replacement = if index == 0 {
+            NonNull::from(self.pages[1].as_ref())
+        } else {
+            NonNull::from(self.pages[index - 1].as_ref())
+        };
+        if index == 0 {
+            self.page_serial_min = self.pages[1].serial;
+        }
+
+        for tracked in &mut self.tracked_pins {
+            let tracked_pin = unsafe {
+                // Safety: tracked pins are owned by this PageList and remain
+                // allocated while we update their target node before dropping
+                // the removed page allocation.
+                tracked.as_mut()
+            };
+            if tracked_pin.node == node {
+                tracked_pin.node = replacement;
+                tracked_pin.y = 0;
+                tracked_pin.x = 0;
+            }
+        }
+
+        if self.viewport == Viewport::Pin {
+            self.viewport_pin_row_offset = None;
+        }
+
+        let removed = self.pages.remove(index);
+        self.page_size -= removed.page.backing_len();
+        debug_assert!(
+            !self.pins_reference_node(node),
+            "erase_page must not leave pins pointing at a removed page"
+        );
+        Ok(())
+    }
+
     fn grow(&mut self) -> Result<Option<NonNull<Node>>, GrowError> {
         let last = self
             .pages
@@ -1997,6 +2059,15 @@ mod tests {
             .rows() as usize;
         list.grow_rows(page_rows * page_multiplier).unwrap();
         (list, page_rows)
+    }
+
+    fn assert_integrity_after_caller_row_accounting(
+        list: &mut PageList,
+        deleted_rows: CellCountInt,
+    ) {
+        list.total_rows -= deleted_rows;
+        list.verify_integrity().unwrap();
+        list.total_rows += deleted_rows;
     }
 
     fn replace_first_page_capacity(list: &mut PageList, capacity: Capacity) {
@@ -5112,6 +5183,203 @@ mod tests {
         assert!(!page.get_row(2).managed_memory());
         assert_eq!(row_marker(page, 2), 0);
         list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_erase_page_deletes_first_page() {
+        let (mut list, _) = bounded_viewport_list(3);
+        assert!(list.pages.len() > 1);
+        let removed = list.first_node_ptr();
+        let replacement = NonNull::from(list.pages[1].as_ref());
+        let replacement_serial = list.pages[1].serial;
+        let stable_second_pin = list
+            .track_pin(Pin {
+                node: replacement,
+                y: 1,
+                x: 2,
+                garbage: false,
+            })
+            .unwrap();
+        let deleted_pin = list
+            .track_pin(Pin {
+                node: removed,
+                y: 2,
+                x: 3,
+                garbage: false,
+            })
+            .unwrap();
+        let removed_rows = list.pages[0].page.size_rows();
+        let removed_len = list.pages[0].page.backing_len();
+        let page_size = list.page_size;
+        let total_rows = list.total_rows;
+        let page_serial = list.page_serial;
+        let rows = list.rows;
+        let cols = list.cols;
+        let explicit_max_size = list.explicit_max_size;
+        let min_max_size = list.min_max_size;
+
+        list.erase_page(removed).unwrap();
+
+        assert_eq!(list.first_node_ptr(), replacement);
+        assert_eq!(list.page_serial_min, replacement_serial);
+        assert_eq!(list.page_size, page_size - removed_len);
+        assert_eq!(list.total_rows, total_rows);
+        assert_eq!(list.page_serial, page_serial);
+        assert_eq!(list.rows, rows);
+        assert_eq!(list.cols, cols);
+        assert_eq!(list.explicit_max_size, explicit_max_size);
+        assert_eq!(list.min_max_size, min_max_size);
+        assert!(!list.pins_reference_node(removed));
+        let deleted = unsafe { deleted_pin.as_ref() };
+        assert_eq!(deleted.node, replacement);
+        assert_eq!(deleted.y, 0);
+        assert_eq!(deleted.x, 0);
+        let stable_second = unsafe { stable_second_pin.as_ref() };
+        assert_eq!(stable_second.node, replacement);
+        assert_eq!(stable_second.y, 1);
+        assert_eq!(stable_second.x, 2);
+        assert_integrity_after_caller_row_accounting(&mut list, removed_rows);
+    }
+
+    #[test]
+    fn page_list_erase_page_deletes_last_page() {
+        let (mut list, _) = bounded_viewport_list(4);
+        assert!(list.pages.len() > 2);
+        let last_index = list.pages.len() - 1;
+        let removed = NonNull::from(list.pages[last_index].as_ref());
+        let replacement = NonNull::from(list.pages[last_index - 1].as_ref());
+        let page_serial_min = list.page_serial_min;
+        let stable_previous_pin = list
+            .track_pin(Pin {
+                node: replacement,
+                y: 1,
+                x: 2,
+                garbage: false,
+            })
+            .unwrap();
+        let deleted_pin = list
+            .track_pin(Pin {
+                node: removed,
+                y: 2,
+                x: 3,
+                garbage: false,
+            })
+            .unwrap();
+        let removed_rows = list.pages[last_index].page.size_rows();
+        let removed_len = list.pages[last_index].page.backing_len();
+        let page_size = list.page_size;
+        let total_rows = list.total_rows;
+        let page_serial = list.page_serial;
+        let rows = list.rows;
+        let cols = list.cols;
+        let explicit_max_size = list.explicit_max_size;
+        let min_max_size = list.min_max_size;
+
+        list.erase_page(removed).unwrap();
+
+        assert_eq!(list.last_node_ptr(), replacement);
+        assert_eq!(list.page_serial_min, page_serial_min);
+        assert_eq!(list.page_size, page_size - removed_len);
+        assert_eq!(list.total_rows, total_rows);
+        assert_eq!(list.page_serial, page_serial);
+        assert_eq!(list.rows, rows);
+        assert_eq!(list.cols, cols);
+        assert_eq!(list.explicit_max_size, explicit_max_size);
+        assert_eq!(list.min_max_size, min_max_size);
+        assert!(!list.pins_reference_node(removed));
+        let deleted = unsafe { deleted_pin.as_ref() };
+        assert_eq!(deleted.node, replacement);
+        assert_eq!(deleted.y, 0);
+        assert_eq!(deleted.x, 0);
+        let stable_previous = unsafe { stable_previous_pin.as_ref() };
+        assert_eq!(stable_previous.node, replacement);
+        assert_eq!(stable_previous.y, 1);
+        assert_eq!(stable_previous.x, 2);
+        assert_integrity_after_caller_row_accounting(&mut list, removed_rows);
+    }
+
+    #[test]
+    fn page_list_erase_page_rejects_middle_page() {
+        let (mut list, _) = bounded_viewport_list(4);
+        assert!(list.pages.len() > 2);
+        let middle = NonNull::from(list.pages[1].as_ref());
+        let ptrs: Vec<_> = list
+            .pages
+            .iter()
+            .map(|node| NonNull::from(node.as_ref()))
+            .collect();
+        let serials: Vec<_> = list.pages.iter().map(|node| node.serial).collect();
+        let page_size = list.page_size;
+        let total_rows = list.total_rows;
+        let page_serial_min = list.page_serial_min;
+
+        assert_eq!(list.erase_page(middle), Err(ErasePageError::MiddlePage));
+
+        assert_eq!(list.page_size, page_size);
+        assert_eq!(list.total_rows, total_rows);
+        assert_eq!(list.page_serial_min, page_serial_min);
+        assert_eq!(
+            list.pages
+                .iter()
+                .map(|node| NonNull::from(node.as_ref()))
+                .collect::<Vec<_>>(),
+            ptrs
+        );
+        assert_eq!(
+            list.pages
+                .iter()
+                .map(|node| node.serial)
+                .collect::<Vec<_>>(),
+            serials
+        );
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_erase_page_rejects_only_page() {
+        let mut list = PageList::init(10, 5, Some(0)).unwrap();
+        assert_eq!(list.pages.len(), 1);
+        let only = list.first_node_ptr();
+        let page_size = list.page_size;
+        let total_rows = list.total_rows;
+        let page_serial_min = list.page_serial_min;
+
+        assert_eq!(list.erase_page(only), Err(ErasePageError::OnlyPage));
+
+        assert_eq!(list.pages.len(), 1);
+        assert_eq!(list.first_node_ptr(), only);
+        assert_eq!(list.page_size, page_size);
+        assert_eq!(list.total_rows, total_rows);
+        assert_eq!(list.page_serial_min, page_serial_min);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_erase_page_moves_viewport_pin_and_clears_cache() {
+        let (mut list, _) = bounded_viewport_list(3);
+        let removed = list.first_node_ptr();
+        let replacement = NonNull::from(list.pages[1].as_ref());
+        let removed_rows = list.pages[0].page.size_rows();
+        list.scroll(Scroll::Pin(Pin {
+            node: removed,
+            y: 2,
+            x: 5,
+            garbage: false,
+        }));
+        assert_eq!(list.viewport, Viewport::Pin);
+        assert!(list.viewport_pin_row_offset.is_none());
+        let _ = list.scrollbar();
+        assert!(list.viewport_pin_row_offset.is_some());
+
+        list.erase_page(removed).unwrap();
+
+        assert_eq!(list.viewport, Viewport::Pin);
+        assert_eq!(list.viewport_pin.node, replacement);
+        assert_eq!(list.viewport_pin.y, 0);
+        assert_eq!(list.viewport_pin.x, 0);
+        assert_eq!(list.viewport_pin_row_offset, None);
+        assert!(!list.pins_reference_node(removed));
+        assert_integrity_after_caller_row_accounting(&mut list, removed_rows);
     }
 
     #[test]
