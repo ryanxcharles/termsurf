@@ -150,6 +150,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 11: Port Offset Hash Map Storage](11-port-offset-hash-map.md) —
   **Pass**
+- [Experiment 12: Port Page Grapheme Storage](12-port-page-graphemes.md) —
+  **Designed**
 
 ## Non-Goals
 
