@@ -173,3 +173,5 @@ and reviewed.
 - [Experiment 5: Add protocol-mediated JavaScript dialogs](05-javascript-dialogs.md)
   — **Pass**
 - [Experiment 6: Add automated page zoom](06-page-zoom.md) — **Pass**
+- [Experiment 7: Add protocol console capture](07-console-capture.md) —
+  **Designed**
