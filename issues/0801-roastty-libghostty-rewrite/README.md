@@ -181,7 +181,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 28: Port Page Integrity Checks](28-port-page-integrity-checks.md)
   — **Pass**
 - [Experiment 29: Port Page Set Graphemes](29-port-page-set-graphemes.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 

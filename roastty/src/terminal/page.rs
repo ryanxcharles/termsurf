@@ -1326,6 +1326,52 @@ impl Page {
         Ok(())
     }
 
+    fn set_graphemes_at(&mut self, x: usize, y: usize, cps: &[u32]) -> Result<(), GraphemeError> {
+        assert!(!cps.is_empty());
+
+        let cell_offset = self.cell_offset_at(x, y);
+        self.set_graphemes_at_offset(y, cell_offset, cps)
+    }
+
+    fn set_graphemes_at_offset(
+        &mut self,
+        row_index: usize,
+        cell_offset: Offset<Cell>,
+        cps: &[u32],
+    ) -> Result<(), GraphemeError> {
+        assert!(!cps.is_empty());
+        for cp in cps {
+            assert!(*cp <= 0x10ffff);
+        }
+        debug_assert!(row_index < self.size.rows as usize);
+        let cell = self.cell_copy_at_offset(cell_offset);
+        assert!(cell.codepoint() > 0);
+        assert_eq!(cell.content_tag(), ContentTag::Codepoint);
+
+        let slice = self.alloc_grapheme_slice(cps.len())?;
+        unsafe {
+            // Safety: `slice` was just allocated from this page and is
+            // uniquely owned until inserted into the grapheme map below.
+            slice
+                .slice_mut(self.memory.as_mut_ptr())
+                .copy_from_slice(cps);
+        }
+
+        let inserted = match self.grapheme_map_mut() {
+            Some(mut map) => map.put_no_clobber(cell_offset, slice),
+            None => Err(offset_hash_map::Error::OutOfMemory),
+        };
+        if inserted.is_err() {
+            self.free_grapheme_slice(slice);
+            return Err(GraphemeError::GraphemeMapOutOfMemory);
+        }
+
+        self.cell_mut_at_offset(cell_offset)
+            .set_content_tag(ContentTag::CodepointGrapheme);
+        self.get_row_mut(row_index).set_grapheme(true);
+        Ok(())
+    }
+
     fn append_grapheme_at_offset(
         &mut self,
         cell_offset: Offset<Cell>,
@@ -3751,6 +3797,128 @@ mod tests {
         assert!(!page.cell_copy_at(0, 0).has_grapheme());
         assert_eq!(page.lookup_grapheme_at(0, 0), None);
         assert_eq!(page.grapheme_count(), 0);
+    }
+
+    #[test]
+    fn page_set_graphemes_multi_codepoint() {
+        let mut page = Page::init(Capacity::new(5, 2)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+
+        page.set_graphemes_at(1, 0, &[0x0301, 0x0300, 0x0327])
+            .unwrap();
+
+        assert_eq!(
+            page.lookup_grapheme_at(1, 0),
+            Some(vec![0x0301, 0x0300, 0x0327])
+        );
+        assert!(page.cell_copy_at(1, 0).has_grapheme());
+        assert!(page.get_row(0).grapheme());
+        assert_eq!(page.grapheme_count(), 1);
+        assert_eq!(page.verify_integrity(), Ok(()));
+    }
+
+    #[test]
+    fn page_set_graphemes_single_codepoint() {
+        let mut page = Page::init(Capacity::new(5, 2)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+
+        page.set_graphemes_at(1, 0, &[0x0301]).unwrap();
+
+        assert_eq!(page.lookup_grapheme_at(1, 0), Some(vec![0x0301]));
+        assert!(page.grapheme_used_bytes() > 0);
+        assert_eq!(page.grapheme_count(), 1);
+        assert_eq!(page.verify_integrity(), Ok(()));
+    }
+
+    #[test]
+    #[should_panic]
+    fn page_set_graphemes_rejects_zero_base_codepoint() {
+        let mut page = Page::init(Capacity::new(5, 2)).unwrap();
+
+        page.set_graphemes_at(1, 0, &[0x0301]).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn page_set_graphemes_rejects_empty_codepoints() {
+        let mut page = Page::init(Capacity::new(5, 2)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+
+        page.set_graphemes_at(1, 0, &[]).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn page_set_graphemes_rejects_existing_grapheme_data() {
+        let mut page = Page::init(Capacity::new(5, 2)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        page.append_grapheme_at(1, 0, 0x0301).unwrap();
+
+        page.set_graphemes_at(1, 0, &[0x0300]).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn page_set_graphemes_rejects_invalid_codepoint() {
+        let mut page = Page::init(Capacity::new(5, 2)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+
+        page.set_graphemes_at(1, 0, &[0x11_0000]).unwrap();
+    }
+
+    #[test]
+    fn page_set_graphemes_map_oom_rolls_back_allocation_and_flags() {
+        let mut page = Page::init(Capacity::with_metadata(
+            2,
+            2,
+            8,
+            HYPERLINK_BYTES_DEFAULT,
+            (GRAPHEME_CHUNK * 2) as GraphemeBytesInt,
+            STRING_BYTES_DEFAULT,
+        ))
+        .unwrap();
+        let hidden_offsets = [page.cell_offset_at(0, 1), page.cell_offset_at(1, 1)];
+        page.size.rows = 1;
+        {
+            let mut map = page.grapheme_map_mut().unwrap();
+            for offset in hidden_offsets {
+                map.put_no_clobber(offset, OffsetSlice::default()).unwrap();
+            }
+            assert_eq!(map.count(), map.capacity());
+        }
+
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+        let used_before = page.grapheme_used_bytes();
+        let result = page.set_graphemes_at(0, 0, &[0x0301]);
+
+        assert_eq!(result, Err(GraphemeError::GraphemeMapOutOfMemory));
+        assert_eq!(page.grapheme_used_bytes(), used_before);
+        assert!(!page.cell_copy_at(0, 0).has_grapheme());
+        assert!(!page.get_row(0).grapheme());
+        assert_eq!(page.verify_integrity(), Ok(()));
+    }
+
+    #[test]
+    fn page_set_graphemes_alloc_oom_rolls_back_flags() {
+        let mut page = Page::init(Capacity::with_metadata(
+            2,
+            2,
+            8,
+            HYPERLINK_BYTES_DEFAULT,
+            0,
+            STRING_BYTES_DEFAULT,
+        ))
+        .unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+
+        let result = page.set_graphemes_at(0, 0, &[0x0301, 0x0300, 0x0327, 0x0328, 0x0323]);
+
+        assert_eq!(result, Err(GraphemeError::GraphemeAllocOutOfMemory));
+        assert_eq!(page.grapheme_used_bytes(), 0);
+        assert_eq!(page.grapheme_count(), 0);
+        assert!(!page.cell_copy_at(0, 0).has_grapheme());
+        assert!(!page.get_row(0).grapheme());
+        assert_eq!(page.verify_integrity(), Ok(()));
     }
 
     #[test]

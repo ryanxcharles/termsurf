@@ -168,3 +168,55 @@ The experiment fails if:
 - it changes append behavior unexpectedly;
 - the implementation expands into parser/screen lifecycle, public ABI, or
   unrelated behavior.
+
+## Result
+
+**Result:** Pass
+
+Implemented internal `Page::set_graphemes_at` and
+`Page::set_graphemes_at_offset` in `roastty/src/terminal/page.rs`.
+
+The implementation preserves upstream ordering: reject invalid preconditions,
+allocate a full grapheme slice, copy all supplied codepoints, insert a
+no-clobber grapheme-map entry, then set the cell content tag and row grapheme
+flag only after all fallible work succeeds. Empty `cps` is an explicit assertion
+because Roastty's current bitmap allocator does not support zero-length
+allocations.
+
+Rollback behavior is covered:
+
+- allocation failure leaves map count, used bytes, cell tag, and row flag
+  unchanged;
+- map insertion failure frees the newly allocated grapheme slice and leaves
+  visible cell/row state unchanged.
+
+Added focused tests covering:
+
+- multi-codepoint set;
+- single-codepoint set;
+- zero base codepoint panic;
+- empty codepoint slice panic;
+- existing grapheme data panic;
+- invalid codepoint panic;
+- map-out-of-memory rollback using hidden-row dummy entries;
+- allocation-out-of-memory rollback;
+- integrity passing after successful and failed operations.
+
+Verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+The targeted Page suite reported 161 passing tests. The full `roastty` suite
+reported 270 unit tests, the ABI harness, and doc tests passing.
+
+## Conclusion
+
+Roastty now has the upstream Page primitive for installing an exact grapheme
+slice on a plain codepoint cell. Existing append, lookup, move, clear, clone,
+reinit, and integrity behavior continues to pass. Clone paths were not rewritten
+in this experiment; they can adopt the primitive later only if doing so is a
+clear cleanup with unchanged behavior.
