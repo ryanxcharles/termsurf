@@ -300,10 +300,17 @@ pub(super) enum GraphemeError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CloneFromError {
-    SourceRowManagedMemory,
-    DestinationRowManagedMemory,
-    SourceCellManagedMemory,
-    DestinationCellManagedMemory,
+    SourceRowUnsupportedManagedMemory,
+    DestinationRowUnsupportedManagedMemory,
+    SourceCellUnsupportedManagedMemory,
+    DestinationCellUnsupportedManagedMemory,
+    Grapheme(GraphemeError),
+}
+
+impl From<GraphemeError> for CloneFromError {
+    fn from(value: GraphemeError) -> Self {
+        Self::Grapheme(value)
+    }
 }
 
 impl Page {
@@ -426,7 +433,7 @@ impl Page {
         })
     }
 
-    fn clone_plain_rows_from(
+    fn clone_rows_from_without_styles_or_hyperlinks(
         &mut self,
         other: &Page,
         y_start: usize,
@@ -437,13 +444,13 @@ impl Page {
         assert!(y_end - y_start <= self.size.rows as usize);
 
         for (dst_y, src_y) in (y_start..y_end).enumerate() {
-            self.clone_plain_row_from(other, dst_y, src_y)?;
+            self.clone_row_from_without_styles_or_hyperlinks(other, dst_y, src_y)?;
         }
 
         Ok(())
     }
 
-    fn clone_plain_row_from(
+    fn clone_row_from_without_styles_or_hyperlinks(
         &mut self,
         other: &Page,
         dst_y: usize,
@@ -451,30 +458,53 @@ impl Page {
     ) -> Result<(), CloneFromError> {
         let src_row = *other.get_row(src_y);
         let dst_row = *self.get_row(dst_y);
-        if src_row.managed_memory() {
-            return Err(CloneFromError::SourceRowManagedMemory);
+        if src_row.styled() || src_row.hyperlink() {
+            return Err(CloneFromError::SourceRowUnsupportedManagedMemory);
         }
-        if dst_row.managed_memory() {
-            return Err(CloneFromError::DestinationRowManagedMemory);
+        if dst_row.styled() || dst_row.hyperlink() {
+            return Err(CloneFromError::DestinationRowUnsupportedManagedMemory);
         }
 
         let copy_len = (self.size.cols as usize).min(other.size.cols as usize);
-        {
+        let dst_cell_offsets = (0..copy_len)
+            .map(|x| self.cell_offset_from_row_cells(dst_row.cells(), x))
+            .collect::<Vec<_>>();
+        let source_graphemes = {
             let src_cells = other.get_cells(other.get_row(src_y));
             if src_cells[..copy_len]
                 .iter()
-                .any(|cell| cell.managed_memory())
+                .any(|cell| cell.unsupported_clone_managed_memory())
             {
-                return Err(CloneFromError::SourceCellManagedMemory);
+                return Err(CloneFromError::SourceCellUnsupportedManagedMemory);
             }
-        }
+            src_cells[..copy_len]
+                .iter()
+                .enumerate()
+                .map(|(x, cell)| {
+                    if cell.has_grapheme() {
+                        let offset = other.cell_offset_from_row_cells(src_row.cells(), x);
+                        other
+                            .lookup_grapheme_at_offset(offset)
+                            .expect("grapheme cell must have map data")
+                    } else {
+                        Vec::new()
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
         {
             let dst_cells = self.get_cells(self.get_row(dst_y));
             if dst_cells[..copy_len]
                 .iter()
-                .any(|cell| cell.managed_memory())
+                .any(|cell| cell.unsupported_clone_managed_memory())
             {
-                return Err(CloneFromError::DestinationCellManagedMemory);
+                return Err(CloneFromError::DestinationCellUnsupportedManagedMemory);
+            }
+        }
+
+        for offset in dst_cell_offsets.iter().copied() {
+            if unsafe { (*offset.ptr(self.memory.as_ptr())).has_grapheme() } {
+                self.clear_grapheme_at_offset(offset);
             }
         }
 
@@ -493,17 +523,33 @@ impl Page {
         *self.get_row_mut(dst_y) = row_copy;
 
         let should_clear_spacer_head = self.size.cols > other.size.cols && copy_len > 0;
-        let src_cells = other.get_cells(other.get_row(src_y));
-        let cells = self.get_cells_mut(dst_y);
-        cells[..copy_len].copy_from_slice(&src_cells[..copy_len]);
+        {
+            let src_cells = other.get_cells(other.get_row(src_y));
+            let cells = self.get_cells_mut(dst_y);
+            cells[..copy_len].copy_from_slice(&src_cells[..copy_len]);
 
-        if should_clear_spacer_head {
-            let last = &mut cells[copy_len - 1];
-            if last.wide() == Wide::SpacerHead {
-                last.set_wide(Wide::Narrow);
+            if should_clear_spacer_head {
+                let last = &mut cells[copy_len - 1];
+                if last.wide() == Wide::SpacerHead {
+                    last.set_wide(Wide::Narrow);
+                }
             }
         }
 
+        for (offset, cps) in dst_cell_offsets.into_iter().zip(source_graphemes) {
+            if !cps.is_empty() {
+                unsafe {
+                    // Safety: offset came from this row's valid cell range.
+                    (*offset.ptr_mut(self.memory.as_mut_ptr()))
+                        .set_content_tag(ContentTag::Codepoint);
+                }
+                for cp in cps {
+                    self.append_grapheme_at_offset(offset, cp)?;
+                }
+            }
+        }
+
+        self.update_row_grapheme_flag(dst_y);
         Ok(())
     }
 
@@ -575,14 +621,28 @@ impl Page {
         cp: u32,
     ) -> Result<(), GraphemeError> {
         assert!(cp <= 0x10ffff);
-        let cell = self.cell_copy_at(x, y);
+        let cell_offset = self.cell_offset_at(x, y);
+        let cell = self.cell_copy_at_offset(cell_offset);
+        assert!(cell.codepoint() != 0);
+
+        self.append_grapheme_at_offset(cell_offset, cp)?;
+        self.get_row_mut(y).set_grapheme(true);
+        Ok(())
+    }
+
+    fn append_grapheme_at_offset(
+        &mut self,
+        cell_offset: Offset<Cell>,
+        cp: u32,
+    ) -> Result<(), GraphemeError> {
+        assert!(cp <= 0x10ffff);
+        let cell = self.cell_copy_at_offset(cell_offset);
         assert!(cell.codepoint() != 0);
 
         if !cell.has_grapheme() {
-            return self.append_first_grapheme_at(x, y, cp);
+            return self.append_first_grapheme_at_offset(cell_offset, cp);
         }
 
-        let cell_offset = self.cell_offset_at(x, y);
         let slice = self
             .grapheme_map_ref()
             .and_then(|map| map.get(cell_offset))
@@ -631,6 +691,10 @@ impl Page {
 
     pub(super) fn lookup_grapheme_at(&self, x: usize, y: usize) -> Option<Vec<u32>> {
         let cell_offset = self.cell_offset_at(x, y);
+        self.lookup_grapheme_at_offset(cell_offset)
+    }
+
+    fn lookup_grapheme_at_offset(&self, cell_offset: Offset<Cell>) -> Option<Vec<u32>> {
         let slice = self.grapheme_map_ref()?.get(cell_offset)?;
         Some(unsafe {
             // Safety: `slice` came from this page's grapheme map.
@@ -641,6 +705,11 @@ impl Page {
     pub(super) fn clear_grapheme_at(&mut self, x: usize, y: usize) {
         assert!(self.cell_copy_at(x, y).has_grapheme());
         let cell_offset = self.cell_offset_at(x, y);
+        self.clear_grapheme_at_offset(cell_offset);
+    }
+
+    fn clear_grapheme_at_offset(&mut self, cell_offset: Offset<Cell>) {
+        assert!(self.cell_copy_at_offset(cell_offset).has_grapheme());
         let slice = {
             let mut map = self
                 .grapheme_map_mut()
@@ -652,8 +721,10 @@ impl Page {
         };
 
         self.free_grapheme_slice(slice);
-        self.cell_mut_at(x, y)
-            .set_content_tag(ContentTag::Codepoint);
+        unsafe {
+            // Safety: offset came from this page's valid cell range.
+            (*cell_offset.ptr_mut(self.memory.as_mut_ptr())).set_content_tag(ContentTag::Codepoint);
+        }
     }
 
     pub(super) fn update_row_grapheme_flag(&mut self, row_index: usize) {
@@ -661,9 +732,7 @@ impl Page {
             .get_cells(self.get_row(row_index))
             .iter()
             .any(|cell| cell.has_grapheme());
-        if !has_grapheme {
-            self.get_row_mut(row_index).set_grapheme(false);
-        }
+        self.get_row_mut(row_index).set_grapheme(has_grapheme);
     }
 
     pub(super) fn grapheme_count(&self) -> usize {
@@ -722,17 +791,15 @@ impl Page {
         }
     }
 
-    fn append_first_grapheme_at(
+    fn append_first_grapheme_at_offset(
         &mut self,
-        x: usize,
-        y: usize,
+        cell_offset: Offset<Cell>,
         cp: u32,
     ) -> Result<(), GraphemeError> {
         let Some(_) = self.grapheme_map else {
             return Err(GraphemeError::GraphemeMapOutOfMemory);
         };
 
-        let cell_offset = self.cell_offset_at(x, y);
         let slice = self.alloc_grapheme_slice(1)?;
         unsafe {
             // Safety: `slice` was just allocated from this page and is uniquely
@@ -750,9 +817,11 @@ impl Page {
             return Err(GraphemeError::GraphemeMapOutOfMemory);
         }
 
-        self.cell_mut_at(x, y)
-            .set_content_tag(ContentTag::CodepointGrapheme);
-        self.get_row_mut(y).set_grapheme(true);
+        unsafe {
+            // Safety: offset came from this page's valid cell range.
+            (*cell_offset.ptr_mut(self.memory.as_mut_ptr()))
+                .set_content_tag(ContentTag::CodepointGrapheme);
+        }
         Ok(())
     }
 
@@ -815,10 +884,30 @@ impl Page {
         )
     }
 
+    fn row_cell_offset(&self, row: &Row, x: usize) -> Offset<Cell> {
+        assert!(x < self.size.cols as usize);
+        self.assert_row_provenance(row);
+        self.cell_offset_from_row_cells(row.cells(), x)
+    }
+
+    fn cell_offset_from_row_cells(&self, cells: Offset<Cell>, x: usize) -> Offset<Cell> {
+        assert!(x < self.size.cols as usize);
+        self.assert_cells_range(cells);
+        Offset::new(
+            (cells.offset() as usize + x * size_of::<Cell>())
+                .try_into()
+                .expect("cell offset must fit OffsetInt"),
+        )
+    }
+
     fn cell_copy_at(&self, x: usize, y: usize) -> Cell {
+        self.cell_copy_at_offset(self.cell_offset_at(x, y))
+    }
+
+    fn cell_copy_at_offset(&self, offset: Offset<Cell>) -> Cell {
         unsafe {
-            // Safety: bounds are checked by cell_offset_at.
-            *self.cell_offset_at(x, y).ptr(self.memory.as_ptr())
+            // Safety: call sites derive offsets from checked page cell ranges.
+            *offset.ptr(self.memory.as_ptr())
         }
     }
 
@@ -1498,8 +1587,8 @@ impl Cell {
         matches!(self.content_tag(), ContentTag::CodepointGrapheme)
     }
 
-    const fn managed_memory(self) -> bool {
-        self.has_grapheme() || self.has_styling() || self.hyperlink()
+    const fn unsupported_clone_managed_memory(self) -> bool {
+        self.has_styling() || self.hyperlink()
     }
 
     pub(super) fn has_text_any(cells: &[Cell]) -> bool {
@@ -2283,7 +2372,7 @@ mod tests {
         })
         .unwrap();
         page2
-            .clone_plain_rows_from(&page, 0, page.size.rows as usize)
+            .clone_rows_from_without_styles_or_hyperlinks(&page, 0, page.size.rows as usize)
             .unwrap();
 
         for y in 0..page2.capacity.rows as usize {
@@ -2324,7 +2413,7 @@ mod tests {
         })
         .unwrap();
         page2
-            .clone_plain_rows_from(&page, 0, page.size.rows as usize)
+            .clone_rows_from_without_styles_or_hyperlinks(&page, 0, page.size.rows as usize)
             .unwrap();
         assert_eq!(page2.size.cols, 5);
 
@@ -2354,7 +2443,9 @@ mod tests {
             ..Capacity::new(10, 10)
         })
         .unwrap();
-        page2.clone_plain_rows_from(&page, 0, 5).unwrap();
+        page2
+            .clone_rows_from_without_styles_or_hyperlinks(&page, 0, 5)
+            .unwrap();
 
         for y in 0..5 {
             assert_eq!(page2.get_cells(page2.get_row(y))[1].codepoint(), y as u32);
@@ -2377,7 +2468,9 @@ mod tests {
         *page2.get_row_and_cell_mut(3, 0).cell = Cell::init('x' as u32);
         *page2.get_row_and_cell_mut(4, 0).cell = Cell::init('y' as u32);
 
-        page2.clone_plain_rows_from(&page, 0, 1).unwrap();
+        page2
+            .clone_rows_from_without_styles_or_hyperlinks(&page, 0, 1)
+            .unwrap();
         let cells = page2.get_cells(page2.get_row(0));
         assert_eq!(cells[0].codepoint(), 'a' as u32);
         assert_eq!(cells[1].codepoint(), 'b' as u32);
@@ -2406,24 +2499,24 @@ mod tests {
 
         source.get_row_mut(0).set_styled(true);
         assert_eq!(
-            destination.clone_plain_rows_from(&source, 0, 1),
-            Err(CloneFromError::SourceRowManagedMemory)
+            destination.clone_rows_from_without_styles_or_hyperlinks(&source, 0, 1),
+            Err(CloneFromError::SourceRowUnsupportedManagedMemory)
         );
         source.get_row_mut(0).set_styled(false);
 
-        destination.get_row_mut(0).set_grapheme(true);
+        destination.get_row_mut(0).set_hyperlink(true);
         assert_eq!(
-            destination.clone_plain_rows_from(&source, 0, 1),
-            Err(CloneFromError::DestinationRowManagedMemory)
+            destination.clone_rows_from_without_styles_or_hyperlinks(&source, 0, 1),
+            Err(CloneFromError::DestinationRowUnsupportedManagedMemory)
         );
-        destination.get_row_mut(0).set_grapheme(false);
+        destination.get_row_mut(0).set_hyperlink(false);
 
         let mut source_cell = Cell::init('s' as u32);
         source_cell.set_style_id(1);
         *source.get_row_and_cell_mut(0, 0).cell = source_cell;
         assert_eq!(
-            destination.clone_plain_rows_from(&source, 0, 1),
-            Err(CloneFromError::SourceCellManagedMemory)
+            destination.clone_rows_from_without_styles_or_hyperlinks(&source, 0, 1),
+            Err(CloneFromError::SourceCellUnsupportedManagedMemory)
         );
         *source.get_row_and_cell_mut(0, 0).cell = Cell::init('s' as u32);
 
@@ -2431,9 +2524,162 @@ mod tests {
         destination_cell.set_hyperlink(true);
         *destination.get_row_and_cell_mut(0, 0).cell = destination_cell;
         assert_eq!(
-            destination.clone_plain_rows_from(&source, 0, 1),
-            Err(CloneFromError::DestinationCellManagedMemory)
+            destination.clone_rows_from_without_styles_or_hyperlinks(&source, 0, 1),
+            Err(CloneFromError::DestinationCellUnsupportedManagedMemory)
         );
+    }
+
+    #[test]
+    fn page_clone_from_graphemes() {
+        let mut page = Page::init(Capacity {
+            cols: 10,
+            rows: 10,
+            styles: 8,
+            ..Capacity::new(10, 10)
+        })
+        .unwrap();
+
+        for y in 0..page.capacity.rows as usize {
+            *page.get_row_and_cell_mut(1, y).cell = Cell::init((y + 1) as u32);
+            page.append_grapheme_at(1, y, 0x0a).unwrap();
+        }
+
+        let mut page2 = Page::init(Capacity {
+            cols: 10,
+            rows: 10,
+            styles: 8,
+            ..Capacity::new(10, 10)
+        })
+        .unwrap();
+        page2
+            .clone_rows_from_without_styles_or_hyperlinks(&page, 0, page.size.rows as usize)
+            .unwrap();
+
+        for y in 0..page2.capacity.rows as usize {
+            let row = page2.get_row(y);
+            let cell = page2.get_cells(row)[1];
+            assert_eq!(cell.codepoint(), (y + 1) as u32);
+            assert!(row.grapheme());
+            assert!(cell.has_grapheme());
+            assert_eq!(page2.lookup_grapheme_at(1, y), Some(vec![0x0a]));
+        }
+
+        for y in 0..page.capacity.rows as usize {
+            page.clear_grapheme_at(1, y);
+            page.update_row_grapheme_flag(y);
+            *page.get_row_and_cell_mut(1, y).cell = Cell::init(0);
+        }
+
+        for y in 0..page2.capacity.rows as usize {
+            let row = page2.get_row(y);
+            let cell = page2.get_cells(row)[1];
+            assert_eq!(cell.codepoint(), (y + 1) as u32);
+            assert!(row.grapheme());
+            assert!(cell.has_grapheme());
+            assert_eq!(page2.lookup_grapheme_at(1, y), Some(vec![0x0a]));
+        }
+
+        for y in 0..page.capacity.rows as usize {
+            assert_eq!(page.cell_copy_at(1, y).codepoint(), 0);
+        }
+    }
+
+    #[test]
+    fn page_clone_from_frees_dst_graphemes() {
+        let mut page = Page::init(Capacity {
+            cols: 10,
+            rows: 10,
+            styles: 8,
+            ..Capacity::new(10, 10)
+        })
+        .unwrap();
+        for y in 0..page.capacity.rows as usize {
+            *page.get_row_and_cell_mut(1, y).cell = Cell::init((y + 1) as u32);
+        }
+
+        let mut page2 = Page::init(Capacity {
+            cols: 10,
+            rows: 10,
+            styles: 8,
+            ..Capacity::new(10, 10)
+        })
+        .unwrap();
+        for y in 0..page2.capacity.rows as usize {
+            *page2.get_row_and_cell_mut(1, y).cell = Cell::init((y + 1) as u32);
+            page2.append_grapheme_at(1, y, 0x0a).unwrap();
+        }
+
+        page2
+            .clone_rows_from_without_styles_or_hyperlinks(&page, 0, page.size.rows as usize)
+            .unwrap();
+
+        for y in 0..page2.capacity.rows as usize {
+            let row = page2.get_row(y);
+            let cell = page2.get_cells(row)[1];
+            assert_eq!(cell.codepoint(), (y + 1) as u32);
+            assert!(!row.grapheme());
+            assert!(!cell.has_grapheme());
+        }
+        assert_eq!(page2.grapheme_count(), 0);
+    }
+
+    #[test]
+    fn page_clone_from_multi_codepoint_grapheme() {
+        let mut page = Page::init(Capacity::new(2, 1)).unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+        page.append_grapheme_at(0, 0, 0x0301).unwrap();
+        page.append_grapheme_at(0, 0, 0x0302).unwrap();
+
+        let mut page2 = Page::init(Capacity::new(2, 1)).unwrap();
+        page2
+            .clone_rows_from_without_styles_or_hyperlinks(&page, 0, 1)
+            .unwrap();
+
+        assert_eq!(page2.cell_copy_at(0, 0).codepoint(), 'a' as u32);
+        assert!(page2.cell_copy_at(0, 0).has_grapheme());
+        assert_eq!(page2.lookup_grapheme_at(0, 0), Some(vec![0x0301, 0x0302]));
+    }
+
+    #[test]
+    fn page_clone_from_preserves_trailing_destination_grapheme() {
+        let mut page = Page::init(Capacity::new(3, 1)).unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('b' as u32);
+        *page.get_row_and_cell_mut(2, 0).cell = Cell::init('c' as u32);
+
+        let mut page2 = Page::init(Capacity::new(5, 1)).unwrap();
+        *page2.get_row_and_cell_mut(4, 0).cell = Cell::init('z' as u32);
+        page2.append_grapheme_at(4, 0, 0x0301).unwrap();
+
+        page2
+            .clone_rows_from_without_styles_or_hyperlinks(&page, 0, 1)
+            .unwrap();
+
+        assert_eq!(page2.cell_copy_at(0, 0).codepoint(), 'a' as u32);
+        assert_eq!(page2.cell_copy_at(1, 0).codepoint(), 'b' as u32);
+        assert_eq!(page2.cell_copy_at(2, 0).codepoint(), 'c' as u32);
+        assert_eq!(page2.cell_copy_at(4, 0).codepoint(), 'z' as u32);
+        assert!(page2.get_row(0).grapheme());
+        assert!(page2.cell_copy_at(4, 0).has_grapheme());
+        assert_eq!(page2.lookup_grapheme_at(4, 0), Some(vec![0x0301]));
+    }
+
+    #[test]
+    fn page_clone_from_source_narrower_grapheme_sets_row_flag() {
+        let mut page = Page::init(Capacity::new(3, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('g' as u32);
+        page.append_grapheme_at(1, 0, 0x0301).unwrap();
+
+        let mut page2 = Page::init(Capacity::new(5, 1)).unwrap();
+        assert!(!page2.get_row(0).grapheme());
+
+        page2
+            .clone_rows_from_without_styles_or_hyperlinks(&page, 0, 1)
+            .unwrap();
+
+        assert!(page2.get_row(0).grapheme());
+        assert!(page2.cell_copy_at(1, 0).has_grapheme());
+        assert_eq!(page2.lookup_grapheme_at(1, 0), Some(vec![0x0301]));
     }
 
     #[test]

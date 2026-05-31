@@ -199,3 +199,101 @@ The experiment fails if:
 This experiment design must be reviewed by Codex before implementation. Any real
 design issues must be fixed before committing the plan or implementing the
 slice.
+
+## Result
+
+**Result:** Pass
+
+Experiment 18 replaced the grapheme portion of Experiment 17's temporary
+managed-memory guard with real grapheme migration and cleanup.
+
+### Method Naming
+
+The clone method is now named:
+
+- `Page::clone_rows_from_without_styles_or_hyperlinks`
+- `Page::clone_row_from_without_styles_or_hyperlinks`
+
+The name is intentionally still scoped. It now supports plain rows and
+graphemes, but it still rejects styles and hyperlinks. A future experiment can
+rename or wrap this as `clone_from` once all managed-memory branches are
+implemented.
+
+### Grapheme Migration
+
+The row-copy path now:
+
+- allows source and destination grapheme rows;
+- allows source and destination grapheme cells;
+- collects source grapheme slices before overwriting destination cells;
+- clears destination grapheme storage in the copied range before overwrite;
+- copies the base cell content;
+- resets copied grapheme cells to `Codepoint` before inserting destination
+  grapheme storage;
+- appends every source grapheme codepoint into destination storage;
+- updates the destination row grapheme flag after each copied row.
+
+Grapheme operations for row clone are keyed by actual row cell offsets, not by a
+canonical `y * cols + x` calculation. The implementation added offset-keyed
+helpers and kept the existing `*_grapheme_at(x, y)` helpers as wrappers for the
+normal indexed Page path.
+
+### Remaining Unsupported Cases
+
+The clone path still rejects:
+
+- source or destination rows with style markers;
+- source or destination rows with hyperlink markers;
+- copied source or destination cells with non-default style IDs;
+- copied source or destination cells with hyperlink markers.
+
+Style migration and hyperlink migration remain deferred. Hyperlinks still need
+Page hyperlink storage first.
+
+### Tests Ported and Added
+
+Ported upstream tests:
+
+- `Page cloneFrom graphemes` -> `page_clone_from_graphemes`
+- `Page cloneFrom frees dst graphemes` -> `page_clone_from_frees_dst_graphemes`
+
+Additional Roastty tests:
+
+- `page_clone_from_multi_codepoint_grapheme`
+- `page_clone_from_preserves_trailing_destination_grapheme`
+- `page_clone_from_source_narrower_grapheme_sets_row_flag`
+
+Experiment 17's plain-row clone tests remain green.
+
+### Result Review Fix
+
+Codex's completed-result review found one real bug before commit:
+source-narrower clones could insert a grapheme into a previously plain
+destination row while leaving the row's grapheme flag false. The fix made
+`Page::update_row_grapheme_flag` set the row flag from the whole-row scan
+result, not only clear false positives, and added
+`page_clone_from_source_narrower_grapheme_sets_row_flag`.
+
+### Verification
+
+Commands run:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo test -p roastty terminal::page`: 63 passed.
+- `cargo test -p roastty`: 172 Rust unit tests passed, ABI harness passed, doc
+  tests passed.
+
+## Conclusion
+
+Roastty's Page row-copy path now covers plain rows and grapheme-managed rows.
+The remaining `cloneFrom` managed-memory work is style migration and hyperlink
+migration. Since Page hyperlink storage does not exist yet, the next clone
+experiment should likely tackle style migration first, then return to hyperlink
+storage and hyperlink row-copy once the storage substrate is available.
