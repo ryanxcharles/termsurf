@@ -245,3 +245,64 @@ The experiment fails if:
 This experiment design must be reviewed by Codex before implementation. Any real
 design issues must be fixed before committing the plan or implementing the
 slice.
+
+## Result
+
+**Result:** Pass
+
+Implemented hyperlink-aware Page row copy:
+
+- renamed the row-copy helpers to `clone_rows_from` and `clone_row_from`;
+- removed the previous hyperlink row/cell rejection path;
+- added a Rust-safe `clone_rows_within_page` helper for same-page copies using a
+  Page snapshot instead of an unsound `&mut self` / `&self` alias;
+- cleared destination hyperlinks before overwriting copied cells;
+- reset copied cell managed markers before fallible migration:
+  - hyperlink bit cleared;
+  - style ID reset to default;
+  - grapheme content tag reset to `Codepoint` when needed;
+- added hyperlink migration for row copy:
+  - same-page/snapshot copies reuse existing destination IDs through
+    content-based lookup and ref acquisition;
+  - cross-page copies deduplicate existing destination entries when possible;
+  - otherwise URI and explicit ID strings are duplicated into destination Page
+    memory and inserted into the destination hyperlink set, preferring the
+    source ID;
+  - map-capacity checks happen before acquiring refs or duplicating strings;
+- added clone-from error variants for Page allocation failure, string OOM,
+  hyperlink map OOM, hyperlink set OOM, and hyperlink set needs-rehash.
+
+Tests added cover cross-page hyperlink copy, same-page copy via the dedicated
+helper, destination deduplication, replacement with trailing destination
+hyperlink preservation, string-OOM cleanup, set-OOM cleanup, and map-OOM
+behavior with no ref/string/set leaks. Existing plain, grapheme, and style
+row-copy tests continue to pass.
+
+The `HyperlinkSetNeedsRehash` row-copy error path is wired through the same
+`RefCountedSet::AddError::NeedsRehash` mapping as styles and hyperlink storage,
+but a row-copy-specific needs-rehash fixture was not kept because the setup
+collapsed back to successful insertion once trailing dead IDs were reclaimed.
+The lower-level `RefCountedSet` needs-rehash behavior remains covered by its own
+tests.
+
+Verification run:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo test -p roastty terminal::page`: 85 passed.
+- `cargo test -p roastty`: 194 unit tests passed, ABI harness passed, doc tests
+  passed.
+
+## Conclusion
+
+Page row copy now handles hyperlinks through Page-owned map/set/string storage.
+This removes the final row-copy managed-memory guard that was blocking hyperlink
+cells. The next experiment can move back to the upstream Page backlog, likely
+`exactRowCapacity` / capacity sizing for cloned rows, unless a review identifies
+a row-copy cleanup that should happen first.

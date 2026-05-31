@@ -323,6 +323,11 @@ pub(super) enum CloneFromError {
     DestinationCellUnsupportedManagedMemory,
     Grapheme(GraphemeError),
     Style(super::ref_counted_set::AddError),
+    PageAlloc,
+    StringAllocOutOfMemory,
+    HyperlinkMapOutOfMemory,
+    HyperlinkSetOutOfMemory,
+    HyperlinkSetNeedsRehash,
 }
 
 impl From<GraphemeError> for CloneFromError {
@@ -494,7 +499,7 @@ impl Page {
         })
     }
 
-    fn clone_rows_from_without_hyperlinks(
+    fn clone_rows_from(
         &mut self,
         other: &Page,
         y_start: usize,
@@ -505,13 +510,13 @@ impl Page {
         assert!(y_end - y_start <= self.size.rows as usize);
 
         for (dst_y, src_y) in (y_start..y_end).enumerate() {
-            self.clone_row_from_without_hyperlinks(other, dst_y, src_y)?;
+            self.clone_row_from(other, dst_y, src_y)?;
         }
 
         Ok(())
     }
 
-    fn clone_row_from_without_hyperlinks(
+    fn clone_row_from(
         &mut self,
         other: &Page,
         dst_y: usize,
@@ -519,12 +524,6 @@ impl Page {
     ) -> Result<(), CloneFromError> {
         let src_row = *other.get_row(src_y);
         let dst_row = *self.get_row(dst_y);
-        if src_row.hyperlink() {
-            return Err(CloneFromError::SourceRowUnsupportedManagedMemory);
-        }
-        if dst_row.hyperlink() {
-            return Err(CloneFromError::DestinationRowUnsupportedManagedMemory);
-        }
 
         let copy_len = (self.size.cols as usize).min(other.size.cols as usize);
         let dst_cell_offsets = (0..copy_len)
@@ -532,12 +531,6 @@ impl Page {
             .collect::<Vec<_>>();
         let source_graphemes = {
             let src_cells = other.get_cells(other.get_row(src_y));
-            if src_cells[..copy_len]
-                .iter()
-                .any(|cell| cell.unsupported_clone_managed_memory())
-            {
-                return Err(CloneFromError::SourceCellUnsupportedManagedMemory);
-            }
             src_cells[..copy_len]
                 .iter()
                 .enumerate()
@@ -553,6 +546,23 @@ impl Page {
                 })
                 .collect::<Vec<_>>()
         };
+        let source_hyperlinks = {
+            let src_cells = other.get_cells(other.get_row(src_y));
+            src_cells[..copy_len]
+                .iter()
+                .enumerate()
+                .map(|(x, cell)| {
+                    if cell.hyperlink() {
+                        let offset = other.cell_offset_from_row_cells(src_row.cells(), x);
+                        other
+                            .lookup_hyperlink_at_offset(offset)
+                            .expect("hyperlink cell must have map data")
+                    } else {
+                        0
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
         let source_styles = {
             let src_cells = other.get_cells(other.get_row(src_y));
             src_cells[..copy_len]
@@ -563,19 +573,13 @@ impl Page {
                 })
                 .collect::<Vec<_>>()
         };
-        {
-            let dst_cells = self.get_cells(self.get_row(dst_y));
-            if dst_cells[..copy_len]
-                .iter()
-                .any(|cell| cell.unsupported_clone_managed_memory())
-            {
-                return Err(CloneFromError::DestinationCellUnsupportedManagedMemory);
-            }
-        }
 
         for offset in dst_cell_offsets.iter().copied() {
             if unsafe { (*offset.ptr(self.memory.as_ptr())).has_grapheme() } {
                 self.clear_grapheme_at_offset(offset);
+            }
+            if unsafe { (*offset.ptr(self.memory.as_ptr())).hyperlink() } {
+                self.clear_hyperlink_at_offset(offset);
             }
             let style_id = unsafe { (*offset.ptr(self.memory.as_ptr())).style_id() };
             if style_id != style::DEFAULT_ID {
@@ -608,6 +612,10 @@ impl Page {
             cells[..copy_len].copy_from_slice(&src_cells[..copy_len]);
             for cell in &mut cells[..copy_len] {
                 cell.set_style_id(style::DEFAULT_ID);
+                cell.set_hyperlink(false);
+                if cell.has_grapheme() {
+                    cell.set_content_tag(ContentTag::Codepoint);
+                }
             }
 
             if should_clear_spacer_head {
@@ -631,6 +639,22 @@ impl Page {
             }
         }
 
+        for (offset, source_id) in dst_cell_offsets.iter().copied().zip(source_hyperlinks) {
+            if source_id == 0 {
+                continue;
+            }
+            let dst_id = self.prepare_cloned_hyperlink(other, source_id)?;
+            if let Err(HyperlinkError::HyperlinkMapOutOfMemory) =
+                self.set_hyperlink_at_offset(dst_y, offset, dst_id)
+            {
+                self.release_hyperlink(dst_id);
+                self.update_row_grapheme_flag(dst_y);
+                self.update_row_hyperlink_flag(dst_y);
+                self.update_row_styled_flag(dst_y);
+                return Err(CloneFromError::HyperlinkMapOutOfMemory);
+            }
+        }
+
         for (offset, source_style) in dst_cell_offsets.iter().copied().zip(source_styles) {
             let Some((source_id, source_style)) = source_style else {
                 continue;
@@ -639,6 +663,7 @@ impl Page {
                 Ok(id) => id,
                 Err(err) => {
                     self.update_row_grapheme_flag(dst_y);
+                    self.update_row_hyperlink_flag(dst_y);
                     self.update_row_styled_flag(dst_y);
                     return Err(err.into());
                 }
@@ -650,7 +675,26 @@ impl Page {
         }
 
         self.update_row_grapheme_flag(dst_y);
+        self.update_row_hyperlink_flag(dst_y);
         self.update_row_styled_flag(dst_y);
+        Ok(())
+    }
+
+    fn clone_rows_within_page(
+        &mut self,
+        src_y_start: usize,
+        src_y_end: usize,
+        dst_y_start: usize,
+    ) -> Result<(), CloneFromError> {
+        assert!(src_y_start <= src_y_end);
+        assert!(src_y_end <= self.size.rows as usize);
+        assert!(src_y_end - src_y_start <= self.size.rows as usize - dst_y_start);
+
+        let snapshot = self.clone_page().map_err(|_| CloneFromError::PageAlloc)?;
+        for (dst_y, src_y) in (src_y_start..src_y_end).enumerate() {
+            self.clone_row_from(&snapshot, dst_y_start + dst_y, src_y)?;
+        }
+
         Ok(())
     }
 
@@ -1006,6 +1050,98 @@ impl Page {
                 .add(self.layout.hyperlink_set_start)
         };
         self.hyperlink_set.release(base, id);
+    }
+
+    fn prepare_cloned_hyperlink(
+        &mut self,
+        source: &Page,
+        source_id: hyperlink::Id,
+    ) -> Result<hyperlink::Id, CloneFromError> {
+        if self.hyperlink_count() >= self.hyperlink_capacity() {
+            return Err(CloneFromError::HyperlinkMapOutOfMemory);
+        }
+
+        let source_entry = *source
+            .hyperlink_set
+            .get(source.hyperlink_set_base(), source_id);
+        if let Some(id) = self.lookup_hyperlink_entry_from(source, source_entry) {
+            self.use_hyperlink(id);
+            return Ok(id);
+        }
+
+        let entry = self.dupe_hyperlink_entry_from(source, source_entry)?;
+        self.add_hyperlink_entry_with_id(entry, source_id)
+    }
+
+    fn lookup_hyperlink_entry_from(
+        &self,
+        source: &Page,
+        entry: hyperlink::PageEntry,
+    ) -> Option<hyperlink::Id> {
+        let context =
+            HyperlinkSetContext::with_source(self.memory.as_ptr(), source.memory.as_ptr());
+        self.hyperlink_set
+            .lookup(self.hyperlink_set_base(), entry, &context)
+    }
+
+    fn add_hyperlink_entry_with_id(
+        &mut self,
+        entry: hyperlink::PageEntry,
+        preferred_id: hyperlink::Id,
+    ) -> Result<hyperlink::Id, CloneFromError> {
+        let base = unsafe {
+            // Safety: hyperlink_set_start is inside this page's live backing
+            // memory.
+            self.memory
+                .as_mut_ptr()
+                .add(self.layout.hyperlink_set_start)
+        };
+        let mut context =
+            HyperlinkSetContext::new(self.memory.as_mut_ptr(), &mut self.string_alloc);
+        match self
+            .hyperlink_set
+            .add_with_id(base, entry, preferred_id, &mut context)
+        {
+            Ok(Some(id)) => Ok(id),
+            Ok(None) => Ok(preferred_id),
+            Err(ref_counted_set::AddError::OutOfMemory) => {
+                self.free_hyperlink_entry(entry);
+                Err(CloneFromError::HyperlinkSetOutOfMemory)
+            }
+            Err(ref_counted_set::AddError::NeedsRehash) => {
+                self.free_hyperlink_entry(entry);
+                Err(CloneFromError::HyperlinkSetNeedsRehash)
+            }
+        }
+    }
+
+    fn dupe_hyperlink_entry_from(
+        &mut self,
+        source: &Page,
+        entry: hyperlink::PageEntry,
+    ) -> Result<hyperlink::PageEntry, CloneFromError> {
+        let uri = self
+            .alloc_string_slice(source.hyperlink_bytes(entry.uri()))
+            .map_err(|_| CloneFromError::StringAllocOutOfMemory)?;
+        let id = match entry.id().tag() {
+            hyperlink::PageEntryIdTag::Implicit => {
+                hyperlink::PageEntryId::implicit(entry.id().implicit_value())
+            }
+            hyperlink::PageEntryIdTag::Explicit => {
+                let explicit = match self
+                    .alloc_string_slice(source.hyperlink_bytes(entry.id().explicit_value()))
+                {
+                    Ok(explicit) => explicit,
+                    Err(_) => {
+                        self.free_string_slice(uri);
+                        return Err(CloneFromError::StringAllocOutOfMemory);
+                    }
+                };
+                hyperlink::PageEntryId::explicit(explicit)
+            }
+        };
+
+        Ok(hyperlink::PageEntry::new(id, uri))
     }
 
     pub(super) fn hyperlink_ref_count(&self, id: hyperlink::Id) -> hyperlink::Id {
@@ -1376,6 +1512,14 @@ impl HyperlinkSetContext {
         }
     }
 
+    fn with_source(page_memory: *const u8, src_memory: *const u8) -> Self {
+        Self {
+            page_memory: page_memory.cast_mut(),
+            src_memory,
+            string_alloc: std::ptr::null_mut(),
+        }
+    }
+
     fn page_memory(&self) -> *const u8 {
         self.page_memory
     }
@@ -1404,6 +1548,7 @@ impl ref_counted_set::Context<hyperlink::PageEntry> for HyperlinkSetContext {
     }
 
     fn deleted(&mut self, value: hyperlink::PageEntry) {
+        assert!(!self.string_alloc.is_null());
         free_hyperlink_entry_from(self.page_memory, self.string_alloc, value);
     }
 }
@@ -3239,7 +3384,7 @@ mod tests {
         })
         .unwrap();
         page2
-            .clone_rows_from_without_hyperlinks(&page, 0, page.size.rows as usize)
+            .clone_rows_from(&page, 0, page.size.rows as usize)
             .unwrap();
 
         for y in 0..page2.capacity.rows as usize {
@@ -3280,7 +3425,7 @@ mod tests {
         })
         .unwrap();
         page2
-            .clone_rows_from_without_hyperlinks(&page, 0, page.size.rows as usize)
+            .clone_rows_from(&page, 0, page.size.rows as usize)
             .unwrap();
         assert_eq!(page2.size.cols, 5);
 
@@ -3310,9 +3455,7 @@ mod tests {
             ..Capacity::new(10, 10)
         })
         .unwrap();
-        page2
-            .clone_rows_from_without_hyperlinks(&page, 0, 5)
-            .unwrap();
+        page2.clone_rows_from(&page, 0, 5).unwrap();
 
         for y in 0..5 {
             assert_eq!(page2.get_cells(page2.get_row(y))[1].codepoint(), y as u32);
@@ -3335,9 +3478,7 @@ mod tests {
         *page2.get_row_and_cell_mut(3, 0).cell = Cell::init('x' as u32);
         *page2.get_row_and_cell_mut(4, 0).cell = Cell::init('y' as u32);
 
-        page2
-            .clone_rows_from_without_hyperlinks(&page, 0, 1)
-            .unwrap();
+        page2.clone_rows_from(&page, 0, 1).unwrap();
         let cells = page2.get_cells(page2.get_row(0));
         assert_eq!(cells[0].codepoint(), 'a' as u32);
         assert_eq!(cells[1].codepoint(), 'b' as u32);
@@ -3348,52 +3489,302 @@ mod tests {
     }
 
     #[test]
-    fn page_clone_from_rejects_hyperlink_rows_and_cells() {
+    fn page_clone_from_hyperlinks_cross_page() {
         let mut source = Page::init(Capacity {
-            cols: 2,
+            cols: 3,
             rows: 1,
             styles: 8,
-            ..Capacity::new(2, 1)
+            ..Capacity::new(3, 1)
         })
         .unwrap();
         let mut destination = Page::init(Capacity {
-            cols: 2,
+            cols: 3,
             rows: 1,
             styles: 8,
-            ..Capacity::new(2, 1)
+            ..Capacity::new(3, 1)
         })
         .unwrap();
+        *source.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+        *source.get_row_and_cell_mut(1, 0).cell = Cell::init('b' as u32);
 
-        source.get_row_mut(0).set_hyperlink(true);
-        assert_eq!(
-            destination.clone_rows_from_without_hyperlinks(&source, 0, 1),
-            Err(CloneFromError::SourceRowUnsupportedManagedMemory)
-        );
-        source.get_row_mut(0).set_hyperlink(false);
+        let implicit = source
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(7),
+                uri: b"https://example.com/a",
+            })
+            .unwrap();
+        let explicit = source
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Explicit(b"id"),
+                uri: b"https://example.com/b",
+            })
+            .unwrap();
+        source.set_hyperlink(0, 0, implicit).unwrap();
+        source.set_hyperlink(1, 0, explicit).unwrap();
 
-        destination.get_row_mut(0).set_hyperlink(true);
-        assert_eq!(
-            destination.clone_rows_from_without_hyperlinks(&source, 0, 1),
-            Err(CloneFromError::DestinationRowUnsupportedManagedMemory)
-        );
-        destination.get_row_mut(0).set_hyperlink(false);
+        destination.clone_rows_from(&source, 0, 1).unwrap();
 
-        let mut source_cell = Cell::init('s' as u32);
-        source_cell.set_hyperlink(true);
-        *source.get_row_and_cell_mut(0, 0).cell = source_cell;
+        let dst_implicit = destination.lookup_hyperlink_at(0, 0).unwrap();
+        let dst_explicit = destination.lookup_hyperlink_at(1, 0).unwrap();
         assert_eq!(
-            destination.clone_rows_from_without_hyperlinks(&source, 0, 1),
-            Err(CloneFromError::SourceCellUnsupportedManagedMemory)
+            destination.get_hyperlink(dst_implicit),
+            HyperlinkSnapshot {
+                id: HyperlinkSnapshotId::Implicit(7),
+                uri: b"https://example.com/a".to_vec(),
+            }
         );
+        assert_eq!(
+            destination.get_hyperlink(dst_explicit),
+            HyperlinkSnapshot {
+                id: HyperlinkSnapshotId::Explicit(b"id".to_vec()),
+                uri: b"https://example.com/b".to_vec(),
+            }
+        );
+        assert!(destination.get_row(0).hyperlink());
+        assert!(destination.cell_copy_at(0, 0).hyperlink());
+        assert!(destination.cell_copy_at(1, 0).hyperlink());
+        assert_eq!(destination.hyperlink_count(), 2);
+
+        source.clear_hyperlink(0, 0);
+        source.clear_hyperlink(1, 0);
+        source.update_row_hyperlink_flag(0);
+        assert_eq!(
+            destination.get_hyperlink(dst_explicit),
+            HyperlinkSnapshot {
+                id: HyperlinkSnapshotId::Explicit(b"id".to_vec()),
+                uri: b"https://example.com/b".to_vec(),
+            }
+        );
+    }
+
+    #[test]
+    fn page_clone_from_hyperlinks_within_page_reuses_ids() {
+        let mut page = Page::init(Capacity {
+            cols: 3,
+            rows: 2,
+            styles: 8,
+            ..Capacity::new(3, 2)
+        })
+        .unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('b' as u32);
+        let id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(9),
+                uri: b"https://example.com",
+            })
+            .unwrap();
+        page.set_hyperlink(0, 0, id).unwrap();
+        page.use_hyperlink(id);
+        page.set_hyperlink(1, 0, id).unwrap();
+        assert_eq!(page.hyperlink_ref_count(id), 2);
+
+        page.clone_rows_within_page(0, 1, 1).unwrap();
+
+        assert_eq!(page.lookup_hyperlink_at(0, 1), Some(id));
+        assert_eq!(page.lookup_hyperlink_at(1, 1), Some(id));
+        assert_eq!(page.hyperlink_ref_count(id), 4);
+        assert_eq!(page.hyperlink_count(), 4);
+        assert!(page.get_row(1).hyperlink());
+    }
+
+    #[test]
+    fn page_clone_from_hyperlinks_dedups_destination_entry() {
+        let mut source = Page::init(Capacity::new(3, 1)).unwrap();
+        let mut destination = Page::init(Capacity::new(3, 1)).unwrap();
+        *source.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+        *source.get_row_and_cell_mut(1, 0).cell = Cell::init('b' as u32);
+
+        let source_id = source
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Explicit(b"id"),
+                uri: b"https://example.com",
+            })
+            .unwrap();
+        source.set_hyperlink(0, 0, source_id).unwrap();
+        source.use_hyperlink(source_id);
+        source.set_hyperlink(1, 0, source_id).unwrap();
+
+        let destination_id = destination
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Explicit(b"id"),
+                uri: b"https://example.com",
+            })
+            .unwrap();
+        let used_before = destination.string_used_bytes();
+
+        destination.clone_rows_from(&source, 0, 1).unwrap();
+
+        assert_eq!(destination.lookup_hyperlink_at(0, 0), Some(destination_id));
+        assert_eq!(destination.lookup_hyperlink_at(1, 0), Some(destination_id));
+        assert_eq!(destination.hyperlink_ref_count(destination_id), 3);
+        assert_eq!(destination.hyperlink_set_count(), 1);
+        assert_eq!(destination.string_used_bytes(), used_before);
+    }
+
+    #[test]
+    fn page_clone_from_hyperlinks_replaces_and_preserves_trailing() {
+        let mut source = Page::init(Capacity::new(2, 1)).unwrap();
+        let mut destination = Page::init(Capacity::new(4, 1)).unwrap();
+        *source.get_row_and_cell_mut(0, 0).cell = Cell::init('a' as u32);
+        *source.get_row_and_cell_mut(1, 0).cell = Cell::init('b' as u32);
+        *destination.get_row_and_cell_mut(2, 0).cell = Cell::init('x' as u32);
+
+        let source_id = source
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(1),
+                uri: b"https://example.com/source",
+            })
+            .unwrap();
+        source.set_hyperlink(0, 0, source_id).unwrap();
+
+        let old_id = destination
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(2),
+                uri: b"https://example.com/old",
+            })
+            .unwrap();
+        destination.set_hyperlink(0, 0, old_id).unwrap();
+        destination.use_hyperlink(old_id);
+        destination.set_hyperlink(2, 0, old_id).unwrap();
+        assert_eq!(destination.hyperlink_ref_count(old_id), 2);
+
+        destination.clone_rows_from(&source, 0, 1).unwrap();
+
+        assert_ne!(destination.lookup_hyperlink_at(0, 0), Some(old_id));
+        assert_eq!(destination.lookup_hyperlink_at(1, 0), None);
+        assert_eq!(destination.lookup_hyperlink_at(2, 0), Some(old_id));
+        assert_eq!(destination.hyperlink_ref_count(old_id), 1);
+        assert!(destination.get_row(0).hyperlink());
+    }
+
+    #[test]
+    fn page_clone_from_hyperlink_map_oom_leaks_no_refs_or_strings() {
+        let mut source = Page::init(Capacity::new(80, 1)).unwrap();
+        let mut destination = Page::init(Capacity::with_metadata(
+            80,
+            2,
+            8,
+            HYPERLINK_BYTES_DEFAULT,
+            GRAPHEME_BYTES_DEFAULT,
+            STRING_BYTES_DEFAULT,
+        ))
+        .unwrap();
+
+        let source_id = source
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(1),
+                uri: b"https://example.com/source",
+            })
+            .unwrap();
         *source.get_row_and_cell_mut(0, 0).cell = Cell::init('s' as u32);
+        source.set_hyperlink(0, 0, source_id).unwrap();
 
-        let mut destination_cell = Cell::init('d' as u32);
-        destination_cell.set_hyperlink(true);
-        *destination.get_row_and_cell_mut(0, 0).cell = destination_cell;
+        let destination_id = destination
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(2),
+                uri: b"https://example.com/destination",
+            })
+            .unwrap();
+        let capacity = destination.hyperlink_capacity();
+        for i in 0..capacity {
+            if i > 0 {
+                destination.use_hyperlink(destination_id);
+            }
+            *destination.get_row_and_cell_mut(i, 1).cell = Cell::init('d' as u32);
+            destination.set_hyperlink(i, 1, destination_id).unwrap();
+        }
+        assert_eq!(destination.hyperlink_count(), capacity);
+        let ref_count_before = destination.hyperlink_ref_count(destination_id);
+        let set_count_before = destination.hyperlink_set_count();
+        let string_used_before = destination.string_used_bytes();
+
         assert_eq!(
-            destination.clone_rows_from_without_hyperlinks(&source, 0, 1),
-            Err(CloneFromError::DestinationCellUnsupportedManagedMemory)
+            destination.clone_rows_from(&source, 0, 1),
+            Err(CloneFromError::HyperlinkMapOutOfMemory)
         );
+
+        assert_eq!(
+            destination.hyperlink_ref_count(destination_id),
+            ref_count_before
+        );
+        assert_eq!(destination.hyperlink_set_count(), set_count_before);
+        assert_eq!(destination.string_used_bytes(), string_used_before);
+        assert_eq!(destination.lookup_hyperlink_at(0, 0), None);
+        assert!(!destination.cell_copy_at(0, 0).hyperlink());
+    }
+
+    #[test]
+    fn page_clone_from_hyperlink_string_oom_leaks_no_state() {
+        let mut source = Page::init(Capacity::new(2, 1)).unwrap();
+        let mut destination = Page::init(Capacity::with_metadata(
+            2,
+            1,
+            8,
+            HYPERLINK_BYTES_DEFAULT,
+            GRAPHEME_BYTES_DEFAULT,
+            0,
+        ))
+        .unwrap();
+        let source_id = source
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Explicit(b"id"),
+                uri: b"https://example.com/source",
+            })
+            .unwrap();
+        *source.get_row_and_cell_mut(0, 0).cell = Cell::init('s' as u32);
+        source.set_hyperlink(0, 0, source_id).unwrap();
+
+        assert_eq!(
+            destination.clone_rows_from(&source, 0, 1),
+            Err(CloneFromError::StringAllocOutOfMemory)
+        );
+
+        assert_eq!(destination.hyperlink_count(), 0);
+        assert_eq!(destination.hyperlink_set_count(), 0);
+        assert_eq!(destination.string_used_bytes(), 0);
+        assert_eq!(destination.lookup_hyperlink_at(0, 0), None);
+        assert!(!destination.cell_copy_at(0, 0).hyperlink());
+    }
+
+    #[test]
+    fn page_clone_from_hyperlink_set_oom_frees_duplicated_strings() {
+        let mut source = Page::init(Capacity::new(2, 1)).unwrap();
+        let mut destination = Page::init(Capacity::new(2, 1)).unwrap();
+        let source_id = source
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(100),
+                uri: b"https://example.com/source",
+            })
+            .unwrap();
+        *source.get_row_and_cell_mut(0, 0).cell = Cell::init('s' as u32);
+        source.set_hyperlink(0, 0, source_id).unwrap();
+
+        let mut inserted = Vec::new();
+        for i in 0.. {
+            match destination.insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(i),
+                uri: b"https://example.com/destination",
+            }) {
+                Ok(id) => inserted.push(id),
+                Err(InsertHyperlinkError::SetOutOfMemory) => break,
+                Err(err) => panic!("unexpected insert error: {err:?}"),
+            }
+        }
+        assert!(!inserted.is_empty());
+        let set_count_before = destination.hyperlink_set_count();
+        let string_used_before = destination.string_used_bytes();
+
+        assert_eq!(
+            destination.clone_rows_from(&source, 0, 1),
+            Err(CloneFromError::HyperlinkSetOutOfMemory)
+        );
+
+        assert_eq!(destination.hyperlink_set_count(), set_count_before);
+        assert_eq!(destination.string_used_bytes(), string_used_before);
+        assert_eq!(destination.hyperlink_count(), 0);
+        assert_eq!(destination.lookup_hyperlink_at(0, 0), None);
+        assert!(!destination.cell_copy_at(0, 0).hyperlink());
     }
 
     #[test]
@@ -3419,7 +3810,7 @@ mod tests {
         })
         .unwrap();
         page2
-            .clone_rows_from_without_hyperlinks(&page, 0, page.size.rows as usize)
+            .clone_rows_from(&page, 0, page.size.rows as usize)
             .unwrap();
 
         for y in 0..page2.capacity.rows as usize {
@@ -3477,7 +3868,7 @@ mod tests {
         }
 
         page2
-            .clone_rows_from_without_hyperlinks(&page, 0, page.size.rows as usize)
+            .clone_rows_from(&page, 0, page.size.rows as usize)
             .unwrap();
 
         for y in 0..page2.capacity.rows as usize {
@@ -3498,9 +3889,7 @@ mod tests {
         page.append_grapheme_at(0, 0, 0x0302).unwrap();
 
         let mut page2 = Page::init(Capacity::new(2, 1)).unwrap();
-        page2
-            .clone_rows_from_without_hyperlinks(&page, 0, 1)
-            .unwrap();
+        page2.clone_rows_from(&page, 0, 1).unwrap();
 
         assert_eq!(page2.cell_copy_at(0, 0).codepoint(), 'a' as u32);
         assert!(page2.cell_copy_at(0, 0).has_grapheme());
@@ -3518,9 +3907,7 @@ mod tests {
         *page2.get_row_and_cell_mut(4, 0).cell = Cell::init('z' as u32);
         page2.append_grapheme_at(4, 0, 0x0301).unwrap();
 
-        page2
-            .clone_rows_from_without_hyperlinks(&page, 0, 1)
-            .unwrap();
+        page2.clone_rows_from(&page, 0, 1).unwrap();
 
         assert_eq!(page2.cell_copy_at(0, 0).codepoint(), 'a' as u32);
         assert_eq!(page2.cell_copy_at(1, 0).codepoint(), 'b' as u32);
@@ -3540,9 +3927,7 @@ mod tests {
         let mut page2 = Page::init(Capacity::new(5, 1)).unwrap();
         assert!(!page2.get_row(0).grapheme());
 
-        page2
-            .clone_rows_from_without_hyperlinks(&page, 0, 1)
-            .unwrap();
+        page2.clone_rows_from(&page, 0, 1).unwrap();
 
         assert!(page2.get_row(0).grapheme());
         assert!(page2.cell_copy_at(1, 0).has_grapheme());
@@ -3582,9 +3967,7 @@ mod tests {
             ..Capacity::new(4, 1)
         })
         .unwrap();
-        page2
-            .clone_rows_from_without_hyperlinks(&page, 0, 1)
-            .unwrap();
+        page2.clone_rows_from(&page, 0, 1).unwrap();
 
         assert!(page2.get_row(0).styled());
         assert_eq!(page2.style_count(), 1);
@@ -3634,9 +4017,7 @@ mod tests {
         page2.release_style(old_id);
         assert_eq!(page2.style_ref_count(old_id), 3);
 
-        page2
-            .clone_rows_from_without_hyperlinks(&page, 0, 1)
-            .unwrap();
+        page2.clone_rows_from(&page, 0, 1).unwrap();
 
         assert!(!page2.get_row(0).styled());
         assert_eq!(page2.style_count(), 0);
@@ -3696,9 +4077,7 @@ mod tests {
         }
         page2.release_style(old_id);
 
-        page2
-            .clone_rows_from_without_hyperlinks(&page, 0, 1)
-            .unwrap();
+        page2.clone_rows_from(&page, 0, 1).unwrap();
 
         assert_eq!(page2.style_count(), 1);
         assert_eq!(page2.get_style(source_id), bold);
@@ -3736,9 +4115,7 @@ mod tests {
         page2.use_style(id);
         page2.release_style(id);
 
-        page2
-            .clone_rows_from_without_hyperlinks(&page, 0, 1)
-            .unwrap();
+        page2.clone_rows_from(&page, 0, 1).unwrap();
 
         assert!(page2.get_row(0).styled());
         assert_eq!(page2.cell_copy_at(0, 0).style_id(), style::DEFAULT_ID);
@@ -3790,9 +4167,7 @@ mod tests {
         let occupied_id = page2.add_style(italic).unwrap();
         assert_eq!(occupied_id, source_id);
 
-        page2
-            .clone_rows_from_without_hyperlinks(&page, 0, 1)
-            .unwrap();
+        page2.clone_rows_from(&page, 0, 1).unwrap();
 
         let copied_id = page2.cell_copy_at(0, 0).style_id();
         assert_ne!(copied_id, source_id);
@@ -3837,7 +4212,7 @@ mod tests {
         *page2.get_row_and_cell_mut(0, 0).cell = Cell::init('x' as u32);
 
         assert_eq!(
-            page2.clone_rows_from_without_hyperlinks(&page, 0, 1),
+            page2.clone_rows_from(&page, 0, 1),
             Err(CloneFromError::Style(
                 super::super::ref_counted_set::AddError::OutOfMemory
             ))

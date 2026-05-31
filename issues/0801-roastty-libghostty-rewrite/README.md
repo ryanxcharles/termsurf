@@ -169,7 +169,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 20: Port Page Hyperlink Storage](20-port-page-hyperlink-storage.md)
   — **Pass**
 - [Experiment 21: Port Page CloneFrom Hyperlinks](21-port-page-hyperlink-row-copy.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 
