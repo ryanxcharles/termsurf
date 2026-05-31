@@ -995,6 +995,95 @@ impl Page {
         map.put_assume_capacity_no_clobber(dst_offset, id);
     }
 
+    fn swap_cells(&mut self, src_y: usize, src_x: usize, dst_y: usize, dst_x: usize) {
+        assert!(src_y < self.size.rows as usize);
+        assert!(dst_y < self.size.rows as usize);
+        assert!(src_x < self.size.cols as usize);
+        assert!(dst_x < self.size.cols as usize);
+
+        if src_y == dst_y && src_x == dst_x {
+            return;
+        }
+
+        let src_offset = self.cell_offset_at(src_x, src_y);
+        let dst_offset = self.cell_offset_at(dst_x, dst_y);
+        let src_cell = self.cell_copy_at_offset(src_offset);
+        let dst_cell = self.cell_copy_at_offset(dst_offset);
+
+        self.swap_grapheme_entries(src_offset, src_cell, dst_offset, dst_cell);
+        self.swap_hyperlink_entries(src_offset, src_cell, dst_offset, dst_cell);
+
+        *self.cell_mut_at_offset(src_offset) = dst_cell;
+        *self.cell_mut_at_offset(dst_offset) = src_cell;
+
+        self.update_row_grapheme_flag(src_y);
+        self.update_row_hyperlink_flag(src_y);
+        self.update_row_styled_flag(src_y);
+        if dst_y != src_y {
+            self.update_row_grapheme_flag(dst_y);
+            self.update_row_hyperlink_flag(dst_y);
+            self.update_row_styled_flag(dst_y);
+        }
+    }
+
+    fn swap_grapheme_entries(
+        &mut self,
+        src_offset: Offset<Cell>,
+        src_cell: Cell,
+        dst_offset: Offset<Cell>,
+        dst_cell: Cell,
+    ) {
+        match (src_cell.has_grapheme(), dst_cell.has_grapheme()) {
+            (false, false) => {}
+            (true, false) => self.move_grapheme_entry(src_offset, dst_offset),
+            (false, true) => self.move_grapheme_entry(dst_offset, src_offset),
+            (true, true) => {
+                let Some(mut map) = self.grapheme_map_mut() else {
+                    panic!("grapheme cell must have map storage");
+                };
+                let src_slice = *map
+                    .get_mut(src_offset)
+                    .expect("source grapheme cell must have map data");
+                let dst_slice = *map
+                    .get_mut(dst_offset)
+                    .expect("destination grapheme cell must have map data");
+                *map.get_mut(src_offset)
+                    .expect("source grapheme cell must have map data") = dst_slice;
+                *map.get_mut(dst_offset)
+                    .expect("destination grapheme cell must have map data") = src_slice;
+            }
+        }
+    }
+
+    fn swap_hyperlink_entries(
+        &mut self,
+        src_offset: Offset<Cell>,
+        src_cell: Cell,
+        dst_offset: Offset<Cell>,
+        dst_cell: Cell,
+    ) {
+        match (src_cell.hyperlink(), dst_cell.hyperlink()) {
+            (false, false) => {}
+            (true, false) => self.move_hyperlink_entry(src_offset, dst_offset),
+            (false, true) => self.move_hyperlink_entry(dst_offset, src_offset),
+            (true, true) => {
+                let Some(mut map) = self.hyperlink_map_mut() else {
+                    panic!("hyperlink cell must have map storage");
+                };
+                let src_id = *map
+                    .get_mut(src_offset)
+                    .expect("source hyperlink cell must have map data");
+                let dst_id = *map
+                    .get_mut(dst_offset)
+                    .expect("destination hyperlink cell must have map data");
+                *map.get_mut(src_offset)
+                    .expect("source hyperlink cell must have map data") = dst_id;
+                *map.get_mut(dst_offset)
+                    .expect("destination hyperlink cell must have map data") = src_id;
+            }
+        }
+    }
+
     pub(super) fn get_row(&self, y: usize) -> &Row {
         assert!(y < self.size.rows as usize);
         unsafe {
@@ -4341,6 +4430,243 @@ mod tests {
         for x in 0..page.size.cols as usize {
             assert_eq!(page.cell_copy_at(x, 0).codepoint(), (x + 1) as u32);
         }
+    }
+
+    #[test]
+    fn page_swap_cells_plain_cells() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        let mut left = Cell::init('a' as u32);
+        left.set_wide(Wide::Wide);
+        let mut right = Cell::init('b' as u32);
+        right.set_protected(true);
+        *page.get_row_and_cell_mut(1, 0).cell = left;
+        *page.get_row_and_cell_mut(3, 0).cell = right;
+
+        page.swap_cells(0, 1, 0, 3);
+
+        assert_eq!(page.cell_copy_at(1, 0).codepoint(), 'b' as u32);
+        assert!(page.cell_copy_at(1, 0).protected());
+        assert_eq!(page.cell_copy_at(3, 0).codepoint(), 'a' as u32);
+        assert_eq!(page.cell_copy_at(3, 0).wide(), Wide::Wide);
+    }
+
+    #[test]
+    fn page_swap_cells_grapheme_source_only() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(3, 0).cell = Cell::init('b' as u32);
+        page.append_grapheme_at(1, 0, 0x0301).unwrap();
+        let count_before = page.grapheme_count();
+        let used_before = page.grapheme_used_bytes();
+
+        page.swap_cells(0, 1, 0, 3);
+
+        assert_eq!(page.grapheme_count(), count_before);
+        assert_eq!(page.grapheme_used_bytes(), used_before);
+        assert_eq!(page.lookup_grapheme_at(1, 0), None);
+        assert_eq!(page.lookup_grapheme_at(3, 0), Some(vec![0x0301]));
+        assert!(!page.cell_copy_at(1, 0).has_grapheme());
+        assert!(page.cell_copy_at(3, 0).has_grapheme());
+        assert!(page.get_row(0).grapheme());
+    }
+
+    #[test]
+    fn page_swap_cells_grapheme_destination_only() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(3, 0).cell = Cell::init('b' as u32);
+        page.append_grapheme_at(3, 0, 0x0302).unwrap();
+        let count_before = page.grapheme_count();
+        let used_before = page.grapheme_used_bytes();
+
+        page.swap_cells(0, 1, 0, 3);
+
+        assert_eq!(page.grapheme_count(), count_before);
+        assert_eq!(page.grapheme_used_bytes(), used_before);
+        assert_eq!(page.lookup_grapheme_at(1, 0), Some(vec![0x0302]));
+        assert_eq!(page.lookup_grapheme_at(3, 0), None);
+        assert!(page.cell_copy_at(1, 0).has_grapheme());
+        assert!(!page.cell_copy_at(3, 0).has_grapheme());
+    }
+
+    #[test]
+    fn page_swap_cells_grapheme_both_sides() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(3, 0).cell = Cell::init('b' as u32);
+        page.append_grapheme_at(1, 0, 0x0301).unwrap();
+        page.append_grapheme_at(3, 0, 0x0302).unwrap();
+        let count_before = page.grapheme_count();
+        let used_before = page.grapheme_used_bytes();
+
+        page.swap_cells(0, 1, 0, 3);
+
+        assert_eq!(page.grapheme_count(), count_before);
+        assert_eq!(page.grapheme_used_bytes(), used_before);
+        assert_eq!(page.lookup_grapheme_at(1, 0), Some(vec![0x0302]));
+        assert_eq!(page.lookup_grapheme_at(3, 0), Some(vec![0x0301]));
+        assert!(page.cell_copy_at(1, 0).has_grapheme());
+        assert!(page.cell_copy_at(3, 0).has_grapheme());
+    }
+
+    #[test]
+    fn page_swap_cells_hyperlink_source_only() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(3, 0).cell = Cell::init('b' as u32);
+        let id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(1),
+                uri: b"https://example.com/source",
+            })
+            .unwrap();
+        page.set_hyperlink(1, 0, id).unwrap();
+
+        page.swap_cells(0, 1, 0, 3);
+
+        assert_eq!(page.lookup_hyperlink_at(1, 0), None);
+        assert_eq!(page.lookup_hyperlink_at(3, 0), Some(id));
+        assert_eq!(page.hyperlink_ref_count(id), 1);
+        assert_eq!(page.hyperlink_count(), 1);
+        assert!(!page.cell_copy_at(1, 0).hyperlink());
+        assert!(page.cell_copy_at(3, 0).hyperlink());
+    }
+
+    #[test]
+    fn page_swap_cells_hyperlink_destination_only() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(3, 0).cell = Cell::init('b' as u32);
+        let id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(1),
+                uri: b"https://example.com/destination",
+            })
+            .unwrap();
+        page.set_hyperlink(3, 0, id).unwrap();
+
+        page.swap_cells(0, 1, 0, 3);
+
+        assert_eq!(page.lookup_hyperlink_at(1, 0), Some(id));
+        assert_eq!(page.lookup_hyperlink_at(3, 0), None);
+        assert_eq!(page.hyperlink_ref_count(id), 1);
+        assert_eq!(page.hyperlink_count(), 1);
+        assert!(page.cell_copy_at(1, 0).hyperlink());
+        assert!(!page.cell_copy_at(3, 0).hyperlink());
+    }
+
+    #[test]
+    fn page_swap_cells_hyperlink_both_sides() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(3, 0).cell = Cell::init('b' as u32);
+        let left_id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(1),
+                uri: b"https://example.com/left",
+            })
+            .unwrap();
+        let right_id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(2),
+                uri: b"https://example.com/right",
+            })
+            .unwrap();
+        page.set_hyperlink(1, 0, left_id).unwrap();
+        page.set_hyperlink(3, 0, right_id).unwrap();
+
+        page.swap_cells(0, 1, 0, 3);
+
+        assert_eq!(page.lookup_hyperlink_at(1, 0), Some(right_id));
+        assert_eq!(page.lookup_hyperlink_at(3, 0), Some(left_id));
+        assert_eq!(page.hyperlink_ref_count(left_id), 1);
+        assert_eq!(page.hyperlink_ref_count(right_id), 1);
+        assert_eq!(page.hyperlink_count(), 2);
+    }
+
+    #[test]
+    fn page_swap_cells_styles_preserve_refcounts() {
+        let mut page = Page::init(Capacity {
+            cols: 5,
+            rows: 1,
+            styles: 8,
+            ..Capacity::new(5, 1)
+        })
+        .unwrap();
+        let bold = style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+        let underline = style::Style {
+            flags: style::Flags {
+                underline: Underline::Single,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+        let left_id = page.add_style(bold).unwrap();
+        let right_id = page.add_style(underline).unwrap();
+        let rac = page.get_row_and_cell_mut(1, 0);
+        *rac.cell = Cell::init('a' as u32);
+        rac.row.set_styled(true);
+        rac.cell.set_style_id(left_id);
+        let rac = page.get_row_and_cell_mut(3, 0);
+        *rac.cell = Cell::init('b' as u32);
+        rac.row.set_styled(true);
+        rac.cell.set_style_id(right_id);
+
+        page.swap_cells(0, 1, 0, 3);
+
+        assert_eq!(page.cell_copy_at(1, 0).style_id(), right_id);
+        assert_eq!(page.cell_copy_at(3, 0).style_id(), left_id);
+        assert_eq!(page.style_ref_count(left_id), 1);
+        assert_eq!(page.style_ref_count(right_id), 1);
+        assert!(page.get_row(0).styled());
+    }
+
+    #[test]
+    fn page_swap_cells_cross_row_updates_flags() {
+        let mut page = Page::init(Capacity::new(5, 2)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        page.append_grapheme_at(1, 0, 0x0301).unwrap();
+        *page.get_row_and_cell_mut(3, 1).cell = Cell::init('b' as u32);
+
+        page.swap_cells(0, 1, 1, 3);
+
+        assert!(!page.get_row(0).grapheme());
+        assert!(page.get_row(1).grapheme());
+        assert_eq!(page.lookup_grapheme_at(1, 0), None);
+        assert_eq!(page.lookup_grapheme_at(3, 1), Some(vec![0x0301]));
+    }
+
+    #[test]
+    fn page_swap_cells_self_swap_is_noop() {
+        let mut page = Page::init(Capacity::new(5, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        page.append_grapheme_at(1, 0, 0x0301).unwrap();
+        let id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(1),
+                uri: b"https://example.com",
+            })
+            .unwrap();
+        page.set_hyperlink(1, 0, id).unwrap();
+        let cell_before = page.cell_copy_at(1, 0);
+        let grapheme_count_before = page.grapheme_count();
+        let hyperlink_count_before = page.hyperlink_count();
+        let hyperlink_ref_before = page.hyperlink_ref_count(id);
+
+        page.swap_cells(0, 1, 0, 1);
+
+        assert_eq!(page.cell_copy_at(1, 0), cell_before);
+        assert_eq!(page.lookup_grapheme_at(1, 0), Some(vec![0x0301]));
+        assert_eq!(page.lookup_hyperlink_at(1, 0), Some(id));
+        assert_eq!(page.grapheme_count(), grapheme_count_before);
+        assert_eq!(page.hyperlink_count(), hyperlink_count_before);
+        assert_eq!(page.hyperlink_ref_count(id), hyperlink_ref_before);
     }
 
     #[test]

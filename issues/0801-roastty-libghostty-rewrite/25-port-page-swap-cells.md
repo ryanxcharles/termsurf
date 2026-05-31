@@ -164,3 +164,64 @@ The experiment fails if:
 - row flags become inconsistent with row contents;
 - the implementation expands into parser/screen integration, reflow, scrollback,
   public ABI, or unrelated behavior.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has internal Page cell-swapping support.
+
+Implementation details:
+
+- added `Page::swap_cells(src_y, src_x, dst_y, dst_x)`;
+- identical-coordinate swaps return as a no-op;
+- grapheme map entries are moved for one-sided grapheme swaps and exchanged for
+  two-sided grapheme swaps before cell payloads are swapped;
+- hyperlink map entries follow the same one-sided move / two-sided exchange
+  pattern before cell payloads are swapped;
+- style IDs move as part of the `Cell` payload, so style refcounts remain
+  stable;
+- hyperlink set refcounts remain stable because hyperlink cells are swapped, not
+  cloned or cleared;
+- affected row `grapheme`, `hyperlink`, and `styled` flags are recomputed after
+  the swap.
+
+Tests added:
+
+- plain cell swap, including non-text metadata bits;
+- source-only grapheme swap;
+- destination-only grapheme swap;
+- two-sided grapheme swap;
+- source-only hyperlink swap;
+- destination-only hyperlink swap;
+- two-sided hyperlink swap;
+- style swap preserving style refcounts;
+- cross-row managed-memory swap updating row flags;
+- identical-coordinate self-swap no-op preserving data and refcounts.
+
+The experiment did not implement terminal edit commands, parser/screen
+integration, reflow, scrollback, public ABI, or app-facing APIs.
+
+Verification run:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo test -p roastty terminal::page`: 122 passed.
+- `cargo test -p roastty`: 231 unit tests passed; ABI harness passed; doc tests
+  passed.
+
+## Conclusion
+
+Experiment 25 successfully ports upstream `Page.swapCells` semantics into
+Roastty's Page storage model. The operation remains internal, no-allocation, and
+keeps map-backed grapheme/hyperlink data aligned with the swapped cell offsets.
+
+The next experiment should continue through the remaining upstream Page
+primitives after re-reading current upstream call sites rather than assuming a
+larger terminal edit operation is ready.
