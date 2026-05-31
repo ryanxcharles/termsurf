@@ -198,3 +198,78 @@ The experiment fails if:
 - the implementation expands into pruning/recycling/remapping or unrelated
   PageList mutation behavior;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Implemented basic non-pruning PageList growth in
+`roastty/src/terminal/page_list.rs`.
+
+Added:
+
+- `GrowError`;
+- `max_size`;
+- `create_page`;
+- `grow`;
+- `grow_rows`.
+
+`grow` returns:
+
+- `Ok(None)` when growth fits inside the last page's existing capacity;
+- `Ok(Some(NonNull<Node>))` when a new page is appended;
+- `Err(GrowError::WouldPrune)` when upstream would enter the prune/reuse/remap
+  branch, which is explicitly deferred to a later experiment;
+- `Err(GrowError::PageAlloc)` if page allocation fails.
+
+Fresh page creation follows upstream's empty-page behavior: `Page::init` creates
+a full-size page in current Roastty, so `create_page` immediately sets the page
+row count to zero before returning the node. The append growth path then sets
+the new page to exactly one row.
+
+Accounting implemented:
+
+- `page_size` increases when a fresh page is created;
+- `page_serial` increments when a fresh node is assigned a serial;
+- `total_rows` increments on every successful grow;
+- fast growth leaves `page_size` and `page_serial` unchanged;
+- append growth updates `page_size`, `page_serial`, `pages`, and `total_rows`.
+
+Pruning remains deferred, but the deferral now matches upstream's boundary:
+
+- single-page growth can append even when the configured explicit max is small;
+- growth that would exceed max size but must preserve the active area is not
+  treated as a prune error;
+- true prune-required cases return `GrowError::WouldPrune` rather than silently
+  ignoring max size or implementing partial pruning.
+
+Added tests for:
+
+- `max_size` using `min_max_size` when explicit max is smaller;
+- `max_size` using explicit max when it is larger;
+- `create_page` producing a zero-row page and updating accounting;
+- fast in-page grow;
+- `grow_rows` building history without manual page-size mutation;
+- append-new-page grow;
+- single-page max-size exceedance;
+- true prune-required deferral.
+
+Verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+The targeted PageList suite reported 73 passing tests. The full `roastty` suite
+reported 354 unit tests, the ABI harness, and doc tests passing.
+
+## Conclusion
+
+Roastty PageList can now grow real history rows without test-only manual row
+size mutation. The implementation covers upstream's non-pruning fast path and
+append-new-page path, preserves accounting and integrity, and deliberately stops
+at the prune boundary. The next growth-related experiment should port pruning,
+page reuse/destruction behavior, tracked-pin remapping, and viewport cache
+fixups.

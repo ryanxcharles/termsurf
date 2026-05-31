@@ -195,7 +195,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 37: Port PageList Viewport Scrolling](37-port-pagelist-scroll.md)
   — **Pass**
 - [Experiment 38: Port PageList Basic Growth](38-port-pagelist-grow.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 

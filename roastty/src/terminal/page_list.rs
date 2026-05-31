@@ -71,6 +71,18 @@ impl From<PageAllocError> for PageListAllocError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GrowError {
+    PageAlloc,
+    WouldPrune,
+}
+
+impl From<PageAllocError> for GrowError {
+    fn from(_: PageAllocError) -> Self {
+        Self::PageAlloc
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IntegrityError {
     PageSerialInvalid,
     TotalRowsMismatch,
@@ -147,6 +159,10 @@ impl PageList {
             .verify_integrity()
             .expect("newly initialized PageList should be valid");
         Ok(result)
+    }
+
+    fn max_size(&self) -> usize {
+        self.explicit_max_size.max(self.min_max_size)
     }
 
     fn verify_integrity(&self) -> Result<(), IntegrityError> {
@@ -626,6 +642,63 @@ impl PageList {
         *self.viewport_pin = pin;
     }
 
+    fn create_page(&mut self, capacity: Capacity) -> Result<Box<Node>, PageAllocError> {
+        let mut page = Page::init(capacity)?;
+        page.set_size_rows(0);
+        self.page_size += page.backing_len();
+
+        let node = Box::new(Node {
+            page,
+            serial: self.page_serial,
+        });
+        self.page_serial += 1;
+        Ok(node)
+    }
+
+    fn grow(&mut self) -> Result<Option<NonNull<Node>>, GrowError> {
+        let last = self
+            .pages
+            .last_mut()
+            .expect("PageList must contain at least one page");
+        if last.page.capacity().rows() > last.page.size_rows() {
+            last.page.set_size_rows(last.page.size_rows() + 1);
+            self.total_rows += 1;
+            self.verify_integrity()
+                .expect("fast grow result must preserve PageList integrity");
+            return Ok(None);
+        }
+
+        if self.pages.len() > 1 && self.page_size + standard_page_size() > self.max_size() {
+            let first_rows = self
+                .pages
+                .first()
+                .expect("PageList must contain at least one page")
+                .page
+                .size_rows() as usize;
+            if self.total_rows as usize - first_rows + 1 >= self.rows as usize {
+                return Err(GrowError::WouldPrune);
+            }
+        }
+
+        let capacity = initial_capacity(self.cols);
+        let mut node = self.create_page(capacity)?;
+        node.page.set_size_rows(1);
+        let node_ptr = NonNull::from(node.as_ref());
+        self.pages.push(node);
+        self.total_rows += 1;
+        self.verify_integrity()
+            .expect("append grow result must preserve PageList integrity");
+        Ok(Some(node_ptr))
+    }
+
+    fn grow_rows(&mut self, rows: usize) -> Result<(), GrowError> {
+        for _ in 0..rows {
+            self.grow()?;
+        }
+
+        Ok(())
+    }
+
     fn pin_down(&self, pin: Pin, rows: usize) -> Option<Pin> {
         let index = self.node_index(pin.node)?;
         let node_rows = self.pages[index].page.size_rows() as usize;
@@ -747,6 +820,13 @@ mod tests {
             .coord()
     }
 
+    fn active_top_left_screen_coord(list: &PageList) -> Coordinate {
+        let pin = list.get_top_left(point::Tag::Active);
+        list.point_from_pin(point::Tag::Screen, pin)
+            .expect("active top-left must map to screen")
+            .coord()
+    }
+
     #[test]
     fn viewport_variants_compare_as_expected() {
         assert_eq!(Viewport::Active, Viewport::Active);
@@ -825,6 +905,35 @@ mod tests {
     }
 
     #[test]
+    fn page_list_max_size_uses_min_when_explicit_is_smaller() {
+        let list = PageList::init(80, 24, Some(1)).unwrap();
+
+        assert_eq!(list.max_size(), list.min_max_size);
+    }
+
+    #[test]
+    fn page_list_max_size_uses_explicit_when_larger() {
+        let explicit = min_max_size(80, 24) + 1024;
+        let list = PageList::init(80, 24, Some(explicit)).unwrap();
+
+        assert_eq!(list.max_size(), explicit);
+    }
+
+    #[test]
+    fn page_list_create_page_starts_with_zero_rows() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        let serial = list.page_serial;
+        let page_size = list.page_size;
+
+        let node = list.create_page(initial_capacity(80)).unwrap();
+
+        assert_eq!(node.page.size_rows(), 0);
+        assert_eq!(node.serial, serial);
+        assert_eq!(list.page_serial, serial + 1);
+        assert_eq!(list.page_size, page_size + node.page.backing_len());
+    }
+
+    #[test]
     fn page_list_init() {
         let list = PageList::init(80, 24, None).unwrap();
 
@@ -893,6 +1002,110 @@ mod tests {
         assert_eq!(list.pages.len(), 1);
         assert_eq!(list.pages[0].page.size_cols(), requested_cols);
         assert!(list.pages[0].page.backing_len() > standard_page_size());
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_grow_with_capacity_adds_row_without_new_page() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        let last_index = list.pages.len() - 1;
+        let last_rows = list.pages[last_index].page.size_rows();
+        let total_rows = list.total_rows;
+        let page_size = list.page_size;
+        let page_serial = list.page_serial;
+
+        assert!(last_rows < list.pages[last_index].page.capacity().rows());
+        assert_eq!(list.grow(), Ok(None));
+
+        assert_eq!(list.pages[last_index].page.size_rows(), last_rows + 1);
+        assert_eq!(list.total_rows, total_rows + 1);
+        assert_eq!(list.page_size, page_size);
+        assert_eq!(list.page_serial, page_serial);
+        assert_eq!(active_top_left_screen_coord(&list), Coordinate::new(0, 1));
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_grow_rows_builds_history_without_manual_size_mutation() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+
+        list.grow_rows(10).unwrap();
+
+        assert_eq!(list.total_rows, 34);
+        assert_eq!(active_top_left_screen_coord(&list), Coordinate::new(0, 10));
+        list.scroll(Scroll::Top);
+        assert_eq!(viewport_top_left_screen_coord(&list), Coordinate::new(0, 0));
+        assert_eq!(
+            list.scrollbar(),
+            Scrollbar {
+                total: 34,
+                offset: 0,
+                len: 24,
+            }
+        );
+    }
+
+    #[test]
+    fn page_list_grow_appends_page_when_last_page_is_full() {
+        let cols = STD_CAPACITY
+            .max_cols()
+            .expect("standard capacity should fit at least one row");
+        let mut list = PageList::init(cols, 1, None).unwrap();
+        let old_last = list.last_node_ptr();
+        let page_size = list.page_size;
+        let page_serial = list.page_serial;
+
+        assert_eq!(list.pages.len(), 1);
+        assert_eq!(list.pages[0].page.size_rows(), 1);
+        assert_eq!(list.pages[0].page.capacity().rows(), 1);
+
+        let new = list.grow().unwrap().unwrap();
+
+        assert_eq!(list.pages.len(), 2);
+        assert_ne!(new, old_last);
+        assert_eq!(new, list.last_node_ptr());
+        assert_eq!(list.pages[1].page.size_rows(), 1);
+        assert_eq!(list.total_rows, 2);
+        assert!(list.page_size > page_size);
+        assert_eq!(list.page_size, page_size + list.pages[1].page.backing_len());
+        assert_eq!(list.page_serial, page_serial + 1);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_grow_allows_single_page_max_exceedance() {
+        let cols = STD_CAPACITY
+            .max_cols()
+            .expect("standard capacity should fit at least one row")
+            + 1;
+        let rows = STD_CAPACITY.rows();
+        let mut list = PageList::init(cols, rows, Some(0)).unwrap();
+
+        assert_eq!(list.pages.len(), 1);
+        assert!(list.pages[0].page.backing_len() > standard_page_size());
+        assert_eq!(list.pages[0].page.size_rows(), rows);
+        assert_eq!(list.pages[0].page.capacity().rows(), rows);
+        assert!(list.page_size + standard_page_size() > list.max_size());
+        assert!(list.grow().unwrap().is_some());
+
+        assert_eq!(list.pages.len(), 2);
+        assert_eq!(list.total_rows, rows + 1);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_grow_reports_would_prune_when_prune_path_is_required() {
+        let cols = STD_CAPACITY
+            .max_cols()
+            .expect("standard capacity should fit at least one row");
+        let mut list = PageList::init(cols, 1, Some(0)).unwrap();
+        list.grow().unwrap();
+
+        assert_eq!(list.pages.len(), 2);
+        assert!(list.page_size + standard_page_size() > list.max_size());
+        assert_eq!(list.grow(), Err(GrowError::WouldPrune));
+        assert_eq!(list.pages.len(), 2);
+        assert_eq!(list.total_rows, 2);
         list.verify_integrity().unwrap();
     }
 
