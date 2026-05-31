@@ -128,6 +128,11 @@ Every experiment must follow the current project process:
 
 No experiment may proceed to the next stage until the required review passes.
 
+## Experiments
+
+- [Experiment 1: Audit Dependencies and Platform Readiness](01-dependency-platform-audit.md)
+  — **Designed**
+
 ## Non-Goals
 
 - Do not add TermSurf browser overlay behavior in this issue. Roastty must first
