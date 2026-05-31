@@ -288,6 +288,8 @@ Roastty and TermSurf-owned shared Rust crates while keeping Wezboard separate.
 - [Experiment 2: Implement the Roastty ABI skeleton](02-roastty-abi-skeleton.md)
   — **Fail** (used `ghostty_*` compatibility symbols instead of the required
   `roastty_*` renamed ABI)
+- [Experiment 3: Replace the compatibility ABI with Roastty naming](03-roastty-renamed-abi.md)
+  — **Designed**
 
 ## Original Expected ABI Experiment
 
