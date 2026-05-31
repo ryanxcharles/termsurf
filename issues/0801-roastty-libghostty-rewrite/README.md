@@ -230,6 +230,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 57: Port Semantic Prompt Highlight](57-port-semantic-prompt-highlight.md)
   — **Pass**
+- [Experiment 58: Port Semantic Input Highlight](58-port-semantic-input-highlight.md)
+  — **Designed**
 
 ## Non-Goals
 
