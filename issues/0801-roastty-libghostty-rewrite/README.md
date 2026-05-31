@@ -139,6 +139,8 @@ No experiment may proceed to the next stage until the required review passes.
   **Pass**
 - [Experiment 5: Decompose Page Storage Port](05-decompose-page-storage.md) —
   **Pass**
+- [Experiment 6: Port Bitmap Allocator](06-port-bitmap-allocator.md) —
+  **Designed**
 
 ## Non-Goals
 
