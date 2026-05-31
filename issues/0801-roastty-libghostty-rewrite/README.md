@@ -138,7 +138,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 4: Port Terminal Size Offsets](04-port-terminal-size.md) —
   **Pass**
 - [Experiment 5: Decompose Page Storage Port](05-decompose-page-storage.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 
