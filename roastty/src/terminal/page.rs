@@ -680,22 +680,7 @@ impl Page {
             .map(|x| self.cell_offset_from_row_cells(dst_row.cells(), x))
             .collect::<Vec<_>>();
 
-        for offset in dst_cell_offsets.iter().copied() {
-            if unsafe { (*offset.ptr(self.memory.as_ptr())).has_grapheme() } {
-                self.clear_grapheme_at_offset(offset);
-            }
-            if unsafe { (*offset.ptr(self.memory.as_ptr())).hyperlink() } {
-                self.clear_hyperlink_at_offset(offset);
-            }
-            let style_id = unsafe { (*offset.ptr(self.memory.as_ptr())).style_id() };
-            if style_id != style::DEFAULT_ID {
-                self.release_style(style_id);
-                unsafe {
-                    // Safety: offset came from this row's valid cell range.
-                    (*offset.ptr_mut(self.memory.as_mut_ptr())).set_style_id(style::DEFAULT_ID);
-                }
-            }
-        }
+        self.clear_cells(dst_y, x_start, x_end);
 
         let mut row_copy = src_row;
         row_copy.set_cells(dst_row.cells());
@@ -914,7 +899,7 @@ impl Page {
             );
         }
 
-        self.clear_cells_range(dst_y, dst_left, dst_end);
+        self.clear_cells(dst_y, dst_left, dst_end);
 
         let src_cells = self.get_row(src_y).cells();
         let dst_cells = self.get_row(dst_y).cells();
@@ -948,7 +933,7 @@ impl Page {
         }
     }
 
-    fn clear_cells_range(&mut self, row_index: usize, left: usize, end: usize) {
+    fn clear_cells(&mut self, row_index: usize, left: usize, end: usize) {
         assert!(row_index < self.size.rows as usize);
         assert!(left <= end);
         assert!(end <= self.size.cols as usize);
@@ -4667,6 +4652,208 @@ mod tests {
         assert_eq!(page.grapheme_count(), grapheme_count_before);
         assert_eq!(page.hyperlink_count(), hyperlink_count_before);
         assert_eq!(page.hyperlink_ref_count(id), hyperlink_ref_before);
+    }
+
+    #[test]
+    fn page_clear_cells_plain_range_and_empty_noop() {
+        let mut page = Page::init(Capacity::new(6, 1)).unwrap();
+        for x in 0..page.size.cols as usize {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init((x + 1) as u32);
+        }
+
+        page.clear_cells(0, 2, 5);
+
+        assert_eq!(page.cell_copy_at(0, 0).codepoint(), 1);
+        assert_eq!(page.cell_copy_at(1, 0).codepoint(), 2);
+        assert_eq!(page.cell_copy_at(2, 0), Cell::default());
+        assert_eq!(page.cell_copy_at(3, 0), Cell::default());
+        assert_eq!(page.cell_copy_at(4, 0), Cell::default());
+        assert_eq!(page.cell_copy_at(5, 0).codepoint(), 6);
+
+        let before = page.get_cells(page.get_row(0)).to_vec();
+        page.clear_cells(0, 3, 3);
+        assert_eq!(page.get_cells(page.get_row(0)), before.as_slice());
+    }
+
+    #[test]
+    fn page_clear_cells_graphemes_partial_and_full() {
+        let mut page = Page::init(Capacity::new(6, 1)).unwrap();
+        for x in 0..page.size.cols as usize {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init((x + 1) as u32);
+        }
+        page.append_grapheme_at(1, 0, 0x0301).unwrap();
+        page.append_grapheme_at(4, 0, 0x0302).unwrap();
+        assert_eq!(page.grapheme_count(), 2);
+        assert!(page.grapheme_used_bytes() > 0);
+
+        page.clear_cells(0, 0, 3);
+
+        assert_eq!(page.lookup_grapheme_at(1, 0), None);
+        assert_eq!(page.lookup_grapheme_at(4, 0), Some(vec![0x0302]));
+        assert_eq!(page.grapheme_count(), 1);
+        assert!(page.get_row(0).grapheme());
+
+        page.clear_cells(0, 0, page.size.cols as usize);
+
+        assert_eq!(page.grapheme_count(), 0);
+        assert_eq!(page.grapheme_used_bytes(), 0);
+        assert!(!page.get_row(0).grapheme());
+        for x in 0..page.size.cols as usize {
+            assert_eq!(page.cell_copy_at(x, 0), Cell::default());
+        }
+    }
+
+    #[test]
+    fn page_clear_cells_hyperlinks_partial_and_full() {
+        let mut page = Page::init(Capacity::new(6, 1)).unwrap();
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('a' as u32);
+        *page.get_row_and_cell_mut(4, 0).cell = Cell::init('b' as u32);
+        let left = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(1),
+                uri: b"https://example.com/left",
+            })
+            .unwrap();
+        let right = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Implicit(2),
+                uri: b"https://example.com/right",
+            })
+            .unwrap();
+        page.set_hyperlink(1, 0, left).unwrap();
+        page.set_hyperlink(4, 0, right).unwrap();
+
+        page.clear_cells(0, 0, 3);
+
+        assert_eq!(page.lookup_hyperlink_at(1, 0), None);
+        assert_eq!(page.hyperlink_ref_count(left), 0);
+        assert_eq!(page.lookup_hyperlink_at(4, 0), Some(right));
+        assert_eq!(page.hyperlink_ref_count(right), 1);
+        assert_eq!(page.hyperlink_count(), 1);
+        assert!(page.get_row(0).hyperlink());
+
+        page.clear_cells(0, 0, page.size.cols as usize);
+
+        assert_eq!(page.hyperlink_ref_count(right), 0);
+        assert_eq!(page.hyperlink_count(), 0);
+        assert!(!page.get_row(0).hyperlink());
+    }
+
+    #[test]
+    fn page_clear_cells_styles_partial_and_full() {
+        let mut page = Page::init(Capacity {
+            cols: 6,
+            rows: 1,
+            styles: 8,
+            ..Capacity::new(6, 1)
+        })
+        .unwrap();
+        let bold = style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+        let underline = style::Style {
+            flags: style::Flags {
+                underline: Underline::Single,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+        let left = page.add_style(bold).unwrap();
+        let right = page.add_style(underline).unwrap();
+        let rac = page.get_row_and_cell_mut(1, 0);
+        *rac.cell = Cell::init('a' as u32);
+        rac.row.set_styled(true);
+        rac.cell.set_style_id(left);
+        let rac = page.get_row_and_cell_mut(4, 0);
+        *rac.cell = Cell::init('b' as u32);
+        rac.row.set_styled(true);
+        rac.cell.set_style_id(right);
+
+        page.clear_cells(0, 0, 3);
+
+        assert_eq!(page.style_ref_count(left), 0);
+        assert_eq!(page.style_ref_count(right), 1);
+        assert_eq!(page.cell_copy_at(1, 0), Cell::default());
+        assert_eq!(page.cell_copy_at(4, 0).style_id(), right);
+        assert!(page.get_row(0).styled());
+
+        page.clear_cells(0, 0, page.size.cols as usize);
+
+        assert_eq!(page.style_ref_count(right), 0);
+        assert!(!page.get_row(0).styled());
+    }
+
+    #[test]
+    fn page_clear_cells_mixed_managed_memory() {
+        let mut page = Page::init(Capacity {
+            cols: 6,
+            rows: 1,
+            styles: 8,
+            ..Capacity::new(6, 1)
+        })
+        .unwrap();
+        let style_id = page
+            .add_style(style::Style {
+                flags: style::Flags {
+                    italic: true,
+                    ..style::Flags::default()
+                },
+                ..style::Style::default()
+            })
+            .unwrap();
+        let link_id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Explicit(b"id"),
+                uri: b"https://example.com",
+            })
+            .unwrap();
+
+        let rac = page.get_row_and_cell_mut(1, 0);
+        *rac.cell = Cell::init('s' as u32);
+        rac.row.set_styled(true);
+        rac.cell.set_style_id(style_id);
+        *page.get_row_and_cell_mut(2, 0).cell = Cell::init('g' as u32);
+        page.append_grapheme_at(2, 0, 0x0301).unwrap();
+        *page.get_row_and_cell_mut(3, 0).cell = Cell::init('h' as u32);
+        page.set_hyperlink(3, 0, link_id).unwrap();
+
+        page.clear_cells(0, 1, 4);
+
+        assert_eq!(page.cell_copy_at(1, 0), Cell::default());
+        assert_eq!(page.cell_copy_at(2, 0), Cell::default());
+        assert_eq!(page.cell_copy_at(3, 0), Cell::default());
+        assert_eq!(page.style_ref_count(style_id), 0);
+        assert_eq!(page.grapheme_count(), 0);
+        assert_eq!(page.hyperlink_ref_count(link_id), 0);
+        assert_eq!(page.hyperlink_count(), 0);
+        assert!(!page.get_row(0).managed_memory());
+    }
+
+    #[test]
+    fn page_clear_cells_preserves_unrelated_row_metadata() {
+        let mut page = Page::init(Capacity::new(4, 1)).unwrap();
+        for x in 0..page.size.cols as usize {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init((x + 1) as u32);
+        }
+        {
+            let row = page.get_row_mut(0);
+            row.set_wrap(true);
+            row.set_wrap_continuation(true);
+            row.set_dirty(true);
+            row.set_semantic_prompt(SemanticPrompt::Prompt);
+        }
+
+        page.clear_cells(0, 0, page.size.cols as usize);
+
+        let row = page.get_row(0);
+        assert!(row.wrap());
+        assert!(row.wrap_continuation());
+        assert!(row.dirty());
+        assert_eq!(row.semantic_prompt(), SemanticPrompt::Prompt);
     }
 
     #[test]

@@ -189,3 +189,67 @@ The experiment fails if:
 - unrelated row metadata is lost;
 - the implementation expands into parser/screen integration, terminal edit
   commands, reflow, scrollback, public ABI, or unrelated behavior.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has canonical internal Page cell-clearing support.
+
+Implementation details:
+
+- promoted the previous `clear_cells_range` helper to `Page::clear_cells`;
+- routed `move_cells` destination cleanup through `clear_cells`;
+- preserved `move_cells` source blanking as raw `Cell::default()` writes with no
+  managed-memory release;
+- routed partial clone destination cleanup through `clear_cells`;
+- preserved Experiment 23's failure-safety behavior by still resetting copied
+  source cell managed-memory markers before fallible migration;
+- `clear_cells` releases grapheme slices/map entries, hyperlink map entries and
+  refs, and style refs only inside the requested range;
+- cleared cells are zeroed;
+- row `grapheme`, `hyperlink`, and `styled` flags are recomputed after clearing;
+- unrelated row metadata such as wrap, wrap-continuation, dirty, and semantic
+  prompt survives clearing.
+
+Tests added:
+
+- plain range clear and empty-range no-op;
+- partial and full grapheme clear with allocator bytes and row flags checked;
+- partial and full hyperlink clear with map count/refcount and row flags
+  checked;
+- partial and full style clear with refcounts and row flags checked;
+- mixed managed-memory clear across style, grapheme, and hyperlink cells;
+- unrelated row metadata preservation.
+
+The existing `move_cells` and partial clone tests continue to verify the two
+important call-site invariants: destination cleanup can use `clear_cells`, while
+`move_cells` source blanking must not release moved managed memory.
+
+The experiment did not implement terminal edit commands, parser/screen
+integration, reflow, scrollback, public ABI, or app-facing APIs.
+
+Verification run:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo test -p roastty terminal::page`: 128 passed.
+- `cargo test -p roastty`: 237 unit tests passed; ABI harness passed; doc tests
+  passed.
+
+## Conclusion
+
+Experiment 26 successfully ports upstream `Page.clearCells` behavior into
+Roastty's Page storage model and removes the last ad hoc destination cleanup in
+partial row clone. Page clearing is now a standalone primitive with focused
+coverage for plain cells, all currently ported managed-memory types, full-row
+and partial-row flag behavior, and metadata preservation.
+
+The next experiment should continue through the remaining upstream Page surface
+after re-reading current upstream call sites.
