@@ -191,7 +191,18 @@ next layer is designed.
 
 ## Expected First Experiment
 
-The first experiment should implement the ABI skeleton.
+The first experiment should create the top-level Rust workspace that will host
+Roastty and TermSurf-owned shared Rust crates while keeping Wezboard separate.
+
+## Experiments
+
+- [Experiment 1: Create the TermSurf Rust workspace](01-termsurf-rust-workspace.md)
+  — **Designed**
+
+## Original Expected ABI Experiment
+
+After the workspace exists, the next experiment should implement the ABI
+skeleton.
 
 It should:
 
