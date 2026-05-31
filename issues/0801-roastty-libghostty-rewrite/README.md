@@ -160,6 +160,8 @@ No experiment may proceed to the next stage until the required review passes.
   **Pass**
 - [Experiment 16: Port Page Style Storage and Clone](16-port-page-style-clone.md)
   — **Pass**
+- [Experiment 17: Port Page CloneFrom Plain Rows](17-port-page-clone-from-plain.md)
+  — **Designed**
 
 ## Non-Goals
 
