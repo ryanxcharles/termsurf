@@ -172,3 +172,4 @@ and reviewed.
   — **Pass**
 - [Experiment 5: Add protocol-mediated JavaScript dialogs](05-javascript-dialogs.md)
   — **Pass**
+- [Experiment 6: Add automated page zoom](06-page-zoom.md) — **Designed**
