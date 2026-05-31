@@ -1388,6 +1388,18 @@ impl PageList {
         Some(result)
     }
 
+    fn highlight_semantic_content(
+        &self,
+        at: Pin,
+        content: SemanticContent,
+    ) -> Option<UntrackedHighlight> {
+        match content {
+            SemanticContent::Prompt => self.highlight_semantic_prompt(at),
+            SemanticContent::Input => self.highlight_semantic_input(at),
+            SemanticContent::Output => self.highlight_semantic_output(at),
+        }
+    }
+
     fn clone_region(&self, mut opts: CloneOptions<'_>) -> Result<Self, CloneRegionError> {
         let chunks = self
             .page_iterator(Direction::RightDown, opts.top, opts.bottom)
@@ -6254,6 +6266,110 @@ mod tests {
         assert_eq!(list.tracked_pins.len(), tracked_count);
         assert_ne!(NonNull::from(&highlight.start), list.tracked_pins[0]);
         assert_ne!(NonNull::from(&highlight.end), list.tracked_pins[0]);
+    }
+
+    #[test]
+    fn page_list_highlight_semantic_content_dispatches_prompt_input_output() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        set_screen_semantic_prompt(&mut list, 5, SemanticPrompt::Prompt);
+        for x in 0..2 {
+            set_screen_cell_semantic(&mut list, x, 5, '$', SemanticContent::Prompt);
+        }
+        for x in 2..5 {
+            set_screen_cell_semantic(&mut list, x, 5, 'i', SemanticContent::Input);
+        }
+        for x in 5..8 {
+            set_screen_cell_semantic(&mut list, x, 5, 'o', SemanticContent::Output);
+        }
+        set_screen_cell_semantic(&mut list, 8, 5, '$', SemanticContent::Prompt);
+        set_screen_semantic_prompt(&mut list, 10, SemanticPrompt::Prompt);
+
+        let at = list
+            .pin(point::Point::screen(Coordinate::new(0, 5)))
+            .unwrap();
+
+        assert_eq!(
+            highlight_screen_points(
+                &list,
+                list.highlight_semantic_content(at, SemanticContent::Prompt)
+                    .unwrap()
+            ),
+            [Coordinate::new(0, 5), Coordinate::new(4, 5)]
+        );
+        assert_eq!(
+            highlight_screen_points(
+                &list,
+                list.highlight_semantic_content(at, SemanticContent::Input)
+                    .unwrap()
+            ),
+            [Coordinate::new(2, 5), Coordinate::new(4, 5)]
+        );
+        assert_eq!(
+            highlight_screen_points(
+                &list,
+                list.highlight_semantic_content(at, SemanticContent::Output)
+                    .unwrap()
+            ),
+            [Coordinate::new(5, 5), Coordinate::new(7, 5)]
+        );
+    }
+
+    #[test]
+    fn page_list_highlight_semantic_content_preserves_none_results() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        set_screen_semantic_prompt(&mut list, 5, SemanticPrompt::Prompt);
+        for x in 0..3 {
+            set_screen_cell_semantic(&mut list, x, 5, '$', SemanticContent::Prompt);
+        }
+        set_screen_cell_semantic(&mut list, 3, 5, 'o', SemanticContent::Output);
+        set_screen_semantic_prompt(&mut list, 10, SemanticPrompt::Prompt);
+
+        let at = list
+            .pin(point::Point::screen(Coordinate::new(0, 5)))
+            .unwrap();
+
+        assert!(list
+            .highlight_semantic_content(at, SemanticContent::Input)
+            .is_none());
+
+        let mut list = PageList::init(10, 20, None).unwrap();
+        set_screen_semantic_prompt(&mut list, 5, SemanticPrompt::Prompt);
+        for x in 0..10 {
+            set_screen_cell_semantic(&mut list, x, 5, 'i', SemanticContent::Input);
+        }
+        set_screen_semantic_prompt(&mut list, 10, SemanticPrompt::Prompt);
+
+        let at = list
+            .pin(point::Point::screen(Coordinate::new(0, 5)))
+            .unwrap();
+
+        assert!(list
+            .highlight_semantic_content(at, SemanticContent::Output)
+            .is_none());
+    }
+
+    #[test]
+    fn page_list_highlight_semantic_content_scans_from_at_x() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        set_screen_semantic_prompt(&mut list, 0, SemanticPrompt::Prompt);
+        set_screen_cell_semantic(&mut list, 0, 0, 'o', SemanticContent::Output);
+        set_screen_cell_semantic(&mut list, 1, 0, '$', SemanticContent::Prompt);
+        set_screen_cell_semantic(&mut list, 2, 0, 'i', SemanticContent::Input);
+        set_screen_cell_semantic(&mut list, 3, 0, 'i', SemanticContent::Input);
+        set_screen_cell_semantic(&mut list, 4, 0, 'o', SemanticContent::Output);
+        set_screen_semantic_prompt(&mut list, 1, SemanticPrompt::Prompt);
+
+        let at = list
+            .pin(point::Point::screen(Coordinate::new(1, 0)))
+            .unwrap();
+        let highlight = list
+            .highlight_semantic_content(at, SemanticContent::Input)
+            .unwrap();
+
+        assert_eq!(
+            highlight_screen_points(&list, highlight),
+            [Coordinate::new(2, 0), Coordinate::new(3, 0)]
+        );
     }
 
     #[test]

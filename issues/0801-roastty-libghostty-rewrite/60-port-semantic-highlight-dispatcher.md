@@ -134,3 +134,54 @@ The experiment fails if:
 - the implementation expands into renderer highlights, search selection, diagram
   output, parser, renderer, app, ABI, resize/reflow, selection, or search work;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Experiment 60 added the private
+`PageList::highlight_semantic_content(at, content)` dispatcher. It matches the
+upstream `highlightSemanticContent` switch shape by dispatching
+`SemanticContent::Prompt`, `SemanticContent::Input`, and
+`SemanticContent::Output` directly to the branch helpers ported in Experiments
+57-59.
+
+The dispatcher does not duplicate branch logic and does not expose renderer,
+app, public API, ABI, tracked highlight, flattened highlight, parser, selection,
+or search behavior.
+
+Tests added:
+
+- dispatching `Prompt`, `Input`, and `Output` returns the expected branch
+  ranges;
+- input and output `None` results pass through unchanged;
+- dispatcher calls respect a nonzero caller-provided `at.x`.
+
+Verification:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo test -p roastty terminal::page_list`: 263 passed, 0 failed.
+- `cargo test -p roastty`: 544 unit tests passed, ABI harness 1 passed,
+  doctests 0.
+
+Independent result review approved the experiment as Pass with no required
+findings. The reviewer confirmed that the dispatcher matches the experiment
+scope and upstream shape, delegates directly to the existing branch helpers, has
+sufficient focused test coverage, and does not drift into renderer, app, public
+API, ABI, or highlight-module work.
+
+## Conclusion
+
+Roastty now has the complete private PageList semantic-highlight entrypoint
+shape for prompt, input, and output content. The next highlight-related step
+should move toward upstream's highlight data model, likely by designing a
+dedicated `terminal/highlight.rs` module for untracked/tracked/flattened
+highlight structures instead of continuing to grow ad hoc highlight types inside
+`page_list.rs`.
