@@ -224,6 +224,8 @@ No experiment may proceed to the next stage until the required review passes.
   **Pass**
 - [Experiment 54: Port PageList Row Iterator](54-port-pagelist-row-iterator.md)
   — **Pass**
+- [Experiment 55: Port PageList Cell Iterator](55-port-pagelist-cell-iterator.md)
+  — **Designed**
 
 ## Non-Goals
 
