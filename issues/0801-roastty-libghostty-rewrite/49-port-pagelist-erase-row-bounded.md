@@ -214,3 +214,67 @@ The experiment fails if:
 - the implementation expands into history/active erase, eraseRows, page
   deletion, resize/reflow, parser, renderer, app, or ABI work;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Implemented `PageList::erase_row_bounded`, matching upstream's bounded one-row
+erase behavior. The method resolves the target point, handles the same-page
+bounded prefix path, handles exact page-boundary and cross-page paths, clones
+the following page's top row into the previous page when crossing a boundary,
+rotates only the bounded row range, clears the blank boundary/final row through
+Page's managed-memory cleanup path, updates tracked pins, updates pinned
+viewport cache state, marks touched pages dirty, and verifies PageList integrity
+after successful mutation.
+
+The implementation intentionally stays internal and scoped:
+
+- no `eraseHistory`, `eraseActive`, or `eraseRows`;
+- no page deletion or active regrowth;
+- no resize/reflow, parser, renderer, app, or C ABI work.
+
+Error behavior reuses `EraseRowError`: invalid points return
+`EraseRowError::InvalidPoint`, and cross-page clone failures return
+`EraseRowError::CloneFrom`. As with upstream, the implementation does not add a
+broad rollback layer after earlier row rotations or pin updates. Lower-level
+Page clone failure tests continue to cover managed-memory rollback for the clone
+operation itself.
+
+Tests added:
+
+- same-page bounded prefix shift leaves rows beyond the bound unchanged;
+- pin-at-top behavior follows upstream's `x = 0` / row-shift semantics;
+- exact page-boundary behavior takes the cross-page path, not the same-page
+  path;
+- exact page-boundary cross-page managed memory survives in the destination page
+  and is released from the source page;
+- no-following-page full-span behavior clears the final row and preserves
+  inside/outside tracked pins;
+- two-page partial span rotates only the bounded prefix of the following page;
+- viewport cache behavior covers single-page, multi-page, full-page-shift, and
+  exhausted-pages variants;
+- same-page managed-memory data is released from the erased row and preserved in
+  moved rows.
+
+Verification:
+
+- `cargo fmt -- roastty/src/terminal/page_list.rs`
+- `cargo test -p roastty terminal::page_list` — 169 PageList tests passed.
+- `cargo test -p roastty` — 450 unit tests passed; ABI harness passed.
+
+Independent result review initially found three test coverage gaps: missing
+cross-page managed-memory coverage, missing no-following-page full-span
+coverage, and incomplete viewport-cache matrix coverage. All three were fixed.
+The follow-up review approved recording Experiment 49 as Pass with no concrete
+blockers remaining.
+
+## Conclusion
+
+PageList now has both one-row erase primitives from this source-order section:
+unbounded erase from Experiment 48 and bounded erase from this experiment. The
+bounded implementation confirms that the row-rotation and row-offset model from
+Experiment 48 is strong enough for exact-boundary and partial cross-page row
+movement. The next PageList erase work can move up to the higher-level
+history/active range erasure paths, where page deletion, total-row accounting,
+active regrowth, and viewport fixup become the main risks.
