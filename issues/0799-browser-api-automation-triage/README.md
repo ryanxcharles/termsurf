@@ -183,3 +183,5 @@ and reviewed.
   — **Pass**
 - [Experiment 12: Add contained file-upload selection](12-contained-file-upload-selection.md)
   — **Pass**
+- [Experiment 13: Add session isolation and incognito coverage](13-session-isolation-incognito.md)
+  — **Designed**
