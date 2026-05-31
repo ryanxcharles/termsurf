@@ -175,6 +175,8 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 23: Port Page Partial Row Clone](23-port-page-partial-row-clone.md)
   — **Pass**
 - [Experiment 24: Port Page Move Cells](24-port-page-move-cells.md) — **Pass**
+- [Experiment 25: Port Page Swap Cells](25-port-page-swap-cells.md) —
+  **Designed**
 
 ## Non-Goals
 
