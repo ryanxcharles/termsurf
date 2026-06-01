@@ -400,6 +400,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 135: Port OSC ANSI Palette Operations](135-port-osc-ansi-palette.md)
   — **Pass**
+- [Experiment 136: Port OSC Dynamic Colors](136-port-osc-dynamic-colors.md) —
+  **Designed**
 
 ## Non-Goals
 
