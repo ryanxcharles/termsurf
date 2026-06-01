@@ -191,3 +191,73 @@ The experiment fails if:
   renderer, parser, app, tracking ownership, or unrelated behavior is added
   prematurely;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Implemented row-specific selection extraction in
+`roastty/src/terminal/page_list.rs`.
+
+The change adds two private PageList helpers:
+
+- `selection_contained_row`;
+- `selection_contained_row_cached`.
+
+The uncached helper computes normalized top-left and bottom-right pins, converts
+top-left, bottom-right, and candidate pins through the existing screen-point
+conversion path, then delegates to the cached helper. The cached helper mirrors
+upstream `containedRowCached` behavior:
+
+- rows outside the selection's vertical bounds return `None`;
+- rectangle rows return a new untracked rectangle selection on the candidate row
+  using the normalized rectangle x bounds;
+- regular single-line selections return the normalized original row segment;
+- regular top rows return from normalized top-left to the last column;
+- regular bottom rows return from column zero to normalized bottom-right;
+- regular middle rows return the full row.
+
+The local Rust helper returns `None` both for rows outside the selection and for
+invalid input pins. That preserves the private PageList helper pattern from
+Experiments 67 and 68 without adding a public error type or API surface.
+
+Added tests for:
+
+- upstream regular top-row, bottom-row, middle-row, and outside-row behavior;
+- reverse regular normalization;
+- upstream rectangle top-row, bottom-row, middle-row, and outside-row behavior;
+- reverse and mirrored rectangle normalization;
+- regular single-line normalization;
+- cross-page row extraction using screen rows;
+- invalid selection start, invalid selection end, invalid candidate, and garbage
+  candidate returning `None`.
+
+Verification:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page_list::tests::selection
+cargo test -p roastty terminal::selection
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo fmt` completed successfully.
+- `cargo test -p roastty terminal::page_list::tests::selection`: 24 passed.
+- `cargo test -p roastty terminal::selection`: 12 passed.
+- `cargo test -p roastty`: 601 unit tests passed, ABI harness passed, doctests
+  passed.
+
+Independent result review approved the implementation as a Pass. The reviewer
+found no blocking issues, confirmed upstream `containedRow` /
+`containedRowCached` semantics, confirmed test coverage, and found no scope
+drift.
+
+## Conclusion
+
+Roastty now has the upstream row-extraction behavior needed to slice a selection
+into the portion that applies to a single screen row. This completes the next
+selection layer above ordering and containment while still leaving adjustment,
+word/line selection, formatting, and higher-level selection features for later
+experiments.
