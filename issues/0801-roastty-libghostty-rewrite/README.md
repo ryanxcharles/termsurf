@@ -408,6 +408,8 @@ tests, choose the larger subsystem.
   **Pass**
 - [Experiment 139: Port OSC 22 Mouse Shape](139-port-osc22-mouse-shape.md) —
   **Pass**
+- [Experiment 140: Port Kitty OSC 66 Text Sizing](140-port-kitty-osc66-text-sizing.md)
+  — **Designed**
 
 ## Non-Goals
 
