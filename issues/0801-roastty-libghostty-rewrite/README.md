@@ -324,6 +324,8 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 107: Port Basic Backspace](107-port-basic-backspace.md) — **Pass**
 - [Experiment 108: Port Basic Horizontal Tab](108-port-basic-horizontal-tab.md)
   — **Pass**
+- [Experiment 109: Port VT and FF Linefeed Aliases](109-port-vt-ff-linefeed-aliases.md)
+  — **Designed**
 
 ## Non-Goals
 
