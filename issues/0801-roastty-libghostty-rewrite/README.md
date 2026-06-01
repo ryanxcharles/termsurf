@@ -472,6 +472,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 172: Port Terminal Grid Reference C ABI](172-port-terminal-grid-reference-c-abi.md)
   — **Pass**
+- [Experiment 173: Port Terminal Selection C ABI](173-port-terminal-selection-c-abi.md)
+  — **Designed**
 
 ## Non-Goals
 
