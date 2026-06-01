@@ -86,6 +86,26 @@ static void assert_config_uintptr(roastty_config_t config,
   assert(value == expected);
 }
 
+static void assert_roastty_string_eq(roastty_string_s value,
+                                     const char *expected) {
+  size_t len = strlen(expected);
+  assert(value.len == len);
+  if (len == 0) {
+    assert(value.ptr == NULL);
+  } else {
+    assert(value.ptr != NULL);
+    assert(memcmp(value.ptr, expected, len) == 0);
+  }
+  assert(!value.sentinel);
+  roastty_string_free(value);
+}
+
+static void terminal_write(roastty_terminal_t terminal, const char *bytes) {
+  assert(roastty_terminal_vt_write(terminal,
+                                   (const uint8_t *)bytes,
+                                   strlen(bytes)) == ROASTTY_SUCCESS);
+}
+
 static roastty_key_mods_s empty_key_mods(void) {
   roastty_key_mods_s mods = {
       .shift = false,
@@ -560,6 +580,78 @@ static void assert_mouse_encoder_abi(void) {
   roastty_mouse_encoder_free(encoder);
 }
 
+static void assert_terminal_abi(void) {
+  roastty_terminal_free(NULL);
+
+  roastty_terminal_t terminal = NULL;
+  assert(roastty_terminal_new(5, 3, SIZE_MAX, NULL) == ROASTTY_INVALID_VALUE);
+  assert(roastty_terminal_new(0, 3, SIZE_MAX, &terminal) ==
+         ROASTTY_INVALID_VALUE);
+  assert(terminal == NULL);
+  assert(roastty_terminal_new(5, 0, SIZE_MAX, &terminal) ==
+         ROASTTY_INVALID_VALUE);
+  assert(terminal == NULL);
+
+  assert(roastty_terminal_new(10, 4, SIZE_MAX, &terminal) == ROASTTY_SUCCESS);
+  assert(terminal != NULL);
+
+  assert(roastty_terminal_vt_write(NULL, NULL, 0) == ROASTTY_INVALID_VALUE);
+  assert(roastty_terminal_vt_write(terminal, NULL, 1) ==
+         ROASTTY_INVALID_VALUE);
+  assert(roastty_terminal_vt_write(terminal, NULL, 0) == ROASTTY_SUCCESS);
+
+  terminal_write(terminal, "abc");
+  roastty_string_s plain = {0};
+  assert(roastty_terminal_read_screen_plain(terminal, false, &plain) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(plain, "abc");
+  assert(roastty_terminal_read_screen_plain(terminal, false, NULL) ==
+         ROASTTY_INVALID_VALUE);
+
+  uint16_t column = 0;
+  uint16_t row = 0;
+  assert(roastty_terminal_cursor_position(terminal, &column, &row));
+  assert(column == 3);
+  assert(row == 0);
+  assert(!roastty_terminal_cursor_position(terminal, NULL, &row));
+  assert(!roastty_terminal_cursor_position(NULL, &column, &row));
+
+  uint8_t utf8_a = 0xc3;
+  uint8_t utf8_b = 0xa9;
+  assert(roastty_terminal_vt_write(terminal, &utf8_a, 1) == ROASTTY_SUCCESS);
+  assert(roastty_terminal_vt_write(terminal, &utf8_b, 1) == ROASTTY_SUCCESS);
+
+  terminal_write(terminal, "\x1b]0;from ");
+  terminal_write(terminal, "c\x07");
+  roastty_string_s title = {0};
+  assert(roastty_terminal_title(terminal, &title) == ROASTTY_SUCCESS);
+  assert_roastty_string_eq(title, "from c");
+
+  terminal_write(terminal, "\x1b]1337;CurrentDir=file://host/");
+  terminal_write(terminal, "c\x07");
+  roastty_string_s pwd = {0};
+  assert(roastty_terminal_pwd(terminal, &pwd) == ROASTTY_SUCCESS);
+  assert_roastty_string_eq(pwd, "file://host/c");
+
+  terminal_write(terminal, "\x1b[");
+  terminal_write(terminal, "6n");
+  roastty_string_s response = {0};
+  assert(roastty_terminal_take_pty_response(terminal, &response) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(response, "\x1b[1;5R");
+  assert(roastty_terminal_take_pty_response(terminal, &response) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(response, "");
+
+  assert(roastty_terminal_title(NULL, &title) == ROASTTY_INVALID_VALUE);
+  assert(title.ptr == NULL);
+  assert(title.len == 0);
+  assert(!title.sentinel);
+  assert(roastty_terminal_title(terminal, NULL) == ROASTTY_INVALID_VALUE);
+
+  roastty_terminal_free(terminal);
+}
+
 int main(int argc, char **argv) {
   assert(roastty_init((uintptr_t)argc, argv) == ROASTTY_SUCCESS);
 
@@ -603,6 +695,7 @@ int main(int argc, char **argv) {
   assert_mouse_encoder_abi();
   assert_key_event_and_encoder_abi();
   assert_osc_parser_abi();
+  assert_terminal_abi();
 
   roastty_info_s info = roastty_info();
   assert(info.version != NULL);

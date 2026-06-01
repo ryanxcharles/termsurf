@@ -5,6 +5,7 @@ use std::slice;
 
 use input::{key, key_encode, key_mods};
 use terminal::kitty::KeyFlags;
+use terminal::terminal::{Terminal as InnerTerminal, TerminalStreamError};
 use terminal::{mouse, mouse_encode, osc, point};
 
 mod input;
@@ -27,6 +28,7 @@ pub type RoasttyMouseEvent = *mut c_void;
 pub type RoasttyOscCommand = *mut c_void;
 pub type RoasttyOscParser = *mut c_void;
 pub type RoasttySurface = *mut c_void;
+pub type RoasttyTerminal = *mut c_void;
 
 const ROASTTY_SUCCESS: c_int = 0;
 #[allow(dead_code)]
@@ -223,6 +225,10 @@ struct Surface {
     color_scheme: c_int,
 }
 
+struct Terminal {
+    terminal: InnerTerminal,
+}
+
 struct MouseEvent {
     event: mouse_encode::Event,
 }
@@ -283,6 +289,14 @@ fn surface_from_handle<'a>(handle: RoasttySurface) -> Option<&'a mut Surface> {
         None
     } else {
         Some(unsafe { &mut *(handle.cast::<Surface>()) })
+    }
+}
+
+fn terminal_from_handle<'a>(handle: RoasttyTerminal) -> Option<&'a mut Terminal> {
+    if handle.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *(handle.cast::<Terminal>()) })
     }
 }
 
@@ -615,6 +629,50 @@ fn empty_string() -> RoasttyString {
     }
 }
 
+fn write_empty_string(out: *mut RoasttyString) {
+    if !out.is_null() {
+        unsafe {
+            out.write(empty_string());
+        }
+    }
+}
+
+fn try_allocated_string(bytes: &[u8]) -> Result<RoasttyString, c_int> {
+    if bytes.is_empty() {
+        return Ok(empty_string());
+    }
+
+    let mut owned = Vec::new();
+    owned
+        .try_reserve_exact(bytes.len())
+        .map_err(|_| ROASTTY_OUT_OF_MEMORY)?;
+    owned.extend_from_slice(bytes);
+    let len = owned.len();
+    let ptr = Box::into_raw(owned.into_boxed_slice()).cast::<u8>();
+    Ok(RoasttyString {
+        ptr: ptr.cast::<c_char>(),
+        len,
+        sentinel: false,
+    })
+}
+
+fn write_copied_string(out: *mut RoasttyString, bytes: &[u8]) -> c_int {
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    write_empty_string(out);
+    match try_allocated_string(bytes) {
+        Ok(value) => {
+            unsafe {
+                out.write(value);
+            }
+            ROASTTY_SUCCESS
+        }
+        Err(error) => error,
+    }
+}
+
 fn allocated_string(bytes: &[u8]) -> RoasttyString {
     let owned = bytes.to_vec().into_boxed_slice();
     let len = owned.len();
@@ -623,6 +681,15 @@ fn allocated_string(bytes: &[u8]) -> RoasttyString {
         ptr: ptr.cast::<c_char>(),
         len,
         sentinel: false,
+    }
+}
+
+fn terminal_stream_error_result(error: TerminalStreamError) -> c_int {
+    match error {
+        TerminalStreamError::PageAlloc => ROASTTY_OUT_OF_MEMORY,
+        TerminalStreamError::ManagedCellUnsupported
+        | TerminalStreamError::InvalidPoint
+        | TerminalStreamError::UnsupportedCodepoint(_) => ROASTTY_INVALID_VALUE,
     }
 }
 
@@ -862,6 +929,145 @@ pub extern "C" fn roastty_app_set_color_scheme(app: RoasttyApp, color_scheme: c_
     if let Some(app) = app_from_handle(app) {
         app.color_scheme = color_scheme;
     }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_terminal_new(
+    columns: u16,
+    rows: u16,
+    max_scrollback_rows: usize,
+    out: *mut RoasttyTerminal,
+) -> c_int {
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    unsafe {
+        out.write(ptr::null_mut());
+    }
+    if columns == 0 || rows == 0 {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    let max_scrollback_rows = if max_scrollback_rows == usize::MAX {
+        None
+    } else {
+        Some(max_scrollback_rows)
+    };
+    let terminal = match InnerTerminal::init(columns, rows, max_scrollback_rows) {
+        Ok(terminal) => terminal,
+        Err(_) => return ROASTTY_OUT_OF_MEMORY,
+    };
+
+    unsafe {
+        out.write(Box::into_raw(Box::new(Terminal { terminal })).cast());
+    }
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_terminal_free(terminal: RoasttyTerminal) {
+    if !terminal.is_null() {
+        unsafe {
+            drop(Box::from_raw(terminal.cast::<Terminal>()));
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_terminal_vt_write(
+    terminal: RoasttyTerminal,
+    bytes: *const u8,
+    len: usize,
+) -> c_int {
+    let Some(terminal) = terminal_from_handle(terminal) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    if bytes.is_null() && len > 0 {
+        return ROASTTY_INVALID_VALUE;
+    }
+    let input = if len == 0 {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(bytes, len) }
+    };
+    match terminal.terminal.next_slice(input) {
+        Ok(()) => ROASTTY_SUCCESS,
+        Err(error) => terminal_stream_error_result(error),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_terminal_read_screen_plain(
+    terminal: RoasttyTerminal,
+    unwrap: bool,
+    out: *mut RoasttyString,
+) -> c_int {
+    let Some(terminal) = terminal_from_handle(terminal) else {
+        write_empty_string(out);
+        return ROASTTY_INVALID_VALUE;
+    };
+    let text = terminal.terminal.plain_screen(unwrap);
+    write_copied_string(out, text.as_bytes())
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_terminal_title(
+    terminal: RoasttyTerminal,
+    out: *mut RoasttyString,
+) -> c_int {
+    let Some(terminal) = terminal_from_handle(terminal) else {
+        write_empty_string(out);
+        return ROASTTY_INVALID_VALUE;
+    };
+    write_copied_string(out, terminal.terminal.title().as_bytes())
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_terminal_pwd(
+    terminal: RoasttyTerminal,
+    out: *mut RoasttyString,
+) -> c_int {
+    let Some(terminal) = terminal_from_handle(terminal) else {
+        write_empty_string(out);
+        return ROASTTY_INVALID_VALUE;
+    };
+    write_copied_string(out, terminal.terminal.pwd().unwrap_or("").as_bytes())
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_terminal_cursor_position(
+    terminal: RoasttyTerminal,
+    column: *mut u16,
+    row: *mut u16,
+) -> bool {
+    let Some(terminal) = terminal_from_handle(terminal) else {
+        return false;
+    };
+    if column.is_null() || row.is_null() {
+        return false;
+    }
+    let (x, y) = terminal.terminal.cursor_position();
+    unsafe {
+        column.write(x);
+        row.write(y);
+    }
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_terminal_take_pty_response(
+    terminal: RoasttyTerminal,
+    out: *mut RoasttyString,
+) -> c_int {
+    let Some(terminal) = terminal_from_handle(terminal) else {
+        write_empty_string(out);
+        return ROASTTY_INVALID_VALUE;
+    };
+    let result = write_copied_string(out, terminal.terminal.pty_response());
+    if result == ROASTTY_SUCCESS {
+        terminal.terminal.clear_pty_response();
+    }
+    result
 }
 
 #[no_mangle]
@@ -1735,6 +1941,41 @@ mod tests {
         parser
     }
 
+    fn new_terminal(cols: u16, rows: u16) -> RoasttyTerminal {
+        let mut terminal = ptr::null_mut();
+        assert_eq!(
+            roastty_terminal_new(cols, rows, usize::MAX, &mut terminal),
+            ROASTTY_SUCCESS
+        );
+        assert!(!terminal.is_null());
+        terminal
+    }
+
+    fn write_terminal(terminal: RoasttyTerminal, bytes: &[u8]) {
+        assert_eq!(
+            roastty_terminal_vt_write(terminal, bytes.as_ptr(), bytes.len()),
+            ROASTTY_SUCCESS
+        );
+    }
+
+    fn take_roastty_string(value: RoasttyString) -> Vec<u8> {
+        if value.ptr.is_null() || value.len == 0 {
+            return Vec::new();
+        }
+        let bytes = unsafe { slice::from_raw_parts(value.ptr.cast::<u8>(), value.len) }.to_vec();
+        roastty_string_free(value);
+        bytes
+    }
+
+    fn terminal_string(
+        terminal: RoasttyTerminal,
+        f: extern "C" fn(RoasttyTerminal, *mut RoasttyString) -> c_int,
+    ) -> Vec<u8> {
+        let mut out = empty_string();
+        assert_eq!(f(terminal, &mut out), ROASTTY_SUCCESS);
+        take_roastty_string(out)
+    }
+
     fn feed_osc(parser: RoasttyOscParser, bytes: &[u8]) {
         for &byte in bytes {
             roastty_osc_next(parser, byte);
@@ -1805,6 +2046,140 @@ mod tests {
         roastty_surface_free(surface);
         roastty_app_free(app);
         roastty_config_free(config);
+    }
+
+    #[test]
+    fn terminal_abi_new_rejects_invalid_inputs() {
+        let mut terminal = ptr::null_mut();
+        assert_eq!(
+            roastty_terminal_new(5, 3, usize::MAX, ptr::null_mut()),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_terminal_new(0, 3, usize::MAX, &mut terminal),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(terminal.is_null());
+        assert_eq!(
+            roastty_terminal_new(5, 0, usize::MAX, &mut terminal),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(terminal.is_null());
+        roastty_terminal_free(ptr::null_mut());
+    }
+
+    #[test]
+    fn terminal_abi_write_validation_and_plain_output() {
+        let terminal = new_terminal(5, 3);
+        assert_eq!(
+            roastty_terminal_vt_write(ptr::null_mut(), ptr::null(), 0),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_terminal_vt_write(terminal, ptr::null(), 1),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_terminal_vt_write(terminal, ptr::null(), 0),
+            ROASTTY_SUCCESS
+        );
+
+        write_terminal(terminal, b"abc");
+        let mut plain = empty_string();
+        assert_eq!(
+            roastty_terminal_read_screen_plain(terminal, false, &mut plain),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(take_roastty_string(plain), b"abc");
+        assert_eq!(
+            roastty_terminal_read_screen_plain(terminal, false, ptr::null_mut()),
+            ROASTTY_INVALID_VALUE
+        );
+
+        let mut column = 0u16;
+        let mut row = 0u16;
+        assert!(roastty_terminal_cursor_position(
+            terminal,
+            &mut column,
+            &mut row
+        ));
+        assert_eq!((column, row), (3, 0));
+        assert!(!roastty_terminal_cursor_position(
+            terminal,
+            ptr::null_mut(),
+            &mut row
+        ));
+        assert!(!roastty_terminal_cursor_position(
+            ptr::null_mut(),
+            &mut column,
+            &mut row
+        ));
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn terminal_abi_parser_state_survives_split_writes() {
+        let terminal = new_terminal(10, 4);
+
+        write_terminal(terminal, &[0xc3]);
+        write_terminal(terminal, &[0xa9]);
+        let mut plain = empty_string();
+        assert_eq!(
+            roastty_terminal_read_screen_plain(terminal, false, &mut plain),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(take_roastty_string(plain), "é".as_bytes());
+
+        write_terminal(terminal, b"\x1b]0;split ");
+        write_terminal(terminal, b"title\x07");
+        assert_eq!(
+            terminal_string(terminal, roastty_terminal_title),
+            b"split title"
+        );
+
+        write_terminal(terminal, b"\x1b]1337;CurrentDir=file://host/");
+        write_terminal(terminal, b"split\x07");
+        assert_eq!(
+            terminal_string(terminal, roastty_terminal_pwd),
+            b"file://host/split"
+        );
+
+        write_terminal(terminal, b"\x1b[");
+        write_terminal(terminal, b"6n");
+        let response = terminal_string(terminal, roastty_terminal_take_pty_response);
+        assert_eq!(response, b"\x1b[1;2R");
+        assert!(terminal_string(terminal, roastty_terminal_take_pty_response).is_empty());
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn terminal_abi_string_helpers_validate_outputs() {
+        let terminal = new_terminal(5, 3);
+        let mut out = RoasttyString {
+            ptr: ptr::dangling(),
+            len: 99,
+            sentinel: true,
+        };
+
+        assert_eq!(
+            roastty_terminal_title(ptr::null_mut(), &mut out),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(out.ptr.is_null());
+        assert_eq!(out.len, 0);
+        assert!(!out.sentinel);
+
+        assert_eq!(
+            roastty_terminal_title(terminal, ptr::null_mut()),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(terminal_string(terminal, roastty_terminal_title).is_empty());
+        assert!(terminal_string(terminal, roastty_terminal_pwd).is_empty());
+        assert!(terminal_string(terminal, roastty_terminal_take_pty_response).is_empty());
+
+        roastty_terminal_free(terminal);
     }
 
     #[test]

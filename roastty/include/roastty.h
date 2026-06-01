@@ -28,6 +28,7 @@ typedef void* roastty_mouse_event_t;
 typedef void* roastty_osc_command_t;
 typedef void* roastty_osc_parser_t;
 typedef void* roastty_surface_t;
+typedef void* roastty_terminal_t;
 
 typedef enum {
   ROASTTY_SUCCESS = 0,
@@ -542,6 +543,28 @@ ROASTTY_API bool roastty_app_needs_confirm_quit(roastty_app_t);
 ROASTTY_API bool roastty_app_has_global_keybinds(roastty_app_t);
 ROASTTY_API void roastty_app_set_color_scheme(roastty_app_t,
                                               roastty_color_scheme_e);
+
+ROASTTY_API roastty_result_e roastty_terminal_new(uint16_t,
+                                                  uint16_t,
+                                                  size_t,
+                                                  roastty_terminal_t*);
+ROASTTY_API void roastty_terminal_free(roastty_terminal_t);
+ROASTTY_API roastty_result_e roastty_terminal_vt_write(roastty_terminal_t,
+                                                       const uint8_t*,
+                                                       size_t);
+ROASTTY_API roastty_result_e
+roastty_terminal_read_screen_plain(roastty_terminal_t,
+                                   bool,
+                                   roastty_string_s*);
+ROASTTY_API roastty_result_e roastty_terminal_title(roastty_terminal_t,
+                                                    roastty_string_s*);
+ROASTTY_API roastty_result_e roastty_terminal_pwd(roastty_terminal_t,
+                                                  roastty_string_s*);
+ROASTTY_API bool roastty_terminal_cursor_position(roastty_terminal_t,
+                                                  uint16_t*,
+                                                  uint16_t*);
+ROASTTY_API roastty_result_e
+roastty_terminal_take_pty_response(roastty_terminal_t, roastty_string_s*);
 
 ROASTTY_API roastty_result_e roastty_key_event_new(roastty_key_event_t*);
 ROASTTY_API void roastty_key_event_free(roastty_key_event_t);

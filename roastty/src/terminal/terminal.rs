@@ -27,7 +27,7 @@ use super::tabstops;
 const TABSTOP_INTERVAL: usize = 8;
 
 #[derive(Debug)]
-pub(super) struct Terminal {
+pub(crate) struct Terminal {
     size: TerminalSize,
     screens: TerminalScreens,
     colors: TerminalColors,
@@ -213,11 +213,16 @@ struct TerminalPwd {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum TerminalStreamError {
+pub(crate) enum TerminalStreamError {
     PageAlloc,
     ManagedCellUnsupported,
     InvalidPoint,
     UnsupportedCodepoint(char),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TerminalInitError {
+    PageAlloc,
 }
 
 struct TerminalStreamHandler<'a> {
@@ -262,15 +267,16 @@ pub(super) struct TerminalFormatterExtra {
 }
 
 impl Terminal {
-    pub(super) fn init(
+    pub(crate) fn init(
         cols: CellCountInt,
         rows: CellCountInt,
         max_scrollback_rows: Option<usize>,
-    ) -> Result<Self, PageListAllocError> {
+    ) -> Result<Self, TerminalInitError> {
         let size = TerminalSize { cols, rows };
         Ok(Self {
             size,
-            screens: TerminalScreens::init(cols, rows, max_scrollback_rows)?,
+            screens: TerminalScreens::init(cols, rows, max_scrollback_rows)
+                .map_err(|_| TerminalInitError::PageAlloc)?,
             colors: TerminalColors {
                 palette: color::DEFAULT_PALETTE,
                 foreground: color::DynamicRgb::init(color::DEFAULT_PALETTE[7]),
@@ -280,7 +286,7 @@ impl Terminal {
             modes: modes::ModeState::default(),
             scrolling_region: ScrollingRegion::full(size),
             tabstops: tabstops::Tabstops::new(cols as usize, TABSTOP_INTERVAL)
-                .map_err(|_| PageListAllocError::PageAlloc)?,
+                .map_err(|_| TerminalInitError::PageAlloc)?,
             pty_response: Vec::new(),
             stream: stream::Stream::init(),
             dcs: dcs::Handler::new(),
@@ -293,7 +299,7 @@ impl Terminal {
         })
     }
 
-    pub(super) fn next_slice(&mut self, input: &[u8]) -> Result<(), TerminalStreamError> {
+    pub(crate) fn next_slice(&mut self, input: &[u8]) -> Result<(), TerminalStreamError> {
         let Terminal {
             size,
             screens,
@@ -329,6 +335,34 @@ impl Terminal {
             flags,
         };
         stream.next_slice(input, &mut handler)
+    }
+
+    pub(crate) fn title(&self) -> &str {
+        self.title.as_str()
+    }
+
+    pub(crate) fn pwd(&self) -> Option<&str> {
+        self.pwd.logical_str()
+    }
+
+    pub(crate) fn cursor_position(&self) -> (CellCountInt, CellCountInt) {
+        self.screens.active().cursor_position()
+    }
+
+    pub(crate) fn plain_screen(&self, unwrap: bool) -> String {
+        TerminalFormatter::init(
+            self,
+            TerminalFormatterOptions::new(PageOutputFormat::Plain).unwrap(unwrap),
+        )
+        .format()
+    }
+
+    pub(crate) fn pty_response(&self) -> &[u8] {
+        &self.pty_response
+    }
+
+    pub(crate) fn clear_pty_response(&mut self) {
+        self.pty_response.clear();
     }
 
     #[cfg(test)]
@@ -1739,7 +1773,6 @@ impl TerminalTitle {
         self.text.clear();
     }
 
-    #[cfg(test)]
     fn as_str(&self) -> &str {
         &self.text
     }
@@ -1766,7 +1799,6 @@ impl TerminalPwd {
         &self.text
     }
 
-    #[cfg(test)]
     fn logical_str(&self) -> Option<&str> {
         if self.text.is_empty() {
             return None;

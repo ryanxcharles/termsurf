@@ -133,7 +133,15 @@ perform rendering.
 
 For new string-returning terminal APIs, use result-returning functions with
 `roastty_string_s* out` rather than returning `roastty_string_s` directly. The
-new APIs must be able to report allocation failure.
+new APIs must be able to report allocation failure for the ABI-owned copied
+output buffer.
+
+The existing plain terminal formatter currently constructs an internal Rust
+`String` before the ABI copy. Making that formatter itself fully fallible is out
+of scope for this experiment and belongs with the fuller formatter ABI. This
+experiment must not hide ABI-owned copy allocation failure, but it is allowed to
+use the existing formatter allocation behavior for producing the intermediate
+plain-screen string.
 
 Add a local helper for copied ABI strings that:
 
@@ -236,8 +244,8 @@ Required evidence:
 - C callers can feed terminal bytes through `roastty_terminal_vt_write`.
 - C callers can read visible active-screen plain content through copied
   `roastty_string_s` memory.
-- string-returning helpers report allocation failure instead of hiding it behind
-  a direct `roastty_string_s` return.
+- string-returning helpers report ABI-owned copied-output allocation failure
+  instead of hiding that copy behind a direct `roastty_string_s` return.
 - UTF-8 state survives across multiple `roastty_terminal_vt_write` calls.
 - OSC parser state survives across multiple `roastty_terminal_vt_write` calls.
 - CSI/query parser state survives across multiple `roastty_terminal_vt_write`
@@ -269,7 +277,8 @@ Required evidence:
   frontend behavior.
 - Do not implement terminal resize/reflow.
 - Do not expose borrowed internal string memory through C; return copied
-  `roastty_string_s` values through result-returning APIs.
+  `roastty_string_s` values through result-returning APIs. Full fallible
+  formatter construction is deferred to the formatter ABI work.
 - Run `cargo fmt` and accept its output.
 - Pass Codex design and result reviews before moving to the next stage.
 
@@ -281,7 +290,8 @@ This experiment fails if:
 - terminal writes can dereference null pointers or panic on invalid inputs;
 - string-returning helpers expose borrowed terminal memory instead of copied
   ABI-owned strings;
-- string-returning helpers cannot report allocation failure;
+- string-returning helpers cannot report ABI-owned copied-output allocation
+  failure;
 - terminal parser state is recreated on every write, causing split UTF-8, split
   OSC, or split CSI/query sequences to fail;
 - terminal query responses are not drained or are duplicated after draining;
@@ -317,3 +327,102 @@ APIs remain deferred.
 
 Codex's final review found no remaining blocking design issues and approved the
 experiment for implementation.
+
+## Result
+
+**Result:** Pass.
+
+Experiment 165 adds the first terminal stream C ABI slice under
+`roastty_terminal_*` names. The implementation adds:
+
+- `roastty_terminal_t`;
+- `roastty_terminal_new` and `roastty_terminal_free`;
+- `roastty_terminal_vt_write`, preserving the upstream terminal-vt-write naming
+  shape;
+- `roastty_terminal_read_screen_plain`;
+- `roastty_terminal_title`;
+- `roastty_terminal_pwd`;
+- `roastty_terminal_cursor_position`;
+- `roastty_terminal_take_pty_response`;
+- narrow crate-level terminal accessors for title, PWD, cursor position, plain
+  active-screen formatting, borrowed PTY response bytes, and response clearing;
+- a terminal-level init error so the C ABI does not expose page-list allocation
+  internals;
+- fallible ABI-owned copied string output helpers;
+- Rust ABI tests and C ABI harness coverage for construction, input validation,
+  plain-screen reads, title/PWD reads, cursor position, PTY response draining,
+  split UTF-8, split OSC, and split CSI/query parser state across writes.
+
+The implementation deliberately does not add PTY spawning, real IO, renderer,
+font, selection, runtime callback, Swift frontend, surface-feed, browser, or
+non-macOS platform behavior.
+
+One contract was tightened during result review: the new string-returning APIs
+report allocation failure for the ABI-owned copied output buffer. The existing
+plain terminal formatter still builds an internal Rust `String`, and making that
+formatter fully fallible is deferred to the fuller formatter ABI work.
+
+## Verification
+
+Commands run:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/terminal/mod.rs roastty/src/terminal/terminal.rs
+prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/165-port-terminal-stream-c-abi.md
+cargo test -p roastty terminal_abi
+cargo test -p roastty c_harness_links_against_roastty_header_and_roastty_dylib
+cargo test -p roastty terminal_stream
+cargo test -p roastty
+! rg -n "ghostty|Ghostty|ghostty_" roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c
+```
+
+Observed results:
+
+- `cargo fmt` completed successfully and its output was accepted.
+- `prettier` completed successfully.
+- `cargo test -p roastty terminal_abi` passed: 4 tests.
+- `cargo test -p roastty c_harness_links_against_roastty_header_and_roastty_dylib`
+  passed.
+- `cargo test -p roastty terminal_stream` passed: 381 tests.
+- `cargo test -p roastty` passed: 1787 unit tests, the C ABI harness, and
+  doc-tests.
+- The public/touched ABI naming grep found no forbidden `ghostty` public names
+  in the touched ABI files.
+
+## Codex Result Review
+
+**Result:** Approved after revision.
+
+Codex's first result review found two real implementation issues and one
+expected process issue. The implementation issues were:
+
+- `roastty_terminal_take_pty_response` drained query responses before the copied
+  string allocation succeeded, so an allocation failure could lose the response;
+- the experiment overpromised allocation-failure reporting for
+  `roastty_terminal_read_screen_plain` because the existing formatter internally
+  constructs a Rust `String`.
+
+The PTY response logic was fixed to copy from borrowed response bytes and clear
+only after `write_copied_string` returns `ROASTTY_SUCCESS`. The experiment
+contract was clarified to require allocation-failure reporting for the ABI-owned
+copied output buffer while deferring fully fallible formatter construction to
+the fuller formatter ABI work.
+
+Codex re-reviewed the corrected implementation and found no remaining
+implementation blockers. The only remaining review note was the process
+requirement to record this result and update the README status, which this
+section satisfies.
+
+## Conclusion
+
+Roastty now exposes a real terminal stream handle through the C ABI. A C caller
+can create a terminal, feed VT bytes through the preserved
+`roastty_terminal_vt_write` boundary, read plain active-screen output, inspect
+title/PWD/cursor state, and drain PTY responses without going through the
+surface skeleton.
+
+This turns the already-ported terminal core into app-facing library behavior and
+gives later experiments a stable boundary for the remaining upstream terminal
+ABI work: resize/reflow, `terminal_get`/`terminal_get_multi`, formatter handles,
+selection handles, PTY integration, renderer integration, and eventually
+surface/frontend ownership.

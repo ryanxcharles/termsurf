@@ -92,4 +92,4 @@ mod stream;
 mod tabstops;
 
 #[allow(dead_code)]
-mod terminal;
+pub(crate) mod terminal;
