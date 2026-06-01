@@ -458,6 +458,8 @@ tests, choose the larger subsystem.
   **Pass**
 - [Experiment 165: Port Terminal Stream C ABI](165-port-terminal-stream-c-abi.md)
   — **Pass**
+- [Experiment 166: Port Terminal Scalar Getters C ABI](166-port-terminal-scalar-getters-c-abi.md)
+  — **Designed**
 
 ## Non-Goals
 
