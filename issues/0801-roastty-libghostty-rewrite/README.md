@@ -427,6 +427,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 149: Port Cursor Visual Style](149-port-cursor-visual-style.md) —
   **Pass**
+- [Experiment 150: Port ESC Cursor State Controls](150-port-esc-cursor-state-controls.md)
+  — **Designed**
 
 ## Non-Goals
 
