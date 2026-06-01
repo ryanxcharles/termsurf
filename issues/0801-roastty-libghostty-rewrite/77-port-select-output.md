@@ -167,3 +167,67 @@ The design now requires exact upstream-equivalent bounds:
 - third output block: `(0, 9)..(6, 11)`.
 
 Follow-up Codex review approved the updated design with no remaining blockers.
+
+## Result
+
+**Result:** Pass
+
+Implemented private PageList output selection in
+`roastty/src/terminal/page_list.rs`:
+
+- `PageList::select_output()` validates the clicked pin and requires
+  `SemanticContent::Output`.
+- When a prior semantic prompt exists, it delegates to the existing semantic
+  output highlight path and returns the output bounds as an untracked
+  non-rectangular `Selection`.
+- When no prior prompt exists, it matches upstream's fallback by finding the
+  next prompt, selecting from top-left screen through the row before that
+  prompt, and trimming the end backward to the last text cell.
+- Invalid pins, garbage pins, prompt cells, input cells, output with no prompt
+  boundary, and output ranges with no text return `None`.
+
+The implementation stays private to PageList. It does not add `Screen`,
+`Terminal`, `ScreenFormatter`, `selectionString`, string-map support,
+`LineIterator`, gesture state, public ABI, renderer, parser, app, platform
+input, mouse behavior, clipboard behavior, or UI wiring.
+
+The tests cover:
+
+- upstream-equivalent first, second, and third output block bounds:
+  `(0, 0)..(6, 1)`, `(0, 4)..(6, 7)`, and `(0, 9)..(6, 11)`;
+- prompt and input clicks returning `None`;
+- invalid and garbage pins returning `None`;
+- output with no prompt boundary returning `None`;
+- screen-domain behavior across scrollback/history rows;
+- untracked non-rectangular selection shape.
+
+Verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty select_output
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Observed results:
+
+- `cargo test -p roastty select_output`: 4 passed.
+- `cargo test -p roastty terminal::page_list`: 377 passed.
+- `cargo test -p roastty`: 670 unit tests passed, ABI harness passed, and
+  doctests passed.
+
+Codex reviewed the implementation and found no implementation blockers. Its only
+finding was to record this result and update the README status.
+
+## Conclusion
+
+Experiment 77 successfully ports upstream `selectOutput` into Roastty's
+PageList-centered terminal layer. Roastty can now compute semantic command
+output selections using the prompt iterator and semantic-output highlight
+substrate, including the upstream no-prior-prompt fallback, without adding
+formatter, string extraction, gesture, UI, or public API behavior.
+
+The next experiment can continue the selection stack with another primitive or
+begin the formatter/string extraction layer that will eventually make these
+selection bounds copyable as text.

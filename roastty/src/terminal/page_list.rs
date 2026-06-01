@@ -3368,6 +3368,46 @@ impl PageList {
         Some(selection::Selection::new(start, end, false))
     }
 
+    fn select_output(&self, pin: Pin) -> Option<selection::Selection> {
+        if pin.garbage || !self.pin_is_valid(&pin) {
+            return None;
+        }
+        if self.pin_cell(pin)?.semantic_content() != SemanticContent::Output {
+            return None;
+        }
+
+        let prompt_pin = {
+            let mut prompts = self.prompt_iterator_from_pin(Direction::LeftUp, pin, None);
+            prompts.next()
+        };
+
+        if let Some(prompt_pin) = prompt_pin {
+            let highlight = self.highlight_semantic_content(prompt_pin, SemanticContent::Output)?;
+            return Some(selection::Selection::new(
+                highlight.start,
+                highlight.end,
+                false,
+            ));
+        }
+
+        let mut prompts = self.prompt_iterator_from_pin(Direction::RightDown, pin, None);
+        let next_prompt = prompts.next()?;
+        let mut end = self.pin_up(next_prompt, 1)?;
+        end.x = self.node_for_pin(&end)?.page.size_cols() - 1;
+        let start = self.get_top_left(point::Tag::Screen);
+
+        let mut trimmed_end = None;
+        for candidate in self.cell_iterator_from_pin(Direction::LeftUp, end, Some(start)) {
+            let cell = self.pin_cell(candidate)?;
+            if cell.has_text() {
+                trimmed_end = Some(candidate);
+                break;
+            }
+        }
+
+        Some(selection::Selection::new(start, trimmed_end?, false))
+    }
+
     fn select_line(&self, options: SelectLineOptions<'_>) -> Option<selection::Selection> {
         let pin = options.pin;
         if pin.garbage || !self.pin_is_valid(&pin) {
@@ -4091,6 +4131,20 @@ mod tests {
         assert_selection_screen_points(list, selection, start, end);
     }
 
+    fn assert_select_output(
+        list: &PageList,
+        pin: (CellCountInt, u32),
+        start: (CellCountInt, u32),
+        end: (CellCountInt, u32),
+    ) {
+        let selection = list
+            .select_output(screen_pin(list, pin.0, pin.1))
+            .expect("output selection must exist");
+        assert!(!selection.is_tracked());
+        assert!(!selection.rectangle());
+        assert_selection_screen_points(list, selection, start, end);
+    }
+
     fn page_cell(page: &Page, x: usize, y: usize) -> Cell {
         page.get_cells(page.get_row(y))[x]
     }
@@ -4190,6 +4244,24 @@ mod tests {
             .page
             .get_row_and_cell_mut(pin.x as usize, pin.y as usize)
             .cell = cell;
+    }
+
+    fn set_screen_semantic_text(
+        list: &mut PageList,
+        x: CellCountInt,
+        y: u32,
+        text: &str,
+        semantic: SemanticContent,
+    ) {
+        for (offset, ch) in text.chars().enumerate() {
+            set_screen_cell_semantic(
+                list,
+                x + CellCountInt::try_from(offset).expect("test x offset must fit CellCountInt"),
+                y,
+                ch,
+                semantic,
+            );
+        }
     }
 
     fn prompt_screen_points(list: &PageList, iterator: PromptIterator<'_>) -> Vec<Coordinate> {
@@ -12173,6 +12245,78 @@ mod tests {
 
         assert_eq!(active_top_left_screen_coord(&list), Coordinate::new(0, 2));
         assert_select_all(&list, (0, 0), (1, 4));
+    }
+
+    fn select_output_upstream_fixture() -> PageList {
+        let mut list = PageList::init(10, 15, None).unwrap();
+
+        set_screen_semantic_text(&mut list, 0, 0, "output1", SemanticContent::Output);
+        set_screen_semantic_text(&mut list, 0, 1, "output1", SemanticContent::Output);
+
+        set_screen_semantic_prompt(&mut list, 2, SemanticPrompt::Prompt);
+        set_screen_semantic_text(&mut list, 0, 2, "prompt2", SemanticContent::Prompt);
+        set_screen_semantic_text(&mut list, 0, 3, "input2", SemanticContent::Input);
+
+        set_screen_semantic_text(&mut list, 0, 4, "output2out", SemanticContent::Output);
+        set_screen_semantic_text(&mut list, 0, 5, "put2outpu", SemanticContent::Output);
+        set_screen_semantic_text(&mut list, 0, 6, "t2output2", SemanticContent::Output);
+        set_screen_semantic_text(&mut list, 0, 7, "output2", SemanticContent::Output);
+
+        set_screen_semantic_prompt(&mut list, 8, SemanticPrompt::Prompt);
+        set_screen_semantic_text(&mut list, 0, 8, "$ ", SemanticContent::Prompt);
+        set_screen_semantic_text(&mut list, 2, 8, "input3", SemanticContent::Input);
+
+        set_screen_semantic_text(&mut list, 0, 9, "output3", SemanticContent::Output);
+        set_screen_semantic_text(&mut list, 0, 10, "output3", SemanticContent::Output);
+        set_screen_semantic_text(&mut list, 0, 11, "output3", SemanticContent::Output);
+
+        list
+    }
+
+    #[test]
+    fn select_output_matches_upstream_blocks() {
+        let list = select_output_upstream_fixture();
+
+        assert_select_output(&list, (1, 1), (0, 0), (6, 1));
+        assert_select_output(&list, (3, 7), (0, 4), (6, 7));
+        assert_select_output(&list, (2, 10), (0, 9), (6, 11));
+    }
+
+    #[test]
+    fn select_output_rejects_prompt_input_invalid_and_garbage() {
+        let list = select_output_upstream_fixture();
+        assert!(list.select_output(screen_pin(&list, 1, 8)).is_none());
+        assert!(list.select_output(screen_pin(&list, 5, 8)).is_none());
+
+        let other = PageList::init(10, 15, None).unwrap();
+        let invalid = Pin::new(other.first_node_ptr(), 0, 0);
+        let mut garbage = screen_pin(&list, 1, 1);
+        garbage.garbage = true;
+
+        assert!(list.select_output(invalid).is_none());
+        assert!(list.select_output(garbage).is_none());
+    }
+
+    #[test]
+    fn select_output_without_prompt_boundary_returns_none() {
+        let mut list = PageList::init(10, 3, None).unwrap();
+        set_screen_semantic_text(&mut list, 0, 0, "output", SemanticContent::Output);
+
+        assert!(list.select_output(screen_pin(&list, 1, 0)).is_none());
+    }
+
+    #[test]
+    fn select_output_uses_screen_domain_across_scrollback() {
+        let mut list = PageList::init(4, 3, None).unwrap();
+        list.grow_rows(2).unwrap();
+        set_screen_semantic_prompt(&mut list, 0, SemanticPrompt::Prompt);
+        set_screen_semantic_text(&mut list, 0, 0, "$ ", SemanticContent::Prompt);
+        set_screen_semantic_text(&mut list, 0, 1, "old", SemanticContent::Output);
+        set_screen_semantic_prompt(&mut list, 3, SemanticPrompt::Prompt);
+        set_screen_semantic_text(&mut list, 0, 3, "$ ", SemanticContent::Prompt);
+
+        assert_eq!(active_top_left_screen_coord(&list), Coordinate::new(0, 2));
+        assert_select_output(&list, (1, 1), (0, 1), (2, 1));
     }
 
     #[test]
