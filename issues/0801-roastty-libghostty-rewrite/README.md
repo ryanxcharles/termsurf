@@ -460,6 +460,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 166: Port Terminal Scalar Getters C ABI](166-port-terminal-scalar-getters-c-abi.md)
   — **Pass**
+- [Experiment 167: Port Terminal Mode Control C ABI](167-port-terminal-mode-control-c-abi.md)
+  — **Designed**
 
 ## Non-Goals
 
