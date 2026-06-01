@@ -392,6 +392,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 131: Port DECRQM Mode Reports](131-port-decrqm-mode-reports.md) —
   **Pass**
+- [Experiment 132: Port SGR and Styled Printing](132-port-sgr-styled-printing.md)
+  — **Designed**
 
 ## Non-Goals
 
