@@ -192,6 +192,25 @@ def extract_session_id(events_path: Path) -> str | None:
     return None
 
 
+def session_full_error(events_path: Path, stderr_path: Path) -> bool:
+    """Return true when Codex failed because the resumed session is too large."""
+    text = ""
+    if events_path.exists():
+        text += events_path.read_text(errors="replace")
+    if stderr_path.exists():
+        text += "\n" + stderr_path.read_text(errors="replace")
+    lowered = text.lower()
+    patterns = (
+        "context_length_exceeded",
+        "context window",
+        "remote compaction failed",
+        "failed to run pre-sampling compact",
+        "error running remote compact task",
+        "input exceeds the context",
+    )
+    return any(pattern in lowered for pattern in patterns)
+
+
 def run_subprocess(
     cmd: list,
     stdin_path: Path,
@@ -265,17 +284,25 @@ def main() -> int:
     cmd = codex_command(resume_id, last_message_path, args.allow_bash, args.model)
     return_code = run_subprocess(cmd, prompt_path, events_path, stderr_path)
 
-    # Self-heal: if resuming a stored session failed (not a timeout/interrupt)
-    # and the session never even started, the stored id has most likely stopped
-    # working. Default policy is to maintain continuity, so rather than failing,
-    # retry once as a fresh session and adopt the new id.
+    # Self-heal: if resuming a stored session failed (not a timeout/interrupt),
+    # retry once as a fresh session when the stored id is no longer usable or
+    # the stored session has grown beyond Codex's context window.
     fell_back = False
+    fallback_reason = ""
     if (
         resume_id is not None
         and return_code not in (0, 124, 130)
-        and not extract_session_id(events_path)
+        and (
+            not extract_session_id(events_path)
+            or session_full_error(events_path, stderr_path)
+        )
     ):
         first_error = stderr_path.read_text(errors="replace").strip()
+        fallback_reason = (
+            "stored session was full"
+            if session_full_error(events_path, stderr_path)
+            else "stored session could not be resumed"
+        )
         resume_id = None
         cmd = codex_command(resume_id, last_message_path, args.allow_bash, args.model)
         return_code = run_subprocess(cmd, prompt_path, events_path, stderr_path)
@@ -289,9 +316,7 @@ def main() -> int:
             SESSION_FILE.write_text(sid + "\n")
 
     if fell_back:
-        print(
-            "note: stored session could not be resumed; started a fresh session."
-        )
+        print(f"note: {fallback_reason}; started a fresh session.")
         if first_error:
             print(f"resume_error={first_error.splitlines()[-1]}")
     print(f"session_id={sid if sid else '(unknown)'}")
