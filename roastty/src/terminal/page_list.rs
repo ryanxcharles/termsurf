@@ -82,6 +82,11 @@ impl Pin {
             garbage: false,
         }
     }
+
+    #[cfg(test)]
+    pub(super) fn mark_garbage_for_tests(&mut self) {
+        self.garbage = true;
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -187,25 +192,25 @@ struct PageStringWithMap {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PageStringWithPinMap {
-    text: String,
-    pin_map: Vec<Pin>,
+pub(super) struct PageStringWithPinMap {
+    pub(super) text: String,
+    pub(super) pin_map: Vec<Pin>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum CodepointReplacement {
+pub(super) enum CodepointReplacement {
     Codepoint(char),
     String(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct CodepointMapEntry {
+pub(super) struct CodepointMapEntry {
     range: RangeInclusive<u32>,
     replacement: CodepointReplacement,
 }
 
 impl CodepointMapEntry {
-    fn new(start: u32, end: u32, replacement: CodepointReplacement) -> Option<Self> {
+    pub(super) fn new(start: u32, end: u32, replacement: CodepointReplacement) -> Option<Self> {
         if !valid_scalar_range(start, end) {
             return None;
         }
@@ -222,7 +227,7 @@ impl CodepointMapEntry {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PageOutputFormat {
+pub(super) enum PageOutputFormat {
     Plain,
     Vt,
     Html,
@@ -1654,7 +1659,7 @@ fn increase_capacity_value(
 }
 
 impl PageList {
-    fn init(
+    pub(super) fn init(
         cols: CellCountInt,
         rows: CellCountInt,
         max_size: Option<usize>,
@@ -1935,7 +1940,7 @@ impl PageList {
         }
     }
 
-    fn pin(&self, point: point::Point) -> Option<Pin> {
+    pub(super) fn pin(&self, point: point::Point) -> Option<Pin> {
         let coord = point.coord();
         if coord.x >= self.cols {
             return None;
@@ -2638,6 +2643,69 @@ impl PageList {
 
     fn page_string(&self, options: PageStringOptions<'_>) -> String {
         self.page_string_inner(options, None)
+    }
+
+    pub(super) fn screen_format_string(
+        &self,
+        selection: Option<selection::Selection>,
+        trim: bool,
+        unwrap: bool,
+        emit: PageOutputFormat,
+        palette: Option<&color::Palette>,
+        codepoint_map: Option<&[CodepointMapEntry]>,
+    ) -> String {
+        self.page_string(PageStringOptions {
+            selection,
+            trim,
+            unwrap,
+            emit,
+            palette,
+            codepoint_map,
+        })
+    }
+
+    pub(super) fn screen_format_string_with_pin_map(
+        &self,
+        selection: Option<selection::Selection>,
+        trim: bool,
+        unwrap: bool,
+        emit: PageOutputFormat,
+        palette: Option<&color::Palette>,
+        codepoint_map: Option<&[CodepointMapEntry]>,
+    ) -> PageStringWithPinMap {
+        self.page_string_with_pin_map(PageStringOptions {
+            selection,
+            trim,
+            unwrap,
+            emit,
+            palette,
+            codepoint_map,
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_screen_cell_for_tests(&mut self, x: CellCountInt, y: u32, codepoint: char) {
+        let pin = self
+            .pin(point::Point::screen(point::Coordinate::new(x, y)))
+            .expect("test screen point must resolve to a pin");
+        let index = self.node_index(pin.node).expect("screen node must exist");
+        *self.pages[index]
+            .page
+            .get_row_and_cell_mut(pin.x as usize, pin.y as usize)
+            .cell = Cell::init(codepoint as u32);
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_screen_text_lines_for_tests(&mut self, lines: &[&str]) {
+        for (y, line) in lines.iter().enumerate() {
+            for (x, ch) in line.chars().enumerate() {
+                self.set_screen_cell_for_tests(
+                    x.try_into().expect("test x must fit CellCountInt"),
+                    y.try_into().expect("test y must fit u32"),
+                    ch,
+                );
+            }
+        }
     }
 
     fn page_string_with_point_map(

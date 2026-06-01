@@ -238,3 +238,83 @@ Codex re-reviewed the updated design and found no remaining blockers. It agreed
 that the ScreenFormatter content slice is appropriately narrow: no VT extras, no
 parser/cursor/Terminal state, no public ABI, and all content delegation remains
 through the completed PageList formatter path.
+
+## Result
+
+**Result:** Pass
+
+Implemented the minimal private ScreenFormatter content layer:
+
+- Added `roastty/src/terminal/screen.rs`.
+- Wired it from `roastty/src/terminal/mod.rs`.
+- Added private `Screen`, `ScreenFormatter`, `ScreenFormatterOptions`, and
+  `ScreenFormatterContent` types.
+- `Screen` currently owns only a `PageList`, matching this experiment's minimal
+  shell requirement.
+- `ScreenFormatterContent` models upstream's content split with `None` and
+  `Selection(Option<selection::Selection>)`.
+
+ScreenFormatter content delegates directly to the completed PageList formatter
+surface:
+
+- `Selection(None)` formats the full screen-domain PageList content.
+- `Selection(Some(selection))` formats the selected content.
+- `None` emits empty output and an empty pin map.
+- Plain, VT, and HTML outputs go through PageList delegation.
+- Pin maps remain byte-indexed, and tests assert `text.len() == pin_map.len()`.
+- The already-ported `codepoint_map` option is preserved through
+  `ScreenFormatterOptions` and the PageList delegation wrappers.
+
+The PageList visibility changes are narrow and remain internal to the `terminal`
+module:
+
+- `PageList::init(...)`;
+- `PageList::pin(...)`;
+- `PageOutputFormat`;
+- `PageStringWithPinMap`;
+- `CodepointMapEntry` / `CodepointReplacement`;
+- `PageList::screen_format_string(...)`;
+- `PageList::screen_format_string_with_pin_map(...)`;
+- test-only PageList content-population helpers.
+
+No public ABI, app behavior, renderer behavior, PTY behavior, clipboard
+behavior, `Terminal`, `TerminalFormatter`, parser state, cursor state, mode
+state, palette extra emission, or VT screen extras were added. Upstream
+ScreenFormatter extras remain deferred because Roastty does not yet have the
+screen cursor/mode/charset/hyperlink state needed to emit them faithfully.
+
+Verification passed without warnings:
+
+```bash
+cargo fmt
+cargo test -p roastty screen_formatter    # 12 unit tests passed
+cargo test -p roastty styled_pin_map      # 9 unit tests passed
+cargo test -p roastty pin_map             # 27 unit tests passed
+cargo test -p roastty page_string         # 12 unit tests passed
+cargo test -p roastty terminal::page_list # 524 unit tests passed
+cargo test -p roastty                     # 829 unit tests passed; ABI harness passed
+```
+
+Codex design review found one blocker in the first draft: sibling-module
+visibility was underspecified. The design was updated with narrow internal
+visibility requirements and then approved.
+
+Codex result review found one blocker in the first implementation:
+`ScreenFormatterOptions` had dropped the already-ported `codepoint_map` option.
+The implementation was updated to carry `codepoint_map` through both output and
+pin-map delegation paths, and a direct ScreenFormatter codepoint-map test was
+added. Codex re-reviewed the corrected implementation and found no remaining
+blockers.
+
+## Conclusion
+
+Experiment 89 establishes the first private `Screen` layer and ports the
+content-routing part of upstream `ScreenFormatter` without expanding into
+cursor, parser, terminal, or VT extra state. The key architectural point is that
+ScreenFormatter remains a wrapper over PageList formatting, not a second text
+traversal.
+
+The next experiment can continue upward through the formatter stack. The most
+natural next slice is either the minimal state needed for ScreenFormatter VT
+extras or the first `TerminalFormatter` content wrapper, depending on whether we
+want to build screen state before terminal state.
