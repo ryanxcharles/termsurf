@@ -83,6 +83,9 @@ mod sgr;
 mod size;
 
 #[allow(dead_code)]
+pub(crate) mod size_report;
+
+#[allow(dead_code)]
 mod style;
 
 #[allow(dead_code)]

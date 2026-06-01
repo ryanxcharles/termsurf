@@ -7,22 +7,22 @@ pub(super) enum Request {
     Tertiary,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Attributes {
     pub(super) primary: Primary,
     pub(super) secondary: Secondary,
     pub(super) tertiary: Tertiary,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Primary {
-    pub(super) conformance_level: ConformanceLevel,
-    pub(super) features: &'static [Feature],
+    pub(super) conformance_level: u16,
+    pub(super) features: Vec<u16>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Secondary {
-    pub(super) device_type: DeviceType,
+    pub(super) device_type: u16,
     pub(super) firmware_version: u16,
     pub(super) rom_cartridge: u16,
 }
@@ -31,34 +31,6 @@ pub(super) struct Secondary {
 pub(super) struct Tertiary {
     pub(super) unit_id: u32,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u16)]
-pub(super) enum ConformanceLevel {
-    Vt100 = 1,
-    Level2 = 62,
-    Level3 = 63,
-    Level4 = 64,
-    Level5 = 65,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u16)]
-pub(super) enum Feature {
-    Columns132 = 1,
-    SelectiveErase = 6,
-    AnsiColor = 22,
-    Clipboard = 52,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u16)]
-pub(super) enum DeviceType {
-    Vt220 = 1,
-    Vt420 = 41,
-}
-
-const DEFAULT_PRIMARY_FEATURES: &[Feature] = &[Feature::AnsiColor];
 
 impl Default for Attributes {
     fn default() -> Self {
@@ -73,8 +45,8 @@ impl Default for Attributes {
 impl Default for Primary {
     fn default() -> Self {
         Self {
-            conformance_level: ConformanceLevel::Level2,
-            features: DEFAULT_PRIMARY_FEATURES,
+            conformance_level: 62,
+            features: vec![22],
         }
     }
 }
@@ -82,7 +54,7 @@ impl Default for Primary {
 impl Default for Secondary {
     fn default() -> Self {
         Self {
-            device_type: DeviceType::Vt220,
+            device_type: 1,
             firmware_version: 0,
             rom_cartridge: 0,
         }
@@ -107,9 +79,9 @@ impl Attributes {
 
 impl Primary {
     fn encode_vt(self) -> String {
-        let mut response = format!("\x1b[?{}", self.conformance_level as u16);
+        let mut response = format!("\x1b[?{}", self.conformance_level);
         for feature in self.features {
-            response.push_str(&format!(";{}", *feature as u16));
+            response.push_str(&format!(";{feature}"));
         }
         response.push('c');
         response
@@ -120,7 +92,7 @@ impl Secondary {
     fn encode_vt(self) -> String {
         format!(
             "\x1b[>{};{};{}c",
-            self.device_type as u16, self.firmware_version, self.rom_cartridge
+            self.device_type, self.firmware_version, self.rom_cartridge
         )
     }
 }
@@ -143,16 +115,24 @@ mod tests {
         );
         let attrs = Attributes {
             primary: Primary {
-                conformance_level: ConformanceLevel::Level4,
-                features: &[
-                    Feature::Columns132,
-                    Feature::SelectiveErase,
-                    Feature::AnsiColor,
-                ],
+                conformance_level: 64,
+                features: vec![1, 6, 22],
             },
             ..Attributes::default()
         };
         assert_eq!(attrs.encode_vt(Request::Primary), "\x1b[?64;1;6;22c");
+
+        let unknown_attrs = Attributes {
+            primary: Primary {
+                conformance_level: 777,
+                features: vec![444, 555],
+            },
+            ..Attributes::default()
+        };
+        assert_eq!(
+            unknown_attrs.encode_vt(Request::Primary),
+            "\x1b[?777;444;555c"
+        );
     }
 
     #[test]
@@ -163,13 +143,26 @@ mod tests {
         );
         let attrs = Attributes {
             secondary: Secondary {
-                device_type: DeviceType::Vt420,
+                device_type: 41,
                 firmware_version: 100,
                 rom_cartridge: 0,
             },
             ..Attributes::default()
         };
         assert_eq!(attrs.encode_vt(Request::Secondary), "\x1b[>41;100;0c");
+
+        let unknown_attrs = Attributes {
+            secondary: Secondary {
+                device_type: 777,
+                firmware_version: 100,
+                rom_cartridge: 2,
+            },
+            ..Attributes::default()
+        };
+        assert_eq!(
+            unknown_attrs.encode_vt(Request::Secondary),
+            "\x1b[>777;100;2c"
+        );
     }
 
     #[test]

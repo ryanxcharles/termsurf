@@ -64,6 +64,15 @@ static const char *effect_enquiry = NULL;
 static size_t effect_enquiry_len = 0;
 static const char *effect_xtversion = NULL;
 static size_t effect_xtversion_len = 0;
+static roastty_size_report_size_s effect_size = {0};
+static bool effect_size_result = false;
+static size_t effect_size_count = 0;
+static roastty_color_scheme_e effect_color_scheme = ROASTTY_COLOR_SCHEME_LIGHT;
+static bool effect_color_scheme_result = false;
+static size_t effect_color_scheme_count = 0;
+static roastty_device_attributes_s effect_device_attributes = {0};
+static bool effect_device_attributes_result = false;
+static size_t effect_device_attributes_count = 0;
 
 static void reset_effect_state(void) {
   effect_terminal = NULL;
@@ -77,6 +86,15 @@ static void reset_effect_state(void) {
   effect_enquiry_len = 0;
   effect_xtversion = NULL;
   effect_xtversion_len = 0;
+  effect_size = (roastty_size_report_size_s){0};
+  effect_size_result = false;
+  effect_size_count = 0;
+  effect_color_scheme = ROASTTY_COLOR_SCHEME_LIGHT;
+  effect_color_scheme_result = false;
+  effect_color_scheme_count = 0;
+  effect_device_attributes = (roastty_device_attributes_s){0};
+  effect_device_attributes_result = false;
+  effect_device_attributes_count = 0;
 }
 
 static void terminal_write_pty_cb(roastty_terminal_t terminal,
@@ -129,6 +147,43 @@ static void terminal_title_changed_cb(roastty_terminal_t terminal,
   effect_terminal = terminal;
   effect_userdata = userdata;
   effect_title_changed_count++;
+}
+
+static bool terminal_size_cb(roastty_terminal_t terminal,
+                             void *userdata,
+                             roastty_size_report_size_s *out_size) {
+  effect_terminal = terminal;
+  effect_userdata = userdata;
+  effect_size_count++;
+  if (effect_size_result && out_size != NULL) {
+    *out_size = effect_size;
+  }
+  return effect_size_result;
+}
+
+static bool terminal_color_scheme_cb(roastty_terminal_t terminal,
+                                     void *userdata,
+                                     roastty_color_scheme_e *out_scheme) {
+  effect_terminal = terminal;
+  effect_userdata = userdata;
+  effect_color_scheme_count++;
+  if (effect_color_scheme_result && out_scheme != NULL) {
+    *out_scheme = effect_color_scheme;
+  }
+  return effect_color_scheme_result;
+}
+
+static bool terminal_device_attributes_cb(
+    roastty_terminal_t terminal,
+    void *userdata,
+    roastty_device_attributes_s *out_attrs) {
+  effect_terminal = terminal;
+  effect_userdata = userdata;
+  effect_device_attributes_count++;
+  if (effect_device_attributes_result && out_attrs != NULL) {
+    *out_attrs = effect_device_attributes;
+  }
+  return effect_device_attributes_result;
 }
 
 static void assert_config_bool(roastty_config_t config,
@@ -707,11 +762,50 @@ static void assert_terminal_abi(void) {
   assert(ROASTTY_TERMINAL_OPTION_ENQUIRY == 3);
   assert(ROASTTY_TERMINAL_OPTION_XTVERSION == 4);
   assert(ROASTTY_TERMINAL_OPTION_TITLE_CHANGED == 5);
+  assert(ROASTTY_TERMINAL_OPTION_SIZE_CB == 6);
+  assert(ROASTTY_TERMINAL_OPTION_COLOR_SCHEME == 7);
+  assert(ROASTTY_TERMINAL_OPTION_DEVICE_ATTRIBUTES == 8);
   assert(ROASTTY_TERMINAL_OPTION_TITLE == 9);
   assert(ROASTTY_TERMINAL_OPTION_PWD == 10);
+  assert(ROASTTY_COLOR_SCHEME_LIGHT == 0);
+  assert(ROASTTY_COLOR_SCHEME_DARK == 1);
+  assert(ROASTTY_SIZE_REPORT_MODE_2048 == 0);
+  assert(ROASTTY_SIZE_REPORT_CSI_14_T == 1);
+  assert(ROASTTY_SIZE_REPORT_CSI_16_T == 2);
+  assert(ROASTTY_SIZE_REPORT_CSI_18_T == 3);
   assert(sizeof(roastty_mode_tag_t) == sizeof(uint16_t));
   assert(ROASTTY_MODE_TAG_VALUE_MASK == 0x7fff);
   assert(ROASTTY_MODE_TAG_ANSI_BIT == 0x8000);
+
+  roastty_size_report_size_s report_size = {
+      .rows = 24,
+      .columns = 80,
+      .cell_width = 9,
+      .cell_height = 18,
+  };
+  char report_buf[64] = {0};
+  size_t report_written = 0;
+  assert(roastty_size_report_encode(ROASTTY_SIZE_REPORT_CSI_14_T,
+                                    report_size,
+                                    report_buf,
+                                    sizeof(report_buf),
+                                    &report_written) == ROASTTY_SUCCESS);
+  assert(report_written == strlen("\x1b[4;432;720t"));
+  assert(memcmp(report_buf, "\x1b[4;432;720t", report_written) == 0);
+  report_written = 0;
+  assert(roastty_size_report_encode(ROASTTY_SIZE_REPORT_CSI_18_T,
+                                    report_size,
+                                    NULL,
+                                    0,
+                                    &report_written) == ROASTTY_OUT_OF_SPACE);
+  assert(report_written == strlen("\x1b[8;24;80t"));
+  report_written = 999;
+  assert(roastty_size_report_encode((roastty_size_report_style_e)99,
+                                    report_size,
+                                    report_buf,
+                                    sizeof(report_buf),
+                                    &report_written) == ROASTTY_INVALID_VALUE);
+  assert(report_written == 0);
 
   roastty_terminal_t terminal = NULL;
   assert(roastty_terminal_new(5, 3, SIZE_MAX, NULL) == ROASTTY_INVALID_VALUE);
@@ -741,9 +835,6 @@ static void assert_terminal_abi(void) {
                               &title_input) == ROASTTY_INVALID_VALUE);
   assert(roastty_terminal_set(terminal,
                               (roastty_terminal_option_e)9999,
-                              &title_input) == ROASTTY_INVALID_VALUE);
-  assert(roastty_terminal_set(terminal,
-                              (roastty_terminal_option_e)6,
                               &title_input) == ROASTTY_INVALID_VALUE);
   assert(roastty_terminal_set(terminal,
                               (roastty_terminal_option_e)15,
@@ -1276,6 +1367,104 @@ static void assert_terminal_abi(void) {
                               NULL) == ROASTTY_SUCCESS);
   terminal_write(terminal, "\x1b]2;from callback 2\x07");
   assert(effect_title_changed_count == 1);
+
+  effect_size = report_size;
+  effect_size_result = true;
+  effect_write_count = 0;
+  assert(roastty_terminal_set(
+             terminal,
+             ROASTTY_TERMINAL_OPTION_SIZE_CB,
+             (const void *)(roastty_terminal_size_cb)terminal_size_cb) ==
+         ROASTTY_SUCCESS);
+  terminal_write(terminal, "\x1b[14t\x1b[16t\x1b[18t");
+  assert(effect_size_count == 3);
+  assert(effect_terminal == terminal);
+  assert(effect_userdata == effect_user);
+  assert(effect_write_count == 3);
+  response = (roastty_string_s){0};
+  assert(roastty_terminal_take_pty_response(terminal, &response) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(response,
+                           "\x1b[4;432;720t\x1b[6;18;9t\x1b[8;24;80t");
+  effect_size_result = false;
+  terminal_write(terminal, "\x1b[14t");
+  response = (roastty_string_s){0};
+  assert(roastty_terminal_take_pty_response(terminal, &response) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(response, "");
+  assert(roastty_terminal_set(terminal,
+                              ROASTTY_TERMINAL_OPTION_SIZE_CB,
+                              NULL) == ROASTTY_SUCCESS);
+  terminal_write(terminal, "\x1b[14t");
+  assert(effect_size_count == 4);
+
+  effect_color_scheme = ROASTTY_COLOR_SCHEME_DARK;
+  effect_color_scheme_result = true;
+  assert(roastty_terminal_set(
+             terminal,
+             ROASTTY_TERMINAL_OPTION_COLOR_SCHEME,
+             (const void *)(roastty_terminal_color_scheme_cb)
+                 terminal_color_scheme_cb) == ROASTTY_SUCCESS);
+  terminal_write(terminal, "\x1b[?996n");
+  response = (roastty_string_s){0};
+  assert(roastty_terminal_take_pty_response(terminal, &response) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(response, "\x1b[?997;1n");
+  effect_color_scheme = ROASTTY_COLOR_SCHEME_LIGHT;
+  terminal_write(terminal, "\x1b[?996n");
+  response = (roastty_string_s){0};
+  assert(roastty_terminal_take_pty_response(terminal, &response) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(response, "\x1b[?997;2n");
+  effect_color_scheme = (roastty_color_scheme_e)99;
+  terminal_write(terminal, "\x1b[?996n");
+  response = (roastty_string_s){0};
+  assert(roastty_terminal_take_pty_response(terminal, &response) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(response, "");
+  effect_color_scheme_result = false;
+  terminal_write(terminal, "\x1b[?996n");
+  response = (roastty_string_s){0};
+  assert(roastty_terminal_take_pty_response(terminal, &response) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(response, "");
+  assert(roastty_terminal_set(terminal,
+                              ROASTTY_TERMINAL_OPTION_COLOR_SCHEME,
+                              NULL) == ROASTTY_SUCCESS);
+
+  effect_device_attributes.primary.conformance_level = 777;
+  effect_device_attributes.primary.features[0] = 444;
+  effect_device_attributes.primary.features[1] = 555;
+  effect_device_attributes.primary.num_features = 2;
+  effect_device_attributes.secondary.device_type = 888;
+  effect_device_attributes.secondary.firmware_version = 99;
+  effect_device_attributes.secondary.rom_cartridge = 7;
+  effect_device_attributes.tertiary.unit_id = 0xAABBCCDD;
+  effect_device_attributes_result = true;
+  assert(roastty_terminal_set(
+             terminal,
+             ROASTTY_TERMINAL_OPTION_DEVICE_ATTRIBUTES,
+             (const void *)(roastty_terminal_device_attributes_cb)
+                 terminal_device_attributes_cb) == ROASTTY_SUCCESS);
+  terminal_write(terminal, "\x1b[c\x1b[>c\x1b[=c");
+  response = (roastty_string_s){0};
+  assert(roastty_terminal_take_pty_response(terminal, &response) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(response,
+                           "\x1b[?777;444;555c\x1b[>888;99;7c"
+                           "\x1bP!|AABBCCDD\x1b\\");
+  assert(effect_device_attributes_count == 3);
+  effect_device_attributes_result = false;
+  terminal_write(terminal, "\x1b[c\x1b[>c\x1b[=c");
+  response = (roastty_string_s){0};
+  assert(roastty_terminal_take_pty_response(terminal, &response) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(response,
+                           "\x1b[?62;22c\x1b[>1;0;0c"
+                           "\x1bP!|00000000\x1b\\");
+  assert(roastty_terminal_set(terminal,
+                              ROASTTY_TERMINAL_OPTION_DEVICE_ATTRIBUTES,
+                              NULL) == ROASTTY_SUCCESS);
 
   assert(roastty_terminal_title(NULL, &title) == ROASTTY_INVALID_VALUE);
   assert(title.ptr == NULL);

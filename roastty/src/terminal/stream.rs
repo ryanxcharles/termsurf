@@ -1,6 +1,8 @@
 //! Terminal byte stream decoding.
 
-use super::{charsets, cursor, device_attributes, device_status, kitty, modes, osc, sgr};
+use super::{
+    charsets, cursor, device_attributes, device_status, kitty, modes, osc, sgr, size_report,
+};
 
 const CSI_PARAM_CAPACITY: usize = 24;
 
@@ -150,6 +152,9 @@ pub(super) enum Action {
     },
     DeviceStatus {
         request: device_status::Request,
+    },
+    SizeReport {
+        request: size_report::Request,
     },
     XtVersion,
     SetAttribute {
@@ -852,6 +857,10 @@ impl CsiState {
             return CsiDispatch::One(action);
         }
 
+        if let Some(action) = self.size_report_action(final_byte) {
+            return CsiDispatch::One(action);
+        }
+
         if let Some(action) = self.xtversion_action(final_byte) {
             return CsiDispatch::One(action);
         }
@@ -1371,6 +1380,26 @@ impl CsiState {
 
         let request = device_status::request_from_int(params.values[0], question)?;
         Some(Action::DeviceStatus { request })
+    }
+
+    fn size_report_action(&self, final_byte: u8) -> Option<Action> {
+        if final_byte != b't' || self.private.is_some() || self.intermediate.is_some() {
+            return None;
+        }
+
+        let params = self.finalized_params()?;
+        if params.len != 1 || params.separator_seen() {
+            return None;
+        }
+
+        let request = match params.values[0] {
+            14 => size_report::Request::Csi14T,
+            16 => size_report::Request::Csi16T,
+            18 => size_report::Request::Csi18T,
+            21 => size_report::Request::Csi21T,
+            _ => return None,
+        };
+        Some(Action::SizeReport { request })
     }
 
     fn xtversion_action(&self, final_byte: u8) -> Option<Action> {
@@ -1897,6 +1926,7 @@ mod tests {
                 | Action::RequestModeUnknown { .. }
                 | Action::DeviceAttributes { .. }
                 | Action::DeviceStatus { .. }
+                | Action::SizeReport { .. }
                 | Action::XtVersion
                 | Action::SetAttribute { .. } => None,
             })
@@ -2630,7 +2660,7 @@ mod tests {
         next_slice(
             &mut stream,
             &mut handler,
-            b"\x05\x1b[c\x1b[>c\x1b[=c\x1bZ\x1b[5n\x1b[6n\x1b[?996n\x1b[>0q",
+            b"\x05\x1b[c\x1b[>c\x1b[=c\x1bZ\x1b[5n\x1b[6n\x1b[?996n\x1b[14t\x1b[16t\x1b[18t\x1b[21t\x1b[>0q",
         );
 
         assert_eq!(
@@ -2658,6 +2688,18 @@ mod tests {
                 Action::DeviceStatus {
                     request: device_status::Request::ColorScheme,
                 },
+                Action::SizeReport {
+                    request: size_report::Request::Csi14T,
+                },
+                Action::SizeReport {
+                    request: size_report::Request::Csi16T,
+                },
+                Action::SizeReport {
+                    request: size_report::Request::Csi18T,
+                },
+                Action::SizeReport {
+                    request: size_report::Request::Csi21T,
+                },
                 Action::XtVersion,
             ]
         );
@@ -2674,6 +2716,10 @@ mod tests {
             b"\x1b[996nA".as_slice(),
             b"\x1b[?997nA".as_slice(),
             b"\x1b[5;6nA".as_slice(),
+            b"\x1b[?14tA".as_slice(),
+            b"\x1b[14;1tA".as_slice(),
+            b"\x1b[14:tA".as_slice(),
+            b"\x1b[$14tA".as_slice(),
             b"\x1b[>qA".as_slice(),
             b"\x1b[>1qA".as_slice(),
             b"\x1b[>0;1qA".as_slice(),
@@ -8108,6 +8154,7 @@ mod tests {
                 | Action::RequestModeUnknown { .. }
                 | Action::DeviceAttributes { .. }
                 | Action::DeviceStatus { .. }
+                | Action::SizeReport { .. }
                 | Action::XtVersion
                 | Action::SetAttribute { .. } => unreachable!("loop only uses D/E actions"),
             };

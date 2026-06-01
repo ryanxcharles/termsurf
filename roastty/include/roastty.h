@@ -93,6 +93,9 @@ typedef enum {
   ROASTTY_TERMINAL_OPTION_ENQUIRY = 3,
   ROASTTY_TERMINAL_OPTION_XTVERSION = 4,
   ROASTTY_TERMINAL_OPTION_TITLE_CHANGED = 5,
+  ROASTTY_TERMINAL_OPTION_SIZE_CB = 6,
+  ROASTTY_TERMINAL_OPTION_COLOR_SCHEME = 7,
+  ROASTTY_TERMINAL_OPTION_DEVICE_ATTRIBUTES = 8,
   ROASTTY_TERMINAL_OPTION_TITLE = 9,
   ROASTTY_TERMINAL_OPTION_PWD = 10,
   ROASTTY_TERMINAL_OPTION_COLOR_FOREGROUND = 11,
@@ -129,6 +132,47 @@ typedef struct {
   bool sentinel;
 } roastty_string_s;
 
+typedef enum {
+  ROASTTY_COLOR_SCHEME_LIGHT = 0,
+  ROASTTY_COLOR_SCHEME_DARK = 1,
+} roastty_color_scheme_e;
+
+typedef enum {
+  ROASTTY_SIZE_REPORT_MODE_2048 = 0,
+  ROASTTY_SIZE_REPORT_CSI_14_T = 1,
+  ROASTTY_SIZE_REPORT_CSI_16_T = 2,
+  ROASTTY_SIZE_REPORT_CSI_18_T = 3,
+} roastty_size_report_style_e;
+
+typedef struct {
+  uint16_t rows;
+  uint16_t columns;
+  uint32_t cell_width;
+  uint32_t cell_height;
+} roastty_size_report_size_s;
+
+typedef struct {
+  uint16_t conformance_level;
+  uint16_t features[64];
+  size_t num_features;
+} roastty_device_attributes_primary_s;
+
+typedef struct {
+  uint16_t device_type;
+  uint16_t firmware_version;
+  uint16_t rom_cartridge;
+} roastty_device_attributes_secondary_s;
+
+typedef struct {
+  uint32_t unit_id;
+} roastty_device_attributes_tertiary_s;
+
+typedef struct {
+  roastty_device_attributes_primary_s primary;
+  roastty_device_attributes_secondary_s secondary;
+  roastty_device_attributes_tertiary_s tertiary;
+} roastty_device_attributes_s;
+
 typedef void (*roastty_terminal_write_pty_cb)(roastty_terminal_t terminal,
                                               void* userdata,
                                               const uint8_t* ptr,
@@ -143,6 +187,18 @@ typedef roastty_string_s (*roastty_terminal_xtversion_cb)(
     void* userdata);
 typedef void (*roastty_terminal_title_changed_cb)(roastty_terminal_t terminal,
                                                   void* userdata);
+typedef bool (*roastty_terminal_size_cb)(
+    roastty_terminal_t terminal,
+    void* userdata,
+    roastty_size_report_size_s* out_size);
+typedef bool (*roastty_terminal_color_scheme_cb)(
+    roastty_terminal_t terminal,
+    void* userdata,
+    roastty_color_scheme_e* out_scheme);
+typedef bool (*roastty_terminal_device_attributes_cb)(
+    roastty_terminal_t terminal,
+    void* userdata,
+    roastty_device_attributes_s* out_attrs);
 
 typedef struct {
   uint8_t r;
@@ -496,11 +552,6 @@ typedef struct {
 } roastty_action_s;
 
 typedef enum {
-  ROASTTY_COLOR_SCHEME_LIGHT,
-  ROASTTY_COLOR_SCHEME_DARK,
-} roastty_color_scheme_e;
-
-typedef enum {
   ROASTTY_MOUSE_ACTION_PRESS = 0,
   ROASTTY_MOUSE_ACTION_RELEASE = 1,
   ROASTTY_MOUSE_ACTION_MOTION = 2,
@@ -618,6 +669,12 @@ ROASTTY_API uint32_t roastty_config_diagnostics_count(roastty_config_t);
 ROASTTY_API roastty_diagnostic_s roastty_config_get_diagnostic(roastty_config_t,
                                                                uint32_t);
 ROASTTY_API roastty_string_s roastty_config_open_path(void);
+ROASTTY_API roastty_result_e
+roastty_size_report_encode(roastty_size_report_style_e,
+                           roastty_size_report_size_s,
+                           char*,
+                           size_t,
+                           size_t*);
 
 ROASTTY_API roastty_app_t roastty_app_new(const roastty_runtime_config_s*,
                                           roastty_config_t);

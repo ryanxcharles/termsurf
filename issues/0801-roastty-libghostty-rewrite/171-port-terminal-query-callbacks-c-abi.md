@@ -377,3 +377,54 @@ This experiment fails if:
 - terminal resize/reflow or app/surface integration is added in this experiment;
 - public `ghostty_*` ABI names are introduced;
 - the design or result proceeds without the required Codex review gate.
+
+## Result
+
+**Result:** Pass
+
+Implemented the terminal query callback C ABI slice:
+
+- added public option constants `6..8`;
+- added public size-report, color-scheme, and device-attributes C ABI types;
+- added `roastty_size_report_encode`;
+- wired `size_cb`, `color_scheme`, and `device_attributes` callbacks through
+  `roastty_terminal_set`;
+- added terminal handling for `CSI 14 t`, `CSI 16 t`, `CSI 18 t`, `CSI 21 t`,
+  `CSI ? 996 n`, and DA primary/secondary/tertiary queries;
+- widened the internal DA response representation so unknown numeric callback
+  values round-trip into VT response bytes without panicking;
+- preserved current Roastty no-callback DA defaults and callback-`false`
+  fallback behavior;
+- extended Rust tests and the C harness to cover the new ABI.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/terminal/terminal.rs roastty/src/terminal/stream.rs roastty/src/terminal/device_attributes.rs roastty/src/terminal/size_report.rs roastty/src/terminal/mod.rs
+cargo test -p roastty terminal_query_callbacks_abi
+cargo test -p roastty size_report
+cargo test -p roastty c_harness_links_against_roastty_header_and_roastty_dylib
+cargo test -p roastty terminal_basic_effects_abi
+cargo test -p roastty terminal_color_set_get_abi
+cargo test -p roastty terminal_get_abi
+cargo test -p roastty terminal_stream
+cargo test -p roastty
+! rg -n "ghostty|Ghostty|ghostty_" roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c
+git diff --check
+```
+
+Codex reviewed the completed implementation and approved it with no blocking
+findings:
+
+- review log: `logs/codex-review/20260601-172016-034602-last-message.md`
+- conclusion: "Experiment 171 is approved; the result is ready to record as
+  `Pass` and commit."
+
+## Conclusion
+
+Roastty now has the remaining pure terminal query callback ABI that can be
+implemented before resize/reflow, app/surface integration, renderer callbacks,
+selection, APC, or Kitty graphics. The next experiment should continue from the
+terminal ABI inventory and choose the next coherent callback or terminal-control
+slice without crossing into resize/reflow unless that whole subsystem is ready
+to be designed.

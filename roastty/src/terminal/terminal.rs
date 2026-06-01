@@ -22,6 +22,7 @@ use super::screen::{
 };
 use super::sgr;
 use super::size::CellCountInt;
+use super::size_report;
 use super::stream::{self, Action, Handler};
 use super::style;
 use super::tabstops;
@@ -83,6 +84,52 @@ pub(crate) type TerminalEnquiryCallback =
 pub(crate) type TerminalXtversionCallback =
     unsafe extern "C" fn(*mut c_void, *mut c_void) -> TerminalEffectString;
 pub(crate) type TerminalTitleChangedCallback = unsafe extern "C" fn(*mut c_void, *mut c_void);
+pub(crate) type TerminalSizeCallback =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, *mut size_report::Size) -> bool;
+pub(crate) type TerminalColorSchemeCallback =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, *mut i32) -> bool;
+pub(crate) type TerminalDeviceAttributesCallback =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, *mut TerminalDeviceAttributes) -> bool;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TerminalDeviceAttributesPrimary {
+    pub(crate) conformance_level: u16,
+    pub(crate) features: [u16; 64],
+    pub(crate) num_features: usize,
+}
+
+impl Default for TerminalDeviceAttributesPrimary {
+    fn default() -> Self {
+        Self {
+            conformance_level: 0,
+            features: [0; 64],
+            num_features: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TerminalDeviceAttributesSecondary {
+    pub(crate) device_type: u16,
+    pub(crate) firmware_version: u16,
+    pub(crate) rom_cartridge: u16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TerminalDeviceAttributesTertiary {
+    pub(crate) unit_id: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TerminalDeviceAttributes {
+    pub(crate) primary: TerminalDeviceAttributesPrimary,
+    pub(crate) secondary: TerminalDeviceAttributesSecondary,
+    pub(crate) tertiary: TerminalDeviceAttributesTertiary,
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct TerminalEffects {
@@ -93,6 +140,9 @@ pub(crate) struct TerminalEffects {
     enquiry: Option<TerminalEnquiryCallback>,
     xtversion: Option<TerminalXtversionCallback>,
     title_changed: Option<TerminalTitleChangedCallback>,
+    size: Option<TerminalSizeCallback>,
+    color_scheme: Option<TerminalColorSchemeCallback>,
+    device_attributes: Option<TerminalDeviceAttributesCallback>,
 }
 
 impl std::fmt::Debug for TerminalEffects {
@@ -105,6 +155,9 @@ impl std::fmt::Debug for TerminalEffects {
             .field("enquiry", &self.enquiry.is_some())
             .field("xtversion", &self.xtversion.is_some())
             .field("title_changed", &self.title_changed.is_some())
+            .field("size", &self.size.is_some())
+            .field("color_scheme", &self.color_scheme.is_some())
+            .field("device_attributes", &self.device_attributes.is_some())
             .finish()
     }
 }
@@ -119,6 +172,9 @@ impl Default for TerminalEffects {
             enquiry: None,
             xtversion: None,
             title_changed: None,
+            size: None,
+            color_scheme: None,
+            device_attributes: None,
         }
     }
 }
@@ -479,6 +535,24 @@ impl Terminal {
         callback: Option<TerminalTitleChangedCallback>,
     ) {
         self.effects.title_changed = callback;
+    }
+
+    pub(crate) fn set_size_callback(&mut self, callback: Option<TerminalSizeCallback>) {
+        self.effects.size = callback;
+    }
+
+    pub(crate) fn set_color_scheme_callback(
+        &mut self,
+        callback: Option<TerminalColorSchemeCallback>,
+    ) {
+        self.effects.color_scheme = callback;
+    }
+
+    pub(crate) fn set_device_attributes_callback(
+        &mut self,
+        callback: Option<TerminalDeviceAttributesCallback>,
+    ) {
+        self.effects.device_attributes = callback;
     }
 
     pub(crate) fn color_effective(&self, kind: TerminalColorKind) -> Option<(u8, u8, u8)> {
@@ -1198,12 +1272,16 @@ impl Handler for TerminalStreamHandler<'_> {
                 Ok(())
             }
             Action::DeviceAttributes { request } => {
-                let response = device_attributes::Attributes::default().encode_vt(request);
+                let response = self.device_attributes(request).encode_vt(request);
                 self.write_pty_response(&response);
                 Ok(())
             }
             Action::DeviceStatus { request } => {
                 self.device_status(request);
+                Ok(())
+            }
+            Action::SizeReport { request } => {
+                self.size_report(request);
                 Ok(())
             }
             Action::XtVersion => {
@@ -1509,6 +1587,78 @@ impl TerminalStreamHandler<'_> {
         }
     }
 
+    fn device_attributes(
+        &mut self,
+        _request: device_attributes::Request,
+    ) -> device_attributes::Attributes {
+        let Some(callback) = self.effects.device_attributes else {
+            return device_attributes::Attributes::default();
+        };
+
+        let mut attrs = TerminalDeviceAttributes::default();
+        let ok = unsafe { callback(self.effects.handle, self.effects.userdata, &mut attrs) };
+        if !ok {
+            return device_attributes::Attributes::default();
+        }
+
+        let feature_len = attrs.primary.num_features.min(attrs.primary.features.len());
+        device_attributes::Attributes {
+            primary: device_attributes::Primary {
+                conformance_level: attrs.primary.conformance_level,
+                features: attrs.primary.features[..feature_len].to_vec(),
+            },
+            secondary: device_attributes::Secondary {
+                device_type: attrs.secondary.device_type,
+                firmware_version: attrs.secondary.firmware_version,
+                rom_cartridge: attrs.secondary.rom_cartridge,
+            },
+            tertiary: device_attributes::Tertiary {
+                unit_id: attrs.tertiary.unit_id,
+            },
+        }
+    }
+
+    fn color_scheme(&mut self) {
+        const LIGHT: i32 = 0;
+        const DARK: i32 = 1;
+
+        let Some(callback) = self.effects.color_scheme else {
+            return;
+        };
+        let mut scheme = LIGHT;
+        let ok = unsafe { callback(self.effects.handle, self.effects.userdata, &mut scheme) };
+        if !ok {
+            return;
+        }
+
+        match scheme {
+            DARK => self.write_pty_response("\x1b[?997;1n"),
+            LIGHT => self.write_pty_response("\x1b[?997;2n"),
+            _ => {}
+        }
+    }
+
+    fn size_report(&mut self, request: size_report::Request) {
+        if request == size_report::Request::Csi21T {
+            self.write_pty_response(&format!("\x1b]l{}\x1b\\", self.title.as_str()));
+            return;
+        }
+
+        let Some(callback) = self.effects.size else {
+            return;
+        };
+        let mut size = size_report::Size::default();
+        let ok = unsafe { callback(self.effects.handle, self.effects.userdata, &mut size) };
+        if !ok {
+            return;
+        }
+        let Some(style) = request.report_style() else {
+            return;
+        };
+        let response = size_report::encode(style, size);
+        self.write_pty_response_bytes(&response);
+    }
+
     fn dcs_command(&mut self, command: dcs::Command) {
         match command {
             dcs::Command::Decrqss(request) => self.decrqss(request),
@@ -1706,7 +1856,7 @@ impl TerminalStreamHandler<'_> {
                 };
                 self.write_pty_response(&format!("\x1b[{};{}R", y + 1, x + 1));
             }
-            device_status::Request::ColorScheme => {}
+            device_status::Request::ColorScheme => self.color_scheme(),
         }
     }
 

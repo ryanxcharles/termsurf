@@ -6,11 +6,12 @@ use std::slice;
 use input::{key, key_encode, key_mods};
 use terminal::kitty::KeyFlags;
 use terminal::terminal::{
-    Terminal as InnerTerminal, TerminalBellCallback, TerminalColorKind, TerminalEnquiryCallback,
-    TerminalScreen, TerminalStreamError, TerminalTitleChangedCallback, TerminalWritePtyCallback,
-    TerminalXtversionCallback,
+    Terminal as InnerTerminal, TerminalBellCallback, TerminalColorKind,
+    TerminalColorSchemeCallback, TerminalDeviceAttributesCallback, TerminalEnquiryCallback,
+    TerminalScreen, TerminalSizeCallback, TerminalStreamError, TerminalTitleChangedCallback,
+    TerminalWritePtyCallback, TerminalXtversionCallback,
 };
-use terminal::{mouse, mouse_encode, osc, point};
+use terminal::{mouse, mouse_encode, osc, point, size_report};
 
 mod input;
 mod terminal;
@@ -88,12 +89,29 @@ const ROASTTY_TERMINAL_OPTION_BELL: c_int = 2;
 const ROASTTY_TERMINAL_OPTION_ENQUIRY: c_int = 3;
 const ROASTTY_TERMINAL_OPTION_XTVERSION: c_int = 4;
 const ROASTTY_TERMINAL_OPTION_TITLE_CHANGED: c_int = 5;
+const ROASTTY_TERMINAL_OPTION_SIZE_CB: c_int = 6;
+const ROASTTY_TERMINAL_OPTION_COLOR_SCHEME: c_int = 7;
+const ROASTTY_TERMINAL_OPTION_DEVICE_ATTRIBUTES: c_int = 8;
 const ROASTTY_TERMINAL_OPTION_TITLE: c_int = 9;
 const ROASTTY_TERMINAL_OPTION_PWD: c_int = 10;
 const ROASTTY_TERMINAL_OPTION_COLOR_FOREGROUND: c_int = 11;
 const ROASTTY_TERMINAL_OPTION_COLOR_BACKGROUND: c_int = 12;
 const ROASTTY_TERMINAL_OPTION_COLOR_CURSOR: c_int = 13;
 const ROASTTY_TERMINAL_OPTION_COLOR_PALETTE: c_int = 14;
+
+#[allow(dead_code)]
+const ROASTTY_COLOR_SCHEME_LIGHT: c_int = 0;
+#[allow(dead_code)]
+const ROASTTY_COLOR_SCHEME_DARK: c_int = 1;
+
+#[allow(dead_code)]
+const ROASTTY_SIZE_REPORT_MODE_2048: c_int = 0;
+#[allow(dead_code)]
+const ROASTTY_SIZE_REPORT_CSI_14_T: c_int = 1;
+#[allow(dead_code)]
+const ROASTTY_SIZE_REPORT_CSI_16_T: c_int = 2;
+#[allow(dead_code)]
+const ROASTTY_SIZE_REPORT_CSI_18_T: c_int = 3;
 
 #[repr(C)]
 pub struct RoasttyInfo {
@@ -203,6 +221,15 @@ pub struct RoasttyTarget {
 pub struct RoasttyAction {
     tag: c_int,
     storage: [usize; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RoasttySizeReportSize {
+    rows: u16,
+    columns: u16,
+    cell_width: u32,
+    cell_height: u32,
 }
 
 #[repr(C)]
@@ -996,6 +1023,49 @@ pub extern "C" fn roastty_string_free(value: RoasttyString) {
 }
 
 #[no_mangle]
+pub extern "C" fn roastty_size_report_encode(
+    style: c_int,
+    size: RoasttySizeReportSize,
+    buf: *mut c_char,
+    buf_len: usize,
+    out_written: *mut usize,
+) -> c_int {
+    if out_written.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    let Some(style) = size_report::style_from_int(style) else {
+        unsafe {
+            out_written.write(0);
+        }
+        return ROASTTY_INVALID_VALUE;
+    };
+
+    let encoded = size_report::encode(
+        style,
+        size_report::Size {
+            rows: size.rows,
+            columns: size.columns,
+            cell_width: size.cell_width,
+            cell_height: size.cell_height,
+        },
+    );
+
+    unsafe {
+        out_written.write(encoded.len());
+    }
+
+    if buf.is_null() || buf_len < encoded.len() {
+        return ROASTTY_OUT_OF_SPACE;
+    }
+
+    unsafe {
+        ptr::copy_nonoverlapping(encoded.as_ptr(), buf.cast::<u8>(), encoded.len());
+    }
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
 pub extern "C" fn roastty_config_new() -> RoasttyConfig {
     Box::into_raw(Box::new(Config { finalized: false })).cast()
 }
@@ -1319,6 +1389,30 @@ pub extern "C" fn roastty_terminal_set(
                 .terminal
                 .set_title_changed_callback((!value.is_null()).then(|| unsafe {
                     std::mem::transmute::<*const c_void, TerminalTitleChangedCallback>(value)
+                }));
+            ROASTTY_SUCCESS
+        }
+        ROASTTY_TERMINAL_OPTION_SIZE_CB => {
+            terminal
+                .terminal
+                .set_size_callback((!value.is_null()).then(|| unsafe {
+                    std::mem::transmute::<*const c_void, TerminalSizeCallback>(value)
+                }));
+            ROASTTY_SUCCESS
+        }
+        ROASTTY_TERMINAL_OPTION_COLOR_SCHEME => {
+            terminal
+                .terminal
+                .set_color_scheme_callback((!value.is_null()).then(|| unsafe {
+                    std::mem::transmute::<*const c_void, TerminalColorSchemeCallback>(value)
+                }));
+            ROASTTY_SUCCESS
+        }
+        ROASTTY_TERMINAL_OPTION_DEVICE_ATTRIBUTES => {
+            terminal
+                .terminal
+                .set_device_attributes_callback((!value.is_null()).then(|| unsafe {
+                    std::mem::transmute::<*const c_void, TerminalDeviceAttributesCallback>(value)
                 }));
             ROASTTY_SUCCESS
         }
@@ -2390,6 +2484,10 @@ pub extern "C" fn roastty_surface_request_close(_surface: RoasttySurface) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal::terminal::{
+        TerminalDeviceAttributes, TerminalDeviceAttributesPrimary,
+        TerminalDeviceAttributesSecondary, TerminalDeviceAttributesTertiary,
+    };
     use std::cell::RefCell;
 
     #[derive(Default)]
@@ -2403,6 +2501,15 @@ mod tests {
         enquiry_len: usize,
         xtversion_ptr: *const c_char,
         xtversion_len: usize,
+        size_response: size_report::Size,
+        size_result: bool,
+        size_count: usize,
+        color_scheme_response: c_int,
+        color_scheme_result: bool,
+        color_scheme_count: usize,
+        device_attributes_response: TerminalDeviceAttributes,
+        device_attributes_result: bool,
+        device_attributes_count: usize,
     }
 
     thread_local! {
@@ -2479,6 +2586,54 @@ mod tests {
             state.last_userdata = userdata;
             state.title_changed_count += 1;
         });
+    }
+
+    unsafe extern "C" fn size_cb(
+        terminal: RoasttyTerminal,
+        userdata: *mut c_void,
+        out_size: *mut size_report::Size,
+    ) -> bool {
+        with_effect_state(|state| {
+            state.last_terminal = terminal;
+            state.last_userdata = userdata;
+            state.size_count += 1;
+            if state.size_result && !out_size.is_null() {
+                out_size.write(state.size_response);
+            }
+            state.size_result
+        })
+    }
+
+    unsafe extern "C" fn color_scheme_cb(
+        terminal: RoasttyTerminal,
+        userdata: *mut c_void,
+        out_scheme: *mut c_int,
+    ) -> bool {
+        with_effect_state(|state| {
+            state.last_terminal = terminal;
+            state.last_userdata = userdata;
+            state.color_scheme_count += 1;
+            if state.color_scheme_result && !out_scheme.is_null() {
+                out_scheme.write(state.color_scheme_response);
+            }
+            state.color_scheme_result
+        })
+    }
+
+    unsafe extern "C" fn device_attributes_cb(
+        terminal: RoasttyTerminal,
+        userdata: *mut c_void,
+        out_attrs: *mut TerminalDeviceAttributes,
+    ) -> bool {
+        with_effect_state(|state| {
+            state.last_terminal = terminal;
+            state.last_userdata = userdata;
+            state.device_attributes_count += 1;
+            if state.device_attributes_result && !out_attrs.is_null() {
+                out_attrs.write(state.device_attributes_response);
+            }
+            state.device_attributes_result
+        })
     }
 
     fn new_key_event() -> RoasttyKeyEvent {
@@ -2937,10 +3092,16 @@ mod tests {
             roastty_terminal_set(terminal, 9999, &title as *const _ as *const c_void),
             ROASTTY_INVALID_VALUE
         );
-        assert_eq!(
-            roastty_terminal_set(terminal, 6, &title as *const _ as *const c_void),
-            ROASTTY_INVALID_VALUE
-        );
+        for option in [
+            ROASTTY_TERMINAL_OPTION_SIZE_CB,
+            ROASTTY_TERMINAL_OPTION_COLOR_SCHEME,
+            ROASTTY_TERMINAL_OPTION_DEVICE_ATTRIBUTES,
+        ] {
+            assert_eq!(
+                roastty_terminal_set(terminal, option, ptr::null()),
+                ROASTTY_SUCCESS
+            );
+        }
         assert_eq!(
             roastty_terminal_set(terminal, 15, &title as *const _ as *const c_void),
             ROASTTY_INVALID_VALUE
@@ -3369,6 +3530,344 @@ mod tests {
         );
         write_terminal(terminal, b"\x1b]2;stream 2\x07");
         with_effect_state(|state| assert_eq!(state.title_changed_count, 1));
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn size_report_encoder_abi_matches_upstream_layout() {
+        let size = RoasttySizeReportSize {
+            rows: 24,
+            columns: 80,
+            cell_width: 9,
+            cell_height: 18,
+        };
+        let mut buf = [0i8; 64];
+        let mut written = usize::MAX;
+
+        assert_eq!(
+            roastty_size_report_encode(
+                ROASTTY_SIZE_REPORT_MODE_2048,
+                size,
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut written,
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(written, b"\x1b[48;24;80;432;720t".len());
+        assert_eq!(
+            unsafe { slice::from_raw_parts(buf.as_ptr().cast::<u8>(), written) },
+            b"\x1b[48;24;80;432;720t"
+        );
+
+        for (style, expected) in [
+            (ROASTTY_SIZE_REPORT_CSI_14_T, b"\x1b[4;432;720t".as_slice()),
+            (ROASTTY_SIZE_REPORT_CSI_16_T, b"\x1b[6;18;9t".as_slice()),
+            (ROASTTY_SIZE_REPORT_CSI_18_T, b"\x1b[8;24;80t".as_slice()),
+        ] {
+            written = usize::MAX;
+            assert_eq!(
+                roastty_size_report_encode(style, size, buf.as_mut_ptr(), buf.len(), &mut written),
+                ROASTTY_SUCCESS
+            );
+            assert_eq!(
+                unsafe { slice::from_raw_parts(buf.as_ptr().cast::<u8>(), written) },
+                expected
+            );
+        }
+
+        written = usize::MAX;
+        assert_eq!(
+            roastty_size_report_encode(
+                ROASTTY_SIZE_REPORT_CSI_18_T,
+                size,
+                ptr::null_mut(),
+                0,
+                &mut written,
+            ),
+            ROASTTY_OUT_OF_SPACE
+        );
+        assert_eq!(written, b"\x1b[8;24;80t".len());
+
+        written = usize::MAX;
+        assert_eq!(
+            roastty_size_report_encode(
+                ROASTTY_SIZE_REPORT_CSI_18_T,
+                size,
+                buf.as_mut_ptr(),
+                1,
+                &mut written,
+            ),
+            ROASTTY_OUT_OF_SPACE
+        );
+        assert_eq!(written, b"\x1b[8;24;80t".len());
+
+        assert_eq!(
+            roastty_size_report_encode(
+                ROASTTY_SIZE_REPORT_CSI_18_T,
+                size,
+                buf.as_mut_ptr(),
+                buf.len(),
+                ptr::null_mut(),
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+
+        written = usize::MAX;
+        assert_eq!(
+            roastty_size_report_encode(99, size, buf.as_mut_ptr(), buf.len(), &mut written),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(written, 0);
+    }
+
+    #[test]
+    fn terminal_query_callbacks_abi_option_values_and_size_reports() {
+        reset_effect_state();
+        let terminal = new_terminal(8, 4);
+        let userdata = 0x9876usize as *const c_void;
+
+        assert_eq!(ROASTTY_TERMINAL_OPTION_SIZE_CB, 6);
+        assert_eq!(ROASTTY_TERMINAL_OPTION_COLOR_SCHEME, 7);
+        assert_eq!(ROASTTY_TERMINAL_OPTION_DEVICE_ATTRIBUTES, 8);
+        assert_eq!(ROASTTY_COLOR_SCHEME_LIGHT, 0);
+        assert_eq!(ROASTTY_COLOR_SCHEME_DARK, 1);
+
+        assert!(terminal_string(terminal, roastty_terminal_take_pty_response).is_empty());
+        write_terminal(terminal, b"\x1b[14t\x1b[16t\x1b[18t");
+        assert!(terminal_string(terminal, roastty_terminal_take_pty_response).is_empty());
+        with_effect_state(|state| assert_eq!(state.size_count, 0));
+
+        with_effect_state(|state| {
+            state.size_response = size_report::Size {
+                rows: 24,
+                columns: 80,
+                cell_width: 9,
+                cell_height: 18,
+            };
+            state.size_result = true;
+        });
+        assert_eq!(
+            roastty_terminal_set(terminal, ROASTTY_TERMINAL_OPTION_USERDATA, userdata),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_set(
+                terminal,
+                ROASTTY_TERMINAL_OPTION_WRITE_PTY,
+                write_pty_cb as *const c_void,
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_set(
+                terminal,
+                ROASTTY_TERMINAL_OPTION_SIZE_CB,
+                size_cb as *const c_void,
+            ),
+            ROASTTY_SUCCESS
+        );
+        write_terminal(terminal, b"\x1b[14t\x1b[16t\x1b[18t");
+        assert_eq!(
+            terminal_string(terminal, roastty_terminal_take_pty_response),
+            b"\x1b[4;432;720t\x1b[6;18;9t\x1b[8;24;80t"
+        );
+        with_effect_state(|state| {
+            assert_eq!(state.size_count, 3);
+            assert_eq!(state.last_terminal, terminal);
+            assert_eq!(state.last_userdata, userdata.cast_mut());
+            assert_eq!(state.write_calls.len(), 3);
+            assert_eq!(state.write_calls[0], b"\x1b[4;432;720t");
+            assert_eq!(state.write_calls[1], b"\x1b[6;18;9t");
+            assert_eq!(state.write_calls[2], b"\x1b[8;24;80t");
+            state.size_result = false;
+        });
+        write_terminal(terminal, b"\x1b[14t");
+        assert!(terminal_string(terminal, roastty_terminal_take_pty_response).is_empty());
+        with_effect_state(|state| assert_eq!(state.size_count, 4));
+
+        assert_eq!(
+            roastty_terminal_set(terminal, ROASTTY_TERMINAL_OPTION_SIZE_CB, ptr::null()),
+            ROASTTY_SUCCESS
+        );
+        write_terminal(terminal, b"\x1b[14t");
+        with_effect_state(|state| assert_eq!(state.size_count, 4));
+
+        let title = borrowed_roastty_string(b"query title");
+        assert_eq!(
+            roastty_terminal_set(
+                terminal,
+                ROASTTY_TERMINAL_OPTION_TITLE,
+                &title as *const _ as *const c_void,
+            ),
+            ROASTTY_SUCCESS
+        );
+        write_terminal(terminal, b"\x1b[21t");
+        assert_eq!(
+            terminal_string(terminal, roastty_terminal_take_pty_response),
+            b"\x1b]lquery title\x1b\\"
+        );
+        with_effect_state(|state| assert_eq!(state.size_count, 4));
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn terminal_query_callbacks_abi_color_scheme() {
+        reset_effect_state();
+        let terminal = new_terminal(5, 3);
+        let userdata = 0x2468usize as *const c_void;
+
+        write_terminal(terminal, b"\x1b[?996n");
+        assert!(terminal_string(terminal, roastty_terminal_take_pty_response).is_empty());
+
+        assert_eq!(
+            roastty_terminal_set(terminal, ROASTTY_TERMINAL_OPTION_USERDATA, userdata),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_set(
+                terminal,
+                ROASTTY_TERMINAL_OPTION_WRITE_PTY,
+                write_pty_cb as *const c_void,
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_set(
+                terminal,
+                ROASTTY_TERMINAL_OPTION_COLOR_SCHEME,
+                color_scheme_cb as *const c_void,
+            ),
+            ROASTTY_SUCCESS
+        );
+
+        with_effect_state(|state| {
+            state.color_scheme_response = ROASTTY_COLOR_SCHEME_DARK;
+            state.color_scheme_result = true;
+        });
+        write_terminal(terminal, b"\x1b[?996n");
+        assert_eq!(
+            terminal_string(terminal, roastty_terminal_take_pty_response),
+            b"\x1b[?997;1n"
+        );
+        with_effect_state(|state| {
+            assert_eq!(state.color_scheme_count, 1);
+            assert_eq!(state.last_terminal, terminal);
+            assert_eq!(state.last_userdata, userdata.cast_mut());
+            assert_eq!(state.write_calls.last().unwrap(), b"\x1b[?997;1n");
+            state.color_scheme_response = ROASTTY_COLOR_SCHEME_LIGHT;
+        });
+        write_terminal(terminal, b"\x1b[?996n");
+        assert_eq!(
+            terminal_string(terminal, roastty_terminal_take_pty_response),
+            b"\x1b[?997;2n"
+        );
+
+        with_effect_state(|state| {
+            state.color_scheme_response = 99;
+            state.color_scheme_result = true;
+        });
+        write_terminal(terminal, b"\x1b[?996n");
+        assert!(terminal_string(terminal, roastty_terminal_take_pty_response).is_empty());
+
+        with_effect_state(|state| {
+            state.color_scheme_response = ROASTTY_COLOR_SCHEME_DARK;
+            state.color_scheme_result = false;
+        });
+        write_terminal(terminal, b"\x1b[?996n");
+        assert!(terminal_string(terminal, roastty_terminal_take_pty_response).is_empty());
+
+        assert_eq!(
+            roastty_terminal_set(terminal, ROASTTY_TERMINAL_OPTION_COLOR_SCHEME, ptr::null(),),
+            ROASTTY_SUCCESS
+        );
+        write_terminal(terminal, b"\x1b[?996n");
+        with_effect_state(|state| assert_eq!(state.color_scheme_count, 4));
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn terminal_query_callbacks_abi_device_attributes() {
+        reset_effect_state();
+        let terminal = new_terminal(5, 3);
+
+        write_terminal(terminal, b"\x1b[c\x1b[>c\x1b[=c");
+        assert_eq!(
+            terminal_string(terminal, roastty_terminal_take_pty_response),
+            b"\x1b[?62;22c\x1b[>1;0;0c\x1bP!|00000000\x1b\\"
+        );
+
+        let mut features = [0u16; 64];
+        features[0] = 444;
+        features[1] = 555;
+        features[2] = 666;
+        with_effect_state(|state| {
+            state.device_attributes_response = TerminalDeviceAttributes {
+                primary: TerminalDeviceAttributesPrimary {
+                    conformance_level: 777,
+                    features,
+                    num_features: 3,
+                },
+                secondary: TerminalDeviceAttributesSecondary {
+                    device_type: 888,
+                    firmware_version: 99,
+                    rom_cartridge: 7,
+                },
+                tertiary: TerminalDeviceAttributesTertiary {
+                    unit_id: 0xAABBCCDD,
+                },
+            };
+            state.device_attributes_result = true;
+        });
+        assert_eq!(
+            roastty_terminal_set(
+                terminal,
+                ROASTTY_TERMINAL_OPTION_DEVICE_ATTRIBUTES,
+                device_attributes_cb as *const c_void,
+            ),
+            ROASTTY_SUCCESS
+        );
+        write_terminal(terminal, b"\x1b[c\x1b[>c\x1b[=c");
+        assert_eq!(
+            terminal_string(terminal, roastty_terminal_take_pty_response),
+            b"\x1b[?777;444;555;666c\x1b[>888;99;7c\x1bP!|AABBCCDD\x1b\\"
+        );
+        with_effect_state(|state| assert_eq!(state.device_attributes_count, 3));
+
+        let all_features = [42u16; 64];
+        with_effect_state(|state| {
+            state.device_attributes_response.primary.features = all_features;
+            state.device_attributes_response.primary.num_features = 1000;
+        });
+        write_terminal(terminal, b"\x1b[c");
+        let response = terminal_string(terminal, roastty_terminal_take_pty_response);
+        assert!(response.starts_with(b"\x1b[?777;42;42"));
+        assert!(response.ends_with(b"c"));
+        assert_eq!(response.iter().filter(|byte| **byte == b';').count(), 64);
+
+        with_effect_state(|state| state.device_attributes_result = false);
+        write_terminal(terminal, b"\x1b[c\x1b[>c\x1b[=c");
+        assert_eq!(
+            terminal_string(terminal, roastty_terminal_take_pty_response),
+            b"\x1b[?62;22c\x1b[>1;0;0c\x1bP!|00000000\x1b\\"
+        );
+
+        assert_eq!(
+            roastty_terminal_set(
+                terminal,
+                ROASTTY_TERMINAL_OPTION_DEVICE_ATTRIBUTES,
+                ptr::null(),
+            ),
+            ROASTTY_SUCCESS
+        );
+        write_terminal(terminal, b"\x1b[c");
+        assert_eq!(
+            terminal_string(terminal, roastty_terminal_take_pty_response),
+            b"\x1b[?62;22c"
+        );
 
         roastty_terminal_free(terminal);
     }

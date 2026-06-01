@@ -469,7 +469,7 @@ tests, choose the larger subsystem.
 - [Experiment 170: Port Terminal Basic Effects C ABI](170-port-terminal-basic-effects-c-abi.md)
   — **Pass**
 - [Experiment 171: Port Terminal Query Callback C ABI](171-port-terminal-query-callbacks-c-abi.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 
