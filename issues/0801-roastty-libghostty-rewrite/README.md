@@ -419,6 +419,8 @@ tests, choose the larger subsystem.
 - [Experiment 144: Port OSC 133 Semantic Prompts](144-port-osc133-semantic-prompts.md)
   — **Pass**
 - [Experiment 145: Port iTerm2 OSC 1337](145-port-iterm2-osc1337.md) — **Pass**
+- [Experiment 146: Port Terminal Query Responses](146-port-terminal-query-responses.md)
+  — **Designed**
 
 ## Non-Goals
 
