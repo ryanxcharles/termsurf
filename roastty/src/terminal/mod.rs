@@ -44,6 +44,9 @@ mod modes;
 mod mouse;
 
 #[allow(dead_code)]
+mod mouse_encode;
+
+#[allow(dead_code)]
 mod offset_hash_map;
 
 #[allow(dead_code)]

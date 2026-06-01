@@ -1,5 +1,61 @@
 //! Mouse-related terminal state.
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum MouseEventMode {
+    #[default]
+    None,
+    X10,
+    Normal,
+    Button,
+    Any,
+}
+
+impl MouseEventMode {
+    pub(super) const fn sends_motion(self) -> bool {
+        matches!(self, Self::Button | Self::Any)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum MouseFormat {
+    #[default]
+    X10,
+    Utf8,
+    Sgr,
+    Urxvt,
+    SgrPixels,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MouseAction {
+    Press,
+    Release,
+    Motion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MouseButton {
+    Unknown,
+    Left,
+    Right,
+    Middle,
+    Four,
+    Five,
+    Six,
+    Seven,
+    Eight,
+    Nine,
+    Ten,
+    Eleven,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct MouseMods {
+    pub(super) shift: bool,
+    pub(super) alt: bool,
+    pub(super) ctrl: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MouseShape {
     Default,

@@ -193,3 +193,70 @@ This experiment fails if:
 - the patch adds app/input wiring, public ABI, renderer behavior, PTY process
   behavior, browser overlay behavior, TermSurf protocol behavior, Kitty
   graphics, or non-macOS platform paths.
+
+## Result
+
+**Result:** Pass
+
+Implemented Ghostty-style terminal mouse event encoding as a pure Roastty
+terminal subsystem.
+
+Code changes:
+
+- `roastty/src/terminal/mouse.rs`
+  - added internal protocol value types for mouse tracking mode, mouse output
+    format, mouse action, mouse button, and shift/alt/ctrl modifiers;
+  - kept existing OSC 22 `MouseShape` parsing unchanged.
+- `roastty/src/terminal/mouse_encode.rs`
+  - added a pure `encode(Event, Options) -> Option<Vec<u8>>` encoder;
+  - ported Ghostty's tracking-mode filtering behavior;
+  - ported button-code calculation, including legacy release behavior, modifier
+    bits, motion bit, wheel buttons, extended buttons, and unsupported button
+    suppression;
+  - ported X10, UTF-8, SGR, URXVT, and SGR-pixels output formats;
+  - added compact geometry conversion matching Ghostty's required renderer-size
+    behavior for clamped grid cells and unclamped rounded terminal-space
+    SGR-pixels coordinates;
+  - added last-cell motion deduplication for cell-based formats while leaving
+    SGR-pixels undeduplicated.
+- `roastty/src/terminal/mod.rs`
+  - registered the new internal `mouse_encode` module.
+
+No C ABI, app input wiring, Swift frontend, renderer event dispatch, PTY process
+write path, browser overlay, TermSurf protocol, Kitty graphics, or non-macOS
+platform path was added.
+
+Verification:
+
+```bash
+cargo fmt
+cargo test -p roastty mouse
+cargo test -p roastty modes
+cargo test -p roastty
+```
+
+All commands passed. The final full suite reported 1735 unit tests passing, the
+ABI harness passing, and 0 doc tests.
+
+The new test coverage includes:
+
+- existing mouse-shape parser behavior;
+- all tracking-mode filtering cases named in the experiment;
+- X10 tracking mode modifier suppression and non-X10 tracking mode modifier
+  inclusion even with X10 output format;
+- left/middle/right, wheel, extended, unsupported, release, modifier, and motion
+  button-code behavior;
+- X10, UTF-8, SGR, URXVT, and SGR-pixels output examples;
+- cell coordinate clamping, padding-aware conversion, terminal-space pixel
+  conversion, outside-viewport motion/release behavior, and motion
+  deduplication.
+
+## Conclusion
+
+Roastty now has the pure terminal mouse encoder needed to turn normalized mouse
+events into VT protocol bytes. This closes the encoder-only slice while keeping
+all live input/app/ABI wiring deferred.
+
+A later experiment should connect terminal mode state to encoder options and,
+after the app/input layer exists, wire actual macOS mouse events through this
+encoder to the PTY.

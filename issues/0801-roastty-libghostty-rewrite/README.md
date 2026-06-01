@@ -439,7 +439,7 @@ tests, choose the larger subsystem.
 - [Experiment 155: Port Kitty Keyboard Protocol](155-port-kitty-keyboard-protocol.md)
   — **Pass**
 - [Experiment 156: Port Mouse Event Encoding](156-port-mouse-event-encoding.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 
