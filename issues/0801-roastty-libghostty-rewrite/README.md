@@ -344,6 +344,8 @@ No experiment may proceed to the next stage until the required review passes.
   **Pass**
 - [Experiment 119: Port CSI Horizontal Tabulation](119-port-csi-horizontal-tabulation.md)
   — **Pass**
+- [Experiment 120: Port CSI Erase Display](120-port-csi-erase-display.md) —
+  **Designed**
 
 ## Non-Goals
 
