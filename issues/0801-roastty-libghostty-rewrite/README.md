@@ -417,7 +417,7 @@ tests, choose the larger subsystem.
 - [Experiment 143: Port OSC 3008 Context Signals](143-port-osc3008-context-signals.md)
   — **Pass**
 - [Experiment 144: Port OSC 133 Semantic Prompts](144-port-osc133-semantic-prompts.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

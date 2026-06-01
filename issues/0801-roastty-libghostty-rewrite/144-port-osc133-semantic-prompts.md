@@ -285,3 +285,77 @@ The design was updated to pin clear-EOL cursor-state behavior, continuation-row
 marking on linefeed and soft wrap, the fresh-line margin edge cases, parser-only
 `redraw` support, and signed `i32` exit-code parsing. Codex re-reviewed the
 revised design and approved it for implementation with no blocking findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented OSC 133 semantic prompts across parser, stream dispatch, page/cell
+metadata writes, and terminal runtime behavior.
+
+The implementation adds `roastty/src/terminal/semantic_prompt.rs` with
+Ghostty-compatible action values and lazy option readers for `aid`, `cl`, `k`,
+`err`, `redraw`, `special_key`, `click_events`, `cmdline`, `cmdline_url`, and
+`exit_code`. Option readers preserve raw bytes for string options, match keys
+case-sensitively, stop at the first matching key even when malformed, parse
+strict enum/bool values, and parse signed decimal `i32` exit codes.
+
+`roastty/src/terminal/osc.rs` now parses fixed-buffer OSC 133 actions and
+rejects malformed tails such as `Aextra`, missing separators, empty data,
+unknown actions, and oversized payloads. `roastty/src/terminal/stream.rs`
+dispatches every OSC 133 action through the stream layer and consumes invalid
+forms without print leakage.
+
+Runtime handling now stores semantic cursor state in `Screen`, writes
+prompt/input/output semantic content into real page cells during printing, and
+writes prompt row markers into real `PageList` row metadata. `A` and `N`
+fresh-line into prompt state, `P` marks prompt kinds, `B` and `I` mark input,
+`C` and `D` restore output, `I` resets semantic state on explicit newline
+without bulk-marking untouched blank cells, and prompt/input linefeeds and soft
+wraps mark prompt-continuation rows.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/terminal/semantic_prompt.rs roastty/src/terminal/mod.rs roastty/src/terminal/osc.rs roastty/src/terminal/stream.rs roastty/src/terminal/page.rs roastty/src/terminal/page_list.rs roastty/src/terminal/screen.rs roastty/src/terminal/terminal.rs
+cargo test -p roastty terminal_stream_osc133
+cargo test -p roastty semantic_prompt
+cargo test -p roastty osc
+cargo test -p roastty page_list_prompt
+cargo test -p roastty
+```
+
+Observed results:
+
+- `cargo test -p roastty terminal_stream_osc133`: 7 passed
+- `cargo test -p roastty semantic_prompt`: 17 passed
+- `cargo test -p roastty osc`: 94 passed
+- `cargo test -p roastty page_list_prompt`: 12 passed
+- `cargo test -p roastty`: 1570 unit tests and 1 ABI harness test passed
+
+## Result Review
+
+Codex reviewed the completed implementation and found no blocking issues. It
+approved the result as good enough to record as **Pass**.
+
+The first result review noted two non-blocking test-polish items:
+
+- stream dispatch coverage should include every OSC 133 action;
+- terminal runtime should have a dedicated `OSC 133;D` assertion.
+
+Both tests were added. After rerunning formatting and tests, Codex re-reviewed
+the updated snippets and confirmed the polish items were resolved with no new
+blocking issues.
+
+## Conclusion
+
+Roastty now recognizes and executes the core OSC 133 semantic prompt protocol
+against real row/cell metadata. This connects the parser and runtime to the
+semantic infrastructure already ported in `PageList`, so prompt iterators,
+semantic selection helpers, and output-selection helpers can now observe
+runtime-produced prompt/input/output markings instead of only manually seeded
+test data.
+
+Advanced behavior remains out of scope for later experiments: prompt-redraw on
+resize, shell command-line decoding, explicit command tracking, prompt-click
+event emission, app/surface delivery, public ABI, and UI highlighting.

@@ -56,6 +56,9 @@ mod selection_codepoints;
 mod selection;
 
 #[allow(dead_code)]
+mod semantic_prompt;
+
+#[allow(dead_code)]
 mod screen;
 
 #[allow(dead_code)]

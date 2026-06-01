@@ -4,6 +4,7 @@ use super::color;
 use super::modes;
 use super::mouse;
 use super::osc;
+use super::page::SemanticPrompt;
 use super::page_list::{
     CodepointMapEntry, PageListAllocError, PageOutputFormat, PageStringWithPinMap,
 };
@@ -435,6 +436,22 @@ impl Terminal {
     }
 
     #[cfg(test)]
+    pub(super) fn active_row_semantic_prompt_for_tests(&self, y: u32) -> SemanticPrompt {
+        self.screens.active.active_row_semantic_prompt_for_tests(y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_semantic_content_for_tests(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> super::page::SemanticContent {
+        self.screens
+            .active
+            .active_cell_semantic_content_for_tests(x, y)
+    }
+
+    #[cfg(test)]
     pub(super) fn verify_integrity_for_tests(&self) {
         self.screens.active.verify_integrity_for_tests();
     }
@@ -676,6 +693,9 @@ impl Handler for TerminalStreamHandler<'_> {
                 self.kitty_color_operation(requests, terminator);
             }
             stream::OscAction::KittyTextSizing { .. } => {}
+            stream::OscAction::SemanticPrompt { value } => {
+                self.semantic_prompt(value)?;
+            }
             stream::OscAction::KittyClipboard { .. } => {}
         }
         Ok(())
@@ -844,6 +864,78 @@ impl TerminalStreamHandler<'_> {
         }
     }
 
+    fn semantic_prompt(
+        &mut self,
+        prompt: super::semantic_prompt::SemanticPrompt<'_>,
+    ) -> Result<(), TerminalStreamError> {
+        use super::semantic_prompt::Action;
+
+        match prompt.action {
+            Action::FreshLine => self.semantic_prompt_fresh_line(),
+            Action::FreshLineNewPrompt => {
+                self.semantic_prompt_fresh_line()?;
+                self.screen
+                    .set_cursor_semantic_prompt(
+                        prompt
+                            .prompt_kind()
+                            .unwrap_or(super::semantic_prompt::PromptKind::Initial),
+                    )
+                    .map_err(TerminalStreamError::from)
+            }
+            Action::NewCommand => {
+                self.semantic_prompt(super::semantic_prompt::SemanticPrompt::new(
+                    Action::FreshLineNewPrompt,
+                    prompt.options(),
+                ))
+            }
+            Action::PromptStart => self
+                .screen
+                .set_cursor_semantic_prompt(
+                    prompt
+                        .prompt_kind()
+                        .unwrap_or(super::semantic_prompt::PromptKind::Initial),
+                )
+                .map_err(TerminalStreamError::from),
+            Action::EndPromptStartInput => {
+                self.screen.set_cursor_semantic_input(false);
+                Ok(())
+            }
+            Action::EndPromptStartInputTerminateEol => {
+                self.screen.set_cursor_semantic_input(true);
+                Ok(())
+            }
+            Action::EndInputStartOutput => {
+                self.screen.set_cursor_semantic_output();
+                if self.screen.cursor_position().0 == 0
+                    && self.screen.current_row_semantic_prompt() != Some(SemanticPrompt::None)
+                {
+                    self.screen
+                        .clear_current_row_semantic_prompt()
+                        .map_err(TerminalStreamError::from)?;
+                }
+                Ok(())
+            }
+            Action::EndCommand => {
+                self.screen.set_cursor_semantic_output();
+                Ok(())
+            }
+        }
+    }
+
+    fn semantic_prompt_fresh_line(&mut self) -> Result<(), TerminalStreamError> {
+        let left_margin = if self.screen.cursor_position().0 < self.scrolling_region.left {
+            0
+        } else {
+            self.scrolling_region.left
+        };
+        if self.screen.cursor_position().0 == left_margin {
+            return Ok(());
+        }
+
+        self.screen.carriage_return_basic();
+        self.index()
+    }
+
     fn set_kitty_color(&mut self, key: super::kitty::ColorKind, rgb: color::Rgb) {
         match key {
             super::kitty::ColorKind::Palette(index) => {
@@ -935,6 +1027,15 @@ impl From<BasicPrintError> for TerminalStreamError {
                 super::page_list::BasicCellWriteError::InvalidPoint => Self::InvalidPoint,
                 super::page_list::BasicCellWriteError::ManagedCell => Self::ManagedCellUnsupported,
             },
+        }
+    }
+}
+
+impl From<super::page_list::BasicCellWriteError> for TerminalStreamError {
+    fn from(err: super::page_list::BasicCellWriteError) -> Self {
+        match err {
+            super::page_list::BasicCellWriteError::InvalidPoint => Self::InvalidPoint,
+            super::page_list::BasicCellWriteError::ManagedCell => Self::ManagedCellUnsupported,
         }
     }
 }
@@ -1331,7 +1432,7 @@ mod tests {
     use crate::terminal::color;
     use crate::terminal::kitty::{KeyFlags, KeySetMode};
     use crate::terminal::modes::Mode;
-    use crate::terminal::page::HyperlinkSnapshotId;
+    use crate::terminal::page::{HyperlinkSnapshotId, SemanticContent, SemanticPrompt};
     use crate::terminal::page_list::{CodepointReplacement, Pin};
     use crate::terminal::screen::ScreenCursorHyperlinkId;
     use crate::terminal::selection;
@@ -2151,6 +2252,181 @@ mod tests {
             assert!(!terminal.is_dirty_for_tests(0, row));
             assert!(!terminal.is_dirty_for_tests(9, row));
         }
+    }
+
+    #[test]
+    fn terminal_stream_osc133_marks_prompt_input_and_output() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal
+            .next_slice(b"abc\x1b]133;A\x07$ \x1b]133;B\x07cmd\x1b]133;C\x07out")
+            .unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "abc\n$ cmdout");
+        assert_eq!(
+            terminal.active_row_semantic_prompt_for_tests(1),
+            SemanticPrompt::Prompt
+        );
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(0, 1),
+            SemanticContent::Prompt
+        );
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(2, 1),
+            SemanticContent::Input
+        );
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(5, 1),
+            SemanticContent::Output
+        );
+        assert!(terminal.pty_response_for_tests().is_empty());
+    }
+
+    #[test]
+    fn terminal_stream_osc133_new_command_and_prompt_kinds() {
+        let mut terminal = Terminal::init(10, 4, None).unwrap();
+
+        terminal.next_slice(b"\x1b]133;N\x07one").unwrap();
+        terminal.next_slice(b"\n\x1b]133;P;k=c\x07two").unwrap();
+        terminal.next_slice(b"\n\x1b]133;P;k=s\x07tri").unwrap();
+
+        assert_eq!(
+            terminal.active_row_semantic_prompt_for_tests(0),
+            SemanticPrompt::Prompt
+        );
+        assert_eq!(
+            terminal.active_row_semantic_prompt_for_tests(1),
+            SemanticPrompt::PromptContinuation
+        );
+        assert_eq!(
+            terminal.active_row_semantic_prompt_for_tests(2),
+            SemanticPrompt::PromptContinuation
+        );
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(0, 0),
+            SemanticContent::Prompt
+        );
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(3, 1),
+            SemanticContent::Prompt
+        );
+    }
+
+    #[test]
+    fn terminal_stream_osc133_clear_eol_resets_on_newline_without_bulk_marking() {
+        let mut terminal = Terminal::init(8, 3, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]133;A\x07> \x1b]133;I\x07cmd\nout")
+            .unwrap();
+
+        assert_eq!(
+            terminal.active_row_semantic_prompt_for_tests(0),
+            SemanticPrompt::Prompt
+        );
+        assert_eq!(
+            terminal.active_row_semantic_prompt_for_tests(1),
+            SemanticPrompt::None
+        );
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(2, 0),
+            SemanticContent::Input
+        );
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(7, 0),
+            SemanticContent::Output
+        );
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(3, 1),
+            SemanticContent::Output
+        );
+    }
+
+    #[test]
+    fn terminal_stream_osc133_marks_linefeed_and_soft_wrap_continuations() {
+        let mut newline = Terminal::init(8, 3, None).unwrap();
+        newline
+            .next_slice(b"\x1b]133;A\x07> \x1b]133;B\x07cmd\nnext")
+            .unwrap();
+        assert_eq!(
+            newline.active_row_semantic_prompt_for_tests(1),
+            SemanticPrompt::PromptContinuation
+        );
+        assert_eq!(
+            newline.active_cell_semantic_content_for_tests(5, 1),
+            SemanticContent::Input
+        );
+
+        let mut wrapped = Terminal::init(4, 3, None).unwrap();
+        wrapped.next_slice(b"\x1b]133;A\x07abcde").unwrap();
+        assert_eq!(
+            wrapped.active_row_semantic_prompt_for_tests(1),
+            SemanticPrompt::PromptContinuation
+        );
+        assert_eq!(
+            wrapped.active_cell_semantic_content_for_tests(0, 1),
+            SemanticContent::Prompt
+        );
+    }
+
+    #[test]
+    fn terminal_stream_osc133_fresh_line_uses_ghostty_margin_rule() {
+        let mut at_zero = Terminal::init(8, 4, None).unwrap();
+        at_zero.set_scrolling_region_for_tests(0, 3, 2, 7);
+        at_zero.next_slice(b"\x1b]133;L\x07").unwrap();
+        assert_eq!(at_zero.cursor_position_for_tests(), (0, 0));
+
+        let mut at_margin = Terminal::init(8, 4, None).unwrap();
+        at_margin.set_scrolling_region_for_tests(0, 3, 2, 7);
+        at_margin.screens.active.set_cursor_position_for_tests(2, 0);
+        at_margin.next_slice(b"\x1b]133;L\x07").unwrap();
+        assert_eq!(at_margin.cursor_position_for_tests(), (2, 0));
+
+        let mut left_of_margin = Terminal::init(8, 4, None).unwrap();
+        left_of_margin.set_scrolling_region_for_tests(0, 3, 2, 7);
+        left_of_margin
+            .screens
+            .active
+            .set_cursor_position_for_tests(1, 0);
+        left_of_margin.next_slice(b"\x1b]133;L\x07").unwrap();
+        assert_eq!(left_of_margin.cursor_position_for_tests(), (0, 1));
+    }
+
+    #[test]
+    fn terminal_stream_osc133_c_clears_prompt_row_only_at_column_zero() {
+        let mut at_zero = Terminal::init(8, 3, None).unwrap();
+        at_zero.next_slice(b"\x1b]133;P\x07\x1b]133;C\x07").unwrap();
+        assert_eq!(
+            at_zero.active_row_semantic_prompt_for_tests(0),
+            SemanticPrompt::None
+        );
+
+        let mut after_prompt = Terminal::init(8, 3, None).unwrap();
+        after_prompt
+            .next_slice(b"\x1b]133;P\x07$\x1b]133;C\x07")
+            .unwrap();
+        assert_eq!(
+            after_prompt.active_row_semantic_prompt_for_tests(0),
+            SemanticPrompt::Prompt
+        );
+    }
+
+    #[test]
+    fn terminal_stream_osc133_d_restores_output_semantic_content() {
+        let mut terminal = Terminal::init(8, 3, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]133;A\x07> \x1b]133;B\x07cmd\x1b]133;D\x07out")
+            .unwrap();
+
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(2, 0),
+            SemanticContent::Input
+        );
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(5, 0),
+            SemanticContent::Output
+        );
     }
 
     #[test]

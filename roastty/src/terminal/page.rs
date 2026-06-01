@@ -1671,6 +1671,7 @@ impl Page {
         codepoint: char,
         cell_style: style::Style,
         cell_hyperlink: Option<hyperlink::Hyperlink<'_>>,
+        semantic_content: SemanticContent,
     ) -> Result<(), PrintCellError> {
         let cell_offset = self.cell_offset_at(x, y);
         let old_cell = self.cell_copy_at_offset(cell_offset);
@@ -1717,6 +1718,7 @@ impl Page {
             *rac.cell = Cell::init(codepoint as u32);
             rac.cell.set_style_id(new_style_id);
             rac.cell.set_hyperlink(new_hyperlink_id.is_some());
+            rac.cell.set_semantic_content(semantic_content);
             rac.row.set_dirty(true);
         }
 
@@ -4816,6 +4818,7 @@ mod tests {
                 id: hyperlink::HyperlinkId::Explicit(b"id"),
                 uri: b"https://example.com",
             }),
+            SemanticContent::Output,
         )
         .unwrap();
 
@@ -4849,29 +4852,64 @@ mod tests {
             uri: b"https://two",
         };
 
-        page.write_print_cell(0, 0, 'A', style::Style::default(), Some(first))
-            .unwrap();
-        page.write_print_cell(1, 0, 'B', style::Style::default(), Some(first))
-            .unwrap();
+        page.write_print_cell(
+            0,
+            0,
+            'A',
+            style::Style::default(),
+            Some(first),
+            SemanticContent::Output,
+        )
+        .unwrap();
+        page.write_print_cell(
+            1,
+            0,
+            'B',
+            style::Style::default(),
+            Some(first),
+            SemanticContent::Output,
+        )
+        .unwrap();
         let first_id = page.lookup_hyperlink_at(0, 0).unwrap();
         assert_eq!(page.lookup_hyperlink_at(1, 0), Some(first_id));
         assert_eq!(page.hyperlink_ref_count(first_id), 2);
 
-        page.write_print_cell(0, 0, 'C', style::Style::default(), Some(second))
-            .unwrap();
+        page.write_print_cell(
+            0,
+            0,
+            'C',
+            style::Style::default(),
+            Some(second),
+            SemanticContent::Output,
+        )
+        .unwrap();
         let second_id = page.lookup_hyperlink_at(0, 0).unwrap();
         assert_ne!(first_id, second_id);
         assert_eq!(page.hyperlink_ref_count(first_id), 1);
         assert_eq!(page.hyperlink_ref_count(second_id), 1);
 
-        page.write_print_cell(1, 0, 'D', style::Style::default(), None)
-            .unwrap();
+        page.write_print_cell(
+            1,
+            0,
+            'D',
+            style::Style::default(),
+            None,
+            SemanticContent::Output,
+        )
+        .unwrap();
         assert_eq!(page.lookup_hyperlink_at(1, 0), None);
         assert_eq!(page.hyperlink_ref_count(first_id), 0);
         assert!(page.get_row(0).hyperlink());
 
-        page.write_print_cell(0, 0, 'E', style::Style::default(), None)
-            .unwrap();
+        page.write_print_cell(
+            0,
+            0,
+            'E',
+            style::Style::default(),
+            None,
+            SemanticContent::Output,
+        )
+        .unwrap();
         assert_eq!(page.lookup_hyperlink_at(0, 0), None);
         assert_eq!(page.hyperlink_ref_count(second_id), 0);
         assert!(!page.get_row(0).hyperlink());
@@ -4900,7 +4938,7 @@ mod tests {
         };
 
         assert_eq!(
-            page.write_print_cell(0, 0, 'A', styled, None),
+            page.write_print_cell(0, 0, 'A', styled, None, SemanticContent::Output),
             Err(PrintCellError::StyleOutOfMemory)
         );
 
@@ -4931,6 +4969,7 @@ mod tests {
                     id: hyperlink::HyperlinkId::Implicit(1),
                     uri: b"https://example.com",
                 }),
+                SemanticContent::Output,
             ),
             Err(PrintCellError::HyperlinkOutOfMemory)
         );
@@ -4971,6 +5010,7 @@ mod tests {
                     id: hyperlink::HyperlinkId::Explicit(b"id"),
                     uri: b"https://example.com",
                 }),
+                SemanticContent::Output,
             ),
             Err(PrintCellError::HyperlinkOutOfMemory)
         );
@@ -5014,7 +5054,14 @@ mod tests {
         assert_eq!(page.hyperlink_set_count(), 1);
 
         assert_eq!(
-            page.write_print_cell(map_capacity, 0, 'Q', style::Style::default(), Some(link)),
+            page.write_print_cell(
+                map_capacity,
+                0,
+                'Q',
+                style::Style::default(),
+                Some(link),
+                SemanticContent::Output,
+            ),
             Err(PrintCellError::HyperlinkOutOfMemory)
         );
 

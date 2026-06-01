@@ -38,6 +38,9 @@ pub(super) enum Command<'a> {
     KittyTextSizing {
         value: KittyTextSizing<'a>,
     },
+    SemanticPrompt {
+        value: super::semantic_prompt::SemanticPrompt<'a>,
+    },
     KittyClipboard {
         value: super::clipboard::KittyClipboard<'a>,
     },
@@ -322,6 +325,9 @@ impl Parser {
                 .map(|requests| Command::ColorOperation { requests }),
             b"12" => parse_dynamic_set_query(rest, DynamicColor::Cursor, terminator)
                 .map(|requests| Command::ColorOperation { requests }),
+            b"133" if split.is_some() => {
+                parse_semantic_prompt(rest).map(|value| Command::SemanticPrompt { value })
+            }
             b"21" => parse_kitty_color(rest).map(|requests| Command::KittyColor {
                 requests,
                 terminator,
@@ -476,6 +482,34 @@ fn parse_context_signal(bytes: &[u8]) -> Option<super::context_signal::ContextSi
         id,
         metadata,
     })
+}
+
+fn parse_semantic_prompt(bytes: &[u8]) -> Option<super::semantic_prompt::SemanticPrompt<'_>> {
+    let (&action, rest) = bytes.split_first()?;
+    let action = match action {
+        b'L' if rest.is_empty() => super::semantic_prompt::Action::FreshLine,
+        b'A' => super::semantic_prompt::Action::FreshLineNewPrompt,
+        b'N' => super::semantic_prompt::Action::NewCommand,
+        b'P' => super::semantic_prompt::Action::PromptStart,
+        b'B' => super::semantic_prompt::Action::EndPromptStartInput,
+        b'I' => super::semantic_prompt::Action::EndPromptStartInputTerminateEol,
+        b'C' => super::semantic_prompt::Action::EndInputStartOutput,
+        b'D' => super::semantic_prompt::Action::EndCommand,
+        _ => return None,
+    };
+
+    let options = if rest.is_empty() {
+        b"".as_slice()
+    } else if let Some(options) = rest.strip_prefix(b";") {
+        if matches!(action, super::semantic_prompt::Action::FreshLine) {
+            return None;
+        }
+        options
+    } else {
+        return None;
+    };
+
+    Some(super::semantic_prompt::SemanticPrompt::new(action, options))
 }
 
 fn parse_osc4(bytes: &[u8], terminator: Terminator) -> Option<ColorRequests> {
@@ -735,6 +769,10 @@ mod tests {
             halign: KittyTextHorizontalAlign,
             text: String,
         },
+        SemanticPrompt {
+            action: super::super::semantic_prompt::Action,
+            options: Vec<u8>,
+        },
         KittyClipboard {
             metadata: Vec<u8>,
             payload: Option<Vec<u8>>,
@@ -788,6 +826,10 @@ mod tests {
                     valign: value.valign,
                     halign: value.halign,
                     text: value.text.to_string(),
+                },
+                Command::SemanticPrompt { value } => Self::SemanticPrompt {
+                    action: value.action,
+                    options: value.options().to_vec(),
                 },
                 Command::KittyClipboard { value } => Self::KittyClipboard {
                     metadata: value.metadata.to_vec(),
@@ -1086,6 +1128,64 @@ mod tests {
         assert_eq!(parse(b"3008;start=bad\xff"), None);
 
         let mut oversized = b"3008;start=id;".to_vec();
+        oversized.extend(std::iter::repeat_n(b'x', MAX_BUF + 32));
+        assert_eq!(parse(&oversized), None);
+    }
+
+    #[test]
+    fn osc_parser_semantic_prompts() {
+        use super::super::semantic_prompt::Action;
+
+        for (raw, action) in [
+            (b"133;L".as_slice(), Action::FreshLine),
+            (b"133;A".as_slice(), Action::FreshLineNewPrompt),
+            (b"133;N".as_slice(), Action::NewCommand),
+            (b"133;P".as_slice(), Action::PromptStart),
+            (b"133;B".as_slice(), Action::EndPromptStartInput),
+            (b"133;I".as_slice(), Action::EndPromptStartInputTerminateEol),
+            (b"133;C".as_slice(), Action::EndInputStartOutput),
+            (b"133;D".as_slice(), Action::EndCommand),
+        ] {
+            assert_eq!(
+                parse(raw),
+                Some(OwnedCommand::SemanticPrompt {
+                    action,
+                    options: b"".to_vec(),
+                })
+            );
+        }
+
+        assert_eq!(
+            parse(b"133;A;aid=foo;cl=line"),
+            Some(OwnedCommand::SemanticPrompt {
+                action: Action::FreshLineNewPrompt,
+                options: b"aid=foo;cl=line".to_vec(),
+            })
+        );
+        assert_eq!(
+            parse(b"133;C;cmdline=\xff"),
+            Some(OwnedCommand::SemanticPrompt {
+                action: Action::EndInputStartOutput,
+                options: b"cmdline=\xff".to_vec(),
+            })
+        );
+    }
+
+    #[test]
+    fn osc_parser_semantic_prompts_reject_invalid_forms() {
+        assert_eq!(parse(b"133"), None);
+        assert_eq!(parse(b"133;"), None);
+        assert_eq!(parse(b"133;X"), None);
+        assert_eq!(parse(b"133;L;aid=foo"), None);
+        assert_eq!(parse(b"133;Aextra"), None);
+        assert_eq!(parse(b"133;Bextra"), None);
+        assert_eq!(parse(b"133;Iextra"), None);
+        assert_eq!(parse(b"133;Cextra"), None);
+        assert_eq!(parse(b"133;Dextra"), None);
+        assert_eq!(parse(b"133;Nextra"), None);
+        assert_eq!(parse(b"133;Pextra"), None);
+
+        let mut oversized = b"133;A;".to_vec();
         oversized.extend(std::iter::repeat_n(b'x', MAX_BUF + 32));
         assert_eq!(parse(&oversized), None);
     }

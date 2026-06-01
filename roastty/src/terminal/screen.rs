@@ -4,6 +4,7 @@ use super::charsets;
 use super::color;
 use super::hyperlink;
 use super::kitty;
+use super::page::{SemanticContent, SemanticPrompt};
 use super::page_list::{
     BasicCellWriteError, CodepointMapEntry, PageList, PageListAllocError, PageOutputFormat,
     PageStringWithPinMap, StyledCellWriteError,
@@ -73,6 +74,8 @@ struct ScreenCursor {
     style: style::Style,
     protected: bool,
     hyperlink: Option<ScreenCursorHyperlink>,
+    semantic_content: SemanticContent,
+    semantic_content_clear_eol: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,6 +203,8 @@ impl Screen {
                 self.pages
                     .set_active_row_wrap_continuation(self.cursor.y.into(), true)
                     .map_err(BasicPrintError::Cell)?;
+                self.mark_semantic_prompt_continuation_on_wrap()
+                    .map_err(BasicPrintError::Cell)?;
             }
         }
 
@@ -218,6 +223,7 @@ impl Screen {
                     .hyperlink
                     .as_ref()
                     .map(ScreenCursorHyperlink::as_page_hyperlink),
+                self.cursor.semantic_content,
             )
             .map_err(BasicPrintError::from)?;
         if self.cursor.x == right_edge {
@@ -240,6 +246,8 @@ impl Screen {
                     .mark_active_row_dirty(y.into())
                     .map_err(BasicPrintError::Cell)?;
             }
+            self.after_explicit_linefeed()
+                .map_err(BasicPrintError::Cell)?;
             return Ok(());
         }
 
@@ -251,12 +259,83 @@ impl Screen {
         self.pages
             .mark_active_row_dirty(self.cursor.y.into())
             .map_err(BasicPrintError::Cell)?;
+        self.after_explicit_linefeed()
+            .map_err(BasicPrintError::Cell)?;
         Ok(())
     }
 
     pub(super) fn carriage_return_basic(&mut self) {
         self.cursor.pending_wrap = false;
         self.cursor.x = 0;
+    }
+
+    pub(super) const fn cursor_position(&self) -> (CellCountInt, CellCountInt) {
+        (self.cursor.x, self.cursor.y)
+    }
+
+    pub(super) fn set_cursor_semantic_output(&mut self) {
+        self.cursor.semantic_content = SemanticContent::Output;
+        self.cursor.semantic_content_clear_eol = false;
+    }
+
+    pub(super) fn set_cursor_semantic_input(&mut self, clear_eol: bool) {
+        self.cursor.semantic_content = SemanticContent::Input;
+        self.cursor.semantic_content_clear_eol = clear_eol;
+    }
+
+    pub(super) fn set_cursor_semantic_prompt(
+        &mut self,
+        kind: super::semantic_prompt::PromptKind,
+    ) -> Result<(), BasicCellWriteError> {
+        self.cursor.semantic_content = SemanticContent::Prompt;
+        self.cursor.semantic_content_clear_eol = false;
+        let prompt = match kind {
+            super::semantic_prompt::PromptKind::Initial
+            | super::semantic_prompt::PromptKind::Right => SemanticPrompt::Prompt,
+            super::semantic_prompt::PromptKind::Continuation
+            | super::semantic_prompt::PromptKind::Secondary => SemanticPrompt::PromptContinuation,
+        };
+        self.pages
+            .set_active_row_semantic_prompt(self.cursor.y.into(), prompt)
+    }
+
+    pub(super) fn clear_current_row_semantic_prompt(&mut self) -> Result<(), BasicCellWriteError> {
+        self.pages
+            .set_active_row_semantic_prompt(self.cursor.y.into(), SemanticPrompt::None)
+    }
+
+    pub(super) fn current_row_semantic_prompt(&self) -> Option<SemanticPrompt> {
+        self.pages.active_row_semantic_prompt(self.cursor.y.into())
+    }
+
+    fn after_explicit_linefeed(&mut self) -> Result<(), BasicCellWriteError> {
+        if self.cursor.semantic_content_clear_eol {
+            self.set_cursor_semantic_output();
+            return Ok(());
+        }
+        if matches!(
+            self.cursor.semantic_content,
+            SemanticContent::Prompt | SemanticContent::Input
+        ) {
+            self.pages.set_active_row_semantic_prompt(
+                self.cursor.y.into(),
+                SemanticPrompt::PromptContinuation,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn mark_semantic_prompt_continuation_on_wrap(&mut self) -> Result<(), BasicCellWriteError> {
+        if matches!(
+            self.cursor.semantic_content,
+            SemanticContent::Prompt | SemanticContent::Input
+        ) {
+            self.pages.set_active_row_semantic_prompt(
+                self.cursor.y.into(),
+                SemanticPrompt::PromptContinuation,
+            )?;
+        }
+        Ok(())
     }
 
     pub(super) fn cursor_up_basic(&mut self, count: CellCountInt) {
@@ -1044,6 +1123,20 @@ impl Screen {
     }
 
     #[cfg(test)]
+    pub(super) fn active_row_semantic_prompt_for_tests(&self, y: u32) -> SemanticPrompt {
+        self.pages.active_row_semantic_prompt_for_tests(y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_semantic_content_for_tests(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> SemanticContent {
+        self.pages.active_cell_semantic_content_for_tests(x, y)
+    }
+
+    #[cfg(test)]
     pub(super) fn verify_integrity_for_tests(&self) {
         self.pages.verify_integrity_for_tests();
     }
@@ -1058,6 +1151,8 @@ impl Default for ScreenCursor {
             style: style::Style::default(),
             protected: false,
             hyperlink: None,
+            semantic_content: SemanticContent::Output,
+            semantic_content_clear_eol: false,
         }
     }
 }

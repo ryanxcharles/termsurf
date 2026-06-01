@@ -3829,6 +3829,7 @@ impl PageList {
         x: CellCountInt,
         y: u32,
         codepoint: char,
+        semantic_content: SemanticContent,
     ) -> Result<(), BasicCellWriteError> {
         self.check_basic_active_cell(x, y)?;
         let point = point::Point::active(point::Coordinate::new(x, y));
@@ -3840,6 +3841,7 @@ impl PageList {
         let rac = page.get_row_and_cell_mut(pin.x as usize, pin.y as usize);
 
         *rac.cell = Cell::init(codepoint as u32);
+        rac.cell.set_semantic_content(semantic_content);
         rac.row.set_dirty(true);
         Ok(())
     }
@@ -3851,13 +3853,15 @@ impl PageList {
         codepoint: char,
         cell_style: style::Style,
         cell_hyperlink: Option<hyperlink::Hyperlink<'_>>,
+        semantic_content: SemanticContent,
     ) -> Result<(), StyledCellWriteError> {
         if cell_style.is_default()
             && cell_hyperlink.is_none()
+            && semantic_content == SemanticContent::Output
             && self.check_basic_active_cell(x, y).is_ok()
         {
             return self
-                .write_basic_active_cell(x, y, codepoint)
+                .write_basic_active_cell(x, y, codepoint, semantic_content)
                 .map_err(StyledCellWriteError::Cell);
         }
 
@@ -3875,6 +3879,7 @@ impl PageList {
             codepoint,
             cell_style,
             cell_hyperlink,
+            semantic_content,
         )
         .map_err(|err| match err {
             super::page::PrintCellError::UnsupportedManagedCell => {
@@ -3883,6 +3888,22 @@ impl PageList {
             super::page::PrintCellError::StyleOutOfMemory
             | super::page::PrintCellError::HyperlinkOutOfMemory => StyledCellWriteError::PageAlloc,
         })
+    }
+
+    pub(super) fn set_active_row_semantic_prompt(
+        &mut self,
+        y: u32,
+        prompt: SemanticPrompt,
+    ) -> Result<(), BasicCellWriteError> {
+        let point = point::Point::active(point::Coordinate::new(0, y));
+        let pin = self.pin(point).ok_or(BasicCellWriteError::InvalidPoint)?;
+        let index = self
+            .node_index(pin.node)
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let row = self.pages[index].page.get_row_mut(pin.y as usize);
+        row.set_semantic_prompt(prompt);
+        row.set_dirty(true);
+        Ok(())
     }
 
     pub(super) fn check_basic_active_cell(
@@ -4067,6 +4088,31 @@ impl PageList {
     fn pin_semantic_prompt(&self, pin: Pin) -> Option<SemanticPrompt> {
         self.node_for_pin(&pin)
             .map(|node| node.page.get_row(pin.y as usize).semantic_prompt())
+    }
+
+    pub(super) fn active_row_semantic_prompt(&self, y: u32) -> Option<SemanticPrompt> {
+        let pin = self.pin(point::Point::active(point::Coordinate::new(0, y)))?;
+        self.pin_semantic_prompt(pin)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_row_semantic_prompt_for_tests(&self, y: u32) -> SemanticPrompt {
+        self.active_row_semantic_prompt(y)
+            .expect("active row semantic prompt must resolve")
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_semantic_content_for_tests(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> SemanticContent {
+        let pin = self
+            .pin(point::Point::active(point::Coordinate::new(x, y)))
+            .expect("active cell must resolve");
+        self.pin_cell(pin)
+            .expect("active cell semantic content must resolve")
+            .semantic_content()
     }
 
     fn pin_cell(&self, pin: Pin) -> Option<&Cell> {

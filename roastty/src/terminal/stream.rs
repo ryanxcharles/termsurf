@@ -1150,6 +1150,10 @@ mod tests {
             halign: osc::KittyTextHorizontalAlign,
             text: String,
         },
+        SemanticPrompt {
+            action: super::super::semantic_prompt::Action,
+            options: Vec<u8>,
+        },
         KittyClipboard {
             metadata: Vec<u8>,
             payload: Option<Vec<u8>>,
@@ -1203,6 +1207,10 @@ mod tests {
                     valign: value.valign,
                     halign: value.halign,
                     text: value.text.to_string(),
+                },
+                OscAction::SemanticPrompt { value } => Self::SemanticPrompt {
+                    action: value.action,
+                    options: value.options().to_vec(),
                 },
                 OscAction::KittyClipboard { value } => Self::KittyClipboard {
                     metadata: value.metadata.to_vec(),
@@ -5766,6 +5774,74 @@ mod tests {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();
         let mut input = b"A\x1b]3008\x07B\x1b]3008;\x07C\x1b]3008;start=\x07D\x1b]3008;bogus=id\x07E\x1b]3008;start=id;".to_vec();
+        input.extend(std::iter::repeat_n(b'x', osc::MAX_BUF + 32));
+        input.extend_from_slice(b"\x07F");
+
+        next_slice(&mut stream, &mut handler, &input);
+
+        assert_eq!(print_chars(&handler), &['A', 'B', 'C', 'D', 'E', 'F']);
+        assert_eq!(osc_actions(&handler), &[]);
+    }
+
+    #[test]
+    fn stream_osc_dispatches_semantic_prompts() {
+        use super::super::semantic_prompt::Action;
+
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(
+            &mut stream,
+            &mut handler,
+            b"\x1b]133;L\x07\x1b]133;A;aid=foo;cl=line\x07\x1b]133;N\x07\x1b]133;P;k=c\x07\x1b]133;B\x07\x1b]133;I\x07\x1b]133;C;cmdline=\xff\x1b\\\x1b]133;D;0\x07",
+        );
+
+        assert_eq!(
+            osc_actions(&handler),
+            &[
+                OwnedOscAction::SemanticPrompt {
+                    action: Action::FreshLine,
+                    options: b"".to_vec(),
+                },
+                OwnedOscAction::SemanticPrompt {
+                    action: Action::FreshLineNewPrompt,
+                    options: b"aid=foo;cl=line".to_vec(),
+                },
+                OwnedOscAction::SemanticPrompt {
+                    action: Action::NewCommand,
+                    options: b"".to_vec(),
+                },
+                OwnedOscAction::SemanticPrompt {
+                    action: Action::PromptStart,
+                    options: b"k=c".to_vec(),
+                },
+                OwnedOscAction::SemanticPrompt {
+                    action: Action::EndPromptStartInput,
+                    options: b"".to_vec(),
+                },
+                OwnedOscAction::SemanticPrompt {
+                    action: Action::EndPromptStartInputTerminateEol,
+                    options: b"".to_vec(),
+                },
+                OwnedOscAction::SemanticPrompt {
+                    action: Action::EndInputStartOutput,
+                    options: b"cmdline=\xff".to_vec(),
+                },
+                OwnedOscAction::SemanticPrompt {
+                    action: Action::EndCommand,
+                    options: b"0".to_vec(),
+                },
+            ]
+        );
+        assert_eq!(actions(&handler), &[]);
+    }
+
+    #[test]
+    fn stream_osc_invalid_semantic_prompts_do_not_dispatch_or_leak() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+        let mut input =
+            b"A\x1b]133\x07B\x1b]133;\x07C\x1b]133;X\x07D\x1b]133;Aextra\x07E\x1b]133;A;".to_vec();
         input.extend(std::iter::repeat_n(b'x', osc::MAX_BUF + 32));
         input.extend_from_slice(b"\x07F");
 
