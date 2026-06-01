@@ -396,6 +396,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 133: Port Basic OSC Runtime](133-port-basic-osc-runtime.md) —
   **Pass**
+- [Experiment 134: Port OSC 8 Printed Cell Hyperlinks](134-port-osc8-cell-hyperlinks.md)
+  — **Designed**
 
 ## Non-Goals
 
