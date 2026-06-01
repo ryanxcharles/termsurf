@@ -65,7 +65,11 @@ API, public ABI, renderer behavior, app behavior, or UI behavior.
      than porting Ghostty's exact SIMD path. Do not add SIMD in this slice.
 
 5. Explicitly defer escape and control handling.
-   - C0/C1 control bytes other than ESC are ignored in this slice.
+   - C0 controls other than ESC and DEL (`0x7f`) are ignored in this slice.
+   - Raw bytes in the `0x80..=0x9f` C1 range are handled by the UTF-8 decoder,
+     because the stream is decoding UTF-8 bytes. A standalone C1 byte therefore
+     dispatches `U+FFFD` as invalid UTF-8 instead of being treated as a terminal
+     control action.
    - ESC (`0x1b`) starts a minimal unsupported-escape state and must not leak
      subsequent escape bytes as printable text.
    - For unsupported CSI-looking input such as `ESC [ C`, consume through the
@@ -92,7 +96,9 @@ API, public ABI, renderer behavior, app behavior, or UI behavior.
        dropping it, matching upstream `UTF8Decoder.zig` behavior;
      - incomplete UTF-8 held at a slice boundary completes correctly on the next
        slice;
-     - unsupported C0/C1 control bytes do not masquerade as printable text;
+     - unsupported C0 controls and DEL do not masquerade as printable text;
+     - raw C1-range bytes are handled by the UTF-8 decoder and do not become
+       terminal control actions;
      - unsupported direct ESC final-byte sequences do not leak their final byte
        as printable text;
      - unsupported CSI-shaped escape sequences such as `ESC [ C` consume the
@@ -208,3 +214,110 @@ Re-review artifacts:
 - Result: `logs/codex-review/20260601-003712-140875-last-message.md`
 
 Codex found no remaining blocking findings and approved implementation.
+
+## Result
+
+**Result:** Pass.
+
+Implemented the first private stream slice in `roastty/src/terminal/stream.rs`
+and wired it into the terminal subsystem with a private `mod stream`
+declaration. The module is not part of the public Roastty API or ABI.
+
+The stream uses a private `Action::Print { cp: char }` enum and a private
+`Handler` trait with `vt(&mut self, action: Action)`. This preserves the
+upstream boundary: byte parsing emits stream actions, and terminal mutation
+remains deferred to a later experiment.
+
+The implementation supports incremental UTF-8 print decoding through
+`Stream::next_slice(&[u8])`:
+
+- ASCII and complete Unicode scalar values dispatch one print action per scalar.
+- Split multi-byte sequences are buffered across calls and dispatch only after
+  the final byte arrives.
+- Invalid UTF-8 dispatches `U+FFFD`.
+- If a pending sequence rejects a byte that can start the next scalar, the
+  stream emits `U+FFFD` for the pending sequence and retries the rejecting byte
+  instead of dropping it. Tests cover both a retried multi-byte starter and a
+  retried ASCII byte.
+- If a pending sequence rejects an ESC, C0 control, or DEL byte, the stream
+  first emits `U+FFFD` for the pending UTF-8 sequence and then handles the
+  rejecting byte as terminal syntax. This preserves upstream's
+  retry-the-rejecting-byte semantics without leaking unsupported terminal syntax
+  as printable text.
+- Incomplete UTF-8 at a slice boundary is held until a later call completes it
+  or proves it invalid.
+
+Unsupported terminal syntax is deliberately minimal and tested:
+
+- C0 controls other than ESC and DEL are ignored.
+- Raw `0x80..=0x9f` bytes are treated as UTF-8 input, not as terminal control
+  actions; standalone invalid bytes dispatch `U+FFFD`.
+- ESC starts a small unsupported-escape state.
+- Direct unsupported ESC final-byte input such as `ESC c` is consumed without
+  leaking the final byte as printable text.
+- CSI-shaped unsupported input such as `ESC [ C` is consumed through the final
+  byte and then returns to ground state.
+
+This experiment did not add terminal mutation, CSI parsing, OSC parsing, DCS
+parsing, APC parsing, PTY IO, public API, public ABI, renderer behavior, app
+behavior, or UI behavior.
+
+Verification run:
+
+```text
+cargo fmt
+cargo test -p roastty stream
+cargo test -p roastty terminal_formatter
+cargo test -p roastty modes
+cargo test -p roastty tabstops
+cargo test -p roastty screen_formatter
+cargo test -p roastty styled_pin_map
+cargo test -p roastty pin_map
+cargo test -p roastty page_string
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo fmt` passed.
+- `cargo test -p roastty stream` passed 72 tests.
+- `cargo test -p roastty terminal_formatter` passed 67 tests.
+- `cargo test -p roastty modes` passed 20 tests.
+- `cargo test -p roastty tabstops` passed 18 tests.
+- `cargo test -p roastty screen_formatter` passed 55 tests.
+- `cargo test -p roastty styled_pin_map` passed 9 tests.
+- `cargo test -p roastty pin_map` passed 65 tests.
+- `cargo test -p roastty page_string` passed 12 tests.
+- `cargo test -p roastty terminal::page_list` passed 524 tests.
+- Full `cargo test -p roastty` passed 973 unit tests, the ABI harness, and
+  doc-tests.
+
+Codex design review passed after the two design findings above were fixed. Codex
+result review found one real upstream-fidelity bug: pending UTF-8 was silently
+dropped if the rejecting byte was ESC, C0, or DEL.
+
+Initial result-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-004839-680527-prompt.md`
+- Result: `logs/codex-review/20260601-004839-680527-last-message.md`
+
+The implementation now emits `U+FFFD` before retrying the rejecting byte through
+terminal syntax, and tests cover pending UTF-8 followed by C0, DEL, direct ESC,
+and CSI-shaped ESC input.
+
+Clean result re-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-005142-208198-prompt.md`
+- Result: `logs/codex-review/20260601-005142-208198-last-message.md`
+
+Codex found no remaining correctness or upstream-fidelity findings and approved
+the result as good enough to commit.
+
+## Conclusion
+
+Roastty now has the first runtime byte-stream boundary: a private, tested stream
+parser that can decode printable UTF-8 input into print actions without touching
+terminal state. The next stream/parser work can build on this by adding real
+parser states and terminal mutation one narrow slice at a time, while keeping
+the action/handler boundary intact.
