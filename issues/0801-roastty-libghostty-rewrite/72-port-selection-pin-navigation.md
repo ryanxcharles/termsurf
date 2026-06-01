@@ -181,3 +181,64 @@ updated design before implementation begins.
 
 Follow-up Codex review approved the updated design for implementation. No
 remaining blockers were found.
+
+## Result
+
+**Result:** Pass
+
+Implemented the PageList-local pin navigation helpers needed before porting
+`SelectionGesture.dragSelection`:
+
+- added `PageList::pin_before`;
+- added `PageList::pin_left_clamp`;
+- added `PageList::pin_right_clamp`;
+- added `PageList::pin_left_wrap`;
+- added `PageList::pin_right_wrap`;
+- added private absolute-row helpers to map between PageList page order and
+  wrapped cell positions.
+
+The helpers remain private to `PageList`, reject invalid or garbage pins, and do
+not assume that `Pin` can traverse linked-list nodes directly. No
+`SelectionGesture`, Screen, Terminal, public ABI, renderer, parser, app, word
+selection, line selection, semantic-output selection, autoscroll, press/release,
+deep-press, or platform input behavior was added.
+
+Tests added:
+
+- `pin_before` within a row, across rows, across pages, and for equal pins;
+- invalid and garbage rejection for `pin_before`;
+- left/right clamp ordinary one-cell movement;
+- left/right clamp saturation;
+- invalid and garbage rejection for clamp helpers;
+- left/right wrap ordinary one-cell movement within a row;
+- left/right wrap across row boundaries;
+- left/right wrap returning `None` at the top-left and bottom-right edges;
+- left/right wrap across PageList page boundaries;
+- invalid and garbage rejection for wrap helpers.
+
+Verification:
+
+```bash
+cargo fmt
+cargo test -p roastty pin_navigation
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo test -p roastty pin_navigation`: 10 passed.
+- `cargo test -p roastty terminal::page_list`: 337 passed.
+- `cargo test -p roastty`: 630 unit tests passed, ABI harness passed, doctests
+  passed.
+
+Codex reviewed the implementation and found no code blockers. The only review
+requirements were to record this result and update the README status to `Pass`.
+Those requirements are reflected here.
+
+## Conclusion
+
+Experiment 72 completed the pin ordering, clamping, and horizontal wrapping
+prerequisite for `SelectionGesture.dragSelection`. The next experiment can port
+the pure cell-granular drag-selection calculation against these helpers without
+pulling in full gesture state, Screen, Terminal, or platform input behavior.

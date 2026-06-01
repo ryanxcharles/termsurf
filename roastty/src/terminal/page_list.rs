@@ -3187,6 +3187,120 @@ impl PageList {
         None
     }
 
+    fn pin_absolute_row(&self, pin: Pin) -> Option<usize> {
+        if pin.garbage || !self.pin_is_valid(&pin) {
+            return None;
+        }
+
+        let mut row = 0usize;
+        for node in &self.pages {
+            if NonNull::from(node.as_ref()) == pin.node {
+                return Some(row + pin.y as usize);
+            }
+            row += node.page.size_rows() as usize;
+        }
+
+        None
+    }
+
+    fn pin_at_absolute_row(&self, row: usize, x: CellCountInt, garbage: bool) -> Option<Pin> {
+        let mut remaining = row;
+        for node in &self.pages {
+            let rows = node.page.size_rows() as usize;
+            if remaining < rows {
+                if x >= node.page.size_cols() {
+                    return None;
+                }
+                return Some(Pin {
+                    node: NonNull::from(node.as_ref()),
+                    y: remaining
+                        .try_into()
+                        .expect("absolute row offset must fit CellCountInt"),
+                    x,
+                    garbage,
+                });
+            }
+            remaining -= rows;
+        }
+
+        None
+    }
+
+    fn pin_before(&self, pin: Pin, other: Pin) -> Option<bool> {
+        if pin.garbage || other.garbage {
+            return None;
+        }
+        if !self.pin_is_valid(&pin) || !self.pin_is_valid(&other) {
+            return None;
+        }
+
+        if pin.node == other.node {
+            if pin.y < other.y {
+                return Some(true);
+            }
+            if pin.y > other.y {
+                return Some(false);
+            }
+            return Some(pin.x < other.x);
+        }
+
+        Some(self.node_index(pin.node)? < self.node_index(other.node)?)
+    }
+
+    fn pin_left_clamp(&self, pin: Pin, cells: CellCountInt) -> Option<Pin> {
+        if pin.garbage || !self.pin_is_valid(&pin) {
+            return None;
+        }
+
+        let mut result = pin;
+        result.x = result.x.saturating_sub(cells);
+        Some(result)
+    }
+
+    fn pin_right_clamp(&self, pin: Pin, cells: CellCountInt) -> Option<Pin> {
+        if pin.garbage || !self.pin_is_valid(&pin) {
+            return None;
+        }
+
+        let node = self.node_for_pin(&pin)?;
+        let max_x = node.page.size_cols() - 1;
+        let mut result = pin;
+        result.x = result.x.saturating_add(cells).min(max_x);
+        Some(result)
+    }
+
+    fn pin_left_wrap(&self, pin: Pin, cells: usize) -> Option<Pin> {
+        let node = self.node_for_pin(&pin)?;
+        let cols = node.page.size_cols() as usize;
+        let row = self.pin_absolute_row(pin)?;
+        let linear = row.checked_mul(cols)?.checked_add(pin.x as usize)?;
+        let target = linear.checked_sub(cells)?;
+        let target_row = target / cols;
+        let target_x = (target % cols)
+            .try_into()
+            .expect("wrapped pin x must fit CellCountInt");
+
+        self.pin_at_absolute_row(target_row, target_x, pin.garbage)
+    }
+
+    fn pin_right_wrap(&self, pin: Pin, cells: usize) -> Option<Pin> {
+        let node = self.node_for_pin(&pin)?;
+        let cols = node.page.size_cols() as usize;
+        let total = self.total_rows().checked_mul(cols)?.checked_sub(1)?;
+        let row = self.pin_absolute_row(pin)?;
+        let linear = row.checked_mul(cols)?.checked_add(pin.x as usize)?;
+        let target = linear.checked_add(cells)?;
+        if target > total {
+            return None;
+        }
+        let target_row = target / cols;
+        let target_x = (target % cols)
+            .try_into()
+            .expect("wrapped pin x must fit CellCountInt");
+
+        self.pin_at_absolute_row(target_row, target_x, pin.garbage)
+    }
+
     fn total_rows(&self) -> usize {
         self.pages
             .iter()
@@ -11135,6 +11249,156 @@ mod tests {
             garbage: false,
         };
         assert_eq!(list.point_from_pin(point::Tag::Active, before_active), None);
+    }
+
+    #[test]
+    fn pin_navigation_before_within_row_and_equal() {
+        let list = PageList::init(10, 5, None).unwrap();
+        let left = screen_pin(&list, 2, 3);
+        let right = screen_pin(&list, 7, 3);
+
+        assert_eq!(list.pin_before(left, right), Some(true));
+        assert_eq!(list.pin_before(right, left), Some(false));
+        assert_eq!(list.pin_before(left, left), Some(false));
+    }
+
+    #[test]
+    fn pin_navigation_before_across_rows_and_pages() {
+        let mut list = PageList::init(4, 4, Some(0)).unwrap();
+        let first = list.first_node_ptr();
+        list.split(Pin::new(first, 2, 0)).unwrap();
+        let top = screen_pin(&list, 3, 1);
+        let bottom = screen_pin(&list, 0, 2);
+
+        assert_ne!(top.node, bottom.node);
+        assert_eq!(list.pin_before(screen_pin(&list, 0, 0), top), Some(true));
+        assert_eq!(list.pin_before(top, bottom), Some(true));
+        assert_eq!(list.pin_before(bottom, top), Some(false));
+    }
+
+    #[test]
+    fn pin_navigation_before_rejects_invalid_or_garbage() {
+        let list = PageList::init(10, 5, None).unwrap();
+        let other = PageList::init(10, 5, None).unwrap();
+        let valid = screen_pin(&list, 2, 3);
+        let invalid = Pin::new(other.first_node_ptr(), 0, 0);
+        let mut garbage = valid;
+        garbage.garbage = true;
+
+        assert_eq!(list.pin_before(invalid, valid), None);
+        assert_eq!(list.pin_before(valid, invalid), None);
+        assert_eq!(list.pin_before(garbage, valid), None);
+        assert_eq!(list.pin_before(valid, garbage), None);
+    }
+
+    #[test]
+    fn pin_navigation_clamp_moves_and_saturates() {
+        let list = PageList::init(10, 5, None).unwrap();
+        let pin = screen_pin(&list, 5, 3);
+
+        assert_eq!(
+            screen_coord(&list, list.pin_left_clamp(pin, 1).unwrap()),
+            Coordinate::new(4, 3)
+        );
+        assert_eq!(
+            screen_coord(&list, list.pin_right_clamp(pin, 1).unwrap()),
+            Coordinate::new(6, 3)
+        );
+        assert_eq!(
+            screen_coord(&list, list.pin_left_clamp(pin, 9).unwrap()),
+            Coordinate::new(0, 3)
+        );
+        assert_eq!(
+            screen_coord(&list, list.pin_right_clamp(pin, 9).unwrap()),
+            Coordinate::new(9, 3)
+        );
+    }
+
+    #[test]
+    fn pin_navigation_clamp_rejects_invalid_or_garbage() {
+        let list = PageList::init(10, 5, None).unwrap();
+        let other = PageList::init(10, 5, None).unwrap();
+        let invalid = Pin::new(other.first_node_ptr(), 0, 0);
+        let mut garbage = screen_pin(&list, 2, 3);
+        garbage.garbage = true;
+
+        assert!(list.pin_left_clamp(invalid, 1).is_none());
+        assert!(list.pin_right_clamp(invalid, 1).is_none());
+        assert!(list.pin_left_clamp(garbage, 1).is_none());
+        assert!(list.pin_right_clamp(garbage, 1).is_none());
+    }
+
+    #[test]
+    fn pin_navigation_wrap_moves_within_row() {
+        let list = PageList::init(10, 5, None).unwrap();
+        let pin = screen_pin(&list, 5, 3);
+
+        assert_eq!(
+            screen_coord(&list, list.pin_left_wrap(pin, 1).unwrap()),
+            Coordinate::new(4, 3)
+        );
+        assert_eq!(
+            screen_coord(&list, list.pin_right_wrap(pin, 1).unwrap()),
+            Coordinate::new(6, 3)
+        );
+    }
+
+    #[test]
+    fn pin_navigation_wrap_crosses_rows() {
+        let list = PageList::init(10, 5, None).unwrap();
+
+        assert_eq!(
+            screen_coord(
+                &list,
+                list.pin_left_wrap(screen_pin(&list, 0, 3), 1).unwrap()
+            ),
+            Coordinate::new(9, 2)
+        );
+        assert_eq!(
+            screen_coord(
+                &list,
+                list.pin_right_wrap(screen_pin(&list, 9, 2), 1).unwrap()
+            ),
+            Coordinate::new(0, 3)
+        );
+    }
+
+    #[test]
+    fn pin_navigation_wrap_returns_none_at_edges() {
+        let list = PageList::init(10, 5, None).unwrap();
+
+        assert!(list.pin_left_wrap(screen_pin(&list, 0, 0), 1).is_none());
+        assert!(list.pin_right_wrap(screen_pin(&list, 9, 4), 1).is_none());
+    }
+
+    #[test]
+    fn pin_navigation_wrap_crosses_page_boundaries() {
+        let mut list = PageList::init(4, 4, Some(0)).unwrap();
+        let first = list.first_node_ptr();
+        list.split(Pin::new(first, 2, 0)).unwrap();
+        let before_boundary = screen_pin(&list, 3, 1);
+        let after_boundary = screen_pin(&list, 0, 2);
+
+        assert_ne!(before_boundary.node, after_boundary.node);
+        assert_eq!(
+            list.pin_right_wrap(before_boundary, 1),
+            Some(after_boundary)
+        );
+        assert_eq!(list.pin_left_wrap(after_boundary, 1), Some(before_boundary));
+    }
+
+    #[test]
+    fn pin_navigation_wrap_rejects_invalid_or_garbage() {
+        let list = PageList::init(10, 5, None).unwrap();
+        let other = PageList::init(10, 5, None).unwrap();
+        let invalid = Pin::new(other.first_node_ptr(), 0, 0);
+        let mut garbage = screen_pin(&list, 2, 3);
+        garbage.garbage = true;
+
+        assert!(list.pin_left_wrap(invalid, 1).is_none());
+        assert!(list.pin_right_wrap(invalid, 1).is_none());
+        assert!(list.pin_left_wrap(garbage, 1).is_none());
+        assert!(list.pin_right_wrap(garbage, 1).is_none());
     }
 
     #[test]
