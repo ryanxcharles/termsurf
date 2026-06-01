@@ -434,6 +434,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 153: Port CSI Repeat Previous Character](153-port-csi-repeat-previous-character.md)
   — **Pass**
+- [Experiment 154: Port Alternate-Screen Modes](154-port-alternate-screen-modes.md)
+  — **Designed**
 
 ## Non-Goals
 
