@@ -301,3 +301,84 @@ Codex re-reviewed the updated design and found no blocking findings:
 `logs/codex-review/20260601-063004-451046-last-message.md`.
 
 The design is approved for implementation.
+
+## Result
+
+**Result:** Pass
+
+Roastty now accepts real SM/RM input for mode state:
+
+- `CSI h` and `CSI l` dispatch ANSI mode set/reset actions;
+- `CSI ? h` and `CSI ? l` dispatch DEC private mode set/reset actions;
+- multi-param mode commands dispatch known modes in parameter order;
+- unknown mode numbers are skipped without aborting later known mode params;
+- empty mode params resolve to value `0`, which is unknown and dispatches no
+  action;
+- over-capacity CSI params are treated as invalid for dispatch, do not panic,
+  and do not leak the final `h` / `l` byte as printable text;
+- colon-separated CSI params remain invalid under the current parser model;
+- unsupported private/intermediate forms do not dispatch;
+- raw C1 `0x9b` remains out of scope and follows the existing UTF-8 replacement
+  behavior.
+
+The stream parser now uses an upstream-sized fixed CSI param capacity of 24, and
+mode commands use a fixed-capacity ordered action list so up to 24 mode actions
+can be delivered without heap allocation. Dispatch stops on the first handler
+error, while the parser has already returned to ground state.
+
+Terminal execution now routes `Action::SetMode` and `Action::ResetMode` through
+real terminal input. Dispatched modes update `ModeState` first, matching
+Ghostty's ordering. The current-core side effects implemented here are:
+
+- `Mode::Origin` set/reset moves the cursor to origin-home, using the scrolling
+  region top/left when origin mode is enabled and screen top-left when disabled;
+- origin-home movement clears pending wrap through the normal cursor movement
+  path;
+- resetting `Mode::EnableLeftAndRightMargin` (`CSI ? 69 l`) clears horizontal
+  margins to the full screen width while preserving the vertical scroll region.
+
+The following modes intentionally remain state-only in this experiment:
+
+- insert mode (`CSI 4 h/l`) does not yet change printable-character insertion
+  behavior;
+- linefeed mode (`CSI 20 h/l`) does not yet make LF behave like CRLF;
+- wraparound mode (`CSI ? 7 h/l`) does not yet disable/enable runtime wrapping;
+- alternate-screen modes (`?47`, `?1047`, `?1049`) do not switch screens;
+- save/restore cursor (`?1048`) does not save or restore cursor state;
+- DECCOLM (`?3`) does not resize the terminal;
+- mouse modes and formats update mode state only and do not affect mouse
+  encoding;
+- keypad and renderer-visible modes update stored state only.
+
+Tests verify that representative deferred modes toggle `ModeState` without
+faking their side effects. Ordinary mode-state commands do not modify cells or
+dirty rows. Formatter mode extras observe the updated mode state, including
+bracketed paste.
+
+Verification commands passed:
+
+```bash
+cargo fmt
+cargo test -p roastty stream
+cargo test -p roastty terminal::modes
+cargo test -p roastty terminal::terminal
+cargo test -p roastty terminal_formatter
+cargo test -p roastty screen_formatter
+cargo test -p roastty page_string
+cargo test -p roastty
+```
+
+The final full `cargo test -p roastty` run passed: 1380 unit tests, 1 ABI
+harness test, and 0 doc tests.
+
+Codex design review passed after the design updates recorded above. Codex result
+review passed with no blocking findings:
+`logs/codex-review/20260601-063851-036562-last-message.md`.
+
+## Conclusion
+
+Experiment 128 successfully connects Roastty's existing mode table and
+`ModeState` storage to real stream input. The parser now has the upstream CSI
+parameter capacity needed for multi-param SM/RM commands, and terminal execution
+implements the honest side effects currently supported by the core while
+explicitly leaving heavier mode behavior for later subsystem experiments.
