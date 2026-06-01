@@ -165,3 +165,87 @@ Clean design re-review artifacts:
 - Result: `logs/codex-review/20260601-014149-223678-last-message.md`
 
 Codex found no remaining design blockers and approved implementation.
+
+## Result
+
+**Result:** Pass.
+
+Implemented basic default backspace behavior for the active full-width path.
+
+Stream action changes:
+
+- `Action::Backspace` was added as a private stream action.
+- Ground-state `0x08` now dispatches `Backspace`.
+- Other C0 controls outside `BS`, `LF`, and `CR` remain ignored.
+- Pending invalid UTF-8 dispatches `U+FFFD` before an interrupting `BS`.
+
+Active backspace behavior:
+
+- Backspace clears pending wrap.
+- If the cursor is right of active column 0, backspace moves it left by one.
+- If the cursor is already at active column 0, backspace leaves it there.
+- Backspace does not change `cursor.y`.
+- Backspace does not modify cells.
+- Backspace does not dirty rows by itself.
+
+Tested behavior:
+
+- `hello\x08y` formats as `helly`.
+- `BS` at column 0 clamps at column 0.
+- `ABCDE\x08X` on a 5-column terminal formats as `ABCXE`, matching upstream's
+  default no-reverse-wrap pending-wrap behavior.
+- Dirty-state testing clears prior dirt before issuing `BS` and verifies rows
+  remain clean.
+- Split-feed backspace behaves the same as same-slice backspace.
+
+This experiment did not implement reverse wrap, reverse-wrap-extended,
+cursor-left CSI, delete/erase behavior, tabs, NEL, RI, C1 controls,
+linefeed-mode changes, margins, scroll regions, no-scrollback rotation, styles,
+hyperlinks, wide/Unicode handling, public API, or public ABI.
+
+Verification run:
+
+```text
+cargo fmt
+cargo test -p roastty stream
+cargo test -p roastty terminal_formatter
+cargo test -p roastty terminal::terminal
+cargo test -p roastty screen_formatter
+cargo test -p roastty page_string
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo fmt` passed.
+- `cargo test -p roastty stream` passed 107 tests.
+- `cargo test -p roastty terminal_formatter` passed 67 tests.
+- `cargo test -p roastty terminal::terminal` passed 98 tests.
+- `cargo test -p roastty screen_formatter` passed 55 tests.
+- `cargo test -p roastty page_string` passed 12 tests.
+- `cargo test -p roastty terminal::page_list` passed 524 tests.
+- Full `cargo test -p roastty` passed 1008 unit tests, the ABI harness, and
+  doc-tests.
+
+Codex design review passed after the upstream-fidelity finding was fixed.
+
+Result-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-014418-923699-prompt.md`
+- Result: `logs/codex-review/20260601-014418-923699-last-message.md`
+
+Codex found no blocking correctness, upstream-fidelity, pending-wrap,
+dirty-state, coordinate-domain, missing-test, or scope findings. Codex approved
+the result for commit.
+
+## Conclusion
+
+Roastty now handles default backspace in the same narrow active full-width
+control path as LF and CR. This gives basic shell-style correction behavior:
+text can move the cursor left, overwrite the previous cell with the next
+printable character, and clear pending wrap without triggering a soft wrap.
+
+The next execute-action experiment should likely port horizontal tab (`HT`)
+using the existing tabstop state, while keeping margin/origin edge cases scoped
+carefully.

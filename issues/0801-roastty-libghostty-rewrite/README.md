@@ -321,8 +321,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 105: Port Basic Wrap Scroll](105-port-basic-wrap-scroll.md) —
   **Pass**
 - [Experiment 106: Port Basic LF and CR](106-port-basic-lf-cr.md) — **Pass**
-- [Experiment 107: Port Basic Backspace](107-port-basic-backspace.md) —
-  **Designed**
+- [Experiment 107: Port Basic Backspace](107-port-basic-backspace.md) — **Pass**
 
 ## Non-Goals
 

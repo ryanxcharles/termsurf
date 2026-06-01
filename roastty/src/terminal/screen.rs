@@ -188,6 +188,11 @@ impl Screen {
         self.cursor.x = 0;
     }
 
+    pub(super) fn backspace_basic(&mut self) {
+        self.cursor.pending_wrap = false;
+        self.cursor.x = self.cursor.x.saturating_sub(1);
+    }
+
     #[cfg(test)]
     pub(super) fn set_cursor_position_for_tests(&mut self, x: CellCountInt, y: CellCountInt) {
         self.cursor.x = x;

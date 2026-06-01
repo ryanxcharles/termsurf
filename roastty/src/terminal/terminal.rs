@@ -281,6 +281,10 @@ impl Handler for TerminalStreamHandler<'_> {
                 self.screen.carriage_return_basic();
                 Ok(())
             }
+            Action::Backspace => {
+                self.screen.backspace_basic();
+                Ok(())
+            }
         }
     }
 }
@@ -987,6 +991,71 @@ mod tests {
 
         assert_eq!(plain_with_unwrap(&terminal, false), "hello\nworld");
         assert_eq!(terminal.cursor_position_for_tests(), (5, 1));
+    }
+
+    #[test]
+    fn terminal_stream_backspace_overwrites_previous_cell() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"hello\x08y").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "helly");
+        assert_eq!(terminal.cursor_position_for_tests(), (5, 0));
+    }
+
+    #[test]
+    fn terminal_stream_backspace_at_column_zero_clamps() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"\x08A").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "A");
+        assert_eq!(terminal.cursor_position_for_tests(), (1, 0));
+    }
+
+    #[test]
+    fn terminal_stream_backspace_clears_pending_wrap_without_soft_wrap() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"ABCDE").unwrap();
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+        assert!(terminal.cursor_pending_wrap_for_tests());
+        terminal.next_slice(b"\x08").unwrap();
+        assert_eq!(terminal.cursor_position_for_tests(), (3, 0));
+        assert!(!terminal.cursor_pending_wrap_for_tests());
+        terminal.next_slice(b"X").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABCXE");
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+        assert!(!terminal.cursor_pending_wrap_for_tests());
+        assert!(!terminal.row_wrap_for_tests(0));
+        assert!(!terminal.row_wrap_continuation_for_tests(1));
+    }
+
+    #[test]
+    fn terminal_stream_backspace_does_not_dirty_rows_or_modify_cells() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"abc").unwrap();
+        terminal.clear_dirty_for_tests();
+        terminal.next_slice(b"\x08").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+        assert_eq!(terminal.cursor_position_for_tests(), (2, 0));
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(4, 0));
+        assert!(!terminal.is_dirty_for_tests(0, 1));
+    }
+
+    #[test]
+    fn terminal_stream_split_feed_backspace_overwrites_previous_cell() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"hello").unwrap();
+        terminal.next_slice(b"\x08y").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "helly");
+        assert_eq!(terminal.cursor_position_for_tests(), (5, 0));
     }
 
     #[test]
