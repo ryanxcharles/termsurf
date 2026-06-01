@@ -256,6 +256,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 70: Port Selection Adjustment](70-port-selection-adjustment.md) —
   **Pass**
+- [Experiment 71: Port Selection Tracking Ownership](71-port-selection-tracking-ownership.md)
+  — **Designed**
 
 ## Non-Goals
 
