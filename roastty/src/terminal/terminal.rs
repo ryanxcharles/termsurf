@@ -363,6 +363,28 @@ mod tests {
     }
 
     #[test]
+    fn terminal_formatter_default_path_does_not_emit_screen_extras() {
+        let mut terminal = terminal_with_lines(&["hi"]);
+        terminal.screens.active.set_cursor_position_for_tests(4, 2);
+        terminal
+            .screens
+            .active
+            .set_cursor_style_for_tests(style::Style {
+                flags: style::Flags {
+                    bold: true,
+                    ..style::Flags::default()
+                },
+                ..style::Style::default()
+            });
+
+        let terminal_output = formatter(&terminal, PageOutputFormat::Vt).format();
+        let screen_output = screen_formatter(&terminal, PageOutputFormat::Vt).format();
+
+        assert_eq!(terminal_output, screen_output);
+        assert_eq!(terminal_output, "hi");
+    }
+
+    #[test]
     fn terminal_formatter_invalid_or_garbage_selection_returns_empty_output_and_map() {
         let terminal = terminal_with_lines(&["hello"]);
         let other = terminal_with_lines(&["other"]);

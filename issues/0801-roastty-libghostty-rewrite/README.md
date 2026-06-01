@@ -291,7 +291,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 90: Port Terminal Formatter Content](90-port-terminal-formatter-content.md)
   — **Pass**
 - [Experiment 91: Port Screen Formatter Cursor and Style Extras](91-port-screen-formatter-cursor-style-extras.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

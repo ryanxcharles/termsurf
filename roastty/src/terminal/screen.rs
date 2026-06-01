@@ -4,12 +4,22 @@ use super::color;
 use super::page_list::{
     CodepointMapEntry, PageList, PageListAllocError, PageOutputFormat, PageStringWithPinMap,
 };
+use super::point;
 use super::selection;
 use super::size::CellCountInt;
+use super::style;
 
 #[derive(Debug)]
 pub(super) struct Screen {
+    cursor: ScreenCursor,
     pages: PageList,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ScreenCursor {
+    x: CellCountInt,
+    y: CellCountInt,
+    style: style::Style,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -32,6 +42,13 @@ pub(super) struct ScreenFormatter<'a> {
     screen: &'a Screen,
     options: ScreenFormatterOptions<'a>,
     content: ScreenFormatterContent,
+    extra: ScreenFormatterExtra,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct ScreenFormatterExtra {
+    cursor: bool,
+    style: bool,
 }
 
 impl Screen {
@@ -41,8 +58,26 @@ impl Screen {
         max_scrollback_rows: Option<usize>,
     ) -> Result<Self, PageListAllocError> {
         Ok(Self {
+            cursor: ScreenCursor::default(),
             pages: PageList::init(cols, rows, max_scrollback_rows)?,
         })
+    }
+
+    fn top_left_pin(&self) -> super::page_list::Pin {
+        self.pages
+            .pin(point::Point::screen(point::Coordinate::new(0, 0)))
+            .expect("screen top-left pin must resolve")
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_cursor_position_for_tests(&mut self, x: CellCountInt, y: CellCountInt) {
+        self.cursor.x = x;
+        self.cursor.y = y;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_cursor_style_for_tests(&mut self, style: style::Style) {
+        self.cursor.style = style;
     }
 
     #[cfg(test)]
@@ -69,6 +104,39 @@ impl Screen {
                 x, y,
             )))
             .expect("screen pin must resolve")
+    }
+}
+
+impl Default for ScreenCursor {
+    fn default() -> Self {
+        Self {
+            x: 0,
+            y: 0,
+            style: style::Style::default(),
+        }
+    }
+}
+
+impl ScreenFormatterExtra {
+    pub(super) const fn none() -> Self {
+        Self {
+            cursor: false,
+            style: false,
+        }
+    }
+
+    pub(super) const fn cursor(mut self, cursor: bool) -> Self {
+        self.cursor = cursor;
+        self
+    }
+
+    pub(super) const fn style(mut self, style: bool) -> Self {
+        self.style = style;
+        self
+    }
+
+    const fn is_empty(self) -> bool {
+        !self.cursor && !self.style
     }
 }
 
@@ -113,6 +181,7 @@ impl<'a> ScreenFormatter<'a> {
             screen,
             options,
             content: ScreenFormatterContent::Selection(None),
+            extra: ScreenFormatterExtra::none(),
         }
     }
 
@@ -121,8 +190,13 @@ impl<'a> ScreenFormatter<'a> {
         self
     }
 
+    pub(super) const fn with_extra(mut self, extra: ScreenFormatterExtra) -> Self {
+        self.extra = extra;
+        self
+    }
+
     pub(super) fn format(self) -> String {
-        match self.content {
+        let mut output = match self.content {
             ScreenFormatterContent::None => String::new(),
             ScreenFormatterContent::Selection(selection) => self.screen.pages.screen_format_string(
                 selection,
@@ -132,11 +206,13 @@ impl<'a> ScreenFormatter<'a> {
                 self.options.palette,
                 self.options.codepoint_map,
             ),
-        }
+        };
+        output.push_str(&self.extra_string());
+        output
     }
 
     pub(super) fn format_with_pin_map(self) -> PageStringWithPinMap {
-        match self.content {
+        let mut output = match self.content {
             ScreenFormatterContent::None => PageStringWithPinMap {
                 text: String::new(),
                 pin_map: Vec::new(),
@@ -151,7 +227,39 @@ impl<'a> ScreenFormatter<'a> {
                     self.options.codepoint_map,
                 )
             }
+        };
+        let extra = self.extra_string();
+        if !extra.is_empty() {
+            let extra_pin = output
+                .pin_map
+                .last()
+                .copied()
+                .unwrap_or_else(|| self.screen.top_left_pin());
+            output
+                .pin_map
+                .extend(std::iter::repeat_n(extra_pin, extra.len()));
+            output.text.push_str(&extra);
         }
+        output
+    }
+
+    fn extra_string(self) -> String {
+        if self.options.emit != PageOutputFormat::Vt || self.extra.is_empty() {
+            return String::new();
+        }
+
+        let mut output = String::new();
+        if self.extra.style {
+            output.push_str(&self.screen.cursor.style.formatter_vt().to_string());
+        }
+        if self.extra.cursor {
+            output.push_str(&format!(
+                "\x1b[{};{}H",
+                self.screen.cursor.y + 1,
+                self.screen.cursor.x + 1
+            ));
+        }
+        output
     }
 }
 
@@ -387,6 +495,154 @@ mod tests {
 
             assert_eq!(screen_output, page_output);
             assert_eq!(screen_output.text.len(), screen_output.pin_map.len());
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_cursor_extra_appends_cup_after_content() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_position_for_tests(4, 2);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().cursor(true))
+            .format();
+
+        assert_eq!(actual, "hi\x1b[3;5H");
+    }
+
+    #[test]
+    fn screen_formatter_vt_style_extra_appends_active_sgr_after_content() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_style_for_tests(style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        });
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().style(true))
+            .format();
+
+        assert_eq!(actual, "hi\x1b[0m\x1b[1m");
+    }
+
+    #[test]
+    fn screen_formatter_vt_style_and_cursor_extras_keep_upstream_order() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_position_for_tests(4, 2);
+        screen.set_cursor_style_for_tests(style::Style {
+            fg_color: style::Color::Palette(1),
+            ..style::Style::default()
+        });
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().style(true).cursor(true))
+            .format();
+
+        assert_eq!(actual, "hi\x1b[0m\x1b[38;5;1m\x1b[3;5H");
+    }
+
+    #[test]
+    fn screen_formatter_plain_and_html_ignore_cursor_and_style_extras() {
+        let mut screen = screen_with_lines(&["<hi"]);
+        screen.set_cursor_position_for_tests(4, 2);
+        screen.set_cursor_style_for_tests(style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        });
+        let extra = ScreenFormatterExtra::none().style(true).cursor(true);
+
+        assert_eq!(
+            formatter(&screen, PageOutputFormat::Plain)
+                .with_extra(extra)
+                .format(),
+            "<hi"
+        );
+        assert_eq!(
+            formatter(&screen, PageOutputFormat::Html)
+                .with_extra(extra)
+                .format(),
+            "<div style=\"font-family: monospace; white-space: pre;\">&lt;hi</div>"
+        );
+    }
+
+    #[test]
+    fn screen_formatter_no_content_can_emit_vt_extras() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_position_for_tests(2, 1);
+        screen.set_cursor_style_for_tests(style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        });
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::None)
+            .with_extra(ScreenFormatterExtra::none().style(true).cursor(true))
+            .format();
+
+        assert_eq!(actual, "\x1b[0m\x1b[1m\x1b[2;3H");
+    }
+
+    #[test]
+    fn screen_formatter_vt_extra_pin_map_uses_last_content_pin() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_position_for_tests(2, 1);
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().cursor(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "hi\x1b[2;3H");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        assert_eq!(actual.pin_map[0], screen_pin(&screen, 0, 0));
+        assert_eq!(actual.pin_map[1], screen_pin(&screen, 1, 0));
+        for pin in &actual.pin_map[2..] {
+            assert_eq!(*pin, screen_pin(&screen, 1, 0));
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_extra_pin_map_without_content_uses_top_left_pin() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_position_for_tests(2, 1);
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::None)
+            .with_extra(ScreenFormatterExtra::none().cursor(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "\x1b[2;3H");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        for pin in actual.pin_map {
+            assert_eq!(pin, screen_pin(&screen, 0, 0));
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_extra_pin_map_after_invalid_selection_uses_top_left_pin() {
+        let mut screen = screen_with_lines(&["hi"]);
+        let other = screen_with_lines(&["other"]);
+        let invalid = screen_pin(&other, 0, 0);
+        let valid = screen_pin(&screen, 0, 0);
+        screen.set_cursor_position_for_tests(2, 1);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::Selection(Some(
+                selection::Selection::new(invalid, valid, false),
+            )))
+            .with_extra(ScreenFormatterExtra::none().cursor(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "\x1b[2;3H");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        for pin in actual.pin_map {
+            assert_eq!(pin, screen_pin(&screen, 0, 0));
         }
     }
 

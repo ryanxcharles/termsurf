@@ -208,3 +208,74 @@ Codex asked for three clarifications, all applied above:
 Codex also recommended avoiding no-op placeholder fields for deferred extras.
 The experiment now keeps `ScreenFormatterExtra` to the two implemented booleans:
 `cursor` and `style`.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has private minimal cursor state on `Screen`:
+
+- `ScreenCursor::x`
+- `ScreenCursor::y`
+- `ScreenCursor::style`
+
+The cursor state is private to `roastty/src/terminal/screen.rs`. It initializes
+to `(0, 0)` with default SGR style. Test-only helpers can set cursor position
+and style, but no parser-driven cursor movement, saved cursor, hyperlink state,
+protection state, semantic cursor state, page-pin cursor cache, public API, or C
+ABI surface was added.
+
+`ScreenFormatter` now has a private `ScreenFormatterExtra` with exactly two
+implemented booleans: `cursor` and `style`. Extras are emitted only for
+`PageOutputFormat::Vt`; plain and HTML output ignore them. When enabled, extras
+append after content in the upstream order for the ported subset:
+
+1. active SGR style via `screen.cursor.style.formatter_vt()`
+2. cursor position via 1-indexed CUP: `\x1b[{row};{col}H`
+
+The implemented test cases verify concrete output such as:
+
+```text
+hi\x1b[0m\x1b[38;5;1m\x1b[3;5H
+```
+
+Pin maps remain byte-indexed. When extras append to content, each extra byte
+maps to the last content pin. When no content is emitted, including
+`Content::None` and invalid selections, each extra byte maps to the screen
+top-left pin. This uses the actual post-content pin-map length rather than
+guessing from the requested content mode.
+
+`TerminalFormatter` remains unchanged as a no-extra delegating wrapper. A new
+regression test confirms that setting screen cursor/style state does not affect
+TerminalFormatter's default Experiment 90 output path.
+
+Hyperlink, protection, Kitty keyboard, charset, and all terminal-level extras
+remain deferred. They require additional screen/parser/terminal state that does
+not yet exist in Roastty, and this experiment intentionally avoided placeholder
+fields for those unsupported extras.
+
+Verification passed:
+
+```text
+cargo fmt
+cargo test -p roastty screen_formatter        # 24 passed
+cargo test -p roastty terminal_formatter      # 14 passed
+cargo test -p roastty styled_pin_map          # 9 passed
+cargo test -p roastty pin_map                 # 36 passed
+cargo test -p roastty page_string             # 12 passed
+cargo test -p roastty terminal::page_list     # 524 passed
+cargo test -p roastty                         # 851 unit + 1 ABI passed
+```
+
+Codex result review initially found no blockers but noted a useful missing
+regression test for invalid selections with extras. That test was added, the
+full verification matrix was rerun, and Codex re-reviewed the result. The second
+review found no blockers and approved recording Experiment 91 as **Pass**.
+
+## Conclusion
+
+Experiment 91 completes the first VT screen-extra slice. Roastty can now
+reconstruct active cursor SGR style and cursor position through
+`ScreenFormatter` without broadening into parser or terminal runtime state. The
+remaining screen extras should be ported as separate state-backed slices rather
+than as placeholders.
