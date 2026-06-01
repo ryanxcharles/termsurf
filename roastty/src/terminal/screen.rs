@@ -336,6 +336,10 @@ impl Screen {
         (self.cursor.x, self.cursor.y)
     }
 
+    pub(super) const fn cursor_pending_wrap(&self) -> bool {
+        self.cursor.pending_wrap
+    }
+
     pub(super) fn set_cursor_semantic_output(&mut self) {
         self.cursor.semantic_content = SemanticContent::Output;
         self.cursor.semantic_content_clear_eol = false;
@@ -1009,6 +1013,14 @@ impl Screen {
         self.kitty_keyboard.current()
     }
 
+    pub(super) fn total_rows(&self) -> usize {
+        self.pages.total_rows()
+    }
+
+    pub(super) fn scrollback_rows(&self) -> usize {
+        self.pages.scrollback_rows()
+    }
+
     pub(super) fn set_kitty_keyboard(&mut self, mode: kitty::KeySetMode, flags: kitty::KeyFlags) {
         self.kitty_keyboard.set(mode, flags);
     }
@@ -1215,7 +1227,7 @@ impl Screen {
 
     #[cfg(test)]
     pub(super) fn cursor_pending_wrap_for_tests(&self) -> bool {
-        self.cursor.pending_wrap
+        self.cursor_pending_wrap()
     }
 
     #[cfg(test)]
@@ -1231,7 +1243,7 @@ impl Screen {
 
     #[cfg(test)]
     pub(super) fn scrollback_rows_for_tests(&self) -> usize {
-        self.pages.scrollback_rows_for_tests()
+        self.pages.scrollback_rows()
     }
 
     #[cfg(test)]

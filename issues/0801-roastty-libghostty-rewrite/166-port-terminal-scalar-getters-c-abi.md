@@ -258,6 +258,7 @@ Required evidence:
   modules.
 - Do not add public `ghostty_*` compatibility names.
 - Preserve upstream terminal data numeric slots.
+
 - Validate raw integer data selectors at the Rust FFI boundary before internal
   enum conversion.
 - Keep this experiment to scalar `terminal_get` / `terminal_get_multi` fields.
@@ -304,3 +305,58 @@ semantics with correct partial `out_written`, and Rust/C harness assertions for
 
 Codex's second review found no remaining blocking design issues and approved the
 experiment for implementation.
+
+## Result
+
+**Result:** Pass
+
+Experiment 166 implemented the scalar terminal getter C ABI slice:
+
+- added `ROASTTY_NO_VALUE = 4` without renumbering existing Roastty result
+  values;
+- added `roastty_terminal_data_e` slots `0..32` and `roastty_terminal_screen_e`
+  slots matching upstream terminal data ordering;
+- added `roastty_terminal_get`;
+- added `roastty_terminal_get_multi`;
+- added narrow read-only terminal accessors for columns, rows, cursor position,
+  pending wrap, active screen, cursor visibility, Kitty keyboard flags, mouse
+  tracking, total rows, and scrollback rows;
+- kept title/PWD outside the generic getter path, preserving the copied-string
+  direct helpers from Experiment 165;
+- returned `ROASTTY_NO_VALUE` for declared-but-deferred fields instead of
+  returning placeholders or borrowed pointers.
+
+Codex result review initially found one non-blocking harness coverage gap: the C
+ABI harness checked terminal data slots through `SCROLLBACK_ROWS == 15` and
+`VIEWPORT_ACTIVE == 32`, but skipped explicit C-side assertions for slots
+`16..31`. That gap was fixed by adding C assertions for the width/height, color,
+Kitty image, Kitty graphics, and selection slots. The second Codex review found
+no blocking issues and confirmed that the prior gap was fixed.
+
+Verification run after the harness fix:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/terminal/terminal.rs roastty/src/terminal/screen.rs roastty/src/terminal/page_list.rs
+cargo test -p roastty terminal_get_abi
+cargo test -p roastty c_harness_links_against_roastty_header_and_roastty_dylib
+cargo test -p roastty terminal_stream
+cargo test -p roastty
+! rg -n "ghostty|Ghostty|ghostty_" roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c
+```
+
+Observed results:
+
+- `terminal_get_abi`: 6 passed.
+- C harness: 1 passed.
+- `terminal_stream`: 381 passed.
+- full `cargo test -p roastty`: 1793 unit tests passed, C harness passed,
+  doc-tests passed.
+- forbidden public-name grep passed.
+
+## Conclusion
+
+Roastty now has the first generic terminal metadata getter ABI, including
+multi-get behavior and explicit deferred-field signaling. This gives future
+frontend/app integration a stable scalar query path while leaving string,
+selection, color, renderer, and Kitty graphics ownership models for later
+experiments.

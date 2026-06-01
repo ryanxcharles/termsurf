@@ -58,6 +58,12 @@ enum TerminalScreenKey {
     Alternate,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TerminalScreen {
+    Primary,
+    Alternate,
+}
+
 impl TerminalScreens {
     fn init(
         cols: CellCountInt,
@@ -347,6 +353,45 @@ impl Terminal {
 
     pub(crate) fn cursor_position(&self) -> (CellCountInt, CellCountInt) {
         self.screens.active().cursor_position()
+    }
+
+    pub(crate) fn columns(&self) -> CellCountInt {
+        self.size.cols
+    }
+
+    pub(crate) fn rows(&self) -> CellCountInt {
+        self.size.rows
+    }
+
+    pub(crate) fn cursor_pending_wrap(&self) -> bool {
+        self.screens.active().cursor_pending_wrap()
+    }
+
+    pub(crate) fn active_screen(&self) -> TerminalScreen {
+        match self.screens.active_key() {
+            TerminalScreenKey::Primary => TerminalScreen::Primary,
+            TerminalScreenKey::Alternate => TerminalScreen::Alternate,
+        }
+    }
+
+    pub(crate) fn cursor_visible(&self) -> bool {
+        self.modes.get(modes::Mode::CursorVisible)
+    }
+
+    pub(crate) fn kitty_keyboard_flags(&self) -> u8 {
+        self.screens.active().kitty_keyboard_flags().int()
+    }
+
+    pub(crate) fn mouse_tracking(&self) -> bool {
+        self.flags.mouse_event != mouse::MouseEventMode::None
+    }
+
+    pub(crate) fn total_rows(&self) -> usize {
+        self.screens.active().total_rows()
+    }
+
+    pub(crate) fn scrollback_rows(&self) -> usize {
+        self.screens.active().scrollback_rows()
     }
 
     pub(crate) fn plain_screen(&self, unwrap: bool) -> String {

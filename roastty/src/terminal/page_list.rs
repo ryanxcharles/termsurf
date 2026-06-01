@@ -3428,9 +3428,13 @@ impl PageList {
         self.clear_dirty();
     }
 
+    pub(super) fn scrollback_rows(&self) -> usize {
+        self.total_rows().saturating_sub(self.rows as usize)
+    }
+
     #[cfg(test)]
     pub(super) fn scrollback_rows_for_tests(&self) -> usize {
-        self.total_rows().saturating_sub(self.rows as usize)
+        self.scrollback_rows()
     }
 
     fn mark_dirty(&mut self, point: point::Point) {
@@ -5882,7 +5886,7 @@ impl PageList {
         ))
     }
 
-    fn total_rows(&self) -> usize {
+    pub(super) fn total_rows(&self) -> usize {
         self.pages
             .iter()
             .map(|node| node.page.size_rows() as usize)

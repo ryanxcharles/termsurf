@@ -5,7 +5,7 @@ use std::slice;
 
 use input::{key, key_encode, key_mods};
 use terminal::kitty::KeyFlags;
-use terminal::terminal::{Terminal as InnerTerminal, TerminalStreamError};
+use terminal::terminal::{Terminal as InnerTerminal, TerminalScreen, TerminalStreamError};
 use terminal::{mouse, mouse_encode, osc, point};
 
 mod input;
@@ -35,7 +35,45 @@ const ROASTTY_SUCCESS: c_int = 0;
 const ROASTTY_OUT_OF_MEMORY: c_int = 1;
 const ROASTTY_INVALID_VALUE: c_int = 2;
 const ROASTTY_OUT_OF_SPACE: c_int = 3;
+const ROASTTY_NO_VALUE: c_int = 4;
 const ROASTTY_BUILD_MODE_DEBUG: c_int = 0;
+
+const ROASTTY_TERMINAL_DATA_INVALID: c_int = 0;
+const ROASTTY_TERMINAL_DATA_COLS: c_int = 1;
+const ROASTTY_TERMINAL_DATA_ROWS: c_int = 2;
+const ROASTTY_TERMINAL_DATA_CURSOR_X: c_int = 3;
+const ROASTTY_TERMINAL_DATA_CURSOR_Y: c_int = 4;
+const ROASTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP: c_int = 5;
+const ROASTTY_TERMINAL_DATA_ACTIVE_SCREEN: c_int = 6;
+const ROASTTY_TERMINAL_DATA_CURSOR_VISIBLE: c_int = 7;
+const ROASTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS: c_int = 8;
+const ROASTTY_TERMINAL_DATA_SCROLLBAR: c_int = 9;
+const ROASTTY_TERMINAL_DATA_CURSOR_STYLE: c_int = 10;
+const ROASTTY_TERMINAL_DATA_MOUSE_TRACKING: c_int = 11;
+const ROASTTY_TERMINAL_DATA_TITLE: c_int = 12;
+const ROASTTY_TERMINAL_DATA_PWD: c_int = 13;
+const ROASTTY_TERMINAL_DATA_TOTAL_ROWS: c_int = 14;
+const ROASTTY_TERMINAL_DATA_SCROLLBACK_ROWS: c_int = 15;
+const ROASTTY_TERMINAL_DATA_WIDTH_PX: c_int = 16;
+const ROASTTY_TERMINAL_DATA_HEIGHT_PX: c_int = 17;
+const ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND: c_int = 18;
+const ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND: c_int = 19;
+const ROASTTY_TERMINAL_DATA_COLOR_CURSOR: c_int = 20;
+const ROASTTY_TERMINAL_DATA_COLOR_PALETTE: c_int = 21;
+const ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND_DEFAULT: c_int = 22;
+const ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND_DEFAULT: c_int = 23;
+const ROASTTY_TERMINAL_DATA_COLOR_CURSOR_DEFAULT: c_int = 24;
+const ROASTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT: c_int = 25;
+const ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT: c_int = 26;
+const ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE: c_int = 27;
+const ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE: c_int = 28;
+const ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM: c_int = 29;
+const ROASTTY_TERMINAL_DATA_KITTY_GRAPHICS: c_int = 30;
+const ROASTTY_TERMINAL_DATA_SELECTION: c_int = 31;
+const ROASTTY_TERMINAL_DATA_VIEWPORT_ACTIVE: c_int = 32;
+
+const ROASTTY_TERMINAL_SCREEN_PRIMARY: c_int = 0;
+const ROASTTY_TERMINAL_SCREEN_ALTERNATE: c_int = 1;
 
 #[repr(C)]
 pub struct RoasttyInfo {
@@ -673,6 +711,66 @@ fn write_copied_string(out: *mut RoasttyString, bytes: &[u8]) -> c_int {
     }
 }
 
+fn terminal_data_selector_is_valid(data: c_int) -> bool {
+    data != ROASTTY_TERMINAL_DATA_INVALID
+        && matches!(
+            data,
+            ROASTTY_TERMINAL_DATA_COLS..=ROASTTY_TERMINAL_DATA_VIEWPORT_ACTIVE
+        )
+}
+
+unsafe fn terminal_get_write(terminal: &InnerTerminal, data: c_int, out: *mut c_void) -> c_int {
+    match data {
+        ROASTTY_TERMINAL_DATA_COLS => out.cast::<u16>().write(terminal.columns()),
+        ROASTTY_TERMINAL_DATA_ROWS => out.cast::<u16>().write(terminal.rows()),
+        ROASTTY_TERMINAL_DATA_CURSOR_X => out.cast::<u16>().write(terminal.cursor_position().0),
+        ROASTTY_TERMINAL_DATA_CURSOR_Y => out.cast::<u16>().write(terminal.cursor_position().1),
+        ROASTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP => {
+            out.cast::<bool>().write(terminal.cursor_pending_wrap())
+        }
+        ROASTTY_TERMINAL_DATA_ACTIVE_SCREEN => {
+            let value = match terminal.active_screen() {
+                TerminalScreen::Primary => ROASTTY_TERMINAL_SCREEN_PRIMARY,
+                TerminalScreen::Alternate => ROASTTY_TERMINAL_SCREEN_ALTERNATE,
+            };
+            out.cast::<c_int>().write(value);
+        }
+        ROASTTY_TERMINAL_DATA_CURSOR_VISIBLE => out.cast::<bool>().write(terminal.cursor_visible()),
+        ROASTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS => {
+            out.cast::<u8>().write(terminal.kitty_keyboard_flags())
+        }
+        ROASTTY_TERMINAL_DATA_MOUSE_TRACKING => out.cast::<bool>().write(terminal.mouse_tracking()),
+        ROASTTY_TERMINAL_DATA_TOTAL_ROWS => out.cast::<usize>().write(terminal.total_rows()),
+        ROASTTY_TERMINAL_DATA_SCROLLBACK_ROWS => {
+            out.cast::<usize>().write(terminal.scrollback_rows())
+        }
+        ROASTTY_TERMINAL_DATA_SCROLLBAR
+        | ROASTTY_TERMINAL_DATA_CURSOR_STYLE
+        | ROASTTY_TERMINAL_DATA_TITLE
+        | ROASTTY_TERMINAL_DATA_PWD
+        | ROASTTY_TERMINAL_DATA_WIDTH_PX
+        | ROASTTY_TERMINAL_DATA_HEIGHT_PX
+        | ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND
+        | ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND
+        | ROASTTY_TERMINAL_DATA_COLOR_CURSOR
+        | ROASTTY_TERMINAL_DATA_COLOR_PALETTE
+        | ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND_DEFAULT
+        | ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND_DEFAULT
+        | ROASTTY_TERMINAL_DATA_COLOR_CURSOR_DEFAULT
+        | ROASTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT
+        | ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT
+        | ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE
+        | ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE
+        | ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM
+        | ROASTTY_TERMINAL_DATA_KITTY_GRAPHICS
+        | ROASTTY_TERMINAL_DATA_SELECTION
+        | ROASTTY_TERMINAL_DATA_VIEWPORT_ACTIVE => return ROASTTY_NO_VALUE,
+        _ => return ROASTTY_INVALID_VALUE,
+    }
+
+    ROASTTY_SUCCESS
+}
+
 fn allocated_string(bytes: &[u8]) -> RoasttyString {
     let owned = bytes.to_vec().into_boxed_slice();
     let len = owned.len();
@@ -1052,6 +1150,71 @@ pub extern "C" fn roastty_terminal_cursor_position(
         row.write(y);
     }
     true
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_terminal_get(
+    terminal: RoasttyTerminal,
+    data: c_int,
+    out: *mut c_void,
+) -> c_int {
+    let Some(terminal) = terminal_from_handle(terminal) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    if !terminal_data_selector_is_valid(data) {
+        return ROASTTY_INVALID_VALUE;
+    }
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    unsafe { terminal_get_write(&terminal.terminal, data, out) }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_terminal_get_multi(
+    terminal: RoasttyTerminal,
+    count: usize,
+    keys: *const c_int,
+    values: *mut *mut c_void,
+    out_written: *mut usize,
+) -> c_int {
+    if !out_written.is_null() {
+        unsafe {
+            out_written.write(0);
+        }
+    }
+    if terminal_from_handle(terminal).is_none() || keys.is_null() || values.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    if count == 0 {
+        return ROASTTY_SUCCESS;
+    }
+
+    for index in 0..count {
+        let key = unsafe { *keys.add(index) };
+        if !terminal_data_selector_is_valid(key) {
+            return ROASTTY_INVALID_VALUE;
+        }
+
+        let value = unsafe { *values.add(index) };
+        if value.is_null() {
+            return ROASTTY_INVALID_VALUE;
+        }
+
+        let result = roastty_terminal_get(terminal, key, value);
+        if result != ROASTTY_SUCCESS {
+            return result;
+        }
+
+        if !out_written.is_null() {
+            unsafe {
+                out_written.write(index + 1);
+            }
+        }
+    }
+
+    ROASTTY_SUCCESS
 }
 
 #[no_mangle]
@@ -2178,6 +2341,508 @@ mod tests {
         assert!(terminal_string(terminal, roastty_terminal_title).is_empty());
         assert!(terminal_string(terminal, roastty_terminal_pwd).is_empty());
         assert!(terminal_string(terminal, roastty_terminal_take_pty_response).is_empty());
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn terminal_get_abi_result_and_selector_values_are_stable() {
+        assert_eq!(ROASTTY_SUCCESS, 0);
+        assert_eq!(ROASTTY_OUT_OF_MEMORY, 1);
+        assert_eq!(ROASTTY_INVALID_VALUE, 2);
+        assert_eq!(ROASTTY_OUT_OF_SPACE, 3);
+        assert_eq!(ROASTTY_NO_VALUE, 4);
+        assert_eq!(ROASTTY_TERMINAL_DATA_INVALID, 0);
+        assert_eq!(ROASTTY_TERMINAL_DATA_COLS, 1);
+        assert_eq!(ROASTTY_TERMINAL_DATA_ROWS, 2);
+        assert_eq!(ROASTTY_TERMINAL_DATA_CURSOR_X, 3);
+        assert_eq!(ROASTTY_TERMINAL_DATA_CURSOR_Y, 4);
+        assert_eq!(ROASTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP, 5);
+        assert_eq!(ROASTTY_TERMINAL_DATA_ACTIVE_SCREEN, 6);
+        assert_eq!(ROASTTY_TERMINAL_DATA_CURSOR_VISIBLE, 7);
+        assert_eq!(ROASTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS, 8);
+        assert_eq!(ROASTTY_TERMINAL_DATA_SCROLLBAR, 9);
+        assert_eq!(ROASTTY_TERMINAL_DATA_CURSOR_STYLE, 10);
+        assert_eq!(ROASTTY_TERMINAL_DATA_MOUSE_TRACKING, 11);
+        assert_eq!(ROASTTY_TERMINAL_DATA_TITLE, 12);
+        assert_eq!(ROASTTY_TERMINAL_DATA_PWD, 13);
+        assert_eq!(ROASTTY_TERMINAL_DATA_TOTAL_ROWS, 14);
+        assert_eq!(ROASTTY_TERMINAL_DATA_SCROLLBACK_ROWS, 15);
+        assert_eq!(ROASTTY_TERMINAL_DATA_WIDTH_PX, 16);
+        assert_eq!(ROASTTY_TERMINAL_DATA_HEIGHT_PX, 17);
+        assert_eq!(ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND, 18);
+        assert_eq!(ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND, 19);
+        assert_eq!(ROASTTY_TERMINAL_DATA_COLOR_CURSOR, 20);
+        assert_eq!(ROASTTY_TERMINAL_DATA_COLOR_PALETTE, 21);
+        assert_eq!(ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND_DEFAULT, 22);
+        assert_eq!(ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND_DEFAULT, 23);
+        assert_eq!(ROASTTY_TERMINAL_DATA_COLOR_CURSOR_DEFAULT, 24);
+        assert_eq!(ROASTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT, 25);
+        assert_eq!(ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT, 26);
+        assert_eq!(ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE, 27);
+        assert_eq!(ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE, 28);
+        assert_eq!(ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM, 29);
+        assert_eq!(ROASTTY_TERMINAL_DATA_KITTY_GRAPHICS, 30);
+        assert_eq!(ROASTTY_TERMINAL_DATA_SELECTION, 31);
+        assert_eq!(ROASTTY_TERMINAL_DATA_VIEWPORT_ACTIVE, 32);
+        assert_eq!(ROASTTY_TERMINAL_SCREEN_PRIMARY, 0);
+        assert_eq!(ROASTTY_TERMINAL_SCREEN_ALTERNATE, 1);
+    }
+
+    #[test]
+    fn terminal_get_abi_validates_terminal_selector_and_output() {
+        let terminal = new_terminal(5, 3);
+        let mut value = 0u16;
+
+        assert_eq!(
+            roastty_terminal_get(
+                ptr::null_mut(),
+                ROASTTY_TERMINAL_DATA_COLS,
+                &mut value as *mut _ as *mut c_void
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_terminal_get(terminal, -1, &mut value as *mut _ as *mut c_void),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_terminal_get(terminal, 33, &mut value as *mut _ as *mut c_void),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_INVALID,
+                &mut value as *mut _ as *mut c_void
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_terminal_get(terminal, ROASTTY_TERMINAL_DATA_COLS, ptr::null_mut()),
+            ROASTTY_INVALID_VALUE
+        );
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn terminal_get_abi_reads_fresh_scalar_fields() {
+        let terminal = new_terminal(10, 4);
+
+        let mut cols = 0u16;
+        let mut rows = 0u16;
+        let mut cursor_x = 99u16;
+        let mut cursor_y = 99u16;
+        let mut pending_wrap = true;
+        let mut active_screen = ROASTTY_TERMINAL_SCREEN_ALTERNATE;
+        let mut cursor_visible = false;
+        let mut key_flags = 99u8;
+        let mut mouse_tracking = true;
+        let mut total_rows = 0usize;
+        let mut scrollback_rows = 99usize;
+
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_COLS,
+                &mut cols as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_ROWS,
+                &mut rows as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_CURSOR_X,
+                &mut cursor_x as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_CURSOR_Y,
+                &mut cursor_y as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP,
+                &mut pending_wrap as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_ACTIVE_SCREEN,
+                &mut active_screen as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_CURSOR_VISIBLE,
+                &mut cursor_visible as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS,
+                &mut key_flags as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_MOUSE_TRACKING,
+                &mut mouse_tracking as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_TOTAL_ROWS,
+                &mut total_rows as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_SCROLLBACK_ROWS,
+                &mut scrollback_rows as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+
+        assert_eq!(cols, 10);
+        assert_eq!(rows, 4);
+        assert_eq!((cursor_x, cursor_y), (0, 0));
+        assert!(!pending_wrap);
+        assert_eq!(active_screen, ROASTTY_TERMINAL_SCREEN_PRIMARY);
+        assert!(cursor_visible);
+        assert_eq!(key_flags, 0);
+        assert!(!mouse_tracking);
+        assert_eq!(total_rows, 4);
+        assert_eq!(scrollback_rows, 0);
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn terminal_get_abi_tracks_runtime_scalar_changes() {
+        let terminal = new_terminal(5, 3);
+
+        write_terminal(terminal, b"abcde");
+        let mut cursor_x = 0u16;
+        let mut cursor_y = 99u16;
+        let mut pending_wrap = false;
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_CURSOR_X,
+                &mut cursor_x as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_CURSOR_Y,
+                &mut cursor_y as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP,
+                &mut pending_wrap as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!((cursor_x, cursor_y), (4, 0));
+        assert!(pending_wrap);
+
+        write_terminal(terminal, b"\x1b[?1049h");
+        let mut active_screen = ROASTTY_TERMINAL_SCREEN_PRIMARY;
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_ACTIVE_SCREEN,
+                &mut active_screen as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(active_screen, ROASTTY_TERMINAL_SCREEN_ALTERNATE);
+        write_terminal(terminal, b"\x1b[?1049l");
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_ACTIVE_SCREEN,
+                &mut active_screen as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(active_screen, ROASTTY_TERMINAL_SCREEN_PRIMARY);
+
+        write_terminal(terminal, b"\x1b[?25l");
+        let mut cursor_visible = true;
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_CURSOR_VISIBLE,
+                &mut cursor_visible as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert!(!cursor_visible);
+        write_terminal(terminal, b"\x1b[?25h");
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_CURSOR_VISIBLE,
+                &mut cursor_visible as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert!(cursor_visible);
+
+        write_terminal(terminal, b"\x1b[>4u");
+        let mut key_flags = 0u8;
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS,
+                &mut key_flags as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(key_flags, 4);
+
+        write_terminal(terminal, b"\x1b[?1000h");
+        let mut mouse_tracking = false;
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_MOUSE_TRACKING,
+                &mut mouse_tracking as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert!(mouse_tracking);
+        write_terminal(terminal, b"\x1b[?1000l");
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_MOUSE_TRACKING,
+                &mut mouse_tracking as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert!(!mouse_tracking);
+
+        write_terminal(terminal, b"\r\n1\r\n2\r\n3\r\n4");
+        let mut total_rows = 0usize;
+        let mut scrollback_rows = 0usize;
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_TOTAL_ROWS,
+                &mut total_rows as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_SCROLLBACK_ROWS,
+                &mut scrollback_rows as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert!(total_rows > 3);
+        assert_eq!(scrollback_rows, total_rows - 3);
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn terminal_get_abi_deferred_fields_return_no_value() {
+        let terminal = new_terminal(5, 3);
+        let mut value = 0usize;
+
+        for data in [
+            ROASTTY_TERMINAL_DATA_SCROLLBAR,
+            ROASTTY_TERMINAL_DATA_CURSOR_STYLE,
+            ROASTTY_TERMINAL_DATA_TITLE,
+            ROASTTY_TERMINAL_DATA_PWD,
+            ROASTTY_TERMINAL_DATA_WIDTH_PX,
+            ROASTTY_TERMINAL_DATA_HEIGHT_PX,
+            ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND,
+            ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND,
+            ROASTTY_TERMINAL_DATA_COLOR_CURSOR,
+            ROASTTY_TERMINAL_DATA_COLOR_PALETTE,
+            ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND_DEFAULT,
+            ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND_DEFAULT,
+            ROASTTY_TERMINAL_DATA_COLOR_CURSOR_DEFAULT,
+            ROASTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM,
+            ROASTTY_TERMINAL_DATA_KITTY_GRAPHICS,
+            ROASTTY_TERMINAL_DATA_SELECTION,
+            ROASTTY_TERMINAL_DATA_VIEWPORT_ACTIVE,
+        ] {
+            assert_eq!(
+                roastty_terminal_get(terminal, data, &mut value as *mut _ as *mut c_void),
+                ROASTTY_NO_VALUE
+            );
+        }
+
+        assert!(terminal_string(terminal, roastty_terminal_title).is_empty());
+        assert!(terminal_string(terminal, roastty_terminal_pwd).is_empty());
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn terminal_get_abi_multi_reports_success_and_partial_counts() {
+        let terminal = new_terminal(8, 4);
+        write_terminal(terminal, b"abc");
+
+        let mut cols = 0u16;
+        let mut rows = 0u16;
+        let mut cursor_x = 0u16;
+        let keys = [
+            ROASTTY_TERMINAL_DATA_COLS,
+            ROASTTY_TERMINAL_DATA_ROWS,
+            ROASTTY_TERMINAL_DATA_CURSOR_X,
+        ];
+        let mut values = [
+            &mut cols as *mut _ as *mut c_void,
+            &mut rows as *mut _ as *mut c_void,
+            &mut cursor_x as *mut _ as *mut c_void,
+        ];
+        let mut written = 999usize;
+        assert_eq!(
+            roastty_terminal_get_multi(
+                terminal,
+                keys.len(),
+                keys.as_ptr(),
+                values.as_mut_ptr(),
+                &mut written,
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(written, 3);
+        assert_eq!((cols, rows, cursor_x), (8, 4, 3));
+
+        assert_eq!(
+            roastty_terminal_get_multi(
+                terminal,
+                0,
+                keys.as_ptr(),
+                values.as_mut_ptr(),
+                &mut written,
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(written, 0);
+
+        let deferred_keys = [
+            ROASTTY_TERMINAL_DATA_COLS,
+            ROASTTY_TERMINAL_DATA_TITLE,
+            ROASTTY_TERMINAL_DATA_ROWS,
+        ];
+        written = 999;
+        assert_eq!(
+            roastty_terminal_get_multi(
+                terminal,
+                deferred_keys.len(),
+                deferred_keys.as_ptr(),
+                values.as_mut_ptr(),
+                &mut written,
+            ),
+            ROASTTY_NO_VALUE
+        );
+        assert_eq!(written, 1);
+
+        let invalid_keys = [ROASTTY_TERMINAL_DATA_COLS, 33];
+        written = 999;
+        assert_eq!(
+            roastty_terminal_get_multi(
+                terminal,
+                invalid_keys.len(),
+                invalid_keys.as_ptr(),
+                values.as_mut_ptr(),
+                &mut written,
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(written, 1);
+
+        values[1] = ptr::null_mut();
+        written = 999;
+        assert_eq!(
+            roastty_terminal_get_multi(
+                terminal,
+                keys.len(),
+                keys.as_ptr(),
+                values.as_mut_ptr(),
+                &mut written,
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(written, 1);
+
+        assert_eq!(
+            roastty_terminal_get_multi(
+                ptr::null_mut(),
+                keys.len(),
+                keys.as_ptr(),
+                values.as_mut_ptr(),
+                &mut written,
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_terminal_get_multi(
+                terminal,
+                keys.len(),
+                ptr::null(),
+                values.as_mut_ptr(),
+                &mut written,
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_terminal_get_multi(
+                terminal,
+                keys.len(),
+                keys.as_ptr(),
+                ptr::null_mut(),
+                &mut written,
+            ),
+            ROASTTY_INVALID_VALUE
+        );
 
         roastty_terminal_free(terminal);
     }

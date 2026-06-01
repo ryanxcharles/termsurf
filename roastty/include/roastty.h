@@ -35,7 +35,49 @@ typedef enum {
   ROASTTY_OUT_OF_MEMORY = 1,
   ROASTTY_INVALID_VALUE = 2,
   ROASTTY_OUT_OF_SPACE = 3,
+  ROASTTY_NO_VALUE = 4,
 } roastty_result_e;
+
+typedef enum {
+  ROASTTY_TERMINAL_DATA_INVALID = 0,
+  ROASTTY_TERMINAL_DATA_COLS = 1,
+  ROASTTY_TERMINAL_DATA_ROWS = 2,
+  ROASTTY_TERMINAL_DATA_CURSOR_X = 3,
+  ROASTTY_TERMINAL_DATA_CURSOR_Y = 4,
+  ROASTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP = 5,
+  ROASTTY_TERMINAL_DATA_ACTIVE_SCREEN = 6,
+  ROASTTY_TERMINAL_DATA_CURSOR_VISIBLE = 7,
+  ROASTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS = 8,
+  ROASTTY_TERMINAL_DATA_SCROLLBAR = 9,
+  ROASTTY_TERMINAL_DATA_CURSOR_STYLE = 10,
+  ROASTTY_TERMINAL_DATA_MOUSE_TRACKING = 11,
+  ROASTTY_TERMINAL_DATA_TITLE = 12,
+  ROASTTY_TERMINAL_DATA_PWD = 13,
+  ROASTTY_TERMINAL_DATA_TOTAL_ROWS = 14,
+  ROASTTY_TERMINAL_DATA_SCROLLBACK_ROWS = 15,
+  ROASTTY_TERMINAL_DATA_WIDTH_PX = 16,
+  ROASTTY_TERMINAL_DATA_HEIGHT_PX = 17,
+  ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND = 18,
+  ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND = 19,
+  ROASTTY_TERMINAL_DATA_COLOR_CURSOR = 20,
+  ROASTTY_TERMINAL_DATA_COLOR_PALETTE = 21,
+  ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND_DEFAULT = 22,
+  ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND_DEFAULT = 23,
+  ROASTTY_TERMINAL_DATA_COLOR_CURSOR_DEFAULT = 24,
+  ROASTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT = 25,
+  ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT = 26,
+  ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE = 27,
+  ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE = 28,
+  ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM = 29,
+  ROASTTY_TERMINAL_DATA_KITTY_GRAPHICS = 30,
+  ROASTTY_TERMINAL_DATA_SELECTION = 31,
+  ROASTTY_TERMINAL_DATA_VIEWPORT_ACTIVE = 32,
+} roastty_terminal_data_e;
+
+typedef enum {
+  ROASTTY_TERMINAL_SCREEN_PRIMARY = 0,
+  ROASTTY_TERMINAL_SCREEN_ALTERNATE = 1,
+} roastty_terminal_screen_e;
 
 typedef enum {
   ROASTTY_BUILD_MODE_DEBUG,
@@ -563,6 +605,15 @@ ROASTTY_API roastty_result_e roastty_terminal_pwd(roastty_terminal_t,
 ROASTTY_API bool roastty_terminal_cursor_position(roastty_terminal_t,
                                                   uint16_t*,
                                                   uint16_t*);
+ROASTTY_API roastty_result_e roastty_terminal_get(roastty_terminal_t,
+                                                  roastty_terminal_data_e,
+                                                  void*);
+ROASTTY_API roastty_result_e roastty_terminal_get_multi(
+    roastty_terminal_t,
+    size_t,
+    const roastty_terminal_data_e*,
+    void**,
+    size_t*);
 ROASTTY_API roastty_result_e
 roastty_terminal_take_pty_response(roastty_terminal_t, roastty_string_s*);
 

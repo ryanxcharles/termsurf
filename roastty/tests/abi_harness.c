@@ -583,6 +583,47 @@ static void assert_mouse_encoder_abi(void) {
 static void assert_terminal_abi(void) {
   roastty_terminal_free(NULL);
 
+  assert(ROASTTY_SUCCESS == 0);
+  assert(ROASTTY_OUT_OF_MEMORY == 1);
+  assert(ROASTTY_INVALID_VALUE == 2);
+  assert(ROASTTY_OUT_OF_SPACE == 3);
+  assert(ROASTTY_NO_VALUE == 4);
+  assert(ROASTTY_TERMINAL_DATA_INVALID == 0);
+  assert(ROASTTY_TERMINAL_DATA_COLS == 1);
+  assert(ROASTTY_TERMINAL_DATA_ROWS == 2);
+  assert(ROASTTY_TERMINAL_DATA_CURSOR_X == 3);
+  assert(ROASTTY_TERMINAL_DATA_CURSOR_Y == 4);
+  assert(ROASTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP == 5);
+  assert(ROASTTY_TERMINAL_DATA_ACTIVE_SCREEN == 6);
+  assert(ROASTTY_TERMINAL_DATA_CURSOR_VISIBLE == 7);
+  assert(ROASTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS == 8);
+  assert(ROASTTY_TERMINAL_DATA_SCROLLBAR == 9);
+  assert(ROASTTY_TERMINAL_DATA_CURSOR_STYLE == 10);
+  assert(ROASTTY_TERMINAL_DATA_MOUSE_TRACKING == 11);
+  assert(ROASTTY_TERMINAL_DATA_TITLE == 12);
+  assert(ROASTTY_TERMINAL_DATA_PWD == 13);
+  assert(ROASTTY_TERMINAL_DATA_TOTAL_ROWS == 14);
+  assert(ROASTTY_TERMINAL_DATA_SCROLLBACK_ROWS == 15);
+  assert(ROASTTY_TERMINAL_DATA_WIDTH_PX == 16);
+  assert(ROASTTY_TERMINAL_DATA_HEIGHT_PX == 17);
+  assert(ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND == 18);
+  assert(ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND == 19);
+  assert(ROASTTY_TERMINAL_DATA_COLOR_CURSOR == 20);
+  assert(ROASTTY_TERMINAL_DATA_COLOR_PALETTE == 21);
+  assert(ROASTTY_TERMINAL_DATA_COLOR_FOREGROUND_DEFAULT == 22);
+  assert(ROASTTY_TERMINAL_DATA_COLOR_BACKGROUND_DEFAULT == 23);
+  assert(ROASTTY_TERMINAL_DATA_COLOR_CURSOR_DEFAULT == 24);
+  assert(ROASTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT == 25);
+  assert(ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT == 26);
+  assert(ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE == 27);
+  assert(ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE == 28);
+  assert(ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM == 29);
+  assert(ROASTTY_TERMINAL_DATA_KITTY_GRAPHICS == 30);
+  assert(ROASTTY_TERMINAL_DATA_SELECTION == 31);
+  assert(ROASTTY_TERMINAL_DATA_VIEWPORT_ACTIVE == 32);
+  assert(ROASTTY_TERMINAL_SCREEN_PRIMARY == 0);
+  assert(ROASTTY_TERMINAL_SCREEN_ALTERNATE == 1);
+
   roastty_terminal_t terminal = NULL;
   assert(roastty_terminal_new(5, 3, SIZE_MAX, NULL) == ROASTTY_INVALID_VALUE);
   assert(roastty_terminal_new(0, 3, SIZE_MAX, &terminal) ==
@@ -615,6 +656,134 @@ static void assert_terminal_abi(void) {
   assert(row == 0);
   assert(!roastty_terminal_cursor_position(terminal, NULL, &row));
   assert(!roastty_terminal_cursor_position(NULL, &column, &row));
+
+  uint16_t cols = 0;
+  uint16_t rows = 0;
+  assert(roastty_terminal_get(terminal, ROASTTY_TERMINAL_DATA_COLS, &cols) ==
+         ROASTTY_SUCCESS);
+  assert(cols == 10);
+  assert(roastty_terminal_get(terminal, ROASTTY_TERMINAL_DATA_ROWS, &rows) ==
+         ROASTTY_SUCCESS);
+  assert(rows == 4);
+  column = 0;
+  row = 0;
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_CURSOR_X,
+                              &column) == ROASTTY_SUCCESS);
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_CURSOR_Y,
+                              &row) == ROASTTY_SUCCESS);
+  assert(column == 3);
+  assert(row == 0);
+  bool pending_wrap = true;
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP,
+                              &pending_wrap) == ROASTTY_SUCCESS);
+  assert(!pending_wrap);
+  roastty_terminal_screen_e active_screen = ROASTTY_TERMINAL_SCREEN_ALTERNATE;
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_ACTIVE_SCREEN,
+                              &active_screen) == ROASTTY_SUCCESS);
+  assert(active_screen == ROASTTY_TERMINAL_SCREEN_PRIMARY);
+  bool cursor_visible = false;
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_CURSOR_VISIBLE,
+                              &cursor_visible) == ROASTTY_SUCCESS);
+  assert(cursor_visible);
+  uint8_t key_flags = 99;
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS,
+                              &key_flags) == ROASTTY_SUCCESS);
+  assert(key_flags == 0);
+  bool mouse_tracking = true;
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_MOUSE_TRACKING,
+                              &mouse_tracking) == ROASTTY_SUCCESS);
+  assert(!mouse_tracking);
+  size_t total_rows = 0;
+  size_t scrollback_rows = 99;
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_TOTAL_ROWS,
+                              &total_rows) == ROASTTY_SUCCESS);
+  assert(total_rows == 4);
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_SCROLLBACK_ROWS,
+                              &scrollback_rows) == ROASTTY_SUCCESS);
+  assert(scrollback_rows == 0);
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_TITLE,
+                              &total_rows) == ROASTTY_NO_VALUE);
+  assert(roastty_terminal_get(terminal,
+                              (roastty_terminal_data_e)-1,
+                              &total_rows) == ROASTTY_INVALID_VALUE);
+  assert(roastty_terminal_get(terminal,
+                              (roastty_terminal_data_e)33,
+                              &total_rows) == ROASTTY_INVALID_VALUE);
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_INVALID,
+                              &total_rows) == ROASTTY_INVALID_VALUE);
+  assert(roastty_terminal_get(terminal,
+                              ROASTTY_TERMINAL_DATA_COLS,
+                              NULL) == ROASTTY_INVALID_VALUE);
+  assert(roastty_terminal_get(NULL,
+                              ROASTTY_TERMINAL_DATA_COLS,
+                              &cols) == ROASTTY_INVALID_VALUE);
+
+  roastty_terminal_data_e keys[] = {
+      ROASTTY_TERMINAL_DATA_COLS,
+      ROASTTY_TERMINAL_DATA_ROWS,
+      ROASTTY_TERMINAL_DATA_CURSOR_X,
+  };
+  void *values[] = {&cols, &rows, &column};
+  size_t written = 999;
+  assert(roastty_terminal_get_multi(terminal, 3, keys, values, &written) ==
+         ROASTTY_SUCCESS);
+  assert(written == 3);
+  assert(cols == 10);
+  assert(rows == 4);
+  assert(column == 3);
+  assert(roastty_terminal_get_multi(terminal, 0, keys, values, &written) ==
+         ROASTTY_SUCCESS);
+  assert(written == 0);
+  roastty_terminal_data_e deferred_keys[] = {
+      ROASTTY_TERMINAL_DATA_COLS,
+      ROASTTY_TERMINAL_DATA_TITLE,
+      ROASTTY_TERMINAL_DATA_ROWS,
+  };
+  void *deferred_values[] = {&cols, &total_rows, &rows};
+  written = 999;
+  assert(roastty_terminal_get_multi(terminal,
+                                    3,
+                                    deferred_keys,
+                                    deferred_values,
+                                    &written) == ROASTTY_NO_VALUE);
+  assert(written == 1);
+  roastty_terminal_data_e invalid_keys[] = {
+      ROASTTY_TERMINAL_DATA_COLS,
+      (roastty_terminal_data_e)33,
+  };
+  void *invalid_values[] = {&cols, &rows};
+  written = 999;
+  assert(roastty_terminal_get_multi(terminal,
+                                    2,
+                                    invalid_keys,
+                                    invalid_values,
+                                    &written) == ROASTTY_INVALID_VALUE);
+  assert(written == 1);
+  void *null_values[] = {&cols, NULL};
+  written = 999;
+  assert(roastty_terminal_get_multi(terminal,
+                                    2,
+                                    keys,
+                                    null_values,
+                                    &written) == ROASTTY_INVALID_VALUE);
+  assert(written == 1);
+  assert(roastty_terminal_get_multi(NULL, 1, keys, values, &written) ==
+         ROASTTY_INVALID_VALUE);
+  assert(roastty_terminal_get_multi(terminal, 1, NULL, values, &written) ==
+         ROASTTY_INVALID_VALUE);
+  assert(roastty_terminal_get_multi(terminal, 1, keys, NULL, &written) ==
+         ROASTTY_INVALID_VALUE);
 
   uint8_t utf8_a = 0xc3;
   uint8_t utf8_b = 0xa9;
