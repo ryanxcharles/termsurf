@@ -342,6 +342,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 118: Port CSI Cursor Position](118-port-csi-cursor-position.md) —
   **Pass**
+- [Experiment 119: Port CSI Horizontal Tabulation](119-port-csi-horizontal-tabulation.md)
+  — **Designed**
 
 ## Non-Goals
 
