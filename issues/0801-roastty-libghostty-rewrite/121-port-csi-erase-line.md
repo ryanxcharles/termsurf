@@ -318,3 +318,114 @@ The experiment fails if:
 - it silently implements incompatible placeholder erase semantics;
 - it adds unrelated insert/delete line, scroll-region, public API, ABI, or
   non-macOS behavior.
+
+## Result
+
+**Result:** Pass
+
+Implemented Roastty's private `CSI K` erase-line path for the current basic
+full-screen terminal model.
+
+Accepted stream forms:
+
+- `CSI K`, `CSI 0 K`, and `CSI ; K` dispatch erase right;
+- `CSI 1 K` and `CSI 1 ; K` dispatch erase left;
+- `CSI 2 K` dispatches complete line erase;
+- the same forms with `?` after `CSI` dispatch protected erase-line requests.
+
+Rejected forms include unsupported modes `3`, `4`, and larger values, real
+multi-param forms, colon/mixed separators, invalid private markers, and raw C1
+CSI. Invalid forms do not leak their final byte as printable text. Pending
+invalid UTF-8 emits `U+FFFD` before the erase-line action, including split-feed
+cases. Handler errors restore the parser to ground state before the next byte.
+
+Terminal behavior now covers:
+
+- erase right: cursor cell through the end of the cursor row;
+- erase left: start of cursor row through the cursor cell;
+- complete: the full cursor row;
+- cursor preservation for all erase-line modes;
+- pending-wrap clearing for all valid erase-line modes;
+- scrollback preservation for all erase-line modes.
+
+The implementation deliberately separates erase-line metadata behavior from
+Experiment 120's erase-display helpers:
+
+- right erase resets the cursor row's `wrap` metadata and clears the next active
+  row's `wrap_continuation` metadata when the cursor row was wrapped, matching
+  Ghostty's `cursorResetWrap()` path;
+- left erase preserves row soft-wrap metadata;
+- complete erase clears every cell in the cursor row while preserving row
+  soft-wrap metadata, matching Ghostty's `eraseLine(.complete, ...)` behavior
+  and avoiding the full-row metadata reset used for `CSI J`.
+
+Protected erase skips already-protected cells and clears unprotected cells in
+the same targeted row range. The broader ISO/DEC protected-mode stream state
+machine remains deferred, as designed.
+
+Implemented code changes:
+
+- `roastty/src/terminal/stream.rs`
+  - added private `EraseLineMode`;
+  - added `Action::EraseLine { mode, protected }`;
+  - added `CSI K` dispatch with Ghostty's accepted mode values and
+    semicolon-finalized one-param behavior;
+  - added parser tests for accepted forms, protected forms, unsupported `3`/`4`
+    modes, invalid forms, split feeds, raw C1, pending UTF-8, and handler error
+    recovery.
+- `roastty/src/terminal/page_list.rs`
+  - added an active-cell clear helper that preserves row metadata;
+  - added a narrow active-row wrap query for the erase-right reset path.
+- `roastty/src/terminal/screen.rs`
+  - added `erase_line_basic()`;
+  - added a cursor-wrap reset helper for erase-right semantics.
+- `roastty/src/terminal/terminal.rs`
+  - routed erase-line actions;
+  - added terminal tests for right/left/complete ranges, protected cells,
+    pending wrap, scrollback preservation, dirty rows, split feed, invalid
+    forms, and soft-wrap metadata behavior.
+
+Verification passed after `cargo fmt`:
+
+```bash
+cargo test -p roastty stream
+cargo test -p roastty terminal::terminal
+cargo test -p roastty terminal::page_list
+cargo test -p roastty terminal_formatter
+cargo test -p roastty screen_formatter
+cargo test -p roastty page_string
+cargo test -p roastty
+```
+
+The final full package run passed `1210` unit tests plus the ABI harness.
+
+Codex result review:
+
+- `logs/codex-review/20260601-043202-664599-last-message.md`
+- Reported no findings.
+- Confirmed the implementation matches the approved design and current upstream
+  Ghostty `CSI K` behavior.
+- Noted that no implementation changes were required before recording Experiment
+  121 as Pass.
+
+Deferred:
+
+- `CSI 4 K` / right-unless-pending-wrap, because current upstream Ghostty's
+  stream parser rejects it despite the enum variant;
+- wide-character erase-boundary adjustment, until Roastty has a wide-cell
+  mutation path;
+- global ISO/DEC protected-mode stream semantics beyond explicit protected `?K`
+  requests and already-stored per-cell protection bits;
+- insert/delete line, scroll-region, origin-mode, margin, SGR, public API, and
+  ABI work.
+
+## Conclusion
+
+Experiment 121 successfully ports the next Ghostty stream action, `CSI K`, into
+Roastty's current basic terminal model. The implementation keeps erase-line
+metadata semantics distinct from erase-display semantics, which was the main
+risk in this slice.
+
+The next experiment should continue in upstream stream order after `CSI K`,
+likely with line insertion/deletion or the next adjacent CSI mutation, using the
+same reviewed one-slice-at-a-time process.

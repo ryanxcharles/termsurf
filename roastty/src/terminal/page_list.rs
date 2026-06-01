@@ -3442,6 +3442,32 @@ impl PageList {
         Ok(())
     }
 
+    pub(super) fn clear_active_cells_preserve_metadata(
+        &mut self,
+        y: u32,
+        left: CellCountInt,
+        end: CellCountInt,
+        protected: bool,
+    ) -> Result<(), BasicCellWriteError> {
+        assert!(left <= end);
+        assert!(end <= self.cols);
+
+        let pin = self
+            .pin(point::Point::active(point::Coordinate::new(left, y)))
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let index = self
+            .node_index(pin.node)
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let page = &mut self.pages[index].page;
+        if protected {
+            page.clear_unprotected_cells(pin.y as usize, left as usize, end as usize);
+        } else {
+            page.clear_cells(pin.y as usize, left as usize, end as usize);
+        }
+        page.get_row_mut(pin.y as usize).set_dirty(true);
+        Ok(())
+    }
+
     pub(super) fn erase_history_basic(&mut self) -> Result<(), BasicCellWriteError> {
         self.erase_history(None)
             .map_err(|_| BasicCellWriteError::InvalidPoint)
@@ -3472,6 +3498,16 @@ impl PageList {
             .pin(point::Point::active(point::Coordinate::new(0, y)))
             .ok_or(BasicCellWriteError::InvalidPoint)?;
         self.set_row_wrap_continuation_at_pin(pin, wrap)
+    }
+
+    pub(super) fn active_row_wrap(&self, y: u32) -> Result<bool, BasicCellWriteError> {
+        let pin = self
+            .pin(point::Point::active(point::Coordinate::new(0, y)))
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let node = self
+            .node_for_pin(&pin)
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        Ok(node.page.get_row(pin.y as usize).wrap())
     }
 
     pub(super) fn set_row_wrap_at_pin(

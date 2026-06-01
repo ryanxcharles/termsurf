@@ -383,6 +383,10 @@ impl Handler for TerminalStreamHandler<'_> {
                 .screen
                 .erase_display_basic(mode, self.size.rows, self.size.cols, protected)
                 .map_err(TerminalStreamError::from),
+            Action::EraseLine { mode, protected } => self
+                .screen
+                .erase_line_basic(mode, self.size.rows, self.size.cols, protected)
+                .map_err(TerminalStreamError::from),
         }
     }
 }
@@ -2235,6 +2239,178 @@ mod tests {
         terminal.next_slice(b"AB").unwrap();
         terminal.next_slice(b"\x1b[").unwrap();
         terminal.next_slice(b"2J").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "");
+    }
+
+    #[test]
+    fn terminal_stream_csi_erase_line_right_clears_cursor_row_suffix() {
+        let mut terminal = Terminal::init(5, 3, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["ABCDE", "FGHIJ", "KLMNO"]);
+        terminal.screens.active.set_cursor_position_for_tests(2, 1);
+        terminal.clear_dirty_for_tests();
+
+        terminal.next_slice(b"\x1b[K").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABCDE\nFG\nKLMNO");
+        assert_eq!(terminal.cursor_position_for_tests(), (2, 1));
+        assert!(terminal.is_dirty_for_tests(0, 1));
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(0, 2));
+    }
+
+    #[test]
+    fn terminal_stream_csi_erase_line_left_clears_cursor_row_prefix() {
+        let mut terminal = Terminal::init(5, 3, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["ABCDE", "FGHIJ", "KLMNO"]);
+        terminal.screens.active.set_cursor_position_for_tests(2, 1);
+
+        terminal.next_slice(b"\x1b[1K").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABCDE\n   IJ\nKLMNO");
+        assert_eq!(terminal.cursor_position_for_tests(), (2, 1));
+    }
+
+    #[test]
+    fn terminal_stream_csi_erase_line_complete_clears_cursor_row_only() {
+        let mut terminal = Terminal::init(5, 3, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["ABCDE", "FGHIJ", "KLMNO"]);
+        terminal.screens.active.set_cursor_position_for_tests(2, 1);
+        terminal.clear_dirty_for_tests();
+
+        terminal.next_slice(b"\x1b[2K").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABCDE\n\nKLMNO");
+        assert_eq!(terminal.cursor_position_for_tests(), (2, 1));
+        assert!(terminal.is_dirty_for_tests(0, 1));
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(0, 2));
+    }
+
+    #[test]
+    fn terminal_stream_csi_erase_line_does_not_mutate_scrollback() {
+        let mut terminal = Terminal::init(5, 2, Some(10)).unwrap();
+
+        terminal.next_slice(b"A\nB\nC").unwrap();
+        let scrollback_before = terminal.scrollback_rows_for_tests();
+        let active_before = plain_with_unwrap(&terminal, false);
+
+        terminal.next_slice(b"\x1b[1K").unwrap();
+
+        assert_eq!(terminal.scrollback_rows_for_tests(), scrollback_before);
+        assert_ne!(plain_with_unwrap(&terminal, false), "");
+        assert_ne!(plain_with_unwrap(&terminal, false), active_before);
+    }
+
+    #[test]
+    fn terminal_stream_csi_erase_line_clears_pending_wrap() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"ABCDE").unwrap();
+        assert!(terminal.cursor_pending_wrap_for_tests());
+
+        terminal.next_slice(b"\x1b[K").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABCD");
+        assert!(!terminal.cursor_pending_wrap_for_tests());
+    }
+
+    #[test]
+    fn terminal_stream_csi_erase_line_right_resets_wrap_metadata() {
+        let mut terminal = Terminal::init(5, 3, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["ABCDE", "FGHIJ", "KLMNO"]);
+        terminal.set_row_wrap_for_tests(0, true);
+        terminal.set_row_wrap_continuation_for_tests(1, true);
+        terminal.screens.active.set_cursor_position_for_tests(2, 0);
+        terminal.clear_dirty_for_tests();
+
+        terminal.next_slice(b"\x1b[K").unwrap();
+
+        assert!(!terminal.row_wrap_for_tests(0));
+        assert!(!terminal.row_wrap_continuation_for_tests(1));
+        assert!(terminal.is_dirty_for_tests(0, 0));
+        assert!(terminal.is_dirty_for_tests(0, 1));
+        assert!(!terminal.is_dirty_for_tests(0, 2));
+    }
+
+    #[test]
+    fn terminal_stream_csi_erase_line_left_preserves_wrap_metadata() {
+        let mut terminal = Terminal::init(5, 3, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["ABCDE", "FGHIJ", "KLMNO"]);
+        terminal.set_row_wrap_for_tests(1, true);
+        terminal.set_row_wrap_continuation_for_tests(2, true);
+        terminal.screens.active.set_cursor_position_for_tests(2, 1);
+
+        terminal.next_slice(b"\x1b[1K").unwrap();
+
+        assert!(terminal.row_wrap_for_tests(1));
+        assert!(terminal.row_wrap_continuation_for_tests(2));
+    }
+
+    #[test]
+    fn terminal_stream_csi_erase_line_complete_preserves_wrap_metadata() {
+        let mut terminal = Terminal::init(5, 3, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["ABCDE", "FGHIJ", "KLMNO"]);
+        terminal.set_row_wrap_for_tests(1, true);
+        terminal.set_row_wrap_continuation_for_tests(2, true);
+        terminal.screens.active.set_cursor_position_for_tests(2, 1);
+
+        terminal.next_slice(b"\x1b[2K").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABCDE\n\nKLMNO");
+        assert!(terminal.row_wrap_for_tests(1));
+        assert!(terminal.row_wrap_continuation_for_tests(2));
+    }
+
+    #[test]
+    fn terminal_stream_csi_erase_line_protected_cells_survive() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["ABCDE", "FGHIJ"]);
+        terminal.set_cell_protected_for_tests(2, 0, true);
+        terminal.screens.active.set_cursor_position_for_tests(1, 0);
+
+        terminal.next_slice(b"\x1b[?K").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "A C\nFGHIJ");
+    }
+
+    #[test]
+    fn terminal_stream_unsupported_csi_erase_line_does_not_mutate_state() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"AB\x1b[4KCD").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABCD");
+    }
+
+    #[test]
+    fn terminal_stream_split_feed_csi_erase_line_clears_row() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"AB").unwrap();
+        terminal.next_slice(b"\x1b[").unwrap();
+        terminal.next_slice(b"2K").unwrap();
 
         assert_eq!(plain_with_unwrap(&terminal, false), "");
     }

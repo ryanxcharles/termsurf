@@ -346,8 +346,7 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 120: Port CSI Erase Display](120-port-csi-erase-display.md) —
   **Pass**
-- [Experiment 121: Port CSI Erase Line](121-port-csi-erase-line.md) —
-  **Designed**
+- [Experiment 121: Port CSI Erase Line](121-port-csi-erase-line.md) — **Pass**
 
 ## Non-Goals
 

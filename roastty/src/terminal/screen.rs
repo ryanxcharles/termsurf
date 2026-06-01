@@ -306,6 +306,46 @@ impl Screen {
         Ok(())
     }
 
+    pub(super) fn erase_line_basic(
+        &mut self,
+        mode: super::stream::EraseLineMode,
+        rows: CellCountInt,
+        cols: CellCountInt,
+        protected: bool,
+    ) -> Result<(), EraseDisplayError> {
+        match mode {
+            super::stream::EraseLineMode::Right => {
+                self.cursor_reset_wrap_basic(rows)?;
+                self.clear_active_cells_preserve_metadata(
+                    self.cursor.y.into(),
+                    self.cursor.x,
+                    cols,
+                    protected,
+                )?;
+            }
+            super::stream::EraseLineMode::Left => {
+                self.clear_active_cells_preserve_metadata(
+                    self.cursor.y.into(),
+                    0,
+                    self.cursor.x.saturating_add(1).min(cols),
+                    protected,
+                )?;
+                self.cursor.pending_wrap = false;
+            }
+            super::stream::EraseLineMode::Complete => {
+                self.clear_active_cells_preserve_metadata(
+                    self.cursor.y.into(),
+                    0,
+                    cols,
+                    protected,
+                )?;
+                self.cursor.pending_wrap = false;
+            }
+        }
+
+        Ok(())
+    }
+
     pub(super) fn cursor_row_relative_basic(&mut self, rows: CellCountInt, count: CellCountInt) {
         let bottom = rows.saturating_sub(1);
         self.cursor.pending_wrap = false;
@@ -355,6 +395,35 @@ impl Screen {
         protected: bool,
     ) -> Result<(), BasicCellWriteError> {
         self.pages.clear_active_cells(y, left, end, protected)?;
+        Ok(())
+    }
+
+    fn clear_active_cells_preserve_metadata(
+        &mut self,
+        y: u32,
+        left: CellCountInt,
+        end: CellCountInt,
+        protected: bool,
+    ) -> Result<(), BasicCellWriteError> {
+        self.pages
+            .clear_active_cells_preserve_metadata(y, left, end, protected)?;
+        Ok(())
+    }
+
+    fn cursor_reset_wrap_basic(&mut self, rows: CellCountInt) -> Result<(), BasicCellWriteError> {
+        self.cursor.pending_wrap = false;
+
+        if !self.pages.active_row_wrap(self.cursor.y.into())? {
+            return Ok(());
+        }
+
+        self.pages
+            .set_active_row_wrap(self.cursor.y.into(), false)?;
+        let next = self.cursor.y.saturating_add(1);
+        if next < rows {
+            self.pages
+                .set_active_row_wrap_continuation(next.into(), false)?;
+        }
         Ok(())
     }
 

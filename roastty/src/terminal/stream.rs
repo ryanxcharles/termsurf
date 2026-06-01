@@ -46,6 +46,10 @@ pub(super) enum Action {
         mode: EraseDisplayMode,
         protected: bool,
     },
+    EraseLine {
+        mode: EraseLineMode,
+        protected: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +59,13 @@ pub(super) enum EraseDisplayMode {
     Complete,
     Scrollback,
     ScrollComplete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EraseLineMode {
+    Right,
+    Left,
+    Complete,
 }
 
 pub(super) trait Handler {
@@ -312,6 +323,10 @@ impl CsiState {
             return CsiDispatch::One(action);
         }
 
+        if let Some(action) = self.erase_line_action(final_byte) {
+            return CsiDispatch::One(action);
+        }
+
         if final_byte == b'W' {
             return self
                 .tab_action()
@@ -448,6 +463,32 @@ impl CsiState {
         };
 
         Some(Action::EraseDisplay { mode, protected })
+    }
+
+    fn erase_line_action(&self, final_byte: u8) -> Option<Action> {
+        if final_byte != b'K' {
+            return None;
+        }
+
+        let protected = match self.private {
+            None => false,
+            Some(b'?') => true,
+            Some(_) => return None,
+        };
+        let params = self.finalized_params()?;
+        if params.len > 1 {
+            return None;
+        }
+
+        let param = (params.len == 1).then_some(params.values[0]).unwrap_or(0);
+        let mode = match param {
+            0 => EraseLineMode::Right,
+            1 => EraseLineMode::Left,
+            2 => EraseLineMode::Complete,
+            _ => return None,
+        };
+
+        Some(Action::EraseLine { mode, protected })
     }
 
     fn line_dispatch(&self, final_byte: u8) -> Option<CsiDispatch> {
@@ -627,7 +668,8 @@ mod tests {
                 | Action::CursorRow { .. }
                 | Action::CursorRowRelative { .. }
                 | Action::CursorPosition { .. }
-                | Action::EraseDisplay { .. } => None,
+                | Action::EraseDisplay { .. }
+                | Action::EraseLine { .. } => None,
             })
             .collect()
     }
@@ -896,6 +938,114 @@ mod tests {
                 b"\x1b[?1;JA".as_slice(),
                 Action::EraseDisplay {
                     mode: EraseDisplayMode::Above,
+                    protected: true,
+                },
+            ),
+        ] {
+            let mut stream = Stream::init();
+            let mut handler = RecordingHandler::default();
+
+            next_slice(&mut stream, &mut handler, input);
+
+            if input.starts_with(b"A") {
+                assert_eq!(
+                    actions(&handler),
+                    &[
+                        Action::Print { cp: 'A' },
+                        expected,
+                        Action::Print { cp: 'B' },
+                    ]
+                );
+            } else {
+                assert_eq!(actions(&handler), &[expected, Action::Print { cp: 'A' }]);
+            }
+        }
+    }
+
+    #[test]
+    fn stream_csi_erase_line_dispatches_modes() {
+        for (input, expected) in [
+            (
+                b"A\x1b[KB".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Right,
+                    protected: false,
+                },
+            ),
+            (
+                b"\x1b[0KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Right,
+                    protected: false,
+                },
+            ),
+            (
+                b"\x1b[;KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Right,
+                    protected: false,
+                },
+            ),
+            (
+                b"\x1b[1KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Left,
+                    protected: false,
+                },
+            ),
+            (
+                b"\x1b[1;KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Left,
+                    protected: false,
+                },
+            ),
+            (
+                b"\x1b[2KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Complete,
+                    protected: false,
+                },
+            ),
+            (
+                b"\x1b[?KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Right,
+                    protected: true,
+                },
+            ),
+            (
+                b"\x1b[?0KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Right,
+                    protected: true,
+                },
+            ),
+            (
+                b"\x1b[?;KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Right,
+                    protected: true,
+                },
+            ),
+            (
+                b"\x1b[?1KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Left,
+                    protected: true,
+                },
+            ),
+            (
+                b"\x1b[?1;KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Left,
+                    protected: true,
+                },
+            ),
+            (
+                b"\x1b[?2KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Complete,
                     protected: true,
                 },
             ),
@@ -1561,6 +1711,45 @@ mod tests {
                 b"2JA".as_slice(),
                 Action::EraseDisplay {
                     mode: EraseDisplayMode::Complete,
+                    protected: true,
+                },
+            ),
+        ] {
+            let mut stream = Stream::init();
+            let mut handler = RecordingHandler::default();
+
+            next_slice(&mut stream, &mut handler, first);
+            assert!(actions(&handler).is_empty());
+            next_slice(&mut stream, &mut handler, second);
+
+            assert_eq!(actions(&handler), &[expected, Action::Print { cp: 'A' }]);
+        }
+    }
+
+    #[test]
+    fn stream_split_csi_erase_line_dispatches_modes() {
+        for (first, second, expected) in [
+            (
+                b"\x1b[".as_slice(),
+                b"KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Right,
+                    protected: false,
+                },
+            ),
+            (
+                b"\x1b[2".as_slice(),
+                b"KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Complete,
+                    protected: false,
+                },
+            ),
+            (
+                b"\x1b[?".as_slice(),
+                b"1KA".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Left,
                     protected: true,
                 },
             ),
@@ -2305,6 +2494,28 @@ mod tests {
     }
 
     #[test]
+    fn stream_pending_utf8_replacement_dispatches_before_csi_erase_line() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"\xf0\x9f\x1b[KA");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print {
+                    cp: char::REPLACEMENT_CHARACTER,
+                },
+                Action::EraseLine {
+                    mode: EraseLineMode::Right,
+                    protected: false,
+                },
+                Action::Print { cp: 'A' },
+            ]
+        );
+    }
+
+    #[test]
     fn stream_pending_utf8_replacement_dispatches_before_split_csi_erase_display() {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();
@@ -2327,6 +2538,36 @@ mod tests {
                 },
                 Action::EraseDisplay {
                     mode: EraseDisplayMode::ScrollComplete,
+                    protected: false,
+                },
+                Action::Print { cp: 'A' },
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_pending_utf8_replacement_dispatches_before_split_csi_erase_line() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"\xf0\x9f\x1b[2");
+        assert_eq!(
+            actions(&handler),
+            &[Action::Print {
+                cp: char::REPLACEMENT_CHARACTER,
+            }]
+        );
+
+        next_slice(&mut stream, &mut handler, b"KA");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print {
+                    cp: char::REPLACEMENT_CHARACTER,
+                },
+                Action::EraseLine {
+                    mode: EraseLineMode::Complete,
                     protected: false,
                 },
                 Action::Print { cp: 'A' },
@@ -2571,6 +2812,28 @@ mod tests {
     }
 
     #[test]
+    fn stream_unsupported_csi_erase_line_variants_do_not_dispatch_actions() {
+        for input in [
+            b"\x1b[>2KA".as_slice(),
+            b"\x1b[5;4KA".as_slice(),
+            b"\x1b[5;;KA".as_slice(),
+            b"\x1b[1:2KA".as_slice(),
+            b"\x1b[1;2:3KA".as_slice(),
+            b"\x1b[3KA".as_slice(),
+            b"\x1b[4KA".as_slice(),
+            b"\x1b[999KA".as_slice(),
+            b"\x1b[ KA".as_slice(),
+        ] {
+            let mut stream = Stream::init();
+            let mut handler = RecordingHandler::default();
+
+            next_slice(&mut stream, &mut handler, input);
+
+            assert_eq!(actions(&handler), &[Action::Print { cp: 'A' }]);
+        }
+    }
+
+    #[test]
     fn stream_unsupported_csi_cursor_position_variants_do_not_dispatch_actions() {
         for input in [
             b"\x1b[?3HA".as_slice(),
@@ -2667,6 +2930,24 @@ mod tests {
                     cp: char::REPLACEMENT_CHARACTER,
                 },
                 Action::Print { cp: 'J' },
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_raw_c1_csi_byte_does_not_dispatch_erase_line_action() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, &[0x9b, b'K']);
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print {
+                    cp: char::REPLACEMENT_CHARACTER,
+                },
+                Action::Print { cp: 'K' },
             ]
         );
     }
@@ -2935,7 +3216,8 @@ mod tests {
                 | Action::CursorRow { .. }
                 | Action::CursorRowRelative { .. }
                 | Action::CursorPosition { .. }
-                | Action::EraseDisplay { .. } => unreachable!("loop only uses D/E actions"),
+                | Action::EraseDisplay { .. }
+                | Action::EraseLine { .. } => unreachable!("loop only uses D/E actions"),
             };
 
             assert_eq!(stream.next_slice(input, &mut handler), Err(()));
@@ -3102,6 +3384,41 @@ mod tests {
                 b"\x1b[22J".as_slice(),
                 Action::EraseDisplay {
                     mode: EraseDisplayMode::ScrollComplete,
+                    protected: false,
+                },
+            ),
+        ] {
+            let mut stream = Stream::init();
+            let mut handler = ErrorOnActionHandler::new(fail);
+
+            assert_eq!(stream.next_slice(input, &mut handler), Err(()));
+            stream.next_slice(b"A", &mut handler).unwrap();
+
+            assert_eq!(handler.actions, &[Action::Print { cp: 'A' }]);
+        }
+    }
+
+    #[test]
+    fn stream_csi_erase_line_restore_ground_before_handler_error() {
+        for (input, fail) in [
+            (
+                b"\x1b[K".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Right,
+                    protected: false,
+                },
+            ),
+            (
+                b"\x1b[?1K".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Left,
+                    protected: true,
+                },
+            ),
+            (
+                b"\x1b[2K".as_slice(),
+                Action::EraseLine {
+                    mode: EraseLineMode::Complete,
                     protected: false,
                 },
             ),
