@@ -208,3 +208,64 @@ Codex identified three high-value improvements before implementation:
   remapped by a `' '` replacement.
 
 The design now requires those behaviors and tests.
+
+## Result
+
+**Result:** Pass
+
+Implemented private formatter codepoint-map support in
+`roastty/src/terminal/page_list.rs`. The new private types are
+`CodepointReplacement` and `CodepointMapEntry`; `PageStringOptions`,
+`PlainPageFormat`, and `StyledPageFormat` now carry an optional borrowed
+`codepoint_map` used only by the private PageList formatter path.
+
+`CodepointMapEntry::new(...)` rejects reversed ranges, out-of-range Unicode
+values, and ranges that intersect surrogate codepoints. Replacements are stored
+as either a valid Rust `char` or a valid Rust `String`, so invalid scalar
+replacement output cannot enter the formatter through these private types.
+
+The ported behavior matches the scoped upstream formatter semantics:
+
+- map entries are scanned from last to first, so the last matching range wins;
+- replacements are one-shot and are not recursively remapped;
+- replacements apply to base cell codepoints and attached grapheme codepoints;
+- `Codepoint` and `String` replacements work in plain, VT, and HTML output;
+- HTML output applies replacement before escaping and numeric entity conversion;
+- generated alignment blanks are not treated as source spaces and are not
+  remapped;
+- no-map `selection_string`, `dump_string`, and `page_string` behavior remains
+  unchanged.
+
+The upstream pin-map and point-map behavior remains deferred. This experiment
+did not add pin maps, point maps, `Screen`, `Terminal`, parser state, cursor
+state, terminal extras, hyperlinks, writer abstraction, public ABI, app,
+renderer, clipboard, PTY, or UI behavior.
+
+Verification passed:
+
+```text
+cargo fmt
+cargo test -p roastty codepoint_map        # 15 passed
+cargo test -p roastty page_string          # 12 passed
+cargo test -p roastty dump_string          # 13 passed
+cargo test -p roastty selection_string     # 22 passed
+cargo test -p roastty terminal::page_list  # 466 passed
+cargo test -p roastty                      # 759 unit tests + ABI harness + doctests passed
+```
+
+Codex design review found no blockers and requested explicit non-recursive,
+Unicode-scalar, and generated-blank coverage; those were added to the design
+before implementation.
+
+Codex result review first found one useful test gap: replacement while a VT/HTML
+style wrapper is active. Added
+`codepoint_map_styled_output_keeps_replacement_inside_style`, reran the full
+verification set, and re-ran Codex review. The second review found no blockers
+and said the implementation is acceptable to record.
+
+## Conclusion
+
+Experiment 83 completes the private `codepoint_map` slice of Ghostty's formatter
+behavior for Roastty's PageList formatter. The remaining formatter work is still
+outside this slice: pin/point maps and any future public formatter API can be
+ported in later experiments when their surrounding infrastructure exists.

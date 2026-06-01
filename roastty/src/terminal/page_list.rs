@@ -1,4 +1,5 @@
 use std::fmt::Write as _;
+use std::ops::RangeInclusive;
 use std::ptr::NonNull;
 
 use super::page::{
@@ -171,6 +172,35 @@ struct PlainStringOptions {
     unwrap: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CodepointReplacement {
+    Codepoint(char),
+    String(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CodepointMapEntry {
+    range: RangeInclusive<u32>,
+    replacement: CodepointReplacement,
+}
+
+impl CodepointMapEntry {
+    fn new(start: u32, end: u32, replacement: CodepointReplacement) -> Option<Self> {
+        if !valid_scalar_range(start, end) {
+            return None;
+        }
+
+        Some(Self {
+            range: start..=end,
+            replacement,
+        })
+    }
+
+    fn matches(&self, codepoint: u32) -> bool {
+        self.range.contains(&codepoint)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PageOutputFormat {
     Plain,
@@ -185,6 +215,7 @@ struct PageStringOptions<'a> {
     unwrap: bool,
     emit: PageOutputFormat,
     palette: Option<&'a color::Palette>,
+    codepoint_map: Option<&'a [CodepointMapEntry]>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -204,6 +235,7 @@ struct PlainPageFormat<'a> {
     trim: bool,
     unwrap: bool,
     trailing_state: Option<PlainTrailingState>,
+    codepoint_map: Option<&'a [CodepointMapEntry]>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -219,6 +251,7 @@ struct StyledPageFormat<'a> {
     emit: PageOutputFormat,
     palette: Option<&'a color::Palette>,
     trailing_state: Option<PlainTrailingState>,
+    codepoint_map: Option<&'a [CodepointMapEntry]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -795,7 +828,7 @@ impl PlainPageFormat<'_> {
                     blank_cells = 0;
                 }
 
-                push_cell_plain(page, x_usize, y_usize, cell, output);
+                push_cell_plain(page, x_usize, y_usize, cell, self.codepoint_map, output);
             }
         }
 
@@ -1044,11 +1077,11 @@ impl StyledPageFormat<'_> {
                     return;
                 }
 
-                self.push_codepoint(cell.codepoint(), output);
+                self.push_codepoint_with_replacement(cell.codepoint(), output);
                 if cell.has_grapheme() {
                     if let Some(graphemes) = page.lookup_grapheme_at(x, y) {
                         for cp in graphemes {
-                            self.push_codepoint(cp, output);
+                            self.push_codepoint_with_replacement(cp, output);
                         }
                     }
                 }
@@ -1082,22 +1115,78 @@ impl StyledPageFormat<'_> {
             PageOutputFormat::Plain => unreachable!(),
         }
     }
+
+    fn push_codepoint_with_replacement(&self, codepoint: u32, output: &mut String) {
+        match replacement_for(self.codepoint_map, codepoint) {
+            Some(CodepointReplacement::Codepoint(ch)) => {
+                self.push_codepoint(*ch as u32, output);
+            }
+            Some(CodepointReplacement::String(value)) => {
+                for ch in value.chars() {
+                    self.push_codepoint(ch as u32, output);
+                }
+            }
+            None => self.push_codepoint(codepoint, output),
+        }
+    }
 }
 
-fn push_cell_plain(page: &Page, x: usize, y: usize, cell: &Cell, output: &mut String) {
-    if let Some(ch) = char::from_u32(cell.codepoint()) {
-        output.push(ch);
-    }
+fn push_cell_plain(
+    page: &Page,
+    x: usize,
+    y: usize,
+    cell: &Cell,
+    codepoint_map: Option<&[CodepointMapEntry]>,
+    output: &mut String,
+) {
+    push_codepoint_plain_with_replacement(cell.codepoint(), codepoint_map, output);
 
     if cell.has_grapheme() {
         if let Some(graphemes) = page.lookup_grapheme_at(x, y) {
             for cp in graphemes {
-                if let Some(ch) = char::from_u32(cp) {
-                    output.push(ch);
-                }
+                push_codepoint_plain_with_replacement(cp, codepoint_map, output);
             }
         }
     }
+}
+
+fn push_codepoint_plain(codepoint: u32, output: &mut String) {
+    if let Some(ch) = char::from_u32(codepoint) {
+        output.push(ch);
+    }
+}
+
+fn push_codepoint_plain_with_replacement(
+    codepoint: u32,
+    codepoint_map: Option<&[CodepointMapEntry]>,
+    output: &mut String,
+) {
+    match replacement_for(codepoint_map, codepoint) {
+        Some(CodepointReplacement::Codepoint(ch)) => output.push(*ch),
+        Some(CodepointReplacement::String(value)) => output.push_str(value),
+        None => push_codepoint_plain(codepoint, output),
+    }
+}
+
+fn replacement_for(
+    codepoint_map: Option<&[CodepointMapEntry]>,
+    codepoint: u32,
+) -> Option<&CodepointReplacement> {
+    codepoint_map?
+        .iter()
+        .rev()
+        .find(|entry| entry.matches(codepoint))
+        .map(|entry| &entry.replacement)
+}
+
+fn valid_scalar_range(start: u32, end: u32) -> bool {
+    if start > end {
+        return false;
+    }
+    if char::from_u32(start).is_none() || char::from_u32(end).is_none() {
+        return false;
+    }
+    !(start <= 0xdfff && end >= 0xd800)
 }
 
 impl PromptIterator<'_> {
@@ -2265,6 +2354,7 @@ impl PageList {
             unwrap: options.unwrap,
             emit: PageOutputFormat::Plain,
             palette: None,
+            codepoint_map: None,
         })
     }
 
@@ -2338,6 +2428,7 @@ impl PageList {
                 trim: options.trim,
                 unwrap: options.unwrap,
                 trailing_state,
+                codepoint_map: options.codepoint_map,
             };
             trailing_state = Some(match options.emit {
                 PageOutputFormat::Plain => formatter.format(&mut output),
@@ -2362,6 +2453,7 @@ impl PageList {
                         emit: options.emit,
                         palette: options.palette,
                         trailing_state,
+                        codepoint_map: options.codepoint_map,
                     };
                     formatter.format(&mut output)
                 }
@@ -5090,8 +5182,38 @@ mod tests {
             unwrap: true,
             emit,
             palette,
+            codepoint_map: None,
         });
         assert_eq!(actual, expected);
+    }
+
+    fn assert_page_string_with_map(
+        list: &PageList,
+        start: (CellCountInt, u32),
+        end: (CellCountInt, u32),
+        emit: PageOutputFormat,
+        trim: bool,
+        codepoint_map: &[CodepointMapEntry],
+        expected: &str,
+    ) {
+        let actual = list.page_string(PageStringOptions {
+            selection: Some(screen_selection(list, start, end, false)),
+            trim,
+            unwrap: true,
+            emit,
+            palette: None,
+            codepoint_map: Some(codepoint_map),
+        });
+        assert_eq!(actual, expected);
+    }
+
+    fn codepoint_map_entry(
+        start: char,
+        end: char,
+        replacement: CodepointReplacement,
+    ) -> CodepointMapEntry {
+        CodepointMapEntry::new(start as u32, end as u32, replacement)
+            .expect("test codepoint range must be valid")
     }
 
     fn set_screen_styled_cell(
@@ -13918,6 +14040,328 @@ mod tests {
     }
 
     #[test]
+    fn codepoint_map_single_replacement() {
+        let mut list = PageList::init(12, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello world"]);
+        let map = [codepoint_map_entry(
+            'o',
+            'o',
+            CodepointReplacement::Codepoint('x'),
+        )];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (10, 0),
+            PageOutputFormat::Plain,
+            true,
+            &map,
+            "hellx wxrld",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_conflicting_replacement_prefers_last() {
+        let mut list = PageList::init(8, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello"]);
+        let map = [
+            codepoint_map_entry('o', 'o', CodepointReplacement::Codepoint('x')),
+            codepoint_map_entry('o', 'o', CodepointReplacement::Codepoint('y')),
+        ];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (4, 0),
+            PageOutputFormat::Plain,
+            true,
+            &map,
+            "helly",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_replacement_with_string() {
+        let mut list = PageList::init(8, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello"]);
+        let map = [codepoint_map_entry(
+            'o',
+            'o',
+            CodepointReplacement::String("XYZ".to_string()),
+        )];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (4, 0),
+            PageOutputFormat::Plain,
+            true,
+            &map,
+            "hellXYZ",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_range_replacement() {
+        let mut list = PageList::init(8, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["abcdefg"]);
+        let map = [codepoint_map_entry(
+            'b',
+            'e',
+            CodepointReplacement::Codepoint('X'),
+        )];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (6, 0),
+            PageOutputFormat::Plain,
+            true,
+            &map,
+            "aXXXXfg",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_multiple_ranges() {
+        let mut list = PageList::init(12, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello world"]);
+        let map = [
+            codepoint_map_entry('a', 'm', CodepointReplacement::Codepoint('A')),
+            codepoint_map_entry('n', 'z', CodepointReplacement::Codepoint('Z')),
+        ];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (10, 0),
+            PageOutputFormat::Plain,
+            true,
+            &map,
+            "AAAAZ ZZZAA",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_unicode_string_replacement() {
+        let mut list = PageList::init(16, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello ⚡ world"]);
+        let map = [codepoint_map_entry(
+            '⚡',
+            '⚡',
+            CodepointReplacement::String("🔥".to_string()),
+        )];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (13, 0),
+            PageOutputFormat::Plain,
+            true,
+            &map,
+            "hello 🔥 world",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_empty_map_preserves_output() {
+        let mut list = PageList::init(12, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello world"]);
+        let map = [];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (10, 0),
+            PageOutputFormat::Plain,
+            true,
+            &map,
+            "hello world",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_replaces_grapheme_codepoints() {
+        let mut list = PageList::init(4, 2, None).unwrap();
+        set_screen_cell(&mut list, 0, 0, 'e');
+        append_screen_grapheme(&mut list, 0, 0, 0x0301);
+        let map = [CodepointMapEntry::new(
+            0x0301,
+            0x0301,
+            CodepointReplacement::String("*".to_string()),
+        )
+        .expect("combining acute accent must be valid")];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (0, 0),
+            PageOutputFormat::Plain,
+            true,
+            &map,
+            "e*",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_replacements_are_not_recursive() {
+        let mut list = PageList::init(4, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["a"]);
+        let map = [
+            codepoint_map_entry('a', 'a', CodepointReplacement::String("b".to_string())),
+            codepoint_map_entry('b', 'b', CodepointReplacement::String("c".to_string())),
+        ];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (0, 0),
+            PageOutputFormat::Plain,
+            true,
+            &map,
+            "b",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_vt_output() {
+        let mut list = PageList::init(10, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["red text"]);
+        let map = [codepoint_map_entry(
+            'e',
+            'e',
+            CodepointReplacement::Codepoint('X'),
+        )];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (7, 0),
+            PageOutputFormat::Vt,
+            true,
+            &map,
+            "rXd tXxt",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_styled_output_keeps_replacement_inside_style() {
+        let mut list = PageList::init(4, 2, None).unwrap();
+        let styled = style::Style {
+            fg_color: style::Color::Palette(1),
+            ..style::Style::default()
+        };
+        set_screen_styled_cell(&mut list, 0, 0, 'e', styled);
+        let map = [codepoint_map_entry(
+            'e',
+            'e',
+            CodepointReplacement::Codepoint('X'),
+        )];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (0, 0),
+            PageOutputFormat::Vt,
+            true,
+            &map,
+            "\x1b[0m\x1b[38;5;1mX\x1b[0m",
+        );
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (0, 0),
+            PageOutputFormat::Html,
+            true,
+            &map,
+            "<div style=\"font-family: monospace; white-space: pre;\"><div style=\"display: inline;color: var(--vt-palette-1);\">X</div></div>",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_html_output_replaces_before_escaping() {
+        let mut list = PageList::init(4, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["xy"]);
+        let map = [
+            codepoint_map_entry('x', 'x', CodepointReplacement::Codepoint('<')),
+            codepoint_map_entry('y', 'y', CodepointReplacement::String("é".to_string())),
+        ];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (1, 0),
+            PageOutputFormat::Html,
+            true,
+            &map,
+            "<div style=\"font-family: monospace; white-space: pre;\">&lt;&#233;</div>",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_does_not_replace_generated_alignment_blanks() {
+        let mut list = PageList::init(4, 2, None).unwrap();
+        set_screen_cell(&mut list, 0, 0, 'A');
+        set_screen_cell(&mut list, 2, 0, 'B');
+        let map = [codepoint_map_entry(
+            ' ',
+            ' ',
+            CodepointReplacement::Codepoint('_'),
+        )];
+
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (2, 0),
+            PageOutputFormat::Plain,
+            false,
+            &map,
+            "A B",
+        );
+
+        set_screen_cell(&mut list, 1, 0, ' ');
+        assert_page_string_with_map(
+            &list,
+            (0, 0),
+            (2, 0),
+            PageOutputFormat::Plain,
+            false,
+            &map,
+            "A_B",
+        );
+    }
+
+    #[test]
+    fn codepoint_map_rejects_invalid_ranges() {
+        assert!(CodepointMapEntry::new(
+            'z' as u32,
+            'a' as u32,
+            CodepointReplacement::Codepoint('x')
+        )
+        .is_none());
+        assert!(
+            CodepointMapEntry::new(0xd800, 0xd800, CodepointReplacement::Codepoint('x')).is_none()
+        );
+        assert!(
+            CodepointMapEntry::new(0xd7ff, 0xe000, CodepointReplacement::Codepoint('x')).is_none()
+        );
+        assert!(
+            CodepointMapEntry::new(0x11_0000, 0x11_0000, CodepointReplacement::Codepoint('x'))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn codepoint_map_no_map_formatters_are_unchanged() {
+        let mut list = PageList::init(6, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["A B"]);
+
+        assert_selection_string(&list, (0, 0), (2, 0), false, false, "A B");
+        assert_dump_string(&list, (0, 0), Some((2, 0)), true, "A B");
+        assert_page_string(&list, (0, 0), (2, 0), PageOutputFormat::Plain, None, "A B");
+    }
+
+    #[test]
     fn page_string_vt_unstyled_single_line() {
         let mut list = PageList::init(10, 2, None).unwrap();
         set_screen_text_lines(&mut list, &["hello"]);
@@ -14094,6 +14538,7 @@ mod tests {
                     unwrap: true,
                     emit: PageOutputFormat::Vt,
                     palette: None,
+                    codepoint_map: None,
                 }),
                 ""
             );
@@ -14104,6 +14549,7 @@ mod tests {
                     unwrap: true,
                     emit: PageOutputFormat::Html,
                     palette: None,
+                    codepoint_map: None,
                 }),
                 ""
             );

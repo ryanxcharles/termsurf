@@ -275,7 +275,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 82: Port Styled Page Formatter Core](82-port-styled-page-formatter-core.md)
   — **Pass**
 - [Experiment 83: Port Formatter Codepoint Map](83-port-codepoint-map.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 
