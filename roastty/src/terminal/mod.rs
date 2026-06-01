@@ -45,3 +45,6 @@ mod style;
 
 #[allow(dead_code)]
 mod tabstops;
+
+#[allow(dead_code)]
+mod terminal;

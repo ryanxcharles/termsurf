@@ -44,6 +44,32 @@ impl Screen {
             pages: PageList::init(cols, rows, max_scrollback_rows)?,
         })
     }
+
+    #[cfg(test)]
+    pub(super) fn set_text_lines_for_tests(&mut self, lines: &[&str]) {
+        self.pages.set_screen_text_lines_for_tests(lines);
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_styled_cell_for_tests(
+        &mut self,
+        x: CellCountInt,
+        y: u32,
+        codepoint: char,
+        style: super::style::Style,
+    ) {
+        self.pages
+            .set_screen_styled_cell_for_tests(x, y, codepoint, style);
+    }
+
+    #[cfg(test)]
+    pub(super) fn pin_for_tests(&self, x: CellCountInt, y: u32) -> super::page_list::Pin {
+        self.pages
+            .pin(super::point::Point::screen(super::point::Coordinate::new(
+                x, y,
+            )))
+            .expect("screen pin must resolve")
+    }
 }
 
 impl<'a> ScreenFormatterOptions<'a> {

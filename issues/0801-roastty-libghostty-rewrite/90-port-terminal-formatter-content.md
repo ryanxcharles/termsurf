@@ -240,3 +240,70 @@ relevant terminal state exists.
 Codex noted one non-blocking implementation detail: `TerminalFormatterExtra` is
 only a sketch, so implementation should treat extras as optional/no-op and
 should not add state just to satisfy the sketch.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a private minimal terminal formatter content path in
+`roastty/src/terminal/terminal.rs`.
+
+The new `Terminal` and `TerminalScreens` types are private to the `terminal`
+module. They hold only an active `Screen`, initialized from the same dimensions
+and scrollback limit used by the Screen/PageList formatter path. No public API,
+C ABI surface, parser state, cursor state, mode state, palette storage, tabstop
+state, PWD state, keyboard state, alt-screen behavior, renderer behavior, PTY
+behavior, clipboard behavior, or UI behavior was added.
+
+`TerminalFormatter` is also private. Its default content is
+`ScreenFormatterContent::Selection(None)`, so it formats the full active screen.
+Selected content passes through the same `ScreenFormatterContent::Selection`
+shape, and `ScreenFormatterContent::None` emits empty output and an empty pin
+map. The terminal formatter does not traverse PageList itself: both `format()`
+and `format_with_pin_map()` instantiate `ScreenFormatter` over
+`terminal.screens.active`, copy the selected content mode, and delegate to the
+screen formatter.
+
+`TerminalFormatterOptions` wraps `ScreenFormatterOptions`, preserving `emit`,
+`trim`, `unwrap`, `palette`, and `codepoint_map` through the TerminalFormatter
+-> ScreenFormatter -> PageListFormatter chain. Plain, VT, and HTML terminal
+formatter output now matches the equivalent ScreenFormatter output for the
+active screen. Pin maps remain byte-indexed by delegation, including the VT/HTML
+styled formatter paths and codepoint replacement path.
+
+The implementation added narrow test-only helpers on `Screen` and `PageList` to
+populate active-screen content and styled cells. Those helpers are
+`#[cfg(test)]` and remain internal to the `terminal` module.
+
+Upstream TerminalFormatter extras remain deferred. Ghostty can emit terminal
+extras such as palette, modes, scrolling region, tabstops, keyboard mode, PWD,
+and screen style data. Roastty does not yet have the corresponding terminal
+state, so emitting those extras here would either be fake or premature.
+
+Verification passed:
+
+```text
+cargo fmt
+cargo test -p roastty terminal_formatter      # 13 passed
+cargo test -p roastty screen_formatter        # 16 passed
+cargo test -p roastty styled_pin_map          # 9 passed
+cargo test -p roastty pin_map                 # 33 passed
+cargo test -p roastty page_string             # 12 passed
+cargo test -p roastty terminal::page_list     # 524 passed
+cargo test -p roastty                         # 842 unit + 1 ABI passed
+```
+
+Codex result review found no blockers. It confirmed the implementation matches
+the plan's scope boundary, keeps the new terminal types private, delegates
+formatter content to `ScreenFormatter`, and preserves byte-indexed pin maps by
+delegation. Codex noted one non-blocking gap: `unwrap` preservation is not
+isolated by a dedicated TerminalFormatter test. The option is structurally
+forwarded through `TerminalFormatterOptions.screen`, and the lower formatter
+suites passed, so no code change was required.
+
+## Conclusion
+
+Experiment 90 completes the content-only TerminalFormatter layer. Roastty now
+has the same formatter stack shape as the upstream terminal-level content path:
+Terminal -> active Screen -> PageList. The next experiment can move to the next
+upstream terminal formatter slice without reworking content routing.

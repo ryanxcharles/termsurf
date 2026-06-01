@@ -2696,6 +2696,29 @@ impl PageList {
     }
 
     #[cfg(test)]
+    pub(super) fn set_screen_styled_cell_for_tests(
+        &mut self,
+        x: CellCountInt,
+        y: u32,
+        codepoint: char,
+        style: style::Style,
+    ) {
+        let pin = self
+            .pin(point::Point::screen(point::Coordinate::new(x, y)))
+            .expect("test screen point must resolve to a pin");
+        let index = self.node_index(pin.node).expect("screen node must exist");
+        let page = &mut self.pages[index].page;
+        let style_id = page.add_style(style).expect("test style should insert");
+        {
+            let rac = page.get_row_and_cell_mut(pin.x as usize, pin.y as usize);
+            rac.row.set_styled(true);
+            *rac.cell = Cell::init(codepoint as u32);
+            rac.cell.set_style_id(style_id);
+        }
+        page.use_style(style_id);
+    }
+
+    #[cfg(test)]
     pub(super) fn set_screen_text_lines_for_tests(&mut self, lines: &[&str]) {
         for (y, line) in lines.iter().enumerate() {
             for (x, ch) in line.chars().enumerate() {
