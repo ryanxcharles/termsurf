@@ -91,6 +91,9 @@ pub(super) enum Action {
     RestoreMode {
         mode: modes::Mode,
     },
+    SaveCursor,
+    RestoreCursor,
+    ReverseIndex,
     CursorVisualStyle {
         style: cursor::VisualStyle,
         blinking: bool,
@@ -357,6 +360,18 @@ impl Stream {
             b'E' => {
                 self.escape = EscapeState::Ground;
                 handler.vt(Action::NextLine)
+            }
+            b'M' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::ReverseIndex)
+            }
+            b'7' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::SaveCursor)
+            }
+            b'8' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::RestoreCursor)
             }
             b'H' => {
                 self.escape = EscapeState::Ground;
@@ -1642,6 +1657,9 @@ mod tests {
                 | Action::ResetMode { .. }
                 | Action::SaveMode { .. }
                 | Action::RestoreMode { .. }
+                | Action::SaveCursor
+                | Action::RestoreCursor
+                | Action::ReverseIndex
                 | Action::CursorVisualStyle { .. }
                 | Action::DcsHook { .. }
                 | Action::DcsPut { .. }
@@ -3287,6 +3305,27 @@ mod tests {
     }
 
     #[test]
+    fn stream_escape_save_restore_and_reverse_index_dispatch_actions() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"A\x1b7B\x1b8C\x1bMD");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print { cp: 'A' },
+                Action::SaveCursor,
+                Action::Print { cp: 'B' },
+                Action::RestoreCursor,
+                Action::Print { cp: 'C' },
+                Action::ReverseIndex,
+                Action::Print { cp: 'D' },
+            ]
+        );
+    }
+
+    #[test]
     fn stream_other_c0_controls_do_not_dispatch_print_actions() {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();
@@ -3599,8 +3638,14 @@ mod tests {
     }
 
     #[test]
-    fn stream_intermediate_escape_forms_do_not_leak_or_dispatch_d_and_e() {
-        for input in [b"A\x1b(DB".as_slice(), b"A\x1b#EB".as_slice()] {
+    fn stream_intermediate_escape_forms_do_not_leak_or_dispatch_escape_actions() {
+        for input in [
+            b"A\x1b(DB".as_slice(),
+            b"A\x1b#EB".as_slice(),
+            b"A\x1b#7B".as_slice(),
+            b"A\x1b#8B".as_slice(),
+            b"A\x1b#MB".as_slice(),
+        ] {
             let mut stream = Stream::init();
             let mut handler = RecordingHandler::default();
 
@@ -3614,7 +3659,49 @@ mod tests {
     }
 
     #[test]
-    fn stream_escape_m_remains_unsupported() {
+    fn stream_split_escape_save_restore_and_reverse_index_dispatch_actions() {
+        for (second, expected) in [
+            (b"7B".as_slice(), Action::SaveCursor),
+            (b"8B".as_slice(), Action::RestoreCursor),
+            (b"MB".as_slice(), Action::ReverseIndex),
+        ] {
+            let mut stream = Stream::init();
+            let mut handler = RecordingHandler::default();
+
+            next_slice(&mut stream, &mut handler, b"A\x1b");
+            assert_eq!(actions(&handler), &[Action::Print { cp: 'A' }]);
+            next_slice(&mut stream, &mut handler, second);
+
+            assert_eq!(
+                actions(&handler),
+                &[
+                    Action::Print { cp: 'A' },
+                    expected,
+                    Action::Print { cp: 'B' },
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn stream_escape_save_restore_and_reverse_index_restore_ground_before_handler_error() {
+        for (input, fail) in [
+            (b"\x1b7".as_slice(), Action::SaveCursor),
+            (b"\x1b8".as_slice(), Action::RestoreCursor),
+            (b"\x1bM".as_slice(), Action::ReverseIndex),
+        ] {
+            let mut stream = Stream::init();
+            let mut handler = ErrorOnActionHandler::new(fail);
+
+            assert_eq!(stream.next_slice(input, &mut handler), Err(()));
+            stream.next_slice(b"A", &mut handler).unwrap();
+
+            assert_eq!(handler.actions, &[Action::Print { cp: 'A' }]);
+        }
+    }
+
+    #[test]
+    fn stream_escape_m_dispatches_reverse_index_action() {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();
 
@@ -3622,7 +3709,11 @@ mod tests {
 
         assert_eq!(
             actions(&handler),
-            &[Action::Print { cp: 'A' }, Action::Print { cp: 'B' }]
+            &[
+                Action::Print { cp: 'A' },
+                Action::ReverseIndex,
+                Action::Print { cp: 'B' },
+            ]
         );
     }
 
@@ -7264,6 +7355,9 @@ mod tests {
                 | Action::ResetMode { .. }
                 | Action::SaveMode { .. }
                 | Action::RestoreMode { .. }
+                | Action::SaveCursor
+                | Action::RestoreCursor
+                | Action::ReverseIndex
                 | Action::CursorVisualStyle { .. }
                 | Action::DcsHook { .. }
                 | Action::DcsPut { .. }

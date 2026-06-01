@@ -20,6 +20,7 @@ use super::tabstops;
 #[derive(Debug)]
 pub(super) struct Screen {
     cursor: ScreenCursor,
+    saved_cursor: Option<ScreenSavedCursor>,
     charset: ScreenCharsetState,
     kitty_keyboard: kitty::KeyFlagStack,
     pages: PageList,
@@ -86,6 +87,17 @@ struct ScreenCursorHyperlink {
     uri: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ScreenSavedCursor {
+    x: CellCountInt,
+    y: CellCountInt,
+    style: style::Style,
+    protected: bool,
+    pending_wrap: bool,
+    origin: bool,
+    charset: ScreenCharsetState,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ScreenCursorHyperlinkId {
     Explicit(String),
@@ -143,6 +155,7 @@ impl Screen {
     ) -> Result<Self, PageListAllocError> {
         Ok(Self {
             cursor: ScreenCursor::default(),
+            saved_cursor: None,
             charset: ScreenCharsetState::default(),
             kitty_keyboard: kitty::KeyFlagStack::default(),
             pages: PageList::init(cols, rows, max_scrollback_rows)?,
@@ -915,6 +928,36 @@ impl Screen {
         self.cursor.visual_style = visual_style;
     }
 
+    pub(super) fn save_cursor(&mut self, origin: bool) {
+        self.saved_cursor = Some(ScreenSavedCursor {
+            x: self.cursor.x,
+            y: self.cursor.y,
+            style: self.cursor.style,
+            protected: self.cursor.protected,
+            pending_wrap: self.cursor.pending_wrap,
+            origin,
+            charset: self.charset,
+        });
+    }
+
+    pub(super) fn saved_cursor_or_default(&self) -> ScreenSavedCursor {
+        self.saved_cursor.unwrap_or_default()
+    }
+
+    pub(super) fn restore_saved_cursor(
+        &mut self,
+        saved: ScreenSavedCursor,
+        cols: CellCountInt,
+        rows: CellCountInt,
+    ) {
+        self.cursor.style = saved.style;
+        self.cursor.protected = saved.protected;
+        self.cursor.pending_wrap = saved.pending_wrap;
+        self.charset = saved.charset;
+        self.cursor.x = saved.x.min(cols.saturating_sub(1));
+        self.cursor.y = saved.y.min(rows.saturating_sub(1));
+    }
+
     #[cfg(test)]
     pub(super) fn set_cursor_position_for_tests(&mut self, x: CellCountInt, y: CellCountInt) {
         self.cursor.x = x;
@@ -934,6 +977,11 @@ impl Screen {
     #[cfg(test)]
     pub(super) fn cursor_visual_style_for_tests(&self) -> cursor::VisualStyle {
         self.cursor.visual_style
+    }
+
+    #[cfg(test)]
+    pub(super) fn cursor_protected_for_tests(&self) -> bool {
+        self.cursor.protected
     }
 
     #[cfg(test)]
@@ -1174,6 +1222,26 @@ impl Default for ScreenCursor {
             semantic_content: SemanticContent::Output,
             semantic_content_clear_eol: false,
         }
+    }
+}
+
+impl Default for ScreenSavedCursor {
+    fn default() -> Self {
+        Self {
+            x: 0,
+            y: 0,
+            style: style::Style::default(),
+            protected: false,
+            pending_wrap: false,
+            origin: false,
+            charset: ScreenCharsetState::default(),
+        }
+    }
+}
+
+impl ScreenSavedCursor {
+    pub(super) const fn origin(self) -> bool {
+        self.origin
     }
 }
 

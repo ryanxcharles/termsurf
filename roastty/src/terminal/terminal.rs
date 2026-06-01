@@ -397,6 +397,11 @@ impl Terminal {
     }
 
     #[cfg(test)]
+    pub(super) fn cursor_protected_for_tests(&self) -> bool {
+        self.screens.active.cursor_protected_for_tests()
+    }
+
+    #[cfg(test)]
     pub(super) fn cursor_hyperlink_for_tests(&self) -> Option<(ScreenCursorHyperlinkId, &str)> {
         self.screens.active.cursor_hyperlink_for_tests()
     }
@@ -654,6 +659,18 @@ impl Handler for TerminalStreamHandler<'_> {
                 self.set_mode_basic(mode, enabled);
                 Ok(())
             }
+            Action::SaveCursor => {
+                self.screen.save_cursor(self.modes.get(modes::Mode::Origin));
+                Ok(())
+            }
+            Action::RestoreCursor => {
+                let saved = self.screen.saved_cursor_or_default();
+                self.modes.set(modes::Mode::Origin, saved.origin());
+                self.screen
+                    .restore_saved_cursor(saved, self.size.cols, self.size.rows);
+                Ok(())
+            }
+            Action::ReverseIndex => self.reverse_index(),
             Action::CursorVisualStyle { style, blinking } => {
                 self.modes.set(modes::Mode::CursorBlinking, blinking);
                 self.screen.set_cursor_visual_style(style);
@@ -787,6 +804,29 @@ impl TerminalStreamHandler<'_> {
     fn index(&mut self) -> Result<(), TerminalStreamError> {
         self.screen
             .line_feed_basic(self.size.rows)
+            .map_err(TerminalStreamError::from)
+    }
+
+    fn reverse_index(&mut self) -> Result<(), TerminalStreamError> {
+        let (x, y) = self.screen.cursor_position();
+        if y != self.scrolling_region.top
+            || x < self.scrolling_region.left
+            || x > self.scrolling_region.right
+        {
+            self.screen.cursor_up_basic(1);
+            return Ok(());
+        }
+
+        self.screen
+            .scroll_down_basic(
+                1,
+                self.scrolling_region.top,
+                self.scrolling_region.bottom,
+                self.scrolling_region.left,
+                self.scrolling_region.right,
+                self.scrolling_region.left == 0
+                    && self.scrolling_region.right == self.size.cols - 1,
+            )
             .map_err(TerminalStreamError::from)
     }
 
@@ -1925,6 +1965,156 @@ mod tests {
 
         assert_eq!(plain_with_unwrap(&terminal, false), "A\nB");
         assert_eq!(terminal.cursor_position_for_tests(), (1, 1));
+    }
+
+    #[test]
+    fn terminal_stream_save_cursor_restore_cursor_round_trips_position_and_text_state() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal.next_slice(b"hello").unwrap();
+        terminal.next_slice(b"\x1b[1;31m").unwrap();
+        terminal.screens.active.set_cursor_protected_for_tests(true);
+        terminal.next_slice(b"\x1b7").unwrap();
+        terminal.next_slice(b"\x1b[3;32m").unwrap();
+        terminal
+            .screens
+            .active
+            .set_cursor_protected_for_tests(false);
+        terminal.screens.active.set_cursor_position_for_tests(0, 2);
+        terminal.next_slice(b"\x1b8").unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (5, 0));
+        assert!(terminal.cursor_protected_for_tests());
+        assert_eq!(
+            terminal.cursor_style_for_tests(),
+            style::Style {
+                fg_color: style::Color::Palette(1),
+                flags: style::Flags {
+                    bold: true,
+                    ..style::Flags::default()
+                },
+                ..style::Style::default()
+            }
+        );
+    }
+
+    #[test]
+    fn terminal_stream_save_cursor_restore_cursor_round_trips_pending_wrap_origin_and_charset() {
+        let mut terminal = Terminal::init(5, 3, None).unwrap();
+
+        terminal.next_slice(b"hello").unwrap();
+        assert!(terminal.cursor_pending_wrap_for_tests());
+        terminal.set_mode_for_tests(Mode::Origin, true);
+        terminal
+            .screens
+            .active
+            .set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
+        terminal
+            .screens
+            .active
+            .set_charset_gl_for_tests(charsets::CharsetSlot::G1);
+        terminal.next_slice(b"\x1b7").unwrap();
+
+        terminal.set_mode_for_tests(Mode::Origin, false);
+        terminal.screens.active.set_cursor_position_for_tests(1, 1);
+        terminal.next_slice(b"\x1b[2 q").unwrap();
+        terminal
+            .screens
+            .active
+            .set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::Utf8);
+        terminal
+            .screens
+            .active
+            .set_charset_gl_for_tests(charsets::CharsetSlot::G0);
+        terminal.next_slice(b"\x1b8").unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+        assert!(terminal.cursor_pending_wrap_for_tests());
+        assert!(terminal.get_mode_for_tests(Mode::Origin));
+        assert_eq!(
+            formatter(&terminal, PageOutputFormat::Vt)
+                .with_extra(
+                    TerminalFormatterExtra::none()
+                        .screen(ScreenFormatterExtra::none().charsets(true))
+                )
+                .format(),
+            "hello\x1b(0\x0e"
+        );
+    }
+
+    #[test]
+    fn terminal_stream_restore_cursor_without_save_uses_ghostty_defaults() {
+        let mut terminal = Terminal::init(5, 3, None).unwrap();
+
+        terminal
+            .next_slice(b"hello\x1b[1;31m\x1b[?6h\x1b[5 q")
+            .unwrap();
+        terminal.screens.active.set_cursor_protected_for_tests(true);
+        terminal.next_slice(b"\x1b8").unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (0, 0));
+        assert_eq!(terminal.cursor_style_for_tests(), style::Style::default());
+        assert!(!terminal.cursor_protected_for_tests());
+        assert!(!terminal.cursor_pending_wrap_for_tests());
+        assert!(!terminal.get_mode_for_tests(Mode::Origin));
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Bar
+        );
+    }
+
+    #[test]
+    fn terminal_stream_save_cursor_restore_cursor_does_not_restore_excluded_state() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b[5 q").unwrap();
+        terminal.screens.active.set_cursor_hyperlink_for_tests(
+            ScreenCursorHyperlinkId::Explicit("saved".to_string()),
+            "https://saved.example",
+        );
+        terminal
+            .next_slice(b"\x1b]133;A\x07\x1b7\x1b[4 q\x1b]133;B\x07")
+            .unwrap();
+        terminal.screens.active.set_cursor_hyperlink_for_tests(
+            ScreenCursorHyperlinkId::Explicit("current".to_string()),
+            "https://current.example",
+        );
+        terminal.next_slice(b"\x1b8X").unwrap();
+
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Underline
+        );
+        assert_eq!(
+            terminal.cursor_hyperlink_for_tests(),
+            Some((
+                ScreenCursorHyperlinkId::Explicit("current".to_string()),
+                "https://current.example"
+            ))
+        );
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(0, 0),
+            SemanticContent::Input
+        );
+    }
+
+    #[test]
+    fn terminal_stream_save_cursor_restore_cursor_does_not_mutate_cells_dirty_rows_or_responses() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"abc").unwrap();
+        terminal.screens.active.set_cursor_position_for_tests(3, 0);
+        terminal.next_slice(b"\x1b7").unwrap();
+        terminal.clear_dirty_for_tests();
+        terminal.screens.active.set_cursor_position_for_tests(8, 1);
+        terminal.next_slice(b"\x1b8").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+        assert_eq!(terminal.cursor_position_for_tests(), (3, 0));
+        assert!(terminal.pty_response_for_tests().is_empty());
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(9, 0));
+        assert!(!terminal.is_dirty_for_tests(0, 1));
     }
 
     #[test]
@@ -4045,6 +4235,70 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn terminal_stream_reverse_index_moves_cursor_up_outside_top_margin_case() {
+        let mut terminal = Terminal::init(5, 4, None).unwrap();
+
+        terminal.screens.active.set_cursor_position_for_tests(2, 2);
+        terminal.next_slice(b"\x1bM").unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (2, 1));
+    }
+
+    #[test]
+    fn terminal_stream_reverse_index_clamps_at_top_when_not_in_scrolling_region() {
+        let mut terminal = Terminal::init(5, 4, None).unwrap();
+
+        terminal.set_scrolling_region_for_tests(1, 3, 0, 4);
+        terminal.screens.active.set_cursor_position_for_tests(2, 0);
+        terminal.next_slice(b"\x1bM").unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (2, 0));
+        assert_eq!(plain_with_unwrap(&terminal, false), "");
+    }
+
+    #[test]
+    fn terminal_stream_reverse_index_scrolls_down_at_top_margin_inside_horizontal_region() {
+        let mut terminal = Terminal::init(5, 4, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["AAAAA", "BBBBB", "CCCCC", "DDDDD"]);
+        terminal.set_scrolling_region_for_tests(1, 2, 1, 3);
+        terminal.screens.active.set_cursor_position_for_tests(2, 1);
+        terminal.clear_dirty_for_tests();
+
+        terminal.next_slice(b"\x1bM").unwrap();
+
+        assert_eq!(
+            plain_with_unwrap(&terminal, false),
+            "AAAAA\nB   B\nCBBBC\nDDDDD"
+        );
+        assert_eq!(terminal.cursor_position_for_tests(), (2, 1));
+        assert!(terminal.is_dirty_for_tests(1, 1));
+        assert!(terminal.is_dirty_for_tests(3, 2));
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+    }
+
+    #[test]
+    fn terminal_stream_reverse_index_does_not_scroll_top_margin_outside_horizontal_region() {
+        let mut terminal = Terminal::init(5, 4, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["AAAAA", "BBBBB", "CCCCC", "DDDDD"]);
+        terminal.set_scrolling_region_for_tests(1, 2, 1, 3);
+        terminal.screens.active.set_cursor_position_for_tests(4, 1);
+
+        terminal.next_slice(b"\x1bM").unwrap();
+
+        assert_eq!(
+            plain_with_unwrap(&terminal, false),
+            "AAAAA\nBBBBB\nCCCCC\nDDDDD"
+        );
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
     }
 
     #[test]

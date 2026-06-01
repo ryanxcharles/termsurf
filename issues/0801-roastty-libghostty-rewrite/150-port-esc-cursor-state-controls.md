@@ -188,3 +188,75 @@ surrounding stream tests. The design was updated with that requirement.
 Codex reviewed the revised design and approved it with no findings. It confirmed
 that the updated verification plan is strong enough to prove the result and that
 the experiment is ready for implementation.
+
+## Result
+
+**Result:** Pass
+
+Experiment 150 ported the ESC cursor-state controls:
+
+- `ESC 7` dispatches and executes save cursor.
+- `ESC 8` dispatches and executes restore cursor.
+- `ESC M` dispatches and executes reverse index.
+
+Implemented changes:
+
+- Added `SaveCursor`, `RestoreCursor`, and `ReverseIndex` stream actions.
+- Wired exact ESC parsing for `ESC 7`, `ESC 8`, and `ESC M`.
+- Kept intermediate forms such as `ESC # 7`, `ESC # 8`, and `ESC # M` inert.
+- Added saved cursor state to `Screen`, including x/y position, cursor text
+  style, protected pen state, pending-wrap state, origin mode, and charset
+  state.
+- Restored unsaved cursors to Ghostty defaults.
+- Preserved the design distinction from Experiment 149: saved cursor state does
+  not restore cursor visual style.
+- Preserved Ghostty's exclusion of cursor hyperlink state and semantic-prompt
+  state from saved cursor restore.
+- Added reverse-index runtime behavior using the current scrolling region and
+  horizontal margins.
+
+Verification commands:
+
+```bash
+cargo fmt
+cargo test -p roastty save_cursor
+cargo test -p roastty restore_cursor
+cargo test -p roastty reverse_index
+cargo test -p roastty
+```
+
+Verification results:
+
+- `cargo test -p roastty save_cursor`: 4 passed, 0 failed.
+- `cargo test -p roastty restore_cursor`: 5 passed, 0 failed.
+- `cargo test -p roastty reverse_index`: 8 passed, 0 failed.
+- `cargo test -p roastty`: 1651 unit tests passed, 1 ABI harness test passed, 0
+  doc tests.
+
+## Conclusion
+
+Roastty now supports Ghostty's basic ESC cursor-state controls. Save/restore
+cursor now covers the state Ghostty stores, excludes the state Ghostty excludes,
+and avoids the origin-mode restore trap by setting origin mode directly before
+restoring the saved cursor position. Reverse index now matches Ghostty's
+scrolling-region rule: scroll down only at the top row of the active region when
+the cursor is inside the horizontal margins; otherwise move/clamp the cursor up.
+
+The next experiment should continue with another coherent terminal-control
+slice. RIS/full reset remains deliberately unimplemented and is a good candidate
+for a future focused reset-state experiment once the surrounding reset
+preconditions are clear.
+
+## Result Review
+
+Codex reviewed the completed implementation and initially found one result/code
+alignment issue: the result text said restore sets origin mode before restoring
+cursor position, while the first implementation restored cursor position first.
+The implementation was changed to match the design: it now obtains the saved
+cursor/default snapshot, sets `Mode::Origin` directly, then restores the saved
+cursor fields and position.
+
+After the fix, Codex re-reviewed the implementation, result record, and
+verification summary. It reported no findings and confirmed that parser
+behavior, handler-error recovery, saved/restored state, excluded state,
+reverse-index margin behavior, and verification results all line up.
