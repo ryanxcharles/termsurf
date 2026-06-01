@@ -264,3 +264,79 @@ string-only allocation behavior, specifies upstream reverse-walk blank mapping,
 pins down pending newline coordinates, and requires invalid/garbage endpoint
 coverage. Final Codex re-review found no blockers and approved the plan for
 implementation.
+
+## Result
+
+**Result:** Pass
+
+Implemented private plain point-map formatting in
+`roastty/src/terminal/page_list.rs`.
+
+The new private result and option types are:
+
+- `PlainStringWithMapOptions<'a>`;
+- `PageStringWithMap`.
+
+The new private entry point is `PageList::plain_string_with_point_map(...)`,
+which returns both formatted text and a byte-indexed `Vec<point::Coordinate>`.
+The coordinates are PageList screen-domain coordinates, not per-page local
+coordinates. Existing string-only calls still pass no point-map sink and do not
+allocate a point map.
+
+The implementation threads an optional point-map sink through the existing plain
+formatter path. It records one coordinate per emitted UTF-8 byte for:
+
+- ASCII and Unicode codepoints;
+- attached grapheme codepoints;
+- wide characters, including selections that start on a spacer tail;
+- explicit source spaces;
+- generated blank-cell spaces;
+- row-ending and pending blank-row newlines;
+- one-shot codepoint-map replacements.
+
+Generated blank-cell spaces match upstream's reverse-walk mapping order. For
+example, if blank cells at `x = 1` and `x = 2` are flushed before a source cell
+at `x = 3`, the emitted spaces map to `x = 2` and then `x = 1`. Codepoint-map
+replacement bytes map to the original source cell, including multi-byte
+replacement strings and replacement codepoints.
+
+This experiment did not add `PinMap`, VT point maps, HTML point maps,
+`ScreenFormatter`, `TerminalFormatter`, `Screen`, `Terminal`, parser state,
+cursor state, terminal extras, hyperlinks, writer abstraction, public ABI, app,
+renderer, clipboard, PTY, or UI behavior.
+
+Verification passed:
+
+```text
+cargo fmt
+cargo test -p roastty point_map           # 31 passed
+cargo test -p roastty page_string         # 12 passed
+cargo test -p roastty dump_string         # 13 passed
+cargo test -p roastty selection_string    # 22 passed
+cargo test -p roastty terminal::page_list # 482 passed
+cargo test -p roastty                     # 775 unit tests + ABI harness + doctests passed
+```
+
+Codex design review required three fixes before implementation:
+
+- make the point-map entry point accept `codepoint_map`;
+- specify upstream's reverse-walk generated blank-cell mapping order;
+- pin down pending blank-row newline coordinates across PageList chunks.
+
+Those changes were made and Codex approved the final design.
+
+Codex result review first found three missing tests from the design:
+
+- leading blank rows;
+- single-codepoint replacement mapping;
+- trailing spaces with `trim == false`.
+
+Those tests were added, verification was rerun, and the second Codex result
+review found no blockers.
+
+## Conclusion
+
+Experiment 84 completes the private plain-output point-map slice needed before
+future pin-map work. The remaining formatter mapping work is explicit and still
+deferred: higher-level `PinMap` conversion plus VT/HTML point maps for generated
+style and wrapper bytes.

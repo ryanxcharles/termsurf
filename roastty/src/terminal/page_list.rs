@@ -172,6 +172,20 @@ struct PlainStringOptions {
     unwrap: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PlainStringWithMapOptions<'a> {
+    selection: Option<selection::Selection>,
+    trim: bool,
+    unwrap: bool,
+    codepoint_map: Option<&'a [CodepointMapEntry]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PageStringWithMap {
+    text: String,
+    point_map: Vec<point::Coordinate>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CodepointReplacement {
     Codepoint(char),
@@ -227,6 +241,7 @@ struct PlainTrailingState {
 #[derive(Debug, Clone, Copy)]
 struct PlainPageFormat<'a> {
     node: &'a Node,
+    screen_y_base: u32,
     start_x: CellCountInt,
     start_y: CellCountInt,
     end_x: CellCountInt,
@@ -714,7 +729,11 @@ impl Iterator for LineIterator<'_> {
 }
 
 impl PlainPageFormat<'_> {
-    fn format(&self, output: &mut String) -> PlainTrailingState {
+    fn format(
+        &self,
+        output: &mut String,
+        mut point_map: Option<&mut Vec<point::Coordinate>>,
+    ) -> PlainTrailingState {
         let page = &self.node.page;
         let mut blank_rows = 0usize;
         let mut blank_cells = 0usize;
@@ -793,9 +812,12 @@ impl PlainPageFormat<'_> {
             }
 
             if blank_rows > 0 {
-                for _ in 0..blank_rows {
-                    output.push('\n');
-                }
+                push_pending_plain_newlines(
+                    output,
+                    point_map.as_mut().map(|map| &mut **map),
+                    blank_rows,
+                    self.screen_y_base + y_usize as u32,
+                );
                 blank_rows = 0;
             }
 
@@ -824,11 +846,28 @@ impl PlainPageFormat<'_> {
                 }
 
                 if blank_cells > 0 {
-                    output.extend(std::iter::repeat_n(' ', blank_cells));
+                    push_blank_cells_plain(
+                        output,
+                        point_map.as_mut().map(|map| &mut **map),
+                        blank_cells,
+                        x_usize,
+                        y_usize,
+                        page.size_cols() as usize,
+                        self.screen_y_base,
+                    );
                     blank_cells = 0;
                 }
 
-                push_cell_plain(page, x_usize, y_usize, cell, self.codepoint_map, output);
+                push_cell_plain(
+                    page,
+                    x_usize,
+                    y_usize,
+                    cell,
+                    self.codepoint_map,
+                    output,
+                    point_map.as_mut().map(|map| &mut **map),
+                    self.screen_y_base,
+                );
             }
         }
 
@@ -1138,21 +1177,49 @@ fn push_cell_plain(
     cell: &Cell,
     codepoint_map: Option<&[CodepointMapEntry]>,
     output: &mut String,
+    point_map: Option<&mut Vec<point::Coordinate>>,
+    screen_y_base: u32,
 ) {
-    push_codepoint_plain_with_replacement(cell.codepoint(), codepoint_map, output);
+    let source = point::Coordinate::new(
+        x.try_into().expect("page cell x must fit CellCountInt"),
+        screen_y_base + y as u32,
+    );
+    let mut point_map = point_map;
+    push_codepoint_plain_with_replacement(
+        cell.codepoint(),
+        codepoint_map,
+        output,
+        source,
+        point_map.as_mut().map(|map| &mut **map),
+    );
 
     if cell.has_grapheme() {
         if let Some(graphemes) = page.lookup_grapheme_at(x, y) {
             for cp in graphemes {
-                push_codepoint_plain_with_replacement(cp, codepoint_map, output);
+                push_codepoint_plain_with_replacement(
+                    cp,
+                    codepoint_map,
+                    output,
+                    source,
+                    point_map.as_mut().map(|map| &mut **map),
+                );
             }
         }
     }
 }
 
-fn push_codepoint_plain(codepoint: u32, output: &mut String) {
+fn push_codepoint_plain(
+    codepoint: u32,
+    output: &mut String,
+    source: point::Coordinate,
+    point_map: Option<&mut Vec<point::Coordinate>>,
+) {
     if let Some(ch) = char::from_u32(codepoint) {
+        let len = ch.len_utf8();
         output.push(ch);
+        if let Some(point_map) = point_map {
+            point_map.extend(std::iter::repeat_n(source, len));
+        }
     }
 }
 
@@ -1160,11 +1227,83 @@ fn push_codepoint_plain_with_replacement(
     codepoint: u32,
     codepoint_map: Option<&[CodepointMapEntry]>,
     output: &mut String,
+    source: point::Coordinate,
+    point_map: Option<&mut Vec<point::Coordinate>>,
 ) {
     match replacement_for(codepoint_map, codepoint) {
-        Some(CodepointReplacement::Codepoint(ch)) => output.push(*ch),
-        Some(CodepointReplacement::String(value)) => output.push_str(value),
-        None => push_codepoint_plain(codepoint, output),
+        Some(CodepointReplacement::Codepoint(ch)) => {
+            let len = ch.len_utf8();
+            output.push(*ch);
+            if let Some(point_map) = point_map {
+                point_map.extend(std::iter::repeat_n(source, len));
+            }
+        }
+        Some(CodepointReplacement::String(value)) => {
+            output.push_str(value);
+            if let Some(point_map) = point_map {
+                point_map.extend(std::iter::repeat_n(source, value.len()));
+            }
+        }
+        None => push_codepoint_plain(codepoint, output, source, point_map),
+    }
+}
+
+fn push_blank_cells_plain(
+    output: &mut String,
+    point_map: Option<&mut Vec<point::Coordinate>>,
+    count: usize,
+    before_x: usize,
+    before_y: usize,
+    cols: usize,
+    screen_y_base: u32,
+) {
+    output.extend(std::iter::repeat_n(' ', count));
+    let Some(point_map) = point_map else {
+        return;
+    };
+
+    let mut x = before_x;
+    let mut y = before_y;
+    for _ in 0..count {
+        if x == 0 {
+            if y == 0 {
+                x = 0;
+            } else {
+                y -= 1;
+                x = cols.saturating_sub(1);
+            }
+        } else {
+            x -= 1;
+        }
+        point_map.push(point::Coordinate::new(
+            x.try_into().expect("page cell x must fit CellCountInt"),
+            screen_y_base + y as u32,
+        ));
+    }
+}
+
+fn push_pending_plain_newlines(
+    output: &mut String,
+    point_map: Option<&mut Vec<point::Coordinate>>,
+    count: usize,
+    current_screen_y: u32,
+) {
+    output.extend(std::iter::repeat_n('\n', count));
+    let Some(point_map) = point_map else {
+        return;
+    };
+
+    let first = point_map
+        .last()
+        .copied()
+        .unwrap_or_else(|| point::Coordinate::new(0, 0));
+    point_map.push(first);
+
+    for i in 1..count {
+        let y = current_screen_y
+            .saturating_sub(count as u32)
+            .saturating_add(i as u32);
+        point_map.push(point::Coordinate::new(0, y));
     }
 }
 
@@ -2358,7 +2497,43 @@ impl PageList {
         })
     }
 
+    fn plain_string_with_point_map(
+        &self,
+        options: PlainStringWithMapOptions<'_>,
+    ) -> PageStringWithMap {
+        let mut point_map = Vec::new();
+        let text = self.page_string_with_point_map(
+            PageStringOptions {
+                selection: options.selection,
+                trim: options.trim,
+                unwrap: options.unwrap,
+                emit: PageOutputFormat::Plain,
+                palette: None,
+                codepoint_map: options.codepoint_map,
+            },
+            &mut point_map,
+        );
+        PageStringWithMap { text, point_map }
+    }
+
     fn page_string(&self, options: PageStringOptions<'_>) -> String {
+        self.page_string_inner(options, None)
+    }
+
+    fn page_string_with_point_map(
+        &self,
+        options: PageStringOptions<'_>,
+        point_map: &mut Vec<point::Coordinate>,
+    ) -> String {
+        debug_assert_eq!(options.emit, PageOutputFormat::Plain);
+        self.page_string_inner(options, Some(point_map))
+    }
+
+    fn page_string_inner(
+        &self,
+        options: PageStringOptions<'_>,
+        point_map: Option<&mut Vec<point::Coordinate>>,
+    ) -> String {
         let (top_left, bottom_right, rectangle) = match options.selection {
             Some(selection) => {
                 let Some(top_left) = self.selection_top_left(selection) else {
@@ -2378,7 +2553,7 @@ impl PageList {
             }
         };
 
-        self.page_string_between(top_left, bottom_right, rectangle, options)
+        self.page_string_between(top_left, bottom_right, rectangle, options, point_map)
     }
 
     fn page_string_between(
@@ -2387,6 +2562,7 @@ impl PageList {
         bottom_right: Pin,
         rectangle: bool,
         options: PageStringOptions<'_>,
+        mut point_map: Option<&mut Vec<point::Coordinate>>,
     ) -> String {
         if top_left.garbage
             || bottom_right.garbage
@@ -2409,9 +2585,16 @@ impl PageList {
             let Some(node) = self.node_for_ptr(chunk.node) else {
                 return String::new();
             };
+            let Some(screen_y_base) = self
+                .point_from_pin(point::Tag::Screen, Pin::new(chunk.node, 0, 0))
+                .map(|point| point.coord().y)
+            else {
+                return String::new();
+            };
 
             let formatter = PlainPageFormat {
                 node,
+                screen_y_base,
                 start_x: if chunk.node == top_left.node {
                     top_left.x
                 } else {
@@ -2431,7 +2614,9 @@ impl PageList {
                 codepoint_map: options.codepoint_map,
             };
             trailing_state = Some(match options.emit {
-                PageOutputFormat::Plain => formatter.format(&mut output),
+                PageOutputFormat::Plain => {
+                    formatter.format(&mut output, point_map.as_mut().map(|map| &mut **map))
+                }
                 PageOutputFormat::Vt | PageOutputFormat::Html => {
                     let formatter = StyledPageFormat {
                         node,
@@ -5205,6 +5390,53 @@ mod tests {
             codepoint_map: Some(codepoint_map),
         });
         assert_eq!(actual, expected);
+    }
+
+    fn assert_plain_point_map(
+        list: &PageList,
+        start: (CellCountInt, u32),
+        end: (CellCountInt, u32),
+        trim: bool,
+        unwrap: bool,
+        codepoint_map: Option<&[CodepointMapEntry]>,
+        expected_text: &str,
+        expected_points: &[point::Coordinate],
+    ) {
+        let actual = list.plain_string_with_point_map(PlainStringWithMapOptions {
+            selection: Some(screen_selection(list, start, end, false)),
+            trim,
+            unwrap,
+            codepoint_map,
+        });
+        assert_eq!(actual.text, expected_text);
+        assert_eq!(actual.point_map, expected_points);
+        assert_eq!(actual.text.len(), actual.point_map.len());
+    }
+
+    fn assert_plain_point_map_for_selection(
+        list: &PageList,
+        selection: Option<selection::Selection>,
+        trim: bool,
+        unwrap: bool,
+        expected_text: &str,
+        expected_points: &[point::Coordinate],
+    ) {
+        let actual = list.plain_string_with_point_map(PlainStringWithMapOptions {
+            selection,
+            trim,
+            unwrap,
+            codepoint_map: None,
+        });
+        assert_eq!(actual.text, expected_text);
+        assert_eq!(actual.point_map, expected_points);
+        assert_eq!(actual.text.len(), actual.point_map.len());
+    }
+
+    fn coords(points: &[(CellCountInt, u32)]) -> Vec<point::Coordinate> {
+        points
+            .iter()
+            .map(|&(x, y)| point::Coordinate::new(x, y))
+            .collect()
     }
 
     fn codepoint_map_entry(
@@ -14353,6 +14585,336 @@ mod tests {
 
     #[test]
     fn codepoint_map_no_map_formatters_are_unchanged() {
+        let mut list = PageList::init(6, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["A B"]);
+
+        assert_selection_string(&list, (0, 0), (2, 0), false, false, "A B");
+        assert_dump_string(&list, (0, 0), Some((2, 0)), true, "A B");
+        assert_page_string(&list, (0, 0), (2, 0), PageOutputFormat::Plain, None, "A B");
+    }
+
+    #[test]
+    fn point_map_plain_single_line_ascii() {
+        let mut list = PageList::init(8, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello"]);
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (4, 0),
+            true,
+            true,
+            None,
+            "hello",
+            &coords(&[(0, 0), (1, 0), (2, 0), (3, 0), (4, 0)]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_unicode_and_grapheme_bytes() {
+        let mut list = PageList::init(4, 2, None).unwrap();
+        set_screen_cell(&mut list, 0, 0, 'é');
+        set_screen_cell(&mut list, 1, 0, 'e');
+        append_screen_grapheme(&mut list, 1, 0, 0x0301);
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (1, 0),
+            true,
+            true,
+            None,
+            "ée\u{301}",
+            &coords(&[(0, 0), (0, 0), (1, 0), (1, 0), (1, 0)]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_wide_character_and_spacer_tail_start() {
+        let mut list = PageList::init(6, 2, None).unwrap();
+        set_screen_cell(&mut list, 0, 0, '1');
+        set_screen_cell(&mut list, 1, 0, 'A');
+        let mut wide = Cell::init('⚡' as u32);
+        wide.set_wide(Wide::Wide);
+        set_screen_cell_raw(&mut list, 2, 0, wide);
+        let mut tail = Cell::init(0);
+        tail.set_wide(Wide::SpacerTail);
+        set_screen_cell_raw(&mut list, 3, 0, tail);
+
+        let expected = coords(&[(2, 0), (2, 0), (2, 0)]);
+        assert_plain_point_map(&list, (2, 0), (3, 0), true, true, None, "⚡", &expected);
+        assert_plain_point_map(&list, (3, 0), (3, 0), true, true, None, "⚡", &expected);
+    }
+
+    #[test]
+    fn point_map_plain_multiline_and_rectangle_newlines() {
+        let mut list = PageList::init(8, 3, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello", "world"]);
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (4, 1),
+            true,
+            true,
+            None,
+            "hello\nworld",
+            &coords(&[
+                (0, 0),
+                (1, 0),
+                (2, 0),
+                (3, 0),
+                (4, 0),
+                (4, 0),
+                (0, 1),
+                (1, 1),
+                (2, 1),
+                (3, 1),
+                (4, 1),
+            ]),
+        );
+
+        let actual = list.plain_string_with_point_map(PlainStringWithMapOptions {
+            selection: Some(screen_selection(&list, (1, 0), (3, 1), true)),
+            trim: true,
+            unwrap: true,
+            codepoint_map: None,
+        });
+        assert_eq!(actual.text, "ell\norl");
+        assert_eq!(
+            actual.point_map,
+            coords(&[(1, 0), (2, 0), (3, 0), (3, 0), (1, 1), (2, 1), (3, 1)])
+        );
+    }
+
+    #[test]
+    fn point_map_plain_generated_blanks_use_upstream_reverse_order() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        set_screen_cell(&mut list, 0, 0, 'A');
+        set_screen_cell(&mut list, 3, 0, 'C');
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (3, 0),
+            false,
+            true,
+            None,
+            "A  C",
+            &coords(&[(0, 0), (2, 0), (1, 0), (3, 0)]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_explicit_spaces_keep_source_order() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["A  C"]);
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (3, 0),
+            false,
+            true,
+            None,
+            "A  C",
+            &coords(&[(0, 0), (1, 0), (2, 0), (3, 0)]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_trimmed_spaces_emit_no_points() {
+        let mut list = PageList::init(8, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello   "]);
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (7, 0),
+            true,
+            true,
+            None,
+            "hello",
+            &coords(&[(0, 0), (1, 0), (2, 0), (3, 0), (4, 0)]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_leading_blank_rows() {
+        let mut list = PageList::init(4, 4, None).unwrap();
+        set_screen_cell(&mut list, 0, 2, 'X');
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (0, 2),
+            true,
+            true,
+            None,
+            "\n\nX",
+            &coords(&[(0, 0), (0, 1), (0, 2)]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_trailing_spaces_with_trim_false() {
+        let mut list = PageList::init(8, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hi  "]);
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (3, 0),
+            false,
+            true,
+            None,
+            "hi  ",
+            &coords(&[(0, 0), (1, 0), (2, 0), (3, 0)]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_wrap_continuation_blank_cells() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        set_screen_cell(&mut list, 0, 0, 'A');
+        set_screen_cell(&mut list, 2, 1, 'B');
+        set_screen_row_wrap(&mut list, 0, true);
+        set_screen_row_wrap_continuation(&mut list, 1, true);
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (2, 1),
+            false,
+            true,
+            None,
+            "A      B",
+            &coords(&[
+                (0, 0),
+                (1, 1),
+                (0, 1),
+                (4, 0),
+                (3, 0),
+                (2, 0),
+                (1, 0),
+                (2, 1),
+            ]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_string_replacement_maps_original_cell() {
+        let mut list = PageList::init(4, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["ao"]);
+        let map = [codepoint_map_entry(
+            'o',
+            'o',
+            CodepointReplacement::String("XYZ".to_string()),
+        )];
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (1, 0),
+            true,
+            true,
+            Some(&map),
+            "aXYZ",
+            &coords(&[(0, 0), (1, 0), (1, 0), (1, 0)]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_single_codepoint_replacement_maps_original_cell() {
+        let mut list = PageList::init(4, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["ao"]);
+        let map = [codepoint_map_entry(
+            'o',
+            'o',
+            CodepointReplacement::Codepoint('é'),
+        )];
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (1, 0),
+            true,
+            true,
+            Some(&map),
+            "aé",
+            &coords(&[(0, 0), (1, 0), (1, 0)]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_codepoint_map_does_not_touch_generated_blanks() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        set_screen_cell(&mut list, 0, 0, 'A');
+        set_screen_cell(&mut list, 2, 0, 'B');
+        let map = [codepoint_map_entry(
+            ' ',
+            ' ',
+            CodepointReplacement::Codepoint('_'),
+        )];
+
+        assert_plain_point_map(
+            &list,
+            (0, 0),
+            (2, 0),
+            false,
+            true,
+            Some(&map),
+            "A B",
+            &coords(&[(0, 0), (1, 0), (2, 0)]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_multi_page_pending_blank_rows_are_screen_domain() {
+        let (mut list, page_rows) = multi_page_list(80);
+        let first_y = page_rows as u32 - 1;
+        set_screen_cell(&mut list, 0, first_y, 'A');
+        set_screen_cell(&mut list, 0, first_y + 2, 'B');
+
+        assert_plain_point_map(
+            &list,
+            (0, first_y),
+            (0, first_y + 2),
+            true,
+            true,
+            None,
+            "A\n\nB",
+            &coords(&[
+                (0, first_y),
+                (0, first_y),
+                (0, first_y + 1),
+                (0, first_y + 2),
+            ]),
+        );
+    }
+
+    #[test]
+    fn point_map_plain_invalid_or_garbage_endpoints_are_empty() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello"]);
+        let other = PageList::init(5, 2, None).unwrap();
+        let invalid = Pin::new(other.first_node_ptr(), 0, 0);
+        let valid = screen_pin(&list, 0, 0);
+        let mut garbage = valid;
+        garbage.garbage = true;
+
+        for selection in [
+            selection::Selection::new(invalid, valid, false),
+            selection::Selection::new(valid, invalid, false),
+            selection::Selection::new(garbage, valid, false),
+            selection::Selection::new(valid, garbage, false),
+        ] {
+            assert_plain_point_map_for_selection(&list, Some(selection), true, true, "", &[]);
+        }
+    }
+
+    #[test]
+    fn point_map_plain_no_map_formatters_are_unchanged() {
         let mut list = PageList::init(6, 2, None).unwrap();
         set_screen_text_lines(&mut list, &["A B"]);
 
