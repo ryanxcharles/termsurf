@@ -62,7 +62,7 @@ struct TerminalPwd {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TerminalStreamError {
-    ScrollUnsupported,
+    PageAlloc,
     ManagedCellUnsupported,
     InvalidPoint,
     UnsupportedCodepoint(char),
@@ -263,6 +263,11 @@ impl Terminal {
     pub(super) fn row_wrap_continuation_for_tests(&self, y: u32) -> bool {
         self.screens.active.row_wrap_continuation_for_tests(y)
     }
+
+    #[cfg(test)]
+    pub(super) fn full_screen_plain_for_tests(&self, unwrap: bool) -> String {
+        self.screens.active.full_screen_plain_for_tests(unwrap)
+    }
 }
 
 impl Handler for TerminalStreamHandler<'_> {
@@ -290,7 +295,7 @@ impl TerminalStreamHandler<'_> {
 impl From<BasicPrintError> for TerminalStreamError {
     fn from(err: BasicPrintError) -> Self {
         match err {
-            BasicPrintError::ScrollUnsupported => Self::ScrollUnsupported,
+            BasicPrintError::PageAlloc => Self::PageAlloc,
             BasicPrintError::Cell(err) => match err {
                 super::page_list::BasicCellWriteError::InvalidPoint => Self::InvalidPoint,
                 super::page_list::BasicCellWriteError::ManagedCell => Self::ManagedCellUnsupported,
@@ -972,26 +977,75 @@ mod tests {
     }
 
     #[test]
-    fn terminal_stream_bottom_row_pending_wrap_returns_error_without_mutating() {
-        let mut terminal = Terminal::init(2, 1, None).unwrap();
+    fn terminal_stream_bottom_row_pending_wrap_scrolls_and_writes() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
 
-        terminal.next_slice(b"AB").unwrap();
-        assert_eq!(plain_with_unwrap(&terminal, false), "AB");
-        assert_eq!(terminal.cursor_position_for_tests(), (1, 0));
-        assert!(terminal.cursor_pending_wrap_for_tests());
-        assert!(!terminal.row_wrap_for_tests(0));
-        assert!(!terminal.row_wrap_continuation_for_tests(0));
+        terminal.next_slice(b"helloworldabc12").unwrap();
 
+        assert_eq!(plain_with_unwrap(&terminal, false), "world\nabc12");
+        assert_eq!(plain_with_unwrap(&terminal, true), "worldabc12");
         assert_eq!(
-            terminal.next_slice(b"C"),
-            Err(TerminalStreamError::ScrollUnsupported)
+            terminal.full_screen_plain_for_tests(false),
+            "hello\nworld\nabc12"
         );
-
-        assert_eq!(plain_with_unwrap(&terminal, false), "AB");
-        assert_eq!(terminal.cursor_position_for_tests(), (1, 0));
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 1));
         assert!(terminal.cursor_pending_wrap_for_tests());
-        assert!(!terminal.row_wrap_for_tests(0));
-        assert!(!terminal.row_wrap_continuation_for_tests(0));
+        assert!(terminal.row_wrap_for_tests(0));
+        assert!(!terminal.row_wrap_for_tests(1));
+        assert!(terminal.row_wrap_continuation_for_tests(0));
+        assert!(terminal.row_wrap_continuation_for_tests(1));
+    }
+
+    #[test]
+    fn terminal_stream_bottom_row_pending_wrap_survives_feed_boundary() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"helloworld").unwrap();
+        assert_eq!(plain_with_unwrap(&terminal, false), "hello\nworld");
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 1));
+        assert!(terminal.cursor_pending_wrap_for_tests());
+
+        terminal.next_slice(b"a").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "world\na");
+        assert_eq!(
+            terminal.full_screen_plain_for_tests(false),
+            "hello\nworld\na"
+        );
+        assert_eq!(terminal.cursor_position_for_tests(), (1, 1));
+        assert!(!terminal.cursor_pending_wrap_for_tests());
+        assert!(terminal.row_wrap_for_tests(0));
+        assert!(terminal.row_wrap_continuation_for_tests(1));
+    }
+
+    #[test]
+    fn terminal_stream_after_scroll_writes_to_active_bottom_row() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"helloworlda").unwrap();
+        terminal.next_slice(b"bc").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "world\nabc");
+        assert_eq!(
+            terminal.full_screen_plain_for_tests(false),
+            "hello\nworld\nabc"
+        );
+        assert_eq!(terminal.cursor_position_for_tests(), (3, 1));
+        assert!(!terminal.cursor_pending_wrap_for_tests());
+    }
+
+    #[test]
+    fn terminal_stream_bottom_row_pending_wrap_marks_visible_rows_dirty() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"helloworld").unwrap();
+        terminal.clear_dirty_for_tests();
+        terminal.next_slice(b"a").unwrap();
+
+        assert!(terminal.is_dirty_for_tests(0, 0));
+        assert!(terminal.is_dirty_for_tests(4, 0));
+        assert!(terminal.is_dirty_for_tests(0, 1));
+        assert!(terminal.is_dirty_for_tests(4, 1));
     }
 
     #[test]

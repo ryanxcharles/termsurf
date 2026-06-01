@@ -252,3 +252,106 @@ Clean design re-review artifacts:
 - Result: `logs/codex-review/20260601-012437-119610-last-message.md`
 
 Codex found no remaining design blockers and approved implementation.
+
+## Result
+
+**Result:** Pass.
+
+Implemented the first bottom-row full-width wrap-scroll slice for the active
+screen.
+
+Active-coordinate conversion:
+
+- The basic print helpers now operate in the active coordinate domain instead of
+  the absolute screen/history coordinate domain.
+- The cursor's `x`/`y` remain active-area coordinates after scrollback exists.
+- Default screen formatting now formats the active visible area. A narrow
+  test-only full-screen dump remains available to prove history rows are still
+  present.
+
+Bottom-row scroll/grow behavior:
+
+- Consuming pending wrap on a non-bottom row keeps Experiment 104 behavior:
+  preflight the active destination cell, mark the old row wrapped, move to the
+  next active row, mark it as a wrap continuation, and write.
+- Consuming pending wrap on the bottom row now grows the `PageList` by one row
+  instead of returning `ScrollUnsupported`.
+- Growth happens before cursor movement, pending-wrap clearing, destination
+  wrap-continuation metadata, or the incoming character write. This preserves
+  transactional failure semantics for the fallible grow path.
+- After successful growth, the old active bottom row is marked wrapped, the
+  cursor stays at active bottom row column 0, the new active bottom row is
+  marked as a wrap continuation, and the incoming one-cell character is written.
+
+Cursor and metadata behavior:
+
+- `helloworldabc12` on a 5-column, 2-row terminal visibly formats as
+  `world\nabc12`; the full screen/history dump is `hello\nworld\nabc12`.
+- The same visible active area unwraps as `worldabc12`.
+- The cursor ends at active row 1, column 4, with `pending_wrap = true`.
+- The active row containing `world` is marked wrapped.
+- The active row containing `abc12` is marked as a wrap continuation.
+- A split-feed test proves bottom-row pending wrap survives across separate
+  `next_slice` calls before scrolling and writing.
+- A post-scroll write-placement test proves printable data lands in the active
+  bottom row, not in the historical row that previously shared the same absolute
+  screen coordinate.
+- Dirty-state testing clears prior dirt before consuming bottom-row pending wrap
+  and verifies both visible active rows are dirtied by the scroll/write.
+
+This experiment did not implement scroll regions, no-scrollback row rotation,
+index control dispatch, margins, SGR background preservation, insert mode,
+Unicode width, wide characters, zero-width characters, grapheme clustering,
+charsets, styles, hyperlinks, semantic prompt state, alternate screen behavior,
+CSI, OSC, DCS, APC, PTY IO, public API, or public ABI.
+
+Verification run:
+
+```text
+cargo fmt
+cargo test -p roastty stream
+cargo test -p roastty terminal_formatter
+cargo test -p roastty terminal::terminal
+cargo test -p roastty screen_formatter
+cargo test -p roastty page_string
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo fmt` passed.
+- `cargo test -p roastty stream` passed 90 tests.
+- `cargo test -p roastty terminal_formatter` passed 67 tests.
+- `cargo test -p roastty terminal::terminal` passed 85 tests.
+- `cargo test -p roastty screen_formatter` passed 55 tests.
+- `cargo test -p roastty page_string` passed 12 tests.
+- `cargo test -p roastty terminal::page_list` passed 524 tests.
+- Full `cargo test -p roastty` passed 991 unit tests, the ABI harness, and
+  doc-tests.
+
+Codex design review passed after all real design findings were fixed.
+
+Result-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-012955-206976-prompt.md`
+- Result: `logs/codex-review/20260601-012955-206976-last-message.md`
+
+Codex found no blocking correctness, upstream-fidelity, coordinate-domain,
+formatter, scrollback-preservation, transactionality, dirty/wrap metadata,
+missing-test, or scope findings. Codex approved the result for commit.
+
+## Conclusion
+
+Roastty's narrow basic print path now has Ghostty-style pending wrap through the
+bottom of the visible active area, including scrollback growth and active-domain
+cursor semantics. The implementation can fill the bottom row, carry pending wrap
+across feed calls, scroll the active area on the next printable character,
+preserve the scrolled row in history, and continue writing into the visible
+bottom row afterward.
+
+The next print experiment should continue along upstream `Terminal.print()` /
+`printWrap()` by choosing the next smallest missing behavior: either explicit
+index control dispatch on the active full-width path, no-scrollback row
+rotation, or wraparound mode plumbing. Margins, styles, hyperlinks, wide
+characters, graphemes, and full scroll-region behavior remain deferred.

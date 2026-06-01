@@ -22,7 +22,7 @@ pub(super) struct Screen {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum BasicPrintError {
-    ScrollUnsupported,
+    PageAlloc,
     Cell(BasicCellWriteError),
 }
 
@@ -107,8 +107,8 @@ impl Screen {
 
     pub(super) fn top_left_pin(&self) -> super::page_list::Pin {
         self.pages
-            .pin(point::Point::screen(point::Coordinate::new(0, 0)))
-            .expect("screen top-left pin must resolve")
+            .pin(point::Point::active(point::Coordinate::new(0, 0)))
+            .expect("active top-left pin must resolve")
     }
 
     pub(super) fn print_basic_cell(
@@ -118,26 +118,36 @@ impl Screen {
         codepoint: char,
     ) -> Result<(), BasicPrintError> {
         if self.cursor.pending_wrap {
-            if self.cursor.y >= rows - 1 {
-                return Err(BasicPrintError::ScrollUnsupported);
+            if self.cursor.y == rows - 1 {
+                let old_row = self
+                    .pages
+                    .active_row_pin(self.cursor.y.into())
+                    .map_err(BasicPrintError::Cell)?;
+                self.pages
+                    .grow_active()
+                    .map_err(|_| BasicPrintError::PageAlloc)?;
+                self.pages
+                    .set_row_wrap_at_pin(old_row, true)
+                    .map_err(BasicPrintError::Cell)?;
+                self.cursor.y = rows - 1;
+            } else {
+                self.pages
+                    .check_basic_active_cell(0, (self.cursor.y + 1).into())
+                    .map_err(BasicPrintError::Cell)?;
+                self.pages
+                    .set_active_row_wrap(self.cursor.y.into(), true)
+                    .map_err(BasicPrintError::Cell)?;
+                self.cursor.y += 1;
             }
-
-            self.pages
-                .check_basic_screen_cell(0, (self.cursor.y + 1).into())
-                .map_err(BasicPrintError::Cell)?;
-            self.pages
-                .set_screen_row_wrap(self.cursor.y.into(), true)
-                .map_err(BasicPrintError::Cell)?;
-            self.cursor.y += 1;
             self.cursor.x = 0;
             self.cursor.pending_wrap = false;
             self.pages
-                .set_screen_row_wrap_continuation(self.cursor.y.into(), true)
+                .set_active_row_wrap_continuation(self.cursor.y.into(), true)
                 .map_err(BasicPrintError::Cell)?;
         }
 
         self.pages
-            .write_basic_screen_cell(self.cursor.x, self.cursor.y.into(), codepoint)
+            .write_basic_active_cell(self.cursor.x, self.cursor.y.into(), codepoint)
             .map_err(BasicPrintError::Cell)?;
         if self.cursor.x == cols - 1 {
             self.cursor.pending_wrap = true;
@@ -239,10 +249,10 @@ impl Screen {
     #[cfg(test)]
     pub(super) fn pin_for_tests(&self, x: CellCountInt, y: u32) -> super::page_list::Pin {
         self.pages
-            .pin(super::point::Point::screen(super::point::Coordinate::new(
+            .pin(super::point::Point::active(super::point::Coordinate::new(
                 x, y,
             )))
-            .expect("screen pin must resolve")
+            .expect("active pin must resolve")
     }
 
     #[cfg(test)]
@@ -258,7 +268,7 @@ impl Screen {
     #[cfg(test)]
     pub(super) fn is_dirty_for_tests(&self, x: CellCountInt, y: u32) -> bool {
         self.pages
-            .is_dirty_for_tests(point::Point::screen(point::Coordinate::new(x, y)))
+            .is_dirty_for_tests(point::Point::active(point::Coordinate::new(x, y)))
     }
 
     #[cfg(test)]
@@ -268,12 +278,17 @@ impl Screen {
 
     #[cfg(test)]
     pub(super) fn row_wrap_for_tests(&self, y: u32) -> bool {
-        self.pages.screen_row_wrap_for_tests(y)
+        self.pages.active_row_wrap_for_tests(y)
     }
 
     #[cfg(test)]
     pub(super) fn row_wrap_continuation_for_tests(&self, y: u32) -> bool {
-        self.pages.screen_row_wrap_continuation_for_tests(y)
+        self.pages.active_row_wrap_continuation_for_tests(y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn full_screen_plain_for_tests(&self, unwrap: bool) -> String {
+        self.pages.full_screen_plain_for_tests(unwrap)
     }
 }
 
