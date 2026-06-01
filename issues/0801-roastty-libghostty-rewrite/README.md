@@ -338,6 +338,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 116: Port CSI Horizontal Absolute](116-port-csi-horizontal-absolute.md)
   — **Pass**
+- [Experiment 117: Port CSI Vertical Positioning](117-port-csi-vertical-positioning.md)
+  — **Designed**
 
 ## Non-Goals
 
