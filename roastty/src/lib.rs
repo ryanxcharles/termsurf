@@ -5,6 +5,11 @@ use std::slice;
 
 use input::{key, key_encode, key_mods};
 use terminal::kitty::KeyFlags;
+use terminal::selection_gesture::{
+    SelectionGesture, SelectionGestureAutoscroll, SelectionGestureAutoscrollTick,
+    SelectionGestureBehavior, SelectionGestureDeepPress, SelectionGestureDrag,
+    SelectionGestureGeometry, SelectionGesturePress, SelectionGestureRelease, DEFAULT_BEHAVIORS,
+};
 use terminal::terminal::{
     Terminal as InnerTerminal, TerminalBellCallback, TerminalColorKind,
     TerminalColorSchemeCallback, TerminalDeviceAttributesCallback, TerminalEnquiryCallback,
@@ -34,6 +39,8 @@ pub type RoasttyMouseEncoder = *mut c_void;
 pub type RoasttyMouseEvent = *mut c_void;
 pub type RoasttyOscCommand = *mut c_void;
 pub type RoasttyOscParser = *mut c_void;
+pub type RoasttySelectionGesture = *mut c_void;
+pub type RoasttySelectionGestureEvent = *mut c_void;
 pub type RoasttySurface = *mut c_void;
 pub type RoasttyTerminal = *mut c_void;
 
@@ -138,6 +145,38 @@ const ROASTTY_SELECTION_ADJUST_PAGE_DOWN: c_int = 7;
 const ROASTTY_SELECTION_ADJUST_BEGINNING_OF_LINE: c_int = 8;
 #[allow(dead_code)]
 const ROASTTY_SELECTION_ADJUST_END_OF_LINE: c_int = 9;
+
+const ROASTTY_SELECTION_GESTURE_EVENT_PRESS: c_int = 0;
+const ROASTTY_SELECTION_GESTURE_EVENT_RELEASE: c_int = 1;
+const ROASTTY_SELECTION_GESTURE_EVENT_DRAG: c_int = 2;
+const ROASTTY_SELECTION_GESTURE_EVENT_AUTOSCROLL_TICK: c_int = 3;
+const ROASTTY_SELECTION_GESTURE_EVENT_DEEP_PRESS: c_int = 4;
+
+const ROASTTY_SELECTION_GESTURE_DATA_CLICK_COUNT: c_int = 0;
+const ROASTTY_SELECTION_GESTURE_DATA_DRAGGED: c_int = 1;
+const ROASTTY_SELECTION_GESTURE_DATA_AUTOSCROLL: c_int = 2;
+const ROASTTY_SELECTION_GESTURE_DATA_BEHAVIOR: c_int = 3;
+const ROASTTY_SELECTION_GESTURE_DATA_ANCHOR: c_int = 4;
+
+const ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REF: c_int = 0;
+const ROASTTY_SELECTION_GESTURE_EVENT_OPTION_POSITION: c_int = 1;
+const ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_DISTANCE: c_int = 2;
+const ROASTTY_SELECTION_GESTURE_EVENT_OPTION_TIME_NS: c_int = 3;
+const ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_INTERVAL_NS: c_int = 4;
+const ROASTTY_SELECTION_GESTURE_EVENT_OPTION_WORD_BOUNDARY_CODEPOINTS: c_int = 5;
+const ROASTTY_SELECTION_GESTURE_EVENT_OPTION_BEHAVIORS: c_int = 6;
+const ROASTTY_SELECTION_GESTURE_EVENT_OPTION_RECTANGLE: c_int = 7;
+const ROASTTY_SELECTION_GESTURE_EVENT_OPTION_GEOMETRY: c_int = 8;
+const ROASTTY_SELECTION_GESTURE_EVENT_OPTION_VIEWPORT: c_int = 9;
+
+const ROASTTY_SELECTION_GESTURE_AUTOSCROLL_NONE: c_int = 0;
+const ROASTTY_SELECTION_GESTURE_AUTOSCROLL_UP: c_int = 1;
+const ROASTTY_SELECTION_GESTURE_AUTOSCROLL_DOWN: c_int = 2;
+
+const ROASTTY_SELECTION_GESTURE_BEHAVIOR_CELL: c_int = 0;
+const ROASTTY_SELECTION_GESTURE_BEHAVIOR_WORD: c_int = 1;
+const ROASTTY_SELECTION_GESTURE_BEHAVIOR_LINE: c_int = 2;
+const ROASTTY_SELECTION_GESTURE_BEHAVIOR_OUTPUT: c_int = 3;
 
 #[allow(dead_code)]
 const ROASTTY_COLOR_SCHEME_LIGHT: c_int = 0;
@@ -330,6 +369,37 @@ pub struct RoasttySelection {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RoasttySurfacePosition {
+    x: f64,
+    y: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RoasttyCodepoints {
+    ptr: *const u32,
+    len: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RoasttySelectionGestureBehaviors {
+    single_click: c_int,
+    double_click: c_int,
+    triple_click: c_int,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RoasttySelectionGestureGeometry {
+    columns: u32,
+    cell_width: u32,
+    padding_left: u32,
+    screen_height: u32,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RoasttyTerminalSelectWordOptions {
     size: usize,
@@ -366,6 +436,33 @@ pub struct RoasttyTerminalSelectionFormatOptions {
     unwrap: bool,
     trim: bool,
     selection: *const RoasttySelection,
+}
+
+struct SelectionGestureHandle {
+    gesture: SelectionGesture,
+}
+
+struct SelectionGestureEventHandle {
+    event: SelectionGestureEventKind,
+    ref_: Option<TerminalGridRef>,
+    position: RoasttySurfacePosition,
+    repeat_distance: f64,
+    time_ns: Option<u64>,
+    repeat_interval_ns: u64,
+    word_boundary_codepoints: Option<Vec<u32>>,
+    behaviors: [SelectionGestureBehavior; 3],
+    rectangle: bool,
+    geometry: Option<SelectionGestureGeometry>,
+    viewport: Option<point::Coordinate>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SelectionGestureEventKind {
+    Press,
+    Release,
+    Drag,
+    AutoscrollTick,
+    DeepPress,
 }
 
 #[repr(C)]
@@ -528,6 +625,26 @@ fn terminal_from_handle<'a>(handle: RoasttyTerminal) -> Option<&'a mut Terminal>
         None
     } else {
         Some(unsafe { &mut *(handle.cast::<Terminal>()) })
+    }
+}
+
+fn selection_gesture_from_handle<'a>(
+    handle: RoasttySelectionGesture,
+) -> Option<&'a mut SelectionGestureHandle> {
+    if handle.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *(handle.cast::<SelectionGestureHandle>()) })
+    }
+}
+
+fn selection_gesture_event_from_handle<'a>(
+    handle: RoasttySelectionGestureEvent,
+) -> Option<&'a mut SelectionGestureEventHandle> {
+    if handle.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *(handle.cast::<SelectionGestureEventHandle>()) })
     }
 }
 
@@ -1208,6 +1325,91 @@ fn read_selection(selection: *const RoasttySelection) -> Result<TerminalSelectio
         end: read_grid_ref_ptr(unsafe { ptr::addr_of!((*selection).end) })?,
         rectangle: unsafe { ptr::addr_of!((*selection).rectangle).read() },
     })
+}
+
+fn selection_gesture_event_kind_from_raw(value: c_int) -> Option<SelectionGestureEventKind> {
+    match value {
+        ROASTTY_SELECTION_GESTURE_EVENT_PRESS => Some(SelectionGestureEventKind::Press),
+        ROASTTY_SELECTION_GESTURE_EVENT_RELEASE => Some(SelectionGestureEventKind::Release),
+        ROASTTY_SELECTION_GESTURE_EVENT_DRAG => Some(SelectionGestureEventKind::Drag),
+        ROASTTY_SELECTION_GESTURE_EVENT_AUTOSCROLL_TICK => {
+            Some(SelectionGestureEventKind::AutoscrollTick)
+        }
+        ROASTTY_SELECTION_GESTURE_EVENT_DEEP_PRESS => Some(SelectionGestureEventKind::DeepPress),
+        _ => None,
+    }
+}
+
+fn selection_gesture_behavior_from_raw(value: c_int) -> Option<SelectionGestureBehavior> {
+    match value {
+        ROASTTY_SELECTION_GESTURE_BEHAVIOR_CELL => Some(SelectionGestureBehavior::Cell),
+        ROASTTY_SELECTION_GESTURE_BEHAVIOR_WORD => Some(SelectionGestureBehavior::Word),
+        ROASTTY_SELECTION_GESTURE_BEHAVIOR_LINE => Some(SelectionGestureBehavior::Line),
+        ROASTTY_SELECTION_GESTURE_BEHAVIOR_OUTPUT => Some(SelectionGestureBehavior::Output),
+        _ => None,
+    }
+}
+
+fn selection_gesture_behavior_to_raw(value: SelectionGestureBehavior) -> c_int {
+    match value {
+        SelectionGestureBehavior::Cell => ROASTTY_SELECTION_GESTURE_BEHAVIOR_CELL,
+        SelectionGestureBehavior::Word => ROASTTY_SELECTION_GESTURE_BEHAVIOR_WORD,
+        SelectionGestureBehavior::Line => ROASTTY_SELECTION_GESTURE_BEHAVIOR_LINE,
+        SelectionGestureBehavior::Output => ROASTTY_SELECTION_GESTURE_BEHAVIOR_OUTPUT,
+    }
+}
+
+fn selection_gesture_autoscroll_to_raw(value: SelectionGestureAutoscroll) -> c_int {
+    match value {
+        SelectionGestureAutoscroll::None => ROASTTY_SELECTION_GESTURE_AUTOSCROLL_NONE,
+        SelectionGestureAutoscroll::Up => ROASTTY_SELECTION_GESTURE_AUTOSCROLL_UP,
+        SelectionGestureAutoscroll::Down => ROASTTY_SELECTION_GESTURE_AUTOSCROLL_DOWN,
+    }
+}
+
+fn read_selection_gesture_behaviors(
+    behaviors: RoasttySelectionGestureBehaviors,
+) -> Option<[SelectionGestureBehavior; 3]> {
+    Some([
+        selection_gesture_behavior_from_raw(behaviors.single_click)?,
+        selection_gesture_behavior_from_raw(behaviors.double_click)?,
+        selection_gesture_behavior_from_raw(behaviors.triple_click)?,
+    ])
+}
+
+fn read_selection_gesture_geometry(
+    geometry: RoasttySelectionGestureGeometry,
+) -> Option<SelectionGestureGeometry> {
+    if geometry.columns == 0 || geometry.cell_width == 0 || geometry.screen_height == 0 {
+        return None;
+    }
+    Some(SelectionGestureGeometry {
+        columns: geometry.columns,
+        cell_width: geometry.cell_width,
+        padding_left: geometry.padding_left,
+        screen_height: geometry.screen_height,
+    })
+}
+
+fn read_selection_gesture_codepoints(value: *const RoasttyCodepoints) -> Result<Vec<u32>, c_int> {
+    if value.is_null() {
+        return Err(ROASTTY_INVALID_VALUE);
+    }
+    let value = unsafe { value.read() };
+    if value.len > 0 && value.ptr.is_null() {
+        return Err(ROASTTY_INVALID_VALUE);
+    }
+    if value.len == 0 {
+        return Ok(Vec::new());
+    }
+    let codepoints = unsafe { slice::from_raw_parts(value.ptr, value.len) };
+    if codepoints
+        .iter()
+        .any(|codepoint| char::from_u32(*codepoint).is_none())
+    {
+        return Err(ROASTTY_INVALID_VALUE);
+    }
+    Ok(codepoints.to_vec())
 }
 
 fn read_sized_abi<T: Copy>(value: *const T) -> Result<T, c_int> {
@@ -2413,6 +2615,435 @@ pub extern "C" fn roastty_terminal_selection_format(
         Err(error) => return error,
     };
     write_copied_string(out, text.as_bytes())
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_selection_gesture_new(out: *mut RoasttySelectionGesture) -> c_int {
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    unsafe {
+        out.write(ptr::null_mut());
+    }
+    let mut handle = Box::new(SelectionGestureHandle {
+        gesture: SelectionGesture::default(),
+    });
+    let ptr = (&mut *handle) as *mut SelectionGestureHandle as RoasttySelectionGesture;
+    std::mem::forget(handle);
+    unsafe {
+        out.write(ptr);
+    }
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_selection_gesture_free(
+    gesture: RoasttySelectionGesture,
+    terminal: RoasttyTerminal,
+) {
+    let Some(mut gesture) = (if gesture.is_null() {
+        None
+    } else {
+        Some(unsafe { Box::from_raw(gesture.cast::<SelectionGestureHandle>()) })
+    }) else {
+        return;
+    };
+    let terminal = terminal_from_handle(terminal).map(|terminal| &mut terminal.terminal);
+    gesture.gesture.free(terminal);
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_selection_gesture_reset(
+    gesture: RoasttySelectionGesture,
+    terminal: RoasttyTerminal,
+) {
+    let Some(gesture) = selection_gesture_from_handle(gesture) else {
+        return;
+    };
+    let terminal = terminal_from_handle(terminal).map(|terminal| &mut terminal.terminal);
+    gesture.gesture.reset(terminal);
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_selection_gesture_event_new(
+    out: *mut RoasttySelectionGestureEvent,
+    event_type: c_int,
+) -> c_int {
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    unsafe {
+        out.write(ptr::null_mut());
+    }
+    let Some(kind) = selection_gesture_event_kind_from_raw(event_type) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    let mut handle = Box::new(SelectionGestureEventHandle {
+        event: kind,
+        ref_: None,
+        position: RoasttySurfacePosition::default(),
+        repeat_distance: 0.0,
+        time_ns: None,
+        repeat_interval_ns: 0,
+        word_boundary_codepoints: None,
+        behaviors: DEFAULT_BEHAVIORS,
+        rectangle: false,
+        geometry: None,
+        viewport: None,
+    });
+    let ptr = (&mut *handle) as *mut SelectionGestureEventHandle as RoasttySelectionGestureEvent;
+    std::mem::forget(handle);
+    unsafe {
+        out.write(ptr);
+    }
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_selection_gesture_event_free(event: RoasttySelectionGestureEvent) {
+    if event.is_null() {
+        return;
+    }
+    drop(unsafe { Box::from_raw(event.cast::<SelectionGestureEventHandle>()) });
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_selection_gesture_get(
+    gesture: RoasttySelectionGesture,
+    terminal: RoasttyTerminal,
+    data: c_int,
+    out: *mut c_void,
+) -> c_int {
+    let Some(gesture) = selection_gesture_from_handle(gesture) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    match data {
+        ROASTTY_SELECTION_GESTURE_DATA_CLICK_COUNT => unsafe {
+            out.cast::<u8>().write(gesture.gesture.click_count());
+            ROASTTY_SUCCESS
+        },
+        ROASTTY_SELECTION_GESTURE_DATA_DRAGGED => unsafe {
+            out.cast::<bool>().write(gesture.gesture.dragged());
+            ROASTTY_SUCCESS
+        },
+        ROASTTY_SELECTION_GESTURE_DATA_AUTOSCROLL => unsafe {
+            out.cast::<c_int>()
+                .write(selection_gesture_autoscroll_to_raw(
+                    gesture.gesture.autoscroll(),
+                ));
+            ROASTTY_SUCCESS
+        },
+        ROASTTY_SELECTION_GESTURE_DATA_BEHAVIOR => unsafe {
+            out.cast::<c_int>().write(selection_gesture_behavior_to_raw(
+                gesture.gesture.behavior(),
+            ));
+            ROASTTY_SUCCESS
+        },
+        ROASTTY_SELECTION_GESTURE_DATA_ANCHOR => {
+            let Some(terminal) = terminal_from_handle(terminal) else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            let Some(anchor) = gesture.gesture.anchor_ref(&terminal.terminal) else {
+                return ROASTTY_NO_VALUE;
+            };
+            write_grid_ref(out.cast::<RoasttyGridRef>(), anchor);
+            ROASTTY_SUCCESS
+        }
+        _ => ROASTTY_INVALID_VALUE,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_selection_gesture_get_multi(
+    gesture: RoasttySelectionGesture,
+    terminal: RoasttyTerminal,
+    count: usize,
+    keys: *const c_int,
+    values: *mut *mut c_void,
+    out_written: *mut usize,
+) -> c_int {
+    if keys.is_null() || values.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    for index in 0..count {
+        let key = unsafe { keys.add(index).read() };
+        let value = unsafe { values.add(index).read() };
+        let result = roastty_selection_gesture_get(gesture, terminal, key, value);
+        if result != ROASTTY_SUCCESS {
+            if !out_written.is_null() {
+                unsafe {
+                    out_written.write(index);
+                }
+            }
+            return result;
+        }
+        if !out_written.is_null() {
+            unsafe {
+                out_written.write(index + 1);
+            }
+        }
+    }
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_selection_gesture_event_set(
+    event: RoasttySelectionGestureEvent,
+    option: c_int,
+    value: *const c_void,
+) -> c_int {
+    let Some(event) = selection_gesture_event_from_handle(event) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+
+    match option {
+        ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REF => match event.event {
+            SelectionGestureEventKind::Press
+            | SelectionGestureEventKind::Release
+            | SelectionGestureEventKind::Drag => {
+                if value.is_null() {
+                    event.ref_ = None;
+                } else {
+                    match read_grid_ref_ptr(value.cast::<RoasttyGridRef>()) {
+                        Ok(ref_) => event.ref_ = Some(ref_),
+                        Err(result) => return result,
+                    }
+                }
+            }
+            _ => return ROASTTY_INVALID_VALUE,
+        },
+        ROASTTY_SELECTION_GESTURE_EVENT_OPTION_POSITION => match event.event {
+            SelectionGestureEventKind::Press
+            | SelectionGestureEventKind::Drag
+            | SelectionGestureEventKind::AutoscrollTick => {
+                event.position = if value.is_null() {
+                    RoasttySurfacePosition::default()
+                } else {
+                    unsafe { value.cast::<RoasttySurfacePosition>().read() }
+                };
+            }
+            _ => return ROASTTY_INVALID_VALUE,
+        },
+        ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_DISTANCE => {
+            if event.event != SelectionGestureEventKind::Press || value.is_null() {
+                return ROASTTY_INVALID_VALUE;
+            }
+            event.repeat_distance = unsafe { value.cast::<f64>().read() };
+        }
+        ROASTTY_SELECTION_GESTURE_EVENT_OPTION_TIME_NS => {
+            if event.event != SelectionGestureEventKind::Press {
+                return ROASTTY_INVALID_VALUE;
+            }
+            event.time_ns = if value.is_null() {
+                None
+            } else {
+                Some(unsafe { value.cast::<u64>().read() })
+            };
+        }
+        ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_INTERVAL_NS => {
+            if event.event != SelectionGestureEventKind::Press || value.is_null() {
+                return ROASTTY_INVALID_VALUE;
+            }
+            event.repeat_interval_ns = unsafe { value.cast::<u64>().read() };
+        }
+        ROASTTY_SELECTION_GESTURE_EVENT_OPTION_WORD_BOUNDARY_CODEPOINTS => match event.event {
+            SelectionGestureEventKind::Press
+            | SelectionGestureEventKind::Drag
+            | SelectionGestureEventKind::AutoscrollTick
+            | SelectionGestureEventKind::DeepPress => {
+                event.word_boundary_codepoints = if value.is_null() {
+                    None
+                } else {
+                    match read_selection_gesture_codepoints(value.cast::<RoasttyCodepoints>()) {
+                        Ok(codepoints) => Some(codepoints),
+                        Err(result) => return result,
+                    }
+                };
+            }
+            _ => return ROASTTY_INVALID_VALUE,
+        },
+        ROASTTY_SELECTION_GESTURE_EVENT_OPTION_BEHAVIORS => {
+            if event.event != SelectionGestureEventKind::Press || value.is_null() {
+                return ROASTTY_INVALID_VALUE;
+            }
+            let behaviors = unsafe { value.cast::<RoasttySelectionGestureBehaviors>().read() };
+            let Some(behaviors) = read_selection_gesture_behaviors(behaviors) else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            event.behaviors = behaviors;
+        }
+        ROASTTY_SELECTION_GESTURE_EVENT_OPTION_RECTANGLE => match event.event {
+            SelectionGestureEventKind::Drag | SelectionGestureEventKind::AutoscrollTick => {
+                event.rectangle = if value.is_null() {
+                    false
+                } else {
+                    unsafe { value.cast::<bool>().read() }
+                };
+            }
+            _ => return ROASTTY_INVALID_VALUE,
+        },
+        ROASTTY_SELECTION_GESTURE_EVENT_OPTION_GEOMETRY => match event.event {
+            SelectionGestureEventKind::Drag | SelectionGestureEventKind::AutoscrollTick => {
+                if value.is_null() {
+                    event.geometry = None;
+                } else {
+                    let geometry =
+                        unsafe { value.cast::<RoasttySelectionGestureGeometry>().read() };
+                    let Some(geometry) = read_selection_gesture_geometry(geometry) else {
+                        return ROASTTY_INVALID_VALUE;
+                    };
+                    event.geometry = Some(geometry);
+                }
+            }
+            _ => return ROASTTY_INVALID_VALUE,
+        },
+        ROASTTY_SELECTION_GESTURE_EVENT_OPTION_VIEWPORT => {
+            if event.event != SelectionGestureEventKind::AutoscrollTick {
+                return ROASTTY_INVALID_VALUE;
+            }
+            if value.is_null() {
+                event.viewport = None;
+            } else {
+                let coordinate = unsafe { value.cast::<RoasttyPointCoordinate>().read() };
+                event.viewport = Some(point::Coordinate::new(coordinate.x, coordinate.y));
+            }
+        }
+        _ => return ROASTTY_INVALID_VALUE,
+    }
+
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_selection_gesture_handle_event(
+    gesture: RoasttySelectionGesture,
+    terminal: RoasttyTerminal,
+    event: RoasttySelectionGestureEvent,
+    out_selection: *mut RoasttySelection,
+) -> c_int {
+    let Some(gesture) = selection_gesture_from_handle(gesture) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    let Some(terminal) = terminal_from_handle(terminal) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    let Some(event) = selection_gesture_event_from_handle(event) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+
+    let boundary = event.word_boundary_codepoints.as_deref();
+    let selection = match event.event {
+        SelectionGestureEventKind::Press => {
+            let Some(ref_) = event.ref_ else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            let Ok(coord) = terminal
+                .terminal
+                .point_from_grid_ref(ref_, TerminalPointTag::Active)
+            else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            let Some(pin) = terminal.terminal.active_pin(coord) else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            gesture.gesture.press(
+                &mut terminal.terminal,
+                SelectionGesturePress {
+                    time_ns: event.time_ns,
+                    pin,
+                    x: event.position.x,
+                    y: event.position.y,
+                    max_distance: event.repeat_distance,
+                    repeat_interval_ns: event.repeat_interval_ns,
+                    word_boundary_codepoints: boundary,
+                    behaviors: event.behaviors,
+                },
+            )
+        }
+        SelectionGestureEventKind::Release => {
+            let pin = match event.ref_ {
+                Some(ref_) => {
+                    let Ok(coord) = terminal
+                        .terminal
+                        .point_from_grid_ref(ref_, TerminalPointTag::Active)
+                    else {
+                        return ROASTTY_INVALID_VALUE;
+                    };
+                    terminal.terminal.active_pin(coord)
+                }
+                None => None,
+            };
+            gesture
+                .gesture
+                .release(&terminal.terminal, SelectionGestureRelease { pin });
+            None
+        }
+        SelectionGestureEventKind::Drag => {
+            let Some(ref_) = event.ref_ else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            let Some(geometry) = event.geometry else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            let Ok(coord) = terminal
+                .terminal
+                .point_from_grid_ref(ref_, TerminalPointTag::Active)
+            else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            let Some(pin) = terminal.terminal.active_pin(coord) else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            gesture.gesture.drag(
+                &mut terminal.terminal,
+                SelectionGestureDrag {
+                    pin,
+                    x: event.position.x,
+                    y: event.position.y,
+                    rectangle: event.rectangle,
+                    word_boundary_codepoints: boundary,
+                    geometry,
+                },
+            )
+        }
+        SelectionGestureEventKind::AutoscrollTick => {
+            let Some(geometry) = event.geometry else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            let Some(viewport) = event.viewport else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            gesture.gesture.autoscroll_tick(
+                &mut terminal.terminal,
+                SelectionGestureAutoscrollTick {
+                    viewport,
+                    x: event.position.x,
+                    y: event.position.y,
+                    rectangle: event.rectangle,
+                    word_boundary_codepoints: boundary,
+                    geometry,
+                },
+            )
+        }
+        SelectionGestureEventKind::DeepPress => gesture.gesture.deep_press(
+            &mut terminal.terminal,
+            SelectionGestureDeepPress {
+                word_boundary_codepoints: boundary,
+            },
+        ),
+    };
+
+    let Some(selection) = selection else {
+        return ROASTTY_NO_VALUE;
+    };
+    if !out_selection.is_null() {
+        write_selection(out_selection, selection);
+    }
+    ROASTTY_SUCCESS
 }
 
 #[no_mangle]
@@ -6905,5 +7536,183 @@ mod tests {
         }
 
         roastty_osc_free(parser);
+    }
+
+    #[test]
+    fn selection_gesture_c_abi_layout_validation_and_events() {
+        assert_eq!(ROASTTY_SELECTION_GESTURE_EVENT_PRESS, 0);
+        assert_eq!(ROASTTY_SELECTION_GESTURE_EVENT_RELEASE, 1);
+        assert_eq!(ROASTTY_SELECTION_GESTURE_EVENT_DRAG, 2);
+        assert_eq!(ROASTTY_SELECTION_GESTURE_EVENT_AUTOSCROLL_TICK, 3);
+        assert_eq!(ROASTTY_SELECTION_GESTURE_EVENT_DEEP_PRESS, 4);
+        assert_eq!(ROASTTY_SELECTION_GESTURE_DATA_CLICK_COUNT, 0);
+        assert_eq!(ROASTTY_SELECTION_GESTURE_DATA_ANCHOR, 4);
+        assert_eq!(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REF, 0);
+        assert_eq!(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_VIEWPORT, 9);
+        assert_eq!(ROASTTY_SELECTION_GESTURE_BEHAVIOR_CELL, 0);
+        assert_eq!(ROASTTY_SELECTION_GESTURE_BEHAVIOR_OUTPUT, 3);
+        assert_eq!(std::mem::size_of::<RoasttySurfacePosition>(), 16);
+        assert_eq!(std::mem::offset_of!(RoasttySurfacePosition, y), 8);
+        assert_eq!(std::mem::size_of::<RoasttyCodepoints>(), 16);
+        assert_eq!(std::mem::offset_of!(RoasttyCodepoints, len), 8);
+        assert_eq!(std::mem::size_of::<RoasttySelectionGestureBehaviors>(), 12);
+        assert_eq!(
+            std::mem::offset_of!(RoasttySelectionGestureBehaviors, triple_click),
+            8
+        );
+        assert_eq!(std::mem::size_of::<RoasttySelectionGestureGeometry>(), 16);
+        assert_eq!(
+            std::mem::offset_of!(RoasttySelectionGestureGeometry, screen_height),
+            12
+        );
+
+        let terminal = new_terminal(20, 3);
+        write_terminal(terminal, b"abcde fghi");
+
+        let mut gesture: RoasttySelectionGesture = ptr::null_mut();
+        assert_eq!(roastty_selection_gesture_new(&mut gesture), ROASTTY_SUCCESS);
+        assert!(!gesture.is_null());
+
+        let mut press: RoasttySelectionGestureEvent = ptr::null_mut();
+        assert_eq!(
+            roastty_selection_gesture_event_new(&mut press, ROASTTY_SELECTION_GESTURE_EVENT_PRESS),
+            ROASTTY_SUCCESS
+        );
+        let ref_ = terminal_grid_ref_at(terminal, 1, 0);
+        let position = RoasttySurfacePosition { x: 10.0, y: 0.0 };
+        let repeat_distance = 20.0;
+        let time_ns = 1_u64;
+        let repeat_interval_ns = 100_u64;
+        assert_eq!(
+            roastty_selection_gesture_event_set(
+                press,
+                ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REF,
+                &ref_ as *const _ as *const c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_selection_gesture_event_set(
+                press,
+                ROASTTY_SELECTION_GESTURE_EVENT_OPTION_POSITION,
+                &position as *const _ as *const c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_selection_gesture_event_set(
+                press,
+                ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_DISTANCE,
+                &repeat_distance as *const _ as *const c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_selection_gesture_event_set(
+                press,
+                ROASTTY_SELECTION_GESTURE_EVENT_OPTION_TIME_NS,
+                &time_ns as *const _ as *const c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_selection_gesture_event_set(
+                press,
+                ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_INTERVAL_NS,
+                &repeat_interval_ns as *const _ as *const c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+
+        let mut custom_boundaries = [b'c' as u32];
+        let codepoints = RoasttyCodepoints {
+            ptr: custom_boundaries.as_ptr(),
+            len: custom_boundaries.len(),
+        };
+        assert_eq!(
+            roastty_selection_gesture_event_set(
+                press,
+                ROASTTY_SELECTION_GESTURE_EVENT_OPTION_WORD_BOUNDARY_CODEPOINTS,
+                &codepoints as *const _ as *const c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        custom_boundaries[0] = b' ' as u32;
+        assert_eq!(custom_boundaries[0], b' ' as u32);
+
+        let mut selection = RoasttySelection::default();
+        assert_eq!(
+            roastty_selection_gesture_handle_event(gesture, terminal, press, &mut selection),
+            ROASTTY_NO_VALUE
+        );
+        let mut click_count = 0_u8;
+        assert_eq!(
+            roastty_selection_gesture_get(
+                gesture,
+                terminal,
+                ROASTTY_SELECTION_GESTURE_DATA_CLICK_COUNT,
+                &mut click_count as *mut _ as *mut c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(click_count, 1);
+
+        let time_ns = 2_u64;
+        assert_eq!(
+            roastty_selection_gesture_event_set(
+                press,
+                ROASTTY_SELECTION_GESTURE_EVENT_OPTION_TIME_NS,
+                &time_ns as *const _ as *const c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_selection_gesture_handle_event(gesture, terminal, press, &mut selection),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!((selection.start.x, selection.end.x), (0, 1));
+
+        let invalid_codepoints = RoasttyCodepoints {
+            ptr: ptr::null(),
+            len: 1,
+        };
+        assert_eq!(
+            roastty_selection_gesture_event_set(
+                press,
+                ROASTTY_SELECTION_GESTURE_EVENT_OPTION_WORD_BOUNDARY_CODEPOINTS,
+                &invalid_codepoints as *const _ as *const c_void
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        let surrogate = [0xd800_u32];
+        let invalid_codepoints = RoasttyCodepoints {
+            ptr: surrogate.as_ptr(),
+            len: surrogate.len(),
+        };
+        assert_eq!(
+            roastty_selection_gesture_event_set(
+                press,
+                ROASTTY_SELECTION_GESTURE_EVENT_OPTION_WORD_BOUNDARY_CODEPOINTS,
+                &invalid_codepoints as *const _ as *const c_void
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        let invalid_behaviors = RoasttySelectionGestureBehaviors {
+            single_click: ROASTTY_SELECTION_GESTURE_BEHAVIOR_CELL,
+            double_click: 99,
+            triple_click: ROASTTY_SELECTION_GESTURE_BEHAVIOR_LINE,
+        };
+        assert_eq!(
+            roastty_selection_gesture_event_set(
+                press,
+                ROASTTY_SELECTION_GESTURE_EVENT_OPTION_BEHAVIORS,
+                &invalid_behaviors as *const _ as *const c_void
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+
+        roastty_selection_gesture_event_free(press);
+        roastty_selection_gesture_free(gesture, terminal);
+        roastty_terminal_free(terminal);
     }
 }

@@ -71,6 +71,9 @@ mod selection_codepoints;
 mod selection;
 
 #[allow(dead_code)]
+pub(crate) mod selection_gesture;
+
+#[allow(dead_code)]
 mod semantic_prompt;
 
 #[allow(dead_code)]

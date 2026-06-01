@@ -7,8 +7,8 @@ use super::hyperlink;
 use super::kitty;
 use super::page::{SemanticContent, SemanticPrompt};
 use super::page_list::{
-    BasicCellWriteError, CodepointMapEntry, GridRef, GridRefPointError, PageList,
-    PageListAllocError, PageOutputFormat, PageStringWithPinMap, SelectLineOptions,
+    BasicCellWriteError, CodepointMapEntry, DragGeometry, GridRef, GridRefPointError, PageList,
+    PageListAllocError, PageOutputFormat, PageStringWithPinMap, Pin, SelectLineOptions,
     StyledCellWriteError,
 };
 use super::point;
@@ -1028,6 +1028,46 @@ impl Screen {
 
     pub(super) fn grid_ref(&self, point: point::Point) -> Option<GridRef> {
         self.pages.grid_ref(point)
+    }
+
+    pub(super) fn pin(&self, point: point::Point) -> Option<Pin> {
+        self.pages.pin(point)
+    }
+
+    pub(super) fn track_pin(&mut self, pin: Pin) -> Option<std::ptr::NonNull<Pin>> {
+        self.pages.track_pin(pin)
+    }
+
+    pub(super) fn untrack_pin(&mut self, pin: std::ptr::NonNull<Pin>) {
+        self.pages.untrack_pin(pin);
+    }
+
+    pub(super) fn scroll_delta_row(&mut self, delta: isize) {
+        self.pages.scroll_delta_row(delta);
+    }
+
+    pub(super) fn drag_selection(
+        &self,
+        click_pin: Pin,
+        drag_pin: Pin,
+        click_x: u32,
+        drag_x: u32,
+        rectangle: bool,
+        geometry: DragGeometry,
+    ) -> Option<(GridRef, GridRef, bool)> {
+        self.pages
+            .drag_selection(click_pin, drag_pin, click_x, drag_x, rectangle, geometry)
+            .map(|selection| {
+                (
+                    GridRef::from(selection.start()),
+                    GridRef::from(selection.end()),
+                    selection.rectangle(),
+                )
+            })
+    }
+
+    pub(super) fn pin_before(&self, pin: Pin, other: Pin) -> Option<bool> {
+        self.pages.pin_before(pin, other)
     }
 
     pub(super) fn point_from_grid_ref(

@@ -14,8 +14,8 @@ use super::mouse;
 use super::osc;
 use super::page::SemanticPrompt;
 use super::page_list::{
-    CodepointMapEntry, GridRef, GridRefPointError, PageListAllocError, PageOutputFormat,
-    PageStringWithPinMap,
+    CodepointMapEntry, DragGeometry, GridRef, GridRefPointError, PageListAllocError,
+    PageOutputFormat, PageStringWithPinMap, Pin,
 };
 use super::screen::{
     BasicPrintError, EraseDisplayError, Screen, ScreenCursorHyperlinkId, ScreenFormatter,
@@ -23,6 +23,7 @@ use super::screen::{
 };
 use super::selection;
 use super::selection_codepoints;
+use super::selection_gesture::{SelectionGestureAnchor, SelectionGestureGeometry};
 use super::sgr;
 use super::size::CellCountInt;
 use super::size_report;
@@ -57,10 +58,16 @@ pub(super) struct TerminalScreens {
     primary: Screen,
     alternate: Option<Screen>,
     active: TerminalScreenKey,
+    primary_generation: u64,
+    alternate_generation: u64,
+    primary_owner_id: u64,
+    alternate_owner_id: u64,
+    next_screen_owner_id: u64,
+    active_epoch: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TerminalScreenKey {
+pub(super) enum TerminalScreenKey {
     Primary,
     Alternate,
 }
@@ -409,6 +416,12 @@ impl TerminalScreens {
             primary: Screen::init(cols, rows, max_scrollback_rows)?,
             alternate: None,
             active: TerminalScreenKey::Primary,
+            primary_generation: 0,
+            alternate_generation: 0,
+            primary_owner_id: 1,
+            alternate_owner_id: 0,
+            next_screen_owner_id: 2,
+            active_epoch: 0,
         })
     }
 
@@ -436,10 +449,46 @@ impl TerminalScreens {
         self.active
     }
 
+    fn active_generation(&self) -> u64 {
+        self.generation(self.active)
+    }
+
+    fn active_owner_id(&self) -> u64 {
+        self.owner_id(self.active)
+            .expect("active screen must exist")
+    }
+
+    fn active_epoch(&self) -> u64 {
+        self.active_epoch
+    }
+
+    fn generation(&self, key: TerminalScreenKey) -> u64 {
+        match key {
+            TerminalScreenKey::Primary => self.primary_generation,
+            TerminalScreenKey::Alternate => self.alternate_generation,
+        }
+    }
+
+    fn owner_id(&self, key: TerminalScreenKey) -> Option<u64> {
+        match key {
+            TerminalScreenKey::Primary => Some(self.primary_owner_id),
+            TerminalScreenKey::Alternate => {
+                self.alternate.as_ref().map(|_| self.alternate_owner_id)
+            }
+        }
+    }
+
     fn screen(&self, key: TerminalScreenKey) -> Option<&Screen> {
         match key {
             TerminalScreenKey::Primary => Some(&self.primary),
             TerminalScreenKey::Alternate => self.alternate.as_ref(),
+        }
+    }
+
+    fn screen_mut(&mut self, key: TerminalScreenKey) -> Option<&mut Screen> {
+        match key {
+            TerminalScreenKey::Primary => Some(&mut self.primary),
+            TerminalScreenKey::Alternate => self.alternate.as_mut(),
         }
     }
 
@@ -450,6 +499,9 @@ impl TerminalScreens {
     ) -> Result<(), PageListAllocError> {
         if self.alternate.is_none() {
             self.alternate = Some(Screen::init(cols, rows, Some(0))?);
+            self.alternate_generation = self.alternate_generation.wrapping_add(1);
+            self.alternate_owner_id = self.next_screen_owner_id;
+            self.next_screen_owner_id = self.next_screen_owner_id.wrapping_add(1).max(1);
         }
         Ok(())
     }
@@ -472,6 +524,7 @@ impl TerminalScreens {
         let charset = self.active().charset_state();
         self.active_mut().clear_cursor_hyperlink();
         self.active = key;
+        self.active_epoch = self.active_epoch.wrapping_add(1);
         self.active_mut().set_charset_state(charset);
         self.active_mut().mark_active_rows_dirty();
         Ok(Some(old))
@@ -503,7 +556,15 @@ impl TerminalScreens {
 
     fn reset(&mut self) {
         self.primary.reset();
+        self.primary_generation = self.primary_generation.wrapping_add(1);
+        if self.alternate.is_some() {
+            self.alternate_generation = self.alternate_generation.wrapping_add(1);
+        }
         self.alternate = None;
+        self.alternate_owner_id = 0;
+        if self.active != TerminalScreenKey::Primary {
+            self.active_epoch = self.active_epoch.wrapping_add(1);
+        }
         self.active = TerminalScreenKey::Primary;
     }
 
@@ -871,6 +932,184 @@ impl Terminal {
         };
 
         self.screens.active().grid_ref(point).map(Into::into)
+    }
+
+    pub(crate) fn active_pin(&self, coord: super::point::Coordinate) -> Option<Pin> {
+        self.screens
+            .active()
+            .pin(super::point::Point::active(coord))
+    }
+
+    pub(crate) fn viewport_pin(&self, coord: super::point::Coordinate) -> Option<Pin> {
+        self.screens
+            .active()
+            .pin(super::point::Point::viewport(coord))
+    }
+
+    pub(crate) fn track_selection_gesture_anchor(
+        &mut self,
+        pin: Pin,
+    ) -> Option<SelectionGestureAnchor> {
+        let key = self.screens.active_key();
+        let generation = self.screens.active_generation();
+        let owner_id = self.screens.active_owner_id();
+        let active_epoch = self.screens.active_epoch();
+        let pin = self.screens.active_mut().track_pin(pin)?;
+        Some(SelectionGestureAnchor {
+            pin,
+            screen_key: key,
+            screen_generation: generation,
+            screen_owner_id: owner_id,
+            active_epoch,
+        })
+    }
+
+    pub(crate) fn untrack_selection_gesture_anchor(&mut self, anchor: SelectionGestureAnchor) {
+        if self.screens.owner_id(anchor.screen_key) != Some(anchor.screen_owner_id) {
+            return;
+        }
+        if let Some(screen) = self.screens.screen_mut(anchor.screen_key) {
+            screen.untrack_pin(anchor.pin);
+        }
+    }
+
+    pub(crate) fn validated_selection_gesture_anchor(
+        &self,
+        anchor: &SelectionGestureAnchor,
+    ) -> Option<Pin> {
+        if self.screens.active_key() != anchor.screen_key
+            || self.screens.active_epoch() != anchor.active_epoch
+            || self.screens.generation(anchor.screen_key) != anchor.screen_generation
+            || self.screens.owner_id(anchor.screen_key) != Some(anchor.screen_owner_id)
+        {
+            return None;
+        }
+        Some(unsafe { *anchor.pin.as_ref() })
+    }
+
+    pub(crate) fn selection_gesture_anchor_ref(
+        &self,
+        anchor: &SelectionGestureAnchor,
+    ) -> Option<TerminalGridRef> {
+        let pin = self.validated_selection_gesture_anchor(anchor)?;
+        Some(GridRef::from(pin).into())
+    }
+
+    pub(crate) fn scroll_selection_gesture_viewport(&mut self, delta: isize) {
+        self.screens.active_mut().scroll_delta_row(delta);
+    }
+
+    pub(crate) fn drag_select_cells(
+        &self,
+        click_pin: Pin,
+        drag_pin: Pin,
+        click_x: u32,
+        drag_x: u32,
+        rectangle: bool,
+        geometry: SelectionGestureGeometry,
+    ) -> Option<TerminalSelection> {
+        Self::selection_from_tuple(self.screens.active().drag_selection(
+            click_pin,
+            drag_pin,
+            click_x,
+            drag_x,
+            rectangle,
+            DragGeometry {
+                columns: geometry.columns,
+                cell_width: geometry.cell_width,
+                padding_left: geometry.padding_left,
+                screen_height: geometry.screen_height,
+            },
+        ))
+    }
+
+    pub(crate) fn drag_select_word(
+        &self,
+        click_pin: Pin,
+        drag_pin: Pin,
+        boundary_codepoints: Option<&[u32]>,
+    ) -> Option<TerminalSelection> {
+        let click = GridRef::from(click_pin).into();
+        let drag = GridRef::from(drag_pin).into();
+        if self
+            .screens
+            .active()
+            .pin_before(drag_pin, click_pin)
+            .unwrap_or(false)
+        {
+            let current = self
+                .select_word_between(drag, click, boundary_codepoints)
+                .ok()??;
+            let start = self
+                .select_word_between(click, drag, boundary_codepoints)
+                .ok()??;
+            Some(TerminalSelection {
+                start: current.start,
+                end: start.end,
+                rectangle: false,
+            })
+        } else {
+            let start = self
+                .select_word_between(click, drag, boundary_codepoints)
+                .ok()??;
+            let current = self
+                .select_word_between(drag, click, boundary_codepoints)
+                .ok()??;
+            Some(TerminalSelection {
+                start: start.start,
+                end: current.end,
+                rectangle: false,
+            })
+        }
+    }
+
+    pub(crate) fn drag_select_line(
+        &self,
+        click_pin: Pin,
+        drag_pin: Pin,
+    ) -> Option<TerminalSelection> {
+        let click = GridRef::from(click_pin).into();
+        let drag = GridRef::from(drag_pin).into();
+        let line = self.select_line(drag, None, false).ok()??;
+        let mut selection = self
+            .select_line(click, None, false)
+            .ok()
+            .flatten()
+            .or_else(|| self.select_line(click, Some(&[]), false).ok().flatten())?;
+        if self
+            .screens
+            .active()
+            .pin_before(drag_pin, click_pin)
+            .unwrap_or(false)
+        {
+            selection.start = line.start;
+        } else {
+            selection.end = line.end;
+        }
+        Some(selection)
+    }
+
+    pub(crate) fn drag_select_output(
+        &self,
+        click_pin: Pin,
+        drag_pin: Pin,
+    ) -> Option<TerminalSelection> {
+        let click = GridRef::from(click_pin).into();
+        let drag = GridRef::from(drag_pin).into();
+        let mut selection = self.select_output(click).ok()??;
+        if let Some(current) = self.select_output(drag).ok().flatten() {
+            if self
+                .screens
+                .active()
+                .pin_before(drag_pin, click_pin)
+                .unwrap_or(false)
+            {
+                selection.start = current.start;
+            } else {
+                selection.end = current.end;
+            }
+        }
+        Some(selection)
     }
 
     pub(crate) fn point_from_grid_ref(

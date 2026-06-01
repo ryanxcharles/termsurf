@@ -79,7 +79,7 @@ pub(super) enum GridRefPointError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct Pin {
+pub(crate) struct Pin {
     node: NonNull<Node>,
     y: CellCountInt,
     x: CellCountInt,
@@ -349,11 +349,11 @@ struct CloneOptions<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct DragGeometry {
-    columns: u32,
-    cell_width: u32,
-    padding_left: u32,
-    screen_height: u32,
+pub(super) struct DragGeometry {
+    pub(super) columns: u32,
+    pub(super) cell_width: u32,
+    pub(super) padding_left: u32,
+    pub(super) screen_height: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4214,7 +4214,7 @@ impl PageList {
         node.page.get_cells(row).get(pin.x as usize)
     }
 
-    fn track_pin(&mut self, pin: Pin) -> Option<NonNull<Pin>> {
+    pub(super) fn track_pin(&mut self, pin: Pin) -> Option<NonNull<Pin>> {
         if !self.pin_is_valid(&pin) {
             return None;
         }
@@ -4226,7 +4226,7 @@ impl PageList {
         Some(ptr)
     }
 
-    fn untrack_pin(&mut self, pin: NonNull<Pin>) {
+    pub(super) fn untrack_pin(&mut self, pin: NonNull<Pin>) {
         assert_ne!(pin, NonNull::from(&*self.viewport_pin));
 
         let Some(tracked_index) = self.tracked_pins.iter().position(|tracked| *tracked == pin)
@@ -4434,7 +4434,7 @@ impl PageList {
         self.viewport = Viewport::Active;
     }
 
-    fn scroll_delta_row(&mut self, delta: isize) {
+    pub(super) fn scroll_delta_row(&mut self, delta: isize) {
         match self.viewport {
             Viewport::Top if delta <= 0 => return,
             Viewport::Active if delta >= 0 => return,
@@ -5428,7 +5428,7 @@ impl PageList {
         None
     }
 
-    fn pin_before(&self, pin: Pin, other: Pin) -> Option<bool> {
+    pub(super) fn pin_before(&self, pin: Pin, other: Pin) -> Option<bool> {
         if pin.garbage || other.garbage {
             return None;
         }
@@ -5875,7 +5875,7 @@ impl PageList {
         None
     }
 
-    fn drag_selection(
+    pub(super) fn drag_selection(
         &self,
         click_pin: Pin,
         drag_pin: Pin,

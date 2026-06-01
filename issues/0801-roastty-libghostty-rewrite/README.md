@@ -475,7 +475,7 @@ tests, choose the larger subsystem.
 - [Experiment 173: Port Terminal Selection C ABI](173-port-terminal-selection-c-abi.md)
   — **Pass**
 - [Experiment 174: Port Selection Gesture C ABI](174-port-selection-gesture-c-abi.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

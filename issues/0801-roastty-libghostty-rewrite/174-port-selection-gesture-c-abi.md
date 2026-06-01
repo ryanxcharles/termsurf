@@ -381,3 +381,68 @@ approves it.
 
 After implementation and result recording, the completed result must also be
 reviewed with Codex and approved before the result commit.
+
+## Result
+
+**Result:** Pass
+
+Implemented the Roastty selection gesture subsystem and C ABI:
+
+- added `roastty/src/terminal/selection_gesture.rs` with press, drag, release,
+  autoscroll tick, deep press, reset, and free behavior;
+- added narrow screen identity tracking to `TerminalScreens` with per-screen
+  generation, per-screen owner id, and active-screen epoch;
+- added terminal/screen helpers for gesture anchor tracking, validation,
+  cleanup, viewport pin lookup, one-row autoscroll, and drag selection;
+- exposed `roastty_selection_gesture_*` and `roastty_selection_gesture_event_*`
+  handles/functions in `roastty/include/roastty.h` and `roastty/src/lib.rs`;
+- added Rust core and ABI tests, including copied-codepoint semantics, surrogate
+  rejection, stale primary-reset cleanup, and stale alternate-destroy/recreate
+  cleanup;
+- extended the C harness with gesture layout checks, lifecycle calls,
+  get/get_multi, press/double-click, drag, deep press, and invalid-event paths.
+
+Verification run:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/terminal/mod.rs roastty/src/terminal/page_list.rs roastty/src/terminal/screen.rs roastty/src/terminal/selection_gesture.rs roastty/src/terminal/terminal.rs
+cargo test -p roastty selection_gesture
+cargo test -p roastty c_harness_links_against_roastty_header_and_roastty_dylib
+cargo test -p roastty terminal_selection_c_abi
+cargo test -p roastty terminal_grid_ref
+cargo test -p roastty terminal_stream
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c roastty/src/terminal/selection_gesture.rs; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Observed results:
+
+- `cargo test -p roastty selection_gesture`: 8 passed.
+- `cargo test -p roastty c_harness_links_against_roastty_header_and_roastty_dylib`:
+  1 passed.
+- `cargo test -p roastty terminal_selection_c_abi`: 4 passed.
+- `cargo test -p roastty terminal_grid_ref`: 4 passed.
+- `cargo test -p roastty terminal_stream`: 381 passed.
+- `cargo test -p roastty`: 1842 Rust tests passed, C harness passed, doc tests
+  passed.
+- No-Ghostty check: passed.
+- `git diff --check`: passed.
+
+Codex result review initially found three real issues:
+
+- `event_set` accepted UTF-16 surrogate codepoints;
+- the alternate destroy/recreate stale-anchor cleanup case was missing;
+- copied-codepoint semantics were not directly verified.
+
+Those were fixed by validating codepoints with `char::from_u32`, adding the
+alternate destroy/recreate cleanup test, and extending the Rust ABI test to
+mutate the caller-owned codepoint array after `event_set`. Codex re-reviewed the
+fixed result and approved it for commit.
+
+## Conclusion
+
+Selection gestures now have a Roastty-owned implementation and public C ABI that
+builds on the selection/grid-reference foundation from Experiment 173. The next
+experiment can move to the next coherent upstream subsystem slice; no follow-up
+is needed for selection gesture correctness before proceeding.

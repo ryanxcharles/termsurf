@@ -855,6 +855,50 @@ static void assert_terminal_abi(void) {
   assert(ROASTTY_SELECTION_ORDER_MIRRORED_REVERSE == 3);
   assert(ROASTTY_SELECTION_ADJUST_LEFT == 0);
   assert(ROASTTY_SELECTION_ADJUST_END_OF_LINE == 9);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_PRESS == 0);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_RELEASE == 1);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_DRAG == 2);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_AUTOSCROLL_TICK == 3);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_DEEP_PRESS == 4);
+  assert(ROASTTY_SELECTION_GESTURE_DATA_CLICK_COUNT == 0);
+  assert(ROASTTY_SELECTION_GESTURE_DATA_DRAGGED == 1);
+  assert(ROASTTY_SELECTION_GESTURE_DATA_AUTOSCROLL == 2);
+  assert(ROASTTY_SELECTION_GESTURE_DATA_BEHAVIOR == 3);
+  assert(ROASTTY_SELECTION_GESTURE_DATA_ANCHOR == 4);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REF == 0);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_POSITION == 1);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_DISTANCE == 2);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_TIME_NS == 3);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_INTERVAL_NS == 4);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_WORD_BOUNDARY_CODEPOINTS == 5);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_BEHAVIORS == 6);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_RECTANGLE == 7);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_GEOMETRY == 8);
+  assert(ROASTTY_SELECTION_GESTURE_EVENT_OPTION_VIEWPORT == 9);
+  assert(ROASTTY_SELECTION_GESTURE_AUTOSCROLL_NONE == 0);
+  assert(ROASTTY_SELECTION_GESTURE_AUTOSCROLL_UP == 1);
+  assert(ROASTTY_SELECTION_GESTURE_AUTOSCROLL_DOWN == 2);
+  assert(ROASTTY_SELECTION_GESTURE_BEHAVIOR_CELL == 0);
+  assert(ROASTTY_SELECTION_GESTURE_BEHAVIOR_WORD == 1);
+  assert(ROASTTY_SELECTION_GESTURE_BEHAVIOR_LINE == 2);
+  assert(ROASTTY_SELECTION_GESTURE_BEHAVIOR_OUTPUT == 3);
+  assert(sizeof(roastty_surface_position_s) == 16);
+  assert(_Alignof(roastty_surface_position_s) == 8);
+  assert(offsetof(roastty_surface_position_s, x) == 0);
+  assert(offsetof(roastty_surface_position_s, y) == 8);
+  assert(sizeof(roastty_codepoints_s) == 16);
+  assert(_Alignof(roastty_codepoints_s) == 8);
+  assert(offsetof(roastty_codepoints_s, ptr) == 0);
+  assert(offsetof(roastty_codepoints_s, len) == 8);
+  assert(sizeof(roastty_selection_gesture_behaviors_s) == 12);
+  assert(offsetof(roastty_selection_gesture_behaviors_s, single_click) == 0);
+  assert(offsetof(roastty_selection_gesture_behaviors_s, double_click) == 4);
+  assert(offsetof(roastty_selection_gesture_behaviors_s, triple_click) == 8);
+  assert(sizeof(roastty_selection_gesture_geometry_s) == 16);
+  assert(offsetof(roastty_selection_gesture_geometry_s, columns) == 0);
+  assert(offsetof(roastty_selection_gesture_geometry_s, cell_width) == 4);
+  assert(offsetof(roastty_selection_gesture_geometry_s, padding_left) == 8);
+  assert(offsetof(roastty_selection_gesture_geometry_s, screen_height) == 12);
 
   roastty_size_report_size_s report_size = {
       .rows = 24,
@@ -1133,6 +1177,183 @@ static void assert_terminal_abi(void) {
   assert(roastty_terminal_select_output(selection_terminal,
                                         &selection.start,
                                         &output_selection) == ROASTTY_NO_VALUE);
+
+  roastty_selection_gesture_t gesture = NULL;
+  assert(roastty_selection_gesture_new(&gesture) == ROASTTY_SUCCESS);
+  assert(gesture != NULL);
+  assert(roastty_selection_gesture_new(NULL) == ROASTTY_INVALID_VALUE);
+
+  uint8_t click_count = 255;
+  bool dragged = true;
+  roastty_selection_gesture_autoscroll_e autoscroll =
+      ROASTTY_SELECTION_GESTURE_AUTOSCROLL_UP;
+  roastty_selection_gesture_behavior_e behavior =
+      ROASTTY_SELECTION_GESTURE_BEHAVIOR_WORD;
+  roastty_selection_gesture_data_e gesture_keys[] = {
+      ROASTTY_SELECTION_GESTURE_DATA_CLICK_COUNT,
+      ROASTTY_SELECTION_GESTURE_DATA_DRAGGED,
+      ROASTTY_SELECTION_GESTURE_DATA_AUTOSCROLL,
+      ROASTTY_SELECTION_GESTURE_DATA_BEHAVIOR,
+  };
+  void *gesture_values[] = {&click_count, &dragged, &autoscroll, &behavior};
+  size_t gesture_written = 0;
+  assert(roastty_selection_gesture_get_multi(gesture,
+                                             selection_terminal,
+                                             4,
+                                             gesture_keys,
+                                             gesture_values,
+                                             &gesture_written) ==
+         ROASTTY_SUCCESS);
+  assert(gesture_written == 4);
+  assert(click_count == 0);
+  assert(!dragged);
+  assert(autoscroll == ROASTTY_SELECTION_GESTURE_AUTOSCROLL_NONE);
+  assert(behavior == ROASTTY_SELECTION_GESTURE_BEHAVIOR_CELL);
+
+  roastty_selection_gesture_event_t press = NULL;
+  assert(roastty_selection_gesture_event_new(
+             &press,
+             ROASTTY_SELECTION_GESTURE_EVENT_PRESS) == ROASTTY_SUCCESS);
+  assert(press != NULL);
+  assert(roastty_selection_gesture_event_new(NULL,
+                                             ROASTTY_SELECTION_GESTURE_EVENT_PRESS) ==
+         ROASTTY_INVALID_VALUE);
+  roastty_selection_gesture_event_t invalid_event = NULL;
+  assert(roastty_selection_gesture_event_new(
+             &invalid_event,
+             (roastty_selection_gesture_event_e)99) == ROASTTY_INVALID_VALUE);
+  assert(invalid_event == NULL);
+
+  roastty_grid_ref_s press_ref = terminal_grid_ref_at(selection_terminal, 1, 0);
+  roastty_surface_position_s press_pos = {.x = 10.0, .y = 0.0};
+  double repeat_distance = 20.0;
+  uint64_t time_ns = 1;
+  uint64_t repeat_interval = 100;
+  assert(roastty_selection_gesture_event_set(
+             press,
+             ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REF,
+             &press_ref) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_event_set(
+             press,
+             ROASTTY_SELECTION_GESTURE_EVENT_OPTION_POSITION,
+             &press_pos) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_event_set(
+             press,
+             ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_DISTANCE,
+             &repeat_distance) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_event_set(
+             press,
+             ROASTTY_SELECTION_GESTURE_EVENT_OPTION_TIME_NS,
+             &time_ns) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_event_set(
+             press,
+             ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_INTERVAL_NS,
+             &repeat_interval) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_event_set(
+             press,
+             ROASTTY_SELECTION_GESTURE_EVENT_OPTION_GEOMETRY,
+             NULL) == ROASTTY_INVALID_VALUE);
+
+  roastty_selection_s gesture_selection = {0};
+  assert(roastty_selection_gesture_handle_event(gesture,
+                                                selection_terminal,
+                                                press,
+                                                &gesture_selection) ==
+         ROASTTY_NO_VALUE);
+  assert(roastty_selection_gesture_get(gesture,
+                                       selection_terminal,
+                                       ROASTTY_SELECTION_GESTURE_DATA_CLICK_COUNT,
+                                       &click_count) == ROASTTY_SUCCESS);
+  assert(click_count == 1);
+
+  time_ns = 2;
+  assert(roastty_selection_gesture_event_set(
+             press,
+             ROASTTY_SELECTION_GESTURE_EVENT_OPTION_TIME_NS,
+             &time_ns) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_handle_event(gesture,
+                                                selection_terminal,
+                                                press,
+                                                &gesture_selection) ==
+         ROASTTY_SUCCESS);
+  assert(gesture_selection.start.x == 0);
+  assert(gesture_selection.end.x == 4);
+
+  roastty_selection_gesture_reset(gesture, selection_terminal);
+  time_ns = 200;
+  assert(roastty_selection_gesture_event_set(
+             press,
+             ROASTTY_SELECTION_GESTURE_EVENT_OPTION_TIME_NS,
+             &time_ns) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_handle_event(gesture,
+                                                selection_terminal,
+                                                press,
+                                                NULL) == ROASTTY_NO_VALUE);
+
+  roastty_selection_gesture_event_t drag = NULL;
+  assert(roastty_selection_gesture_event_new(
+             &drag,
+             ROASTTY_SELECTION_GESTURE_EVENT_DRAG) == ROASTTY_SUCCESS);
+  roastty_grid_ref_s drag_ref = terminal_grid_ref_at(selection_terminal, 3, 0);
+  roastty_surface_position_s drag_pos = {.x = 39.0, .y = 10.0};
+  roastty_selection_gesture_geometry_s geometry = {
+      .columns = 20,
+      .cell_width = 10,
+      .padding_left = 0,
+      .screen_height = 100,
+  };
+  assert(roastty_selection_gesture_event_set(
+             drag,
+             ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REF,
+             &drag_ref) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_event_set(
+             drag,
+             ROASTTY_SELECTION_GESTURE_EVENT_OPTION_POSITION,
+             &drag_pos) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_event_set(
+             drag,
+             ROASTTY_SELECTION_GESTURE_EVENT_OPTION_GEOMETRY,
+             &geometry) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_handle_event(gesture,
+                                                selection_terminal,
+                                                drag,
+                                                &gesture_selection) ==
+         ROASTTY_SUCCESS);
+  assert(gesture_selection.start.x == 1);
+  assert(gesture_selection.end.x == 3);
+
+  roastty_selection_gesture_reset(gesture, selection_terminal);
+  assert(roastty_selection_gesture_handle_event(gesture,
+                                                selection_terminal,
+                                                press,
+                                                NULL) == ROASTTY_NO_VALUE);
+  roastty_selection_gesture_event_t deep_press = NULL;
+  assert(roastty_selection_gesture_event_new(
+             &deep_press,
+             ROASTTY_SELECTION_GESTURE_EVENT_DEEP_PRESS) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_handle_event(gesture,
+                                                selection_terminal,
+                                                deep_press,
+                                                &gesture_selection) ==
+         ROASTTY_SUCCESS);
+  assert(gesture_selection.start.x == 0);
+  assert(gesture_selection.end.x == 4);
+
+  roastty_selection_gesture_event_t missing_drag = NULL;
+  assert(roastty_selection_gesture_event_new(
+             &missing_drag,
+             ROASTTY_SELECTION_GESTURE_EVENT_DRAG) == ROASTTY_SUCCESS);
+  assert(roastty_selection_gesture_handle_event(gesture,
+                                                selection_terminal,
+                                                missing_drag,
+                                                &gesture_selection) ==
+         ROASTTY_INVALID_VALUE);
+
+  roastty_selection_gesture_event_free(missing_drag);
+  roastty_selection_gesture_event_free(deep_press);
+  roastty_selection_gesture_event_free(drag);
+  roastty_selection_gesture_event_free(press);
+  roastty_selection_gesture_free(gesture, selection_terminal);
 
   roastty_terminal_free(selection_terminal);
 

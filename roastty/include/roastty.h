@@ -27,6 +27,8 @@ typedef void* roastty_mouse_encoder_t;
 typedef void* roastty_mouse_event_t;
 typedef void* roastty_osc_command_t;
 typedef void* roastty_osc_parser_t;
+typedef void* roastty_selection_gesture_t;
+typedef void* roastty_selection_gesture_event_t;
 typedef void* roastty_surface_t;
 typedef void* roastty_terminal_t;
 
@@ -219,6 +221,71 @@ typedef enum {
   ROASTTY_SELECTION_ADJUST_BEGINNING_OF_LINE = 8,
   ROASTTY_SELECTION_ADJUST_END_OF_LINE = 9,
 } roastty_selection_adjustment_e;
+
+typedef enum {
+  ROASTTY_SELECTION_GESTURE_EVENT_PRESS = 0,
+  ROASTTY_SELECTION_GESTURE_EVENT_RELEASE = 1,
+  ROASTTY_SELECTION_GESTURE_EVENT_DRAG = 2,
+  ROASTTY_SELECTION_GESTURE_EVENT_AUTOSCROLL_TICK = 3,
+  ROASTTY_SELECTION_GESTURE_EVENT_DEEP_PRESS = 4,
+} roastty_selection_gesture_event_e;
+
+typedef enum {
+  ROASTTY_SELECTION_GESTURE_DATA_CLICK_COUNT = 0,
+  ROASTTY_SELECTION_GESTURE_DATA_DRAGGED = 1,
+  ROASTTY_SELECTION_GESTURE_DATA_AUTOSCROLL = 2,
+  ROASTTY_SELECTION_GESTURE_DATA_BEHAVIOR = 3,
+  ROASTTY_SELECTION_GESTURE_DATA_ANCHOR = 4,
+} roastty_selection_gesture_data_e;
+
+typedef enum {
+  ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REF = 0,
+  ROASTTY_SELECTION_GESTURE_EVENT_OPTION_POSITION = 1,
+  ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_DISTANCE = 2,
+  ROASTTY_SELECTION_GESTURE_EVENT_OPTION_TIME_NS = 3,
+  ROASTTY_SELECTION_GESTURE_EVENT_OPTION_REPEAT_INTERVAL_NS = 4,
+  ROASTTY_SELECTION_GESTURE_EVENT_OPTION_WORD_BOUNDARY_CODEPOINTS = 5,
+  ROASTTY_SELECTION_GESTURE_EVENT_OPTION_BEHAVIORS = 6,
+  ROASTTY_SELECTION_GESTURE_EVENT_OPTION_RECTANGLE = 7,
+  ROASTTY_SELECTION_GESTURE_EVENT_OPTION_GEOMETRY = 8,
+  ROASTTY_SELECTION_GESTURE_EVENT_OPTION_VIEWPORT = 9,
+} roastty_selection_gesture_event_option_e;
+
+typedef enum {
+  ROASTTY_SELECTION_GESTURE_AUTOSCROLL_NONE = 0,
+  ROASTTY_SELECTION_GESTURE_AUTOSCROLL_UP = 1,
+  ROASTTY_SELECTION_GESTURE_AUTOSCROLL_DOWN = 2,
+} roastty_selection_gesture_autoscroll_e;
+
+typedef enum {
+  ROASTTY_SELECTION_GESTURE_BEHAVIOR_CELL = 0,
+  ROASTTY_SELECTION_GESTURE_BEHAVIOR_WORD = 1,
+  ROASTTY_SELECTION_GESTURE_BEHAVIOR_LINE = 2,
+  ROASTTY_SELECTION_GESTURE_BEHAVIOR_OUTPUT = 3,
+} roastty_selection_gesture_behavior_e;
+
+typedef struct {
+  double x;
+  double y;
+} roastty_surface_position_s;
+
+typedef struct {
+  const uint32_t* ptr;
+  size_t len;
+} roastty_codepoints_s;
+
+typedef struct {
+  roastty_selection_gesture_behavior_e single_click;
+  roastty_selection_gesture_behavior_e double_click;
+  roastty_selection_gesture_behavior_e triple_click;
+} roastty_selection_gesture_behaviors_s;
+
+typedef struct {
+  uint32_t columns;
+  uint32_t cell_width;
+  uint32_t padding_left;
+  uint32_t screen_height;
+} roastty_selection_gesture_geometry_s;
 
 typedef struct {
   size_t size;
@@ -895,6 +962,40 @@ ROASTTY_API roastty_result_e
 roastty_terminal_selection_format(roastty_terminal_t,
                                   const roastty_terminal_selection_format_options_s*,
                                   roastty_string_s*);
+ROASTTY_API roastty_result_e
+roastty_selection_gesture_new(roastty_selection_gesture_t*);
+ROASTTY_API void
+roastty_selection_gesture_free(roastty_selection_gesture_t,
+                               roastty_terminal_t);
+ROASTTY_API void
+roastty_selection_gesture_reset(roastty_selection_gesture_t,
+                                roastty_terminal_t);
+ROASTTY_API roastty_result_e roastty_selection_gesture_get(
+    roastty_selection_gesture_t,
+    roastty_terminal_t,
+    roastty_selection_gesture_data_e,
+    void*);
+ROASTTY_API roastty_result_e roastty_selection_gesture_get_multi(
+    roastty_selection_gesture_t,
+    roastty_terminal_t,
+    size_t,
+    const roastty_selection_gesture_data_e*,
+    void**,
+    size_t*);
+ROASTTY_API roastty_result_e
+roastty_selection_gesture_event_new(roastty_selection_gesture_event_t*,
+                                    roastty_selection_gesture_event_e);
+ROASTTY_API void
+roastty_selection_gesture_event_free(roastty_selection_gesture_event_t);
+ROASTTY_API roastty_result_e roastty_selection_gesture_event_set(
+    roastty_selection_gesture_event_t,
+    roastty_selection_gesture_event_option_e,
+    const void*);
+ROASTTY_API roastty_result_e roastty_selection_gesture_handle_event(
+    roastty_selection_gesture_t,
+    roastty_terminal_t,
+    roastty_selection_gesture_event_t,
+    roastty_selection_s*);
 
 ROASTTY_API roastty_result_e roastty_key_event_new(roastty_key_event_t*);
 ROASTTY_API void roastty_key_event_free(roastty_key_event_t);
