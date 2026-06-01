@@ -412,6 +412,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 141: Port OSC Notifications](141-port-osc-notifications.md) —
   **Pass**
+- [Experiment 142: Port OSC Clipboard Protocols](142-port-osc-clipboard-protocols.md)
+  — **Designed**
 
 ## Non-Goals
 
