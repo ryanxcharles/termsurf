@@ -296,6 +296,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 93: Port Screen Formatter Charset Extra](93-port-screen-formatter-charset-extra.md)
   — **Pass**
+- [Experiment 94: Port Screen Formatter Kitty Keyboard Extra](94-port-screen-formatter-kitty-keyboard-extra.md)
+  — **Designed**
 
 ## Non-Goals
 
