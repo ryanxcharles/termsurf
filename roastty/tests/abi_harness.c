@@ -86,6 +86,202 @@ static void assert_config_uintptr(roastty_config_t config,
   assert(value == expected);
 }
 
+static void assert_mouse_event_abi(void) {
+  roastty_mouse_event_free(NULL);
+
+  roastty_mouse_event_t event = NULL;
+  assert(roastty_mouse_event_new(NULL) == ROASTTY_INVALID_VALUE);
+  assert(roastty_mouse_event_new(&event) == ROASTTY_SUCCESS);
+  assert(event != NULL);
+
+  assert(roastty_mouse_event_set_action(event, ROASTTY_MOUSE_ACTION_MOTION) ==
+         ROASTTY_SUCCESS);
+  assert(roastty_mouse_event_get_action(event) == ROASTTY_MOUSE_ACTION_MOTION);
+  assert(roastty_mouse_event_set_action(event, ROASTTY_MOUSE_ACTION_RELEASE) ==
+         ROASTTY_SUCCESS);
+  assert(roastty_mouse_event_get_action(event) == ROASTTY_MOUSE_ACTION_RELEASE);
+  assert(roastty_mouse_event_set_action(event, ROASTTY_MOUSE_ACTION_PRESS) ==
+         ROASTTY_SUCCESS);
+  assert(roastty_mouse_event_set_action(event, 9999) == ROASTTY_INVALID_VALUE);
+  assert(roastty_mouse_event_get_action(event) == ROASTTY_MOUSE_ACTION_PRESS);
+
+  int button = -1;
+  assert(!roastty_mouse_event_get_button(event, &button));
+  assert(roastty_mouse_event_set_button(event, ROASTTY_MOUSE_BUTTON_LEFT) ==
+         ROASTTY_SUCCESS);
+  assert(roastty_mouse_event_get_button(event, &button));
+  assert(button == ROASTTY_MOUSE_BUTTON_LEFT);
+  assert(roastty_mouse_event_get_button(event, NULL));
+  assert(roastty_mouse_event_set_button(event, ROASTTY_MOUSE_BUTTON_EIGHT) ==
+         ROASTTY_SUCCESS);
+  assert(roastty_mouse_event_get_button(event, &button));
+  assert(button == ROASTTY_MOUSE_BUTTON_EIGHT);
+  assert(roastty_mouse_event_set_button(event, 9999) == ROASTTY_INVALID_VALUE);
+  assert(roastty_mouse_event_get_button(event, &button));
+  assert(button == ROASTTY_MOUSE_BUTTON_EIGHT);
+  roastty_mouse_event_clear_button(event);
+  assert(!roastty_mouse_event_get_button(event, &button));
+
+  roastty_mouse_mods_s mods = {
+      .shift = true,
+      .alt = false,
+      .ctrl = true,
+  };
+  roastty_mouse_event_set_mods(event, mods);
+  roastty_mouse_mods_s got_mods = roastty_mouse_event_get_mods(event);
+  assert(got_mods.shift);
+  assert(!got_mods.alt);
+  assert(got_mods.ctrl);
+
+  roastty_mouse_position_s pos = {
+      .x = 12.5f,
+      .y = -4.0f,
+  };
+  roastty_mouse_event_set_position(event, pos);
+  roastty_mouse_position_s got_pos = roastty_mouse_event_get_position(event);
+  assert(got_pos.x == 12.5f);
+  assert(got_pos.y == -4.0f);
+
+  roastty_mouse_event_free(event);
+}
+
+static void set_mouse_encoder_option(roastty_mouse_encoder_t encoder,
+                                     roastty_mouse_encoder_option_e option,
+                                     const void *value) {
+  assert(roastty_mouse_encoder_setopt(encoder, option, value) == ROASTTY_SUCCESS);
+}
+
+static void assert_mouse_encoder_abi(void) {
+  roastty_mouse_encoder_free(NULL);
+  roastty_mouse_encoder_reset(NULL);
+
+  roastty_mouse_encoder_t encoder = NULL;
+  assert(roastty_mouse_encoder_new(NULL) == ROASTTY_INVALID_VALUE);
+  assert(roastty_mouse_encoder_new(&encoder) == ROASTTY_SUCCESS);
+  assert(encoder != NULL);
+
+  assert(roastty_mouse_encoder_setopt(NULL,
+                                      ROASTTY_MOUSE_ENCODER_OPTION_EVENT,
+                                      NULL) == ROASTTY_INVALID_VALUE);
+  assert(roastty_mouse_encoder_setopt(encoder,
+                                      ROASTTY_MOUSE_ENCODER_OPTION_EVENT,
+                                      NULL) == ROASTTY_INVALID_VALUE);
+
+  int event_mode = ROASTTY_MOUSE_TRACKING_ANY;
+  set_mouse_encoder_option(encoder, ROASTTY_MOUSE_ENCODER_OPTION_EVENT, &event_mode);
+  int format = ROASTTY_MOUSE_FORMAT_SGR;
+  set_mouse_encoder_option(encoder, ROASTTY_MOUSE_ENCODER_OPTION_FORMAT, &format);
+  roastty_mouse_encoder_size_s size = {
+      .size = sizeof(roastty_mouse_encoder_size_s),
+      .screen_width = 1000,
+      .screen_height = 1000,
+      .cell_width = 1,
+      .cell_height = 1,
+      .padding_top = 0,
+      .padding_bottom = 0,
+      .padding_right = 0,
+      .padding_left = 0,
+  };
+  set_mouse_encoder_option(encoder, ROASTTY_MOUSE_ENCODER_OPTION_SIZE, &size);
+  bool any_button_pressed = true;
+  set_mouse_encoder_option(encoder,
+                           ROASTTY_MOUSE_ENCODER_OPTION_ANY_BUTTON_PRESSED,
+                           &any_button_pressed);
+
+  int invalid_enum = 9999;
+  assert(roastty_mouse_encoder_setopt(encoder,
+                                      ROASTTY_MOUSE_ENCODER_OPTION_EVENT,
+                                      &invalid_enum) == ROASTTY_INVALID_VALUE);
+  assert(roastty_mouse_encoder_setopt(encoder,
+                                      ROASTTY_MOUSE_ENCODER_OPTION_FORMAT,
+                                      &invalid_enum) == ROASTTY_INVALID_VALUE);
+  assert(roastty_mouse_encoder_setopt(encoder, 9999, &invalid_enum) ==
+         ROASTTY_INVALID_VALUE);
+  roastty_mouse_encoder_size_s bad_size = size;
+  bad_size.cell_width = 0;
+  assert(roastty_mouse_encoder_setopt(encoder,
+                                      ROASTTY_MOUSE_ENCODER_OPTION_SIZE,
+                                      &bad_size) == ROASTTY_INVALID_VALUE);
+  bad_size = size;
+  bad_size.size = sizeof(size_t);
+  assert(roastty_mouse_encoder_setopt(encoder,
+                                      ROASTTY_MOUSE_ENCODER_OPTION_SIZE,
+                                      &bad_size) == ROASTTY_INVALID_VALUE);
+  struct tiny_size {
+    size_t size;
+  };
+  struct tiny_size tiny_size = {
+      .size = sizeof(tiny_size),
+  };
+  assert(roastty_mouse_encoder_setopt(encoder,
+                                      ROASTTY_MOUSE_ENCODER_OPTION_SIZE,
+                                      &tiny_size) == ROASTTY_INVALID_VALUE);
+
+  roastty_mouse_event_t event = NULL;
+  assert(roastty_mouse_event_new(&event) == ROASTTY_SUCCESS);
+  assert(roastty_mouse_event_set_action(event, ROASTTY_MOUSE_ACTION_PRESS) ==
+         ROASTTY_SUCCESS);
+  assert(roastty_mouse_event_set_button(event, ROASTTY_MOUSE_BUTTON_LEFT) ==
+         ROASTTY_SUCCESS);
+  roastty_mouse_position_s pos = {
+      .x = 0.0f,
+      .y = 0.0f,
+  };
+  roastty_mouse_event_set_position(event, pos);
+
+  size_t written = 0;
+  assert(roastty_mouse_encoder_encode(NULL, event, NULL, 0, &written) ==
+         ROASTTY_INVALID_VALUE);
+  assert(roastty_mouse_encoder_encode(encoder, NULL, NULL, 0, &written) ==
+         ROASTTY_INVALID_VALUE);
+  assert(roastty_mouse_encoder_encode(encoder, event, NULL, 1, &written) ==
+         ROASTTY_INVALID_VALUE);
+  assert(roastty_mouse_encoder_encode(encoder, event, NULL, 0, NULL) ==
+         ROASTTY_INVALID_VALUE);
+
+  assert(roastty_mouse_encoder_encode(encoder, event, NULL, 0, &written) ==
+         ROASTTY_OUT_OF_SPACE);
+  assert(written == strlen("\x1b[<0;1;1M"));
+
+  uint8_t tiny[2] = {0};
+  assert(roastty_mouse_encoder_encode(encoder, event, tiny, sizeof(tiny), &written) ==
+         ROASTTY_OUT_OF_SPACE);
+  assert(written == strlen("\x1b[<0;1;1M"));
+
+  uint8_t buf[32] = {0};
+  assert(roastty_mouse_encoder_encode(encoder, event, buf, sizeof(buf), &written) ==
+         ROASTTY_SUCCESS);
+  assert(written == strlen("\x1b[<0;1;1M"));
+  assert(memcmp(buf, "\x1b[<0;1;1M", written) == 0);
+
+  bool track_last_cell = true;
+  set_mouse_encoder_option(encoder,
+                           ROASTTY_MOUSE_ENCODER_OPTION_TRACK_LAST_CELL,
+                           &track_last_cell);
+  assert(roastty_mouse_event_set_action(event, ROASTTY_MOUSE_ACTION_MOTION) ==
+         ROASTTY_SUCCESS);
+  pos.x = 5.0f;
+  pos.y = 6.0f;
+  roastty_mouse_event_set_position(event, pos);
+
+  assert(roastty_mouse_encoder_encode(encoder, event, NULL, 0, &written) ==
+         ROASTTY_OUT_OF_SPACE);
+  assert(written > 0);
+  assert(roastty_mouse_encoder_encode(encoder, event, buf, sizeof(buf), &written) ==
+         ROASTTY_SUCCESS);
+  assert(written > 0);
+  assert(roastty_mouse_encoder_encode(encoder, event, buf, sizeof(buf), &written) ==
+         ROASTTY_SUCCESS);
+  assert(written == 0);
+  roastty_mouse_encoder_reset(encoder);
+  assert(roastty_mouse_encoder_encode(encoder, event, buf, sizeof(buf), &written) ==
+         ROASTTY_SUCCESS);
+  assert(written > 0);
+
+  roastty_mouse_event_free(event);
+  roastty_mouse_encoder_free(encoder);
+}
+
 int main(int argc, char **argv) {
   assert(roastty_init((uintptr_t)argc, argv) == ROASTTY_SUCCESS);
 
@@ -125,6 +321,8 @@ int main(int argc, char **argv) {
   assert(null_size.cell_height_px == 0);
   assert(roastty_surface_foreground_pid(NULL) == 0);
   roastty_surface_request_close(NULL);
+  assert_mouse_event_abi();
+  assert_mouse_encoder_abi();
 
   roastty_info_s info = roastty_info();
   assert(info.version != NULL);

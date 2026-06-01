@@ -3,6 +3,8 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 use std::slice;
 
+use terminal::{mouse, mouse_encode, point};
+
 mod terminal;
 
 // ABI ownership model:
@@ -15,9 +17,15 @@ mod terminal;
 //   they were returned by Roastty string-returning functions.
 pub type RoasttyApp = *mut c_void;
 pub type RoasttyConfig = *mut c_void;
+pub type RoasttyMouseEncoder = *mut c_void;
+pub type RoasttyMouseEvent = *mut c_void;
 pub type RoasttySurface = *mut c_void;
 
 const ROASTTY_SUCCESS: c_int = 0;
+#[allow(dead_code)]
+const ROASTTY_OUT_OF_MEMORY: c_int = 1;
+const ROASTTY_INVALID_VALUE: c_int = 2;
+const ROASTTY_OUT_OF_SPACE: c_int = 3;
 const ROASTTY_BUILD_MODE_DEBUG: c_int = 0;
 
 #[repr(C)]
@@ -120,6 +128,35 @@ pub struct RoasttyAction {
     storage: [usize; 8],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RoasttyMouseMods {
+    shift: bool,
+    alt: bool,
+    ctrl: bool,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RoasttyMousePosition {
+    x: f32,
+    y: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RoasttyMouseEncoderSize {
+    size: usize,
+    screen_width: u32,
+    screen_height: u32,
+    cell_width: u32,
+    cell_height: u32,
+    padding_top: u32,
+    padding_bottom: u32,
+    padding_right: u32,
+    padding_left: u32,
+}
+
 type WakeupCallback = Option<unsafe extern "C" fn(*mut c_void)>;
 type ActionCallback =
     Option<unsafe extern "C" fn(RoasttyApp, RoasttyTarget, RoasttyAction) -> bool>;
@@ -164,6 +201,19 @@ struct Surface {
     color_scheme: c_int,
 }
 
+struct MouseEvent {
+    event: mouse_encode::Event,
+}
+
+struct MouseEncoder {
+    event: mouse::MouseEventMode,
+    format: mouse::MouseFormat,
+    geometry: mouse_encode::Geometry,
+    any_button_pressed: bool,
+    track_last_cell: bool,
+    last_cell: Option<point::Coordinate>,
+}
+
 static VERSION: &[u8] = b"0.1.0-roastty\0";
 static EMPTY_DIAGNOSTIC: &[u8] = b"\0";
 static WINDOW_SAVE_STATE_DEFAULT: &[u8] = b"default\0";
@@ -192,6 +242,143 @@ fn surface_from_handle<'a>(handle: RoasttySurface) -> Option<&'a mut Surface> {
     } else {
         Some(unsafe { &mut *(handle.cast::<Surface>()) })
     }
+}
+
+fn mouse_event_from_handle<'a>(handle: RoasttyMouseEvent) -> Option<&'a mut MouseEvent> {
+    if handle.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *(handle.cast::<MouseEvent>()) })
+    }
+}
+
+fn mouse_encoder_from_handle<'a>(handle: RoasttyMouseEncoder) -> Option<&'a mut MouseEncoder> {
+    if handle.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *(handle.cast::<MouseEncoder>()) })
+    }
+}
+
+fn mouse_action_from_int(value: c_int) -> Option<mouse::MouseAction> {
+    match value {
+        0 => Some(mouse::MouseAction::Press),
+        1 => Some(mouse::MouseAction::Release),
+        2 => Some(mouse::MouseAction::Motion),
+        _ => None,
+    }
+}
+
+fn mouse_action_to_int(value: mouse::MouseAction) -> c_int {
+    match value {
+        mouse::MouseAction::Press => 0,
+        mouse::MouseAction::Release => 1,
+        mouse::MouseAction::Motion => 2,
+    }
+}
+
+fn mouse_button_from_int(value: c_int) -> Option<mouse::MouseButton> {
+    match value {
+        0 => Some(mouse::MouseButton::Unknown),
+        1 => Some(mouse::MouseButton::Left),
+        2 => Some(mouse::MouseButton::Right),
+        3 => Some(mouse::MouseButton::Middle),
+        4 => Some(mouse::MouseButton::Four),
+        5 => Some(mouse::MouseButton::Five),
+        6 => Some(mouse::MouseButton::Six),
+        7 => Some(mouse::MouseButton::Seven),
+        8 => Some(mouse::MouseButton::Eight),
+        9 => Some(mouse::MouseButton::Nine),
+        10 => Some(mouse::MouseButton::Ten),
+        11 => Some(mouse::MouseButton::Eleven),
+        _ => None,
+    }
+}
+
+fn mouse_button_to_int(value: mouse::MouseButton) -> c_int {
+    match value {
+        mouse::MouseButton::Unknown => 0,
+        mouse::MouseButton::Left => 1,
+        mouse::MouseButton::Right => 2,
+        mouse::MouseButton::Middle => 3,
+        mouse::MouseButton::Four => 4,
+        mouse::MouseButton::Five => 5,
+        mouse::MouseButton::Six => 6,
+        mouse::MouseButton::Seven => 7,
+        mouse::MouseButton::Eight => 8,
+        mouse::MouseButton::Nine => 9,
+        mouse::MouseButton::Ten => 10,
+        mouse::MouseButton::Eleven => 11,
+    }
+}
+
+fn mouse_event_mode_from_int(value: c_int) -> Option<mouse::MouseEventMode> {
+    match value {
+        0 => Some(mouse::MouseEventMode::None),
+        1 => Some(mouse::MouseEventMode::X10),
+        2 => Some(mouse::MouseEventMode::Normal),
+        3 => Some(mouse::MouseEventMode::Button),
+        4 => Some(mouse::MouseEventMode::Any),
+        _ => None,
+    }
+}
+
+fn mouse_format_from_int(value: c_int) -> Option<mouse::MouseFormat> {
+    match value {
+        0 => Some(mouse::MouseFormat::X10),
+        1 => Some(mouse::MouseFormat::Utf8),
+        2 => Some(mouse::MouseFormat::Sgr),
+        3 => Some(mouse::MouseFormat::Urxvt),
+        4 => Some(mouse::MouseFormat::SgrPixels),
+        _ => None,
+    }
+}
+
+fn default_mouse_geometry() -> mouse_encode::Geometry {
+    mouse_encode::Geometry {
+        screen: mouse_encode::PixelSize {
+            width: 1,
+            height: 1,
+        },
+        cell: mouse_encode::PixelSize {
+            width: 1,
+            height: 1,
+        },
+        padding: mouse_encode::Padding::default(),
+    }
+}
+
+fn mouse_geometry_from_abi(size: &RoasttyMouseEncoderSize) -> Option<mouse_encode::Geometry> {
+    if size.cell_width == 0 || size.cell_height == 0 {
+        return None;
+    }
+
+    Some(mouse_encode::Geometry {
+        screen: mouse_encode::PixelSize {
+            width: size.screen_width,
+            height: size.screen_height,
+        },
+        cell: mouse_encode::PixelSize {
+            width: size.cell_width,
+            height: size.cell_height,
+        },
+        padding: mouse_encode::Padding {
+            top: size.padding_top,
+            bottom: size.padding_bottom,
+            right: size.padding_right,
+            left: size.padding_left,
+        },
+    })
+}
+
+fn mouse_geometry_from_abi_ptr(value: *const c_void) -> Option<mouse_encode::Geometry> {
+    let provided_size = unsafe { value.cast::<usize>().read() };
+    if provided_size < std::mem::size_of::<RoasttyMouseEncoderSize>() {
+        return None;
+    }
+
+    let size = unsafe { value.cast::<RoasttyMouseEncoderSize>().read() };
+    mouse_geometry_from_abi(&size)
 }
 
 fn empty_string() -> RoasttyString {
@@ -449,6 +636,284 @@ pub extern "C" fn roastty_app_set_color_scheme(app: RoasttyApp, color_scheme: c_
     if let Some(app) = app_from_handle(app) {
         app.color_scheme = color_scheme;
     }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_event_new(out: *mut RoasttyMouseEvent) -> c_int {
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    let event = Box::new(MouseEvent {
+        event: mouse_encode::Event::default(),
+    });
+    unsafe {
+        out.write(Box::into_raw(event).cast());
+    }
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_event_free(event: RoasttyMouseEvent) {
+    if !event.is_null() {
+        unsafe {
+            drop(Box::from_raw(event.cast::<MouseEvent>()));
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_event_set_action(event: RoasttyMouseEvent, action: c_int) -> c_int {
+    let Some(event) = mouse_event_from_handle(event) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    let Some(action) = mouse_action_from_int(action) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+
+    event.event.action = action;
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_event_get_action(event: RoasttyMouseEvent) -> c_int {
+    mouse_event_from_handle(event)
+        .map(|event| mouse_action_to_int(event.event.action))
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_event_set_button(event: RoasttyMouseEvent, button: c_int) -> c_int {
+    let Some(event) = mouse_event_from_handle(event) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    let Some(button) = mouse_button_from_int(button) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+
+    event.event.button = Some(button);
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_event_clear_button(event: RoasttyMouseEvent) {
+    if let Some(event) = mouse_event_from_handle(event) {
+        event.event.button = None;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_event_get_button(
+    event: RoasttyMouseEvent,
+    out: *mut c_int,
+) -> bool {
+    let Some(event) = mouse_event_from_handle(event) else {
+        return false;
+    };
+    let Some(button) = event.event.button else {
+        return false;
+    };
+
+    if !out.is_null() {
+        unsafe {
+            out.write(mouse_button_to_int(button));
+        }
+    }
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_event_set_mods(event: RoasttyMouseEvent, mods: RoasttyMouseMods) {
+    if let Some(event) = mouse_event_from_handle(event) {
+        event.event.mods = mouse::MouseMods {
+            shift: mods.shift,
+            alt: mods.alt,
+            ctrl: mods.ctrl,
+        };
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_event_get_mods(event: RoasttyMouseEvent) -> RoasttyMouseMods {
+    mouse_event_from_handle(event)
+        .map(|event| RoasttyMouseMods {
+            shift: event.event.mods.shift,
+            alt: event.event.mods.alt,
+            ctrl: event.event.mods.ctrl,
+        })
+        .unwrap_or(RoasttyMouseMods {
+            shift: false,
+            alt: false,
+            ctrl: false,
+        })
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_event_set_position(
+    event: RoasttyMouseEvent,
+    pos: RoasttyMousePosition,
+) {
+    if let Some(event) = mouse_event_from_handle(event) {
+        event.event.pos = mouse_encode::Position { x: pos.x, y: pos.y };
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_event_get_position(
+    event: RoasttyMouseEvent,
+) -> RoasttyMousePosition {
+    mouse_event_from_handle(event)
+        .map(|event| RoasttyMousePosition {
+            x: event.event.pos.x,
+            y: event.event.pos.y,
+        })
+        .unwrap_or(RoasttyMousePosition { x: 0.0, y: 0.0 })
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_encoder_new(out: *mut RoasttyMouseEncoder) -> c_int {
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    let encoder = Box::new(MouseEncoder {
+        event: mouse::MouseEventMode::None,
+        format: mouse::MouseFormat::X10,
+        geometry: default_mouse_geometry(),
+        any_button_pressed: false,
+        track_last_cell: false,
+        last_cell: None,
+    });
+    unsafe {
+        out.write(Box::into_raw(encoder).cast());
+    }
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_encoder_free(encoder: RoasttyMouseEncoder) {
+    if !encoder.is_null() {
+        unsafe {
+            drop(Box::from_raw(encoder.cast::<MouseEncoder>()));
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_encoder_setopt(
+    encoder: RoasttyMouseEncoder,
+    option: c_int,
+    value: *const c_void,
+) -> c_int {
+    let Some(encoder) = mouse_encoder_from_handle(encoder) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    if value.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    match option {
+        0 => {
+            let value = unsafe { value.cast::<c_int>().read() };
+            let Some(event) = mouse_event_mode_from_int(value) else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            if encoder.event != event {
+                encoder.last_cell = None;
+            }
+            encoder.event = event;
+        }
+        1 => {
+            let value = unsafe { value.cast::<c_int>().read() };
+            let Some(format) = mouse_format_from_int(value) else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            if encoder.format != format {
+                encoder.last_cell = None;
+            }
+            encoder.format = format;
+        }
+        2 => {
+            let Some(geometry) = mouse_geometry_from_abi_ptr(value) else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            encoder.geometry = geometry;
+            encoder.last_cell = None;
+        }
+        3 => {
+            encoder.any_button_pressed = unsafe { value.cast::<bool>().read() };
+        }
+        4 => {
+            encoder.track_last_cell = unsafe { value.cast::<bool>().read() };
+            if !encoder.track_last_cell {
+                encoder.last_cell = None;
+            }
+        }
+        _ => return ROASTTY_INVALID_VALUE,
+    }
+
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_encoder_reset(encoder: RoasttyMouseEncoder) {
+    if let Some(encoder) = mouse_encoder_from_handle(encoder) {
+        encoder.last_cell = None;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_mouse_encoder_encode(
+    encoder: RoasttyMouseEncoder,
+    event: RoasttyMouseEvent,
+    out: *mut u8,
+    out_len: usize,
+    out_written: *mut usize,
+) -> c_int {
+    let Some(encoder) = mouse_encoder_from_handle(encoder) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    let Some(event) = mouse_event_from_handle(event) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    if out_written.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    if out.is_null() && out_len != 0 {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    let mut next_last_cell = encoder.last_cell;
+    let encoded = mouse_encode::encode(
+        event.event,
+        mouse_encode::Options {
+            event: encoder.event,
+            format: encoder.format,
+            geometry: encoder.geometry,
+            any_button_pressed: encoder.any_button_pressed,
+            last_cell: encoder.track_last_cell.then_some(&mut next_last_cell),
+        },
+    )
+    .unwrap_or_default();
+
+    unsafe {
+        out_written.write(encoded.len());
+    }
+
+    if encoded.len() > out_len || (!encoded.is_empty() && out.is_null()) {
+        return ROASTTY_OUT_OF_SPACE;
+    }
+
+    if !encoded.is_empty() {
+        unsafe {
+            ptr::copy_nonoverlapping(encoded.as_ptr(), out, encoded.len());
+        }
+    }
+    if encoder.track_last_cell {
+        encoder.last_cell = next_last_cell;
+    }
+
+    ROASTTY_SUCCESS
 }
 
 #[no_mangle]

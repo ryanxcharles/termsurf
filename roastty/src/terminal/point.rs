@@ -9,7 +9,7 @@ pub(super) enum Tag {
 }
 
 #[derive(Debug, Clone, Copy, Default, Hash, PartialEq, Eq)]
-pub(super) struct Coordinate {
+pub(crate) struct Coordinate {
     pub(super) x: CellCountInt,
     pub(super) y: u32,
 }

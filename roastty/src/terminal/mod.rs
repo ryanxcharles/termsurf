@@ -41,10 +41,10 @@ mod kitty;
 mod modes;
 
 #[allow(dead_code)]
-mod mouse;
+pub(crate) mod mouse;
 
 #[allow(dead_code)]
-mod mouse_encode;
+pub(crate) mod mouse_encode;
 
 #[allow(dead_code)]
 mod offset_hash_map;
@@ -59,7 +59,7 @@ mod page;
 mod page_list;
 
 #[allow(dead_code)]
-mod point;
+pub(crate) mod point;
 
 #[allow(dead_code)]
 mod ref_counted_set;

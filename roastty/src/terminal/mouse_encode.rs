@@ -5,47 +5,47 @@ use super::point;
 use super::size::CellCountInt;
 
 #[derive(Debug)]
-pub(super) struct Options<'a> {
-    pub(super) event: MouseEventMode,
-    pub(super) format: MouseFormat,
-    pub(super) geometry: Geometry,
-    pub(super) any_button_pressed: bool,
-    pub(super) last_cell: Option<&'a mut Option<point::Coordinate>>,
+pub(crate) struct Options<'a> {
+    pub(crate) event: MouseEventMode,
+    pub(crate) format: MouseFormat,
+    pub(crate) geometry: Geometry,
+    pub(crate) any_button_pressed: bool,
+    pub(crate) last_cell: Option<&'a mut Option<point::Coordinate>>,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct Event {
-    pub(super) action: MouseAction,
-    pub(super) button: Option<MouseButton>,
-    pub(super) mods: MouseMods,
-    pub(super) pos: Position,
+pub(crate) struct Event {
+    pub(crate) action: MouseAction,
+    pub(crate) button: Option<MouseButton>,
+    pub(crate) mods: MouseMods,
+    pub(crate) pos: Position,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(super) struct Position {
-    pub(super) x: f32,
-    pub(super) y: f32,
+pub(crate) struct Position {
+    pub(crate) x: f32,
+    pub(crate) y: f32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct Geometry {
-    pub(super) screen: PixelSize,
-    pub(super) cell: PixelSize,
-    pub(super) padding: Padding,
+pub(crate) struct Geometry {
+    pub(crate) screen: PixelSize,
+    pub(crate) cell: PixelSize,
+    pub(crate) padding: Padding,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct PixelSize {
-    pub(super) width: u32,
-    pub(super) height: u32,
+pub(crate) struct PixelSize {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct Padding {
-    pub(super) top: u32,
-    pub(super) bottom: u32,
-    pub(super) right: u32,
-    pub(super) left: u32,
+pub(crate) struct Padding {
+    pub(crate) top: u32,
+    pub(crate) bottom: u32,
+    pub(crate) right: u32,
+    pub(crate) left: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,7 +132,7 @@ impl<'a> Options<'a> {
     }
 }
 
-pub(super) fn encode(event: Event, mut opts: Options<'_>) -> Option<Vec<u8>> {
+pub(crate) fn encode(event: Event, mut opts: Options<'_>) -> Option<Vec<u8>> {
     if !should_report(event, &opts) {
         return None;
     }

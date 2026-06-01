@@ -1,7 +1,7 @@
 //! Mouse-related terminal state.
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) enum MouseEventMode {
+pub(crate) enum MouseEventMode {
     #[default]
     None,
     X10,
@@ -17,7 +17,7 @@ impl MouseEventMode {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) enum MouseFormat {
+pub(crate) enum MouseFormat {
     #[default]
     X10,
     Utf8,
@@ -27,14 +27,14 @@ pub(super) enum MouseFormat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MouseAction {
+pub(crate) enum MouseAction {
     Press,
     Release,
     Motion,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MouseButton {
+pub(crate) enum MouseButton {
     Unknown,
     Left,
     Right,
@@ -50,10 +50,10 @@ pub(super) enum MouseButton {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct MouseMods {
-    pub(super) shift: bool,
-    pub(super) alt: bool,
-    pub(super) ctrl: bool,
+pub(crate) struct MouseMods {
+    pub(crate) shift: bool,
+    pub(crate) alt: bool,
+    pub(crate) ctrl: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

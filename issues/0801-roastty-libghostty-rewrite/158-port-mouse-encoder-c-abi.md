@@ -271,3 +271,75 @@ Clean design re-review artifacts:
 
 Codex found no remaining blockers and approved the experiment for
 implementation.
+
+## Result
+
+**Result:** Pass
+
+Experiment 158 exposes the mouse event and mouse encoder through the public
+Roastty C ABI.
+
+Implemented:
+
+- `roastty/include/roastty.h` now defines opaque `roastty_mouse_event_t` /
+  `roastty_mouse_encoder_t` handles, one public `roastty_result_e`, C enum
+  values for mouse actions, buttons, tracking modes, formats, and encoder
+  options, plus ABI structs for modifiers, position, and encoder size.
+- `roastty/src/lib.rs` now owns the event and encoder handles with explicit
+  `Box` allocation/free, validates all C enum-like values as raw integers at the
+  FFI boundary, rejects invalid/null inputs with result codes, and exposes
+  required-size / out-of-space reporting for encoded mouse bytes.
+- `roastty/src/terminal/{mouse.rs,mouse_encode.rs,point.rs,mod.rs}` exposes the
+  already-ported internal mouse types to the ABI module without changing the
+  pure encoder semantics.
+- `roastty/tests/abi_harness.c` now exercises the new C header/API surface:
+  event allocation/free/null-free, action/button/modifier/position setters and
+  getters, encoder options, SGR left-press encoding, required-size queries,
+  too-small buffer handling, motion dedupe, reset, and invalid value handling.
+
+The upstream `setopt_from_terminal()` behavior remains intentionally deferred.
+Roastty still does not expose a real public terminal/surface terminal handle
+through the C ABI, so this experiment did not fake the behavior from mode bits
+or a placeholder handle.
+
+Verification:
+
+- `cargo fmt -- roastty/src/lib.rs roastty/src/terminal/mod.rs roastty/src/terminal/point.rs roastty/src/terminal/mouse.rs roastty/src/terminal/mouse_encode.rs`
+- `cargo test -p roastty mouse` — 43 passed
+- `cargo test -p roastty --test abi_harness` — 1 passed
+- `cargo test -p roastty` — 1744 unit tests passed, ABI harness passed, doc
+  tests passed
+
+## Codex Result Review
+
+Codex reviewed the completed implementation and recorded result before commit.
+
+Initial result-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-135347-412672-prompt.md`
+- Result: `logs/codex-review/20260601-135347-412672-last-message.md`
+
+Codex found one real result issue:
+
+- `roastty_mouse_encoder_setopt(..., ROASTTY_MOUSE_ENCODER_OPTION_SIZE, ...)`
+  read the full `roastty_mouse_encoder_size_s` before validating the leading
+  `size` field, so a caller with an actually smaller versioned struct could be
+  read past before rejection.
+
+The issue was fixed by reading only the leading `size_t` first, rejecting
+undersized payloads before reading the full struct, and adding a C ABI harness
+case that passes a genuinely smaller one-field struct.
+
+Clean result re-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-135540-444027-prompt.md`
+- Result: `logs/codex-review/20260601-135540-444027-last-message.md`
+
+Codex found no remaining blockers and approved the result for commit.
+
+## Conclusion
+
+The public C ABI now covers the mouse event and standalone mouse encoder layer
+that can be backed by Roastty's current internal implementation. The remaining
+upstream mouse C ABI gap is `setopt_from_terminal()`, which should wait until a
+future experiment introduces a real public terminal/surface terminal handle.

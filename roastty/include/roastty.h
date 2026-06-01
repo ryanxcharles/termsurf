@@ -21,11 +21,16 @@ extern "C" {
 
 typedef void* roastty_app_t;
 typedef void* roastty_config_t;
+typedef void* roastty_mouse_encoder_t;
+typedef void* roastty_mouse_event_t;
 typedef void* roastty_surface_t;
 
-enum {
+typedef enum {
   ROASTTY_SUCCESS = 0,
-};
+  ROASTTY_OUT_OF_MEMORY = 1,
+  ROASTTY_INVALID_VALUE = 2,
+  ROASTTY_OUT_OF_SPACE = 3,
+} roastty_result_e;
 
 typedef enum {
   ROASTTY_BUILD_MODE_DEBUG,
@@ -144,6 +149,74 @@ typedef enum {
   ROASTTY_COLOR_SCHEME_DARK,
 } roastty_color_scheme_e;
 
+typedef enum {
+  ROASTTY_MOUSE_ACTION_PRESS = 0,
+  ROASTTY_MOUSE_ACTION_RELEASE = 1,
+  ROASTTY_MOUSE_ACTION_MOTION = 2,
+} roastty_mouse_action_e;
+
+typedef enum {
+  ROASTTY_MOUSE_BUTTON_UNKNOWN = 0,
+  ROASTTY_MOUSE_BUTTON_LEFT = 1,
+  ROASTTY_MOUSE_BUTTON_RIGHT = 2,
+  ROASTTY_MOUSE_BUTTON_MIDDLE = 3,
+  ROASTTY_MOUSE_BUTTON_FOUR = 4,
+  ROASTTY_MOUSE_BUTTON_FIVE = 5,
+  ROASTTY_MOUSE_BUTTON_SIX = 6,
+  ROASTTY_MOUSE_BUTTON_SEVEN = 7,
+  ROASTTY_MOUSE_BUTTON_EIGHT = 8,
+  ROASTTY_MOUSE_BUTTON_NINE = 9,
+  ROASTTY_MOUSE_BUTTON_TEN = 10,
+  ROASTTY_MOUSE_BUTTON_ELEVEN = 11,
+} roastty_mouse_button_e;
+
+typedef enum {
+  ROASTTY_MOUSE_TRACKING_NONE = 0,
+  ROASTTY_MOUSE_TRACKING_X10 = 1,
+  ROASTTY_MOUSE_TRACKING_NORMAL = 2,
+  ROASTTY_MOUSE_TRACKING_BUTTON = 3,
+  ROASTTY_MOUSE_TRACKING_ANY = 4,
+} roastty_mouse_tracking_mode_e;
+
+typedef enum {
+  ROASTTY_MOUSE_FORMAT_X10 = 0,
+  ROASTTY_MOUSE_FORMAT_UTF8 = 1,
+  ROASTTY_MOUSE_FORMAT_SGR = 2,
+  ROASTTY_MOUSE_FORMAT_URXVT = 3,
+  ROASTTY_MOUSE_FORMAT_SGR_PIXELS = 4,
+} roastty_mouse_format_e;
+
+typedef enum {
+  ROASTTY_MOUSE_ENCODER_OPTION_EVENT = 0,
+  ROASTTY_MOUSE_ENCODER_OPTION_FORMAT = 1,
+  ROASTTY_MOUSE_ENCODER_OPTION_SIZE = 2,
+  ROASTTY_MOUSE_ENCODER_OPTION_ANY_BUTTON_PRESSED = 3,
+  ROASTTY_MOUSE_ENCODER_OPTION_TRACK_LAST_CELL = 4,
+} roastty_mouse_encoder_option_e;
+
+typedef struct {
+  bool shift;
+  bool alt;
+  bool ctrl;
+} roastty_mouse_mods_s;
+
+typedef struct {
+  float x;
+  float y;
+} roastty_mouse_position_s;
+
+typedef struct {
+  size_t size;
+  uint32_t screen_width;
+  uint32_t screen_height;
+  uint32_t cell_width;
+  uint32_t cell_height;
+  uint32_t padding_top;
+  uint32_t padding_bottom;
+  uint32_t padding_right;
+  uint32_t padding_left;
+} roastty_mouse_encoder_size_s;
+
 typedef void (*roastty_runtime_wakeup_cb)(void*);
 typedef bool (*roastty_runtime_action_cb)(roastty_app_t,
                                           roastty_target_s,
@@ -206,6 +279,35 @@ ROASTTY_API bool roastty_app_needs_confirm_quit(roastty_app_t);
 ROASTTY_API bool roastty_app_has_global_keybinds(roastty_app_t);
 ROASTTY_API void roastty_app_set_color_scheme(roastty_app_t,
                                               roastty_color_scheme_e);
+
+ROASTTY_API roastty_result_e roastty_mouse_event_new(roastty_mouse_event_t*);
+ROASTTY_API void roastty_mouse_event_free(roastty_mouse_event_t);
+ROASTTY_API roastty_result_e roastty_mouse_event_set_action(roastty_mouse_event_t,
+                                                            int);
+ROASTTY_API int roastty_mouse_event_get_action(roastty_mouse_event_t);
+ROASTTY_API roastty_result_e roastty_mouse_event_set_button(roastty_mouse_event_t,
+                                                            int);
+ROASTTY_API void roastty_mouse_event_clear_button(roastty_mouse_event_t);
+ROASTTY_API bool roastty_mouse_event_get_button(roastty_mouse_event_t, int*);
+ROASTTY_API void roastty_mouse_event_set_mods(roastty_mouse_event_t,
+                                              roastty_mouse_mods_s);
+ROASTTY_API roastty_mouse_mods_s roastty_mouse_event_get_mods(roastty_mouse_event_t);
+ROASTTY_API void roastty_mouse_event_set_position(roastty_mouse_event_t,
+                                                  roastty_mouse_position_s);
+ROASTTY_API roastty_mouse_position_s
+roastty_mouse_event_get_position(roastty_mouse_event_t);
+
+ROASTTY_API roastty_result_e roastty_mouse_encoder_new(roastty_mouse_encoder_t*);
+ROASTTY_API void roastty_mouse_encoder_free(roastty_mouse_encoder_t);
+ROASTTY_API roastty_result_e roastty_mouse_encoder_setopt(roastty_mouse_encoder_t,
+                                                          int,
+                                                          const void*);
+ROASTTY_API void roastty_mouse_encoder_reset(roastty_mouse_encoder_t);
+ROASTTY_API roastty_result_e roastty_mouse_encoder_encode(roastty_mouse_encoder_t,
+                                                          roastty_mouse_event_t,
+                                                          uint8_t*,
+                                                          size_t,
+                                                          size_t*);
 
 ROASTTY_API roastty_surface_config_s roastty_surface_config_new(void);
 ROASTTY_API roastty_surface_t roastty_surface_new(roastty_app_t,
