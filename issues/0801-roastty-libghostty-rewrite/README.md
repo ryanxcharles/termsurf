@@ -454,6 +454,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 163: Port Key Encoder C ABI](163-port-key-encoder-c-abi.md) —
   **Pass**
+- [Experiment 164: Port OSC Parser C ABI](164-port-osc-parser-c-abi.md) —
+  **Designed**
 
 ## Non-Goals
 
