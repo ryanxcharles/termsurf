@@ -165,3 +165,77 @@ The experiment fails if:
   search, renderer, parser, app, tracking ownership, or unrelated behavior is
   added prematurely;
 - tests or formatting fail.
+
+## Result
+
+**Result:** Pass
+
+Implemented selection containment in `roastty/src/terminal/page_list.rs`.
+
+The change adds a private `selection_pin_screen_point` helper and a private
+`selection_contains(selection, pin) -> Option<bool>` helper on `PageList`.
+Containment remains PageList-owned because it depends on converting pins to
+screen coordinates; no `Selection::contains` method was added.
+
+The containment helper:
+
+- normalizes selections with the Experiment 67 `selection_top_left` and
+  `selection_bottom_right` helpers;
+- converts normalized top-left, bottom-right, and candidate pins through
+  `point_from_pin(point::Tag::Screen, pin)`;
+- matches upstream regular-selection rules for single-line, top-row, bottom-row,
+  and middle-row containment;
+- matches upstream rectangle-selection rules for inclusive rectangular bounds;
+- handles mirrored rectangles through normalized top-left/bottom-right pins;
+- returns `None` for invalid selection endpoints, invalid candidate pins,
+  missing-node pins, garbage pins, or any unmappable screen conversion.
+
+During implementation, the design was corrected and re-reviewed: current
+PageList behavior cannot construct a PageList-owned structurally valid pin that
+fails `point::Tag::Screen` mapping, because `Tag::Screen` starts at the first
+stored node. That failure mode applies to narrower coordinate spaces such as
+Active or Viewport. The implementation still calls `point_from_pin` for the
+candidate before comparing coordinates.
+
+Added tests for:
+
+- regular forward and reverse multi-line containment using the upstream included
+  and excluded points;
+- regular single-line containment;
+- rectangle forward and reverse containment using the upstream interior, border,
+  and excluded points;
+- rectangle single-line containment;
+- mirrored-forward and mirrored-reverse rectangle containment after
+  normalization;
+- cross-page containment using screen rows;
+- invalid selection start, invalid selection end, invalid candidate, and garbage
+  candidate returning `None`.
+
+Verification:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page_list::tests::selection
+cargo test -p roastty terminal::selection
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo fmt` completed successfully.
+- `cargo test -p roastty terminal::page_list::tests::selection`: 17 passed.
+- `cargo test -p roastty terminal::selection`: 12 passed.
+- `cargo test -p roastty`: 594 unit tests passed, ABI harness passed, doctests
+  passed.
+
+Independent result review approved the implementation as a Pass. The reviewer
+found no blocking issues, confirmed upstream containment semantics, confirmed
+the `Option<bool>` invalid-pin behavior, confirmed the test coverage, and found
+no scope drift.
+
+## Conclusion
+
+Roastty now has the upstream `Selection.contains` behavior represented as a
+PageList-owned helper. This completes the containment layer that sits directly
+above selection ordering and normalization, while leaving row extraction,
+adjustment, and higher-level selection features for later experiments.

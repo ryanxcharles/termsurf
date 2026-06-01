@@ -251,7 +251,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 67: Port Selection Ordering](67-port-selection-ordering.md) —
   **Pass**
 - [Experiment 68: Port Selection Containment](68-port-selection-containment.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

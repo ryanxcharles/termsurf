@@ -1107,19 +1107,21 @@ impl PageList {
         })
     }
 
+    fn selection_pin_screen_point(&self, pin: Pin) -> Option<point::Point> {
+        if pin.garbage || !self.pin_is_valid(&pin) {
+            return None;
+        }
+
+        self.point_from_pin(point::Tag::Screen, pin)
+    }
+
     fn selection_screen_points(
         &self,
         selection: selection::Selection,
     ) -> Option<(point::Point, point::Point)> {
-        let start = selection.start();
-        let end = selection.end();
-        if !self.pin_is_valid(&start) || !self.pin_is_valid(&end) {
-            return None;
-        }
-
         Some((
-            self.point_from_pin(point::Tag::Screen, start)?,
-            self.point_from_pin(point::Tag::Screen, end)?,
+            self.selection_pin_screen_point(selection.start())?,
+            self.selection_pin_screen_point(selection.end())?,
         ))
     }
 
@@ -1217,6 +1219,39 @@ impl PageList {
                 selection::Selection::new(bottom_right, top_left, selection.rectangle())
             }
         })
+    }
+
+    fn selection_contains(&self, selection: selection::Selection, pin: Pin) -> Option<bool> {
+        let top_left = self.selection_top_left(selection)?;
+        let bottom_right = self.selection_bottom_right(selection)?;
+        let top_left = self.selection_pin_screen_point(top_left)?.coord();
+        let bottom_right = self.selection_pin_screen_point(bottom_right)?.coord();
+        let point = self.selection_pin_screen_point(pin)?.coord();
+
+        if selection.rectangle() {
+            return Some(
+                point.y >= top_left.y
+                    && point.y <= bottom_right.y
+                    && point.x >= top_left.x
+                    && point.x <= bottom_right.x,
+            );
+        }
+
+        if top_left.y == bottom_right.y {
+            return Some(
+                point.y == top_left.y && point.x >= top_left.x && point.x <= bottom_right.x,
+            );
+        }
+
+        if point.y == top_left.y {
+            return Some(point.x >= top_left.x);
+        }
+
+        if point.y == bottom_right.y {
+            return Some(point.x <= bottom_right.x);
+        }
+
+        Some(point.y > top_left.y && point.y < bottom_right.y)
     }
 
     fn page_iterator(
@@ -7115,6 +7150,172 @@ mod tests {
                 .selection_ordered(selection, selection::Order::Forward)
                 .is_none());
         }
+    }
+
+    #[test]
+    fn selection_contains_regular_matches_upstream_forward_and_reverse() {
+        let list = PageList::init(10, 10, None).unwrap();
+        for selection in [
+            screen_selection(&list, (5, 1), (3, 2), false),
+            screen_selection(&list, (3, 2), (5, 1), false),
+        ] {
+            assert_eq!(
+                list.selection_contains(selection, screen_pin(&list, 6, 1)),
+                Some(true)
+            );
+            assert_eq!(
+                list.selection_contains(selection, screen_pin(&list, 1, 2)),
+                Some(true)
+            );
+            assert_eq!(
+                list.selection_contains(selection, screen_pin(&list, 1, 1)),
+                Some(false)
+            );
+            assert_eq!(
+                list.selection_contains(selection, screen_pin(&list, 5, 2)),
+                Some(false)
+            );
+        }
+    }
+
+    #[test]
+    fn selection_contains_regular_single_line_matches_upstream() {
+        let list = PageList::init(10, 10, None).unwrap();
+        let selection = screen_selection(&list, (5, 1), (8, 1), false);
+
+        assert_eq!(
+            list.selection_contains(selection, screen_pin(&list, 6, 1)),
+            Some(true)
+        );
+        assert_eq!(
+            list.selection_contains(selection, screen_pin(&list, 2, 1)),
+            Some(false)
+        );
+        assert_eq!(
+            list.selection_contains(selection, screen_pin(&list, 9, 1)),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn selection_contains_rectangle_matches_upstream_forward_and_reverse() {
+        let list = PageList::init(15, 15, None).unwrap();
+        for selection in [
+            screen_selection(&list, (3, 3), (7, 9), true),
+            screen_selection(&list, (7, 9), (3, 3), true),
+        ] {
+            for point in [(5, 6), (3, 6), (7, 6), (5, 3), (5, 9)] {
+                assert_eq!(
+                    list.selection_contains(selection, screen_pin(&list, point.0, point.1)),
+                    Some(true),
+                    "expected {:?} to be contained",
+                    point
+                );
+            }
+
+            for point in [(5, 2), (5, 10), (2, 6), (8, 6), (8, 3), (2, 9)] {
+                assert_eq!(
+                    list.selection_contains(selection, screen_pin(&list, point.0, point.1)),
+                    Some(false),
+                    "expected {:?} to be excluded",
+                    point
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn selection_contains_rectangle_single_line_matches_upstream() {
+        let list = PageList::init(15, 15, None).unwrap();
+        let selection = screen_selection(&list, (5, 1), (10, 1), true);
+
+        assert_eq!(
+            list.selection_contains(selection, screen_pin(&list, 6, 1)),
+            Some(true)
+        );
+        assert_eq!(
+            list.selection_contains(selection, screen_pin(&list, 2, 1)),
+            Some(false)
+        );
+        assert_eq!(
+            list.selection_contains(selection, screen_pin(&list, 12, 1)),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn selection_contains_mirrored_rectangles_after_normalization() {
+        let list = PageList::init(15, 15, None).unwrap();
+        for selection in [
+            screen_selection(&list, (7, 3), (3, 9), true),
+            screen_selection(&list, (3, 9), (7, 3), true),
+        ] {
+            for point in [(5, 6), (3, 6), (7, 6), (5, 3), (5, 9)] {
+                assert_eq!(
+                    list.selection_contains(selection, screen_pin(&list, point.0, point.1)),
+                    Some(true),
+                    "expected {:?} to be contained",
+                    point
+                );
+            }
+
+            for point in [(5, 2), (5, 10), (2, 6), (8, 6)] {
+                assert_eq!(
+                    list.selection_contains(selection, screen_pin(&list, point.0, point.1)),
+                    Some(false),
+                    "expected {:?} to be excluded",
+                    point
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn selection_contains_uses_screen_rows_across_pages() {
+        let (list, page_rows) = multi_page_list(80);
+        let selection = screen_selection(
+            &list,
+            (5, page_rows as u32 - 1),
+            (3, page_rows as u32 + 1),
+            false,
+        );
+
+        assert_ne!(
+            row_tuple(&list, selection.start()).0,
+            row_tuple(&list, selection.end()).0
+        );
+        assert_eq!(
+            list.selection_contains(selection, screen_pin(&list, 6, page_rows as u32 - 1)),
+            Some(true)
+        );
+        assert_eq!(
+            list.selection_contains(selection, screen_pin(&list, 4, page_rows as u32)),
+            Some(true)
+        );
+        assert_eq!(
+            list.selection_contains(selection, screen_pin(&list, 4, page_rows as u32 + 1)),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn selection_contains_returns_none_for_invalid_selection_or_candidate_pins() {
+        let list = PageList::init(10, 20, None).unwrap();
+        let other = PageList::init(10, 20, None).unwrap();
+        let invalid = Pin::new(other.first_node_ptr(), 0, 0);
+        let valid = screen_pin(&list, 2, 5);
+        let selection = selection::Selection::new(valid, screen_pin(&list, 4, 5), false);
+        let mut garbage = valid;
+        garbage.garbage = true;
+
+        assert!(list
+            .selection_contains(selection::Selection::new(invalid, valid, false), valid)
+            .is_none());
+        assert!(list
+            .selection_contains(selection::Selection::new(valid, invalid, false), valid)
+            .is_none());
+        assert!(list.selection_contains(selection, invalid).is_none());
+        assert!(list.selection_contains(selection, garbage).is_none());
     }
 
     #[test]
