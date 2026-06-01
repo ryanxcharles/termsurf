@@ -336,6 +336,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 115: Port CSI Next and Previous Line](115-port-csi-next-previous-line.md)
   — **Pass**
+- [Experiment 116: Port CSI Horizontal Absolute](116-port-csi-horizontal-absolute.md)
+  — **Designed**
 
 ## Non-Goals
 
