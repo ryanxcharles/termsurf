@@ -5,6 +5,7 @@ use std::slice;
 
 use terminal::{mouse, mouse_encode, point};
 
+mod input;
 mod terminal;
 
 // ABI ownership model:

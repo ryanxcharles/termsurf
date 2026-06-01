@@ -241,3 +241,82 @@ Clean design re-review artifacts:
 
 Codex found no remaining blockers and approved the experiment for
 implementation.
+
+## Result
+
+**Result:** Pass
+
+Experiment 159 ports the internal key input value-type foundation into Roastty
+without wiring it to live input, key encoding, public ABI, PTY writes, or config
+remapping.
+
+Implemented:
+
+- `roastty/src/input/mod.rs`
+  - registers the internal input modules;
+  - keeps the currently-unwired foundation quiet with a module-level `dead_code`
+    allowance until later experiments consume it.
+- `roastty/src/input/key_mods.rs`
+  - adds `Mod`, `Side`, `OptionAsAlt`, `ModSides`, `ModKeys`, and `Mods`;
+  - preserves the upstream modifier bit layout for shift, ctrl, alt, super,
+    caps-lock, num-lock, and side bits;
+  - ports modifier helpers for integer layout, empty checks, bindable keys,
+    binding modifiers, consumed-modifier removal, lock removal, macOS
+    option-as-alt translation, and macOS ctrl-or-super behavior.
+- `roastty/src/input/key.rs`
+  - adds `KeyAction`, `KeyEvent`, and the full 176-value physical `Key` enum in
+    upstream order;
+  - ports effective-modifier behavior and a deterministic binding hash over the
+    same binding-relevant fields;
+  - ports physical-key helpers for ASCII mapping, codepoint lookup, keypad
+    detection, W3C names, W3C lookup, macOS ctrl-or-super behavior, shift-side
+    detection, and alt-side detection.
+- `roastty/src/lib.rs`
+  - registers the internal `input` module.
+
+The experiment deliberately did not port key encoding, key C ABI, live
+Swift/macOS input, app runtime wiring, renderer behavior, PTY writes, browser
+overlay behavior, TermSurf protocol behavior, keybindings, keymap, or
+modifier-remap config parsing.
+
+Verification:
+
+- `cargo fmt -- roastty/src/lib.rs roastty/src/input/mod.rs roastty/src/input/key.rs roastty/src/input/key_mods.rs`
+- `cargo test -p roastty key_event` — 3 passed
+- `cargo test -p roastty key_mods` — 5 passed
+- `cargo test -p roastty` — 1757 unit tests passed, ABI harness passed, doc
+  tests passed
+- `rg -n "ghostty|Ghostty|ghostty_" roastty/src/input roastty/src/lib.rs` — no
+  matches
+
+## Codex Result Review
+
+Codex reviewed the completed implementation and recorded result before commit.
+
+Initial result-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-140546-223511-prompt.md`
+- Result: `logs/codex-review/20260601-140546-223511-last-message.md`
+
+Codex found one real result issue:
+
+- `Key::from_w3c()` accepted exact W3C strings and snake-case names, but did not
+  preserve upstream's normalization for forms such as `digit0` and `numpad0`.
+
+The issue was fixed by adding W3C-to-snake normalization before lookup and test
+coverage for `Digit0`, `digit0`, `Numpad0`, `numpad0`, `KeyA`, `key_a`, and an
+invalid string.
+
+Clean result re-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-140850-577523-prompt.md`
+- Result: `logs/codex-review/20260601-140850-577523-last-message.md`
+
+Codex found no remaining blockers and approved the result for commit.
+
+## Conclusion
+
+Roastty now has the pure key input model needed before the key encoder and key C
+ABI can be ported. The next keyboard slice can build on this by porting the pure
+key encoder, still without adding live macOS input or PTY process wiring until
+the encoder is independently verified.
