@@ -1,6 +1,118 @@
-//! Kitty keyboard protocol state.
+//! Kitty protocol state.
+
+use super::color;
 
 const KEY_FLAG_STACK_LEN: usize = 8;
+const COLOR_SPECIAL_COUNT: usize = 8;
+pub(super) const COLOR_REQUEST_CAPACITY: usize = (u8::MAX as usize + COLOR_SPECIAL_COUNT) * 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ColorSpecial {
+    Foreground,
+    Background,
+    SelectionForeground,
+    SelectionBackground,
+    Cursor,
+    CursorText,
+    VisualBell,
+    SecondTransparentBackground,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ColorKind {
+    Palette(u8),
+    Special(ColorSpecial),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ColorRequest {
+    Query(ColorKind),
+    Set { key: ColorKind, rgb: color::Rgb },
+    Reset(ColorKind),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ColorRequests {
+    items: [Option<ColorRequest>; COLOR_REQUEST_CAPACITY],
+    len: usize,
+}
+
+impl ColorSpecial {
+    pub(super) fn parse(bytes: &[u8]) -> Option<Self> {
+        match bytes {
+            b"foreground" => Some(Self::Foreground),
+            b"background" => Some(Self::Background),
+            b"selection_foreground" => Some(Self::SelectionForeground),
+            b"selection_background" => Some(Self::SelectionBackground),
+            b"cursor" => Some(Self::Cursor),
+            b"cursor_text" => Some(Self::CursorText),
+            b"visual_bell" => Some(Self::VisualBell),
+            b"second_transparent_background" => Some(Self::SecondTransparentBackground),
+            _ => None,
+        }
+    }
+
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::Foreground => "foreground",
+            Self::Background => "background",
+            Self::SelectionForeground => "selection_foreground",
+            Self::SelectionBackground => "selection_background",
+            Self::Cursor => "cursor",
+            Self::CursorText => "cursor_text",
+            Self::VisualBell => "visual_bell",
+            Self::SecondTransparentBackground => "second_transparent_background",
+        }
+    }
+}
+
+impl ColorKind {
+    pub(super) fn parse(bytes: &[u8]) -> Option<Self> {
+        if let Some(special) = ColorSpecial::parse(bytes) {
+            return Some(Self::Special(special));
+        }
+        if !bytes.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        let text = std::str::from_utf8(bytes).ok()?;
+        text.parse::<u8>().ok().map(Self::Palette)
+    }
+
+    pub(super) fn append_to_string(self, output: &mut String) {
+        match self {
+            Self::Palette(index) => output.push_str(&index.to_string()),
+            Self::Special(special) => output.push_str(special.name()),
+        }
+    }
+}
+
+impl ColorRequests {
+    pub(super) const fn new() -> Self {
+        Self {
+            items: [None; COLOR_REQUEST_CAPACITY],
+            len: 0,
+        }
+    }
+
+    pub(super) fn push(&mut self, request: ColorRequest) -> Result<(), ()> {
+        let Some(slot) = self.items.get_mut(self.len) else {
+            return Err(());
+        };
+        *slot = Some(request);
+        self.len += 1;
+        Ok(())
+    }
+
+    pub(super) const fn len(self) -> usize {
+        self.len
+    }
+
+    pub(super) fn iter(&self) -> impl Iterator<Item = ColorRequest> + '_ {
+        self.items[..self.len]
+            .iter()
+            .map(|request| request.expect("color request slots below len must be initialized"))
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct KeyFlags {
@@ -112,6 +224,30 @@ impl Default for KeyFlagStack {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn color_kind_parse_and_format() {
+        assert_eq!(
+            ColorKind::parse(b"foreground"),
+            Some(ColorKind::Special(ColorSpecial::Foreground))
+        );
+        assert_eq!(ColorKind::parse(b"Foreground"), None);
+        assert_eq!(ColorKind::parse(b"255"), Some(ColorKind::Palette(255)));
+        assert_eq!(ColorKind::parse(b"256"), None);
+        assert_eq!(ColorKind::parse(b"+1"), None);
+
+        let mut output = String::new();
+        ColorKind::Special(ColorSpecial::SelectionBackground).append_to_string(&mut output);
+        assert_eq!(output, "selection_background");
+        output.clear();
+        ColorKind::Palette(42).append_to_string(&mut output);
+        assert_eq!(output, "42");
+    }
+
+    #[test]
+    fn color_request_capacity_matches_ghostty_expression() {
+        assert_eq!(COLOR_REQUEST_CAPACITY, 526);
+    }
 
     fn flags(value: u8) -> KeyFlags {
         KeyFlags::from_int(value)

@@ -652,6 +652,12 @@ impl Handler for TerminalStreamHandler<'_> {
             stream::OscAction::ColorOperation { requests } => {
                 self.color_operation(requests);
             }
+            stream::OscAction::KittyColor {
+                requests,
+                terminator,
+            } => {
+                self.kitty_color_operation(requests, terminator);
+            }
         }
         Ok(())
     }
@@ -791,6 +797,100 @@ impl TerminalStreamHandler<'_> {
         );
         self.write_pty_response(&response);
         self.write_pty_response_bytes(terminator.bytes());
+    }
+
+    fn kitty_color_operation(
+        &mut self,
+        requests: super::kitty::ColorRequests,
+        terminator: osc::Terminator,
+    ) {
+        let mut response = String::new();
+        for request in requests.iter() {
+            match request {
+                super::kitty::ColorRequest::Set { key, rgb } => {
+                    self.set_kitty_color(key, rgb);
+                }
+                super::kitty::ColorRequest::Reset(key) => {
+                    self.reset_kitty_color(key);
+                }
+                super::kitty::ColorRequest::Query(key) => {
+                    self.write_kitty_color_query(&mut response, key);
+                }
+            }
+        }
+
+        if !response.is_empty() {
+            self.write_pty_response(&response);
+            self.write_pty_response_bytes(terminator.bytes());
+        }
+    }
+
+    fn set_kitty_color(&mut self, key: super::kitty::ColorKind, rgb: color::Rgb) {
+        match key {
+            super::kitty::ColorKind::Palette(index) => {
+                self.colors.palette[index as usize] = rgb;
+            }
+            super::kitty::ColorKind::Special(special) => match special {
+                super::kitty::ColorSpecial::Foreground => self.colors.foreground.set(rgb),
+                super::kitty::ColorSpecial::Background => self.colors.background.set(rgb),
+                super::kitty::ColorSpecial::Cursor => self.colors.cursor.set(rgb),
+                super::kitty::ColorSpecial::SelectionForeground
+                | super::kitty::ColorSpecial::SelectionBackground
+                | super::kitty::ColorSpecial::CursorText
+                | super::kitty::ColorSpecial::VisualBell
+                | super::kitty::ColorSpecial::SecondTransparentBackground => {}
+            },
+        }
+    }
+
+    fn reset_kitty_color(&mut self, key: super::kitty::ColorKind) {
+        match key {
+            super::kitty::ColorKind::Palette(index) => {
+                self.colors.palette[index as usize] = color::DEFAULT_PALETTE[index as usize];
+            }
+            super::kitty::ColorKind::Special(special) => match special {
+                super::kitty::ColorSpecial::Foreground => self.colors.foreground.reset(),
+                super::kitty::ColorSpecial::Background => self.colors.background.reset(),
+                super::kitty::ColorSpecial::Cursor => self.colors.cursor.reset(),
+                super::kitty::ColorSpecial::SelectionForeground
+                | super::kitty::ColorSpecial::SelectionBackground
+                | super::kitty::ColorSpecial::CursorText
+                | super::kitty::ColorSpecial::VisualBell
+                | super::kitty::ColorSpecial::SecondTransparentBackground => {}
+            },
+        }
+    }
+
+    fn write_kitty_color_query(&self, response: &mut String, key: super::kitty::ColorKind) {
+        if response.is_empty() {
+            response.push_str("\x1b]21");
+        }
+
+        match key {
+            super::kitty::ColorKind::Palette(index) => {
+                append_kitty_color_response(
+                    response,
+                    key,
+                    Some(self.colors.palette[index as usize]),
+                );
+            }
+            super::kitty::ColorKind::Special(special) => match special {
+                super::kitty::ColorSpecial::Foreground => {
+                    append_kitty_color_response(response, key, self.colors.foreground.get());
+                }
+                super::kitty::ColorSpecial::Background => {
+                    append_kitty_color_response(response, key, self.colors.background.get());
+                }
+                super::kitty::ColorSpecial::Cursor => {
+                    append_kitty_color_response(response, key, self.colors.cursor.get());
+                }
+                super::kitty::ColorSpecial::SelectionForeground
+                | super::kitty::ColorSpecial::SelectionBackground
+                | super::kitty::ColorSpecial::CursorText
+                | super::kitty::ColorSpecial::VisualBell
+                | super::kitty::ColorSpecial::SecondTransparentBackground => {}
+            },
+        }
     }
 
     fn move_cursor_to_origin_home(&mut self) {
@@ -1132,6 +1232,19 @@ fn palette_html_string(palette: &color::Palette) -> String {
     }
     output.push_str("}</style>");
     output
+}
+
+fn append_kitty_color_response(
+    output: &mut String,
+    key: super::kitty::ColorKind,
+    rgb: Option<color::Rgb>,
+) {
+    output.push(';');
+    key.append_to_string(output);
+    output.push('=');
+    if let Some(rgb) = rgb {
+        output.push_str(&format!("rgb:{:02x}/{:02x}/{:02x}", rgb.r, rgb.g, rgb.b));
+    }
 }
 
 fn modes_vt_string(state: &modes::ModeState) -> String {
@@ -2361,6 +2474,98 @@ mod tests {
             terminal.pty_response_for_tests(),
             b"\x1b]12;rgb:abab/cdcd/efef\x1b\\"
         );
+    }
+
+    #[test]
+    fn terminal_stream_kitty_osc21_palette_set_reset_and_query() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]21;2=#010203;2=?;2=\x1b\\")
+            .unwrap();
+
+        assert_eq!(terminal.colors.palette[2], color::DEFAULT_PALETTE[2]);
+        assert_eq!(
+            terminal.pty_response_for_tests(),
+            b"\x1b]21;2=rgb:01/02/03\x1b\\"
+        );
+    }
+
+    #[test]
+    fn terminal_stream_kitty_osc21_dynamic_set_reset_and_query() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal
+            .next_slice(
+                b"\x1b]21;foreground=#112233;background=#445566;cursor=#778899;foreground=?;background=?;cursor=?\x07",
+            )
+            .unwrap();
+
+        assert_eq!(
+            terminal.pty_response_for_tests(),
+            b"\x1b]21;foreground=rgb:11/22/33;background=rgb:44/55/66;cursor=rgb:77/88/99\x07"
+        );
+
+        terminal.take_pty_response_for_tests();
+        terminal
+            .next_slice(
+                b"\x1b]21;foreground=;background=;cursor=;foreground=?;background=?;cursor=?\x1b\\",
+            )
+            .unwrap();
+
+        assert_eq!(
+            terminal.pty_response_for_tests(),
+            b"\x1b]21;foreground=rgb:c5/c8/c6;background=rgb:1d/1f/21;cursor=\x1b\\"
+        );
+    }
+
+    #[test]
+    fn terminal_stream_kitty_osc21_cursor_query_has_no_foreground_fallback() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]21;foreground=#123456;cursor=?\x1b\\")
+            .unwrap();
+
+        assert_eq!(terminal.pty_response_for_tests(), b"\x1b]21;cursor=\x1b\\");
+    }
+
+    #[test]
+    fn terminal_stream_kitty_osc21_mixed_order_uses_current_state() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]21;foreground=?;foreground=#010203;foreground=?\x1b\\")
+            .unwrap();
+
+        assert_eq!(
+            terminal.pty_response_for_tests(),
+            b"\x1b]21;foreground=rgb:c5/c8/c6;foreground=rgb:01/02/03\x1b\\"
+        );
+    }
+
+    #[test]
+    fn terminal_stream_kitty_osc21_unsupported_specials_are_inert() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+        let original_palette = terminal.colors.palette;
+
+        terminal
+            .next_slice(
+                b"\x1b]21;selection_foreground=#010203;cursor_text=;selection_background=?\x1b\\",
+            )
+            .unwrap();
+
+        assert_eq!(terminal.colors.palette, original_palette);
+        assert_eq!(
+            terminal.colors.foreground.get(),
+            Some(color::DEFAULT_PALETTE[7])
+        );
+        assert_eq!(
+            terminal.colors.background.get(),
+            Some(color::DEFAULT_PALETTE[0])
+        );
+        assert_eq!(terminal.colors.cursor.get(), None);
+        assert_eq!(terminal.pty_response_for_tests(), b"\x1b]21\x1b\\");
     }
 
     #[test]

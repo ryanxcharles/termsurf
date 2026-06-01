@@ -3,11 +3,24 @@ const OSC_COLOR_REQUEST_CAPACITY: usize = MAX_BUF / 2 + 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Command<'a> {
-    WindowTitle { title: &'a str },
-    ReportPwd { url: &'a str },
-    StartHyperlink { id: Option<&'a str>, uri: &'a str },
+    WindowTitle {
+        title: &'a str,
+    },
+    ReportPwd {
+        url: &'a str,
+    },
+    StartHyperlink {
+        id: Option<&'a str>,
+        uri: &'a str,
+    },
     EndHyperlink,
-    ColorOperation { requests: ColorRequests },
+    ColorOperation {
+        requests: ColorRequests,
+    },
+    KittyColor {
+        requests: super::kitty::ColorRequests,
+        terminator: Terminator,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +193,10 @@ impl Parser {
                 .map(|requests| Command::ColorOperation { requests }),
             b"12" => parse_dynamic_set_query(rest, DynamicColor::Cursor, terminator)
                 .map(|requests| Command::ColorOperation { requests }),
+            b"21" => parse_kitty_color(rest).map(|requests| Command::KittyColor {
+                requests,
+                terminator,
+            }),
             b"104" => parse_osc104(rest).map(|requests| Command::ColorOperation { requests }),
             b"110" => parse_dynamic_reset(rest, DynamicColor::Foreground)
                 .map(|requests| Command::ColorOperation { requests }),
@@ -313,9 +330,55 @@ fn parse_dynamic_reset(bytes: &[u8], target: DynamicColor) -> Option<ColorReques
     Some(result)
 }
 
+fn parse_kitty_color(bytes: &[u8]) -> Option<super::kitty::ColorRequests> {
+    let mut result = super::kitty::ColorRequests::new();
+
+    for item in bytes.split(|byte| *byte == b';') {
+        if result.len() >= super::kitty::COLOR_REQUEST_CAPACITY {
+            return None;
+        }
+
+        let (key_bytes, value_bytes) =
+            SplitOnce::split_once(item, |byte| *byte == b'=').unwrap_or((item, &[]));
+        if key_bytes.is_empty() {
+            continue;
+        }
+        let Some(key) = super::kitty::ColorKind::parse(key_bytes) else {
+            continue;
+        };
+
+        let value = trim_edge_spaces(value_bytes);
+        let request = if value.is_empty() {
+            super::kitty::ColorRequest::Reset(key)
+        } else if value == b"?" {
+            super::kitty::ColorRequest::Query(key)
+        } else {
+            let Some(rgb) = super::color::Rgb::parse(value) else {
+                continue;
+            };
+            super::kitty::ColorRequest::Set { key, rgb }
+        };
+        result.push(request).ok()?;
+    }
+
+    Some(result)
+}
+
 fn parse_palette_index(bytes: &[u8]) -> Result<u8, ()> {
     let text = std::str::from_utf8(bytes).map_err(|_| ())?;
     text.parse::<u8>().map_err(|_| ())
+}
+
+fn trim_edge_spaces(bytes: &[u8]) -> &[u8] {
+    let mut start = 0;
+    let mut end = bytes.len();
+    while start < end && bytes[start] == b' ' {
+        start += 1;
+    }
+    while end > start && bytes[end - 1] == b' ' {
+        end -= 1;
+    }
+    &bytes[start..end]
 }
 
 trait SplitOnce {
@@ -340,11 +403,24 @@ mod tests {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum OwnedCommand {
-        WindowTitle { title: String },
-        ReportPwd { url: String },
-        StartHyperlink { id: Option<String>, uri: String },
+        WindowTitle {
+            title: String,
+        },
+        ReportPwd {
+            url: String,
+        },
+        StartHyperlink {
+            id: Option<String>,
+            uri: String,
+        },
         EndHyperlink,
-        ColorOperation { requests: Vec<ColorRequest> },
+        ColorOperation {
+            requests: Vec<ColorRequest>,
+        },
+        KittyColor {
+            requests: Vec<super::super::kitty::ColorRequest>,
+            terminator: Terminator,
+        },
     }
 
     impl From<Command<'_>> for OwnedCommand {
@@ -363,6 +439,13 @@ mod tests {
                 Command::EndHyperlink => Self::EndHyperlink,
                 Command::ColorOperation { requests } => Self::ColorOperation {
                     requests: requests.iter().collect(),
+                },
+                Command::KittyColor {
+                    requests,
+                    terminator,
+                } => Self::KittyColor {
+                    requests: requests.iter().collect(),
+                    terminator,
                 },
             }
         }
@@ -695,6 +778,83 @@ mod tests {
         assert_eq!(parse(b"19;?"), None);
         assert_eq!(parse(b"113"), None);
         assert_eq!(parse(b"119"), None);
+    }
+
+    #[test]
+    fn osc_parser_kitty_color_protocol_mixed_example() {
+        use super::super::kitty::{ColorKind, ColorRequest, ColorSpecial};
+
+        assert_eq!(
+            parse(b"21;foreground=?;background=rgb:f0/f8/ff;cursor=aliceblue;cursor_text;visual_bell=;selection_foreground=#xxxyyzz;selection_background=?;selection_background=#aabbcc;2=?;3=rgbi:1.0/1.0/1.0"),
+            Some(OwnedCommand::KittyColor {
+                terminator: Terminator::St,
+                requests: vec![
+                    ColorRequest::Query(ColorKind::Special(ColorSpecial::Foreground)),
+                    ColorRequest::Set {
+                        key: ColorKind::Special(ColorSpecial::Background),
+                        rgb: super::super::color::Rgb::new(0xf0, 0xf8, 0xff),
+                    },
+                    ColorRequest::Set {
+                        key: ColorKind::Special(ColorSpecial::Cursor),
+                        rgb: super::super::color::Rgb::new(0xf0, 0xf8, 0xff),
+                    },
+                    ColorRequest::Reset(ColorKind::Special(ColorSpecial::CursorText)),
+                    ColorRequest::Reset(ColorKind::Special(ColorSpecial::VisualBell)),
+                    ColorRequest::Query(ColorKind::Special(ColorSpecial::SelectionBackground)),
+                    ColorRequest::Set {
+                        key: ColorKind::Special(ColorSpecial::SelectionBackground),
+                        rgb: super::super::color::Rgb::new(0xaa, 0xbb, 0xcc),
+                    },
+                    ColorRequest::Query(ColorKind::Palette(2)),
+                    ColorRequest::Set {
+                        key: ColorKind::Palette(3),
+                        rgb: super::super::color::Rgb::new(0xff, 0xff, 0xff),
+                    },
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn osc_parser_kitty_color_protocol_edge_cases() {
+        use super::super::kitty::{ColorKind, ColorRequest, ColorSpecial};
+
+        assert_eq!(
+            parse(b"21;"),
+            Some(OwnedCommand::KittyColor {
+                requests: vec![],
+                terminator: Terminator::St,
+            })
+        );
+        assert_eq!(
+            parse_with_terminator(
+                b"21;;unknown=?;foreground= ? ;Foreground=?;+1=red;255=red;256=red;foreground=\t?\t",
+                Terminator::Bel
+            ),
+            Some(OwnedCommand::KittyColor {
+                terminator: Terminator::Bel,
+                requests: vec![
+                    ColorRequest::Query(ColorKind::Special(ColorSpecial::Foreground)),
+                    ColorRequest::Set {
+                        key: ColorKind::Palette(255),
+                        rgb: super::super::color::Rgb::new(255, 0, 0),
+                    },
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn osc_parser_kitty_color_protocol_cap_overflow_invalidates() {
+        let mut input = b"21;".to_vec();
+        for index in 0..=super::super::kitty::COLOR_REQUEST_CAPACITY {
+            if index > 0 {
+                input.push(b';');
+            }
+            input.push(b'0');
+        }
+
+        assert_eq!(parse(&input), None);
     }
 
     #[test]

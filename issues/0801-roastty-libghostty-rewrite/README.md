@@ -405,7 +405,7 @@ tests, choose the larger subsystem.
 - [Experiment 137: Port RGB Parser Parity](137-port-rgb-parser-parity.md) —
   **Pass**
 - [Experiment 138: Port Kitty OSC 21 Colors](138-port-kitty-osc21-colors.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 

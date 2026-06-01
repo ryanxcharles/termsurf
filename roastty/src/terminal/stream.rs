@@ -1083,7 +1083,7 @@ impl Utf8Decoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terminal::color;
+    use crate::terminal::{color, kitty};
 
     #[derive(Debug, Default)]
     struct RecordingHandler {
@@ -1107,11 +1107,24 @@ mod tests {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum OwnedOscAction {
-        WindowTitle { title: String },
-        ReportPwd { url: String },
-        StartHyperlink { id: Option<String>, uri: String },
+        WindowTitle {
+            title: String,
+        },
+        ReportPwd {
+            url: String,
+        },
+        StartHyperlink {
+            id: Option<String>,
+            uri: String,
+        },
         EndHyperlink,
-        ColorOperation { requests: Vec<osc::ColorRequest> },
+        ColorOperation {
+            requests: Vec<osc::ColorRequest>,
+        },
+        KittyColor {
+            requests: Vec<kitty::ColorRequest>,
+            terminator: osc::Terminator,
+        },
     }
 
     impl From<OscAction<'_>> for OwnedOscAction {
@@ -1130,6 +1143,13 @@ mod tests {
                 OscAction::EndHyperlink => Self::EndHyperlink,
                 OscAction::ColorOperation { requests } => Self::ColorOperation {
                     requests: requests.iter().collect(),
+                },
+                OscAction::KittyColor {
+                    requests,
+                    terminator,
+                } => Self::KittyColor {
+                    requests: requests.iter().collect(),
+                    terminator,
                 },
             }
         }
@@ -5561,6 +5581,25 @@ mod tests {
                 },
                 OwnedOscAction::EndHyperlink,
             ]
+        );
+        assert_eq!(actions(&handler), &[]);
+    }
+
+    #[test]
+    fn stream_osc_dispatches_kitty_color_protocol() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"\x1b]21;foreground=?\x07");
+
+        assert_eq!(
+            osc_actions(&handler),
+            &[OwnedOscAction::KittyColor {
+                terminator: osc::Terminator::Bel,
+                requests: vec![kitty::ColorRequest::Query(kitty::ColorKind::Special(
+                    kitty::ColorSpecial::Foreground
+                ))],
+            }]
         );
         assert_eq!(actions(&handler), &[]);
     }

@@ -205,3 +205,65 @@ contradiction: unsupported special set/reset requests are inert, but unsupported
 special queries intentionally emit Ghostty's bare-prefix response side effect.
 The design now distinguishes those cases and Codex approved the experiment for
 implementation with no remaining blocking findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now parses and executes Kitty OSC 21 color requests for the state this
+terminal currently owns: ANSI palette entries, dynamic foreground, dynamic
+background, and dynamic cursor color.
+
+The implementation added a `terminal::kitty` color request model with Ghostty's
+exact fixed request cap expression, wired OSC 21 parsing through the OSC parser
+and stream dispatcher, and executed requests in terminal order. Palette
+set/reset/query mutates and reports `TerminalColors.palette`. Foreground,
+background, and cursor set/reset/query mutates and reports the corresponding
+dynamic color. Cursor queries intentionally do not fall back to foreground,
+matching Kitty OSC 21 behavior rather than OSC 12 behavior.
+
+Unsupported special keys are parsed but remain inert for set/reset operations,
+so this experiment did not add new selection, cursor-text, visual-bell, or
+transparent-background state. Unsupported special queries preserve Ghostty's
+termio side effect: a query-only unsupported request emits a bare `ESC ] 21`
+prefix plus the incoming terminator.
+
+Verification passed:
+
+```text
+cargo fmt
+completed successfully
+
+cargo test -p roastty kitty
+29 passed; 0 failed
+
+cargo test -p roastty osc
+58 passed; 0 failed
+
+cargo test -p roastty terminal_stream_osc
+22 passed; 0 failed
+
+cargo test -p roastty
+1518 unit tests passed; 0 failed
+1 ABI harness test passed; 0 failed
+```
+
+## Result Review
+
+Codex reviewed the completed implementation and found one real parity issue:
+Rust's `u8` parser accepts `+1`, while Ghostty's unsigned integer parser rejects
+that palette key. The parser now requires palette keys to contain only ASCII
+digits before parsing, and the OSC 21 edge-case test covers `+1=red` being
+skipped. After that fix, `cargo fmt` and the full Experiment 138 verification
+suite passed again.
+
+## Conclusion
+
+Experiment 138 completes the Kitty OSC 21 color protocol slice for Roastty's
+current color state. It preserves Ghostty parser details, Ghostty's unusual
+request cap, byte-width Kitty response formatting, incoming BEL/ST terminator
+selection, and the unsupported-query bare-prefix quirk while leaving unsupported
+special color state out of scope.
+
+The next experiment can continue with the next Ghostty terminal subsystem after
+OSC color handling, using the same plan-review and result-review gate.
