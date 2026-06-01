@@ -276,6 +276,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 83: Port Formatter Codepoint Map](83-port-codepoint-map.md) —
   **Pass**
+- [Experiment 84: Port Plain Formatter Point Map](84-port-plain-formatter-point-map.md)
+  — **Designed**
 
 ## Non-Goals
 
