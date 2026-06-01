@@ -8,7 +8,7 @@ use super::point::{self, Coordinate};
 use super::size::{
     CellCountInt, GraphemeBytesInt, HyperlinkCountInt, StringBytesInt, StyleCountInt, MAX_PAGE_SIZE,
 };
-use super::{highlight, selection};
+use super::{highlight, selection, selection_codepoints};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Viewport {
@@ -181,6 +181,23 @@ struct DragGeometry {
     cell_width: u32,
     padding_left: u32,
     screen_height: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SelectLineOptions<'a> {
+    pin: Pin,
+    whitespace: Option<&'a [u32]>,
+    semantic_prompt_boundary: bool,
+}
+
+impl<'a> SelectLineOptions<'a> {
+    fn new(pin: Pin) -> Self {
+        Self {
+            pin,
+            whitespace: Some(selection_codepoints::DEFAULT_LINE_WHITESPACE),
+            semantic_prompt_boundary: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3309,6 +3326,176 @@ impl PageList {
         self.pin_at_absolute_row(target_row, target_x, pin.garbage)
     }
 
+    fn select_line(&self, options: SelectLineOptions<'_>) -> Option<selection::Selection> {
+        let pin = options.pin;
+        if pin.garbage || !self.pin_is_valid(&pin) {
+            return None;
+        }
+
+        let semantic_state = options
+            .semantic_prompt_boundary
+            .then(|| self.pin_cell(pin).map(|cell| cell.semantic_content()))
+            .flatten();
+
+        let start_pin = {
+            let mut rows = self.row_iterator_from_pin(Direction::LeftUp, pin, None);
+            let mut previous = rows.next()?;
+            let mut start = previous;
+            let mut found_start = false;
+
+            if let Some(semantic) = semantic_state {
+                let node = self.node_for_pin(&previous)?;
+                let row = node.page.get_row(previous.y as usize);
+                let cells = node.page.get_cells(row);
+                for offset in 0..=pin.x {
+                    let x = pin.x - offset;
+                    if cells[x as usize].semantic_content() != semantic {
+                        let mut result = previous;
+                        result.x = x + 1;
+                        start = result;
+                        found_start = true;
+                        break;
+                    }
+                }
+            }
+
+            if !found_start {
+                let mut stopped_at_boundary = false;
+                'rows: for mut row_pin in rows {
+                    let node = self.node_for_pin(&row_pin)?;
+                    let row = node.page.get_row(row_pin.y as usize);
+                    if !row.wrap() {
+                        start = previous;
+                        start.x = 0;
+                        stopped_at_boundary = true;
+                        break;
+                    }
+
+                    if let Some(semantic) = semantic_state {
+                        let cells = node.page.get_cells(row);
+                        for x in (0..cells.len()).rev() {
+                            if cells[x].semantic_content() != semantic {
+                                start = previous;
+                                stopped_at_boundary = true;
+                                break 'rows;
+                            }
+
+                            row_pin.x = x.try_into().expect("row cell index must fit CellCountInt");
+                            previous = row_pin;
+                            start = row_pin;
+                        }
+
+                        continue;
+                    }
+
+                    previous = row_pin;
+                    start = row_pin;
+                }
+
+                if !stopped_at_boundary {
+                    start.x = 0;
+                }
+            }
+
+            start
+        };
+
+        let end_pin = {
+            let rows = self.row_iterator_from_pin(Direction::RightDown, pin, None);
+            let mut end = None;
+            for mut row_pin in rows {
+                let node = self.node_for_pin(&row_pin)?;
+                let row = node.page.get_row(row_pin.y as usize);
+                let cells = node.page.get_cells(row);
+
+                if let Some(semantic) = semantic_state {
+                    let same_row = row_pin.node == pin.node && row_pin.y == pin.y;
+                    let start_offset = if same_row { pin.x as usize } else { 0 };
+
+                    if start_offset == 0 && cells[0].semantic_content() != semantic {
+                        let mut previous_row = self.pin_up(row_pin, 1)?;
+                        previous_row.x = self.node_for_pin(&previous_row)?.page.size_cols() - 1;
+                        end = Some(previous_row);
+                        break;
+                    }
+
+                    for (x, cell) in cells.iter().enumerate().skip(start_offset) {
+                        if cell.semantic_content() != semantic {
+                            row_pin.x = (x - 1)
+                                .try_into()
+                                .expect("row cell index must fit CellCountInt");
+                            end = Some(row_pin);
+                            break;
+                        }
+                    }
+
+                    if end.is_some() {
+                        break;
+                    }
+                }
+
+                if !row.wrap() {
+                    row_pin.x = node.page.size_cols() - 1;
+                    end = Some(row_pin);
+                    break;
+                }
+            }
+
+            end?
+        };
+
+        self.select_line_trimmed(start_pin, end_pin, options.whitespace)
+    }
+
+    fn select_line_trimmed(
+        &self,
+        start_pin: Pin,
+        end_pin: Pin,
+        whitespace: Option<&[u32]>,
+    ) -> Option<selection::Selection> {
+        let start = if let Some(whitespace) = whitespace {
+            let mut result = None;
+            for pin in self.cell_iterator_from_pin(Direction::RightDown, start_pin, Some(end_pin)) {
+                if self.pin_before(end_pin, pin).unwrap_or(true) {
+                    break;
+                }
+
+                let cell = self.pin_cell(pin)?;
+                if !cell.has_text() || whitespace.contains(&cell.codepoint()) {
+                    continue;
+                }
+
+                result = Some(pin);
+                break;
+            }
+            result?
+        } else {
+            start_pin
+        };
+
+        let end = if let Some(whitespace) = whitespace {
+            let mut result = None;
+            for pin in self.cell_iterator_from_pin(Direction::LeftUp, end_pin, Some(start_pin)) {
+                if self.pin_before(pin, start_pin).unwrap_or(true) {
+                    break;
+                }
+
+                let cell = self.pin_cell(pin)?;
+                if !cell.has_text() || whitespace.contains(&cell.codepoint()) {
+                    continue;
+                }
+
+                result = Some(pin);
+                break;
+            }
+            result?
+        } else {
+            end_pin
+        };
+
+        Some(selection::Selection::new(start, end, false))
+    }
+
     fn select_word(&self, pin: Pin, boundary_codepoints: &[u32]) -> Option<selection::Selection> {
         if pin.garbage || !self.pin_is_valid(&pin) {
             return None;
@@ -3823,6 +4010,34 @@ mod tests {
                 selection_codepoints::DEFAULT_WORD_BOUNDARIES,
             )
             .expect("word-between selection must exist");
+        assert!(!selection.rectangle());
+        assert_selection_screen_points(list, selection, start, end);
+    }
+
+    fn assert_line_selection(
+        list: &PageList,
+        pin: (CellCountInt, u32),
+        start: (CellCountInt, u32),
+        end: (CellCountInt, u32),
+    ) {
+        let selection = list
+            .select_line(SelectLineOptions::new(screen_pin(list, pin.0, pin.1)))
+            .expect("line selection must exist");
+        assert!(!selection.is_tracked());
+        assert!(!selection.rectangle());
+        assert_selection_screen_points(list, selection, start, end);
+    }
+
+    fn assert_line_selection_with_options(
+        list: &PageList,
+        options: SelectLineOptions<'_>,
+        start: (CellCountInt, u32),
+        end: (CellCountInt, u32),
+    ) {
+        let selection = list
+            .select_line(options)
+            .expect("line selection must exist");
+        assert!(!selection.is_tracked());
         assert!(!selection.rectangle());
         assert_selection_screen_points(list, selection, start, end);
     }
@@ -11857,6 +12072,368 @@ mod tests {
             .is_none());
         assert!(list
             .drag_selection(valid, garbage, 35, 45, false, geometry)
+            .is_none());
+    }
+
+    #[test]
+    fn select_line_matches_upstream_basic_cases() {
+        let mut list = PageList::init(10, 10, None).unwrap();
+        set_screen_text_lines(&mut list, &["ABC  DEF", " 123", "456"]);
+
+        assert_line_selection(&list, (0, 0), (0, 0), (7, 0));
+        assert_line_selection(&list, (7, 0), (0, 0), (7, 0));
+        assert_line_selection(&list, (3, 0), (0, 0), (7, 0));
+        assert_line_selection(&list, (9, 0), (0, 0), (7, 0));
+        assert!(list
+            .select_line(SelectLineOptions::new(screen_pin(&list, 0, 5)))
+            .is_none());
+    }
+
+    #[test]
+    fn select_line_crosses_soft_wrap_like_upstream() {
+        let mut list = PageList::init(5, 10, None).unwrap();
+        set_screen_text_lines(&mut list, &[" 12 3", "4012 ", "     ", " 123"]);
+        set_screen_row_wrap(&mut list, 0, true);
+        set_screen_row_wrap(&mut list, 1, true);
+
+        assert_line_selection(&list, (1, 0), (1, 0), (3, 1));
+        assert_line_selection(&list, (1, 1), (1, 0), (3, 1));
+        assert_line_selection(&list, (3, 0), (1, 0), (3, 1));
+    }
+
+    #[test]
+    fn select_line_crosses_full_soft_wrap_like_upstream() {
+        let mut list = PageList::init(5, 5, None).unwrap();
+        set_screen_text_lines(&mut list, &["1ABCD", "2EFGH", "3IJKL"]);
+        set_screen_row_wrap(&mut list, 0, true);
+
+        assert_line_selection(&list, (2, 1), (0, 0), (4, 1));
+    }
+
+    #[test]
+    fn select_line_stops_at_hard_row_boundaries() {
+        let mut list = PageList::init(5, 5, None).unwrap();
+        set_screen_text_lines(&mut list, &["12345", "678"]);
+
+        assert_line_selection(&list, (2, 0), (0, 0), (4, 0));
+        assert_line_selection(&list, (1, 1), (0, 1), (2, 1));
+    }
+
+    #[test]
+    fn select_line_disabled_whitespace_selects_full_span() {
+        let mut list = PageList::init(5, 10, None).unwrap();
+        set_screen_text_lines(&mut list, &[" 12 3", "4012 ", "     ", " 123"]);
+        set_screen_row_wrap(&mut list, 0, true);
+        set_screen_row_wrap(&mut list, 1, true);
+
+        assert_line_selection_with_options(
+            &list,
+            SelectLineOptions {
+                pin: screen_pin(&list, 1, 0),
+                whitespace: None,
+                semantic_prompt_boundary: true,
+            },
+            (0, 0),
+            (4, 2),
+        );
+        assert_line_selection_with_options(
+            &list,
+            SelectLineOptions {
+                pin: screen_pin(&list, 1, 3),
+                whitespace: None,
+                semantic_prompt_boundary: true,
+            },
+            (0, 3),
+            (4, 3),
+        );
+    }
+
+    #[test]
+    fn select_line_with_scrollback_uses_active_coordinates() {
+        let mut list = PageList::init(2, 3, None).unwrap();
+        list.grow_rows(2).unwrap();
+        set_screen_text_lines(&mut list, &["1A", "2B", "3C", "4D", "5E"]);
+
+        let first = list
+            .select_line(SelectLineOptions::new(
+                list.pin(point::Point::active(Coordinate::new(0, 0)))
+                    .unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(
+            list.point_from_pin(point::Tag::Active, first.start()),
+            Some(point::Point::active(Coordinate::new(0, 0)))
+        );
+        assert_eq!(
+            list.point_from_pin(point::Tag::Active, first.end()),
+            Some(point::Point::active(Coordinate::new(1, 0)))
+        );
+        assert_eq!(screen_coord(&list, first.start()), Coordinate::new(0, 2));
+        assert_eq!(screen_coord(&list, first.end()), Coordinate::new(1, 2));
+
+        let last = list
+            .select_line(SelectLineOptions::new(
+                list.pin(point::Point::active(Coordinate::new(0, 2)))
+                    .unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(
+            list.point_from_pin(point::Tag::Active, last.start()),
+            Some(point::Point::active(Coordinate::new(0, 2)))
+        );
+        assert_eq!(
+            list.point_from_pin(point::Tag::Active, last.end()),
+            Some(point::Point::active(Coordinate::new(1, 2)))
+        );
+        assert_eq!(screen_coord(&list, last.start()), Coordinate::new(0, 4));
+        assert_eq!(screen_coord(&list, last.end()), Coordinate::new(1, 4));
+    }
+
+    #[test]
+    fn select_line_semantic_boundaries_split_mid_row() {
+        let mut list = PageList::init(10, 5, None).unwrap();
+        for (x, ch) in "$>".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                x.try_into().unwrap(),
+                0,
+                ch,
+                SemanticContent::Prompt,
+            );
+        }
+        for (offset, ch) in "command".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                (offset + 2).try_into().unwrap(),
+                0,
+                ch,
+                SemanticContent::Input,
+            );
+        }
+
+        assert_line_selection(&list, (0, 0), (0, 0), (1, 0));
+        assert_line_selection(&list, (5, 0), (2, 0), (8, 0));
+    }
+
+    #[test]
+    fn select_line_semantic_boundaries_split_rows() {
+        let mut list = PageList::init(10, 5, None).unwrap();
+        for (x, ch) in "ls -la".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                x.try_into().unwrap(),
+                0,
+                ch,
+                SemanticContent::Input,
+            );
+        }
+        for (x, ch) in "file.txt".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                x.try_into().unwrap(),
+                1,
+                ch,
+                SemanticContent::Output,
+            );
+        }
+
+        assert_line_selection(&list, (2, 0), (0, 0), (5, 0));
+        assert_line_selection(&list, (2, 1), (0, 1), (7, 1));
+    }
+
+    #[test]
+    fn select_line_semantic_boundaries_split_output_prompt_input() {
+        let mut list = PageList::init(10, 5, None).unwrap();
+        for (x, ch) in "out".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                x.try_into().unwrap(),
+                0,
+                ch,
+                SemanticContent::Output,
+            );
+        }
+        for (offset, ch) in "$>".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                (offset + 3).try_into().unwrap(),
+                0,
+                ch,
+                SemanticContent::Prompt,
+            );
+        }
+        for (offset, ch) in "cmd".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                (offset + 5).try_into().unwrap(),
+                0,
+                ch,
+                SemanticContent::Input,
+            );
+        }
+
+        assert_line_selection(&list, (1, 0), (0, 0), (2, 0));
+        assert_line_selection(&list, (3, 0), (3, 0), (4, 0));
+        assert_line_selection(&list, (6, 0), (5, 0), (7, 0));
+    }
+
+    #[test]
+    fn select_line_semantic_boundaries_cross_soft_wrap() {
+        let mut list = PageList::init(5, 5, None).unwrap();
+        set_screen_cell_semantic(&mut list, 0, 0, '$', SemanticContent::Prompt);
+        set_screen_cell_semantic(&mut list, 1, 0, ' ', SemanticContent::Prompt);
+        for (offset, ch) in "cmd".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                (offset + 2).try_into().unwrap(),
+                0,
+                ch,
+                SemanticContent::Input,
+            );
+        }
+        set_screen_row_wrap(&mut list, 0, true);
+        set_screen_cell_semantic(&mut list, 0, 1, '1', SemanticContent::Input);
+        set_screen_cell_semantic(&mut list, 1, 1, '2', SemanticContent::Input);
+        for (offset, ch) in "out".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                (offset + 2).try_into().unwrap(),
+                1,
+                ch,
+                SemanticContent::Output,
+            );
+        }
+
+        assert_line_selection(&list, (3, 0), (2, 0), (1, 1));
+        assert_line_selection(&list, (0, 1), (2, 0), (1, 1));
+        assert_line_selection(&list, (3, 1), (2, 1), (4, 1));
+    }
+
+    #[test]
+    fn select_line_disabled_semantic_boundary_selects_whole_line() {
+        let mut list = PageList::init(10, 5, None).unwrap();
+        set_screen_cell_semantic(&mut list, 0, 0, '$', SemanticContent::Prompt);
+        set_screen_cell_semantic(&mut list, 1, 0, ' ', SemanticContent::Prompt);
+        for (offset, ch) in "command".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                (offset + 2).try_into().unwrap(),
+                0,
+                ch,
+                SemanticContent::Input,
+            );
+        }
+
+        assert_line_selection_with_options(
+            &list,
+            SelectLineOptions {
+                pin: screen_pin(&list, 0, 0),
+                whitespace: Some(selection_codepoints::DEFAULT_LINE_WHITESPACE),
+                semantic_prompt_boundary: false,
+            },
+            (0, 0),
+            (8, 0),
+        );
+    }
+
+    #[test]
+    fn select_line_disabled_whitespace_still_honors_semantic_boundaries() {
+        let mut list = PageList::init(10, 5, None).unwrap();
+        set_screen_cell_semantic(&mut list, 0, 0, '$', SemanticContent::Prompt);
+        set_screen_cell_semantic(&mut list, 1, 0, ' ', SemanticContent::Prompt);
+        for (offset, ch) in "command".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                (offset + 2).try_into().unwrap(),
+                0,
+                ch,
+                SemanticContent::Input,
+            );
+        }
+
+        assert_line_selection_with_options(
+            &list,
+            SelectLineOptions {
+                pin: screen_pin(&list, 0, 0),
+                whitespace: None,
+                semantic_prompt_boundary: true,
+            },
+            (0, 0),
+            (1, 0),
+        );
+        assert_line_selection_with_options(
+            &list,
+            SelectLineOptions {
+                pin: screen_pin(&list, 0, 0),
+                whitespace: None,
+                semantic_prompt_boundary: false,
+            },
+            (0, 0),
+            (9, 0),
+        );
+    }
+
+    #[test]
+    fn select_line_semantic_boundary_first_cell_of_row() {
+        let mut list = PageList::init(5, 5, None).unwrap();
+        for (x, ch) in "12345".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                x.try_into().unwrap(),
+                0,
+                ch,
+                SemanticContent::Input,
+            );
+        }
+        set_screen_row_wrap(&mut list, 0, true);
+        for (x, ch) in "ABCDE".chars().enumerate() {
+            set_screen_cell_semantic(
+                &mut list,
+                x.try_into().unwrap(),
+                1,
+                ch,
+                SemanticContent::Output,
+            );
+        }
+
+        assert_line_selection(&list, (2, 0), (0, 0), (4, 0));
+        assert_line_selection(&list, (2, 1), (0, 1), (4, 1));
+    }
+
+    #[test]
+    fn select_line_semantic_all_same_content_crosses_soft_wrap() {
+        let mut list = PageList::init(5, 5, None).unwrap();
+        for (y, text) in ["promp", "t tex", "t"].iter().enumerate() {
+            for (x, ch) in text.chars().enumerate() {
+                set_screen_cell_semantic(
+                    &mut list,
+                    x.try_into().unwrap(),
+                    y.try_into().unwrap(),
+                    ch,
+                    SemanticContent::Prompt,
+                );
+            }
+        }
+        set_screen_row_wrap(&mut list, 0, true);
+        set_screen_row_wrap(&mut list, 1, true);
+
+        assert_line_selection(&list, (2, 1), (0, 0), (0, 2));
+    }
+
+    #[test]
+    fn select_line_rejects_invalid_garbage_and_all_whitespace() {
+        let mut list = PageList::init(5, 5, None).unwrap();
+        let other = PageList::init(5, 5, None).unwrap();
+        set_screen_text_lines(&mut list, &["     ", "     "]);
+        set_screen_row_wrap(&mut list, 0, true);
+        let invalid = Pin::new(other.first_node_ptr(), 0, 0);
+        let mut garbage = screen_pin(&list, 0, 0);
+        garbage.garbage = true;
+
+        assert!(list.select_line(SelectLineOptions::new(invalid)).is_none());
+        assert!(list.select_line(SelectLineOptions::new(garbage)).is_none());
+        assert!(list
+            .select_line(SelectLineOptions::new(screen_pin(&list, 0, 0)))
             .is_none());
     }
 

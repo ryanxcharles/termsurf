@@ -213,3 +213,78 @@ proving semantic boundaries still apply with `whitespace = None` unless
 `semantic_prompt_boundary = false`.
 
 Follow-up Codex review approved the updated design with no remaining blockers.
+
+## Result
+
+**Result:** Pass
+
+Implemented private PageList line selection in
+`roastty/src/terminal/page_list.rs`:
+
+- `SelectLineOptions<'a>` stores the clicked `Pin`, optional whitespace table,
+  and semantic-boundary toggle.
+- `PageList::select_line()` ports upstream `Screen.selectLine` behavior into
+  Roastty's PageList model.
+- `PageList::select_line_trimmed()` handles the upstream leading/trailing
+  whitespace trimming behavior and returns `None` for all-whitespace or empty
+  selections.
+
+The implementation stays private to PageList. It does not add
+`SelectionGesture`, press/release state, word/line drag wiring, semantic-output
+selection, Screen, Terminal, public ABI, renderer, parser, app, platform input,
+autoscroll, deep-press, or mouse event behavior.
+
+The tests cover the upstream line-selection cases this experiment targeted:
+
+- ordinary start/middle/end clicks;
+- clicks on unwritten cells in an active row;
+- soft-wrapped rows, full-width soft wraps, and hard row boundaries;
+- disabled whitespace trimming;
+- real scrollback using a `2x3` PageList grown to five rows, proving active
+  coordinates select the visible active rows while mapping to the expected
+  screen rows;
+- semantic-content boundaries for mid-row transitions, row transitions,
+  prompt/output/input splits, soft-wrap transitions, first-cell-of-row
+  transitions, disabled semantic boundaries, and all-same semantic content
+  across soft wraps.
+
+Roastty-specific edge coverage was also added for invalid and garbage pins,
+all-whitespace wrapped lines, and the requirement that line selections are
+untracked and non-rectangular.
+
+Verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty select_line
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Observed results:
+
+- `cargo test -p roastty select_line`: 15 passed.
+- `cargo test -p roastty terminal::page_list`: 369 passed.
+- `cargo test -p roastty`: 662 unit tests passed, ABI harness passed, and
+  doctests passed.
+
+Codex reviewed the implementation after the first verification run and found one
+real blocker: the scrollback test did not actually create scrollback. The test
+was corrected to initialize a `2x3` PageList, grow two history rows, populate
+rows `1A` through `5E`, and assert that active `(0, 0)` selects screen row `2`
+while active `(0, 2)` selects screen row `4`.
+
+Codex reviewed the corrected implementation and found no remaining
+implementation blockers. Its only remaining finding was to record this result
+and update the README status.
+
+## Conclusion
+
+Experiment 75 successfully ports line-selection calculation into Roastty's
+current PageList-centered terminal layer. This gives the rewrite ordinary line
+selection, soft-wrap line selection, whitespace trimming, semantic-content
+boundary handling, and scrollback-aware active-coordinate behavior without
+adding UI gesture state or public API.
+
+The next experiment can build on this by porting the next selection primitive or
+gesture layer that depends on word and line selection.
