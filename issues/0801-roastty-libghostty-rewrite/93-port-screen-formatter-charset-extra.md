@@ -241,3 +241,90 @@ Codex re-reviewed the updated design and found no remaining blockers. It noted
 one non-blocking implementation preference: make GR emission return an optional
 sequence for G1/G3 and `None` for default G2, rather than using `unreachable!()`
 for any normal state.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a private `roastty/src/terminal/charsets.rs` module with:
+
+- `CharsetSlot` for G0, G1, G2, and G3;
+- `CharsetGrSlot` for only the upstream-valid GR slots G1, G2, and G3;
+- `Charset` for Utf8, Ascii, British, and DecSpecial.
+
+`CharsetGrSlot` makes G0-as-GR unrepresentable in normal Rust code. GR emission
+uses an optional sequence helper: G1 emits `\x1b~`, default G2 emits nothing,
+and G3 emits `\x1b|`.
+
+The charset translation tables were added only as private test parity helpers
+under `#[cfg(test)]`. They are not wired into parser mutation or print-time
+translation. Tests cover table length, ASCII identity mapping, British `#` ->
+`£`, and key DEC special graphics mappings.
+
+`Screen` now has private charset state with upstream defaults:
+
+- all G0-G3 designations default to Utf8;
+- GL defaults to G0;
+- GR defaults to G2.
+
+`ScreenFormatterExtra` now includes a private `charsets` flag. Charset extras
+are emitted only for VT output and only when requested. Default charset state
+emits no bytes. Non-default designations and invocations emit the upstream
+restore sequences:
+
+- G0: `ESC ( final`
+- G1: `ESC ) final`
+- G2: `ESC * final`
+- G3: `ESC + final`
+- Ascii final: `B`
+- British final: `A`
+- DEC special final: `0`
+- GL G1: SO (`\x0e`)
+- GL G2: `ESC n`
+- GL G3: `ESC o`
+- GR G1: `ESC ~`
+- GR G3: `ESC |`
+
+For the currently implemented screen-extra subset, ordering is:
+
+```text
+style -> protection -> charsets -> cursor
+```
+
+Pin maps remain byte-indexed. Charset extra bytes are assigned to the last
+post-content pin when content emitted pins, or to the screen top-left pin when
+content emitted no pins, including `Content::None`, invalid selections, and
+valid selections trimmed to empty output.
+
+`TerminalFormatter` still does not forward screen extras. Regression tests prove
+that non-default charset state does not change default TerminalFormatter text or
+pin maps.
+
+Verification passed:
+
+```text
+cargo fmt
+cargo test -p roastty charsets                 # 6 passed
+cargo test -p roastty screen_formatter         # 36 passed
+cargo test -p roastty terminal_formatter       # 15 passed
+cargo test -p roastty styled_pin_map           # 9 passed
+cargo test -p roastty pin_map                  # 41 passed
+cargo test -p roastty page_string              # 12 passed
+cargo test -p roastty terminal::page_list      # 524 passed
+cargo test -p roastty                          # 870 unit + 1 ABI passed
+```
+
+Codex result review found no blockers. It confirmed invalid GR state is avoided
+by the type shape, screen charset defaults match upstream, charset extras are
+VT-only and correctly ordered, designation/invocation bytes match Ghostty's
+formatter path, pin maps remain byte-indexed, and TerminalFormatter continues to
+delegate without screen extras. Codex noted one non-blocking recording caveat
+that the charset tables should be described as table parity test helpers, not
+production formatter behavior; this result records them that way.
+
+## Conclusion
+
+Experiment 93 completes charset restore for `ScreenFormatter` without adding
+parser or print-time charset behavior. Roastty can now restore active SGR style,
+protection state, charset designations/invocations, and cursor position for the
+ported VT screen-extra subset.

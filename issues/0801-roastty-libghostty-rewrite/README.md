@@ -295,7 +295,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 92: Port Screen Formatter Protection Extra](92-port-screen-formatter-protection-extra.md)
   — **Pass**
 - [Experiment 93: Port Screen Formatter Charset Extra](93-port-screen-formatter-charset-extra.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

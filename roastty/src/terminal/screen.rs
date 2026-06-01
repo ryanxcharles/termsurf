@@ -1,5 +1,6 @@
 //! Terminal screen state.
 
+use super::charsets;
 use super::color;
 use super::page_list::{
     CodepointMapEntry, PageList, PageListAllocError, PageOutputFormat, PageStringWithPinMap,
@@ -12,6 +13,7 @@ use super::style;
 #[derive(Debug)]
 pub(super) struct Screen {
     cursor: ScreenCursor,
+    charset: ScreenCharsetState,
     pages: PageList,
 }
 
@@ -21,6 +23,16 @@ struct ScreenCursor {
     y: CellCountInt,
     style: style::Style,
     protected: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ScreenCharsetState {
+    g0: charsets::Charset,
+    g1: charsets::Charset,
+    g2: charsets::Charset,
+    g3: charsets::Charset,
+    gl: charsets::CharsetSlot,
+    gr: charsets::CharsetGrSlot,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -51,6 +63,7 @@ pub(super) struct ScreenFormatterExtra {
     cursor: bool,
     style: bool,
     protection: bool,
+    charsets: bool,
 }
 
 impl Screen {
@@ -61,6 +74,7 @@ impl Screen {
     ) -> Result<Self, PageListAllocError> {
         Ok(Self {
             cursor: ScreenCursor::default(),
+            charset: ScreenCharsetState::default(),
             pages: PageList::init(cols, rows, max_scrollback_rows)?,
         })
     }
@@ -85,6 +99,25 @@ impl Screen {
     #[cfg(test)]
     pub(super) fn set_cursor_protected_for_tests(&mut self, protected: bool) {
         self.cursor.protected = protected;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_charset_for_tests(
+        &mut self,
+        slot: charsets::CharsetSlot,
+        charset: charsets::Charset,
+    ) {
+        self.charset.set(slot, charset);
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_charset_gl_for_tests(&mut self, slot: charsets::CharsetSlot) {
+        self.charset.gl = slot;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_charset_gr_for_tests(&mut self, slot: charsets::CharsetGrSlot) {
+        self.charset.gr = slot;
     }
 
     #[cfg(test)]
@@ -125,12 +158,47 @@ impl Default for ScreenCursor {
     }
 }
 
+impl ScreenCharsetState {
+    const fn get(self, slot: charsets::CharsetSlot) -> charsets::Charset {
+        match slot {
+            charsets::CharsetSlot::G0 => self.g0,
+            charsets::CharsetSlot::G1 => self.g1,
+            charsets::CharsetSlot::G2 => self.g2,
+            charsets::CharsetSlot::G3 => self.g3,
+        }
+    }
+
+    #[cfg(test)]
+    fn set(&mut self, slot: charsets::CharsetSlot, charset: charsets::Charset) {
+        match slot {
+            charsets::CharsetSlot::G0 => self.g0 = charset,
+            charsets::CharsetSlot::G1 => self.g1 = charset,
+            charsets::CharsetSlot::G2 => self.g2 = charset,
+            charsets::CharsetSlot::G3 => self.g3 = charset,
+        }
+    }
+}
+
+impl Default for ScreenCharsetState {
+    fn default() -> Self {
+        Self {
+            g0: charsets::Charset::Utf8,
+            g1: charsets::Charset::Utf8,
+            g2: charsets::Charset::Utf8,
+            g3: charsets::Charset::Utf8,
+            gl: charsets::CharsetSlot::G0,
+            gr: charsets::CharsetGrSlot::G2,
+        }
+    }
+}
+
 impl ScreenFormatterExtra {
     pub(super) const fn none() -> Self {
         Self {
             cursor: false,
             style: false,
             protection: false,
+            charsets: false,
         }
     }
 
@@ -149,8 +217,13 @@ impl ScreenFormatterExtra {
         self
     }
 
+    pub(super) const fn charsets(mut self, charsets: bool) -> Self {
+        self.charsets = charsets;
+        self
+    }
+
     const fn is_empty(self) -> bool {
-        !self.cursor && !self.style && !self.protection
+        !self.cursor && !self.style && !self.protection && !self.charsets
     }
 }
 
@@ -269,6 +342,9 @@ impl<'a> ScreenFormatter<'a> {
         if self.extra.protection && self.screen.cursor.protected {
             output.push_str("\x1b[1\"q");
         }
+        if self.extra.charsets {
+            self.push_charset_extras(&mut output);
+        }
         if self.extra.cursor {
             output.push_str(&format!(
                 "\x1b[{};{}H",
@@ -277,6 +353,33 @@ impl<'a> ScreenFormatter<'a> {
             ));
         }
         output
+    }
+
+    fn push_charset_extras(self, output: &mut String) {
+        for slot in [
+            charsets::CharsetSlot::G0,
+            charsets::CharsetSlot::G1,
+            charsets::CharsetSlot::G2,
+            charsets::CharsetSlot::G3,
+        ] {
+            let charset = self.screen.charset.get(slot);
+            if let Some(final_byte) = charset.designation_final() {
+                output.push('\x1b');
+                output.push(char::from(slot.designation_intermediate()));
+                output.push(char::from(final_byte));
+            }
+        }
+
+        match self.screen.charset.gl {
+            charsets::CharsetSlot::G0 => {}
+            charsets::CharsetSlot::G1 => output.push('\x0e'),
+            charsets::CharsetSlot::G2 => output.push_str("\x1bn"),
+            charsets::CharsetSlot::G3 => output.push_str("\x1bo"),
+        }
+
+        if let Some(sequence) = self.screen.charset.gr.invocation_sequence() {
+            output.push_str(sequence);
+        }
     }
 }
 
@@ -607,10 +710,98 @@ mod tests {
     }
 
     #[test]
+    fn screen_formatter_vt_default_charset_extra_emits_nothing() {
+        let screen = screen_with_lines(&["hi"]);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().charsets(true))
+            .format();
+
+        assert_eq!(actual, "hi");
+    }
+
+    #[test]
+    fn screen_formatter_vt_charset_designations_emit_upstream_sequences() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::Ascii);
+        screen.set_charset_for_tests(charsets::CharsetSlot::G1, charsets::Charset::British);
+        screen.set_charset_for_tests(charsets::CharsetSlot::G2, charsets::Charset::DecSpecial);
+        screen.set_charset_for_tests(charsets::CharsetSlot::G3, charsets::Charset::Ascii);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().charsets(true))
+            .format();
+
+        assert_eq!(actual, "hi\x1b(B\x1b)A\x1b*0\x1b+B");
+    }
+
+    #[test]
+    fn screen_formatter_vt_charset_gl_invocations_emit_upstream_sequences() {
+        for (slot, expected) in [
+            (charsets::CharsetSlot::G1, "hi\x0e"),
+            (charsets::CharsetSlot::G2, "hi\x1bn"),
+            (charsets::CharsetSlot::G3, "hi\x1bo"),
+        ] {
+            let mut screen = screen_with_lines(&["hi"]);
+            screen.set_charset_gl_for_tests(slot);
+
+            let actual = formatter(&screen, PageOutputFormat::Vt)
+                .with_extra(ScreenFormatterExtra::none().charsets(true))
+                .format();
+
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_charset_gr_invocations_emit_upstream_sequences() {
+        for (slot, expected) in [
+            (charsets::CharsetGrSlot::G1, "hi\x1b~"),
+            (charsets::CharsetGrSlot::G3, "hi\x1b|"),
+        ] {
+            let mut screen = screen_with_lines(&["hi"]);
+            screen.set_charset_gr_for_tests(slot);
+
+            let actual = formatter(&screen, PageOutputFormat::Vt)
+                .with_extra(ScreenFormatterExtra::none().charsets(true))
+                .format();
+
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_style_protection_charset_and_cursor_extras_keep_upstream_order() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_position_for_tests(4, 2);
+        screen.set_cursor_protected_for_tests(true);
+        screen.set_cursor_style_for_tests(style::Style {
+            fg_color: style::Color::Palette(1),
+            ..style::Style::default()
+        });
+        screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
+        screen.set_charset_gl_for_tests(charsets::CharsetSlot::G1);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(
+                ScreenFormatterExtra::none()
+                    .style(true)
+                    .protection(true)
+                    .charsets(true)
+                    .cursor(true),
+            )
+            .format();
+
+        assert_eq!(actual, "hi\x1b[0m\x1b[38;5;1m\x1b[1\"q\x1b(0\x0e\x1b[3;5H");
+    }
+
+    #[test]
     fn screen_formatter_plain_and_html_ignore_cursor_and_style_extras() {
         let mut screen = screen_with_lines(&["<hi"]);
         screen.set_cursor_position_for_tests(4, 2);
         screen.set_cursor_protected_for_tests(true);
+        screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
+        screen.set_charset_gl_for_tests(charsets::CharsetSlot::G1);
         screen.set_cursor_style_for_tests(style::Style {
             flags: style::Flags {
                 bold: true,
@@ -621,6 +812,7 @@ mod tests {
         let extra = ScreenFormatterExtra::none()
             .style(true)
             .protection(true)
+            .charsets(true)
             .cursor(true);
 
         assert_eq!(
@@ -642,6 +834,7 @@ mod tests {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(2, 1);
         screen.set_cursor_protected_for_tests(true);
+        screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
         screen.set_cursor_style_for_tests(style::Style {
             flags: style::Flags {
                 bold: true,
@@ -656,11 +849,12 @@ mod tests {
                 ScreenFormatterExtra::none()
                     .style(true)
                     .protection(true)
+                    .charsets(true)
                     .cursor(true),
             )
             .format();
 
-        assert_eq!(actual, "\x1b[0m\x1b[1m\x1b[1\"q\x1b[2;3H");
+        assert_eq!(actual, "\x1b[0m\x1b[1m\x1b[1\"q\x1b(0\x1b[2;3H");
     }
 
     #[test]
@@ -668,11 +862,12 @@ mod tests {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(2, 1);
         screen.set_cursor_protected_for_tests(true);
+        screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
         let actual = formatter(&screen, PageOutputFormat::Vt)
-            .with_extra(ScreenFormatterExtra::none().protection(true))
+            .with_extra(ScreenFormatterExtra::none().charsets(true))
             .format_with_pin_map();
 
-        assert_eq!(actual.text, "hi\x1b[1\"q");
+        assert_eq!(actual.text, "hi\x1b(0");
         assert_eq!(actual.text.len(), actual.pin_map.len());
         assert_eq!(actual.pin_map[0], screen_pin(&screen, 0, 0));
         assert_eq!(actual.pin_map[1], screen_pin(&screen, 1, 0));
@@ -699,16 +894,34 @@ mod tests {
     }
 
     #[test]
+    fn screen_formatter_vt_protection_extra_pin_map_uses_last_content_pin() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_protected_for_tests(true);
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().protection(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "hi\x1b[1\"q");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        assert_eq!(actual.pin_map[0], screen_pin(&screen, 0, 0));
+        assert_eq!(actual.pin_map[1], screen_pin(&screen, 1, 0));
+        for pin in &actual.pin_map[2..] {
+            assert_eq!(*pin, screen_pin(&screen, 1, 0));
+        }
+    }
+
+    #[test]
     fn screen_formatter_vt_extra_pin_map_without_content_uses_top_left_pin() {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(2, 1);
         screen.set_cursor_protected_for_tests(true);
+        screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
         let actual = formatter(&screen, PageOutputFormat::Vt)
             .with_content(ScreenFormatterContent::None)
-            .with_extra(ScreenFormatterExtra::none().protection(true))
+            .with_extra(ScreenFormatterExtra::none().charsets(true))
             .format_with_pin_map();
 
-        assert_eq!(actual.text, "\x1b[1\"q");
+        assert_eq!(actual.text, "\x1b(0");
         assert_eq!(actual.text.len(), actual.pin_map.len());
         for pin in actual.pin_map {
             assert_eq!(pin, screen_pin(&screen, 0, 0));
@@ -739,15 +952,16 @@ mod tests {
         let valid = screen_pin(&screen, 0, 0);
         screen.set_cursor_position_for_tests(2, 1);
         screen.set_cursor_protected_for_tests(true);
+        screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
 
         let actual = formatter(&screen, PageOutputFormat::Vt)
             .with_content(ScreenFormatterContent::Selection(Some(
                 selection::Selection::new(invalid, valid, false),
             )))
-            .with_extra(ScreenFormatterExtra::none().protection(true))
+            .with_extra(ScreenFormatterExtra::none().charsets(true))
             .format_with_pin_map();
 
-        assert_eq!(actual.text, "\x1b[1\"q");
+        assert_eq!(actual.text, "\x1b(0");
         assert_eq!(actual.text.len(), actual.pin_map.len());
         for pin in actual.pin_map {
             assert_eq!(pin, screen_pin(&screen, 0, 0));
@@ -759,13 +973,14 @@ mod tests {
         let mut screen = screen_with_lines(&["  "]);
         let selection = screen_selection(&screen, (0, 0), (1, 0));
         screen.set_cursor_protected_for_tests(true);
+        screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
 
         let actual = formatter(&screen, PageOutputFormat::Vt)
             .with_content(ScreenFormatterContent::Selection(Some(selection)))
-            .with_extra(ScreenFormatterExtra::none().protection(true))
+            .with_extra(ScreenFormatterExtra::none().charsets(true))
             .format_with_pin_map();
 
-        assert_eq!(actual.text, "\x1b[1\"q");
+        assert_eq!(actual.text, "\x1b(0");
         assert_eq!(actual.text.len(), actual.pin_map.len());
         for pin in actual.pin_map {
             assert_eq!(pin, screen_pin(&screen, 0, 0));

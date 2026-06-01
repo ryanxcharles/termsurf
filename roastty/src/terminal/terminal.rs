@@ -104,6 +104,7 @@ impl<'a> TerminalFormatter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal::charsets;
     use crate::terminal::color;
     use crate::terminal::page_list::{CodepointReplacement, Pin};
     use crate::terminal::selection;
@@ -377,6 +378,14 @@ mod tests {
                 ..style::Style::default()
             });
         terminal.screens.active.set_cursor_protected_for_tests(true);
+        terminal
+            .screens
+            .active
+            .set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
+        terminal
+            .screens
+            .active
+            .set_charset_gl_for_tests(charsets::CharsetSlot::G1);
 
         let terminal_output = formatter(&terminal, PageOutputFormat::Vt).format();
         let screen_output = screen_formatter(&terminal, PageOutputFormat::Vt).format();
@@ -390,6 +399,14 @@ mod tests {
         let mut terminal = terminal_with_lines(&["hi"]);
         terminal.screens.active.set_cursor_position_for_tests(4, 2);
         terminal.screens.active.set_cursor_protected_for_tests(true);
+        terminal
+            .screens
+            .active
+            .set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
+        terminal
+            .screens
+            .active
+            .set_charset_gl_for_tests(charsets::CharsetSlot::G1);
 
         let terminal_output = formatter(&terminal, PageOutputFormat::Vt).format_with_pin_map();
         let screen_output = screen_formatter(&terminal, PageOutputFormat::Vt).format_with_pin_map();

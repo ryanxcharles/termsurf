@@ -2,6 +2,9 @@
 mod bitmap_allocator;
 
 #[allow(dead_code)]
+mod charsets;
+
+#[allow(dead_code)]
 mod color;
 
 #[allow(dead_code)]
