@@ -112,6 +112,7 @@ struct ScreenCharsetState {
     g3: charsets::Charset,
     gl: charsets::CharsetSlot,
     gr: charsets::CharsetGrSlot,
+    single_shift: Option<charsets::CharsetSlot>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -237,6 +238,8 @@ impl Screen {
                 .map_err(BasicPrintError::from)?;
         }
 
+        let codepoint = self.map_charset_codepoint(codepoint);
+
         self.pages
             .write_active_cell(
                 self.cursor.x,
@@ -257,6 +260,22 @@ impl Screen {
             self.cursor.pending_wrap = false;
         }
         Ok(())
+    }
+
+    fn map_charset_codepoint(&mut self, codepoint: char) -> char {
+        let slot = self.charset.single_shift.take().unwrap_or(self.charset.gl);
+        let charset = self.charset.get(slot);
+        if matches!(charset, charsets::Charset::Utf8 | charsets::Charset::Ascii) {
+            return codepoint;
+        }
+        let Some(table) = charset.table() else {
+            return codepoint;
+        };
+        let codepoint = codepoint as u32;
+        if codepoint > u8::MAX.into() {
+            return ' ';
+        }
+        char::from_u32(table[codepoint as usize].into()).unwrap_or(' ')
     }
 
     pub(super) fn line_feed_basic(&mut self, rows: CellCountInt) -> Result<(), BasicPrintError> {
@@ -921,6 +940,39 @@ impl Screen {
         });
     }
 
+    pub(super) fn configure_charset(
+        &mut self,
+        slot: charsets::CharsetSlot,
+        charset: charsets::Charset,
+    ) {
+        self.charset.set(slot, charset);
+    }
+
+    pub(super) fn invoke_charset(
+        &mut self,
+        bank: charsets::CharsetBank,
+        slot: charsets::CharsetSlot,
+        single: bool,
+    ) {
+        if single {
+            debug_assert!(matches!(bank, charsets::CharsetBank::Gl));
+            self.charset.single_shift = Some(slot);
+            return;
+        }
+
+        match bank {
+            charsets::CharsetBank::Gl => self.charset.gl = slot,
+            charsets::CharsetBank::Gr => {
+                self.charset.gr = match slot {
+                    charsets::CharsetSlot::G0 => charsets::CharsetGrSlot::G2,
+                    charsets::CharsetSlot::G1 => charsets::CharsetGrSlot::G1,
+                    charsets::CharsetSlot::G2 => charsets::CharsetGrSlot::G2,
+                    charsets::CharsetSlot::G3 => charsets::CharsetGrSlot::G3,
+                };
+            }
+        }
+    }
+
     pub(super) fn clear_cursor_hyperlink(&mut self) {
         self.cursor.hyperlink = None;
     }
@@ -1264,7 +1316,6 @@ impl ScreenCharsetState {
         }
     }
 
-    #[cfg(test)]
     fn set(&mut self, slot: charsets::CharsetSlot, charset: charsets::Charset) {
         match slot {
             charsets::CharsetSlot::G0 => self.g0 = charset,
@@ -1284,6 +1335,7 @@ impl Default for ScreenCharsetState {
             g3: charsets::Charset::Utf8,
             gl: charsets::CharsetSlot::G0,
             gr: charsets::CharsetGrSlot::G2,
+            single_shift: None,
         }
     }
 }

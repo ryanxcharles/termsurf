@@ -1,6 +1,6 @@
 //! Terminal byte stream decoding.
 
-use super::{cursor, device_attributes, device_status, modes, osc, sgr};
+use super::{charsets, cursor, device_attributes, device_status, modes, osc, sgr};
 
 const CSI_PARAM_CAPACITY: usize = 24;
 
@@ -95,6 +95,15 @@ pub(super) enum Action {
     RestoreCursor,
     ReverseIndex,
     FullReset,
+    ConfigureCharset {
+        slot: charsets::CharsetSlot,
+        charset: charsets::Charset,
+    },
+    InvokeCharset {
+        bank: charsets::CharsetBank,
+        slot: charsets::CharsetSlot,
+        single: bool,
+    },
     CursorVisualStyle {
         style: cursor::VisualStyle,
         blinking: bool,
@@ -171,6 +180,7 @@ pub(super) trait Handler {
 enum EscapeState {
     Ground,
     Escape,
+    EscapeIntermediate(u8),
     EscapeInvalidIntermediate,
     Csi(CsiState),
     Osc,
@@ -279,6 +289,9 @@ impl Stream {
         match self.escape {
             EscapeState::Ground => self.next_ground(byte, handler),
             EscapeState::Escape => self.next_escape(byte, handler),
+            EscapeState::EscapeIntermediate(intermediate) => {
+                self.next_escape_intermediate(byte, intermediate, handler)
+            }
             EscapeState::EscapeInvalidIntermediate => {
                 self.next_escape_invalid_intermediate(byte);
                 Ok(())
@@ -325,7 +338,17 @@ impl Stream {
             b'\n' | 0x0b | 0x0c => handler.vt(Action::LineFeed)?,
             b'\r' => handler.vt(Action::CarriageReturn)?,
             0x05 => handler.vt(Action::Enquiry)?,
-            0x00..=0x04 | 0x06..=0x07 | 0x0e..=0x1a | 0x1c..=0x1f | 0x7f => {}
+            0x0e => handler.vt(Action::InvokeCharset {
+                bank: charsets::CharsetBank::Gl,
+                slot: charsets::CharsetSlot::G1,
+                single: false,
+            })?,
+            0x0f => handler.vt(Action::InvokeCharset {
+                bank: charsets::CharsetBank::Gl,
+                slot: charsets::CharsetSlot::G0,
+                single: false,
+            })?,
+            0x00..=0x04 | 0x06..=0x07 | 0x10..=0x1a | 0x1c..=0x1f | 0x7f => {}
             _ => self.next_utf8(byte, handler)?,
         }
         Ok(())
@@ -334,7 +357,7 @@ impl Stream {
     fn next_escape<H: Handler>(&mut self, byte: u8, handler: &mut H) -> Result<(), H::Error> {
         match byte {
             0x20..=0x2f => {
-                self.escape = EscapeState::EscapeInvalidIntermediate;
+                self.escape = EscapeState::EscapeIntermediate(byte);
                 Ok(())
             }
             b'[' => {
@@ -388,6 +411,62 @@ impl Stream {
                     request: device_attributes::Request::Primary,
                 })
             }
+            b'n' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gl,
+                    slot: charsets::CharsetSlot::G2,
+                    single: false,
+                })
+            }
+            b'o' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gl,
+                    slot: charsets::CharsetSlot::G3,
+                    single: false,
+                })
+            }
+            b'N' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gl,
+                    slot: charsets::CharsetSlot::G2,
+                    single: true,
+                })
+            }
+            b'O' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gl,
+                    slot: charsets::CharsetSlot::G3,
+                    single: true,
+                })
+            }
+            b'~' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gr,
+                    slot: charsets::CharsetSlot::G1,
+                    single: false,
+                })
+            }
+            b'}' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gr,
+                    slot: charsets::CharsetSlot::G2,
+                    single: false,
+                })
+            }
+            b'|' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gr,
+                    slot: charsets::CharsetSlot::G3,
+                    single: false,
+                })
+            }
             _ => {
                 self.escape = EscapeState::Ground;
                 Ok(())
@@ -399,6 +478,38 @@ impl Stream {
         if (0x30..=0x7e).contains(&byte) {
             self.escape = EscapeState::Ground;
         }
+    }
+
+    fn next_escape_intermediate<H: Handler>(
+        &mut self,
+        byte: u8,
+        intermediate: u8,
+        handler: &mut H,
+    ) -> Result<(), H::Error> {
+        if (0x20..=0x2f).contains(&byte) {
+            self.escape = EscapeState::EscapeInvalidIntermediate;
+            return Ok(());
+        }
+
+        if !(0x30..=0x7e).contains(&byte) {
+            return Ok(());
+        }
+
+        self.escape = EscapeState::Ground;
+        let slot = match intermediate {
+            b'(' => charsets::CharsetSlot::G0,
+            b')' => charsets::CharsetSlot::G1,
+            b'*' => charsets::CharsetSlot::G2,
+            b'+' => charsets::CharsetSlot::G3,
+            _ => return Ok(()),
+        };
+        let charset = match byte {
+            b'B' => charsets::Charset::Ascii,
+            b'A' => charsets::Charset::British,
+            b'0' => charsets::Charset::DecSpecial,
+            _ => return Ok(()),
+        };
+        handler.vt(Action::ConfigureCharset { slot, charset })
     }
 
     fn next_csi<H: Handler>(
@@ -1666,6 +1777,8 @@ mod tests {
                 | Action::RestoreCursor
                 | Action::ReverseIndex
                 | Action::FullReset
+                | Action::ConfigureCharset { .. }
+                | Action::InvokeCharset { .. }
                 | Action::CursorVisualStyle { .. }
                 | Action::DcsHook { .. }
                 | Action::DcsPut { .. }
@@ -3358,7 +3471,15 @@ mod tests {
         assert_eq!(print_chars(&handler), vec!['A', 'B']);
         assert_eq!(
             actions(&handler),
-            &[Action::Print { cp: 'A' }, Action::Print { cp: 'B' }]
+            &[
+                Action::Print { cp: 'A' },
+                Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gl,
+                    slot: charsets::CharsetSlot::G1,
+                    single: false,
+                },
+                Action::Print { cp: 'B' },
+            ]
         );
     }
 
@@ -3662,22 +3783,34 @@ mod tests {
 
     #[test]
     fn stream_intermediate_escape_forms_do_not_leak_or_dispatch_escape_actions() {
-        for input in [
-            b"A\x1b(DB".as_slice(),
-            b"A\x1b#EB".as_slice(),
-            b"A\x1b#7B".as_slice(),
-            b"A\x1b#8B".as_slice(),
-            b"A\x1b#MB".as_slice(),
+        for (input, expected) in [
+            (
+                b"A\x1b(DB".as_slice(),
+                vec![Action::Print { cp: 'A' }, Action::Print { cp: 'B' }],
+            ),
+            (
+                b"A\x1b#EB".as_slice(),
+                vec![Action::Print { cp: 'A' }, Action::Print { cp: 'B' }],
+            ),
+            (
+                b"A\x1b#7B".as_slice(),
+                vec![Action::Print { cp: 'A' }, Action::Print { cp: 'B' }],
+            ),
+            (
+                b"A\x1b#8B".as_slice(),
+                vec![Action::Print { cp: 'A' }, Action::Print { cp: 'B' }],
+            ),
+            (
+                b"A\x1b#MB".as_slice(),
+                vec![Action::Print { cp: 'A' }, Action::Print { cp: 'B' }],
+            ),
         ] {
             let mut stream = Stream::init();
             let mut handler = RecordingHandler::default();
 
             next_slice(&mut stream, &mut handler, input);
 
-            assert_eq!(
-                actions(&handler),
-                &[Action::Print { cp: 'A' }, Action::Print { cp: 'B' }]
-            );
+            assert_eq!(actions(&handler), expected.as_slice());
         }
     }
 
@@ -3736,6 +3869,192 @@ mod tests {
             actions(&handler),
             &[Action::Print { cp: 'A' }, Action::Print { cp: 'B' }]
         );
+    }
+
+    #[test]
+    fn stream_escape_charset_designations_dispatch_actions() {
+        for (intermediate, slot) in [
+            (b'(', charsets::CharsetSlot::G0),
+            (b')', charsets::CharsetSlot::G1),
+            (b'*', charsets::CharsetSlot::G2),
+            (b'+', charsets::CharsetSlot::G3),
+        ] {
+            for (final_byte, charset) in [
+                (b'B', charsets::Charset::Ascii),
+                (b'A', charsets::Charset::British),
+                (b'0', charsets::Charset::DecSpecial),
+            ] {
+                let mut stream = Stream::init();
+                let mut handler = RecordingHandler::default();
+
+                next_slice(
+                    &mut stream,
+                    &mut handler,
+                    &[b'\x1b', intermediate, final_byte],
+                );
+
+                assert_eq!(
+                    actions(&handler),
+                    &[Action::ConfigureCharset { slot, charset }]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stream_escape_charset_designation_rejects_invalid_forms() {
+        for (input, expected) in [
+            (
+                b"A\x1b(1B".as_slice(),
+                vec![Action::Print { cp: 'A' }, Action::Print { cp: 'B' }],
+            ),
+            (b"A\x1b-B".as_slice(), vec![Action::Print { cp: 'A' }]),
+            (b"A\x1b((B".as_slice(), vec![Action::Print { cp: 'A' }]),
+        ] {
+            let mut stream = Stream::init();
+            let mut handler = RecordingHandler::default();
+
+            next_slice(&mut stream, &mut handler, input);
+
+            assert_eq!(actions(&handler), expected.as_slice());
+        }
+    }
+
+    #[test]
+    fn stream_split_escape_charset_designation_dispatches_action() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"\x1b(");
+        assert_eq!(actions(&handler), &[]);
+        next_slice(&mut stream, &mut handler, b"0A");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::ConfigureCharset {
+                    slot: charsets::CharsetSlot::G0,
+                    charset: charsets::Charset::DecSpecial,
+                },
+                Action::Print { cp: 'A' },
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_escape_charset_designation_restores_ground_before_handler_error() {
+        let mut stream = Stream::init();
+        let fail = Action::ConfigureCharset {
+            slot: charsets::CharsetSlot::G0,
+            charset: charsets::Charset::DecSpecial,
+        };
+        let mut handler = ErrorOnActionHandler::new(fail);
+
+        assert_eq!(stream.next_slice(b"\x1b(0", &mut handler), Err(()));
+        stream.next_slice(b"A", &mut handler).unwrap();
+
+        assert_eq!(handler.actions, &[Action::Print { cp: 'A' }]);
+    }
+
+    #[test]
+    fn stream_escape_invoke_charset_restores_ground_before_handler_error() {
+        let mut stream = Stream::init();
+        let fail = Action::InvokeCharset {
+            bank: charsets::CharsetBank::Gl,
+            slot: charsets::CharsetSlot::G2,
+            single: true,
+        };
+        let mut handler = ErrorOnActionHandler::new(fail);
+
+        assert_eq!(stream.next_slice(b"\x1bN", &mut handler), Err(()));
+        stream.next_slice(b"A", &mut handler).unwrap();
+
+        assert_eq!(handler.actions, &[Action::Print { cp: 'A' }]);
+    }
+
+    #[test]
+    fn stream_escape_invoke_charset_dispatches_actions() {
+        for (input, expected) in [
+            (
+                b"\x0e".as_slice(),
+                Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gl,
+                    slot: charsets::CharsetSlot::G1,
+                    single: false,
+                },
+            ),
+            (
+                b"\x0f".as_slice(),
+                Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gl,
+                    slot: charsets::CharsetSlot::G0,
+                    single: false,
+                },
+            ),
+            (
+                b"\x1bn".as_slice(),
+                Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gl,
+                    slot: charsets::CharsetSlot::G2,
+                    single: false,
+                },
+            ),
+            (
+                b"\x1bo".as_slice(),
+                Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gl,
+                    slot: charsets::CharsetSlot::G3,
+                    single: false,
+                },
+            ),
+            (
+                b"\x1bN".as_slice(),
+                Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gl,
+                    slot: charsets::CharsetSlot::G2,
+                    single: true,
+                },
+            ),
+            (
+                b"\x1bO".as_slice(),
+                Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gl,
+                    slot: charsets::CharsetSlot::G3,
+                    single: true,
+                },
+            ),
+            (
+                b"\x1b~".as_slice(),
+                Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gr,
+                    slot: charsets::CharsetSlot::G1,
+                    single: false,
+                },
+            ),
+            (
+                b"\x1b}".as_slice(),
+                Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gr,
+                    slot: charsets::CharsetSlot::G2,
+                    single: false,
+                },
+            ),
+            (
+                b"\x1b|".as_slice(),
+                Action::InvokeCharset {
+                    bank: charsets::CharsetBank::Gr,
+                    slot: charsets::CharsetSlot::G3,
+                    single: false,
+                },
+            ),
+        ] {
+            let mut stream = Stream::init();
+            let mut handler = RecordingHandler::default();
+
+            next_slice(&mut stream, &mut handler, input);
+
+            assert_eq!(actions(&handler), &[expected]);
+        }
     }
 
     #[test]
@@ -7397,6 +7716,8 @@ mod tests {
                 | Action::RestoreCursor
                 | Action::ReverseIndex
                 | Action::FullReset
+                | Action::ConfigureCharset { .. }
+                | Action::InvokeCharset { .. }
                 | Action::CursorVisualStyle { .. }
                 | Action::DcsHook { .. }
                 | Action::DcsPut { .. }

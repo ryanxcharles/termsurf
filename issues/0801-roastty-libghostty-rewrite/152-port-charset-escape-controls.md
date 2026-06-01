@@ -45,8 +45,9 @@ not invent GR print behavior that Ghostty has not implemented.
    - Keep table access internal to `terminal::charsets`; do not expose public
      ABI.
    - Keep UTF-8 and ASCII as identity mappings.
-   - For non-ASCII codepoints printed through a mapped charset, follow Ghostty's
-     current behavior and write a space.
+   - For codepoints outside the u8 charset-table range printed through a mapped
+     charset, follow Ghostty's current behavior and write a space. Codepoints
+     inside the u8 range use the active charset table.
 
 2. Extend screen charset state.
    - Add single-shift state to `ScreenCharsetState`, matching Ghostty's
@@ -146,7 +147,8 @@ Required test coverage:
   - `ESC ( B` restores ASCII identity mapping;
   - non-ASCII codepoints remain unchanged under the default UTF-8 charset state;
   - non-ASCII codepoints remain unchanged after `ESC ( B` / ASCII designation;
-  - non-ASCII codepoints printed through a mapped charset become spaces;
+  - codepoints outside the u8 table range printed through a mapped charset
+    become spaces;
   - `SO`/`SI` switch between G1 and G0 for GL;
   - `ESC n` and `ESC o` lock G2/G3 into GL;
   - `ESC N` and `ESC O` affect exactly one printed character and then restore
@@ -194,3 +196,85 @@ tests proving default UTF-8 and ASCII-designated GL remain identity mappings for
 non-ASCII input. The verification plan was updated to require both tests.
 
 Follow-up Codex review approved the design with no findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now parses and executes runtime charset designation and invocation
+controls.
+
+Implemented:
+
+- moved ASCII, British, and DEC special graphics charset tables into runtime
+  code while keeping them internal to `terminal::charsets`;
+- added a `CharsetBank` value for GL/GR invocation actions;
+- added `ScreenCharsetState::single_shift`;
+- added screen helpers for G0-G3 configuration, GL/GR invocation, and
+  single-shift invocation;
+- mapped printed cells through the active GL charset or one-shot single-shift
+  slot before writing the active cell;
+- consumed single-shift state exactly once;
+- preserved Ghostty's current GR boundary by storing GR invocation state for VT
+  formatter round-tripping without applying GR to printable input;
+- added stream actions for charset configuration and invocation;
+- parsed `ESC (`, `ESC )`, `ESC *`, and `ESC +` designations for ASCII, British,
+  and DEC special charsets;
+- parsed `SI`, `SO`, `ESC n`, `ESC o`, `ESC N`, `ESC O`, `ESC ~`, `ESC }`, and
+  `ESC |` charset invocation controls;
+- wired terminal runtime handling without PTY responses, dirty rows, ABI
+  changes, app integration, PTY changes, or browser overlay changes.
+
+During implementation, the design text was corrected to match Ghostty's actual
+u8-table behavior: UTF-8 and ASCII remain identity mappings, mapped charsets use
+the table for u8-range codepoints, and only codepoints outside the u8 table
+range become spaces.
+
+The implementation also necessarily allowed completed non-ASCII Unicode scalar
+values to print as single cells. This is still not full Unicode width parity;
+wide-cell handling remains future terminal work.
+
+Verification:
+
+```bash
+cargo fmt
+cargo test -p roastty charset
+cargo test -p roastty invoke_charset
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo test -p roastty charset`: 28 passed
+- `cargo test -p roastty invoke_charset`: 3 passed
+- `cargo test -p roastty`: 1672 unit tests passed, 1 ABI harness test passed, 0
+  doc tests
+
+## Conclusion
+
+Experiment 152 completes the active GL charset runtime path and the parser
+controls needed to configure and invoke G0-G3 charsets. Roastty now has both the
+formatter-side charset state from earlier experiments and the runtime behavior
+that makes common DEC special graphics and British charset sequences visible in
+printed cells.
+
+The next experiment can move to another coherent terminal parser/runtime slice;
+charset GR rendering remains intentionally deferred because upstream Ghostty
+also leaves non-UTF-8 GR print behavior as a TODO.
+
+## Result Review
+
+Initial Codex result review found two real coverage gaps: save/restore coverage
+did not explicitly prove GL/GR invocation state survived, and handler-error
+recovery coverage did not include an ESC-based charset invocation action.
+
+Both gaps were fixed:
+
+- `stream_escape_invoke_charset_restores_ground_before_handler_error` covers
+  parser recovery after an `ESC N` `InvokeCharset` handler error.
+- `terminal_stream_charset_save_restore_preserves_gl_and_gr_invocation` proves
+  GL affects printing after restore and GR round-trips through VT formatter
+  extras after restore.
+
+Follow-up Codex result review approved the implementation and result with no
+findings.

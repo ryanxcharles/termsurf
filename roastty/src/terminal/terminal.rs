@@ -1,5 +1,6 @@
 //! Terminal state.
 
+use super::charsets;
 use super::color;
 #[cfg(test)]
 use super::cursor;
@@ -678,6 +679,14 @@ impl Handler for TerminalStreamHandler<'_> {
                 self.full_reset();
                 Ok(())
             }
+            Action::ConfigureCharset { slot, charset } => {
+                self.configure_charset(slot, charset);
+                Ok(())
+            }
+            Action::InvokeCharset { bank, slot, single } => {
+                self.invoke_charset(bank, slot, single);
+                Ok(())
+            }
             Action::CursorVisualStyle { style, blinking } => {
                 self.modes.set(modes::Mode::CursorBlinking, blinking);
                 self.screen.set_cursor_visual_style(style);
@@ -781,7 +790,7 @@ impl Handler for TerminalStreamHandler<'_> {
 
 impl TerminalStreamHandler<'_> {
     fn print(&mut self, cp: char) -> Result<(), TerminalStreamError> {
-        if !(cp.is_ascii() && !cp.is_ascii_control()) && cp != char::REPLACEMENT_CHARACTER {
+        if cp.is_ascii_control() {
             return Err(TerminalStreamError::UnsupportedCodepoint(cp));
         }
 
@@ -874,6 +883,19 @@ impl TerminalStreamHandler<'_> {
         self.pwd.clear();
         *self.dcs = dcs::Handler::new();
         *self.flags = TerminalFlags::default();
+    }
+
+    fn configure_charset(&mut self, slot: charsets::CharsetSlot, charset: charsets::Charset) {
+        self.screen.configure_charset(slot, charset);
+    }
+
+    fn invoke_charset(
+        &mut self,
+        bank: charsets::CharsetBank,
+        slot: charsets::CharsetSlot,
+        single: bool,
+    ) {
+        self.screen.invoke_charset(bank, slot, single);
     }
 
     fn decrqss(&mut self, request: dcs::Decrqss) {
@@ -2213,6 +2235,136 @@ mod tests {
             assert!(terminal.is_dirty_for_tests(0, row));
             assert!(terminal.is_dirty_for_tests(19, row));
         }
+    }
+
+    #[test]
+    fn terminal_stream_charset_designation_maps_printed_cells() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice("é\x1b(0`\x1b(A#\x1b(Bé".as_bytes())
+            .unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "é◆£é");
+        assert!(terminal.pty_response_for_tests().is_empty());
+    }
+
+    #[test]
+    fn terminal_stream_default_and_ascii_charset_preserve_non_ascii() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice("😀\x1b(B😀".as_bytes()).unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "😀😀");
+    }
+
+    #[test]
+    fn terminal_stream_mapped_charset_replaces_non_u8_codepoint_with_space() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice("\x1b(0😀".as_bytes()).unwrap();
+
+        assert_eq!(terminal.full_screen_plain_for_tests(false), " ");
+    }
+
+    #[test]
+    fn terminal_stream_invoke_charset_switches_gl_slots() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b)0`\x0e``\x0f`").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "`◆◆`");
+    }
+
+    #[test]
+    fn terminal_stream_charset_single_shift_affects_one_character() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b*0`\x1bN``").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "`◆`");
+    }
+
+    #[test]
+    fn terminal_stream_charset_gr_invocation_round_trips_without_affecting_print() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b|`").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "`");
+        assert_eq!(
+            formatter(&terminal, PageOutputFormat::Vt)
+                .with_extra(
+                    TerminalFormatterExtra::none()
+                        .screen(ScreenFormatterExtra::none().charsets(true))
+                )
+                .format(),
+            "`\x1b|"
+        );
+    }
+
+    #[test]
+    fn terminal_stream_charset_save_restore_preserves_designations_and_shifts() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"a\x1b*0\x1bN\x1b7b\x1b8``").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "a◆`");
+    }
+
+    #[test]
+    fn terminal_stream_charset_save_restore_preserves_gl_and_gr_invocation() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b)0\x0e\x1b|\x1b7\x0f\x1b~\x1b8`")
+            .unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "◆");
+        assert_eq!(
+            formatter(&terminal, PageOutputFormat::Vt)
+                .with_extra(
+                    TerminalFormatterExtra::none()
+                        .screen(ScreenFormatterExtra::none().charsets(true))
+                )
+                .format(),
+            "◆\x1b)0\x0e\x1b|"
+        );
+    }
+
+    #[test]
+    fn terminal_stream_charset_controls_do_not_dirty_rows_or_write_responses() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.clear_dirty_for_tests();
+        terminal.next_slice(b"\x1b(0\x1b)0\x0e\x1b~").unwrap();
+
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(9, 0));
+        assert!(terminal.pty_response_for_tests().is_empty());
+
+        terminal.next_slice(b"`").unwrap();
+        assert!(terminal.is_dirty_for_tests(0, 0));
+    }
+
+    #[test]
+    fn terminal_stream_ris_resets_charset_state() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b(0\x1b*0\x1bN\x1b|\x1bc`")
+            .unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "`");
+        assert_eq!(
+            formatter(&terminal, PageOutputFormat::Vt)
+                .with_extra(
+                    TerminalFormatterExtra::none()
+                        .screen(ScreenFormatterExtra::none().charsets(true))
+                )
+                .format(),
+            "`"
+        );
     }
 
     #[test]
@@ -7329,13 +7481,10 @@ mod tests {
 
         terminal.next_slice(&bytes[..1]).unwrap();
         assert_eq!(formatter(&terminal, PageOutputFormat::Plain).format(), "");
-        assert_eq!(
-            terminal.next_slice(&bytes[1..]),
-            Err(TerminalStreamError::UnsupportedCodepoint('é'))
-        );
+        terminal.next_slice(&bytes[1..]).unwrap();
 
-        assert_eq!(formatter(&terminal, PageOutputFormat::Plain).format(), "");
-        assert_eq!(terminal.cursor_position_for_tests(), (0, 0));
+        assert_eq!(formatter(&terminal, PageOutputFormat::Plain).format(), "é");
+        assert_eq!(terminal.cursor_position_for_tests(), (1, 0));
     }
 
     #[test]
@@ -7508,15 +7657,13 @@ mod tests {
     }
 
     #[test]
-    fn terminal_stream_non_ascii_print_returns_private_error() {
+    fn terminal_stream_non_ascii_prints_as_single_cell() {
         let mut terminal = Terminal::init(10, 2, None).unwrap();
 
-        assert_eq!(
-            terminal.next_slice("é".as_bytes()),
-            Err(TerminalStreamError::UnsupportedCodepoint('é'))
-        );
-        assert_eq!(formatter(&terminal, PageOutputFormat::Plain).format(), "");
-        assert_eq!(terminal.cursor_position_for_tests(), (0, 0));
+        terminal.next_slice("é".as_bytes()).unwrap();
+
+        assert_eq!(formatter(&terminal, PageOutputFormat::Plain).format(), "é");
+        assert_eq!(terminal.cursor_position_for_tests(), (1, 0));
     }
 
     #[test]

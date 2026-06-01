@@ -431,7 +431,7 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 151: Port RIS Full Reset](151-port-ris-full-reset.md) — **Pass**
 - [Experiment 152: Port Charset Escape Controls](152-port-charset-escape-controls.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

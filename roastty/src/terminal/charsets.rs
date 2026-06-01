@@ -16,6 +16,12 @@ pub(super) enum CharsetGrSlot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CharsetBank {
+    Gl,
+    Gr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Charset {
     Utf8,
     Ascii,
@@ -54,35 +60,33 @@ impl Charset {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn table(self) -> Option<[u16; 256]> {
+    pub(super) const fn table(self) -> Option<&'static [u16; 256]> {
         match self {
             Self::Utf8 => None,
-            Self::Ascii => Some(ascii_table()),
-            Self::British => Some(british_table()),
-            Self::DecSpecial => Some(dec_special_table()),
+            Self::Ascii => Some(&ASCII_TABLE),
+            Self::British => Some(&BRITISH_TABLE),
+            Self::DecSpecial => Some(&DEC_SPECIAL_TABLE),
         }
     }
 }
 
-#[cfg(test)]
-fn ascii_table() -> [u16; 256] {
+const fn ascii_table() -> [u16; 256] {
     let mut table = [0; 256];
-    for (idx, value) in table.iter_mut().enumerate() {
-        *value = idx as u16;
+    let mut idx = 0;
+    while idx < 256 {
+        table[idx] = idx as u16;
+        idx += 1;
     }
     table
 }
 
-#[cfg(test)]
-fn british_table() -> [u16; 256] {
+const fn british_table() -> [u16; 256] {
     let mut table = ascii_table();
     table[0x23] = 0x00a3;
     table
 }
 
-#[cfg(test)]
-fn dec_special_table() -> [u16; 256] {
+const fn dec_special_table() -> [u16; 256] {
     let mut table = ascii_table();
     table[0x60] = 0x25c6;
     table[0x61] = 0x2592;
@@ -117,6 +121,10 @@ fn dec_special_table() -> [u16; 256] {
     table[0x7e] = 0x00b7;
     table
 }
+
+const ASCII_TABLE: [u16; 256] = ascii_table();
+const BRITISH_TABLE: [u16; 256] = british_table();
+const DEC_SPECIAL_TABLE: [u16; 256] = dec_special_table();
 
 #[cfg(test)]
 mod tests {
