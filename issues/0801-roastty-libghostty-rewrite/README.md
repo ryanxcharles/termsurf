@@ -447,7 +447,7 @@ tests, choose the larger subsystem.
 - [Experiment 159: Port Key Event Value Types](159-port-key-event-value-types.md)
   — **Pass**
 - [Experiment 160: Port Key Encoder Core](160-port-key-encoder-core.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 

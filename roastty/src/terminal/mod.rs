@@ -35,7 +35,7 @@ mod hyperlink;
 mod highlight;
 
 #[allow(dead_code)]
-mod kitty;
+pub(crate) mod kitty;
 
 #[allow(dead_code)]
 mod modes;

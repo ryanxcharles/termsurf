@@ -115,12 +115,12 @@ impl ColorRequests {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct KeyFlags {
-    pub(super) disambiguate: bool,
-    pub(super) report_events: bool,
-    pub(super) report_alternates: bool,
-    pub(super) report_all: bool,
-    pub(super) report_associated: bool,
+pub(crate) struct KeyFlags {
+    pub(crate) disambiguate: bool,
+    pub(crate) report_events: bool,
+    pub(crate) report_alternates: bool,
+    pub(crate) report_all: bool,
+    pub(crate) report_associated: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -138,7 +138,7 @@ pub(super) struct KeyFlagStack {
 }
 
 impl KeyFlags {
-    pub(super) const DISABLED: Self = Self {
+    pub(crate) const DISABLED: Self = Self {
         disambiguate: false,
         report_events: false,
         report_alternates: false,
@@ -146,7 +146,7 @@ impl KeyFlags {
         report_associated: false,
     };
 
-    pub(super) const TRUE: Self = Self {
+    pub(crate) const TRUE: Self = Self {
         disambiguate: true,
         report_events: true,
         report_alternates: true,
@@ -154,7 +154,7 @@ impl KeyFlags {
         report_associated: true,
     };
 
-    pub(super) const fn int(self) -> u8 {
+    pub(crate) const fn int(self) -> u8 {
         (self.disambiguate as u8)
             | ((self.report_events as u8) << 1)
             | ((self.report_alternates as u8) << 2)
@@ -162,11 +162,11 @@ impl KeyFlags {
             | ((self.report_associated as u8) << 4)
     }
 
-    pub(super) const fn is_disabled(self) -> bool {
+    pub(crate) const fn is_disabled(self) -> bool {
         self.int() == Self::DISABLED.int()
     }
 
-    pub(super) const fn from_protocol_int(value: u16) -> Option<Self> {
+    pub(crate) const fn from_protocol_int(value: u16) -> Option<Self> {
         if value <= Self::TRUE.int() as u16 {
             Some(Self::from_int(value as u8))
         } else {
