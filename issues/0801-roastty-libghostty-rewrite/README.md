@@ -326,8 +326,7 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 109: Port VT and FF Linefeed Aliases](109-port-vt-ff-linefeed-aliases.md)
   — **Pass**
-- [Experiment 110: Port Escape Tab Set](110-port-escape-tab-set.md) —
-  **Designed**
+- [Experiment 110: Port Escape Tab Set](110-port-escape-tab-set.md) — **Pass**
 
 ## Non-Goals
 

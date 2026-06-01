@@ -185,3 +185,108 @@ Clean design re-review artifacts:
 - Result: `logs/codex-review/20260601-020953-678362-last-message.md`
 
 Codex found no remaining blockers and approved implementation.
+
+## Result
+
+**Result:** Pass.
+
+Implemented simple escape-sequence horizontal tab set for `ESC H`.
+
+Stream action changes:
+
+- `Action::TabSet` was added as a private stream action.
+- Escape-state `H` now dispatches `TabSet`.
+- The parser consumes `H` and returns to ground before invoking the generic
+  handler, so a handler error cannot leave the parser stuck in escape state.
+- Unsupported direct escape finals remain ignored and do not leak bytes.
+- CSI `W` and `CSI 0 W` remain unsupported in this experiment.
+- Pending invalid UTF-8 dispatches `U+FFFD` before `ESC H` dispatches `TabSet`.
+
+Tabstop mutation wiring:
+
+- `TerminalStreamHandler` now mutably borrows `Terminal.tabstops`.
+- A private `Screen::tab_set_basic()` helper sets the tabstop at the active
+  cursor column without exposing public API or ABI.
+- Tabstop state is not cloned and ownership stays in `Terminal`.
+
+`ESC H` behavior:
+
+- `ESC H` sets a tabstop at the current active cursor column.
+- `ESC H` leaves cursor position unchanged.
+- `ESC H` leaves pending wrap unchanged, including at the right edge.
+- `ESC H` does not modify cells.
+- `ESC H` does not dirty rows by itself.
+- A later `HT` can use the tabstop created by `ESC H`.
+
+Tested behavior:
+
+- `A\x1bHB` dispatches print, tab-set, print.
+- Split-feed `ESC H` dispatches the same action.
+- A generic handler error from `TabSet` leaves the parser in ground state for
+  the next byte.
+- After clearing defaults, `abc\x1bH` sets column 3 as a tabstop.
+- After setting column 3 with `ESC H`, `\r1\tZ` uses that tabstop and writes `Z`
+  at column 3.
+- `ESC H` at the right edge preserves pending wrap and sets the right-edge
+  column as a tabstop.
+- Dirty-state testing clears prior dirt before issuing `ESC H` and verifies rows
+  remain clean.
+
+This experiment did not implement CSI `W` / `CSI 0 W`, tab clear/reset,
+horizontal-tab-back, margins, origin mode, no-scrollback rotation, styles,
+hyperlinks, wide/Unicode handling, public API, or public ABI.
+
+Verification run:
+
+```text
+cargo fmt
+cargo test -p roastty stream
+cargo test -p roastty terminal_formatter
+cargo test -p roastty terminal::terminal
+cargo test -p roastty screen_formatter
+cargo test -p roastty page_string
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo fmt` passed.
+- `cargo test -p roastty stream` passed 139 tests.
+- `cargo test -p roastty terminal_formatter` passed 67 tests.
+- `cargo test -p roastty terminal::terminal` passed 119 tests.
+- `cargo test -p roastty screen_formatter` passed 55 tests.
+- `cargo test -p roastty page_string` passed 12 tests.
+- `cargo test -p roastty terminal::page_list` passed 524 tests.
+- Full `cargo test -p roastty` passed 1040 unit tests, the ABI harness, and
+  doc-tests.
+
+Codex design review passed after the private cursor-column helper and
+parser-state requirements were added.
+
+Initial result-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-021233-223437-prompt.md`
+- Result: `logs/codex-review/20260601-021233-223437-last-message.md`
+
+Codex found one real test-plan gap: the result needed the combined split case
+where pending invalid UTF-8 is rejected before split-feed `ESC H`. The missing
+test was added.
+
+Clean result re-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-021409-649551-prompt.md`
+- Result: `logs/codex-review/20260601-021409-649551-last-message.md`
+
+Codex found no remaining blockers and approved the result for commit.
+
+## Conclusion
+
+Roastty now supports the simple upstream `ESC H` horizontal-tab-set path. This
+connects stream parsing to the tabstop state used by `HT`, so applications can
+create a tabstop in the stream and immediately use it for horizontal tab
+movement.
+
+The next tabstop experiment should likely cover CSI `W` / `CSI 0 W` tab set or
+tab clear/reset, still keeping each parser/control path in its own reviewed
+slice.

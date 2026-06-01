@@ -209,6 +209,10 @@ impl Screen {
         self.cursor.x = next_tabstop;
     }
 
+    pub(super) fn tab_set_basic(&self, tabstops: &mut tabstops::Tabstops) {
+        tabstops.set(usize::from(self.cursor.x));
+    }
+
     #[cfg(test)]
     pub(super) fn set_cursor_position_for_tests(&mut self, x: CellCountInt, y: CellCountInt) {
         self.cursor.x = x;

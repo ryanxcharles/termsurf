@@ -7,6 +7,7 @@ pub(super) enum Action {
     CarriageReturn,
     Backspace,
     HorizontalTab,
+    TabSet,
 }
 
 pub(super) trait Handler {
@@ -63,10 +64,7 @@ impl Stream {
     fn next<H: Handler>(&mut self, byte: u8, handler: &mut H) -> Result<(), H::Error> {
         match self.escape {
             EscapeState::Ground => self.next_ground(byte, handler),
-            EscapeState::Escape => {
-                self.next_escape(byte);
-                Ok(())
-            }
+            EscapeState::Escape => self.next_escape(byte, handler),
             EscapeState::Csi => {
                 self.next_csi(byte);
                 Ok(())
@@ -100,12 +98,21 @@ impl Stream {
         Ok(())
     }
 
-    fn next_escape(&mut self, byte: u8) {
-        self.escape = if byte == b'[' {
-            EscapeState::Csi
-        } else {
-            EscapeState::Ground
-        };
+    fn next_escape<H: Handler>(&mut self, byte: u8, handler: &mut H) -> Result<(), H::Error> {
+        match byte {
+            b'[' => {
+                self.escape = EscapeState::Csi;
+                Ok(())
+            }
+            b'H' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::TabSet)
+            }
+            _ => {
+                self.escape = EscapeState::Ground;
+                Ok(())
+            }
+        }
     }
 
     fn next_csi(&mut self, byte: u8) {
@@ -241,7 +248,8 @@ mod tests {
                 Action::LineFeed
                 | Action::CarriageReturn
                 | Action::Backspace
-                | Action::HorizontalTab => None,
+                | Action::HorizontalTab
+                | Action::TabSet => None,
             })
             .collect()
     }
@@ -420,6 +428,23 @@ mod tests {
     }
 
     #[test]
+    fn stream_escape_h_dispatches_tab_set_action() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"A\x1bHB");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print { cp: 'A' },
+                Action::TabSet,
+                Action::Print { cp: 'B' },
+            ]
+        );
+    }
+
+    #[test]
     fn stream_other_c0_controls_do_not_dispatch_print_actions() {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();
@@ -561,6 +586,52 @@ mod tests {
     }
 
     #[test]
+    fn stream_pending_utf8_replacement_dispatches_before_escape_h_tab_set() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"\xf0\x9f\x1bHA");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print {
+                    cp: char::REPLACEMENT_CHARACTER,
+                },
+                Action::TabSet,
+                Action::Print { cp: 'A' },
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_pending_utf8_replacement_dispatches_before_split_escape_h_tab_set() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"\xf0\x9f\x1b");
+        assert_eq!(
+            actions(&handler),
+            &[Action::Print {
+                cp: char::REPLACEMENT_CHARACTER,
+            }]
+        );
+
+        next_slice(&mut stream, &mut handler, b"HA");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print {
+                    cp: char::REPLACEMENT_CHARACTER,
+                },
+                Action::TabSet,
+                Action::Print { cp: 'A' },
+            ]
+        );
+    }
+
+    #[test]
     fn stream_pending_utf8_replacement_dispatches_before_ignoring_del() {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();
@@ -610,6 +681,25 @@ mod tests {
     }
 
     #[test]
+    fn stream_split_escape_h_dispatches_tab_set_action() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"A\x1b");
+        assert_eq!(actions(&handler), &[Action::Print { cp: 'A' }]);
+        next_slice(&mut stream, &mut handler, b"HB");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print { cp: 'A' },
+                Action::TabSet,
+                Action::Print { cp: 'B' },
+            ]
+        );
+    }
+
+    #[test]
     fn stream_unsupported_csi_sequence_does_not_leak_bytes_as_printable_text() {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();
@@ -617,6 +707,47 @@ mod tests {
         next_slice(&mut stream, &mut handler, b"A\x1b[CB");
 
         assert_eq!(print_chars(&handler), vec!['A', 'B']);
+    }
+
+    #[test]
+    fn stream_csi_w_sequences_remain_unsupported() {
+        for input in [b"\x1b[W".as_slice(), b"\x1b[0W".as_slice()] {
+            let mut stream = Stream::init();
+            let mut handler = RecordingHandler::default();
+
+            next_slice(&mut stream, &mut handler, input);
+
+            assert!(actions(&handler).is_empty());
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct ErrorOnTabSetHandler {
+        actions: Vec<Action>,
+    }
+
+    impl Handler for ErrorOnTabSetHandler {
+        type Error = ();
+
+        fn vt(&mut self, action: Action) -> Result<(), Self::Error> {
+            if action == Action::TabSet {
+                return Err(());
+            }
+
+            self.actions.push(action);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn stream_escape_h_restores_ground_before_handler_error() {
+        let mut stream = Stream::init();
+        let mut handler = ErrorOnTabSetHandler::default();
+
+        assert_eq!(stream.next_slice(b"\x1bH", &mut handler), Err(()));
+        stream.next_slice(b"A", &mut handler).unwrap();
+
+        assert_eq!(handler.actions, &[Action::Print { cp: 'A' }]);
     }
 
     #[test]
