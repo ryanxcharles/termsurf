@@ -109,6 +109,13 @@ impl Selection {
         matches!(self.bounds, Bounds::Tracked { .. })
     }
 
+    pub(super) fn tracked_pins(&self) -> Option<(NonNull<Pin>, NonNull<Pin>)> {
+        match self.bounds {
+            Bounds::Untracked { .. } => None,
+            Bounds::Tracked { start, end } => Some((start, end)),
+        }
+    }
+
     pub(super) fn rectangle(&self) -> bool {
         self.rectangle
     }

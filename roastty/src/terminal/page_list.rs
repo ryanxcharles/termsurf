@@ -1442,6 +1442,39 @@ impl PageList {
         }
     }
 
+    fn track_selection(&mut self, selection: selection::Selection) -> Option<selection::Selection> {
+        if selection.is_tracked() {
+            return None;
+        }
+
+        let start = selection.start();
+        let end = selection.end();
+        if start.garbage || end.garbage {
+            return None;
+        }
+
+        let start = self.track_pin(start)?;
+        let Some(end) = self.track_pin(end) else {
+            self.untrack_pin(start);
+            return None;
+        };
+
+        Some(selection::Selection::tracked(
+            start,
+            end,
+            selection.rectangle(),
+        ))
+    }
+
+    fn untrack_selection(&mut self, selection: selection::Selection) {
+        let Some((start, end)) = selection.tracked_pins() else {
+            return;
+        };
+
+        self.untrack_pin(start);
+        self.untrack_pin(end);
+    }
+
     fn page_iterator(
         &self,
         direction: Direction,
@@ -7881,6 +7914,214 @@ mod tests {
         list.selection_adjust(&mut selection, selection::Adjustment::Right)
             .unwrap();
         assert_selection_screen_points(&list, selection, (0, 0), (0, 0));
+    }
+
+    #[test]
+    fn page_list_track_selection_tracks_and_untracks_owned_pins() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let selection = screen_selection(&list, (2, 5), (7, 5), true);
+        let count = list.count_tracked_pins();
+
+        let tracked = list.track_selection(selection).unwrap();
+
+        assert!(tracked.is_tracked());
+        assert_eq!(tracked.start(), selection.start());
+        assert_eq!(tracked.end(), selection.end());
+        assert_eq!(tracked.rectangle(), selection.rectangle());
+        assert_eq!(list.count_tracked_pins(), count + 2);
+        let (start, end) = tracked.tracked_pins().unwrap();
+        assert!(list.tracked_pins().contains(&start));
+        assert!(list.tracked_pins().contains(&end));
+        assert_eq!(tracked_pin_value(start), selection.start());
+        assert_eq!(tracked_pin_value(end), selection.end());
+
+        list.untrack_selection(tracked);
+
+        assert_eq!(list.count_tracked_pins(), count);
+        assert!(!list.tracked_pins().contains(&start));
+        assert!(!list.tracked_pins().contains(&end));
+    }
+
+    #[test]
+    fn page_list_untrack_selection_untracked_is_noop() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let selection = screen_selection(&list, (2, 5), (7, 5), false);
+        let count = list.count_tracked_pins();
+
+        list.untrack_selection(selection);
+
+        assert_eq!(list.count_tracked_pins(), count);
+    }
+
+    #[test]
+    fn page_list_track_selection_tracked_input_returns_none_without_leak() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let start = screen_pin(&list, 2, 5);
+        let end = screen_pin(&list, 7, 5);
+        let start_ptr = list.track_pin(start).unwrap();
+        let end_ptr = list.track_pin(end).unwrap();
+        let selection = selection::Selection::tracked(start_ptr, end_ptr, false);
+        let count = list.count_tracked_pins();
+
+        assert!(list.track_selection(selection).is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+
+        list.untrack_pin(start_ptr);
+        list.untrack_pin(end_ptr);
+    }
+
+    #[test]
+    fn page_list_track_selection_invalid_start_returns_none_without_leak() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let node = list.first_node_ptr();
+        let start = Pin::new(node, 0, list.cols);
+        let end = screen_pin(&list, 7, 5);
+        let count = list.count_tracked_pins();
+
+        assert!(list
+            .track_selection(selection::Selection::new(start, end, false))
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+    }
+
+    #[test]
+    fn page_list_track_selection_invalid_end_rolls_back_start() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let start = screen_pin(&list, 2, 5);
+        let node = list.first_node_ptr();
+        let end = Pin::new(node, list.node_for_ptr(node).unwrap().page.size_rows(), 0);
+        let count = list.count_tracked_pins();
+
+        assert!(list
+            .track_selection(selection::Selection::new(start, end, false))
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+    }
+
+    #[test]
+    fn page_list_track_selection_missing_start_returns_none_without_leak() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let other = PageList::init(10, 20, None).unwrap();
+        let start = Pin::new(other.first_node_ptr(), 0, 0);
+        let end = screen_pin(&list, 7, 5);
+        let count = list.count_tracked_pins();
+
+        assert!(list
+            .track_selection(selection::Selection::new(start, end, false))
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+    }
+
+    #[test]
+    fn page_list_track_selection_missing_end_rolls_back_start() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let other = PageList::init(10, 20, None).unwrap();
+        let start = screen_pin(&list, 2, 5);
+        let end = Pin::new(other.first_node_ptr(), 0, 0);
+        let count = list.count_tracked_pins();
+
+        assert!(list
+            .track_selection(selection::Selection::new(start, end, false))
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+    }
+
+    #[test]
+    fn page_list_track_selection_garbage_pins_return_none_without_leak() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let start = screen_pin(&list, 2, 5);
+        let end = screen_pin(&list, 7, 5);
+        let count = list.count_tracked_pins();
+        let mut garbage_start = start;
+        garbage_start.garbage = true;
+        let mut garbage_end = end;
+        garbage_end.garbage = true;
+
+        assert!(list
+            .track_selection(selection::Selection::new(garbage_start, end, false))
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+        assert!(list
+            .track_selection(selection::Selection::new(start, garbage_end, false))
+            .is_none());
+        assert_eq!(list.count_tracked_pins(), count);
+    }
+
+    #[test]
+    fn page_list_track_selection_preserves_reversed_stored_endpoints() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let selection = screen_selection(&list, (7, 5), (2, 5), false);
+        let count = list.count_tracked_pins();
+
+        let tracked = list.track_selection(selection).unwrap();
+
+        assert_eq!(tracked.start(), selection.start());
+        assert_eq!(tracked.end(), selection.end());
+        assert_eq!(
+            list.selection_order(tracked),
+            Some(selection::Order::Reverse)
+        );
+        assert_eq!(list.count_tracked_pins(), count + 2);
+
+        list.untrack_selection(tracked);
+    }
+
+    #[test]
+    fn page_list_track_selection_duplicate_endpoints_are_distinct_tracked_pins() {
+        let mut list = PageList::init(10, 20, None).unwrap();
+        let pin = screen_pin(&list, 2, 5);
+        let selection = selection::Selection::new(pin, pin, false);
+        let count = list.count_tracked_pins();
+
+        let tracked = list.track_selection(selection).unwrap();
+        let (start, end) = tracked.tracked_pins().unwrap();
+
+        assert_ne!(start, end);
+        assert_eq!(tracked.start(), pin);
+        assert_eq!(tracked.end(), pin);
+        assert_eq!(list.count_tracked_pins(), count + 2);
+
+        list.untrack_selection(tracked);
+    }
+
+    #[test]
+    fn page_list_track_selection_tracks_page_list_pin_mutation() {
+        let mut list = PageList::init(10, 10, Some(0)).unwrap();
+        let node = list.first_node_ptr();
+        let selection = selection::Selection::new(
+            Pin {
+                node,
+                y: 1,
+                x: 2,
+                garbage: false,
+            },
+            Pin {
+                node,
+                y: 7,
+                x: 3,
+                garbage: false,
+            },
+            false,
+        );
+        let tracked = list.track_selection(selection).unwrap();
+
+        list.split(Pin {
+            node,
+            y: 5,
+            x: 0,
+            garbage: false,
+        })
+        .unwrap();
+
+        let second = NonNull::from(list.pages[1].as_ref());
+        assert_eq!(tracked.start().node, list.first_node_ptr());
+        assert_eq!(tracked.start().y, 1);
+        assert_eq!(tracked.start().x, 2);
+        assert_eq!(tracked.end().node, second);
+        assert_eq!(tracked.end().y, 2);
+        assert_eq!(tracked.end().x, 3);
+
+        list.untrack_selection(tracked);
     }
 
     #[test]

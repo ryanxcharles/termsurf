@@ -203,3 +203,78 @@ updated design before implementation begins.
 
 Follow-up Codex review approved the updated design for implementation. No
 remaining blockers were found.
+
+## Result
+
+**Result:** Pass
+
+Implemented PageList-owned selection tracking for Roastty:
+
+- added `PageList::track_selection`;
+- added `PageList::untrack_selection`;
+- added an internal `Selection::tracked_pins` accessor so PageList can release
+  tracked selection pins without exposing pointer storage publicly;
+- kept `Selection::tracked(...)` as a non-owning wrapper;
+- kept ownership and cleanup at the PageList layer;
+- did not add `Drop`, public C ABI, Screen integration, formatting, gestures,
+  word/line selection, search, renderer, parser, app, or unrelated terminal
+  behavior.
+
+Behavior covered by tests:
+
+- tracking an untracked selection allocates exactly two PageList-owned tracked
+  pins;
+- returned tracked selections preserve start, end, and rectangle values;
+- `untrack_selection` releases both PageList-owned pins for selections returned
+  by `track_selection`;
+- untracking an untracked selection is a no-op;
+- already tracked input returns `None` without allocation or leaks;
+- invalid start returns `None` without leaks;
+- invalid end rolls back the already tracked start;
+- missing-node start returns `None` without leaks;
+- missing-node end rolls back the already tracked start;
+- garbage start or end returns `None` before calling `track_pin`;
+- reversed stored endpoints are tracked as-is;
+- duplicate start/end endpoints create two distinct tracked pins;
+- tracked selections remain connected to PageList-owned tracked pin storage
+  across `PageList::split`.
+
+Verification:
+
+```bash
+cargo fmt
+cargo test -p roastty terminal::page_list::tests::selection
+cargo test -p roastty page_list_track_selection
+cargo test -p roastty terminal::selection
+cargo test -p roastty
+cargo test -p roastty track_selection
+```
+
+Results:
+
+- `cargo test -p roastty terminal::page_list::tests::selection`: 32 passed. This
+  historical filter does not include the new `page_list_track_selection_*`
+  tests.
+- `cargo test -p roastty page_list_track_selection`: 10 passed.
+- `cargo test -p roastty terminal::selection`: 12 passed.
+- `cargo test -p roastty`: 620 unit tests passed, ABI harness passed, doctests
+  passed.
+- `cargo test -p roastty track_selection`: 11 passed, covering all new
+  tracking/untracking tests.
+
+Codex reviewed the implementation and found no code blockers. The only review
+requirements were to record this result, update the README status to `Pass`, and
+include a verification command that actually ran the new tracking tests. Those
+requirements are reflected here.
+
+## Conclusion
+
+Experiment 71 completes the upstream `Selection.track` / `Selection.deinit`
+ownership slice at the PageList layer. Roastty now has the same explicit
+tracked-selection lifecycle shape as Ghostty: untracked bounds can be converted
+into PageList-owned tracked pins, those tracked pins follow PageList mutation,
+and explicit untracking releases them.
+
+The next experiment should continue from the remaining upstream selection or
+terminal behavior not yet ported, rather than revisiting selection tracking
+ownership.
