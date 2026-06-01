@@ -415,7 +415,7 @@ tests, choose the larger subsystem.
 - [Experiment 142: Port OSC Clipboard Protocols](142-port-osc-clipboard-protocols.md)
   — **Pass**
 - [Experiment 143: Port OSC 3008 Context Signals](143-port-osc3008-context-signals.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

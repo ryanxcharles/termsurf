@@ -647,6 +647,7 @@ impl Handler for TerminalStreamHandler<'_> {
                 self.pwd.set(url);
             }
             stream::OscAction::ClipboardContents { .. } => {}
+            stream::OscAction::ContextSignal { .. } => {}
             stream::OscAction::DesktopNotification { .. } => {}
             stream::OscAction::MouseShape { shape } => {
                 *self.mouse_shape = shape;
@@ -2146,8 +2147,10 @@ mod tests {
         assert!(terminal.get_mode_for_tests(Mode::Insert));
         assert_eq!(terminal.colors.foreground.get(), foreground);
         assert!(terminal.pty_response_for_tests().is_empty());
-        assert!(!terminal.is_dirty_for_tests(0, 0));
-        assert!(!terminal.is_dirty_for_tests(9, 0));
+        for row in 0..3 {
+            assert!(!terminal.is_dirty_for_tests(0, row));
+            assert!(!terminal.is_dirty_for_tests(9, row));
+        }
     }
 
     #[test]
@@ -2202,6 +2205,44 @@ mod tests {
 
         terminal
             .next_slice(b"\x1b]52;s;?\x07\x1b]5522;type=read;payload\x1b\\")
+            .unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+        assert_eq!(terminal.title_for_tests(), "title");
+        assert_eq!(terminal.pwd_for_tests(), Some("file://host/home"));
+        assert_eq!(
+            terminal.cursor_hyperlink_for_tests(),
+            Some((
+                ScreenCursorHyperlinkId::Explicit("x".to_string()),
+                "https://e"
+            ))
+        );
+        assert_eq!(terminal.cursor_position_for_tests(), (5, 1));
+        assert!(terminal.get_mode_for_tests(Mode::Insert));
+        assert_eq!(terminal.colors.foreground.get(), foreground);
+        assert!(terminal.pty_response_for_tests().is_empty());
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(9, 0));
+    }
+
+    #[test]
+    fn terminal_stream_context_signals_are_ignored() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal.next_slice(b"abc").unwrap();
+        terminal
+            .next_slice(b"\x1b]0;title\x07\x1b]7;file://host/home\x07\x1b]8;id=x;https://e\x07")
+            .unwrap();
+        terminal.next_slice(b"\x1b]10;#112233\x07").unwrap();
+        terminal.set_mode_for_tests(Mode::Insert, true);
+        terminal.screens.active.set_cursor_position_for_tests(5, 1);
+        let foreground = terminal.colors.foreground.get();
+        terminal.clear_dirty_for_tests();
+
+        terminal
+            .next_slice(
+                b"\x1b]3008;start=myctx;type=shell\x07\x1b]3008;end=myctx;exit=success\x1b\\",
+            )
             .unwrap();
 
         assert_eq!(plain_with_unwrap(&terminal, false), "abc");

@@ -1117,6 +1117,11 @@ mod tests {
             kind: u8,
             data: Vec<u8>,
         },
+        ContextSignal {
+            action: super::super::context_signal::Action,
+            id: Vec<u8>,
+            metadata: Vec<u8>,
+        },
         DesktopNotification {
             title: Vec<u8>,
             body: Vec<u8>,
@@ -1164,6 +1169,11 @@ mod tests {
                 OscAction::ClipboardContents { value } => Self::ClipboardContents {
                     kind: value.kind,
                     data: value.data.to_vec(),
+                },
+                OscAction::ContextSignal { value } => Self::ContextSignal {
+                    action: value.action,
+                    id: value.id.to_vec(),
+                    metadata: value.metadata.to_vec(),
                 },
                 OscAction::DesktopNotification { title, body } => Self::DesktopNotification {
                     title: title.to_vec(),
@@ -5720,6 +5730,49 @@ mod tests {
             ]
         );
         assert_eq!(actions(&handler), &[]);
+    }
+
+    #[test]
+    fn stream_osc_dispatches_context_signals() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(
+            &mut stream,
+            &mut handler,
+            b"\x1b]3008;start=myctx;type=shell;user=root\x07\x1b]3008;end=myctx;exit=failure;status=1\x1b\\",
+        );
+
+        assert_eq!(
+            osc_actions(&handler),
+            &[
+                OwnedOscAction::ContextSignal {
+                    action: super::super::context_signal::Action::Start,
+                    id: b"myctx".to_vec(),
+                    metadata: b"type=shell;user=root".to_vec(),
+                },
+                OwnedOscAction::ContextSignal {
+                    action: super::super::context_signal::Action::End,
+                    id: b"myctx".to_vec(),
+                    metadata: b"exit=failure;status=1".to_vec(),
+                },
+            ]
+        );
+        assert_eq!(actions(&handler), &[]);
+    }
+
+    #[test]
+    fn stream_osc_invalid_context_signals_do_not_dispatch_or_leak() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+        let mut input = b"A\x1b]3008\x07B\x1b]3008;\x07C\x1b]3008;start=\x07D\x1b]3008;bogus=id\x07E\x1b]3008;start=id;".to_vec();
+        input.extend(std::iter::repeat_n(b'x', osc::MAX_BUF + 32));
+        input.extend_from_slice(b"\x07F");
+
+        next_slice(&mut stream, &mut handler, &input);
+
+        assert_eq!(print_chars(&handler), &['A', 'B', 'C', 'D', 'E', 'F']);
+        assert_eq!(osc_actions(&handler), &[]);
     }
 
     #[test]

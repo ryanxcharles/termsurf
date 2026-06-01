@@ -13,6 +13,9 @@ pub(super) enum Command<'a> {
     ClipboardContents {
         value: super::clipboard::ClipboardContents<'a>,
     },
+    ContextSignal {
+        value: super::context_signal::ContextSignal<'a>,
+    },
     DesktopNotification {
         title: &'a [u8],
         body: &'a [u8],
@@ -329,6 +332,9 @@ impl Parser {
             b"52" => parse_osc52_clipboard(rest).map(|value| Command::ClipboardContents { value }),
             b"66" => parse_kitty_text_sizing(rest).map(|value| Command::KittyTextSizing { value }),
             b"777" => parse_osc777_notification(rest),
+            b"3008" if split.is_some() => {
+                parse_context_signal(rest).map(|value| Command::ContextSignal { value })
+            }
             b"5522" if split.is_some() => Some(Command::KittyClipboard {
                 value: parse_kitty_clipboard(rest, terminator),
             }),
@@ -448,6 +454,28 @@ fn parse_kitty_clipboard(
         payload,
         terminator,
     }
+}
+
+fn parse_context_signal(bytes: &[u8]) -> Option<super::context_signal::ContextSignal<'_>> {
+    let (action, rest) = if let Some(rest) = bytes.strip_prefix(b"start=") {
+        (super::context_signal::Action::Start, rest)
+    } else if let Some(rest) = bytes.strip_prefix(b"end=") {
+        (super::context_signal::Action::End, rest)
+    } else {
+        return None;
+    };
+
+    let (id, metadata) =
+        SplitOnce::split_once(rest, |byte| *byte == b';').unwrap_or((rest, b"".as_slice()));
+    if id.is_empty() || id.len() > 64 || !id.iter().all(|byte| matches!(byte, 0x20..=0x7e)) {
+        return None;
+    }
+
+    Some(super::context_signal::ContextSignal {
+        action,
+        id,
+        metadata,
+    })
 }
 
 fn parse_osc4(bytes: &[u8], terminator: Terminator) -> Option<ColorRequests> {
@@ -674,6 +702,11 @@ mod tests {
             kind: u8,
             data: Vec<u8>,
         },
+        ContextSignal {
+            action: super::super::context_signal::Action,
+            id: Vec<u8>,
+            metadata: Vec<u8>,
+        },
         DesktopNotification {
             title: Vec<u8>,
             body: Vec<u8>,
@@ -721,6 +754,11 @@ mod tests {
                 Command::ClipboardContents { value } => Self::ClipboardContents {
                     kind: value.kind,
                     data: value.data.to_vec(),
+                },
+                Command::ContextSignal { value } => Self::ContextSignal {
+                    action: value.action,
+                    id: value.id.to_vec(),
+                    metadata: value.metadata.to_vec(),
                 },
                 Command::DesktopNotification { title, body } => Self::DesktopNotification {
                     title: title.to_vec(),
@@ -974,6 +1012,82 @@ mod tests {
             })
         );
         assert_eq!(parse(b"5522"), None);
+    }
+
+    #[test]
+    fn osc_parser_context_signals() {
+        assert_eq!(
+            parse(b"3008;start=abc123"),
+            Some(OwnedCommand::ContextSignal {
+                action: super::super::context_signal::Action::Start,
+                id: b"abc123".to_vec(),
+                metadata: b"".to_vec(),
+            })
+        );
+        assert_eq!(
+            parse(b"3008;end=abc123"),
+            Some(OwnedCommand::ContextSignal {
+                action: super::super::context_signal::Action::End,
+                id: b"abc123".to_vec(),
+                metadata: b"".to_vec(),
+            })
+        );
+        assert_eq!(
+            parse(b"3008;start=myctx;type=shell;user=root;hostname=myhost"),
+            Some(OwnedCommand::ContextSignal {
+                action: super::super::context_signal::Action::Start,
+                id: b"myctx".to_vec(),
+                metadata: b"type=shell;user=root;hostname=myhost".to_vec(),
+            })
+        );
+        assert_eq!(
+            parse(b"3008;end=myctx;exit=failure;status=1;signal=SIGKILL"),
+            Some(OwnedCommand::ContextSignal {
+                action: super::super::context_signal::Action::End,
+                id: b"myctx".to_vec(),
+                metadata: b"exit=failure;status=1;signal=SIGKILL".to_vec(),
+            })
+        );
+        assert_eq!(
+            parse(b"3008;start=myctx;cmdline=\xff"),
+            Some(OwnedCommand::ContextSignal {
+                action: super::super::context_signal::Action::Start,
+                id: b"myctx".to_vec(),
+                metadata: b"cmdline=\xff".to_vec(),
+            })
+        );
+    }
+
+    #[test]
+    fn osc_parser_context_signals_reject_invalid_forms() {
+        assert_eq!(parse(b"3008"), None);
+        assert_eq!(parse(b"3008;"), None);
+        assert_eq!(parse(b"3008;bogus=abc123"), None);
+        assert_eq!(parse(b"3008;start="), None);
+
+        let mut max_id = b"3008;start=".to_vec();
+        max_id.extend(std::iter::repeat_n(b'a', 64));
+        assert_eq!(
+            parse(&max_id),
+            Some(OwnedCommand::ContextSignal {
+                action: super::super::context_signal::Action::Start,
+                id: std::iter::repeat_n(b'a', 64).collect(),
+                metadata: b"".to_vec(),
+            })
+        );
+
+        let mut overlong = b"3008;start=".to_vec();
+        overlong.extend(std::iter::repeat_n(b'a', 65));
+        assert_eq!(parse(&overlong), None);
+
+        assert_eq!(parse(b"3008;start=bad\x1f"), None);
+        assert_eq!(parse(b"3008;start=bad\x7f"), None);
+        assert_eq!(parse(b"3008;start=bad\x80"), None);
+        assert_eq!(parse(b"3008;start=bad\xff"), None);
+
+        let mut oversized = b"3008;start=id;".to_vec();
+        oversized.extend(std::iter::repeat_n(b'x', MAX_BUF + 32));
+        assert_eq!(parse(&oversized), None);
     }
 
     #[test]

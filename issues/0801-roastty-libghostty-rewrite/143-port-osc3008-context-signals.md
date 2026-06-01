@@ -237,3 +237,83 @@ The design now pins first-matching-key behavior, adds duplicate malformed-value
 tests, requires oversized OSC 3008 no-dispatch/no-leak coverage, and calls out
 the implementation guard for the initial separator. Codex re-reviewed the
 revised design and approved it for implementation with no blocking findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented OSC 3008 context-signal parsing, stream dispatch, and explicit
+terminal-runtime no-op handling.
+
+The implementation adds `roastty/src/terminal/context_signal.rs` with raw-byte
+`ContextSignal`, `Action`, `ContextType`, and `ExitStatus` values. Metadata
+field readers match Ghostty's lazy field behavior: fields are
+semicolon-separated, unknown/malformed non-matching fields are skipped, matching
+is exact and case-sensitive, string fields return `None` for empty values,
+numeric fields parse decimal `u64` only, and the first matching key wins even
+when that value is malformed.
+
+`roastty/src/terminal/osc.rs` now recognizes `OSC 3008;start=...` and
+`OSC 3008;end=...`, preserves raw metadata bytes, rejects missing separators,
+empty/unknown actions, empty IDs, over-64-byte IDs, and ID bytes outside
+`0x20..=0x7e`. OSC 3008 remains on the fixed-buffer capture path; oversized
+context-signal payloads reject and do not dispatch.
+
+`roastty/src/terminal/stream.rs` now dispatches valid context signals and
+consumes invalid forms without print leakage. `roastty/src/terminal/terminal.rs`
+explicitly ignores context signals so the runtime does not mutate display
+contents, title, PWD, hyperlink state, color state, cursor position, modes,
+dirty rows, or PTY responses.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/terminal/context_signal.rs roastty/src/terminal/mod.rs roastty/src/terminal/osc.rs roastty/src/terminal/stream.rs roastty/src/terminal/terminal.rs
+cargo test -p roastty context_signal
+cargo test -p roastty osc
+cargo test -p roastty terminal_stream_osc
+cargo test -p roastty
+```
+
+Observed results:
+
+- `cargo test -p roastty context_signal`: 9 passed
+- `cargo test -p roastty osc`: 83 passed
+- `cargo test -p roastty terminal_stream_osc`: 25 passed
+- `cargo test -p roastty`: 1555 unit tests and 1 ABI harness test passed
+
+After Codex result review noted that the terminal no-op test could check all
+rows for dirty-state preservation, the test was strengthened and rerun:
+
+```bash
+cargo fmt -- roastty/src/terminal/context_signal.rs roastty/src/terminal/mod.rs roastty/src/terminal/osc.rs roastty/src/terminal/stream.rs roastty/src/terminal/terminal.rs
+cargo test -p roastty terminal_stream_context_signals_are_ignored
+cargo test -p roastty
+```
+
+Observed results:
+
+- `cargo test -p roastty terminal_stream_context_signals_are_ignored`: 1 passed
+- `cargo test -p roastty`: 1555 unit tests and 1 ABI harness test passed
+
+## Result Review
+
+Codex reviewed the completed implementation and found no blocking implementation
+bugs. It approved the result as good enough to record as **Pass**.
+
+Codex raised two non-blocking notes:
+
+- ensure the new `context_signal.rs` file is included in the result commit;
+- strengthen the runtime no-op test to check dirty-state preservation across all
+  rows.
+
+The dirty-row test was strengthened before recording the result. The new module
+will be included in the result commit.
+
+## Conclusion
+
+OSC 3008 context signals are now recognized with Ghostty-compatible parser and
+field-reader semantics and are safely ignored by the terminal runtime until a
+future app/surface context-stack boundary exists. This keeps parser parity
+moving forward without introducing premature UI, ABI, shell-integration, or
+semantic-prompt behavior.
