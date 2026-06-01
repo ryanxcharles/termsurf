@@ -213,6 +213,10 @@ impl Screen {
         tabstops.set(usize::from(self.cursor.x));
     }
 
+    pub(super) fn tab_clear_current_basic(&self, tabstops: &mut tabstops::Tabstops) {
+        tabstops.unset(usize::from(self.cursor.x));
+    }
+
     #[cfg(test)]
     pub(super) fn set_cursor_position_for_tests(&mut self, x: CellCountInt, y: CellCountInt) {
         self.cursor.x = x;

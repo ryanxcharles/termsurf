@@ -13,6 +13,8 @@ use super::size::CellCountInt;
 use super::stream::{self, Action, Handler};
 use super::tabstops;
 
+const TABSTOP_INTERVAL: usize = 8;
+
 #[derive(Debug)]
 pub(super) struct Terminal {
     size: TerminalSize,
@@ -115,7 +117,7 @@ impl Terminal {
             },
             modes: modes::ModeState::default(),
             scrolling_region: ScrollingRegion::full(size),
-            tabstops: tabstops::Tabstops::new(cols as usize, 8)
+            tabstops: tabstops::Tabstops::new(cols as usize, TABSTOP_INTERVAL)
                 .map_err(|_| PageListAllocError::PageAlloc)?,
             stream: stream::Stream::init(),
             flags: TerminalFlags::default(),
@@ -295,6 +297,18 @@ impl Handler for TerminalStreamHandler<'_> {
             }
             Action::TabSet => {
                 self.screen.tab_set_basic(self.tabstops);
+                Ok(())
+            }
+            Action::TabClearCurrent => {
+                self.screen.tab_clear_current_basic(self.tabstops);
+                Ok(())
+            }
+            Action::TabClearAll => {
+                self.tabstops.reset(0);
+                Ok(())
+            }
+            Action::TabReset => {
+                self.tabstops.reset(TABSTOP_INTERVAL);
                 Ok(())
             }
         }
@@ -1354,6 +1368,100 @@ mod tests {
         assert!(!terminal.is_dirty_for_tests(0, 0));
         assert!(!terminal.is_dirty_for_tests(9, 0));
         assert!(!terminal.is_dirty_for_tests(0, 1));
+    }
+
+    #[test]
+    fn terminal_stream_csi_tab_clear_current_removes_current_tabstop() {
+        let mut terminal = Terminal::init(30, 2, None).unwrap();
+
+        terminal.next_slice(b"\t").unwrap();
+        assert_eq!(terminal.cursor_position_for_tests(), (8, 0));
+        assert!(terminal.get_tabstop_for_tests(8));
+
+        terminal.next_slice(b"\x1b[2W\r\t").unwrap();
+
+        assert!(!terminal.get_tabstop_for_tests(8));
+        assert_eq!(terminal.cursor_position_for_tests(), (16, 0));
+    }
+
+    #[test]
+    fn terminal_stream_csi_tab_clear_all_removes_all_tabstops() {
+        let mut terminal = Terminal::init(30, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b[5W\r\t").unwrap();
+
+        assert!(!terminal.get_tabstop_for_tests(8));
+        assert!(!terminal.get_tabstop_for_tests(16));
+        assert!(!terminal.get_tabstop_for_tests(24));
+        assert_eq!(terminal.cursor_position_for_tests(), (29, 0));
+    }
+
+    #[test]
+    fn terminal_stream_csi_tab_reset_restores_default_tabstops() {
+        let mut terminal = Terminal::init(30, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b[5W\x1b[?5W\r\t").unwrap();
+
+        assert!(terminal.get_tabstop_for_tests(8));
+        assert!(terminal.get_tabstop_for_tests(16));
+        assert!(terminal.get_tabstop_for_tests(24));
+        assert_eq!(terminal.cursor_position_for_tests(), (8, 0));
+    }
+
+    #[test]
+    fn terminal_stream_csi_tab_clear_and_reset_preserve_cursor_position() {
+        for input in [
+            b"abc\x1bH\x1b[2W".as_slice(),
+            b"abc\x1b[5W".as_slice(),
+            b"abc\x1b[?5W".as_slice(),
+        ] {
+            let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+            terminal.next_slice(input).unwrap();
+
+            assert_eq!(terminal.cursor_position_for_tests(), (3, 0));
+            assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+        }
+    }
+
+    #[test]
+    fn terminal_stream_csi_tab_clear_and_reset_preserve_pending_wrap() {
+        for input in [
+            b"\x1b[2W".as_slice(),
+            b"\x1b[5W".as_slice(),
+            b"\x1b[?5W".as_slice(),
+        ] {
+            let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+            terminal.next_slice(b"ABCDE").unwrap();
+            assert!(terminal.cursor_pending_wrap_for_tests());
+            terminal.next_slice(input).unwrap();
+
+            assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+            assert!(terminal.cursor_pending_wrap_for_tests());
+            assert_eq!(plain_with_unwrap(&terminal, false), "ABCDE");
+        }
+    }
+
+    #[test]
+    fn terminal_stream_csi_tab_clear_and_reset_do_not_dirty_rows_or_modify_cells() {
+        for input in [
+            b"\x1b[2W".as_slice(),
+            b"\x1b[5W".as_slice(),
+            b"\x1b[?5W".as_slice(),
+        ] {
+            let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+            terminal.next_slice(b"abc\x1bH").unwrap();
+            terminal.clear_dirty_for_tests();
+            terminal.next_slice(input).unwrap();
+
+            assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+            assert_eq!(terminal.cursor_position_for_tests(), (3, 0));
+            assert!(!terminal.is_dirty_for_tests(0, 0));
+            assert!(!terminal.is_dirty_for_tests(9, 0));
+            assert!(!terminal.is_dirty_for_tests(0, 1));
+        }
     }
 
     #[test]

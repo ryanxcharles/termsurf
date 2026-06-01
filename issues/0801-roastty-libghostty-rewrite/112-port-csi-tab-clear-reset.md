@@ -205,3 +205,100 @@ terminal tabstop mutations, scope boundaries, and test plan match upstream
 Ghostty and Roastty's current shape. It noted that the existing unsupported CSI
 `W` variant test from Experiment 111 will need to move `CSI 2 W`, `CSI 5 W`, and
 `CSI ? 5 W` into accepted-action coverage during implementation.
+
+## Result
+
+**Result:** Pass.
+
+Implemented the remaining Ghostty CSI cursor-tabulation-control tabstop actions:
+
+- `CSI 2 W` dispatches `Action::TabClearCurrent`;
+- `CSI 5 W` dispatches `Action::TabClearAll`;
+- `CSI ? 5 W` dispatches `Action::TabReset`.
+
+Accepted and rejected CSI `W` forms:
+
+- `CSI W` and `CSI 0 W` continue to dispatch `Action::TabSet`.
+- `CSI 2 W`, `CSI 5 W`, and `CSI ? 5 W` now dispatch their new private tab
+  actions.
+- Invalid forms including `CSI ? W`, `CSI > W`, `CSI ? 2 W`, `CSI > 5 W`,
+  `CSI ? 1 W`, `CSI 1 W`, `CSI 99 W`, `CSI 0 ; 5 W`, and overflowing numeric
+  params dispatch no tab action and recover for the next printable byte.
+
+Stream parser behavior:
+
+- CSI state now tracks `?` private-marker forms separately from ordinary numeric
+  params.
+- Numeric params are still parsed with checked arithmetic.
+- Unsupported non-`W` CSI finals remain consumed and ignored.
+- The parser returns to ground before invoking the handler for `TabSet`,
+  `TabClearCurrent`, `TabClearAll`, and `TabReset`, so handler errors cannot
+  leave the parser stuck in CSI state.
+- Pending invalid UTF-8 dispatches `U+FFFD` before accepted tab clear/reset
+  actions, matching the existing stream-control ordering.
+
+Terminal tabstop behavior:
+
+- `TabClearCurrent` unsets the tabstop at the active cursor column through a new
+  private `Screen::tab_clear_current_basic()` helper.
+- `TabClearAll` clears all tabstops with `Tabstops::reset(0)`.
+- `TabReset` restores the default tabstop interval with
+  `Tabstops::reset(TABSTOP_INTERVAL)`.
+- The default interval literal was named `TABSTOP_INTERVAL` and reused for
+  initialization and reset.
+- The existing `Tabstops::unset()` XOR behavior was preserved because it mirrors
+  upstream Ghostty.
+- Tab clear/reset actions leave cursor position and pending wrap unchanged.
+- Tab clear/reset actions do not dirty rows or modify cells by themselves.
+
+This experiment did not implement horizontal-tab-back, margins, origin mode,
+no-scrollback rotation, styles, hyperlinks, wide/Unicode handling, public API,
+or public ABI.
+
+Verification run:
+
+```text
+cargo fmt
+cargo test -p roastty stream
+cargo test -p roastty terminal_formatter
+cargo test -p roastty terminal::terminal
+cargo test -p roastty screen_formatter
+cargo test -p roastty page_string
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo fmt` passed.
+- `cargo test -p roastty stream` passed 162 tests.
+- `cargo test -p roastty terminal_formatter` passed 67 tests.
+- `cargo test -p roastty terminal::terminal` passed 130 tests.
+- `cargo test -p roastty screen_formatter` passed 55 tests.
+- `cargo test -p roastty page_string` passed 12 tests.
+- `cargo test -p roastty terminal::page_list` passed 524 tests.
+- Full `cargo test -p roastty` passed 1063 unit tests, the ABI harness, and
+  doc-tests.
+
+Codex design review passed without required changes.
+
+Result-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-023308-996342-prompt.md`
+- Result: `logs/codex-review/20260601-023308-996342-last-message.md`
+
+Codex found no code correctness issues. It confirmed the implementation matches
+the approved experiment, the tests cover the accepted and rejected forms plus
+terminal mutation behavior, and the result is good enough to commit after
+recording this review outcome.
+
+## Conclusion
+
+Roastty now supports Ghostty's tabstop set, clear-current, clear-all, and reset
+actions for the CSI `W` cursor tabulation control family. Together with
+Experiments 108, 110, and 111, the basic horizontal-tab and tabstop control path
+is now covered for stream parsing and terminal mutation.
+
+The next stream-control experiment should move beyond tabstop control, likely to
+the next small upstream escape/control action that can reuse the current private
+stream-action pattern without broadening into a full CSI parser.
