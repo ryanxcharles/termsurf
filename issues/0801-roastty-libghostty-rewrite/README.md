@@ -384,6 +384,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 127: Port CSI Horizontal Tab Back](127-port-csi-horizontal-tab-back.md)
   — **Pass**
+- [Experiment 128: Port CSI Mode Set and Reset](128-port-csi-mode-set-reset.md)
+  — **Designed**
 
 ## Non-Goals
 
