@@ -88,10 +88,12 @@ ABI, Screen, search, renderer, parser, app, or terminal mutation behavior.
      - invalid selection start returns `None`;
      - invalid selection end returns `None`;
      - invalid candidate pin returns `None`.
-     - structurally valid candidate pin that cannot map to `point::Tag::Screen`
-       returns `None`. This specifically catches the case where a pin is valid
-       PageList storage but is before the current screen top, so `pin_is_valid`
-       alone is not enough for the candidate.
+     - if current PageList behavior permits constructing a structurally valid
+       candidate pin that cannot map to `point::Tag::Screen`, add that case too.
+       If not, document that `Tag::Screen` starts at the first stored node, so a
+       PageList-valid owned pin maps to screen coordinates by construction.
+       Still ensure the helper calls `point_from_pin(point::Tag::Screen, pin)`
+       for the candidate instead of relying on `pin_is_valid` alone.
    - Existing selection ordering, highlight, PageList, and full Roastty tests
      must continue passing.
 
