@@ -195,3 +195,71 @@ Codex specifically approved the byte-indexed map requirement, the empty
 output/map behavior on failed point-to-pin conversion, the multi-page
 source-node checks, and the scope boundary excluding `ScreenFormatter`,
 `TerminalFormatter`, public API, app behavior, and HTML hyperlink tag emission.
+
+## Result
+
+**Result:** Pass
+
+Implemented the private format-general PageList pin-map path in
+`roastty/src/terminal/page_list.rs`:
+
+- `PageStringWithPinMap` remains private.
+- `PageList::page_string_with_pin_map(PageStringOptions<'_>)` now calls
+  `PageList::page_string_with_point_map(...)` and converts each screen-domain
+  coordinate with `PageList::pin(point::Point::screen(...))`.
+- `PageList::plain_string_with_pin_map(...)` delegates to the general helper
+  with `PageOutputFormat::Plain`, preserving the Experiment 85 plain behavior.
+
+The returned maps are byte-indexed: every output byte has exactly one `Pin`, and
+tests assert `text.len() == pin_map.len()`. If any point-to-pin conversion
+fails, the helper returns empty text and an empty pin map rather than producing
+a partial map.
+
+VT pin maps now come from the VT point-map path. Style-open bytes map to the
+style-transition cell, final style-close bytes map to the previous emitted cell,
+`\r\n` bytes map byte-for-byte through the point map, and generated blanks plus
+codepoint replacements map to their source cells.
+
+HTML pin maps now come from the HTML point-map path. Wrapper bytes map to the
+row-base source pin, escaped and numeric entities map to the original source
+cell, style wrapper bytes and final close bytes map through their point-map
+coordinates, styled empty cells map their emitted space, generated blanks and
+codepoint replacements map to source cells, and hyperlinked-cell text remains
+mapped without emitting `<a>` tags.
+
+Multi-page VT and HTML tests prove bytes on each side of a page boundary keep
+the correct source-node identity. `ScreenFormatter` and `TerminalFormatter`
+pin-map behavior remains deferred, as does public API exposure, app behavior,
+writer abstraction work, and HTML hyperlink tag emission.
+
+Verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty styled_pin_map      # 9 unit tests passed
+cargo test -p roastty pin_map             # 21 unit tests passed
+cargo test -p roastty html_point_map      # 10 unit tests passed
+cargo test -p roastty vt_point_map        # 11 unit tests passed
+cargo test -p roastty point_map           # 53 unit tests passed
+cargo test -p roastty page_string         # 12 unit tests passed
+cargo test -p roastty terminal::page_list # 524 unit tests passed
+cargo test -p roastty                     # 817 unit tests passed; ABI harness passed
+```
+
+Codex design review found no blockers and approved the experiment design. Codex
+result review first found no blockers but suggested direct HTML
+codepoint-replacement coverage as a useful addition. I added direct styled
+pin-map coverage for VT unstyled output and HTML generated blanks plus codepoint
+replacements, reran the full verification matrix, and reran Codex result review.
+The final review found no remaining blockers.
+
+## Conclusion
+
+Experiment 88 completed upstream-style PageList pin maps for all currently
+supported private formatter output formats: plain, VT, and HTML. The
+implementation deliberately reuses point maps as the single traversal source,
+which matches upstream's architecture and avoids a second formatter walk.
+
+The next formatter work can move beyond PageList-private string, point-map, and
+pin-map support into the next upstream formatter layer, while keeping
+`ScreenFormatter` and `TerminalFormatter` as explicit future scope.

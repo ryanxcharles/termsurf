@@ -2609,9 +2609,21 @@ impl PageList {
         &self,
         options: PlainStringWithMapOptions<'_>,
     ) -> PageStringWithPinMap {
-        let mapped = self.plain_string_with_point_map(options);
-        let mut pin_map = Vec::with_capacity(mapped.point_map.len());
-        for coord in mapped.point_map {
+        self.page_string_with_pin_map(PageStringOptions {
+            selection: options.selection,
+            trim: options.trim,
+            unwrap: options.unwrap,
+            emit: PageOutputFormat::Plain,
+            palette: None,
+            codepoint_map: options.codepoint_map,
+        })
+    }
+
+    fn page_string_with_pin_map(&self, options: PageStringOptions<'_>) -> PageStringWithPinMap {
+        let mut point_map = Vec::new();
+        let text = self.page_string_with_point_map(options, &mut point_map);
+        let mut pin_map = Vec::with_capacity(point_map.len());
+        for coord in point_map {
             let Some(pin) = self.pin(point::Point::screen(coord)) else {
                 return PageStringWithPinMap {
                     text: String::new(),
@@ -2621,10 +2633,7 @@ impl PageList {
             pin_map.push(pin);
         }
 
-        PageStringWithPinMap {
-            text: mapped.text,
-            pin_map,
-        }
+        PageStringWithPinMap { text, pin_map }
     }
 
     fn page_string(&self, options: PageStringOptions<'_>) -> String {
@@ -5681,6 +5690,52 @@ mod tests {
             selection,
             trim,
             unwrap,
+            codepoint_map: None,
+        });
+        assert_eq!(actual.text, expected_text);
+        assert_eq!(actual.pin_map, expected_pins);
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+    }
+
+    fn assert_styled_pin_map(
+        list: &PageList,
+        start: (CellCountInt, u32),
+        end: (CellCountInt, u32),
+        emit: PageOutputFormat,
+        trim: bool,
+        unwrap: bool,
+        codepoint_map: Option<&[CodepointMapEntry]>,
+        expected_text: &str,
+        expected_pins: &[Pin],
+    ) {
+        let actual = list.page_string_with_pin_map(PageStringOptions {
+            selection: Some(screen_selection(list, start, end, false)),
+            trim,
+            unwrap,
+            emit,
+            palette: None,
+            codepoint_map,
+        });
+        assert_eq!(actual.text, expected_text);
+        assert_eq!(actual.pin_map, expected_pins);
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+    }
+
+    fn assert_styled_pin_map_for_selection(
+        list: &PageList,
+        selection: Option<selection::Selection>,
+        emit: PageOutputFormat,
+        trim: bool,
+        unwrap: bool,
+        expected_text: &str,
+        expected_pins: &[Pin],
+    ) {
+        let actual = list.page_string_with_pin_map(PageStringOptions {
+            selection,
+            trim,
+            unwrap,
+            emit,
+            palette: None,
             codepoint_map: None,
         });
         assert_eq!(actual.text, expected_text);
@@ -16089,6 +16144,297 @@ mod tests {
             selection::Selection::new(valid, garbage, false),
         ] {
             assert_html_point_map_for_selection(&list, Some(selection), true, true, "", &[]);
+        }
+    }
+
+    #[test]
+    fn styled_pin_map_plain_general_helper_matches_plain_helper() {
+        let mut list = PageList::init(6, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["A B"]);
+
+        let general = list.page_string_with_pin_map(PageStringOptions {
+            selection: Some(screen_selection(&list, (0, 0), (2, 0), false)),
+            trim: false,
+            unwrap: true,
+            emit: PageOutputFormat::Plain,
+            palette: None,
+            codepoint_map: None,
+        });
+        let plain = list.plain_string_with_pin_map(PlainStringWithMapOptions {
+            selection: Some(screen_selection(&list, (0, 0), (2, 0), false)),
+            trim: false,
+            unwrap: true,
+            codepoint_map: None,
+        });
+
+        assert_eq!(general, plain);
+        assert_eq!(general.text, "A B");
+        assert_eq!(general.pin_map, pins(&list, &[(0, 0), (1, 0), (2, 0)]));
+    }
+
+    #[test]
+    fn styled_pin_map_vt_unstyled_single_line() {
+        let mut list = PageList::init(8, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello"]);
+
+        assert_styled_pin_map(
+            &list,
+            (0, 0),
+            (4, 0),
+            PageOutputFormat::Vt,
+            true,
+            true,
+            None,
+            "hello",
+            &pins(&list, &[(0, 0), (1, 0), (2, 0), (3, 0), (4, 0)]),
+        );
+    }
+
+    #[test]
+    fn styled_pin_map_vt_style_close_and_newline_bytes() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        let bold = style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+        set_screen_styled_cell(&mut list, 0, 0, 'A', bold);
+        set_screen_cell(&mut list, 0, 1, 'B');
+
+        let expected = "\x1b[0m\x1b[1mA\x1b[0m\r\nB";
+        let mut expected_points = Vec::new();
+        expected_points.extend(std::iter::repeat_n((0, 0), "\x1b[0m\x1b[1m".len()));
+        expected_points.push((0, 0));
+        expected_points.extend(std::iter::repeat_n((0, 0), "\x1b[0m".len()));
+        expected_points.extend(std::iter::repeat_n((0, 0), "\r\n".len()));
+        expected_points.push((0, 1));
+
+        assert_styled_pin_map(
+            &list,
+            (0, 0),
+            (0, 1),
+            PageOutputFormat::Vt,
+            true,
+            true,
+            None,
+            expected,
+            &pins(&list, &expected_points),
+        );
+    }
+
+    #[test]
+    fn styled_pin_map_vt_generated_blanks_and_replacements() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        set_screen_cell(&mut list, 0, 0, 'A');
+        set_screen_cell(&mut list, 3, 0, 'o');
+        let map = [codepoint_map_entry(
+            'o',
+            'o',
+            CodepointReplacement::String("XYZ".to_string()),
+        )];
+
+        assert_styled_pin_map(
+            &list,
+            (0, 0),
+            (3, 0),
+            PageOutputFormat::Vt,
+            false,
+            true,
+            Some(&map),
+            "A  XYZ",
+            &pins(&list, &[(0, 0), (2, 0), (1, 0), (3, 0), (3, 0), (3, 0)]),
+        );
+    }
+
+    #[test]
+    fn styled_pin_map_html_wrapper_entities_and_close() {
+        let mut list = PageList::init(8, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["<é"]);
+
+        let expected = "<div style=\"font-family: monospace; white-space: pre;\">&lt;&#233;</div>";
+        let mut expected_points = Vec::new();
+        expected_points.extend(std::iter::repeat_n(
+            (0, 0),
+            "<div style=\"font-family: monospace; white-space: pre;\">".len(),
+        ));
+        expected_points.extend(std::iter::repeat_n((0, 0), "&lt;".len()));
+        expected_points.extend(std::iter::repeat_n((1, 0), "&#233;".len()));
+        expected_points.extend(std::iter::repeat_n((1, 0), "</div>".len()));
+
+        assert_styled_pin_map(
+            &list,
+            (0, 0),
+            (1, 0),
+            PageOutputFormat::Html,
+            true,
+            true,
+            None,
+            expected,
+            &pins(&list, &expected_points),
+        );
+    }
+
+    #[test]
+    fn styled_pin_map_html_generated_blanks_and_replacements() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        set_screen_cell(&mut list, 0, 0, 'A');
+        set_screen_cell(&mut list, 3, 0, 'o');
+        let map = [codepoint_map_entry(
+            'o',
+            'o',
+            CodepointReplacement::String("<é".to_string()),
+        )];
+
+        let expected =
+            "<div style=\"font-family: monospace; white-space: pre;\">A  &lt;&#233;</div>";
+        let mut expected_points = Vec::new();
+        expected_points.extend(std::iter::repeat_n(
+            (0, 0),
+            "<div style=\"font-family: monospace; white-space: pre;\">".len(),
+        ));
+        expected_points.extend([(0, 0), (2, 0), (1, 0)]);
+        expected_points.extend(std::iter::repeat_n((3, 0), "&lt;".len()));
+        expected_points.extend(std::iter::repeat_n((3, 0), "&#233;".len()));
+        expected_points.extend(std::iter::repeat_n((3, 0), "</div>".len()));
+
+        assert_styled_pin_map(
+            &list,
+            (0, 0),
+            (3, 0),
+            PageOutputFormat::Html,
+            false,
+            true,
+            Some(&map),
+            expected,
+            &pins(&list, &expected_points),
+        );
+    }
+
+    #[test]
+    fn styled_pin_map_html_style_empty_and_hyperlinked_text() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        let styled = style::Style {
+            bg_color: style::Color::Palette(4),
+            ..style::Style::default()
+        };
+        set_screen_styled_empty_cell(&mut list, 0, 0, styled);
+        set_screen_cell(&mut list, 1, 0, 'L');
+        let link_id = list.pages[0]
+            .page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Explicit(b"guard"),
+                uri: b"https://example.com",
+            })
+            .unwrap();
+        list.pages[0].page.set_hyperlink(1, 0, link_id).unwrap();
+
+        let expected = "<div style=\"font-family: monospace; white-space: pre;\"><div style=\"display: inline;background-color: var(--vt-palette-4);\"> </div>L</div>";
+        let mut expected_points = Vec::new();
+        expected_points.extend(std::iter::repeat_n(
+            (0, 0),
+            "<div style=\"font-family: monospace; white-space: pre;\">".len(),
+        ));
+        expected_points.extend(std::iter::repeat_n(
+            (0, 0),
+            "<div style=\"display: inline;background-color: var(--vt-palette-4);\">".len(),
+        ));
+        expected_points.push((0, 0));
+        expected_points.extend(std::iter::repeat_n((0, 0), "</div>".len()));
+        expected_points.push((1, 0));
+        expected_points.extend(std::iter::repeat_n((1, 0), "</div>".len()));
+
+        assert_styled_pin_map(
+            &list,
+            (0, 0),
+            (1, 0),
+            PageOutputFormat::Html,
+            true,
+            true,
+            None,
+            expected,
+            &pins(&list, &expected_points),
+        );
+    }
+
+    #[test]
+    fn styled_pin_map_multi_page_vt_and_html_preserve_nodes() {
+        let (mut list, page_rows) = multi_page_list(80);
+        let first_y = page_rows as u32 - 1;
+        let second_y = first_y + 1;
+        set_screen_cell(&mut list, 0, first_y, 'A');
+        set_screen_cell(&mut list, 0, second_y, 'B');
+
+        let vt = list.page_string_with_pin_map(PageStringOptions {
+            selection: Some(screen_selection(&list, (0, first_y), (0, second_y), false)),
+            trim: true,
+            unwrap: true,
+            emit: PageOutputFormat::Vt,
+            palette: None,
+            codepoint_map: None,
+        });
+        assert_eq!(vt.text, "A\r\nB");
+        assert_eq!(
+            vt.pin_map,
+            pins(
+                &list,
+                &[(0, first_y), (0, first_y), (0, first_y), (0, second_y)]
+            )
+        );
+        assert_ne!(vt.pin_map[0].node, vt.pin_map[3].node);
+
+        let html = list.page_string_with_pin_map(PageStringOptions {
+            selection: Some(screen_selection(&list, (0, first_y), (0, second_y), false)),
+            trim: true,
+            unwrap: true,
+            emit: PageOutputFormat::Html,
+            palette: None,
+            codepoint_map: None,
+        });
+        let wrapper = "<div style=\"font-family: monospace; white-space: pre;\">";
+        assert_eq!(html.text, format!("{wrapper}A</div>{wrapper}\nB</div>"));
+        let second_node_index = wrapper.len() + "A</div>".len() + wrapper.len();
+        assert_ne!(
+            html.pin_map[wrapper.len()].node,
+            html.pin_map[second_node_index].node
+        );
+    }
+
+    #[test]
+    fn styled_pin_map_invalid_or_garbage_endpoints_are_empty() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        set_screen_text_lines(&mut list, &["hello"]);
+        let other = PageList::init(5, 2, None).unwrap();
+        let invalid = Pin::new(other.first_node_ptr(), 0, 0);
+        let valid = screen_pin(&list, 0, 0);
+        let mut garbage = valid;
+        garbage.garbage = true;
+
+        for selection in [
+            selection::Selection::new(invalid, valid, false),
+            selection::Selection::new(valid, invalid, false),
+            selection::Selection::new(garbage, valid, false),
+            selection::Selection::new(valid, garbage, false),
+        ] {
+            assert_styled_pin_map_for_selection(
+                &list,
+                Some(selection),
+                PageOutputFormat::Vt,
+                true,
+                true,
+                "",
+                &[],
+            );
+            assert_styled_pin_map_for_selection(
+                &list,
+                Some(selection),
+                PageOutputFormat::Html,
+                true,
+                true,
+                "",
+                &[],
+            );
         }
     }
 
