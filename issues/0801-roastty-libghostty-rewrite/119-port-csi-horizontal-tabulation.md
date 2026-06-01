@@ -260,3 +260,83 @@ Final review artifacts:
 
 Codex approved the corrected design with no findings and said it is ready to
 commit before implementation.
+
+## Result
+
+**Result:** Pass
+
+Experiment 119 ports `CSI I` / CHT into Roastty's current full-screen terminal
+model.
+
+Accepted forms:
+
+- raw `HT` still dispatches `Action::HorizontalTab { count: 1 }`;
+- `CSI I` dispatches count `1`;
+- `CSI n I` dispatches count `n`;
+- `CSI 0 I` dispatches count `0`;
+- semicolon-finalized one-param forms match Ghostty:
+  - `CSI ; I` dispatches count `0`;
+  - `CSI 3 ; I` dispatches count `3`;
+- oversized counts saturate to `u16::MAX`.
+
+Rejected forms:
+
+- private variants such as `CSI ? 3 I`;
+- non-standard private variants such as `CSI > 3 I`;
+- colon or mixed-separator variants such as `CSI 1 : 2 I` and `CSI 1 ; 2 : 3 I`;
+- real multi-param variants such as `CSI 5 ; 4 I`;
+- intermediate-bearing forms;
+- raw C1 `0x9b` followed by `I`, which remains out of scope and keeps the
+  current replacement-character behavior.
+
+The implementation changes the private `HorizontalTab` stream action to carry a
+count. Raw `HT` dispatches count `1`, while `CSI I` uses an explicit-zero
+preserving tabulation helper. The helper accepts semicolon-finalized one-param
+forms for this new final without broadening prior one-param CSI behavior.
+
+Terminal routing now repeats the existing single-step `horizontal_tab_basic()`
+helper up to the requested count and stops early if a step does not move the
+cursor. This preserves existing tab-stop behavior, right-edge clamping, and
+pending-wrap behavior. Count `0` performs no movement. Counted tabulation does
+not write cells, dirty rows, or scroll.
+
+Parser error behavior was preserved: if a handler fails on counted
+`HorizontalTab`, the stream is already back in ground state and the next
+printable byte is parsed normally. Pending invalid UTF-8 still emits `U+FFFD`
+before same-slice and split-feed `CSI I` actions.
+
+Existing raw `HT`, cursor movement, cursor positioning, line movement, and
+`CSI W` tab-stop behavior continued to pass. This experiment did not add
+`CSI Z`, reverse tabulation, margin-aware tabulation, erase-display, public API,
+or ABI behavior.
+
+Verification passed:
+
+```text
+cargo fmt
+cargo test -p roastty stream
+cargo test -p roastty terminal::terminal
+cargo test -p roastty terminal_formatter
+cargo test -p roastty screen_formatter
+cargo test -p roastty page_string
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+The full package test run passed with 1174 unit tests and the ABI harness.
+
+Codex reviewed the completed implementation with no findings.
+
+Result review artifacts:
+
+- Prompt: `logs/codex-review/20260601-035542-503389-prompt.md`
+- Result: `logs/codex-review/20260601-035542-503389-last-message.md`
+
+## Conclusion
+
+Roastty now has counted forward horizontal tabulation for the current basic
+terminal model. The important parser distinction from this slice is that a new
+CSI final can opt into semicolon-finalized one-param forms without changing the
+previously ported one-param cursor actions.
+
+Reverse tabulation (`CSI Z`) and margin-aware tab movement remain deferred.

@@ -267,6 +267,21 @@ impl Screen {
         self.cursor.x = next_tabstop;
     }
 
+    pub(super) fn horizontal_tab_count_basic(
+        &mut self,
+        cols: CellCountInt,
+        tabstops: &tabstops::Tabstops,
+        count: CellCountInt,
+    ) {
+        for _ in 0..count {
+            let x = self.cursor.x;
+            self.horizontal_tab_basic(cols, tabstops);
+            if self.cursor.x == x {
+                break;
+            }
+        }
+    }
+
     pub(super) fn tab_set_basic(&self, tabstops: &mut tabstops::Tabstops) {
         tabstops.set(usize::from(self.cursor.x));
     }

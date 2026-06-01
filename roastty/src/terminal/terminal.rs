@@ -290,9 +290,9 @@ impl Handler for TerminalStreamHandler<'_> {
                 self.screen.backspace_basic();
                 Ok(())
             }
-            Action::HorizontalTab => {
+            Action::HorizontalTab { count } => {
                 self.screen
-                    .horizontal_tab_basic(self.size.cols, self.tabstops);
+                    .horizontal_tab_count_basic(self.size.cols, self.tabstops, count);
                 Ok(())
             }
             Action::TabSet => {
@@ -1954,6 +1954,110 @@ mod tests {
         assert!(!terminal.is_dirty_for_tests(0, 0));
         assert!(!terminal.is_dirty_for_tests(9, 0));
         assert!(!terminal.is_dirty_for_tests(0, 1));
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_tabulation_moves_to_next_default_tabstop() {
+        let mut terminal = Terminal::init(20, 2, None).unwrap();
+
+        terminal.next_slice(b"1\x1b[IA").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "1       A");
+        assert_eq!(terminal.cursor_position_for_tests(), (9, 0));
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_tabulation_zero_count_does_not_move() {
+        for input in [b"\x1b[0I".as_slice(), b"\x1b[;I".as_slice()] {
+            let mut terminal = Terminal::init(20, 2, None).unwrap();
+            terminal.screens.active.set_cursor_position_for_tests(3, 0);
+
+            terminal.next_slice(input).unwrap();
+
+            assert_eq!(terminal.cursor_position_for_tests(), (3, 0));
+        }
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_tabulation_count_moves_multiple_tabstops() {
+        for input in [b"\x1b[2I".as_slice(), b"\x1b[2;I".as_slice()] {
+            let mut terminal = Terminal::init(24, 2, None).unwrap();
+
+            terminal.next_slice(input).unwrap();
+
+            assert_eq!(terminal.cursor_position_for_tests(), (16, 0));
+        }
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_tabulation_stops_at_right_edge() {
+        let mut terminal = Terminal::init(20, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b[999999999999999999999999I")
+            .unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (19, 0));
+        assert!(!terminal.cursor_pending_wrap_for_tests());
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_tabulation_uses_custom_tabstops() {
+        let mut terminal = Terminal::init(12, 2, None).unwrap();
+        terminal.clear_tabstops_for_tests();
+        terminal.set_tabstop_for_tests(3);
+        terminal.set_tabstop_for_tests(7);
+
+        terminal.next_slice(b"\x1b[2I").unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (7, 0));
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_tabulation_starting_on_tabstop_moves_next() {
+        let mut terminal = Terminal::init(20, 2, None).unwrap();
+        terminal.screens.active.set_cursor_position_for_tests(8, 0);
+
+        terminal.next_slice(b"\x1b[I").unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (16, 0));
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_tabulation_preserves_pending_wrap_at_right_edge() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"ABCDE").unwrap();
+        assert!(terminal.cursor_pending_wrap_for_tests());
+        terminal.next_slice(b"\x1b[I").unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+        assert!(terminal.cursor_pending_wrap_for_tests());
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_tabulation_does_not_dirty_rows_or_modify_cells() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"abc").unwrap();
+        terminal.clear_dirty_for_tests();
+        terminal.next_slice(b"\x1b[2I").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+        assert_eq!(terminal.cursor_position_for_tests(), (9, 0));
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(9, 0));
+        assert!(!terminal.is_dirty_for_tests(0, 1));
+    }
+
+    #[test]
+    fn terminal_stream_split_feed_csi_horizontal_tabulation_moves_cursor() {
+        let mut terminal = Terminal::init(24, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b[2").unwrap();
+        terminal.next_slice(b"I").unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (16, 0));
     }
 
     #[test]
