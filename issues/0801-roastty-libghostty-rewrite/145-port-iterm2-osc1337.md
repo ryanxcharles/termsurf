@@ -141,3 +141,61 @@ approved. Required fixes were added:
 
 Codex approved the revised design after those additions. No remaining required
 design fixes.
+
+## Result
+
+**Result:** Pass
+
+Roastty now parses Ghostty's meaningful OSC 1337 iTerm2 extension behavior:
+
+- `Copy=:<data>` dispatches existing clipboard contents with kind `c`.
+- `CurrentDir=<value>` dispatches existing PWD reporting.
+- Both command-producing keys match ASCII case-insensitively.
+- Recognized but unimplemented iTerm2 keys remain inert.
+- Unknown OSC 1337 keys remain inert.
+- OSC 1337 stays on the fixed-buffer parser path; oversized payloads dispatch
+  nothing and do not leak bytes into printable output.
+
+Runtime behavior stays intentionally narrow. OSC 1337 `CurrentDir` updates the
+terminal PWD state through the existing OSC 7 path, while OSC 1337 `Copy`
+reaches the stream clipboard action and remains a terminal-layer no-op like the
+existing OSC 52 clipboard action.
+
+Verification run:
+
+```bash
+cargo fmt -- roastty/src/terminal/osc.rs roastty/src/terminal/stream.rs roastty/src/terminal/terminal.rs
+cargo test -p roastty osc_parser_iterm2_osc1337
+cargo test -p roastty terminal_stream_osc1337
+cargo test -p roastty stream_osc1337
+cargo test -p roastty stream_osc_dispatches_iterm2_osc1337
+cargo test -p roastty
+```
+
+All tests passed. The full Roastty suite reported 1579 unit tests, 1 ABI harness
+test, and 0 doc tests passing.
+
+## Result Review
+
+Codex reviewed the completed implementation and found no implementation
+correctness issues. It approved the result after requiring this approval note to
+replace the pending review placeholder.
+
+Codex also reran the focused and full Roastty verification commands:
+
+```bash
+cargo test -p roastty osc_parser_iterm2_osc1337
+cargo test -p roastty stream_osc1337
+cargo test -p roastty stream_osc_dispatches_iterm2_osc1337
+cargo test -p roastty terminal_stream_osc1337
+cargo test -p roastty
+```
+
+All passed.
+
+## Conclusion
+
+Experiment 145 completed the iTerm2 OSC 1337 parser slice that Ghostty currently
+uses for runtime-visible terminal behavior. The next experiment should continue
+from the remaining Ghostty terminal parser/runtime surface rather than expand
+OSC 1337 into unimplemented iTerm2 file/image/annotation features.

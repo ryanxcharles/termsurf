@@ -5741,6 +5741,77 @@ mod tests {
     }
 
     #[test]
+    fn stream_osc_dispatches_iterm2_osc1337() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(
+            &mut stream,
+            &mut handler,
+            b"\x1b]1337;Copy=:YWJjMTIz\x07\x1b]1337;CurrentDir=file://host/p\x1b\\",
+        );
+
+        assert_eq!(
+            osc_actions(&handler),
+            &[
+                OwnedOscAction::ClipboardContents {
+                    kind: b'c',
+                    data: b"YWJjMTIz".to_vec(),
+                },
+                OwnedOscAction::ReportPwd {
+                    url: "file://host/p".to_string(),
+                },
+            ]
+        );
+        assert_eq!(actions(&handler), &[]);
+    }
+
+    #[test]
+    fn stream_osc1337_inert_keys_do_not_leak() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(
+            &mut stream,
+            &mut handler,
+            b"A\x1b]1337;SetBadgeFormat\x07\x1b]1337;SetBadgeFormat=\x1b\\\x1b]1337;SetBadgeFormat=abc123\x07B",
+        );
+        next_slice(
+            &mut stream,
+            &mut handler,
+            b"C\x1b]1337;Unknown\x07\x1b]1337;Unknown=\x1b\\\x1b]1337;Unknown=abc123\x07D",
+        );
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print { cp: 'A' },
+                Action::Print { cp: 'B' },
+                Action::Print { cp: 'C' },
+                Action::Print { cp: 'D' },
+            ]
+        );
+        assert_eq!(osc_actions(&handler), &[]);
+    }
+
+    #[test]
+    fn stream_osc1337_oversized_payload_does_not_leak() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+        let mut input = b"A\x1b]1337;Copy=:".to_vec();
+        input.extend(std::iter::repeat_n(b'a', osc::MAX_BUF + 32));
+        input.extend_from_slice(b"\x07B");
+
+        next_slice(&mut stream, &mut handler, &input);
+
+        assert_eq!(
+            actions(&handler),
+            &[Action::Print { cp: 'A' }, Action::Print { cp: 'B' }]
+        );
+        assert_eq!(osc_actions(&handler), &[]);
+    }
+
+    #[test]
     fn stream_osc_dispatches_context_signals() {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();

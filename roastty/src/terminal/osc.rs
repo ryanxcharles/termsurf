@@ -338,6 +338,7 @@ impl Parser {
             b"52" => parse_osc52_clipboard(rest).map(|value| Command::ClipboardContents { value }),
             b"66" => parse_kitty_text_sizing(rest).map(|value| Command::KittyTextSizing { value }),
             b"777" => parse_osc777_notification(rest),
+            b"1337" if split.is_some() => parse_iterm2_extension(rest),
             b"3008" if split.is_some() => {
                 parse_context_signal(rest).map(|value| Command::ContextSignal { value })
             }
@@ -443,6 +444,79 @@ fn parse_osc52_clipboard(bytes: &[u8]) -> Option<super::clipboard::ClipboardCont
         [] | [_] => None,
         _ => None,
     }
+}
+
+fn parse_iterm2_extension(bytes: &[u8]) -> Option<Command<'_>> {
+    let (key, value) = match SplitOnce::split_once(bytes, |byte| *byte == b'=') {
+        Some((key, value)) => (key, Some(value)),
+        None => (bytes, None),
+    };
+
+    if key.eq_ignore_ascii_case(b"Copy") {
+        let value = value?;
+        if value.is_empty() || value.first() != Some(&b':') {
+            return None;
+        }
+        let data = &value[1..];
+        if data.is_empty() || data == b"?" {
+            return None;
+        }
+        return Some(Command::ClipboardContents {
+            value: super::clipboard::ClipboardContents { kind: b'c', data },
+        });
+    }
+
+    if key.eq_ignore_ascii_case(b"CurrentDir") {
+        let value = value?;
+        if value.is_empty() {
+            return None;
+        }
+        return valid_utf8(value).map(|url| Command::ReportPwd { url });
+    }
+
+    is_iterm2_unimplemented_key(key).then_some(())?;
+    None
+}
+
+fn is_iterm2_unimplemented_key(key: &[u8]) -> bool {
+    [
+        b"AddAnnotation".as_slice(),
+        b"AddHiddenAnnotation",
+        b"Block",
+        b"Button",
+        b"ClearCapturedOutput",
+        b"ClearScrollback",
+        b"CopyToClipboard",
+        b"CursorShape",
+        b"Custom",
+        b"Disinter",
+        b"EndCopy",
+        b"File",
+        b"FileEnd",
+        b"FilePart",
+        b"HighlightCursorLine",
+        b"MultipartFile",
+        b"OpenURL",
+        b"PopKeyLabels",
+        b"PushKeyLabels",
+        b"RemoteHost",
+        b"ReportCellSize",
+        b"ReportVariable",
+        b"RequestAttention",
+        b"RequestUpload",
+        b"SetBackgroundImageFile",
+        b"SetBadgeFormat",
+        b"SetColors",
+        b"SetKeyLabel",
+        b"SetMark",
+        b"SetProfile",
+        b"SetUserVar",
+        b"ShellIntegrationVersion",
+        b"StealFocus",
+        b"UnicodeVersion",
+    ]
+    .iter()
+    .any(|candidate| key.eq_ignore_ascii_case(candidate))
 }
 
 fn parse_kitty_clipboard(
@@ -1017,6 +1091,87 @@ mod tests {
         assert_eq!(parse(b"52;"), None);
         assert_eq!(parse(b"52;s"), None);
         assert_eq!(parse(b"52;sx?"), None);
+    }
+
+    #[test]
+    fn osc_parser_iterm2_osc1337_unimplemented_and_unknown_keys() {
+        assert_eq!(parse(b"1337"), None);
+        assert_eq!(parse(b"1337;"), None);
+
+        for input in [
+            b"1337;SetBadgeFormat".as_slice(),
+            b"1337;SetBadgeFormat=",
+            b"1337;SetBadgeFormat=abc123",
+            b"1337;setbadgeformat",
+            b"1337;setbadgeformat=",
+            b"1337;setbadgeformat=abc123",
+            b"1337;Unknown",
+            b"1337;Unknown=",
+            b"1337;Unknown=abc123",
+        ] {
+            assert_eq!(parse(input), None, "input should be inert: {input:?}");
+        }
+    }
+
+    #[test]
+    fn osc_parser_iterm2_osc1337_copy() {
+        for input in [
+            b"1337;Copy".as_slice(),
+            b"1337;Copy=",
+            b"1337;Copy=:",
+            b"1337;Copy=:?",
+            b"1337;Copy=YWJjMTIz",
+        ] {
+            assert_eq!(parse(input), None, "input should be invalid: {input:?}");
+        }
+
+        assert_eq!(
+            parse(b"1337;Copy=:YWJjMTIz"),
+            Some(OwnedCommand::ClipboardContents {
+                kind: b'c',
+                data: b"YWJjMTIz".to_vec(),
+            })
+        );
+        assert_eq!(
+            parse(b"1337;copy=:YWJjMTIz"),
+            Some(OwnedCommand::ClipboardContents {
+                kind: b'c',
+                data: b"YWJjMTIz".to_vec(),
+            })
+        );
+        assert_eq!(
+            parse(b"1337;Copy=:abc123"),
+            Some(OwnedCommand::ClipboardContents {
+                kind: b'c',
+                data: b"abc123".to_vec(),
+            })
+        );
+    }
+
+    #[test]
+    fn osc_parser_iterm2_osc1337_current_dir() {
+        assert_eq!(parse(b"1337;CurrentDir"), None);
+        assert_eq!(parse(b"1337;CurrentDir="), None);
+        assert_eq!(parse(b"1337;CurrentDir=\xff"), None);
+        assert_eq!(
+            parse(b"1337;CurrentDir=abc123"),
+            Some(OwnedCommand::ReportPwd {
+                url: "abc123".to_string(),
+            })
+        );
+        assert_eq!(
+            parse(b"1337;currentdir=abc123"),
+            Some(OwnedCommand::ReportPwd {
+                url: "abc123".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn osc_parser_iterm2_osc1337_oversized_stays_fixed_buffered() {
+        let mut input = b"1337;Copy=:".to_vec();
+        input.extend(std::iter::repeat_n(b'a', MAX_BUF + 32));
+        assert_eq!(parse(&input), None);
     }
 
     #[test]

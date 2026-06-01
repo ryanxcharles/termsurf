@@ -2180,6 +2180,35 @@ mod tests {
     }
 
     #[test]
+    fn terminal_stream_osc1337_current_dir_updates_pwd() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]1337;CurrentDir=file://host/osc1337\x07")
+            .unwrap();
+
+        assert_eq!(terminal.pwd_for_tests(), Some("file://host/osc1337"));
+    }
+
+    #[test]
+    fn terminal_stream_osc1337_copy_is_terminal_noop() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"abc").unwrap();
+        terminal.set_pwd_for_tests("file://host/original");
+        terminal.clear_dirty_for_tests();
+        terminal
+            .next_slice(b"\x1b]1337;Copy=:YWJjMTIz\x07")
+            .unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+        assert_eq!(terminal.pwd_for_tests(), Some("file://host/original"));
+        assert!(terminal.pty_response_for_tests().is_empty());
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(9, 0));
+    }
+
+    #[test]
     fn terminal_stream_osc22_updates_mouse_shape() {
         let mut terminal = Terminal::init(10, 2, None).unwrap();
 
