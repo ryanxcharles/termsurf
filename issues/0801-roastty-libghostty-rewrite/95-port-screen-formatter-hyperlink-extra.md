@@ -235,3 +235,93 @@ Codex found three required design fixes, all applied above:
 
 Codex re-reviewed the revised design and found no remaining required changes. It
 explicitly approved the design for implementation.
+
+## Result
+
+**Result:** Pass
+
+Experiment 95 ported the private active hyperlink state needed by upstream
+Ghostty's `ScreenFormatter.Extra.hyperlink` path.
+
+The implementation added cursor-associated private state in
+`roastty/src/terminal/screen.rs`:
+
+- `ScreenCursorHyperlink`, containing an owned URI string and hyperlink ID;
+- `ScreenCursorHyperlinkId`, with `Explicit(String)` and `Implicit(u32)`;
+- test-only helpers to set and clear active cursor hyperlink state.
+
+Because the state owns strings, `ScreenCursor` is no longer `Copy`. This follows
+the design-review decision to keep active hyperlink state directly associated
+with the cursor rather than inventing a second cursor-adjacent storage path.
+
+`ScreenFormatterExtra` now has a private `hyperlink` flag. VT output emits
+hyperlink state only when the extra is requested and active cursor hyperlink
+state is present. Absent state emits no bytes.
+
+Implicit hyperlinks emit exactly:
+
+```text
+\x1b]8;;{uri}\x1b\
+```
+
+The private implicit numeric identity is not emitted. Explicit hyperlinks emit
+exactly:
+
+```text
+\x1b]8;id={id};{uri}\x1b\
+```
+
+URI and explicit ID payloads are emitted raw for VT output, matching upstream's
+OSC 8 behavior. Plain and HTML output ignore hyperlink extras.
+
+The implemented screen-extra ordering is now:
+
+```text
+style -> hyperlink -> protection -> kitty keyboard -> charsets -> cursor
+```
+
+Pin-map behavior reuses the existing byte-indexed extra mapping rule. Hyperlink
+extra bytes map to the last content pin when formatted content exists, and to
+the screen top-left pin when content is absent, invalid, or a valid empty
+selection. Tests include a multibyte UTF-8 URI/id case to prove byte-indexed
+pin-map length and mapping behavior for non-ASCII OSC payload bytes.
+
+`TerminalFormatter` remains unchanged: it still delegates default active-screen
+content without forwarding screen extras. Regression tests set non-default
+cursor hyperlink state on the active screen and confirm default terminal text
+and pin maps remain unchanged.
+
+No OSC 8 parser support, runtime start/end hyperlink mutation, page-cell
+hyperlink writes, HTML anchor output, terminal extras, public API, public ABI,
+app behavior, renderer behavior, PTY behavior, clipboard behavior, or UI
+behavior was added.
+
+Verification passed:
+
+```text
+cargo fmt
+cargo test -p roastty screen_formatter              # 54 passed
+cargo test -p roastty terminal_formatter            # 15 passed
+cargo test -p roastty styled_pin_map                # 9 passed
+cargo test -p roastty pin_map                       # 50 passed
+cargo test -p roastty page_string                   # 12 passed
+cargo test -p roastty terminal::page_list           # 524 passed
+cargo test -p roastty                               # 898 unit + 1 ABI passed
+```
+
+Codex result review approved the implementation with no required changes. It
+confirmed the cursor-owned state, upstream extra ordering, explicit and implicit
+OSC 8 sequence shapes, byte-indexed pin-map behavior, and unchanged
+TerminalFormatter delegation.
+
+## Conclusion
+
+Roastty now has the full currently planned `ScreenFormatter` screen-extra subset
+ported: cursor, style, hyperlink, protection, Kitty keyboard, charsets, and
+their byte-indexed pin-map behavior.
+
+The next experiment should move to the next formatter/state slice outside
+`ScreenFormatter` extras. The likely candidate is the first `TerminalFormatter`
+terminal-extra field, chosen by re-reading upstream `formatter.zig` and picking
+the smallest coherent state surface that can be represented and tested without
+parser/runtime scope creep.

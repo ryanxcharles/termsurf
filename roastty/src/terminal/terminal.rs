@@ -108,6 +108,7 @@ mod tests {
     use crate::terminal::color;
     use crate::terminal::kitty::{KeyFlags, KeySetMode};
     use crate::terminal::page_list::{CodepointReplacement, Pin};
+    use crate::terminal::screen::ScreenCursorHyperlinkId;
     use crate::terminal::selection;
     use crate::terminal::style;
 
@@ -397,6 +398,10 @@ mod tests {
             .screens
             .active
             .set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
+        terminal
+            .screens
+            .active
+            .set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(1), "http://e");
 
         let terminal_output = formatter(&terminal, PageOutputFormat::Vt).format();
         let screen_output = screen_formatter(&terminal, PageOutputFormat::Vt).format();
@@ -422,6 +427,10 @@ mod tests {
             .screens
             .active
             .set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
+        terminal
+            .screens
+            .active
+            .set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(1), "http://e");
 
         let terminal_output = formatter(&terminal, PageOutputFormat::Vt).format_with_pin_map();
         let screen_output = screen_formatter(&terminal, PageOutputFormat::Vt).format_with_pin_map();

@@ -19,12 +19,25 @@ pub(super) struct Screen {
     pages: PageList,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ScreenCursor {
     x: CellCountInt,
     y: CellCountInt,
     style: style::Style,
     protected: bool,
+    hyperlink: Option<ScreenCursorHyperlink>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ScreenCursorHyperlink {
+    id: ScreenCursorHyperlinkId,
+    uri: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ScreenCursorHyperlinkId {
+    Explicit(String),
+    Implicit(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +77,7 @@ pub(super) struct ScreenFormatter<'a> {
 pub(super) struct ScreenFormatterExtra {
     cursor: bool,
     style: bool,
+    hyperlink: bool,
     protection: bool,
     kitty_keyboard: bool,
     charsets: bool,
@@ -103,6 +117,23 @@ impl Screen {
     #[cfg(test)]
     pub(super) fn set_cursor_protected_for_tests(&mut self, protected: bool) {
         self.cursor.protected = protected;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_cursor_hyperlink_for_tests(
+        &mut self,
+        id: ScreenCursorHyperlinkId,
+        uri: &str,
+    ) {
+        self.cursor.hyperlink = Some(ScreenCursorHyperlink {
+            id,
+            uri: uri.to_string(),
+        });
+    }
+
+    #[cfg(test)]
+    pub(super) fn clear_cursor_hyperlink_for_tests(&mut self) {
+        self.cursor.hyperlink = None;
     }
 
     #[cfg(test)]
@@ -177,6 +208,7 @@ impl Default for ScreenCursor {
             y: 0,
             style: style::Style::default(),
             protected: false,
+            hyperlink: None,
         }
     }
 }
@@ -220,6 +252,7 @@ impl ScreenFormatterExtra {
         Self {
             cursor: false,
             style: false,
+            hyperlink: false,
             protection: false,
             kitty_keyboard: false,
             charsets: false,
@@ -233,6 +266,11 @@ impl ScreenFormatterExtra {
 
     pub(super) const fn style(mut self, style: bool) -> Self {
         self.style = style;
+        self
+    }
+
+    pub(super) const fn hyperlink(mut self, hyperlink: bool) -> Self {
+        self.hyperlink = hyperlink;
         self
     }
 
@@ -252,7 +290,12 @@ impl ScreenFormatterExtra {
     }
 
     const fn is_empty(self) -> bool {
-        !self.cursor && !self.style && !self.protection && !self.kitty_keyboard && !self.charsets
+        !self.cursor
+            && !self.style
+            && !self.hyperlink
+            && !self.protection
+            && !self.kitty_keyboard
+            && !self.charsets
     }
 }
 
@@ -368,6 +411,9 @@ impl<'a> ScreenFormatter<'a> {
         if self.extra.style {
             output.push_str(&self.screen.cursor.style.formatter_vt().to_string());
         }
+        if self.extra.hyperlink {
+            self.push_hyperlink_extra(&mut output);
+        }
         if self.extra.protection && self.screen.cursor.protected {
             output.push_str("\x1b[1\"q");
         }
@@ -388,6 +434,27 @@ impl<'a> ScreenFormatter<'a> {
             ));
         }
         output
+    }
+
+    fn push_hyperlink_extra(self, output: &mut String) {
+        let Some(link) = &self.screen.cursor.hyperlink else {
+            return;
+        };
+
+        match &link.id {
+            ScreenCursorHyperlinkId::Explicit(id) => {
+                output.push_str("\x1b]8;id=");
+                output.push_str(id);
+                output.push(';');
+                output.push_str(&link.uri);
+                output.push_str("\x1b\\");
+            }
+            ScreenCursorHyperlinkId::Implicit(_) => {
+                output.push_str("\x1b]8;;");
+                output.push_str(&link.uri);
+                output.push_str("\x1b\\");
+            }
+        }
     }
 
     fn push_charset_extras(self, output: &mut String) {
@@ -773,6 +840,65 @@ mod tests {
     }
 
     #[test]
+    fn screen_formatter_vt_hyperlink_extra_ignores_absent_state() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(42), "http://e");
+        screen.clear_cursor_hyperlink_for_tests();
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().hyperlink(true))
+            .format();
+
+        assert_eq!(actual, "hi");
+    }
+
+    #[test]
+    fn screen_formatter_vt_hyperlink_extra_appends_implicit_osc8_after_content() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(42), "http://e");
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().hyperlink(true))
+            .format();
+
+        assert_eq!(actual, "hi\x1b]8;;http://e\x1b\\");
+        assert!(!actual.contains("42"));
+    }
+
+    #[test]
+    fn screen_formatter_vt_hyperlink_extra_appends_explicit_osc8_after_content() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_hyperlink_for_tests(
+            ScreenCursorHyperlinkId::Explicit("tab-1".to_string()),
+            "http://e",
+        );
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().hyperlink(true))
+            .format();
+
+        assert_eq!(actual, "hi\x1b]8;id=tab-1;http://e\x1b\\");
+    }
+
+    #[test]
+    fn screen_formatter_vt_hyperlink_extra_emits_raw_osc8_payload() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_hyperlink_for_tests(
+            ScreenCursorHyperlinkId::Explicit("x&<y".to_string()),
+            "https://example.com?a=1&b=<2>",
+        );
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().hyperlink(true))
+            .format();
+
+        assert_eq!(
+            actual,
+            "hi\x1b]8;id=x&<y;https://example.com?a=1&b=<2>\x1b\\"
+        );
+    }
+
+    #[test]
     fn screen_kitty_keyboard_helpers_preserve_stack_behavior() {
         let mut screen = screen_with_lines(&["hi"]);
 
@@ -794,6 +920,7 @@ mod tests {
     fn screen_formatter_vt_style_protection_and_cursor_extras_keep_upstream_order() {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(4, 2);
+        screen.set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(1), "http://e");
         screen.set_cursor_protected_for_tests(true);
         screen.set_cursor_style_for_tests(style::Style {
             fg_color: style::Color::Palette(1),
@@ -804,12 +931,16 @@ mod tests {
             .with_extra(
                 ScreenFormatterExtra::none()
                     .style(true)
+                    .hyperlink(true)
                     .protection(true)
                     .cursor(true),
             )
             .format();
 
-        assert_eq!(actual, "hi\x1b[0m\x1b[38;5;1m\x1b[1\"q\x1b[3;5H");
+        assert_eq!(
+            actual,
+            "hi\x1b[0m\x1b[38;5;1m\x1b]8;;http://e\x1b\\\x1b[1\"q\x1b[3;5H"
+        );
     }
 
     #[test]
@@ -878,6 +1009,7 @@ mod tests {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(4, 2);
         screen.set_cursor_protected_for_tests(true);
+        screen.set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(1), "http://e");
         screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
         screen.set_cursor_style_for_tests(style::Style {
             fg_color: style::Color::Palette(1),
@@ -890,6 +1022,7 @@ mod tests {
             .with_extra(
                 ScreenFormatterExtra::none()
                     .style(true)
+                    .hyperlink(true)
                     .protection(true)
                     .kitty_keyboard(true)
                     .charsets(true)
@@ -899,7 +1032,7 @@ mod tests {
 
         assert_eq!(
             actual,
-            "hi\x1b[0m\x1b[38;5;1m\x1b[1\"q\x1b[=3;1u\x1b(0\x0e\x1b[3;5H"
+            "hi\x1b[0m\x1b[38;5;1m\x1b]8;;http://e\x1b\\\x1b[1\"q\x1b[=3;1u\x1b(0\x0e\x1b[3;5H"
         );
     }
 
@@ -908,6 +1041,10 @@ mod tests {
         let mut screen = screen_with_lines(&["<hi"]);
         screen.set_cursor_position_for_tests(4, 2);
         screen.set_cursor_protected_for_tests(true);
+        screen.set_cursor_hyperlink_for_tests(
+            ScreenCursorHyperlinkId::Explicit("x&<y".to_string()),
+            "https://example.com?a=1&b=<2>",
+        );
         screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
         screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
         screen.set_charset_gl_for_tests(charsets::CharsetSlot::G1);
@@ -920,6 +1057,7 @@ mod tests {
         });
         let extra = ScreenFormatterExtra::none()
             .style(true)
+            .hyperlink(true)
             .protection(true)
             .kitty_keyboard(true)
             .charsets(true)
@@ -944,6 +1082,7 @@ mod tests {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(2, 1);
         screen.set_cursor_protected_for_tests(true);
+        screen.set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(1), "http://e");
         screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
         screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
         screen.set_cursor_style_for_tests(style::Style {
@@ -959,6 +1098,7 @@ mod tests {
             .with_extra(
                 ScreenFormatterExtra::none()
                     .style(true)
+                    .hyperlink(true)
                     .protection(true)
                     .kitty_keyboard(true)
                     .charsets(true)
@@ -966,7 +1106,10 @@ mod tests {
             )
             .format();
 
-        assert_eq!(actual, "\x1b[0m\x1b[1m\x1b[1\"q\x1b[=3;1u\x1b(0\x1b[2;3H");
+        assert_eq!(
+            actual,
+            "\x1b[0m\x1b[1m\x1b]8;;http://e\x1b\\\x1b[1\"q\x1b[=3;1u\x1b(0\x1b[2;3H"
+        );
     }
 
     #[test]
@@ -980,6 +1123,19 @@ mod tests {
             .format();
 
         assert_eq!(actual, "\x1b[=3;1u");
+    }
+
+    #[test]
+    fn screen_formatter_no_content_can_emit_only_hyperlink_extra() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(1), "http://e");
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::None)
+            .with_extra(ScreenFormatterExtra::none().hyperlink(true))
+            .format();
+
+        assert_eq!(actual, "\x1b]8;;http://e\x1b\\");
     }
 
     #[test]
@@ -1036,6 +1192,42 @@ mod tests {
     }
 
     #[test]
+    fn screen_formatter_vt_hyperlink_extra_pin_map_uses_last_content_pin() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(1), "http://e");
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().hyperlink(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "hi\x1b]8;;http://e\x1b\\");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        assert_eq!(actual.pin_map[0], screen_pin(&screen, 0, 0));
+        assert_eq!(actual.pin_map[1], screen_pin(&screen, 1, 0));
+        for pin in &actual.pin_map[2..] {
+            assert_eq!(*pin, screen_pin(&screen, 1, 0));
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_hyperlink_extra_pin_map_is_byte_indexed_for_multibyte_uri() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_hyperlink_for_tests(
+            ScreenCursorHyperlinkId::Explicit("idé".to_string()),
+            "https://e.test/é",
+        );
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().hyperlink(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "hi\x1b]8;id=idé;https://e.test/é\x1b\\");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        assert!(actual.text.chars().count() < actual.text.len());
+        for pin in &actual.pin_map[2..] {
+            assert_eq!(*pin, screen_pin(&screen, 1, 0));
+        }
+    }
+
+    #[test]
     fn screen_formatter_vt_kitty_keyboard_extra_pin_map_uses_last_content_pin() {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
@@ -1080,6 +1272,22 @@ mod tests {
             .format_with_pin_map();
 
         assert_eq!(actual.text, "\x1b[=3;1u");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        for pin in actual.pin_map {
+            assert_eq!(pin, screen_pin(&screen, 0, 0));
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_hyperlink_extra_pin_map_without_content_uses_top_left_pin() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(1), "http://e");
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::None)
+            .with_extra(ScreenFormatterExtra::none().hyperlink(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "\x1b]8;;http://e\x1b\\");
         assert_eq!(actual.text.len(), actual.pin_map.len());
         for pin in actual.pin_map {
             assert_eq!(pin, screen_pin(&screen, 0, 0));
@@ -1150,6 +1358,28 @@ mod tests {
     }
 
     #[test]
+    fn screen_formatter_vt_hyperlink_extra_pin_map_after_invalid_selection_uses_top_left_pin() {
+        let mut screen = screen_with_lines(&["hi"]);
+        let other = screen_with_lines(&["other"]);
+        let invalid = screen_pin(&other, 0, 0);
+        let valid = screen_pin(&screen, 0, 0);
+        screen.set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(1), "http://e");
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::Selection(Some(
+                selection::Selection::new(invalid, valid, false),
+            )))
+            .with_extra(ScreenFormatterExtra::none().hyperlink(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "\x1b]8;;http://e\x1b\\");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        for pin in actual.pin_map {
+            assert_eq!(pin, screen_pin(&screen, 0, 0));
+        }
+    }
+
+    #[test]
     fn screen_formatter_vt_extra_pin_map_after_empty_selection_uses_top_left_pin() {
         let mut screen = screen_with_lines(&["  "]);
         let selection = screen_selection(&screen, (0, 0), (1, 0));
@@ -1162,6 +1392,24 @@ mod tests {
             .format_with_pin_map();
 
         assert_eq!(actual.text, "\x1b(0");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        for pin in actual.pin_map {
+            assert_eq!(pin, screen_pin(&screen, 0, 0));
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_hyperlink_extra_pin_map_after_empty_selection_uses_top_left_pin() {
+        let mut screen = screen_with_lines(&["  "]);
+        let selection = screen_selection(&screen, (0, 0), (1, 0));
+        screen.set_cursor_hyperlink_for_tests(ScreenCursorHyperlinkId::Implicit(1), "http://e");
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::Selection(Some(selection)))
+            .with_extra(ScreenFormatterExtra::none().hyperlink(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "\x1b]8;;http://e\x1b\\");
         assert_eq!(actual.text.len(), actual.pin_map.len());
         for pin in actual.pin_map {
             assert_eq!(pin, screen_pin(&screen, 0, 0));
