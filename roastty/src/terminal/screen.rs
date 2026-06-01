@@ -162,6 +162,15 @@ impl Screen {
         })
     }
 
+    pub(super) fn reset(&mut self) {
+        self.pages.reset();
+        self.pages.mark_active_rows_dirty();
+        self.cursor = ScreenCursor::default();
+        self.saved_cursor = None;
+        self.charset = ScreenCharsetState::default();
+        self.kitty_keyboard = kitty::KeyFlagStack::default();
+    }
+
     pub(super) fn top_left_pin(&self) -> super::page_list::Pin {
         self.pages
             .pin(point::Point::active(point::Coordinate::new(0, 0)))
@@ -1593,6 +1602,63 @@ mod tests {
         report_events: true,
         ..KeyFlags::DISABLED
     };
+
+    #[test]
+    fn screen_reset_clears_content_cursor_metadata_and_terminal_extras() {
+        let mut screen = screen_with_lines(&["hello", "world"]);
+
+        screen.set_cursor_position_for_tests(3, 1);
+        screen.set_cursor_style_for_tests(style::Style {
+            fg_color: style::Color::Palette(2),
+            ..style::Style::default()
+        });
+        screen.set_cursor_visual_style(cursor::VisualStyle::Bar);
+        screen.set_cursor_protected_for_tests(true);
+        screen.set_cursor_hyperlink_for_tests(
+            ScreenCursorHyperlinkId::Explicit("before".to_string()),
+            "https://example.test",
+        );
+        screen
+            .set_cursor_semantic_prompt(crate::terminal::semantic_prompt::PromptKind::Initial)
+            .unwrap();
+        screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
+        screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
+        screen.set_charset_gl_for_tests(charsets::CharsetSlot::G1);
+        screen.save_cursor(true);
+
+        screen.reset();
+        screen.restore_saved_cursor(screen.saved_cursor_or_default(), 5, 2);
+
+        assert_eq!(screen.full_screen_plain_for_tests(false), "");
+        assert_eq!(screen.cursor_position_for_tests(), (0, 0));
+        assert_eq!(screen.cursor_style_for_tests(), style::Style::default());
+        assert_eq!(
+            screen.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Block
+        );
+        assert!(!screen.cursor_protected_for_tests());
+        assert_eq!(screen.cursor_hyperlink_for_tests(), None);
+        assert_eq!(
+            screen.active_cell_semantic_content_for_tests(0, 0),
+            SemanticContent::Output
+        );
+        assert_eq!(
+            screen.active_row_semantic_prompt_for_tests(0),
+            SemanticPrompt::None
+        );
+        assert_eq!(
+            formatter(&screen, PageOutputFormat::Vt)
+                .with_extra(
+                    ScreenFormatterExtra::none()
+                        .kitty_keyboard(true)
+                        .charsets(true)
+                )
+                .format(),
+            ""
+        );
+        assert!(screen.is_dirty_for_tests(0, 0));
+        assert!(screen.is_dirty_for_tests(0, 1));
+    }
 
     #[test]
     fn screen_formatter_plain_full_screen_single_line() {

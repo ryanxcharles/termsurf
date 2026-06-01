@@ -1737,7 +1737,7 @@ impl PageList {
         self.explicit_max_size.max(self.min_max_size)
     }
 
-    fn reset(&mut self) {
+    pub(super) fn reset(&mut self) {
         self.page_serial_min = self.page_serial;
 
         let capacity = initial_capacity(self.cols);
@@ -3383,6 +3383,13 @@ impl PageList {
             for y in 0..node.page.size_rows() as usize {
                 node.page.get_row_mut(y).set_dirty(false);
             }
+        }
+    }
+
+    pub(super) fn mark_active_rows_dirty(&mut self) {
+        for y in 0..self.rows {
+            self.mark_active_row_dirty(y.into())
+                .expect("active row must resolve while marking reset dirty state");
         }
     }
 

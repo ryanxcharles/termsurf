@@ -106,6 +106,7 @@ struct TerminalStreamHandler<'a> {
     mouse_shape: &'a mut mouse::MouseShape,
     next_implicit_hyperlink_id: &'a mut u32,
     dcs: &'a mut dcs::Handler,
+    flags: &'a mut TerminalFlags,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -180,6 +181,7 @@ impl Terminal {
             pwd,
             mouse_shape,
             next_implicit_hyperlink_id,
+            flags,
             ..
         } = self;
         let mut handler = TerminalStreamHandler {
@@ -195,6 +197,7 @@ impl Terminal {
             mouse_shape,
             next_implicit_hyperlink_id,
             dcs,
+            flags,
         };
         stream.next_slice(input, &mut handler)
     }
@@ -671,6 +674,10 @@ impl Handler for TerminalStreamHandler<'_> {
                 Ok(())
             }
             Action::ReverseIndex => self.reverse_index(),
+            Action::FullReset => {
+                self.full_reset();
+                Ok(())
+            }
             Action::CursorVisualStyle { style, blinking } => {
                 self.modes.set(modes::Mode::CursorBlinking, blinking);
                 self.screen.set_cursor_visual_style(style);
@@ -856,6 +863,17 @@ impl TerminalStreamHandler<'_> {
             dcs::Command::Decrqss(request) => self.decrqss(request),
             dcs::Command::XtGettcap(mut request) => while request.next().is_some() {},
         }
+    }
+
+    fn full_reset(&mut self) {
+        self.screen.reset();
+        self.modes.reset();
+        *self.scrolling_region = ScrollingRegion::full(self.size);
+        self.tabstops.reset(TABSTOP_INTERVAL);
+        self.title.clear();
+        self.pwd.clear();
+        *self.dcs = dcs::Handler::new();
+        *self.flags = TerminalFlags::default();
     }
 
     fn decrqss(&mut self, request: dcs::Decrqss) {
@@ -1295,6 +1313,10 @@ impl TerminalTitle {
     fn set(&mut self, title: &str) {
         self.text.clear();
         self.text.push_str(title);
+    }
+
+    fn clear(&mut self) {
+        self.text.clear();
     }
 
     #[cfg(test)]
@@ -1854,7 +1876,7 @@ mod tests {
     fn terminal_stream_controls_and_unsupported_escapes_do_not_write_cells() {
         let mut terminal = Terminal::init(10, 2, None).unwrap();
 
-        terminal.next_slice(b"A\x0eB\x1bcC\x1b[?ZD").unwrap();
+        terminal.next_slice(b"A\x0eB\x1bxC\x1b[?ZD").unwrap();
 
         assert_eq!(
             formatter(&terminal, PageOutputFormat::Plain).format(),
@@ -2115,6 +2137,82 @@ mod tests {
         assert!(!terminal.is_dirty_for_tests(0, 0));
         assert!(!terminal.is_dirty_for_tests(9, 0));
         assert!(!terminal.is_dirty_for_tests(0, 1));
+    }
+
+    #[test]
+    fn terminal_stream_ris_full_reset_clears_screen_and_cursor_state() {
+        let mut terminal = Terminal::init(10, 3, Some(10)).unwrap();
+
+        terminal.next_slice(b"one\ntwo\nthree\nfour").unwrap();
+        assert!(terminal.scrollback_rows_for_tests() > 0);
+        terminal.next_slice(b"\x1b[1;31m\x1b[5 q").unwrap();
+        terminal.screens.active.set_cursor_position_for_tests(4, 2);
+        terminal.screens.active.set_cursor_protected_for_tests(true);
+        terminal.screens.active.set_cursor_hyperlink_for_tests(
+            ScreenCursorHyperlinkId::Explicit("link".to_string()),
+            "https://example.test",
+        );
+        terminal
+            .next_slice(b"\x1b]133;A\x07prompt\x1b]133;B\x07input")
+            .unwrap();
+        terminal.next_slice(b"\x1b7").unwrap();
+
+        terminal.next_slice(b"\x1bc").unwrap();
+        terminal.next_slice(b"\x1b8X").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "X");
+        assert_eq!(terminal.scrollback_rows_for_tests(), 0);
+        assert_eq!(terminal.cursor_position_for_tests(), (1, 0));
+        assert_eq!(terminal.cursor_style_for_tests(), style::Style::default());
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Block
+        );
+        assert!(!terminal.cursor_protected_for_tests());
+        assert_eq!(terminal.cursor_hyperlink_for_tests(), None);
+        assert_eq!(
+            terminal.active_cell_semantic_content_for_tests(0, 0),
+            SemanticContent::Output
+        );
+        assert_eq!(
+            terminal.active_row_semantic_prompt_for_tests(0),
+            SemanticPrompt::None
+        );
+    }
+
+    #[test]
+    fn terminal_stream_ris_full_reset_clears_terminal_global_state() {
+        let mut terminal = Terminal::init(20, 4, None).unwrap();
+
+        terminal.next_slice(b"\x1b]0;title\x07").unwrap();
+        terminal.set_pwd_for_tests("file://host/home");
+        terminal.set_mode_for_tests(Mode::Insert, true);
+        terminal.save_mode_for_tests(Mode::Insert);
+        terminal.set_modify_other_keys_2_for_tests(true);
+        terminal.clear_tabstops_for_tests();
+        terminal.set_tabstop_for_tests(1);
+        terminal.set_scrolling_region_for_tests(1, 2, 3, 10);
+        terminal.clear_dirty_for_tests();
+
+        terminal.next_slice(b"\x1bc").unwrap();
+
+        assert!(!terminal.get_mode_for_tests(Mode::Insert));
+        assert!(!terminal.restore_mode_for_tests(Mode::Insert));
+        assert!(!terminal.modify_other_keys_2_for_tests());
+        assert!(!terminal.get_tabstop_for_tests(1));
+        assert!(terminal.get_tabstop_for_tests(8));
+        assert!(terminal.get_tabstop_for_tests(16));
+        assert_eq!(terminal.title_for_tests(), "");
+        assert_eq!(terminal.pwd_for_tests(), None);
+        assert_eq!(
+            terminal.scrolling_region_for_tests(),
+            ScrollingRegion::full(terminal.size)
+        );
+        assert!(terminal.pty_response_for_tests().is_empty());
+        for row in 0..4 {
+            assert!(terminal.is_dirty_for_tests(0, row));
+            assert!(terminal.is_dirty_for_tests(19, row));
+        }
     }
 
     #[test]

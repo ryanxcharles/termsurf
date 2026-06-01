@@ -94,6 +94,7 @@ pub(super) enum Action {
     SaveCursor,
     RestoreCursor,
     ReverseIndex,
+    FullReset,
     CursorVisualStyle {
         style: cursor::VisualStyle,
         blinking: bool,
@@ -364,6 +365,10 @@ impl Stream {
             b'M' => {
                 self.escape = EscapeState::Ground;
                 handler.vt(Action::ReverseIndex)
+            }
+            b'c' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::FullReset)
             }
             b'7' => {
                 self.escape = EscapeState::Ground;
@@ -1660,6 +1665,7 @@ mod tests {
                 | Action::SaveCursor
                 | Action::RestoreCursor
                 | Action::ReverseIndex
+                | Action::FullReset
                 | Action::CursorVisualStyle { .. }
                 | Action::DcsHook { .. }
                 | Action::DcsPut { .. }
@@ -3326,6 +3332,23 @@ mod tests {
     }
 
     #[test]
+    fn stream_escape_c_dispatches_full_reset_action() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"A\x1bcB");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print { cp: 'A' },
+                Action::FullReset,
+                Action::Print { cp: 'B' },
+            ]
+        );
+    }
+
+    #[test]
     fn stream_other_c0_controls_do_not_dispatch_print_actions() {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();
@@ -3664,6 +3687,7 @@ mod tests {
             (b"7B".as_slice(), Action::SaveCursor),
             (b"8B".as_slice(), Action::RestoreCursor),
             (b"MB".as_slice(), Action::ReverseIndex),
+            (b"cB".as_slice(), Action::FullReset),
         ] {
             let mut stream = Stream::init();
             let mut handler = RecordingHandler::default();
@@ -3689,6 +3713,7 @@ mod tests {
             (b"\x1b7".as_slice(), Action::SaveCursor),
             (b"\x1b8".as_slice(), Action::RestoreCursor),
             (b"\x1bM".as_slice(), Action::ReverseIndex),
+            (b"\x1bc".as_slice(), Action::FullReset),
         ] {
             let mut stream = Stream::init();
             let mut handler = ErrorOnActionHandler::new(fail);
@@ -3698,6 +3723,19 @@ mod tests {
 
             assert_eq!(handler.actions, &[Action::Print { cp: 'A' }]);
         }
+    }
+
+    #[test]
+    fn stream_escape_c_with_intermediate_is_ignored_and_consumes_final_byte() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"A\x1b#cB");
+
+        assert_eq!(
+            actions(&handler),
+            &[Action::Print { cp: 'A' }, Action::Print { cp: 'B' }]
+        );
     }
 
     #[test]
@@ -7358,6 +7396,7 @@ mod tests {
                 | Action::SaveCursor
                 | Action::RestoreCursor
                 | Action::ReverseIndex
+                | Action::FullReset
                 | Action::CursorVisualStyle { .. }
                 | Action::DcsHook { .. }
                 | Action::DcsPut { .. }

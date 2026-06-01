@@ -174,3 +174,58 @@ noted one non-blocking implementation reminder: the DCS/stream parser reset
 bullet is intentionally conditional, and implementation should leave parser
 framing alone for a fully parsed `ESC c` unless concrete Roastty state needs
 clearing.
+
+## Result
+
+**Result:** Pass
+
+Implemented RIS/full reset for the Roastty terminal state that exists today.
+
+Code changes:
+
+- Added `Action::FullReset` and exact `ESC c` dispatch in the stream parser.
+- Kept intermediate forms such as `ESC # c` invalid/ignored.
+- Added `Screen::reset()` using the existing `PageList::reset()` machinery.
+- Made `PageList::reset()` available to the screen layer and added a helper to
+  mark all active rows dirty after reset.
+- Reset current screen state: visible content, scrollback, cursor position,
+  cursor text style, cursor visual style, protected state, cursor hyperlink
+  state, semantic prompt state, pending wrap, saved cursor, charset state, and
+  Kitty keyboard state.
+- Reset terminal-global state: modes, saved mode state, flags, tabstops, title,
+  pwd, DCS handler state, and scrolling region.
+- Left parser framing alone for a fully parsed `ESC c`, matching the design
+  review guidance.
+- Updated the prior unsupported-escape test so it no longer treats `ESC c` as
+  unsupported.
+
+Verification:
+
+```bash
+cargo fmt
+cargo test -p roastty full_reset
+cargo test -p roastty ris
+cargo test -p roastty
+```
+
+Observed results:
+
+- `cargo test -p roastty full_reset`: 3 passed.
+- `cargo test -p roastty ris`: 2 passed.
+- `cargo test -p roastty`: 1656 unit tests passed, 1 ABI harness test passed, 0
+  doc tests.
+
+## Conclusion
+
+Roastty now handles `ESC c` / RIS as a real full reset for the terminal and
+screen state currently implemented. The deferred Ghostty reset pieces remain
+unchanged: alternate-screen storage, status-display state, previous-character /
+repeat-print state, and Kitty graphics are still future subsystem work.
+
+The next experiment should continue with the next missing terminal-control
+subsystem that builds on the now-resettable screen and terminal-global state.
+
+## Result Review
+
+Codex reviewed the implementation diff and recorded result after verification.
+It reported no findings and approved the result.
