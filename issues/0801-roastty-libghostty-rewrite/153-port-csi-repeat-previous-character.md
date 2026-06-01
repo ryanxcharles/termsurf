@@ -35,8 +35,10 @@ charset handling.
      clamps it to one, matching Ghostty's `printRepeat()`.
    - Parse `CSI n b` as count `n`.
    - Reject multiple params, private CSI markers, CSI intermediates, colon
-     params, mixed separators, params the existing Roastty CSI parser marks
-     invalid, and raw C1 CSI bytes.
+     params, mixed separators, and params the existing Roastty CSI parser marks
+     invalid.
+   - Keep raw C1 CSI bytes out of scope: they must not dispatch REP and must
+     continue following Roastty's existing raw-C1 behavior.
    - Ensure rejected forms consume their final byte and do not leak printable
      text.
    - Restore parser ground state before calling the handler so handler errors do
@@ -90,8 +92,10 @@ Required test coverage:
     `CSI 3 ; b` dispatch nothing and do not leak the final byte;
   - colon and mixed-separator forms such as `CSI 1 : 2 b` and `CSI 1 ; 2 : 3 b`
     dispatch nothing and do not leak the final byte;
-  - private markers, CSI intermediates, parser-invalid params, and raw C1 CSI
-    bytes dispatch nothing and do not leak the final byte;
+  - private markers, CSI intermediates, and parser-invalid params dispatch
+    nothing and do not leak the final byte;
+  - raw C1 CSI bytes dispatch no REP action and preserve existing raw-C1
+    behavior;
   - split-feed `CSI` REP works;
   - handler-error recovery restores parser ground state before returning the
     error;
@@ -157,3 +161,8 @@ Roastty CSI parser marks invalid, and to require concrete negative cases for
 `CSI 1 ; 2 b`, `CSI ; b`, `CSI 3 ; b`, `CSI 1 : 2 b`, and `CSI 1 ; 2 : 3 b`.
 
 Follow-up Codex review approved the design with no findings.
+
+During implementation planning, the raw-C1 requirement was tightened: raw C1 CSI
+bytes remain out of scope and should preserve existing raw-C1 behavior while
+dispatching no REP action. Codex reviewed and approved that correction with no
+findings.
