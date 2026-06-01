@@ -10,7 +10,7 @@ use super::point::{self, Coordinate};
 use super::size::{
     CellCountInt, GraphemeBytesInt, HyperlinkCountInt, StringBytesInt, StyleCountInt, MAX_PAGE_SIZE,
 };
-use super::{color, highlight, selection, selection_codepoints, style};
+use super::{color, highlight, hyperlink, selection, selection_codepoints, style};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Viewport {
@@ -529,9 +529,12 @@ fn cell_has_managed_print_state(cell: Cell) -> bool {
 }
 
 fn cell_has_unsupported_styled_print_state(cell: Cell) -> bool {
+    cell_has_unsupported_print_replace_state(cell)
+}
+
+fn cell_has_unsupported_print_replace_state(cell: Cell) -> bool {
     !matches!(cell.content_tag(), ContentTag::Codepoint)
         || cell.has_grapheme()
-        || cell.hyperlink()
         || !matches!(cell.wide(), Wide::Narrow)
         || cell.protected()
         || !matches!(cell.semantic_content(), SemanticContent::Output)
@@ -3847,8 +3850,12 @@ impl PageList {
         y: u32,
         codepoint: char,
         cell_style: style::Style,
+        cell_hyperlink: Option<hyperlink::Hyperlink<'_>>,
     ) -> Result<(), StyledCellWriteError> {
-        if cell_style.is_default() && self.check_basic_active_cell(x, y).is_ok() {
+        if cell_style.is_default()
+            && cell_hyperlink.is_none()
+            && self.check_basic_active_cell(x, y).is_ok()
+        {
             return self
                 .write_basic_active_cell(x, y, codepoint)
                 .map_err(StyledCellWriteError::Cell);
@@ -3862,49 +3869,20 @@ impl PageList {
             BasicCellWriteError::InvalidPoint,
         ))?;
         let page = &mut self.pages[index].page;
-        let old_cell = *page
-            .get_cells(page.get_row(pin.y as usize))
-            .get(pin.x as usize)
-            .ok_or(StyledCellWriteError::Cell(
-                BasicCellWriteError::InvalidPoint,
-            ))?;
-
-        if cell_has_unsupported_styled_print_state(old_cell) {
-            return Err(StyledCellWriteError::Cell(BasicCellWriteError::ManagedCell));
-        }
-
-        let new_style_id = if cell_style.is_default() {
-            style::DEFAULT_ID
-        } else {
-            page.add_style(cell_style)
-                .map_err(|_| StyledCellWriteError::PageAlloc)?
-        };
-        let old_style_id = old_cell.style_id();
-
-        {
-            let rac = page.get_row_and_cell_mut(pin.x as usize, pin.y as usize);
-            *rac.cell = Cell::init(codepoint as u32);
-            rac.cell.set_style_id(new_style_id);
-            if new_style_id != style::DEFAULT_ID {
-                rac.row.set_styled(true);
+        page.write_print_cell(
+            pin.x as usize,
+            pin.y as usize,
+            codepoint,
+            cell_style,
+            cell_hyperlink,
+        )
+        .map_err(|err| match err {
+            super::page::PrintCellError::UnsupportedManagedCell => {
+                StyledCellWriteError::Cell(BasicCellWriteError::ManagedCell)
             }
-            rac.row.set_dirty(true);
-        }
-
-        if old_style_id != style::DEFAULT_ID {
-            page.release_style(old_style_id);
-        }
-
-        if new_style_id == style::DEFAULT_ID && old_style_id != style::DEFAULT_ID {
-            let row = page.get_row(pin.y as usize);
-            let styled = page
-                .get_cells(row)
-                .iter()
-                .any(|cell| cell.style_id() != style::DEFAULT_ID);
-            page.get_row_mut(pin.y as usize).set_styled(styled);
-        }
-
-        Ok(())
+            super::page::PrintCellError::StyleOutOfMemory
+            | super::page::PrintCellError::HyperlinkOutOfMemory => StyledCellWriteError::PageAlloc,
+        })
     }
 
     pub(super) fn check_basic_active_cell(
@@ -4022,6 +4000,46 @@ impl PageList {
             .get(pin.x as usize)
             .expect("test cell must exist");
         cell.hyperlink()
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_hyperlink_snapshot_for_tests(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> Option<super::page::HyperlinkSnapshot> {
+        let pin = self
+            .pin(point::Point::active(point::Coordinate::new(x, y)))
+            .expect("test active point must resolve to a pin");
+        let node = self.node_for_pin(&pin).expect("test node must exist");
+        let id = node
+            .page
+            .lookup_hyperlink_at(pin.x as usize, pin.y as usize)?;
+        Some(node.page.get_hyperlink(id))
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_hyperlink_ref_count_for_tests(&self, x: CellCountInt, y: u32) -> u16 {
+        let pin = self
+            .pin(point::Point::active(point::Coordinate::new(x, y)))
+            .expect("test active point must resolve to a pin");
+        let node = self.node_for_pin(&pin).expect("test node must exist");
+        let Some(id) = node
+            .page
+            .lookup_hyperlink_at(pin.x as usize, pin.y as usize)
+        else {
+            return 0;
+        };
+        node.page.hyperlink_ref_count(id)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_row_hyperlink_for_tests(&self, y: u32) -> bool {
+        let pin = self
+            .pin(point::Point::active(point::Coordinate::new(0, y)))
+            .expect("test active point must resolve to a pin");
+        let node = self.node_for_pin(&pin).expect("test node must exist");
+        node.page.get_row(pin.y as usize).hyperlink()
     }
 
     #[cfg(test)]

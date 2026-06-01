@@ -256,3 +256,88 @@ Codex re-reviewed the updated design and found no remaining blocking issues:
 `logs/codex-review/20260601-081538-077871-last-message.md`.
 
 The design is approved for implementation.
+
+## Result
+
+**Result:** Pass
+
+Experiment 134 adds a rollback-safe printed-cell write helper at the page layer.
+The new helper writes the codepoint, style, and optional hyperlink as one
+logical print operation. It rejects unsupported managed-cell state before any
+allocation, allocates the new style first, inserts or deduplicates the new
+hyperlink next, prepares the hyperlink cell map, and only then mutates the cell.
+
+The implemented rollback guarantees are:
+
+- if style allocation fails, the old cell is unchanged;
+- if hyperlink insertion fails, any newly allocated style is released and the
+  old cell is unchanged;
+- if hyperlink map insertion fails, the newly inserted/deduplicated hyperlink
+  ref and any newly allocated style are released and the old cell is unchanged;
+- after a successful commit, replaced style and hyperlink refs are released
+  exactly once;
+- row styled and hyperlink flags are recomputed after add, replace, and clear.
+
+`Screen::print_basic_cell` now converts active cursor OSC 8 state into page
+hyperlink data for printed cells. Explicit OSC 8 IDs are stored as raw explicit
+ID bytes, implicit OSC 8 ranges store their current implicit numeric ID, and URI
+strings are stored as raw UTF-8 bytes without normalization or validation.
+
+Printing after OSC 8 end clears any old destination hyperlink, matching normal
+overwrite behavior. Style and hyperlink metadata now compose on the same printed
+cell. Pending-wrap printing uses the same replaceable-cell rule as the final
+write path, so overwriting cells with replaceable style and/or hyperlink
+metadata is allowed while graphemes, wide cells, protected cells, non-codepoint
+content, and non-output semantic content remain unsupported.
+
+Tests were added for:
+
+- style and hyperlink coexisting on printed cells;
+- hyperlink dedup, replacement, clear, row flag maintenance, and exact ref
+  counts;
+- rollback on style allocation failure;
+- rollback on hyperlink string/set failure;
+- rollback on hyperlink map insertion failure;
+- OSC 8 active ranges writing page hyperlink metadata;
+- text printed after OSC 8 end clearing destination hyperlink metadata;
+- exact explicit ID storage;
+- distinct implicit IDs across separate OSC 8 ranges;
+- SGR and OSC 8 composition;
+- pending-wrap overwrite with and without an active hyperlink;
+- insert-mode hyperlink movement;
+- scroll-up preservation of printed hyperlink metadata.
+
+Verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty page_print_cell
+cargo test -p roastty terminal_stream_osc
+cargo test -p roastty terminal_stream_scroll_up_preserves_printed_hyperlinks
+cargo test -p roastty terminal_stream_osc
+cargo test -p roastty terminal_stream_sgr
+cargo test -p roastty terminal_formatter
+cargo test -p roastty terminal::page
+cargo test -p roastty terminal::page_list
+cargo test -p roastty terminal::screen
+cargo test -p roastty terminal::terminal
+cargo test -p roastty
+```
+
+The final full `cargo test -p roastty` run reported `1474 passed, 0 failed`; the
+ABI harness also passed.
+
+Codex reviewed the completed implementation and found no required changes:
+`logs/codex-review/20260601-083021-999539-last-message.md`.
+
+## Conclusion
+
+OSC 8 hyperlinks now persist onto printed cells instead of only living in active
+cursor state. The implementation preserves the existing managed-memory
+discipline: printable cells can replace style and hyperlink metadata safely,
+while unsupported managed cell shapes remain rejected until their owning
+subsystems add explicit support.
+
+The next experiment can build on this by expanding OSC handling or moving to a
+larger coherent terminal subsystem slice; no follow-up is required for OSC 8
+printed-cell hyperlink storage itself.

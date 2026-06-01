@@ -386,6 +386,29 @@ impl Terminal {
     }
 
     #[cfg(test)]
+    pub(super) fn active_cell_hyperlink_snapshot_for_tests(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> Option<super::page::HyperlinkSnapshot> {
+        self.screens
+            .active
+            .active_cell_hyperlink_snapshot_for_tests(x, y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_hyperlink_ref_count_for_tests(&self, x: CellCountInt, y: u32) -> u16 {
+        self.screens
+            .active
+            .active_cell_hyperlink_ref_count_for_tests(x, y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_row_hyperlink_for_tests(&self, y: u32) -> bool {
+        self.screens.active.active_row_hyperlink_for_tests(y)
+    }
+
+    #[cfg(test)]
     pub(super) fn active_row_styled_for_tests(&self, y: u32) -> bool {
         self.screens.active.active_row_styled_for_tests(y)
     }
@@ -1079,6 +1102,7 @@ mod tests {
     use crate::terminal::color;
     use crate::terminal::kitty::{KeyFlags, KeySetMode};
     use crate::terminal::modes::Mode;
+    use crate::terminal::page::HyperlinkSnapshotId;
     use crate::terminal::page_list::{CodepointReplacement, Pin};
     use crate::terminal::screen::ScreenCursorHyperlinkId;
     use crate::terminal::selection;
@@ -1866,7 +1890,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_stream_osc_does_not_write_page_hyperlink_metadata() {
+    fn terminal_stream_osc_writes_page_hyperlink_metadata() {
         let mut terminal = Terminal::init(10, 2, None).unwrap();
 
         terminal
@@ -1874,9 +1898,201 @@ mod tests {
             .unwrap();
 
         assert_eq!(plain_with_unwrap(&terminal, false), "AB");
-        assert!(!terminal.active_cell_hyperlink_for_tests(0, 0));
-        assert!(!terminal.active_cell_hyperlink_for_tests(1, 0));
+        assert!(terminal.active_cell_hyperlink_for_tests(0, 0));
+        assert!(terminal.active_cell_hyperlink_for_tests(1, 0));
+        let first = terminal
+            .active_cell_hyperlink_snapshot_for_tests(0, 0)
+            .unwrap();
+        let second = terminal
+            .active_cell_hyperlink_snapshot_for_tests(1, 0)
+            .unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.id, HyperlinkSnapshotId::Implicit(0));
+        assert_eq!(first.uri, b"https://e");
+        assert_eq!(terminal.active_cell_hyperlink_ref_count_for_tests(0, 0), 2);
+        assert!(terminal.active_row_hyperlink_for_tests(0));
         assert_eq!(terminal.cursor_hyperlink_for_tests(), None);
+        terminal.verify_integrity_for_tests();
+    }
+
+    #[test]
+    fn terminal_stream_osc_after_end_clears_destination_hyperlink() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]8;;https://e\x1b\\AB\x1b]8;;\x1b\\")
+            .unwrap();
+        terminal.screens.active.set_cursor_position_for_tests(1, 0);
+        terminal.next_slice(b"Z").unwrap();
+
+        assert!(terminal.active_cell_hyperlink_for_tests(0, 0));
+        assert!(!terminal.active_cell_hyperlink_for_tests(1, 0));
+        assert_eq!(terminal.active_cell_hyperlink_ref_count_for_tests(0, 0), 1);
+        assert!(terminal.active_row_hyperlink_for_tests(0));
+
+        terminal.screens.active.set_cursor_position_for_tests(0, 0);
+        terminal.next_slice(b"Y").unwrap();
+        assert!(!terminal.active_cell_hyperlink_for_tests(0, 0));
+        assert!(!terminal.active_row_hyperlink_for_tests(0));
+        terminal.verify_integrity_for_tests();
+    }
+
+    #[test]
+    fn terminal_stream_osc_stores_explicit_ids_exactly() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]8;id=x&<y;https://example.com?a=1&b=<2>\x1b\\A")
+            .unwrap();
+
+        let link = terminal
+            .active_cell_hyperlink_snapshot_for_tests(0, 0)
+            .unwrap();
+        assert_eq!(link.id, HyperlinkSnapshotId::Explicit(b"x&<y".to_vec()));
+        assert_eq!(link.uri, b"https://example.com?a=1&b=<2>");
+    }
+
+    #[test]
+    fn terminal_stream_osc_separate_implicit_ranges_get_distinct_ids() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]8;;https://one\x1b\\A\x1b]8;;\x1b\\")
+            .unwrap();
+        terminal
+            .next_slice(b"\x1b]8;;https://two\x1b\\B\x1b]8;;\x1b\\")
+            .unwrap();
+
+        assert_eq!(
+            terminal
+                .active_cell_hyperlink_snapshot_for_tests(0, 0)
+                .unwrap()
+                .id,
+            HyperlinkSnapshotId::Implicit(0)
+        );
+        assert_eq!(
+            terminal
+                .active_cell_hyperlink_snapshot_for_tests(1, 0)
+                .unwrap()
+                .id,
+            HyperlinkSnapshotId::Implicit(1)
+        );
+    }
+
+    #[test]
+    fn terminal_stream_osc_and_sgr_compose_on_printed_cells() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]8;;https://e\x1b\\\x1b[1;31mA")
+            .unwrap();
+
+        assert!(terminal.active_cell_hyperlink_for_tests(0, 0));
+        assert_eq!(
+            terminal.active_cell_style_for_tests(0, 0),
+            style::Style {
+                fg_color: style::Color::Palette(1),
+                flags: style::Flags {
+                    bold: true,
+                    ..style::Flags::default()
+                },
+                ..style::Style::default()
+            }
+        );
+        terminal.verify_integrity_for_tests();
+    }
+
+    #[test]
+    fn terminal_stream_pending_wrap_overwrites_hyperlink_destination() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.screens.active.set_cursor_position_for_tests(0, 1);
+        terminal
+            .next_slice(b"\x1b]8;;https://old\x1b\\X\x1b]8;;\x1b\\")
+            .unwrap();
+        terminal.screens.active.set_cursor_position_for_tests(0, 0);
+        terminal.next_slice(b"hello").unwrap();
+        terminal.next_slice(b"\x1b]8;;https://new\x1b\\w").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "hello\nw");
+        assert_eq!(
+            terminal
+                .active_cell_hyperlink_snapshot_for_tests(0, 1)
+                .unwrap()
+                .uri,
+            b"https://new"
+        );
+        assert!(!terminal.active_cell_hyperlink_for_tests(0, 0));
+        terminal.verify_integrity_for_tests();
+    }
+
+    #[test]
+    fn terminal_stream_pending_wrap_without_active_link_clears_hyperlink_destination() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.screens.active.set_cursor_position_for_tests(0, 1);
+        terminal
+            .next_slice(b"\x1b]8;;https://old\x1b\\X\x1b]8;;\x1b\\")
+            .unwrap();
+        terminal.screens.active.set_cursor_position_for_tests(0, 0);
+        terminal.next_slice(b"hellow").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "hello\nw");
+        assert!(!terminal.active_cell_hyperlink_for_tests(0, 1));
+        assert!(!terminal.active_row_hyperlink_for_tests(1));
+        terminal.verify_integrity_for_tests();
+    }
+
+    #[test]
+    fn terminal_stream_insert_mode_shifts_existing_hyperlinks() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"A\x1b]8;;https://old\x1b\\B\x1b]8;;\x1b\\")
+            .unwrap();
+        terminal.screens.active.set_cursor_position_for_tests(0, 0);
+        terminal.set_mode_for_tests(Mode::Insert, true);
+        terminal.next_slice(b"\x1b]8;;https://new\x1b\\Z").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ZAB");
+        assert_eq!(
+            terminal
+                .active_cell_hyperlink_snapshot_for_tests(0, 0)
+                .unwrap()
+                .uri,
+            b"https://new"
+        );
+        assert_eq!(
+            terminal
+                .active_cell_hyperlink_snapshot_for_tests(2, 0)
+                .unwrap()
+                .uri,
+            b"https://old"
+        );
+        assert!(!terminal.active_cell_hyperlink_for_tests(1, 0));
+        terminal.verify_integrity_for_tests();
+    }
+
+    #[test]
+    fn terminal_stream_scroll_up_preserves_printed_hyperlinks() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.screens.active.set_cursor_position_for_tests(0, 1);
+        terminal
+            .next_slice(b"\x1b]8;;https://scroll\x1b\\X\x1b]8;;\x1b\\")
+            .unwrap();
+        terminal.screens.active.set_cursor_position_for_tests(0, 0);
+        terminal.next_slice(b"\x1b[S").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "X");
+        assert_eq!(
+            terminal
+                .active_cell_hyperlink_snapshot_for_tests(0, 0)
+                .unwrap()
+                .uri,
+            b"https://scroll"
+        );
+        assert!(terminal.active_row_hyperlink_for_tests(0));
         terminal.verify_integrity_for_tests();
     }
 

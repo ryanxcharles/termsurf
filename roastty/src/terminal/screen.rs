@@ -2,6 +2,7 @@
 
 use super::charsets;
 use super::color;
+use super::hyperlink;
 use super::kitty;
 use super::page_list::{
     BasicCellWriteError, CodepointMapEntry, PageList, PageListAllocError, PageOutputFormat,
@@ -213,6 +214,10 @@ impl Screen {
                 self.cursor.y.into(),
                 codepoint,
                 self.cursor.style,
+                self.cursor
+                    .hyperlink
+                    .as_ref()
+                    .map(ScreenCursorHyperlink::as_page_hyperlink),
             )
             .map_err(BasicPrintError::from)?;
         if self.cursor.x == right_edge {
@@ -1015,6 +1020,25 @@ impl Screen {
     }
 
     #[cfg(test)]
+    pub(super) fn active_cell_hyperlink_snapshot_for_tests(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> Option<super::page::HyperlinkSnapshot> {
+        self.pages.active_cell_hyperlink_snapshot_for_tests(x, y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_hyperlink_ref_count_for_tests(&self, x: CellCountInt, y: u32) -> u16 {
+        self.pages.active_cell_hyperlink_ref_count_for_tests(x, y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_row_hyperlink_for_tests(&self, y: u32) -> bool {
+        self.pages.active_row_hyperlink_for_tests(y)
+    }
+
+    #[cfg(test)]
     pub(super) fn active_row_styled_for_tests(&self, y: u32) -> bool {
         self.pages.active_row_styled_for_tests(y)
     }
@@ -1121,6 +1145,21 @@ impl ScreenFormatterExtra {
             && !self.protection
             && !self.kitty_keyboard
             && !self.charsets
+    }
+}
+
+impl ScreenCursorHyperlink {
+    fn as_page_hyperlink(&self) -> hyperlink::Hyperlink<'_> {
+        let id = match &self.id {
+            ScreenCursorHyperlinkId::Explicit(id) => {
+                hyperlink::HyperlinkId::Explicit(id.as_bytes())
+            }
+            ScreenCursorHyperlinkId::Implicit(id) => hyperlink::HyperlinkId::Implicit(*id),
+        };
+        hyperlink::Hyperlink {
+            id,
+            uri: self.uri.as_bytes(),
+        }
     }
 }
 

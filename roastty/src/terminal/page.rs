@@ -370,6 +370,13 @@ pub(super) enum HyperlinkError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PrintCellError {
+    UnsupportedManagedCell,
+    StyleOutOfMemory,
+    HyperlinkOutOfMemory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CloneFromError {
     SourceRowUnsupportedManagedMemory,
     DestinationRowUnsupportedManagedMemory,
@@ -1657,6 +1664,100 @@ impl Page {
         self.get_row_mut(row_index).set_styled(has_styling);
     }
 
+    pub(super) fn write_print_cell(
+        &mut self,
+        x: usize,
+        y: usize,
+        codepoint: char,
+        cell_style: style::Style,
+        cell_hyperlink: Option<hyperlink::Hyperlink<'_>>,
+    ) -> Result<(), PrintCellError> {
+        let cell_offset = self.cell_offset_at(x, y);
+        let old_cell = self.cell_copy_at_offset(cell_offset);
+        if cell_has_unsupported_print_replace_state(old_cell) {
+            return Err(PrintCellError::UnsupportedManagedCell);
+        }
+
+        let new_style_id = if cell_style.is_default() {
+            style::DEFAULT_ID
+        } else {
+            self.add_style(cell_style)
+                .map_err(|_| PrintCellError::StyleOutOfMemory)?
+        };
+
+        let new_hyperlink_id = match cell_hyperlink {
+            Some(link) => match self.insert_hyperlink(link) {
+                Ok(id) => Some(id),
+                Err(_) => {
+                    if new_style_id != style::DEFAULT_ID {
+                        self.release_style(new_style_id);
+                    }
+                    return Err(PrintCellError::HyperlinkOutOfMemory);
+                }
+            },
+            None => None,
+        };
+
+        let old_hyperlink_id = match self.prepare_print_hyperlink(cell_offset, new_hyperlink_id) {
+            Ok(id) => id,
+            Err(err) => {
+                if let Some(id) = new_hyperlink_id {
+                    self.release_hyperlink(id);
+                }
+                if new_style_id != style::DEFAULT_ID {
+                    self.release_style(new_style_id);
+                }
+                return Err(err);
+            }
+        };
+        let old_style_id = old_cell.style_id();
+
+        {
+            let rac = self.get_row_and_cell_mut(x, y);
+            *rac.cell = Cell::init(codepoint as u32);
+            rac.cell.set_style_id(new_style_id);
+            rac.cell.set_hyperlink(new_hyperlink_id.is_some());
+            rac.row.set_dirty(true);
+        }
+
+        if old_style_id != style::DEFAULT_ID {
+            self.release_style(old_style_id);
+        }
+        if let Some(id) = old_hyperlink_id {
+            self.release_hyperlink(id);
+        }
+
+        self.update_row_styled_flag(y);
+        self.update_row_hyperlink_flag(y);
+        Ok(())
+    }
+
+    fn prepare_print_hyperlink(
+        &mut self,
+        cell_offset: Offset<Cell>,
+        new_hyperlink_id: Option<hyperlink::Id>,
+    ) -> Result<Option<hyperlink::Id>, PrintCellError> {
+        match new_hyperlink_id {
+            Some(id) => {
+                let Some(mut map) = self.hyperlink_map_mut() else {
+                    return Err(PrintCellError::HyperlinkOutOfMemory);
+                };
+                let result = map
+                    .get_or_put(cell_offset)
+                    .map_err(|_| PrintCellError::HyperlinkOutOfMemory)?;
+                let old = result.found_existing.then_some(*result.value);
+                *result.value = id;
+                Ok(old)
+            }
+            None => {
+                let Some(mut map) = self.hyperlink_map_mut() else {
+                    return Ok(None);
+                };
+                Ok(map.fetch_remove(cell_offset).map(|(_, id)| id))
+            }
+        }
+    }
+
     pub(super) fn insert_hyperlink(
         &mut self,
         link: hyperlink::Hyperlink<'_>,
@@ -2743,6 +2844,14 @@ const fn row_bits() -> usize {
 
 const fn cell_bits() -> usize {
     size_of::<Cell>() * u8::BITS as usize
+}
+
+fn cell_has_unsupported_print_replace_state(cell: Cell) -> bool {
+    !matches!(cell.content_tag(), ContentTag::Codepoint)
+        || cell.has_grapheme()
+        || !matches!(cell.wide(), Wide::Narrow)
+        || cell.protected()
+        || !matches!(cell.semantic_content(), SemanticContent::Output)
 }
 
 fn div_ceil(value: usize, divisor: usize) -> usize {
@@ -4685,6 +4794,236 @@ mod tests {
         assert_eq!(page.lookup_hyperlink_at(0, 0), Some(id));
         assert!(page.cell_copy_at(0, 0).hyperlink());
         assert!(page.get_row(0).hyperlink());
+    }
+
+    #[test]
+    fn page_print_cell_writes_style_and_hyperlink() {
+        let mut page = Page::init(Capacity::new(5, 5)).unwrap();
+        let styled = style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+
+        page.write_print_cell(
+            0,
+            0,
+            'A',
+            styled,
+            Some(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Explicit(b"id"),
+                uri: b"https://example.com",
+            }),
+        )
+        .unwrap();
+
+        let cell = page.cell_copy_at(0, 0);
+        let link_id = page.lookup_hyperlink_at(0, 0).unwrap();
+        assert_eq!(cell.codepoint(), 'A' as u32);
+        assert_ne!(cell.style_id(), style::DEFAULT_ID);
+        assert!(cell.hyperlink());
+        assert!(page.get_row(0).styled());
+        assert!(page.get_row(0).hyperlink());
+        assert_eq!(page.style_ref_count(cell.style_id()), 1);
+        assert_eq!(page.hyperlink_ref_count(link_id), 1);
+        assert_eq!(
+            page.get_hyperlink(link_id),
+            HyperlinkSnapshot {
+                id: HyperlinkSnapshotId::Explicit(b"id".to_vec()),
+                uri: b"https://example.com".to_vec(),
+            }
+        );
+    }
+
+    #[test]
+    fn page_print_cell_dedups_replaces_and_clears_hyperlinks() {
+        let mut page = Page::init(Capacity::new(5, 5)).unwrap();
+        let first = hyperlink::Hyperlink {
+            id: hyperlink::HyperlinkId::Implicit(1),
+            uri: b"https://one",
+        };
+        let second = hyperlink::Hyperlink {
+            id: hyperlink::HyperlinkId::Implicit(2),
+            uri: b"https://two",
+        };
+
+        page.write_print_cell(0, 0, 'A', style::Style::default(), Some(first))
+            .unwrap();
+        page.write_print_cell(1, 0, 'B', style::Style::default(), Some(first))
+            .unwrap();
+        let first_id = page.lookup_hyperlink_at(0, 0).unwrap();
+        assert_eq!(page.lookup_hyperlink_at(1, 0), Some(first_id));
+        assert_eq!(page.hyperlink_ref_count(first_id), 2);
+
+        page.write_print_cell(0, 0, 'C', style::Style::default(), Some(second))
+            .unwrap();
+        let second_id = page.lookup_hyperlink_at(0, 0).unwrap();
+        assert_ne!(first_id, second_id);
+        assert_eq!(page.hyperlink_ref_count(first_id), 1);
+        assert_eq!(page.hyperlink_ref_count(second_id), 1);
+
+        page.write_print_cell(1, 0, 'D', style::Style::default(), None)
+            .unwrap();
+        assert_eq!(page.lookup_hyperlink_at(1, 0), None);
+        assert_eq!(page.hyperlink_ref_count(first_id), 0);
+        assert!(page.get_row(0).hyperlink());
+
+        page.write_print_cell(0, 0, 'E', style::Style::default(), None)
+            .unwrap();
+        assert_eq!(page.lookup_hyperlink_at(0, 0), None);
+        assert_eq!(page.hyperlink_ref_count(second_id), 0);
+        assert!(!page.get_row(0).hyperlink());
+        assert_eq!(page.hyperlink_count(), 0);
+        assert_eq!(page.hyperlink_set_count(), 0);
+    }
+
+    #[test]
+    fn page_print_cell_rolls_back_on_style_allocation_failure() {
+        let mut page = Page::init(Capacity::with_metadata(
+            5,
+            5,
+            0,
+            HYPERLINK_BYTES_DEFAULT,
+            GRAPHEME_BYTES_DEFAULT,
+            STRING_BYTES_DEFAULT,
+        ))
+        .unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('x' as u32);
+        let styled = style::Style {
+            flags: style::Flags {
+                bold: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+
+        assert_eq!(
+            page.write_print_cell(0, 0, 'A', styled, None),
+            Err(PrintCellError::StyleOutOfMemory)
+        );
+
+        assert_eq!(page.cell_copy_at(0, 0).codepoint(), 'x' as u32);
+        assert_eq!(page.style_count(), 0);
+    }
+
+    #[test]
+    fn page_print_cell_rolls_back_on_hyperlink_allocation_failure() {
+        let mut page = Page::init(Capacity::with_metadata(
+            5,
+            5,
+            8,
+            0,
+            GRAPHEME_BYTES_DEFAULT,
+            0,
+        ))
+        .unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('x' as u32);
+
+        assert_eq!(
+            page.write_print_cell(
+                0,
+                0,
+                'A',
+                style::Style::default(),
+                Some(hyperlink::Hyperlink {
+                    id: hyperlink::HyperlinkId::Implicit(1),
+                    uri: b"https://example.com",
+                }),
+            ),
+            Err(PrintCellError::HyperlinkOutOfMemory)
+        );
+
+        assert_eq!(page.cell_copy_at(0, 0).codepoint(), 'x' as u32);
+        assert!(!page.cell_copy_at(0, 0).hyperlink());
+        assert_eq!(page.hyperlink_count(), 0);
+        assert_eq!(page.hyperlink_set_count(), 0);
+    }
+
+    #[test]
+    fn page_print_cell_releases_new_style_on_hyperlink_failure() {
+        let mut page = Page::init(Capacity::with_metadata(
+            5,
+            5,
+            8,
+            0,
+            GRAPHEME_BYTES_DEFAULT,
+            1,
+        ))
+        .unwrap();
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('x' as u32);
+        let styled = style::Style {
+            flags: style::Flags {
+                italic: true,
+                ..style::Flags::default()
+            },
+            ..style::Style::default()
+        };
+
+        assert_eq!(
+            page.write_print_cell(
+                0,
+                0,
+                'A',
+                styled,
+                Some(hyperlink::Hyperlink {
+                    id: hyperlink::HyperlinkId::Explicit(b"id"),
+                    uri: b"https://example.com",
+                }),
+            ),
+            Err(PrintCellError::HyperlinkOutOfMemory)
+        );
+
+        assert_eq!(page.cell_copy_at(0, 0).codepoint(), 'x' as u32);
+        assert_eq!(page.cell_copy_at(0, 0).style_id(), style::DEFAULT_ID);
+        assert!(!page.cell_copy_at(0, 0).hyperlink());
+        assert_eq!(page.style_count(), 0);
+        assert_eq!(page.hyperlink_count(), 0);
+        assert_eq!(page.hyperlink_set_count(), 0);
+    }
+
+    #[test]
+    fn page_print_cell_rolls_back_on_hyperlink_map_failure() {
+        let mut page = Page::init(Capacity::with_metadata(
+            128,
+            1,
+            8,
+            (hyperlink::Set::capacity_for_count(1) * HYPERLINK_SET_ITEM_SIZE) as HyperlinkCountInt,
+            GRAPHEME_BYTES_DEFAULT,
+            STRING_BYTES_DEFAULT,
+        ))
+        .unwrap();
+        let link = hyperlink::Hyperlink {
+            id: hyperlink::HyperlinkId::Implicit(1),
+            uri: b"https://example.com",
+        };
+        let id = page.insert_hyperlink(link).unwrap();
+        let map_capacity = page.hyperlink_capacity();
+        assert!(map_capacity + 1 <= page.capacity().cols as usize);
+
+        for x in 0..map_capacity {
+            *page.get_row_and_cell_mut(x, 0).cell = Cell::init(b'a' as u32 + x as u32);
+            if x > 0 {
+                page.use_hyperlink(id);
+            }
+            page.set_hyperlink(x, 0, id).unwrap();
+        }
+        assert_eq!(page.hyperlink_count(), map_capacity);
+        assert_eq!(page.hyperlink_ref_count(id), map_capacity as u16);
+        assert_eq!(page.hyperlink_set_count(), 1);
+
+        assert_eq!(
+            page.write_print_cell(map_capacity, 0, 'Q', style::Style::default(), Some(link)),
+            Err(PrintCellError::HyperlinkOutOfMemory)
+        );
+
+        assert_eq!(page.cell_copy_at(map_capacity, 0).codepoint(), 0);
+        assert!(!page.cell_copy_at(map_capacity, 0).hyperlink());
+        assert_eq!(page.lookup_hyperlink_at(map_capacity, 0), None);
+        assert_eq!(page.hyperlink_count(), map_capacity);
+        assert_eq!(page.hyperlink_ref_count(id), map_capacity as u16);
+        assert_eq!(page.hyperlink_set_count(), 1);
     }
 
     #[test]
