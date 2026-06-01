@@ -165,3 +165,65 @@ approve until these design details were pinned down:
 
 Codex approved the revised design after those updates. No remaining required
 design fixes.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has typed terminal query response support for:
+
+- ENQ (`0x05`) stream dispatch, currently terminal-runtime inert until an
+  app/effects layer exists;
+- DA1, DA2, DA3, and DECID (`ESC Z`) with default Roastty device attribute
+  responses;
+- DSR operating status and cursor-position reports;
+- DSR color-scheme query dispatch, currently terminal-runtime inert until an
+  app/effects layer exists;
+- XTVERSION (`CSI > 0 q`) with the renamed default `libroastty` response.
+
+The implementation intentionally keeps the narrower policies approved in the
+design:
+
+- DA dispatch accepts only parameterless `CSI c`, `CSI > c`, and `CSI = c`.
+  Parameter-bearing forms remain inert.
+- XTVERSION accepts only `CSI > 0 q`. Other parameter forms remain inert.
+- Cursor-position reports respect origin mode by subtracting both the current
+  top margin and left margin from the absolute cursor before converting to
+  1-based coordinates.
+- XTVERSION response bytes contain lower-case `libroastty` and no Ghostty
+  spelling.
+
+Verification run:
+
+```bash
+cargo fmt
+cargo test -p roastty device_attributes
+cargo test -p roastty device_status
+cargo test -p roastty query_response
+cargo test -p roastty
+```
+
+All tests passed. The full Roastty suite reported 1590 unit tests, 1 ABI harness
+test, and 0 doc tests passing.
+
+## Result Review
+
+Codex reviewed the completed implementation and approved it with no findings. It
+specifically checked ENQ dispatch/runtime inertness, DA/DECID responses,
+malformed DA and XTVERSION rejection, DSR request typing, origin-relative CPR,
+lower-case `libroastty` XTVERSION naming, and DA value-type coverage.
+
+Codex reran:
+
+```bash
+cargo test -p roastty query_response
+```
+
+The focused review target passed.
+
+## Conclusion
+
+Experiment 146 completed the basic terminal query response path without adding
+the future app/effects layer. The next experiment should continue with another
+remaining Ghostty terminal parser/runtime surface, likely DCS/APC scaffolding or
+another coherent query/input subsystem slice.

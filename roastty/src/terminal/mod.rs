@@ -14,6 +14,12 @@ mod context_signal;
 mod color;
 
 #[allow(dead_code)]
+mod device_attributes;
+
+#[allow(dead_code)]
+mod device_status;
+
+#[allow(dead_code)]
 mod x11_color;
 
 #[allow(dead_code)]

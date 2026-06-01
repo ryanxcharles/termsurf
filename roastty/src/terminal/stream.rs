@@ -1,6 +1,6 @@
 //! Terminal byte stream decoding.
 
-use super::{modes, osc, sgr};
+use super::{device_attributes, device_status, modes, osc, sgr};
 
 const CSI_PARAM_CAPACITY: usize = 24;
 
@@ -12,6 +12,7 @@ pub(super) enum Action {
     LineFeed,
     CarriageReturn,
     Backspace,
+    Enquiry,
     HorizontalTab {
         count: u16,
     },
@@ -97,6 +98,13 @@ pub(super) enum Action {
         value: u16,
         ansi: bool,
     },
+    DeviceAttributes {
+        request: device_attributes::Request,
+    },
+    DeviceStatus {
+        request: device_status::Request,
+    },
+    XtVersion,
     SetAttribute {
         attr: sgr::Attribute,
     },
@@ -257,7 +265,8 @@ impl Stream {
             b'\t' => handler.vt(Action::HorizontalTab { count: 1 })?,
             b'\n' | 0x0b | 0x0c => handler.vt(Action::LineFeed)?,
             b'\r' => handler.vt(Action::CarriageReturn)?,
-            0x00..=0x07 | 0x0e..=0x1a | 0x1c..=0x1f | 0x7f => {}
+            0x05 => handler.vt(Action::Enquiry)?,
+            0x00..=0x04 | 0x06..=0x07 | 0x0e..=0x1a | 0x1c..=0x1f | 0x7f => {}
             _ => self.next_utf8(byte, handler)?,
         }
         Ok(())
@@ -289,6 +298,12 @@ impl Stream {
             b'H' => {
                 self.escape = EscapeState::Ground;
                 handler.vt(Action::TabSet)
+            }
+            b'Z' => {
+                self.escape = EscapeState::Ground;
+                handler.vt(Action::DeviceAttributes {
+                    request: device_attributes::Request::Primary,
+                })
             }
             _ => {
                 self.escape = EscapeState::Ground;
@@ -424,10 +439,11 @@ impl CsiState {
         }
 
         match byte {
-            b'?' if self.private.is_none()
-                && self.params_len == 0
-                && !self.param_has_digits
-                && !self.separator_seen() =>
+            b'?' | b'>' | b'='
+                if self.private.is_none()
+                    && self.params_len == 0
+                    && !self.param_has_digits
+                    && !self.separator_seen() =>
             {
                 self.private = Some(byte);
             }
@@ -544,6 +560,18 @@ impl CsiState {
 
         if let Some(dispatch) = self.sgr_dispatch(final_byte) {
             return dispatch;
+        }
+
+        if let Some(action) = self.device_attributes_action(final_byte) {
+            return CsiDispatch::One(action);
+        }
+
+        if let Some(action) = self.device_status_action(final_byte) {
+            return CsiDispatch::One(action);
+        }
+
+        if let Some(action) = self.xtversion_action(final_byte) {
+            return CsiDispatch::One(action);
         }
 
         if final_byte == b'W' {
@@ -933,6 +961,57 @@ impl CsiState {
             CsiDispatch::Many(actions)
         })
     }
+
+    fn device_attributes_action(&self, final_byte: u8) -> Option<Action> {
+        if final_byte != b'c' || self.intermediate.is_some() {
+            return None;
+        }
+
+        let params = self.finalized_params()?;
+        if params.len != 0 || params.separator_seen() {
+            return None;
+        }
+
+        let request = match self.private {
+            None => device_attributes::Request::Primary,
+            Some(b'>') => device_attributes::Request::Secondary,
+            Some(b'=') => device_attributes::Request::Tertiary,
+            Some(_) => return None,
+        };
+        Some(Action::DeviceAttributes { request })
+    }
+
+    fn device_status_action(&self, final_byte: u8) -> Option<Action> {
+        if final_byte != b'n' || self.intermediate.is_some() {
+            return None;
+        }
+
+        let question = match self.private {
+            None => false,
+            Some(b'?') => true,
+            Some(_) => return None,
+        };
+        let params = self.finalized_params()?;
+        if params.len != 1 || params.separator_seen() {
+            return None;
+        }
+
+        let request = device_status::request_from_int(params.values[0], question)?;
+        Some(Action::DeviceStatus { request })
+    }
+
+    fn xtversion_action(&self, final_byte: u8) -> Option<Action> {
+        if final_byte != b'q' || self.private != Some(b'>') || self.intermediate.is_some() {
+            return None;
+        }
+
+        let params = self.finalized_params()?;
+        if params.len == 1 && params.values[0] == 0 && !params.separator_seen() {
+            Some(Action::XtVersion)
+        } else {
+            None
+        }
+    }
 }
 
 impl CsiParams {
@@ -1227,7 +1306,8 @@ mod tests {
             .iter()
             .filter_map(|action| match action {
                 Action::Print { cp } => Some(*cp),
-                Action::LineFeed
+                Action::Enquiry
+                | Action::LineFeed
                 | Action::CarriageReturn
                 | Action::Backspace
                 | Action::HorizontalTab { .. }
@@ -1261,6 +1341,9 @@ mod tests {
                 | Action::RestoreMode { .. }
                 | Action::RequestMode { .. }
                 | Action::RequestModeUnknown { .. }
+                | Action::DeviceAttributes { .. }
+                | Action::DeviceStatus { .. }
+                | Action::XtVersion
                 | Action::SetAttribute { .. } => None,
             })
             .collect()
@@ -1802,6 +1885,71 @@ mod tests {
             b"\x1b[>7rA".as_slice(),
             b"\x1b[?7:8sA".as_slice(),
             b"\x1b[?7:8rA".as_slice(),
+        ] {
+            let mut stream = Stream::init();
+            let mut handler = RecordingHandler::default();
+
+            next_slice(&mut stream, &mut handler, input);
+
+            assert_eq!(actions(&handler), &[Action::Print { cp: 'A' }]);
+        }
+    }
+
+    #[test]
+    fn stream_query_response_dispatches_enq_da_dsr_and_xtversion() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(
+            &mut stream,
+            &mut handler,
+            b"\x05\x1b[c\x1b[>c\x1b[=c\x1bZ\x1b[5n\x1b[6n\x1b[?996n\x1b[>0q",
+        );
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Enquiry,
+                Action::DeviceAttributes {
+                    request: device_attributes::Request::Primary,
+                },
+                Action::DeviceAttributes {
+                    request: device_attributes::Request::Secondary,
+                },
+                Action::DeviceAttributes {
+                    request: device_attributes::Request::Tertiary,
+                },
+                Action::DeviceAttributes {
+                    request: device_attributes::Request::Primary,
+                },
+                Action::DeviceStatus {
+                    request: device_status::Request::OperatingStatus,
+                },
+                Action::DeviceStatus {
+                    request: device_status::Request::CursorPosition,
+                },
+                Action::DeviceStatus {
+                    request: device_status::Request::ColorScheme,
+                },
+                Action::XtVersion,
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_query_response_malformed_forms_do_not_dispatch_or_leak() {
+        for input in [
+            b"\x1b[0cA".as_slice(),
+            b"\x1b[>0cA".as_slice(),
+            b"\x1b[=0cA".as_slice(),
+            b"\x1b[?cA".as_slice(),
+            b"\x1b[?5nA".as_slice(),
+            b"\x1b[996nA".as_slice(),
+            b"\x1b[?997nA".as_slice(),
+            b"\x1b[5;6nA".as_slice(),
+            b"\x1b[>qA".as_slice(),
+            b"\x1b[>1qA".as_slice(),
+            b"\x1b[>0;1qA".as_slice(),
         ] {
             let mut stream = Stream::init();
             let mut handler = RecordingHandler::default();
@@ -6238,6 +6386,7 @@ mod tests {
                 Action::Index => b"\x1bD".as_slice(),
                 Action::NextLine => b"\x1bE".as_slice(),
                 Action::Print { .. }
+                | Action::Enquiry
                 | Action::LineFeed
                 | Action::CarriageReturn
                 | Action::Backspace
@@ -6270,6 +6419,9 @@ mod tests {
                 | Action::RestoreMode { .. }
                 | Action::RequestMode { .. }
                 | Action::RequestModeUnknown { .. }
+                | Action::DeviceAttributes { .. }
+                | Action::DeviceStatus { .. }
+                | Action::XtVersion
                 | Action::SetAttribute { .. } => unreachable!("loop only uses D/E actions"),
             };
 

@@ -420,7 +420,7 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 145: Port iTerm2 OSC 1337](145-port-iterm2-osc1337.md) — **Pass**
 - [Experiment 146: Port Terminal Query Responses](146-port-terminal-query-responses.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

@@ -1,6 +1,8 @@
 //! Terminal state.
 
 use super::color;
+use super::device_attributes;
+use super::device_status;
 use super::modes;
 use super::mouse;
 use super::osc;
@@ -463,6 +465,7 @@ impl Handler for TerminalStreamHandler<'_> {
     fn vt(&mut self, action: Action) -> Result<(), Self::Error> {
         match action {
             Action::Print { cp } => self.print(cp),
+            Action::Enquiry => Ok(()),
             Action::LineFeed => self.line_feed(),
             Action::CarriageReturn => {
                 self.screen.carriage_return_basic();
@@ -648,6 +651,19 @@ impl Handler for TerminalStreamHandler<'_> {
                 self.write_pty_response(&report.encode_vt());
                 Ok(())
             }
+            Action::DeviceAttributes { request } => {
+                let response = device_attributes::Attributes::default().encode_vt(request);
+                self.write_pty_response(&response);
+                Ok(())
+            }
+            Action::DeviceStatus { request } => {
+                self.device_status(request);
+                Ok(())
+            }
+            Action::XtVersion => {
+                self.write_pty_response("\x1bP>|libroastty\x1b\\");
+                Ok(())
+            }
             Action::SetAttribute { attr } => {
                 self.screen.set_attribute_basic(attr);
                 Ok(())
@@ -756,6 +772,25 @@ impl TerminalStreamHandler<'_> {
 
     fn write_pty_response_bytes(&mut self, bytes: &[u8]) {
         self.pty_response.extend_from_slice(bytes);
+    }
+
+    fn device_status(&mut self, request: device_status::Request) {
+        match request {
+            device_status::Request::OperatingStatus => self.write_pty_response("\x1b[0n"),
+            device_status::Request::CursorPosition => {
+                let (cursor_x, cursor_y) = self.screen.cursor_position();
+                let (x, y) = if self.modes.get(modes::Mode::Origin) {
+                    (
+                        cursor_x.saturating_sub(self.scrolling_region.left),
+                        cursor_y.saturating_sub(self.scrolling_region.top),
+                    )
+                } else {
+                    (cursor_x, cursor_y)
+                };
+                self.write_pty_response(&format!("\x1b[{};{}R", y + 1, x + 1));
+            }
+            device_status::Request::ColorScheme => {}
+        }
     }
 
     fn color_operation(&mut self, requests: osc::ColorRequests) {
@@ -2108,6 +2143,88 @@ mod tests {
         assert!(!terminal.is_dirty_for_tests(9, 0));
         assert!(!terminal.is_dirty_for_tests(0, 1));
         assert_eq!(terminal.pty_response_for_tests(), b"\x1b[?7;1$y");
+    }
+
+    #[test]
+    fn terminal_stream_query_response_enq_and_color_scheme_are_inert() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"abc").unwrap();
+        terminal.clear_dirty_for_tests();
+        terminal.next_slice(b"\x05\x1b[?996n").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+        assert!(terminal.pty_response_for_tests().is_empty());
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(9, 0));
+    }
+
+    #[test]
+    fn terminal_stream_query_response_device_attributes_and_decid() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b[c").unwrap();
+        assert_eq!(terminal.take_pty_response_for_tests(), b"\x1b[?62;22c");
+
+        terminal.next_slice(b"\x1b[>c").unwrap();
+        assert_eq!(terminal.take_pty_response_for_tests(), b"\x1b[>1;0;0c");
+
+        terminal.next_slice(b"\x1b[=c").unwrap();
+        assert_eq!(
+            terminal.take_pty_response_for_tests(),
+            b"\x1bP!|00000000\x1b\\"
+        );
+
+        terminal.next_slice(b"\x1bZ").unwrap();
+        assert_eq!(terminal.take_pty_response_for_tests(), b"\x1b[?62;22c");
+    }
+
+    #[test]
+    fn terminal_stream_query_response_xtversion_uses_roastty_name() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b[>0q").unwrap();
+
+        assert_eq!(
+            terminal.pty_response_for_tests(),
+            b"\x1bP>|libroastty\x1b\\"
+        );
+        assert!(!terminal
+            .pty_response_for_tests()
+            .windows(b"ghostty".len())
+            .any(|window| window == b"ghostty"));
+        assert!(!terminal
+            .pty_response_for_tests()
+            .windows(b"Ghostty".len())
+            .any(|window| window == b"Ghostty"));
+        assert!(!terminal
+            .pty_response_for_tests()
+            .windows(b"Roastty".len())
+            .any(|window| window == b"Roastty"));
+    }
+
+    #[test]
+    fn terminal_stream_query_response_device_status_reports() {
+        let mut terminal = Terminal::init(10, 5, None).unwrap();
+
+        terminal.next_slice(b"\x1b[5n").unwrap();
+        assert_eq!(terminal.take_pty_response_for_tests(), b"\x1b[0n");
+
+        terminal.screens.active.set_cursor_position_for_tests(4, 2);
+        terminal.next_slice(b"\x1b[6n").unwrap();
+        assert_eq!(terminal.take_pty_response_for_tests(), b"\x1b[3;5R");
+    }
+
+    #[test]
+    fn terminal_stream_query_response_cursor_report_respects_origin_mode() {
+        let mut terminal = Terminal::init(10, 5, None).unwrap();
+
+        terminal.set_scrolling_region_for_tests(1, 4, 2, 8);
+        terminal.next_slice(b"\x1b[?6h").unwrap();
+        terminal.screens.active.set_cursor_position_for_tests(5, 3);
+        terminal.next_slice(b"\x1b[6n").unwrap();
+
+        assert_eq!(terminal.take_pty_response_for_tests(), b"\x1b[3;4R");
     }
 
     #[test]
