@@ -57,7 +57,7 @@ pub(crate) struct MouseMods {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MouseShape {
+pub(crate) enum MouseShape {
     Default,
     ContextMenu,
     Help,

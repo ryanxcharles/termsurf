@@ -3,7 +3,7 @@ const OSC_COLOR_REQUEST_CAPACITY: usize = MAX_BUF / 2 + 1;
 const KITTY_TEXT_SIZING_MAX_PAYLOAD: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Command<'a> {
+pub(crate) enum Command<'a> {
     WindowTitle {
         title: &'a str,
     },
@@ -47,13 +47,13 @@ pub(super) enum Command<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Terminator {
+pub(crate) enum Terminator {
     Bel,
     St,
 }
 
 impl Terminator {
-    pub(super) const fn bytes(self) -> &'static [u8] {
+    pub(crate) const fn bytes(self) -> &'static [u8] {
         match self {
             Self::Bel => b"\x07",
             Self::St => b"\x1b\\",
@@ -62,13 +62,13 @@ impl Terminator {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct ColorRequests {
+pub(crate) struct ColorRequests {
     items: [Option<ColorRequest>; OSC_COLOR_REQUEST_CAPACITY],
     len: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ColorRequest {
+pub(crate) enum ColorRequest {
     SetPalette {
         index: u8,
         rgb: super::color::Rgb,
@@ -95,14 +95,14 @@ pub(super) enum ColorRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum DynamicColor {
+pub(crate) enum DynamicColor {
     Foreground,
     Background,
     Cursor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct KittyTextSizing<'a> {
+pub(crate) struct KittyTextSizing<'a> {
     pub(super) scale: u8,
     pub(super) width: u8,
     pub(super) numerator: u8,
@@ -221,7 +221,7 @@ impl ColorRequests {
         Ok(())
     }
 
-    pub(super) fn iter(&self) -> impl Iterator<Item = ColorRequest> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = ColorRequest> + '_ {
         self.items[..self.len]
             .iter()
             .map(|request| request.expect("color request slots below len must be initialized"))
@@ -234,7 +234,7 @@ impl ColorRequests {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Parser {
+pub(crate) struct Parser {
     buffer: [u8; MAX_BUF],
     len: usize,
     overflow: Option<Vec<u8>>,
@@ -242,7 +242,7 @@ pub(super) struct Parser {
 }
 
 impl Parser {
-    pub(super) const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             buffer: [0; MAX_BUF],
             len: 0,
@@ -251,17 +251,17 @@ impl Parser {
         }
     }
 
-    pub(super) fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.len = 0;
         self.overflow = None;
         self.invalid = false;
     }
 
-    pub(super) fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.invalid = true;
     }
 
-    pub(super) fn push(&mut self, byte: u8) {
+    pub(crate) fn push(&mut self, byte: u8) {
         if self.invalid {
             return;
         }
@@ -293,12 +293,12 @@ impl Parser {
         self.len += 1;
     }
 
-    pub(super) fn push_escape_and(&mut self, byte: u8) {
+    pub(crate) fn push_escape_and(&mut self, byte: u8) {
         self.push(0x1b);
         self.push(byte);
     }
 
-    pub(super) fn command(&self, terminator: Terminator) -> Option<Command<'_>> {
+    pub(crate) fn command(&self, terminator: Terminator) -> Option<Command<'_>> {
         if self.invalid {
             return None;
         }

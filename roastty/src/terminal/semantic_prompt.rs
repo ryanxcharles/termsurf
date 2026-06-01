@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct SemanticPrompt<'a> {
+pub(crate) struct SemanticPrompt<'a> {
     pub(super) action: Action,
     options: &'a [u8],
 }

@@ -50,7 +50,7 @@ pub(crate) mod mouse_encode;
 mod offset_hash_map;
 
 #[allow(dead_code)]
-mod osc;
+pub(crate) mod osc;
 
 #[allow(dead_code)]
 mod page;

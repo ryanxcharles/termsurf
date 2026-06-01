@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct ContextSignal<'a> {
+pub(crate) struct ContextSignal<'a> {
     pub(super) action: Action,
     pub(super) id: &'a [u8],
     pub(super) metadata: &'a [u8],

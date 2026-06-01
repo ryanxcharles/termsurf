@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct Rgb {
+pub(crate) struct Rgb {
     pub(super) r: u8,
     pub(super) g: u8,
     pub(super) b: u8,

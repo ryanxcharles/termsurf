@@ -1,14 +1,14 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct ClipboardContents<'a> {
-    pub(super) kind: u8,
-    pub(super) data: &'a [u8],
+pub(crate) struct ClipboardContents<'a> {
+    pub(crate) kind: u8,
+    pub(crate) data: &'a [u8],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct KittyClipboard<'a> {
-    pub(super) metadata: &'a [u8],
-    pub(super) payload: Option<&'a [u8]>,
-    pub(super) terminator: super::osc::Terminator,
+pub(crate) struct KittyClipboard<'a> {
+    pub(crate) metadata: &'a [u8],
+    pub(crate) payload: Option<&'a [u8]>,
+    pub(crate) terminator: super::osc::Terminator,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

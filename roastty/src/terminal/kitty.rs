@@ -32,7 +32,7 @@ pub(super) enum ColorRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct ColorRequests {
+pub(crate) struct ColorRequests {
     items: [Option<ColorRequest>; COLOR_REQUEST_CAPACITY],
     len: usize,
 }

@@ -25,6 +25,8 @@ typedef void* roastty_key_encoder_t;
 typedef void* roastty_key_event_t;
 typedef void* roastty_mouse_encoder_t;
 typedef void* roastty_mouse_event_t;
+typedef void* roastty_osc_command_t;
+typedef void* roastty_osc_parser_t;
 typedef void* roastty_surface_t;
 
 typedef enum {
@@ -338,6 +340,44 @@ typedef struct {
 } roastty_key_mods_s;
 
 typedef enum {
+  ROASTTY_OSC_COMMAND_INVALID = 0,
+  ROASTTY_OSC_COMMAND_CHANGE_WINDOW_TITLE = 1,
+  ROASTTY_OSC_COMMAND_CHANGE_WINDOW_ICON = 2,
+  ROASTTY_OSC_COMMAND_SEMANTIC_PROMPT = 3,
+  ROASTTY_OSC_COMMAND_CLIPBOARD_CONTENTS = 4,
+  ROASTTY_OSC_COMMAND_REPORT_PWD = 5,
+  ROASTTY_OSC_COMMAND_MOUSE_SHAPE = 6,
+  ROASTTY_OSC_COMMAND_COLOR_OPERATION = 7,
+  ROASTTY_OSC_COMMAND_KITTY_COLOR_PROTOCOL = 8,
+  ROASTTY_OSC_COMMAND_SHOW_DESKTOP_NOTIFICATION = 9,
+  ROASTTY_OSC_COMMAND_HYPERLINK_START = 10,
+  ROASTTY_OSC_COMMAND_HYPERLINK_END = 11,
+  ROASTTY_OSC_COMMAND_CONEMU_SLEEP = 12,
+  ROASTTY_OSC_COMMAND_CONEMU_SHOW_MESSAGE_BOX = 13,
+  ROASTTY_OSC_COMMAND_CONEMU_CHANGE_TAB_TITLE = 14,
+  ROASTTY_OSC_COMMAND_CONEMU_PROGRESS_REPORT = 15,
+  ROASTTY_OSC_COMMAND_CONEMU_WAIT_INPUT = 16,
+  ROASTTY_OSC_COMMAND_CONEMU_GUIMACRO = 17,
+  ROASTTY_OSC_COMMAND_CONEMU_RUN_PROCESS = 18,
+  ROASTTY_OSC_COMMAND_CONEMU_OUTPUT_ENVIRONMENT_VARIABLE = 19,
+  ROASTTY_OSC_COMMAND_CONEMU_XTERM_EMULATION = 20,
+  ROASTTY_OSC_COMMAND_CONEMU_COMMENT = 21,
+  ROASTTY_OSC_COMMAND_KITTY_TEXT_SIZING = 22,
+  ROASTTY_OSC_COMMAND_KITTY_CLIPBOARD_PROTOCOL = 23,
+  ROASTTY_OSC_COMMAND_CONTEXT_SIGNAL = 24,
+} roastty_osc_command_e;
+
+typedef enum {
+  ROASTTY_OSC_COMMAND_DATA_INVALID = 0,
+  /*
+   * Expects out as const char**. On success, writes parser-owned
+   * NUL-terminated memory valid until the owning parser receives another byte,
+   * is reset, ends another command, or is freed.
+   */
+  ROASTTY_OSC_COMMAND_DATA_CHANGE_WINDOW_TITLE_STR = 1,
+} roastty_osc_command_data_e;
+
+typedef enum {
   ROASTTY_CLIPBOARD_STANDARD,
   ROASTTY_CLIPBOARD_SELECTION,
 } roastty_clipboard_e;
@@ -572,6 +612,14 @@ ROASTTY_API roastty_result_e roastty_mouse_encoder_encode(roastty_mouse_encoder_
                                                           uint8_t*,
                                                           size_t,
                                                           size_t*);
+
+ROASTTY_API roastty_result_e roastty_osc_new(roastty_osc_parser_t*);
+ROASTTY_API void roastty_osc_free(roastty_osc_parser_t);
+ROASTTY_API void roastty_osc_reset(roastty_osc_parser_t);
+ROASTTY_API void roastty_osc_next(roastty_osc_parser_t, uint8_t);
+ROASTTY_API roastty_osc_command_t roastty_osc_end(roastty_osc_parser_t, int);
+ROASTTY_API int roastty_osc_command_type(roastty_osc_command_t);
+ROASTTY_API bool roastty_osc_command_data(roastty_osc_command_t, int, void*);
 
 ROASTTY_API roastty_surface_config_s roastty_surface_config_new(void);
 ROASTTY_API roastty_surface_t roastty_surface_new(roastty_app_t,

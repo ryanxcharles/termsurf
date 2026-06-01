@@ -5,7 +5,7 @@ use std::slice;
 
 use input::{key, key_encode, key_mods};
 use terminal::kitty::KeyFlags;
-use terminal::{mouse, mouse_encode, point};
+use terminal::{mouse, mouse_encode, osc, point};
 
 mod input;
 mod terminal;
@@ -24,6 +24,8 @@ pub type RoasttyKeyEncoder = *mut c_void;
 pub type RoasttyKeyEvent = *mut c_void;
 pub type RoasttyMouseEncoder = *mut c_void;
 pub type RoasttyMouseEvent = *mut c_void;
+pub type RoasttyOscCommand = *mut c_void;
+pub type RoasttyOscParser = *mut c_void;
 pub type RoasttySurface = *mut c_void;
 
 const ROASTTY_SUCCESS: c_int = 0;
@@ -242,6 +244,18 @@ struct KeyEncoder {
     opts: key_encode::Options,
 }
 
+struct OscParser {
+    parser: osc::Parser,
+    last_command: Option<OwnedOscCommand>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct OwnedOscCommand {
+    tag: c_int,
+    title: Option<Vec<u8>>,
+    terminator: Option<c_int>,
+}
+
 static VERSION: &[u8] = b"0.1.0-roastty\0";
 static EMPTY_DIAGNOSTIC: &[u8] = b"\0";
 static WINDOW_SAVE_STATE_DEFAULT: &[u8] = b"default\0";
@@ -301,6 +315,95 @@ fn key_encoder_from_handle<'a>(handle: RoasttyKeyEncoder) -> Option<&'a mut KeyE
         None
     } else {
         Some(unsafe { &mut *(handle.cast::<KeyEncoder>()) })
+    }
+}
+
+fn osc_parser_from_handle<'a>(handle: RoasttyOscParser) -> Option<&'a mut OscParser> {
+    if handle.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *(handle.cast::<OscParser>()) })
+    }
+}
+
+fn osc_command_from_handle<'a>(handle: RoasttyOscCommand) -> Option<&'a OwnedOscCommand> {
+    if handle.is_null() {
+        None
+    } else {
+        Some(unsafe { &*(handle.cast::<OwnedOscCommand>()) })
+    }
+}
+
+fn osc_terminator_from_int(value: c_int) -> Option<osc::Terminator> {
+    match value {
+        0 | 92 => Some(osc::Terminator::St),
+        0x07 => Some(osc::Terminator::Bel),
+        _ => None,
+    }
+}
+
+fn osc_terminator_to_int(value: osc::Terminator) -> c_int {
+    match value {
+        osc::Terminator::Bel => 0x07,
+        osc::Terminator::St => b'\\' as c_int,
+    }
+}
+
+fn owned_osc_command(command: osc::Command<'_>) -> Option<OwnedOscCommand> {
+    match command {
+        osc::Command::WindowTitle { title } => {
+            if title.as_bytes().contains(&0) {
+                return None;
+            }
+            let mut title = title.as_bytes().to_vec();
+            title.push(0);
+            Some(OwnedOscCommand {
+                tag: 1,
+                title: Some(title),
+                terminator: None,
+            })
+        }
+        osc::Command::ClipboardContents { .. } => Some(owned_osc_tag(4)),
+        osc::Command::ReportPwd { .. } => Some(owned_osc_tag(5)),
+        osc::Command::MouseShape { .. } => Some(owned_osc_tag(6)),
+        osc::Command::ColorOperation { requests } => {
+            let terminator = requests.iter().find_map(|request| match request {
+                osc::ColorRequest::QueryPalette { terminator, .. }
+                | osc::ColorRequest::QueryDynamic { terminator, .. } => {
+                    Some(osc_terminator_to_int(terminator))
+                }
+                _ => None,
+            });
+            Some(OwnedOscCommand {
+                tag: 7,
+                title: None,
+                terminator,
+            })
+        }
+        osc::Command::KittyColor { terminator, .. } => Some(OwnedOscCommand {
+            tag: 8,
+            title: None,
+            terminator: Some(osc_terminator_to_int(terminator)),
+        }),
+        osc::Command::DesktopNotification { .. } => Some(owned_osc_tag(9)),
+        osc::Command::StartHyperlink { .. } => Some(owned_osc_tag(10)),
+        osc::Command::EndHyperlink => Some(owned_osc_tag(11)),
+        osc::Command::KittyTextSizing { .. } => Some(owned_osc_tag(22)),
+        osc::Command::KittyClipboard { value } => Some(OwnedOscCommand {
+            tag: 23,
+            title: None,
+            terminator: Some(osc_terminator_to_int(value.terminator)),
+        }),
+        osc::Command::ContextSignal { .. } => Some(owned_osc_tag(24)),
+        osc::Command::SemanticPrompt { .. } => Some(owned_osc_tag(3)),
+    }
+}
+
+fn owned_osc_tag(tag: c_int) -> OwnedOscCommand {
+    OwnedOscCommand {
+        tag,
+        title: None,
+        terminator: None,
     }
 }
 
@@ -1342,6 +1445,111 @@ pub extern "C" fn roastty_mouse_encoder_encode(
 }
 
 #[no_mangle]
+pub extern "C" fn roastty_osc_new(out: *mut RoasttyOscParser) -> c_int {
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    let parser = Box::new(OscParser {
+        parser: osc::Parser::new(),
+        last_command: None,
+    });
+    unsafe {
+        out.write(Box::into_raw(parser).cast());
+    }
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_osc_free(parser: RoasttyOscParser) {
+    if !parser.is_null() {
+        unsafe {
+            drop(Box::from_raw(parser.cast::<OscParser>()));
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_osc_reset(parser: RoasttyOscParser) {
+    if let Some(parser) = osc_parser_from_handle(parser) {
+        parser.parser.reset();
+        parser.last_command = None;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_osc_next(parser: RoasttyOscParser, byte: u8) {
+    if let Some(parser) = osc_parser_from_handle(parser) {
+        parser.last_command = None;
+        parser.parser.push(byte);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_osc_end(
+    parser: RoasttyOscParser,
+    terminator: c_int,
+) -> RoasttyOscCommand {
+    let Some(parser) = osc_parser_from_handle(parser) else {
+        return ptr::null_mut();
+    };
+    let Some(terminator) = osc_terminator_from_int(terminator) else {
+        parser.last_command = None;
+        parser.parser.reset();
+        return ptr::null_mut();
+    };
+
+    parser.last_command = parser
+        .parser
+        .command(terminator)
+        .and_then(owned_osc_command);
+    parser.parser.reset();
+
+    parser
+        .last_command
+        .as_ref()
+        .map(|command| {
+            let ptr: *const OwnedOscCommand = command;
+            ptr.cast_mut().cast()
+        })
+        .unwrap_or(ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_osc_command_type(command: RoasttyOscCommand) -> c_int {
+    osc_command_from_handle(command)
+        .map(|command| command.tag)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_osc_command_data(
+    command: RoasttyOscCommand,
+    data: c_int,
+    out: *mut c_void,
+) -> bool {
+    let Some(command) = osc_command_from_handle(command) else {
+        return false;
+    };
+    if out.is_null() {
+        return false;
+    }
+
+    match data {
+        1 if command.tag == 1 => {
+            let Some(title) = command.title.as_ref() else {
+                return false;
+            };
+            unsafe {
+                out.cast::<*const c_char>().write(title.as_ptr().cast());
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn roastty_surface_config_new() -> RoasttySurfaceConfig {
     RoasttySurfaceConfig {
         platform_tag: 0,
@@ -1518,6 +1726,24 @@ mod tests {
         assert_eq!(roastty_key_encoder_new(&mut encoder), ROASTTY_SUCCESS);
         assert!(!encoder.is_null());
         encoder
+    }
+
+    fn new_osc_parser() -> RoasttyOscParser {
+        let mut parser = ptr::null_mut();
+        assert_eq!(roastty_osc_new(&mut parser), ROASTTY_SUCCESS);
+        assert!(!parser.is_null());
+        parser
+    }
+
+    fn feed_osc(parser: RoasttyOscParser, bytes: &[u8]) {
+        for &byte in bytes {
+            roastty_osc_next(parser, byte);
+        }
+    }
+
+    fn parse_osc(parser: RoasttyOscParser, bytes: &[u8], terminator: c_int) -> RoasttyOscCommand {
+        feed_osc(parser, bytes);
+        roastty_osc_end(parser, terminator)
     }
 
     fn key_mods() -> RoasttyKeyMods {
@@ -1809,5 +2035,155 @@ mod tests {
         assert_eq!(key_from_int(0), Some(key::Key::Unidentified));
         assert_eq!(key_from_int(175), Some(key::Key::Paste));
         assert_eq!(key_from_int(176), None);
+    }
+
+    #[test]
+    fn osc_parser_abi_allocates_parses_title_and_extracts_data() {
+        roastty_osc_free(ptr::null_mut());
+        roastty_osc_reset(ptr::null_mut());
+        roastty_osc_next(ptr::null_mut(), b'x');
+        assert_eq!(roastty_osc_new(ptr::null_mut()), ROASTTY_INVALID_VALUE);
+        assert!(roastty_osc_end(ptr::null_mut(), 0).is_null());
+        assert_eq!(roastty_osc_command_type(ptr::null_mut()), 0);
+        assert!(!roastty_osc_command_data(
+            ptr::null_mut(),
+            1,
+            ptr::null_mut()
+        ));
+
+        let parser = new_osc_parser();
+        let command = parse_osc(parser, b"0;hello", 0);
+        assert!(!command.is_null());
+        assert_eq!(roastty_osc_command_type(command), 1);
+
+        let mut title: *const c_char = ptr::null();
+        assert!(roastty_osc_command_data(
+            command,
+            1,
+            (&mut title as *mut *const c_char).cast()
+        ));
+        assert!(!title.is_null());
+        let title = unsafe { std::ffi::CStr::from_ptr(title) };
+        assert_eq!(title.to_bytes(), b"hello");
+
+        let mut unchanged: *const c_char = ptr::dangling();
+        assert!(!roastty_osc_command_data(
+            command,
+            0,
+            (&mut unchanged as *mut *const c_char).cast()
+        ));
+        assert_eq!(unchanged, ptr::dangling());
+        assert!(!roastty_osc_command_data(command, 1, ptr::null_mut()));
+
+        let nul_title = parse_osc(parser, b"0;a\0b", 0);
+        assert!(nul_title.is_null());
+
+        roastty_osc_free(parser);
+    }
+
+    #[test]
+    fn osc_parser_abi_end_resets_input_for_sequential_commands() {
+        let parser = new_osc_parser();
+        let first = parse_osc(parser, b"0;first", 0);
+        assert_eq!(roastty_osc_command_type(first), 1);
+        let first_addr = first as usize;
+
+        let second = parse_osc(parser, b"0;second", 0);
+        assert_eq!(roastty_osc_command_type(second), 1);
+        assert_ne!(second as usize, 0);
+        assert_eq!(first_addr, second as usize);
+
+        let mut title: *const c_char = ptr::null();
+        assert!(roastty_osc_command_data(
+            second,
+            1,
+            (&mut title as *mut *const c_char).cast()
+        ));
+        let title_cstr = unsafe { std::ffi::CStr::from_ptr(title) };
+        assert_eq!(title_cstr.to_bytes(), b"second");
+
+        roastty_osc_reset(parser);
+        let third = parse_osc(parser, b"7;file://host/path", 0);
+        assert_eq!(roastty_osc_command_type(third), 5);
+        assert!(!roastty_osc_command_data(
+            third,
+            1,
+            (&mut title as *mut *const c_char).cast()
+        ));
+
+        roastty_osc_next(parser, b'x');
+        assert_eq!(roastty_osc_command_type(ptr::null_mut()), 0);
+        let after_partial = roastty_osc_end(parser, 0);
+        assert!(after_partial.is_null());
+
+        roastty_osc_free(parser);
+    }
+
+    #[test]
+    fn osc_parser_abi_validates_terminators_and_preserves_sensitive_state() {
+        let parser = new_osc_parser();
+        assert!(parse_osc(parser, b"0;title", 9999).is_null());
+
+        let color_default = parse_osc(parser, b"4;2;?", 0);
+        assert_eq!(roastty_osc_command_type(color_default), 7);
+        assert_eq!(
+            osc_command_from_handle(color_default).and_then(|command| command.terminator),
+            Some(b'\\' as c_int)
+        );
+
+        let color_st = parse_osc(parser, b"4;2;?", b'\\' as c_int);
+        assert_eq!(roastty_osc_command_type(color_st), 7);
+        assert_eq!(
+            osc_command_from_handle(color_st).and_then(|command| command.terminator),
+            Some(b'\\' as c_int)
+        );
+
+        let color_bel = parse_osc(parser, b"4;2;?", 0x07);
+        assert_eq!(roastty_osc_command_type(color_bel), 7);
+        assert_eq!(
+            osc_command_from_handle(color_bel).and_then(|command| command.terminator),
+            Some(0x07)
+        );
+
+        let kitty_clipboard = parse_osc(parser, b"5522;type=read;payload", 0x07);
+        assert_eq!(roastty_osc_command_type(kitty_clipboard), 23);
+        assert_eq!(
+            osc_command_from_handle(kitty_clipboard).and_then(|command| command.terminator),
+            Some(0x07)
+        );
+
+        roastty_osc_free(parser);
+    }
+
+    #[test]
+    fn osc_parser_abi_maps_current_command_types_and_reserves_unsupported_slots() {
+        let parser = new_osc_parser();
+        let cases: &[(&[u8], c_int)] = &[
+            (b"7;file://host/path", 5),
+            (b"8;;https://example.com", 10),
+            (b"8;;", 11),
+            (b"777;notify;title;body", 9),
+            (b"22;pointer", 6),
+            (b"4;2;?", 7),
+            (b"66;;hello", 22),
+            (b"5522;type=read;payload", 23),
+            (b"3008;start=abc123", 24),
+            (b"133;A", 3),
+        ];
+
+        for (input, expected) in cases {
+            let command = parse_osc(parser, input, 0);
+            assert_eq!(roastty_osc_command_type(command), *expected, "{input:?}");
+        }
+
+        for unsupported in [b"1;icon".as_slice(), b"9;1;10", b"9;2;message"] {
+            let command = parse_osc(parser, unsupported, 0);
+            assert!(
+                command.is_null(),
+                "reserved command unexpectedly returned for {unsupported:?}"
+            );
+        }
+
+        roastty_osc_free(parser);
     }
 }

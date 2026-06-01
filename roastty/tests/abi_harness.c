@@ -283,6 +283,87 @@ static void assert_key_event_and_encoder_abi(void) {
   roastty_key_event_free(event);
 }
 
+static void feed_osc(roastty_osc_parser_t parser, const char *bytes) {
+  for (size_t i = 0; bytes[i] != '\0'; i++) {
+    roastty_osc_next(parser, (uint8_t)bytes[i]);
+  }
+}
+
+static void assert_osc_parser_abi(void) {
+  roastty_osc_free(NULL);
+  roastty_osc_reset(NULL);
+  roastty_osc_next(NULL, 'x');
+  assert(roastty_osc_new(NULL) == ROASTTY_INVALID_VALUE);
+  assert(roastty_osc_end(NULL, 0) == NULL);
+  assert(roastty_osc_command_type(NULL) == ROASTTY_OSC_COMMAND_INVALID);
+  assert(!roastty_osc_command_data(NULL,
+                                   ROASTTY_OSC_COMMAND_DATA_CHANGE_WINDOW_TITLE_STR,
+                                   NULL));
+
+  assert(ROASTTY_OSC_COMMAND_INVALID == 0);
+  assert(ROASTTY_OSC_COMMAND_CHANGE_WINDOW_TITLE == 1);
+  assert(ROASTTY_OSC_COMMAND_CHANGE_WINDOW_ICON == 2);
+  assert(ROASTTY_OSC_COMMAND_SEMANTIC_PROMPT == 3);
+  assert(ROASTTY_OSC_COMMAND_CONTEXT_SIGNAL == 24);
+
+  roastty_osc_parser_t parser = NULL;
+  assert(roastty_osc_new(&parser) == ROASTTY_SUCCESS);
+  assert(parser != NULL);
+
+  feed_osc(parser, "0;from-c");
+  roastty_osc_command_t command = roastty_osc_end(parser, 0);
+  assert(command != NULL);
+  assert(roastty_osc_command_type(command) ==
+         ROASTTY_OSC_COMMAND_CHANGE_WINDOW_TITLE);
+
+  const char *title = NULL;
+  assert(roastty_osc_command_data(command,
+                                  ROASTTY_OSC_COMMAND_DATA_CHANGE_WINDOW_TITLE_STR,
+                                  &title));
+  assert(title != NULL);
+  assert(strcmp(title, "from-c") == 0);
+
+  const char *unchanged = (const char *)0x1;
+  assert(!roastty_osc_command_data(command,
+                                   ROASTTY_OSC_COMMAND_DATA_INVALID,
+                                   &unchanged));
+  assert(unchanged == (const char *)0x1);
+  assert(!roastty_osc_command_data(command,
+                                   ROASTTY_OSC_COMMAND_DATA_CHANGE_WINDOW_TITLE_STR,
+                                   NULL));
+
+  feed_osc(parser, "0;second");
+  command = roastty_osc_end(parser, 0);
+  assert(command != NULL);
+  title = NULL;
+  assert(roastty_osc_command_data(command,
+                                  ROASTTY_OSC_COMMAND_DATA_CHANGE_WINDOW_TITLE_STR,
+                                  &title));
+  assert(title != NULL);
+  assert(strcmp(title, "second") == 0);
+
+  feed_osc(parser, "7;file://host/path");
+  command = roastty_osc_end(parser, 0);
+  assert(command != NULL);
+  assert(roastty_osc_command_type(command) == ROASTTY_OSC_COMMAND_REPORT_PWD);
+  title = (const char *)0x1;
+  assert(!roastty_osc_command_data(command,
+                                   ROASTTY_OSC_COMMAND_DATA_CHANGE_WINDOW_TITLE_STR,
+                                   &title));
+  assert(title == (const char *)0x1);
+
+  feed_osc(parser, "4;2;?");
+  command = roastty_osc_end(parser, 0x07);
+  assert(command != NULL);
+  assert(roastty_osc_command_type(command) == ROASTTY_OSC_COMMAND_COLOR_OPERATION);
+
+  feed_osc(parser, "0;bad");
+  assert(roastty_osc_end(parser, 9999) == NULL);
+
+  roastty_osc_reset(parser);
+  roastty_osc_free(parser);
+}
+
 static void assert_mouse_event_abi(void) {
   roastty_mouse_event_free(NULL);
 
@@ -521,6 +602,7 @@ int main(int argc, char **argv) {
   assert_mouse_event_abi();
   assert_mouse_encoder_abi();
   assert_key_event_and_encoder_abi();
+  assert_osc_parser_abi();
 
   roastty_info_s info = roastty_info();
   assert(info.version != NULL);

@@ -280,3 +280,84 @@ invalid by contract rather than promised as safely detectable.
 
 The design was updated to address those findings. Codex's second review found no
 remaining blocking design issues and approved the experiment for implementation.
+
+## Result
+
+**Result:** Pass.
+
+Experiment 164 exposes the existing OSC parser through a C ABI without adding
+terminal/runtime dispatch. The implementation adds:
+
+- `roastty_osc_parser_t` and `roastty_osc_command_t` opaque handles;
+- `roastty_osc_new`, `roastty_osc_free`, `roastty_osc_reset`,
+  `roastty_osc_next`, and `roastty_osc_end`;
+- `roastty_osc_command_type` and `roastty_osc_command_data`;
+- stable `roastty_osc_command_e` numeric slots matching upstream command-key
+  ordering, with unsupported upstream slots reserved but not returned;
+- owned wrapper storage for C-visible command data;
+- exact `const char**` title extraction for
+  `ROASTTY_OSC_COMMAND_DATA_CHANGE_WINDOW_TITLE_STR`;
+- BEL, ST, and default terminator handling for terminator-sensitive commands;
+- Rust ABI tests and C ABI harness coverage for allocation, parsing, data
+  extraction, reset/end behavior, invalid inputs, reserved commands, and
+  terminators.
+
+The parser ABI deliberately does not execute parsed commands. Clipboard writes,
+notifications, color mutations, hyperlink mutations, renderer changes, PTY work,
+platform behavior, and terminal runtime dispatch remain out of scope.
+
+## Verification
+
+Commands run:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/terminal/mod.rs roastty/src/terminal/osc.rs roastty/src/terminal/clipboard.rs roastty/src/terminal/context_signal.rs roastty/src/terminal/mouse.rs roastty/src/terminal/kitty.rs roastty/src/terminal/color.rs roastty/src/terminal/semantic_prompt.rs
+cargo test -p roastty osc_parser_abi
+cargo test -p roastty c_harness_links_against_roastty_header_and_roastty_dylib
+cargo test -p roastty osc
+cargo test -p roastty
+! rg -n "ghostty|Ghostty|ghostty_" roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c
+```
+
+Observed results:
+
+- `cargo fmt` completed successfully and its output was accepted.
+- `cargo test -p roastty osc_parser_abi` passed: 4 tests.
+- `cargo test -p roastty c_harness_links_against_roastty_header_and_roastty_dylib`
+  passed.
+- `cargo test -p roastty osc` passed: 107 tests.
+- `cargo test -p roastty` passed: 1783 unit tests, the C ABI harness, and
+  doc-tests.
+- The public/touched ABI naming grep found no forbidden `ghostty` public names
+  in the touched ABI files.
+
+## Codex Result Review
+
+**Result:** Approved.
+
+Codex first reviewed the completed implementation and found three real issues:
+the default terminator behavior needed a terminator-sensitive test, interior-NUL
+title rejection was implemented but untested, and the public header needed to
+spell out the exact `const char**` output contract for
+`roastty_osc_command_data`.
+
+The implementation and tests were updated to address all three findings. Codex
+then re-reviewed the corrected implementation and found no remaining blocking
+issues. The review specifically confirmed that command data is copied into
+wrapper-owned storage, command handles are invalidated according to the
+documented contract, `roastty_osc_end` resets parser input for sequential
+commands, reserved upstream enum slots are not claimed as returned, and the
+implementation does not drift into OSC runtime dispatch.
+
+## Conclusion
+
+Roastty now has a parser-only OSC C ABI that can feed OSC bytes, end a command,
+inspect the command type, and extract owned title data through a documented C
+output convention. This moves another substantial chunk of libghostty parity
+behind stable Roastty-named ABI handles without exposing borrowed parser memory
+or adding runtime side effects.
+
+The next experiment should continue filling the remaining ABI/runtime surface
+needed for macOS frontend integration, choosing the next coherent subsystem from
+the remaining Roastty parity gap rather than splitting one behavior at a time
+where the foundation is already stable.
