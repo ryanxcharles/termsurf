@@ -247,3 +247,88 @@ test bullet had ambiguous Markdown, and the implementation constraint should
 explicitly warn against reusing the relative `movement_count()` helper because
 relative movement and absolute positioning have different zero semantics. The
 design was updated for both findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented the horizontal absolute cursor-positioning slice:
+
+- `CSI G` dispatches private `Action::CursorColumn { col }`.
+- ``CSI ` `` dispatches private `Action::CursorColumn { col }`.
+
+The parser uses a separate absolute-column helper instead of the relative
+`movement_count()` helper. This preserves Ghostty's parser/terminal split:
+
+- missing param dispatches `col: 1`;
+- explicit `0` dispatches `col: 0`;
+- numeric overflow saturates at `u16::MAX`;
+- terminal positioning resolves `0` to the left edge and clamps oversized
+  columns to the right edge.
+
+Accepted forms:
+
+- `CSI G` and ``CSI ` ``;
+- `CSI 0 G` and ``CSI 0 ` ``;
+- `CSI n G` and ``CSI n ` ``.
+
+Rejected forms:
+
+- private forms such as `CSI ? 3 G` and ``CSI ? 3 ` ``;
+- unsupported private markers such as `CSI > 3 G` and ``CSI > 3 ` ``;
+- semicolon params such as `CSI 5 ; 4 G` and ``CSI 5 ; 4 ` ``;
+- colon params such as `CSI 1 : 2 G` and ``CSI 1 : 2 ` ``;
+- intermediate-bearing forms such as `CSI SP G` and ``CSI SP ` ``.
+
+Rejected forms dispatch no cursor-column action and do not leak printable final
+bytes. Direct C1 CSI byte `0x9b` remains out of scope and follows the current
+raw-C1 UTF-8 replacement behavior.
+
+Terminal behavior:
+
+- keeps the current row unchanged;
+- converts 1-indexed columns to zero-indexed cursor `x`;
+- treats explicit zero as the left edge;
+- clamps oversized columns to the right edge;
+- clears pending wrap;
+- does not write cells, dirty rows, or scroll.
+
+Existing `CSI A/B/C/D/E/F/k/a/j` cursor behavior and `CSI W` tab behavior did
+not regress. `CSI H` / `CSI f`, row positioning, two-param parsing, origin-mode,
+scrolling-region-aware positioning, direct C1 CSI, public API, and ABI behavior
+remain deferred.
+
+Verification:
+
+```text
+cargo fmt
+cargo test -p roastty stream
+cargo test -p roastty terminal::terminal
+cargo test -p roastty terminal_formatter
+cargo test -p roastty screen_formatter
+cargo test -p roastty page_string
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+All commands passed. The full `cargo test -p roastty` run reported 1128 unit
+tests passed, the ABI harness passed, and doc-tests had zero tests.
+
+Codex result review artifacts:
+
+- Prompt: `logs/codex-review/20260601-031707-728435-prompt.md`
+- Result: `logs/codex-review/20260601-031707-728435-last-message.md`
+
+Codex found no implementation blockers and approved recording a Pass. It noted
+one non-blocking coverage gap: split-feed pending invalid UTF-8 covers `CSI G`
+but not the backtick alias. Same-slice pending invalid UTF-8 and ordinary
+split-feed tests cover the alias, so no implementation change was required.
+
+## Conclusion
+
+Experiment 116 completed the next upstream CSI cursor-positioning branch without
+pulling in full two-parameter cursor positioning. Roastty now parses `CSI G` and
+``CSI ` `` with the correct absolute-column zero semantics and basic full-screen
+terminal behavior. The next positioning slice can add row/column positioning
+with two CSI params (`CSI H` / `CSI f`) or first add the remaining single-axis
+forms (`CSI d` and `CSI e`) depending on which parser refactor is most useful.

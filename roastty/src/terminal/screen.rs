@@ -215,6 +215,12 @@ impl Screen {
         self.cursor.x = self.cursor.x.saturating_sub(count);
     }
 
+    pub(super) fn cursor_column_basic(&mut self, cols: CellCountInt, col: CellCountInt) {
+        let right = cols.saturating_sub(1);
+        self.cursor.pending_wrap = false;
+        self.cursor.x = col.saturating_sub(1).min(right);
+    }
+
     pub(super) fn backspace_basic(&mut self) {
         self.cursor.pending_wrap = false;
         self.cursor.x = self.cursor.x.saturating_sub(1);

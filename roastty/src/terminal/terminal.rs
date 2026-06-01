@@ -333,6 +333,10 @@ impl Handler for TerminalStreamHandler<'_> {
                 self.screen.cursor_left_basic(count);
                 Ok(())
             }
+            Action::CursorColumn { col } => {
+                self.screen.cursor_column_basic(self.size.cols, col);
+                Ok(())
+            }
         }
     }
 }
@@ -1504,6 +1508,102 @@ mod tests {
         terminal.next_slice(b"2F").unwrap();
 
         assert_eq!(terminal.cursor_position_for_tests(), (0, 0));
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_absolute_moves_to_default_column() {
+        for input in [b"\x1b[G".as_slice(), b"\x1b[`".as_slice()] {
+            let mut terminal = Terminal::init(5, 3, None).unwrap();
+            terminal.screens.active.set_cursor_position_for_tests(3, 1);
+
+            terminal.next_slice(input).unwrap();
+
+            assert_eq!(terminal.cursor_position_for_tests(), (0, 1));
+        }
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_absolute_uses_one_indexed_columns() {
+        for (input, expected) in [
+            (b"\x1b[1G".as_slice(), (0, 1)),
+            (b"\x1b[2G".as_slice(), (1, 1)),
+            (b"\x1b[5G".as_slice(), (4, 1)),
+            (b"\x1b[1`".as_slice(), (0, 1)),
+            (b"\x1b[3`".as_slice(), (2, 1)),
+        ] {
+            let mut terminal = Terminal::init(5, 3, None).unwrap();
+            terminal.screens.active.set_cursor_position_for_tests(3, 1);
+
+            terminal.next_slice(input).unwrap();
+
+            assert_eq!(terminal.cursor_position_for_tests(), expected);
+        }
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_absolute_zero_and_oversized_columns_clamp() {
+        for (input, expected_x) in [
+            (b"\x1b[0G".as_slice(), 0),
+            (b"\x1b[0`".as_slice(), 0),
+            (b"\x1b[999999999999999999999999G".as_slice(), 4),
+            (b"\x1b[999999999999999999999999`".as_slice(), 4),
+        ] {
+            let mut terminal = Terminal::init(5, 3, None).unwrap();
+            terminal.screens.active.set_cursor_position_for_tests(2, 1);
+
+            terminal.next_slice(input).unwrap();
+
+            assert_eq!(terminal.cursor_position_for_tests(), (expected_x, 1));
+        }
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_absolute_clears_pending_wrap() {
+        for input in [b"\x1b[G".as_slice(), b"\x1b[`".as_slice()] {
+            let mut terminal = Terminal::init(5, 3, None).unwrap();
+
+            terminal.next_slice(b"ABCDE").unwrap();
+            assert!(terminal.cursor_pending_wrap_for_tests());
+            terminal.next_slice(input).unwrap();
+
+            assert_eq!(terminal.cursor_position_for_tests(), (0, 0));
+            assert!(!terminal.cursor_pending_wrap_for_tests());
+        }
+    }
+
+    #[test]
+    fn terminal_stream_csi_horizontal_absolute_does_not_modify_cells_or_dirty_rows() {
+        for input in [b"\x1b[2G".as_slice(), b"\x1b[3`".as_slice()] {
+            let mut terminal = Terminal::init(5, 3, None).unwrap();
+
+            terminal.next_slice(b"abc").unwrap();
+            terminal.screens.active.set_cursor_position_for_tests(4, 1);
+            terminal.clear_dirty_for_tests();
+            terminal.next_slice(input).unwrap();
+
+            assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+            assert_eq!(terminal.cursor_position_for_tests().1, 1);
+            assert!(!terminal.is_dirty_for_tests(0, 0));
+            assert!(!terminal.is_dirty_for_tests(4, 0));
+            assert!(!terminal.is_dirty_for_tests(0, 1));
+            assert!(!terminal.is_dirty_for_tests(4, 1));
+        }
+    }
+
+    #[test]
+    fn terminal_stream_split_feed_csi_horizontal_absolute_moves_cursor() {
+        let mut terminal = Terminal::init(5, 3, None).unwrap();
+        terminal.screens.active.set_cursor_position_for_tests(4, 1);
+
+        terminal.next_slice(b"\x1b[").unwrap();
+        terminal.next_slice(b"3G").unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (2, 1));
+
+        terminal.next_slice(b"\x1b[0").unwrap();
+        terminal.next_slice(b"`").unwrap();
+
+        assert_eq!(terminal.cursor_position_for_tests(), (0, 1));
     }
 
     #[test]
