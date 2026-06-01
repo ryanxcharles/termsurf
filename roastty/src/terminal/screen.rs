@@ -158,6 +158,36 @@ impl Screen {
         Ok(())
     }
 
+    pub(super) fn line_feed_basic(&mut self, rows: CellCountInt) -> Result<(), BasicPrintError> {
+        if self.cursor.y == rows - 1 {
+            self.pages
+                .grow_active()
+                .map_err(|_| BasicPrintError::PageAlloc)?;
+            self.cursor.pending_wrap = false;
+            for y in 0..rows {
+                self.pages
+                    .mark_active_row_dirty(y.into())
+                    .map_err(BasicPrintError::Cell)?;
+            }
+            return Ok(());
+        }
+
+        self.pages
+            .mark_active_row_dirty(self.cursor.y.into())
+            .map_err(BasicPrintError::Cell)?;
+        self.cursor.y += 1;
+        self.cursor.pending_wrap = false;
+        self.pages
+            .mark_active_row_dirty(self.cursor.y.into())
+            .map_err(BasicPrintError::Cell)?;
+        Ok(())
+    }
+
+    pub(super) fn carriage_return_basic(&mut self) {
+        self.cursor.pending_wrap = false;
+        self.cursor.x = 0;
+    }
+
     #[cfg(test)]
     pub(super) fn set_cursor_position_for_tests(&mut self, x: CellCountInt, y: CellCountInt) {
         self.cursor.x = x;

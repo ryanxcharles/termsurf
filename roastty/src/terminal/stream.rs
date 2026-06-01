@@ -3,6 +3,8 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Action {
     Print { cp: char },
+    LineFeed,
+    CarriageReturn,
 }
 
 pub(super) trait Handler {
@@ -86,7 +88,9 @@ impl Stream {
             0x1b => {
                 self.escape = EscapeState::Escape;
             }
-            0x00..=0x1a | 0x1c..=0x1f | 0x7f => {}
+            b'\n' => handler.vt(Action::LineFeed)?,
+            b'\r' => handler.vt(Action::CarriageReturn)?,
+            0x00..=0x09 | 0x0b..=0x0c | 0x0e..=0x1a | 0x1c..=0x1f | 0x7f => {}
             _ => self.next_utf8(byte, handler)?,
         }
         Ok(())
@@ -228,10 +232,15 @@ mod tests {
         handler
             .actions
             .iter()
-            .map(|action| match action {
-                Action::Print { cp } => *cp,
+            .filter_map(|action| match action {
+                Action::Print { cp } => Some(*cp),
+                Action::LineFeed | Action::CarriageReturn => None,
             })
             .collect()
+    }
+
+    fn actions(handler: &RecordingHandler) -> &[Action] {
+        &handler.actions
     }
 
     fn next_slice(stream: &mut Stream, handler: &mut RecordingHandler, input: &[u8]) {
@@ -332,13 +341,36 @@ mod tests {
     }
 
     #[test]
-    fn stream_c0_controls_do_not_dispatch_print_actions() {
+    fn stream_lf_and_cr_dispatch_control_actions() {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();
 
-        next_slice(&mut stream, &mut handler, b"A\t\nB");
+        next_slice(&mut stream, &mut handler, b"A\nB\rC");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print { cp: 'A' },
+                Action::LineFeed,
+                Action::Print { cp: 'B' },
+                Action::CarriageReturn,
+                Action::Print { cp: 'C' },
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_other_c0_controls_do_not_dispatch_print_actions() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"A\t\x0bB");
 
         assert_eq!(print_chars(&handler), vec!['A', 'B']);
+        assert_eq!(
+            actions(&handler),
+            &[Action::Print { cp: 'A' }, Action::Print { cp: 'B' }]
+        );
     }
 
     #[test]
@@ -355,15 +387,40 @@ mod tests {
     }
 
     #[test]
-    fn stream_pending_utf8_replacement_dispatches_before_ignoring_c0_control() {
+    fn stream_pending_utf8_replacement_dispatches_before_lf() {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();
 
         next_slice(&mut stream, &mut handler, b"\xf0\x9f\nA");
 
         assert_eq!(
-            print_chars(&handler),
-            vec![char::REPLACEMENT_CHARACTER, 'A']
+            actions(&handler),
+            &[
+                Action::Print {
+                    cp: char::REPLACEMENT_CHARACTER,
+                },
+                Action::LineFeed,
+                Action::Print { cp: 'A' },
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_pending_utf8_replacement_dispatches_before_cr() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"\xf0\x9f\rA");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print {
+                    cp: char::REPLACEMENT_CHARACTER,
+                },
+                Action::CarriageReturn,
+                Action::Print { cp: 'A' },
+            ]
         );
     }
 

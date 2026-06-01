@@ -221,3 +221,99 @@ Clean design re-review artifacts:
 - Result: `logs/codex-review/20260601-013454-220110-last-message.md`
 
 Codex found no remaining design blockers and approved implementation.
+
+## Result
+
+**Result:** Pass.
+
+Implemented private LF and CR control handling for the narrow active full-width
+terminal path.
+
+Stream action changes:
+
+- `Action::LineFeed` and `Action::CarriageReturn` were added as private stream
+  actions.
+- Ground-state `0x0A` now dispatches `LineFeed`.
+- Ground-state `0x0D` now dispatches `CarriageReturn`.
+- Other C0 controls remain ignored in this experiment.
+- Pending invalid UTF-8 still dispatches `U+FFFD` before an interrupting LF or
+  CR action.
+
+Line-feed / index behavior:
+
+- LF clears pending wrap without first soft-wrapping.
+- LF preserves the cursor column.
+- Non-bottom LF marks the old and new active rows dirty.
+- Bottom-row LF grows/scrolls the active `PageList`, keeps the cursor on the
+  active bottom row at the same column, clears pending wrap, and marks the
+  visible active rows dirty.
+- Bottom-row growth happens before cursor, pending-wrap, dirty-state, or cell
+  mutation, preserving transactional grow-failure semantics for this slice.
+
+Carriage-return behavior:
+
+- CR clears pending wrap.
+- CR moves the cursor to active column 0.
+- CR does not dirty rows.
+
+Tested behavior:
+
+- `hello\r\nworld` formats as `hello\nworld`.
+- Bare `A\nB` formats as `A\n B`, proving LF preserves column.
+- Split-feed CRLF works when `\r` and `\n` arrive in separate `next_slice`
+  calls.
+- Bottom-row LF preserves history through the full-screen dump from
+  Experiment 105.
+- Dirty-state tests clear prior dirt before checking LF and CR effects.
+
+This experiment did not implement backspace, tabs, next-line (`NEL`), reverse
+index (`RI`), parser C1 controls, linefeed mode configuration, origin mode,
+left/right margins, vertical scroll regions, no-scrollback row rotation, styles,
+hyperlinks, wide characters, Unicode width, public API, or public ABI.
+
+Verification run:
+
+```text
+cargo fmt
+cargo test -p roastty stream
+cargo test -p roastty terminal_formatter
+cargo test -p roastty terminal::terminal
+cargo test -p roastty screen_formatter
+cargo test -p roastty page_string
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo fmt` passed.
+- `cargo test -p roastty stream` passed 100 tests.
+- `cargo test -p roastty terminal_formatter` passed 67 tests.
+- `cargo test -p roastty terminal::terminal` passed 93 tests.
+- `cargo test -p roastty screen_formatter` passed 55 tests.
+- `cargo test -p roastty page_string` passed 12 tests.
+- `cargo test -p roastty terminal::page_list` passed 524 tests.
+- Full `cargo test -p roastty` passed 1001 unit tests, the ABI harness, and
+  doc-tests.
+
+Codex design review passed after all real design findings were fixed.
+
+Result-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-013810-808249-prompt.md`
+- Result: `logs/codex-review/20260601-013810-808249-last-message.md`
+
+Codex found no blocking correctness, upstream-fidelity, control-ordering,
+pending-wrap, dirty-state, bottom-row transactionality, coordinate-domain,
+missing-test, or scope findings. Codex approved the result for commit.
+
+## Conclusion
+
+Roastty now handles the first C0 controls needed for normal line-oriented text.
+Printable text can use CRLF to create ordinary terminal lines, bare LF preserves
+the cursor column like Ghostty, CR returns to column 0 without dirtying content,
+and LF can scroll at the active bottom row without losing history.
+
+The next control experiment should choose another small execute-action slice,
+likely backspace or horizontal tab, before broadening into CSI cursor movement
+or full scroll-region behavior.

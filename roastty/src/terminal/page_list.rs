@@ -3381,6 +3381,14 @@ impl PageList {
         }
     }
 
+    pub(super) fn mark_active_row_dirty(&mut self, y: u32) -> Result<(), BasicCellWriteError> {
+        let pin = self
+            .pin(point::Point::active(point::Coordinate::new(0, y)))
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        pin.mark_dirty(self);
+        Ok(())
+    }
+
     pub(super) fn set_active_row_wrap(
         &mut self,
         y: u32,
