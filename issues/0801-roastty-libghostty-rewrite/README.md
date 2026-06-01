@@ -421,6 +421,8 @@ tests, choose the larger subsystem.
 - [Experiment 145: Port iTerm2 OSC 1337](145-port-iterm2-osc1337.md) — **Pass**
 - [Experiment 146: Port Terminal Query Responses](146-port-terminal-query-responses.md)
   — **Pass**
+- [Experiment 147: Port DCS and APC Framing](147-port-dcs-apc-framing.md) —
+  **Designed**
 
 ## Non-Goals
 
