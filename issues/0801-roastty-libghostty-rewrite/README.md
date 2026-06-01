@@ -293,7 +293,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 91: Port Screen Formatter Cursor and Style Extras](91-port-screen-formatter-cursor-style-extras.md)
   — **Pass**
 - [Experiment 92: Port Screen Formatter Protection Extra](92-port-screen-formatter-protection-extra.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

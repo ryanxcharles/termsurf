@@ -20,6 +20,7 @@ struct ScreenCursor {
     x: CellCountInt,
     y: CellCountInt,
     style: style::Style,
+    protected: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,6 +50,7 @@ pub(super) struct ScreenFormatter<'a> {
 pub(super) struct ScreenFormatterExtra {
     cursor: bool,
     style: bool,
+    protection: bool,
 }
 
 impl Screen {
@@ -78,6 +80,11 @@ impl Screen {
     #[cfg(test)]
     pub(super) fn set_cursor_style_for_tests(&mut self, style: style::Style) {
         self.cursor.style = style;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_cursor_protected_for_tests(&mut self, protected: bool) {
+        self.cursor.protected = protected;
     }
 
     #[cfg(test)]
@@ -113,6 +120,7 @@ impl Default for ScreenCursor {
             x: 0,
             y: 0,
             style: style::Style::default(),
+            protected: false,
         }
     }
 }
@@ -122,6 +130,7 @@ impl ScreenFormatterExtra {
         Self {
             cursor: false,
             style: false,
+            protection: false,
         }
     }
 
@@ -135,8 +144,13 @@ impl ScreenFormatterExtra {
         self
     }
 
+    pub(super) const fn protection(mut self, protection: bool) -> Self {
+        self.protection = protection;
+        self
+    }
+
     const fn is_empty(self) -> bool {
-        !self.cursor && !self.style
+        !self.cursor && !self.style && !self.protection
     }
 }
 
@@ -251,6 +265,9 @@ impl<'a> ScreenFormatter<'a> {
         let mut output = String::new();
         if self.extra.style {
             output.push_str(&self.screen.cursor.style.formatter_vt().to_string());
+        }
+        if self.extra.protection && self.screen.cursor.protected {
+            output.push_str("\x1b[1\"q");
         }
         if self.extra.cursor {
             output.push_str(&format!(
@@ -545,9 +562,55 @@ mod tests {
     }
 
     #[test]
+    fn screen_formatter_vt_protection_extra_appends_decsca_after_content() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_protected_for_tests(true);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().protection(true))
+            .format();
+
+        assert_eq!(actual, "hi\x1b[1\"q");
+    }
+
+    #[test]
+    fn screen_formatter_vt_protection_extra_ignores_unprotected_cursor() {
+        let screen = screen_with_lines(&["hi"]);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().protection(true))
+            .format();
+
+        assert_eq!(actual, "hi");
+    }
+
+    #[test]
+    fn screen_formatter_vt_style_protection_and_cursor_extras_keep_upstream_order() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_position_for_tests(4, 2);
+        screen.set_cursor_protected_for_tests(true);
+        screen.set_cursor_style_for_tests(style::Style {
+            fg_color: style::Color::Palette(1),
+            ..style::Style::default()
+        });
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(
+                ScreenFormatterExtra::none()
+                    .style(true)
+                    .protection(true)
+                    .cursor(true),
+            )
+            .format();
+
+        assert_eq!(actual, "hi\x1b[0m\x1b[38;5;1m\x1b[1\"q\x1b[3;5H");
+    }
+
+    #[test]
     fn screen_formatter_plain_and_html_ignore_cursor_and_style_extras() {
         let mut screen = screen_with_lines(&["<hi"]);
         screen.set_cursor_position_for_tests(4, 2);
+        screen.set_cursor_protected_for_tests(true);
         screen.set_cursor_style_for_tests(style::Style {
             flags: style::Flags {
                 bold: true,
@@ -555,7 +618,10 @@ mod tests {
             },
             ..style::Style::default()
         });
-        let extra = ScreenFormatterExtra::none().style(true).cursor(true);
+        let extra = ScreenFormatterExtra::none()
+            .style(true)
+            .protection(true)
+            .cursor(true);
 
         assert_eq!(
             formatter(&screen, PageOutputFormat::Plain)
@@ -575,6 +641,7 @@ mod tests {
     fn screen_formatter_no_content_can_emit_vt_extras() {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(2, 1);
+        screen.set_cursor_protected_for_tests(true);
         screen.set_cursor_style_for_tests(style::Style {
             flags: style::Flags {
                 bold: true,
@@ -585,14 +652,37 @@ mod tests {
 
         let actual = formatter(&screen, PageOutputFormat::Vt)
             .with_content(ScreenFormatterContent::None)
-            .with_extra(ScreenFormatterExtra::none().style(true).cursor(true))
+            .with_extra(
+                ScreenFormatterExtra::none()
+                    .style(true)
+                    .protection(true)
+                    .cursor(true),
+            )
             .format();
 
-        assert_eq!(actual, "\x1b[0m\x1b[1m\x1b[2;3H");
+        assert_eq!(actual, "\x1b[0m\x1b[1m\x1b[1\"q\x1b[2;3H");
     }
 
     #[test]
     fn screen_formatter_vt_extra_pin_map_uses_last_content_pin() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_position_for_tests(2, 1);
+        screen.set_cursor_protected_for_tests(true);
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().protection(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "hi\x1b[1\"q");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        assert_eq!(actual.pin_map[0], screen_pin(&screen, 0, 0));
+        assert_eq!(actual.pin_map[1], screen_pin(&screen, 1, 0));
+        for pin in &actual.pin_map[2..] {
+            assert_eq!(*pin, screen_pin(&screen, 1, 0));
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_cursor_extra_pin_map_uses_last_content_pin() {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(2, 1);
         let actual = formatter(&screen, PageOutputFormat::Vt)
@@ -610,6 +700,23 @@ mod tests {
 
     #[test]
     fn screen_formatter_vt_extra_pin_map_without_content_uses_top_left_pin() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_cursor_position_for_tests(2, 1);
+        screen.set_cursor_protected_for_tests(true);
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::None)
+            .with_extra(ScreenFormatterExtra::none().protection(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "\x1b[1\"q");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        for pin in actual.pin_map {
+            assert_eq!(pin, screen_pin(&screen, 0, 0));
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_cursor_extra_pin_map_without_content_uses_top_left_pin() {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(2, 1);
         let actual = formatter(&screen, PageOutputFormat::Vt)
@@ -631,15 +738,34 @@ mod tests {
         let invalid = screen_pin(&other, 0, 0);
         let valid = screen_pin(&screen, 0, 0);
         screen.set_cursor_position_for_tests(2, 1);
+        screen.set_cursor_protected_for_tests(true);
 
         let actual = formatter(&screen, PageOutputFormat::Vt)
             .with_content(ScreenFormatterContent::Selection(Some(
                 selection::Selection::new(invalid, valid, false),
             )))
-            .with_extra(ScreenFormatterExtra::none().cursor(true))
+            .with_extra(ScreenFormatterExtra::none().protection(true))
             .format_with_pin_map();
 
-        assert_eq!(actual.text, "\x1b[2;3H");
+        assert_eq!(actual.text, "\x1b[1\"q");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        for pin in actual.pin_map {
+            assert_eq!(pin, screen_pin(&screen, 0, 0));
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_extra_pin_map_after_empty_selection_uses_top_left_pin() {
+        let mut screen = screen_with_lines(&["  "]);
+        let selection = screen_selection(&screen, (0, 0), (1, 0));
+        screen.set_cursor_protected_for_tests(true);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::Selection(Some(selection)))
+            .with_extra(ScreenFormatterExtra::none().protection(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "\x1b[1\"q");
         assert_eq!(actual.text.len(), actual.pin_map.len());
         for pin in actual.pin_map {
             assert_eq!(pin, screen_pin(&screen, 0, 0));

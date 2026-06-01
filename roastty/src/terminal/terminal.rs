@@ -376,12 +376,27 @@ mod tests {
                 },
                 ..style::Style::default()
             });
+        terminal.screens.active.set_cursor_protected_for_tests(true);
 
         let terminal_output = formatter(&terminal, PageOutputFormat::Vt).format();
         let screen_output = screen_formatter(&terminal, PageOutputFormat::Vt).format();
 
         assert_eq!(terminal_output, screen_output);
         assert_eq!(terminal_output, "hi");
+    }
+
+    #[test]
+    fn terminal_formatter_default_pin_map_does_not_emit_screen_extras() {
+        let mut terminal = terminal_with_lines(&["hi"]);
+        terminal.screens.active.set_cursor_position_for_tests(4, 2);
+        terminal.screens.active.set_cursor_protected_for_tests(true);
+
+        let terminal_output = formatter(&terminal, PageOutputFormat::Vt).format_with_pin_map();
+        let screen_output = screen_formatter(&terminal, PageOutputFormat::Vt).format_with_pin_map();
+
+        assert_eq!(terminal_output, screen_output);
+        assert_eq!(terminal_output.text, "hi");
+        assert_eq!(terminal_output.pin_map, pins(&terminal, &[(0, 0), (1, 0)]));
     }
 
     #[test]

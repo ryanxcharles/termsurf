@@ -191,3 +191,66 @@ Codex re-reviewed the updated design and found no remaining blockers. It noted
 one non-blocking implementation suggestion: testing both an invalid selection
 and a valid selection that emits empty content would make the fallback coverage
 clearer, but the committed design already states the required fallback behavior.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has private protection state on `ScreenCursor`:
+
+```rust
+protected: bool
+```
+
+The flag defaults to `false` and can only be set in tests through a
+`#[cfg(test)]` helper. No parser-driven DECSCA handling, protected-cell storage
+semantics, protected erase behavior, public API, or C ABI surface was added.
+
+`ScreenFormatterExtra` now includes a private `protection` flag with a builder.
+For VT output, protection is emitted after active SGR style and before cursor
+position for the currently implemented subset. If the protection extra is
+requested and `screen.cursor.protected` is true, the formatter appends:
+
+```text
+\x1b[1"q
+```
+
+If the cursor is not protected, protection emits nothing. Plain and HTML output
+ignore protection extras.
+
+Pin maps remain byte-indexed. Protection bytes are assigned to the last
+post-content pin when content emitted pins. If content emits no pins, including
+`Content::None`, invalid selections, or a valid whitespace selection trimmed to
+empty output, protection bytes map to the screen top-left pin.
+
+`TerminalFormatter` still does not forward screen extras. Regression tests prove
+that protected active-screen cursor state does not change default
+TerminalFormatter text or pin maps.
+
+Verification passed:
+
+```text
+cargo fmt
+cargo test -p roastty screen_formatter        # 30 passed
+cargo test -p roastty terminal_formatter      # 15 passed
+cargo test -p roastty styled_pin_map          # 9 passed
+cargo test -p roastty pin_map                 # 40 passed
+cargo test -p roastty page_string             # 12 passed
+cargo test -p roastty terminal::page_list     # 524 passed
+cargo test -p roastty                         # 858 unit + 1 ABI passed
+```
+
+Codex result review found no blockers. It confirmed the implementation matches
+the upstream Ghostty slice, preserves VT-only behavior, keeps the implemented
+ordering as style -> protection -> cursor, emits DECSCA only for protected
+cursor state, preserves byte-indexed pin maps, and avoids parser, terminal,
+public API, and ABI scope creep. Codex noted one non-blocking naming detail: the
+`Content::None` text assertion lives inside the pin-map fallback test rather
+than a dedicated output-only test, but it directly asserts the required output.
+
+## Conclusion
+
+Experiment 92 completes the screen protection formatter extra. Roastty can now
+restore active SGR style, protection state, and cursor position through
+`ScreenFormatter` for the currently ported VT screen-extra subset. Parser-level
+protection behavior remains a separate future port.
