@@ -226,3 +226,119 @@ pin-map model, with two required design fixes:
   or rejecting invalid regions.
 
 Both findings were applied before implementation.
+
+## Result
+
+**Result:** Pass
+
+Implemented private terminal scrolling-region state and the opt-in terminal
+formatter scrolling-region extra.
+
+Code changes:
+
+- `Terminal` now owns private `TerminalSize { cols, rows }` state so formatter
+  extras can compare terminal-level state against the current grid bounds
+  without reaching into page internals.
+- `Terminal` now owns private `ScrollingRegion { top, bottom, left, right }`
+  state.
+- The default scrolling region is the full terminal grid: `top = 0`,
+  `bottom = rows - 1`, `left = 0`, `right = cols - 1`.
+- Region coordinates are 0-indexed and inclusive.
+- Test helpers assert invalid/out-of-bounds regions. Existing one-row or
+  one-column test terminals remain representable as degenerate full-screen
+  regions, but non-degenerate regions still require ordered bounds.
+- `TerminalFormatterExtra` now has an opt-in `scrolling_region: bool` flag and
+  `.scrolling_region(bool)` builder.
+
+Formatter behavior:
+
+- Default `TerminalFormatter::init()` still uses
+  `TerminalFormatterExtra::none()` and emits no scrolling-region bytes without
+  explicit opt-in.
+- VT output emits DECSTBM only when the vertical region differs from full
+  screen:
+
+  ```text
+  \x1b[{top + 1};{bottom + 1}r
+  ```
+
+- VT output emits DECSLRM only when the horizontal region differs from full
+  width:
+
+  ```text
+  \x1b[{left + 1};{right + 1}s
+  ```
+
+- When both are needed, DECSTBM emits before DECSLRM.
+- Plain and HTML output ignore the scrolling-region extra.
+- When combined with palette, modes, and screen extras, VT ordering is
+  `palette -> modes -> content -> screen extras -> scrolling region`.
+
+Pin-map behavior:
+
+- Generated scrolling-region bytes are byte-indexed.
+- Scrolling-region bytes are appended after screen formatter output.
+- Appended scrolling-region bytes map to the last existing pin when prior output
+  exists.
+- If the formatter emits only scrolling-region bytes, they map to active-screen
+  top-left.
+- Tests cover both no-content top-left mapping and selected row-1 content where
+  the suffix maps to the final selected content pin.
+
+Deferred by design:
+
+- VT parser/runtime DECSTBM/DECSLRM mutation.
+- Left/right-margin runtime behavior.
+- Scroll behavior.
+- Resize behavior.
+- Public API and public ABI.
+- App behavior, renderer behavior, PTY behavior, clipboard behavior, and UI
+  behavior.
+
+Verification run:
+
+```text
+cargo fmt
+cargo test -p roastty terminal_formatter
+cargo test -p roastty modes
+cargo test -p roastty screen_formatter
+cargo test -p roastty styled_pin_map
+cargo test -p roastty pin_map
+cargo test -p roastty page_string
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `terminal_formatter`: 47 passed.
+- `modes`: 20 passed.
+- `screen_formatter`: 55 passed.
+- `styled_pin_map`: 9 passed.
+- `pin_map`: 59 passed.
+- `page_string`: 12 passed.
+- `terminal::page_list`: 524 passed.
+- full `cargo test -p roastty`: 937 unit tests passed, ABI harness passed, doc
+  tests passed.
+
+Codex reviewed the completed implementation and result text before the result
+commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260601-001239-468486-prompt.md`
+- Result: `logs/codex-review/20260601-001239-468486-last-message.md`
+
+Codex found no required changes. It confirmed the DECSTBM/DECSLRM sequence
+shapes, full-region no-op behavior, DECSTBM-before-DECSLRM ordering,
+palette/modes/content/screen-extra/scrolling-region ordering, post-screen
+pin-map behavior, private terminal size and region state, default text and
+pin-map preservation, scope deferrals, result language, and verification
+evidence were sufficient.
+
+## Conclusion
+
+Roastty can now serialize stored scrolling-region state through the terminal
+formatter without changing default behavior. This completes another
+formatter-facing terminal-state slice while keeping runtime mutation, resize,
+scroll behavior, and public surfaces deferred for later subsystem experiments.

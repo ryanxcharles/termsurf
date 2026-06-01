@@ -12,9 +12,11 @@ use super::size::CellCountInt;
 
 #[derive(Debug)]
 pub(super) struct Terminal {
+    size: TerminalSize,
     screens: TerminalScreens,
     colors: TerminalColors,
     modes: modes::ModeState,
+    scrolling_region: ScrollingRegion,
 }
 
 #[derive(Debug)]
@@ -22,9 +24,23 @@ pub(super) struct TerminalScreens {
     active: Screen,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TerminalSize {
+    cols: CellCountInt,
+    rows: CellCountInt,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct TerminalColors {
     palette: color::Palette,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ScrollingRegion {
+    top: CellCountInt,
+    bottom: CellCountInt,
+    left: CellCountInt,
+    right: CellCountInt,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -44,6 +60,7 @@ pub(super) struct TerminalFormatter<'a> {
 pub(super) struct TerminalFormatterExtra {
     palette: bool,
     modes: bool,
+    scrolling_region: bool,
     screen: ScreenFormatterExtra,
 }
 
@@ -53,7 +70,9 @@ impl Terminal {
         rows: CellCountInt,
         max_scrollback_rows: Option<usize>,
     ) -> Result<Self, PageListAllocError> {
+        let size = TerminalSize { cols, rows };
         Ok(Self {
+            size,
             screens: TerminalScreens {
                 active: Screen::init(cols, rows, max_scrollback_rows)?,
             },
@@ -61,6 +80,7 @@ impl Terminal {
                 palette: color::DEFAULT_PALETTE,
             },
             modes: modes::ModeState::default(),
+            scrolling_region: ScrollingRegion::full(size),
         })
     }
 
@@ -87,6 +107,53 @@ impl Terminal {
     #[cfg(test)]
     pub(super) fn restore_mode_for_tests(&mut self, mode: modes::Mode) -> bool {
         self.modes.restore(mode)
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_scrolling_region_for_tests(
+        &mut self,
+        top: CellCountInt,
+        bottom: CellCountInt,
+        left: CellCountInt,
+        right: CellCountInt,
+    ) {
+        let region = ScrollingRegion {
+            top,
+            bottom,
+            left,
+            right,
+        };
+        region.assert_valid(self.size);
+        self.scrolling_region = region;
+    }
+
+    #[cfg(test)]
+    fn scrolling_region_for_tests(&self) -> ScrollingRegion {
+        self.scrolling_region
+    }
+}
+
+impl ScrollingRegion {
+    fn full(size: TerminalSize) -> Self {
+        Self {
+            top: 0,
+            bottom: size.rows - 1,
+            left: 0,
+            right: size.cols - 1,
+        }
+    }
+
+    fn assert_valid(self, size: TerminalSize) {
+        assert!(self.top <= self.bottom);
+        assert!(self.left <= self.right);
+        assert!(self.bottom < size.rows);
+        assert!(self.right < size.cols);
+        if size.rows > 1 {
+            assert!(self.top < self.bottom);
+        }
+        if size.cols > 1 {
+            assert!(self.left < self.right);
+        }
     }
 }
 
@@ -149,11 +216,13 @@ impl<'a> TerminalFormatter<'a> {
                 .with_extra(self.extra.screen)
                 .format(),
         );
+        output.push_str(&self.terminal_suffix_string());
         output
     }
 
     pub(super) fn format_with_pin_map(self) -> PageStringWithPinMap {
         let prefix = self.terminal_prefix_string();
+        let suffix = self.terminal_suffix_string();
         let mut output = ScreenFormatter::init(&self.terminal.screens.active, self.options.screen)
             .with_content(self.content)
             .with_extra(self.extra.screen)
@@ -168,6 +237,18 @@ impl<'a> TerminalFormatter<'a> {
             output = PageStringWithPinMap { text, pin_map };
         }
 
+        if !suffix.is_empty() {
+            let suffix_pin = output
+                .pin_map
+                .last()
+                .copied()
+                .unwrap_or_else(|| self.terminal.screens.active.top_left_pin());
+            output
+                .pin_map
+                .extend(std::iter::repeat_n(suffix_pin, suffix.len()));
+            output.text.push_str(&suffix);
+        }
+
         output
     }
 
@@ -175,6 +256,10 @@ impl<'a> TerminalFormatter<'a> {
         let mut output = self.palette_string();
         output.push_str(&self.modes_string());
         output
+    }
+
+    fn terminal_suffix_string(&self) -> String {
+        self.scrolling_region_string()
     }
 
     fn palette_string(&self) -> String {
@@ -197,6 +282,14 @@ impl<'a> TerminalFormatter<'a> {
 
         modes_vt_string(&self.terminal.modes)
     }
+
+    fn scrolling_region_string(&self) -> String {
+        if !self.extra.scrolling_region || self.options.screen.emit() != PageOutputFormat::Vt {
+            return String::new();
+        }
+
+        scrolling_region_vt_string(self.terminal.size, self.terminal.scrolling_region)
+    }
 }
 
 impl TerminalFormatterExtra {
@@ -204,6 +297,7 @@ impl TerminalFormatterExtra {
         Self {
             palette: false,
             modes: false,
+            scrolling_region: false,
             screen: ScreenFormatterExtra::none(),
         }
     }
@@ -215,6 +309,11 @@ impl TerminalFormatterExtra {
 
     pub(super) const fn modes(mut self, modes: bool) -> Self {
         self.modes = modes;
+        self
+    }
+
+    pub(super) const fn scrolling_region(mut self, scrolling_region: bool) -> Self {
+        self.scrolling_region = scrolling_region;
         self
     }
 
@@ -261,6 +360,17 @@ fn modes_vt_string(state: &modes::ModeState) -> String {
             entry.value,
             if current { "h" } else { "l" }
         ));
+    }
+    output
+}
+
+fn scrolling_region_vt_string(size: TerminalSize, region: ScrollingRegion) -> String {
+    let mut output = String::new();
+    if region.top != 0 || region.bottom != size.rows - 1 {
+        output.push_str(&format!("\x1b[{};{}r", region.top + 1, region.bottom + 1));
+    }
+    if region.left != 0 || region.right != size.cols - 1 {
+        output.push_str(&format!("\x1b[{};{}s", region.left + 1, region.right + 1));
     }
     output
 }
@@ -385,6 +495,10 @@ mod tests {
         TerminalFormatterExtra::none().palette(true).modes(true)
     }
 
+    const fn terminal_scrolling_region_extra() -> TerminalFormatterExtra {
+        TerminalFormatterExtra::none().scrolling_region(true)
+    }
+
     fn set_test_palette_entries(terminal: &mut Terminal) {
         terminal.set_palette_entry_for_tests(0, color::Rgb::new(0x12, 0x34, 0x56));
         terminal.set_palette_entry_for_tests(1, color::Rgb::new(0xab, 0xcd, 0xef));
@@ -401,6 +515,10 @@ mod tests {
 
     fn modes_prefix_len(terminal: &Terminal) -> usize {
         modes_vt_string(&terminal.modes).len()
+    }
+
+    fn scrolling_region_suffix_len(terminal: &Terminal) -> usize {
+        scrolling_region_vt_string(terminal.size, terminal.scrolling_region).len()
     }
 
     #[test]
@@ -1024,6 +1142,190 @@ mod tests {
         );
         assert!(output[palette_len + modes_len + 2..].starts_with("\x1b[0m"));
         assert!(output.ends_with("\x1b[3;5H"));
+    }
+
+    #[test]
+    fn terminal_formatter_default_path_does_not_emit_scrolling_region_or_change_pin_map() {
+        let mut terminal = terminal_with_lines(&["hello", "world", "again"]);
+        terminal.set_scrolling_region_for_tests(1, 2, 1, 4);
+
+        let default_text = formatter(&terminal, PageOutputFormat::Vt).format();
+        let default_pin_map = formatter(&terminal, PageOutputFormat::Vt).format_with_pin_map();
+        let screen_text = screen_formatter(&terminal, PageOutputFormat::Vt).format();
+        let screen_pin_map =
+            screen_formatter(&terminal, PageOutputFormat::Vt).format_with_pin_map();
+
+        assert_eq!(terminal.scrolling_region_for_tests().top, 1);
+        assert_eq!(default_text, screen_text);
+        assert_eq!(default_text, "hello\r\nworld\r\nagain");
+        assert_eq!(default_pin_map, screen_pin_map);
+    }
+
+    #[test]
+    fn terminal_formatter_scrolling_region_full_screen_emits_nothing() {
+        let terminal = terminal_with_lines(&["hello", "world"]);
+
+        let output = formatter(&terminal, PageOutputFormat::Vt)
+            .with_extra(terminal_scrolling_region_extra())
+            .format();
+
+        assert_eq!(output, "hello\r\nworld");
+        assert_eq!(scrolling_region_suffix_len(&terminal), 0);
+    }
+
+    #[test]
+    fn terminal_formatter_scrolling_region_vertical_only_emits_decstbm_after_content() {
+        let mut terminal = terminal_with_lines(&["one", "two", "three", "four"]);
+        terminal.set_scrolling_region_for_tests(1, 2, 0, 4);
+
+        let output = formatter(&terminal, PageOutputFormat::Vt)
+            .with_extra(terminal_scrolling_region_extra())
+            .format();
+
+        assert_eq!(output, "one\r\ntwo\r\nthree\r\nfour\x1b[2;3r");
+    }
+
+    #[test]
+    fn terminal_formatter_scrolling_region_horizontal_only_emits_decslrm_after_content() {
+        let mut terminal = terminal_with_lines(&["hello", "world"]);
+        terminal.set_scrolling_region_for_tests(0, 1, 1, 3);
+
+        let output = formatter(&terminal, PageOutputFormat::Vt)
+            .with_extra(terminal_scrolling_region_extra())
+            .format();
+
+        assert_eq!(output, "hello\r\nworld\x1b[2;4s");
+    }
+
+    #[test]
+    fn terminal_formatter_scrolling_region_combined_emits_decstbm_then_decslrm() {
+        let mut terminal = terminal_with_lines(&["hello", "world", "again"]);
+        terminal.set_scrolling_region_for_tests(1, 2, 1, 4);
+
+        let output = formatter(&terminal, PageOutputFormat::Vt)
+            .with_extra(terminal_scrolling_region_extra())
+            .format();
+
+        assert!(output.ends_with("\x1b[2;3r\x1b[2;5s"));
+        assert!(output.find("\x1b[2;3r").unwrap() < output.find("\x1b[2;5s").unwrap());
+        assert!(output.find("again").unwrap() < output.find("\x1b[2;3r").unwrap());
+    }
+
+    #[test]
+    fn terminal_formatter_scrolling_region_emits_after_forwarded_screen_extras() {
+        let mut terminal = terminal_with_lines(&["hey", "you"]);
+        terminal.set_scrolling_region_for_tests(0, 1, 0, 1);
+        set_active_screen_extras(&mut terminal);
+
+        let output = formatter(&terminal, PageOutputFormat::Vt)
+            .with_extra(
+                TerminalFormatterExtra::none()
+                    .screen(all_screen_extras())
+                    .scrolling_region(true),
+            )
+            .format();
+
+        assert!(output.contains("hey\r\nyou\x1b[0m"));
+        assert!(output.ends_with("\x1b[1;2s"));
+        assert!(output.find("\x1b[3;5H").unwrap() < output.find("\x1b[1;2s").unwrap());
+    }
+
+    #[test]
+    fn terminal_formatter_palette_modes_screen_extras_and_scrolling_region_order() {
+        let mut terminal = terminal_with_lines(&["hey", "you"]);
+        set_test_palette_entries(&mut terminal);
+        terminal.set_mode_for_tests(Mode::BracketedPaste, true);
+        terminal.set_scrolling_region_for_tests(0, 1, 0, 1);
+        set_active_screen_extras(&mut terminal);
+
+        let output = formatter(&terminal, PageOutputFormat::Vt)
+            .with_extra(
+                TerminalFormatterExtra::none()
+                    .palette(true)
+                    .modes(true)
+                    .screen(all_screen_extras())
+                    .scrolling_region(true),
+            )
+            .format();
+        let palette_len = palette_vt_prefix_len(&terminal);
+        let modes_len = modes_prefix_len(&terminal);
+
+        assert_eq!(&output[palette_len..palette_len + modes_len], "\x1b[?2004h");
+        assert_eq!(
+            &output[palette_len + modes_len..palette_len + modes_len + 8],
+            "hey\r\nyou"
+        );
+        assert!(output[palette_len + modes_len + 8..].starts_with("\x1b[0m"));
+        assert!(output.ends_with("\x1b[1;2s"));
+        assert!(output.find("\x1b[3;5H").unwrap() < output.find("\x1b[1;2s").unwrap());
+    }
+
+    #[test]
+    fn terminal_formatter_plain_and_html_ignore_scrolling_region_extra() {
+        let mut terminal = terminal_with_lines(&["<hi", "row"]);
+        terminal.set_scrolling_region_for_tests(0, 1, 1, 2);
+
+        for emit in [PageOutputFormat::Plain, PageOutputFormat::Html] {
+            let default_output = formatter(&terminal, emit).format();
+            let region_output = formatter(&terminal, emit)
+                .with_extra(terminal_scrolling_region_extra())
+                .format();
+
+            assert_eq!(region_output, default_output);
+            assert!(!region_output.contains("\x1b["));
+        }
+    }
+
+    #[test]
+    fn terminal_formatter_scrolling_region_without_content_maps_to_top_left() {
+        let mut terminal = terminal_with_lines(&["hello", "world"]);
+        terminal.set_scrolling_region_for_tests(0, 1, 1, 3);
+
+        let output = formatter(&terminal, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::None)
+            .with_extra(terminal_scrolling_region_extra())
+            .format_with_pin_map();
+
+        assert_eq!(output.text, "\x1b[2;4s");
+        assert_eq!(output.text.len(), output.pin_map.len());
+        for pin in output.pin_map {
+            assert_eq!(pin, active_pin(&terminal, 0, 0));
+        }
+    }
+
+    #[test]
+    fn terminal_formatter_scrolling_region_pin_map_uses_last_content_pin() {
+        let mut terminal = terminal_with_lines(&["top", "éB"]);
+        terminal.set_scrolling_region_for_tests(0, 1, 1, 2);
+        let selection = active_selection(&terminal, (0, 1), (1, 1));
+
+        let output = formatter(&terminal, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::Selection(Some(selection)))
+            .with_extra(terminal_scrolling_region_extra())
+            .format_with_pin_map();
+        let suffix_len = scrolling_region_suffix_len(&terminal);
+        let content_len = output.text.len() - suffix_len;
+
+        assert_eq!(output.text, "éB\x1b[2;3s");
+        assert_eq!(output.text.len(), output.pin_map.len());
+        assert_eq!(
+            &output.pin_map[..content_len],
+            pins(&terminal, &[(0, 1), (0, 1), (1, 1)])
+        );
+        for pin in &output.pin_map[content_len..] {
+            assert_eq!(*pin, active_pin(&terminal, 1, 1));
+        }
+    }
+
+    #[test]
+    fn terminal_formatter_scrolling_region_rejects_invalid_test_regions() {
+        let mut terminal = terminal_with_lines(&["hello", "world"]);
+
+        let invalid = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            terminal.set_scrolling_region_for_tests(1, 0, 0, 4);
+        }));
+
+        assert!(invalid.is_err());
     }
 
     #[test]
