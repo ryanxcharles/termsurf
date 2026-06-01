@@ -237,3 +237,90 @@ The only changes requested were test-precision notes, both applied above:
   count, because upstream resets when `n >= len`.
 
 With those updates, the design is approved for implementation.
+
+## Result
+
+**Result:** Pass
+
+Experiment 94 ported the private Kitty keyboard formatter state needed by
+upstream Ghostty's `ScreenFormatter.Extra.kitty_keyboard` path.
+
+The implementation added a private `roastty/src/terminal/kitty.rs` module with:
+
+- `KeyFlags`, containing the five upstream Kitty keyboard flags: `disambiguate`,
+  `report_events`, `report_alternates`, `report_all`, and `report_associated`;
+- `KeySetMode` for set/or/not mutation;
+- `KeyFlagStack`, with eight fixed entries and wrapping push/pop behavior.
+
+The flag bit ordering matches upstream: disambiguate is bit 0, report-events is
+bit 1, report-alternates is bit 2, report-all is bit 3, and report-associated is
+bit 4. Tests cover defaults, bit packing, set/or/not behavior, push/pop,
+`pop(8)`, larger pop counts, and nine distinct pushes to prove wrap/eviction
+past the eight-entry stack boundary.
+
+`Screen` now owns private Kitty keyboard state initialized to disabled/default.
+The only mutation path added in this experiment is test-only helper plumbing. No
+parser handling for CSI `> u`, `< u`, `= u`, or `? u` was added. Query replies,
+key encoding, terminal input behavior, public API, and public ABI all remain
+deferred.
+
+`ScreenFormatterExtra` now has a private `kitty_keyboard` flag. VT output emits
+Kitty keyboard state only when the extra is requested and the current state is
+non-disabled. The emitted sequence is exactly:
+
+```text
+\x1b[={flags};1u
+```
+
+Disabled state emits no bytes. Plain and HTML output ignore the Kitty keyboard
+extra, matching the existing screen-extra format split.
+
+The implemented screen-extra ordering is now:
+
+```text
+style -> protection -> kitty keyboard -> charsets -> cursor
+```
+
+This matches upstream ordering for the currently implemented subset, with
+hyperlink restore still deferred.
+
+Pin-map behavior reuses the existing byte-indexed extra mapping rule. Kitty
+keyboard extra bytes map to the last content pin when formatted content exists,
+and to the screen top-left pin when content is absent, invalid, or a valid empty
+selection. Tests cover all of those cases.
+
+`TerminalFormatter` remains unchanged: it still delegates default active-screen
+content without forwarding screen extras. Regression tests set non-default Kitty
+keyboard state on the active screen and confirm default terminal text and pin
+maps remain unchanged.
+
+Verification passed:
+
+```text
+cargo fmt
+cargo test -p roastty kitty                         # 18 passed
+cargo test -p roastty screen_formatter              # 44 passed
+cargo test -p roastty terminal_formatter            # 15 passed
+cargo test -p roastty styled_pin_map                # 9 passed
+cargo test -p roastty pin_map                       # 45 passed
+cargo test -p roastty page_string                   # 12 passed
+cargo test -p roastty terminal::page_list           # 524 passed
+cargo test -p roastty                               # 888 unit + 1 ABI passed
+```
+
+Codex result review approved the implementation with no required changes. It
+confirmed that the implementation matches the design, preserves scope, keeps
+TerminalFormatter delegation unchanged, avoids parser/query/key-encoding/API/ABI
+creep, and can be recorded as a Pass.
+
+## Conclusion
+
+Roastty now has the Kitty keyboard state and VT formatter restore path needed by
+the current screen-extra subset. This closes another formatter-state gap while
+keeping runtime parser and input behavior out of scope.
+
+The remaining known `ScreenFormatter` extra from this group is hyperlink
+restore. That is larger than Kitty keyboard because it needs cursor-owned
+hyperlink URI/id state and the corresponding memory/storage model, so it should
+be designed as the next coherent formatter slice rather than folded into this
+experiment.

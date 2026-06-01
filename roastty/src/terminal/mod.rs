@@ -14,6 +14,9 @@ mod hyperlink;
 mod highlight;
 
 #[allow(dead_code)]
+mod kitty;
+
+#[allow(dead_code)]
 mod offset_hash_map;
 
 #[allow(dead_code)]

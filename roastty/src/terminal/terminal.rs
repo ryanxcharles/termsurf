@@ -106,6 +106,7 @@ mod tests {
     use super::*;
     use crate::terminal::charsets;
     use crate::terminal::color;
+    use crate::terminal::kitty::{KeyFlags, KeySetMode};
     use crate::terminal::page_list::{CodepointReplacement, Pin};
     use crate::terminal::selection;
     use crate::terminal::style;
@@ -157,6 +158,12 @@ mod tests {
             .map(|&(x, y)| active_pin(terminal, x, y))
             .collect()
     }
+
+    const KITTY_FLAGS_3: KeyFlags = KeyFlags {
+        disambiguate: true,
+        report_events: true,
+        ..KeyFlags::DISABLED
+    };
 
     #[test]
     fn terminal_formatter_plain_full_active_screen_single_line() {
@@ -386,6 +393,10 @@ mod tests {
             .screens
             .active
             .set_charset_gl_for_tests(charsets::CharsetSlot::G1);
+        terminal
+            .screens
+            .active
+            .set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
 
         let terminal_output = formatter(&terminal, PageOutputFormat::Vt).format();
         let screen_output = screen_formatter(&terminal, PageOutputFormat::Vt).format();
@@ -407,6 +418,10 @@ mod tests {
             .screens
             .active
             .set_charset_gl_for_tests(charsets::CharsetSlot::G1);
+        terminal
+            .screens
+            .active
+            .set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
 
         let terminal_output = formatter(&terminal, PageOutputFormat::Vt).format_with_pin_map();
         let screen_output = screen_formatter(&terminal, PageOutputFormat::Vt).format_with_pin_map();

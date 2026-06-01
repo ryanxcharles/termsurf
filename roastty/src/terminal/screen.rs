@@ -2,6 +2,7 @@
 
 use super::charsets;
 use super::color;
+use super::kitty;
 use super::page_list::{
     CodepointMapEntry, PageList, PageListAllocError, PageOutputFormat, PageStringWithPinMap,
 };
@@ -14,6 +15,7 @@ use super::style;
 pub(super) struct Screen {
     cursor: ScreenCursor,
     charset: ScreenCharsetState,
+    kitty_keyboard: kitty::KeyFlagStack,
     pages: PageList,
 }
 
@@ -63,6 +65,7 @@ pub(super) struct ScreenFormatterExtra {
     cursor: bool,
     style: bool,
     protection: bool,
+    kitty_keyboard: bool,
     charsets: bool,
 }
 
@@ -75,6 +78,7 @@ impl Screen {
         Ok(Self {
             cursor: ScreenCursor::default(),
             charset: ScreenCharsetState::default(),
+            kitty_keyboard: kitty::KeyFlagStack::default(),
             pages: PageList::init(cols, rows, max_scrollback_rows)?,
         })
     }
@@ -118,6 +122,25 @@ impl Screen {
     #[cfg(test)]
     pub(super) fn set_charset_gr_for_tests(&mut self, slot: charsets::CharsetGrSlot) {
         self.charset.gr = slot;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_kitty_keyboard_for_tests(
+        &mut self,
+        mode: kitty::KeySetMode,
+        flags: kitty::KeyFlags,
+    ) {
+        self.kitty_keyboard.set(mode, flags);
+    }
+
+    #[cfg(test)]
+    pub(super) fn push_kitty_keyboard_for_tests(&mut self, flags: kitty::KeyFlags) {
+        self.kitty_keyboard.push(flags);
+    }
+
+    #[cfg(test)]
+    pub(super) fn pop_kitty_keyboard_for_tests(&mut self, n: usize) {
+        self.kitty_keyboard.pop(n);
     }
 
     #[cfg(test)]
@@ -198,6 +221,7 @@ impl ScreenFormatterExtra {
             cursor: false,
             style: false,
             protection: false,
+            kitty_keyboard: false,
             charsets: false,
         }
     }
@@ -217,13 +241,18 @@ impl ScreenFormatterExtra {
         self
     }
 
+    pub(super) const fn kitty_keyboard(mut self, kitty_keyboard: bool) -> Self {
+        self.kitty_keyboard = kitty_keyboard;
+        self
+    }
+
     pub(super) const fn charsets(mut self, charsets: bool) -> Self {
         self.charsets = charsets;
         self
     }
 
     const fn is_empty(self) -> bool {
-        !self.cursor && !self.style && !self.protection && !self.charsets
+        !self.cursor && !self.style && !self.protection && !self.kitty_keyboard && !self.charsets
     }
 }
 
@@ -342,6 +371,12 @@ impl<'a> ScreenFormatter<'a> {
         if self.extra.protection && self.screen.cursor.protected {
             output.push_str("\x1b[1\"q");
         }
+        if self.extra.kitty_keyboard {
+            let flags = self.screen.kitty_keyboard.current();
+            if !flags.is_disabled() {
+                output.push_str(&format!("\x1b[={};1u", flags.int()));
+            }
+        }
         if self.extra.charsets {
             self.push_charset_extras(&mut output);
         }
@@ -386,6 +421,7 @@ impl<'a> ScreenFormatter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal::kitty::{KeyFlags, KeySetMode};
     use crate::terminal::page_list::CodepointReplacement;
     use crate::terminal::page_list::Pin;
     use crate::terminal::point;
@@ -433,6 +469,12 @@ mod tests {
             .map(|&(x, y)| screen_pin(screen, x, y))
             .collect()
     }
+
+    const KITTY_FLAGS_3: KeyFlags = KeyFlags {
+        disambiguate: true,
+        report_events: true,
+        ..KeyFlags::DISABLED
+    };
 
     #[test]
     fn screen_formatter_plain_full_screen_single_line() {
@@ -688,6 +730,67 @@ mod tests {
     }
 
     #[test]
+    fn screen_formatter_vt_kitty_keyboard_extra_ignores_disabled_state() {
+        let screen = screen_with_lines(&["hi"]);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().kitty_keyboard(true))
+            .format();
+
+        assert_eq!(actual, "hi");
+    }
+
+    #[test]
+    fn screen_formatter_vt_kitty_keyboard_extra_appends_csi_equal_u_after_content() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().kitty_keyboard(true))
+            .format();
+
+        assert_eq!(actual, "hi\x1b[=3;1u");
+    }
+
+    #[test]
+    fn screen_formatter_vt_kitty_keyboard_extra_combines_flag_bits() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_kitty_keyboard_for_tests(
+            KeySetMode::Set,
+            KeyFlags {
+                report_events: true,
+                report_all: true,
+                report_associated: true,
+                ..KeyFlags::DISABLED
+            },
+        );
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().kitty_keyboard(true))
+            .format();
+
+        assert_eq!(actual, "hi\x1b[=26;1u");
+    }
+
+    #[test]
+    fn screen_kitty_keyboard_helpers_preserve_stack_behavior() {
+        let mut screen = screen_with_lines(&["hi"]);
+
+        screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
+        screen.push_kitty_keyboard_for_tests(KeyFlags {
+            report_all: true,
+            ..KeyFlags::DISABLED
+        });
+        screen.pop_kitty_keyboard_for_tests(1);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().kitty_keyboard(true))
+            .format();
+
+        assert_eq!(actual, "hi\x1b[=3;1u");
+    }
+
+    #[test]
     fn screen_formatter_vt_style_protection_and_cursor_extras_keep_upstream_order() {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(4, 2);
@@ -775,6 +878,7 @@ mod tests {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(4, 2);
         screen.set_cursor_protected_for_tests(true);
+        screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
         screen.set_cursor_style_for_tests(style::Style {
             fg_color: style::Color::Palette(1),
             ..style::Style::default()
@@ -787,12 +891,16 @@ mod tests {
                 ScreenFormatterExtra::none()
                     .style(true)
                     .protection(true)
+                    .kitty_keyboard(true)
                     .charsets(true)
                     .cursor(true),
             )
             .format();
 
-        assert_eq!(actual, "hi\x1b[0m\x1b[38;5;1m\x1b[1\"q\x1b(0\x0e\x1b[3;5H");
+        assert_eq!(
+            actual,
+            "hi\x1b[0m\x1b[38;5;1m\x1b[1\"q\x1b[=3;1u\x1b(0\x0e\x1b[3;5H"
+        );
     }
 
     #[test]
@@ -800,6 +908,7 @@ mod tests {
         let mut screen = screen_with_lines(&["<hi"]);
         screen.set_cursor_position_for_tests(4, 2);
         screen.set_cursor_protected_for_tests(true);
+        screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
         screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
         screen.set_charset_gl_for_tests(charsets::CharsetSlot::G1);
         screen.set_cursor_style_for_tests(style::Style {
@@ -812,6 +921,7 @@ mod tests {
         let extra = ScreenFormatterExtra::none()
             .style(true)
             .protection(true)
+            .kitty_keyboard(true)
             .charsets(true)
             .cursor(true);
 
@@ -834,6 +944,7 @@ mod tests {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(2, 1);
         screen.set_cursor_protected_for_tests(true);
+        screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
         screen.set_charset_for_tests(charsets::CharsetSlot::G0, charsets::Charset::DecSpecial);
         screen.set_cursor_style_for_tests(style::Style {
             flags: style::Flags {
@@ -849,12 +960,26 @@ mod tests {
                 ScreenFormatterExtra::none()
                     .style(true)
                     .protection(true)
+                    .kitty_keyboard(true)
                     .charsets(true)
                     .cursor(true),
             )
             .format();
 
-        assert_eq!(actual, "\x1b[0m\x1b[1m\x1b[1\"q\x1b(0\x1b[2;3H");
+        assert_eq!(actual, "\x1b[0m\x1b[1m\x1b[1\"q\x1b[=3;1u\x1b(0\x1b[2;3H");
+    }
+
+    #[test]
+    fn screen_formatter_no_content_can_emit_only_kitty_keyboard_extra() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::None)
+            .with_extra(ScreenFormatterExtra::none().kitty_keyboard(true))
+            .format();
+
+        assert_eq!(actual, "\x1b[=3;1u");
     }
 
     #[test]
@@ -911,6 +1036,23 @@ mod tests {
     }
 
     #[test]
+    fn screen_formatter_vt_kitty_keyboard_extra_pin_map_uses_last_content_pin() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_extra(ScreenFormatterExtra::none().kitty_keyboard(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "hi\x1b[=3;1u");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        assert_eq!(actual.pin_map[0], screen_pin(&screen, 0, 0));
+        assert_eq!(actual.pin_map[1], screen_pin(&screen, 1, 0));
+        for pin in &actual.pin_map[2..] {
+            assert_eq!(*pin, screen_pin(&screen, 1, 0));
+        }
+    }
+
+    #[test]
     fn screen_formatter_vt_extra_pin_map_without_content_uses_top_left_pin() {
         let mut screen = screen_with_lines(&["hi"]);
         screen.set_cursor_position_for_tests(2, 1);
@@ -922,6 +1064,22 @@ mod tests {
             .format_with_pin_map();
 
         assert_eq!(actual.text, "\x1b(0");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        for pin in actual.pin_map {
+            assert_eq!(pin, screen_pin(&screen, 0, 0));
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_kitty_keyboard_extra_pin_map_without_content_uses_top_left_pin() {
+        let mut screen = screen_with_lines(&["hi"]);
+        screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::None)
+            .with_extra(ScreenFormatterExtra::none().kitty_keyboard(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "\x1b[=3;1u");
         assert_eq!(actual.text.len(), actual.pin_map.len());
         for pin in actual.pin_map {
             assert_eq!(pin, screen_pin(&screen, 0, 0));
@@ -969,6 +1127,29 @@ mod tests {
     }
 
     #[test]
+    fn screen_formatter_vt_kitty_keyboard_extra_pin_map_after_invalid_selection_uses_top_left_pin()
+    {
+        let mut screen = screen_with_lines(&["hi"]);
+        let other = screen_with_lines(&["other"]);
+        let invalid = screen_pin(&other, 0, 0);
+        let valid = screen_pin(&screen, 0, 0);
+        screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::Selection(Some(
+                selection::Selection::new(invalid, valid, false),
+            )))
+            .with_extra(ScreenFormatterExtra::none().kitty_keyboard(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "\x1b[=3;1u");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        for pin in actual.pin_map {
+            assert_eq!(pin, screen_pin(&screen, 0, 0));
+        }
+    }
+
+    #[test]
     fn screen_formatter_vt_extra_pin_map_after_empty_selection_uses_top_left_pin() {
         let mut screen = screen_with_lines(&["  "]);
         let selection = screen_selection(&screen, (0, 0), (1, 0));
@@ -981,6 +1162,24 @@ mod tests {
             .format_with_pin_map();
 
         assert_eq!(actual.text, "\x1b(0");
+        assert_eq!(actual.text.len(), actual.pin_map.len());
+        for pin in actual.pin_map {
+            assert_eq!(pin, screen_pin(&screen, 0, 0));
+        }
+    }
+
+    #[test]
+    fn screen_formatter_vt_kitty_keyboard_extra_pin_map_after_empty_selection_uses_top_left_pin() {
+        let mut screen = screen_with_lines(&["  "]);
+        let selection = screen_selection(&screen, (0, 0), (1, 0));
+        screen.set_kitty_keyboard_for_tests(KeySetMode::Set, KITTY_FLAGS_3);
+
+        let actual = formatter(&screen, PageOutputFormat::Vt)
+            .with_content(ScreenFormatterContent::Selection(Some(selection)))
+            .with_extra(ScreenFormatterExtra::none().kitty_keyboard(true))
+            .format_with_pin_map();
+
+        assert_eq!(actual.text, "\x1b[=3;1u");
         assert_eq!(actual.text.len(), actual.pin_map.len());
         for pin in actual.pin_map {
             assert_eq!(pin, screen_pin(&screen, 0, 0));
