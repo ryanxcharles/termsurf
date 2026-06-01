@@ -233,3 +233,88 @@ the private full-content formatter extension, requires cross-page trailing state
 coverage, and includes a focused `SpacerHead` start requirement and test.
 
 Follow-up Codex review approved the updated design with no remaining blockers.
+
+## Result
+
+**Result:** Pass
+
+Implemented private plain selection-string extraction in
+`roastty/src/terminal/page_list.rs`:
+
+- `SelectionStringOptions` carries the optional PageList-level selection and
+  trim flag.
+- `PlainTrailingState` carries pending blank row/cell state across page chunks,
+  matching the plain `PageFormatter.TrailingState` behavior this experiment
+  needed.
+- `PlainPageFormat` formats one page chunk of plain text, with soft-wrap
+  unwrapping, trimming, rectangular selection bounds, wide-cell spacer handling,
+  and grapheme emission.
+- `PageList::selection_string()` orders selection bounds, supports rectangular
+  selections, handles the private `selection = None` full-content formatter
+  extension, validates endpoints, and returns an empty string for invalid or
+  garbage endpoints.
+
+The implementation remains private to the terminal module. It does not add VT or
+HTML output, style or hyperlink serialization, extra terminal state,
+pin-map/byte-map support, `Screen`, `Terminal`, parser, renderer, app, platform
+input, clipboard, gesture state, public ABI, or UI wiring.
+
+Ported or covered the upstream-equivalent plain selection-string behavior for:
+
+- basic selection strings;
+- selections starting outside written content;
+- selections ending outside written content;
+- trim and no-trim trailing spaces;
+- trim and no-trim empty-line preservation;
+- soft-wrap unwrapping;
+- wide characters, including start-on-tail and end-on-spacer-head cases;
+- zero-width-joiner grapheme emission;
+- rectangular selections, including end-of-line clipping and blank-line breaks;
+- multi-page selections;
+- line-iterator selections copied as text.
+
+Added Roastty-specific guard coverage for:
+
+- the private `selection = None` full screen-domain formatter extension;
+- invalid and garbage endpoints returning an empty string;
+- tracked selections reading current tracked pin values;
+- screen-domain selection across scrollback;
+- cross-page trailing blank-cell state.
+
+Verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty selection_string
+cargo test -p roastty line_iterator
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Observed results:
+
+- `cargo test -p roastty selection_string`: 22 passed.
+- `cargo test -p roastty line_iterator`: 8 passed.
+- `cargo test -p roastty terminal::page_list`: 405 passed.
+- `cargo test -p roastty`: 698 unit tests passed, ABI harness passed, and
+  doctests passed.
+
+Codex reviewed the completed implementation and found one real blocker: the
+wide-character-with-header test did not actually exercise the upstream
+end-on-`SpacerHead` path. The fixture now places `SpacerHead` at the selected
+end column and the wide cell on the wrapped continuation row. Verification
+passed again after the fix.
+
+Follow-up Codex review found no remaining blockers and approved recording the
+experiment result.
+
+## Conclusion
+
+Experiment 79 successfully ports the plain-text selection extraction path needed
+above Roastty's PageList selection primitives. Roastty can now convert ordinary,
+rectangular, wrapped, wide-character, grapheme, tracked, and multi-page
+selections into copied plain text with upstream-style trimming and unwrapping.
+
+The next experiment can continue upward from copied plain selections into the
+next small upstream selection/prompt helper or begin decomposing the remaining
+formatter outputs into separate VT/HTML/pin-map slices.

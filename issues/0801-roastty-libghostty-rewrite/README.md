@@ -268,7 +268,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 77: Port Select Output](77-port-select-output.md) — **Pass**
 - [Experiment 78: Port Line Iterator](78-port-line-iterator.md) — **Pass**
 - [Experiment 79: Port Plain Selection String](79-port-plain-selection-string.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

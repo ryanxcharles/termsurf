@@ -2,7 +2,7 @@ use std::ptr::NonNull;
 
 use super::page::{
     page_layout, Capacity, CapacityAdjustment, Cell, CloneFromError, Page, PageAllocError, Row,
-    SemanticContent, SemanticPrompt, STD_CAPACITY,
+    SemanticContent, SemanticPrompt, Wide, STD_CAPACITY,
 };
 use super::point::{self, Coordinate};
 use super::size::{
@@ -155,6 +155,30 @@ struct PromptIterator<'a> {
 struct LineIterator<'a> {
     list: &'a PageList,
     current: Option<Pin>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SelectionStringOptions {
+    selection: Option<selection::Selection>,
+    trim: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PlainTrailingState {
+    rows: usize,
+    cells: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PlainPageFormat<'a> {
+    node: &'a Node,
+    start_x: CellCountInt,
+    start_y: CellCountInt,
+    end_x: CellCountInt,
+    end_y: CellCountInt,
+    rectangle: bool,
+    trim: bool,
+    trailing_state: Option<PlainTrailingState>,
 }
 
 #[derive(Debug, Default)]
@@ -593,6 +617,148 @@ impl Iterator for LineIterator<'_> {
 
         self.current = self.list.pin_down(result.end(), 1);
         Some(result)
+    }
+}
+
+impl PlainPageFormat<'_> {
+    fn format(&self, output: &mut String) -> PlainTrailingState {
+        let page = &self.node.page;
+        let mut blank_rows = 0usize;
+        let mut blank_cells = 0usize;
+
+        if let Some(state) = self.trailing_state {
+            if self.start_y == 0 && self.start_x == 0 {
+                blank_rows = state.rows;
+                blank_cells = state.cells;
+            }
+        }
+
+        if self.start_x >= page.size_cols() || self.start_y >= page.size_rows() {
+            return PlainTrailingState {
+                rows: blank_rows,
+                cells: blank_cells,
+            };
+        }
+
+        let mut end_x = self.end_x.min(page.size_cols() - 1);
+        let mut end_y = self.end_y.min(page.size_rows() - 1);
+        if self.start_y > end_y {
+            return PlainTrailingState {
+                rows: blank_rows,
+                cells: blank_cells,
+            };
+        }
+
+        if !self.rectangle {
+            let final_row = page.get_row(end_y as usize);
+            let cells = page.get_cells(final_row);
+            if cells[end_x as usize].wide() == Wide::SpacerHead && end_y < page.size_rows() - 1 {
+                end_y += 1;
+                end_x = 0;
+            }
+        }
+
+        if self.start_y == end_y && self.start_x > end_x {
+            return PlainTrailingState {
+                rows: blank_rows,
+                cells: blank_cells,
+            };
+        }
+
+        for y_usize in self.start_y as usize..=end_y as usize {
+            let y: CellCountInt = y_usize
+                .try_into()
+                .expect("page row index must fit CellCountInt");
+            let row = page.get_row(y_usize);
+            let cells = page.get_cells(row);
+
+            let row_end_x = if self.rectangle || y == end_y {
+                end_x.saturating_add(1).min(page.size_cols())
+            } else {
+                page.size_cols()
+            };
+
+            let row_start_x = if self.start_x > 0 && (self.rectangle || y == self.start_y) {
+                match cells[self.start_x as usize].wide() {
+                    Wide::SpacerTail => self.start_x - 1,
+                    Wide::SpacerHead => continue,
+                    Wide::Narrow | Wide::Wide => self.start_x,
+                }
+            } else {
+                0
+            };
+
+            if row_start_x >= row_end_x {
+                blank_rows += 1;
+                continue;
+            }
+
+            let subset = &cells[row_start_x as usize..row_end_x as usize];
+            if !Cell::has_text_any(subset) {
+                blank_rows += 1;
+                continue;
+            }
+
+            if blank_rows > 0 {
+                for _ in 0..blank_rows {
+                    output.push('\n');
+                }
+                blank_rows = 0;
+            }
+
+            if !row.wrap() {
+                blank_rows += 1;
+            }
+
+            if !row.wrap_continuation() {
+                blank_cells = 0;
+            }
+
+            for (cell, x_usize) in subset.iter().zip(row_start_x as usize..) {
+                match cell.wide() {
+                    Wide::Narrow | Wide::Wide => {}
+                    Wide::SpacerHead | Wide::SpacerTail => continue,
+                }
+
+                if !cell.has_text() {
+                    blank_cells += 1;
+                    continue;
+                }
+
+                if cell.codepoint() == ' ' as u32 && self.trim {
+                    blank_cells += 1;
+                    continue;
+                }
+
+                if blank_cells > 0 {
+                    output.extend(std::iter::repeat_n(' ', blank_cells));
+                    blank_cells = 0;
+                }
+
+                push_cell_plain(page, x_usize, y_usize, cell, output);
+            }
+        }
+
+        PlainTrailingState {
+            rows: blank_rows,
+            cells: blank_cells,
+        }
+    }
+}
+
+fn push_cell_plain(page: &Page, x: usize, y: usize, cell: &Cell, output: &mut String) {
+    if let Some(ch) = char::from_u32(cell.codepoint()) {
+        output.push(ch);
+    }
+
+    if cell.has_grapheme() {
+        if let Some(graphemes) = page.lookup_grapheme_at(x, y) {
+            for cp in graphemes {
+                if let Some(ch) = char::from_u32(cp) {
+                    output.push(ch);
+                }
+            }
+        }
     }
 }
 
@@ -1714,6 +1880,72 @@ impl PageList {
             list: self,
             current: (!start.garbage && self.pin_is_valid(&start)).then_some(start),
         }
+    }
+
+    fn selection_string(&self, options: SelectionStringOptions) -> String {
+        let (top_left, bottom_right, rectangle) = match options.selection {
+            Some(selection) => {
+                let Some(top_left) = self.selection_top_left(selection) else {
+                    return String::new();
+                };
+                let Some(bottom_right) = self.selection_bottom_right(selection) else {
+                    return String::new();
+                };
+                (top_left, bottom_right, selection.rectangle())
+            }
+            None => {
+                let top_left = self.get_top_left(point::Tag::Screen);
+                let Some(bottom_right) = self.get_bottom_right(point::Tag::Screen) else {
+                    return String::new();
+                };
+                (top_left, bottom_right, false)
+            }
+        };
+
+        if top_left.garbage
+            || bottom_right.garbage
+            || !self.pin_is_valid(&top_left)
+            || !self.pin_is_valid(&bottom_right)
+        {
+            return String::new();
+        }
+
+        let mut output = String::new();
+        let mut trailing_state = None;
+        let iter = PageIterator {
+            list: self,
+            row: Some(top_left),
+            limit: Some(bottom_right),
+            direction: Direction::RightDown,
+        };
+
+        for chunk in iter {
+            let Some(node) = self.node_for_ptr(chunk.node) else {
+                return String::new();
+            };
+
+            let formatter = PlainPageFormat {
+                node,
+                start_x: if chunk.node == top_left.node {
+                    top_left.x
+                } else {
+                    0
+                },
+                start_y: chunk.start,
+                end_x: if chunk.node == bottom_right.node {
+                    bottom_right.x
+                } else {
+                    node.page.size_cols() - 1
+                },
+                end_y: chunk.end - 1,
+                rectangle,
+                trim: options.trim,
+                trailing_state,
+            };
+            trailing_state = Some(formatter.format(&mut output));
+        }
+
+        output
     }
 
     fn semantic_prompt_zone_end(&self, at: Pin) -> Option<Pin> {
@@ -3960,6 +4192,20 @@ mod tests {
         }
     }
 
+    fn set_screen_text_lines_at(list: &mut PageList, start_y: u32, lines: &[&str]) {
+        for (offset_y, line) in lines.iter().enumerate() {
+            let y = start_y + offset_y as u32;
+            for (x, ch) in line.chars().enumerate() {
+                set_screen_cell(
+                    list,
+                    x.try_into().expect("test x must fit CellCountInt"),
+                    y,
+                    ch,
+                );
+            }
+        }
+    }
+
     fn set_screen_row_wrap(list: &mut PageList, y: u32, wrap: bool) {
         let pin = screen_pin(list, 0, y);
         let index = list.node_index(pin.node).expect("screen node must exist");
@@ -3967,6 +4213,33 @@ mod tests {
             .page
             .get_row_mut(pin.y as usize)
             .set_wrap(wrap);
+    }
+
+    fn set_screen_row_wrap_continuation(list: &mut PageList, y: u32, wrap: bool) {
+        let pin = screen_pin(list, 0, y);
+        let index = list.node_index(pin.node).expect("screen node must exist");
+        list.pages[index]
+            .page
+            .get_row_mut(pin.y as usize)
+            .set_wrap_continuation(wrap);
+    }
+
+    fn set_screen_cell_raw(list: &mut PageList, x: CellCountInt, y: u32, cell: Cell) {
+        let pin = screen_pin(list, x, y);
+        let index = list.node_index(pin.node).expect("screen node must exist");
+        *list.pages[index]
+            .page
+            .get_row_and_cell_mut(pin.x as usize, pin.y as usize)
+            .cell = cell;
+    }
+
+    fn append_screen_grapheme(list: &mut PageList, x: CellCountInt, y: u32, cp: u32) {
+        let pin = screen_pin(list, x, y);
+        let index = list.node_index(pin.node).expect("screen node must exist");
+        list.pages[index]
+            .page
+            .append_grapheme_at(pin.x as usize, pin.y as usize, cp)
+            .expect("test grapheme must fit page storage");
     }
 
     fn assert_selection_screen_points(
@@ -4187,6 +4460,21 @@ mod tests {
             assert_selection_screen_points(list, selection, (start_x, start_y), (end_x, end_y));
         }
         assert!(iter.next().is_none());
+    }
+
+    fn assert_selection_string(
+        list: &PageList,
+        start: (CellCountInt, u32),
+        end: (CellCountInt, u32),
+        rectangle: bool,
+        trim: bool,
+        expected: &str,
+    ) {
+        let actual = list.selection_string(SelectionStringOptions {
+            selection: Some(screen_selection(list, start, end, rectangle)),
+            trim,
+        });
+        assert_eq!(actual, expected);
     }
 
     fn page_cell(page: &Page, x: usize, y: usize) -> Cell {
@@ -12448,6 +12736,365 @@ mod tests {
                 (0, 3, 2, 3),
                 (0, 4, 2, 4),
             ],
+        );
+    }
+
+    #[test]
+    fn selection_string_basic() {
+        let mut list = PageList::init(5, 3, None).unwrap();
+        set_screen_text_lines(&mut list, &["1ABCD", "2EFGH", "3IJKL"]);
+
+        assert_selection_string(&list, (0, 1), (2, 2), false, true, "2EFGH\n3IJ");
+    }
+
+    #[test]
+    fn selection_string_start_outside_written_area() {
+        let mut list = PageList::init(5, 10, None).unwrap();
+        set_screen_text_lines(&mut list, &["1ABCD", "2EFGH", "3IJKL"]);
+
+        assert_selection_string(&list, (0, 5), (2, 6), false, true, "");
+    }
+
+    #[test]
+    fn selection_string_end_outside_written_area() {
+        let mut list = PageList::init(5, 10, None).unwrap();
+        set_screen_text_lines(&mut list, &["1ABCD", "2EFGH", "3IJKL"]);
+
+        assert_selection_string(&list, (0, 2), (2, 6), false, true, "3IJKL");
+    }
+
+    #[test]
+    fn selection_string_trim_space() {
+        let mut list = PageList::init(5, 3, None).unwrap();
+        set_screen_text_lines(&mut list, &["1AB  ", "2EFGH", "3IJKL"]);
+
+        assert_selection_string(&list, (0, 0), (2, 1), false, true, "1AB\n2EF");
+        assert_selection_string(&list, (0, 0), (2, 1), false, false, "1AB  \n2EF");
+    }
+
+    #[test]
+    fn selection_string_trim_empty_line() {
+        let mut list = PageList::init(5, 5, None).unwrap();
+        set_screen_text_lines(&mut list, &["1AB  ", "", "2EFGH", "3IJKL"]);
+
+        assert_selection_string(&list, (0, 0), (2, 2), false, true, "1AB\n\n2EF");
+        assert_selection_string(&list, (0, 0), (2, 2), false, false, "1AB  \n\n2EF");
+    }
+
+    #[test]
+    fn selection_string_soft_wrap() {
+        let mut list = PageList::init(5, 3, None).unwrap();
+        set_screen_text_lines(&mut list, &["1ABCD", "2EFGH", "3IJKL"]);
+        set_screen_row_wrap(&mut list, 0, true);
+        set_screen_row_wrap(&mut list, 1, true);
+        set_screen_row_wrap_continuation(&mut list, 1, true);
+        set_screen_row_wrap_continuation(&mut list, 2, true);
+
+        assert_selection_string(&list, (0, 1), (2, 2), false, true, "2EFGH3IJ");
+    }
+
+    #[test]
+    fn selection_string_wide_char() {
+        let mut list = PageList::init(5, 3, None).unwrap();
+        set_screen_cell(&mut list, 0, 0, '1');
+        set_screen_cell(&mut list, 1, 0, 'A');
+        let mut wide = Cell::init('⚡' as u32);
+        wide.set_wide(Wide::Wide);
+        set_screen_cell_raw(&mut list, 2, 0, wide);
+        let mut tail = Cell::init(0);
+        tail.set_wide(Wide::SpacerTail);
+        set_screen_cell_raw(&mut list, 3, 0, tail);
+
+        assert_selection_string(&list, (0, 0), (3, 0), false, true, "1A⚡");
+        assert_selection_string(&list, (0, 0), (2, 0), false, true, "1A⚡");
+        assert_selection_string(&list, (3, 0), (3, 0), false, true, "⚡");
+    }
+
+    #[test]
+    fn selection_string_wide_char_with_header() {
+        let mut list = PageList::init(5, 3, None).unwrap();
+        set_screen_text_lines(&mut list, &["1ABC"]);
+        let mut head = Cell::init(0);
+        head.set_wide(Wide::SpacerHead);
+        set_screen_cell_raw(&mut list, 4, 0, head);
+        let mut wide = Cell::init('⚡' as u32);
+        wide.set_wide(Wide::Wide);
+        set_screen_cell_raw(&mut list, 0, 1, wide);
+        let mut tail = Cell::init(0);
+        tail.set_wide(Wide::SpacerTail);
+        set_screen_cell_raw(&mut list, 1, 1, tail);
+        set_screen_row_wrap(&mut list, 0, true);
+        set_screen_row_wrap_continuation(&mut list, 1, true);
+
+        assert_selection_string(&list, (0, 0), (4, 0), false, true, "1ABC⚡");
+    }
+
+    #[test]
+    fn selection_string_empty_with_soft_wrap() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        let mut wide = Cell::init('👨' as u32);
+        wide.set_wide(Wide::Wide);
+        set_screen_cell_raw(&mut list, 0, 0, wide);
+        let mut tail = Cell::init(0);
+        tail.set_wide(Wide::SpacerTail);
+        set_screen_cell_raw(&mut list, 1, 0, tail);
+        set_screen_cell(&mut list, 2, 0, ' ');
+        set_screen_cell(&mut list, 3, 0, ' ');
+        set_screen_cell(&mut list, 4, 0, ' ');
+        set_screen_row_wrap(&mut list, 0, true);
+        set_screen_row_wrap_continuation(&mut list, 1, true);
+
+        assert_selection_string(&list, (1, 0), (2, 0), false, true, "👨");
+    }
+
+    #[test]
+    fn selection_string_with_zero_width_joiner() {
+        let mut list = PageList::init(10, 1, None).unwrap();
+        let mut wide = Cell::init('👨' as u32);
+        wide.set_wide(Wide::Wide);
+        set_screen_cell_raw(&mut list, 0, 0, wide);
+        let mut tail = Cell::init(0);
+        tail.set_wide(Wide::SpacerTail);
+        set_screen_cell_raw(&mut list, 1, 0, tail);
+        append_screen_grapheme(&mut list, 0, 0, 0x200d);
+
+        assert_selection_string(&list, (0, 0), (1, 0), false, true, "👨‍");
+    }
+
+    #[test]
+    fn selection_string_rectangle_basic() {
+        let mut list = PageList::init(30, 5, None).unwrap();
+        set_screen_text_lines(
+            &mut list,
+            &[
+                "Lorem ipsum dolor",
+                "sit amet, consectetur",
+                "adipiscing elit, sed do",
+                "eiusmod tempor incididunt",
+                "ut labore et dolore",
+            ],
+        );
+
+        assert_selection_string(&list, (2, 1), (6, 3), true, true, "t ame\nipisc\nusmod");
+    }
+
+    #[test]
+    fn selection_string_rectangle_with_eol() {
+        let mut list = PageList::init(30, 5, None).unwrap();
+        set_screen_text_lines(
+            &mut list,
+            &[
+                "Lorem ipsum dolor",
+                "sit amet, consectetur",
+                "adipiscing elit, sed do",
+                "eiusmod tempor incididunt",
+                "ut labore et dolore",
+            ],
+        );
+
+        assert_selection_string(
+            &list,
+            (12, 0),
+            (26, 4),
+            true,
+            true,
+            "dolor\nnsectetur\nlit, sed do\nor incididunt\n dolore",
+        );
+    }
+
+    #[test]
+    fn selection_string_rectangle_complex_with_breaks() {
+        let mut list = PageList::init(30, 8, None).unwrap();
+        set_screen_text_lines(
+            &mut list,
+            &[
+                "Lorem ipsum dolor",
+                "sit amet, consectetur",
+                "adipiscing elit, sed do",
+                "eiusmod tempor incididunt",
+                "ut labore et dolore",
+                "",
+                "magna aliqua. Ut enim",
+                "ad minim veniam, quis",
+            ],
+        );
+
+        assert_selection_string(
+            &list,
+            (11, 2),
+            (26, 7),
+            true,
+            true,
+            "elit, sed do\npor incididunt\nt dolore\n\na. Ut enim\nniam, quis",
+        );
+    }
+
+    #[test]
+    fn selection_string_multi_page() {
+        let (mut list, page_rows) = multi_page_list(100);
+        let start_y = page_rows as u32 - 1;
+        set_screen_text_lines_at(&mut list, start_y, &["123456789", "!@#$%^&*(", "123456789"]);
+
+        assert_selection_string(
+            &list,
+            (0, start_y),
+            (2, start_y + 2),
+            false,
+            true,
+            "123456789\n!@#$%^&*(\n123",
+        );
+    }
+
+    #[test]
+    fn selection_string_carries_trailing_state_across_page_chunks() {
+        let (mut list, page_rows) = multi_page_list(100);
+        let first_y = page_rows as u32 - 1;
+        set_screen_text_lines_at(&mut list, first_y, &["A  ", "B"]);
+        set_screen_row_wrap(&mut list, first_y, true);
+        set_screen_row_wrap_continuation(&mut list, first_y + 1, true);
+
+        let mut expected = String::from("A");
+        expected.extend(std::iter::repeat_n(' ', list.cols as usize - 1));
+        expected.push('B');
+        assert_selection_string(
+            &list,
+            (0, first_y),
+            (0, first_y + 1),
+            false,
+            true,
+            &expected,
+        );
+    }
+
+    #[test]
+    fn selection_string_none_formats_full_screen_domain() {
+        let mut list = PageList::init(5, 3, None).unwrap();
+        set_screen_text_lines(&mut list, &["1AB  ", "2EFGH"]);
+
+        assert_eq!(
+            list.selection_string(SelectionStringOptions {
+                selection: None,
+                trim: true,
+            }),
+            "1AB\n2EFGH"
+        );
+    }
+
+    #[test]
+    fn selection_string_invalid_or_garbage_endpoints_are_empty() {
+        let mut list = PageList::init(5, 3, None).unwrap();
+        set_screen_text_lines(&mut list, &["1ABCD"]);
+        let other = PageList::init(5, 3, None).unwrap();
+        let invalid = Pin::new(other.first_node_ptr(), 0, 0);
+        let valid = screen_pin(&list, 0, 0);
+        let mut garbage = valid;
+        garbage.garbage = true;
+
+        for selection in [
+            selection::Selection::new(invalid, valid, false),
+            selection::Selection::new(valid, invalid, false),
+            selection::Selection::new(garbage, valid, false),
+            selection::Selection::new(valid, garbage, false),
+        ] {
+            assert_eq!(
+                list.selection_string(SelectionStringOptions {
+                    selection: Some(selection),
+                    trim: true,
+                }),
+                ""
+            );
+        }
+    }
+
+    #[test]
+    fn selection_string_uses_current_tracked_pins() {
+        let mut list = PageList::init(5, 3, None).unwrap();
+        set_screen_text_lines(&mut list, &["1ABCD", "2EFGH"]);
+        let tracked = list
+            .track_selection(screen_selection(&list, (0, 0), (1, 0), false))
+            .unwrap();
+        let (start, end) = tracked.tracked_pins().unwrap();
+
+        unsafe {
+            *start.as_ptr() = screen_pin(&list, 0, 1);
+            *end.as_ptr() = screen_pin(&list, 2, 1);
+        }
+
+        assert_eq!(
+            list.selection_string(SelectionStringOptions {
+                selection: Some(tracked),
+                trim: true,
+            }),
+            "2EF"
+        );
+
+        list.untrack_selection(tracked);
+    }
+
+    #[test]
+    fn selection_string_uses_screen_domain_across_scrollback() {
+        let mut list = PageList::init(3, 3, None).unwrap();
+        list.grow_rows(2).unwrap();
+        set_screen_text_lines(&mut list, &["1AB", "2CD", "3EF", "4GH", "5IJ"]);
+
+        assert_selection_string(&list, (0, 0), (1, 1), false, true, "1AB\n2C");
+    }
+
+    #[test]
+    fn selection_string_start_on_spacer_head_skips_row() {
+        let mut list = PageList::init(5, 2, None).unwrap();
+        set_screen_cell(&mut list, 0, 0, 'A');
+        let mut head = Cell::init(0);
+        head.set_wide(Wide::SpacerHead);
+        set_screen_cell_raw(&mut list, 1, 0, head);
+        set_screen_text_lines_at(&mut list, 1, &["BC"]);
+
+        assert_selection_string(&list, (1, 0), (1, 1), false, true, "BC");
+    }
+
+    #[test]
+    fn line_iterator_selection_strings_match_upstream_basic() {
+        let mut list = PageList::init(5, 5, None).unwrap();
+        set_screen_text_lines(&mut list, &["1ABCD", "2EFGH"]);
+        let mut iter = list.line_iterator(screen_pin(&list, 0, 0));
+
+        assert_eq!(
+            list.selection_string(SelectionStringOptions {
+                selection: iter.next(),
+                trim: false,
+            }),
+            "1ABCD"
+        );
+        assert_eq!(
+            list.selection_string(SelectionStringOptions {
+                selection: iter.next(),
+                trim: false,
+            }),
+            "2EFGH"
+        );
+    }
+
+    #[test]
+    fn line_iterator_selection_strings_match_upstream_soft_wrap() {
+        let mut list = PageList::init(5, 5, None).unwrap();
+        set_screen_text_lines(&mut list, &["1ABCD", "2EFGH", "3ABCD"]);
+        set_screen_row_wrap(&mut list, 0, true);
+        set_screen_row_wrap_continuation(&mut list, 1, true);
+        let mut iter = list.line_iterator(screen_pin(&list, 0, 0));
+
+        assert_eq!(
+            list.selection_string(SelectionStringOptions {
+                selection: iter.next(),
+                trim: false,
+            }),
+            "1ABCD2EFGH"
+        );
+        assert_eq!(
+            list.selection_string(SelectionStringOptions {
+                selection: iter.next(),
+                trim: false,
+            }),
+            "3ABCD"
         );
     }
 
