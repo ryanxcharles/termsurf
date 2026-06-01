@@ -318,6 +318,8 @@ No experiment may proceed to the next stage until the required review passes.
   — **Pass**
 - [Experiment 104: Port Basic Pending Wrap](104-port-basic-pending-wrap.md) —
   **Pass**
+- [Experiment 105: Port Basic Wrap Scroll](105-port-basic-wrap-scroll.md) —
+  **Designed**
 
 ## Non-Goals
 
