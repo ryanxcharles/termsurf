@@ -176,6 +176,14 @@ struct CloneOptions<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DragGeometry {
+    columns: u32,
+    cell_width: u32,
+    padding_left: u32,
+    screen_height: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CloneRegionError {
     Empty,
     PageAlloc,
@@ -3301,6 +3309,106 @@ impl PageList {
         self.pin_at_absolute_row(target_row, target_x, pin.garbage)
     }
 
+    fn drag_selection(
+        &self,
+        click_pin: Pin,
+        drag_pin: Pin,
+        click_x: u32,
+        drag_x: u32,
+        rectangle_selection: bool,
+        geometry: DragGeometry,
+    ) -> Option<selection::Selection> {
+        if click_pin.garbage
+            || drag_pin.garbage
+            || !self.pin_is_valid(&click_pin)
+            || !self.pin_is_valid(&drag_pin)
+        {
+            return None;
+        }
+
+        if geometry.columns == 0 || geometry.cell_width == 0 {
+            return None;
+        }
+        let max_x = geometry
+            .columns
+            .checked_mul(geometry.cell_width)?
+            .checked_sub(1)?;
+
+        let threshold_point = ((geometry.cell_width as f64) * 0.6).round() as u32;
+        let drag_x_frac =
+            drag_x.saturating_sub(geometry.padding_left).min(max_x) % geometry.cell_width;
+        let click_x_frac =
+            click_x.saturating_sub(geometry.padding_left).min(max_x) % geometry.cell_width;
+        let same_pin = drag_pin == click_pin;
+
+        let end_before_start = if same_pin {
+            drag_x_frac < click_x_frac
+        } else if rectangle_selection {
+            match drag_pin.x.cmp(&click_pin.x) {
+                std::cmp::Ordering::Equal => drag_x_frac < click_x_frac,
+                std::cmp::Ordering::Less => true,
+                std::cmp::Ordering::Greater => false,
+            }
+        } else {
+            self.pin_before(drag_pin, click_pin)?
+        };
+
+        let include_click_cell = if end_before_start {
+            click_x_frac >= threshold_point
+        } else {
+            click_x_frac < threshold_point
+        };
+        let include_drag_cell = if end_before_start {
+            drag_x_frac < threshold_point
+        } else {
+            drag_x_frac >= threshold_point
+        };
+
+        let start_pin = if include_click_cell {
+            click_pin
+        } else if end_before_start {
+            if rectangle_selection {
+                self.pin_left_clamp(click_pin, 1)?
+            } else {
+                self.pin_left_wrap(click_pin, 1).unwrap_or(click_pin)
+            }
+        } else if rectangle_selection {
+            self.pin_right_clamp(click_pin, 1)?
+        } else {
+            self.pin_right_wrap(click_pin, 1).unwrap_or(click_pin)
+        };
+
+        let end_pin = if include_drag_cell {
+            drag_pin
+        } else if end_before_start {
+            if rectangle_selection {
+                self.pin_right_clamp(drag_pin, 1)?
+            } else {
+                self.pin_right_wrap(drag_pin, 1).unwrap_or(drag_pin)
+            }
+        } else if rectangle_selection {
+            self.pin_left_clamp(drag_pin, 1)?
+        } else {
+            self.pin_left_wrap(drag_pin, 1).unwrap_or(drag_pin)
+        };
+
+        if (!include_click_cell && same_pin)
+            || (!include_click_cell && rectangle_selection && click_pin.x == drag_pin.x)
+            || (!include_click_cell && end_pin == click_pin)
+            || (!include_click_cell && rectangle_selection && end_pin.x == click_pin.x)
+            || (!include_drag_cell && start_pin == drag_pin)
+            || (!include_drag_cell && rectangle_selection && start_pin.x == drag_pin.x)
+        {
+            return None;
+        }
+
+        Some(selection::Selection::new(
+            start_pin,
+            end_pin,
+            rectangle_selection,
+        ))
+    }
+
     fn total_rows(&self) -> usize {
         self.pages
             .iter()
@@ -3501,6 +3609,64 @@ mod tests {
             bottom: None,
             tracked_pins: None,
         }
+    }
+
+    fn drag_geometry() -> DragGeometry {
+        DragGeometry {
+            columns: 10,
+            cell_width: 10,
+            padding_left: 5,
+            screen_height: 110,
+        }
+    }
+
+    fn drag_x_pos(x: f64, geometry: DragGeometry) -> u32 {
+        ((x * geometry.cell_width as f64).floor() as u32) + geometry.padding_left
+    }
+
+    fn assert_drag_selection(
+        click: (f64, u32),
+        drag: (f64, u32),
+        expected_start: (CellCountInt, u32),
+        expected_end: (CellCountInt, u32),
+        rectangle: bool,
+    ) {
+        let list = PageList::init(10, 5, None).unwrap();
+        let geometry = drag_geometry();
+        let click_pin = screen_pin(&list, click.0.floor() as CellCountInt, click.1);
+        let drag_pin = screen_pin(&list, drag.0.floor() as CellCountInt, drag.1);
+        let expected = screen_selection(&list, expected_start, expected_end, rectangle);
+
+        assert_eq!(
+            list.drag_selection(
+                click_pin,
+                drag_pin,
+                drag_x_pos(click.0, geometry),
+                drag_x_pos(drag.0, geometry),
+                rectangle,
+                geometry,
+            ),
+            Some(expected)
+        );
+    }
+
+    fn assert_drag_selection_is_none(click: (f64, u32), drag: (f64, u32), rectangle: bool) {
+        let list = PageList::init(10, 5, None).unwrap();
+        let geometry = drag_geometry();
+        let click_pin = screen_pin(&list, click.0.floor() as CellCountInt, click.1);
+        let drag_pin = screen_pin(&list, drag.0.floor() as CellCountInt, drag.1);
+
+        assert_eq!(
+            list.drag_selection(
+                click_pin,
+                drag_pin,
+                drag_x_pos(click.0, geometry),
+                drag_x_pos(drag.0, geometry),
+                rectangle,
+                geometry,
+            ),
+            None
+        );
     }
 
     fn page_cell(page: &Page, x: usize, y: usize) -> Cell {
@@ -11399,6 +11565,141 @@ mod tests {
         assert!(list.pin_right_wrap(invalid, 1).is_none());
         assert!(list.pin_left_wrap(garbage, 1).is_none());
         assert!(list.pin_right_wrap(garbage, 1).is_none());
+    }
+
+    #[test]
+    fn drag_selection_regular_matches_upstream_ltr_cases() {
+        assert_drag_selection((3.0, 3), (3.9, 3), (3, 3), (3, 3), false);
+        assert_drag_selection((3.0, 3), (5.9, 3), (3, 3), (5, 3), false);
+        assert_drag_selection((3.0, 3), (5.0, 3), (3, 3), (4, 3), false);
+        assert_drag_selection((3.9, 3), (5.9, 3), (4, 3), (5, 3), false);
+        assert_drag_selection((3.9, 3), (5.0, 3), (4, 3), (4, 3), false);
+        assert_drag_selection_is_none((3.0, 3), (3.1, 3), false);
+        assert_drag_selection_is_none((3.8, 3), (3.9, 3), false);
+        assert_drag_selection_is_none((3.9, 3), (4.0, 3), false);
+    }
+
+    #[test]
+    fn drag_selection_regular_matches_upstream_rtl_cases() {
+        assert_drag_selection((3.9, 3), (3.0, 3), (3, 3), (3, 3), false);
+        assert_drag_selection((5.9, 3), (3.0, 3), (5, 3), (3, 3), false);
+        assert_drag_selection((5.9, 3), (3.9, 3), (5, 3), (4, 3), false);
+        assert_drag_selection((5.0, 3), (3.0, 3), (4, 3), (3, 3), false);
+        assert_drag_selection((5.0, 3), (3.9, 3), (4, 3), (4, 3), false);
+        assert_drag_selection_is_none((3.1, 3), (3.0, 3), false);
+        assert_drag_selection_is_none((3.9, 3), (3.8, 3), false);
+        assert_drag_selection_is_none((4.0, 3), (3.9, 3), false);
+    }
+
+    #[test]
+    fn drag_selection_regular_wraps_rows_like_upstream() {
+        assert_drag_selection((9.9, 2), (0.0, 4), (0, 3), (9, 3), false);
+        assert_drag_selection((0.0, 4), (9.9, 2), (9, 3), (0, 3), false);
+    }
+
+    #[test]
+    fn drag_selection_regular_wrap_failure_falls_back_to_original_pin() {
+        assert_drag_selection_is_none((0.5, 0), (0.0, 0), false);
+        assert_drag_selection_is_none((9.9, 4), (9.9, 4), false);
+    }
+
+    #[test]
+    fn drag_selection_rectangle_matches_upstream_ltr_cases() {
+        assert_drag_selection((3.0, 2), (3.9, 4), (3, 2), (3, 4), true);
+        assert_drag_selection((3.0, 2), (5.9, 4), (3, 2), (5, 4), true);
+        assert_drag_selection((3.0, 2), (5.0, 4), (3, 2), (4, 4), true);
+        assert_drag_selection((3.9, 2), (5.9, 4), (4, 2), (5, 4), true);
+        assert_drag_selection((3.9, 2), (5.0, 4), (4, 2), (4, 4), true);
+        assert_drag_selection_is_none((3.0, 2), (3.1, 4), true);
+        assert_drag_selection_is_none((3.8, 2), (3.9, 4), true);
+        assert_drag_selection_is_none((3.9, 2), (4.0, 4), true);
+    }
+
+    #[test]
+    fn drag_selection_rectangle_matches_upstream_rtl_cases() {
+        assert_drag_selection((3.9, 2), (3.0, 4), (3, 2), (3, 4), true);
+        assert_drag_selection((5.9, 2), (3.0, 4), (5, 2), (3, 4), true);
+        assert_drag_selection((5.9, 2), (3.9, 4), (5, 2), (4, 4), true);
+        assert_drag_selection((5.0, 2), (3.0, 4), (4, 2), (3, 4), true);
+        assert_drag_selection((5.0, 2), (3.9, 4), (4, 2), (4, 4), true);
+        assert_drag_selection_is_none((3.1, 2), (3.0, 4), true);
+        assert_drag_selection_is_none((3.9, 2), (3.8, 4), true);
+        assert_drag_selection_is_none((4.0, 2), (3.9, 4), true);
+    }
+
+    #[test]
+    fn drag_selection_rectangle_does_not_wrap_like_upstream() {
+        assert_drag_selection((9.9, 2), (0.0, 4), (9, 2), (0, 4), true);
+        assert_drag_selection((0.0, 4), (9.9, 2), (0, 4), (9, 2), true);
+    }
+
+    #[test]
+    fn drag_selection_handles_padding_and_invalid_geometry() {
+        let list = PageList::init(10, 5, None).unwrap();
+        let mut geometry = drag_geometry();
+        geometry.padding_left = 50;
+        assert_eq!(
+            list.drag_selection(
+                screen_pin(&list, 3, 3),
+                screen_pin(&list, 3, 3),
+                10,
+                39,
+                false,
+                geometry,
+            ),
+            None
+        );
+
+        for geometry in [
+            DragGeometry {
+                columns: 0,
+                ..drag_geometry()
+            },
+            DragGeometry {
+                cell_width: 0,
+                ..drag_geometry()
+            },
+            DragGeometry {
+                columns: u32::MAX,
+                cell_width: 2,
+                ..drag_geometry()
+            },
+        ] {
+            assert!(list
+                .drag_selection(
+                    screen_pin(&list, 3, 3),
+                    screen_pin(&list, 4, 3),
+                    35,
+                    45,
+                    false,
+                    geometry,
+                )
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn drag_selection_rejects_invalid_or_garbage_pins() {
+        let list = PageList::init(10, 5, None).unwrap();
+        let other = PageList::init(10, 5, None).unwrap();
+        let valid = screen_pin(&list, 3, 3);
+        let invalid = Pin::new(other.first_node_ptr(), 0, 0);
+        let mut garbage = valid;
+        garbage.garbage = true;
+        let geometry = drag_geometry();
+
+        assert!(list
+            .drag_selection(invalid, valid, 35, 45, false, geometry)
+            .is_none());
+        assert!(list
+            .drag_selection(valid, invalid, 35, 45, false, geometry)
+            .is_none());
+        assert!(list
+            .drag_selection(garbage, valid, 35, 45, false, geometry)
+            .is_none());
+        assert!(list
+            .drag_selection(valid, garbage, 35, 45, false, geometry)
+            .is_none());
     }
 
     #[test]

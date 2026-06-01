@@ -199,3 +199,60 @@ updated design before implementation begins.
 
 Follow-up Codex review approved the updated design for implementation. No
 remaining blockers were found.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a private `PageList::drag_selection` helper in
+`roastty/src/terminal/page_list.rs`. The helper takes click and drag pins, pixel
+x positions, a rectangle-selection flag, and private `DragGeometry`, then
+returns an untracked `selection::Selection` or `None`.
+
+The implementation ports the pure cell-granular part of upstream
+`SelectionGesture.dragSelection` without adding full `SelectionGesture` state,
+Screen, Terminal, ABI, renderer, parser, app, platform input, word/line/output
+selection, autoscroll, press/release, double/triple-click, or deep-press
+behavior.
+
+Coverage added:
+
+- upstream regular drag-selection table cases for LTR, RTL, same-cell empty
+  selections, adjacent empty selections, and row wrapping;
+- upstream rectangle drag-selection table cases for LTR, RTL, empty selections,
+  and non-wrapping column clamping;
+- Roastty-specific invalid geometry checks for `columns == 0`,
+  `cell_width == 0`, and overflowing `columns * cell_width`;
+- Roastty-specific invalid and garbage pin checks;
+- padding-left saturating subtraction coverage;
+- regular-selection wrap-edge coverage preserving the upstream
+  `orelse original_pin` fallback behavior.
+
+Verification passed:
+
+```bash
+cargo fmt
+cargo test -p roastty drag_selection
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+The targeted drag-selection test run passed 9 tests. The PageList test run
+passed 346 tests. The full Roastty test run passed 639 unit tests, the ABI
+harness, and doctests.
+
+Codex result review found no code blockers. Its only finding was that the
+experiment result and README status still needed to be recorded, which this
+section and the README update complete.
+
+## Conclusion
+
+Experiment 73 successfully ports the pure cell drag-selection calculation. The
+selection subsystem now has the PageList-local logic needed to convert click and
+drag cell geometry into regular or rectangular untracked selections while
+matching upstream threshold, wrapping, clamping, and empty-selection behavior.
+
+The next experiment can continue upward from this pure helper toward the next
+piece of upstream selection behavior, still preserving the rule that each new
+slice must be designed, Codex-reviewed, implemented, result-reviewed, recorded,
+and committed separately.

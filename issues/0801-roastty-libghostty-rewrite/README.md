@@ -261,7 +261,7 @@ No experiment may proceed to the next stage until the required review passes.
 - [Experiment 72: Port Selection Pin Navigation](72-port-selection-pin-navigation.md)
   — **Pass**
 - [Experiment 73: Port Cell Drag Selection](73-port-cell-drag-selection.md) —
-  **Designed**
+  **Pass**
 
 ## Non-Goals
 
