@@ -856,7 +856,7 @@ impl Page {
         self.clone_partial_row_from(other, dst_y, src_y, 0, self.size.cols as usize)
     }
 
-    fn clone_partial_row_from(
+    pub(super) fn clone_partial_row_from(
         &mut self,
         other: &Page,
         dst_y: usize,
@@ -882,7 +882,7 @@ impl Page {
         )
     }
 
-    fn clone_partial_row_within_page(
+    pub(super) fn clone_partial_row_within_page(
         &mut self,
         dst_y: usize,
         src_y: usize,

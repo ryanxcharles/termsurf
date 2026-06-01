@@ -345,3 +345,102 @@ The experiment fails if:
 - it silently implements incompatible placeholder insert-line semantics;
 - it adds unrelated delete-line, scroll up/down, public API, ABI, or non-macOS
   behavior.
+
+## Result
+
+**Result:** Pass
+
+Roastty now parses and executes `CSI L` / Insert Lines for the current basic
+cell model.
+
+The stream parser accepts the Ghostty-compatible forms for this slice:
+
+- `CSI L` dispatches `InsertLines { count: 1 }`;
+- `CSI 0 L` and `CSI ; L` dispatch `InsertLines { count: 0 }`;
+- `CSI 1 L` and `CSI 1 ; L` dispatch count `1`;
+- larger single numeric params dispatch their parsed `u16` count.
+
+The parser rejects private, real multi-param, colon-param, mixed-separator, and
+invalid forms without leaking printable final bytes or mutating terminal state.
+Direct raw-C1 `0x9b` remains out of scope: it does not dispatch `InsertLines`,
+and it follows the current replacement-plus-printable-final behavior (`U+FFFD`
+then `L`). Pending invalid UTF-8 still dispatches `U+FFFD` before the
+insert-lines action, including split-feed cases, and handler errors leave the
+parser in ground state.
+
+The terminal implementation now:
+
+- treats count `0` as a true no-op;
+- no-ops when the cursor is outside the active vertical or horizontal scrolling
+  margins;
+- clamps larger counts to the remaining rows from the cursor through the bottom
+  margin;
+- shifts rows downward only inside the active margins;
+- clears inserted cells to default blank/default style cells under the current
+  basic model;
+- restores the cursor to the left scrolling margin on the original cursor row
+  after an actual insert;
+- clears pending wrap after an actual insert and preserves it for no-ops;
+- resets affected row wrap metadata for full-width inserts;
+- preserves row wrap metadata for left/right-margin inserts;
+- leaves rows above the cursor, rows below the bottom margin, and scrollback
+  unchanged.
+
+The PageList helper shifts active rows from bottom to top so source rows are
+copied before overwrite. It handles same-page and cross-page copies, preserves
+managed style/grapheme/hyperlink ownership, preserves non-managed metadata such
+as protected bits, releases overwritten/cleared managed cells through the
+existing page cell-clear path, dirties affected rows, and preserves scrollback
+row count/content.
+
+Current-SGR blank-cell coloring remains deferred because Roastty's current basic
+print path does not yet write cells with cursor style. Ghostty's
+`rowWillBeShifted` wide-head/tail and spacer-cell boundary behavior also remains
+deferred until Roastty has Unicode-width and wide-cell mutation support. This
+experiment deliberately did not add delete-line, scroll up/down, SGR,
+Unicode-width, wide-character rendering, public API, ABI, or non-macOS behavior.
+
+Verification passed:
+
+```text
+cargo fmt
+cargo test -p roastty stream
+cargo test -p roastty terminal::page_list
+cargo test -p roastty terminal::terminal
+cargo test -p roastty terminal_formatter
+cargo test -p roastty screen_formatter
+cargo test -p roastty page_string
+cargo test -p roastty
+```
+
+The full `cargo test -p roastty` run passed with 1255 unit tests, the ABI
+harness passed, and doctests had no tests to run. Existing raw print, linefeed,
+cursor, positioning, tabstop, erase-display, erase-line, delete-character,
+formatter, PageList, and ABI behavior remained green.
+
+Codex design review found two real issues in the initial plan and approved the
+updated design after they were fixed:
+
+- `logs/codex-review/20260601-045628-466529-last-message.md`
+- `logs/codex-review/20260601-045804-240451-last-message.md`
+
+Codex result review found two real issues:
+`logs/codex-review/20260601-050942-959179-last-message.md`.
+
+- The result text overclaimed raw-C1 behavior. The wording now states the actual
+  behavior: direct `0x9b` does not dispatch `InsertLines`, and it follows the
+  current replacement-plus-printable-final path.
+- Scrollback preservation needed content coverage, not just row-count coverage.
+  The implementation now has explicit PageList and terminal tests proving
+  scrollback content is unchanged.
+
+Codex re-reviewed the fixed result and reported no blocking findings:
+`logs/codex-review/20260601-051342-362780-last-message.md`.
+
+## Conclusion
+
+`CSI L` is now ported for Roastty's current basic cell engine. The
+implementation adds the first downward active-region row-shift primitive without
+weakening page integrity or expanding public surface area. The next experiment
+can continue the same row-mutation family, most likely with delete-line or
+scroll-region behavior that reuses the new PageList directionality work.

@@ -368,6 +368,43 @@ impl Screen {
         Ok(())
     }
 
+    pub(super) fn insert_lines_basic(
+        &mut self,
+        count: CellCountInt,
+        top_margin: CellCountInt,
+        bottom_margin: CellCountInt,
+        left_margin: CellCountInt,
+        right_margin: CellCountInt,
+        full_width: bool,
+    ) -> Result<(), EraseDisplayError> {
+        if count == 0 {
+            return Ok(());
+        }
+        if self.cursor.y < top_margin
+            || self.cursor.y > bottom_margin
+            || self.cursor.x < left_margin
+            || self.cursor.x > right_margin
+        {
+            return Ok(());
+        }
+
+        let remaining = bottom_margin - self.cursor.y + 1;
+        let count = count.min(remaining);
+        let start_y = self.cursor.y;
+        self.pages.insert_active_lines(
+            start_y.into(),
+            bottom_margin,
+            left_margin,
+            right_margin,
+            count,
+            full_width,
+        )?;
+        self.cursor.x = left_margin;
+        self.cursor.y = start_y;
+        self.cursor.pending_wrap = false;
+        Ok(())
+    }
+
     pub(super) fn cursor_row_relative_basic(&mut self, rows: CellCountInt, count: CellCountInt) {
         let bottom = rows.saturating_sub(1);
         self.cursor.pending_wrap = false;

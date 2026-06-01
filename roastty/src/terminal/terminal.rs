@@ -404,6 +404,18 @@ impl Handler for TerminalStreamHandler<'_> {
                     self.scrolling_region.right,
                 )
                 .map_err(TerminalStreamError::from),
+            Action::InsertLines { count } => self
+                .screen
+                .insert_lines_basic(
+                    count,
+                    self.scrolling_region.top,
+                    self.scrolling_region.bottom,
+                    self.scrolling_region.left,
+                    self.scrolling_region.right,
+                    self.scrolling_region.left == 0
+                        && self.scrolling_region.right == self.size.cols - 1,
+                )
+                .map_err(TerminalStreamError::from),
         }
     }
 }
@@ -2621,6 +2633,205 @@ mod tests {
         terminal.next_slice(b"2P").unwrap();
 
         assert_eq!(plain_with_unwrap(&terminal, false), "ADE");
+    }
+
+    #[test]
+    fn terminal_stream_csi_insert_lines_count_one_shifts_rows_down() {
+        let mut terminal = Terminal::init(5, 5, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["ABC", "DEF", "GHI"]);
+        terminal.screens.active.set_cursor_position_for_tests(1, 1);
+        terminal.clear_dirty_for_tests();
+
+        terminal.next_slice(b"\x1b[L").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABC\n\nDEF\nGHI");
+        assert_eq!(terminal.cursor_position_for_tests(), (0, 1));
+        assert!(!terminal.cursor_pending_wrap_for_tests());
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(terminal.is_dirty_for_tests(0, 1));
+        assert!(terminal.is_dirty_for_tests(0, 2));
+        assert!(terminal.is_dirty_for_tests(0, 3));
+    }
+
+    #[test]
+    fn terminal_stream_csi_insert_lines_zero_count_is_noop() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"ABCDE").unwrap();
+        assert!(terminal.cursor_pending_wrap_for_tests());
+        terminal.clear_dirty_for_tests();
+
+        terminal.next_slice(b"\x1b[0L").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABCDE");
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+        assert!(terminal.cursor_pending_wrap_for_tests());
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+    }
+
+    #[test]
+    fn terminal_stream_csi_insert_lines_clamps_to_remaining_region() {
+        let mut terminal = Terminal::init(5, 4, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["AAAAA", "BBBBB", "CCCCC", "DDDDD"]);
+        terminal.screens.active.set_cursor_position_for_tests(0, 2);
+
+        terminal.next_slice(b"\x1b[99L").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "AAAAA\nBBBBB");
+        assert_eq!(terminal.cursor_position_for_tests(), (0, 2));
+    }
+
+    #[test]
+    fn terminal_stream_csi_insert_lines_preserves_scrollback_content() {
+        let mut terminal = Terminal::init(5, 2, Some(10)).unwrap();
+
+        terminal.next_slice(b"AAAAA\nBBBBB\nCCCCC\nDDDDD").unwrap();
+        let active_before = plain_with_unwrap(&terminal, false);
+        let full_before = terminal.full_screen_plain_for_tests(false);
+        let scrollback_before = terminal.scrollback_rows_for_tests();
+        let history_before = full_before
+            .strip_suffix(&active_before)
+            .expect("full screen output should end with active output")
+            .to_owned();
+        terminal.screens.active.set_cursor_position_for_tests(0, 0);
+
+        terminal.next_slice(b"\x1b[L").unwrap();
+
+        assert_eq!(terminal.scrollback_rows_for_tests(), scrollback_before);
+        assert!(terminal
+            .full_screen_plain_for_tests(false)
+            .starts_with(&history_before));
+        assert_ne!(plain_with_unwrap(&terminal, false), active_before);
+    }
+
+    #[test]
+    fn terminal_stream_csi_insert_lines_outside_vertical_margin_is_noop() {
+        let mut terminal = terminal_with_lines(&["AAAAA", "BBBBB", "CCCCC"]);
+        terminal.set_scrolling_region_for_tests(1, 2, 0, 4);
+        terminal.screens.active.set_cursor_position_for_tests(0, 0);
+        terminal.clear_dirty_for_tests();
+
+        terminal.next_slice(b"\x1b[L").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "AAAAA\nBBBBB\nCCCCC");
+        assert_eq!(terminal.cursor_position_for_tests(), (0, 0));
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(0, 1));
+        assert!(!terminal.is_dirty_for_tests(0, 2));
+    }
+
+    #[test]
+    fn terminal_stream_csi_insert_lines_outside_horizontal_margin_is_noop() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"ABCDE").unwrap();
+        assert!(terminal.cursor_pending_wrap_for_tests());
+        terminal.set_scrolling_region_for_tests(0, 1, 0, 3);
+        terminal.clear_dirty_for_tests();
+
+        terminal.next_slice(b"\x1b[L").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABCDE");
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+        assert!(terminal.cursor_pending_wrap_for_tests());
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+    }
+
+    #[test]
+    fn terminal_stream_csi_insert_lines_honors_top_bottom_region() {
+        let mut terminal = Terminal::init(5, 4, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["AAAAA", "BBBBB", "CCCCC", "DDDDD"]);
+        terminal.set_scrolling_region_for_tests(1, 2, 0, 4);
+        terminal.screens.active.set_cursor_position_for_tests(2, 1);
+
+        terminal.next_slice(b"\x1b[L").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "AAAAA\n\nBBBBB\nDDDDD");
+        assert_eq!(terminal.cursor_position_for_tests(), (0, 1));
+    }
+
+    #[test]
+    fn terminal_stream_csi_insert_lines_honors_left_right_region() {
+        let mut terminal = Terminal::init(6, 3, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["ABC123", "DEF456", "GHI789"]);
+        terminal.set_scrolling_region_for_tests(0, 2, 1, 3);
+        terminal.screens.active.set_cursor_position_for_tests(2, 1);
+
+        terminal.next_slice(b"\x1b[L").unwrap();
+
+        assert_eq!(
+            plain_with_unwrap(&terminal, false),
+            "ABC123\nD   56\nGEF489"
+        );
+        assert_eq!(terminal.cursor_position_for_tests(), (1, 1));
+    }
+
+    #[test]
+    fn terminal_stream_csi_insert_lines_wrap_metadata_depends_on_width() {
+        let mut terminal = Terminal::init(5, 3, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["AAAAA", "BBBBB", "CCCCC"]);
+        terminal.set_row_wrap_for_tests(1, true);
+        terminal.set_row_wrap_continuation_for_tests(2, true);
+        terminal.screens.active.set_cursor_position_for_tests(0, 1);
+
+        terminal.next_slice(b"\x1b[L").unwrap();
+
+        assert!(!terminal.row_wrap_for_tests(1));
+        assert!(!terminal.row_wrap_continuation_for_tests(2));
+
+        let mut terminal = Terminal::init(5, 3, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["AAAAA", "BBBBB", "CCCCC"]);
+        terminal.set_row_wrap_for_tests(1, true);
+        terminal.set_row_wrap_continuation_for_tests(2, true);
+        terminal.set_scrolling_region_for_tests(0, 2, 1, 3);
+        terminal.screens.active.set_cursor_position_for_tests(1, 1);
+
+        terminal.next_slice(b"\x1b[L").unwrap();
+
+        assert!(terminal.row_wrap_for_tests(1));
+        assert!(terminal.row_wrap_continuation_for_tests(2));
+    }
+
+    #[test]
+    fn terminal_stream_unsupported_csi_insert_lines_does_not_mutate_state() {
+        let mut terminal = terminal_with_lines(&["abc"]);
+
+        terminal.next_slice(b"\x1b[?L").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+    }
+
+    #[test]
+    fn terminal_stream_split_feed_csi_insert_lines_shifts_rows() {
+        let mut terminal = Terminal::init(5, 4, None).unwrap();
+        terminal
+            .screens
+            .active
+            .set_text_lines_for_tests(&["AAAAA", "BBBBB", "CCCCC"]);
+        terminal.screens.active.set_cursor_position_for_tests(0, 1);
+
+        terminal.next_slice(b"\x1b[").unwrap();
+        terminal.next_slice(b"L").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "AAAAA\n\nBBBBB\nCCCCC");
     }
 
     #[test]

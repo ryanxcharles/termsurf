@@ -3506,6 +3506,137 @@ impl PageList {
         Ok(())
     }
 
+    pub(super) fn insert_active_lines(
+        &mut self,
+        cursor_y: u32,
+        bottom: CellCountInt,
+        left: CellCountInt,
+        right: CellCountInt,
+        count: CellCountInt,
+        reset_wrap_metadata: bool,
+    ) -> Result<(), BasicCellWriteError> {
+        assert!(left <= right);
+        assert!(right < self.cols);
+        assert!(count > 0);
+        assert!(cursor_y <= u32::from(bottom));
+
+        let count = u32::from(count);
+        for y in (cursor_y..=u32::from(bottom)).rev() {
+            if y >= cursor_y + count {
+                self.clone_active_row_range(y - count, y, left, right)?;
+            } else {
+                self.clear_active_row_range(y, left, right)?;
+            }
+
+            if reset_wrap_metadata {
+                self.reset_active_row_wrap_metadata(y)?;
+            }
+        }
+
+        self.verify_integrity()
+            .expect("insert_active_lines result must preserve PageList integrity");
+        Ok(())
+    }
+
+    fn clone_active_row_range(
+        &mut self,
+        src_y: u32,
+        dst_y: u32,
+        left: CellCountInt,
+        right: CellCountInt,
+    ) -> Result<(), BasicCellWriteError> {
+        let src_pin = self
+            .pin(point::Point::active(point::Coordinate::new(left, src_y)))
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let dst_pin = self
+            .pin(point::Point::active(point::Coordinate::new(left, dst_y)))
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let src_index = self
+            .node_index(src_pin.node)
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let dst_index = self
+            .node_index(dst_pin.node)
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let end = usize::from(right) + 1;
+
+        if src_index == dst_index {
+            let page = &mut self.pages[dst_index].page;
+            page.clone_partial_row_within_page(
+                dst_pin.y as usize,
+                src_pin.y as usize,
+                left as usize,
+                end,
+            )
+            .map_err(|_| BasicCellWriteError::ManagedCell)?;
+            page.get_row_mut(dst_pin.y as usize).set_dirty(true);
+            return Ok(());
+        }
+
+        if src_index < dst_index {
+            let (src_pages, dst_pages) = self.pages.split_at_mut(dst_index);
+            let src_page = &src_pages[src_index].page;
+            let dst_page = &mut dst_pages[0].page;
+            dst_page
+                .clone_partial_row_from(
+                    src_page,
+                    dst_pin.y as usize,
+                    src_pin.y as usize,
+                    left as usize,
+                    end,
+                )
+                .map_err(|_| BasicCellWriteError::ManagedCell)?;
+            dst_page.get_row_mut(dst_pin.y as usize).set_dirty(true);
+        } else {
+            let (dst_pages, src_pages) = self.pages.split_at_mut(src_index);
+            let dst_page = &mut dst_pages[dst_index].page;
+            let src_page = &src_pages[0].page;
+            dst_page
+                .clone_partial_row_from(
+                    src_page,
+                    dst_pin.y as usize,
+                    src_pin.y as usize,
+                    left as usize,
+                    end,
+                )
+                .map_err(|_| BasicCellWriteError::ManagedCell)?;
+            dst_page.get_row_mut(dst_pin.y as usize).set_dirty(true);
+        }
+
+        Ok(())
+    }
+
+    fn clear_active_row_range(
+        &mut self,
+        y: u32,
+        left: CellCountInt,
+        right: CellCountInt,
+    ) -> Result<(), BasicCellWriteError> {
+        let pin = self
+            .pin(point::Point::active(point::Coordinate::new(left, y)))
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let index = self
+            .node_index(pin.node)
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let page = &mut self.pages[index].page;
+        page.clear_cells(pin.y as usize, left as usize, usize::from(right) + 1);
+        page.get_row_mut(pin.y as usize).set_dirty(true);
+        Ok(())
+    }
+
+    fn reset_active_row_wrap_metadata(&mut self, y: u32) -> Result<(), BasicCellWriteError> {
+        let pin = self
+            .pin(point::Point::active(point::Coordinate::new(0, y)))
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let index = self
+            .node_index(pin.node)
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let row = self.pages[index].page.get_row_mut(pin.y as usize);
+        row.set_wrap(false);
+        row.set_wrap_continuation(false);
+        row.set_dirty(true);
+        Ok(())
+    }
+
     pub(super) fn erase_history_basic(&mut self) -> Result<(), BasicCellWriteError> {
         self.erase_history(None)
             .map_err(|_| BasicCellWriteError::InvalidPoint)
@@ -6278,6 +6409,44 @@ mod tests {
             .page
             .get_row_and_cell_mut(0, pin.y as usize)
             .cell = cell;
+    }
+
+    fn set_active_cell_at(list: &mut PageList, x: CellCountInt, y: CellCountInt, cell: Cell) {
+        let pin = list
+            .pin(point::Point::active(Coordinate::new(x, y as u32)))
+            .expect("active cell must exist");
+        let index = list.node_index(pin.node).expect("active node must exist");
+        *list.pages[index]
+            .page
+            .get_row_and_cell_mut(pin.x as usize, pin.y as usize)
+            .cell = cell;
+    }
+
+    fn active_cell_at(list: &PageList, x: CellCountInt, y: CellCountInt) -> Cell {
+        let pin = list
+            .pin(point::Point::active(Coordinate::new(x, y as u32)))
+            .expect("active cell must exist");
+        let node = list.node_for_pin(&pin).expect("active node must exist");
+        page_cell(&node.page, pin.x as usize, pin.y as usize)
+    }
+
+    fn set_history_cell_at(list: &mut PageList, x: CellCountInt, y: CellCountInt, cell: Cell) {
+        let pin = list
+            .pin(point::Point::history(Coordinate::new(x, y as u32)))
+            .expect("history cell must exist");
+        let index = list.node_index(pin.node).expect("history node must exist");
+        *list.pages[index]
+            .page
+            .get_row_and_cell_mut(pin.x as usize, pin.y as usize)
+            .cell = cell;
+    }
+
+    fn history_cell_at(list: &PageList, x: CellCountInt, y: CellCountInt) -> Cell {
+        let pin = list
+            .pin(point::Point::history(Coordinate::new(x, y as u32)))
+            .expect("history cell must exist");
+        let node = list.node_for_pin(&pin).expect("history node must exist");
+        page_cell(&node.page, pin.x as usize, pin.y as usize)
     }
 
     fn active_row_marker(list: &PageList, y: CellCountInt) -> u32 {
@@ -12068,6 +12237,220 @@ mod tests {
         assert!(list.pages[0].page.get_row(first_rows as usize - 2).dirty());
         assert!(list.pages[0].page.get_row(first_rows as usize - 1).dirty());
         assert!(list.pages[1].page.get_row(0).dirty());
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_insert_active_lines_full_width_single_page_shifts_rows_down() {
+        let mut list = PageList::init(5, 4, None).unwrap();
+        for y in 0..4 {
+            set_active_row_marker(&mut list, y, u32::from(b'A') + y as u32);
+        }
+
+        list.insert_active_lines(1, 3, 0, 4, 1, true).unwrap();
+
+        assert_eq!(active_row_marker(&list, 0), u32::from(b'A'));
+        assert_eq!(active_row_marker(&list, 1), 0);
+        assert_eq!(active_row_marker(&list, 2), u32::from(b'B'));
+        assert_eq!(active_row_marker(&list, 3), u32::from(b'C'));
+        for x in 0..5 {
+            assert_eq!(active_cell_at(&list, x, 1), Cell::default());
+        }
+        assert!(list.is_dirty(point::Point::active(Coordinate::new(0, 1))));
+        assert!(list.is_dirty(point::Point::active(Coordinate::new(0, 2))));
+        assert!(list.is_dirty(point::Point::active(Coordinate::new(0, 3))));
+        assert!(!list.is_dirty(point::Point::active(Coordinate::new(0, 0))));
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_insert_active_lines_left_right_margin_preserves_outside_cells() {
+        let mut list = PageList::init(6, 3, None).unwrap();
+        for (y, text) in ["ABC123", "DEF456", "GHI789"].iter().enumerate() {
+            for (x, ch) in text.chars().enumerate() {
+                set_active_cell_at(
+                    &mut list,
+                    x.try_into().unwrap(),
+                    y.try_into().unwrap(),
+                    Cell::init(ch as u32),
+                );
+            }
+        }
+
+        list.insert_active_lines(1, 2, 1, 3, 1, false).unwrap();
+
+        let row_text = |list: &PageList, y| {
+            (0..6)
+                .map(|x| {
+                    let cp = active_cell_at(list, x, y).codepoint();
+                    if cp == 0 {
+                        ' '
+                    } else {
+                        char::from_u32(cp).unwrap()
+                    }
+                })
+                .collect::<String>()
+        };
+        assert_eq!(row_text(&list, 0), "ABC123");
+        assert_eq!(row_text(&list, 1), "D   56");
+        assert_eq!(row_text(&list, 2), "GEF489");
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_insert_active_lines_moves_managed_and_protected_metadata() {
+        let mut list = PageList::init(5, 3, None).unwrap();
+        let pin = list
+            .pin(point::Point::active(Coordinate::new(0, 1)))
+            .unwrap();
+        let index = list.node_index(pin.node).unwrap();
+        let page = &mut list.pages[index].page;
+        let style_id = page
+            .add_style(style::Style {
+                flags: style::Flags {
+                    bold: true,
+                    ..style::Flags::default()
+                },
+                ..style::Style::default()
+            })
+            .unwrap();
+        let link_id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Explicit(b"insert-lines"),
+                uri: b"https://example.com/insert-lines",
+            })
+            .unwrap();
+        {
+            let rac = page.get_row_and_cell_mut(pin.x as usize, pin.y as usize);
+            rac.row.set_styled(true);
+            *rac.cell = Cell::init('M' as u32);
+            rac.cell.set_style_id(style_id);
+            rac.cell.set_protected(true);
+        }
+        page.append_grapheme_at(pin.x as usize, pin.y as usize, 0x0301)
+            .unwrap();
+        page.set_hyperlink(pin.x as usize, pin.y as usize, link_id)
+            .unwrap();
+
+        list.insert_active_lines(1, 2, 0, 4, 1, true).unwrap();
+
+        let dst_pin = list
+            .pin(point::Point::active(Coordinate::new(0, 2)))
+            .unwrap();
+        let dst_node = list.node_for_pin(&dst_pin).unwrap();
+        let dst_page = &dst_node.page;
+        let dst_cell = page_cell(dst_page, dst_pin.x as usize, dst_pin.y as usize);
+        assert_eq!(dst_cell.codepoint(), 'M' as u32);
+        assert_eq!(dst_cell.style_id(), style_id);
+        assert!(dst_cell.protected());
+        assert_eq!(
+            dst_page.lookup_grapheme_at(dst_pin.x as usize, dst_pin.y as usize),
+            Some(vec![0x0301])
+        );
+        assert_eq!(
+            dst_page.lookup_hyperlink_at(dst_pin.x as usize, dst_pin.y as usize),
+            Some(link_id)
+        );
+        assert_eq!(active_cell_at(&list, 0, 1), Cell::default());
+        assert_eq!(dst_page.style_ref_count(style_id), 1);
+        assert_eq!(dst_page.grapheme_count(), 1);
+        assert_eq!(dst_page.hyperlink_ref_count(link_id), 1);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_insert_active_lines_moves_managed_metadata_across_pages() {
+        let capacity_rows = initial_capacity(80).rows();
+        assert!(capacity_rows > 2);
+        let mut list = PageList::init(80, capacity_rows, None).unwrap();
+        list.grow_rows(2).unwrap();
+
+        let source_y = capacity_rows - 3;
+        let target_y = capacity_rows - 2;
+        let pin = list
+            .pin(point::Point::active(Coordinate::new(0, source_y as u32)))
+            .unwrap();
+        let source_index = list.node_index(pin.node).unwrap();
+        let page = &mut list.pages[source_index].page;
+        let style_id = page
+            .add_style(style::Style {
+                flags: style::Flags {
+                    italic: true,
+                    ..style::Flags::default()
+                },
+                ..style::Style::default()
+            })
+            .unwrap();
+        let link_id = page
+            .insert_hyperlink(hyperlink::Hyperlink {
+                id: hyperlink::HyperlinkId::Explicit(b"cross-page-insert"),
+                uri: b"https://example.com/cross-page-insert",
+            })
+            .unwrap();
+        {
+            let rac = page.get_row_and_cell_mut(pin.x as usize, pin.y as usize);
+            rac.row.set_styled(true);
+            *rac.cell = Cell::init('X' as u32);
+            rac.cell.set_style_id(style_id);
+        }
+        page.append_grapheme_at(pin.x as usize, pin.y as usize, 0x0301)
+            .unwrap();
+        page.set_hyperlink(pin.x as usize, pin.y as usize, link_id)
+            .unwrap();
+
+        list.insert_active_lines(source_y as u32, target_y, 0, 79, 1, true)
+            .unwrap();
+
+        let dst_pin = list
+            .pin(point::Point::active(Coordinate::new(0, target_y as u32)))
+            .unwrap();
+        let dst_index = list.node_index(dst_pin.node).unwrap();
+        assert_ne!(source_index, dst_index);
+        let dst_page = &list.pages[dst_index].page;
+        let dst_cell = page_cell(dst_page, dst_pin.x as usize, dst_pin.y as usize);
+        assert_eq!(dst_cell.codepoint(), 'X' as u32);
+        assert_eq!(dst_cell.style_id(), style_id);
+        assert_eq!(
+            dst_page.lookup_grapheme_at(dst_pin.x as usize, dst_pin.y as usize),
+            Some(vec![0x0301])
+        );
+        assert_eq!(
+            dst_page.lookup_hyperlink_at(dst_pin.x as usize, dst_pin.y as usize),
+            Some(link_id)
+        );
+        assert_eq!(active_cell_at(&list, 0, source_y), Cell::default());
+        assert_eq!(dst_page.style_ref_count(style_id), 1);
+        assert_eq!(dst_page.grapheme_count(), 1);
+        assert_eq!(dst_page.hyperlink_ref_count(link_id), 1);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_insert_active_lines_preserves_scrollback_count() {
+        let mut list = PageList::init(5, 3, Some(10)).unwrap();
+        list.grow_rows(3).unwrap();
+        let before = list.scrollback_rows_for_tests();
+
+        list.insert_active_lines(0, 2, 0, 4, 1, true).unwrap();
+
+        assert_eq!(list.scrollback_rows_for_tests(), before);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn page_list_insert_active_lines_preserves_scrollback_content() {
+        let mut list = PageList::init(5, 3, Some(10)).unwrap();
+        list.grow_rows(2).unwrap();
+        set_history_cell_at(&mut list, 0, 0, Cell::init('H' as u32));
+        set_history_cell_at(&mut list, 0, 1, Cell::init('I' as u32));
+        let before = [history_cell_at(&list, 0, 0), history_cell_at(&list, 0, 1)];
+
+        list.insert_active_lines(0, 2, 0, 4, 1, true).unwrap();
+
+        assert_eq!(
+            [history_cell_at(&list, 0, 0), history_cell_at(&list, 0, 1)],
+            before
+        );
         list.verify_integrity().unwrap();
     }
 
