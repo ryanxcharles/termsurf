@@ -17,7 +17,8 @@ This experiment ports only the default active full-width behavior:
 - dispatch `0x09` as a private `HorizontalTab` action;
 - move to the next tabstop strictly after the current cursor column;
 - clamp at the active right edge (`cols - 1`) when no later tabstop exists;
-- clear pending wrap before moving;
+- preserve pending wrap, matching Ghostty's lower-level `Screen.cursorRight()`
+  path;
 - do not modify cells;
 - do not dirty rows just because the cursor moved.
 
@@ -53,11 +54,11 @@ wide characters, and public API/ABI remain separate experiments.
    - Add a private `Screen` helper that receives the active column count and the
      current `Tabstops`.
    - The helper:
-     - clears `pending_wrap`;
      - searches columns `(cursor.x + 1)..cols` for the first tabstop;
      - sets `cursor.x` to that tabstop if one exists;
      - otherwise sets `cursor.x` to `cols - 1`;
      - leaves `cursor.y` unchanged;
+     - preserves `pending_wrap`;
      - does not dirty rows;
      - does not modify cells.
    - This deliberately mirrors Ghostty's "move first, then test tabstop"
@@ -81,9 +82,8 @@ wide characters, and public API/ABI remain separate experiments.
        terminal;
      - starting from column 8 moves to the next tabstop at column 16;
      - `HT` at the right edge stays at the right edge;
-     - `HT` clears pending wrap without soft-wrapping first, so `ABCDE\tX` on a
-       5-column terminal overwrites the last cell instead of moving to the next
-       row;
+     - `HT` at the right edge preserves pending wrap, so `ABCDE\tX` on a
+       5-column terminal wraps before writing `X`;
      - `HT` does not dirty rows by itself, verified by clearing dirty state
        before issuing `HT`;
      - split-feed `HT` works when printable bytes and `HT` arrive in separate
@@ -145,7 +145,7 @@ The experiment passes if:
   hard-coding default 8-column stops;
 - repeated `HT` advances to the next tabstop and clamps at the right edge;
 - starting on a tabstop moves to the following tabstop;
-- `HT` clears pending wrap without soft-wrapping first;
+- `HT` preserves pending wrap at the right edge;
 - `HT` does not dirty rows or modify cells by itself;
 - split-feed `HT` behaves the same as same-slice `HT`;
 - no margins, origin mode, `CBT`, tab-clear/set CSI behavior, NEL, RI, C1
@@ -166,7 +166,7 @@ The experiment fails if:
 - `HT` remains silently ignored;
 - `HT` lands on the current tabstop instead of the next tabstop;
 - `HT` fails to clamp at the right edge;
-- `HT` soft-wraps pending wrap before clearing it;
+- `HT` clears pending wrap at the right edge instead of preserving it;
 - `HT` dirties rows or modifies cells without a following printable write;
 - margin/origin/CSI tab behavior is added without a separate reviewed
   experiment;
@@ -193,3 +193,111 @@ Clean design re-review artifacts:
 - Result: `logs/codex-review/20260601-015043-321806-last-message.md`
 
 Codex found no remaining blockers and approved implementation.
+
+## Result
+
+**Result:** Pass.
+
+Implemented basic default horizontal-tab behavior for the active full-width
+stream path.
+
+Stream action changes:
+
+- `Action::HorizontalTab` was added as a private stream action.
+- Ground-state `0x09` now dispatches `HorizontalTab`.
+- Other C0 controls outside `BS`, `HT`, `LF`, and `CR` remain ignored.
+- Pending invalid UTF-8 dispatches `U+FFFD` before an interrupting `HT`.
+
+Terminal and tabstop wiring:
+
+- `TerminalStreamHandler` now borrows immutable `Terminal.tabstops` alongside
+  its mutable active-screen borrow.
+- The handler does not clone tabstops and does not move ownership out of
+  `Terminal`.
+- No public API or ABI changed.
+
+Active horizontal-tab behavior:
+
+- It searches for the next tabstop strictly after the current cursor column.
+- It moves to that next tabstop when one exists.
+- It clamps to `cols - 1` when no later tabstop exists.
+- Starting on a tabstop moves to the following tabstop.
+- It leaves `cursor.y` unchanged.
+- It preserves pending wrap, including at the right edge.
+- It does not modify cells.
+- It does not dirty rows by itself.
+
+Tested behavior:
+
+- `1\tA` on a 20-column terminal writes `A` at column 8.
+- Custom-tabstop coverage clears default tabstops, sets only column 3, and
+  verifies `HT` moves there.
+- All-tabstops-cleared coverage verifies `HT` clamps to the right edge.
+- Repeated `HT` moves to columns 8, 16, then 19 on a 20-column terminal.
+- `HT` at the right edge stays there.
+- `ABCDE\tX` on a 5-column terminal formats as `ABCDE\nX`, proving `HT`
+  preserves pending wrap at the right edge before the next printable byte wraps.
+- Dirty-state testing clears prior dirt before issuing `HT` and verifies rows
+  remain clean.
+- Split-feed horizontal tab behaves the same as same-slice horizontal tab.
+
+This experiment did not implement margins, origin mode, `CBT`, tab-clear/set CSI
+behavior, NEL, RI, C1 controls, linefeed-mode changes, scroll regions,
+no-scrollback rotation, styles, hyperlinks, wide/Unicode handling, public API,
+or public ABI.
+
+Verification run:
+
+```text
+cargo fmt
+cargo test -p roastty stream
+cargo test -p roastty terminal_formatter
+cargo test -p roastty terminal::terminal
+cargo test -p roastty screen_formatter
+cargo test -p roastty page_string
+cargo test -p roastty terminal::page_list
+cargo test -p roastty
+```
+
+Results:
+
+- `cargo fmt` passed.
+- `cargo test -p roastty stream` passed 118 tests.
+- `cargo test -p roastty terminal_formatter` passed 67 tests.
+- `cargo test -p roastty terminal::terminal` passed 107 tests.
+- `cargo test -p roastty screen_formatter` passed.
+- `cargo test -p roastty page_string` passed.
+- `cargo test -p roastty terminal::page_list` passed.
+- Full `cargo test -p roastty` passed 1019 unit tests, the ABI harness, and
+  doc-tests.
+
+Codex design review passed after the custom-tabstop verification finding was
+fixed.
+
+Initial result-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-015411-636447-prompt.md`
+- Result: `logs/codex-review/20260601-015411-636447-last-message.md`
+
+Codex found one real upstream-fidelity bug: the first implementation cleared
+pending wrap for `HT`, but Ghostty's `horizontalTab()` uses the lower-level
+screen cursor movement path and preserves pending wrap at the right edge. The
+code, tests, and result language were corrected to preserve pending wrap.
+
+Clean result re-review artifacts:
+
+- Prompt: `logs/codex-review/20260601-015624-288570-prompt.md`
+- Result: `logs/codex-review/20260601-015624-288570-last-message.md`
+
+Codex found no remaining blockers and approved the result for commit.
+
+## Conclusion
+
+Roastty now handles basic horizontal tab in the same narrow active full-width
+control path as LF, CR, and BS. The implementation uses the existing
+`Terminal.tabstops` state, not hard-coded default stops, and preserves the
+upstream "move first, then test tabstop" behavior.
+
+The next execute-action experiment should continue through the remaining simple
+C0 actions or the next lowest-risk cursor action while keeping margins, origin
+mode, CSI tab editing, and reverse-direction tabbing separate.

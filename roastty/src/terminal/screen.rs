@@ -11,6 +11,7 @@ use super::point;
 use super::selection;
 use super::size::CellCountInt;
 use super::style;
+use super::tabstops;
 
 #[derive(Debug)]
 pub(super) struct Screen {
@@ -191,6 +192,21 @@ impl Screen {
     pub(super) fn backspace_basic(&mut self) {
         self.cursor.pending_wrap = false;
         self.cursor.x = self.cursor.x.saturating_sub(1);
+    }
+
+    pub(super) fn horizontal_tab_basic(
+        &mut self,
+        cols: CellCountInt,
+        tabstops: &tabstops::Tabstops,
+    ) {
+        let right_edge = cols.saturating_sub(1);
+        let start = usize::from(self.cursor.x) + 1;
+        let end = usize::from(cols);
+        let next_tabstop = (start..end)
+            .find(|&col| tabstops.get(col))
+            .map(|col| col as CellCountInt)
+            .unwrap_or(right_edge);
+        self.cursor.x = next_tabstop;
     }
 
     #[cfg(test)]

@@ -6,6 +6,7 @@ pub(super) enum Action {
     LineFeed,
     CarriageReturn,
     Backspace,
+    HorizontalTab,
 }
 
 pub(super) trait Handler {
@@ -90,9 +91,10 @@ impl Stream {
                 self.escape = EscapeState::Escape;
             }
             0x08 => handler.vt(Action::Backspace)?,
+            b'\t' => handler.vt(Action::HorizontalTab)?,
             b'\n' => handler.vt(Action::LineFeed)?,
             b'\r' => handler.vt(Action::CarriageReturn)?,
-            0x00..=0x07 | 0x09 | 0x0b..=0x0c | 0x0e..=0x1a | 0x1c..=0x1f | 0x7f => {}
+            0x00..=0x07 | 0x0b..=0x0c | 0x0e..=0x1a | 0x1c..=0x1f | 0x7f => {}
             _ => self.next_utf8(byte, handler)?,
         }
         Ok(())
@@ -236,7 +238,10 @@ mod tests {
             .iter()
             .filter_map(|action| match action {
                 Action::Print { cp } => Some(*cp),
-                Action::LineFeed | Action::CarriageReturn | Action::Backspace => None,
+                Action::LineFeed
+                | Action::CarriageReturn
+                | Action::Backspace
+                | Action::HorizontalTab => None,
             })
             .collect()
     }
@@ -379,11 +384,28 @@ mod tests {
     }
 
     #[test]
+    fn stream_horizontal_tab_dispatches_control_action() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"A\tB");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print { cp: 'A' },
+                Action::HorizontalTab,
+                Action::Print { cp: 'B' },
+            ]
+        );
+    }
+
+    #[test]
     fn stream_other_c0_controls_do_not_dispatch_print_actions() {
         let mut stream = Stream::init();
         let mut handler = RecordingHandler::default();
 
-        next_slice(&mut stream, &mut handler, b"A\t\x0bB");
+        next_slice(&mut stream, &mut handler, b"A\x0bB");
 
         assert_eq!(print_chars(&handler), vec!['A', 'B']);
         assert_eq!(
@@ -457,6 +479,25 @@ mod tests {
                     cp: char::REPLACEMENT_CHARACTER,
                 },
                 Action::Backspace,
+                Action::Print { cp: 'A' },
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_pending_utf8_replacement_dispatches_before_horizontal_tab() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"\xf0\x9f\tA");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print {
+                    cp: char::REPLACEMENT_CHARACTER,
+                },
+                Action::HorizontalTab,
                 Action::Print { cp: 'A' },
             ]
         );

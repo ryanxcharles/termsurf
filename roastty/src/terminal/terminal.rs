@@ -71,6 +71,7 @@ pub(super) enum TerminalStreamError {
 struct TerminalStreamHandler<'a> {
     screen: &'a mut Screen,
     size: TerminalSize,
+    tabstops: &'a tabstops::Tabstops,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -126,12 +127,14 @@ impl Terminal {
         let Terminal {
             size,
             screens,
+            tabstops,
             stream,
             ..
         } = self;
         let mut handler = TerminalStreamHandler {
             screen: &mut screens.active,
             size: *size,
+            tabstops,
         };
         stream.next_slice(input, &mut handler)
     }
@@ -283,6 +286,11 @@ impl Handler for TerminalStreamHandler<'_> {
             }
             Action::Backspace => {
                 self.screen.backspace_basic();
+                Ok(())
+            }
+            Action::HorizontalTab => {
+                self.screen
+                    .horizontal_tab_basic(self.size.cols, self.tabstops);
                 Ok(())
             }
         }
@@ -879,7 +887,7 @@ mod tests {
     fn terminal_stream_controls_and_unsupported_escapes_do_not_write_cells() {
         let mut terminal = Terminal::init(10, 2, None).unwrap();
 
-        terminal.next_slice(b"A\t\x0bB\x1bcC\x1b[DD").unwrap();
+        terminal.next_slice(b"A\x0bB\x1bcC\x1b[DD").unwrap();
 
         assert_eq!(
             formatter(&terminal, PageOutputFormat::Plain).format(),
@@ -1001,6 +1009,123 @@ mod tests {
 
         assert_eq!(plain_with_unwrap(&terminal, false), "helly");
         assert_eq!(terminal.cursor_position_for_tests(), (5, 0));
+    }
+
+    #[test]
+    fn terminal_stream_horizontal_tab_moves_to_next_default_tabstop() {
+        let mut terminal = Terminal::init(20, 2, None).unwrap();
+
+        terminal.next_slice(b"1\tA").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "1       A");
+        assert_eq!(terminal.cursor_position_for_tests(), (9, 0));
+    }
+
+    #[test]
+    fn terminal_stream_horizontal_tab_uses_custom_tabstops() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+        terminal.clear_tabstops_for_tests();
+        terminal.set_tabstop_for_tests(3);
+
+        terminal.next_slice(b"1\tA").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "1  A");
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+    }
+
+    #[test]
+    fn terminal_stream_horizontal_tab_without_later_tabstop_clamps_to_right_edge() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+        terminal.clear_tabstops_for_tests();
+
+        terminal.next_slice(b"1\tA").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "1   A");
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+        assert!(terminal.cursor_pending_wrap_for_tests());
+    }
+
+    #[test]
+    fn terminal_stream_repeated_horizontal_tabs_advance_and_clamp() {
+        let mut terminal = Terminal::init(20, 2, None).unwrap();
+
+        terminal.next_slice(b"1\t").unwrap();
+        assert_eq!(terminal.cursor_position_for_tests(), (8, 0));
+
+        terminal.next_slice(b"\t").unwrap();
+        assert_eq!(terminal.cursor_position_for_tests(), (16, 0));
+
+        terminal.next_slice(b"\t").unwrap();
+        assert_eq!(terminal.cursor_position_for_tests(), (19, 0));
+
+        terminal.next_slice(b"\t").unwrap();
+        assert_eq!(terminal.cursor_position_for_tests(), (19, 0));
+    }
+
+    #[test]
+    fn terminal_stream_horizontal_tab_starting_on_tabstop_moves_to_next_tabstop() {
+        let mut terminal = Terminal::init(20, 2, None).unwrap();
+
+        terminal.next_slice(b"12345678\tA").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "12345678        A");
+        assert_eq!(terminal.cursor_position_for_tests(), (17, 0));
+    }
+
+    #[test]
+    fn terminal_stream_horizontal_tab_at_right_edge_stays_at_right_edge() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"ABCD\t").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABCD");
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+        assert!(!terminal.cursor_pending_wrap_for_tests());
+    }
+
+    #[test]
+    fn terminal_stream_horizontal_tab_preserves_pending_wrap_at_right_edge() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal.next_slice(b"ABCDE").unwrap();
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+        assert!(terminal.cursor_pending_wrap_for_tests());
+        terminal.next_slice(b"\t").unwrap();
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 0));
+        assert!(terminal.cursor_pending_wrap_for_tests());
+        terminal.next_slice(b"X").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABCDE\nX");
+        assert_eq!(terminal.cursor_position_for_tests(), (1, 1));
+        assert!(!terminal.cursor_pending_wrap_for_tests());
+        assert!(terminal.row_wrap_for_tests(0));
+        assert!(terminal.row_wrap_continuation_for_tests(1));
+    }
+
+    #[test]
+    fn terminal_stream_horizontal_tab_does_not_dirty_rows_or_modify_cells() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"abc").unwrap();
+        terminal.clear_dirty_for_tests();
+        terminal.next_slice(b"\t").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+        assert_eq!(terminal.cursor_position_for_tests(), (8, 0));
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(9, 0));
+        assert!(!terminal.is_dirty_for_tests(0, 1));
+    }
+
+    #[test]
+    fn terminal_stream_split_feed_horizontal_tab_writes_at_next_tabstop() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"hello").unwrap();
+        terminal.next_slice(b"\tX").unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "hello   X");
+        assert_eq!(terminal.cursor_position_for_tests(), (9, 0));
     }
 
     #[test]
