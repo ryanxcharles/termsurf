@@ -423,6 +423,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 147: Port DCS and APC Framing](147-port-dcs-apc-framing.md) —
   **Pass**
+- [Experiment 148: Port DCS Command Handling](148-port-dcs-command-handling.md)
+  — **Designed**
 
 ## Non-Goals
 
