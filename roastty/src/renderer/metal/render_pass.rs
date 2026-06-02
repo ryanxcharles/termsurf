@@ -434,13 +434,31 @@ mod tests {
         grid_pos: [u16; 2],
         color: [u8; 4],
     ) -> CellTextVertex {
+        cell_text_vertex_with_atlas(
+            glyph_pos,
+            glyph_size,
+            bearings,
+            grid_pos,
+            color,
+            CellTextAtlas::Grayscale,
+        )
+    }
+
+    fn cell_text_vertex_with_atlas(
+        glyph_pos: [u32; 2],
+        glyph_size: [u32; 2],
+        bearings: [i16; 2],
+        grid_pos: [u16; 2],
+        color: [u8; 4],
+        atlas: CellTextAtlas,
+    ) -> CellTextVertex {
         CellTextVertex {
             glyph_pos,
             glyph_size,
             bearings,
             grid_pos,
             color,
-            atlas: CellTextAtlas::Grayscale,
+            atlas,
             flags: CellTextFlags::new(false, false),
             _padding: [0; 2],
         }
@@ -854,6 +872,140 @@ mod tests {
                 transparent,
             ],
         );
+    }
+
+    #[test]
+    fn cell_text_color_render_pass_draws_color_atlas_pixels() {
+        let device = metal_device();
+        let queue = device
+            .newCommandQueue()
+            .expect("command queue should be created");
+        let pipelines = MetalStandardPipelines::new(&device, MetalPixelFormat::Bgra8Unorm)
+            .expect("standard pipelines should compile");
+        let uniforms = uniform_buffer(
+            &device,
+            cell_text_uniforms([2, 2], [1, 1], [2.0, 2.0], [0, 0, 0, 0]),
+        );
+        let cells = cell_bg_buffer(&device, &[CellBg([0, 0, 0, 0])]);
+        let vertices = cell_text_vertex_buffer(
+            &device,
+            cell_text_vertex_with_atlas(
+                [0, 0],
+                [2, 2],
+                [0, 2],
+                [0, 0],
+                [255, 0, 255, 255],
+                CellTextAtlas::Color,
+            ),
+        );
+        let grayscale_atlas = grayscale_atlas_texture(&device, 1, 1, &[0]);
+        let color_atlas = image_texture(
+            &device,
+            2,
+            2,
+            &[
+                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+            ],
+        );
+        let target = render_target(&device, 2, 2);
+        let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
+        let pass = frame
+            .render_pass(&[MetalRenderPassAttachment {
+                texture: &target,
+                clear_color: Some(MetalClearColor {
+                    red: 0.0,
+                    green: 0.0,
+                    blue: 0.0,
+                    alpha: 0.0,
+                }),
+            }])
+            .expect("render pass should begin");
+
+        pass.step(MetalRenderPassStep {
+            pipeline: &pipelines.cell_text,
+            buffers: &[Some(vertices.buffer()), Some(cells.buffer())],
+            textures: &[Some(&grayscale_atlas), Some(&color_atlas)],
+            uniforms: Some(uniforms.buffer()),
+            draw: MetalDraw {
+                primitive_type: MetalPrimitiveType::TriangleStrip,
+                vertex_count: 4,
+                instance_count: 1,
+            },
+        });
+        pass.complete();
+        frame
+            .commit_and_wait()
+            .expect("command frame should complete");
+
+        assert_pixel_grid(
+            &target.read_bytes(),
+            2,
+            &[
+                [0, 0, 255, 255],
+                [0, 255, 0, 255],
+                [255, 0, 0, 255],
+                [255, 255, 255, 255],
+            ],
+        );
+    }
+
+    #[test]
+    fn cell_text_color_uses_glyph_pos_and_ignores_grayscale_mask() {
+        let device = metal_device();
+        let queue = device
+            .newCommandQueue()
+            .expect("command queue should be created");
+        let pipelines = MetalStandardPipelines::new(&device, MetalPixelFormat::Bgra8Unorm)
+            .expect("standard pipelines should compile");
+        let uniforms = uniform_buffer(
+            &device,
+            cell_text_uniforms([1, 1], [1, 1], [1.0, 1.0], [0, 0, 0, 0]),
+        );
+        let cells = cell_bg_buffer(&device, &[CellBg([0, 0, 0, 0])]);
+        let vertices = cell_text_vertex_buffer(
+            &device,
+            cell_text_vertex_with_atlas(
+                [1, 0],
+                [1, 1],
+                [0, 1],
+                [0, 0],
+                [255, 0, 0, 255],
+                CellTextAtlas::Color,
+            ),
+        );
+        let grayscale_atlas = grayscale_atlas_texture(&device, 1, 1, &[0]);
+        let color_atlas = image_texture(&device, 2, 1, &[255, 0, 0, 255, 0, 0, 255, 255]);
+        let target = render_target(&device, 1, 1);
+        let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
+        let pass = frame
+            .render_pass(&[MetalRenderPassAttachment {
+                texture: &target,
+                clear_color: Some(MetalClearColor {
+                    red: 0.0,
+                    green: 0.0,
+                    blue: 0.0,
+                    alpha: 0.0,
+                }),
+            }])
+            .expect("render pass should begin");
+
+        pass.step(MetalRenderPassStep {
+            pipeline: &pipelines.cell_text,
+            buffers: &[Some(vertices.buffer()), Some(cells.buffer())],
+            textures: &[Some(&grayscale_atlas), Some(&color_atlas)],
+            uniforms: Some(uniforms.buffer()),
+            draw: MetalDraw {
+                primitive_type: MetalPrimitiveType::TriangleStrip,
+                vertex_count: 4,
+                instance_count: 1,
+            },
+        });
+        pass.complete();
+        frame
+            .commit_and_wait()
+            .expect("command frame should complete");
+
+        assert_pixel_grid(&target.read_bytes(), 1, &[[255, 0, 0, 255]]);
     }
 
     #[test]

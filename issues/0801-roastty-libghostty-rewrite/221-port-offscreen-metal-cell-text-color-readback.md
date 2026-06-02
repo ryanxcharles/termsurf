@@ -184,8 +184,66 @@ All public names must use Roastty naming.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Implemented production `cell_text` color-atlas read-back tests in
+`roastty/src/renderer/metal/render_pass.rs`.
+
+The implementation added a small test helper,
+`cell_text_vertex_with_atlas(...)`, so tests can select `CellTextAtlas::Color`
+while preserving the grayscale helper from Experiment 220.
+
+The new tests prove:
+
+- a 2x2 opaque endpoint-only RGBA color atlas renders exact BGRA output through
+  `pipelines.cell_text`;
+- color atlas sampling uses `textureColor` at texture index `1`;
+- `glyph_pos = [1, 0]` selects the second color-atlas texel;
+- a zero grayscale atlas mask does not affect the color-atlas branch;
+- the color-atlas branch ignores the per-vertex text color.
+
+The render-pass step binds text vertex data through `buffers[0]`, uniforms
+through Metal buffer `1`, the `CellBg` grid through `buffers[1]` so the existing
+mapping sends it to Metal buffer `2`, the dummy grayscale atlas through
+`textures[0]`, and the color atlas through `textures[1]`.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/renderer/metal/render_pass.rs
+cargo test -p roastty renderer::metal::render_pass
+cargo test -p roastty renderer::metal::shaders
+cargo test -p roastty renderer::metal::pipeline
+cargo test -p roastty renderer::shader
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/renderer/metal; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Observed results:
+
+- `renderer::metal::render_pass`: 19 passed.
+- `renderer::metal::shaders`: 8 passed.
+- `renderer::metal::pipeline`: 17 passed.
+- `renderer::shader`: 9 passed.
+- Full `roastty`: 2203 unit tests passed, plus the C ABI harness passed.
+- Both no-`ghostty` gates passed.
+- `git diff --check` passed.
+
+Codex reviewed the completed implementation and found no blocking issues. It
+confirmed the resource binding path, the load-bearing color atlas tests, the
+grayscale-mask independence proof, and the deterministic endpoint-only color
+setup.
 
 ## Conclusion
 
-Pending.
+Roastty now has automated production-shader read-back coverage for both
+`cell_text` atlas branches. Experiment 220 proved grayscale glyph masks;
+Experiment 221 proved color atlas sampling at texture index `1`, glyph-position
+selection, grayscale-mask independence, and vertex-color independence.
+
+This is still renderer proof work. It intentionally leaves font loading, glyph
+rasterization, real atlas allocation, color emoji selection, partial-alpha color
+glyphs, min-contrast behavior, cursor glyph behavior, presentation, and public C
+ABI integration for later experiments.
