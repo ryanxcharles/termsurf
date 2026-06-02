@@ -204,3 +204,92 @@ It raised three real findings, all fixed in the design above before this commit:
 3. **(Low)** the `f32`→`u16` conversion in `update` differs from Zig safe-mode
    on out-of-range floats (Rust saturates) — documented this as an accepted
    divergence in the faithfulness notes.
+
+## Result
+
+**Result:** Pass
+
+Added `roastty/src/renderer/size.rs` (module-level `#![allow(dead_code)]`,
+"upstream `renderer/size.zig`" attribution) and wired `pub(crate) mod size;`
+into `roastty/src/renderer/mod.rs`.
+
+Implemented value types and methods with exact upstream arithmetic:
+
+- `CellSize { width, height }`;
+- `ScreenSize { width, height }` with `sub_padding` (saturating),
+  `blank_padding` (saturating leftover), and `equals`;
+- `GridSize { columns, rows }` over `Unit = u16` (mirroring
+  `terminal::size::CellCountInt`), with `init`, `update` (`f32` divide →
+  truncate → `max(1)`), and `equals`;
+- `Padding { top, bottom, right, left }` with `balanced` (`f32` → `.floor()` →
+  `max(0.0)`), `add`, and `eql`.
+
+`PartialEq`/`Eq` are derived; the named `equals`/`eql` methods delegate to `==`
+to preserve the upstream call surface for later slices.
+
+Tests added (12): `padding_balanced_on_zero`, `padding_balanced_nonzero`,
+`padding_balanced_floor_odd_leftover`, `grid_size_update_exact`,
+`grid_size_update_rounding`, `grid_size_update_min_one`,
+`screen_sub_padding_saturates`, `screen_blank_padding`,
+`screen_blank_padding_saturates`, `padding_add`, `padding_eql`,
+`size_equals_helpers`. This includes the three directly-ported upstream tests
+plus the two extra cases Codex requested at design time (odd-leftover floor
+proof and saturating blank padding).
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty renderer::size
+cargo test -p roastty renderer
+cargo test -p roastty
+```
+
+Observed:
+
+- `renderer::size`: 12 passed.
+- Full `roastty`: 2227 unit tests passed (2215 prior + 12 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/renderer/size.rs` and for
+  `roastty/src/lib.rs`, `roastty/include/roastty.h`,
+  `roastty/tests/abi_harness.c`.
+- `git diff --check`: clean.
+
+No `Size`/`Coordinate`/`PaddingBalance` surface, and no C ABI, header, or ABI
+inventory changes.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** ("nothing
+should change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-071307-390291-prompt.md`
+- Result: `logs/codex-review/20260602-071307-390291-last-message.md`
+
+Codex confirmed, against upstream `renderer/size.zig`, that every method's
+arithmetic is faithful (saturating subtraction in `sub_padding`/`blank_padding`,
+`f32`/truncate/`max(1)` in `update`, `f32`/`floor`/`max(0)` in `balanced`,
+`blank_padding` leftover on `right`/`bottom` only), that the `u16`→`u32` and
+`f32` casts are correct in the realistic renderer domain, that the 12 tests are
+solid (including the floor-proof and saturation-proof cases), and that the
+`#![allow(dead_code)]` plus derived `PartialEq` with named `equals`/`eql`
+wrappers is a clean port of the upstream surface.
+
+## Conclusion
+
+Experiment 224 succeeds. Roastty's `renderer::size` module now has the core
+sizing value types and arithmetic — `CellSize`, `ScreenSize`, `GridSize`,
+`Padding` — that every later renderer geometry slice depends on, with faithful
+saturating/float semantics and 12 passing tests. Both Codex gates passed (three
+design findings fixed before implementation, zero result findings).
+
+The next slice (Experiment 225) is the rest of `renderer/size.zig`: the `Size`
+aggregate (`grid()`, `terminal()`), the `PaddingBalance` enum with
+`Size.balancePadding`, and the `Coordinate` union with `convert` (surface ↔
+terminal ↔ grid coordinate conversion). Those build directly on the value types
+landed here, and the upstream tests deferred from this experiment
+(`Size.balancePadding` ×2 and `coordinate conversion`) port there.

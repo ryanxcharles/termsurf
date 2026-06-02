@@ -671,7 +671,7 @@ are past the correctness-critical foundation.
 - [Experiment 223: Port Renderer Cursor Style](223-port-renderer-cursor-style.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 224: Port Renderer Sizing Value Types](224-port-renderer-sizing-value-types.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
