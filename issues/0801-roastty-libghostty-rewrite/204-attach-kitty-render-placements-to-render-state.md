@@ -192,8 +192,57 @@ All public names must use Roastty naming.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Implemented the render-state Kitty placement binding as designed.
+
+Changes made:
+
+- added `ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR = 18` without
+  renumbering existing render-state selectors;
+- added `kitty_render_placements` to the update-time `RenderStateScalar`
+  snapshot;
+- populated that field through the existing Experiment 203 Kitty render
+  placement snapshot builder, so the standalone iterator and render-state path
+  share the same geometry and ordering logic;
+- taught `roastty_render_state_get` to bind a created
+  `roastty_kitty_graphics_render_placement_iterator_t` to a cloned render-state
+  Kitty placement snapshot;
+- preserved the iterator's current layer filter while resetting selection on
+  bind;
+- updated the C ABI harness for the new enum value and empty-snapshot binding
+  path;
+- added Rust tests for pinned placements, virtual placements, layer filter
+  broadening, snapshot lifetime after terminal/render-state mutation and free,
+  standalone-vs-render-state equivalence, and invalid binding cases.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/lib.rs
+cargo test -p roastty kitty_graphics_render_placement_c_abi
+cargo test -p roastty render_state
+cargo test -p roastty --test abi_harness
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Codex result review passed with no blocking findings. It confirmed that the new
+selector is appended safely, render-state binding clones the placement snapshot
+into the already-created iterator, the iterator lifetime is covered, layer
+filter behavior is preserved, and the experiment satisfies the design.
 
 ## Conclusion
 
-Pending.
+Roastty now exposes Kitty image render placements through the same
+`roastty_render_state_t` frame snapshot used for rows, cells, colors, and cursor
+state. Future renderer/app work can consume one render-state boundary instead of
+querying terminal rows and Kitty placements separately.
+
+The standalone terminal-scoped Kitty render placement iterator remains in place
+for focused tests and direct terminal inspection, but both paths now share the
+same snapshot builder. The next experiment can move further toward renderer
+consumption: either image renderer state/cache prep modeled on upstream
+`renderer/image.zig`, or another missing render-state surface if inspection
+shows one should precede image upload/cache work.

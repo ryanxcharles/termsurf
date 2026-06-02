@@ -366,6 +366,7 @@ const ROASTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE: c_int = 14;
 const ROASTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X: c_int = 15;
 const ROASTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y: c_int = 16;
 const ROASTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_WIDE_TAIL: c_int = 17;
+const ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR: c_int = 18;
 
 const ROASTTY_RENDER_STATE_OPTION_DIRTY: c_int = 0;
 
@@ -686,6 +687,7 @@ struct RenderStateScalar {
     cursor_password_input: bool,
     cursor_viewport: Option<RenderStateCursorViewport>,
     rows_snapshot: Vec<RenderStateRowSnapshot>,
+    kitty_render_placements: Vec<KittyGraphicsRenderPlacementSnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1937,6 +1939,7 @@ fn render_state_default() -> RenderStateScalar {
         cursor_password_input: false,
         cursor_viewport: None,
         rows_snapshot: Vec::new(),
+        kitty_render_placements: Vec::new(),
     }
 }
 
@@ -2008,6 +2011,7 @@ fn render_state_from_terminal(terminal: &InnerTerminal) -> RenderStateScalar {
                     .collect(),
             })
             .collect(),
+        kitty_render_placements: kitty_render_placement_snapshots(terminal),
     }
 }
 
@@ -2545,7 +2549,8 @@ fn render_dirty_from_raw(value: c_int) -> Option<c_int> {
 fn valid_render_state_data(data: c_int) -> bool {
     matches!(
         data,
-        ROASTTY_RENDER_STATE_DATA_INVALID..=ROASTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_WIDE_TAIL
+        ROASTTY_RENDER_STATE_DATA_INVALID
+            ..=ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR
     )
 }
 
@@ -2785,6 +2790,18 @@ unsafe fn render_state_get_write(
                 return ROASTTY_NO_VALUE;
             };
             out.cast::<bool>().write(viewport.wide_tail);
+        }
+        ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR => {
+            let iterator_handle = out
+                .cast::<RoasttyKittyGraphicsRenderPlacementIterator>()
+                .read();
+            let Some(iterator) =
+                kitty_graphics_render_placement_iterator_mut_from_handle(iterator_handle)
+            else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            iterator.entries.clone_from(&state.kitty_render_placements);
+            iterator.selected = None;
         }
         _ => return ROASTTY_INVALID_VALUE,
     }
@@ -8751,6 +8768,16 @@ mod tests {
         info
     }
 
+    fn collect_render_placement_infos(
+        iterator: RoasttyKittyGraphicsRenderPlacementIterator,
+    ) -> Vec<RoasttyKittyGraphicsRenderPlacementInfo> {
+        let mut result = Vec::new();
+        while roastty_kitty_graphics_render_placement_next(iterator) {
+            result.push(render_placement_info(iterator));
+        }
+        result
+    }
+
     fn write_kitty_delete(terminal: RoasttyTerminal, args: &str) {
         write_terminal(terminal, format!("\x1b_Ga=d,{args}\x1b\\").as_bytes());
         let _ = terminal_string(terminal, roastty_terminal_take_pty_response);
@@ -8989,6 +9016,22 @@ mod tests {
             roastty_render_state_get(
                 state,
                 ROASTTY_RENDER_STATE_DATA_ROW_ITERATOR,
+                &mut iterator_handle as *mut _ as *mut c_void,
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(iterator_handle, iterator);
+    }
+
+    fn bind_render_state_render_placements(
+        state: RoasttyRenderStateHandle,
+        iterator: RoasttyKittyGraphicsRenderPlacementIterator,
+    ) {
+        let mut iterator_handle = iterator;
+        assert_eq!(
+            roastty_render_state_get(
+                state,
+                ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR,
                 &mut iterator_handle as *mut _ as *mut c_void,
             ),
             ROASTTY_SUCCESS
@@ -11134,6 +11177,10 @@ mod tests {
         assert_eq!(ROASTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X, 15);
         assert_eq!(ROASTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y, 16);
         assert_eq!(ROASTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_WIDE_TAIL, 17);
+        assert_eq!(
+            ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR,
+            18
+        );
         assert_eq!(ROASTTY_RENDER_STATE_OPTION_DIRTY, 0);
         assert_eq!(ROASTTY_RENDER_STATE_ROW_DATA_INVALID, 0);
         assert_eq!(ROASTTY_RENDER_STATE_ROW_DATA_DIRTY, 1);
@@ -11394,6 +11441,289 @@ mod tests {
 
         roastty_render_state_free(state);
         roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn render_state_c_abi_binds_pinned_kitty_render_placements() {
+        let terminal = new_terminal(10, 5);
+        set_kitty_metrics(terminal, 100, 50);
+        write_kitty_fixture(
+            terminal,
+            KittyDisplayFixture {
+                image_id: 7,
+                placement_id: 4,
+                image_width: 4,
+                image_height: 4,
+                source_x: 1,
+                source_y: 2,
+                source_width: 2,
+                source_height: 1,
+                x_offset: 3,
+                y_offset: 4,
+                columns: 2,
+                rows: 3,
+                z: 1,
+            },
+        );
+
+        let state = new_render_state();
+        assert_eq!(
+            roastty_render_state_update(state, terminal),
+            ROASTTY_SUCCESS
+        );
+        let bound = new_render_placement_iterator();
+        bind_render_state_render_placements(state, bound);
+        assert!(roastty_kitty_graphics_render_placement_next(bound));
+        let info = render_placement_info(bound);
+        assert_eq!(
+            (info.image_id, info.placement_id, info.is_virtual),
+            (7, 4, false)
+        );
+        assert_eq!((info.x_offset, info.y_offset), (3, 4));
+        assert_eq!((info.pixel_width, info.pixel_height), (20, 30));
+        assert!(!roastty_kitty_graphics_render_placement_next(bound));
+
+        let standalone = new_render_placement_iterator();
+        update_render_placement_iterator(standalone, terminal);
+        assert_eq!(
+            collect_render_placement_infos(bound),
+            collect_render_placement_infos(standalone)
+        );
+
+        roastty_kitty_graphics_render_placement_iterator_free(standalone);
+        roastty_kitty_graphics_render_placement_iterator_free(bound);
+        roastty_render_state_free(state);
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn render_state_c_abi_binds_virtual_kitty_render_placements() {
+        let terminal = new_terminal(10, 5);
+        set_kitty_metrics(terminal, 10, 10);
+        write_kitty_virtual_fixture(
+            terminal,
+            KittyDisplayFixture {
+                image_id: 7,
+                placement_id: 4,
+                image_width: 4,
+                image_height: 4,
+                source_x: 0,
+                source_y: 0,
+                source_width: 0,
+                source_height: 0,
+                x_offset: 0,
+                y_offset: 0,
+                columns: 4,
+                rows: 4,
+                z: -1,
+            },
+        );
+        write_kitty_placeholder(terminal, 7, Some(4), None, None, 1);
+        terminal_from_handle(terminal)
+            .unwrap()
+            .terminal
+            .append_grapheme_for_tests(0, 0, 0x030d);
+        terminal_from_handle(terminal)
+            .unwrap()
+            .terminal
+            .append_grapheme_for_tests(0, 0, 0x030d);
+
+        let state = new_render_state();
+        assert_eq!(
+            roastty_render_state_update(state, terminal),
+            ROASTTY_SUCCESS
+        );
+        let iterator = new_render_placement_iterator();
+        bind_render_state_render_placements(state, iterator);
+        assert!(roastty_kitty_graphics_render_placement_next(iterator));
+        let info = render_placement_info(iterator);
+        assert_eq!(
+            (info.image_id, info.placement_id, info.is_virtual),
+            (7, 4, true)
+        );
+        assert_eq!((info.viewport_col, info.viewport_row), (0, 0));
+        assert_eq!((info.source_x, info.source_y), (1, 1));
+        assert_eq!((info.source_width, info.source_height), (1, 1));
+        assert_eq!(info.z, -1);
+        assert!(!roastty_kitty_graphics_render_placement_next(iterator));
+
+        roastty_kitty_graphics_render_placement_iterator_free(iterator);
+        roastty_render_state_free(state);
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn render_state_c_abi_kitty_render_placement_layer_filter_can_broaden() {
+        let terminal = new_terminal(10, 5);
+        set_kitty_metrics(terminal, 10, 10);
+        write_kitty_fixture(
+            terminal,
+            KittyDisplayFixture {
+                image_id: 9,
+                placement_id: 3,
+                image_width: 1,
+                image_height: 1,
+                source_x: 0,
+                source_y: 0,
+                source_width: 0,
+                source_height: 0,
+                x_offset: 0,
+                y_offset: 0,
+                columns: 1,
+                rows: 1,
+                z: 1,
+            },
+        );
+        write_kitty_virtual_fixture(
+            terminal,
+            KittyDisplayFixture {
+                image_id: 7,
+                placement_id: 4,
+                image_width: 4,
+                image_height: 4,
+                source_x: 0,
+                source_y: 0,
+                source_width: 0,
+                source_height: 0,
+                x_offset: 0,
+                y_offset: 0,
+                columns: 4,
+                rows: 4,
+                z: -1,
+            },
+        );
+        write_kitty_placeholder(terminal, 7, Some(4), None, None, 1);
+
+        let state = new_render_state();
+        assert_eq!(
+            roastty_render_state_update(state, terminal),
+            ROASTTY_SUCCESS
+        );
+        let iterator = new_render_placement_iterator();
+        let above = ROASTTY_KITTY_PLACEMENT_LAYER_ABOVE_TEXT;
+        assert_eq!(
+            roastty_kitty_graphics_render_placement_iterator_set(
+                iterator,
+                ROASTTY_KITTY_GRAPHICS_PLACEMENT_ITERATOR_OPTION_LAYER,
+                (&above as *const c_int).cast(),
+            ),
+            ROASTTY_SUCCESS
+        );
+        bind_render_state_render_placements(state, iterator);
+        assert!(roastty_kitty_graphics_render_placement_next(iterator));
+        assert_eq!(render_placement_info(iterator).image_id, 9);
+        assert!(!roastty_kitty_graphics_render_placement_next(iterator));
+
+        let all = ROASTTY_KITTY_PLACEMENT_LAYER_ALL;
+        assert_eq!(
+            roastty_kitty_graphics_render_placement_iterator_set(
+                iterator,
+                ROASTTY_KITTY_GRAPHICS_PLACEMENT_ITERATOR_OPTION_LAYER,
+                (&all as *const c_int).cast(),
+            ),
+            ROASTTY_SUCCESS
+        );
+        let infos = collect_render_placement_infos(iterator);
+        assert_eq!(infos.len(), 2);
+        assert_eq!((infos[0].image_id, infos[0].is_virtual), (7, true));
+        assert_eq!((infos[1].image_id, infos[1].is_virtual), (9, false));
+
+        roastty_kitty_graphics_render_placement_iterator_free(iterator);
+        roastty_render_state_free(state);
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn render_state_c_abi_kitty_render_placement_snapshot_survives_free() {
+        let terminal = new_terminal(10, 5);
+        set_kitty_metrics(terminal, 10, 10);
+        write_kitty_virtual_fixture(
+            terminal,
+            KittyDisplayFixture {
+                image_id: 7,
+                placement_id: 4,
+                image_width: 4,
+                image_height: 4,
+                source_x: 0,
+                source_y: 0,
+                source_width: 0,
+                source_height: 0,
+                x_offset: 0,
+                y_offset: 0,
+                columns: 4,
+                rows: 4,
+                z: 1,
+            },
+        );
+        write_kitty_placeholder(terminal, 7, Some(4), None, None, 1);
+
+        let state = new_render_state();
+        assert_eq!(
+            roastty_render_state_update(state, terminal),
+            ROASTTY_SUCCESS
+        );
+        let iterator = new_render_placement_iterator();
+        bind_render_state_render_placements(state, iterator);
+
+        write_kitty_delete(terminal, "a=I,i=7");
+        write_terminal(terminal, b"\rX\n\n\n\n\n\n");
+        assert_eq!(
+            roastty_render_state_update(state, terminal),
+            ROASTTY_SUCCESS
+        );
+        roastty_render_state_free(state);
+        roastty_terminal_free(terminal);
+
+        assert!(roastty_kitty_graphics_render_placement_next(iterator));
+        let info = render_placement_info(iterator);
+        assert_eq!(
+            (info.image_id, info.placement_id, info.is_virtual),
+            (7, 4, true)
+        );
+        let image = roastty_kitty_graphics_render_placement_image(iterator);
+        assert!(!image.is_null());
+        roastty_kitty_graphics_image_free(image);
+        assert!(!roastty_kitty_graphics_render_placement_next(iterator));
+
+        roastty_kitty_graphics_render_placement_iterator_free(iterator);
+    }
+
+    #[test]
+    fn render_state_c_abi_kitty_render_placement_binding_validation() {
+        let state = new_render_state();
+        let iterator = new_render_placement_iterator();
+        let mut iterator_handle = iterator;
+
+        assert_eq!(
+            roastty_render_state_get(
+                ptr::null_mut(),
+                ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR,
+                (&mut iterator_handle as *mut RoasttyKittyGraphicsRenderPlacementIterator).cast(),
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_render_state_get(
+                state,
+                ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR,
+                ptr::null_mut(),
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        let mut null_iterator: RoasttyKittyGraphicsRenderPlacementIterator = ptr::null_mut();
+        assert_eq!(
+            roastty_render_state_get(
+                state,
+                ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR,
+                (&mut null_iterator as *mut RoasttyKittyGraphicsRenderPlacementIterator).cast(),
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        bind_render_state_render_placements(state, iterator);
+        assert!(!roastty_kitty_graphics_render_placement_next(iterator));
+
+        roastty_kitty_graphics_render_placement_iterator_free(iterator);
+        roastty_render_state_free(state);
     }
 
     #[test]

@@ -720,6 +720,7 @@ static void assert_render_state_abi(void) {
   assert(ROASTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X == 15);
   assert(ROASTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y == 16);
   assert(ROASTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_WIDE_TAIL == 17);
+  assert(ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR == 18);
   assert(ROASTTY_RENDER_STATE_OPTION_DIRTY == 0);
   assert(ROASTTY_RENDER_STATE_ROW_DATA_INVALID == 0);
   assert(ROASTTY_RENDER_STATE_ROW_DATA_DIRTY == 1);
@@ -810,6 +811,14 @@ static void assert_render_state_abi(void) {
   assert(cells != NULL);
   assert(!roastty_render_state_row_cells_next(NULL));
   assert(!roastty_render_state_row_cells_next(cells));
+  roastty_kitty_graphics_render_placement_iterator_t render_placements = NULL;
+  assert(roastty_kitty_graphics_render_placement_iterator_new(NULL) ==
+         ROASTTY_INVALID_VALUE);
+  assert(roastty_kitty_graphics_render_placement_iterator_new(&render_placements) ==
+         ROASTTY_SUCCESS);
+  assert(render_placements != NULL);
+  assert(!roastty_kitty_graphics_render_placement_next(NULL));
+  assert(!roastty_kitty_graphics_render_placement_next(render_placements));
 
   uint16_t dim = 999;
   assert(roastty_render_state_get(state, ROASTTY_RENDER_STATE_DATA_COLS, &dim) ==
@@ -873,6 +882,16 @@ static void assert_render_state_abi(void) {
                                   ROASTTY_RENDER_STATE_DATA_ROW_ITERATOR,
                                   &iterator) == ROASTTY_SUCCESS);
   assert(!roastty_render_state_row_iterator_next(iterator));
+  roastty_kitty_graphics_render_placement_iterator_t null_render_placements = NULL;
+  assert(roastty_render_state_get(
+             state,
+             ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR,
+             &null_render_placements) == ROASTTY_INVALID_VALUE);
+  assert(roastty_render_state_get(
+             state,
+             ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR,
+             &render_placements) == ROASTTY_SUCCESS);
+  assert(!roastty_kitty_graphics_render_placement_next(render_placements));
   assert(roastty_render_state_get(state,
                                   ROASTTY_RENDER_STATE_DATA_INVALID,
                                   &dim) == ROASTTY_INVALID_VALUE);
@@ -1013,6 +1032,19 @@ static void assert_render_state_abi(void) {
                                   ROASTTY_RENDER_STATE_DATA_CURSOR_BLINKING,
                                   &flag) == ROASTTY_SUCCESS);
   assert(!flag);
+  assert(roastty_render_state_get(
+             NULL,
+             ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR,
+             &render_placements) == ROASTTY_INVALID_VALUE);
+  assert(roastty_render_state_get(
+             state,
+             ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR,
+             NULL) == ROASTTY_INVALID_VALUE);
+  assert(roastty_render_state_get(
+             state,
+             ROASTTY_RENDER_STATE_DATA_KITTY_RENDER_PLACEMENT_ITERATOR,
+             &render_placements) == ROASTTY_SUCCESS);
+  assert(!roastty_kitty_graphics_render_placement_next(render_placements));
 
   assert(roastty_render_state_get(state,
                                   ROASTTY_RENDER_STATE_DATA_ROW_ITERATOR,
@@ -1137,6 +1169,8 @@ static void assert_render_state_abi(void) {
   roastty_render_state_row_cells_free(NULL);
   roastty_render_state_row_iterator_free(iterator);
   roastty_render_state_row_iterator_free(NULL);
+  roastty_kitty_graphics_render_placement_iterator_free(render_placements);
+  roastty_kitty_graphics_render_placement_iterator_free(NULL);
   roastty_render_state_free(state);
   roastty_render_state_free(NULL);
 }
