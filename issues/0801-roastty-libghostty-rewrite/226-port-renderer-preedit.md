@@ -173,3 +173,80 @@ Two real findings, fixed in the design above before this commit:
 2. **(Medium)** the tests did not prove the nonzero-`cp_offset` truncation path
    — added `preedit_range_truncates_at_nonzero_offset` (four narrow codepoints,
    `start=8, max=9` → `start=7, end=9, cp_offset=1`).
+
+## Result
+
+**Result:** Pass
+
+Added `roastty/src/renderer/state.rs` (module-level `#![allow(dead_code)]`,
+"upstream `renderer/State.zig`" attribution) and wired `pub(crate) mod state;`
+into `roastty/src/renderer/mod.rs`.
+
+Implemented `Codepoint { codepoint: u32, wide: bool }`,
+`Preedit { codepoints: Vec<Codepoint> }`,
+`PreeditRange { start: Unit, end: Unit, cp_offset: usize }` (`Unit = u16`), and
+`pub(crate)` `Preedit::width` and `Preedit::range`. `range` reproduces upstream
+exactly: `max_width = max - start + 1`, reverse width accumulation with early
+exit setting `cp_offset` to the reached index (full width / `cp_offset = 0`
+otherwise), `end = if w > 0 { start + (w - 1) } else { start }`, and the
+saturating right-edge shift. `Vec` ownership replaces upstream `deinit`/`clone`.
+The live `State`/`Mouse` are deferred.
+
+Tests added (4): `preedit_range_covers_exact_cell_width`,
+`preedit_range_shifts_left_at_right_edge`,
+`preedit_range_truncates_at_nonzero_offset` (the nonzero-`cp_offset` case), and
+`preedit_width`.
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty renderer::state
+cargo test -p roastty renderer
+cargo test -p roastty
+```
+
+Observed:
+
+- `renderer::state`: 4 passed.
+- Full `roastty`: 2236 unit tests passed (2232 prior + 4 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/renderer/state.rs` and for
+  `roastty/src/lib.rs`, `roastty/include/roastty.h`,
+  `roastty/tests/abi_harness.c`.
+- `git diff --check`: clean.
+
+No C ABI, header, or ABI inventory changes; live `State`/`Mouse` not pulled in.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** ("nothing
+should change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-072623-278764-prompt.md`
+- Result: `logs/codex-review/20260602-072623-278764-last-message.md`
+
+Codex confirmed `width`/`range` match upstream, that the Rust loop preserves the
+Zig labeled-block semantics exactly (`w` persists after break, `cp_offset` set
+only on early exit, no-break leaves `cp_offset = 0` with full width), that the
+four tests pass for the right reasons (including the `7,9,1` truncation trace),
+that there is no `u16` over/underflow in the tested domain, and that the
+`pub(crate)` visibility, derives, `Vec` ownership, and module wiring are clean.
+
+## Conclusion
+
+Experiment 226 succeeds. Roastty's `renderer::state` module now holds the
+`Preedit` type and its cell-placement `range` logic, which the IME/preedit
+rendering path and Experiment 223's preedit-aware cursor `style()` will consume.
+Both Codex gates passed (two design findings fixed; zero result findings).
+
+The live render `State` struct (mutex, terminal pointer, inspector) and `Mouse`
+remain deferred until the renderer threading model and `input` (`Mods`) are
+available. The next renderer slice is likely `renderer/cell.zig` (per-cell
+render data: backgrounds, glyph/text quads, and the cursor cell), which is large
+and will need splitting, and which consumes the `Size`/`Coordinate` model (Exp
+224–225), the cursor `Style` (Exp 223), and this `Preedit`.

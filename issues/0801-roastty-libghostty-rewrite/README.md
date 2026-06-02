@@ -675,7 +675,7 @@ are past the correctness-critical foundation.
 - [Experiment 225: Port Renderer Size, PaddingBalance, and Coordinate](225-port-renderer-size-coordinate.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 226: Port Renderer Preedit](226-port-renderer-preedit.md) —
-  **Designed** · Claude/Codex/Codex
+  **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
