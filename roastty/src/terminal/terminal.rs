@@ -12,6 +12,7 @@ use super::device_status;
 use super::kitty::graphics_command::{Command, Parser, Response};
 use super::kitty::graphics_exec;
 use super::kitty::graphics_image::MAX_IMAGE_SIZE;
+use super::kitty::graphics_storage::CellMetrics;
 use super::modes;
 use super::mouse;
 use super::osc;
@@ -691,6 +692,7 @@ struct TerminalStreamHandler<'a> {
 struct KittyGraphicsApc {
     state: KittyGraphicsApcState,
     max_bytes: usize,
+    metrics_px: Option<(u32, u32)>,
 }
 
 #[derive(Debug)]
@@ -707,6 +709,7 @@ impl Default for KittyGraphicsApc {
         Self {
             state: KittyGraphicsApcState::Idle,
             max_bytes: MAX_IMAGE_SIZE,
+            metrics_px: None,
         }
     }
 }
@@ -714,6 +717,23 @@ impl Default for KittyGraphicsApc {
 impl KittyGraphicsApc {
     fn reset(&mut self) {
         self.state = KittyGraphicsApcState::Idle;
+    }
+
+    fn cell_metrics(&self, size: TerminalSize) -> CellMetrics {
+        let columns = u32::from(size.cols);
+        let rows = u32::from(size.rows);
+        let (width_px, height_px) = self.metrics_px.unwrap_or((columns, rows));
+        CellMetrics {
+            columns,
+            rows,
+            width_px,
+            height_px,
+        }
+    }
+
+    #[cfg(test)]
+    fn set_cell_metrics_for_tests(&mut self, width_px: u32, height_px: u32) {
+        self.metrics_px = Some((width_px, height_px));
     }
 
     fn start(&mut self) {
@@ -2472,7 +2492,8 @@ impl TerminalStreamHandler<'_> {
     }
 
     fn kitty_graphics_command(&mut self, command: Command) {
-        let response = graphics_exec::execute_screen(self.screens.active_mut(), &command);
+        let metrics = self.kitty_graphics.cell_metrics(self.size);
+        let response = graphics_exec::execute_screen(self.screens.active_mut(), &command, metrics);
         self.write_kitty_graphics_response(response);
     }
 
@@ -3635,6 +3656,17 @@ mod tests {
         format!("\x1b_Ga=p,i={image_id},p={placement_id}\x1b\\").into_bytes()
     }
 
+    fn kitty_display_sized_apc(
+        image_id: u32,
+        placement_id: u32,
+        columns: u32,
+        rows: u32,
+        z: i32,
+    ) -> Vec<u8> {
+        format!("\x1b_Ga=p,i={image_id},p={placement_id},c={columns},r={rows},z={z}\x1b\\")
+            .into_bytes()
+    }
+
     fn kitty_display_number_apc(image_number: u32, placement_id: u32) -> Vec<u8> {
         format!("\x1b_Ga=p,I={image_number},p={placement_id}\x1b\\").into_bytes()
     }
@@ -3649,6 +3681,10 @@ mod tests {
 
     fn kitty_cursor_after_display_apc(image_id: u32, placement_id: u32) -> Vec<u8> {
         format!("\x1b_Ga=p,i={image_id},p={placement_id},C=0\x1b\\").into_bytes()
+    }
+
+    fn kitty_delete_apc(args: &str) -> Vec<u8> {
+        format!("\x1b_Ga=d,{args}\x1b\\").into_bytes()
     }
 
     fn kitty_placement_key(image_id: u32, placement_id: u32) -> PlacementKey {
@@ -6212,6 +6248,286 @@ mod tests {
         terminal.next_slice(b"\x1bc").unwrap();
 
         assert_eq!(terminal.screens.active().kitty_images().len(), 0);
+        assert_eq!(active_tracked_pin_count(&terminal), 1);
+        assert!(terminal.pty_response_for_tests().is_empty());
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_delete_all_images_is_silent_and_untracks() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal.next_slice(&kitty_transmit_apc(1)).unwrap();
+        terminal.next_slice(&kitty_display_apc(1, 1)).unwrap();
+        terminal.next_slice(&kitty_transmit_apc(2)).unwrap();
+        terminal.next_slice(&kitty_display_apc(2, 1)).unwrap();
+        assert_eq!(active_tracked_pin_count(&terminal), 3);
+        terminal.clear_pty_response();
+
+        terminal.next_slice(&kitty_delete_apc("d=A")).unwrap();
+
+        assert!(terminal.pty_response_for_tests().is_empty());
+        assert_eq!(terminal.screens.active().kitty_images().len(), 0);
+        assert_eq!(terminal.screens.active().kitty_images().placement_len(), 0);
+        assert_eq!(active_tracked_pin_count(&terminal), 1);
+        assert!(terminal.screens.active().kitty_images().dirty);
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_delete_all_placements_keeps_images_and_virtuals() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal.next_slice(&kitty_transmit_apc(1)).unwrap();
+        terminal.next_slice(&kitty_display_apc(1, 1)).unwrap();
+        terminal
+            .next_slice(&kitty_virtual_display_apc(1, 2))
+            .unwrap();
+        terminal.clear_pty_response();
+
+        terminal.next_slice(&kitty_delete_apc("d=a")).unwrap();
+
+        assert!(terminal.pty_response_for_tests().is_empty());
+        assert_eq!(terminal.screens.active().kitty_images().len(), 1);
+        assert_eq!(terminal.screens.active().kitty_images().placement_len(), 1);
+        assert_eq!(
+            terminal
+                .screens
+                .active()
+                .kitty_images()
+                .placement_by_key(kitty_placement_key(1, 2))
+                .unwrap()
+                .location,
+            PlacementLocation::Virtual
+        );
+        assert_eq!(active_tracked_pin_count(&terminal), 1);
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_delete_by_id_and_unused_image() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal.next_slice(&kitty_transmit_apc(1)).unwrap();
+        terminal.next_slice(&kitty_display_apc(1, 1)).unwrap();
+        terminal.next_slice(&kitty_display_apc(1, 2)).unwrap();
+        terminal.clear_pty_response();
+
+        terminal
+            .next_slice(&kitty_delete_apc("d=i,i=1,p=2"))
+            .unwrap();
+
+        assert!(terminal.pty_response_for_tests().is_empty());
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(1, 2))
+            .is_none());
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .image_by_id(1)
+            .is_some());
+        assert_eq!(active_tracked_pin_count(&terminal), 2);
+
+        terminal
+            .next_slice(&kitty_delete_apc("d=I,i=1,p=1"))
+            .unwrap();
+
+        assert_eq!(terminal.screens.active().kitty_images().len(), 0);
+        assert_eq!(terminal.screens.active().kitty_images().placement_len(), 0);
+        assert_eq!(active_tracked_pin_count(&terminal), 1);
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_delete_newest_by_number() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal
+            .next_slice(&kitty_numbered_transmit_apc(5))
+            .unwrap();
+        let first_id = terminal.screens.active().kitty_images().next_image_id - 1;
+        terminal
+            .next_slice(&kitty_display_apc(first_id, 1))
+            .unwrap();
+        terminal
+            .next_slice(&kitty_numbered_transmit_apc(5))
+            .unwrap();
+        let second_id = terminal.screens.active().kitty_images().next_image_id - 1;
+        terminal
+            .next_slice(&kitty_display_apc(second_id, 1))
+            .unwrap();
+        terminal.clear_pty_response();
+
+        terminal
+            .next_slice(&kitty_delete_apc("d=N,I=5,p=1"))
+            .unwrap();
+
+        assert!(terminal.pty_response_for_tests().is_empty());
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(first_id, 1))
+            .is_some());
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(second_id, 1))
+            .is_none());
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .image_by_id(second_id)
+            .is_none());
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_delete_intersect_cursor_cell_and_z() {
+        let mut terminal = Terminal::init(100, 100, None).unwrap();
+        terminal.kitty_graphics.set_cell_metrics_for_tests(100, 100);
+
+        terminal.next_slice(&kitty_transmit_apc(1)).unwrap();
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(0, 0);
+        terminal
+            .next_slice(&kitty_display_sized_apc(1, 1, 50, 50, 3))
+            .unwrap();
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(25, 25);
+        terminal
+            .next_slice(&kitty_display_sized_apc(1, 2, 50, 50, 7))
+            .unwrap();
+        terminal.clear_pty_response();
+
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(12, 12);
+        terminal.next_slice(&kitty_delete_apc("d=c")).unwrap();
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(1, 1))
+            .is_none());
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(1, 2))
+            .is_some());
+
+        terminal
+            .next_slice(&kitty_delete_apc("d=q,x=26,y=26,z=7"))
+            .unwrap();
+        assert_eq!(terminal.screens.active().kitty_images().placement_len(), 0);
+        assert_eq!(active_tracked_pin_count(&terminal), 1);
+        assert!(terminal.pty_response_for_tests().is_empty());
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_delete_intersect_clamps_oversized_placement() {
+        let mut terminal = Terminal::init(100, 100, None).unwrap();
+        terminal.kitty_graphics.set_cell_metrics_for_tests(100, 100);
+
+        terminal.next_slice(&kitty_transmit_apc(1)).unwrap();
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(0, 0);
+        terminal
+            .next_slice(&kitty_display_sized_apc(1, 1, 10, 200, 0))
+            .unwrap();
+        assert_eq!(active_tracked_pin_count(&terminal), 2);
+        terminal.clear_pty_response();
+
+        terminal
+            .next_slice(&kitty_delete_apc("d=p,x=1,y=100"))
+            .unwrap();
+
+        assert!(terminal.pty_response_for_tests().is_empty());
+        assert_eq!(terminal.screens.active().kitty_images().placement_len(), 0);
+        assert_eq!(active_tracked_pin_count(&terminal), 1);
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_delete_column_row_z_and_range() {
+        let mut terminal = Terminal::init(100, 100, None).unwrap();
+        terminal.kitty_graphics.set_cell_metrics_for_tests(100, 100);
+
+        for id in 1..=3 {
+            terminal.next_slice(&kitty_transmit_apc(id)).unwrap();
+        }
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(0, 0);
+        terminal
+            .next_slice(&kitty_display_sized_apc(1, 1, 10, 10, 1))
+            .unwrap();
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(20, 20);
+        terminal
+            .next_slice(&kitty_display_sized_apc(2, 1, 10, 10, 2))
+            .unwrap();
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(40, 40);
+        terminal
+            .next_slice(&kitty_display_sized_apc(3, 1, 10, 10, 3))
+            .unwrap();
+        terminal.clear_pty_response();
+
+        terminal.next_slice(&kitty_delete_apc("d=x,x=25")).unwrap();
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(2, 1))
+            .is_none());
+
+        terminal.next_slice(&kitty_delete_apc("d=y,y=45")).unwrap();
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(3, 1))
+            .is_none());
+
+        terminal
+            .next_slice(&kitty_display_sized_apc(2, 1, 10, 10, 2))
+            .unwrap();
+        terminal.clear_pty_response();
+        terminal.next_slice(&kitty_delete_apc("d=z,z=2")).unwrap();
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(2, 1))
+            .is_none());
+
+        terminal
+            .next_slice(&kitty_display_sized_apc(2, 1, 10, 10, 2))
+            .unwrap();
+        terminal
+            .next_slice(&kitty_display_sized_apc(3, 1, 10, 10, 3))
+            .unwrap();
+        terminal.clear_pty_response();
+        terminal
+            .next_slice(&kitty_delete_apc("d=R,x=1,y=2"))
+            .unwrap();
+
+        assert_eq!(terminal.screens.active().kitty_images().len(), 0);
+        assert_eq!(terminal.screens.active().kitty_images().placement_len(), 0);
         assert_eq!(active_tracked_pin_count(&terminal), 1);
         assert!(terminal.pty_response_for_tests().is_empty());
     }

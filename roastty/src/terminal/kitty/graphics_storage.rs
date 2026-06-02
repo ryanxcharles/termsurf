@@ -41,6 +41,15 @@ pub(crate) enum PlacementId {
     External(u32),
 }
 
+impl PlacementId {
+    pub(crate) const fn external_id(self) -> Option<u32> {
+        match self {
+            Self::External(id) => Some(id),
+            Self::Internal(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlacementLocation {
     Pin(NonNull<Pin>),
@@ -233,6 +242,17 @@ impl ImageStorage {
             .collect()
     }
 
+    pub(crate) fn placement_snapshots(&self) -> Vec<(PlacementKey, Placement)> {
+        self.placements
+            .iter()
+            .map(|(key, placement)| (*key, *placement))
+            .collect()
+    }
+
+    pub(crate) fn image_ids(&self) -> Vec<u32> {
+        self.images.keys().copied().collect()
+    }
+
     pub(crate) fn add_placement(
         &mut self,
         image_id: u32,
@@ -271,6 +291,38 @@ impl ImageStorage {
         self.total_bytes = 0;
         self.dirty = true;
         RemovedPlacements::new(removed)
+    }
+
+    pub(crate) fn remove_placements_by_keys(&mut self, keys: &[PlacementKey]) -> RemovedPlacements {
+        let mut removed = Vec::new();
+        for key in keys {
+            if let Some(placement) = self.placements.remove(key) {
+                removed.push(placement);
+            }
+        }
+        if !removed.is_empty() {
+            self.dirty = true;
+        }
+        RemovedPlacements::new(removed)
+    }
+
+    pub(crate) fn delete_unused_images<I>(&mut self, image_ids: I)
+    where
+        I: IntoIterator<Item = u32>,
+    {
+        for image_id in image_ids {
+            if self.placements.keys().any(|key| key.image_id == image_id) {
+                continue;
+            }
+            if let Some(image) = self.images.remove(&image_id) {
+                self.total_bytes -= image.data.len();
+                self.dirty = true;
+            }
+        }
+    }
+
+    pub(crate) fn mark_dirty(&mut self) {
+        self.dirty = true;
     }
 
     fn evict_image_excluding(
@@ -969,6 +1021,44 @@ mod tests {
         assert_eq!(stored.data.as_ptr(), survivor_ptr);
         assert_eq!(storage.total_bytes, 10);
         assert!(storage.image_by_id(1).is_none());
+    }
+
+    #[test]
+    fn kitty_graphics_storage_delete_remove_placements_by_keys_returns_removed_and_marks_dirty() {
+        let base = Instant::now();
+        let mut storage = ImageStorage::new();
+        storage.add_image(image(1, 0, 10, base)).unwrap();
+        let removed_key = storage.add_placement(1, 1, placement()).unwrap();
+        let kept_key = storage.add_placement(1, 2, Placement::default()).unwrap();
+        storage.dirty = false;
+
+        let removed = storage.remove_placements_by_keys(&[removed_key.key]);
+
+        assert_eq!(removed.into_vec(), vec![placement()]);
+        assert!(storage.dirty);
+        assert!(storage.placement_by_key(removed_key).is_none());
+        assert!(storage.placement_by_key(kept_key).is_some());
+    }
+
+    #[test]
+    fn kitty_graphics_storage_delete_unused_images_updates_bytes_and_preserves_limit() {
+        let base = Instant::now();
+        let mut storage = ImageStorage::new();
+        storage.total_limit = 5000;
+        storage.add_image(image(1, 0, 10, base)).unwrap();
+        storage
+            .add_image(image(2, 0, 20, base + Duration::from_secs(1)))
+            .unwrap();
+        storage.add_placement(2, 1, placement()).unwrap();
+        storage.dirty = false;
+
+        storage.delete_unused_images([1, 2]);
+
+        assert!(storage.dirty);
+        assert_eq!(storage.total_limit, 5000);
+        assert_eq!(storage.total_bytes, 20);
+        assert!(storage.image_by_id(1).is_none());
+        assert!(storage.image_by_id(2).is_some());
     }
 
     #[test]

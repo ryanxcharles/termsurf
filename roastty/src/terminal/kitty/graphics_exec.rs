@@ -7,7 +7,9 @@ use super::graphics_command::{
     Delete, Display, Quiet, Response, Transmission,
 };
 use super::graphics_image::{ImageLoadError, LoadingImage};
-use super::graphics_storage::{ImageStorage, Placement, PlacementError, PlacementLocation};
+use super::graphics_storage::{
+    CellMetrics, ImageStorage, Placement, PlacementError, PlacementLocation,
+};
 
 pub(crate) fn execute(storage: &mut ImageStorage, command: &Command) -> Option<Response<'static>> {
     if !storage.enabled() {
@@ -48,6 +50,7 @@ pub(crate) fn execute(storage: &mut ImageStorage, command: &Command) -> Option<R
 pub(in crate::terminal) fn execute_screen(
     screen: &mut Screen,
     command: &Command,
+    metrics: CellMetrics,
 ) -> Option<Response<'static>> {
     if !screen.kitty_images().enabled() {
         return None;
@@ -69,7 +72,10 @@ pub(in crate::terminal) fn execute_screen(
             Some(unimplemented_response_for_transmission(*transmission))
         }
         CommandControl::Display(display) => Some(display_on_screen(screen, *display)),
-        CommandControl::Delete(delete) => Some(unimplemented_response_for_delete(*delete)),
+        CommandControl::Delete(delete) => {
+            screen.delete_kitty(*delete, metrics);
+            None
+        }
         CommandControl::TransmitAnimationFrame(animation) => {
             Some(unimplemented_response_for_animation_frame(*animation))
         }

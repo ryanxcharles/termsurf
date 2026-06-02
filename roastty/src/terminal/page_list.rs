@@ -117,6 +117,15 @@ impl Pin {
         }
     }
 
+    pub(in crate::terminal) const fn x(self) -> CellCountInt {
+        self.x
+    }
+
+    pub(in crate::terminal) const fn with_x(mut self, x: CellCountInt) -> Self {
+        self.x = x;
+        self
+    }
+
     #[cfg(test)]
     pub(super) fn mark_garbage_for_tests(&mut self) {
         self.garbage = true;
@@ -5505,7 +5514,7 @@ impl PageList {
         Ok(())
     }
 
-    fn pin_down(&self, pin: Pin, rows: usize) -> Option<Pin> {
+    pub(in crate::terminal) fn pin_down(&self, pin: Pin, rows: usize) -> Option<Pin> {
         let index = self.node_index(pin.node)?;
         let node_rows = self.pages[index].page.size_rows() as usize;
         let remaining_in_row = node_rows - (pin.y as usize + 1);
@@ -5534,6 +5543,57 @@ impl PageList {
         }
 
         None
+    }
+
+    pub(in crate::terminal) fn pin_down_or_end(&self, pin: Pin, rows: usize) -> Option<Pin> {
+        self.pin_down(pin, rows).or_else(|| {
+            let node = self.pages.last()?;
+            Some(Pin {
+                node: NonNull::from(node.as_ref()),
+                y: node.page.size_rows().saturating_sub(1),
+                x: pin.x,
+                garbage: pin.garbage,
+            })
+        })
+    }
+
+    pub(in crate::terminal) fn pin_is_between(
+        &self,
+        pin: Pin,
+        top_left: Pin,
+        bottom_right: Pin,
+    ) -> bool {
+        let Some(pin_index) = self.node_index(pin.node) else {
+            return false;
+        };
+        let Some(top_index) = self.node_index(top_left.node) else {
+            return false;
+        };
+        let Some(bottom_index) = self.node_index(bottom_right.node) else {
+            return false;
+        };
+
+        if pin_index < top_index || pin_index > bottom_index {
+            return false;
+        }
+        if pin_index == top_index {
+            if pin.y < top_left.y {
+                return false;
+            }
+            if pin.y == top_left.y && pin.x < top_left.x {
+                return false;
+            }
+        }
+        if pin_index == bottom_index {
+            if pin.y > bottom_right.y {
+                return false;
+            }
+            if pin.y == bottom_right.y && pin.x > bottom_right.x {
+                return false;
+            }
+        }
+
+        true
     }
 
     fn pin_up(&self, pin: Pin, rows: usize) -> Option<Pin> {

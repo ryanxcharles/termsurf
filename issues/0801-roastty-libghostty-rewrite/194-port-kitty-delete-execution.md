@@ -175,3 +175,49 @@ unchanged.
 - Do not skip Codex design review. If the design review finds a real issue, fix
   it and re-review before committing this experiment design.
 - Do not skip Codex result review after implementation.
+
+## Result
+
+**Result:** Pass
+
+Kitty delete execution now runs on the screen-owned terminal path. Parsed delete
+commands are dispatched through `graphics_exec::execute_screen(...)` into
+`Screen::delete_kitty(...)`, and successful deletes are silent. Removed
+placements are returned to `Screen`, so tracked pins are untracked from the
+page-list owner instead of being deleted inside storage alone.
+
+The implementation covers delete-all, image ID selectors, newest-image
+selectors, cursor/cell/z intersections, row, column, z, range, unused-image
+cleanup, dirty tracking, and byte accounting. Storage-only delete execution
+remains unimplemented by design because it cannot safely clean up screen-owned
+tracked pins.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/terminal/terminal.rs roastty/src/terminal/screen.rs roastty/src/terminal/page_list.rs roastty/src/terminal/kitty/graphics_exec.rs roastty/src/terminal/kitty/graphics_storage.rs
+cargo test -p roastty kitty_graphics_storage_delete
+cargo test -p roastty terminal_stream_kitty_graphics_delete
+cargo test -p roastty kitty_graphics_command_delete
+cargo test -p roastty kitty_graphics_exec
+cargo test -p roastty terminal_stream_kitty_graphics
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+The full suite passed with `2008` unit tests plus the ABI harness.
+
+Codex result review initially found one real blocker: oversized placements that
+extended past the page-list rows could be skipped by intersection deletes. The
+fix added `PageList::pin_down_or_end(...)`, switched Kitty placement rectangle
+calculation to clamp to the page-list end, and added
+`terminal_stream_kitty_graphics_delete_intersect_clamps_oversized_placement`.
+After that fix, Codex re-reviewed the diff and reported no blocking findings.
+
+## Conclusion
+
+Experiment 194 completes the first screen-owned Kitty graphics mutation path.
+Roastty can now remove stored Kitty placements and images while keeping
+page-list pin ownership coherent. The next experiment can move to the next Kitty
+graphics subsystem without leaving stale tracked placement state behind.

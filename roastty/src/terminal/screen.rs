@@ -5,9 +5,10 @@ use super::color;
 use super::cursor;
 use super::hyperlink;
 use super::kitty;
+use super::kitty::graphics_command::Delete;
 use super::kitty::graphics_image::{Image, ImageLoadError};
 use super::kitty::graphics_storage::{
-    ImageStorage, Placement, PlacementAddResult, PlacementError, PlacementKey,
+    CellMetrics, ImageStorage, Placement, PlacementAddResult, PlacementError, PlacementKey,
 };
 use super::page::{SemanticContent, SemanticPrompt};
 use super::page_list::{
@@ -32,6 +33,12 @@ pub(super) struct Screen {
     kitty_images: ImageStorage,
     pages: PageList,
     selection: Option<selection::Selection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KittyPlacementRect {
+    top_left: Pin,
+    bottom_right: Pin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,6 +241,285 @@ impl Screen {
     pub(super) fn clear_kitty_images(&mut self) {
         let removed = self.kitty_images.clear();
         self.untrack_kitty_placements(removed.into_vec());
+    }
+
+    pub(super) fn delete_kitty(&mut self, delete: Delete, metrics: CellMetrics) {
+        match delete {
+            Delete::All { delete_images } => {
+                let image_ids = self.kitty_images.image_ids();
+                let keys: Vec<PlacementKey> = self
+                    .kitty_images
+                    .placement_snapshots()
+                    .into_iter()
+                    .filter_map(|(key, placement)| placement.tracked_pin().map(|_| key))
+                    .collect();
+                self.delete_kitty_placement_keys(keys, delete_images, image_ids);
+                self.kitty_images.mark_dirty();
+            }
+            Delete::Id {
+                delete,
+                image_id,
+                placement_id,
+            } => {
+                let keys: Vec<PlacementKey> = self
+                    .kitty_images
+                    .placement_snapshots()
+                    .into_iter()
+                    .filter_map(|(key, _)| {
+                        if key.image_id != image_id {
+                            return None;
+                        }
+                        if placement_id == 0 || key.placement_id.external_id() == Some(placement_id)
+                        {
+                            Some(key)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                self.delete_kitty_placement_keys(keys, delete, [image_id]);
+                self.kitty_images.mark_dirty();
+            }
+            Delete::Newest {
+                delete,
+                image_number,
+                placement_id,
+            } => {
+                let Some(image_id) = self
+                    .kitty_images
+                    .image_by_number(image_number)
+                    .map(|image| image.id)
+                else {
+                    return;
+                };
+                let keys: Vec<PlacementKey> = self
+                    .kitty_images
+                    .placement_snapshots()
+                    .into_iter()
+                    .filter_map(|(key, _)| {
+                        if key.image_id != image_id {
+                            return None;
+                        }
+                        if placement_id == 0 || key.placement_id.external_id() == Some(placement_id)
+                        {
+                            Some(key)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                self.delete_kitty_placement_keys(keys, delete, [image_id]);
+                self.kitty_images.mark_dirty();
+            }
+            Delete::IntersectCursor { delete } => {
+                let (x, y) = self.cursor_position();
+                let Some(pin) = self.pin(point::Point::active(point::Coordinate::new(x, y.into())))
+                else {
+                    return;
+                };
+                self.delete_kitty_intersecting(pin, delete, metrics, |_| true);
+                self.kitty_images.mark_dirty();
+            }
+            Delete::AnimationFrames { .. } => {}
+            Delete::IntersectCell { delete, x, y } => {
+                let Some(pin) = self.kitty_delete_cell_pin(x, y) else {
+                    return;
+                };
+                self.delete_kitty_intersecting(pin, delete, metrics, |_| true);
+                self.kitty_images.mark_dirty();
+            }
+            Delete::IntersectCellZ { delete, x, y, z } => {
+                let Some(pin) = self.kitty_delete_cell_pin(x, y) else {
+                    return;
+                };
+                self.delete_kitty_intersecting(pin, delete, metrics, |placement| placement.z == z);
+                self.kitty_images.mark_dirty();
+            }
+            Delete::Range {
+                delete,
+                first,
+                last,
+            } => {
+                if first == 0 || last == 0 || first > last {
+                    return;
+                }
+                let image_ids = self.kitty_images.image_ids();
+                let keys: Vec<PlacementKey> = self
+                    .kitty_images
+                    .placement_snapshots()
+                    .into_iter()
+                    .filter_map(|(key, _)| {
+                        // Upstream Ghostty currently uses this broad range
+                        // predicate; keep it for parity and test it directly.
+                        if key.image_id >= first || key.image_id <= last {
+                            Some(key)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                self.delete_kitty_placement_keys(keys, delete, image_ids);
+                self.kitty_images.mark_dirty();
+            }
+            Delete::Column { delete, x } => {
+                if x == 0 {
+                    return;
+                }
+                let column = x - 1;
+                let keys = self.kitty_delete_matching_rect_keys(metrics, |_, rect| {
+                    let left = u32::from(rect.top_left.x());
+                    let right = u32::from(rect.bottom_right.x());
+                    left <= column && right >= column
+                });
+                let image_ids = self.image_ids_for_placement_keys(&keys);
+                self.delete_kitty_placement_keys(keys, delete, image_ids);
+                self.kitty_images.mark_dirty();
+            }
+            Delete::Row { delete, y } => {
+                if y == 0 {
+                    return;
+                }
+                let Some(target_pin) = self.kitty_delete_row_pin(y) else {
+                    return;
+                };
+                let keys = self.kitty_delete_matching_rect_keys(metrics, |screen, rect| {
+                    let target = target_pin.with_x(rect.top_left.x());
+                    screen
+                        .pages
+                        .pin_is_between(target, rect.top_left, rect.bottom_right)
+                });
+                let image_ids = self.image_ids_for_placement_keys(&keys);
+                self.delete_kitty_placement_keys(keys, delete, image_ids);
+                self.kitty_images.mark_dirty();
+            }
+            Delete::Z { delete, z } => {
+                let keys: Vec<PlacementKey> = self
+                    .kitty_images
+                    .placement_snapshots()
+                    .into_iter()
+                    .filter_map(|(key, placement)| {
+                        if placement.tracked_pin().is_some() && placement.z == z {
+                            Some(key)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let image_ids = self.image_ids_for_placement_keys(&keys);
+                self.delete_kitty_placement_keys(keys, delete, image_ids);
+                self.kitty_images.mark_dirty();
+            }
+        }
+    }
+
+    fn delete_kitty_intersecting<F>(
+        &mut self,
+        pin: Pin,
+        delete_unused: bool,
+        metrics: CellMetrics,
+        filter: F,
+    ) where
+        F: Fn(Placement) -> bool,
+    {
+        let keys = self.kitty_delete_matching_rect_keys(metrics, |screen, rect| {
+            screen
+                .pages
+                .pin_is_between(pin, rect.top_left, rect.bottom_right)
+        });
+        let keys: Vec<PlacementKey> = keys
+            .into_iter()
+            .filter(|key| {
+                self.kitty_images
+                    .placement_by_key(*key)
+                    .is_some_and(|placement| filter(*placement))
+            })
+            .collect();
+        let image_ids = self.image_ids_for_placement_keys(&keys);
+        self.delete_kitty_placement_keys(keys, delete_unused, image_ids);
+    }
+
+    fn delete_kitty_placement_keys<I>(
+        &mut self,
+        keys: Vec<PlacementKey>,
+        delete_unused: bool,
+        image_ids: I,
+    ) where
+        I: IntoIterator<Item = u32>,
+    {
+        let removed = self.kitty_images.remove_placements_by_keys(&keys);
+        self.untrack_kitty_placements(removed.into_vec());
+        if delete_unused {
+            self.kitty_images.delete_unused_images(image_ids);
+        }
+    }
+
+    fn kitty_delete_matching_rect_keys<F>(
+        &self,
+        metrics: CellMetrics,
+        mut filter: F,
+    ) -> Vec<PlacementKey>
+    where
+        F: FnMut(&Self, KittyPlacementRect) -> bool,
+    {
+        self.kitty_images
+            .placement_snapshots()
+            .into_iter()
+            .filter_map(|(key, placement)| {
+                let image = self.kitty_images.image_by_id(key.image_id)?;
+                let rect = self.kitty_placement_rect(placement, image, metrics)?;
+                if filter(self, rect) {
+                    Some(key)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn image_ids_for_placement_keys(&self, keys: &[PlacementKey]) -> Vec<u32> {
+        keys.iter().map(|key| key.image_id).collect()
+    }
+
+    fn kitty_delete_cell_pin(&self, x: u32, y: u32) -> Option<Pin> {
+        if x == 0 || y == 0 {
+            return None;
+        }
+        let x = CellCountInt::try_from(x - 1).ok()?;
+        let y = CellCountInt::try_from(y - 1).ok()?;
+        self.pin(point::Point::active(point::Coordinate::new(x, y.into())))
+    }
+
+    fn kitty_delete_row_pin(&self, y: u32) -> Option<Pin> {
+        if y == 0 {
+            return None;
+        }
+        let y = CellCountInt::try_from(y - 1).ok()?;
+        self.pin(point::Point::active(point::Coordinate::new(0, y.into())))
+    }
+
+    fn kitty_placement_rect(
+        &self,
+        placement: Placement,
+        image: &Image,
+        metrics: CellMetrics,
+    ) -> Option<KittyPlacementRect> {
+        let top_left = self.tracked_pin_value(placement.tracked_pin()?)?;
+        let grid_size = placement.grid_size(image, metrics);
+        if grid_size.columns == 0 || grid_size.rows == 0 {
+            return None;
+        }
+        let mut bottom_right = self
+            .pages
+            .pin_down_or_end(top_left, grid_size.rows.saturating_sub(1) as usize)?;
+        let right = top_left
+            .x()
+            .saturating_add(CellCountInt::try_from(grid_size.columns - 1).ok()?);
+        let max_right = CellCountInt::try_from(metrics.columns.saturating_sub(1)).ok()?;
+        bottom_right = bottom_right.with_x(right.min(max_right));
+        Some(KittyPlacementRect {
+            top_left,
+            bottom_right,
+        })
     }
 
     fn untrack_kitty_placements(&mut self, placements: Vec<Placement>) {
