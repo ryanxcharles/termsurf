@@ -548,6 +548,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 211: Port Metal Vertex Descriptor Mapping](211-port-metal-vertex-descriptor-mapping.md)
   — **Pass**
+- [Experiment 212: Port Metal Pipeline Attachment Values](212-port-metal-pipeline-attachment-values.md)
+  — **Designed**
 
 ## Non-Goals
 
