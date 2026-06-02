@@ -504,6 +504,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 189: Port Kitty Transmit and Query Execution](189-port-kitty-transmit-query-execution.md)
   — **Pass**
+- [Experiment 190: Port Kitty Placement Storage Foundation](190-port-kitty-placement-storage-foundation.md)
+  — **Designed**
 
 ## Non-Goals
 
