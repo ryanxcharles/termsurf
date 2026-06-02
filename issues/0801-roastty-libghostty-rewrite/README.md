@@ -508,6 +508,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 191: Port Kitty Display Storage Execution](191-port-kitty-display-storage-execution.md)
   — **Pass**
+- [Experiment 192: Port Kitty Graphics Terminal Dispatch](192-port-kitty-graphics-terminal-dispatch.md)
+  — **Designed**
 
 ## Non-Goals
 
