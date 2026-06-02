@@ -712,6 +712,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 244: Port Atlas `grow`, `set_from_larger`, and `dump`](244-port-atlas-grow.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 245: Port the sprite canvas geometric primitives and `Color`](245-port-sprite-primitives.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
