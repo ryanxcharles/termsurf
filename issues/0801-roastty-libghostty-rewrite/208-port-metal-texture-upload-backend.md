@@ -206,8 +206,61 @@ All public names must use Roastty naming.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Experiment 208 added the internal Metal texture upload boundary for Roastty. The
+implementation:
+
+- added `objc2` and narrowly-featured `objc2-metal` dependencies, including the
+  `MTLAllocation` feature required by `objc2-metal` 0.3.2's generated
+  `MTLTexture` protocol gate;
+- added the private CoreGraphics link block required by
+  `MTLCreateSystemDefaultDevice()`;
+- added raw-value-preserving conversions from Roastty Metal value types to
+  `objc2-metal` values;
+- added `MetalTexture`, which builds an `MTLTextureDescriptor`, validates pixel
+  format and byte length, creates an `MTLTexture`, and writes initial data with
+  `replaceRegion:mipmapLevel:withBytes:bytesPerRow:`;
+- added `MetalImageUploadBackend`, which implements Experiment 206's
+  `ImageUploadBackend` contract for prepared RGBA images without changing
+  `ImageState::upload`;
+- added headless live Metal tests that create a 1x1 RGBA texture and read it
+  back with `getBytes:bytesPerRow:fromRegion:mipmapLevel:` to prove the initial
+  upload path wrote the expected bytes.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/renderer/metal/api.rs roastty/src/renderer/metal/texture.rs
+cargo test -p roastty renderer::metal
+cargo test -p roastty renderer::image
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Observed results:
+
+- `cargo test -p roastty renderer::metal`: 16 passed.
+- `cargo test -p roastty renderer::image`: 29 passed.
+- `cargo test -p roastty`: 2125 library tests plus 1 ABI harness test passed.
+- The public no-`ghostty` gate and `git diff --check` both exited 0.
+
+Codex result review approved the experiment as Pass. It raised one low-severity
+feature-scope note about `MTLAllocation`; that feature remains because the
+actual crates.io `objc2-metal` 0.3.2 generated `MTLTexture` protocol is gated by
+`all(feature = "MTLAllocation", feature = "MTLResource")`, and the first compile
+attempt failed before adding it.
 
 ## Conclusion
 
-Pending.
+The renderer image pipeline now has the first real platform texture object:
+prepared RGBA image payloads can become live Metal textures through an internal
+backend, and the upload path is proven by a headless device test with byte
+readback.
+
+The next experiment can move from upload-time texture creation toward rendering
+integration: either the Metal draw-side resource binding slice or the next
+upstream renderer primitive that consumes these image textures. It should keep
+the same pattern: internal-only Metal code, no public ABI expansion until the
+renderer surface is ready, and live tests where possible.

@@ -1,3 +1,6 @@
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u64)]
 pub(crate) enum MetalPixelFormat {
@@ -13,6 +16,18 @@ pub(crate) enum MetalPixelFormat {
 impl MetalPixelFormat {
     pub(crate) fn raw(self) -> u64 {
         self as u64
+    }
+
+    pub(crate) fn to_objc(self) -> objc2_metal::MTLPixelFormat {
+        match self {
+            MetalPixelFormat::Invalid => objc2_metal::MTLPixelFormat::Invalid,
+            MetalPixelFormat::R8Unorm => objc2_metal::MTLPixelFormat::R8Unorm,
+            MetalPixelFormat::R8UnormSrgb => objc2_metal::MTLPixelFormat::R8Unorm_sRGB,
+            MetalPixelFormat::Rgba8Unorm => objc2_metal::MTLPixelFormat::RGBA8Unorm,
+            MetalPixelFormat::Rgba8UnormSrgb => objc2_metal::MTLPixelFormat::RGBA8Unorm_sRGB,
+            MetalPixelFormat::Bgra8Unorm => objc2_metal::MTLPixelFormat::BGRA8Unorm,
+            MetalPixelFormat::Bgra8UnormSrgb => objc2_metal::MTLPixelFormat::BGRA8Unorm_sRGB,
+        }
     }
 
     pub(crate) fn bytes_per_pixel(self) -> Option<usize> {
@@ -72,6 +87,10 @@ impl MetalResourceOptions {
             | ((self.storage_mode as u64) << 4)
             | ((self.hazard_tracking_mode as u64) << 8)
     }
+
+    pub(crate) fn to_objc(self) -> objc2_metal::MTLResourceOptions {
+        objc2_metal::MTLResourceOptions(self.raw() as usize)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -91,6 +110,10 @@ impl MetalTextureUsage {
     pub(crate) fn raw(self) -> u64 {
         (self.shader_read as u64) | ((self.render_target as u64) << 2)
     }
+
+    pub(crate) fn to_objc(self) -> objc2_metal::MTLTextureUsage {
+        objc2_metal::MTLTextureUsage(self.raw() as usize)
+    }
 }
 
 #[cfg(test)]
@@ -106,6 +129,38 @@ mod tests {
         assert_eq!(MetalPixelFormat::Rgba8UnormSrgb.raw(), 71);
         assert_eq!(MetalPixelFormat::Bgra8Unorm.raw(), 80);
         assert_eq!(MetalPixelFormat::Bgra8UnormSrgb.raw(), 81);
+    }
+
+    #[test]
+    fn metal_pixel_format_objc_values_match_internal_raw_values() {
+        assert_eq!(
+            MetalPixelFormat::Invalid.to_objc().0 as u64,
+            MetalPixelFormat::Invalid.raw()
+        );
+        assert_eq!(
+            MetalPixelFormat::R8Unorm.to_objc().0 as u64,
+            MetalPixelFormat::R8Unorm.raw()
+        );
+        assert_eq!(
+            MetalPixelFormat::R8UnormSrgb.to_objc().0 as u64,
+            MetalPixelFormat::R8UnormSrgb.raw()
+        );
+        assert_eq!(
+            MetalPixelFormat::Rgba8Unorm.to_objc().0 as u64,
+            MetalPixelFormat::Rgba8Unorm.raw()
+        );
+        assert_eq!(
+            MetalPixelFormat::Rgba8UnormSrgb.to_objc().0 as u64,
+            MetalPixelFormat::Rgba8UnormSrgb.raw()
+        );
+        assert_eq!(
+            MetalPixelFormat::Bgra8Unorm.to_objc().0 as u64,
+            MetalPixelFormat::Bgra8Unorm.raw()
+        );
+        assert_eq!(
+            MetalPixelFormat::Bgra8UnormSrgb.to_objc().0 as u64,
+            MetalPixelFormat::Bgra8UnormSrgb.raw()
+        );
     }
 
     #[test]
@@ -167,6 +222,12 @@ mod tests {
     }
 
     #[test]
+    fn metal_resource_options_objc_values_match_internal_raw_values() {
+        let options = MetalResourceOptions::image(MetalStorageMode::Managed);
+        assert_eq!(options.to_objc().0 as u64, options.raw());
+    }
+
+    #[test]
     fn metal_texture_usage_raw_values_match_packed_layout() {
         assert_eq!(MetalTextureUsage::shader_read().raw(), 0x1);
         assert_eq!(
@@ -177,6 +238,12 @@ mod tests {
             .raw(),
             0x4
         );
+    }
+
+    #[test]
+    fn metal_texture_usage_objc_values_match_internal_raw_values() {
+        let usage = MetalTextureUsage::shader_read();
+        assert_eq!(usage.to_objc().0 as u64, usage.raw());
     }
 
     #[test]

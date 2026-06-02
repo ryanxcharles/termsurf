@@ -541,7 +541,7 @@ tests, choose the larger subsystem.
 - [Experiment 207: Port Metal Image Texture Values](207-port-metal-image-texture-values.md)
   — **Pass**
 - [Experiment 208: Port Metal Texture Upload Backend](208-port-metal-texture-upload-backend.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 
