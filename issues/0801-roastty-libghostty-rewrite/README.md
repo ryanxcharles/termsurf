@@ -516,6 +516,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 195: Port Kitty Transmit-Display and Cursor-After](195-port-kitty-transmit-display-cursor-after.md)
   — **Pass**
+- [Experiment 196: Port Kitty Graphics C ABI Handles](196-port-kitty-graphics-c-abi-handles.md)
+  — **Designed**
 
 ## Non-Goals
 
