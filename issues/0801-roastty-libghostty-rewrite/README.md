@@ -530,6 +530,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 202: Port Kitty Virtual Placeholder Foundation](202-port-kitty-virtual-placeholder-foundation.md)
   — **Pass**
+- [Experiment 203: Port Kitty Terminal Render Placement ABI](203-port-kitty-terminal-render-placement-abi.md)
+  — **Designed**
 
 ## Non-Goals
 
