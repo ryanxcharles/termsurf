@@ -704,6 +704,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 240: Port `Modifier::apply` (u32 / i32 / f64)](240-port-modifier-apply.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 241: Port Font `Key` and `ModifierSet`](241-port-font-key-modifierset.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
