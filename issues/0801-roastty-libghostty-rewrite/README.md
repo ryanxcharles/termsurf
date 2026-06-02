@@ -511,7 +511,7 @@ tests, choose the larger subsystem.
 - [Experiment 192: Port Kitty Graphics Terminal Dispatch](192-port-kitty-graphics-terminal-dispatch.md)
   — **Pass**
 - [Experiment 193: Port Kitty Tracked Placement Ownership](193-port-kitty-tracked-placement-ownership.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

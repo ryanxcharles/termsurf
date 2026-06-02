@@ -177,3 +177,47 @@ semantics deferred.
 - Do not skip Codex design review. If the design review finds a real issue, fix
   it and re-review before committing this experiment design.
 - Do not skip Codex result review after implementation.
+
+## Result
+
+**Result:** Pass
+
+Normal Kitty graphics display placements now store tracked page pins instead of
+raw cell coordinates. Terminal APC dispatch routes through a screen-owned
+execution path, and `Screen` coordinates every placement-removing storage
+operation with `PageList` pin cleanup.
+
+The implementation added explicit removed/replaced placement return values for
+storage mutation paths, screen-level ownership helpers, reset-time cleanup
+before page reset, and focused tests for replacement, internal placement IDs,
+transmit-driven eviction, storage disable, failed insertion cleanup, same-image
+replacement, virtual placement behavior, reset/RIS cleanup, and alternate-screen
+independence.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/terminal/terminal.rs roastty/src/terminal/screen.rs roastty/src/terminal/page_list.rs roastty/src/terminal/kitty/graphics_exec.rs roastty/src/terminal/kitty/graphics_storage.rs
+cargo test -p roastty kitty_graphics_storage
+cargo test -p roastty kitty_graphics_exec
+cargo test -p roastty terminal_stream_kitty_graphics
+cargo test -p roastty tracked_grid_ref
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+The full `cargo test -p roastty` run passed 1999 unit tests plus the ABI
+harness. Codex result review also passed with no findings and called the
+implementation pass-ready.
+
+## Conclusion
+
+Experiment 193 completes the Kitty placement ownership foundation needed before
+renderer-facing image state can safely consume placements. Normal placements now
+follow terminal storage through tracked pins, and every currently implemented
+storage-removal path has a cleanup owner.
+
+The next experiment should build on this by choosing the next coherent Kitty
+graphics slice: either renderer-facing placement iteration/C ABI, delete command
+execution, or cursor-after/atomic transmit-and-display semantics.

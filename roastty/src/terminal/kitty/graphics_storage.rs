@@ -1,7 +1,10 @@
 //! Kitty graphics image storage.
 
 use std::collections::HashMap;
+use std::ops::Deref;
+use std::ptr::NonNull;
 
+use super::super::page_list::Pin;
 use super::graphics_image::{Image, ImageLoadError, LoadingImage, LoadingImageLimits};
 
 pub(crate) const DEFAULT_NEXT_IMAGE_ID: u32 = 2_147_483_647;
@@ -40,8 +43,38 @@ pub(crate) enum PlacementId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlacementLocation {
-    Cell { x: u32, y: u32 },
+    Pin(NonNull<Pin>),
+    #[cfg(test)]
+    Cell {
+        x: u32,
+        y: u32,
+    },
     Virtual,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RemovedPlacements {
+    placements: Vec<Placement>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PlacementAddResult {
+    pub(crate) key: PlacementKey,
+    pub(crate) replaced: Option<Placement>,
+}
+
+impl Deref for PlacementAddResult {
+    type Target = PlacementKey;
+
+    fn deref(&self) -> &Self::Target {
+        &self.key
+    }
+}
+
+impl From<PlacementAddResult> for PlacementKey {
+    fn from(value: PlacementAddResult) -> Self {
+        value.key
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,29 +146,33 @@ impl ImageStorage {
         self.images.len()
     }
 
-    pub(crate) fn set_limit(&mut self, limit: usize) {
+    pub(crate) fn set_limit(&mut self, limit: usize) -> RemovedPlacements {
         if limit == 0 {
             let image_limits = self.image_limits;
+            let removed = self.clear_placements();
             self.images.clear();
-            self.placements.clear();
             self.loading = None;
             self.next_internal_placement_id = DEFAULT_NEXT_INTERNAL_PLACEMENT_ID;
             self.total_bytes = 0;
             self.total_limit = 0;
             self.image_limits = image_limits;
             self.dirty = true;
-            return;
+            return RemovedPlacements::new(removed);
         }
 
+        let mut removed = Vec::new();
         if limit < self.total_bytes {
             let required_bytes = self.total_bytes - limit;
-            let _ = self.evict_image(required_bytes);
+            if let Some(evicted) = self.evict_image_excluding(required_bytes, u32::MAX) {
+                removed.extend(evicted);
+            }
         }
 
         self.total_limit = limit;
+        RemovedPlacements::new(removed)
     }
 
-    pub(crate) fn add_image(&mut self, image: Image) -> Result<(), ImageLoadError> {
+    pub(crate) fn add_image(&mut self, image: Image) -> Result<RemovedPlacements, ImageLoadError> {
         let image_bytes = image.data.len();
         if image_bytes > self.total_limit {
             return Err(ImageLoadError::OutOfMemory);
@@ -152,11 +189,13 @@ impl ImageStorage {
             .and_then(|bytes| bytes.checked_add(image_bytes))
             .ok_or(ImageLoadError::OutOfMemory)?;
 
+        let mut removed = Vec::new();
         if final_bytes_without_eviction > self.total_limit {
             let required_bytes = final_bytes_without_eviction - self.total_limit;
-            if !self.evict_image_excluding(required_bytes, image.id) {
-                return Err(ImageLoadError::OutOfMemory);
-            }
+            let evicted = self
+                .evict_image_excluding(required_bytes, image.id)
+                .ok_or(ImageLoadError::OutOfMemory)?;
+            removed.extend(evicted);
         }
 
         if let Some(old) = self.images.insert(image.id, image) {
@@ -164,7 +203,7 @@ impl ImageStorage {
         }
         self.total_bytes += image_bytes;
         self.dirty = true;
-        Ok(())
+        Ok(RemovedPlacements::new(removed))
     }
 
     pub(crate) fn image_by_id(&self, image_id: u32) -> Option<&Image> {
@@ -182,8 +221,8 @@ impl ImageStorage {
         self.placements.len()
     }
 
-    pub(crate) fn placement_by_key(&self, key: PlacementKey) -> Option<&Placement> {
-        self.placements.get(&key)
+    pub(crate) fn placement_by_key<K: Into<PlacementKey>>(&self, key: K) -> Option<&Placement> {
+        self.placements.get(&key.into())
     }
 
     pub(crate) fn placements_for_image(&self, image_id: u32) -> Vec<(PlacementKey, &Placement)> {
@@ -199,7 +238,7 @@ impl ImageStorage {
         image_id: u32,
         placement_id: u32,
         placement: Placement,
-    ) -> Result<PlacementKey, PlacementError> {
+    ) -> Result<PlacementAddResult, PlacementError> {
         if !self.images.contains_key(&image_id) {
             return Err(PlacementError::ImageNotFound);
         }
@@ -214,18 +253,33 @@ impl ImageStorage {
                 PlacementId::External(placement_id)
             },
         };
-        self.placements.insert(key, placement);
+        let replaced = self.placements.insert(key, placement);
         self.dirty = true;
-        Ok(key)
+        Ok(PlacementAddResult { key, replaced })
     }
 
-    pub(crate) fn evict_image(&mut self, required_bytes: usize) -> bool {
+    pub(crate) fn evict_image(&mut self, required_bytes: usize) -> Option<RemovedPlacements> {
         self.evict_image_excluding(required_bytes, u32::MAX)
+            .map(RemovedPlacements::new)
     }
 
-    fn evict_image_excluding(&mut self, required_bytes: usize, excluded_id: u32) -> bool {
+    pub(crate) fn clear(&mut self) -> RemovedPlacements {
+        let removed = self.clear_placements();
+        self.images.clear();
+        self.loading = None;
+        self.next_internal_placement_id = DEFAULT_NEXT_INTERNAL_PLACEMENT_ID;
+        self.total_bytes = 0;
+        self.dirty = true;
+        RemovedPlacements::new(removed)
+    }
+
+    fn evict_image_excluding(
+        &mut self,
+        required_bytes: usize,
+        excluded_id: u32,
+    ) -> Option<Vec<Placement>> {
         if required_bytes == 0 {
-            return true;
+            return Some(Vec::new());
         }
 
         let mut candidates: Vec<(u32, Option<std::time::Instant>, bool)> = self
@@ -248,32 +302,66 @@ impl ImageStorage {
             },
         );
 
+        let available_bytes = candidates
+            .iter()
+            .filter_map(|(id, _, _)| self.images.get(id).map(|image| image.data.len()))
+            .sum::<usize>();
+        if available_bytes < required_bytes {
+            return None;
+        }
+
         let mut evicted = 0usize;
+        let mut removed_placements = Vec::new();
         for (id, _, _) in candidates {
             let Some(image) = self.images.remove(&id) else {
                 continue;
             };
             evicted += image.data.len();
             self.total_bytes -= image.data.len();
-            self.remove_placements_for_image(id);
+            removed_placements.extend(self.remove_placements_for_image(id));
             self.dirty = true;
             if evicted >= required_bytes {
-                return true;
+                return Some(removed_placements);
             }
         }
 
-        false
+        Some(removed_placements)
     }
 
-    fn remove_placements_for_image(&mut self, image_id: u32) {
-        self.placements.retain(|key, _| key.image_id != image_id);
+    fn remove_placements_for_image(&mut self, image_id: u32) -> Vec<Placement> {
+        let keys: Vec<PlacementKey> = self
+            .placements
+            .keys()
+            .filter(|key| key.image_id == image_id)
+            .copied()
+            .collect();
+        keys.into_iter()
+            .filter_map(|key| self.placements.remove(&key))
+            .collect()
+    }
+
+    fn clear_placements(&mut self) -> Vec<Placement> {
+        self.placements
+            .drain()
+            .map(|(_, placement)| placement)
+            .collect()
+    }
+}
+
+impl RemovedPlacements {
+    fn new(placements: Vec<Placement>) -> Self {
+        Self { placements }
+    }
+
+    pub(crate) fn into_vec(self) -> Vec<Placement> {
+        self.placements
     }
 }
 
 impl Default for Placement {
     fn default() -> Self {
         Self {
-            location: PlacementLocation::Cell { x: 0, y: 0 },
+            location: default_placement_location(),
             x_offset: 0,
             y_offset: 0,
             source_x: 0,
@@ -288,6 +376,15 @@ impl Default for Placement {
 }
 
 impl Placement {
+    pub(crate) fn tracked_pin(&self) -> Option<NonNull<Pin>> {
+        match self.location {
+            PlacementLocation::Pin(pin) => Some(pin),
+            PlacementLocation::Virtual => None,
+            #[cfg(test)]
+            PlacementLocation::Cell { .. } => None,
+        }
+    }
+
     pub(crate) fn pixel_size(&self, image: &Image, metrics: CellMetrics) -> PixelSize {
         let image_width = if self.source_width > 0 {
             self.source_width
@@ -349,6 +446,17 @@ impl Placement {
             columns: div_ceil_axis(pixel_size.width, self.x_offset, metrics.cell_width()),
             rows: div_ceil_axis(pixel_size.height, self.y_offset, metrics.cell_height()),
         }
+    }
+}
+
+fn default_placement_location() -> PlacementLocation {
+    #[cfg(test)]
+    {
+        PlacementLocation::Cell { x: 0, y: 0 }
+    }
+    #[cfg(not(test))]
+    {
+        PlacementLocation::Virtual
     }
 }
 
@@ -610,7 +718,7 @@ mod tests {
         storage
             .add_image(image(2, 0, 5, base + Duration::from_secs(1)))
             .unwrap();
-        let placement_key = storage.add_placement(1, 5, placement()).unwrap();
+        let placement_key = storage.add_placement(1, 5, placement()).unwrap().key;
 
         storage
             .add_image(image(1, 0, 15, base + Duration::from_secs(2)))
@@ -632,9 +740,11 @@ mod tests {
         let first = storage.add_placement(1, 0, Placement::default()).unwrap();
         let second = storage.add_placement(1, 0, placement()).unwrap();
 
-        assert_eq!(first.image_id, 1);
-        assert_eq!(first.placement_id, PlacementId::Internal(0));
-        assert_eq!(second.placement_id, PlacementId::Internal(1));
+        assert_eq!(first.key.image_id, 1);
+        assert_eq!(first.key.placement_id, PlacementId::Internal(0));
+        assert_eq!(first.replaced, None);
+        assert_eq!(second.key.placement_id, PlacementId::Internal(1));
+        assert_eq!(second.replaced, None);
         assert_eq!(storage.next_internal_placement_id, 2);
         assert_eq!(storage.placement_len(), 2);
         assert_eq!(storage.placements_for_image(1).len(), 2);
@@ -649,8 +759,10 @@ mod tests {
         let first = storage.add_placement(1, 9, Placement::default()).unwrap();
         let second = storage.add_placement(1, 9, placement()).unwrap();
 
-        assert_eq!(first, second);
-        assert_eq!(first.placement_id, PlacementId::External(9));
+        assert_eq!(first.key, second.key);
+        assert_eq!(first.replaced, None);
+        assert_eq!(second.replaced, Some(Placement::default()));
+        assert_eq!(first.key.placement_id, PlacementId::External(9));
         assert_eq!(storage.placement_len(), 1);
         assert_eq!(storage.placement_by_key(first), Some(&placement()));
     }
@@ -851,7 +963,7 @@ mod tests {
         let survivor_ptr = survivor.data.as_ptr();
         storage.add_image(survivor).unwrap();
 
-        assert!(storage.evict_image(10));
+        assert!(storage.evict_image(10).is_some());
 
         let stored = storage.image_by_id(2).unwrap();
         assert_eq!(stored.data.as_ptr(), survivor_ptr);

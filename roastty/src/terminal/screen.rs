@@ -5,7 +5,10 @@ use super::color;
 use super::cursor;
 use super::hyperlink;
 use super::kitty;
-use super::kitty::graphics_storage::ImageStorage;
+use super::kitty::graphics_image::{Image, ImageLoadError};
+use super::kitty::graphics_storage::{
+    ImageStorage, Placement, PlacementAddResult, PlacementError, PlacementKey,
+};
 use super::page::{SemanticContent, SemanticPrompt};
 use super::page_list::{
     BasicCellWriteError, CodepointMapEntry, DragGeometry, GridRef, GridRefPointError, PageList,
@@ -172,6 +175,7 @@ impl Screen {
 
     pub(super) fn reset(&mut self) {
         self.clear_selection();
+        self.clear_kitty_images();
         self.pages.reset();
         self.pages.mark_active_rows_dirty();
         self.cursor = ScreenCursor::default();
@@ -191,6 +195,57 @@ impl Screen {
 
     pub(super) fn kitty_images_mut(&mut self) -> &mut ImageStorage {
         &mut self.kitty_images
+    }
+
+    pub(super) fn add_kitty_image(&mut self, image: Image) -> Result<(), ImageLoadError> {
+        let removed = self.kitty_images.add_image(image)?;
+        self.untrack_kitty_placements(removed.into_vec());
+        Ok(())
+    }
+
+    pub(super) fn set_kitty_image_limit(&mut self, limit: usize) {
+        let removed = self.kitty_images.set_limit(limit);
+        self.untrack_kitty_placements(removed.into_vec());
+    }
+
+    pub(super) fn add_kitty_placement(
+        &mut self,
+        image_id: u32,
+        placement_id: u32,
+        placement: Placement,
+    ) -> Result<PlacementKey, PlacementError> {
+        match self
+            .kitty_images
+            .add_placement(image_id, placement_id, placement)
+        {
+            Ok(PlacementAddResult { key, replaced }) => {
+                if let Some(replaced) = replaced {
+                    self.untrack_kitty_placement(replaced);
+                }
+                Ok(key)
+            }
+            Err(err) => {
+                self.untrack_kitty_placement(placement);
+                Err(err)
+            }
+        }
+    }
+
+    pub(super) fn clear_kitty_images(&mut self) {
+        let removed = self.kitty_images.clear();
+        self.untrack_kitty_placements(removed.into_vec());
+    }
+
+    fn untrack_kitty_placements(&mut self, placements: Vec<Placement>) {
+        for placement in placements {
+            self.untrack_kitty_placement(placement);
+        }
+    }
+
+    fn untrack_kitty_placement(&mut self, placement: Placement) {
+        if let Some(pin) = placement.tracked_pin() {
+            self.untrack_pin(pin);
+        }
     }
 
     pub(super) fn top_left_pin(&self) -> super::page_list::Pin {
@@ -1056,6 +1111,11 @@ impl Screen {
 
     pub(super) fn tracked_pin_value(&self, pin: std::ptr::NonNull<Pin>) -> Option<Pin> {
         self.pages.tracked_pin_value(pin)
+    }
+
+    #[cfg(test)]
+    pub(super) fn count_tracked_pins_for_tests(&self) -> usize {
+        self.pages.count_tracked_pins()
     }
 
     pub(super) fn scroll_delta_row(&mut self, delta: isize) {

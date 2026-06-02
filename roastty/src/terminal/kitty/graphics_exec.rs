@@ -1,5 +1,7 @@
 //! Kitty graphics command execution.
 
+use super::super::point::{Coordinate, Point};
+use super::super::screen::Screen;
 use super::graphics_command::{
     AnimationControl, AnimationFrameComposition, AnimationFrameLoading, Command, CommandControl,
     Delete, Display, Quiet, Response, Transmission,
@@ -28,6 +30,45 @@ pub(crate) fn execute(storage: &mut ImageStorage, command: &Command) -> Option<R
             Some(unimplemented_response_for_transmission(*transmission))
         }
         CommandControl::Display(display) => Some(unimplemented_response_for_display(*display)),
+        CommandControl::Delete(delete) => Some(unimplemented_response_for_delete(*delete)),
+        CommandControl::TransmitAnimationFrame(animation) => {
+            Some(unimplemented_response_for_animation_frame(*animation))
+        }
+        CommandControl::ControlAnimation(animation) => {
+            Some(unimplemented_response_for_animation_control(*animation))
+        }
+        CommandControl::ComposeAnimation(composition) => Some(
+            unimplemented_response_for_animation_composition(*composition),
+        ),
+    };
+
+    filter_response(response, quiet)
+}
+
+pub(in crate::terminal) fn execute_screen(
+    screen: &mut Screen,
+    command: &Command,
+) -> Option<Response<'static>> {
+    if !screen.kitty_images().enabled() {
+        return None;
+    }
+
+    let mut quiet = command.quiet;
+    let response = match &command.control {
+        CommandControl::Query(transmission) => query(screen.kitty_images(), command, *transmission),
+        CommandControl::Transmit(_) => {
+            if let Some(loading) = screen.kitty_images_mut().loading.as_mut() {
+                match command.quiet {
+                    Quiet::No => quiet = loading.quiet,
+                    Quiet::Ok | Quiet::Failures => loading.quiet = command.quiet,
+                }
+            }
+            Some(transmit_screen(screen, command))
+        }
+        CommandControl::TransmitAndDisplay { transmission, .. } => {
+            Some(unimplemented_response_for_transmission(*transmission))
+        }
+        CommandControl::Display(display) => Some(display_on_screen(screen, *display)),
         CommandControl::Delete(delete) => Some(unimplemented_response_for_delete(*delete)),
         CommandControl::TransmitAnimationFrame(animation) => {
             Some(unimplemented_response_for_animation_frame(*animation))
@@ -91,6 +132,109 @@ fn transmit(storage: &mut ImageStorage, command: &Command) -> Response<'static> 
             response
         }
     }
+}
+
+fn transmit_screen(screen: &mut Screen, command: &Command) -> Response<'static> {
+    let Some(transmission) = command.transmission() else {
+        return error_response(b"EINVAL: invalid data");
+    };
+    let mut response = response_for_transmission(transmission);
+    if let Some(loading) = screen.kitty_images().loading.as_ref() {
+        response.id = loading.image.id;
+        response.image_number = loading.image.number;
+    }
+
+    if transmission.image_id > 0 && transmission.image_number > 0 {
+        response.message = b"EINVAL: image ID and number are mutually exclusive";
+        return response;
+    }
+
+    match load_and_add_image_screen(screen, command, transmission) {
+        Ok(load) => {
+            if load.more || load.implicit_id {
+                return Response::default();
+            }
+
+            response.id = load.id;
+            response.image_number = load.image_number;
+            response.placement_id = load.placement_id;
+            response
+        }
+        Err(err) => {
+            encode_error(&mut response, err);
+            response
+        }
+    }
+}
+
+fn display_on_screen(screen: &mut Screen, display: Display) -> Response<'static> {
+    if display.image_id == 0 && display.image_number == 0 {
+        return error_response(b"EINVAL: image ID or number required");
+    }
+
+    let mut response = Response {
+        id: display.image_id,
+        image_number: display.image_number,
+        placement_id: display.placement_id,
+        message: b"OK",
+    };
+
+    let image_id = if display.image_id != 0 {
+        match screen.kitty_images().image_by_id(display.image_id) {
+            Some(image) => image.id,
+            None => {
+                response.message = b"ENOENT: image not found";
+                return response;
+            }
+        }
+    } else {
+        match screen.kitty_images().image_by_number(display.image_number) {
+            Some(image) => image.id,
+            None => {
+                response.message = b"ENOENT: image not found";
+                return response;
+            }
+        }
+    };
+    response.id = image_id;
+
+    let location = if display.virtual_placement {
+        if display.parent_id > 0 {
+            response.message = b"EINVAL: virtual placement cannot refer to a parent";
+            return response;
+        }
+        PlacementLocation::Virtual
+    } else {
+        let (x, y) = screen.cursor_position();
+        let Some(pin) = screen.pin(Point::active(Coordinate::new(x, y.into()))) else {
+            response.message = b"EINVAL: failed to prepare terminal state";
+            return response;
+        };
+        let Some(pin) = screen.track_pin(pin) else {
+            response.message = b"EINVAL: failed to prepare terminal state";
+            return response;
+        };
+        PlacementLocation::Pin(pin)
+    };
+
+    let placement = Placement {
+        location,
+        x_offset: display.x_offset,
+        y_offset: display.y_offset,
+        source_x: display.x,
+        source_y: display.y,
+        source_width: display.width,
+        source_height: display.height,
+        columns: display.columns,
+        rows: display.rows,
+        z: display.z,
+    };
+
+    if let Err(err) = screen.add_kitty_placement(image_id, display.placement_id, placement) {
+        encode_placement_error(&mut response, err);
+    }
+
+    response
 }
 
 pub(crate) fn display_with_location(
@@ -183,7 +327,7 @@ fn load_and_add_image(
 
         let mut image = loading.complete()?;
         let result = load_result_from_image(&image, false);
-        storage.add_image(std::mem::take(&mut image))?;
+        let _ = storage.add_image(std::mem::take(&mut image))?;
         return Ok(result);
     }
 
@@ -198,7 +342,42 @@ fn load_and_add_image(
 
     let mut image = loading.complete()?;
     let result = load_result_from_image(&image, false);
-    storage.add_image(std::mem::take(&mut image))?;
+    let _ = storage.add_image(std::mem::take(&mut image))?;
+    Ok(result)
+}
+
+fn load_and_add_image_screen(
+    screen: &mut Screen,
+    command: &Command,
+    transmission: Transmission,
+) -> Result<LoadResult, ImageLoadError> {
+    if let Some(mut loading) = screen.kitty_images_mut().loading.take() {
+        loading.add_data(&command.data)?;
+
+        if transmission.more_chunks {
+            let result = load_result_from_loading(&loading, true);
+            screen.kitty_images_mut().loading = Some(loading);
+            return Ok(result);
+        }
+
+        let mut image = loading.complete()?;
+        let result = load_result_from_image(&image, false);
+        screen.add_kitty_image(std::mem::take(&mut image))?;
+        return Ok(result);
+    }
+
+    let mut loading = LoadingImage::init(command, screen.kitty_images().image_limits)?;
+    assign_image_id(screen.kitty_images_mut(), &mut loading);
+
+    if transmission.more_chunks {
+        let result = load_result_from_loading(&loading, true);
+        screen.kitty_images_mut().loading = Some(Box::new(loading));
+        return Ok(result);
+    }
+
+    let mut image = loading.complete()?;
+    let result = load_result_from_image(&image, false);
+    screen.add_kitty_image(std::mem::take(&mut image))?;
     Ok(result)
 }
 

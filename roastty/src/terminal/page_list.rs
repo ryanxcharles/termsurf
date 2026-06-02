@@ -4418,10 +4418,12 @@ impl PageList {
         Some(value)
     }
 
-    fn count_tracked_pins(&self) -> usize {
+    #[cfg(test)]
+    pub(super) fn count_tracked_pins(&self) -> usize {
         self.tracked_pins.len()
     }
 
+    #[cfg(test)]
     fn tracked_pins(&self) -> &[NonNull<Pin>] {
         &self.tracked_pins
     }

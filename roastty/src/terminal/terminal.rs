@@ -9,10 +9,9 @@ use super::cursor;
 use super::dcs;
 use super::device_attributes;
 use super::device_status;
-use super::kitty::graphics_command::{Command, CommandControl, Display, Parser, Quiet, Response};
+use super::kitty::graphics_command::{Command, Parser, Response};
 use super::kitty::graphics_exec;
 use super::kitty::graphics_image::MAX_IMAGE_SIZE;
-use super::kitty::graphics_storage::PlacementLocation;
 use super::modes;
 use super::mouse;
 use super::osc;
@@ -754,18 +753,6 @@ impl KittyGraphicsApc {
     #[cfg(test)]
     fn set_max_bytes_for_tests(&mut self, max_bytes: usize) {
         self.max_bytes = max_bytes;
-    }
-}
-
-fn filter_kitty_graphics_response(
-    response: Response<'static>,
-    quiet: Quiet,
-) -> Option<Response<'static>> {
-    match quiet {
-        Quiet::No => Some(response),
-        Quiet::Ok if response.ok() => None,
-        Quiet::Ok => Some(response),
-        Quiet::Failures => None,
     }
 }
 
@@ -2485,44 +2472,8 @@ impl TerminalStreamHandler<'_> {
     }
 
     fn kitty_graphics_command(&mut self, command: Command) {
-        let response = match &command.control {
-            CommandControl::Display(display) => self.kitty_graphics_display(&command, *display),
-            CommandControl::Query(_)
-            | CommandControl::Transmit(_)
-            | CommandControl::TransmitAndDisplay { .. }
-            | CommandControl::Delete(_)
-            | CommandControl::TransmitAnimationFrame(_)
-            | CommandControl::ControlAnimation(_)
-            | CommandControl::ComposeAnimation(_) => {
-                graphics_exec::execute(self.screens.active_mut().kitty_images_mut(), &command)
-            }
-        };
-
+        let response = graphics_exec::execute_screen(self.screens.active_mut(), &command);
         self.write_kitty_graphics_response(response);
-    }
-
-    fn kitty_graphics_display(
-        &mut self,
-        command: &Command,
-        display: Display,
-    ) -> Option<Response<'static>> {
-        let (x, y) = self.screens.active().cursor_position();
-        let response = {
-            let storage = self.screens.active_mut().kitty_images_mut();
-            if !storage.enabled() {
-                return None;
-            }
-            graphics_exec::display_with_location(
-                storage,
-                display,
-                PlacementLocation::Cell {
-                    x: u32::from(x),
-                    y: u32::from(y),
-                },
-            )
-        };
-
-        filter_kitty_graphics_response(response, command.quiet)
     }
 
     fn write_kitty_graphics_response(&mut self, response: Option<Response<'static>>) {
@@ -3604,11 +3555,14 @@ mod tests {
     use crate::terminal::charsets;
     use crate::terminal::color;
     use crate::terminal::cursor;
-    use crate::terminal::kitty::graphics_storage::{PlacementId, PlacementKey, PlacementLocation};
+    use crate::terminal::kitty::graphics_storage::{
+        Placement, PlacementId, PlacementKey, PlacementLocation,
+    };
     use crate::terminal::kitty::{KeyFlags, KeySetMode};
     use crate::terminal::modes::Mode;
     use crate::terminal::page::{HyperlinkSnapshotId, SemanticContent, SemanticPrompt};
     use crate::terminal::page_list::{CodepointReplacement, Pin};
+    use crate::terminal::point::{Coordinate, Point};
     use crate::terminal::screen::ScreenCursorHyperlinkId;
     use crate::terminal::selection;
     use crate::terminal::style;
@@ -3695,6 +3649,43 @@ mod tests {
 
     fn kitty_cursor_after_display_apc(image_id: u32, placement_id: u32) -> Vec<u8> {
         format!("\x1b_Ga=p,i={image_id},p={placement_id},C=0\x1b\\").into_bytes()
+    }
+
+    fn kitty_placement_key(image_id: u32, placement_id: u32) -> PlacementKey {
+        PlacementKey {
+            image_id,
+            placement_id: PlacementId::External(placement_id),
+        }
+    }
+
+    fn active_tracked_pin_count(terminal: &Terminal) -> usize {
+        terminal.screens.active().count_tracked_pins_for_tests()
+    }
+
+    fn active_kitty_placement_pin(
+        terminal: &Terminal,
+        image_id: u32,
+        placement_id: u32,
+    ) -> std::ptr::NonNull<Pin> {
+        let placement = terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(image_id, placement_id))
+            .unwrap();
+        match placement.location {
+            PlacementLocation::Pin(pin) => pin,
+            other => panic!("expected tracked pin placement, got {other:?}"),
+        }
+    }
+
+    fn active_tracked_pin_value(terminal: &Terminal, pin: std::ptr::NonNull<Pin>) -> Option<Pin> {
+        terminal.screens.active().tracked_pin_value(pin)
+    }
+
+    fn tracked_placement_at_cursor(terminal: &Terminal, image_id: u32, placement_id: u32) -> Pin {
+        let pin = active_kitty_placement_pin(terminal, image_id, placement_id);
+        active_tracked_pin_value(terminal, pin).expect("placement pin must still be tracked")
     }
 
     fn pins(terminal: &Terminal, points: &[(CellCountInt, u32)]) -> Vec<Pin> {
@@ -5809,33 +5800,131 @@ mod tests {
     }
 
     #[test]
-    fn terminal_stream_kitty_graphics_display_stores_cursor_cell_placement() {
+    fn terminal_stream_kitty_graphics_display_stores_cursor_tracked_pin() {
         let mut terminal = Terminal::init(10, 3, None).unwrap();
 
         terminal.next_slice(&kitty_transmit_apc(7)).unwrap();
         terminal.clear_pty_response();
+        let tracked_before = active_tracked_pin_count(&terminal);
         terminal
             .screens
             .active_mut()
             .set_cursor_position_for_tests(5, 1);
         terminal.next_slice(&kitty_display_apc(7, 4)).unwrap();
 
-        let key = PlacementKey {
-            image_id: 7,
-            placement_id: PlacementId::External(4),
-        };
-        let placement = terminal
-            .screens
-            .active()
-            .kitty_images()
-            .placement_by_key(key)
-            .unwrap();
-        let location = placement.location;
         assert_eq!(
             terminal.take_pty_response_for_tests(),
             b"\x1b_Gi=7,p=4;OK\x1b\\"
         );
-        assert_eq!(location, PlacementLocation::Cell { x: 5, y: 1 });
+        assert_eq!(active_tracked_pin_count(&terminal), tracked_before + 1);
+        assert_eq!(
+            tracked_placement_at_cursor(&terminal, 7, 4),
+            active_pin(&terminal, 5, 1)
+        );
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_external_replacement_untracks_old_pin() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal.next_slice(&kitty_transmit_apc(7)).unwrap();
+        terminal.clear_pty_response();
+        let tracked_before = active_tracked_pin_count(&terminal);
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(2, 0);
+        terminal.next_slice(&kitty_display_apc(7, 4)).unwrap();
+        let old_pin = active_kitty_placement_pin(&terminal, 7, 4);
+        assert_eq!(active_tracked_pin_count(&terminal), tracked_before + 1);
+
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(6, 2);
+        terminal.clear_pty_response();
+        terminal.next_slice(&kitty_display_apc(7, 4)).unwrap();
+
+        assert_eq!(
+            terminal.take_pty_response_for_tests(),
+            b"\x1b_Gi=7,p=4;OK\x1b\\"
+        );
+        assert_eq!(active_tracked_pin_count(&terminal), tracked_before + 1);
+        assert_eq!(active_tracked_pin_value(&terminal, old_pin), None);
+        assert_eq!(
+            tracked_placement_at_cursor(&terminal, 7, 4),
+            active_pin(&terminal, 6, 2)
+        );
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_internal_placements_track_distinct_pins() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal.next_slice(&kitty_transmit_apc(7)).unwrap();
+        terminal.clear_pty_response();
+        let tracked_before = active_tracked_pin_count(&terminal);
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(1, 0);
+        terminal.next_slice(&kitty_display_apc(7, 0)).unwrap();
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(3, 1);
+        terminal.next_slice(&kitty_display_apc(7, 0)).unwrap();
+
+        assert_eq!(active_tracked_pin_count(&terminal), tracked_before + 2);
+        let first = terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(PlacementKey {
+                image_id: 7,
+                placement_id: PlacementId::Internal(0),
+            })
+            .unwrap()
+            .tracked_pin()
+            .unwrap();
+        let second = terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(PlacementKey {
+                image_id: 7,
+                placement_id: PlacementId::Internal(1),
+            })
+            .unwrap()
+            .tracked_pin()
+            .unwrap();
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_transmit_eviction_untracks_placements() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+        terminal.screens.active_mut().set_kitty_image_limit(6);
+
+        terminal.next_slice(&kitty_transmit_apc(1)).unwrap();
+        terminal.clear_pty_response();
+        terminal.next_slice(&kitty_display_apc(1, 4)).unwrap();
+        let tracked_before_eviction = active_tracked_pin_count(&terminal);
+        let old_pin = active_kitty_placement_pin(&terminal, 1, 4);
+
+        terminal.next_slice(&kitty_transmit_apc(2)).unwrap();
+
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .image_by_id(1)
+            .is_none());
+        assert_eq!(active_tracked_pin_value(&terminal, old_pin), None);
+        assert_eq!(
+            active_tracked_pin_count(&terminal),
+            tracked_before_eviction - 1
+        );
     }
 
     #[test]
@@ -5892,15 +5981,17 @@ mod tests {
 
         terminal.next_slice(&kitty_transmit_apc(7)).unwrap();
         terminal.clear_pty_response();
-        terminal
-            .screens
-            .active_mut()
-            .kitty_images_mut()
-            .set_limit(0);
+        let tracked_before = active_tracked_pin_count(&terminal);
+        terminal.next_slice(&kitty_display_apc(7, 3)).unwrap();
+        assert_eq!(active_tracked_pin_count(&terminal), tracked_before + 1);
+        terminal.clear_pty_response();
+
+        terminal.screens.active_mut().set_kitty_image_limit(0);
         terminal.next_slice(&kitty_display_apc(7, 4)).unwrap();
 
         assert!(terminal.pty_response_for_tests().is_empty());
         assert_eq!(terminal.screens.active().kitty_images().placement_len(), 0);
+        assert_eq!(active_tracked_pin_count(&terminal), tracked_before);
     }
 
     #[test]
@@ -5942,6 +6033,7 @@ mod tests {
 
         terminal.next_slice(&kitty_transmit_apc(7)).unwrap();
         terminal.clear_pty_response();
+        let tracked_before = active_tracked_pin_count(&terminal);
         terminal
             .next_slice(&kitty_virtual_display_apc(7, 4))
             .unwrap();
@@ -5956,6 +6048,58 @@ mod tests {
             })
             .unwrap();
         assert_eq!(placement.location, PlacementLocation::Virtual);
+        assert_eq!(active_tracked_pin_count(&terminal), tracked_before);
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_failed_screen_insert_untracks_new_pin() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+        let tracked_before = active_tracked_pin_count(&terminal);
+        let screen = terminal.screens.active_mut();
+        let pin = screen
+            .pin(Point::active(Coordinate::new(2, 1)))
+            .expect("test cell must have a pin");
+        let tracked = screen.track_pin(pin).expect("test pin must track");
+        assert_eq!(screen.count_tracked_pins_for_tests(), tracked_before + 1);
+
+        let result = screen.add_kitty_placement(
+            404,
+            1,
+            Placement {
+                location: PlacementLocation::Pin(tracked),
+                ..Placement::default()
+            },
+        );
+
+        assert!(result.is_err());
+        assert_eq!(active_tracked_pin_count(&terminal), tracked_before);
+        assert_eq!(active_tracked_pin_value(&terminal, tracked), None);
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_same_image_replacement_preserves_pin() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal.next_slice(&kitty_transmit_apc(7)).unwrap();
+        terminal.clear_pty_response();
+        terminal.next_slice(&kitty_display_apc(7, 4)).unwrap();
+        let tracked_before_replace = active_tracked_pin_count(&terminal);
+        let pin = active_kitty_placement_pin(&terminal, 7, 4);
+
+        terminal.clear_pty_response();
+        terminal.next_slice(&kitty_transmit_apc(7)).unwrap();
+
+        assert_eq!(active_tracked_pin_count(&terminal), tracked_before_replace);
+        assert_eq!(
+            active_tracked_pin_value(&terminal, pin),
+            Some(active_pin(&terminal, 0, 0))
+        );
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(7, 4))
+            .is_some());
     }
 
     #[test]
@@ -5989,8 +6133,17 @@ mod tests {
         let mut terminal = Terminal::init(10, 3, None).unwrap();
 
         terminal.next_slice(&kitty_transmit_apc(7)).unwrap();
+        terminal.clear_pty_response();
+        terminal.next_slice(&kitty_display_apc(7, 1)).unwrap();
+        let primary_count = terminal
+            .screens
+            .screen(TerminalScreenKey::Primary)
+            .unwrap()
+            .count_tracked_pins_for_tests();
         terminal.next_slice(b"\x1b[?1049h").unwrap();
         terminal.next_slice(&kitty_transmit_apc(8)).unwrap();
+        terminal.clear_pty_response();
+        terminal.next_slice(&kitty_display_apc(8, 1)).unwrap();
 
         assert!(terminal
             .screens
@@ -6011,6 +6164,28 @@ mod tests {
             .kitty_images()
             .image_by_id(7)
             .is_some());
+        assert_eq!(
+            terminal
+                .screens
+                .screen(TerminalScreenKey::Primary)
+                .unwrap()
+                .count_tracked_pins_for_tests(),
+            primary_count
+        );
+        assert_eq!(terminal.screens.active().count_tracked_pins_for_tests(), 2);
+        assert!(terminal
+            .screens
+            .screen(TerminalScreenKey::Primary)
+            .unwrap()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(7, 1))
+            .is_some());
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .placement_by_key(kitty_placement_key(8, 1))
+            .is_some());
     }
 
     #[test]
@@ -6018,19 +6193,26 @@ mod tests {
         let mut terminal = Terminal::init(10, 3, None).unwrap();
 
         terminal.next_slice(&kitty_transmit_apc(7)).unwrap();
+        terminal.next_slice(&kitty_display_apc(7, 4)).unwrap();
+        let tracked_before_reset = active_tracked_pin_count(&terminal);
+        assert!(tracked_before_reset > 1);
         terminal.clear_pty_response();
         terminal.next_slice(b"\x1b_Ga=q,i=9").unwrap();
         terminal.reset();
         terminal.next_slice(b";AQIDBA==\x1b\\").unwrap();
 
         assert_eq!(terminal.screens.active().kitty_images().len(), 0);
+        assert_eq!(active_tracked_pin_count(&terminal), 1);
         assert!(terminal.pty_response_for_tests().is_empty());
 
         terminal.next_slice(&kitty_transmit_apc(8)).unwrap();
+        terminal.next_slice(&kitty_display_apc(8, 4)).unwrap();
+        assert!(active_tracked_pin_count(&terminal) > 1);
         terminal.clear_pty_response();
         terminal.next_slice(b"\x1bc").unwrap();
 
         assert_eq!(terminal.screens.active().kitty_images().len(), 0);
+        assert_eq!(active_tracked_pin_count(&terminal), 1);
         assert!(terminal.pty_response_for_tests().is_empty());
     }
 
