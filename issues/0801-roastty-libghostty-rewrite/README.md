@@ -564,6 +564,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 219: Port Offscreen Metal Background Image Readback](219-port-offscreen-metal-background-image-readback.md)
   — **Pass**
+- [Experiment 220: Port Offscreen Metal Cell Text Grayscale Readback](220-port-offscreen-metal-cell-text-grayscale-readback.md)
+  — **Designed**
 
 ## Non-Goals
 
