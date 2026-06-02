@@ -215,8 +215,57 @@ All public names must use Roastty naming.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Roastty now has an internal `renderer::image` module that ports the
+renderer-independent image-state foundation from upstream `renderer/image.zig`.
+The module tracks renderer image ids, CPU pending image data, replacement and
+unload state, prepared Kitty placements, virtual-placement presence, and the
+background/text z-layer split indices. It consumes the render-state Kitty
+placement snapshots added by Experiment 204 and does not re-read terminal state
+or recompute Kitty placement geometry.
+
+The implementation also made the render-state Kitty image and placement
+snapshots visible inside the crate so the renderer module can consume them
+without adding public C ABI. Public ABI names remain Roastty-only.
+
+Tests cover:
+
+- image id z tie-breaking;
+- pending image byte ownership and length accounting;
+- pinned and virtual Kitty render placements;
+- duplicate same-frame placements for one image id;
+- z sorting and layer split indices;
+- unchanged-image reuse;
+- changed-image replacement;
+- image removal/unload;
+- reappearing unchanged images canceling unload state.
+
+The reappearing-image case was added after Codex result review found that an
+image could go `present -> absent -> same image present` and remain marked for
+unload while a placement referenced it. The state transition now restores the
+image to `Pending` when the same image reappears and replaces the image directly
+when changed image data reappears after an unload mark.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/renderer/mod.rs roastty/src/renderer/image.rs
+cargo test -p roastty renderer::image
+cargo test -p roastty render_state
+cargo test -p roastty kitty_graphics_render_placement_c_abi
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Codex reviewed the corrected result and approved it with no blockers.
 
 ## Conclusion
 
-Pending.
+Experiment 205 establishes the CPU-side renderer image-state boundary that later
+renderer experiments can extend with upload and draw behavior. The next
+experiment should continue from this internal state model into a coherent
+renderer-side slice, likely the Metal-facing image upload/draw boundary or the
+smallest renderer abstraction needed to consume these prepared images without
+exposing new app ABI prematurely.

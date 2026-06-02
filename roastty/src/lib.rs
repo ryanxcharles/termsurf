@@ -37,6 +37,7 @@ use terminal::terminal::{
 use terminal::{mouse, mouse_encode, osc, point, sgr, size_report, style};
 
 mod input;
+mod renderer;
 mod terminal;
 
 // ABI ownership model:
@@ -719,14 +720,14 @@ struct RenderStateCellSnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct KittyGraphicsImageSnapshot {
-    id: u32,
-    number: u32,
-    width: u32,
-    height: u32,
-    format: c_int,
-    compression: c_int,
-    data: Vec<u8>,
+pub(crate) struct KittyGraphicsImageSnapshot {
+    pub(crate) id: u32,
+    pub(crate) number: u32,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) format: c_int,
+    pub(crate) compression: c_int,
+    pub(crate) data: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -753,17 +754,17 @@ impl Default for KittyGraphicsPlacementIterator {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct KittyGraphicsRenderPlacementSnapshot {
-    image: KittyGraphicsImageSnapshot,
-    info: RoasttyKittyGraphicsRenderPlacementInfo,
-    virtual_row: u32,
-    virtual_col: u32,
+pub(crate) struct KittyGraphicsRenderPlacementSnapshot {
+    pub(crate) image: KittyGraphicsImageSnapshot,
+    pub(crate) info: RoasttyKittyGraphicsRenderPlacementInfo,
+    pub(crate) virtual_row: u32,
+    pub(crate) virtual_col: u32,
     source_group: KittyGraphicsRenderPlacementSourceGroup,
     discovery_index: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum KittyGraphicsRenderPlacementSourceGroup {
+pub(crate) enum KittyGraphicsRenderPlacementSourceGroup {
     Pinned,
     Virtual,
 }
@@ -1010,24 +1011,24 @@ pub struct RoasttyKittyGraphicsPlacementRenderInfo {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RoasttyKittyGraphicsRenderPlacementInfo {
-    size: usize,
-    image_id: u32,
-    placement_id: u32,
-    is_virtual: bool,
-    x_offset: u32,
-    y_offset: u32,
-    pixel_width: u32,
-    pixel_height: u32,
-    grid_cols: u32,
-    grid_rows: u32,
-    viewport_col: i32,
-    viewport_row: i32,
-    viewport_visible: bool,
-    source_x: u32,
-    source_y: u32,
-    source_width: u32,
-    source_height: u32,
-    z: i32,
+    pub(crate) size: usize,
+    pub(crate) image_id: u32,
+    pub(crate) placement_id: u32,
+    pub(crate) is_virtual: bool,
+    pub(crate) x_offset: u32,
+    pub(crate) y_offset: u32,
+    pub(crate) pixel_width: u32,
+    pub(crate) pixel_height: u32,
+    pub(crate) grid_cols: u32,
+    pub(crate) grid_rows: u32,
+    pub(crate) viewport_col: i32,
+    pub(crate) viewport_row: i32,
+    pub(crate) viewport_visible: bool,
+    pub(crate) source_x: u32,
+    pub(crate) source_y: u32,
+    pub(crate) source_width: u32,
+    pub(crate) source_height: u32,
+    pub(crate) z: i32,
 }
 
 #[repr(C)]
