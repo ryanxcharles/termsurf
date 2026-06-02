@@ -690,6 +690,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 233: Establish the `font` Module and Port `Glyph`](233-establish-font-module-glyph.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 234: Port Font `Style` and `Presentation` Enums](234-port-font-style-presentation.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
