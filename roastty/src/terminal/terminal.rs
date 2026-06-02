@@ -3815,6 +3815,7 @@ mod tests {
     use crate::terminal::charsets;
     use crate::terminal::color;
     use crate::terminal::cursor;
+    use crate::terminal::kitty::graphics_command::TransmissionFormat;
     use crate::terminal::kitty::graphics_storage::{
         Placement, PlacementId, PlacementKey, PlacementLocation,
     };
@@ -3826,9 +3827,12 @@ mod tests {
     use crate::terminal::screen::ScreenCursorHyperlinkId;
     use crate::terminal::selection;
     use crate::terminal::style;
+    use std::ffi::c_void;
     use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
+    use std::ptr;
+    use std::sync::MutexGuard;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn terminal_with_lines(lines: &[&str]) -> Terminal {
@@ -3885,6 +3889,64 @@ mod tests {
 
     fn kitty_transmit_apc(image_id: u32) -> Vec<u8> {
         format!("\x1b_Ga=t,f=32,s=1,v=1,i={image_id};AQIDBA==\x1b\\").into_bytes()
+    }
+
+    fn kitty_png_transmit_apc(image_id: u32) -> Vec<u8> {
+        format!("\x1b_Ga=t,f=100,i={image_id};ZmFrZSBwbmc=\x1b\\").into_bytes()
+    }
+
+    struct SysDecodeGuard {
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl SysDecodeGuard {
+        fn with_png_decoder(
+            callback: unsafe extern "C" fn(
+                *mut c_void,
+                *const crate::RoasttyAllocator,
+                *const u8,
+                usize,
+                *mut crate::RoasttySysImage,
+            ) -> bool,
+        ) -> Self {
+            let guard = crate::SYS_TEST_LOCK.lock().unwrap();
+            assert_eq!(
+                crate::roastty_sys_set(
+                    crate::ROASTTY_SYS_OPT_DECODE_PNG,
+                    callback as *const c_void
+                ),
+                crate::ROASTTY_SUCCESS
+            );
+            Self { _guard: guard }
+        }
+    }
+
+    impl Drop for SysDecodeGuard {
+        fn drop(&mut self) {
+            let _ = crate::roastty_sys_set(crate::ROASTTY_SYS_OPT_DECODE_PNG, ptr::null());
+        }
+    }
+
+    unsafe extern "C" fn decode_png_rgba_1x1(
+        _userdata: *mut c_void,
+        allocator: *const crate::RoasttyAllocator,
+        _data: *const u8,
+        _data_len: usize,
+        out: *mut crate::RoasttySysImage,
+    ) -> bool {
+        let data = [9, 8, 7, 6];
+        let ptr = crate::roastty_alloc(allocator, data.len());
+        if ptr.is_null() {
+            return false;
+        }
+        ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
+        out.write(crate::RoasttySysImage {
+            width: 1,
+            height: 1,
+            data: ptr,
+            data_len: data.len(),
+        });
+        true
     }
 
     struct KittyFileTestDir {
@@ -6442,6 +6504,25 @@ mod tests {
             .kitty_images()
             .image_by_id(93)
             .is_some());
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_png_decodes_through_sys_callback() {
+        let _guard = SysDecodeGuard::with_png_decoder(decode_png_rgba_1x1);
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal.next_slice(&kitty_png_transmit_apc(94)).unwrap();
+
+        let image = terminal
+            .screens
+            .active()
+            .kitty_images()
+            .image_by_id(94)
+            .unwrap();
+        assert_eq!(image.width, 1);
+        assert_eq!(image.height, 1);
+        assert_eq!(image.format, TransmissionFormat::Rgba);
+        assert_eq!(image.data, [9, 8, 7, 6]);
     }
 
     #[test]

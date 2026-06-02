@@ -956,6 +956,11 @@ mod tests {
 
     #[test]
     fn kitty_graphics_exec_unsupported_format_response() {
+        let _guard = crate::SYS_TEST_LOCK.lock().unwrap();
+        assert_eq!(
+            crate::roastty_sys_set(crate::ROASTTY_SYS_OPT_DECODE_PNG, std::ptr::null()),
+            crate::ROASTTY_SUCCESS
+        );
         let mut storage = ImageStorage::new();
         let command = transmit(
             Transmission {
@@ -976,6 +981,11 @@ mod tests {
 
     #[test]
     fn kitty_graphics_exec_unsupported_medium_response() {
+        let _guard = crate::SYS_TEST_LOCK.lock().unwrap();
+        assert_eq!(
+            crate::roastty_sys_set(crate::ROASTTY_SYS_OPT_DECODE_PNG, std::ptr::null()),
+            crate::ROASTTY_SUCCESS
+        );
         let mut storage = ImageStorage::new();
         storage.image_limits = LoadingImageLimits::ALL;
         let command = transmit(
@@ -1171,6 +1181,11 @@ mod tests {
 
     #[test]
     fn kitty_graphics_exec_query_maps_init_error() {
+        let _guard = crate::SYS_TEST_LOCK.lock().unwrap();
+        assert_eq!(
+            crate::roastty_sys_set(crate::ROASTTY_SYS_OPT_DECODE_PNG, std::ptr::null()),
+            crate::ROASTTY_SUCCESS
+        );
         let mut storage = ImageStorage::new();
         storage.image_limits = LoadingImageLimits::ALL;
         let command = query(

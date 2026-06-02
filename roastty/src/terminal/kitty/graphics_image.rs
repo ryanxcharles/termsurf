@@ -134,21 +134,21 @@ impl LoadingImage {
                 Ok(result)
             }
             TransmissionMedium::File => {
-                if !limits.file || transmission.format == TransmissionFormat::Png {
+                if !limits.file || png_without_decoder(transmission.format) {
                     return Err(ImageLoadError::UnsupportedMedium);
                 }
                 result.read_file(transmission, &command.data, false)?;
                 Ok(result)
             }
             TransmissionMedium::TemporaryFile => {
-                if !limits.temporary_file || transmission.format == TransmissionFormat::Png {
+                if !limits.temporary_file || png_without_decoder(transmission.format) {
                     return Err(ImageLoadError::UnsupportedMedium);
                 }
                 result.read_file(transmission, &command.data, true)?;
                 Ok(result)
             }
             TransmissionMedium::SharedMemory => {
-                if !limits.shared_memory || transmission.format == TransmissionFormat::Png {
+                if !limits.shared_memory || png_without_decoder(transmission.format) {
                     return Err(ImageLoadError::UnsupportedMedium);
                 }
                 result.read_shared_memory(transmission, &command.data)?;
@@ -182,7 +182,7 @@ impl LoadingImage {
         self.decompress()?;
 
         if self.image.format == TransmissionFormat::Png {
-            return Err(ImageLoadError::UnsupportedFormat);
+            self.decode_png()?;
         }
 
         if self.image.width == 0 || self.image.height == 0 {
@@ -208,6 +208,15 @@ impl LoadingImage {
         self.image.transmit_time = Some(Instant::now());
         self.image.data = std::mem::take(&mut self.data);
         Ok(self.image)
+    }
+
+    fn decode_png(&mut self) -> Result<(), ImageLoadError> {
+        let decoded = crate::sys_decode_png(&self.data)?;
+        self.data = decoded.data;
+        self.image.width = decoded.width;
+        self.image.height = decoded.height;
+        self.image.format = TransmissionFormat::Rgba;
+        Ok(())
     }
 
     fn decompress(&mut self) -> Result<(), ImageLoadError> {
@@ -330,7 +339,11 @@ impl LoadingImage {
             return Err(ImageLoadError::InvalidData);
         }
         let stat_size = usize::try_from(stat.st_size).map_err(|_| ImageLoadError::InvalidData)?;
-        let expected_size = expected_raw_size(transmission)?;
+        let expected_size = if transmission.format == TransmissionFormat::Png {
+            stat_size
+        } else {
+            expected_raw_size(transmission)?
+        };
         if stat_size < expected_size {
             return Err(ImageLoadError::InvalidData);
         }
@@ -439,6 +452,10 @@ fn expected_raw_size(
         .ok_or(ImageLoadError::InvalidData)
 }
 
+fn png_without_decoder(format: TransmissionFormat) -> bool {
+    format == TransmissionFormat::Png && !crate::sys_has_decode_png()
+}
+
 fn is_unsafe_path(path: &Path) -> bool {
     let bytes = path.as_os_str().as_bytes();
     bytes.starts_with(b"/proc/")
@@ -474,7 +491,10 @@ mod tests {
     };
     use super::*;
     use std::fs;
+    use std::os::raw::c_void;
     use std::os::unix::ffi::OsStrExt;
+    use std::ptr;
+    use std::sync::MutexGuard;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const RGB_NONE_20X15: &[u8] = include_bytes!(
@@ -490,6 +510,150 @@ mod tests {
             quiet: Quiet::No,
             data: data.to_vec(),
         }
+    }
+
+    struct SysDecodeGuard {
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl SysDecodeGuard {
+        fn without_png_decoder() -> Self {
+            let guard = crate::SYS_TEST_LOCK.lock().unwrap();
+            assert_eq!(
+                crate::roastty_sys_set(crate::ROASTTY_SYS_OPT_DECODE_PNG, ptr::null()),
+                crate::ROASTTY_SUCCESS
+            );
+            Self { _guard: guard }
+        }
+
+        fn with_png_decoder(
+            callback: unsafe extern "C" fn(
+                *mut c_void,
+                *const crate::RoasttyAllocator,
+                *const u8,
+                usize,
+                *mut crate::RoasttySysImage,
+            ) -> bool,
+        ) -> Self {
+            let guard = crate::SYS_TEST_LOCK.lock().unwrap();
+            assert_eq!(
+                crate::roastty_sys_set(
+                    crate::ROASTTY_SYS_OPT_DECODE_PNG,
+                    callback as *const c_void
+                ),
+                crate::ROASTTY_SUCCESS
+            );
+            Self { _guard: guard }
+        }
+    }
+
+    impl Drop for SysDecodeGuard {
+        fn drop(&mut self) {
+            let _ = crate::roastty_sys_set(crate::ROASTTY_SYS_OPT_DECODE_PNG, ptr::null());
+        }
+    }
+
+    unsafe extern "C" fn decode_png_rgba_1x1(
+        _userdata: *mut c_void,
+        allocator: *const crate::RoasttyAllocator,
+        _data: *const u8,
+        _data_len: usize,
+        out: *mut crate::RoasttySysImage,
+    ) -> bool {
+        write_decoded_png(allocator, out, 1, 1, &[9, 8, 7, 6])
+    }
+
+    unsafe extern "C" fn decode_png_fails(
+        _userdata: *mut c_void,
+        _allocator: *const crate::RoasttyAllocator,
+        _data: *const u8,
+        _data_len: usize,
+        _out: *mut crate::RoasttySysImage,
+    ) -> bool {
+        false
+    }
+
+    unsafe extern "C" fn decode_png_null_zero(
+        _userdata: *mut c_void,
+        _allocator: *const crate::RoasttyAllocator,
+        _data: *const u8,
+        _data_len: usize,
+        out: *mut crate::RoasttySysImage,
+    ) -> bool {
+        out.write(crate::RoasttySysImage {
+            width: 0,
+            height: 0,
+            data: ptr::null_mut(),
+            data_len: 0,
+        });
+        true
+    }
+
+    unsafe extern "C" fn decode_png_null_nonzero(
+        _userdata: *mut c_void,
+        _allocator: *const crate::RoasttyAllocator,
+        _data: *const u8,
+        _data_len: usize,
+        out: *mut crate::RoasttySysImage,
+    ) -> bool {
+        out.write(crate::RoasttySysImage {
+            width: 1,
+            height: 1,
+            data: ptr::null_mut(),
+            data_len: 4,
+        });
+        true
+    }
+
+    unsafe extern "C" fn decode_png_oversized_for_test(
+        _userdata: *mut c_void,
+        allocator: *const crate::RoasttyAllocator,
+        _data: *const u8,
+        _data_len: usize,
+        out: *mut crate::RoasttySysImage,
+    ) -> bool {
+        write_decoded_png(allocator, out, 1, 2, &[1, 2, 3, 4, 5, 6, 7, 8])
+    }
+
+    unsafe extern "C" fn decode_png_zero_width(
+        _userdata: *mut c_void,
+        allocator: *const crate::RoasttyAllocator,
+        _data: *const u8,
+        _data_len: usize,
+        out: *mut crate::RoasttySysImage,
+    ) -> bool {
+        write_decoded_png(allocator, out, 0, 1, &[1, 2, 3, 4])
+    }
+
+    unsafe extern "C" fn decode_png_length_mismatch(
+        _userdata: *mut c_void,
+        allocator: *const crate::RoasttyAllocator,
+        _data: *const u8,
+        _data_len: usize,
+        out: *mut crate::RoasttySysImage,
+    ) -> bool {
+        write_decoded_png(allocator, out, 2, 1, &[1, 2, 3, 4])
+    }
+
+    unsafe fn write_decoded_png(
+        allocator: *const crate::RoasttyAllocator,
+        out: *mut crate::RoasttySysImage,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> bool {
+        let ptr = crate::roastty_alloc(allocator, data.len());
+        if ptr.is_null() {
+            return false;
+        }
+        ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
+        out.write(crate::RoasttySysImage {
+            width,
+            height,
+            data: ptr,
+            data_len: data.len(),
+        });
+        true
     }
 
     struct TestDir {
@@ -830,6 +994,7 @@ mod tests {
 
     #[test]
     fn kitty_graphics_image_png_direct_deferred() {
+        let _guard = SysDecodeGuard::without_png_decoder();
         let command = transmit_command(
             Transmission {
                 format: TransmissionFormat::Png,
@@ -844,6 +1009,75 @@ mod tests {
 
         let loading = LoadingImage::init(&command, LoadingImageLimits::DIRECT).unwrap();
         assert_eq!(loading.complete(), Err(ImageLoadError::UnsupportedFormat));
+    }
+
+    #[test]
+    fn kitty_graphics_image_png_direct_decodes_through_sys_callback() {
+        let _guard = SysDecodeGuard::with_png_decoder(decode_png_rgba_1x1);
+        let command = transmit_command(
+            Transmission {
+                format: TransmissionFormat::Png,
+                medium: TransmissionMedium::Direct,
+                width: 99,
+                height: 88,
+                image_id: 31,
+                ..Transmission::default()
+            },
+            b"fake png",
+        );
+
+        let image = LoadingImage::init(&command, LoadingImageLimits::DIRECT)
+            .unwrap()
+            .complete()
+            .unwrap();
+        assert_eq!(image.width, 1);
+        assert_eq!(image.height, 1);
+        assert_eq!(image.format, TransmissionFormat::Rgba);
+        assert_eq!(image.data, [9, 8, 7, 6]);
+    }
+
+    #[test]
+    fn kitty_graphics_image_png_callback_errors_and_malformed_output() {
+        for (callback, expected) in [
+            (
+                decode_png_fails
+                    as unsafe extern "C" fn(
+                        *mut c_void,
+                        *const crate::RoasttyAllocator,
+                        *const u8,
+                        usize,
+                        *mut crate::RoasttySysImage,
+                    ) -> bool,
+                ImageLoadError::InvalidData,
+            ),
+            (decode_png_null_zero, ImageLoadError::InvalidData),
+            (decode_png_null_nonzero, ImageLoadError::InvalidData),
+            (decode_png_zero_width, ImageLoadError::DimensionsRequired),
+            (decode_png_length_mismatch, ImageLoadError::InvalidData),
+        ] {
+            let _guard = SysDecodeGuard::with_png_decoder(callback);
+            let command = transmit_command(
+                Transmission {
+                    format: TransmissionFormat::Png,
+                    medium: TransmissionMedium::Direct,
+                    image_id: 31,
+                    ..Transmission::default()
+                },
+                b"fake png",
+            );
+
+            let loading = LoadingImage::init(&command, LoadingImageLimits::DIRECT).unwrap();
+            assert_eq!(loading.complete(), Err(expected));
+        }
+    }
+
+    #[test]
+    fn kitty_graphics_image_png_callback_oversized_output_fails_before_copy() {
+        let _guard = SysDecodeGuard::with_png_decoder(decode_png_oversized_for_test);
+        assert!(matches!(
+            crate::sys_decode_png_with_limit_for_test(b"fake png", 4),
+            Err(ImageLoadError::InvalidData)
+        ));
     }
 
     #[test]
@@ -1059,6 +1293,7 @@ mod tests {
 
     #[test]
     fn kitty_graphics_image_non_direct_png_and_shared_memory_remain_deferred() {
+        let _guard = SysDecodeGuard::without_png_decoder();
         let dir = TestDir::temp();
         let png_temp = dir.write("tty-graphics-protocol-image.png", b"not a png");
 
@@ -1096,6 +1331,56 @@ mod tests {
             Err(ImageLoadError::UnsupportedMedium)
         );
         assert!(shm.exists());
+    }
+
+    #[test]
+    fn kitty_graphics_image_non_direct_png_decodes_when_sys_callback_is_installed() {
+        let _guard = SysDecodeGuard::with_png_decoder(decode_png_rgba_1x1);
+        let dir = TestDir::temp();
+
+        for (medium, name) in [
+            (TransmissionMedium::File, "image.png"),
+            (
+                TransmissionMedium::TemporaryFile,
+                "tty-graphics-protocol-image.png",
+            ),
+        ] {
+            let path = dir.write(name, b"fake png");
+            let command = transmit_command(
+                Transmission {
+                    format: TransmissionFormat::Png,
+                    medium,
+                    image_id: 31,
+                    ..Transmission::default()
+                },
+                &path_bytes(&path),
+            );
+            let image = LoadingImage::init(&command, LoadingImageLimits::ALL)
+                .unwrap()
+                .complete()
+                .unwrap();
+            assert_eq!(image.format, TransmissionFormat::Rgba);
+            assert_eq!(image.data, [9, 8, 7, 6]);
+            assert_eq!(path.exists(), medium == TransmissionMedium::File);
+        }
+
+        let shm = SharedMemoryObject::new(b"fake png");
+        let command = transmit_command(
+            Transmission {
+                format: TransmissionFormat::Png,
+                medium: TransmissionMedium::SharedMemory,
+                image_id: 32,
+                ..Transmission::default()
+            },
+            shm.name_bytes(),
+        );
+        let image = LoadingImage::init(&command, LoadingImageLimits::ALL)
+            .unwrap()
+            .complete()
+            .unwrap();
+        assert_eq!(image.format, TransmissionFormat::Rgba);
+        assert_eq!(image.data, [9, 8, 7, 6]);
+        assert!(!shm.exists());
     }
 
     #[test]

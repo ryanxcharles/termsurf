@@ -177,3 +177,76 @@ The experiment passes when:
 - Do not weaken Experiment 200's shared-memory cleanup guarantees.
 - Do not expose any `ghostty_*` ABI names.
 - Do not skip Codex design review or Codex result review.
+
+## Result
+
+**Result:** Pass
+
+Implemented the Kitty graphics PNG decode hook through the existing Roastty sys
+callback ABI. `LoadingImage::complete()` now decompresses first, decodes PNG
+through `ROASTTY_SYS_OPT_DECODE_PNG` when installed, normalizes decoded PNGs to
+RGBA, updates image dimensions from the callback result, and then runs the
+existing dimension and byte-length validation.
+
+The sys bridge in `roastty/src/lib.rs` now:
+
+- passes a real Roastty allocator pointer to the callback;
+- maps missing callbacks to `UnsupportedFormat`;
+- maps callback failure and malformed callback output to `InvalidData`;
+- rejects null decoded data unconditionally;
+- rejects oversized decoded output before copying callback-owned bytes;
+- copies callback-owned bytes into Rust-owned memory;
+- frees callback-owned bytes with the same allocator after success and on
+  oversized/allocation-failure paths.
+
+Non-direct PNG now follows upstream's capability gate:
+
+- without a decoder callback, file, temporary-file, and shared-memory PNG still
+  return `UnsupportedMedium` before touching OS resources;
+- with a decoder callback, the existing file, temporary-file, and shared-memory
+  loaders read the PNG bytes and decode during completion.
+
+Added test coverage for:
+
+- direct PNG unsupported behavior without a callback;
+- direct PNG decode through the sys callback;
+- callback failure;
+- null output with zero and nonzero lengths;
+- oversized callback output using a small test-only limit so the pre-copy guard
+  is exercised without allocating hundreds of megabytes;
+- decoded zero dimensions and decoded byte-length mismatch;
+- non-direct PNG blocked before OS access without a callback;
+- file, temporary-file, and shared-memory PNG decode with a callback;
+- terminal-stream PNG storage through parser/executor/active-screen state.
+
+Because the sys callback table is global process state, PNG tests and the
+existing sys callback ABI test now use `SYS_TEST_LOCK` to serialize callback
+mutation and avoid parallel test races.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/terminal/terminal.rs roastty/src/terminal/kitty/graphics_image.rs roastty/src/terminal/kitty/graphics_exec.rs
+cargo test -p roastty kitty_graphics_image
+cargo test -p roastty terminal_stream_kitty_graphics
+cargo test -p roastty sys_c_abi
+cargo test -p roastty kitty_graphics_c_abi
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Codex result review found no blocking issues and approved recording Experiment
+201 as Pass.
+
+## Conclusion
+
+Roastty's Kitty graphics loading layer now supports PNG as an embedder-supplied
+decode capability rather than a built-in dependency. Direct, file,
+temporary-file, and shared-memory PNG transmissions can all reach image storage
+when the sys callback is installed, while no-decoder behavior remains
+predictably unsupported before unnecessary OS work.
+
+The remaining Kitty graphics work can now move beyond image loading into the
+next missing subsystem slice, such as animation/frame behavior or renderer-side
+image presentation.

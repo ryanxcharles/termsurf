@@ -12,7 +12,7 @@ use terminal::color;
 use terminal::cursor;
 use terminal::focus;
 use terminal::kitty::graphics_command::{TransmissionCompression, TransmissionFormat};
-use terminal::kitty::graphics_image::Image as KittyImage;
+use terminal::kitty::graphics_image::{Image as KittyImage, ImageLoadError, MAX_IMAGE_SIZE};
 use terminal::kitty::graphics_storage::{
     ImageStorage as KittyImageStorage, Placement as KittyPlacement,
     PlacementId as KittyPlacementId, PlacementKey as KittyPlacementKey,
@@ -499,6 +499,121 @@ static SYS_STATE: Mutex<SysState> = Mutex::new(SysState {
     decode_png: None,
     log: None,
 });
+
+#[cfg(test)]
+pub(crate) static SYS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+pub(crate) struct DecodedPng {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) data: Vec<u8>,
+}
+
+static SYS_DECODE_ALLOCATOR_VTABLE: RoasttyAllocatorVtable = RoasttyAllocatorVtable {
+    alloc: Some(sys_decode_allocator_alloc),
+    resize: None,
+    remap: None,
+    free: Some(sys_decode_allocator_free),
+};
+
+unsafe extern "C" fn sys_decode_allocator_alloc(
+    _ctx: *mut c_void,
+    len: usize,
+    _alignment: u8,
+    _ret_addr: usize,
+) -> *mut u8 {
+    roastty_alloc(ptr::null(), len)
+}
+
+unsafe extern "C" fn sys_decode_allocator_free(
+    _ctx: *mut c_void,
+    ptr: *mut c_void,
+    len: usize,
+    _alignment: u8,
+    _ret_addr: usize,
+) {
+    roastty_free(ptr::null(), ptr.cast::<u8>(), len);
+}
+
+fn sys_decode_allocator() -> RoasttyAllocator {
+    RoasttyAllocator {
+        ctx: ptr::null_mut(),
+        vtable: &SYS_DECODE_ALLOCATOR_VTABLE,
+    }
+}
+
+pub(crate) fn sys_has_decode_png() -> bool {
+    SYS_STATE
+        .lock()
+        .map(|state| state.decode_png.is_some())
+        .unwrap_or(false)
+}
+
+pub(crate) fn sys_decode_png(data: &[u8]) -> Result<DecodedPng, ImageLoadError> {
+    sys_decode_png_with_limit(data, MAX_IMAGE_SIZE)
+}
+
+#[cfg(test)]
+pub(crate) fn sys_decode_png_with_limit_for_test(
+    data: &[u8],
+    max_output_size: usize,
+) -> Result<DecodedPng, ImageLoadError> {
+    sys_decode_png_with_limit(data, max_output_size)
+}
+
+fn sys_decode_png_with_limit(
+    data: &[u8],
+    max_output_size: usize,
+) -> Result<DecodedPng, ImageLoadError> {
+    let (userdata, callback) = {
+        let state = SYS_STATE.lock().map_err(|_| ImageLoadError::InvalidData)?;
+        let callback = state.decode_png.ok_or(ImageLoadError::UnsupportedFormat)?;
+        (state.userdata, callback)
+    };
+
+    let allocator = sys_decode_allocator();
+    let mut output = RoasttySysImage {
+        width: 0,
+        height: 0,
+        data: ptr::null_mut(),
+        data_len: 0,
+    };
+    let ok = unsafe {
+        callback(
+            userdata as *mut c_void,
+            &allocator,
+            data.as_ptr(),
+            data.len(),
+            &mut output,
+        )
+    };
+    if !ok {
+        return Err(ImageLoadError::InvalidData);
+    }
+    if output.data.is_null() {
+        return Err(ImageLoadError::InvalidData);
+    }
+    if output.data_len > max_output_size {
+        roastty_free(&allocator, output.data, output.data_len);
+        return Err(ImageLoadError::InvalidData);
+    }
+
+    let decoded = unsafe { slice::from_raw_parts(output.data, output.data_len) };
+    let mut owned = Vec::new();
+    let result = owned
+        .try_reserve(output.data_len)
+        .map_err(|_| ImageLoadError::OutOfMemory)
+        .map(|()| {
+            owned.extend_from_slice(decoded);
+            DecodedPng {
+                width: output.width,
+                height: output.height,
+                data: owned,
+            }
+        });
+    roastty_free(&allocator, output.data, output.data_len);
+    result
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -9401,6 +9516,7 @@ mod tests {
 
     #[test]
     fn sys_c_abi_sets_callbacks_and_userdata() {
+        let _guard = SYS_TEST_LOCK.lock().unwrap();
         assert_eq!(ROASTTY_SYS_LOG_LEVEL_ERROR, 0);
         assert_eq!(ROASTTY_SYS_LOG_LEVEL_WARNING, 1);
         assert_eq!(ROASTTY_SYS_LOG_LEVEL_INFO, 2);
