@@ -537,7 +537,7 @@ tests, choose the larger subsystem.
 - [Experiment 205: Port Renderer Image State Foundation](205-port-renderer-image-state-foundation.md)
   — **Pass**
 - [Experiment 206: Port Renderer Image Upload and Draw Contract](206-port-renderer-image-upload-draw-contract.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

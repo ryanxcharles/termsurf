@@ -241,8 +241,84 @@ All public names must use Roastty naming.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Roastty now has an internal renderer image upload/draw contract layered on top
+of the CPU image-state foundation from Experiment 205. `RendererImage` now
+supports pending, ready, replace, and unload states with an internal generic
+texture type, and `ImageState` can upload pending/replacement images through a
+fake-testable backend contract. Unloading images are removed during upload,
+successful uploads become ready textures, failed uploads leave retryable state
+intact, and replacement failures preserve both the old texture and the pending
+replacement.
+
+The implementation also ports the renderer-independent RGBA preparation from
+upstream `renderer/image.zig`: grayscale, grayscale-alpha, and RGB pending
+images are converted to RGBA upload payloads, while stored source identity
+remains in the original render-state format. That source-preservation detail
+matters because render-state snapshots can keep arriving as RGB/gray even after
+the renderer uploads an RGBA texture; a fresh identical frame must not look like
+a changed image.
+
+`ImageState::draw` now supports the upstream draw buckets:
+
+- Kitty below background;
+- Kitty below text;
+- Kitty above text;
+- overlay.
+
+The draw path uses the existing `kitty_bg_end` and `kitty_text_end` split
+indices, skips missing or non-ready images, ignores backend draw errors, and
+returns a small testable summary so behavior is verifiable without logs or a
+real Metal device. The overlay bucket exists but remains empty until overlay
+update is ported in a later experiment.
+
+Tests cover:
+
+- RGBA preparation for grayscale, grayscale-alpha, RGB, and RGBA;
+- length-mismatch preparation errors;
+- replacement and unload state preservation;
+- `Ready -> UnloadReady -> Ready` reappearance;
+- `Ready -> UnloadReady -> Replace` changed reappearance;
+- `Replace -> UnloadReplace -> Replace` reappearance;
+- pending upload success/failure;
+- replacement upload success/failure;
+- mixed upload success/failure;
+- draw bucket selection;
+- missing and non-ready draw skips;
+- draw error continuation;
+- empty overlay draw bucket behavior.
+
+Codex result review found two real bugs in the first implementation:
+
+- uploaded non-RGBA images stored converted RGBA as their source identity, so a
+  later identical RGB/gray snapshot would be treated as changed;
+- `UnloadReplace` reappearance dropped the retained texture.
+
+Both were fixed. Upload now converts a copy while preserving the original source
+identity, and `UnloadReplace` reappearance restores
+`Replace { texture, pending }`. Codex re-reviewed the corrected result and
+approved it with no blockers.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/renderer/mod.rs roastty/src/renderer/image.rs
+cargo test -p roastty renderer::image
+cargo test -p roastty render_state
+cargo test -p roastty kitty_graphics_render_placement_c_abi
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
 
 ## Conclusion
 
-Pending.
+Experiment 206 ports the testable upload/draw state-machine boundary without
+taking on real Metal. The renderer image state can now preserve images across
+frames, prepare upload payloads, retain old textures during replacement, remove
+unloading images, and emit draw calls by layer bucket through an internal
+backend contract. The next experiment should continue toward the concrete macOS
+renderer side, likely by porting the Metal texture/value definitions or the
+smallest Metal-facing backend adapter that can satisfy this internal contract
+without exposing public C ABI prematurely.
