@@ -1,8 +1,11 @@
 //! Font metrics: recommended cell dimensions and decoration positions.
 //!
-//! Faithful port of the `Metrics` value type from upstream `font/Metrics.zig`.
-//! The `FaceMetrics` input, the `Minimums` table, the `calc` derivation, and
+//! Faithful port of upstream `font/Metrics.zig`: the `Metrics` and `FaceMetrics`
+//! value types and their accessors, the `calc` derivation and `clamp`, and the
+//! `Modifier`/`Key`/`ModifierSet` metric-modifier types. `Metrics::apply` and
 //! constraint application are ported in later slices.
+
+use std::collections::HashMap;
 
 /// Recommended cell dimensions and decoration positions/thicknesses for a
 /// monospace grid using a given font.
@@ -379,6 +382,35 @@ impl Modifier {
         }
     }
 }
+
+/// Identifies a modifiable metric — one per `Metrics` field. The discriminants
+/// match the `Metrics` field order (upstream derives `Key` from the field
+/// indices).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub(crate) enum Key {
+    CellWidth = 0,
+    CellHeight = 1,
+    CellBaseline = 2,
+    UnderlinePosition = 3,
+    UnderlineThickness = 4,
+    StrikethroughPosition = 5,
+    StrikethroughThickness = 6,
+    OverlinePosition = 7,
+    OverlineThickness = 8,
+    BoxThickness = 9,
+    CursorThickness = 10,
+    CursorHeight = 11,
+    IconHeight = 12,
+    IconHeightSingle = 13,
+    FaceWidth = 14,
+    FaceHeight = 15,
+    FaceY = 16,
+}
+
+/// A set of modifiers to apply to metrics, keyed by [`Key`]. Most metrics are
+/// unmodified, so a map keeps it compact.
+pub(crate) type ModifierSet = HashMap<Key, Modifier>;
 
 #[cfg(test)]
 mod tests {
@@ -804,5 +836,75 @@ mod tests {
         assert_eq!(Modifier::Absolute(5).apply_f64(10.0), 15.0);
         assert_eq!(Modifier::Absolute(-3).apply_f64(2.5), -0.5);
         assert_eq!(Modifier::Percent(-1.0).apply_f64(10.0), 0.0);
+    }
+
+    const ALL_KEYS: [Key; 17] = [
+        Key::CellWidth,
+        Key::CellHeight,
+        Key::CellBaseline,
+        Key::UnderlinePosition,
+        Key::UnderlineThickness,
+        Key::StrikethroughPosition,
+        Key::StrikethroughThickness,
+        Key::OverlinePosition,
+        Key::OverlineThickness,
+        Key::BoxThickness,
+        Key::CursorThickness,
+        Key::CursorHeight,
+        Key::IconHeight,
+        Key::IconHeightSingle,
+        Key::FaceWidth,
+        Key::FaceHeight,
+        Key::FaceY,
+    ];
+
+    #[test]
+    fn key_discriminants() {
+        for (i, key) in ALL_KEYS.iter().enumerate() {
+            assert_eq!(*key as u8, i as u8);
+        }
+    }
+
+    #[test]
+    fn key_matches_metrics_field_count() {
+        assert_eq!(ALL_KEYS.len(), 17);
+        // An exhaustive, wildcard-free match: adding or removing a `Metrics`
+        // field (hence a `Key` variant) forces this to be updated.
+        for key in ALL_KEYS {
+            match key {
+                Key::CellWidth
+                | Key::CellHeight
+                | Key::CellBaseline
+                | Key::UnderlinePosition
+                | Key::UnderlineThickness
+                | Key::StrikethroughPosition
+                | Key::StrikethroughThickness
+                | Key::OverlinePosition
+                | Key::OverlineThickness
+                | Key::BoxThickness
+                | Key::CursorThickness
+                | Key::CursorHeight
+                | Key::IconHeight
+                | Key::IconHeightSingle
+                | Key::FaceWidth
+                | Key::FaceHeight
+                | Key::FaceY => {}
+            }
+        }
+    }
+
+    #[test]
+    fn modifier_set_insert_get() {
+        let mut set = ModifierSet::new();
+        set.insert(Key::CellWidth, Modifier::Percent(1.2));
+        set.insert(Key::OverlinePosition, Modifier::Absolute(-2));
+        assert_eq!(
+            set.get(&Key::OverlinePosition),
+            Some(&Modifier::Absolute(-2))
+        );
+        match set.get(&Key::CellWidth) {
+            Some(Modifier::Percent(p)) => assert!(approx(*p, 1.2)),
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }

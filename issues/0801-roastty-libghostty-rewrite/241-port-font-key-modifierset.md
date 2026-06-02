@@ -140,3 +140,76 @@ Two Low findings, fixed in the design above before this commit:
    spot-check), to catch a swapped/wrong middle discriminant.
 2. the `Description` heading was `#` (H1); corrected to `##` to match the
    experiment format.
+
+## Result
+
+**Result:** Pass
+
+Added `use std::collections::HashMap;`, `pub(crate) enum Key` (17 variants,
+`#[repr(u8)]`, discriminants `0..=16` in `Metrics` field order, deriving
+`Debug, Clone, Copy, PartialEq, Eq, Hash`), and
+`pub(crate) type ModifierSet = HashMap<Key, Modifier>` to
+`roastty/src/font/metrics.rs`. Also refreshed the module doc comment (which had
+become stale) to reflect that the value types, `calc`/`clamp`, and the modifier
+types are now ported.
+
+Tests added (3): `key_discriminants` (all 17 variants' values in order via a
+`const ALL_KEYS` array), `key_matches_metrics_field_count` (count == 17 plus a
+wildcard-free exhaustive `match` guard that forces a `Key` update when a field
+is added/removed), and `modifier_set_insert_get` (insert/read a `Percent` and an
+`Absolute` modifier).
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty font
+cargo test -p roastty
+```
+
+Observed:
+
+- `font`: 36 passed (33 prior + 3 new).
+- Full `roastty`: 2312 unit tests passed (2309 prior + 3 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/font` and for
+  `roastty/src/lib.rs`, `roastty/include/roastty.h`,
+  `roastty/tests/abi_harness.c`.
+- `git diff --check`: clean.
+
+No C ABI, header, or ABI inventory changes; no `Metrics::apply` scope pulled in.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** ("nothing
+needs to change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-085623-604362-prompt.md`
+- Result: `logs/codex-review/20260602-085623-604362-last-message.md`
+
+Codex confirmed the `Key` enum matches the `Metrics` field order exactly
+(`CellWidth = 0` … `FaceY = 16`, all 17 fields qualifying), that the derives and
+`ModifierSet = HashMap<Key, Modifier>` are right, that the three tests are
+correct (the wildcard-free match guards the variant set), and that the doc
+refresh is consistent with scope.
+
+## Conclusion
+
+Experiment 241 succeeds. `Key` and `ModifierSet` are in place, completing the
+input types for the metric-modifier path. Both Codex gates passed (two low
+design findings fixed; zero result findings).
+
+The last `Metrics.zig` behavior slice is
+`Metrics::apply(&mut self, mods: ModifierSet)` (Experiment 242): iterate the
+`ModifierSet`, dispatch each `Modifier` to the right `apply_*` for the keyed
+field, with the special cases — `cell_width`/`cell_height` clamped to a minimum
+of 1 and skipped when unchanged; `cell_height` additionally re-centering the
+baseline (the `diff_top`/`diff_bottom` split with the `addFloatToInt` saturating
+helper and the `overline_position` saturating add); `icon_height` applying to
+both `icon_height` and `icon_height_single` — then a final `clamp`. That slice
+carries the upstream `Metrics.zig` modifier tests (adjust cell height
+smaller/larger, adjust icon height) and completes the file.
