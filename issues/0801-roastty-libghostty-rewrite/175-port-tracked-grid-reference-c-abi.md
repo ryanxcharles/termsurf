@@ -235,3 +235,55 @@ approves it.
 
 After implementation and result recording, the completed result must also be
 reviewed with Codex and approved before the result commit.
+
+## Result
+
+**Result:** Pass
+
+Implemented the owned tracked-grid-reference ABI with Roastty-only public names:
+
+- `roastty_tracked_grid_ref_t`;
+- `roastty_terminal_grid_ref_track`;
+- `roastty_tracked_grid_ref_free`;
+- `roastty_tracked_grid_ref_has_value`;
+- `roastty_tracked_grid_ref_snapshot`;
+- `roastty_tracked_grid_ref_point`;
+- `roastty_tracked_grid_ref_set`.
+
+The implementation adds a terminal-wrapper registry for live tracked refs. When
+`roastty_terminal_free` runs, it detaches every live tracked ref before dropping
+the terminal so post-terminal-free calls return `ROASTTY_NO_VALUE` or
+`ROASTTY_INVALID_VALUE` without dereferencing the stale terminal handle.
+
+Core terminal helpers now track a `PageList` pin with screen key, screen
+generation, and screen owner id. Valid tracked refs follow page-list mutation
+while their owning screen remains live. Reset, alternate destruction/recreation,
+terminal free, garbage pins, generation mismatch, and owner mismatch all produce
+no value. Cleanup untracks only through the original still-owned screen object.
+
+`roastty_tracked_grid_ref_set` tracks the replacement pin before untracking the
+old pin, and validates the raw terminal handle before dereferencing the terminal
+wrapper. Detached refs cannot be reattached to a stale or different terminal.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/terminal/page_list.rs roastty/src/terminal/screen.rs roastty/src/terminal/terminal.rs
+cargo test -p roastty tracked_grid_ref
+cargo test -p roastty terminal_grid_ref
+cargo test -p roastty c_harness_links_against_roastty_header_and_roastty_dylib
+cargo test -p roastty terminal_stream
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+The final full `roastty` run passed with 1847 Rust tests, the C ABI harness, and
+doc tests.
+
+## Conclusion
+
+Experiment 175 completes the tracked grid-ref C ABI slice. Roastty now has both
+borrowed grid-ref snapshots and owned tracked refs that can safely outlive page
+mutation and terminal free. The next experiment can move to the next coherent
+libroastty parity gap instead of adding more grid-ref ownership plumbing.

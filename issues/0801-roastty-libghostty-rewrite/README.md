@@ -477,7 +477,7 @@ tests, choose the larger subsystem.
 - [Experiment 174: Port Selection Gesture C ABI](174-port-selection-gesture-c-abi.md)
   — **Pass**
 - [Experiment 175: Port Tracked Grid Reference C ABI](175-port-tracked-grid-reference-c-abi.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

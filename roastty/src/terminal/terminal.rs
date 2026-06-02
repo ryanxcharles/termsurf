@@ -1,6 +1,7 @@
 //! Terminal state.
 
 use std::ffi::{c_char, c_void};
+use std::ptr::NonNull;
 
 use super::charsets;
 use super::color;
@@ -121,6 +122,14 @@ pub(crate) struct TerminalSelection {
     pub(crate) start: TerminalGridRef,
     pub(crate) end: TerminalGridRef,
     pub(crate) rectangle: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TerminalTrackedGridRef {
+    pin: NonNull<Pin>,
+    screen_key: TerminalScreenKey,
+    screen_generation: u64,
+    screen_owner_id: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -932,6 +941,75 @@ impl Terminal {
         };
 
         self.screens.active().grid_ref(point).map(Into::into)
+    }
+
+    pub(crate) fn track_grid_ref(
+        &mut self,
+        tag: TerminalPointTag,
+        coord: super::point::Coordinate,
+    ) -> Option<TerminalTrackedGridRef> {
+        let point = match tag {
+            TerminalPointTag::Active => super::point::Point::active(coord),
+            TerminalPointTag::Viewport => super::point::Point::viewport(coord),
+            TerminalPointTag::Screen => super::point::Point::screen(coord),
+            TerminalPointTag::History => super::point::Point::history(coord),
+        };
+        let pin = self.screens.active().pin(point)?;
+        let screen_key = self.screens.active_key();
+        let screen_generation = self.screens.active_generation();
+        let screen_owner_id = self.screens.active_owner_id();
+        let pin = self.screens.active_mut().track_pin(pin)?;
+
+        Some(TerminalTrackedGridRef {
+            pin,
+            screen_key,
+            screen_generation,
+            screen_owner_id,
+        })
+    }
+
+    pub(crate) fn untrack_grid_ref(&mut self, tracked: TerminalTrackedGridRef) {
+        if self.screens.owner_id(tracked.screen_key) != Some(tracked.screen_owner_id) {
+            return;
+        }
+        if let Some(screen) = self.screens.screen_mut(tracked.screen_key) {
+            screen.untrack_pin(tracked.pin);
+        }
+    }
+
+    fn tracked_grid_ref_pin(&self, tracked: &TerminalTrackedGridRef) -> Option<Pin> {
+        if self.screens.generation(tracked.screen_key) != tracked.screen_generation
+            || self.screens.owner_id(tracked.screen_key) != Some(tracked.screen_owner_id)
+        {
+            return None;
+        }
+        self.screens
+            .screen(tracked.screen_key)?
+            .tracked_pin_value(tracked.pin)
+    }
+
+    pub(crate) fn tracked_grid_ref_snapshot(
+        &self,
+        tracked: &TerminalTrackedGridRef,
+    ) -> Option<TerminalGridRef> {
+        Some(GridRef::from(self.tracked_grid_ref_pin(tracked)?).into())
+    }
+
+    pub(crate) fn tracked_grid_ref_point(
+        &self,
+        tracked: &TerminalTrackedGridRef,
+        tag: TerminalPointTag,
+    ) -> Result<super::point::Coordinate, TerminalGridRefPointError> {
+        let grid_ref = self
+            .tracked_grid_ref_snapshot(tracked)
+            .ok_or(TerminalGridRefPointError::NoValue)?;
+        let screen = self
+            .screens
+            .screen(tracked.screen_key)
+            .ok_or(TerminalGridRefPointError::NoValue)?;
+        screen
+            .point_from_grid_ref(grid_ref.node, grid_ref.x, grid_ref.y, tag.into())
+            .map_err(Into::into)
     }
 
     pub(crate) fn active_pin(&self, coord: super::point::Coordinate) -> Option<Pin> {

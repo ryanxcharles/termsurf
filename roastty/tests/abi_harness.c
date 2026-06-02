@@ -252,6 +252,19 @@ static roastty_grid_ref_s terminal_grid_ref_at(roastty_terminal_t terminal,
   return ref;
 }
 
+static roastty_tracked_grid_ref_t
+terminal_tracked_grid_ref_at(roastty_terminal_t terminal, uint16_t x, uint32_t y) {
+  roastty_tracked_grid_ref_t ref = NULL;
+  roastty_point_s point = {
+      .tag = ROASTTY_POINT_ACTIVE,
+      .value = {.active = {.x = x, .y = y}},
+  };
+  assert(roastty_terminal_grid_ref_track(terminal, point, &ref) ==
+         ROASTTY_SUCCESS);
+  assert(ref != NULL);
+  return ref;
+}
+
 static roastty_key_mods_s empty_key_mods(void) {
   roastty_key_mods_s mods = {
       .shift = false,
@@ -814,6 +827,7 @@ static void assert_terminal_abi(void) {
   assert(offsetof(roastty_grid_ref_s, node) == 8);
   assert(offsetof(roastty_grid_ref_s, x) == 16);
   assert(offsetof(roastty_grid_ref_s, y) == 18);
+  assert(sizeof(roastty_tracked_grid_ref_t) == sizeof(void *));
   assert(sizeof(roastty_selection_s) == 64);
   assert(_Alignof(roastty_selection_s) == 8);
   assert(offsetof(roastty_selection_s, size) == 0);
@@ -1030,6 +1044,79 @@ static void assert_terminal_abi(void) {
                                               &coord) == ROASTTY_SUCCESS);
   assert(coord.x == 2);
   assert(coord.y == 0);
+
+  roastty_tracked_grid_ref_t tracked = NULL;
+  assert(roastty_terminal_grid_ref_track(NULL, point, &tracked) ==
+         ROASTTY_INVALID_VALUE);
+  assert(tracked == NULL);
+  assert(roastty_terminal_grid_ref_track(terminal, point, NULL) ==
+         ROASTTY_INVALID_VALUE);
+  tracked = terminal_tracked_grid_ref_at(terminal, 2, 0);
+  assert(roastty_tracked_grid_ref_has_value(tracked));
+  assert(roastty_tracked_grid_ref_snapshot(NULL, NULL) == ROASTTY_INVALID_VALUE);
+  assert(roastty_tracked_grid_ref_snapshot(tracked, NULL) == ROASTTY_SUCCESS);
+  assert(roastty_tracked_grid_ref_point(tracked,
+                                        ROASTTY_POINT_VIEWPORT,
+                                        NULL) == ROASTTY_SUCCESS);
+  roastty_grid_ref_s tracked_snapshot = {0};
+  assert(roastty_tracked_grid_ref_snapshot(tracked, &tracked_snapshot) ==
+         ROASTTY_SUCCESS);
+  assert(tracked_snapshot.size == sizeof(roastty_grid_ref_s));
+  assert(tracked_snapshot.node != NULL);
+  assert(tracked_snapshot.x == 2);
+  assert(roastty_tracked_grid_ref_point(tracked,
+                                        ROASTTY_POINT_VIEWPORT,
+                                        &coord) == ROASTTY_SUCCESS);
+  assert(coord.x == 2);
+
+  assert(roastty_tracked_grid_ref_set(tracked,
+                                      NULL,
+                                      (roastty_point_s){
+                                          .tag = ROASTTY_POINT_ACTIVE,
+                                          .value = {.active = {.x = 0, .y = 0}},
+                                      }) == ROASTTY_INVALID_VALUE);
+  assert(roastty_tracked_grid_ref_set(tracked,
+                                      terminal,
+                                      (roastty_point_s){
+                                          .tag = ROASTTY_POINT_ACTIVE,
+                                          .value = {.active = {.x = 3, .y = 0}},
+                                      }) == ROASTTY_SUCCESS);
+  assert(roastty_tracked_grid_ref_point(tracked,
+                                        ROASTTY_POINT_ACTIVE,
+                                        &coord) == ROASTTY_SUCCESS);
+  assert(coord.x == 3);
+  roastty_tracked_grid_ref_free(tracked);
+
+  tracked = terminal_tracked_grid_ref_at(terminal, 0, 0);
+  terminal_write(terminal, "\nscroll\nscroll\nscroll\n");
+  assert(roastty_tracked_grid_ref_has_value(tracked));
+  assert(roastty_tracked_grid_ref_snapshot(tracked, &tracked_snapshot) ==
+         ROASTTY_SUCCESS);
+  roastty_tracked_grid_ref_free(tracked);
+
+  tracked = terminal_tracked_grid_ref_at(terminal, 0, 0);
+  roastty_terminal_reset(terminal);
+  assert(!roastty_tracked_grid_ref_has_value(tracked));
+  assert(roastty_tracked_grid_ref_snapshot(tracked, NULL) == ROASTTY_NO_VALUE);
+  assert(roastty_tracked_grid_ref_point(tracked,
+                                        ROASTTY_POINT_ACTIVE,
+                                        NULL) == ROASTTY_NO_VALUE);
+  roastty_tracked_grid_ref_free(tracked);
+
+  roastty_terminal_t tracked_free_terminal = NULL;
+  assert(roastty_terminal_new(5, 3, SIZE_MAX, &tracked_free_terminal) ==
+         ROASTTY_SUCCESS);
+  tracked = terminal_tracked_grid_ref_at(tracked_free_terminal, 0, 0);
+  roastty_terminal_free(tracked_free_terminal);
+  assert(!roastty_tracked_grid_ref_has_value(tracked));
+  assert(roastty_tracked_grid_ref_snapshot(tracked, NULL) == ROASTTY_NO_VALUE);
+  assert(roastty_tracked_grid_ref_set(tracked,
+                                      tracked_free_terminal,
+                                      (roastty_point_s){
+                                          .tag = ROASTTY_POINT_ACTIVE,
+                                          .value = {.active = {.x = 0, .y = 0}},
+                                      }) == ROASTTY_INVALID_VALUE);
+  roastty_tracked_grid_ref_free(tracked);
 
   roastty_terminal_t selection_terminal = NULL;
   assert(roastty_terminal_new(20, 3, SIZE_MAX, &selection_terminal) ==

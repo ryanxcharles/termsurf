@@ -4244,6 +4244,18 @@ impl PageList {
         }
     }
 
+    pub(super) fn tracked_pin_value(&self, pin: NonNull<Pin>) -> Option<Pin> {
+        if !self.tracked_pins.contains(&pin) {
+            return None;
+        }
+
+        let value = unsafe { *pin.as_ref() };
+        if value.garbage || !self.pin_is_valid(&value) {
+            return None;
+        }
+        Some(value)
+    }
+
     fn count_tracked_pins(&self) -> usize {
         self.tracked_pins.len()
     }

@@ -1,6 +1,7 @@
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
+use std::ptr::NonNull;
 use std::slice;
 
 use input::{key, key_encode, key_mods};
@@ -16,7 +17,8 @@ use terminal::terminal::{
     TerminalGridRef, TerminalGridRefPointError, TerminalPointTag, TerminalScreen,
     TerminalSelection, TerminalSelectionAdjustment, TerminalSelectionFormat,
     TerminalSelectionOrder, TerminalSizeCallback, TerminalStreamError,
-    TerminalTitleChangedCallback, TerminalWritePtyCallback, TerminalXtversionCallback,
+    TerminalTitleChangedCallback, TerminalTrackedGridRef, TerminalWritePtyCallback,
+    TerminalXtversionCallback,
 };
 use terminal::{mouse, mouse_encode, osc, point, size_report};
 
@@ -43,6 +45,7 @@ pub type RoasttySelectionGesture = *mut c_void;
 pub type RoasttySelectionGestureEvent = *mut c_void;
 pub type RoasttySurface = *mut c_void;
 pub type RoasttyTerminal = *mut c_void;
+pub type RoasttyTrackedGridRef = *mut c_void;
 
 const ROASTTY_MODE_TAG_VALUE_MASK: u16 = 0x7fff;
 const ROASTTY_MODE_TAG_ANSI_BIT: u16 = 0x8000;
@@ -555,6 +558,13 @@ struct Surface {
 
 struct Terminal {
     terminal: InnerTerminal,
+    tracked_grid_refs: Vec<NonNull<TrackedGridRefHandle>>,
+}
+
+struct TrackedGridRefHandle {
+    terminal: Option<NonNull<Terminal>>,
+    terminal_handle: RoasttyTerminal,
+    tracked: Option<TerminalTrackedGridRef>,
 }
 
 struct MouseEvent {
@@ -625,6 +635,36 @@ fn terminal_from_handle<'a>(handle: RoasttyTerminal) -> Option<&'a mut Terminal>
         None
     } else {
         Some(unsafe { &mut *(handle.cast::<Terminal>()) })
+    }
+}
+
+fn tracked_grid_ref_from_handle<'a>(
+    handle: RoasttyTrackedGridRef,
+) -> Option<&'a mut TrackedGridRefHandle> {
+    if handle.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *(handle.cast::<TrackedGridRefHandle>()) })
+    }
+}
+
+impl Terminal {
+    fn detach_tracked_grid_refs(&mut self) {
+        for mut tracked in self.tracked_grid_refs.drain(..) {
+            let tracked = unsafe { tracked.as_mut() };
+            tracked.terminal = None;
+            tracked.tracked = None;
+        }
+    }
+
+    fn unregister_tracked_grid_ref(&mut self, tracked: NonNull<TrackedGridRefHandle>) {
+        if let Some(index) = self
+            .tracked_grid_refs
+            .iter()
+            .position(|current| *current == tracked)
+        {
+            self.tracked_grid_refs.swap_remove(index);
+        }
     }
 }
 
@@ -1833,7 +1873,10 @@ pub extern "C" fn roastty_terminal_new(
         Err(_) => return ROASTTY_OUT_OF_MEMORY,
     };
 
-    let mut terminal = Box::new(Terminal { terminal });
+    let mut terminal = Box::new(Terminal {
+        terminal,
+        tracked_grid_refs: Vec::new(),
+    });
     let handle = (&mut *terminal) as *mut Terminal as RoasttyTerminal;
     terminal.terminal.set_effect_handle(handle);
     unsafe {
@@ -1846,7 +1889,9 @@ pub extern "C" fn roastty_terminal_new(
 pub extern "C" fn roastty_terminal_free(terminal: RoasttyTerminal) {
     if !terminal.is_null() {
         unsafe {
-            drop(Box::from_raw(terminal.cast::<Terminal>()));
+            let mut terminal = Box::from_raw(terminal.cast::<Terminal>());
+            terminal.detach_tracked_grid_refs();
+            drop(terminal);
         }
     }
 }
@@ -2253,6 +2298,175 @@ pub extern "C" fn roastty_terminal_point_from_grid_ref(
         }
         Err(error) => grid_ref_error_result(error),
     }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_terminal_grid_ref_track(
+    terminal: RoasttyTerminal,
+    point: RoasttyPoint,
+    out_ref: *mut RoasttyTrackedGridRef,
+) -> c_int {
+    if out_ref.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    unsafe {
+        out_ref.write(ptr::null_mut());
+    }
+
+    let Some(terminal) = terminal_from_handle(terminal) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    let Some(tag) = point_tag_from_raw(point.tag) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+
+    let coord = point_coordinate(point, tag);
+    let Some(tracked) = terminal
+        .terminal
+        .track_grid_ref(tag, point::Coordinate::new(coord.x, coord.y))
+    else {
+        return ROASTTY_INVALID_VALUE;
+    };
+
+    let terminal_ptr = NonNull::from(&mut *terminal);
+    let terminal_handle = terminal_ptr.as_ptr().cast::<c_void>();
+    let mut handle = Box::new(TrackedGridRefHandle {
+        terminal: Some(terminal_ptr),
+        terminal_handle,
+        tracked: Some(tracked),
+    });
+    let handle_ptr = NonNull::from(handle.as_mut());
+    terminal.tracked_grid_refs.push(handle_ptr);
+
+    unsafe {
+        out_ref.write(Box::into_raw(handle).cast());
+    }
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_tracked_grid_ref_free(ref_: RoasttyTrackedGridRef) {
+    if ref_.is_null() {
+        return;
+    }
+
+    let mut ref_ = unsafe { Box::from_raw(ref_.cast::<TrackedGridRefHandle>()) };
+    let ref_ptr = NonNull::from(ref_.as_mut());
+    if let Some(mut terminal_ptr) = ref_.terminal.take() {
+        let terminal = unsafe { terminal_ptr.as_mut() };
+        terminal.unregister_tracked_grid_ref(ref_ptr);
+        if let Some(tracked) = ref_.tracked.take() {
+            terminal.terminal.untrack_grid_ref(tracked);
+        }
+    }
+}
+
+fn tracked_grid_ref_snapshot(ref_: &TrackedGridRefHandle) -> Option<TerminalGridRef> {
+    let terminal_ptr = ref_.terminal?;
+    let tracked = ref_.tracked.as_ref()?;
+    let terminal = unsafe { terminal_ptr.as_ref() };
+    terminal.terminal.tracked_grid_ref_snapshot(tracked)
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_tracked_grid_ref_has_value(ref_: RoasttyTrackedGridRef) -> bool {
+    let Some(ref_) = tracked_grid_ref_from_handle(ref_) else {
+        return false;
+    };
+    tracked_grid_ref_snapshot(ref_).is_some()
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_tracked_grid_ref_snapshot(
+    ref_: RoasttyTrackedGridRef,
+    out_ref: *mut RoasttyGridRef,
+) -> c_int {
+    let Some(ref_) = tracked_grid_ref_from_handle(ref_) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    let Some(snapshot) = tracked_grid_ref_snapshot(ref_) else {
+        return ROASTTY_NO_VALUE;
+    };
+    if !out_ref.is_null() {
+        write_grid_ref(out_ref, snapshot);
+    }
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_tracked_grid_ref_point(
+    ref_: RoasttyTrackedGridRef,
+    tag: c_int,
+    out_coordinate: *mut RoasttyPointCoordinate,
+) -> c_int {
+    let Some(ref_) = tracked_grid_ref_from_handle(ref_) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    let Some(tag) = point_tag_from_raw(tag) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    let Some(terminal_ptr) = ref_.terminal else {
+        return ROASTTY_NO_VALUE;
+    };
+    let Some(tracked) = ref_.tracked.as_ref() else {
+        return ROASTTY_NO_VALUE;
+    };
+
+    let terminal = unsafe { terminal_ptr.as_ref() };
+    match terminal.terminal.tracked_grid_ref_point(tracked, tag) {
+        Ok(coord) => {
+            if !out_coordinate.is_null() {
+                unsafe {
+                    out_coordinate.write(RoasttyPointCoordinate {
+                        x: coord.x,
+                        y: coord.y,
+                    });
+                }
+            }
+            ROASTTY_SUCCESS
+        }
+        Err(error) => grid_ref_error_result(error),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_tracked_grid_ref_set(
+    ref_: RoasttyTrackedGridRef,
+    terminal: RoasttyTerminal,
+    point: RoasttyPoint,
+) -> c_int {
+    let Some(ref_) = tracked_grid_ref_from_handle(ref_) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    if terminal.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    if ref_.terminal.is_none() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    if terminal != ref_.terminal_handle {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    let Some(terminal) = terminal_from_handle(terminal) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    let Some(tag) = point_tag_from_raw(point.tag) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+
+    let coord = point_coordinate(point, tag);
+    let Some(new_tracked) = terminal
+        .terminal
+        .track_grid_ref(tag, point::Coordinate::new(coord.x, coord.y))
+    else {
+        return ROASTTY_INVALID_VALUE;
+    };
+
+    if let Some(old_tracked) = ref_.tracked.replace(new_tracked) {
+        terminal.terminal.untrack_grid_ref(old_tracked);
+    }
+    ROASTTY_SUCCESS
 }
 
 #[no_mangle]
@@ -4110,6 +4324,24 @@ mod tests {
         grid_ref
     }
 
+    fn terminal_tracked_grid_ref_at(
+        terminal: RoasttyTerminal,
+        x: u16,
+        y: u32,
+    ) -> RoasttyTrackedGridRef {
+        let mut tracked = ptr::null_mut();
+        assert_eq!(
+            roastty_terminal_grid_ref_track(
+                terminal,
+                c_point(ROASTTY_POINT_ACTIVE, x, y),
+                &mut tracked
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert!(!tracked.is_null());
+        tracked
+    }
+
     fn terminal_selection(
         terminal: RoasttyTerminal,
         start: (u16, u32),
@@ -5847,6 +6079,188 @@ mod tests {
             ROASTTY_SUCCESS
         );
 
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn tracked_grid_ref_abi_validates_nulls_and_invalid_points() {
+        let terminal = new_terminal(4, 2);
+        let tracked = terminal_tracked_grid_ref_at(terminal, 1, 0);
+        assert!(roastty_tracked_grid_ref_has_value(tracked));
+
+        let mut invalid_out = tracked;
+        assert_eq!(
+            roastty_terminal_grid_ref_track(
+                ptr::null_mut(),
+                c_point(ROASTTY_POINT_ACTIVE, 0, 0),
+                &mut invalid_out
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(invalid_out.is_null());
+
+        assert_eq!(
+            roastty_terminal_grid_ref_track(
+                terminal,
+                c_point(ROASTTY_POINT_ACTIVE, 0, 0),
+                ptr::null_mut()
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+
+        assert_eq!(
+            roastty_tracked_grid_ref_snapshot(ptr::null_mut(), ptr::null_mut()),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_tracked_grid_ref_point(tracked, 999, ptr::null_mut()),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_tracked_grid_ref_set(
+                ptr::null_mut(),
+                terminal,
+                c_point(ROASTTY_POINT_ACTIVE, 0, 0),
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_tracked_grid_ref_set(
+                tracked,
+                ptr::null_mut(),
+                c_point(ROASTTY_POINT_ACTIVE, 0, 0)
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+
+        roastty_tracked_grid_ref_free(tracked);
+        roastty_tracked_grid_ref_free(ptr::null_mut());
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn tracked_grid_ref_snapshot_follows_scroll_and_allows_null_outputs() {
+        let terminal = new_terminal(5, 3);
+        write_terminal(terminal, b"alpha");
+        let tracked = terminal_tracked_grid_ref_at(terminal, 1, 0);
+
+        for _ in 0..6 {
+            write_terminal(terminal, b"\nline");
+        }
+
+        assert!(roastty_tracked_grid_ref_has_value(tracked));
+        assert_eq!(
+            roastty_tracked_grid_ref_snapshot(tracked, ptr::null_mut()),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_tracked_grid_ref_point(tracked, ROASTTY_POINT_HISTORY, ptr::null_mut()),
+            ROASTTY_SUCCESS
+        );
+
+        let mut snapshot = RoasttyGridRef::default();
+        assert_eq!(
+            roastty_tracked_grid_ref_snapshot(tracked, &mut snapshot),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(snapshot.size, std::mem::size_of::<RoasttyGridRef>());
+        assert_eq!(snapshot.x, 1);
+        assert!(!snapshot.node.is_null());
+
+        let mut coord = RoasttyPointCoordinate::default();
+        assert_eq!(
+            roastty_tracked_grid_ref_point(tracked, ROASTTY_POINT_HISTORY, &mut coord),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(coord.x, 1);
+
+        roastty_tracked_grid_ref_free(tracked);
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn tracked_grid_ref_returns_no_value_after_reset_and_alternate_recreate() {
+        let terminal = new_terminal(5, 3);
+        let primary = terminal_tracked_grid_ref_at(terminal, 0, 0);
+        roastty_terminal_reset(terminal);
+        assert!(!roastty_tracked_grid_ref_has_value(primary));
+        assert_eq!(
+            roastty_tracked_grid_ref_snapshot(primary, ptr::null_mut()),
+            ROASTTY_NO_VALUE
+        );
+        assert_eq!(
+            roastty_tracked_grid_ref_point(primary, ROASTTY_POINT_ACTIVE, ptr::null_mut()),
+            ROASTTY_NO_VALUE
+        );
+        roastty_tracked_grid_ref_free(primary);
+
+        write_terminal(terminal, b"\x1b[?1049hALT");
+        let alternate = terminal_tracked_grid_ref_at(terminal, 0, 0);
+        roastty_terminal_reset(terminal);
+        write_terminal(terminal, b"\x1b[?1049hNEW");
+        assert!(!roastty_tracked_grid_ref_has_value(alternate));
+        assert_eq!(
+            roastty_tracked_grid_ref_snapshot(alternate, ptr::null_mut()),
+            ROASTTY_NO_VALUE
+        );
+        roastty_tracked_grid_ref_free(alternate);
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn tracked_grid_ref_terminal_free_detaches_refs() {
+        let terminal = new_terminal(5, 3);
+        let tracked = terminal_tracked_grid_ref_at(terminal, 0, 0);
+
+        roastty_terminal_free(terminal);
+
+        assert!(!roastty_tracked_grid_ref_has_value(tracked));
+        assert_eq!(
+            roastty_tracked_grid_ref_snapshot(tracked, ptr::null_mut()),
+            ROASTTY_NO_VALUE
+        );
+        assert_eq!(
+            roastty_tracked_grid_ref_point(tracked, ROASTTY_POINT_ACTIVE, ptr::null_mut()),
+            ROASTTY_NO_VALUE
+        );
+        assert_eq!(
+            roastty_tracked_grid_ref_set(tracked, terminal, c_point(ROASTTY_POINT_ACTIVE, 0, 0)),
+            ROASTTY_INVALID_VALUE
+        );
+
+        roastty_tracked_grid_ref_free(tracked);
+    }
+
+    #[test]
+    fn tracked_grid_ref_set_updates_attached_ref_and_rejects_wrong_terminal() {
+        let terminal = new_terminal(5, 3);
+        write_terminal(terminal, b"abcde");
+        let other = new_terminal(5, 3);
+        let tracked = terminal_tracked_grid_ref_at(terminal, 0, 0);
+
+        assert_eq!(
+            roastty_tracked_grid_ref_set(tracked, other, c_point(ROASTTY_POINT_ACTIVE, 1, 0)),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_tracked_grid_ref_set(tracked, terminal, c_point(ROASTTY_POINT_ACTIVE, 9, 0)),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_tracked_grid_ref_set(tracked, terminal, c_point(ROASTTY_POINT_ACTIVE, 3, 0)),
+            ROASTTY_SUCCESS
+        );
+
+        let mut coord = RoasttyPointCoordinate::default();
+        assert_eq!(
+            roastty_tracked_grid_ref_point(tracked, ROASTTY_POINT_ACTIVE, &mut coord),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(coord, RoasttyPointCoordinate { x: 3, y: 0 });
+
+        roastty_tracked_grid_ref_free(tracked);
+        roastty_terminal_free(other);
         roastty_terminal_free(terminal);
     }
 

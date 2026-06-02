@@ -31,6 +31,7 @@ typedef void* roastty_selection_gesture_t;
 typedef void* roastty_selection_gesture_event_t;
 typedef void* roastty_surface_t;
 typedef void* roastty_terminal_t;
+typedef void* roastty_tracked_grid_ref_t;
 
 typedef uint16_t roastty_mode_tag_t;
 
@@ -911,6 +912,24 @@ roastty_terminal_point_from_grid_ref(roastty_terminal_t,
                                      const roastty_grid_ref_s*,
                                      roastty_point_tag_e,
                                      roastty_point_coordinate_s*);
+ROASTTY_API roastty_result_e
+roastty_terminal_grid_ref_track(roastty_terminal_t,
+                                roastty_point_s,
+                                roastty_tracked_grid_ref_t*);
+ROASTTY_API void roastty_tracked_grid_ref_free(roastty_tracked_grid_ref_t);
+ROASTTY_API bool
+roastty_tracked_grid_ref_has_value(roastty_tracked_grid_ref_t);
+ROASTTY_API roastty_result_e
+roastty_tracked_grid_ref_snapshot(roastty_tracked_grid_ref_t,
+                                  roastty_grid_ref_s*);
+ROASTTY_API roastty_result_e
+roastty_tracked_grid_ref_point(roastty_tracked_grid_ref_t,
+                               roastty_point_tag_e,
+                               roastty_point_coordinate_s*);
+ROASTTY_API roastty_result_e
+roastty_tracked_grid_ref_set(roastty_tracked_grid_ref_t,
+                             roastty_terminal_t,
+                             roastty_point_s);
 ROASTTY_API roastty_result_e
 roastty_terminal_select_word(roastty_terminal_t,
                              const roastty_terminal_select_word_options_s*,

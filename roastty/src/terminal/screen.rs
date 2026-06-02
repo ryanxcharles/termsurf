@@ -1042,6 +1042,10 @@ impl Screen {
         self.pages.untrack_pin(pin);
     }
 
+    pub(super) fn tracked_pin_value(&self, pin: std::ptr::NonNull<Pin>) -> Option<Pin> {
+        self.pages.tracked_pin_value(pin)
+    }
+
     pub(super) fn scroll_delta_row(&mut self, delta: isize) {
         self.pages.scroll_delta_row(delta);
     }
