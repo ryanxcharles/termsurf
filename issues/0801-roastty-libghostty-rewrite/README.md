@@ -507,7 +507,7 @@ tests, choose the larger subsystem.
 - [Experiment 190: Port Kitty Placement Storage Foundation](190-port-kitty-placement-storage-foundation.md)
   — **Pass**
 - [Experiment 191: Port Kitty Display Storage Execution](191-port-kitty-display-storage-execution.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

@@ -5,7 +5,7 @@ use super::graphics_command::{
     Delete, Display, Quiet, Response, Transmission,
 };
 use super::graphics_image::{ImageLoadError, LoadingImage};
-use super::graphics_storage::ImageStorage;
+use super::graphics_storage::{ImageStorage, Placement, PlacementError, PlacementLocation};
 
 pub(crate) fn execute(storage: &mut ImageStorage, command: &Command) -> Option<Response<'static>> {
     if !storage.enabled() {
@@ -91,6 +91,71 @@ fn transmit(storage: &mut ImageStorage, command: &Command) -> Response<'static> 
             response
         }
     }
+}
+
+pub(crate) fn display_with_location(
+    storage: &mut ImageStorage,
+    display: Display,
+    location: PlacementLocation,
+) -> Response<'static> {
+    if display.image_id == 0 && display.image_number == 0 {
+        return error_response(b"EINVAL: image ID or number required");
+    }
+
+    let mut response = Response {
+        id: display.image_id,
+        image_number: display.image_number,
+        placement_id: display.placement_id,
+        message: b"OK",
+    };
+
+    let image_id = if display.image_id != 0 {
+        match storage.image_by_id(display.image_id) {
+            Some(image) => image.id,
+            None => {
+                response.message = b"ENOENT: image not found";
+                return response;
+            }
+        }
+    } else {
+        match storage.image_by_number(display.image_number) {
+            Some(image) => image.id,
+            None => {
+                response.message = b"ENOENT: image not found";
+                return response;
+            }
+        }
+    };
+    response.id = image_id;
+
+    let location = if display.virtual_placement {
+        if display.parent_id > 0 {
+            response.message = b"EINVAL: virtual placement cannot refer to a parent";
+            return response;
+        }
+        PlacementLocation::Virtual
+    } else {
+        location
+    };
+
+    let placement = Placement {
+        location,
+        x_offset: display.x_offset,
+        y_offset: display.y_offset,
+        source_x: display.x,
+        source_y: display.y,
+        source_width: display.width,
+        source_height: display.height,
+        columns: display.columns,
+        rows: display.rows,
+        z: display.z,
+    };
+
+    if let Err(err) = storage.add_placement(image_id, display.placement_id, placement) {
+        encode_placement_error(&mut response, err);
+    }
+
+    response
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,6 +325,12 @@ fn encode_error(response: &mut Response<'static>, error: ImageLoadError) {
     };
 }
 
+fn encode_placement_error(response: &mut Response<'static>, error: PlacementError) {
+    response.message = match error {
+        PlacementError::ImageNotFound => b"EINVAL: failed to prepare terminal state",
+    };
+}
+
 fn filter_response(response: Option<Response<'static>>, quiet: Quiet) -> Option<Response<'static>> {
     let response = response?;
     match quiet {
@@ -281,7 +352,9 @@ mod tests {
         TransmissionCompression, TransmissionFormat, TransmissionMedium,
     };
     use super::super::graphics_image::LoadingImageLimits;
-    use super::super::graphics_storage::{ImageStorage, DEFAULT_NEXT_IMAGE_ID};
+    use super::super::graphics_storage::{
+        ImageStorage, PlacementId, PlacementKey, PlacementLocation, DEFAULT_NEXT_IMAGE_ID,
+    };
     use super::*;
 
     fn transmit(transmission: Transmission, data: &[u8]) -> Command {
@@ -311,6 +384,48 @@ mod tests {
 
     fn rgba_data() -> Vec<u8> {
         vec![0xff; 8]
+    }
+
+    fn display(image_id: u32) -> Display {
+        Display {
+            image_id,
+            cursor_movement: CursorMovement::None,
+            ..Display::default()
+        }
+    }
+
+    fn location() -> PlacementLocation {
+        PlacementLocation::Cell { x: 11, y: 13 }
+    }
+
+    fn store_rgba(storage: &mut ImageStorage, image_id: u32) {
+        let command = transmit(
+            Transmission {
+                image_id,
+                width: 1,
+                height: 2,
+                ..Transmission::default()
+            },
+            &rgba_data(),
+        );
+        assert!(execute(storage, &command).unwrap().ok());
+    }
+
+    fn store_numbered_rgba(storage: &mut ImageStorage, image_number: u32) -> u32 {
+        let expected_id = storage.next_image_id;
+        let command = transmit(
+            Transmission {
+                image_number,
+                width: 1,
+                height: 2,
+                ..Transmission::default()
+            },
+            &rgba_data(),
+        );
+        let response = execute(storage, &command).unwrap();
+        assert!(response.ok());
+        assert_eq!(response.id, expected_id);
+        expected_id
     }
 
     fn response_message(response: Option<Response<'static>>) -> &'static [u8] {
@@ -737,6 +852,7 @@ mod tests {
         }
 
         assert_eq!(storage.len(), 0);
+        assert_eq!(storage.placement_len(), 0);
         assert!(storage.loading.is_none());
     }
 
@@ -799,5 +915,215 @@ mod tests {
 
         assert!(execute(&mut storage, &command).unwrap().ok());
         assert_eq!(storage.image_by_id(1).unwrap().data, rgba_data());
+    }
+
+    #[test]
+    fn kitty_graphics_exec_display_helper_requires_image_id_or_number() {
+        let mut storage = ImageStorage::new();
+
+        let response = display_with_location(&mut storage, Display::default(), location());
+
+        assert_eq!(response.message, b"EINVAL: image ID or number required");
+        assert!(response.empty());
+        assert_eq!(storage.placement_len(), 0);
+    }
+
+    #[test]
+    fn kitty_graphics_exec_display_helper_missing_image_errors_without_mutation() {
+        let mut storage = ImageStorage::new();
+
+        let response = display_with_location(&mut storage, display(99), location());
+
+        assert_eq!(response.message, b"ENOENT: image not found");
+        assert_eq!(response.id, 99);
+        assert_eq!(storage.placement_len(), 0);
+    }
+
+    #[test]
+    fn kitty_graphics_exec_display_helper_by_id_inserts_placement() {
+        let mut storage = ImageStorage::new();
+        store_rgba(&mut storage, 1);
+
+        let response = display_with_location(&mut storage, display(1), location());
+
+        assert!(response.ok());
+        assert_eq!(response.id, 1);
+        assert_eq!(storage.placement_len(), 1);
+        let key = PlacementKey {
+            image_id: 1,
+            placement_id: PlacementId::Internal(0),
+        };
+        assert_eq!(storage.placement_by_key(key).unwrap().location, location());
+    }
+
+    #[test]
+    fn kitty_graphics_exec_display_helper_by_number_resolves_newest_image_id() {
+        let mut storage = ImageStorage::new();
+        let _first_id = store_numbered_rgba(&mut storage, 7);
+        let second_id = store_numbered_rgba(&mut storage, 7);
+        let display = Display {
+            image_number: 7,
+            cursor_movement: CursorMovement::None,
+            ..Display::default()
+        };
+
+        let response = display_with_location(&mut storage, display, location());
+
+        assert!(response.ok());
+        assert_eq!(response.id, second_id);
+        assert_eq!(response.image_number, 7);
+        assert_eq!(storage.placements_for_image(second_id).len(), 1);
+    }
+
+    #[test]
+    fn kitty_graphics_exec_display_helper_maps_display_fields_to_placement() {
+        let mut storage = ImageStorage::new();
+        store_rgba(&mut storage, 1);
+        let display = Display {
+            image_id: 1,
+            placement_id: 5,
+            x: 2,
+            y: 3,
+            width: 4,
+            height: 5,
+            x_offset: 6,
+            y_offset: 7,
+            columns: 8,
+            rows: 9,
+            cursor_movement: CursorMovement::After,
+            z: -10,
+            ..Display::default()
+        };
+
+        let response = display_with_location(&mut storage, display, location());
+
+        assert!(response.ok());
+        assert_eq!(response.placement_id, 5);
+        let key = PlacementKey {
+            image_id: 1,
+            placement_id: PlacementId::External(5),
+        };
+        let placement = storage.placement_by_key(key).unwrap();
+        assert_eq!(placement.location, location());
+        assert_eq!(placement.source_x, 2);
+        assert_eq!(placement.source_y, 3);
+        assert_eq!(placement.source_width, 4);
+        assert_eq!(placement.source_height, 5);
+        assert_eq!(placement.x_offset, 6);
+        assert_eq!(placement.y_offset, 7);
+        assert_eq!(placement.columns, 8);
+        assert_eq!(placement.rows, 9);
+        assert_eq!(placement.z, -10);
+    }
+
+    #[test]
+    fn kitty_graphics_exec_display_helper_zero_placement_id_keeps_zero_response() {
+        let mut storage = ImageStorage::new();
+        store_rgba(&mut storage, 1);
+
+        let response = display_with_location(&mut storage, display(1), location());
+
+        assert!(response.ok());
+        assert_eq!(response.placement_id, 0);
+        assert!(storage
+            .placement_by_key(PlacementKey {
+                image_id: 1,
+                placement_id: PlacementId::Internal(0),
+            })
+            .is_some());
+    }
+
+    #[test]
+    fn kitty_graphics_exec_display_helper_external_placement_replaces() {
+        let mut storage = ImageStorage::new();
+        store_rgba(&mut storage, 1);
+        let display = Display {
+            image_id: 1,
+            placement_id: 5,
+            cursor_movement: CursorMovement::None,
+            ..Display::default()
+        };
+
+        assert!(display_with_location(&mut storage, display, location()).ok());
+        assert!(display_with_location(
+            &mut storage,
+            display,
+            PlacementLocation::Cell { x: 17, y: 19 },
+        )
+        .ok());
+
+        assert_eq!(storage.placement_len(), 1);
+        assert_eq!(
+            storage
+                .placement_by_key(PlacementKey {
+                    image_id: 1,
+                    placement_id: PlacementId::External(5),
+                })
+                .unwrap()
+                .location,
+            PlacementLocation::Cell { x: 17, y: 19 }
+        );
+    }
+
+    #[test]
+    fn kitty_graphics_exec_display_helper_virtual_placement_overrides_location() {
+        let mut storage = ImageStorage::new();
+        store_rgba(&mut storage, 1);
+        let display = Display {
+            image_id: 1,
+            virtual_placement: true,
+            cursor_movement: CursorMovement::None,
+            ..Display::default()
+        };
+
+        let response = display_with_location(&mut storage, display, location());
+
+        assert!(response.ok());
+        let key = PlacementKey {
+            image_id: 1,
+            placement_id: PlacementId::Internal(0),
+        };
+        assert_eq!(
+            storage.placement_by_key(key).unwrap().location,
+            PlacementLocation::Virtual
+        );
+    }
+
+    #[test]
+    fn kitty_graphics_exec_display_helper_virtual_parent_errors_without_mutation() {
+        let mut storage = ImageStorage::new();
+        store_rgba(&mut storage, 1);
+        let display = Display {
+            image_id: 1,
+            virtual_placement: true,
+            parent_id: 9,
+            cursor_movement: CursorMovement::None,
+            ..Display::default()
+        };
+
+        let response = display_with_location(&mut storage, display, location());
+
+        assert_eq!(
+            response.message,
+            b"EINVAL: virtual placement cannot refer to a parent"
+        );
+        assert_eq!(storage.placement_len(), 0);
+    }
+
+    #[test]
+    fn kitty_graphics_exec_display_helper_quiet_filtering() {
+        let mut storage = ImageStorage::new();
+        store_rgba(&mut storage, 1);
+
+        let success = display_with_location(&mut storage, display(1), location());
+        assert!(filter_response(Some(success), Quiet::Ok).is_none());
+
+        let failure = display_with_location(&mut storage, display(99), location());
+        assert_eq!(
+            filter_response(Some(failure), Quiet::Ok).unwrap().message,
+            b"ENOENT: image not found"
+        );
+        let hidden_failure = display_with_location(&mut storage, display(99), location());
+        assert!(filter_response(Some(hidden_failure), Quiet::Failures).is_none());
     }
 }

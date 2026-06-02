@@ -143,3 +143,62 @@ and public C ABI deferred.
 - Do not skip Codex design review. If the design review finds a real issue, fix
   it and re-review before committing this experiment design.
 - Do not skip Codex result review after implementation.
+
+## Result
+
+**Result:** Pass
+
+Implemented storage-side Kitty display execution in
+`roastty/src/terminal/kitty/graphics_exec.rs`.
+
+The implementation adds an internal `display_with_location()` helper that:
+
+- validates that display commands specify either image ID or image number;
+- resolves images by ID;
+- resolves images by newest matching image number;
+- sets the response ID to the resolved image ID for number lookups;
+- returns `ENOENT: image not found` for missing images;
+- rejects parented virtual placements with
+  `EINVAL: virtual placement cannot refer to a parent`;
+- stores unparented virtual placements as `PlacementLocation::Virtual`;
+- maps display source rectangle, offsets, rows, columns, z, and placement ID
+  into `Placement`;
+- inserts placements through `ImageStorage::add_placement`;
+- preserves zero placement ID response behavior while storage creates an
+  internal placement key;
+- supports external placement replacement through non-zero placement IDs;
+- lets quiet filtering suppress successes and preserve/report failures as
+  expected.
+
+The generic `execute(storage, command)` path still returns
+`ERROR: unimplemented action` for display commands. This preserves the
+experiment's scope: terminal cursor movement, tracked page pins, renderer
+integration, Unicode virtual rendering, deletion execution, animation execution,
+and public C ABI remain deferred.
+
+Codex result review found no blocking issues and approved the result as pass
+ready.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/terminal/kitty/mod.rs roastty/src/terminal/kitty/graphics_exec.rs roastty/src/terminal/kitty/graphics_storage.rs roastty/src/terminal/kitty/graphics_image.rs
+cargo test -p roastty kitty_graphics_exec
+cargo test -p roastty kitty_graphics_storage
+cargo test -p roastty kitty_graphics_image
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+The focused exec suite passed with 33 tests. The full Roastty suite passed with
+1,980 Rust tests plus the C harness.
+
+## Conclusion
+
+Roastty now has a storage-side display helper that can validate and create Kitty
+image placements once terminal integration supplies a real location. The next
+experiment should integrate Kitty display execution with terminal state so
+non-virtual display commands can use the current cursor/tracked location and
+`CursorMovement::After` can be implemented without faking state in
+`ImageStorage` alone.
