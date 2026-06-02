@@ -172,8 +172,71 @@ All public names must use Roastty naming.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Implemented production `cell_text` cursor-color read-back tests in
+`roastty/src/renderer/metal/render_pass.rs`.
+
+The implementation added a test-only `cell_text_cursor_uniforms(...)` helper
+that starts from the existing cell-text uniforms and sets:
+
+- `cursor_pos`;
+- `cursor_color`;
+- `cursor_wide`.
+
+The new tests prove:
+
+- a non-cursor grayscale glyph at `cursor_pos` renders with `cursor_color`
+  instead of its red vertex text color;
+- a glyph marked with `CellTextFlags::new(false, true)` preserves its own red
+  vertex color at `cursor_pos`;
+- `cursor_wide = true` applies the cursor-color override to the cell immediately
+  to the right of `cursor_pos`;
+- `cursor_wide = false` does not override the cell immediately to the right of
+  `cursor_pos`.
+
+The render-pass step binds text vertex data through `buffers[0]`, uniforms
+through Metal buffer `1`, the `CellBg` grid through `buffers[1]` so the existing
+mapping sends it to Metal buffer `2`, the grayscale atlas through `textures[0]`,
+and the dummy color atlas through `textures[1]`.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/renderer/metal/render_pass.rs
+cargo test -p roastty renderer::metal::render_pass
+cargo test -p roastty renderer::metal::shaders
+cargo test -p roastty renderer::metal::pipeline
+cargo test -p roastty renderer::shader
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/renderer/metal; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Observed results:
+
+- `renderer::metal::render_pass`: 23 passed.
+- `renderer::metal::shaders`: 8 passed.
+- `renderer::metal::pipeline`: 17 passed.
+- `renderer::shader`: 9 passed.
+- Full `roastty`: 2207 unit tests passed, plus the C ABI harness passed.
+- Both no-`ghostty` gates passed.
+- `git diff --check` passed.
+
+Codex reviewed the completed implementation, identified one real low-risk
+coverage gap, and the implementation was updated with a `cursor_wide = false`
+second-cell negative test. Codex reviewed the updated diff again and found no
+remaining issues.
 
 ## Conclusion
 
-Pending.
+Roastty now has automated production-shader read-back coverage for the
+`cell_text` cursor-color override rules. The renderer proof covers ordinary
+cursor-position override, cursor-glyph exemption, wide-cursor second-cell
+override, and the corresponding non-wide second-cell non-override.
+
+This remains renderer proof work. It intentionally leaves cursor shape
+rendering, cursor blink, render ordering with selection/reverse-video behavior,
+font loading, glyph rasterization, real atlas allocation, presentation, and
+public C ABI integration for later experiments.

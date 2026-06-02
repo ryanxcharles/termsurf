@@ -569,7 +569,7 @@ tests, choose the larger subsystem.
 - [Experiment 221: Port Offscreen Metal Cell Text Color Readback](221-port-offscreen-metal-cell-text-color-readback.md)
   — **Pass**
 - [Experiment 222: Port Offscreen Metal Cell Text Cursor Readback](222-port-offscreen-metal-cell-text-cursor-readback.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 
