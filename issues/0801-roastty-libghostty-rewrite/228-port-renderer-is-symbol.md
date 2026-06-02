@@ -156,3 +156,76 @@ that all eleven ranges are correct, that stopping the supplementary PUA at
 `..FFFD` correctly excludes the plane noncharacters (`Cn`, not `Co`), and that
 the test plan (PUA boundaries, block edges, `+`/`$` general-symbol exclusion) is
 sufficient. No changes were required.
+
+## Result
+
+**Result:** Pass
+
+Extended `roastty/src/renderer/cell.rs` with `pub(crate) is_symbol` and a
+private `is_private_use`. `is_symbol` is
+`is_private_use(cp) || <8-block match>`, each block range commented by name;
+`is_private_use` matches the three Private-Use (`Co`) ranges with the
+supplementary planes stopping at `..FFFD` to exclude the plane noncharacters. No
+generated table — the ranges reproduce the upstream `uucode`-generated
+`is_symbol` exactly.
+
+Tests added (3): `is_symbol_private_use` (BMP and both supplementary PUAs, with
+the noncharacter boundaries), `is_symbol_blocks` (low/high edge and a
+just-outside value for each of the eight blocks), and
+`is_symbol_excludes_general_symbols` (`+`, `$`, `a` are not symbols, proving the
+block-scoped definition).
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty renderer::cell
+cargo test -p roastty renderer
+cargo test -p roastty
+```
+
+Observed:
+
+- `renderer::cell`: 11 passed (8 from Exp 227 + 3 new).
+- Full `roastty`: 2247 unit tests passed (2244 prior + 3 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/renderer/cell.rs` and for
+  `roastty/src/lib.rs`, `roastty/include/roastty.h`,
+  `roastty/tests/abi_harness.c`.
+- `git diff --check`: clean.
+
+No C ABI, header, or ABI inventory changes; `constraintWidth`/`Contents` not
+pulled in.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** ("nothing
+should change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-073952-313247-prompt.md`
+- Result: `logs/codex-review/20260602-073952-313247-last-message.md`
+
+Codex confirmed the implementation matches `uucode_config.zig`'s
+`computeIsSymbol` definition (PUA `Co` plus the eight named blocks, with the
+noncharacter-excluding supplementary-PUA bounds), that the three tests cover the
+right behavior, and that visibility (`is_symbol` `pub(crate)`, `is_private_use`
+private) and the `matches!` patterns are clean.
+
+## Conclusion
+
+Experiment 228 succeeds. `renderer::cell` now has the faithful `is_symbol`
+predicate, reconstructed as fixed ranges from the `uucode_config.zig` definition
+rather than the generated lookup table — a much smaller, dependency-free port
+that is byte-for-byte identical to upstream. Both Codex gates passed with zero
+findings.
+
+The next slice (Experiment 229) is `constraintWidth`, the last standalone
+function in `cell.zig` before the `Contents` builder. It uses `is_symbol`,
+`is_graphics_element`, and `is_space` (all now landed) plus a row of cells with
+codepoint and grid-width access, so its main new dependency is a
+`terminal::page` cell-row representation — which the design will need to map to
+Roastty's render cell snapshot or page cell type.

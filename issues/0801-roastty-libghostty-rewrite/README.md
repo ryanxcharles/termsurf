@@ -679,7 +679,7 @@ are past the correctness-critical foundation.
 - [Experiment 227: Port Renderer Cell Codepoint Classification](227-port-renderer-cell-codepoint-classification.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 228: Port Renderer `is_symbol` Predicate](228-port-renderer-is-symbol.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

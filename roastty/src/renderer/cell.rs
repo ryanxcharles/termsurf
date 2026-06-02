@@ -51,6 +51,32 @@ fn is_space(cp: u32) -> bool {
     matches!(cp, 0x0020 | 0x2002)
 }
 
+/// True if the codepoint is "symbol-like". Faithful to upstream's generated
+/// `is_symbol` table, whose membership is defined in `uucode_config.zig` as the
+/// Private-Use general category plus eight named Unicode blocks. Unicode block
+/// membership is range-based (including unassigned codepoints inside a block),
+/// so this is byte-for-byte identical to the generated table.
+pub(crate) fn is_symbol(cp: u32) -> bool {
+    is_private_use(cp)
+        || matches!(cp,
+            0x2190..=0x21FF      // Arrows
+            | 0x2700..=0x27BF    // Dingbats
+            | 0x1F600..=0x1F64F  // Emoticons
+            | 0x2600..=0x26FF    // Miscellaneous Symbols
+            | 0x2460..=0x24FF    // Enclosed Alphanumerics
+            | 0x1F100..=0x1F1FF  // Enclosed Alphanumeric Supplement
+            | 0x1F300..=0x1F5FF  // Miscellaneous Symbols and Pictographs
+            | 0x1F680..=0x1F6FF  // Transport and Map Symbols
+        )
+}
+
+/// True for the Private-Use general category (`Co`). The supplementary planes
+/// stop at `..FFFD`; the last two code points of each plane are noncharacters
+/// (`Cn`), not Private-Use.
+fn is_private_use(cp: u32) -> bool {
+    matches!(cp, 0xE000..=0xF8FF | 0xF0000..=0xFFFFD | 0x100000..=0x10FFFD)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,5 +149,80 @@ mod tests {
         assert!(is_space(0x2002));
         assert!(!is_space(0x2003));
         assert!(!is_space('a' as u32));
+    }
+
+    #[test]
+    fn is_symbol_private_use() {
+        // BMP Private Use Area.
+        assert!(!is_symbol(0xDFFF));
+        assert!(is_symbol(0xE000));
+        assert!(is_symbol(0xF8FF));
+        assert!(!is_symbol(0xF900));
+
+        // Plane 15 Supplementary PUA-A, excluding the plane noncharacters.
+        assert!(!is_symbol(0xEFFFF));
+        assert!(is_symbol(0xF0000));
+        assert!(is_symbol(0xFFFFD));
+        assert!(!is_symbol(0xFFFFE));
+
+        // Plane 16 Supplementary PUA-B, excluding the plane noncharacters.
+        assert!(is_symbol(0x100000));
+        assert!(is_symbol(0x10FFFD));
+        assert!(!is_symbol(0x10FFFE));
+    }
+
+    #[test]
+    fn is_symbol_blocks() {
+        // Arrows 0x2190..=0x21FF.
+        assert!(!is_symbol(0x218F));
+        assert!(is_symbol(0x2190));
+        assert!(is_symbol(0x21FF));
+        assert!(!is_symbol(0x2200));
+
+        // Dingbats 0x2700..=0x27BF.
+        assert!(is_symbol(0x2700));
+        assert!(is_symbol(0x27BF));
+        assert!(!is_symbol(0x27C0));
+
+        // Emoticons 0x1F600..=0x1F64F.
+        assert!(is_symbol(0x1F600));
+        assert!(is_symbol(0x1F64F));
+        assert!(!is_symbol(0x1F650));
+
+        // Miscellaneous Symbols 0x2600..=0x26FF.
+        assert!(!is_symbol(0x25FF));
+        assert!(is_symbol(0x2600));
+        assert!(is_symbol(0x26FF));
+
+        // Enclosed Alphanumerics 0x2460..=0x24FF.
+        assert!(!is_symbol(0x245F));
+        assert!(is_symbol(0x2460));
+        assert!(is_symbol(0x24FF));
+        assert!(!is_symbol(0x2500));
+
+        // Enclosed Alphanumeric Supplement 0x1F100..=0x1F1FF.
+        assert!(!is_symbol(0x1F0FF));
+        assert!(is_symbol(0x1F100));
+        assert!(is_symbol(0x1F1FF));
+
+        // Miscellaneous Symbols and Pictographs 0x1F300..=0x1F5FF.
+        assert!(!is_symbol(0x1F2FF));
+        assert!(is_symbol(0x1F300));
+        assert!(is_symbol(0x1F5FF));
+
+        // Transport and Map Symbols 0x1F680..=0x1F6FF.
+        assert!(!is_symbol(0x1F67F));
+        assert!(is_symbol(0x1F680));
+        assert!(is_symbol(0x1F6FF));
+        assert!(!is_symbol(0x1F700));
+    }
+
+    #[test]
+    fn is_symbol_excludes_general_symbols() {
+        // Block-scoped definition: Unicode general symbol categories (e.g. `+`
+        // is Sm, `$` is Sc) are not symbols here.
+        assert!(!is_symbol('+' as u32));
+        assert!(!is_symbol('$' as u32));
+        assert!(!is_symbol('a' as u32));
     }
 }
