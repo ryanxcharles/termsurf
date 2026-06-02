@@ -153,3 +153,72 @@ analogs, and that the percent expectations (`20% → 1.2`, `-20% → 0.8`,
 `-100%`/`-150% → 0.0`) are right. It suggested two optional extra cases — `"+5"`
 (accepted by both parsers) and `"%"` (empty prefix) — which were added to the
 test plan above.
+
+## Result
+
+**Result:** Pass
+
+Added `pub(crate) enum ModifierParseError { InvalidFormat }`,
+`pub(crate) enum Modifier { Percent(f64), Absolute(i32) }`, and
+`Modifier::parse` to `roastty/src/font/metrics.rs`. `parse` errors on empty
+input; for a trailing `%` it parses the prefix as `f64`, divides by 100, and
+returns `Percent(0.0)` when `<= -1.0` else `Percent(1.0 + fraction)`; otherwise
+it parses the whole string as `i32` into `Absolute`. Parse failures map to
+`InvalidFormat`.
+
+Tests added (4): `modifier_parse_percent` (`20% → 1.2`, `-20% → 0.8`,
+`0% → 1.0`), `modifier_parse_percent_clamps` (`-100%`/`-150% → 0.0`),
+`modifier_parse_absolute` (`5`, `-3`, `+5`), and `modifier_parse_errors` (`""`,
+`"abc"`, `"abc%"`, `"%"`). Percent comparisons use the `1e-9` epsilon helper.
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty font
+cargo test -p roastty
+```
+
+Observed:
+
+- `font`: 27 passed (23 prior + 4 new).
+- Full `roastty`: 2303 unit tests passed (2299 prior + 4 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/font` and for
+  `roastty/src/lib.rs`, `roastty/include/roastty.h`,
+  `roastty/tests/abi_harness.c`.
+- `git diff --check`: clean.
+
+No C ABI, header, or ABI inventory changes; no `apply`/`parseCLI`/`formatEntry`/
+`ModifierSet` scope pulled in.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** ("nothing
+needs to change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-084523-003390-prompt.md`
+- Result: `logs/codex-review/20260602-084523-003390-last-message.md`
+
+Codex confirmed `parse` is faithful to upstream (empty → `InvalidFormat`,
+trailing `%` → `f64` prefix ÷ 100 with the `<= -1.0` clamp to `Percent(0.0)`
+else `Percent(1.0 + fraction)`, otherwise `i32` `Absolute`), that the tests
+cover the multipliers/clamp/signed-absolute/error paths (including `"%"` failing
+via empty-prefix float parse), and that the derives are right (`Modifier`
+`PartialEq` only, `ModifierParseError` `Eq`).
+
+## Conclusion
+
+Experiment 239 succeeds. `Modifier` and its `parse` are in place — the config
+metric-adjustment type. Both Codex gates passed with zero findings.
+
+The remaining modifier machinery: `Modifier::apply` (the numeric application —
+percent rounds `v * multiplier`, absolute saturating-adds, with the int/float
+type handling; Experiment 240), then `parseCLI`/`formatEntry` (config
+integration), the `ModifierSet` map, and `Metrics::apply` (which carries the
+upstream `Metrics.zig` modifier tests). With `Modifier::apply` ported next,
+`Metrics::apply` becomes portable, completing the `Metrics.zig` behavior.

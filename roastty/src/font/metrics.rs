@@ -299,6 +299,49 @@ impl Metrics {
     }
 }
 
+/// An error parsing a [`Modifier`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModifierParseError {
+    InvalidFormat,
+}
+
+/// A modifier to apply to a metrics value. The value is a delta, not a target:
+/// a percent of `"20%"` means 20% larger (stored as the multiplier `1.2`), and
+/// an absolute of `"20"` means 20 larger.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Modifier {
+    Percent(f64),
+    Absolute(i32),
+}
+
+impl Modifier {
+    /// Parse a modifier value. A trailing `%` makes it a percent; otherwise the
+    /// value is parsed as an integer absolute delta.
+    pub(crate) fn parse(input: &str) -> Result<Modifier, ModifierParseError> {
+        if input.is_empty() {
+            return Err(ModifierParseError::InvalidFormat);
+        }
+
+        if let Some(prefix) = input.strip_suffix('%') {
+            let percent: f64 = prefix
+                .parse()
+                .map_err(|_| ModifierParseError::InvalidFormat)?;
+            let percent = percent / 100.0;
+            // A percent of <= -1 (i.e. "-100%" or more negative) clamps the
+            // multiplier to 0; otherwise the stored value is 1 + the fraction.
+            if percent <= -1.0 {
+                return Ok(Modifier::Percent(0.0));
+            }
+            return Ok(Modifier::Percent(1.0 + percent));
+        }
+
+        let absolute: i32 = input
+            .parse()
+            .map_err(|_| ModifierParseError::InvalidFormat)?;
+        Ok(Modifier::Absolute(absolute))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -649,5 +692,40 @@ mod tests {
         assert_eq!(m.strikethrough_position, 9);
         assert_eq!(m.overline_position, -3);
         assert_eq!(m.face_y, 2.5);
+    }
+
+    fn percent_of(m: Modifier) -> f64 {
+        match m {
+            Modifier::Percent(p) => p,
+            other => panic!("expected Percent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn modifier_parse_percent() {
+        assert!(approx(percent_of(Modifier::parse("20%").unwrap()), 1.2));
+        assert!(approx(percent_of(Modifier::parse("-20%").unwrap()), 0.8));
+        assert!(approx(percent_of(Modifier::parse("0%").unwrap()), 1.0));
+    }
+
+    #[test]
+    fn modifier_parse_percent_clamps() {
+        assert!(approx(percent_of(Modifier::parse("-100%").unwrap()), 0.0));
+        assert!(approx(percent_of(Modifier::parse("-150%").unwrap()), 0.0));
+    }
+
+    #[test]
+    fn modifier_parse_absolute() {
+        assert_eq!(Modifier::parse("5").unwrap(), Modifier::Absolute(5));
+        assert_eq!(Modifier::parse("-3").unwrap(), Modifier::Absolute(-3));
+        assert_eq!(Modifier::parse("+5").unwrap(), Modifier::Absolute(5));
+    }
+
+    #[test]
+    fn modifier_parse_errors() {
+        assert!(Modifier::parse("").is_err());
+        assert!(Modifier::parse("abc").is_err());
+        assert!(Modifier::parse("abc%").is_err());
+        assert!(Modifier::parse("%").is_err());
     }
 }

@@ -701,7 +701,7 @@ are past the correctness-critical foundation.
 - [Experiment 238: Port Font `Metrics::calc` and `clamp`](238-port-font-metrics-calc.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 239: Port Font `Modifier` and `Modifier::parse`](239-port-font-modifier-parse.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
