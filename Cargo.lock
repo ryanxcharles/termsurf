@@ -1559,6 +1559,7 @@ dependencies = [
  "flate2",
  "libc",
  "objc2",
+ "objc2-foundation",
  "objc2-metal",
 ]
 

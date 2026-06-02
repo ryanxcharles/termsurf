@@ -545,7 +545,7 @@ tests, choose the larger subsystem.
 - [Experiment 209: Port Image Draw Command Contract](209-port-image-draw-command-contract.md)
   — **Pass**
 - [Experiment 210: Port Metal Buffer Wrapper](210-port-metal-buffer-wrapper.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

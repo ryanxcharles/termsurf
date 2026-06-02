@@ -202,8 +202,65 @@ All public names must use Roastty naming.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Experiment 210 added the internal typed Metal buffer wrapper. The
+implementation:
+
+- added the narrow `objc2-metal` `MTLBuffer` feature and direct
+  `objc2-foundation` `NSRange` dependency;
+- added `renderer::metal::buffer`;
+- added `MetalBufferOptions`, `MetalBuffer<T>`, `MetalBufferError`, and the
+  internal unsafe `MetalBufferElement` marker trait;
+- implemented `MetalBufferElement` for `ImageVertex`;
+- implemented `new`, `init_fill`, `sync`, `capacity_items`, and
+  `capacity_bytes`;
+- used checked byte-length arithmetic and explicit errors for overflow,
+  zero-sized element types, zero-length buffers, and Metal buffer creation
+  failure;
+- preserved capacity-oriented buffer semantics: shorter syncs do not shrink
+  capacity and leave trailing bytes untouched;
+- implemented safe reallocation ordering, allocating the replacement before
+  replacing the old buffer so failed reallocation leaves the old buffer intact;
+- added a testable `requires_did_modify` predicate for managed-storage sync
+  decisions.
+
+The first implementation tried to allow zero-length buffers, but the live Metal
+test proved `newBufferWithLength:options:` returns no buffer for length 0 on the
+test machine. Per the experiment design, the implementation now rejects
+zero-length buffers explicitly with `MetalBufferError::ZeroLengthBuffer`.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/renderer/metal/buffer.rs roastty/src/renderer/metal/mod.rs roastty/src/renderer/metal/api.rs roastty/src/renderer/shader.rs
+cargo test -p roastty renderer::metal::buffer
+cargo test -p roastty renderer::image
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Observed results:
+
+- `cargo test -p roastty renderer::metal::buffer`: 9 passed.
+- `cargo test -p roastty renderer::image`: 30 passed.
+- `cargo test -p roastty`: 2136 library tests plus 1 ABI harness test passed.
+- The public no-`ghostty` gate and `git diff --check` both exited 0.
+
+Codex result review initially found two blocking test gaps: zero-length buffer
+behavior was allowed but unproven, and the managed-storage `didModifyRange`
+branch was untested. Both were fixed before recording the result. The follow-up
+Codex result review approved the experiment as Pass.
 
 ## Conclusion
 
-Pending.
+Roastty now has the Metal storage primitive needed by the image draw path:
+stable-layout `ImageVertex` values can be uploaded into live `MTLBuffer`
+objects, synchronized in place, reallocated when needed, and read back in
+headless tests.
+
+The next experiment can use this buffer wrapper to move toward real Metal render
+steps: either port the render-pass step value/binding layer or the minimal image
+draw backend that turns Experiment 209 `ImageDrawCall`s into one-item
+`MetalBuffer<ImageVertex>` instances for later encoder submission.
