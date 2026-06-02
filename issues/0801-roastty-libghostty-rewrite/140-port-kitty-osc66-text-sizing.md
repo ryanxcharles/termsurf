@@ -1,3 +1,20 @@
++++
+[implementer]
+agent = "codex"
+model = "gpt-5.5"
+reasoning = "medium"
+
+[review.design]
+agent = "codex"
+model = "gpt-5.5"
+reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5.5"
+reasoning = "medium"
++++
+
 # Experiment 140: Port Kitty OSC 66 Text Sizing
 
 ## Description

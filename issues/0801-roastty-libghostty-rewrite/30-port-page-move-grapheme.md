@@ -1,3 +1,20 @@
++++
+[implementer]
+agent = "codex"
+model = "gpt-5.5"
+reasoning = "medium"
+
+[review.design]
+agent = "codex"
+model = "gpt-5.5"
+reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5.5"
+reasoning = "medium"
++++
+
 # Experiment 30: Port Page Move Grapheme
 
 ## Description

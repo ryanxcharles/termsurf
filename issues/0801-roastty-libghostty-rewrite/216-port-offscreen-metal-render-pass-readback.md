@@ -1,3 +1,20 @@
++++
+[implementer]
+agent = "codex"
+model = "gpt-5.5"
+reasoning = "medium"
+
+[review.design]
+agent = "codex"
+model = "gpt-5.5"
+reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5.5"
+reasoning = "medium"
++++
+
 # Experiment 216: Port Offscreen Metal Render Pass Readback
 
 ## Description

@@ -128,6 +128,35 @@ Every experiment must follow the current project process:
 
 No experiment may proceed to the next stage until the required review passes.
 
+## Agent Provenance
+
+Every experiment records, in TOML frontmatter at the top of its file, which AI
+agent performed each role: the **implementer** (designs, writes, and records the
+experiment) and the two review gates (**design review** and **result review**).
+Each role logs `agent`, `model`, and `reasoning` (effort level), so the record
+is machine-parseable for later comparison. The implementer and reviewer are
+always different agents, keeping the review gate independent.
+
+- **Experiments 1–222:** designed, reviewed, implemented, and re-reviewed
+  entirely by **Codex (GPT-5.5, medium)** — all three roles.
+- **Experiment 223 onward:** the implementer switches to **Claude (Opus 4.8,
+  high)** as a controlled trial; both review gates remain **Codex (GPT-5.5,
+  medium)**. This is the first time implementer and reviewer differ.
+
+Frontmatter schema:
+
+```toml
++++
+[implementer]
+agent = "..."      # codex | claude-code
+model = "..."      # gpt-5.5 | claude-opus-4-8
+reasoning = "..."  # effort level: medium | high
+
+[review.design]    # same three keys
+[review.result]    # same three keys
++++
+```
+
 ## Experiment Granularity
 
 Early experiments may be small when they establish correctness-critical
