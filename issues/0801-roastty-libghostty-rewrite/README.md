@@ -503,7 +503,7 @@ tests, choose the larger subsystem.
 - [Experiment 188: Port Kitty Image Storage Foundation](188-port-kitty-image-storage-foundation.md)
   — **Pass**
 - [Experiment 189: Port Kitty Transmit and Query Execution](189-port-kitty-transmit-query-execution.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

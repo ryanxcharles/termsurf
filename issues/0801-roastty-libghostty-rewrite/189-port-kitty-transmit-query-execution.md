@@ -160,3 +160,56 @@ deferred.
 - Do not skip Codex design review. If the design review finds a real issue, fix
   it and re-review before committing this experiment design.
 - Do not skip Codex result review after implementation.
+
+## Result
+
+**Result:** Pass
+
+Implemented internal Kitty graphics query/transmit execution in
+`roastty/src/terminal/kitty/graphics_exec.rs` and wired it from
+`roastty/src/terminal/kitty/mod.rs`.
+
+The implementation now:
+
+- executes query commands without storing images;
+- executes transmit commands against `ImageStorage`;
+- stores validated direct images;
+- assigns automatic image IDs with wrapping behavior;
+- suppresses implicit-ID success responses;
+- handles multi-chunk direct image loads;
+- preserves upstream quiet inheritance across chunks;
+- clears stale loading state on final-chunk failure;
+- maps representative `ImageLoadError` values into Kitty response messages;
+- suppresses all behavior when image storage is disabled;
+- rejects `TransmitAndDisplay`, display, delete, and animation actions as
+  explicitly unimplemented without mutating storage.
+
+Codex result review found one real issue before approval: unaddressed
+unimplemented animation/delete errors were being filtered out under default
+`q=0` because they had no image ID or number. The fix changed quiet filtering so
+empty `OK` responses are still suppressed, but empty non-OK responses are
+returned internally. Focused tests now cover default-quiet unimplemented
+animation and unaddressed delete behavior.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/terminal/kitty/mod.rs roastty/src/terminal/kitty/graphics_command.rs roastty/src/terminal/kitty/graphics_image.rs roastty/src/terminal/kitty/graphics_storage.rs roastty/src/terminal/kitty/graphics_exec.rs
+cargo test -p roastty kitty_graphics_exec
+cargo test -p roastty kitty_graphics_storage
+cargo test -p roastty kitty_graphics_image
+cargo test -p roastty kitty_graphics_command
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+The full Roastty suite passed with 1,959 Rust tests plus the C harness.
+
+## Conclusion
+
+The parser, direct image loader, image storage, and non-placement execution path
+now form a working internal Kitty graphics pipeline for query and transmit
+commands. The next experiment should move into the first placement-oriented
+slice: image display lookup and placement state, without yet adding renderer or
+public C ABI integration.
