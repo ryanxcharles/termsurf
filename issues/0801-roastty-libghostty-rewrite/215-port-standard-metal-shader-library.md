@@ -252,8 +252,69 @@ they are explicitly citing the original project in an issue document.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Experiment 215 ported the standard Metal shader-library layer for Roastty.
+
+The implementation added:
+
+- `roastty/src/renderer/metal/shaders.metal`, a faithful Roastty adaptation of
+  the upstream production Metal shader source;
+- `roastty/src/renderer/metal/shaders.rs`;
+- `STANDARD_METAL_SHADER_SOURCE`;
+- `MetalShaderLibrary`, which compiles the production source into a retained
+  `MTLLibrary`;
+- a private `compile_source(...)` helper used by both production compilation and
+  invalid-source testing;
+- `MetalStandardPipelines`, a strongly typed collection for the five standard
+  pipelines;
+- a private `build_from_library(...)` helper used by both production standard
+  pipeline creation and deterministic named-failure testing.
+
+The live tests prove:
+
+- the production source contains every shader function required by
+  `STANDARD_PIPELINE_DESCRIPTIONS`;
+- the production source compiles with the system default Metal device;
+- every required vertex and fragment function resolves from the compiled
+  production library;
+- all five standard pipelines create live `MTLRenderPipelineState` objects with
+  a BGRA8 sRGB pixel format;
+- invalid shader source returns `CompileFailed(...)` with a non-empty message;
+- a deliberately incompatible compiled library returns a named standard-pipeline
+  error before the underlying `MetalPipelineError`.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/renderer/metal/mod.rs roastty/src/renderer/metal/shaders.rs
+cargo test -p roastty renderer::metal::shaders
+cargo test -p roastty renderer::metal::pipeline
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/renderer/metal; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Observed test results:
+
+- `cargo test -p roastty renderer::metal::shaders`: 6 passed, 0 failed;
+- `cargo test -p roastty renderer::metal::pipeline`: 17 passed, 0 failed;
+- `cargo test -p roastty`: 2176 library tests passed, 1 ABI harness test passed,
+  0 doc tests.
+
+Codex reviewed the implementation result and reported no blocking findings. The
+review explicitly approved recording Experiment 215 as Pass.
 
 ## Conclusion
 
-Pending.
+Roastty now has the production standard Metal shader source wired into a real
+runtime `MTLLibrary`, and every standard pipeline description can create a live
+`MTLRenderPipelineState` from that library.
+
+This proves source compilation, function resolution, and pipeline compatibility.
+It still does not prove draw-time shader semantics, visual output, color
+correctness, glyph correctness, or texture sampling correctness. The next
+renderer slice should move from pipeline creation into render-pass or command
+encoding work with read-back tests, so the standard pipelines are exercised by
+actual draw commands rather than only pipeline construction.
