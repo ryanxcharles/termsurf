@@ -202,8 +202,58 @@ All public names must use Roastty naming.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Roastty now has an internal `renderer::metal` value module for the image texture
+constants and option mapping needed by a future real Metal backend. The
+implementation added:
+
+- `renderer::metal::api` for the supported Metal pixel format constants,
+  resource option bit packing, storage/cache/hazard modes, texture usage, and
+  supported bytes-per-pixel behavior;
+- `renderer::metal::texture` for image texture format mapping, image texture
+  option construction, and the bridge from prepared renderer image pixel format
+  to Metal image texture format;
+- scoped `dead_code` allowance on the internal Metal module because this
+  foundation is intentionally consumed by later renderer slices.
+
+The implementation stays value-only. It adds no Objective-C runtime calls, no
+live Metal device or texture descriptor allocation, no IOSurface target, no
+shader/buffer work, no dependencies, no C ABI, and no changes to Experiment
+206's upload/draw state machine.
+
+Tests cover:
+
+- Metal pixel format raw values copied from upstream;
+- `MetalResourceOptions` raw bit packing for CPU cache, storage mode, and hazard
+  tracking;
+- `MetalTextureUsage` raw bit packing for shader-read and render-target flags;
+- image texture format mapping for Gray/RGBA/BGRA with and without sRGB;
+- image texture option construction with write-combined CPU cache,
+  caller-provided storage mode, default hazard tracking, and shader-read usage;
+- bytes-per-pixel results for supported image texture formats;
+- invalid pixel format returning no byte size instead of panicking;
+- the upload bridge accepting only already-prepared RGBA payloads.
+
+Codex reviewed the implementation and approved it with no blockers. The only
+process note was to ensure the new `roastty/src/renderer/metal/` files are
+included in the result commit.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/renderer/mod.rs roastty/src/renderer/metal/mod.rs roastty/src/renderer/metal/api.rs roastty/src/renderer/metal/texture.rs
+cargo test -p roastty renderer::metal
+cargo test -p roastty renderer::image
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
 
 ## Conclusion
 
-Pending.
+Experiment 207 establishes the Metal image texture value layer without taking on
+runtime Metal integration. The next experiment can now build on known-good
+constants and option mapping, likely by adding the Objective-C/Metal dependency
+decision and the smallest real texture wrapper that can implement Experiment
+206's `ImageUploadBackend` for RGBA image uploads.

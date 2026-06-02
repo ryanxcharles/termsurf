@@ -539,7 +539,7 @@ tests, choose the larger subsystem.
 - [Experiment 206: Port Renderer Image Upload and Draw Contract](206-port-renderer-image-upload-draw-contract.md)
   — **Pass**
 - [Experiment 207: Port Metal Image Texture Values](207-port-metal-image-texture-values.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 
