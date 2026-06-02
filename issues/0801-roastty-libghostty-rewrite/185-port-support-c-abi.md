@@ -190,3 +190,58 @@ system callbacks without adding Kitty graphics behavior.
 - Do not skip Codex design review. If the design review finds a real issue, fix
   it and re-review before committing this experiment design.
 - Do not skip Codex result review after implementation.
+
+## Result
+
+**Result:** Pass
+
+The experiment added the support C ABI surface with Roastty naming:
+
+- `roastty_build_info`;
+- `roastty_alloc` and `roastty_free`;
+- `roastty_sys_set`;
+- `roastty_sys_log_stderr`;
+- support enums and structs for build info, allocators, sys callbacks, and sys
+  images.
+
+The build-info API returns deterministic current values. SIMD, Kitty graphics,
+and tmux control mode report `false` because those support paths are not ported
+yet. Optimize mode maps debug builds to `ROASTTY_OPTIMIZE_DEBUG` and non-debug
+builds to `ROASTTY_OPTIMIZE_RELEASE_FAST`; Rust build metadata does not
+distinguish release-safe/release-small in this slice. Version strings are
+borrowed process-static `roastty_string_s` values and are documented as not
+owned by the caller.
+
+The allocator helpers support the default Rust global allocator for
+`allocator == null`, custom vtable-backed allocation/free for non-null
+allocators, zero-length allocation returning null, null-free no-op behavior, and
+safe handling of malformed custom allocators. The sys callback API stores
+process-global userdata, PNG decode callback, and log callback under
+synchronized state. Kitty graphics decoding/storage was deliberately not added.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/lib.rs
+cargo test -p roastty build_info
+cargo test -p roastty support_allocator
+cargo test -p roastty sys_c_abi
+cargo test -p roastty c_harness_links_against_roastty_header_and_roastty_dylib
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Codex result review initially found only low-level coverage gaps for
+`ROASTTY_BUILD_INFO_TMUX_CONTROL_MODE`, `ROASTTY_BUILD_INFO_VERSION_BUILD`, and
+the custom allocator missing-`free` path. Those tests were added in both Rust
+and the C harness. A second Codex review found no blocking issues and explicitly
+approved recording Experiment 185 as Pass.
+
+## Conclusion
+
+Roastty now has the upstream-shaped support ABI needed by later library
+subsystems: build metadata queries, byte-buffer allocation helpers, and
+process-global sys callback registration/logging. The support substrate is in
+place without implementing Kitty graphics, PTY/app runtime behavior, or any
+browser overlay behavior.

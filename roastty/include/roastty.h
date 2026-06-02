@@ -132,6 +132,86 @@ typedef enum {
   ROASTTY_BUILD_MODE_RELEASE_SMALL,
 } roastty_build_mode_e;
 
+typedef enum {
+  ROASTTY_OPTIMIZE_DEBUG = 0,
+  ROASTTY_OPTIMIZE_RELEASE_SAFE = 1,
+  ROASTTY_OPTIMIZE_RELEASE_SMALL = 2,
+  ROASTTY_OPTIMIZE_RELEASE_FAST = 3,
+} roastty_optimize_mode_e;
+
+typedef enum {
+  ROASTTY_BUILD_INFO_INVALID = 0,
+  ROASTTY_BUILD_INFO_SIMD = 1,
+  ROASTTY_BUILD_INFO_KITTY_GRAPHICS = 2,
+  ROASTTY_BUILD_INFO_TMUX_CONTROL_MODE = 3,
+  ROASTTY_BUILD_INFO_OPTIMIZE = 4,
+  ROASTTY_BUILD_INFO_VERSION_STRING = 5,
+  ROASTTY_BUILD_INFO_VERSION_MAJOR = 6,
+  ROASTTY_BUILD_INFO_VERSION_MINOR = 7,
+  ROASTTY_BUILD_INFO_VERSION_PATCH = 8,
+  ROASTTY_BUILD_INFO_VERSION_PRE = 9,
+  ROASTTY_BUILD_INFO_VERSION_BUILD = 10,
+} roastty_build_info_e;
+
+typedef struct roastty_allocator_vtable_s {
+  void* (*alloc)(void* ctx, size_t len, uint8_t alignment, uintptr_t ret_addr);
+  bool (*resize)(void* ctx,
+                 void* memory,
+                 size_t memory_len,
+                 uint8_t alignment,
+                 size_t new_len,
+                 uintptr_t ret_addr);
+  void* (*remap)(void* ctx,
+                 void* memory,
+                 size_t memory_len,
+                 uint8_t alignment,
+                 size_t new_len,
+                 uintptr_t ret_addr);
+  void (*free)(void* ctx,
+               void* memory,
+               size_t memory_len,
+               uint8_t alignment,
+               uintptr_t ret_addr);
+} roastty_allocator_vtable_s;
+
+typedef struct {
+  void* ctx;
+  const roastty_allocator_vtable_s* vtable;
+} roastty_allocator_s;
+
+typedef enum {
+  ROASTTY_SYS_LOG_LEVEL_ERROR = 0,
+  ROASTTY_SYS_LOG_LEVEL_WARNING = 1,
+  ROASTTY_SYS_LOG_LEVEL_INFO = 2,
+  ROASTTY_SYS_LOG_LEVEL_DEBUG = 3,
+} roastty_sys_log_level_e;
+
+typedef struct {
+  uint32_t width;
+  uint32_t height;
+  uint8_t* data;
+  size_t data_len;
+} roastty_sys_image_s;
+
+typedef void (*roastty_sys_log_fn)(void*,
+                                   roastty_sys_log_level_e,
+                                   const uint8_t*,
+                                   size_t,
+                                   const uint8_t*,
+                                   size_t);
+
+typedef bool (*roastty_sys_decode_png_fn)(void*,
+                                          const roastty_allocator_s*,
+                                          const uint8_t*,
+                                          size_t,
+                                          roastty_sys_image_s*);
+
+typedef enum {
+  ROASTTY_SYS_OPT_USERDATA = 0,
+  ROASTTY_SYS_OPT_DECODE_PNG = 1,
+  ROASTTY_SYS_OPT_LOG = 2,
+} roastty_sys_option_e;
+
 typedef struct {
   roastty_build_mode_e build_mode;
   const char* version;
@@ -1052,6 +1132,20 @@ typedef struct {
 
 ROASTTY_API int roastty_init(uintptr_t, char**);
 ROASTTY_API roastty_info_s roastty_info(void);
+/* String values returned by roastty_build_info are borrowed process-static
+ * values. They remain valid for the lifetime of the process and must not be
+ * passed to roastty_string_free. */
+ROASTTY_API roastty_result_e roastty_build_info(roastty_build_info_e, void*);
+ROASTTY_API uint8_t* roastty_alloc(const roastty_allocator_s*, size_t);
+ROASTTY_API void roastty_free(const roastty_allocator_s*, uint8_t*, size_t);
+ROASTTY_API roastty_result_e roastty_sys_set(roastty_sys_option_e,
+                                             const void*);
+ROASTTY_API void roastty_sys_log_stderr(void*,
+                                        roastty_sys_log_level_e,
+                                        const uint8_t*,
+                                        size_t,
+                                        const uint8_t*,
+                                        size_t);
 ROASTTY_API void roastty_string_free(roastty_string_s);
 ROASTTY_API void roastty_style_default(roastty_style_s*);
 ROASTTY_API bool roastty_style_is_default(const roastty_style_s*);

@@ -1,8 +1,11 @@
+use std::alloc::{self, Layout};
 use std::ffi::CString;
+use std::io::Write;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 use std::ptr::NonNull;
 use std::slice;
+use std::sync::Mutex;
 
 use input::{key, key_encode, key_mods, paste};
 use terminal::color;
@@ -67,6 +70,34 @@ const ROASTTY_INVALID_VALUE: c_int = 2;
 const ROASTTY_OUT_OF_SPACE: c_int = 3;
 const ROASTTY_NO_VALUE: c_int = 4;
 const ROASTTY_BUILD_MODE_DEBUG: c_int = 0;
+
+const ROASTTY_OPTIMIZE_DEBUG: c_int = 0;
+#[allow(dead_code)]
+const ROASTTY_OPTIMIZE_RELEASE_SAFE: c_int = 1;
+#[allow(dead_code)]
+const ROASTTY_OPTIMIZE_RELEASE_SMALL: c_int = 2;
+const ROASTTY_OPTIMIZE_RELEASE_FAST: c_int = 3;
+
+const ROASTTY_BUILD_INFO_INVALID: c_int = 0;
+const ROASTTY_BUILD_INFO_SIMD: c_int = 1;
+const ROASTTY_BUILD_INFO_KITTY_GRAPHICS: c_int = 2;
+const ROASTTY_BUILD_INFO_TMUX_CONTROL_MODE: c_int = 3;
+const ROASTTY_BUILD_INFO_OPTIMIZE: c_int = 4;
+const ROASTTY_BUILD_INFO_VERSION_STRING: c_int = 5;
+const ROASTTY_BUILD_INFO_VERSION_MAJOR: c_int = 6;
+const ROASTTY_BUILD_INFO_VERSION_MINOR: c_int = 7;
+const ROASTTY_BUILD_INFO_VERSION_PATCH: c_int = 8;
+const ROASTTY_BUILD_INFO_VERSION_PRE: c_int = 9;
+const ROASTTY_BUILD_INFO_VERSION_BUILD: c_int = 10;
+
+const ROASTTY_SYS_LOG_LEVEL_ERROR: c_int = 0;
+const ROASTTY_SYS_LOG_LEVEL_WARNING: c_int = 1;
+const ROASTTY_SYS_LOG_LEVEL_INFO: c_int = 2;
+const ROASTTY_SYS_LOG_LEVEL_DEBUG: c_int = 3;
+
+const ROASTTY_SYS_OPT_USERDATA: c_int = 0;
+const ROASTTY_SYS_OPT_DECODE_PNG: c_int = 1;
+const ROASTTY_SYS_OPT_LOG: c_int = 2;
 
 const ROASTTY_TERMINAL_DATA_INVALID: c_int = 0;
 const ROASTTY_TERMINAL_DATA_COLS: c_int = 1;
@@ -358,6 +389,57 @@ pub struct RoasttyString {
     len: usize,
     sentinel: bool,
 }
+
+type AllocCallback = Option<unsafe extern "C" fn(*mut c_void, usize, u8, usize) -> *mut u8>;
+type ResizeCallback =
+    Option<unsafe extern "C" fn(*mut c_void, *mut c_void, usize, u8, usize, usize) -> bool>;
+type RemapCallback =
+    Option<unsafe extern "C" fn(*mut c_void, *mut c_void, usize, u8, usize, usize) -> *mut c_void>;
+type FreeCallback = Option<unsafe extern "C" fn(*mut c_void, *mut c_void, usize, u8, usize)>;
+
+#[repr(C)]
+pub struct RoasttyAllocatorVtable {
+    alloc: AllocCallback,
+    resize: ResizeCallback,
+    remap: RemapCallback,
+    free: FreeCallback,
+}
+
+#[repr(C)]
+pub struct RoasttyAllocator {
+    ctx: *mut c_void,
+    vtable: *const RoasttyAllocatorVtable,
+}
+
+#[repr(C)]
+pub struct RoasttySysImage {
+    width: u32,
+    height: u32,
+    data: *mut u8,
+    data_len: usize,
+}
+
+type SysLogCallback = unsafe extern "C" fn(*mut c_void, c_int, *const u8, usize, *const u8, usize);
+type SysDecodePngCallback = unsafe extern "C" fn(
+    *mut c_void,
+    *const RoasttyAllocator,
+    *const u8,
+    usize,
+    *mut RoasttySysImage,
+) -> bool;
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SysState {
+    userdata: usize,
+    decode_png: Option<SysDecodePngCallback>,
+    log: Option<SysLogCallback>,
+}
+
+static SYS_STATE: Mutex<SysState> = Mutex::new(SysState {
+    userdata: 0,
+    decode_png: None,
+    log: None,
+});
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -921,6 +1003,7 @@ struct OwnedOscCommand {
 }
 
 static VERSION: &[u8] = b"0.1.0-roastty\0";
+static EMPTY_STRING: &[u8] = b"\0";
 static EMPTY_DIAGNOSTIC: &[u8] = b"\0";
 static WINDOW_SAVE_STATE_DEFAULT: &[u8] = b"default\0";
 static WINDOW_DECORATION_AUTO: &[u8] = b"auto\0";
@@ -3405,6 +3488,208 @@ pub extern "C" fn roastty_info() -> RoasttyInfo {
         build_mode: ROASTTY_BUILD_MODE_DEBUG,
         version: VERSION.as_ptr().cast::<c_char>(),
         version_len: VERSION.len() - 1,
+    }
+}
+
+fn version_component(index: usize) -> usize {
+    let version = std::str::from_utf8(&VERSION[..VERSION.len() - 1]).unwrap_or("");
+    let core = version.split(['-', '+']).next().unwrap_or("");
+    core.split('.')
+        .nth(index)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0)
+}
+
+fn borrowed_string(bytes: &'static [u8]) -> RoasttyString {
+    RoasttyString {
+        ptr: bytes.as_ptr().cast::<c_char>(),
+        len: bytes.len().saturating_sub(1),
+        sentinel: false,
+    }
+}
+
+fn current_optimize_mode() -> c_int {
+    if cfg!(debug_assertions) {
+        ROASTTY_OPTIMIZE_DEBUG
+    } else {
+        ROASTTY_OPTIMIZE_RELEASE_FAST
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_build_info(data: c_int, out: *mut c_void) -> c_int {
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    unsafe {
+        match data {
+            ROASTTY_BUILD_INFO_INVALID => ROASTTY_INVALID_VALUE,
+            ROASTTY_BUILD_INFO_SIMD => {
+                out.cast::<bool>().write(false);
+                ROASTTY_SUCCESS
+            }
+            ROASTTY_BUILD_INFO_KITTY_GRAPHICS => {
+                out.cast::<bool>().write(false);
+                ROASTTY_SUCCESS
+            }
+            ROASTTY_BUILD_INFO_TMUX_CONTROL_MODE => {
+                out.cast::<bool>().write(false);
+                ROASTTY_SUCCESS
+            }
+            ROASTTY_BUILD_INFO_OPTIMIZE => {
+                out.cast::<c_int>().write(current_optimize_mode());
+                ROASTTY_SUCCESS
+            }
+            ROASTTY_BUILD_INFO_VERSION_STRING => {
+                out.cast::<RoasttyString>().write(borrowed_string(VERSION));
+                ROASTTY_SUCCESS
+            }
+            ROASTTY_BUILD_INFO_VERSION_MAJOR => {
+                out.cast::<usize>().write(version_component(0));
+                ROASTTY_SUCCESS
+            }
+            ROASTTY_BUILD_INFO_VERSION_MINOR => {
+                out.cast::<usize>().write(version_component(1));
+                ROASTTY_SUCCESS
+            }
+            ROASTTY_BUILD_INFO_VERSION_PATCH => {
+                out.cast::<usize>().write(version_component(2));
+                ROASTTY_SUCCESS
+            }
+            ROASTTY_BUILD_INFO_VERSION_PRE | ROASTTY_BUILD_INFO_VERSION_BUILD => {
+                out.cast::<RoasttyString>()
+                    .write(borrowed_string(EMPTY_STRING));
+                ROASTTY_SUCCESS
+            }
+            _ => ROASTTY_INVALID_VALUE,
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_alloc(allocator: *const RoasttyAllocator, len: usize) -> *mut u8 {
+    if len == 0 {
+        return ptr::null_mut();
+    }
+
+    if allocator.is_null() {
+        let Ok(layout) = Layout::array::<u8>(len) else {
+            return ptr::null_mut();
+        };
+        return unsafe { alloc::alloc(layout) };
+    }
+
+    let allocator = unsafe { &*allocator };
+    if allocator.vtable.is_null() {
+        return ptr::null_mut();
+    }
+    let vtable = unsafe { &*allocator.vtable };
+    let Some(alloc_fn) = vtable.alloc else {
+        return ptr::null_mut();
+    };
+    unsafe { alloc_fn(allocator.ctx, len, 1, 0) }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_free(allocator: *const RoasttyAllocator, ptr: *mut u8, len: usize) {
+    if ptr.is_null() || len == 0 {
+        return;
+    }
+
+    if allocator.is_null() {
+        let Ok(layout) = Layout::array::<u8>(len) else {
+            return;
+        };
+        unsafe {
+            alloc::dealloc(ptr, layout);
+        }
+        return;
+    }
+
+    let allocator = unsafe { &*allocator };
+    if allocator.vtable.is_null() {
+        return;
+    }
+    let vtable = unsafe { &*allocator.vtable };
+    let Some(free_fn) = vtable.free else {
+        return;
+    };
+    unsafe {
+        free_fn(allocator.ctx, ptr.cast::<c_void>(), len, 1, 0);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_sys_set(option: c_int, value: *const c_void) -> c_int {
+    let Ok(mut state) = SYS_STATE.lock() else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    match option {
+        ROASTTY_SYS_OPT_USERDATA => {
+            state.userdata = value as usize;
+            ROASTTY_SUCCESS
+        }
+        ROASTTY_SYS_OPT_DECODE_PNG => {
+            state.decode_png = if value.is_null() {
+                None
+            } else {
+                Some(unsafe { std::mem::transmute::<*const c_void, SysDecodePngCallback>(value) })
+            };
+            ROASTTY_SUCCESS
+        }
+        ROASTTY_SYS_OPT_LOG => {
+            state.log = if value.is_null() {
+                None
+            } else {
+                Some(unsafe { std::mem::transmute::<*const c_void, SysLogCallback>(value) })
+            };
+            ROASTTY_SUCCESS
+        }
+        _ => ROASTTY_INVALID_VALUE,
+    }
+}
+
+fn log_level_name(level: c_int) -> &'static str {
+    match level {
+        ROASTTY_SYS_LOG_LEVEL_ERROR => "error",
+        ROASTTY_SYS_LOG_LEVEL_WARNING => "warning",
+        ROASTTY_SYS_LOG_LEVEL_INFO => "info",
+        ROASTTY_SYS_LOG_LEVEL_DEBUG => "debug",
+        _ => "unknown",
+    }
+}
+
+unsafe fn nullable_bytes<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
+    if ptr.is_null() || len == 0 {
+        &[]
+    } else {
+        slice::from_raw_parts(ptr, len)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_sys_log_stderr(
+    _userdata: *mut c_void,
+    level: c_int,
+    scope: *const u8,
+    scope_len: usize,
+    message: *const u8,
+    message_len: usize,
+) {
+    let scope = unsafe { nullable_bytes(scope, scope_len) };
+    let message = unsafe { nullable_bytes(message, message_len) };
+    let level = log_level_name(level);
+    let mut stderr = std::io::stderr().lock();
+    if scope.is_empty() {
+        let _ = writeln!(stderr, "[{level}]: {}", String::from_utf8_lossy(message));
+    } else {
+        let _ = writeln!(
+            stderr,
+            "[{level}]({}): {}",
+            String::from_utf8_lossy(scope),
+            String::from_utf8_lossy(message)
+        );
     }
 }
 
@@ -6283,6 +6568,7 @@ mod tests {
         TerminalDeviceAttributesSecondary, TerminalDeviceAttributesTertiary,
     };
     use std::cell::RefCell;
+    use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
     #[derive(Default)]
     struct EffectState {
@@ -7673,6 +7959,376 @@ mod tests {
         with_effect_state(|state| assert_eq!(state.title_changed_count, 1));
 
         roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn build_info_c_abi_returns_static_values() {
+        assert_eq!(ROASTTY_OPTIMIZE_DEBUG, 0);
+        assert_eq!(ROASTTY_OPTIMIZE_RELEASE_SAFE, 1);
+        assert_eq!(ROASTTY_OPTIMIZE_RELEASE_SMALL, 2);
+        assert_eq!(ROASTTY_OPTIMIZE_RELEASE_FAST, 3);
+        assert_eq!(ROASTTY_BUILD_INFO_INVALID, 0);
+        assert_eq!(ROASTTY_BUILD_INFO_SIMD, 1);
+        assert_eq!(ROASTTY_BUILD_INFO_KITTY_GRAPHICS, 2);
+        assert_eq!(ROASTTY_BUILD_INFO_TMUX_CONTROL_MODE, 3);
+        assert_eq!(ROASTTY_BUILD_INFO_OPTIMIZE, 4);
+        assert_eq!(ROASTTY_BUILD_INFO_VERSION_STRING, 5);
+        assert_eq!(ROASTTY_BUILD_INFO_VERSION_MAJOR, 6);
+        assert_eq!(ROASTTY_BUILD_INFO_VERSION_MINOR, 7);
+        assert_eq!(ROASTTY_BUILD_INFO_VERSION_PATCH, 8);
+        assert_eq!(ROASTTY_BUILD_INFO_VERSION_PRE, 9);
+        assert_eq!(ROASTTY_BUILD_INFO_VERSION_BUILD, 10);
+
+        let mut simd = true;
+        assert_eq!(
+            roastty_build_info(ROASTTY_BUILD_INFO_SIMD, (&mut simd as *mut bool).cast()),
+            ROASTTY_SUCCESS
+        );
+        assert!(!simd);
+
+        let mut kitty_graphics = true;
+        assert_eq!(
+            roastty_build_info(
+                ROASTTY_BUILD_INFO_KITTY_GRAPHICS,
+                (&mut kitty_graphics as *mut bool).cast()
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert!(!kitty_graphics);
+        let mut tmux_control_mode = true;
+        assert_eq!(
+            roastty_build_info(
+                ROASTTY_BUILD_INFO_TMUX_CONTROL_MODE,
+                (&mut tmux_control_mode as *mut bool).cast()
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert!(!tmux_control_mode);
+
+        let mut optimize = -1;
+        assert_eq!(
+            roastty_build_info(
+                ROASTTY_BUILD_INFO_OPTIMIZE,
+                (&mut optimize as *mut c_int).cast()
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(optimize, current_optimize_mode());
+
+        let mut version = RoasttyString {
+            ptr: ptr::null(),
+            len: 0,
+            sentinel: true,
+        };
+        assert_eq!(
+            roastty_build_info(
+                ROASTTY_BUILD_INFO_VERSION_STRING,
+                (&mut version as *mut RoasttyString).cast()
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(version.ptr, VERSION.as_ptr().cast::<c_char>());
+        assert_eq!(version.len, VERSION.len() - 1);
+        assert!(!version.sentinel);
+
+        let mut major = usize::MAX;
+        let mut minor = usize::MAX;
+        let mut patch = usize::MAX;
+        assert_eq!(
+            roastty_build_info(
+                ROASTTY_BUILD_INFO_VERSION_MAJOR,
+                (&mut major as *mut usize).cast()
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_build_info(
+                ROASTTY_BUILD_INFO_VERSION_MINOR,
+                (&mut minor as *mut usize).cast()
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_build_info(
+                ROASTTY_BUILD_INFO_VERSION_PATCH,
+                (&mut patch as *mut usize).cast()
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!((major, minor, patch), (0, 1, 0));
+
+        let mut pre = RoasttyString {
+            ptr: ptr::null(),
+            len: 0,
+            sentinel: true,
+        };
+        assert_eq!(
+            roastty_build_info(
+                ROASTTY_BUILD_INFO_VERSION_PRE,
+                (&mut pre as *mut RoasttyString).cast()
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(pre.len, 0);
+        assert!(!pre.ptr.is_null());
+        let mut build = RoasttyString {
+            ptr: ptr::null(),
+            len: 0,
+            sentinel: true,
+        };
+        assert_eq!(
+            roastty_build_info(
+                ROASTTY_BUILD_INFO_VERSION_BUILD,
+                (&mut build as *mut RoasttyString).cast()
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(build.len, 0);
+        assert!(!build.ptr.is_null());
+
+        assert_eq!(
+            roastty_build_info(ROASTTY_BUILD_INFO_INVALID, (&mut simd as *mut bool).cast()),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_build_info(99, (&mut simd as *mut bool).cast()),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_build_info(ROASTTY_BUILD_INFO_SIMD, ptr::null_mut()),
+            ROASTTY_INVALID_VALUE
+        );
+    }
+
+    static CUSTOM_ALLOC_CALLED: AtomicUsize = AtomicUsize::new(0);
+    static CUSTOM_FREE_CALLED: AtomicUsize = AtomicUsize::new(0);
+    static CUSTOM_LAST_CTX: AtomicUsize = AtomicUsize::new(0);
+    static CUSTOM_LAST_LEN: AtomicUsize = AtomicUsize::new(0);
+    static CUSTOM_LAST_ALIGNMENT: AtomicU8 = AtomicU8::new(0);
+
+    unsafe extern "C" fn custom_alloc(
+        ctx: *mut c_void,
+        len: usize,
+        alignment: u8,
+        ret_addr: usize,
+    ) -> *mut u8 {
+        assert_eq!(ret_addr, 0);
+        CUSTOM_ALLOC_CALLED.fetch_add(1, Ordering::SeqCst);
+        CUSTOM_LAST_CTX.store(ctx as usize, Ordering::SeqCst);
+        CUSTOM_LAST_LEN.store(len, Ordering::SeqCst);
+        CUSTOM_LAST_ALIGNMENT.store(alignment, Ordering::SeqCst);
+        roastty_alloc(ptr::null(), len)
+    }
+
+    unsafe extern "C" fn custom_free(
+        ctx: *mut c_void,
+        memory: *mut c_void,
+        memory_len: usize,
+        alignment: u8,
+        ret_addr: usize,
+    ) {
+        assert_eq!(ret_addr, 0);
+        CUSTOM_FREE_CALLED.fetch_add(1, Ordering::SeqCst);
+        CUSTOM_LAST_CTX.store(ctx as usize, Ordering::SeqCst);
+        CUSTOM_LAST_LEN.store(memory_len, Ordering::SeqCst);
+        CUSTOM_LAST_ALIGNMENT.store(alignment, Ordering::SeqCst);
+        roastty_free(ptr::null(), memory.cast::<u8>(), memory_len);
+    }
+
+    #[test]
+    fn support_allocator_c_abi_allocates_and_frees() {
+        let ptr = roastty_alloc(ptr::null(), 8);
+        assert!(!ptr.is_null());
+        unsafe {
+            ptr.write_bytes(0xab, 8);
+        }
+        roastty_free(ptr::null(), ptr, 8);
+        assert!(roastty_alloc(ptr::null(), 0).is_null());
+        roastty_free(ptr::null(), ptr::null_mut(), 8);
+
+        CUSTOM_ALLOC_CALLED.store(0, Ordering::SeqCst);
+        CUSTOM_FREE_CALLED.store(0, Ordering::SeqCst);
+        CUSTOM_LAST_CTX.store(0, Ordering::SeqCst);
+        CUSTOM_LAST_LEN.store(0, Ordering::SeqCst);
+        CUSTOM_LAST_ALIGNMENT.store(0, Ordering::SeqCst);
+
+        let vtable = RoasttyAllocatorVtable {
+            alloc: Some(custom_alloc),
+            resize: None,
+            remap: None,
+            free: Some(custom_free),
+        };
+        let allocator = RoasttyAllocator {
+            ctx: 0xfeedusize as *mut c_void,
+            vtable: &vtable,
+        };
+        let ptr = roastty_alloc(&allocator, 11);
+        assert!(!ptr.is_null());
+        assert_eq!(CUSTOM_ALLOC_CALLED.load(Ordering::SeqCst), 1);
+        assert_eq!(CUSTOM_LAST_CTX.load(Ordering::SeqCst), 0xfeed);
+        assert_eq!(CUSTOM_LAST_LEN.load(Ordering::SeqCst), 11);
+        assert_eq!(CUSTOM_LAST_ALIGNMENT.load(Ordering::SeqCst), 1);
+        roastty_free(&allocator, ptr, 11);
+        assert_eq!(CUSTOM_FREE_CALLED.load(Ordering::SeqCst), 1);
+
+        assert!(roastty_alloc(&allocator, 0).is_null());
+        assert_eq!(CUSTOM_ALLOC_CALLED.load(Ordering::SeqCst), 1);
+        roastty_free(&allocator, 0x1usize as *mut u8, 0);
+        assert_eq!(CUSTOM_FREE_CALLED.load(Ordering::SeqCst), 1);
+
+        let malformed = RoasttyAllocator {
+            ctx: ptr::null_mut(),
+            vtable: ptr::null(),
+        };
+        assert!(roastty_alloc(&malformed, 1).is_null());
+        roastty_free(&malformed, 0x1usize as *mut u8, 1);
+
+        let no_alloc = RoasttyAllocatorVtable {
+            alloc: None,
+            resize: None,
+            remap: None,
+            free: None,
+        };
+        let malformed = RoasttyAllocator {
+            ctx: ptr::null_mut(),
+            vtable: &no_alloc,
+        };
+        assert!(roastty_alloc(&malformed, 1).is_null());
+
+        let no_free = RoasttyAllocatorVtable {
+            alloc: Some(custom_alloc),
+            resize: None,
+            remap: None,
+            free: None,
+        };
+        let malformed = RoasttyAllocator {
+            ctx: ptr::null_mut(),
+            vtable: &no_free,
+        };
+        roastty_free(&malformed, 0x1usize as *mut u8, 1);
+    }
+
+    static SYS_LOG_CALLED: AtomicBool = AtomicBool::new(false);
+    static SYS_LOG_USERDATA: AtomicUsize = AtomicUsize::new(0);
+    static SYS_DECODE_CALLED: AtomicBool = AtomicBool::new(false);
+    static SYS_DECODE_USERDATA: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn sys_log_cb(
+        userdata: *mut c_void,
+        _level: c_int,
+        _scope: *const u8,
+        _scope_len: usize,
+        _message: *const u8,
+        _message_len: usize,
+    ) {
+        SYS_LOG_CALLED.store(true, Ordering::SeqCst);
+        SYS_LOG_USERDATA.store(userdata as usize, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn sys_decode_cb(
+        userdata: *mut c_void,
+        _allocator: *const RoasttyAllocator,
+        _data: *const u8,
+        _data_len: usize,
+        out: *mut RoasttySysImage,
+    ) -> bool {
+        SYS_DECODE_CALLED.store(true, Ordering::SeqCst);
+        SYS_DECODE_USERDATA.store(userdata as usize, Ordering::SeqCst);
+        if !out.is_null() {
+            out.write(RoasttySysImage {
+                width: 0,
+                height: 0,
+                data: ptr::null_mut(),
+                data_len: 0,
+            });
+        }
+        true
+    }
+
+    #[test]
+    fn sys_c_abi_sets_callbacks_and_userdata() {
+        assert_eq!(ROASTTY_SYS_LOG_LEVEL_ERROR, 0);
+        assert_eq!(ROASTTY_SYS_LOG_LEVEL_WARNING, 1);
+        assert_eq!(ROASTTY_SYS_LOG_LEVEL_INFO, 2);
+        assert_eq!(ROASTTY_SYS_LOG_LEVEL_DEBUG, 3);
+        assert_eq!(ROASTTY_SYS_OPT_USERDATA, 0);
+        assert_eq!(ROASTTY_SYS_OPT_DECODE_PNG, 1);
+        assert_eq!(ROASTTY_SYS_OPT_LOG, 2);
+
+        SYS_LOG_CALLED.store(false, Ordering::SeqCst);
+        SYS_DECODE_CALLED.store(false, Ordering::SeqCst);
+        assert_eq!(
+            roastty_sys_set(ROASTTY_SYS_OPT_USERDATA, 0xbeefusize as *const c_void),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_sys_set(ROASTTY_SYS_OPT_LOG, sys_log_cb as *const c_void),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_sys_set(ROASTTY_SYS_OPT_DECODE_PNG, sys_decode_cb as *const c_void),
+            ROASTTY_SUCCESS
+        );
+
+        {
+            let state = SYS_STATE.lock().unwrap();
+            assert_eq!(state.userdata, 0xbeef);
+            assert!(state.log.is_some());
+            assert!(state.decode_png.is_some());
+            unsafe {
+                (state.log.unwrap())(
+                    state.userdata as *mut c_void,
+                    ROASTTY_SYS_LOG_LEVEL_INFO,
+                    ptr::null(),
+                    0,
+                    ptr::null(),
+                    0,
+                );
+                let mut image = RoasttySysImage {
+                    width: 1,
+                    height: 1,
+                    data: 0x1usize as *mut u8,
+                    data_len: 1,
+                };
+                assert!((state.decode_png.unwrap())(
+                    state.userdata as *mut c_void,
+                    ptr::null(),
+                    ptr::null(),
+                    0,
+                    &mut image,
+                ));
+                assert_eq!(image.width, 0);
+                assert_eq!(image.data_len, 0);
+            }
+        }
+        assert!(SYS_LOG_CALLED.load(Ordering::SeqCst));
+        assert_eq!(SYS_LOG_USERDATA.load(Ordering::SeqCst), 0xbeef);
+        assert!(SYS_DECODE_CALLED.load(Ordering::SeqCst));
+        assert_eq!(SYS_DECODE_USERDATA.load(Ordering::SeqCst), 0xbeef);
+
+        assert_eq!(
+            roastty_sys_set(ROASTTY_SYS_OPT_LOG, ptr::null()),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_sys_set(ROASTTY_SYS_OPT_DECODE_PNG, ptr::null()),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(roastty_sys_set(99, ptr::null()), ROASTTY_INVALID_VALUE);
+        {
+            let state = SYS_STATE.lock().unwrap();
+            assert!(state.log.is_none());
+            assert!(state.decode_png.is_none());
+        }
+
+        roastty_sys_log_stderr(
+            ptr::null_mut(),
+            99,
+            b"scope".as_ptr(),
+            5,
+            b"message".as_ptr(),
+            7,
+        );
     }
 
     #[test]

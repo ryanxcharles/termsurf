@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "roastty.h"
 
@@ -52,6 +53,104 @@ static void write_clipboard_cb(void *userdata,
 static void close_surface_cb(void *userdata, bool process_alive) {
   (void)userdata;
   (void)process_alive;
+}
+
+static size_t support_alloc_count = 0;
+static size_t support_free_count = 0;
+static void *support_last_ctx = NULL;
+static size_t support_last_len = 0;
+static uint8_t support_last_alignment = 0;
+
+static void *support_alloc_cb(void *ctx,
+                              size_t len,
+                              uint8_t alignment,
+                              uintptr_t ret_addr) {
+  assert(ret_addr == 0);
+  support_alloc_count++;
+  support_last_ctx = ctx;
+  support_last_len = len;
+  support_last_alignment = alignment;
+  return malloc(len);
+}
+
+static bool support_resize_cb(void *ctx,
+                              void *memory,
+                              size_t memory_len,
+                              uint8_t alignment,
+                              size_t new_len,
+                              uintptr_t ret_addr) {
+  (void)ctx;
+  (void)memory;
+  (void)memory_len;
+  (void)alignment;
+  (void)new_len;
+  (void)ret_addr;
+  return false;
+}
+
+static void *support_remap_cb(void *ctx,
+                              void *memory,
+                              size_t memory_len,
+                              uint8_t alignment,
+                              size_t new_len,
+                              uintptr_t ret_addr) {
+  (void)ctx;
+  (void)memory;
+  (void)memory_len;
+  (void)alignment;
+  (void)new_len;
+  (void)ret_addr;
+  return NULL;
+}
+
+static void support_free_cb(void *ctx,
+                            void *memory,
+                            size_t memory_len,
+                            uint8_t alignment,
+                            uintptr_t ret_addr) {
+  assert(ret_addr == 0);
+  support_free_count++;
+  support_last_ctx = ctx;
+  support_last_len = memory_len;
+  support_last_alignment = alignment;
+  free(memory);
+}
+
+static bool support_log_called = false;
+static void *support_log_userdata = NULL;
+static bool support_decode_called = false;
+static void *support_decode_userdata = NULL;
+
+static void support_log_cb(void *userdata,
+                           roastty_sys_log_level_e level,
+                           const uint8_t *scope,
+                           size_t scope_len,
+                           const uint8_t *message,
+                           size_t message_len) {
+  (void)level;
+  (void)scope;
+  (void)scope_len;
+  (void)message;
+  (void)message_len;
+  support_log_called = true;
+  support_log_userdata = userdata;
+}
+
+static bool support_decode_cb(void *userdata,
+                              const roastty_allocator_s *allocator,
+                              const uint8_t *data,
+                              size_t data_len,
+                              roastty_sys_image_s *out) {
+  (void)allocator;
+  (void)data;
+  (void)data_len;
+  support_decode_called = true;
+  support_decode_userdata = userdata;
+  out->width = 0;
+  out->height = 0;
+  out->data = NULL;
+  out->data_len = 0;
+  return true;
 }
 
 static roastty_terminal_t effect_terminal = NULL;
@@ -1566,6 +1665,156 @@ static void assert_mouse_encoder_abi(void) {
 
   roastty_mouse_event_free(event);
   roastty_mouse_encoder_free(encoder);
+}
+
+static void assert_support_abi(void) {
+  assert(ROASTTY_OPTIMIZE_DEBUG == 0);
+  assert(ROASTTY_OPTIMIZE_RELEASE_SAFE == 1);
+  assert(ROASTTY_OPTIMIZE_RELEASE_SMALL == 2);
+  assert(ROASTTY_OPTIMIZE_RELEASE_FAST == 3);
+  assert(ROASTTY_BUILD_INFO_INVALID == 0);
+  assert(ROASTTY_BUILD_INFO_SIMD == 1);
+  assert(ROASTTY_BUILD_INFO_KITTY_GRAPHICS == 2);
+  assert(ROASTTY_BUILD_INFO_TMUX_CONTROL_MODE == 3);
+  assert(ROASTTY_BUILD_INFO_OPTIMIZE == 4);
+  assert(ROASTTY_BUILD_INFO_VERSION_STRING == 5);
+  assert(ROASTTY_BUILD_INFO_VERSION_MAJOR == 6);
+  assert(ROASTTY_BUILD_INFO_VERSION_MINOR == 7);
+  assert(ROASTTY_BUILD_INFO_VERSION_PATCH == 8);
+  assert(ROASTTY_BUILD_INFO_VERSION_PRE == 9);
+  assert(ROASTTY_BUILD_INFO_VERSION_BUILD == 10);
+  assert(ROASTTY_SYS_LOG_LEVEL_ERROR == 0);
+  assert(ROASTTY_SYS_LOG_LEVEL_WARNING == 1);
+  assert(ROASTTY_SYS_LOG_LEVEL_INFO == 2);
+  assert(ROASTTY_SYS_LOG_LEVEL_DEBUG == 3);
+  assert(ROASTTY_SYS_OPT_USERDATA == 0);
+  assert(ROASTTY_SYS_OPT_DECODE_PNG == 1);
+  assert(ROASTTY_SYS_OPT_LOG == 2);
+  assert(sizeof(roastty_allocator_s) == sizeof(void *) * 2);
+  assert(offsetof(roastty_allocator_s, ctx) == 0);
+  assert(offsetof(roastty_allocator_s, vtable) == sizeof(void *));
+  assert(offsetof(roastty_allocator_vtable_s, alloc) == 0);
+  assert(offsetof(roastty_allocator_vtable_s, resize) == sizeof(void *));
+  assert(offsetof(roastty_allocator_vtable_s, remap) == sizeof(void *) * 2);
+  assert(offsetof(roastty_allocator_vtable_s, free) == sizeof(void *) * 3);
+  assert(sizeof(roastty_sys_image_s) == 24);
+  assert(offsetof(roastty_sys_image_s, width) == 0);
+  assert(offsetof(roastty_sys_image_s, height) == 4);
+  assert(offsetof(roastty_sys_image_s, data) == 8);
+  assert(offsetof(roastty_sys_image_s, data_len) == 16);
+
+  bool bool_value = true;
+  assert(roastty_build_info(ROASTTY_BUILD_INFO_SIMD, &bool_value) ==
+         ROASTTY_SUCCESS);
+  assert(!bool_value);
+  assert(roastty_build_info(ROASTTY_BUILD_INFO_KITTY_GRAPHICS, &bool_value) ==
+         ROASTTY_SUCCESS);
+  assert(!bool_value);
+  assert(roastty_build_info(ROASTTY_BUILD_INFO_TMUX_CONTROL_MODE, &bool_value) ==
+         ROASTTY_SUCCESS);
+  assert(!bool_value);
+  roastty_optimize_mode_e optimize = (roastty_optimize_mode_e)99;
+  assert(roastty_build_info(ROASTTY_BUILD_INFO_OPTIMIZE, &optimize) ==
+         ROASTTY_SUCCESS);
+  assert(optimize == ROASTTY_OPTIMIZE_DEBUG ||
+         optimize == ROASTTY_OPTIMIZE_RELEASE_FAST);
+  roastty_string_s version = {0};
+  assert(roastty_build_info(ROASTTY_BUILD_INFO_VERSION_STRING, &version) ==
+         ROASTTY_SUCCESS);
+  assert(version.ptr != NULL);
+  assert(version.len > 0);
+  assert(!version.sentinel);
+  assert(roastty_build_info(ROASTTY_BUILD_INFO_VERSION_BUILD, &version) ==
+         ROASTTY_SUCCESS);
+  assert(version.ptr != NULL);
+  assert(version.len == 0);
+  assert(!version.sentinel);
+  size_t component = SIZE_MAX;
+  assert(roastty_build_info(ROASTTY_BUILD_INFO_VERSION_MAJOR, &component) ==
+         ROASTTY_SUCCESS);
+  assert(component == 0);
+  assert(roastty_build_info(ROASTTY_BUILD_INFO_INVALID, &bool_value) ==
+         ROASTTY_INVALID_VALUE);
+  assert(roastty_build_info((roastty_build_info_e)99, &bool_value) ==
+         ROASTTY_INVALID_VALUE);
+  assert(roastty_build_info(ROASTTY_BUILD_INFO_SIMD, NULL) ==
+         ROASTTY_INVALID_VALUE);
+
+  uint8_t *default_buf = roastty_alloc(NULL, 8);
+  assert(default_buf != NULL);
+  memset(default_buf, 0xab, 8);
+  roastty_free(NULL, default_buf, 8);
+  assert(roastty_alloc(NULL, 0) == NULL);
+  roastty_free(NULL, NULL, 8);
+
+  roastty_allocator_vtable_s vtable = {
+      .alloc = support_alloc_cb,
+      .resize = support_resize_cb,
+      .remap = support_remap_cb,
+      .free = support_free_cb,
+  };
+  roastty_allocator_s allocator = {
+      .ctx = (void *)0xfeed,
+      .vtable = &vtable,
+  };
+  support_alloc_count = 0;
+  support_free_count = 0;
+  uint8_t *custom_buf = roastty_alloc(&allocator, 13);
+  assert(custom_buf != NULL);
+  assert(support_alloc_count == 1);
+  assert(support_last_ctx == (void *)0xfeed);
+  assert(support_last_len == 13);
+  assert(support_last_alignment == 1);
+  roastty_free(&allocator, custom_buf, 13);
+  assert(support_free_count == 1);
+  assert(roastty_alloc(&allocator, 0) == NULL);
+  assert(support_alloc_count == 1);
+  roastty_allocator_s malformed = {
+      .ctx = NULL,
+      .vtable = NULL,
+  };
+  assert(roastty_alloc(&malformed, 1) == NULL);
+  roastty_free(&malformed, (uint8_t *)0x1, 1);
+  roastty_allocator_vtable_s no_free = {
+      .alloc = support_alloc_cb,
+      .resize = support_resize_cb,
+      .remap = support_remap_cb,
+      .free = NULL,
+  };
+  malformed = (roastty_allocator_s){
+      .ctx = NULL,
+      .vtable = &no_free,
+  };
+  roastty_free(&malformed, (uint8_t *)0x1, 1);
+
+  assert(roastty_sys_set(ROASTTY_SYS_OPT_USERDATA, (const void *)0xbeef) ==
+         ROASTTY_SUCCESS);
+  assert(roastty_sys_set(ROASTTY_SYS_OPT_LOG, (const void *)support_log_cb) ==
+         ROASTTY_SUCCESS);
+  assert(roastty_sys_set(ROASTTY_SYS_OPT_DECODE_PNG,
+                         (const void *)support_decode_cb) == ROASTTY_SUCCESS);
+  support_log_cb((void *)0xbeef,
+                 ROASTTY_SYS_LOG_LEVEL_INFO,
+                 NULL,
+                 0,
+                 NULL,
+                 0);
+  assert(support_log_called);
+  assert(support_log_userdata == (void *)0xbeef);
+  roastty_sys_image_s image = {0};
+  assert(support_decode_cb((void *)0xbeef, NULL, NULL, 0, &image));
+  assert(support_decode_called);
+  assert(support_decode_userdata == (void *)0xbeef);
+  assert(roastty_sys_set(ROASTTY_SYS_OPT_LOG, NULL) == ROASTTY_SUCCESS);
+  assert(roastty_sys_set(ROASTTY_SYS_OPT_DECODE_PNG, NULL) == ROASTTY_SUCCESS);
+  assert(roastty_sys_set((roastty_sys_option_e)99, NULL) ==
+         ROASTTY_INVALID_VALUE);
+  roastty_sys_log_stderr(NULL,
+                         (roastty_sys_log_level_e)99,
+                         (const uint8_t *)"scope",
+                         5,
+                         (const uint8_t *)"message",
+                         7);
 }
 
 static void assert_terminal_abi(void) {
@@ -3222,6 +3471,7 @@ int main(int argc, char **argv) {
   assert_osc_parser_abi();
   assert_style_abi();
   assert_row_cell_abi();
+  assert_support_abi();
   assert_render_state_abi();
   assert_terminal_abi();
 
