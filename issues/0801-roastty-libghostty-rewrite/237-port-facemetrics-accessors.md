@@ -165,3 +165,76 @@ One Low finding, fixed in the design above before this commit:
 1. the `effective_ic_width` tests did not prove the `> 0` guard for a
    non-positive stored value — added `ic_width = Some(0.0)` and a negative case
    that fall through to `min(effective_ascii_height(), 2.0 * cell_width)`.
+
+## Result
+
+**Result:** Pass
+
+Added the six `pub(crate)` accessors to `impl FaceMetrics` in
+`roastty/src/font/metrics.rs`: `effective_ascii_height`, `effective_ic_width`,
+`effective_underline_thickness`, `effective_strikethrough_thickness` (each with
+the `Some && > 0` size guard), and `effective_underline_position`,
+`effective_strikethrough_position` (plain `unwrap_or_else`, no sign guard —
+negative stored positions honored). The position methods use `unwrap_or_else` so
+the fallback is computed lazily, matching upstream `orelse`.
+
+Tests added (6): value-and-estimate for ascii height; value/min-of-two-cells for
+ic width (including the non-positive guard and the `2*cell_width`-wins branch);
+value-and-estimate for underline thickness; value-and-fallback (= underline) for
+strikethrough thickness; negative-honored + fallback for underline position; and
+negative-honored + fallback for strikethrough position. Float assertions use a
+`1e-9` epsilon helper because the `0.15`-derived values are not exactly
+representable in `f64`.
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty font
+cargo test -p roastty
+```
+
+Observed:
+
+- `font`: 19 passed (13 prior + 6 new).
+- Full `roastty`: 2295 unit tests passed (2289 prior + 6 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/font` and for
+  `roastty/src/lib.rs`, `roastty/include/roastty.h`,
+  `roastty/tests/abi_harness.c`.
+- `git diff --check`: clean.
+
+No C ABI, header, or ABI inventory changes; no `calc`/`Minimums`/constraint
+scope pulled in.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** ("nothing
+needs to change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-083120-043748-prompt.md`
+- Result: `logs/codex-review/20260602-083120-043748-last-message.md`
+
+Codex confirmed the implementation matches upstream — the four size methods use
+the `Some && > 0` guard, the two position methods use `unwrap_or_else` with no
+sign guard (negatives honored), all six formulas are exact, `unwrap_or_else` is
+a good lazy analog of `orelse`, the six tests cover the positive/fallback/guard
+paths and both `ic_width` min branches, and the `1e-9` epsilon is appropriate
+for the `0.15`-derived floats.
+
+## Conclusion
+
+Experiment 237 succeeds. `FaceMetrics` now has its complete set of effective
+accessors — the inputs the deferred `calc` uses to derive a `Metrics`. Both
+Codex gates passed (one design finding fixed; zero result findings).
+
+`calc` is now unblocked: `Metrics` (output, Exp 235), `FaceMetrics` and all its
+effective accessors (Exps 236–237) are in place. Experiment 238 ports `calc` —
+the metric-derivation logic (cell-size rounding, baseline centering, the
+underline/strikethrough/overline/box/cursor/icon derivations, and the `Minimums`
+clamps), which carries the bulk of the upstream `Metrics.zig` tests and is the
+substantive remaining slice of that file.

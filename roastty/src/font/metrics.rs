@@ -142,6 +142,66 @@ impl FaceMetrics {
         }
         0.75 * self.effective_cap_height()
     }
+
+    /// The effective ASCII height: the stored `ascii_height` when present and
+    /// positive, otherwise an estimate of `1.5 * effective_cap_height()`.
+    pub(crate) fn effective_ascii_height(&self) -> f64 {
+        if let Some(value) = self.ascii_height {
+            if value > 0.0 {
+                return value;
+            }
+        }
+        1.5 * self.effective_cap_height()
+    }
+
+    /// The effective ideograph width: the stored `ic_width` when present and
+    /// positive, otherwise the minimum of the ASCII height and two cell widths.
+    pub(crate) fn effective_ic_width(&self) -> f64 {
+        if let Some(value) = self.ic_width {
+            if value > 0.0 {
+                return value;
+            }
+        }
+        self.effective_ascii_height().min(2.0 * self.cell_width)
+    }
+
+    /// The effective underline thickness: the stored value when present and
+    /// positive, otherwise an estimate of `0.15 * effective_ex_height()`.
+    pub(crate) fn effective_underline_thickness(&self) -> f64 {
+        if let Some(value) = self.underline_thickness {
+            if value > 0.0 {
+                return value;
+            }
+        }
+        0.15 * self.effective_ex_height()
+    }
+
+    /// The effective strikethrough thickness: the stored value when present and
+    /// positive, otherwise equal to the underline thickness.
+    pub(crate) fn effective_strikethrough_thickness(&self) -> f64 {
+        if let Some(value) = self.strikethrough_thickness {
+            if value > 0.0 {
+                return value;
+            }
+        }
+        self.effective_underline_thickness()
+    }
+
+    /// The effective underline position. Positions are valid whether positive or
+    /// negative, so a stored value is used as-is; otherwise it is placed one
+    /// underline thickness below the baseline.
+    pub(crate) fn effective_underline_position(&self) -> f64 {
+        self.underline_position
+            .unwrap_or_else(|| -self.effective_underline_thickness())
+    }
+
+    /// The effective strikethrough position. A stored value is used as-is;
+    /// otherwise it is centered at half the ex height plus thickness.
+    pub(crate) fn effective_strikethrough_position(&self) -> f64 {
+        self.strikethrough_position.unwrap_or_else(|| {
+            (self.effective_ex_height() + self.effective_strikethrough_thickness()) * 0.5
+        })
+    }
 }
 
 #[cfg(test)]
@@ -285,5 +345,92 @@ mod tests {
         assert_eq!(f.effective_ex_height(), 6.75);
         f.ex_height = Some(-1.0);
         assert_eq!(f.effective_ex_height(), 6.75);
+    }
+
+    fn approx(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn effective_ascii_height_value_and_estimate() {
+        let mut f = face_sample();
+        f.ascii_height = Some(20.0);
+        assert!(approx(f.effective_ascii_height(), 20.0));
+        // ascent 12 -> cap estimate 9 -> 1.5 * 9 = 13.5.
+        for v in [None, Some(0.0), Some(-1.0)] {
+            f.ascii_height = v;
+            assert!(approx(f.effective_ascii_height(), 13.5));
+        }
+    }
+
+    #[test]
+    fn effective_ic_width_value_and_min() {
+        let mut f = face_sample(); // cell_width 8, ascii estimate 13.5
+        f.ic_width = Some(10.0);
+        assert!(approx(f.effective_ic_width(), 10.0));
+        // Non-positive falls through to min(ascii=13.5, 2*8=16) = 13.5.
+        for v in [None, Some(0.0), Some(-1.0)] {
+            f.ic_width = v;
+            f.ascii_height = None;
+            assert!(approx(f.effective_ic_width(), 13.5));
+        }
+        // When two cell widths is the smaller, it wins.
+        let mut g = face_sample();
+        g.ic_width = None;
+        g.ascii_height = None;
+        g.cell_width = 5.0; // 2 * 5 = 10 < 13.5
+        assert!(approx(g.effective_ic_width(), 10.0));
+    }
+
+    #[test]
+    fn effective_underline_thickness_value_and_estimate() {
+        let mut f = face_sample();
+        f.underline_thickness = Some(2.0);
+        assert!(approx(f.effective_underline_thickness(), 2.0));
+        // ex estimate 6.75 -> 0.15 * 6.75 = 1.0125.
+        for v in [None, Some(0.0), Some(-1.0)] {
+            f.underline_thickness = v;
+            assert!(approx(f.effective_underline_thickness(), 1.0125));
+        }
+    }
+
+    #[test]
+    fn effective_strikethrough_thickness_value_and_fallback() {
+        let mut f = face_sample();
+        f.strikethrough_thickness = Some(3.0);
+        assert!(approx(f.effective_strikethrough_thickness(), 3.0));
+        // Fallback equals the underline thickness.
+        f.strikethrough_thickness = None;
+        f.underline_thickness = Some(2.0);
+        assert!(approx(
+            f.effective_strikethrough_thickness(),
+            f.effective_underline_thickness()
+        ));
+    }
+
+    #[test]
+    fn effective_underline_position_honors_negative() {
+        let mut f = face_sample();
+        f.underline_position = Some(-2.0);
+        // No `> 0` guard: a negative stored position is used as-is.
+        assert!(approx(f.effective_underline_position(), -2.0));
+        // Fallback: one underline thickness below the baseline.
+        f.underline_position = None;
+        f.underline_thickness = None;
+        assert!(approx(
+            f.effective_underline_position(),
+            -f.effective_underline_thickness()
+        ));
+    }
+
+    #[test]
+    fn effective_strikethrough_position_honors_negative() {
+        let mut f = face_sample();
+        f.strikethrough_position = Some(-1.5);
+        assert!(approx(f.effective_strikethrough_position(), -1.5));
+        // Fallback: (ex + strikethrough_thickness) * 0.5.
+        f.strikethrough_position = None;
+        let expected = (f.effective_ex_height() + f.effective_strikethrough_thickness()) * 0.5;
+        assert!(approx(f.effective_strikethrough_position(), expected));
     }
 }
