@@ -524,6 +524,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 199: Port Kitty Graphics File Media](199-port-kitty-graphics-file-media.md)
   — **Pass**
+- [Experiment 200: Port Kitty Graphics Shared Memory](200-port-kitty-graphics-shared-memory.md)
+  — **Designed**
 
 ## Non-Goals
 
