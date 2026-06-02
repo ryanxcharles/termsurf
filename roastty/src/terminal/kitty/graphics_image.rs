@@ -494,8 +494,8 @@ mod tests {
     use std::os::raw::c_void;
     use std::os::unix::ffi::OsStrExt;
     use std::ptr;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::MutexGuard;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     const RGB_NONE_20X15: &[u8] = include_bytes!(
         "../../../../vendor/ghostty/src/terminal/kitty/testdata/image-rgb-none-20x15-2147483647-raw.data"
@@ -503,6 +503,11 @@ mod tests {
     const RGB_ZLIB_128X96: &[u8] = include_bytes!(
         "../../../../vendor/ghostty/src/terminal/kitty/testdata/image-rgb-zlib_deflate-128x96-2147483647-raw.data"
     );
+    static TEST_NAME_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn next_test_name_id() -> u64 {
+        TEST_NAME_COUNTER.fetch_add(1, Ordering::Relaxed)
+    }
 
     fn transmit_command(transmission: Transmission, data: &[u8]) -> Command {
         Command {
@@ -670,12 +675,9 @@ mod tests {
         }
 
         fn in_base(base: PathBuf) -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
+            let id = next_test_name_id();
             let path = base.join(format!(
-                "roastty-kitty-graphics-image-{}-{nanos}",
+                "roastty-kitty-graphics-image-{}-{id}",
                 std::process::id()
             ));
             fs::create_dir_all(&path).unwrap();
@@ -711,16 +713,8 @@ mod tests {
 
     impl SharedMemoryObject {
         fn new(data: &[u8]) -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let name = CString::new(format!(
-                "/rt{:x}{:x}",
-                std::process::id(),
-                (nanos & 0xffff_ffff) as u64
-            ))
-            .unwrap();
+            let id = next_test_name_id();
+            let name = CString::new(format!("/rt{:x}{id:x}", std::process::id())).unwrap();
             let fd = unsafe {
                 libc::shm_open(
                     name.as_ptr(),

@@ -1506,7 +1506,7 @@ impl Terminal {
         self.screens.active().render_rows_snapshot()
     }
 
-    pub(in crate::terminal) fn kitty_virtual_placements_visible(
+    pub(crate) fn kitty_virtual_placements_visible(
         &self,
     ) -> Vec<graphics_unicode::VirtualPlacement> {
         self.screens.active().kitty_virtual_placements_visible()

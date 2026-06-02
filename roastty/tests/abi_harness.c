@@ -3528,6 +3528,104 @@ static void assert_terminal_abi(void) {
 
   assert(!roastty_kitty_graphics_placement_next(placement_iterator));
   roastty_kitty_graphics_placement_iterator_free(placement_iterator);
+
+  assert(sizeof(roastty_kitty_graphics_render_placement_info_s) == 80);
+  assert(_Alignof(roastty_kitty_graphics_render_placement_info_s) == 8);
+  assert(offsetof(roastty_kitty_graphics_render_placement_info_s, size) == 0);
+  assert(offsetof(roastty_kitty_graphics_render_placement_info_s, image_id) ==
+         8);
+  assert(offsetof(roastty_kitty_graphics_render_placement_info_s,
+                  placement_id) == 12);
+  assert(offsetof(roastty_kitty_graphics_render_placement_info_s,
+                  is_virtual) == 16);
+  assert(offsetof(roastty_kitty_graphics_render_placement_info_s, x_offset) ==
+         20);
+  assert(offsetof(roastty_kitty_graphics_render_placement_info_s, y_offset) ==
+         24);
+  assert(offsetof(roastty_kitty_graphics_render_placement_info_s,
+                  pixel_width) == 28);
+  assert(offsetof(roastty_kitty_graphics_render_placement_info_s, z) == 72);
+  assert(ROASTTY_KITTY_GRAPHICS_RENDER_PLACEMENT_DATA_IMAGE_ID == 1);
+  assert(ROASTTY_KITTY_GRAPHICS_RENDER_PLACEMENT_DATA_X_OFFSET == 14);
+  assert(ROASTTY_KITTY_GRAPHICS_RENDER_PLACEMENT_DATA_Z == 16);
+
+  roastty_kitty_graphics_render_placement_iterator_t render_iterator = NULL;
+  assert(roastty_kitty_graphics_render_placement_iterator_new(
+             &render_iterator) == ROASTTY_SUCCESS);
+  assert(render_iterator != NULL);
+  assert(roastty_kitty_graphics_render_placement_iterator_update(
+             render_iterator,
+             terminal) == ROASTTY_SUCCESS);
+  assert(roastty_kitty_graphics_render_placement_next(render_iterator));
+
+  uint32_t render_image_id = 0;
+  uint32_t render_placement_id = 0;
+  bool render_virtual = true;
+  uint32_t render_x_offset = 0;
+  uint32_t render_y_offset = 0;
+  roastty_kitty_graphics_render_placement_data_e render_keys[] = {
+      ROASTTY_KITTY_GRAPHICS_RENDER_PLACEMENT_DATA_IMAGE_ID,
+      ROASTTY_KITTY_GRAPHICS_RENDER_PLACEMENT_DATA_PLACEMENT_ID,
+      ROASTTY_KITTY_GRAPHICS_RENDER_PLACEMENT_DATA_IS_VIRTUAL,
+      ROASTTY_KITTY_GRAPHICS_RENDER_PLACEMENT_DATA_X_OFFSET,
+      ROASTTY_KITTY_GRAPHICS_RENDER_PLACEMENT_DATA_Y_OFFSET,
+  };
+  void *render_values[] = {
+      &render_image_id,
+      &render_placement_id,
+      &render_virtual,
+      &render_x_offset,
+      &render_y_offset,
+  };
+  written = 99;
+  assert(roastty_kitty_graphics_render_placement_get_multi(
+             render_iterator,
+             5,
+             render_keys,
+             render_values,
+             &written) == ROASTTY_SUCCESS);
+  assert(written == 5);
+  assert(render_image_id == 7);
+  assert(render_placement_id == 4);
+  assert(!render_virtual);
+  assert(render_x_offset == 0);
+  assert(render_y_offset == 0);
+
+  roastty_kitty_graphics_render_placement_info_s render_info = {
+      .size = sizeof(render_info)};
+  assert(roastty_kitty_graphics_render_placement_render_info(
+             render_iterator,
+             &render_info) == ROASTTY_SUCCESS);
+  assert(render_info.size == sizeof(render_info));
+  assert(render_info.image_id == 7);
+  assert(render_info.placement_id == 4);
+  assert(!render_info.is_virtual);
+  assert(render_info.pixel_width == placement_pixel_width);
+  assert(render_info.pixel_height == placement_pixel_height);
+  assert(render_info.grid_cols == placement_grid_cols);
+  assert(render_info.grid_rows == placement_grid_rows);
+  assert(render_info.viewport_col == placement_viewport_col);
+  assert(render_info.viewport_row == placement_viewport_row);
+  assert(render_info.viewport_visible);
+  assert(render_info.source_x == placement_source_x);
+  assert(render_info.source_y == placement_source_y);
+  assert(render_info.source_width == placement_source_width);
+  assert(render_info.source_height == placement_source_height);
+
+  roastty_kitty_graphics_image_t render_image =
+      roastty_kitty_graphics_render_placement_image(render_iterator);
+  assert(render_image != NULL);
+  roastty_kitty_graphics_image_free(render_image);
+
+  roastty_kitty_graphics_render_placement_info_s undersized_render_info = {
+      .size = sizeof(undersized_render_info) - 1, .image_id = 123};
+  assert(roastty_kitty_graphics_render_placement_render_info(
+             render_iterator,
+             &undersized_render_info) == ROASTTY_INVALID_VALUE);
+  assert(undersized_render_info.image_id == 123);
+
+  assert(!roastty_kitty_graphics_render_placement_next(render_iterator));
+  roastty_kitty_graphics_render_placement_iterator_free(render_iterator);
   roastty_kitty_graphics_image_free(image);
 
   uint8_t utf8_a = 0xc3;

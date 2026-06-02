@@ -3,7 +3,7 @@
 use super::super::style::{self, Color};
 use super::super::{page::Cell, page_list::Pin};
 
-pub(in crate::terminal) const PLACEHOLDER: u32 = 0x10eeee;
+pub(crate) const PLACEHOLDER: u32 = 0x10eeee;
 
 const DIACRITICS: &[u32] = &[
     0x0305, 0x030d, 0x030e, 0x0310, 0x0312, 0x033d, 0x033e, 0x033f, 0x0346, 0x034a, 0x034b, 0x034c,
@@ -34,14 +34,14 @@ const DIACRITICS: &[u32] = &[
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::terminal) struct VirtualPlacement {
-    pub(in crate::terminal) pin: Pin,
-    pub(in crate::terminal) image_id: u32,
-    pub(in crate::terminal) placement_id: u32,
-    pub(in crate::terminal) col: u32,
-    pub(in crate::terminal) row: u32,
-    pub(in crate::terminal) width: u32,
-    pub(in crate::terminal) height: u32,
+pub(crate) struct VirtualPlacement {
+    pub(crate) pin: Pin,
+    pub(crate) image_id: u32,
+    pub(crate) placement_id: u32,
+    pub(crate) col: u32,
+    pub(crate) row: u32,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

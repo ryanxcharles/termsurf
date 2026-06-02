@@ -359,3 +359,59 @@ The experiment passes when:
   math.
 - Do not expose any `ghostty_*` ABI names.
 - Do not skip Codex design review or Codex result review.
+
+## Result
+
+**Result:** Pass
+
+Roastty now exposes a terminal-scoped Kitty render placement ABI:
+
+- `roastty_kitty_graphics_render_placement_iterator_t` snapshots renderable
+  Kitty placements from a terminal frame.
+- Pinned storage-backed placements are resolved into stable update-time
+  snapshots, including geometry, image data, offsets, source rectangles,
+  viewport position, and z.
+- Visible Unicode virtual placeholders are matched against stored virtual
+  placements, converted into render placements, and exposed through the same
+  iterator.
+- Virtual render geometry ports the renderer-independent upstream slicing logic:
+  aspect-ratio fit, source clipping, destination offsets, destination pixel
+  size, no-op slices, and visible-cell viewport position.
+- Layer filtering happens during `next`, so changing the layer after update can
+  broaden or narrow the same snapshot without another terminal update.
+- The storage-backed Kitty placement iterator remains unchanged.
+- The C ABI harness now covers the new render-placement handle, data selectors,
+  info struct layout, image accessor, render-info accessor, and undersized
+  struct validation.
+
+The implementation also fixed a pre-existing parallel-test collision in Kitty
+image tests by replacing timestamp-derived temporary directory and shared memory
+names with a process-local atomic counter.
+
+Verification run:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/terminal/kitty/graphics_unicode.rs roastty/src/terminal/kitty/graphics_image.rs roastty/src/terminal/terminal.rs roastty/src/terminal/page_list.rs
+cargo test -p roastty kitty_graphics_render_placement_c_abi
+cargo test -p roastty kitty_graphics_render_info_c_abi
+cargo test -p roastty terminal_stream_kitty_virtual_placeholder
+cargo test -p roastty --test abi_harness
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+All commands passed.
+
+Codex reviewed the completed implementation twice. The first review found a real
+test-coverage blocker for virtual matching, aspect clipping, no-op slices, and
+snapshot stability. The missing tests were added, and the second review found no
+remaining correctness, regression, public ABI layout/safety, or scope issues.
+Codex approved recording the experiment as Pass.
+
+## Conclusion
+
+Experiment 203 gives app/render code a correct terminal-scoped Kitty render
+placement snapshot boundary. The next experiment can build on this ABI to move
+toward the actual renderer/app consumption path for Kitty graphics, without
+reopening storage-only placement iteration or Unicode placeholder decoding.

@@ -119,8 +119,12 @@ impl Pin {
         }
     }
 
-    pub(in crate::terminal) const fn x(self) -> CellCountInt {
+    pub(crate) const fn x(self) -> CellCountInt {
         self.x
+    }
+
+    pub(crate) const fn y(self) -> CellCountInt {
+        self.y
     }
 
     #[cfg(test)]
