@@ -179,8 +179,71 @@ All public names must use Roastty naming.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Experiment 219 added production `bg_image` offscreen read-back tests using the
+render-pass texture binding from Experiment 218.
+
+Implementation details:
+
+- added test helpers for `BgImageVertex` buffers and opaque-background uniforms;
+- drew `pipelines.bg_image` with `MetalPrimitiveType::Triangle` and
+  `vertex_count = 3`;
+- bound `BgImageVertex` as `buffers[0]`;
+- bound uploaded RGBA textures as `textures[0]`;
+- kept uniforms at Metal buffer index `1`;
+- used endpoint-only opaque RGBA texture colors and opaque black background
+  colors for deterministic exact-byte read-back.
+
+The new tests cover:
+
+- full-screen/stretch background-image read-back over an opaque black
+  background;
+- `BgImageFit::None` plus `BgImagePosition::MiddleCenter`, proving that
+  vertex-stage texture size from `image.get_width()` / `image.get_height()`
+  affects placement;
+- zero-instance no-draw behavior for `bg_image`.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/renderer/metal/render_pass.rs
+cargo test -p roastty renderer::metal::render_pass
+cargo test -p roastty renderer::metal::shaders
+cargo test -p roastty renderer::metal::pipeline
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/renderer/metal; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Observed results:
+
+- `renderer::metal::render_pass`: 14 passed.
+- `renderer::metal::shaders`: 8 passed.
+- `renderer::metal::pipeline`: 17 passed.
+- Full `roastty`: 2198 library tests passed, plus the C ABI harness passed.
+- Both no-`ghostty` gates passed.
+- `git diff --check` passed.
+
+Codex reviewed the completed implementation and found no blocking issues. It
+confirmed that the `bg_image` tests use the production pipeline, bind texture
+resources through the shared render-pass mapping, prove vertex-stage texture
+size use through the centered `Fit::None` case, and keep exact BGRA expectations
+sound for endpoint-only opaque inputs.
+
+Residual scope: partial alpha, opacity less than `1.0`, repeat, contain, and
+cover behavior are not covered in this experiment. That is acceptable because
+the target here was production `bg_image` offscreen read-back plus vertex-stage
+texture-size proof, not the full background-image feature matrix.
 
 ## Conclusion
 
-Pending.
+Roastty now has automated production-shader read-back coverage for background
+images. This completes the immediate proof that the render-pass texture mapping
+from Experiment 218 reaches both shader stages: `image` proved fragment-stage
+sampling, and `bg_image` proved vertex-stage texture-size use.
+
+The next renderer slice can move toward terminal text rendering and glyph atlas
+resources, or it can broaden background-image coverage for opacity, repeat,
+contain, and cover if that feature matrix becomes more important before text.

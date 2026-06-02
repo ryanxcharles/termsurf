@@ -563,7 +563,7 @@ tests, choose the larger subsystem.
 - [Experiment 218: Port Offscreen Metal Image Texture Readback](218-port-offscreen-metal-image-texture-readback.md)
   — **Pass**
 - [Experiment 219: Port Offscreen Metal Background Image Readback](219-port-offscreen-metal-background-image-readback.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 
