@@ -984,6 +984,7 @@ mod tests {
                 width: 1,
                 height: 2,
                 medium: TransmissionMedium::SharedMemory,
+                format: TransmissionFormat::Png,
                 ..Transmission::default()
             },
             b"/tmp/image",
@@ -1176,6 +1177,7 @@ mod tests {
             Transmission {
                 image_id: 1,
                 medium: TransmissionMedium::SharedMemory,
+                format: TransmissionFormat::Png,
                 ..Transmission::default()
             },
             b"/tmp/image",

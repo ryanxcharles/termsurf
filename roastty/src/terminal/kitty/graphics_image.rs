@@ -1,10 +1,12 @@
 //! Kitty graphics image loading.
 
-use std::ffi::OsString;
+use std::ffi::{CString, OsString};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
+use std::ptr;
+use std::slice;
 use std::time::Instant;
 
 use flate2::read::ZlibDecoder;
@@ -146,8 +148,11 @@ impl LoadingImage {
                 Ok(result)
             }
             TransmissionMedium::SharedMemory => {
-                let _ = limits.shared_memory;
-                Err(ImageLoadError::UnsupportedMedium)
+                if !limits.shared_memory || transmission.format == TransmissionFormat::Png {
+                    return Err(ImageLoadError::UnsupportedMedium);
+                }
+                result.read_shared_memory(transmission, &command.data)?;
+                Ok(result)
             }
         }
     }
@@ -302,6 +307,61 @@ impl LoadingImage {
         self.data = data;
         Ok(())
     }
+
+    fn read_shared_memory(
+        &mut self,
+        transmission: super::graphics_command::Transmission,
+        name: &[u8],
+    ) -> Result<(), ImageLoadError> {
+        let name = CString::new(name).map_err(|_| ImageLoadError::InvalidData)?;
+        let fd = unsafe { libc::shm_open(name.as_ptr(), libc::O_RDONLY, 0) };
+        if fd < 0 {
+            return Err(ImageLoadError::InvalidData);
+        }
+        let handle = SharedMemoryHandle { fd, name };
+
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        let result = unsafe { libc::fstat(handle.fd, stat.as_mut_ptr()) };
+        if result != 0 {
+            return Err(ImageLoadError::InvalidData);
+        }
+        let stat = unsafe { stat.assume_init() };
+        if stat.st_size <= 0 {
+            return Err(ImageLoadError::InvalidData);
+        }
+        let stat_size = usize::try_from(stat.st_size).map_err(|_| ImageLoadError::InvalidData)?;
+        let expected_size = expected_raw_size(transmission)?;
+        if stat_size < expected_size {
+            return Err(ImageLoadError::InvalidData);
+        }
+
+        let start =
+            usize::try_from(transmission.offset).map_err(|_| ImageLoadError::InvalidData)?;
+        if start > expected_size {
+            return Err(ImageLoadError::InvalidData);
+        }
+        let end = if transmission.size > 0 {
+            let size =
+                usize::try_from(transmission.size).map_err(|_| ImageLoadError::InvalidData)?;
+            start
+                .checked_add(size)
+                .ok_or(ImageLoadError::InvalidData)?
+                .min(expected_size)
+        } else {
+            expected_size
+        };
+        if end < start {
+            return Err(ImageLoadError::InvalidData);
+        }
+
+        let mapping = SharedMemoryMap::new(handle.fd, stat_size)?;
+        let data = unsafe { mapping.bytes(start, end - start) };
+        self.data
+            .try_reserve(data.len())
+            .map_err(|_| ImageLoadError::OutOfMemory)?;
+        self.data.extend_from_slice(data);
+        Ok(())
+    }
 }
 
 struct TemporaryFileCleanup {
@@ -312,6 +372,71 @@ impl Drop for TemporaryFileCleanup {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
     }
+}
+
+struct SharedMemoryHandle {
+    fd: libc::c_int,
+    name: CString,
+}
+
+impl Drop for SharedMemoryHandle {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = libc::shm_unlink(self.name.as_ptr());
+            let _ = libc::close(self.fd);
+        }
+    }
+}
+
+struct SharedMemoryMap {
+    ptr: *mut libc::c_void,
+    len: usize,
+}
+
+impl SharedMemoryMap {
+    fn new(fd: libc::c_int, len: usize) -> Result<Self, ImageLoadError> {
+        let ptr = unsafe {
+            libc::mmap(
+                ptr::null_mut(),
+                len,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                fd,
+                0,
+            )
+        };
+        if ptr == libc::MAP_FAILED {
+            return Err(ImageLoadError::InvalidData);
+        }
+        Ok(Self { ptr, len })
+    }
+
+    unsafe fn bytes(&self, start: usize, len: usize) -> &[u8] {
+        debug_assert!(start <= self.len);
+        debug_assert!(len <= self.len - start);
+        slice::from_raw_parts(self.ptr.cast::<u8>().add(start), len)
+    }
+}
+
+impl Drop for SharedMemoryMap {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = libc::munmap(self.ptr, self.len);
+        }
+    }
+}
+
+fn expected_raw_size(
+    transmission: super::graphics_command::Transmission,
+) -> Result<usize, ImageLoadError> {
+    let bytes_per_pixel = transmission
+        .format
+        .bytes_per_pixel()
+        .ok_or(ImageLoadError::UnsupportedFormat)?;
+    (transmission.width as usize)
+        .checked_mul(transmission.height as usize)
+        .and_then(|pixels| pixels.checked_mul(bytes_per_pixel))
+        .ok_or(ImageLoadError::InvalidData)
 }
 
 fn is_unsafe_path(path: &Path) -> bool {
@@ -414,6 +539,76 @@ mod tests {
 
     fn path_bytes(path: &Path) -> Vec<u8> {
         path.as_os_str().as_bytes().to_vec()
+    }
+
+    struct SharedMemoryObject {
+        name: CString,
+    }
+
+    impl SharedMemoryObject {
+        fn new(data: &[u8]) -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let name = CString::new(format!(
+                "/rt{:x}{:x}",
+                std::process::id(),
+                (nanos & 0xffff_ffff) as u64
+            ))
+            .unwrap();
+            let fd = unsafe {
+                libc::shm_open(
+                    name.as_ptr(),
+                    libc::O_CREAT | libc::O_EXCL | libc::O_RDWR,
+                    0o600,
+                )
+            };
+            assert!(fd >= 0);
+            assert_eq!(unsafe { libc::ftruncate(fd, data.len() as libc::off_t) }, 0);
+            if !data.is_empty() {
+                let ptr = unsafe {
+                    libc::mmap(
+                        ptr::null_mut(),
+                        data.len(),
+                        libc::PROT_READ | libc::PROT_WRITE,
+                        libc::MAP_SHARED,
+                        fd,
+                        0,
+                    )
+                };
+                assert_ne!(ptr, libc::MAP_FAILED);
+                unsafe {
+                    ptr::copy_nonoverlapping(data.as_ptr(), ptr.cast::<u8>(), data.len());
+                    assert_eq!(libc::munmap(ptr, data.len()), 0);
+                }
+            }
+            assert_eq!(unsafe { libc::close(fd) }, 0);
+            Self { name }
+        }
+
+        fn name_bytes(&self) -> &[u8] {
+            self.name.as_bytes()
+        }
+
+        fn exists(&self) -> bool {
+            let fd = unsafe { libc::shm_open(self.name.as_ptr(), libc::O_RDONLY, 0) };
+            if fd < 0 {
+                return false;
+            }
+            unsafe {
+                let _ = libc::close(fd);
+            }
+            true
+        }
+    }
+
+    impl Drop for SharedMemoryObject {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = libc::shm_unlink(self.name.as_ptr());
+            }
+        }
     }
 
     #[test]
@@ -886,21 +1081,180 @@ mod tests {
         }
         assert!(png_temp.exists());
 
+        let shm = SharedMemoryObject::new(b"not a png");
+        let command = transmit_command(
+            Transmission {
+                format: TransmissionFormat::Png,
+                medium: TransmissionMedium::SharedMemory,
+                image_id: 31,
+                ..Transmission::default()
+            },
+            shm.name_bytes(),
+        );
+        assert_eq!(
+            LoadingImage::init(&command, LoadingImageLimits::ALL),
+            Err(ImageLoadError::UnsupportedMedium)
+        );
+        assert!(shm.exists());
+    }
+
+    #[test]
+    fn kitty_graphics_image_shared_memory_blocked_and_allowed_by_limits() {
+        let shm = SharedMemoryObject::new(RGB_NONE_20X15);
         let command = transmit_command(
             Transmission {
                 format: TransmissionFormat::Rgb,
+                medium: TransmissionMedium::SharedMemory,
+                width: 20,
+                height: 15,
+                image_id: 31,
+                ..Transmission::default()
+            },
+            shm.name_bytes(),
+        );
+
+        assert_eq!(
+            LoadingImage::init(&command, LoadingImageLimits::DIRECT),
+            Err(ImageLoadError::UnsupportedMedium)
+        );
+        assert!(shm.exists());
+
+        let image = LoadingImage::init(&command, LoadingImageLimits::ALL)
+            .unwrap()
+            .complete()
+            .unwrap();
+        assert_eq!(image.data, RGB_NONE_20X15);
+        assert!(!shm.exists());
+    }
+
+    #[test]
+    fn kitty_graphics_image_shared_memory_unlinks_after_open_failures() {
+        let empty = SharedMemoryObject::new(b"");
+        let command = transmit_command(
+            Transmission {
+                format: TransmissionFormat::Rgba,
                 medium: TransmissionMedium::SharedMemory,
                 width: 1,
                 height: 1,
                 image_id: 31,
                 ..Transmission::default()
             },
-            b"/shared",
+            empty.name_bytes(),
         );
         assert_eq!(
             LoadingImage::init(&command, LoadingImageLimits::ALL),
-            Err(ImageLoadError::UnsupportedMedium)
+            Err(ImageLoadError::InvalidData)
         );
+        assert!(!empty.exists());
+
+        let too_small = SharedMemoryObject::new(b"ABC");
+        let command = transmit_command(
+            Transmission {
+                format: TransmissionFormat::Rgba,
+                medium: TransmissionMedium::SharedMemory,
+                width: 10_000,
+                height: 1,
+                image_id: 32,
+                ..Transmission::default()
+            },
+            too_small.name_bytes(),
+        );
+        assert_eq!(
+            LoadingImage::init(&command, LoadingImageLimits::ALL),
+            Err(ImageLoadError::InvalidData)
+        );
+        assert!(!too_small.exists());
+
+        let overflow = SharedMemoryObject::new(b"AAAA");
+        let command = transmit_command(
+            Transmission {
+                format: TransmissionFormat::Rgba,
+                medium: TransmissionMedium::SharedMemory,
+                width: u32::MAX,
+                height: u32::MAX,
+                image_id: 33,
+                ..Transmission::default()
+            },
+            overflow.name_bytes(),
+        );
+        assert_eq!(
+            LoadingImage::init(&command, LoadingImageLimits::ALL),
+            Err(ImageLoadError::InvalidData)
+        );
+        assert!(!overflow.exists());
+    }
+
+    #[test]
+    fn kitty_graphics_image_shared_memory_invalid_names_and_ranges() {
+        let command = transmit_command(
+            Transmission {
+                format: TransmissionFormat::Rgba,
+                medium: TransmissionMedium::SharedMemory,
+                width: 1,
+                height: 1,
+                image_id: 31,
+                ..Transmission::default()
+            },
+            b"/missing-roastty-kitty-shared-memory",
+        );
+        assert_eq!(
+            LoadingImage::init(&command, LoadingImageLimits::ALL),
+            Err(ImageLoadError::InvalidData)
+        );
+
+        let command = transmit_command(
+            Transmission {
+                format: TransmissionFormat::Rgba,
+                medium: TransmissionMedium::SharedMemory,
+                width: 1,
+                height: 1,
+                image_id: 32,
+                ..Transmission::default()
+            },
+            b"/roastty\0kitty",
+        );
+        assert_eq!(
+            LoadingImage::init(&command, LoadingImageLimits::ALL),
+            Err(ImageLoadError::InvalidData)
+        );
+
+        let ranged = SharedMemoryObject::new(&[1, 2, 3, 4]);
+        let command = transmit_command(
+            Transmission {
+                format: TransmissionFormat::Rgba,
+                medium: TransmissionMedium::SharedMemory,
+                width: 1,
+                height: 1,
+                image_id: 33,
+                offset: 1,
+                size: 2,
+                ..Transmission::default()
+            },
+            ranged.name_bytes(),
+        );
+        let loading = LoadingImage::init(&command, LoadingImageLimits::ALL).unwrap();
+        assert_eq!(loading.data, [2, 3]);
+        assert_eq!(loading.complete(), Err(ImageLoadError::InvalidData));
+        assert!(!ranged.exists());
+
+        let invalid_range = SharedMemoryObject::new(&[1, 2, 3, 4]);
+        let command = transmit_command(
+            Transmission {
+                format: TransmissionFormat::Rgba,
+                medium: TransmissionMedium::SharedMemory,
+                width: 1,
+                height: 1,
+                image_id: 34,
+                offset: 5,
+                ..Transmission::default()
+            },
+            invalid_range.name_bytes(),
+        );
+        assert_eq!(
+            LoadingImage::init(&command, LoadingImageLimits::ALL),
+            Err(ImageLoadError::InvalidData)
+        );
+        assert!(!invalid_range.exists());
     }
 
     #[test]

@@ -155,3 +155,63 @@ The experiment passes when:
   enabled.
 - Do not expose any `ghostty_*` ABI names.
 - Do not skip Codex design review or Codex result review.
+
+## Result
+
+**Result:** Pass
+
+Implemented Kitty graphics shared-memory loading for raw image formats.
+`TransmissionMedium::SharedMemory` is now gated by the terminal's shared-memory
+image-medium option, opens named POSIX shared-memory objects with `shm_open`,
+validates the mapped size against the expected raw image size, maps the object
+read-only, copies the requested byte range into owned Roastty memory, and
+unlinks/closes the object on every path after a successful open.
+
+The implementation keeps PNG decoding out of scope. Direct PNG remains deferred
+to the existing unsupported-format completion path, while non-direct PNG,
+including shared-memory PNG, still short-circuits with `UnsupportedMedium`
+before any OS resource access.
+
+Added image-loader tests for:
+
+- shared-memory media blocked and allowed by terminal limits;
+- successful shared-memory loading and unlink cleanup;
+- unlink cleanup after empty, positive-size-too-small, and overflow failures
+  after `shm_open`;
+- missing objects and interior-NUL names;
+- offset/size range copying and invalid offsets;
+- non-direct PNG shared memory remaining deferred.
+
+Added terminal-stream coverage proving the parser and active-screen storage path
+obey the `KittyImageMedium::SharedMemory` terminal option and that direct image
+loading remains unaffected when shared memory is disabled.
+
+During result review, Codex found one real missing-test blocker: the initial
+test suite covered zero-length shared-memory objects but did not cover a
+positive-size object smaller than the expected raw image size. The test was
+added with an expected size large enough to exceed macOS shared-memory page
+rounding, and Codex re-reviewed the result with no blocking findings.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/terminal/terminal.rs roastty/src/terminal/kitty/graphics_image.rs roastty/src/terminal/kitty/graphics_exec.rs
+cargo test -p roastty kitty_graphics_image
+cargo test -p roastty terminal_stream_kitty_graphics
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Codex result review:
+
+- First review: blocked on missing positive-size-too-small shared-memory object
+  test.
+- Second review: no blocking findings; result acceptable to record as Pass.
+
+## Conclusion
+
+Roastty now supports all Kitty graphics transmission media that do not require
+PNG decoding or rendering: direct bytes, regular files, temporary files, and
+shared memory. The remaining Kitty graphics work can continue above the loading
+layer, with PNG decode and rendering still intentionally deferred.

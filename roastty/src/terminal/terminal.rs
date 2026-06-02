@@ -3891,6 +3891,76 @@ mod tests {
         path: PathBuf,
     }
 
+    struct KittySharedMemoryObject {
+        name: std::ffi::CString,
+    }
+
+    impl KittySharedMemoryObject {
+        fn new(data: &[u8]) -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let name = std::ffi::CString::new(format!(
+                "/rt{:x}{:x}",
+                std::process::id(),
+                (nanos & 0xffff_ffff) as u64
+            ))
+            .unwrap();
+            let fd = unsafe {
+                libc::shm_open(
+                    name.as_ptr(),
+                    libc::O_CREAT | libc::O_EXCL | libc::O_RDWR,
+                    0o600,
+                )
+            };
+            assert!(fd >= 0);
+            assert_eq!(unsafe { libc::ftruncate(fd, data.len() as libc::off_t) }, 0);
+            if !data.is_empty() {
+                let ptr = unsafe {
+                    libc::mmap(
+                        std::ptr::null_mut(),
+                        data.len(),
+                        libc::PROT_READ | libc::PROT_WRITE,
+                        libc::MAP_SHARED,
+                        fd,
+                        0,
+                    )
+                };
+                assert_ne!(ptr, libc::MAP_FAILED);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(data.as_ptr(), ptr.cast::<u8>(), data.len());
+                    assert_eq!(libc::munmap(ptr, data.len()), 0);
+                }
+            }
+            assert_eq!(unsafe { libc::close(fd) }, 0);
+            Self { name }
+        }
+
+        fn name_bytes(&self) -> &[u8] {
+            self.name.as_bytes()
+        }
+
+        fn exists(&self) -> bool {
+            let fd = unsafe { libc::shm_open(self.name.as_ptr(), libc::O_RDONLY, 0) };
+            if fd < 0 {
+                return false;
+            }
+            unsafe {
+                let _ = libc::close(fd);
+            }
+            true
+        }
+    }
+
+    impl Drop for KittySharedMemoryObject {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = libc::shm_unlink(self.name.as_ptr());
+            }
+        }
+    }
+
     impl KittyFileTestDir {
         fn new() -> Self {
             let nanos = SystemTime::now()
@@ -3946,6 +4016,14 @@ mod tests {
         format!(
             "\x1b_Ga=t,t={medium},f=32,s=1,v=1,i={image_id};{}\x1b\\",
             base64(path.as_os_str().as_bytes())
+        )
+        .into_bytes()
+    }
+
+    fn kitty_shared_memory_transmit_apc(image_id: u32, shm: &KittySharedMemoryObject) -> Vec<u8> {
+        format!(
+            "\x1b_Ga=t,t=s,f=32,s=1,v=1,i={image_id};{}\x1b\\",
+            base64(shm.name_bytes())
         )
         .into_bytes()
     }
@@ -6313,6 +6391,57 @@ mod tests {
             .kitty_images()
             .image_by_id(82)
             .is_none());
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_shared_memory_obeys_terminal_options() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+        let blocked = KittySharedMemoryObject::new(&[1, 2, 3, 4]);
+
+        terminal
+            .next_slice(&kitty_shared_memory_transmit_apc(90, &blocked))
+            .unwrap();
+        assert!(blocked.exists());
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .image_by_id(90)
+            .is_none());
+
+        terminal.set_kitty_image_medium(KittyImageMedium::SharedMemory, true);
+        let allowed = KittySharedMemoryObject::new(&[1, 2, 3, 4]);
+        terminal
+            .next_slice(&kitty_shared_memory_transmit_apc(91, &allowed))
+            .unwrap();
+        assert!(!allowed.exists());
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .image_by_id(91)
+            .is_some());
+
+        terminal.set_kitty_image_medium(KittyImageMedium::SharedMemory, false);
+        let disabled = KittySharedMemoryObject::new(&[1, 2, 3, 4]);
+        terminal
+            .next_slice(&kitty_shared_memory_transmit_apc(92, &disabled))
+            .unwrap();
+        assert!(disabled.exists());
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .image_by_id(92)
+            .is_none());
+
+        terminal.next_slice(&kitty_transmit_apc(93)).unwrap();
+        assert!(terminal
+            .screens
+            .active()
+            .kitty_images()
+            .image_by_id(93)
+            .is_some());
     }
 
     #[test]
