@@ -21,6 +21,7 @@ extern "C" {
 
 typedef void* roastty_app_t;
 typedef void* roastty_config_t;
+typedef void* roastty_formatter_t;
 typedef void* roastty_key_encoder_t;
 typedef void* roastty_key_event_t;
 typedef void* roastty_mouse_encoder_t;
@@ -213,6 +214,12 @@ typedef enum {
 } roastty_selection_format_e;
 
 typedef enum {
+  ROASTTY_FORMATTER_FORMAT_PLAIN = 0,
+  ROASTTY_FORMATTER_FORMAT_VT = 1,
+  ROASTTY_FORMATTER_FORMAT_HTML = 2,
+} roastty_formatter_format_e;
+
+typedef enum {
   ROASTTY_SELECTION_ORDER_FORWARD = 0,
   ROASTTY_SELECTION_ORDER_REVERSE = 1,
   ROASTTY_SELECTION_ORDER_MIRRORED_FORWARD = 2,
@@ -334,6 +341,36 @@ typedef struct {
   bool trim;
   const roastty_selection_s* selection;
 } roastty_terminal_selection_format_options_s;
+
+typedef struct {
+  size_t size;
+  bool cursor;
+  bool style;
+  bool hyperlink;
+  bool protection;
+  bool kitty_keyboard;
+  bool charsets;
+} roastty_formatter_screen_extra_s;
+
+typedef struct {
+  size_t size;
+  bool palette;
+  bool modes;
+  bool scrolling_region;
+  bool tabstops;
+  bool pwd;
+  bool keyboard;
+  roastty_formatter_screen_extra_s screen;
+} roastty_formatter_terminal_extra_s;
+
+typedef struct {
+  size_t size;
+  roastty_formatter_format_e emit;
+  bool unwrap;
+  bool trim;
+  roastty_formatter_terminal_extra_s extra;
+  const roastty_selection_s* selection;
+} roastty_formatter_terminal_options_s;
 
 typedef struct {
   uint16_t conformance_level;
@@ -1254,6 +1291,17 @@ ROASTTY_API roastty_result_e
 roastty_terminal_selection_format(roastty_terminal_t,
                                   const roastty_terminal_selection_format_options_s*,
                                   roastty_string_s*);
+ROASTTY_API roastty_result_e
+roastty_formatter_terminal_new(roastty_formatter_t*,
+                               roastty_terminal_t,
+                               roastty_formatter_terminal_options_s);
+ROASTTY_API roastty_result_e roastty_formatter_format_buf(roastty_formatter_t,
+                                                          uint8_t*,
+                                                          size_t,
+                                                          size_t*);
+ROASTTY_API roastty_result_e roastty_formatter_format(roastty_formatter_t,
+                                                      roastty_string_s*);
+ROASTTY_API void roastty_formatter_free(roastty_formatter_t);
 ROASTTY_API roastty_result_e
 roastty_selection_gesture_new(roastty_selection_gesture_t*);
 ROASTTY_API void

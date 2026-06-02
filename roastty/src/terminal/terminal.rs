@@ -683,12 +683,12 @@ struct TerminalStreamHandler<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct TerminalFormatterOptions<'a> {
+pub(crate) struct TerminalFormatterOptions<'a> {
     screen: ScreenFormatterOptions<'a>,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct TerminalFormatter<'a> {
+pub(crate) struct TerminalFormatter<'a> {
     terminal: &'a Terminal,
     options: TerminalFormatterOptions<'a>,
     content: ScreenFormatterContent,
@@ -696,7 +696,7 @@ pub(super) struct TerminalFormatter<'a> {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct TerminalFormatterExtra {
+pub(crate) struct TerminalFormatterExtra {
     palette: bool,
     modes: bool,
     scrolling_region: bool,
@@ -1442,6 +1442,37 @@ impl Terminal {
                 .trim(trim),
         )
         .with_content(ScreenFormatterContent::Selection(Some(selection)))
+        .format())
+    }
+
+    pub(crate) fn formatter_format(
+        &self,
+        format: TerminalSelectionFormat,
+        unwrap: bool,
+        trim: bool,
+        extra: TerminalFormatterExtra,
+        selection: Option<TerminalSelection>,
+    ) -> Result<String, TerminalGridRefPointError> {
+        let content = match selection {
+            Some(selection) => {
+                let selection = self.screens.active().selection_from_grid_refs(
+                    selection.start.into(),
+                    selection.end.into(),
+                    selection.rectangle,
+                )?;
+                ScreenFormatterContent::Selection(Some(selection))
+            }
+            None => ScreenFormatterContent::Selection(None),
+        };
+
+        Ok(TerminalFormatter::init(
+            self,
+            TerminalFormatterOptions::new(format.into())
+                .unwrap(unwrap)
+                .trim(trim),
+        )
+        .with_content(content)
+        .with_extra(extra)
         .format())
     }
 
@@ -3224,7 +3255,7 @@ impl<'a> TerminalFormatter<'a> {
 }
 
 impl TerminalFormatterExtra {
-    pub(super) const fn none() -> Self {
+    pub(crate) const fn none() -> Self {
         Self {
             palette: false,
             modes: false,
@@ -3236,32 +3267,32 @@ impl TerminalFormatterExtra {
         }
     }
 
-    pub(super) const fn palette(mut self, palette: bool) -> Self {
+    pub(crate) const fn palette(mut self, palette: bool) -> Self {
         self.palette = palette;
         self
     }
 
-    pub(super) const fn modes(mut self, modes: bool) -> Self {
+    pub(crate) const fn modes(mut self, modes: bool) -> Self {
         self.modes = modes;
         self
     }
 
-    pub(super) const fn scrolling_region(mut self, scrolling_region: bool) -> Self {
+    pub(crate) const fn scrolling_region(mut self, scrolling_region: bool) -> Self {
         self.scrolling_region = scrolling_region;
         self
     }
 
-    pub(super) const fn tabstops(mut self, tabstops: bool) -> Self {
+    pub(crate) const fn tabstops(mut self, tabstops: bool) -> Self {
         self.tabstops = tabstops;
         self
     }
 
-    pub(super) const fn keyboard(mut self, keyboard: bool) -> Self {
+    pub(crate) const fn keyboard(mut self, keyboard: bool) -> Self {
         self.keyboard = keyboard;
         self
     }
 
-    pub(super) const fn pwd(mut self, pwd: bool) -> Self {
+    pub(crate) const fn pwd(mut self, pwd: bool) -> Self {
         self.pwd = pwd;
         self
     }
@@ -3269,6 +3300,26 @@ impl TerminalFormatterExtra {
     pub(super) const fn screen(mut self, screen: ScreenFormatterExtra) -> Self {
         self.screen = screen;
         self
+    }
+
+    pub(crate) const fn screen_extra(
+        self,
+        cursor: bool,
+        style: bool,
+        hyperlink: bool,
+        protection: bool,
+        kitty_keyboard: bool,
+        charsets: bool,
+    ) -> Self {
+        self.screen(
+            ScreenFormatterExtra::none()
+                .cursor(cursor)
+                .style(style)
+                .hyperlink(hyperlink)
+                .protection(protection)
+                .kitty_keyboard(kitty_keyboard)
+                .charsets(charsets),
+        )
     }
 }
 

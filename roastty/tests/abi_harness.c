@@ -234,6 +234,24 @@ static void assert_roastty_string_eq(roastty_string_s value,
   roastty_string_free(value);
 }
 
+static bool bytes_contains(const char *haystack,
+                           size_t haystack_len,
+                           const char *needle,
+                           size_t needle_len) {
+  if (needle_len == 0) {
+    return true;
+  }
+  if (haystack_len < needle_len) {
+    return false;
+  }
+  for (size_t i = 0; i <= haystack_len - needle_len; i++) {
+    if (memcmp(haystack + i, needle, needle_len) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static roastty_cell_t packed_cell(roastty_cell_content_tag_e tag,
                                   uint64_t content);
 static roastty_cell_t packed_cell_with_flags(
@@ -1674,6 +1692,22 @@ static void assert_terminal_abi(void) {
   assert(ROASTTY_SELECTION_FORMAT_PLAIN == 0);
   assert(ROASTTY_SELECTION_FORMAT_VT == 1);
   assert(ROASTTY_SELECTION_FORMAT_HTML == 2);
+  assert(ROASTTY_FORMATTER_FORMAT_PLAIN == 0);
+  assert(ROASTTY_FORMATTER_FORMAT_VT == 1);
+  assert(ROASTTY_FORMATTER_FORMAT_HTML == 2);
+  assert(sizeof(roastty_formatter_t) == sizeof(void *));
+  assert(sizeof(roastty_formatter_screen_extra_s) == 16);
+  assert(_Alignof(roastty_formatter_screen_extra_s) == 8);
+  assert(offsetof(roastty_formatter_screen_extra_s, cursor) == 8);
+  assert(offsetof(roastty_formatter_screen_extra_s, charsets) == 13);
+  assert(sizeof(roastty_formatter_terminal_extra_s) == 32);
+  assert(offsetof(roastty_formatter_terminal_extra_s, palette) == 8);
+  assert(offsetof(roastty_formatter_terminal_extra_s, keyboard) == 13);
+  assert(offsetof(roastty_formatter_terminal_extra_s, screen) == 16);
+  assert(sizeof(roastty_formatter_terminal_options_s) == 56);
+  assert(offsetof(roastty_formatter_terminal_options_s, emit) == 8);
+  assert(offsetof(roastty_formatter_terminal_options_s, extra) == 16);
+  assert(offsetof(roastty_formatter_terminal_options_s, selection) == 48);
   assert(ROASTTY_SELECTION_ORDER_FORWARD == 0);
   assert(ROASTTY_SELECTION_ORDER_REVERSE == 1);
   assert(ROASTTY_SELECTION_ORDER_MIRRORED_FORWARD == 2);
@@ -2115,6 +2149,88 @@ static void assert_terminal_abi(void) {
   assert(roastty_terminal_select_output(selection_terminal,
                                         &selection.start,
                                         &output_selection) == ROASTTY_NO_VALUE);
+
+  roastty_formatter_terminal_options_s formatter_options = {
+      .size = sizeof(roastty_formatter_terminal_options_s),
+      .emit = ROASTTY_FORMATTER_FORMAT_PLAIN,
+      .unwrap = true,
+      .trim = true,
+      .extra = {
+          .size = sizeof(roastty_formatter_terminal_extra_s),
+          .screen = {.size = sizeof(roastty_formatter_screen_extra_s)},
+      },
+      .selection = NULL,
+  };
+  roastty_formatter_t formatter = NULL;
+  assert(roastty_formatter_terminal_new(NULL,
+                                        selection_terminal,
+                                        formatter_options) ==
+         ROASTTY_INVALID_VALUE);
+  assert(roastty_formatter_terminal_new(&formatter,
+                                        NULL,
+                                        formatter_options) ==
+         ROASTTY_INVALID_VALUE);
+  assert(formatter == NULL);
+  roastty_formatter_terminal_options_s invalid_formatter_options =
+      formatter_options;
+  invalid_formatter_options.emit = (roastty_formatter_format_e)99;
+  assert(roastty_formatter_terminal_new(&formatter,
+                                        selection_terminal,
+                                        invalid_formatter_options) ==
+         ROASTTY_INVALID_VALUE);
+  assert(formatter == NULL);
+
+  assert(roastty_formatter_terminal_new(&formatter,
+                                        selection_terminal,
+                                        formatter_options) ==
+         ROASTTY_SUCCESS);
+  assert(formatter != NULL);
+  assert(roastty_formatter_format_buf(formatter,
+                                      NULL,
+                                      42,
+                                      &required) == ROASTTY_OUT_OF_SPACE);
+  assert(required == strlen("Hello World\nsecond line"));
+  uint8_t formatter_buf[32] = {0};
+  assert(roastty_formatter_format_buf(formatter,
+                                      formatter_buf,
+                                      sizeof(formatter_buf),
+                                      &required) == ROASTTY_SUCCESS);
+  assert(memcmp(formatter_buf, "Hello World\nsecond line", required) == 0);
+  roastty_string_s formatted_terminal = {0};
+  assert(roastty_formatter_format(formatter, &formatted_terminal) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(formatted_terminal, "Hello World\nsecond line");
+  roastty_formatter_free(formatter);
+
+  formatter_options.selection = &active_selection;
+  assert(roastty_formatter_terminal_new(&formatter,
+                                        selection_terminal,
+                                        formatter_options) ==
+         ROASTTY_SUCCESS);
+  assert(roastty_formatter_format(formatter, &formatted_terminal) ==
+         ROASTTY_SUCCESS);
+  assert_roastty_string_eq(formatted_terminal, "World");
+  roastty_formatter_free(formatter);
+
+  formatter_options.selection = NULL;
+  formatter_options.emit = ROASTTY_FORMATTER_FORMAT_VT;
+  formatter_options.extra.palette = true;
+  formatter_options.extra.screen.cursor = true;
+  assert(roastty_formatter_terminal_new(&formatter,
+                                        selection_terminal,
+                                        formatter_options) ==
+         ROASTTY_SUCCESS);
+  assert(roastty_formatter_format(formatter, &formatted_terminal) ==
+         ROASTTY_SUCCESS);
+  assert(formatted_terminal.len > strlen("Hello World\nsecond line"));
+  assert(formatted_terminal.ptr != NULL);
+  assert(bytes_contains(formatted_terminal.ptr,
+                        formatted_terminal.len,
+                        "\x1b]4;",
+                        4));
+  roastty_string_free(formatted_terminal);
+  roastty_formatter_free(formatter);
+  roastty_formatter_free(NULL);
 
   roastty_selection_gesture_t gesture = NULL;
   assert(roastty_selection_gesture_new(&gesture) == ROASTTY_SUCCESS);

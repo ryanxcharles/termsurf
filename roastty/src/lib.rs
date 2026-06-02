@@ -16,8 +16,8 @@ use terminal::selection_gesture::{
 use terminal::terminal::{
     Terminal as InnerTerminal, TerminalBellCallback, TerminalColorKind,
     TerminalColorSchemeCallback, TerminalDeviceAttributesCallback, TerminalEnquiryCallback,
-    TerminalGridRef, TerminalGridRefPointError, TerminalPointTag, TerminalScreen,
-    TerminalSelection, TerminalSelectionAdjustment, TerminalSelectionFormat,
+    TerminalFormatterExtra, TerminalGridRef, TerminalGridRefPointError, TerminalPointTag,
+    TerminalScreen, TerminalSelection, TerminalSelectionAdjustment, TerminalSelectionFormat,
     TerminalSelectionOrder, TerminalSizeCallback, TerminalStreamError,
     TerminalTitleChangedCallback, TerminalTrackedGridRef, TerminalWritePtyCallback,
     TerminalXtversionCallback,
@@ -37,6 +37,7 @@ mod terminal;
 //   they were returned by Roastty string-returning functions.
 pub type RoasttyApp = *mut c_void;
 pub type RoasttyConfig = *mut c_void;
+pub type RoasttyFormatter = *mut c_void;
 pub type RoasttyKeyEncoder = *mut c_void;
 pub type RoasttyKeyEvent = *mut c_void;
 pub type RoasttyMouseEncoder = *mut c_void;
@@ -125,6 +126,13 @@ const ROASTTY_SELECTION_FORMAT_PLAIN: c_int = 0;
 const ROASTTY_SELECTION_FORMAT_VT: c_int = 1;
 #[allow(dead_code)]
 const ROASTTY_SELECTION_FORMAT_HTML: c_int = 2;
+
+#[allow(dead_code)]
+const ROASTTY_FORMATTER_FORMAT_PLAIN: c_int = 0;
+#[allow(dead_code)]
+const ROASTTY_FORMATTER_FORMAT_VT: c_int = 1;
+#[allow(dead_code)]
+const ROASTTY_FORMATTER_FORMAT_HTML: c_int = 2;
 
 #[allow(dead_code)]
 const ROASTTY_SELECTION_ORDER_FORWARD: c_int = 0;
@@ -697,6 +705,42 @@ pub struct RoasttyTerminalSelectionFormatOptions {
     selection: *const RoasttySelection,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RoasttyFormatterScreenExtra {
+    size: usize,
+    cursor: bool,
+    style: bool,
+    hyperlink: bool,
+    protection: bool,
+    kitty_keyboard: bool,
+    charsets: bool,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RoasttyFormatterTerminalExtra {
+    size: usize,
+    palette: bool,
+    modes: bool,
+    scrolling_region: bool,
+    tabstops: bool,
+    pwd: bool,
+    keyboard: bool,
+    screen: RoasttyFormatterScreenExtra,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RoasttyFormatterTerminalOptions {
+    size: usize,
+    emit: c_int,
+    unwrap: bool,
+    trim: bool,
+    extra: RoasttyFormatterTerminalExtra,
+    selection: *const RoasttySelection,
+}
+
 struct SelectionGestureHandle {
     gesture: SelectionGesture,
 }
@@ -817,6 +861,15 @@ struct Terminal {
     tracked_grid_refs: Vec<NonNull<TrackedGridRefHandle>>,
 }
 
+struct FormatterHandle {
+    terminal: RoasttyTerminal,
+    format: TerminalSelectionFormat,
+    unwrap: bool,
+    trim: bool,
+    extra: TerminalFormatterExtra,
+    selection: Option<TerminalSelection>,
+}
+
 struct TrackedGridRefHandle {
     terminal: Option<NonNull<Terminal>>,
     terminal_handle: RoasttyTerminal,
@@ -891,6 +944,14 @@ fn terminal_from_handle<'a>(handle: RoasttyTerminal) -> Option<&'a mut Terminal>
         None
     } else {
         Some(unsafe { &mut *(handle.cast::<Terminal>()) })
+    }
+}
+
+fn formatter_from_handle<'a>(handle: RoasttyFormatter) -> Option<&'a mut FormatterHandle> {
+    if handle.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *(handle.cast::<FormatterHandle>()) })
     }
 }
 
@@ -2058,6 +2119,241 @@ fn read_codepoints(ptr: *const u32, len: usize) -> Result<Option<Vec<u32>>, c_in
 
 fn selection_format_from_raw(value: c_int) -> Result<TerminalSelectionFormat, c_int> {
     TerminalSelectionFormat::from_raw(value).ok_or(ROASTTY_INVALID_VALUE)
+}
+
+fn formatter_format_from_raw(value: c_int) -> Result<TerminalSelectionFormat, c_int> {
+    selection_format_from_raw(value)
+}
+
+fn sized_abi_size<T>(value: *const T) -> Result<usize, c_int> {
+    if value.is_null() {
+        return Err(ROASTTY_INVALID_VALUE);
+    }
+    let size = unsafe { value.cast::<usize>().read() };
+    if size < std::mem::size_of::<usize>() {
+        return Err(ROASTTY_INVALID_VALUE);
+    }
+    Ok(size)
+}
+
+const fn field_end<T, F>(field_offset: usize) -> usize {
+    field_offset + std::mem::size_of::<F>()
+}
+
+fn formatter_field_present<T, F>(provided_size: usize, field_offset: usize) -> bool {
+    provided_size >= field_end::<T, F>(field_offset)
+}
+
+fn formatter_nested_size_is_contained(
+    parent_size: usize,
+    field_offset: usize,
+    nested_size: usize,
+) -> bool {
+    field_offset
+        .checked_add(nested_size)
+        .is_some_and(|end| parent_size >= end)
+}
+
+fn read_formatter_screen_extra(
+    extra: *const RoasttyFormatterScreenExtra,
+) -> Result<(bool, bool, bool, bool, bool, bool), c_int> {
+    let size = sized_abi_size(extra)?;
+    let mut cursor = false;
+    let mut style = false;
+    let mut hyperlink = false;
+    let mut protection = false;
+    let mut kitty_keyboard = false;
+    let mut charsets = false;
+
+    unsafe {
+        if formatter_field_present::<RoasttyFormatterScreenExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterScreenExtra, cursor),
+        ) {
+            cursor = ptr::addr_of!((*extra).cursor).read();
+        }
+        if formatter_field_present::<RoasttyFormatterScreenExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterScreenExtra, style),
+        ) {
+            style = ptr::addr_of!((*extra).style).read();
+        }
+        if formatter_field_present::<RoasttyFormatterScreenExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterScreenExtra, hyperlink),
+        ) {
+            hyperlink = ptr::addr_of!((*extra).hyperlink).read();
+        }
+        if formatter_field_present::<RoasttyFormatterScreenExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterScreenExtra, protection),
+        ) {
+            protection = ptr::addr_of!((*extra).protection).read();
+        }
+        if formatter_field_present::<RoasttyFormatterScreenExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterScreenExtra, kitty_keyboard),
+        ) {
+            kitty_keyboard = ptr::addr_of!((*extra).kitty_keyboard).read();
+        }
+        if formatter_field_present::<RoasttyFormatterScreenExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterScreenExtra, charsets),
+        ) {
+            charsets = ptr::addr_of!((*extra).charsets).read();
+        }
+    }
+
+    Ok((
+        cursor,
+        style,
+        hyperlink,
+        protection,
+        kitty_keyboard,
+        charsets,
+    ))
+}
+
+fn read_formatter_terminal_extra(
+    extra: *const RoasttyFormatterTerminalExtra,
+) -> Result<TerminalFormatterExtra, c_int> {
+    let size = sized_abi_size(extra)?;
+    let mut result = TerminalFormatterExtra::none();
+
+    unsafe {
+        if formatter_field_present::<RoasttyFormatterTerminalExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalExtra, palette),
+        ) {
+            result = result.palette(ptr::addr_of!((*extra).palette).read());
+        }
+        if formatter_field_present::<RoasttyFormatterTerminalExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalExtra, modes),
+        ) {
+            result = result.modes(ptr::addr_of!((*extra).modes).read());
+        }
+        if formatter_field_present::<RoasttyFormatterTerminalExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalExtra, scrolling_region),
+        ) {
+            result = result.scrolling_region(ptr::addr_of!((*extra).scrolling_region).read());
+        }
+        if formatter_field_present::<RoasttyFormatterTerminalExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalExtra, tabstops),
+        ) {
+            result = result.tabstops(ptr::addr_of!((*extra).tabstops).read());
+        }
+        if formatter_field_present::<RoasttyFormatterTerminalExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalExtra, pwd),
+        ) {
+            result = result.pwd(ptr::addr_of!((*extra).pwd).read());
+        }
+        if formatter_field_present::<RoasttyFormatterTerminalExtra, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalExtra, keyboard),
+        ) {
+            result = result.keyboard(ptr::addr_of!((*extra).keyboard).read());
+        }
+        if formatter_field_present::<RoasttyFormatterTerminalExtra, usize>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalExtra, screen),
+        ) {
+            let screen_size = ptr::addr_of!((*extra).screen).cast::<usize>().read();
+            if screen_size < std::mem::size_of::<usize>()
+                || !formatter_nested_size_is_contained(
+                    size,
+                    std::mem::offset_of!(RoasttyFormatterTerminalExtra, screen),
+                    screen_size,
+                )
+            {
+                return Err(ROASTTY_INVALID_VALUE);
+            }
+            let (cursor, style, hyperlink, protection, kitty_keyboard, charsets) =
+                read_formatter_screen_extra(ptr::addr_of!((*extra).screen))?;
+            result = result.screen_extra(
+                cursor,
+                style,
+                hyperlink,
+                protection,
+                kitty_keyboard,
+                charsets,
+            );
+        }
+    }
+
+    Ok(result)
+}
+
+fn read_formatter_terminal_options(
+    options: *const RoasttyFormatterTerminalOptions,
+) -> Result<FormatterHandle, c_int> {
+    let size = sized_abi_size(options)?;
+    let mut emit = ROASTTY_FORMATTER_FORMAT_PLAIN;
+    let mut unwrap = false;
+    let mut trim = false;
+    let mut extra = TerminalFormatterExtra::none();
+    let mut selection_ptr = ptr::null();
+
+    unsafe {
+        if formatter_field_present::<RoasttyFormatterTerminalOptions, c_int>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalOptions, emit),
+        ) {
+            emit = ptr::addr_of!((*options).emit).read();
+        }
+        if formatter_field_present::<RoasttyFormatterTerminalOptions, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalOptions, unwrap),
+        ) {
+            unwrap = ptr::addr_of!((*options).unwrap).read();
+        }
+        if formatter_field_present::<RoasttyFormatterTerminalOptions, bool>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalOptions, trim),
+        ) {
+            trim = ptr::addr_of!((*options).trim).read();
+        }
+        if formatter_field_present::<RoasttyFormatterTerminalOptions, usize>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalOptions, extra),
+        ) {
+            let extra_size = ptr::addr_of!((*options).extra).cast::<usize>().read();
+            if extra_size < std::mem::size_of::<usize>()
+                || !formatter_nested_size_is_contained(
+                    size,
+                    std::mem::offset_of!(RoasttyFormatterTerminalOptions, extra),
+                    extra_size,
+                )
+            {
+                return Err(ROASTTY_INVALID_VALUE);
+            }
+            extra = read_formatter_terminal_extra(ptr::addr_of!((*options).extra))?;
+        }
+        if formatter_field_present::<RoasttyFormatterTerminalOptions, *const RoasttySelection>(
+            size,
+            std::mem::offset_of!(RoasttyFormatterTerminalOptions, selection),
+        ) {
+            selection_ptr = ptr::addr_of!((*options).selection).read();
+        }
+    }
+
+    let selection = if selection_ptr.is_null() {
+        None
+    } else {
+        Some(read_selection(selection_ptr)?)
+    };
+
+    Ok(FormatterHandle {
+        terminal: ptr::null_mut(),
+        format: formatter_format_from_raw(emit)?,
+        unwrap,
+        trim,
+        extra,
+        selection,
+    })
 }
 
 fn selection_order_from_raw(value: c_int) -> Result<TerminalSelectionOrder, c_int> {
@@ -4469,6 +4765,110 @@ pub extern "C" fn roastty_terminal_selection_format(
 }
 
 #[no_mangle]
+pub extern "C" fn roastty_formatter_terminal_new(
+    out: *mut RoasttyFormatter,
+    terminal: RoasttyTerminal,
+    options: RoasttyFormatterTerminalOptions,
+) -> c_int {
+    if !out.is_null() {
+        unsafe {
+            out.write(ptr::null_mut());
+        }
+    }
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    if terminal_from_handle(terminal).is_none() {
+        return ROASTTY_INVALID_VALUE;
+    }
+
+    let mut formatter = match read_formatter_terminal_options(&options) {
+        Ok(formatter) => formatter,
+        Err(error) => return error,
+    };
+    formatter.terminal = terminal;
+
+    let handle = Box::into_raw(Box::new(formatter)).cast::<c_void>();
+    unsafe {
+        out.write(handle);
+    }
+    ROASTTY_SUCCESS
+}
+
+fn formatter_format_text(formatter: RoasttyFormatter) -> Result<String, c_int> {
+    let Some(formatter) = formatter_from_handle(formatter) else {
+        return Err(ROASTTY_INVALID_VALUE);
+    };
+    let Some(terminal) = terminal_from_handle(formatter.terminal) else {
+        return Err(ROASTTY_INVALID_VALUE);
+    };
+    terminal
+        .terminal
+        .formatter_format(
+            formatter.format,
+            formatter.unwrap,
+            formatter.trim,
+            formatter.extra,
+            formatter.selection,
+        )
+        .map_err(grid_ref_error_result)
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_formatter_format_buf(
+    formatter: RoasttyFormatter,
+    out: *mut u8,
+    out_len: usize,
+    out_written: *mut usize,
+) -> c_int {
+    if out_written.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    let text = match formatter_format_text(formatter) {
+        Ok(text) => text,
+        Err(error) => return error,
+    };
+    let bytes = text.as_bytes();
+    unsafe {
+        out_written.write(bytes.len());
+    }
+    if (out.is_null() && !bytes.is_empty()) || out_len < bytes.len() {
+        return ROASTTY_OUT_OF_SPACE;
+    }
+    if !bytes.is_empty() {
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len());
+        }
+    }
+    ROASTTY_SUCCESS
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_formatter_format(
+    formatter: RoasttyFormatter,
+    out: *mut RoasttyString,
+) -> c_int {
+    write_empty_string(out);
+    if out.is_null() {
+        return ROASTTY_INVALID_VALUE;
+    }
+    let text = match formatter_format_text(formatter) {
+        Ok(text) => text,
+        Err(error) => return error,
+    };
+    write_copied_string(out, text.as_bytes())
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_formatter_free(formatter: RoasttyFormatter) {
+    if !formatter.is_null() {
+        unsafe {
+            drop(Box::from_raw(formatter.cast::<FormatterHandle>()));
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn roastty_selection_gesture_new(out: *mut RoasttySelectionGesture) -> c_int {
     if out.is_null() {
         return ROASTTY_INVALID_VALUE;
@@ -6015,6 +6415,46 @@ mod tests {
         let mut out = empty_string();
         assert_eq!(
             roastty_terminal_read_screen_plain(terminal, false, &mut out),
+            ROASTTY_SUCCESS
+        );
+        take_roastty_string(out)
+    }
+
+    fn formatter_options(emit: c_int) -> RoasttyFormatterTerminalOptions {
+        RoasttyFormatterTerminalOptions {
+            size: std::mem::size_of::<RoasttyFormatterTerminalOptions>(),
+            emit,
+            unwrap: true,
+            trim: true,
+            extra: RoasttyFormatterTerminalExtra {
+                size: std::mem::size_of::<RoasttyFormatterTerminalExtra>(),
+                screen: RoasttyFormatterScreenExtra {
+                    size: std::mem::size_of::<RoasttyFormatterScreenExtra>(),
+                    ..RoasttyFormatterScreenExtra::default()
+                },
+                ..RoasttyFormatterTerminalExtra::default()
+            },
+            selection: ptr::null(),
+        }
+    }
+
+    fn new_formatter(
+        terminal: RoasttyTerminal,
+        options: RoasttyFormatterTerminalOptions,
+    ) -> RoasttyFormatter {
+        let mut formatter = ptr::null_mut();
+        assert_eq!(
+            roastty_formatter_terminal_new(&mut formatter, terminal, options),
+            ROASTTY_SUCCESS
+        );
+        assert!(!formatter.is_null());
+        formatter
+    }
+
+    fn formatter_string(formatter: RoasttyFormatter) -> Vec<u8> {
+        let mut out = empty_string();
+        assert_eq!(
+            roastty_formatter_format(formatter, &mut out),
             ROASTTY_SUCCESS
         );
         take_roastty_string(out)
@@ -10582,6 +11022,43 @@ mod tests {
             std::mem::offset_of!(RoasttyTerminalSelectionFormatOptions, selection),
             16
         );
+
+        assert_eq!(ROASTTY_FORMATTER_FORMAT_PLAIN, 0);
+        assert_eq!(ROASTTY_FORMATTER_FORMAT_VT, 1);
+        assert_eq!(ROASTTY_FORMATTER_FORMAT_HTML, 2);
+        assert_eq!(std::mem::size_of::<RoasttyFormatterScreenExtra>(), 16);
+        assert_eq!(std::mem::align_of::<RoasttyFormatterScreenExtra>(), 8);
+        assert_eq!(std::mem::offset_of!(RoasttyFormatterScreenExtra, cursor), 8);
+        assert_eq!(
+            std::mem::offset_of!(RoasttyFormatterScreenExtra, charsets),
+            13
+        );
+        assert_eq!(std::mem::size_of::<RoasttyFormatterTerminalExtra>(), 32);
+        assert_eq!(
+            std::mem::offset_of!(RoasttyFormatterTerminalExtra, palette),
+            8
+        );
+        assert_eq!(
+            std::mem::offset_of!(RoasttyFormatterTerminalExtra, keyboard),
+            13
+        );
+        assert_eq!(
+            std::mem::offset_of!(RoasttyFormatterTerminalExtra, screen),
+            16
+        );
+        assert_eq!(std::mem::size_of::<RoasttyFormatterTerminalOptions>(), 56);
+        assert_eq!(
+            std::mem::offset_of!(RoasttyFormatterTerminalOptions, emit),
+            8
+        );
+        assert_eq!(
+            std::mem::offset_of!(RoasttyFormatterTerminalOptions, extra),
+            16
+        );
+        assert_eq!(
+            std::mem::offset_of!(RoasttyFormatterTerminalOptions, selection),
+            48
+        );
     }
 
     #[test]
@@ -10697,6 +11174,234 @@ mod tests {
             ROASTTY_NO_VALUE
         );
 
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn formatter_c_abi_validates_creation_inputs_and_sizes() {
+        let terminal = new_terminal(20, 2);
+        let options = formatter_options(ROASTTY_FORMATTER_FORMAT_PLAIN);
+        let mut formatter = ptr::dangling_mut();
+
+        assert_eq!(
+            roastty_formatter_terminal_new(ptr::null_mut(), terminal, options),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_formatter_terminal_new(&mut formatter, ptr::null_mut(), options),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(formatter.is_null());
+
+        let mut invalid_emit = options;
+        invalid_emit.emit = 99;
+        formatter = ptr::dangling_mut();
+        assert_eq!(
+            roastty_formatter_terminal_new(&mut formatter, terminal, invalid_emit),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(formatter.is_null());
+
+        let mut undersized_options = options;
+        undersized_options.size = std::mem::size_of::<usize>() - 1;
+        formatter = ptr::dangling_mut();
+        assert_eq!(
+            roastty_formatter_terminal_new(&mut formatter, terminal, undersized_options),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(formatter.is_null());
+
+        let mut undersized_extra = options;
+        undersized_extra.extra.size = std::mem::size_of::<usize>() - 1;
+        formatter = ptr::dangling_mut();
+        assert_eq!(
+            roastty_formatter_terminal_new(&mut formatter, terminal, undersized_extra),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(formatter.is_null());
+
+        let mut undersized_screen = options;
+        undersized_screen.extra.screen.size = std::mem::size_of::<usize>() - 1;
+        formatter = ptr::dangling_mut();
+        assert_eq!(
+            roastty_formatter_terminal_new(&mut formatter, terminal, undersized_screen),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(formatter.is_null());
+
+        let mut uncontained_extra = options;
+        uncontained_extra.size = std::mem::offset_of!(RoasttyFormatterTerminalOptions, extra)
+            + std::mem::size_of::<usize>();
+        uncontained_extra.extra.size = std::mem::size_of::<RoasttyFormatterTerminalExtra>();
+        formatter = ptr::dangling_mut();
+        assert_eq!(
+            roastty_formatter_terminal_new(&mut formatter, terminal, uncontained_extra),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(formatter.is_null());
+
+        let mut uncontained_screen = options;
+        uncontained_screen.extra.size = std::mem::offset_of!(RoasttyFormatterTerminalExtra, screen)
+            + std::mem::size_of::<usize>();
+        uncontained_screen.extra.screen.size = std::mem::size_of::<RoasttyFormatterScreenExtra>();
+        formatter = ptr::dangling_mut();
+        assert_eq!(
+            roastty_formatter_terminal_new(&mut formatter, terminal, uncontained_screen),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(formatter.is_null());
+
+        let mut size_only = options;
+        size_only.size = std::mem::size_of::<usize>();
+        formatter = ptr::null_mut();
+        assert_eq!(
+            roastty_formatter_terminal_new(&mut formatter, terminal, size_only),
+            ROASTTY_SUCCESS
+        );
+        assert!(!formatter.is_null());
+        roastty_formatter_free(formatter);
+
+        let mut partial_screen = options;
+        partial_screen.emit = ROASTTY_FORMATTER_FORMAT_VT;
+        partial_screen.extra.size = std::mem::offset_of!(RoasttyFormatterTerminalExtra, screen)
+            + std::mem::offset_of!(RoasttyFormatterScreenExtra, cursor)
+            + std::mem::size_of::<bool>();
+        partial_screen.extra.screen.size =
+            std::mem::offset_of!(RoasttyFormatterScreenExtra, cursor) + std::mem::size_of::<bool>();
+        partial_screen.extra.screen.cursor = true;
+        partial_screen.size = std::mem::offset_of!(RoasttyFormatterTerminalOptions, extra)
+            + partial_screen.extra.size;
+        formatter = ptr::null_mut();
+        assert_eq!(
+            roastty_formatter_terminal_new(&mut formatter, terminal, partial_screen),
+            ROASTTY_SUCCESS
+        );
+        assert!(!formatter.is_null());
+        let output = formatter_string(formatter);
+        let output = std::str::from_utf8(&output).unwrap();
+        assert!(output.ends_with('H'));
+        roastty_formatter_free(formatter);
+
+        roastty_formatter_free(ptr::null_mut());
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn formatter_c_abi_formats_plain_to_caller_buffer() {
+        let terminal = new_terminal(20, 2);
+        write_terminal(terminal, b"Hello");
+        let formatter = new_formatter(terminal, formatter_options(ROASTTY_FORMATTER_FORMAT_PLAIN));
+
+        let mut written = 999usize;
+        assert_eq!(
+            roastty_formatter_format_buf(ptr::null_mut(), ptr::null_mut(), 0, &mut written),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_formatter_format_buf(formatter, ptr::null_mut(), 0, ptr::null_mut()),
+            ROASTTY_INVALID_VALUE
+        );
+
+        assert_eq!(
+            roastty_formatter_format_buf(formatter, ptr::null_mut(), 0, &mut written),
+            ROASTTY_OUT_OF_SPACE
+        );
+        assert_eq!(written, 5);
+        assert_eq!(
+            roastty_formatter_format_buf(formatter, ptr::null_mut(), 99, &mut written),
+            ROASTTY_OUT_OF_SPACE
+        );
+        assert_eq!(written, 5);
+
+        let mut small = [0u8; 2];
+        assert_eq!(
+            roastty_formatter_format_buf(formatter, small.as_mut_ptr(), small.len(), &mut written),
+            ROASTTY_OUT_OF_SPACE
+        );
+        assert_eq!(written, 5);
+
+        let mut buf = [0u8; 16];
+        assert_eq!(
+            roastty_formatter_format_buf(formatter, buf.as_mut_ptr(), buf.len(), &mut written),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(&buf[..written], b"Hello");
+
+        roastty_formatter_free(formatter);
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn formatter_c_abi_formats_allocated_string_and_explicit_selection() {
+        let terminal = new_terminal(20, 2);
+        write_terminal(terminal, b"Hello World");
+        let selection = terminal_selection(terminal, (6, 0), (10, 0), false);
+        let mut options = formatter_options(ROASTTY_FORMATTER_FORMAT_PLAIN);
+        options.selection = &selection;
+        let formatter = new_formatter(terminal, options);
+
+        let mut out = empty_string();
+        assert_eq!(
+            roastty_formatter_format(ptr::null_mut(), &mut out),
+            ROASTTY_INVALID_VALUE
+        );
+        assert!(out.ptr.is_null());
+        assert_eq!(out.len, 0);
+        assert!(!out.sentinel);
+        assert_eq!(
+            roastty_formatter_format(formatter, ptr::null_mut()),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(formatter_string(formatter), b"World");
+
+        roastty_formatter_free(formatter);
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn formatter_c_abi_null_selection_formats_full_screen_not_active_selection() {
+        let terminal = new_terminal(20, 2);
+        write_terminal(terminal, b"Hello World");
+        let active = terminal_selection(terminal, (6, 0), (10, 0), false);
+        assert_eq!(
+            roastty_terminal_set(
+                terminal,
+                ROASTTY_TERMINAL_OPTION_SELECTION,
+                &active as *const _ as *const c_void
+            ),
+            ROASTTY_SUCCESS
+        );
+
+        let formatter = new_formatter(terminal, formatter_options(ROASTTY_FORMATTER_FORMAT_PLAIN));
+        assert_eq!(formatter_string(formatter), b"Hello World");
+
+        roastty_formatter_free(formatter);
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn formatter_c_abi_formats_vt_html_and_representative_extras() {
+        let terminal = new_terminal(20, 3);
+        write_terminal(terminal, b"<hi");
+
+        let html = new_formatter(terminal, formatter_options(ROASTTY_FORMATTER_FORMAT_HTML));
+        let html_output = formatter_string(html);
+        assert!(std::str::from_utf8(&html_output)
+            .unwrap()
+            .contains("&lt;hi"));
+        roastty_formatter_free(html);
+
+        let mut options = formatter_options(ROASTTY_FORMATTER_FORMAT_VT);
+        options.extra.palette = true;
+        options.extra.screen.cursor = true;
+        let vt = new_formatter(terminal, options);
+        let vt_output = formatter_string(vt);
+        let vt_output = std::str::from_utf8(&vt_output).unwrap();
+        assert!(vt_output.starts_with("\x1b]4;0;"));
+        assert!(vt_output.contains("<hi"));
+        assert!(vt_output.ends_with('H'));
+
+        roastty_formatter_free(vt);
         roastty_terminal_free(terminal);
     }
 

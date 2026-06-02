@@ -157,3 +157,48 @@ Roastty formatter implementation.
   Handles borrow a terminal by handle and format fresh snapshots on each call.
 - Do not skip Codex result review. If the result review finds a real gap, fix it
   and re-review before recording the result.
+
+## Result
+
+**Result:** Pass
+
+Implemented the terminal formatter C ABI with Roastty names:
+
+- `roastty_formatter_t`
+- `roastty_formatter_terminal_new`
+- `roastty_formatter_format_buf`
+- `roastty_formatter_format`
+- `roastty_formatter_free`
+
+The formatter handle stores the terminal handle, format mode, unwrap/trim flags,
+extra flags, and an optional copied selection. It does not store Rust references
+into terminal storage. Each format call resolves the terminal handle and formats
+a fresh snapshot through the existing terminal formatter path.
+
+The first Codex result review found one real blocker: nested sized structs were
+not yet proven safe because a parent struct size could cover only a nested
+`size` field while the nested struct claimed more fields than the parent
+covered. The implementation was corrected to reject uncontained nested `extra`
+and `screen` sizes, and tests were added for uncontained nested structs plus a
+partial-but-contained screen cursor extra.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/terminal/terminal.rs
+cargo test -p roastty formatter_c_abi
+cargo test -p roastty c_harness_links_against_roastty_header_and_roastty_dylib
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Codex re-reviewed the fixed implementation and found no remaining blockers.
+
+## Conclusion
+
+Roastty now exposes the formatter ABI needed by C callers for full-terminal
+plain, VT, and HTML formatting, including caller-buffer formatting,
+`roastty_string_s` allocation, explicit selection-restricted formatting, and
+representative terminal/screen extras. The next experiment can continue with the
+remaining public C ABI gaps rather than revisiting formatter internals.
