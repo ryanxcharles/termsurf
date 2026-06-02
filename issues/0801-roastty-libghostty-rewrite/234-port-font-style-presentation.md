@@ -125,3 +125,67 @@ discriminants is the right Rust shape for the `u3`/`u1` encodings, that placing
 them in `font/mod.rs` mirrors upstream `main.zig`, that omitting `Default` is
 faithful, that the `U+FE0F` comment correction is documentation-only, and that
 the two discriminant tests are adequate. No changes required.
+
+## Result
+
+**Result:** Pass
+
+Added
+`pub(crate) enum Style { Regular = 0, Bold = 1, Italic = 2, BoldItalic = 3 }`
+and `pub(crate) enum Presentation { Text = 0, Emoji = 1 }` to
+`roastty/src/font/mod.rs`, both `#[repr(u8)]` deriving
+`Debug, Clone, Copy, PartialEq, Eq`, with the upstream doc comments and the
+`U+FE0F` correction. No `Default` (faithful to upstream).
+
+Tests added (2): `style_discriminants` (0/1/2/3) and
+`presentation_discriminants` (0/1), proving the explicit discriminants are
+preserved.
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty font
+cargo test -p roastty
+```
+
+Observed:
+
+- `font`: 4 passed (2 from Exp 233 + 2 new).
+- Full `roastty`: 2280 unit tests passed (2278 prior + 2 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/font` and for
+  `roastty/src/lib.rs`, `roastty/include/roastty.h`,
+  `roastty/tests/abi_harness.c`.
+- `git diff --check`: clean.
+
+No C ABI, header, or ABI inventory changes; no face/collection/shaping scope
+pulled in.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** ("nothing
+needs to change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-081657-905832-prompt.md`
+- Result: `logs/codex-review/20260602-081657-905832-last-message.md`
+
+Codex confirmed the implementation matches upstream (`Style` 0–3, `Presentation`
+0–1), that `#[repr(u8)]` correctly preserves the `u3`/`u1` encodings, that the
+derives and tests are appropriate, and that visibility is internal with no ABI
+exposure.
+
+## Conclusion
+
+Experiment 234 succeeds. The font module now has the `Style` and `Presentation`
+enums — foundational types the face/collection/resolver/shaping layers key off.
+Both Codex gates passed with zero findings.
+
+Next font slices continue building the foundation: the `font/Metrics` value type
+and its cell-size/constraint math (the next substantial, splittable file), the
+glyph `Atlas`, and eventually the CoreText face/rasterization. `Style` and
+`Presentation` feed directly into the face/collection lookups those slices add.
