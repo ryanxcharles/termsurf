@@ -184,8 +184,56 @@ All public names must use Roastty naming.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Experiment 211 added the internal Metal vertex descriptor value layer. The
+implementation:
+
+- added `MetalVertexFormat` and `MetalVertexStepFunction` raw-value enums for
+  the subset used by upstream `Pipeline.zig`;
+- added tests proving the raw values match upstream/Metal values;
+- added internal `renderer::metal::pipeline` value types:
+  `MetalVertexAttribute`, `MetalVertexLayout`, and `MetalVertexDescriptor`;
+- added the `MetalVertexInput` trait;
+- implemented `MetalVertexInput` for `ImageVertex`;
+- mapped `ImageVertex` fields with structured `std::mem::offset_of!` offsets,
+  buffer index `0`, `Float2`/`Float4` formats, `size_of::<ImageVertex>()`
+  stride, and caller-provided step function;
+- kept the implementation value-only: no Objective-C `MTLVertexDescriptor`,
+  `MTLRenderPipelineDescriptor`, shader library, or pipeline state is created.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/renderer/metal/api.rs roastty/src/renderer/metal/mod.rs roastty/src/renderer/metal/pipeline.rs roastty/src/renderer/shader.rs
+cargo test -p roastty renderer::metal::pipeline
+cargo test -p roastty renderer::metal::api
+cargo test -p roastty renderer::shader
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Observed results:
+
+- `cargo test -p roastty renderer::metal::pipeline`: 2 passed.
+- `cargo test -p roastty renderer::metal::api`: 9 passed.
+- `cargo test -p roastty renderer::shader`: 1 passed.
+- `cargo test -p roastty`: 2140 library tests plus 1 ABI harness test passed.
+- The public no-`ghostty` gate and `git diff --check` both exited 0.
+
+Codex result review approved the experiment as Pass. Its only note was to ensure
+the new `roastty/src/renderer/metal/pipeline.rs` file is included in the result
+commit.
 
 ## Conclusion
 
-Pending.
+Roastty now has the value-level vertex descriptor mapping needed before real
+Metal pipeline creation. The image shader input layout, field formats, offsets,
+buffer index, stride, and step function are all represented and tested without
+pulling in shader library or pipeline-state work prematurely.
+
+The next experiment can move from descriptor values toward the real
+Objective-C-backed pipeline wrapper, or it can first port the small remaining
+pipeline value pieces such as color attachment blend configuration if that keeps
+the next slice easier to verify.

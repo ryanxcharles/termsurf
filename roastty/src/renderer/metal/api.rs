@@ -116,6 +116,43 @@ impl MetalTextureUsage {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u64)]
+pub(crate) enum MetalVertexFormat {
+    UChar4 = 3,
+    Short2 = 16,
+    UShort2 = 13,
+    Float = 28,
+    Float2 = 29,
+    Float4 = 31,
+    Int = 32,
+    Int2 = 33,
+    UInt = 36,
+    UInt2 = 37,
+    UInt4 = 39,
+    UChar = 45,
+    Char = 46,
+}
+
+impl MetalVertexFormat {
+    pub(crate) fn raw(self) -> u64 {
+        self as u64
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u64)]
+pub(crate) enum MetalVertexStepFunction {
+    PerVertex = 1,
+    PerInstance = 2,
+}
+
+impl MetalVertexStepFunction {
+    pub(crate) fn raw(self) -> u64 {
+        self as u64
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,5 +292,28 @@ mod tests {
         assert_eq!(MetalPixelFormat::Rgba8UnormSrgb.bytes_per_pixel(), Some(4));
         assert_eq!(MetalPixelFormat::Bgra8Unorm.bytes_per_pixel(), Some(4));
         assert_eq!(MetalPixelFormat::Bgra8UnormSrgb.bytes_per_pixel(), Some(4));
+    }
+
+    #[test]
+    fn metal_vertex_format_raw_values_match_upstream_subset() {
+        assert_eq!(MetalVertexFormat::UChar4.raw(), 3);
+        assert_eq!(MetalVertexFormat::UShort2.raw(), 13);
+        assert_eq!(MetalVertexFormat::Short2.raw(), 16);
+        assert_eq!(MetalVertexFormat::Float.raw(), 28);
+        assert_eq!(MetalVertexFormat::Float2.raw(), 29);
+        assert_eq!(MetalVertexFormat::Float4.raw(), 31);
+        assert_eq!(MetalVertexFormat::Int.raw(), 32);
+        assert_eq!(MetalVertexFormat::Int2.raw(), 33);
+        assert_eq!(MetalVertexFormat::UInt.raw(), 36);
+        assert_eq!(MetalVertexFormat::UInt2.raw(), 37);
+        assert_eq!(MetalVertexFormat::UInt4.raw(), 39);
+        assert_eq!(MetalVertexFormat::UChar.raw(), 45);
+        assert_eq!(MetalVertexFormat::Char.raw(), 46);
+    }
+
+    #[test]
+    fn metal_vertex_step_function_raw_values_match_upstream_subset() {
+        assert_eq!(MetalVertexStepFunction::PerVertex.raw(), 1);
+        assert_eq!(MetalVertexStepFunction::PerInstance.raw(), 2);
     }
 }

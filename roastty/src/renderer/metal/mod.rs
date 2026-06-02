@@ -3,4 +3,5 @@
 
 pub(crate) mod api;
 pub(crate) mod buffer;
+pub(crate) mod pipeline;
 pub(crate) mod texture;
