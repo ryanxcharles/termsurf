@@ -711,7 +711,7 @@ are past the correctness-critical foundation.
 - [Experiment 243: Port the Atlas core (skyline packing: `reserve`/`fit`/`merge`/`set`)](243-port-atlas-core.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 244: Port Atlas `grow`, `set_from_larger`, and `dump`](244-port-atlas-grow.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

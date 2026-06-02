@@ -225,3 +225,86 @@ Two findings, both fixed in the design above before this commit:
    `self.data`/`self.size`) before panicking on a later slice. Upstream asserts
    up-front. Fixed to `assert!` placed before any state change, so a misuse
    panics with the atlas intact.
+
+## Result
+
+**Result:** Pass
+
+Added `set_from_larger`, `grow`, and `dump` to `impl Atlas` in
+`roastty/src/font/atlas.rs`, and updated the module doc to note the atlas's full
+public surface is ported (minus WASM). `grow` asserts up-front
+(`assert!(size_new >= self.size)`), no-ops on equal size, swaps in a new zeroed
+`Vec` via `std::mem::replace`, copies the interior rows back through `set`
+(`Region { x: 0, y: 1, width: size_old, height: size_old - 2 }` from
+`&data_old[size_old * depth..]`), appends the right-hand node, and bumps
+`modified` and `resized`. `set_from_larger` mirrors `set` with the
+`src_width`/`src_x`/`src_y` source stride. `dump` writes `P5`/`P6` (via a `char`
+magic, so the header is `P5` not `P53`), `{size} {size}\n255\n`, then the raw
+data; `Bgra` panics.
+
+Tests added (4): `writing_data_from_larger_source`, `grow_preserves_data`,
+`grow_bgr` (the three ported upstream tests), and `dump_grayscale_header` (a
+Rust-side equivalent, since upstream has no `dump` test). The
+`grow OOM`/`grow error` upstream tests are not ported (infallible `Vec`
+allocation, per the Faithfulness notes).
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty atlas
+cargo test -p roastty
+```
+
+Observed:
+
+- `atlas`: 10 passed (6 prior + 4 new).
+- Full `roastty`: 2328 unit tests passed (2324 prior + 4 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/font` and for
+  `roastty/src/lib.rs`, `roastty/include/roastty.h`,
+  `roastty/tests/abi_harness.c`.
+- `git diff --check`: clean.
+
+The `grow` data-copy offsets reproduced exactly (grayscale `5/6/9/10` before
+grow and `size+1/size+2/size*2+1/size*2+2` after; BGR top-left/next-row offsets
+and the border zero, before and after grow). No C ABI, header, or ABI inventory
+changes. `Atlas.zig` is now fully ported except the WASM bindings.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** ("nothing
+needs to change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-092617-775920-prompt.md`
+- Result: `logs/codex-review/20260602-092617-775920-last-message.md`
+
+Codex confirmed the design-gate fixes are correctly implemented (`grow`'s
+up-front `assert!` before mutation, `dump`'s `char` magic so the header is
+`P5`/`P6`), that `grow` matches upstream (no-op on equal size, non-aliasing
+`mem::replace`, interior-row copy through `set`, right-hand node appended, both
+`modified` and `resized` bumped), that `set_from_larger` uses the correct
+source/texture offsets and bumps `modified`, and that the four tests cover the
+expected upstream values and the Rust `dump` equivalent.
+
+## Conclusion
+
+Experiment 244 succeeds, completing the texture `Atlas` port. `grow`,
+`set_from_larger`, and `dump` are in place atop the Exp 243 core, so `Atlas.zig`
+is fully reproduced (minus the out-of-scope WASM bindings), with all of its
+non-OOM tests ported. Both Codex gates passed (two design findings fixed — the
+`dump` character-format bug and the `grow` always-on assert; zero result
+findings).
+
+With the atlas done, the font layer's remaining work is the face/rasterization
+path: the CoreText `Face` that produces a glyph bitmap and the `FaceMetrics`
+feeding `Metrics::calc`, the `Glyph`/atlas write that rasterization performs,
+and above them the `Collection`/`SharedGrid` glyph cache. The next experiment
+will port the smallest coherent next type there — likely the `FaceMetrics`
+source side of the CoreText face (the metrics extraction that the already-ported
+`Metrics::calc` consumes) or the glyph-rasterization result type — keeping the
+same one-surface, predictable-tests sizing.

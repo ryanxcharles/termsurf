@@ -9,9 +9,9 @@
 //! custom strides), and the texture is always square (regions written into it
 //! need not be).
 //!
-//! This slice ports the allocation core (`new`/`clear`, `reserve` with `fit`
-//! and `merge`, and `set`). `grow`, `set_from_larger`, and `dump` land in a
-//! later experiment; the WASM bindings are out of scope (macOS-only).
+//! The full public surface is ported (`new`/`clear`, `reserve` with `fit` and
+//! `merge`, `set`, `set_from_larger`, `grow`, and `dump`); only the WASM
+//! bindings are out of scope (macOS-only).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -278,6 +278,100 @@ impl Atlas {
         self.modified.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Like [`set`](Self::set), but the source has its own row stride
+    /// (`src_width`) and an `(src_x, src_y)` offset, so a sub-rectangle of a
+    /// larger buffer can be copied into the region.
+    pub(crate) fn set_from_larger(
+        &mut self,
+        reg: Region,
+        src: &[u8],
+        src_width: u32,
+        src_x: u32,
+        src_y: u32,
+    ) {
+        debug_assert!(reg.x < (self.size - 1));
+        debug_assert!((reg.x + reg.width) <= (self.size - 1));
+        debug_assert!(reg.y < (self.size - 1));
+        debug_assert!((reg.y + reg.height) <= (self.size - 1));
+
+        let depth = self.format.depth() as usize;
+        let size = self.size as usize;
+        let rx = reg.x as usize;
+        let ry = reg.y as usize;
+        let sw = src_width as usize;
+        let sx = src_x as usize;
+        let sy = src_y as usize;
+        let row = reg.width as usize * depth;
+        for i in 0..reg.height as usize {
+            let tex_offset = ((ry + i) * size + rx) * depth;
+            let src_offset = ((sy + i) * sw + sx) * depth;
+            self.data[tex_offset..tex_offset + row]
+                .copy_from_slice(&src[src_offset..src_offset + row]);
+        }
+
+        self.modified.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Grow the texture to `size_new` × `size_new`, preserving all previously
+    /// written data. `size_new` must not be smaller than the current size.
+    ///
+    /// Infallible in Rust (`Vec` allocation aborts on OOM), so unlike upstream
+    /// `grow` this returns nothing.
+    pub(crate) fn grow(&mut self, size_new: u32) {
+        assert!(size_new >= self.size);
+        if size_new == self.size {
+            return;
+        }
+
+        let depth = self.format.depth() as usize;
+        let size_old = self.size;
+
+        // Swap in the new (already-zeroed) buffer and keep the old one to copy
+        // from. `data_old` is a separate binding, so it does not alias `self`.
+        let data_old = std::mem::replace(
+            &mut self.data,
+            vec![0u8; size_new as usize * size_new as usize * depth],
+        );
+        self.size = size_new;
+
+        // Copy the old data over. We take the full old width starting at x = 0
+        // (no border skip) so we can avoid strides, skipping the first and last
+        // border rows.
+        self.set(
+            Region {
+                x: 0,
+                y: 1,
+                width: size_old,
+                height: size_old - 2,
+            },
+            &data_old[size_old as usize * depth..],
+        );
+
+        // Add the new rectangle for the added right-hand space.
+        self.nodes.push(Node {
+            x: size_old - 1,
+            y: 1,
+            width: size_new - size_old,
+        });
+
+        // We are both modified and resized.
+        self.modified.fetch_add(1, Ordering::Relaxed);
+        self.resized.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Dump the atlas as a PPM to a writer, for debugging. Only grayscale and
+    /// BGR are supported (BGR is written as-is, so red/blue are swapped versus
+    /// true RGB — a debug-only wart). Panics on any other format.
+    pub(crate) fn dump<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+        let magic = match self.format {
+            Format::Grayscale => '5',
+            Format::Bgr => '6',
+            Format::Bgra => panic!("cannot dump this atlas format: {:?}", self.format),
+        };
+        write!(w, "P{}\n{} {}\n255\n", magic, self.size, self.size)?;
+        w.write_all(&self.data)
+    }
+
     /// Reset the atlas: zero the data and re-seed the single full-texture node
     /// inside the 1px border.
     pub(crate) fn clear(&mut self) {
@@ -366,5 +460,143 @@ mod tests {
         assert_eq!(atlas.data[65 * depth], 4);
         assert_eq!(atlas.data[65 * depth + 1], 5);
         assert_eq!(atlas.data[65 * depth + 2], 6);
+    }
+
+    #[test]
+    fn writing_data_from_larger_source() {
+        let mut atlas = Atlas::new(32, Format::Grayscale);
+        let reg = atlas.reserve(2, 2).unwrap();
+        let old = atlas.modified();
+        #[rustfmt::skip]
+        atlas.set_from_larger(
+            reg,
+            &[
+                8, 8, 8, 8, 8,
+                8, 8, 1, 2, 8,
+                8, 8, 3, 4, 8,
+                8, 8, 8, 8, 8,
+            ],
+            5,
+            2,
+            1,
+        );
+        assert!(atlas.modified() > old);
+
+        // 33 because of the 1px border and so on.
+        assert_eq!(atlas.data[33], 1);
+        assert_eq!(atlas.data[34], 2);
+        assert_eq!(atlas.data[65], 3);
+        assert_eq!(atlas.data[66], 4);
+
+        // None of the `8`s outside the specified region should reach the atlas.
+        assert!(!atlas.data.contains(&8));
+    }
+
+    #[test]
+    fn grow_preserves_data() {
+        let mut atlas = Atlas::new(4, Format::Grayscale); // +2 for 1px border
+        let reg = atlas.reserve(2, 2).unwrap();
+        assert_eq!(atlas.reserve(1, 1), Err(AtlasError::AtlasFull));
+
+        // Write data so we can verify that growing doesn't mess it up.
+        atlas.set(reg, &[1, 2, 3, 4]);
+        assert_eq!(atlas.data[5], 1);
+        assert_eq!(atlas.data[6], 2);
+        assert_eq!(atlas.data[9], 3);
+        assert_eq!(atlas.data[10], 4);
+
+        // Expanding by exactly 1 should fit our new 1x1 block.
+        let old_modified = atlas.modified();
+        let old_resized = atlas.resized();
+        atlas.grow(atlas.size + 1);
+        assert!(atlas.modified() > old_modified);
+        assert!(atlas.resized() > old_resized);
+        atlas.reserve(1, 1).unwrap();
+
+        // Data should still be set; offsets change due to the new size.
+        let size = atlas.size as usize;
+        assert_eq!(atlas.data[size + 1], 1);
+        assert_eq!(atlas.data[size + 2], 2);
+        assert_eq!(atlas.data[size * 2 + 1], 3);
+        assert_eq!(atlas.data[size * 2 + 2], 4);
+    }
+
+    #[test]
+    fn grow_bgr() {
+        // 4x4 with a 1px border leaves only 2x2 usable.
+        let mut atlas = Atlas::new(4, Format::Bgr);
+
+        // Get our 2x2, which is ALL the usable space.
+        let reg = atlas.reserve(2, 2).unwrap();
+        assert_eq!(atlas.reserve(1, 1), Err(AtlasError::AtlasFull));
+
+        // BGR is 3 bytes per pixel.
+        #[rustfmt::skip]
+        atlas.set(reg, &[
+            10, 11, 12, // (0, 0) from top-left
+            13, 14, 15, // (1, 0)
+            20, 21, 22, // (0, 1)
+            23, 24, 25, // (1, 1)
+        ]);
+
+        // Top-left skips the first row (size * depth) and first column (depth).
+        let depth = atlas.format.depth() as usize;
+        let mut tl = (atlas.size as usize * depth) + depth;
+        assert_eq!(atlas.data[tl], 10);
+        assert_eq!(atlas.data[tl + 1], 11);
+        assert_eq!(atlas.data[tl + 2], 12);
+        assert_eq!(atlas.data[tl + 3], 13);
+        assert_eq!(atlas.data[tl + 4], 14);
+        assert_eq!(atlas.data[tl + 5], 15);
+        assert_eq!(atlas.data[tl + 6], 0); // border
+
+        tl += atlas.size as usize * depth; // next row
+        assert_eq!(atlas.data[tl], 20);
+        assert_eq!(atlas.data[tl + 1], 21);
+        assert_eq!(atlas.data[tl + 2], 22);
+        assert_eq!(atlas.data[tl + 3], 23);
+        assert_eq!(atlas.data[tl + 4], 24);
+        assert_eq!(atlas.data[tl + 5], 25);
+        assert_eq!(atlas.data[tl + 6], 0); // border
+
+        // Expanding by exactly 1 should fit the new 1x1 block.
+        atlas.grow(atlas.size + 1);
+
+        // Data should be in the same place accounting for the new size.
+        tl = (atlas.size as usize * depth) + depth;
+        assert_eq!(atlas.data[tl], 10);
+        assert_eq!(atlas.data[tl + 1], 11);
+        assert_eq!(atlas.data[tl + 2], 12);
+        assert_eq!(atlas.data[tl + 3], 13);
+        assert_eq!(atlas.data[tl + 4], 14);
+        assert_eq!(atlas.data[tl + 5], 15);
+        assert_eq!(atlas.data[tl + 6], 0); // border
+
+        tl += atlas.size as usize * depth; // next row
+        assert_eq!(atlas.data[tl], 20);
+        assert_eq!(atlas.data[tl + 1], 21);
+        assert_eq!(atlas.data[tl + 2], 22);
+        assert_eq!(atlas.data[tl + 3], 23);
+        assert_eq!(atlas.data[tl + 4], 24);
+        assert_eq!(atlas.data[tl + 5], 25);
+        assert_eq!(atlas.data[tl + 6], 0); // border
+
+        // Should fit the new blocks around the edges.
+        atlas.reserve(1, 3).unwrap();
+        atlas.reserve(2, 1).unwrap();
+        assert_eq!(atlas.reserve(1, 1), Err(AtlasError::AtlasFull));
+    }
+
+    #[test]
+    fn dump_grayscale_header() {
+        let atlas = Atlas::new(4, Format::Grayscale);
+        let mut buf: Vec<u8> = Vec::new();
+        atlas.dump(&mut buf).unwrap();
+
+        let header = b"P5\n4 4\n255\n";
+        assert_eq!(&buf[..header.len()], header);
+        // The remainder is the raw texture data (4*4*1 bytes).
+        assert_eq!(&buf[header.len()..], &atlas.data[..]);
+        assert_eq!(buf.len(), header.len() + 4 * 4);
     }
 }
