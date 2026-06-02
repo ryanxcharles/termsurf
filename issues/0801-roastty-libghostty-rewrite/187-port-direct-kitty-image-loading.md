@@ -142,3 +142,55 @@ added by accident.
 - Do not skip Codex design review. If the design review finds a real issue, fix
   it and re-review before committing this experiment design.
 - Do not skip Codex result review after implementation.
+
+## Result
+
+**Result:** Pass
+
+The experiment added direct Kitty graphics image loading in
+`roastty/src/terminal/kitty/graphics_image.rs`, wired it from
+`roastty/src/terminal/kitty/mod.rs`, and added the command helpers needed by
+image loading in `graphics_command.rs`.
+
+The implementation includes:
+
+- internal `Image`, `LoadingImage`, `LoadingImageLimits`, and image-loading
+  error types;
+- upstream constants for maximum dimensions and maximum image byte size;
+- direct-medium initialization and chunk accumulation;
+- bounded zlib decompression via `flate2`;
+- dimension validation;
+- final byte-length validation using bytes-per-pixel helpers;
+- metadata-only `Image::without_data()` without cloning image payload bytes.
+
+The experiment intentionally did not add PNG decoding, file/temp/shared-memory
+reads, image storage, placement tracking, terminal APC execution, rendering, or
+public Kitty graphics C ABI.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/terminal/kitty/mod.rs roastty/src/terminal/kitty/graphics_command.rs roastty/src/terminal/kitty/graphics_image.rs
+cargo test -p roastty kitty_graphics_image
+cargo test -p roastty kitty_graphics_command
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+The full `roastty` suite passed with 1923 Rust tests plus the C harness.
+
+Codex result review found one real issue: `Image::without_data()` initially
+cloned the full image payload before clearing it, which could copy up to the
+400MB image limit for a logging-style metadata helper. The implementation was
+fixed to construct the metadata-only image field-by-field with an empty `Vec`,
+`Clone` derives were removed from `Image` and `LoadingImage`, and a regression
+test was added. A follow-up Codex review found no blocking issues.
+
+## Conclusion
+
+Roastty now has the direct image-loading foundation needed by later Kitty
+graphics execution and storage experiments. Parsed transmit commands can become
+validated `Image` values for direct RGB/RGBA-style payloads, including chunked
+zlib-compressed data, while the OS-facing and renderer-facing parts of Kitty
+graphics remain deliberately deferred.

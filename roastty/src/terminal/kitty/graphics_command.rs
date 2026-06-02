@@ -325,6 +325,46 @@ impl<'a> Default for Response<'a> {
     }
 }
 
+impl Command {
+    pub(crate) fn transmission(&self) -> Option<Transmission> {
+        match &self.control {
+            CommandControl::Query(transmission)
+            | CommandControl::Transmit(transmission)
+            | CommandControl::TransmitAndDisplay { transmission, .. } => Some(*transmission),
+            CommandControl::Display(_)
+            | CommandControl::Delete(_)
+            | CommandControl::TransmitAnimationFrame(_)
+            | CommandControl::ControlAnimation(_)
+            | CommandControl::ComposeAnimation(_) => None,
+        }
+    }
+
+    pub(crate) fn display(&self) -> Option<Display> {
+        match &self.control {
+            CommandControl::Display(display)
+            | CommandControl::TransmitAndDisplay { display, .. } => Some(*display),
+            CommandControl::Query(_)
+            | CommandControl::Transmit(_)
+            | CommandControl::Delete(_)
+            | CommandControl::TransmitAnimationFrame(_)
+            | CommandControl::ControlAnimation(_)
+            | CommandControl::ComposeAnimation(_) => None,
+        }
+    }
+}
+
+impl TransmissionFormat {
+    pub(crate) const fn bytes_per_pixel(self) -> Option<usize> {
+        match self {
+            Self::Gray => Some(1),
+            Self::GrayAlpha => Some(2),
+            Self::Rgb => Some(3),
+            Self::Rgba => Some(4),
+            Self::Png => None,
+        }
+    }
+}
+
 impl Parser {
     pub(crate) fn new(max_bytes: usize) -> Self {
         Self {

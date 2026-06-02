@@ -8,4 +8,5 @@ name = "roastty"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
+flate2 = "1.1.9"
 libc = "0.2"

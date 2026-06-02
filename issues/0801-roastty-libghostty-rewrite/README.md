@@ -499,7 +499,7 @@ tests, choose the larger subsystem.
 - [Experiment 186: Port Kitty Graphics Command Parser](186-port-kitty-graphics-command-parser.md)
   — **Pass**
 - [Experiment 187: Port Direct Kitty Image Loading](187-port-direct-kitty-image-loading.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 

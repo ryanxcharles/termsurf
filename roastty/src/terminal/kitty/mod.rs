@@ -1,6 +1,7 @@
 //! Kitty protocol state.
 
 pub(crate) mod graphics_command;
+pub(crate) mod graphics_image;
 
 use super::color;
 
