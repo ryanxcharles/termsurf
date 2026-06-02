@@ -546,6 +546,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 210: Port Metal Buffer Wrapper](210-port-metal-buffer-wrapper.md)
   — **Pass**
+- [Experiment 211: Port Metal Vertex Descriptor Mapping](211-port-metal-vertex-descriptor-mapping.md)
+  — **Designed**
 
 ## Non-Goals
 
