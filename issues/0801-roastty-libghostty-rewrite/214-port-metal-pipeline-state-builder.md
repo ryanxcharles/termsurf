@@ -218,8 +218,71 @@ All public names must use Roastty naming.
 
 ## Result
 
-Not run yet.
+**Result:** Pass
+
+Experiment 214 added the first real Metal pipeline-state builder for Roastty.
+
+The implementation added:
+
+- narrow `objc2-foundation` and `objc2-metal` feature additions for Foundation
+  strings/errors, Metal libraries, render pipelines, and vertex descriptors;
+- Objective-C conversion methods for `MetalVertexFormat`,
+  `MetalVertexStepFunction`, `MetalBlendFactor`, and `MetalBlendOperation`;
+- `build_metal_vertex_descriptor(...)`;
+- `apply_pipeline_attachment_descriptor(...)`;
+- `MetalPipelineOptions`;
+- `MetalPipelineError`;
+- `MetalPipeline`, which creates and retains a real `MTLRenderPipelineState`.
+
+The live tests compile a small test-only Metal shader source with
+`newLibraryWithSource_options_error(...)`. They prove:
+
+- Objective-C vertex descriptor read-back matches the tested Rust descriptor
+  values;
+- enabled and disabled color attachment descriptor read-back matches the tested
+  attachment/blend values;
+- a live pipeline can be created for `bg_color`, which has no vertex descriptor;
+- a live pipeline can be created for `image`, which has a vertex descriptor;
+- missing vertex and fragment functions return explicit errors;
+- when both shader functions resolve but the shader interface is incompatible
+  with the descriptor, pipeline creation returns `PipelineCreationFailed(...)`
+  with a non-empty message.
+
+The first attempt to test the `PipelineCreationFailed(...)` path used
+`MetalPixelFormat::Invalid`, as suggested by the design. Metal accepted that
+case on this device, so the final test uses the deterministic incompatible
+shader-interface case instead.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/renderer/metal/api.rs roastty/src/renderer/metal/pipeline.rs
+cargo test -p roastty renderer::metal::api
+cargo test -p roastty renderer::metal::pipeline
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Observed test results:
+
+- `cargo test -p roastty renderer::metal::api`: 15 passed, 0 failed;
+- `cargo test -p roastty renderer::metal::pipeline`: 17 passed, 0 failed;
+- `cargo test -p roastty`: 2170 library tests passed, 1 ABI harness test passed,
+  0 doc tests.
+
+Codex reviewed the implementation result and reported no blocking findings. The
+review explicitly approved recording Experiment 214 as Pass.
 
 ## Conclusion
 
-Pending.
+Roastty can now turn the tested Metal pipeline values into real Objective-C
+Metal descriptors and create live `MTLRenderPipelineState` objects. This is the
+first renderer step that crosses from value modeling into real Metal runtime
+objects.
+
+The production shader collection is still not ported. The next renderer slice
+should build on this by introducing the shader-library layer: either compile or
+embed Roastty's production Metal shader source, initialize all standard
+pipelines from `STANDARD_PIPELINE_DESCRIPTIONS`, and preserve the same tested
+error/cleanup discipline.

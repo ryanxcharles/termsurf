@@ -12,14 +12,19 @@ flate2 = "1.1.9"
 libc = "0.2"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = [
+    "NSError",
     "NSRange",
+    "NSString",
 ] }
 objc2-metal = { version = "0.3", default-features = false, features = [
     "MTLAllocation",
     "MTLBuffer",
     "MTLDevice",
+    "MTLLibrary",
     "MTLPixelFormat",
+    "MTLRenderPipeline",
     "MTLResource",
     "MTLTexture",
     "MTLTypes",
+    "MTLVertexDescriptor",
 ] }

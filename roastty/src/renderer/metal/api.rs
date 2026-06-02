@@ -138,6 +138,24 @@ impl MetalVertexFormat {
     pub(crate) fn raw(self) -> u64 {
         self as u64
     }
+
+    pub(crate) fn to_objc(self) -> objc2_metal::MTLVertexFormat {
+        match self {
+            MetalVertexFormat::UChar4 => objc2_metal::MTLVertexFormat::UChar4,
+            MetalVertexFormat::Short2 => objc2_metal::MTLVertexFormat::Short2,
+            MetalVertexFormat::UShort2 => objc2_metal::MTLVertexFormat::UShort2,
+            MetalVertexFormat::Float => objc2_metal::MTLVertexFormat::Float,
+            MetalVertexFormat::Float2 => objc2_metal::MTLVertexFormat::Float2,
+            MetalVertexFormat::Float4 => objc2_metal::MTLVertexFormat::Float4,
+            MetalVertexFormat::Int => objc2_metal::MTLVertexFormat::Int,
+            MetalVertexFormat::Int2 => objc2_metal::MTLVertexFormat::Int2,
+            MetalVertexFormat::UInt => objc2_metal::MTLVertexFormat::UInt,
+            MetalVertexFormat::UInt2 => objc2_metal::MTLVertexFormat::UInt2,
+            MetalVertexFormat::UInt4 => objc2_metal::MTLVertexFormat::UInt4,
+            MetalVertexFormat::UChar => objc2_metal::MTLVertexFormat::UChar,
+            MetalVertexFormat::Char => objc2_metal::MTLVertexFormat::Char,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,6 +168,13 @@ pub(crate) enum MetalVertexStepFunction {
 impl MetalVertexStepFunction {
     pub(crate) fn raw(self) -> u64 {
         self as u64
+    }
+
+    pub(crate) fn to_objc(self) -> objc2_metal::MTLVertexStepFunction {
+        match self {
+            MetalVertexStepFunction::PerVertex => objc2_metal::MTLVertexStepFunction::PerVertex,
+            MetalVertexStepFunction::PerInstance => objc2_metal::MTLVertexStepFunction::PerInstance,
+        }
     }
 }
 
@@ -164,6 +189,15 @@ impl MetalBlendFactor {
     pub(crate) fn raw(self) -> u64 {
         self as u64
     }
+
+    pub(crate) fn to_objc(self) -> objc2_metal::MTLBlendFactor {
+        match self {
+            MetalBlendFactor::One => objc2_metal::MTLBlendFactor::One,
+            MetalBlendFactor::OneMinusSourceAlpha => {
+                objc2_metal::MTLBlendFactor::OneMinusSourceAlpha
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,6 +209,12 @@ pub(crate) enum MetalBlendOperation {
 impl MetalBlendOperation {
     pub(crate) fn raw(self) -> u64 {
         self as u64
+    }
+
+    pub(crate) fn to_objc(self) -> objc2_metal::MTLBlendOperation {
+        match self {
+            MetalBlendOperation::Add => objc2_metal::MTLBlendOperation::Add,
+        }
     }
 }
 
@@ -337,9 +377,44 @@ mod tests {
     }
 
     #[test]
+    fn metal_vertex_format_objc_values_match_internal_raw_values() {
+        let formats = [
+            MetalVertexFormat::UChar4,
+            MetalVertexFormat::Short2,
+            MetalVertexFormat::UShort2,
+            MetalVertexFormat::Float,
+            MetalVertexFormat::Float2,
+            MetalVertexFormat::Float4,
+            MetalVertexFormat::Int,
+            MetalVertexFormat::Int2,
+            MetalVertexFormat::UInt,
+            MetalVertexFormat::UInt2,
+            MetalVertexFormat::UInt4,
+            MetalVertexFormat::UChar,
+            MetalVertexFormat::Char,
+        ];
+
+        for format in formats {
+            assert_eq!(format.to_objc().0 as u64, format.raw());
+        }
+    }
+
+    #[test]
     fn metal_vertex_step_function_raw_values_match_upstream_subset() {
         assert_eq!(MetalVertexStepFunction::PerVertex.raw(), 1);
         assert_eq!(MetalVertexStepFunction::PerInstance.raw(), 2);
+    }
+
+    #[test]
+    fn metal_vertex_step_function_objc_values_match_internal_raw_values() {
+        assert_eq!(
+            MetalVertexStepFunction::PerVertex.to_objc().0 as u64,
+            MetalVertexStepFunction::PerVertex.raw()
+        );
+        assert_eq!(
+            MetalVertexStepFunction::PerInstance.to_objc().0 as u64,
+            MetalVertexStepFunction::PerInstance.raw()
+        );
     }
 
     #[test]
@@ -349,7 +424,27 @@ mod tests {
     }
 
     #[test]
+    fn metal_blend_factor_objc_values_match_internal_raw_values() {
+        assert_eq!(
+            MetalBlendFactor::One.to_objc().0 as u64,
+            MetalBlendFactor::One.raw()
+        );
+        assert_eq!(
+            MetalBlendFactor::OneMinusSourceAlpha.to_objc().0 as u64,
+            MetalBlendFactor::OneMinusSourceAlpha.raw()
+        );
+    }
+
+    #[test]
     fn metal_blend_operation_raw_values_match_upstream_subset() {
         assert_eq!(MetalBlendOperation::Add.raw(), 0);
+    }
+
+    #[test]
+    fn metal_blend_operation_objc_values_match_internal_raw_values() {
+        assert_eq!(
+            MetalBlendOperation::Add.to_objc().0 as u64,
+            MetalBlendOperation::Add.raw()
+        );
     }
 }
