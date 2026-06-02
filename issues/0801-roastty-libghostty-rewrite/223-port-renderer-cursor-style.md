@@ -241,3 +241,129 @@ Roastty sources, that:
 Implementation note adopted from the review: build the direct-render-state tests
 from the existing `render_state_default()` helper (`lib.rs:1924`) and mutate the
 cursor fields, to keep test setup compact.
+
+## Result
+
+**Result:** Pass
+
+Added `roastty/src/renderer/cursor.rs` and wired `pub(crate) mod cursor;` into
+`roastty/src/renderer/mod.rs`. The module follows the renderer convention of
+`#![allow(dead_code)]` with a "consumed by later renderer slices" note, since
+the renderer has no live frame loop calling it yet.
+
+Implemented:
+
+- `Style { Block, BlockHollow, Bar, Underline, Lock }`;
+- `StyleOptions { preedit, focused, blink_visible }` with an all-`false`
+  `Default`, matching upstream;
+- `Style::from_terminal(VisualStyle) -> Style`;
+- a private `visual_style_from_render_int(c_int) -> VisualStyle` that inverts
+  the encoding using the existing `ROASTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_*`
+  constants (single-sourced) and falls back to `Block` with a `debug_assert` on
+  an unknown integer;
+- `style(&RenderStateScalar, StyleOptions) -> Option<Style>` reproducing the
+  upstream priority order exactly (viewport → preedit → password → visible →
+  focus → blink → terminal style).
+
+The final `style()` branch routes the stored integer through
+`visual_style_from_render_int` and then `Style::from_terminal`, so the
+upstream-faithful `from_terminal` mapping is the single place that maps a visual
+style to a renderer style (no duplicated enum pairing), and the integer encoding
+stays single-sourced in the existing constants.
+
+### Deviation from the design's test framing
+
+The design described four "terminal-driven" tests built from an `InnerTerminal`
+via `render_state_from_terminal`. During implementation the terminal-side
+setters needed for that setup — `set_mode_for_tests` and the cursor visual-style
+setter — turned out to be `pub(super)` to the `terminal` module and therefore
+not reachable from `renderer::cursor` tests, and there is no `pub(crate)`
+byte-feed path to drive the cursor style via escape sequences from outside that
+module. All eight tests were therefore written by constructing a
+`RenderStateScalar` directly (via `render_state_default()` plus field mutation,
+as the review suggested).
+
+This is faithful to the experiment's purpose and the upstream tests' intent: it
+exercises the exact `style()` priority logic over the same input conditions, and
+it additionally covers every branch — including the `lock` (password) and
+absent-viewport branches that are not yet reachable from a real terminal. The
+integration that `render_state_from_terminal` populates `cursor_visual_style`
+correctly is already covered by the existing render-state ABI tests, so no
+coverage is lost for this slice.
+
+Tests added (8): `from_terminal_maps_each_visual_style`,
+`render_int_round_trips_each_visual_style`,
+`cursor_default_uses_configured_style`, `cursor_blinking_disabled`,
+`cursor_explicitly_not_visible`, `cursor_always_block_with_preedit`,
+`cursor_password_input_is_lock`, `cursor_absent_viewport_is_none`.
+
+The attribution comment uses "upstream `renderer/cursor.zig`" rather than naming
+Ghostty, matching the existing renderer-subtree convention (no `ghostty` token
+in renderer sources).
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty renderer::cursor
+cargo test -p roastty renderer
+cargo test -p roastty
+```
+
+Observed:
+
+- `renderer::cursor`: 8 passed.
+- `renderer`: 135 passed.
+- Full `roastty`: 2215 unit tests passed (2207 prior + 8 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/renderer/cursor.rs` and for
+  `roastty/src/lib.rs`, `roastty/include/roastty.h`,
+  `roastty/tests/abi_harness.c`.
+- `git diff --check`: clean.
+
+No C ABI, header, or ABI inventory changes.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** (findings:
+none; "nothing should change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-070520-876713-prompt.md`
+- Result: `logs/codex-review/20260602-070520-876713-last-message.md`
+
+Codex confirmed, against upstream `renderer/cursor.zig` and the Roastty sources,
+that the `style()` priority order is faithful (viewport → preedit → password →
+visible → focus → blink → terminal style), that `visual_style_from_render_int`
+is a correct inverse of `render_cursor_visual_style` and routing the final
+branch through `from_terminal` avoids duplicated encoding, that the eight
+direct-construction tests are correct and sufficient (a terminal-driven
+integration test is not essential, and terminal snapshotting of cursor
+style/visibility/blinking is already covered by existing render-state ABI
+tests), and that the `#![allow(dead_code)]` and
+`debug_assert`-plus-`Block`-fallback are appropriate.
+
+## Conclusion
+
+Experiment 223 succeeds. Roastty now has a `renderer::cursor` module with the
+exact upstream cursor-style priority logic and the `Style`/`StyleOptions` types
+later renderer slices will consume. This is the first experiment implemented by
+Claude (Opus 4.8, high) under the new agent arrangement, with Codex passing both
+the design and result review gates with no findings.
+
+The notable practical lesson is that the terminal module's cursor/mode setters
+are `pub(super)`, so renderer-side tests operate on directly-constructed render
+states rather than driving a real terminal. That is the right boundary for pure
+renderer logic, but two follow-ups are now visible:
+
+- the `lock` (password input) and scroll-away `viewport == None` branches are
+  logic-complete but not yet reachable from a real terminal — wiring
+  `cursor_password_input` and viewport scroll-away nulling into
+  `render_state_from_terminal` are candidate future experiments;
+- the next renderer slice is likely cursor geometry/placement (the quads/cells a
+  given `Style` produces) or the cursor color/inversion ordering, building on
+  this style decision and the Experiment 216–222 `cell_text` cursor read-back
+  work.

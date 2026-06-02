@@ -669,7 +669,7 @@ are past the correctness-critical foundation.
 - [Experiment 222: Port Offscreen Metal Cell Text Cursor Readback](222-port-offscreen-metal-cell-text-cursor-readback.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 223: Port Renderer Cursor Style](223-port-renderer-cursor-style.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
