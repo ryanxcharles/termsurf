@@ -528,6 +528,8 @@ tests, choose the larger subsystem.
   — **Pass**
 - [Experiment 201: Port Kitty Graphics PNG Decode Hook](201-port-kitty-graphics-png-decode-hook.md)
   — **Pass**
+- [Experiment 202: Port Kitty Virtual Placeholder Foundation](202-port-kitty-virtual-placeholder-foundation.md)
+  — **Designed**
 
 ## Non-Goals
 
