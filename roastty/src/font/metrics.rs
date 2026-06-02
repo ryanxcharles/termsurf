@@ -340,6 +340,44 @@ impl Modifier {
             .map_err(|_| ModifierParseError::InvalidFormat)?;
         Ok(Modifier::Absolute(absolute))
     }
+
+    /// Apply this modifier to an unsigned metric value.
+    pub(crate) fn apply_u32(self, v: u32) -> u32 {
+        match self {
+            Modifier::Percent(p) => {
+                let applied = (v as f64 * p.max(0.0)).round();
+                applied.clamp(0.0, u32::MAX as f64) as u32
+            }
+            // Saturating add, then the unsigned clamp-below-0 and saturate-above.
+            Modifier::Absolute(abs) => (v as i64)
+                .saturating_add(abs as i64)
+                .clamp(0, u32::MAX as i64) as u32,
+        }
+    }
+
+    /// Apply this modifier to a signed metric value.
+    pub(crate) fn apply_i32(self, v: i32) -> i32 {
+        match self {
+            Modifier::Percent(p) => {
+                let applied = (v as f64 * p.max(0.0)).round();
+                applied.clamp(i32::MIN as f64, i32::MAX as f64) as i32
+            }
+            // Upstream saturates a failed cast to `maxInt * sign`, so a negative
+            // overflow becomes `-i32::MAX`, never `i32::MIN`.
+            Modifier::Absolute(abs) => (v as i64)
+                .saturating_add(abs as i64)
+                .clamp(-(i32::MAX as i64), i32::MAX as i64)
+                as i32,
+        }
+    }
+
+    /// Apply this modifier to a floating-point metric value.
+    pub(crate) fn apply_f64(self, v: f64) -> f64 {
+        match self {
+            Modifier::Percent(p) => v * p.max(0.0),
+            Modifier::Absolute(abs) => v + abs as f64,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -727,5 +765,44 @@ mod tests {
         assert!(Modifier::parse("abc").is_err());
         assert!(Modifier::parse("abc%").is_err());
         assert!(Modifier::parse("%").is_err());
+    }
+
+    #[test]
+    fn apply_u32_percent() {
+        assert_eq!(Modifier::Percent(1.2).apply_u32(10), 12);
+        assert_eq!(Modifier::Percent(0.8).apply_u32(10), 8);
+        assert_eq!(Modifier::Percent(-1.0).apply_u32(10), 0);
+    }
+
+    #[test]
+    fn apply_u32_absolute() {
+        assert_eq!(Modifier::Absolute(5).apply_u32(10), 15);
+        assert_eq!(Modifier::Absolute(-3).apply_u32(10), 7);
+        assert_eq!(Modifier::Absolute(-20).apply_u32(10), 0);
+    }
+
+    #[test]
+    fn apply_u32_saturates() {
+        assert_eq!(Modifier::Absolute(i32::MAX).apply_u32(u32::MAX), u32::MAX);
+    }
+
+    #[test]
+    fn apply_i32_signed() {
+        assert_eq!(Modifier::Absolute(-20).apply_i32(10), -10);
+        assert_eq!(Modifier::Percent(1.5).apply_i32(-4), -6);
+    }
+
+    #[test]
+    fn apply_i32_negative_overflow_saturates() {
+        // Upstream `maxInt * sign` saturation yields -i32::MAX, not i32::MIN.
+        assert_eq!(Modifier::Absolute(i32::MIN).apply_i32(i32::MIN), -i32::MAX);
+    }
+
+    #[test]
+    fn apply_f64() {
+        assert!(approx(Modifier::Percent(1.2).apply_f64(10.0), 12.0));
+        assert_eq!(Modifier::Absolute(5).apply_f64(10.0), 15.0);
+        assert_eq!(Modifier::Absolute(-3).apply_f64(2.5), -0.5);
+        assert_eq!(Modifier::Percent(-1.0).apply_f64(10.0), 0.0);
     }
 }

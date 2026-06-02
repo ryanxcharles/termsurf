@@ -159,3 +159,76 @@ One Medium finding, fixed in the design above before this commit:
    (`Absolute(i32::MIN).apply_i32(i32::MIN) == -i32::MAX`). The percent path
    keeps the full-range `[i32::MIN, i32::MAX]` defensive clamp, as it does not
    use the `maxInt * sign` saturation.
+
+## Result
+
+**Result:** Pass
+
+Added `apply_u32`, `apply_i32`, and `apply_f64` to `impl Modifier` in
+`roastty/src/font/metrics.rs`. `Percent` rounds `v * max(0, p)` (the integer
+variants clamp to the target range, defensively for the percent path);
+`Absolute` saturating-adds in `i64` — `apply_u32` clamps to `[0, u32::MAX]` (the
+unsigned clamp-below-0 and saturate-above), `apply_i32` clamps to
+`[-i32::MAX, i32::MAX]` (the `maxInt * sign` saturation, so negative overflow is
+`-i32::MAX`, not `i32::MIN`); `apply_f64` is direct (`v * max(0, p)` /
+`v + abs`).
+
+Tests added (6): `apply_u32_percent`, `apply_u32_absolute` (including the
+clamp-to-0 case), `apply_u32_saturates`, `apply_i32_signed`,
+`apply_i32_negative_overflow_saturates`
+(`Absolute(i32::MIN).apply_i32(i32::MIN) == -i32::MAX`), and `apply_f64`.
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty font
+cargo test -p roastty
+```
+
+Observed:
+
+- `font`: 33 passed (27 prior + 6 new).
+- Full `roastty`: 2309 unit tests passed (2303 prior + 6 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/font` and for
+  `roastty/src/lib.rs`, `roastty/include/roastty.h`,
+  `roastty/tests/abi_harness.c`.
+- `git diff --check`: clean.
+
+No C ABI, header, or ABI inventory changes; no `Metrics::apply`/`ModifierSet`/
+`Key` scope pulled in.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** ("nothing
+needs to change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-085047-917514-prompt.md`
+- Result: `logs/codex-review/20260602-085047-917514-last-message.md`
+
+Codex confirmed all three methods match upstream (integer percent
+`round(v * max(0, p))`, float `v * max(0, p)`, absolute `i64::saturating_add`
+with the unsigned `[0, u32::MAX]` clamp and the signed `[-i32::MAX, i32::MAX]`
+saturation matching `maxInt * sign`), that the six tests cover the normal,
+clamp, and both overflow-saturation paths, and that there are no
+precision/visibility/scope concerns.
+
+## Conclusion
+
+Experiment 240 succeeds. `Modifier` now applies to the `u32`/`i32`/`f64` metric
+field types with the exact upstream rounding and saturation. Both Codex gates
+passed (one design finding fixed — the `-i32::MAX` signed-overflow saturation;
+zero result findings).
+
+With `Modifier`, `parse`, and `apply` all in place, the remaining `Metrics.zig`
+modifier work is the `Key` enum (one per `Metrics` field), the `ModifierSet` map
+(`Key → Modifier`), and `Metrics::apply` — which iterates a `ModifierSet`,
+dispatches each `Modifier` to the right `apply_*` for the keyed field, and
+carries the special cell-height-adjustment logic (re-centering the baseline) and
+the icon-height pairing. `Metrics::apply` holds the actual upstream
+`Metrics.zig` tests and is the next slice, completing that file's behavior.

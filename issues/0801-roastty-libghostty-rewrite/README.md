@@ -703,7 +703,7 @@ are past the correctness-critical foundation.
 - [Experiment 239: Port Font `Modifier` and `Modifier::parse`](239-port-font-modifier-parse.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 240: Port `Modifier::apply` (u32 / i32 / f64)](240-port-modifier-apply.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
