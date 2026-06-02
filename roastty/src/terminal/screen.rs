@@ -192,6 +192,15 @@ impl Screen {
         self.kitty_images = ImageStorage::new();
     }
 
+    pub(super) fn reset_with_kitty_config(
+        &mut self,
+        image_storage_limit: usize,
+        image_limits: super::kitty::graphics_image::LoadingImageLimits,
+    ) {
+        self.reset();
+        self.apply_kitty_config(image_storage_limit, image_limits);
+    }
+
     pub(super) fn mark_active_rows_dirty(&mut self) {
         self.pages.mark_active_rows_dirty();
     }
@@ -202,6 +211,15 @@ impl Screen {
 
     pub(super) fn kitty_images_mut(&mut self) -> &mut ImageStorage {
         &mut self.kitty_images
+    }
+
+    pub(super) fn apply_kitty_config(
+        &mut self,
+        image_storage_limit: usize,
+        image_limits: super::kitty::graphics_image::LoadingImageLimits,
+    ) {
+        self.set_kitty_image_limit(image_storage_limit);
+        self.kitty_images.image_limits = image_limits;
     }
 
     pub(super) fn add_kitty_image(&mut self, image: Image) -> Result<(), ImageLoadError> {

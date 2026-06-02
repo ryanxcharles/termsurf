@@ -11,9 +11,8 @@ use super::device_attributes;
 use super::device_status;
 use super::kitty::graphics_command::{Command, Parser, Response};
 use super::kitty::graphics_exec;
-use super::kitty::graphics_image::Image;
-use super::kitty::graphics_image::MAX_IMAGE_SIZE;
-use super::kitty::graphics_storage::{CellMetrics, Placement, PlacementKey};
+use super::kitty::graphics_image::{Image, LoadingImageLimits, MAX_IMAGE_SIZE};
+use super::kitty::graphics_storage::{CellMetrics, Placement, PlacementKey, DEFAULT_TOTAL_LIMIT};
 use super::modes;
 use super::mouse;
 use super::osc;
@@ -51,6 +50,7 @@ pub(crate) struct Terminal {
     stream: stream::Stream,
     dcs: dcs::Handler,
     kitty_graphics: KittyGraphicsApc,
+    kitty_config: KittyGraphicsConfig,
     flags: TerminalFlags,
     title: TerminalTitle,
     pwd: TerminalPwd,
@@ -532,9 +532,13 @@ impl TerminalScreens {
         &mut self,
         cols: CellCountInt,
         rows: CellCountInt,
+        kitty_config: KittyGraphicsConfig,
     ) -> Result<(), PageListAllocError> {
         if self.alternate.is_none() {
-            self.alternate = Some(Screen::init(cols, rows, Some(0))?);
+            let mut alternate = Screen::init(cols, rows, Some(0))?;
+            alternate
+                .apply_kitty_config(kitty_config.image_storage_limit, kitty_config.image_limits);
+            self.alternate = Some(alternate);
             self.alternate_generation = self.alternate_generation.wrapping_add(1);
             self.alternate_owner_id = self.next_screen_owner_id;
             self.next_screen_owner_id = self.next_screen_owner_id.wrapping_add(1).max(1);
@@ -547,13 +551,14 @@ impl TerminalScreens {
         key: TerminalScreenKey,
         cols: CellCountInt,
         rows: CellCountInt,
+        kitty_config: KittyGraphicsConfig,
     ) -> Result<Option<TerminalScreenKey>, PageListAllocError> {
         if self.active == key {
             return Ok(None);
         }
 
         if key == TerminalScreenKey::Alternate {
-            self.ensure_alternate(cols, rows)?;
+            self.ensure_alternate(cols, rows, kitty_config)?;
         }
 
         let old = self.active;
@@ -590,8 +595,9 @@ impl TerminalScreens {
         }
     }
 
-    fn reset(&mut self) {
-        self.primary.reset();
+    fn reset(&mut self, kitty_config: KittyGraphicsConfig) {
+        self.primary
+            .reset_with_kitty_config(kitty_config.image_storage_limit, kitty_config.image_limits);
         self.primary_generation = self.primary_generation.wrapping_add(1);
         if self.alternate.is_some() {
             self.alternate_generation = self.alternate_generation.wrapping_add(1);
@@ -602,6 +608,15 @@ impl TerminalScreens {
             self.active_epoch = self.active_epoch.wrapping_add(1);
         }
         self.active = TerminalScreenKey::Primary;
+    }
+
+    fn apply_kitty_config(&mut self, kitty_config: KittyGraphicsConfig) {
+        self.primary
+            .apply_kitty_config(kitty_config.image_storage_limit, kitty_config.image_limits);
+        if let Some(alternate) = self.alternate.as_mut() {
+            alternate
+                .apply_kitty_config(kitty_config.image_storage_limit, kitty_config.image_limits);
+        }
     }
 
     #[cfg(test)]
@@ -647,6 +662,33 @@ struct TerminalFlags {
     mouse_shift_capture: Option<bool>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KittyGraphicsConfig {
+    image_storage_limit: usize,
+    image_limits: LoadingImageLimits,
+    apc_max_bytes: Option<usize>,
+    kitty_apc_max_bytes: Option<usize>,
+}
+
+impl Default for KittyGraphicsConfig {
+    fn default() -> Self {
+        Self {
+            image_storage_limit: DEFAULT_TOTAL_LIMIT,
+            image_limits: LoadingImageLimits::DIRECT,
+            apc_max_bytes: None,
+            kitty_apc_max_bytes: None,
+        }
+    }
+}
+
+impl KittyGraphicsConfig {
+    fn effective_kitty_apc_max_bytes(self) -> usize {
+        self.kitty_apc_max_bytes
+            .or(self.apc_max_bytes)
+            .unwrap_or(MAX_IMAGE_SIZE)
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct TerminalTitle {
     text: String,
@@ -663,6 +705,13 @@ pub(crate) enum TerminalStreamError {
     ManagedCellUnsupported,
     InvalidPoint,
     UnsupportedCodepoint(char),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KittyImageMedium {
+    File,
+    TemporaryFile,
+    SharedMemory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -686,6 +735,7 @@ struct TerminalStreamHandler<'a> {
     previous_char: &'a mut Option<char>,
     dcs: &'a mut dcs::Handler,
     kitty_graphics: &'a mut KittyGraphicsApc,
+    kitty_config: &'a mut KittyGraphicsConfig,
     flags: &'a mut TerminalFlags,
 }
 
@@ -773,6 +823,10 @@ impl KittyGraphicsApc {
 
     #[cfg(test)]
     fn set_max_bytes_for_tests(&mut self, max_bytes: usize) {
+        self.set_max_bytes(max_bytes);
+    }
+
+    fn set_max_bytes(&mut self, max_bytes: usize) {
         self.max_bytes = max_bytes;
     }
 }
@@ -827,6 +881,7 @@ impl Terminal {
             stream: stream::Stream::init(),
             dcs: dcs::Handler::new(),
             kitty_graphics: KittyGraphicsApc::default(),
+            kitty_config: KittyGraphicsConfig::default(),
             flags: TerminalFlags::default(),
             title: TerminalTitle::default(),
             pwd: TerminalPwd::default(),
@@ -849,6 +904,7 @@ impl Terminal {
             stream,
             dcs,
             kitty_graphics,
+            kitty_config,
             title,
             pwd,
             mouse_shape,
@@ -873,13 +929,14 @@ impl Terminal {
             previous_char,
             dcs,
             kitty_graphics,
+            kitty_config,
             flags,
         };
         stream.next_slice(input, &mut handler)
     }
 
     pub(crate) fn reset(&mut self) {
-        self.screens.reset();
+        self.screens.reset(self.kitty_config);
         self.modes.reset();
         self.scrolling_region = ScrollingRegion::full(self.size);
         self.tabstops.reset(TABSTOP_INTERVAL);
@@ -1043,6 +1100,52 @@ impl Terminal {
 
     pub(crate) fn kitty_images(&self) -> &super::kitty::graphics_storage::ImageStorage {
         self.screens.active().kitty_images()
+    }
+
+    pub(crate) fn kitty_image_storage_limit(&self) -> usize {
+        self.screens.active().kitty_images().total_limit
+    }
+
+    pub(crate) fn kitty_image_medium_enabled(&self, medium: KittyImageMedium) -> bool {
+        let limits = self.screens.active().kitty_images().image_limits;
+        match medium {
+            KittyImageMedium::File => limits.file,
+            KittyImageMedium::TemporaryFile => limits.temporary_file,
+            KittyImageMedium::SharedMemory => limits.shared_memory,
+        }
+    }
+
+    pub(crate) fn set_kitty_image_storage_limit(&mut self, limit: usize) {
+        self.kitty_config.image_storage_limit = limit;
+        self.screens.apply_kitty_config(self.kitty_config);
+    }
+
+    pub(crate) fn set_kitty_image_medium(&mut self, medium: KittyImageMedium, enabled: bool) {
+        match medium {
+            KittyImageMedium::File => self.kitty_config.image_limits.file = enabled,
+            KittyImageMedium::TemporaryFile => {
+                self.kitty_config.image_limits.temporary_file = enabled
+            }
+            KittyImageMedium::SharedMemory => {
+                self.kitty_config.image_limits.shared_memory = enabled
+            }
+        }
+        self.screens.apply_kitty_config(self.kitty_config);
+    }
+
+    pub(crate) fn set_apc_max_bytes(&mut self, max_bytes: Option<usize>) {
+        self.kitty_config.apc_max_bytes = max_bytes;
+        self.apply_effective_kitty_apc_max_bytes();
+    }
+
+    pub(crate) fn set_kitty_apc_max_bytes(&mut self, max_bytes: Option<usize>) {
+        self.kitty_config.kitty_apc_max_bytes = max_bytes;
+        self.apply_effective_kitty_apc_max_bytes();
+    }
+
+    fn apply_effective_kitty_apc_max_bytes(&mut self) {
+        self.kitty_graphics
+            .set_max_bytes(self.kitty_config.effective_kitty_apc_max_bytes());
     }
 
     pub(crate) fn kitty_cell_metrics(&self) -> CellMetrics {
@@ -2767,7 +2870,7 @@ impl TerminalStreamHandler<'_> {
     }
 
     fn full_reset(&mut self) -> Result<(), TerminalStreamError> {
-        self.screens.reset();
+        self.screens.reset(*self.kitty_config);
         self.modes.reset();
         *self.scrolling_region = ScrollingRegion::full(self.size);
         self.tabstops.reset(TABSTOP_INTERVAL);
@@ -2843,7 +2946,7 @@ impl TerminalStreamHandler<'_> {
         target: TerminalScreenKey,
     ) -> Result<Option<TerminalScreenKey>, TerminalStreamError> {
         self.screens
-            .switch_to(target, self.size.cols, self.size.rows)
+            .switch_to(target, self.size.cols, self.size.rows, *self.kitty_config)
             .map_err(|_| TerminalStreamError::PageAlloc)
     }
 
@@ -5983,6 +6086,74 @@ mod tests {
         assert!(terminal.pty_response_for_tests().is_empty());
         assert_eq!(terminal.screens.active().kitty_images().len(), 0);
         assert!(!terminal.is_dirty_for_tests(0, 0));
+    }
+
+    #[test]
+    fn terminal_stream_kitty_graphics_config_applies_to_screens_and_resets() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal.set_kitty_image_storage_limit(0);
+        terminal.set_kitty_image_medium(KittyImageMedium::File, true);
+        assert_eq!(terminal.screens.active().kitty_images().total_limit, 0);
+        assert!(terminal.screens.active().kitty_images().image_limits.file);
+
+        terminal.next_slice(b"\x1b[?1049h").unwrap();
+        assert_eq!(terminal.screens.active().kitty_images().total_limit, 0);
+        assert!(terminal.screens.active().kitty_images().image_limits.file);
+
+        terminal.set_kitty_image_storage_limit(123);
+        terminal.set_kitty_image_medium(KittyImageMedium::TemporaryFile, true);
+        assert_eq!(terminal.screens.active().kitty_images().total_limit, 123);
+        assert!(
+            terminal
+                .screens
+                .active()
+                .kitty_images()
+                .image_limits
+                .temporary_file
+        );
+
+        terminal.next_slice(b"\x1b[?1049l").unwrap();
+        assert_eq!(terminal.screens.active().kitty_images().total_limit, 123);
+        assert!(terminal.screens.active().kitty_images().image_limits.file);
+        assert!(
+            terminal
+                .screens
+                .active()
+                .kitty_images()
+                .image_limits
+                .temporary_file
+        );
+
+        terminal.set_kitty_image_storage_limit(0);
+        terminal.next_slice(&kitty_transmit_apc(7)).unwrap();
+        assert_eq!(terminal.screens.active().kitty_images().len(), 0);
+
+        terminal.reset();
+        assert_eq!(terminal.screens.active().kitty_images().total_limit, 0);
+        assert!(terminal.screens.active().kitty_images().image_limits.file);
+        assert!(
+            terminal
+                .screens
+                .active()
+                .kitty_images()
+                .image_limits
+                .temporary_file
+        );
+        terminal.next_slice(&kitty_transmit_apc(8)).unwrap();
+        assert_eq!(terminal.screens.active().kitty_images().len(), 0);
+
+        terminal.next_slice(b"\x1bc").unwrap();
+        assert_eq!(terminal.screens.active().kitty_images().total_limit, 0);
+        assert!(terminal.screens.active().kitty_images().image_limits.file);
+        assert!(
+            terminal
+                .screens
+                .active()
+                .kitty_images()
+                .image_limits
+                .temporary_file
+        );
     }
 
     #[test]

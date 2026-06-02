@@ -235,3 +235,50 @@ The experiment passes when:
   storage limits or APC byte limits intentionally gate it.
 - Do not expose any `ghostty_*` ABI names.
 - Do not skip Codex design review or Codex result review.
+
+## Result
+
+**Result:** Pass
+
+Implemented the missing Kitty graphics terminal option/data surface:
+
+- added public terminal option selectors 15-20 in `roastty/include/roastty.h`
+  and matching Rust constants;
+- added terminal-level Kitty graphics configuration for storage limit, allowed
+  non-direct media flags, global APC byte limit, and Kitty-specific APC byte
+  limit;
+- applied that configuration to the primary screen, existing alternate screen,
+  future alternate screen creation, `Terminal::reset()`, and RIS/full reset;
+- wired `roastty_terminal_set(...)` for storage/media/APC options with the
+  upstream pointer semantics;
+- wired `roastty_terminal_get(...)` so Kitty image storage/media data selectors
+  no longer return `ROASTTY_NO_VALUE`;
+- preserved the experiment non-goals: file, temp-file, shared-memory, PNG, and
+  renderer support remain unimplemented.
+
+Verification passed:
+
+```bash
+cargo fmt -- roastty/src/lib.rs roastty/src/terminal/terminal.rs roastty/src/terminal/screen.rs roastty/src/terminal/kitty/graphics_storage.rs roastty/src/terminal/kitty/graphics_image.rs
+cargo test -p roastty kitty_graphics_terminal_options_c_abi
+cargo test -p roastty terminal_stream_kitty_graphics
+cargo test -p roastty kitty_graphics_storage
+cargo test -p roastty --test abi_harness
+cargo test -p roastty
+if rg -n 'ghostty|Ghostty|GHOSTTY' roastty/src/lib.rs roastty/include/roastty.h roastty/tests/abi_harness.c; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Codex reviewed the completed implementation and found no blocking issues. The
+review specifically confirmed that the option selectors, `terminal_get`,
+`terminal_set`, terminal-level config propagation, reset/RIS persistence, APC
+precedence, Rust tests, and C ABI harness coverage satisfy this experiment.
+
+## Conclusion
+
+Roastty now exposes the Kitty graphics terminal configuration ABI slice. Direct
+Kitty image storage remains the only loaded medium, but the storage limit,
+non-direct media permission flags, and APC byte limits are now stored,
+queryable, inherited across screens, and persistent across reset paths. Future
+experiments can use the media flags as permission gates when they port
+file-backed, temp-file, or shared-memory image loading.

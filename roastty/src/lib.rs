@@ -26,7 +26,7 @@ use terminal::selection_gesture::{
     SelectionGestureGeometry, SelectionGesturePress, SelectionGestureRelease, DEFAULT_BEHAVIORS,
 };
 use terminal::terminal::{
-    Terminal as InnerTerminal, TerminalBellCallback, TerminalColorKind,
+    KittyImageMedium, Terminal as InnerTerminal, TerminalBellCallback, TerminalColorKind,
     TerminalColorSchemeCallback, TerminalDeviceAttributesCallback, TerminalEnquiryCallback,
     TerminalFormatterExtra, TerminalGridRef, TerminalGridRefPointError, TerminalPointTag,
     TerminalScreen, TerminalSelection, TerminalSelectionAdjustment, TerminalSelectionFormat,
@@ -204,6 +204,12 @@ const ROASTTY_TERMINAL_OPTION_COLOR_FOREGROUND: c_int = 11;
 const ROASTTY_TERMINAL_OPTION_COLOR_BACKGROUND: c_int = 12;
 const ROASTTY_TERMINAL_OPTION_COLOR_CURSOR: c_int = 13;
 const ROASTTY_TERMINAL_OPTION_COLOR_PALETTE: c_int = 14;
+const ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT: c_int = 15;
+const ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_FILE: c_int = 16;
+const ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_TEMP_FILE: c_int = 17;
+const ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_SHARED_MEM: c_int = 18;
+const ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES: c_int = 19;
+const ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES_KITTY: c_int = 20;
 const ROASTTY_TERMINAL_OPTION_SELECTION: c_int = 21;
 
 const ROASTTY_FOCUS_EVENT_GAINED: c_int = 0;
@@ -1648,6 +1654,27 @@ fn read_palette(value: *const c_void) -> Option<[(u8, u8, u8); 256]> {
     Some(palette_to_tuples(palette))
 }
 
+fn read_optional_u64(value: *const c_void) -> Option<u64> {
+    if value.is_null() {
+        return None;
+    }
+    Some(unsafe { value.cast::<u64>().read() })
+}
+
+fn read_optional_usize(value: *const c_void) -> Option<usize> {
+    if value.is_null() {
+        return None;
+    }
+    Some(unsafe { value.cast::<usize>().read() })
+}
+
+fn read_optional_bool(value: *const c_void) -> Option<bool> {
+    if value.is_null() {
+        return None;
+    }
+    Some(unsafe { value.cast::<bool>().read() })
+}
+
 fn palette_to_tuples(palette: RoasttyPalette) -> [(u8, u8, u8); 256] {
     let mut result = [(0, 0, 0); 256];
     for (index, rgb) in palette.into_iter().enumerate() {
@@ -2114,6 +2141,26 @@ unsafe fn terminal_get_write(terminal: &InnerTerminal, data: c_int, out: *mut c_
         ROASTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT => {
             write_palette(out, terminal.palette_default())
         }
+        ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT => {
+            let Ok(limit) = u64::try_from(terminal.kitty_image_storage_limit()) else {
+                return ROASTTY_INVALID_VALUE;
+            };
+            unsafe {
+                out.cast::<u64>().write(limit);
+            }
+        }
+        ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE => unsafe {
+            out.cast::<bool>()
+                .write(terminal.kitty_image_medium_enabled(KittyImageMedium::File));
+        },
+        ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE => unsafe {
+            out.cast::<bool>()
+                .write(terminal.kitty_image_medium_enabled(KittyImageMedium::TemporaryFile));
+        },
+        ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM => unsafe {
+            out.cast::<bool>()
+                .write(terminal.kitty_image_medium_enabled(KittyImageMedium::SharedMemory));
+        },
         ROASTTY_TERMINAL_DATA_SELECTION => {
             let Some(selection) = terminal.active_selection() else {
                 return ROASTTY_NO_VALUE;
@@ -2126,10 +2173,6 @@ unsafe fn terminal_get_write(terminal: &InnerTerminal, data: c_int, out: *mut c_
         | ROASTTY_TERMINAL_DATA_PWD
         | ROASTTY_TERMINAL_DATA_WIDTH_PX
         | ROASTTY_TERMINAL_DATA_HEIGHT_PX
-        | ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT
-        | ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE
-        | ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE
-        | ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM
         | ROASTTY_TERMINAL_DATA_VIEWPORT_ACTIVE => return ROASTTY_NO_VALUE,
         ROASTTY_TERMINAL_DATA_KITTY_GRAPHICS => out
             .cast::<RoasttyKittyGraphics>()
@@ -4553,6 +4596,53 @@ pub extern "C" fn roastty_terminal_set(
         }
         ROASTTY_TERMINAL_OPTION_COLOR_PALETTE => {
             terminal.terminal.set_palette_default(read_palette(value));
+            ROASTTY_SUCCESS
+        }
+        ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT => {
+            let limit = match read_optional_u64(value) {
+                Some(value) => match usize::try_from(value) {
+                    Ok(value) => value,
+                    Err(_) => return ROASTTY_INVALID_VALUE,
+                },
+                None => 0,
+            };
+            terminal.terminal.set_kitty_image_storage_limit(limit);
+            ROASTTY_SUCCESS
+        }
+        ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_FILE => {
+            if let Some(enabled) = read_optional_bool(value) {
+                terminal
+                    .terminal
+                    .set_kitty_image_medium(KittyImageMedium::File, enabled);
+            }
+            ROASTTY_SUCCESS
+        }
+        ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_TEMP_FILE => {
+            if let Some(enabled) = read_optional_bool(value) {
+                terminal
+                    .terminal
+                    .set_kitty_image_medium(KittyImageMedium::TemporaryFile, enabled);
+            }
+            ROASTTY_SUCCESS
+        }
+        ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_SHARED_MEM => {
+            if let Some(enabled) = read_optional_bool(value) {
+                terminal
+                    .terminal
+                    .set_kitty_image_medium(KittyImageMedium::SharedMemory, enabled);
+            }
+            ROASTTY_SUCCESS
+        }
+        ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES => {
+            terminal
+                .terminal
+                .set_apc_max_bytes(read_optional_usize(value));
+            ROASTTY_SUCCESS
+        }
+        ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES_KITTY => {
+            terminal
+                .terminal
+                .set_kitty_apc_max_bytes(read_optional_usize(value));
             ROASTTY_SUCCESS
         }
         ROASTTY_TERMINAL_OPTION_SELECTION => {
@@ -7647,6 +7737,56 @@ mod tests {
         graphics
     }
 
+    fn get_kitty_storage_limit(terminal: RoasttyTerminal) -> u64 {
+        let mut limit = 0u64;
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT,
+                (&mut limit as *mut u64).cast()
+            ),
+            ROASTTY_SUCCESS
+        );
+        limit
+    }
+
+    fn get_kitty_medium(terminal: RoasttyTerminal, data: c_int) -> bool {
+        let mut enabled = false;
+        assert_eq!(
+            roastty_terminal_get(terminal, data, (&mut enabled as *mut bool).cast()),
+            ROASTTY_SUCCESS
+        );
+        enabled
+    }
+
+    fn set_u64_option(terminal: RoasttyTerminal, option: c_int, value: u64) {
+        assert_eq!(
+            roastty_terminal_set(terminal, option, (&value as *const u64).cast()),
+            ROASTTY_SUCCESS
+        );
+    }
+
+    fn set_bool_option(terminal: RoasttyTerminal, option: c_int, value: bool) {
+        assert_eq!(
+            roastty_terminal_set(terminal, option, (&value as *const bool).cast()),
+            ROASTTY_SUCCESS
+        );
+    }
+
+    fn set_usize_option(terminal: RoasttyTerminal, option: c_int, value: usize) {
+        assert_eq!(
+            roastty_terminal_set(terminal, option, (&value as *const usize).cast()),
+            ROASTTY_SUCCESS
+        );
+    }
+
+    fn kitty_image_exists(terminal: RoasttyTerminal, image_id: u32) -> bool {
+        let image = roastty_kitty_graphics_image(kitty_graphics_handle(terminal), image_id);
+        let exists = !image.is_null();
+        roastty_kitty_graphics_image_free(image);
+        exists
+    }
+
     fn write_kitty_transmit_display(
         terminal: RoasttyTerminal,
         image_id: u32,
@@ -8544,7 +8684,7 @@ mod tests {
             );
         }
         assert_eq!(
-            roastty_terminal_set(terminal, 15, &title as *const _ as *const c_void),
+            roastty_terminal_set(terminal, 22, &title as *const _ as *const c_void),
             ROASTTY_INVALID_VALUE
         );
 
@@ -14054,10 +14194,6 @@ mod tests {
             ROASTTY_TERMINAL_DATA_PWD,
             ROASTTY_TERMINAL_DATA_WIDTH_PX,
             ROASTTY_TERMINAL_DATA_HEIGHT_PX,
-            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT,
-            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE,
-            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE,
-            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM,
             ROASTTY_TERMINAL_DATA_SELECTION,
             ROASTTY_TERMINAL_DATA_VIEWPORT_ACTIVE,
         ] {
@@ -14069,6 +14205,231 @@ mod tests {
 
         assert!(terminal_string(terminal, roastty_terminal_title).is_empty());
         assert!(terminal_string(terminal, roastty_terminal_pwd).is_empty());
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn kitty_graphics_terminal_options_c_abi_values_and_get_set() {
+        assert_eq!(ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT, 15);
+        assert_eq!(ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_FILE, 16);
+        assert_eq!(ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_TEMP_FILE, 17);
+        assert_eq!(ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_SHARED_MEM, 18);
+        assert_eq!(ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES, 19);
+        assert_eq!(ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES_KITTY, 20);
+        assert_eq!(ROASTTY_TERMINAL_OPTION_SELECTION, 21);
+
+        let terminal = new_terminal(10, 3);
+
+        assert_eq!(
+            get_kitty_storage_limit(terminal),
+            crate::terminal::kitty::graphics_storage::DEFAULT_TOTAL_LIMIT as u64
+        );
+        assert!(!get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE
+        ));
+        assert!(!get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE
+        ));
+        assert!(!get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM
+        ));
+
+        set_u64_option(
+            terminal,
+            ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT,
+            123,
+        );
+        assert_eq!(get_kitty_storage_limit(terminal), 123);
+
+        set_bool_option(
+            terminal,
+            ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_FILE,
+            true,
+        );
+        set_bool_option(
+            terminal,
+            ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_TEMP_FILE,
+            true,
+        );
+        set_bool_option(
+            terminal,
+            ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_SHARED_MEM,
+            true,
+        );
+        assert!(get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE
+        ));
+        assert!(get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE
+        ));
+        assert!(get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM
+        ));
+
+        assert_eq!(
+            roastty_terminal_set(
+                terminal,
+                ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_FILE,
+                ptr::null()
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert!(get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE
+        ));
+
+        assert_eq!(
+            roastty_terminal_set(
+                terminal,
+                ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT,
+                ptr::null()
+            ),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(get_kitty_storage_limit(terminal), 0);
+        assert_eq!(
+            roastty_terminal_get(
+                terminal,
+                ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT,
+                ptr::null_mut()
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+        assert_eq!(
+            roastty_terminal_set(
+                ptr::null_mut(),
+                ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT,
+                ptr::null()
+            ),
+            ROASTTY_INVALID_VALUE
+        );
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn kitty_graphics_terminal_options_c_abi_gate_storage_and_apc() {
+        let terminal = new_terminal(10, 3);
+
+        write_kitty_transmit_display(terminal, 70, 1, 1);
+        assert!(kitty_image_exists(terminal, 70));
+
+        set_u64_option(
+            terminal,
+            ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT,
+            0,
+        );
+        assert!(!kitty_image_exists(terminal, 70));
+        write_kitty_transmit_display(terminal, 71, 1, 1);
+        assert!(!kitty_image_exists(terminal, 71));
+
+        set_u64_option(
+            terminal,
+            ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT,
+            crate::terminal::kitty::graphics_storage::DEFAULT_TOTAL_LIMIT as u64,
+        );
+        write_kitty_transmit_display(terminal, 72, 1, 1);
+        assert!(kitty_image_exists(terminal, 72));
+
+        set_usize_option(terminal, ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES, 2);
+        write_kitty_transmit_display(terminal, 73, 1, 1);
+        assert!(!kitty_image_exists(terminal, 73));
+
+        set_usize_option(terminal, ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES_KITTY, 256);
+        write_kitty_transmit_display(terminal, 74, 1, 1);
+        assert!(kitty_image_exists(terminal, 74));
+
+        assert_eq!(
+            roastty_terminal_set(
+                terminal,
+                ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES_KITTY,
+                ptr::null()
+            ),
+            ROASTTY_SUCCESS
+        );
+        write_kitty_transmit_display(terminal, 75, 1, 1);
+        assert!(!kitty_image_exists(terminal, 75));
+
+        assert_eq!(
+            roastty_terminal_set(terminal, ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES, ptr::null()),
+            ROASTTY_SUCCESS
+        );
+        write_kitty_transmit_display(terminal, 76, 1, 1);
+        assert!(kitty_image_exists(terminal, 76));
+
+        roastty_terminal_free(terminal);
+    }
+
+    #[test]
+    fn kitty_graphics_terminal_options_c_abi_follow_screens_and_resets() {
+        let terminal = new_terminal(10, 3);
+
+        set_u64_option(
+            terminal,
+            ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT,
+            0,
+        );
+        set_bool_option(
+            terminal,
+            ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_FILE,
+            true,
+        );
+        write_terminal(terminal, b"\x1b[?1049h");
+        assert_eq!(get_kitty_storage_limit(terminal), 0);
+        assert!(get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE
+        ));
+
+        set_u64_option(
+            terminal,
+            ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT,
+            77,
+        );
+        set_bool_option(
+            terminal,
+            ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_TEMP_FILE,
+            true,
+        );
+        write_terminal(terminal, b"\x1b[?1049l");
+        assert_eq!(get_kitty_storage_limit(terminal), 77);
+        assert!(get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE
+        ));
+        assert!(get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE
+        ));
+
+        roastty_terminal_reset(terminal);
+        assert_eq!(get_kitty_storage_limit(terminal), 77);
+        assert!(get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE
+        ));
+        assert!(get_kitty_medium(
+            terminal,
+            ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE
+        ));
+
+        set_u64_option(
+            terminal,
+            ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT,
+            0,
+        );
+        write_terminal(terminal, b"\x1bc");
+        assert_eq!(get_kitty_storage_limit(terminal), 0);
+        write_kitty_transmit_display(terminal, 77, 1, 1);
+        assert!(!kitty_image_exists(terminal, 77));
 
         roastty_terminal_free(terminal);
     }

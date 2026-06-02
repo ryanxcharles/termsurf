@@ -1907,6 +1907,12 @@ static void assert_terminal_abi(void) {
   assert(ROASTTY_TERMINAL_OPTION_DEVICE_ATTRIBUTES == 8);
   assert(ROASTTY_TERMINAL_OPTION_TITLE == 9);
   assert(ROASTTY_TERMINAL_OPTION_PWD == 10);
+  assert(ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT == 15);
+  assert(ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_FILE == 16);
+  assert(ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_TEMP_FILE == 17);
+  assert(ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_SHARED_MEM == 18);
+  assert(ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES == 19);
+  assert(ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES_KITTY == 20);
   assert(ROASTTY_COLOR_SCHEME_LIGHT == 0);
   assert(ROASTTY_COLOR_SCHEME_DARK == 1);
   assert(ROASTTY_SIZE_REPORT_MODE_2048 == 0);
@@ -2824,7 +2830,7 @@ static void assert_terminal_abi(void) {
                               (roastty_terminal_option_e)9999,
                               &title_input) == ROASTTY_INVALID_VALUE);
   assert(roastty_terminal_set(terminal,
-                              (roastty_terminal_option_e)15,
+                              (roastty_terminal_option_e)22,
                               &title_input) == ROASTTY_INVALID_VALUE);
   assert(roastty_terminal_set(terminal,
                               ROASTTY_TERMINAL_OPTION_TITLE,
@@ -2932,6 +2938,85 @@ static void assert_terminal_abi(void) {
                               ROASTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS,
                               &key_flags) == ROASTTY_SUCCESS);
   assert(key_flags == 0);
+  uint64_t kitty_storage_limit = 0;
+  assert(roastty_terminal_get(
+             terminal,
+             ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT,
+             &kitty_storage_limit) == ROASTTY_SUCCESS);
+  assert(kitty_storage_limit == 320000000);
+  bool kitty_medium_file = true;
+  bool kitty_medium_temp_file = true;
+  bool kitty_medium_shared_mem = true;
+  assert(roastty_terminal_get(
+             terminal,
+             ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE,
+             &kitty_medium_file) == ROASTTY_SUCCESS);
+  assert(!kitty_medium_file);
+  assert(roastty_terminal_get(
+             terminal,
+             ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE,
+             &kitty_medium_temp_file) == ROASTTY_SUCCESS);
+  assert(!kitty_medium_temp_file);
+  assert(roastty_terminal_get(
+             terminal,
+             ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM,
+             &kitty_medium_shared_mem) == ROASTTY_SUCCESS);
+  assert(!kitty_medium_shared_mem);
+  uint64_t new_kitty_storage_limit = 123;
+  assert(roastty_terminal_set(
+             terminal,
+             ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_STORAGE_LIMIT,
+             &new_kitty_storage_limit) == ROASTTY_SUCCESS);
+  assert(roastty_terminal_get(
+             terminal,
+             ROASTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT,
+             &kitty_storage_limit) == ROASTTY_SUCCESS);
+  assert(kitty_storage_limit == 123);
+  kitty_medium_file = true;
+  assert(roastty_terminal_set(
+             terminal,
+             ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_FILE,
+             &kitty_medium_file) == ROASTTY_SUCCESS);
+  kitty_medium_file = false;
+  assert(roastty_terminal_get(
+             terminal,
+             ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE,
+             &kitty_medium_file) == ROASTTY_SUCCESS);
+  assert(kitty_medium_file);
+  assert(roastty_terminal_set(
+             terminal,
+             ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_FILE,
+             NULL) == ROASTTY_SUCCESS);
+  kitty_medium_file = false;
+  assert(roastty_terminal_get(
+             terminal,
+             ROASTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE,
+             &kitty_medium_file) == ROASTTY_SUCCESS);
+  assert(kitty_medium_file);
+  kitty_medium_temp_file = true;
+  kitty_medium_shared_mem = true;
+  assert(roastty_terminal_set(
+             terminal,
+             ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_TEMP_FILE,
+             &kitty_medium_temp_file) == ROASTTY_SUCCESS);
+  assert(roastty_terminal_set(
+             terminal,
+             ROASTTY_TERMINAL_OPTION_KITTY_IMAGE_MEDIUM_SHARED_MEM,
+             &kitty_medium_shared_mem) == ROASTTY_SUCCESS);
+  size_t apc_max_bytes = 2;
+  assert(roastty_terminal_set(terminal,
+                              ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES,
+                              &apc_max_bytes) == ROASTTY_SUCCESS);
+  size_t kitty_apc_max_bytes = 256;
+  assert(roastty_terminal_set(terminal,
+                              ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES_KITTY,
+                              &kitty_apc_max_bytes) == ROASTTY_SUCCESS);
+  assert(roastty_terminal_set(terminal,
+                              ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES_KITTY,
+                              NULL) == ROASTTY_SUCCESS);
+  assert(roastty_terminal_set(terminal,
+                              ROASTTY_TERMINAL_OPTION_APC_MAX_BYTES,
+                              NULL) == ROASTTY_SUCCESS);
   bool mouse_tracking = true;
   assert(roastty_terminal_get(terminal,
                               ROASTTY_TERMINAL_DATA_MOUSE_TRACKING,

@@ -521,7 +521,7 @@ tests, choose the larger subsystem.
 - [Experiment 197: Port Kitty Placement Render Info ABI](197-port-kitty-placement-render-info-abi.md)
   — **Pass**
 - [Experiment 198: Port Kitty Graphics Terminal Options](198-port-kitty-graphics-terminal-options.md)
-  — **Designed**
+  — **Pass**
 
 ## Non-Goals
 
