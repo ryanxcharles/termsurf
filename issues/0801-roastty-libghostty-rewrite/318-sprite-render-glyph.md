@@ -152,3 +152,71 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-093552-125296-prompt.md`
 - Result: `logs/codex-review/20260603-093552-125296-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/canvas.rs` gained `clip_left()`/`clip_bottom()`
+accessors. `roastty/src/font/sprite/mod.rs` gained
+`render_codepoint(cp, metrics, atlas) -> Result<Option<Glyph>, AtlasError>`: it
+sizes a padded `Canvas` (`width = cell_width`, `height = cell_height`,
+`padding = width/4 × height/4`), calls `draw_codepoint` (returning `Ok(None)` if
+unmatched), writes the trimmed buffer to the atlas, and builds the `Glyph` from
+the region and the trim margins (`offset_x = clip_left − padding_x`,
+`offset_y = (region.height +| clip_bottom) − padding_y`).
+
+Tests (the fixture `9×18` metrics, a fresh `Atlas::new(64, Grayscale)`):
+
+- `render_codepoint_box_line` — `0x2500` returns `Ok(Some(glyph))` with a
+  non-empty trimmed region and non-blank atlas pixels.
+- `render_codepoint_offsets` — the bearings equal an independent direct
+  `Canvas` + `write_atlas` render's `clip_left − padding_x` /
+  `(region.height +| clip_bottom) − padding_y`.
+- `render_codepoint_blank` — `0x2800` (covered-but-blank Braille) returns
+  `Ok(Some(_))` (not `None`) with `width`/`height` `0`, no panic.
+- `render_codepoint_none` — `'M'` returns `Ok(None)`, and the next glyph's atlas
+  placement matches a fresh-atlas baseline (no region wasted on the `None`).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2668 passed, 0 failed (+4, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The sprite render-to-atlas lands: `render_codepoint` is the codepoint path of
+the sprite `Face.renderGlyph` — a codepoint becomes an atlas `Glyph` with
+correct bearings. The sprite font is now complete end-to-end for codepoint-keyed
+glyphs: `has_codepoint` (cover) → `render_codepoint` (draw + atlas → `Glyph`).
+
+The remaining work is: the **wide-glyph `cell_width` factoring** (a `Canvas`
+`width = cell_width × cell_count` for double-width sprites, threading the count
+into the dispatch); the **sprite-kind special glyphs**
+(underlines/strikethrough/ overline/cursors, keyed by a `Sprite` enum — a
+parallel render entry point that takes the kind, the glyph width/height, and the
+metrics); and the **resolver wiring** — `codepoint_resolver.render_glyph`
+replacing its `SpriteUnavailable` arm with a call into `render_codepoint` (and a
+`has_codepoint`-backed coverage check in the collection), threading the metrics
+and the atlas. After the sprite font: the discovery consumer, the UCD
+emoji-presentation default, codepoint overrides, the shaper, the Nerd Font
+attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes** (and no Optional). It confirmed `render_codepoint` faithfully ports
+the single-cell codepoint path of upstream `renderGlyph` (the padded canvas
+sizing, the dispatch draw, the post-`write_atlas` trimmed region,
+`offset_x = clip_left − padding_x`, and the saturating
+`offset_y = region.height + clip_bottom − padding_y`); that the `0x2800` test
+covers the important covered-but-blank case; that the `None` test verifies
+unsupported codepoints do not consume atlas space; and that the offset test is
+well-targeted (comparing against an independent direct canvas render with the
+same trim-state semantics).
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-093858-841658-last-message.md`

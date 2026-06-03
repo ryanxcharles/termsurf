@@ -164,6 +164,18 @@ impl Canvas {
         self.padding_y
     }
 
+    /// The left trim margin (set by [`write_atlas`](Self::write_atlas)'s trim).
+    /// Used to compute a rendered glyph's left bearing.
+    pub(crate) fn clip_left(&self) -> u32 {
+        self.clip_left
+    }
+
+    /// The bottom trim margin (set by [`write_atlas`](Self::write_atlas)'s
+    /// trim). Used to compute a rendered glyph's top bearing.
+    pub(crate) fn clip_bottom(&self) -> u32 {
+        self.clip_bottom
+    }
+
     /// Draw and fill a single pixel, offset by the padding. Writes outside the
     /// surface are silently dropped (matching z2d `putPixel`).
     pub(crate) fn pixel(&mut self, x: i32, y: i32, color: Color) {

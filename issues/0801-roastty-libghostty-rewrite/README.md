@@ -1082,7 +1082,7 @@ are past the correctness-critical foundation.
 - [Experiment 317: the sprite has_codepoint predicate](317-sprite-has-codepoint.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 318: the sprite render-to-atlas (renderGlyph)](318-sprite-render-glyph.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
