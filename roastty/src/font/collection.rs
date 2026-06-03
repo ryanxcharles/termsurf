@@ -202,6 +202,16 @@ pub(crate) enum CompleteError {
     DefaultUnavailable,
 }
 
+/// Which styles may be **synthesized** (vs. aliased) when missing. Stand-in for
+/// upstream's `config.FontSyntheticStyle` (the config subsystem is a separate
+/// future area).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SyntheticStyle {
+    pub italic: bool,
+    pub bold: bool,
+    pub bold_italic: bool,
+}
+
 /// A slot in a style's face list: either an owned [`Entry`] or an `Alias` to a
 /// face elsewhere in the collection. Faithful port of upstream `EntryOrAlias`,
 /// with the alias stored as an [`Index`] (upstream's `*Entry` pointer is not
@@ -343,14 +353,14 @@ impl Collection {
         self.entry_of(&list[i]).has_codepoint(cp, p_mode)
     }
 
-    /// Ensure every style has at least one face by aliasing missing styles to
-    /// the first regular face that has text glyphs. Faithful port of upstream
-    /// `completeStyles`'s aliasing path (face synthesis is deferred).
+    /// Ensure every style has at least one face. For each missing style, either
+    /// synthesize a face (when enabled in `syn`) or alias it to the first regular
+    /// face that has text glyphs. Faithful port of upstream `completeStyles`.
     ///
     /// No-ops if every style is already populated. Returns `DefaultUnavailable`
     /// if there are regular faces but none has text glyphs; returns `Ok` (doing
     /// nothing) if there is no regular face at all.
-    pub(crate) fn complete_styles(&mut self) -> Result<(), CompleteError> {
+    pub(crate) fn complete_styles(&mut self, syn: SyntheticStyle) -> Result<(), CompleteError> {
         // The common case: every style already has at least one entry.
         if self.faces.iter().all(|list| !list.is_empty()) {
             return Ok(());
@@ -387,13 +397,68 @@ impl Collection {
             return Err(CompleteError::DefaultUnavailable);
         };
 
-        // Alias each missing style to the regular face. (Synthesis is deferred,
-        // so this always aliases — upstream's synthesis-disabled path.)
-        for style in [Style::Italic, Style::Bold, Style::BoldItalic] {
-            if self.faces[style as usize].is_empty() {
-                // The target is a validated direct entry, so this can't fail.
-                self.add_alias(style, regular)
+        // Capture whether bold/italic were *originally* present, before we
+        // complete them — the bold-italic preference below depends on this.
+        let have_bold = !self.faces[Style::Bold as usize].is_empty();
+        let have_italic = !self.faces[Style::Italic as usize].is_empty();
+
+        // The `expect`s below are invariant-backed: `regular` (and `Bold,0`/
+        // `Italic,0` once completed) is a validated direct entry, and each
+        // destination style list is empty, so neither `get_face` nor `add` can
+        // fail. The Rust synthetic methods are infallible, so upstream's
+        // synthesis-failure alias fallbacks don't occur.
+
+        // Italic: synthesize from the regular face, or alias to it.
+        if !have_italic {
+            if syn.italic {
+                let face = self
+                    .get_face(regular)
+                    .expect("regular resolves")
+                    .synthetic_italic();
+                self.add(face, Style::Italic, false)
+                    .expect("italic list is empty");
+            } else {
+                self.add_alias(Style::Italic, regular)
                     .expect("regular is a valid direct entry");
+            }
+        }
+
+        // Bold: synthesize from the regular face, or alias to it.
+        if !have_bold {
+            if syn.bold {
+                let face = self
+                    .get_face(regular)
+                    .expect("regular resolves")
+                    .synthetic_bold();
+                self.add(face, Style::Bold, false)
+                    .expect("bold list is empty");
+            } else {
+                self.add_alias(Style::Bold, regular)
+                    .expect("regular is a valid direct entry");
+            }
+        }
+
+        // Bold-italic: prefer to synthesize on top of whatever we already had —
+        // italicize the bold face if bold was original, else embolden the italic
+        // face. If disabled, alias to the regular face.
+        if self.faces[Style::BoldItalic as usize].is_empty() {
+            if !syn.bold_italic {
+                self.add_alias(Style::BoldItalic, regular)
+                    .expect("regular is a valid direct entry");
+            } else if have_bold {
+                let face = self
+                    .get_face(Index::new(Style::Bold, 0))
+                    .expect("bold resolves")
+                    .synthetic_italic();
+                self.add(face, Style::BoldItalic, false)
+                    .expect("bold-italic list is empty");
+            } else {
+                let face = self
+                    .get_face(Index::new(Style::Italic, 0))
+                    .expect("italic resolves")
+                    .synthetic_bold();
+                self.add(face, Style::BoldItalic, false)
+                    .expect("bold-italic list is empty");
             }
         }
 
@@ -529,6 +594,17 @@ mod tests {
     }
 
     const EMOJI: u32 = 0x1F600; // 😀
+
+    const NO_SYNTHESIS: SyntheticStyle = SyntheticStyle {
+        italic: false,
+        bold: false,
+        bold_italic: false,
+    };
+    const ALL_SYNTHESIS: SyntheticStyle = SyntheticStyle {
+        italic: true,
+        bold: true,
+        bold_italic: true,
+    };
 
     fn menlo_collection() -> Collection {
         let mut c = Collection::new();
@@ -668,7 +744,7 @@ mod tests {
     #[test]
     fn complete_styles_aliases_missing() {
         let mut c = menlo_collection(); // Menlo at {Regular, 0}
-        c.complete_styles().expect("complete");
+        c.complete_styles(NO_SYNTHESIS).expect("complete");
 
         // Each missing style now aliases the regular Menlo face at index 0.
         for style in [Style::Italic, Style::Bold, Style::BoldItalic] {
@@ -689,7 +765,7 @@ mod tests {
         ] {
             c.add(Face::new("Menlo", 32.0), style, false).unwrap();
         }
-        c.complete_styles().expect("complete");
+        c.complete_styles(NO_SYNTHESIS).expect("complete");
         // No style gained a second entry: index 1 is out of bounds everywhere.
         for style in [
             Style::Regular,
@@ -707,7 +783,7 @@ mod tests {
     #[test]
     fn complete_styles_empty_is_ok() {
         let mut c = Collection::new();
-        c.complete_styles().expect("complete on empty");
+        c.complete_styles(NO_SYNTHESIS).expect("complete on empty");
         // Still empty: no regular face to alias to.
         assert_eq!(
             c.get_entry(Index::new(Style::Italic, 0)).err(),
@@ -725,7 +801,64 @@ mod tests {
         }
         let mut c = Collection::new();
         c.add(emoji, Style::Regular, false).unwrap();
-        assert_eq!(c.complete_styles(), Err(CompleteError::DefaultUnavailable));
+        assert_eq!(
+            c.complete_styles(NO_SYNTHESIS),
+            Err(CompleteError::DefaultUnavailable)
+        );
+    }
+
+    #[test]
+    fn complete_styles_synthesizes() {
+        let mut c = menlo_collection(); // Menlo at {Regular, 0}; no bold/italic.
+        c.complete_styles(ALL_SYNTHESIS).expect("complete");
+
+        // Bold is synthesized from the regular face (has a bold line width).
+        assert!(c
+            .get_face(Index::new(Style::Bold, 0))
+            .unwrap()
+            .synthetic_bold_width()
+            .is_some());
+        // Italic is synthesized (sheared).
+        assert!(c
+            .get_face(Index::new(Style::Italic, 0))
+            .unwrap()
+            .is_skewed());
+        // Bold-italic: bold wasn't originally present, so it's bold-on-italic —
+        // its base is the synthetic italic, so it's both bold-width and skewed.
+        let bi = c.get_face(Index::new(Style::BoldItalic, 0)).unwrap();
+        assert!(bi.synthetic_bold_width().is_some());
+        assert!(bi.is_skewed());
+    }
+
+    #[test]
+    fn complete_styles_bold_italic_prefers_bold() {
+        // Regular and Bold present (so have_bold is true), italic/bold-italic not.
+        let mut c = menlo_collection();
+        c.add(Face::new("Menlo", 32.0), Style::Bold, false).unwrap();
+        c.complete_styles(ALL_SYNTHESIS).expect("complete");
+
+        // Bold-italic is synthesized as italic-on-bold: the base is the real
+        // (non-synthetic) bold Menlo, so it's skewed but has no bold line width.
+        let bi = c.get_face(Index::new(Style::BoldItalic, 0)).unwrap();
+        assert!(bi.is_skewed());
+        assert!(bi.synthetic_bold_width().is_none());
+    }
+
+    #[test]
+    fn complete_styles_alias_when_disabled() {
+        let mut c = menlo_collection();
+        c.complete_styles(NO_SYNTHESIS).expect("complete");
+        // With synthesis off, the missing styles alias the plain regular face:
+        // no bold width, no skew.
+        assert!(c
+            .get_face(Index::new(Style::Bold, 0))
+            .unwrap()
+            .synthetic_bold_width()
+            .is_none());
+        assert!(!c
+            .get_face(Index::new(Style::Italic, 0))
+            .unwrap()
+            .is_skewed());
     }
 
     #[test]

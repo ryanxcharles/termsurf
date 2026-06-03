@@ -177,6 +177,18 @@ impl Face {
         self.color.is_some()
     }
 
+    /// The synthetic-bold line width, if this is a synthetic-bold face.
+    pub(crate) fn synthetic_bold_width(&self) -> Option<f64> {
+        self.synthetic_bold
+    }
+
+    /// True if this face has an oblique (sheared) transform — i.e. a synthetic
+    /// italic. Checks the font's transform matrix for a non-zero shear.
+    pub(crate) fn is_skewed(&self) -> bool {
+        // SAFETY: `self.font` is a live `CTFont`.
+        unsafe { self.font.matrix() }.c != 0.0
+    }
+
     /// True if the given glyph id is colored.
     pub(crate) fn is_color_glyph(&self, glyph: u16) -> bool {
         self.color.is_some_and(|c| c.is_color_glyph(glyph))

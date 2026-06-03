@@ -170,3 +170,62 @@ Review artifacts:
   `…-222620-054216-prompt.md`
 - Results: `logs/codex-review/20260602-222514-898742-last-message.md`,
   `…-222620-054216-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`SyntheticStyle { italic, bold, bold_italic }` was added; `complete_styles`
+gained the `syn` parameter and the synthesis branches (italic/bold synthesized
+from the regular face when enabled, else aliased; bold-italic prefers
+italic-on-bold when `have_bold` was originally true, else bold-on-italic).
+`have_bold`/`have_italic` are captured before completion; the `get_face`/`add`
+calls are invariant-backed `expect`s. `Face` gained `synthetic_bold_width` and
+`is_skewed` accessors.
+
+Tests (live CoreText):
+
+- `complete_styles_synthesizes` — all-enabled: Bold has a bold width, Italic is
+  skewed, and Bold-italic (bold-on-italic, since `have_bold` is false) is both.
+- `complete_styles_bold_italic_prefers_bold` — Regular+Bold present: Bold-italic
+  is italic-on-bold (skewed, no bold width — its base is the real bold).
+- `complete_styles_alias_when_disabled` — all-disabled: Bold/Italic alias the
+  plain regular (no bold width, no skew).
+- The Experiment 266 tests (updated to `NO_SYNTHESIS`) still pass.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty collection` → 26 passed, 0 failed.
+- `cargo test -p roastty` → 2412 passed, 0 failed (no regressions; +3).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+`completeStyles` is now fully ported — synthesize-vs-alias per style with the
+faithful bold-italic preference. The `Collection` can present every style. Its
+remaining work is the per-entry **`scale_factor`** + `load_options`/`setSize`
+size normalization (so fallback faces are scaled to match the primary) and
+`setSize`/`updateMetrics`. Then the `DeferredFace` + `discovery` lazy-loading
+sub-area (CoreText font matching), the `CodepointResolver` (sprite/box routing
+over `Collection.getIndex`), the shaper, and the Nerd Font attribute table.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no required
+changes**.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-223026-017108-prompt.md`
+- Result: `logs/codex-review/20260602-223026-017108-last-message.md`
+
+Codex confirmed the code matches upstream's style completion: italic/bold
+synthesize from regular only when enabled (else alias); bold-italic aliases
+regular when disabled, else uses `have_bold` (captured before bold completion)
+to choose italic-on-bold, falling back to bold-on-italic. The borrow shape is
+sound (`get_face(...).synthetic_*()` returns an owned `Face` before the `&mut`
+`add`), the `expect`s are invariant-backed in the eager-only model, and the
+accessors and tests align (the `have_bold=false` path is both bold and skewed;
+the originally-present-bold path is skewed without a synthetic-bold width).
