@@ -21,6 +21,7 @@ use crate::font::face::constraint::{Constraint, Size};
 use crate::font::face::coretext::RenderOptions;
 use crate::font::face::nerd_font_attributes::get_constraint;
 use crate::font::metrics::Metrics;
+use crate::font::run::ShapedRun;
 use crate::font::shape;
 use crate::font::shared_grid::SharedGrid;
 use crate::font::Presentation;
@@ -398,6 +399,53 @@ pub(crate) fn add_glyph(
     Ok(())
 }
 
+/// Place every glyph of one [`ShapedRun`] into `contents` on row `y`. For each
+/// shaped cell, the absolute column is `run.offset + cell.x`; its
+/// [`RenderOptions`] come from [`render_options`] over `row_cells`, its
+/// color/alpha from `fg_colors[col]`, and its `no_min_contrast` from the cell's
+/// codepoint. The per-run inner loop of upstream `rebuildCells`.
+pub(crate) fn add_run(
+    contents: &mut Contents,
+    grid: &mut SharedGrid,
+    y: u16,
+    run: &ShapedRun,
+    row_cells: &[CellInfo],
+    fg_colors: &[[u8; 4]],
+    cols: usize,
+    thicken: bool,
+    thicken_strength: u8,
+) -> Result<(), ResolverRenderError> {
+    let grid_metrics = grid.metrics;
+    for cell in &run.glyphs {
+        let col = usize::from(run.run.offset) + usize::from(cell.x);
+        debug_assert!(col < cols && cols <= row_cells.len() && cols <= fg_colors.len());
+        // Checked, like upstream's `@intCast` (and the bearings in `add_glyph`).
+        let grid_x = u16::try_from(col).expect("glyph column fits u16");
+        let opts = render_options(
+            grid_metrics,
+            row_cells,
+            col,
+            cols,
+            thicken,
+            thicken_strength,
+        );
+        let cp = row_cells[col].codepoint;
+        let rgba = fg_colors[col];
+        add_glyph(
+            contents,
+            grid,
+            [grid_x, y],
+            run.run.font_index,
+            cell,
+            [rgba[0], rgba[1], rgba[2]],
+            rgba[3],
+            no_min_contrast(cp),
+            &opts,
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -707,6 +755,65 @@ mod tests {
         let opts = render_options(sample_metrics(), &row, 0, 1, false, 255);
         assert_eq!(opts.constraint, expected);
         assert_ne!(opts.constraint.size, Size::Fit);
+    }
+
+    #[test]
+    fn add_run_places_glyphs_at_absolute_columns() {
+        use crate::font::collection::Index;
+        use crate::font::run::TextRun;
+        let mut shared = menlo_grid();
+        let mut c = Contents::default();
+        c.resize(grid(4, 2));
+
+        // A run at column offset 2 with two glyphs at run-relative x 0/1.
+        let run = ShapedRun {
+            run: TextRun {
+                hash: 0,
+                offset: 2,
+                cells: 2,
+                font_index: Index::default(),
+            },
+            glyphs: vec![
+                shape::Cell {
+                    x: 0,
+                    x_offset: 0,
+                    y_offset: 0,
+                    glyph_index: glyph_for(b'A'),
+                },
+                shape::Cell {
+                    x: 1,
+                    x_offset: 0,
+                    y_offset: 0,
+                    glyph_index: glyph_for(b'B'),
+                },
+            ],
+        };
+        // 'A'/'B' live at columns 2/3 of a 4-wide row.
+        let row = [
+            ci('x' as u32, 1),
+            ci('x' as u32, 1),
+            ci('A' as u32, 1),
+            ci('B' as u32, 1),
+        ];
+        let fg = [
+            [0, 0, 0, 255],
+            [0, 0, 0, 255],
+            [10, 20, 30, 255],
+            [40, 50, 60, 255],
+        ];
+
+        add_run(&mut c, &mut shared, 1, &run, &row, &fg, 4, false, 255).expect("add_run");
+
+        // Two glyphs land at absolute columns 2 and 3 (offset 2 + x 0/1).
+        assert_eq!(c.fg_rows[2].len(), 2);
+        let v0 = c.fg_rows[2][0];
+        let v1 = c.fg_rows[2][1];
+        assert_eq!(v0.grid_pos, [2, 1]);
+        assert_eq!(v1.grid_pos, [3, 1]);
+        assert_eq!(v0.color, [10, 20, 30, 255]);
+        assert_eq!(v1.color, [40, 50, 60, 255]);
+        assert_eq!(v0.atlas, CellTextAtlas::Grayscale);
+        assert_eq!(v1.atlas, CellTextAtlas::Grayscale);
     }
 
     #[test]

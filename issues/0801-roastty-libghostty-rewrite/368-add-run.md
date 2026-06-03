@@ -186,3 +186,64 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-180745-101114-prompt.md` (design)
 - Result: `logs/codex-review/20260603-180745-101114-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+A whole shaped run now places its glyphs — the inner loop of `rebuildCells`.
+
+- `roastty/src/renderer/cell.rs`:
+  `add_run(contents, grid, y, run, row_cells, fg_colors, cols, thicken, thicken_strength)`
+  reads `grid.metrics` once, then for each shaped cell of the run computes the
+  absolute column `run.offset + cell.x` (checked `u16::try_from` for the grid
+  position, with a `debug_assert` on the slice-shape contract), derives the
+  cell's `RenderOptions` (`render_options`), splits the column's RGBA into
+  color + alpha, and calls `add_glyph` with the run's shared `font_index` and
+  the codepoint's `no_min_contrast`. Imported `font::run::ShapedRun`.
+
+Test (in `cell.rs`): `add_run_places_glyphs_at_absolute_columns` builds a
+`ShapedRun` with `run.offset = 2` and glyphs `'A'`/`'B'` at run-relative
+`x = 0/1`, a 4-wide `CellInfo` row with `'A'`/`'B'` at columns 2/3 and matching
+`fg_colors`, and asserts the two emitted cells land at
+`grid_pos [2, 1]`/`[3, 1]` (offset + x — a regression dropping `run.offset`
+would put them at `[0,1]`/ `[1,1]`), with each cell's `color` the matching
+column's `fg_colors` and `atlas == Grayscale`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2818 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The per-run glyph placement is complete: a `ShapedRun` (from the shaping
+pipeline) becomes a sequence of correctly-positioned `CellTextVertex`es in
+`Contents`. The renderer can now draw an entire run's text.
+
+The remaining renderer-bridge work is the **outer `rebuildCells` loop**: for the
+viewport, iterate each row's `ShapedRun`s (from `shape_viewport`), build the
+row's `CellInfo` slice and per-column `fg_colors` from the terminal page (cell
+codepoint/grid width and the resolved foreground color), and call `add_run` per
+run — plus the background cells, decorations (underline/strikethrough), the
+cursor, and the Metal upload of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation is faithful to the per-run part
+of upstream `rebuildCells` (computes `col = run.offset + cell.x`, derives
+per-cell `RenderOptions`, uses the row cell's codepoint for `no_min_contrast`,
+splits RGBA into color + alpha, and passes the run's shared `font_index` to
+`add_glyph`); that both design-review fixes landed correctly (`grid_x` uses
+checked `u16::try_from(col)` instead of a truncating cast, and the test uses
+`run.offset = 2` so dropping the offset would fail), with the debug assertion
+appropriate for the internal slice-shape contract; and that the test proves the
+key behavior (nonzero-offset column math, per-column color selection, row
+routing, atlas mapping). Nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-181029-822664-last-message.md`
