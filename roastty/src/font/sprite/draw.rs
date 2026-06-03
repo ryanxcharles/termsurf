@@ -1,16 +1,17 @@
-//! Procedural box-drawing glyphs.
+//! Procedural box-drawing and block glyphs.
 //!
-//! Faithful port of the box-drawing **line** primitive of upstream
-//! `font/sprite/draw/box.zig` (`linesChar`), plus the `Thickness` helper from
-//! `font/sprite/draw/common.zig` and the per-direction line style. `linesChar`
-//! is the foundation the line glyphs (`U+2500`–`U+254B` straight lines, corners,
-//! T-junctions, crosses) and the double-line glyphs build on. The remaining
-//! box-drawing primitives (dashes, arcs, diagonals), the full `draw2500_257F`
-//! dispatch, the sprite `hasCodepoint` inventory, and the other sprite
-//! categories (block, braille, powerline, legacy) are later experiments.
+//! Faithful port of upstream `font/sprite/draw/box.zig` (the `linesChar` line
+//! primitive, the dash primitives) and `block.zig` (the Block Elements), plus
+//! the shared `font/sprite/draw/common.zig` primitives (`Thickness`,
+//! `Fraction`/`fill`, the `hline`/`vline` helpers, `Shade`/`Alignment`/`Quads`).
+//! Covered so far: the box-drawing line glyphs (`U+2500`–`U+257F` `linesChar`
+//! dispatch), the dashes, and the Block Elements (`U+2580`–`U+259F`). The
+//! `z2d`-based primitives (arcs, diagonals), the sprite `hasCodepoint`
+//! inventory, and the other sprite categories (braille, powerline, legacy,
+//! geometric) are later experiments.
 
 use crate::font::metrics::Metrics;
-use crate::font::sprite::canvas::{Canvas, Color};
+use crate::font::sprite::canvas::{Canvas, Color, Rect};
 
 /// Stroke thickness class. Faithful port of upstream `common.Thickness`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -785,6 +786,207 @@ pub(crate) fn draw_box_dashes(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -
     true
 }
 
+/// A pixel shade. The enum value is the pixel alpha. Faithful port of upstream
+/// `common.Shade`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum Shade {
+    Off = 0x00,
+    Light = 0x40,
+    Medium = 0x80,
+    Dark = 0xc0,
+    On = 0xff,
+}
+
+impl Shade {
+    /// The [`Color`] (alpha) for this shade.
+    pub(crate) fn color(self) -> Color {
+        Color(self as u8)
+    }
+}
+
+/// Horizontal alignment of a figure within a cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HAlign {
+    Left,
+    Right,
+    Center,
+}
+
+/// Vertical alignment of a figure within a cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VAlign {
+    Top,
+    Bottom,
+    Middle,
+}
+
+/// Alignment of a figure within a cell. Faithful port of upstream
+/// `common.Alignment` (defaults to centered).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Alignment {
+    pub horizontal: HAlign,
+    pub vertical: VAlign,
+}
+
+impl Alignment {
+    pub(crate) const UPPER: Alignment = Alignment {
+        horizontal: HAlign::Center,
+        vertical: VAlign::Top,
+    };
+    pub(crate) const LOWER: Alignment = Alignment {
+        horizontal: HAlign::Center,
+        vertical: VAlign::Bottom,
+    };
+    pub(crate) const LEFT: Alignment = Alignment {
+        horizontal: HAlign::Left,
+        vertical: VAlign::Middle,
+    };
+    pub(crate) const RIGHT: Alignment = Alignment {
+        horizontal: HAlign::Right,
+        vertical: VAlign::Middle,
+    };
+
+    /// The centered alignment (the upstream default).
+    pub(crate) const fn center() -> Alignment {
+        Alignment {
+            horizontal: HAlign::Center,
+            vertical: VAlign::Middle,
+        }
+    }
+}
+
+/// A set of cell quadrants that may each be present or not. Faithful port of
+/// upstream `common.Quads`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct Quads {
+    pub tl: bool,
+    pub tr: bool,
+    pub bl: bool,
+    pub br: bool,
+}
+
+/// Draw a `width × height` fraction of the cell, aligned per `align`, shaded by
+/// `shade`. Faithful port of upstream `blockShade`.
+fn block_shade(
+    metrics: &Metrics,
+    canvas: &mut Canvas,
+    align: Alignment,
+    width: f64,
+    height: f64,
+    shade: Shade,
+) {
+    let w = (metrics.cell_width as f64 * width).round() as u32;
+    let h = (metrics.cell_height as f64 * height).round() as u32;
+
+    let x = match align.horizontal {
+        HAlign::Left => 0,
+        HAlign::Right => metrics.cell_width - w,
+        HAlign::Center => (metrics.cell_width - w) / 2,
+    };
+    let y = match align.vertical {
+        VAlign::Top => 0,
+        VAlign::Bottom => metrics.cell_height - h,
+        VAlign::Middle => (metrics.cell_height - h) / 2,
+    };
+
+    canvas.rect(
+        Rect {
+            x: x as i32,
+            y: y as i32,
+            width: w as i32,
+            height: h as i32,
+        },
+        shade.color(),
+    );
+}
+
+/// Draw a solid (`.on`) `width × height` block aligned per `align`. Faithful
+/// port of upstream `block`.
+fn block(metrics: &Metrics, canvas: &mut Canvas, align: Alignment, width: f64, height: f64) {
+    block_shade(metrics, canvas, align, width, height, Shade::On);
+}
+
+/// Shade the whole cell. Faithful port of upstream `fullBlockShade`.
+fn full_block_shade(metrics: &Metrics, canvas: &mut Canvas, shade: Shade) {
+    canvas.r#box(
+        0,
+        0,
+        metrics.cell_width as i32,
+        metrics.cell_height as i32,
+        shade.color(),
+    );
+}
+
+/// Fill the set quadrants of `quads`. Faithful port of upstream `quadrant`.
+fn quadrant(metrics: &Metrics, canvas: &mut Canvas, quads: Quads) {
+    use Fraction::{Full, Half, Zero};
+    if quads.tl {
+        fill(metrics, canvas, Zero, Half, Zero, Half);
+    }
+    if quads.tr {
+        fill(metrics, canvas, Half, Full, Zero, Half);
+    }
+    if quads.bl {
+        fill(metrics, canvas, Zero, Half, Half, Full);
+    }
+    if quads.br {
+        fill(metrics, canvas, Half, Full, Half, Full);
+    }
+}
+
+/// Draw the Block Elements glyph for `cp` (`U+2580`–`U+259F`) into `canvas`,
+/// returning `true` if `cp` is a dispatched block glyph. Faithful port of
+/// upstream `draw2580_259F`.
+pub(crate) fn draw_block(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> bool {
+    // Utility fractions for the eighth/quarter blocks.
+    const ONE_EIGHTH: f64 = 0.125;
+    const ONE_QUARTER: f64 = 0.25;
+    const THREE_EIGHTHS: f64 = 0.375;
+    const HALF: f64 = 0.5;
+    const FIVE_EIGHTHS: f64 = 0.625;
+    const THREE_QUARTERS: f64 = 0.75;
+    const SEVEN_EIGHTHS: f64 = 0.875;
+
+    let q = |tl: bool, tr: bool, bl: bool, br: bool| Quads { tl, tr, bl, br };
+    match cp {
+        0x2580 => block(metrics, canvas, Alignment::UPPER, 1.0, HALF),
+        0x2581 => block(metrics, canvas, Alignment::LOWER, 1.0, ONE_EIGHTH),
+        0x2582 => block(metrics, canvas, Alignment::LOWER, 1.0, ONE_QUARTER),
+        0x2583 => block(metrics, canvas, Alignment::LOWER, 1.0, THREE_EIGHTHS),
+        0x2584 => block(metrics, canvas, Alignment::LOWER, 1.0, HALF),
+        0x2585 => block(metrics, canvas, Alignment::LOWER, 1.0, FIVE_EIGHTHS),
+        0x2586 => block(metrics, canvas, Alignment::LOWER, 1.0, THREE_QUARTERS),
+        0x2587 => block(metrics, canvas, Alignment::LOWER, 1.0, SEVEN_EIGHTHS),
+        0x2588 => full_block_shade(metrics, canvas, Shade::On),
+        0x2589 => block(metrics, canvas, Alignment::LEFT, SEVEN_EIGHTHS, 1.0),
+        0x258A => block(metrics, canvas, Alignment::LEFT, THREE_QUARTERS, 1.0),
+        0x258B => block(metrics, canvas, Alignment::LEFT, FIVE_EIGHTHS, 1.0),
+        0x258C => block(metrics, canvas, Alignment::LEFT, HALF, 1.0),
+        0x258D => block(metrics, canvas, Alignment::LEFT, THREE_EIGHTHS, 1.0),
+        0x258E => block(metrics, canvas, Alignment::LEFT, ONE_QUARTER, 1.0),
+        0x258F => block(metrics, canvas, Alignment::LEFT, ONE_EIGHTH, 1.0),
+        0x2590 => block(metrics, canvas, Alignment::RIGHT, HALF, 1.0),
+        0x2591 => full_block_shade(metrics, canvas, Shade::Light),
+        0x2592 => full_block_shade(metrics, canvas, Shade::Medium),
+        0x2593 => full_block_shade(metrics, canvas, Shade::Dark),
+        0x2594 => block(metrics, canvas, Alignment::UPPER, 1.0, ONE_EIGHTH),
+        0x2595 => block(metrics, canvas, Alignment::RIGHT, ONE_EIGHTH, 1.0),
+        0x2596 => quadrant(metrics, canvas, q(false, false, true, false)),
+        0x2597 => quadrant(metrics, canvas, q(false, false, false, true)),
+        0x2598 => quadrant(metrics, canvas, q(true, false, false, false)),
+        0x2599 => quadrant(metrics, canvas, q(true, false, true, true)),
+        0x259A => quadrant(metrics, canvas, q(true, false, false, true)),
+        0x259B => quadrant(metrics, canvas, q(true, true, true, false)),
+        0x259C => quadrant(metrics, canvas, q(true, true, false, true)),
+        0x259D => quadrant(metrics, canvas, q(false, true, false, false)),
+        0x259E => quadrant(metrics, canvas, q(false, true, true, false)),
+        0x259F => quadrant(metrics, canvas, q(false, true, true, true)),
+        _ => return false,
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1387,5 +1589,134 @@ mod tests {
         assert!(!inked(&c, 4, 8), "y=8 is outside [9,18)");
         assert_eq!(row_spans(&c, 17, m.cell_width), vec![(4, 9)]);
         assert_eq!(col_spans(&c, 8, m.cell_height), vec![(9, 18)]);
+    }
+
+    /// Whether every pixel of the cell has the given alpha.
+    fn all_alpha(c: &Canvas, m: &Metrics, alpha: u8) -> bool {
+        (0..m.cell_height as i32).all(|y| (0..m.cell_width as i32).all(|x| c.get(x, y) == alpha))
+    }
+
+    #[test]
+    fn block_upper_half() {
+        // 0x2580: w=9, h=round(9.0)=9, upper -> x[0,9) y[0,9).
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_block(0x2580, &m, &mut c));
+        for x in 0..m.cell_width as i32 {
+            assert_eq!(col_spans(&c, x, m.cell_height), vec![(0, 9)], "col {x}");
+        }
+    }
+
+    #[test]
+    fn block_lower_eighth() {
+        // 0x2581: h=round(18*0.125)=round(2.25)=2, lower -> y[16,18).
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_block(0x2581, &m, &mut c));
+        for x in 0..m.cell_width as i32 {
+            assert_eq!(col_spans(&c, x, m.cell_height), vec![(16, 18)], "col {x}");
+        }
+    }
+
+    #[test]
+    fn block_lower_three_eighths() {
+        // 0x2583: h=round(18*0.375)=round(6.75)=7, lower -> y[11,18).
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_block(0x2583, &m, &mut c));
+        assert_eq!(col_spans(&c, 0, m.cell_height), vec![(11, 18)]);
+    }
+
+    #[test]
+    fn block_left_half() {
+        // 0x258C: w=round(9*0.5)=round(4.5)=5, left -> x[0,5) y[0,18).
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_block(0x258C, &m, &mut c));
+        for y in 0..m.cell_height as i32 {
+            assert_eq!(row_spans(&c, y, m.cell_width), vec![(0, 5)], "row {y}");
+        }
+    }
+
+    #[test]
+    fn block_right_eighth() {
+        // 0x2595: w=round(9*0.125)=round(1.125)=1, right -> x[8,9).
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_block(0x2595, &m, &mut c));
+        assert_eq!(row_spans(&c, 0, m.cell_width), vec![(8, 9)]);
+    }
+
+    #[test]
+    fn full_block_on() {
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_block(0x2588, &m, &mut c));
+        assert!(all_alpha(&c, &m, 0xFF));
+    }
+
+    #[test]
+    fn full_block_shades() {
+        // 0x2591/2/3 -> light/medium/dark alpha.
+        let m = fixture_metrics();
+        for (cp, alpha) in [(0x2591u32, 0x40u8), (0x2592, 0x80), (0x2593, 0xC0)] {
+            let mut c = cell_canvas();
+            assert!(draw_block(cp, &m, &mut c));
+            assert!(all_alpha(&c, &m, alpha), "{cp:#06x} -> alpha {alpha:#x}");
+        }
+    }
+
+    #[test]
+    fn quadrant_bl() {
+        // 0x2596: bottom-left -> x[0,5) y[9,18).
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_block(0x2596, &m, &mut c));
+        assert!(inked(&c, 0, 9));
+        assert!(inked(&c, 4, 17));
+        assert!(!inked(&c, 5, 17), "x=5 outside [0,5)");
+        assert!(!inked(&c, 0, 8), "y=8 outside [9,18)");
+        assert_eq!(col_spans(&c, 0, m.cell_height), vec![(9, 18)]);
+        assert_eq!(row_spans(&c, 17, m.cell_width), vec![(0, 5)]);
+    }
+
+    #[test]
+    fn quadrant_diagonal() {
+        // 0x259A: tl + br. TL x[0,5)y[0,9), BR x[4,9)y[9,18). TR and BL empty.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_block(0x259A, &m, &mut c));
+        // TL present.
+        assert!(inked(&c, 0, 0));
+        assert!(inked(&c, 4, 8));
+        // BR present.
+        assert!(inked(&c, 8, 17));
+        assert!(inked(&c, 4, 9));
+        // TR (x[5,9) y[0,9)) empty.
+        assert!(!inked(&c, 8, 0), "TR empty");
+        // BL (x[0,4) y[9,18)) empty.
+        assert!(!inked(&c, 0, 17), "BL empty");
+    }
+
+    #[test]
+    fn quadrant_three() {
+        // 0x259F: tr + bl + br. TL (x[0,4) y[0,9)) empty.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_block(0x259F, &m, &mut c));
+        assert!(inked(&c, 8, 0), "TR present");
+        assert!(inked(&c, 0, 17), "BL present");
+        assert!(inked(&c, 8, 17), "BR present");
+        assert!(!inked(&c, 0, 0), "TL empty");
+    }
+
+    #[test]
+    fn draw_block_excludes() {
+        let m = fixture_metrics();
+        for cp in [0x2500u32, 0x257F, 'M' as u32] {
+            let mut c = cell_canvas();
+            assert!(!draw_block(cp, &m, &mut c), "{cp:#06x} not a block");
+            assert!(all_alpha(&c, &m, 0), "{cp:#06x} drew ink");
+        }
     }
 }

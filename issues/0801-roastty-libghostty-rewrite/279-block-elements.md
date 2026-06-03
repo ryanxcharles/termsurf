@@ -186,3 +186,67 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-005735-609888-prompt.md`
 - Result: `logs/codex-review/20260603-005735-609888-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/draw.rs` gained `Shade` (+ `color`), `HAlign`/`VAlign`/
+`Alignment` (+ `UPPER`/`LOWER`/`LEFT`/`RIGHT`/`center`), `Quads`, `block_shade`
+(the `round` + alignment placement), `block`, `full_block_shade`, `quadrant`,
+and the 32-arm `draw_block` dispatch. The module doc now covers box **and**
+block glyphs; `Rect` was added to the imports.
+
+Tests (deterministic, the fixture `Metrics`):
+
+- `block_upper_half` (`0x2580`) → `x[0,9) y[0,9)`.
+- `block_lower_eighth` (`0x2581`) → `y[16,18)`; `block_lower_three_eighths`
+  (`0x2583`) → `y[11,18)`.
+- `block_left_half` (`0x258C`) → `x[0,5)` full height; `block_right_eighth`
+  (`0x2595`) → `x[8,9)`.
+- `full_block_on` (`0x2588`) → all pixels alpha `0xFF`; `full_block_shades`
+  (`0x2591/2/3`) → all pixels `0x40`/`0x80`/`0xC0`.
+- `quadrant_bl` (`0x2596`) → `x[0,5) y[9,18)`; `quadrant_diagonal` (`0x259A`,
+  tl+br) and `quadrant_three` (`0x259F`, tr+bl+br) confirm the correct corners
+  inked and the complementary corners empty.
+- `draw_block_excludes` → `0x2500`, `0x257F`, `'M'` return `false`, draw
+  nothing.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty sprite` → 53 passed (11 new).
+- `cargo test -p roastty` → 2479 passed, 0 failed (no regressions; +11).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The Block Elements (`U+2580`–`U+259F`) are ported and pixel-verified — the
+half/eighth blocks placed per alignment, the three shade glyphs carrying the
+right alpha, and the ten quadrant combinations filling the correct corners. The
+rect-based sprite families are progressing well on the existing `Canvas`. The
+next rect-based candidates are the eighth-block/octant and sextant families
+(`symbols_for_legacy_computing*`) and the rect parts of the geometric shapes;
+separately, the `z2d` anti-aliased-path port remains the prerequisite for the
+arcs and diagonals. Wiring the box/dash/block dispatchers under one sprite
+`has_codepoint`/draw entry point — which the resolver's deferred sprite render
+arm needs — becomes worthwhile once a few more families land. Alongside the
+sprite font remain the discovery consumer, the UCD emoji-presentation default,
+codepoint overrides, the shaper, the Nerd Font attribute table, and SVG color
+detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no required
+changes**. It verified `draw_block` matches upstream arm-for-arm across
+`0x2580`–`0x259F` (including the `q(tl, tr, bl, br)` ordering and all ten
+quadrant combinations), that `block_shade`/`block`/`full_block_shade`/
+`Shade::color`/`Alignment`/`Quads`/`quadrant` match upstream semantics, and that
+the tests assert the expected spans and shade alphas. It judged the verification
+clean.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260603-010035-327081-prompt.md`
+- Result: `logs/codex-review/20260603-010035-327081-last-message.md`

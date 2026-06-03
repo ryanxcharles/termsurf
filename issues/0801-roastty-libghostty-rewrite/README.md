@@ -1004,7 +1004,7 @@ are past the correctness-critical foundation.
 - [Experiment 278: The Fraction + fill cell-geometry primitive](278-fraction-fill.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 279: Block Elements (U+2580–U+259F)](279-block-elements.md) —
-  **Designed** · Claude/Codex/Codex
+  **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
