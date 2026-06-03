@@ -91,6 +91,7 @@ requested variations.
   resolves — both `discover_faces` and `discover_fallback_faces` — matching
   upstream, which applies variations at deferred-face resolution (not just one
   iterator). Add a small helper and use it at each face-producing site:
+
   ```rust
   /// Apply this descriptor's requested variations to a resolved face.
   fn apply_variations(&self, mut face: Face) -> Face {
@@ -231,3 +232,73 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-135038-953972-prompt.md` (design)
 - Result: `logs/codex-review/20260603-135038-953972-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+Faces now carry their requested variations.
+
+- `roastty/src/font/face/coretext.rs`:
+  `Face::set_variations(&mut self, vs: &[Variation])` is a no-op for an empty
+  list; otherwise it copies the font's descriptor (`font_descriptor`), folds
+  each axis in via
+  `copy_with_variation(&CFNumber::new_i32(v.id as i32), v.value)`, rebuilds the
+  font with `copy_with_attributes(0.0, null, Some(&desc))` (size `0.0` preserves
+  the source size), and reconstructs the face through `from_ct_font`
+  (re-deriving color), carrying `synthetic_bold` across. Imported `CFNumber` and
+  `Variation`.
+- `roastty/src/font/discovery.rs`: added `Descriptor::apply_variations`;
+  `discover_faces` applies the requested variations in its lazy map (and the
+  "deferred" doc note was dropped); `discover_fallback_faces` applies them at
+  all three return paths (the CJK `font_for_codepoint` early return, the
+  empty-descriptors fallback, and the general `deferred_face` map).
+
+Tests: `set_variations_empty_noop` (empty → `glyph_index('A')` unchanged),
+`set_variations_runs_on_face` (`wght = 700` on Menlo → no crash, still renders
+'A'), `discover_faces_applies_variations` (a `Descriptor` with `wght = 700` →
+`discover_faces` yields a face that renders 'M'). All pass.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2757 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+Upstream's `Face.setVariations` is ported and wired into discovery's face
+resolution (both the primary and fallback paths), matching upstream's
+`DeferredFace`-time variation application. A descriptor's requested axes now
+reach the faces it produces.
+
+The remaining variation work is the **variation-axis `score()` refinement** —
+deriving bold/italic from a variable font's `wght`/`slnt` axes during discovery
+scoring (`discovery.rs` notes this overwrites the style flags for variable
+fonts). The **special-font** fast path and the `Shaper` struct + `RunIterator`
+also remain deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It confirmed: `set_variations` matches upstream's
+mechanics (descriptor copy from the current `CTFont`, per-axis
+`copy_with_variation` chaining, rebuild through
+`copy_with_attributes(0.0, null, Some(&desc))`, and reconstruction through
+`from_ct_font` so derived state is recomputed; preserving `synthetic_bold` is a
+harmless local improvement); the `v.id as i32` → `CFNumber::new_i32` path is
+faithful (it preserves the packed 32-bit tag pattern as CoreText's signed int,
+high-bit tags becoming negative `i32` with unchanged bits); the prior design
+Required finding is resolved — `discover_faces` applies variations lazily and
+`discover_fallback_faces` applies them on all three paths; and the CF lifetimes
+are sound (the `CFRetained` descriptor reassignment drops the prior copy, each
+`id` lives through its call, `Some(&desc)` is borrowed only for the rebuild). It
+noted the documented, accepted limitation that the deterministic smoke tests do
+not prove an actual variable-axis change (no guaranteed variable font). The
+deferred scope (variation-axis `score()` refinement, special-font, `Shaper`/
+`RunIterator`) is intact.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-135527-267205-last-message.md`

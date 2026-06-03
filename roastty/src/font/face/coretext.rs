@@ -10,8 +10,8 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use objc2_core_foundation::{
-    CFArray, CFAttributedString, CFIndex, CFMutableDictionary, CFRange, CFRetained, CFString,
-    CFType, CGAffineTransform, CGPoint, CGSize,
+    CFArray, CFAttributedString, CFIndex, CFMutableDictionary, CFNumber, CFRange, CFRetained,
+    CFString, CFType, CGAffineTransform, CGPoint, CGSize,
 };
 use objc2_core_graphics::{
     kCGColorSpaceDisplayP3, CGBitmapContextCreate, CGColorSpace, CGContext, CGGlyph,
@@ -23,6 +23,7 @@ use objc2_core_text::{
 
 use super::constraint::{Constraint, GlyphSize, Size};
 use crate::font::atlas::{Atlas, AtlasError, Format};
+use crate::font::discovery::Variation;
 use crate::font::glyph::Glyph;
 use crate::font::metrics::{FaceMetrics, Metrics};
 use crate::font::opentype::{head::Head, hhea::Hhea, os2::Os2, post::Post, svg::Svg};
@@ -188,6 +189,36 @@ impl Face {
         if was_synthetic_bold {
             self.synthetic_bold = Some((points / 14.0).max(1.0));
         }
+    }
+
+    /// Apply variation-axis settings to this face in place, rebuilding its
+    /// `CTFont` from a font descriptor copied with each axis set. Faithful port of
+    /// upstream `setVariations`: a no-op for an empty list; otherwise each
+    /// variation's packed tag id becomes a `CFNumber` folded into the descriptor
+    /// via `CTFontDescriptorCreateCopyWithVariation`, and the font is rebuilt at
+    /// the preserved size. The face is reconstructed (re-deriving color), with
+    /// `synthetic_bold` carried across.
+    pub(crate) fn set_variations(&mut self, vs: &[Variation]) {
+        if vs.is_empty() {
+            return;
+        }
+        // SAFETY: `self.font` is a live `CTFont`.
+        let mut desc = unsafe { self.font.font_descriptor() };
+        for v in vs {
+            let id = CFNumber::new_i32(v.id as i32);
+            // SAFETY: `desc` and `id` are live; the call returns a retained
+            // descriptor copy with the axis set.
+            desc = unsafe { desc.copy_with_variation(&id, v.value) };
+        }
+        // SAFETY: `self.font` and `desc` are live; a null matrix is valid; size
+        // `0.0` preserves the current size.
+        let font = unsafe {
+            self.font
+                .copy_with_attributes(0.0, std::ptr::null(), Some(&desc))
+        };
+        let synthetic_bold = self.synthetic_bold;
+        *self = Face::from_ct_font(font);
+        self.synthetic_bold = synthetic_bold;
     }
 
     /// Synthesize an italic (oblique) face from this one — a copy sheared by the
@@ -2133,5 +2164,31 @@ mod tests {
             "marks still fold into cell 0/1"
         );
         assert_eq!(cells.last().unwrap().x, 1, "'a' still in cell 1");
+    }
+
+    #[test]
+    fn set_variations_empty_noop() {
+        // No variations → the face is left usable and unchanged.
+        let mut face = Face::new("Menlo", 24.0);
+        let before = face.glyph_index('A' as u32);
+        assert!(before.is_some(), "Menlo renders 'A'");
+        face.set_variations(&[]);
+        assert_eq!(face.glyph_index('A' as u32), before, "unchanged by no-op");
+    }
+
+    #[test]
+    fn set_variations_runs_on_face() {
+        // Setting a `wght` axis on a non-variable font does not crash and leaves a
+        // usable face (CoreText returns a valid copy even with no matching axis).
+        // Exercises the descriptor-copy + font-rebuild path end to end.
+        let mut face = Face::new("Menlo", 24.0);
+        face.set_variations(&[Variation {
+            id: Variation::id_from_tag(b"wght"),
+            value: 700.0,
+        }]);
+        assert!(
+            face.glyph_index('A' as u32).is_some(),
+            "the varied face still renders 'A'"
+        );
     }
 }

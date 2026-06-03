@@ -234,14 +234,26 @@ impl Descriptor {
         scored.into_iter().map(|(_, d)| d).collect()
     }
 
+    /// Apply this descriptor's requested variations to a resolved face. A no-op
+    /// when no variations were requested.
+    fn apply_variations(&self, mut face: Face) -> Face {
+        face.set_variations(&self.variations);
+        face
+    }
+
     /// Discover the matching faces, ranked best-first, as a **lazy** iterator.
     /// Faithful port of upstream `DiscoverIterator.next`: each sorted candidate
     /// descriptor has its character-set attribute removed (it was a search
-    /// filter, not a render constraint) and is turned into a [`Face`]. The face
-    /// is produced only when the iterator advances. (Applying the requested
-    /// variations to the face is deferred.)
+    /// filter, not a render constraint) and is turned into a [`Face`], with the
+    /// requested variations applied (upstream's `DeferredFace`-time
+    /// `setVariations`). The face is produced only when the iterator advances.
     pub(crate) fn discover_faces(&self) -> impl Iterator<Item = Face> {
-        self.discover_descriptors().into_iter().map(deferred_face)
+        let variations = self.variations.clone();
+        self.discover_descriptors().into_iter().map(move |d| {
+            let mut face = deferred_face(d);
+            face.set_variations(&variations);
+            face
+        })
     }
 
     /// Discover fallback faces for this descriptor, ranked best-first. Faithful
@@ -257,7 +269,7 @@ impl Descriptor {
         // `orelse break :han`); on `None`, fall through to the general path.
         if (0x4E00..=0x9FFF).contains(&self.codepoint) {
             if let Some(face) = original.font_for_codepoint(self.codepoint) {
-                return vec![face];
+                return vec![self.apply_variations(face)];
             }
         }
 
@@ -268,9 +280,13 @@ impl Descriptor {
             return original
                 .font_for_codepoint(self.codepoint)
                 .into_iter()
+                .map(|f| self.apply_variations(f))
                 .collect();
         }
-        descriptors.into_iter().map(deferred_face).collect()
+        descriptors
+            .into_iter()
+            .map(|d| self.apply_variations(deferred_face(d)))
+            .collect()
     }
 }
 
@@ -1121,6 +1137,27 @@ mod tests {
         assert!(
             face.glyph_index('M' as u32).is_some(),
             "the face renders 'M'"
+        );
+    }
+
+    #[test]
+    fn discover_faces_applies_variations() {
+        // A descriptor carrying a `wght` variation still produces usable faces:
+        // the wiring calls `set_variations` without breaking face production.
+        // (Smoke test — the host's Menlo match is non-variable, so the axis has no
+        // observable effect; the call simply must not break the face.)
+        let req = Descriptor {
+            family: Some("Menlo".into()),
+            variations: vec![Variation {
+                id: Variation::id_from_tag(b"wght"),
+                value: 700.0,
+            }],
+            ..Default::default()
+        };
+        let face = req.discover_faces().next().expect("a discovered face");
+        assert!(
+            face.glyph_index('M' as u32).is_some(),
+            "the varied discovered face renders 'M'"
         );
     }
 
