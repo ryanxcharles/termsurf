@@ -1039,6 +1039,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 296: Canvas::line + the box-drawing diagonals](296-canvas-line-diagonals.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 297: z2d port — the multi-segment open-path stroke](297-z2d-stroke-path.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
