@@ -997,6 +997,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 275: Sprite box-drawing — the lines_char primitive](275-sprite-box-lines.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 276: Complete the lines_char dispatch (all 109 line glyphs)](276-box-lines-full-dispatch.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
