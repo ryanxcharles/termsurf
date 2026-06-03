@@ -1163,6 +1163,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 358: decoding a terminal row into RunCells](358-render-runcell-extract.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 359: assembling RunOptions for the viewport](359-render-run-options.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
