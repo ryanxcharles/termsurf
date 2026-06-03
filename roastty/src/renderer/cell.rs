@@ -554,6 +554,30 @@ pub(crate) fn rebuild_viewport(
     Ok(())
 }
 
+/// Write one viewport row's background cells into `contents`. Each cell with an
+/// explicit background ([`Style::resolve_bg`](crate::terminal::style::Style::resolve_bg)
+/// → `Some`) paints a [`CellBg`] at its column with `alpha`; cells with the
+/// default background (`None`) are actively written transparent so a stale
+/// background from a prior rebuild cannot linger. The background half of upstream
+/// `rebuildCells`'s per-cell work.
+pub(crate) fn rebuild_bg_row(
+    contents: &mut Contents,
+    y: u16,
+    row_cells: &[RunCell],
+    palette: &Palette,
+    alpha: u8,
+) {
+    let row = usize::from(y);
+    for (col, cell) in row_cells.iter().enumerate() {
+        let bg = cell
+            .style
+            .resolve_bg(palette)
+            .map(|rgb| CellBg([rgb.r, rgb.g, rgb.b, alpha]))
+            .unwrap_or(CellBg([0, 0, 0, 0]));
+        *contents.bg_cell_mut(row, col) = bg;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1057,6 +1081,40 @@ mod tests {
         assert_eq!(c.fg_rows[1][0].grid_pos, [0, 0]);
         assert_eq!(c.fg_rows[1][1].grid_pos, [1, 0]);
         assert_eq!(c.fg_rows[2][0].grid_pos, [0, 1]);
+    }
+
+    #[test]
+    fn rebuild_bg_row_writes_and_clears() {
+        use crate::terminal::color::DEFAULT_PALETTE;
+        use crate::terminal::style::{Color, Style as TermStyle};
+
+        let mut c = Contents::default();
+        c.resize(grid(2, 2));
+
+        // Pre-seed column 1's background with a stale color to prove the default
+        // (`None`) cell is actively cleared, not merely left untouched.
+        *c.bg_cell_mut(0, 1) = CellBg([1, 2, 3, 4]);
+
+        let cell = |bg: Color| RunCell {
+            codepoint: 'x' as u32,
+            graphemes: vec![],
+            style: TermStyle {
+                bg_color: bg,
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        let row_cells = [cell(Color::Palette(1)), cell(Color::None)];
+
+        rebuild_bg_row(&mut c, 0, &row_cells, &DEFAULT_PALETTE, 255);
+
+        let p1 = DEFAULT_PALETTE[1];
+        assert_eq!(*c.bg_cell(0, 0), CellBg([p1.r, p1.g, p1.b, 255]));
+        // The default-background cell is cleared to transparent.
+        assert_eq!(*c.bg_cell(0, 1), CellBg([0, 0, 0, 0]));
     }
 
     #[test]

@@ -178,3 +178,68 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-183624-528353-prompt.md` (design)
 - Result: `logs/codex-review/20260603-183624-528353-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The background-cell row is in place — the first non-foreground renderer
+subsystem.
+
+- `roastty/src/terminal/style.rs`:
+  `Style::resolve_bg(self, palette) -> Option<Rgb>` added as a `pub(crate)`
+  wrapper over the (still `pub(super)`) `Style::bg_color` — a pure pass-through
+  (`Color::None → None`, `Palette(idx) → palette[idx]`, `Rgb(rgb) → rgb`).
+- `roastty/src/renderer/cell.rs`:
+  `rebuild_bg_row(contents, y, row_cells, palette, alpha)` writes each column's
+  background into `Contents.bg_cells` — `Some(rgb) → CellBg([r, g, b, alpha])`,
+  and `None` **actively** written transparent (`[0, 0, 0, 0]`) so a stale
+  background cannot linger. Uses the raw row index `bg_cell_mut(y, col)` (no
+  foreground `+ 1` cursor offset).
+
+Tests:
+
+- `style.rs` `resolve_bg_delegates_to_bg_color` — `None`,
+  `Palette(2) → DEFAULT_PALETTE[2]`, `Rgb(x) → x`.
+- `cell.rs` `rebuild_bg_row_writes_and_clears` — a 2×2 `Contents` with column 1
+  **pre-seeded** to `CellBg([1, 2, 3, 4])`; a row
+  `[bg = Palette(1), bg = None]`; after `rebuild_bg_row(0, 255)`,
+  `bg_cell(0, 0) == CellBg([p1.r, p1.g, p1.b, 255])` and
+  `bg_cell(0, 1) == CellBg([0, 0, 0, 0])` — the stale background is cleared.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2824 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The renderer can now paint per-cell backgrounds: each row's explicit-background
+cells become `CellBg`s in `Contents`, and default cells are cleared. With the
+foreground text (Experiments 358–372) and the background row (this experiment),
+`Contents` holds both the foreground glyphs and the background colors a viewport
+needs.
+
+The remaining renderer-bridge work: wire `rebuild_bg_row` into the viewport loop
+(alongside `rebuild_row`); the **decorations** (underline/strikethrough/overline
+cells); the **cursor** cell; the renderer-layer color adjustments
+(reverse-video, selection, min-contrast, faint/dim alpha, default-background
+fill, opacity); and the **Metal upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `resolve_bg` is a faithful wrapper (delegates
+directly to `Style::bg_color` with no logic change), that `rebuild_bg_row`
+correctly maps `Some(rgb)` to `CellBg([r, g, b, alpha])` and **actively** writes
+transparent for `None` (so stale backgrounds cannot linger), and that the
+indexing is correct (raw row/column via `bg_cell_mut(row, col)`, no foreground
+`+ 1` offset). It confirmed the pre-seeded test proves the Required fix — a
+stale background at `(0, 1)` is cleared when the cell resolves to
+default/`None`. Nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-183909-151437-last-message.md`

@@ -88,6 +88,13 @@ impl Style {
         }
     }
 
+    /// Resolve this cell's background to an [`Rgb`], or `None` for the default
+    /// (`Color::None`). A `pub(crate)` wrapper over the (terminal-internal)
+    /// [`Self::bg_color`] so the renderer can resolve backgrounds.
+    pub(crate) fn resolve_bg(self, palette: &Palette) -> Option<Rgb> {
+        self.bg_color(palette)
+    }
+
     pub(super) fn underline_color(self, palette: &Palette) -> Option<Rgb> {
         match self.underline_color {
             Color::None => None,
@@ -811,6 +818,30 @@ mod tests {
             ..Style::default()
         };
         assert_eq!(rgb_style.resolve_fg(default, &DEFAULT_PALETTE, None), rgb);
+    }
+
+    #[test]
+    fn resolve_bg_delegates_to_bg_color() {
+        // Color::None -> None (the default background).
+        assert_eq!(Style::default().resolve_bg(&DEFAULT_PALETTE), None);
+
+        // Color::Palette(2) -> palette[2].
+        let palette_bg = Style {
+            bg_color: Color::Palette(2),
+            ..Style::default()
+        };
+        assert_eq!(
+            palette_bg.resolve_bg(&DEFAULT_PALETTE),
+            Some(DEFAULT_PALETTE[2])
+        );
+
+        // Color::Rgb(x) -> x.
+        let rgb = Rgb::new(7, 8, 9);
+        let rgb_bg = Style {
+            bg_color: Color::Rgb(rgb),
+            ..Style::default()
+        };
+        assert_eq!(rgb_bg.resolve_bg(&DEFAULT_PALETTE), Some(rgb));
     }
 
     #[test]
