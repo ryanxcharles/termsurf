@@ -3,10 +3,11 @@
 //! Faithful port of the core resolution chain of upstream
 //! `font/CodepointResolver.zig`. The resolver sits on top of a [`Collection`]
 //! and adds style-disabled fallback, presentation defaults, and the
-//! regular-style fallback chain, and resolves sprite codepoints to the
-//! procedurally-drawn sprite face when sprite drawing is enabled. Codepoint
-//! overrides, the UCD emoji-presentation default, and discovery-based fallback
-//! are deferred to later experiments.
+//! regular-style fallback chain, resolves sprite codepoints to the
+//! procedurally-drawn sprite face when sprite drawing is enabled, and defaults a
+//! presentation-less codepoint via the UCD `Emoji_Presentation` property.
+//! Codepoint overrides and discovery-based fallback are deferred to later
+//! experiments.
 
 use crate::font::atlas::{Atlas, AtlasError};
 use crate::font::collection::{Collection, EntryError, Index, PresentationMode, Special};
@@ -106,8 +107,9 @@ impl CodepointResolver {
 
     /// Resolve `cp` (in `style`, with optional explicit presentation `p`) to a
     /// face [`Index`], or `None`. Faithful port of upstream `getIndex`'s core
-    /// chain (sprite, codepoint overrides, the UCD presentation default, and
-    /// discovery are deferred).
+    /// chain (the sprite check, the UCD presentation default, and the
+    /// regular-style/last-resort fallbacks; codepoint overrides and discovery
+    /// are deferred).
     pub(crate) fn get_index(
         &self,
         cp: u32,
@@ -129,11 +131,18 @@ impl CodepointResolver {
         }
 
         // Build the presentation mode. With an explicit presentation we use it;
-        // otherwise we'd consult the Unicode Character Database for the default
-        // (deferred — `None` defaults to text for now).
+        // otherwise we consult the Unicode Character Database (the
+        // `Emoji_Presentation` property) for the default — emoji for codepoints
+        // that render as emoji without a variation selector, text otherwise.
         let p_mode = match p {
             Some(v) => PresentationMode::Explicit(v),
-            None => PresentationMode::Default(Presentation::Text),
+            None => PresentationMode::Default(
+                if crate::font::emoji_presentation::is_emoji_presentation(cp) {
+                    Presentation::Emoji
+                } else {
+                    Presentation::Text
+                },
+            ),
         };
 
         // Exact match in the requested style.
@@ -232,6 +241,37 @@ mod tests {
         c.add(Face::new("Menlo", 32.0), Style::Regular, false)
             .unwrap();
         CodepointResolver::new(c)
+    }
+
+    #[test]
+    fn get_index_default_presentation_emoji() {
+        // U+2614 (umbrella with rain, Emoji_Presentation = Yes) exists in both a
+        // monochrome text face (non-color) and the color emoji face. Both are
+        // added as fallback faces, so presentation discriminates between them.
+        // With no explicit presentation the UCD default is emoji, so it resolves
+        // to the color face; with a forced text presentation it resolves to the
+        // text face — proving `get_index` consults `is_emoji_presentation` for
+        // the default (and that the exact-match step, not the last-resort `Any`,
+        // makes the choice).
+        let mut c = Collection::new();
+        let text = c
+            .add(Face::new("Menlo", 32.0), Style::Regular, true)
+            .unwrap();
+        let emoji = c
+            .add(Face::new("Apple Color Emoji", 32.0), Style::Regular, true)
+            .unwrap();
+        let r = CodepointResolver::new(c);
+        let umbrella = 0x2614;
+        assert_eq!(
+            r.get_index(umbrella, Style::Regular, None),
+            Some(emoji),
+            "the emoji default resolves the color umbrella"
+        );
+        assert_eq!(
+            r.get_index(umbrella, Style::Regular, Some(Presentation::Text)),
+            Some(text),
+            "a forced text presentation resolves the monochrome umbrella"
+        );
     }
 
     #[test]

@@ -13,6 +13,7 @@ pub(crate) mod codepoint_map;
 pub(crate) mod codepoint_resolver;
 pub(crate) mod collection;
 pub(crate) mod discovery;
+pub(crate) mod emoji_presentation;
 pub(crate) mod face;
 pub(crate) mod glyph;
 pub(crate) mod metrics;

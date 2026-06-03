@@ -191,3 +191,82 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-104155-273447-prompt.md`
 - Result: `logs/codex-review/20260603-104155-273447-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+The UCD emoji-presentation default lands.
+
+- `roastty/src/font/emoji_presentation.rs` (new, committed, generated): the
+  `EMOJI_PRESENTATION` table — 296 inclusive `(start, end)` ranges parsed from
+  `vendor/uucode/ucd/emoji/emoji-data.txt` (the `Emoji_Presentation` property,
+  dated 2025-07-25), sorted by `start` and non-overlapping — plus
+  `is_emoji_presentation(cp)`, a `partition_point` binary search. The build
+  never reads the txt; the table is baked into source.
+- `roastty/src/font/mod.rs`: declares `emoji_presentation`.
+- `roastty/src/font/codepoint_resolver.rs`: `get_index` now builds the
+  no-explicit-presentation default as
+  `PresentationMode::Default(if is_emoji_presentation(cp) { Emoji } else { Text })`,
+  keeping the sprite check before it. The module/method docs no longer list the
+  UCD default as deferred.
+
+Tests: `is_emoji_presentation_known` (the emoji-presentation `0x231A`/`0x26BD`/
+`0x1F004`/`0x1F600` are `true`; the text-default `0x2764`/`0x263A` and the
+non-emoji `0x41`/`0x2500`/`0x10_FFFF` are `false`; first-range boundaries);
+`emoji_presentation_table_sorted` (`len == 296`, every `start <= end`, strictly
+non-overlapping windows); `get_index_default_presentation_emoji` (`U+2614`
+umbrella — `Emoji_Presentation = Yes`, present in Menlo as non-color and Apple
+Color Emoji as color, both added as **fallback** faces so presentation
+discriminates: `None` resolves to the emoji face, `Some(Text)` to the Menlo face
+— proving the exact-match default, not the last-resort `Any`, makes the choice).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2685 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+A note on the resolver test: a single-face emoji codepoint's default is
+**unobservable** through `get_index`'s final result, because upstream's
+last-resort "any presentation" path resolves it regardless of the default. The
+two-fallback `U+2614` setup is what makes the default observable (a fallback
+entry treats `Default(p)` as `Explicit(p)`), so the test genuinely exercises the
+exact-match default-presentation path. This is the full resolver-behavior test
+the design anticipated might be impractical — it proved expressible, so the
+result is **Pass**, not Partial.
+
+## Conclusion
+
+A presentation-less codepoint now defaults to emoji or text per the UCD
+`Emoji_Presentation` property, faithful to upstream's `uucode.get(...)`. The
+resolver's `get_index` is closer to complete: the sprite check, the UCD
+presentation default, and the regular-style/last-resort fallbacks are all
+ported; codepoint overrides and discovery-based fallback remain the deferred
+pieces.
+
+The next resolver work is **codepoint overrides** (the placeholder before the
+sprite check — a user/config table remapping specific codepoints to specific
+faces) and the **discovery-based fallback** (CoreText font matching for a
+codepoint no loaded face covers). After the resolver: the shaper, the Nerd Font
+attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It **mechanically compared** the committed table
+against `emoji-data.txt` (extracting only `; Emoji_Presentation` lines):
+`ucd = 296`, `rust = 296`, `equal = true` — ruling out any accidental inclusion
+of the broader `Emoji`, `Emoji_Component`, or `Extended_Pictographic` rows. It
+confirmed the `partition_point` binary search is correct across before-first,
+inside-range, range-end, gap, and after-last cases, and that the
+sorted/non-overlap and boundary tests cover the invariant. It confirmed the
+resolver ordering is faithful (sprite before presentation, only `None` changes,
+explicit `Some(Text)`/`Some(Emoji)` passed through unchanged) and that the
+umbrella two-fallback test soundly proves the exact-match default-presentation
+path rather than the last-resort `Any` fallback. No Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-105003-333222-last-message.md`
