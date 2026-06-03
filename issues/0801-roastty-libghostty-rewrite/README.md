@@ -1124,7 +1124,7 @@ are past the correctness-critical foundation.
 - [Experiment 338: the CoreText shaping core](338-shaper-coretext-core.md) —
   **Pass** · Claude/Codex/Codex
 - [Experiment 339: the shaper's glyph offsets](339-shaper-glyph-offsets.md) —
-  **Designed** · Claude/Codex/Codex
+  **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

@@ -310,6 +310,9 @@ impl Face {
         let runs: CFRetained<CFArray<CTRun>> = unsafe { CFRetained::cast_unchecked(runs) };
 
         let mut cells = Vec::new();
+        // The pen's x: the accumulated advance width across the whole line (all
+        // runs), against which each glyph's position gives its `x_offset`.
+        let mut pen: f64 = 0.0;
         for i in 0..runs.len() {
             let Some(run) = runs.get(i) else { continue };
             // SAFETY: `run` is live.
@@ -319,13 +322,17 @@ impl Face {
             }
             let glyphs = run_glyphs(&run, n);
             let indices = run_string_indices(&run, n);
+            let positions = run_positions(&run, n);
+            let advances = run_advances(&run, n);
             for k in 0..n {
                 cells.push(shape::Cell {
                     x: indices[k].max(0) as u16,
-                    x_offset: 0,
-                    y_offset: 0,
+                    x_offset: (positions[k].x - pen).round() as i16,
+                    y_offset: positions[k].y.round() as i16,
                     glyph_index: glyphs[k] as u32,
                 });
+                // The advance applies to the next glyph's pen position.
+                pen += advances[k].width;
             }
         }
         cells
@@ -1030,6 +1037,55 @@ fn run_string_indices(run: &CTRun, n: usize) -> Vec<CFIndex> {
     buf
 }
 
+/// Read a `CTRun`'s `n` glyph positions (line-origin-relative) — fast pointer or
+/// copy.
+fn run_positions(run: &CTRun, n: usize) -> Vec<CGPoint> {
+    // SAFETY: see `run_glyphs`.
+    let ptr = unsafe { run.positions_ptr() };
+    if !ptr.is_null() {
+        return unsafe { std::slice::from_raw_parts(ptr, n) }.to_vec();
+    }
+    let mut buf = vec![CGPoint { x: 0.0, y: 0.0 }; n];
+    // SAFETY: `buf` holds `n` elements; the range covers the whole run.
+    unsafe {
+        run.positions(
+            CFRange {
+                location: 0,
+                length: n as isize,
+            },
+            NonNull::new(buf.as_mut_ptr()).unwrap(),
+        );
+    }
+    buf
+}
+
+/// Read a `CTRun`'s `n` glyph advances (pen movement) — fast pointer or copy.
+fn run_advances(run: &CTRun, n: usize) -> Vec<CGSize> {
+    // SAFETY: see `run_glyphs`.
+    let ptr = unsafe { run.advances_ptr() };
+    if !ptr.is_null() {
+        return unsafe { std::slice::from_raw_parts(ptr, n) }.to_vec();
+    }
+    let mut buf = vec![
+        CGSize {
+            width: 0.0,
+            height: 0.0
+        };
+        n
+    ];
+    // SAFETY: `buf` holds `n` elements; the range covers the whole run.
+    unsafe {
+        run.advances(
+            CFRange {
+                location: 0,
+                length: n as isize,
+            },
+            NonNull::new(buf.as_mut_ptr()).unwrap(),
+        );
+    }
+    buf
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1692,5 +1748,31 @@ mod tests {
     fn shape_empty() {
         let face = Face::new("Menlo", 24.0);
         assert!(face.shape_codepoints(&[]).is_empty());
+    }
+
+    #[test]
+    fn shape_plain_offsets_zero() {
+        // Plain monospace ASCII sits exactly at the pen, on the baseline: the
+        // advance-based x_offset and y_offset round to zero for every glyph.
+        let face = Face::new("Menlo", 24.0);
+        let cells = face.shape_codepoints(&['A' as u32, 'B' as u32, 'C' as u32]);
+        assert_eq!(cells.len(), 3);
+        for (i, c) in cells.iter().enumerate() {
+            assert_eq!(c.x_offset, 0, "cell {i} x_offset is zero for plain text");
+            assert_eq!(c.y_offset, 0, "cell {i} y_offset is zero for plain text");
+        }
+    }
+
+    #[test]
+    fn shape_advances_monotonic() {
+        // The advance accumulation does not corrupt the per-glyph output: one
+        // cell per codepoint, with non-decreasing string-index `x`.
+        let face = Face::new("Menlo", 24.0);
+        let cells = face.shape_codepoints(&['x' as u32, 'y' as u32, 'z' as u32]);
+        assert_eq!(cells.len(), 3, "one cell per codepoint");
+        assert!(
+            cells.windows(2).all(|w| w[0].x <= w[1].x),
+            "the cell x positions are non-decreasing"
+        );
     }
 }

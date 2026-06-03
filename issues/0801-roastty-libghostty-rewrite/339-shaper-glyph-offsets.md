@@ -169,3 +169,69 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-130316-951763-prompt.md`
 - Result: `logs/codex-review/20260603-130316-951763-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+The shaper now carries each glyph's positioning nudge.
+
+- `roastty/src/font/face/coretext.rs`: `shape_codepoints` declares a line-wide
+  `pen: f64 = 0.0` before the `CTRun` loop and, per glyph `k`, emits
+  `x_offset: (positions[k].x - pen).round() as i16` and
+  `y_offset: positions[k].y.round() as i16`, then accumulates
+  `pen += advances[k].width` after pushing the cell — faithful to upstream's
+  `position.x − run_offset.x` / `round(position.y)` with the advance applying to
+  the next glyph. Two free helpers `run_positions` (→ `Vec<CGPoint>`) and
+  `run_advances` (→ `Vec<CGSize>`) factor the ptr-or-copy reads, mirroring
+  `run_glyphs`/`run_string_indices`.
+
+Tests: `shape_plain_offsets_zero` (Menlo `"ABC"` → all `x_offset`/`y_offset`
+`== 0`, proving the `position − pen` formula and the position/advance reads are
+wired correctly), `shape_advances_monotonic` (`"xyz"` → 3 cells with
+non-decreasing `x`).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2744 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The advance-based positioning core of `Shaper.shape` is ported: glyphs now carry
+`x_offset`/`y_offset` computed from their CoreText positions against a line-wide
+pen. Plain monospace ASCII rounds to zero offsets (glyphs sit exactly at the
+pen, on the baseline), confirming the wiring; combining/positioned glyphs would
+carry their nudge.
+
+The remaining shaper work builds the orchestration around this core: the
+**cluster→cell mapping** (the `cell_offset` reset with the ligature heuristic
+that maps glyphs to terminal cells and sets `Cell.x` to the cluster); the
+**special-font** fast path (codepoint == glyph); **RTL/non-monotonic** run
+sorting; and the `Shaper` struct with its run state, caching, and the
+**`RunIterator`** over terminal cells (which threads in the terminal
+grid/render- state types). The deferred **variation-axis** `score()` refinement
+and **variations** application also remain.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It verified: `pen` is line-wide (declared before the
+`CTRun` loop), matching upstream's `run_offset.x` across all runs;
+`x_offset = round(position.x − pen)` faithfully matches upstream's
+`position.x − cell_offset.x` for the per-codepoint-cell case where
+`cell_offset.x == run_offset.x`; `y_offset = round(position.y)` is a direct
+match; `pen += advances[k].width` after emitting the cell matches upstream's
+"advance applies to the next glyph"; the `run_positions`/`run_advances`
+ptr-or-copy helpers are sound under the same lifetime model as the glyph/index
+helpers (`n` from `glyph_count`, fast-path slices copied while the run is alive,
+fallback buffers sized before CoreText fills them); and the Menlo zero-offset
+test validates the simple-case wiring while the monotonic test guards output
+order. The cluster→cell mapping (ligatures/reordering) remains correctly
+deferred.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-130556-764352-last-message.md`
