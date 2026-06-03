@@ -503,6 +503,178 @@ pub(crate) fn draw_box_lines(cp: u32, metrics: &Metrics, canvas: &mut Canvas) ->
     }
 }
 
+/// Horizontal line with the top edge at `y`, from `x1` to `x2`, `thick` pixels
+/// tall. Faithful port of upstream `common.hline`.
+fn hline(canvas: &mut Canvas, x1: i32, x2: i32, y: i32, thick: u32) {
+    canvas.r#box(x1, y, x2, y + thick as i32, Color::ON);
+}
+
+/// Vertical line with the left edge at `x`, from `y1` to `y2`, `thick` pixels
+/// wide. Faithful port of upstream `common.vline`.
+fn vline(canvas: &mut Canvas, y1: i32, y2: i32, x: i32, thick: u32) {
+    canvas.r#box(x, y1, x + thick as i32, y2, Color::ON);
+}
+
+/// Centered horizontal line of the given thickness across the full cell width.
+/// Faithful port of upstream `common.hlineMiddle`.
+fn hline_middle(metrics: &Metrics, canvas: &mut Canvas, thickness: Thickness) {
+    let thick_px = thickness.height(metrics.box_thickness);
+    hline(
+        canvas,
+        0,
+        metrics.cell_width as i32,
+        (metrics.cell_height.saturating_sub(thick_px) / 2) as i32,
+        thick_px,
+    );
+}
+
+/// Centered vertical line of the given thickness down the full cell height.
+/// Faithful port of upstream `common.vlineMiddle`.
+fn vline_middle(metrics: &Metrics, canvas: &mut Canvas, thickness: Thickness) {
+    let thick_px = thickness.height(metrics.box_thickness);
+    vline(
+        canvas,
+        0,
+        metrics.cell_height as i32,
+        (metrics.cell_width.saturating_sub(thick_px) / 2) as i32,
+        thick_px,
+    );
+}
+
+/// Draw `count` evenly-tiled horizontal dashes, centered vertically, with
+/// half-gaps on each side so the pattern tiles seamlessly. Faithful port of
+/// upstream `dashHorizontal`. Falls back to a solid light line when the cell is
+/// too narrow to hold the dashes.
+fn dash_horizontal(
+    metrics: &Metrics,
+    canvas: &mut Canvas,
+    count: u32,
+    thick_px: u32,
+    desired_gap: u32,
+) {
+    assert!((2..=4).contains(&count));
+
+    // For N dashes there are N - 1 gaps between them, plus half-gaps on either
+    // side that add up to one more — so N total gaps.
+    let gap_count = count;
+
+    // Without at least 1px per dash and per gap we can't draw the pattern, so
+    // fall back to a solid line.
+    if metrics.cell_width < count + gap_count {
+        hline_middle(metrics, canvas, Thickness::Light);
+        return;
+    }
+
+    // Never let the gaps exceed 50% of the width, or the dashes look wrong.
+    let gap_width: i32 = desired_gap.min(metrics.cell_width / (2 * count)) as i32;
+    let total_gap_width: i32 = gap_count as i32 * gap_width;
+    let total_dash_width: i32 = metrics.cell_width as i32 - total_gap_width;
+    let dash_width: i32 = total_dash_width.div_euclid(count as i32);
+    let remaining: i32 = total_dash_width.rem_euclid(count as i32);
+
+    assert!(
+        dash_width * count as i32 + gap_width * gap_count as i32 + remaining
+            == metrics.cell_width as i32
+    );
+
+    // Dashes are centered vertically.
+    let y: i32 = (metrics.cell_height.saturating_sub(thick_px) / 2) as i32;
+
+    // Start half a gap from the left edge to center the pattern.
+    let mut x: i32 = gap_width.div_euclid(2);
+
+    // Distribute the leftover space into dash widths, 1px at a time — less
+    // visually obvious there than in the gaps.
+    let mut extra: i32 = remaining;
+
+    for _ in 0..count {
+        let mut x1 = x + dash_width;
+        if extra > 0 {
+            extra -= 1;
+            x1 += 1;
+        }
+        hline(canvas, x, x1, y, thick_px);
+        x = x1 + gap_width;
+    }
+}
+
+/// Draw `count` evenly-tiled vertical dashes, centered horizontally, with a
+/// single full extra gap at the bottom. Faithful port of upstream
+/// `dashVertical`. Falls back to a solid light line when the cell is too short.
+fn dash_vertical(
+    metrics: &Metrics,
+    canvas: &mut Canvas,
+    count: u32,
+    thick_px: u32,
+    desired_gap: u32,
+) {
+    assert!((2..=4).contains(&count));
+
+    // The extra gap at the bottom means there are as many gaps as dashes.
+    let gap_count = count;
+
+    if metrics.cell_height < count + gap_count {
+        vline_middle(metrics, canvas, Thickness::Light);
+        return;
+    }
+
+    let gap_height: i32 = desired_gap.min(metrics.cell_height / (2 * count)) as i32;
+    let total_gap_height: i32 = gap_count as i32 * gap_height;
+    let total_dash_height: i32 = metrics.cell_height as i32 - total_gap_height;
+    let dash_height: i32 = total_dash_height.div_euclid(count as i32);
+    let remaining: i32 = total_dash_height.rem_euclid(count as i32);
+
+    assert!(
+        dash_height * count as i32 + gap_height * gap_count as i32 + remaining
+            == metrics.cell_height as i32
+    );
+
+    // Dashes are centered horizontally.
+    let x: i32 = (metrics.cell_width.saturating_sub(thick_px) / 2) as i32;
+
+    // Start at the top of the cell.
+    let mut y: i32 = 0;
+
+    let mut extra: i32 = remaining;
+
+    for _ in 0..count {
+        let mut y1 = y + dash_height;
+        if extra > 0 {
+            extra -= 1;
+            y1 += 1;
+        }
+        vline(canvas, y, y1, x, thick_px);
+        y = y1 + gap_height;
+    }
+}
+
+/// Draw the box-drawing dash glyph for `cp` into `canvas`, returning `true` if
+/// `cp` is a dispatched dash character. Covers the dash codepoints
+/// `U+2504`–`U+250B` and `U+254C`–`U+254F` of upstream's `draw2500_257F`; the
+/// non-dash primitives (lines, arcs, diagonals) and other sprite categories are
+/// elsewhere.
+pub(crate) fn draw_box_dashes(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> bool {
+    let light = Thickness::Light.height(metrics.box_thickness);
+    let heavy = Thickness::Heavy.height(metrics.box_thickness);
+    let wide_gap = light.max(4);
+    match cp {
+        0x2504 => dash_horizontal(metrics, canvas, 3, light, wide_gap),
+        0x2505 => dash_horizontal(metrics, canvas, 3, heavy, wide_gap),
+        0x2506 => dash_vertical(metrics, canvas, 3, light, wide_gap),
+        0x2507 => dash_vertical(metrics, canvas, 3, heavy, wide_gap),
+        0x2508 => dash_horizontal(metrics, canvas, 4, light, wide_gap),
+        0x2509 => dash_horizontal(metrics, canvas, 4, heavy, wide_gap),
+        0x250A => dash_vertical(metrics, canvas, 4, light, wide_gap),
+        0x250B => dash_vertical(metrics, canvas, 4, heavy, wide_gap),
+        0x254C => dash_horizontal(metrics, canvas, 2, light, light),
+        0x254D => dash_horizontal(metrics, canvas, 2, heavy, heavy),
+        0x254E => dash_vertical(metrics, canvas, 2, light, heavy),
+        0x254F => dash_vertical(metrics, canvas, 2, heavy, heavy),
+        _ => return false,
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -864,5 +1036,143 @@ mod tests {
             !inked(&c, v_left as i32, m.cell_height as i32 - 1),
             "bottom edge empty"
         );
+    }
+
+    /// The fixture metrics with a custom cell width (for the dash fallback).
+    fn fixture_metrics_width(cell_width: u32) -> Metrics {
+        Metrics {
+            cell_width,
+            ..fixture_metrics()
+        }
+    }
+
+    /// All contiguous inked spans of a row `y` (as `[start, end)` ranges).
+    fn row_spans(c: &Canvas, y: i32, width: u32) -> Vec<(i32, i32)> {
+        let mut spans = Vec::new();
+        let mut start: Option<i32> = None;
+        for x in 0..width as i32 {
+            if inked(c, x, y) {
+                start.get_or_insert(x);
+            } else if let Some(s) = start.take() {
+                spans.push((s, x));
+            }
+        }
+        if let Some(s) = start {
+            spans.push((s, width as i32));
+        }
+        spans
+    }
+
+    /// All contiguous inked spans of a column `x`.
+    fn col_spans(c: &Canvas, x: i32, height: u32) -> Vec<(i32, i32)> {
+        let mut spans = Vec::new();
+        let mut start: Option<i32> = None;
+        for y in 0..height as i32 {
+            if inked(c, x, y) {
+                start.get_or_insert(y);
+            } else if let Some(s) = start.take() {
+                spans.push((s, y));
+            }
+        }
+        if let Some(s) = start {
+            spans.push((s, height as i32));
+        }
+        spans
+    }
+
+    #[test]
+    fn dash_horizontal_3() {
+        // 0x2504: count 3, light (2px), gap max(4,2)=4 clamped to 9/6=1.
+        // dashes [0,2),[3,5),[6,8) on rows 8,9; gaps at x=2,5,8.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_box_dashes(0x2504, &m, &mut c));
+        assert_eq!(row_spans(&c, 8, m.cell_width), vec![(0, 2), (3, 5), (6, 8)]);
+        assert_eq!(row_spans(&c, 9, m.cell_width), vec![(0, 2), (3, 5), (6, 8)]);
+        // Vertically centered: nothing on rows 7 or 10.
+        assert!(row_spans(&c, 7, m.cell_width).is_empty());
+        assert!(row_spans(&c, 10, m.cell_width).is_empty());
+    }
+
+    #[test]
+    fn dash_vertical_3() {
+        // 0x2506: count 3, light (2px), gap clamped to 18/6=3.
+        // dashes [0,3),[6,9),[12,15) on cols 3,4.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_box_dashes(0x2506, &m, &mut c));
+        assert_eq!(
+            col_spans(&c, 3, m.cell_height),
+            vec![(0, 3), (6, 9), (12, 15)]
+        );
+        assert_eq!(
+            col_spans(&c, 4, m.cell_height),
+            vec![(0, 3), (6, 9), (12, 15)]
+        );
+        // Horizontally centered: nothing on cols 2 or 5.
+        assert!(col_spans(&c, 2, m.cell_height).is_empty());
+        assert!(col_spans(&c, 5, m.cell_height).is_empty());
+    }
+
+    #[test]
+    fn dash_count_4() {
+        // 0x2508: count 4, light (2px), gap clamped to 9/8=1. total_dash=5,
+        // dash_width=1, remaining=1 -> first dash gets the extra pixel.
+        // dashes [0,2),[3,4),[5,6),[7,8) on rows 8,9.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_box_dashes(0x2508, &m, &mut c));
+        assert_eq!(
+            row_spans(&c, 8, m.cell_width),
+            vec![(0, 2), (3, 4), (5, 6), (7, 8)]
+        );
+    }
+
+    #[test]
+    fn dash_double_2() {
+        // 0x254C: count 2, light (2px), gap light=2 (clamped to 9/4=2).
+        // total_gap=4, total_dash=5, dash_width=2, remaining=1, x0=gap/2=1.
+        // dashes [1,4),[6,8) on rows 8,9.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_box_dashes(0x254C, &m, &mut c));
+        assert_eq!(row_spans(&c, 8, m.cell_width), vec![(1, 4), (6, 8)]);
+    }
+
+    #[test]
+    fn dash_heavy_thickness() {
+        // 0x2505: count 3, heavy (4px). Same x-pattern as 0x2504 but the band is
+        // 4px tall (rows 7..11), centered at y=(18-4)/2=7.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_box_dashes(0x2505, &m, &mut c));
+        // A dash column (x=0) is inked on rows 7,8,9,10 only.
+        assert_eq!(col_spans(&c, 0, m.cell_height), vec![(7, 11)]);
+        assert!(!inked(&c, 0, 6));
+        assert!(!inked(&c, 0, 11));
+    }
+
+    #[test]
+    fn dash_fallback_solid() {
+        // A cell too narrow for the dashes (cell_width 5 < count 3 + gaps 3)
+        // falls back to a solid light line across the full width.
+        let m = fixture_metrics_width(5);
+        let mut c = Canvas::new(5, 18, 0, 0);
+        assert!(draw_box_dashes(0x2504, &m, &mut c));
+        // Solid: rows 8,9 inked continuously, no gaps.
+        assert_eq!(row_spans(&c, 8, m.cell_width), vec![(0, 5)]);
+        assert_eq!(row_spans(&c, 9, m.cell_width), vec![(0, 5)]);
+    }
+
+    #[test]
+    fn draw_box_dashes_excludes() {
+        let m = fixture_metrics();
+        for cp in [0x2500u32, 0x253C, 0x2550, 'M' as u32] {
+            let mut c = cell_canvas();
+            assert!(!draw_box_dashes(cp, &m, &mut c), "{cp:#06x} not a dash");
+            let any = (0..m.cell_height as i32)
+                .any(|y| (0..m.cell_width as i32).any(|x| inked(&c, x, y)));
+            assert!(!any, "{cp:#06x} drew ink");
+        }
     }
 }

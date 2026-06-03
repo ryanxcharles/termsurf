@@ -173,3 +173,77 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260602-233919-805836-prompt.md`
 - Result: `logs/codex-review/20260602-233919-805836-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/draw.rs` gained the line helpers `hline`/`vline`/
+`hline_middle`/`vline_middle`, the `dash_horizontal`/`dash_vertical` primitives
+(faithful ports — the `2..=4` count assert, the `< count + gap_count` solid-line
+fallback, `div_euclid`/`rem_euclid` for the floor/mod tiling math, the invariant
+assert, the one-per-dash `remaining` distribution, and the centered offset), and
+the `draw_box_dashes` dispatch for the 12 dash codepoints.
+
+Tests (deterministic, the Experiment 275 fixture; `light = 2`, `heavy = 4`):
+
+- `dash_horizontal_3` (`0x2504`) — segments `[0,2),[3,5),[6,8)` on rows 8–9,
+  vertically centered (rows 7/10 empty).
+- `dash_vertical_3` (`0x2506`) — segments `[0,3),[6,9),[12,15)` on cols 3–4,
+  horizontally centered.
+- `dash_count_4` (`0x2508`) — four segments `[0,2),[3,4),[5,6),[7,8)` (first 2px
+  from the distributed `remaining`).
+- `dash_double_2` (`0x254C`) — two segments `[1,4),[6,8)`.
+- `dash_heavy_thickness` (`0x2505`) — a dash column is the 4px heavy band
+  (`[7,11)`).
+- `dash_fallback_solid` — a `cell_width = 5` cell (`5 < 3 + 3`) draws a solid
+  continuous light line (`[0,5)` on rows 8–9, no gaps).
+- `draw_box_dashes_excludes` — line chars (`0x2500`, `0x253C`, `0x2550`) and
+  `'M'` return `false` and draw nothing.
+
+The tests use `row_spans`/`col_spans` helpers that collapse a row/column into
+its contiguous inked `[start, end)` ranges, so each dash pattern is asserted
+exactly.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty sprite` → 37 passed (7 new).
+- `cargo test -p roastty` → 2463 passed, 0 failed (no regressions; +7).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The box-drawing dash primitives are ported and pixel-verified, including the
+seamless-tiling gap math, the `remaining`-pixel distribution, and the
+narrow-cell solid-line fallback. The shared line helpers (`hline`/`vline`/
+`hline_middle`/`vline_middle`) are now available for the remaining primitives.
+The next sprite work is the last box-drawing family — the rounded corners and
+diagonals (`0x256D`–`0x2573`, `arc`/`lightDiagonal*`), which need the `Canvas`
+anti-aliased path/line API (a `z2d`-style quadratic curve and stroked line) not
+yet ported — and then the other sprite categories (block, braille, powerline,
+legacy). Those, with a unifying box dispatch, complete the inventory the sprite
+`has_codepoint` derives from. Alongside remain the discovery consumer, the UCD
+emoji-presentation default, codepoint overrides, the shaper, the Nerd Font
+attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no required
+changes**. It confirmed the `hline`/`vline`/middle helpers match `common.zig`,
+that both dash primitives match the upstream control flow and arithmetic (gap
+clamping, the solid-line fallback, the invariant, floor/mod via
+`div_euclid`/`rem_euclid` on non-negative values, the centered offsets, the
+starts, and the one-extra-pixel-per-dash distribution), and that
+`draw_box_dashes` matches all 12 upstream switch arms exactly — including the
+`0x254D`/`0x254E` heavy-gap cases. It judged the exact-span tests appropriate
+and the result sound.
+
+(The completion gate was retried across a sustained Codex backend `429`/`403`
+rate-limit; it succeeded after a cooldown.)
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260603-002117-172618-prompt.md`
+- Result: `logs/codex-review/20260603-002117-172618-last-message.md`
