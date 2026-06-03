@@ -1226,6 +1226,17 @@ pub(crate) fn draw_codepoint(cp: u32, metrics: &Metrics, canvas: &mut Canvas) ->
         || draw_powerline_flame(cp, w, h, metrics, canvas)
 }
 
+/// Whether `cp` is a drawable codepoint-keyed sprite glyph (ignoring
+/// presentation, like upstream's `Face.hasCodepoint` = `getDrawFn(cp) != null`).
+/// Implemented against the single source of truth [`draw_codepoint`] — a scratch
+/// render whose drawn bytes are discarded — so the predicate can never diverge
+/// from what actually renders. (A range-only fast path is a future optimization
+/// if the coverage check proves hot.)
+pub(crate) fn has_codepoint(cp: u32, metrics: &Metrics) -> bool {
+    let mut scratch = Canvas::new(metrics.cell_width, metrics.cell_height, 0, 0);
+    draw_codepoint(cp, metrics, &mut scratch)
+}
+
 /// The block cursor: a full-cell rect. Faithful port of upstream `special.zig`'s
 /// `cursor_rect`.
 pub(crate) fn draw_cursor_rect(canvas: &mut Canvas, width: u32, height: u32, _metrics: &Metrics) {
@@ -3675,6 +3686,46 @@ mod tests {
             let mut c = cell_canvas();
             assert!(!draw_codepoint(cp, &m, &mut c), "{cp:#06x} is not a sprite");
             assert!(all_alpha(&c, &m, 0), "{cp:#06x} drew ink");
+        }
+    }
+
+    // The sprite has_codepoint predicate.
+
+    const SPRITE_REPRESENTATIVES: &[u32] = &[
+        0x2500, 0x2504, 0x2571, 0x2570, 0x2802, 0x1fb00, 0x1cd00, 0x1cc21, 0x2588, 0x25e2, 0x25f8,
+        0xe0b0, 0xe0b1, 0xe0b4, 0xe0b9, 0xe0d2,
+    ];
+
+    #[test]
+    fn has_codepoint_covers() {
+        let m = fixture_metrics();
+        for &cp in SPRITE_REPRESENTATIVES {
+            assert!(has_codepoint(cp, &m), "{cp:#07x} should be a sprite");
+        }
+    }
+
+    #[test]
+    fn has_codepoint_excludes() {
+        let m = fixture_metrics();
+        for cp in ['M' as u32, 0x0041, 0x20, 0x2603] {
+            assert!(!has_codepoint(cp, &m), "{cp:#06x} is not a sprite");
+        }
+    }
+
+    #[test]
+    fn has_codepoint_matches_draw() {
+        // The predicate agrees with the render path for covered and uncovered
+        // codepoints alike.
+        let m = fixture_metrics();
+        let probes: &[u32] = &[
+            0x2500, 0x2504, 0x2571, 0x2570, 0x2802, 0x1fb00, 0x1cd00, 0x1cc21, 0x2588, 0x25e2,
+            0x25f8, 0xe0b0, 0xe0b1, 0xe0b4, 0xe0b9, 0xe0d2, // covered
+            0x41, 0x20, 0x2603, 0x4d, 0xe0d3, // not covered
+        ];
+        for &cp in probes {
+            let mut c = cell_canvas();
+            let drew = draw_codepoint(cp, &m, &mut c);
+            assert_eq!(has_codepoint(cp, &m), drew, "{cp:#07x} predicate vs draw");
         }
     }
 

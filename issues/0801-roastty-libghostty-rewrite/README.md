@@ -1080,7 +1080,7 @@ are past the correctness-critical foundation.
 - [Experiment 316: the unifying codepoint sprite dispatch (draw_codepoint)](316-sprite-dispatch.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 317: the sprite has_codepoint predicate](317-sprite-has-codepoint.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

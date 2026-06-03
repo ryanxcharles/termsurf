@@ -131,3 +131,63 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-092943-003682-prompt.md`
 - Result: `logs/codex-review/20260603-092943-003682-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/draw.rs` gained `has_codepoint(cp, metrics) -> bool`:
+it renders `cp` into a scratch cell-sized `Canvas` via `draw_codepoint` and
+returns whether it matched — DRY against the single source of truth, ignoring
+presentation (matching upstream's `getDrawFn(cp) != null`), with a range-only
+fast path noted as a future optimization.
+
+Tests:
+
+- `has_codepoint_covers` — the 16 per-family representatives all return `true`.
+- `has_codepoint_excludes` — `'M'`, `0x0041`, `0x20`, and `0x2603` (☃) return
+  `false`.
+- `has_codepoint_matches_draw` — for a spread of covered and uncovered probes
+  (including the nearby uncovered `0xE0D3`), `has_codepoint(cp)` equals whether
+  `draw_codepoint(cp, …)` matched — pinning the predicate to the render path.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2664 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The sprite dispatch is now complete at the codepoint level: `draw_codepoint`
+(render) and `has_codepoint` (cover), the faithful pair of upstream's
+`getDrawFn`-based `renderGlyph`/`hasCodepoint`. Any sprite codepoint can be
+classified and rendered through one source of truth.
+
+The remaining sprite-font work is: the **sprite-kind special glyphs**
+(underlines/strikethrough/overline/cursors, keyed by a `Sprite` enum rather than
+a codepoint — a separate dispatch and the cursor/underline-style plumbing); and
+the **resolver/atlas wiring** — a sprite `Face`-equivalent that sizes a `Canvas`
+(cell width × the run's cell count), calls `draw_codepoint`, writes the alpha8
+buffer to the atlas, and returns a `Glyph` with the right metrics, filling the
+resolver's deferred `SpriteUnavailable` arm (and a `has_codepoint`-backed
+coverage check in the collection). After the sprite font: the discovery
+consumer, the UCD emoji-presentation default, codepoint overrides, the shaper,
+the Nerd Font attribute table, and SVG color detection. A range-only fast path
+for `has_codepoint` is a deferred optimization.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes** (and no Optional). It confirmed `has_codepoint` is faithful for the
+current codepoint-keyed sprite surface: it uses `draw_codepoint` as the single
+source of truth, ignores presentation, and returns `true` exactly when the
+render dispatcher matches, with the scratch-canvas mutation contained and
+discarded; and that the tests cover one representative per dispatched family,
+clear non-sprite exclusions, and direct agreement with `draw_codepoint` for
+covered and uncovered probes (including the nearby uncovered `0xE0D3`).
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-093151-749056-last-message.md`
