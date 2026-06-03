@@ -6,4 +6,5 @@
 //! table access; `getMetrics` assembly and glyph rasterization land in later
 //! experiments.
 
+pub(crate) mod constraint;
 pub(crate) mod coretext;

@@ -172,3 +172,64 @@ constructing the two Nerd-Font fixture `Constraint`s literally (deferring
 tolerance matches upstream's intent and noted the exact-zero `stretch`
 expectations require the arithmetic to produce exact `0.0` — which the
 `stretch`/`start`/`center1` path should.
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/face/constraint.rs` ports `GlyphSize`, `Constraint`, `Size`,
+`Align`, `Height`, and the full `does_anything`/`constrain`/`constrain_inner`/
+`scale_factors`/`aligned_y`/`aligned_x` geometry, against the already-ported
+`Metrics`. All five upstream fixtures match value-for-value within
+`approxEqRel(sqrt(f64::EPSILON))`.
+
+A correction surfaced during implementation: the two Nerd-Font-sourced fixtures
+need the **full** `getConstraint` result, not just the four fields upstream's
+test asserts via `expectEqual`. The `0xEA61` lightbulb is part of a scale group,
+so its constraint carries non-default `relative_{width,height,x,y}`
+(`0.7513…`/`0.9291…`/`0.0846…`/`0.0708…`); omitting them produced
+`{9.6, 13.859…, 0.0, 3.830…}` instead of `{7.2125, 10.4125, 0.8125, 5.9506…}`.
+The `0xE0C0` flame carries negative pads (`-0.025`/`-0.005`) that the `stretch`
+path clamps to `0`. Both fixtures were reconstructed with their exact
+`nerd_font_attributes.zig` field values (sourced from the table, which itself
+stays deferred), after which all cases pass. This also exercises the
+`relative_*` scale-group math and the stretch padding clamp.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty constraint` → 14 passed, 0 failed (the 5 new cases plus
+  the existing `renderer::cell` constraint-width tests).
+- `cargo test -p roastty` → 2371 passed, 0 failed (no regressions; +5).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The constraint geometry is ported and pinned to upstream value-for-value across
+every `Size` variant. The next experiment (257) wires it into `render_glyph`:
+introduce the `RenderOptions`/`grid_metrics` parameter, add the `cell_baseline`
+term to the glyph `y` before constraining, apply `constrain`, and then use the
+constrained size/position in the rasterization — the
+`scaleCTM(width/rect.w, height/rect.h)` stretch, the whole-pixel/`frac`
+recomputation from the constrained `x`/`y`, and the cell re-centering `dx`. The
+`relative_*` lesson (use the full `getConstraint` result) carries forward to the
+deferred Nerd Font attribute-table experiment.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no required
+changes**.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-205113-194869-prompt.md`
+- Result: `logs/codex-review/20260602-205113-194869-last-message.md`
+
+Codex found no correctness, faithfulness, tolerance, attribute-value, or
+integer-cast issues. The port matches upstream `face.zig` control flow and
+arithmetic (the stretch metrics fib and pad clamp, the `relative_*` scale-group
+reconstruction, center-preserving scale, the `fit_cover1` recursion,
+`max_xy_ratio`, `aligned_y`, and `aligned_x`/`center1`/`full_face_span`), the
+EA61/E0C0 fixture constraints match `nerd_font_attributes.zig` exactly, and the
+relative-only `sqrt(f64::EPSILON)` comparison matches upstream behavior.
