@@ -310,8 +310,62 @@ impl Descriptor {
         s.bold = self.bold == is_bold;
         s.italic = self.italic == is_italic;
 
+        // Style-string match: an exact (case-insensitive) match on the first
+        // desired style, plus a fuzzy substring score.
+        let desired = desired_styles(self.style.as_deref(), self.bold, self.italic);
+        let (exact, fuzzy) = style_score(&style_name(ct_desc), &desired);
+        s.exact_style = exact;
+        s.fuzzy_style = fuzzy;
+
         s
     }
+}
+
+/// The candidate's style name (e.g. `"Regular"`, `"Bold Italic"`), or `""`.
+fn style_name(ct_desc: &CTFontDescriptor) -> String {
+    // SAFETY: a static CF string key; the descriptor is live.
+    unsafe { ct_desc.attribute(kCTFontStyleNameAttribute) }
+        .and_then(|v| v.downcast::<CFString>().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_default()
+}
+
+/// The desired style strings for a request, in precedence order (the first is
+/// the exact-match target). Faithful port of upstream's `desired_styles`: an
+/// explicit style wins; otherwise the bold/italic combination picks the list.
+fn desired_styles(style: Option<&str>, bold: bool, italic: bool) -> Vec<&str> {
+    if let Some(s) = style {
+        return vec![s];
+    }
+    if bold {
+        if italic {
+            vec!["bold italic", "bold", "italic", "oblique"]
+        } else {
+            vec!["bold", "upright"]
+        }
+    } else if italic {
+        vec!["italic", "regular", "oblique"]
+    } else {
+        vec!["regular", "upright"]
+    }
+}
+
+/// Score a font's style name against the desired styles: `(exact, fuzzy)`.
+/// `exact` is a case-insensitive equality with the first desired style; `fuzzy`
+/// rewards style names mostly composed of desired substrings (`255 −` the
+/// leftover length after subtracting each matched desired substring). Faithful
+/// port of upstream's byte-wise-ASCII style scoring.
+fn style_score(style_str: &str, desired: &[&str]) -> (bool, u8) {
+    let exact = style_str.eq_ignore_ascii_case(desired[0]);
+
+    let lower = style_str.to_ascii_lowercase();
+    let mut fuzzy = style_str.len().min(u8::MAX as usize) as u8;
+    for ds in desired {
+        if lower.contains(&ds.to_ascii_lowercase()) {
+            fuzzy = fuzzy.saturating_sub(ds.len().min(u8::MAX as usize) as u8);
+        }
+    }
+    (exact, u8::MAX.saturating_sub(fuzzy))
 }
 
 /// Copy the raw bytes of the OpenType table `tag` from `font`, or `None`.
@@ -828,6 +882,67 @@ mod tests {
         assert!(
             any_regular,
             "the regular Menlo face is detected as neither bold nor italic"
+        );
+    }
+
+    #[test]
+    fn desired_styles_chain() {
+        assert_eq!(desired_styles(Some("Foo"), false, false), vec!["Foo"]);
+        // An explicit style wins over bold/italic.
+        assert_eq!(desired_styles(Some("Foo"), true, true), vec!["Foo"]);
+        assert_eq!(
+            desired_styles(None, true, true),
+            vec!["bold italic", "bold", "italic", "oblique"]
+        );
+        assert_eq!(desired_styles(None, true, false), vec!["bold", "upright"]);
+        assert_eq!(
+            desired_styles(None, false, true),
+            vec!["italic", "regular", "oblique"]
+        );
+        assert_eq!(
+            desired_styles(None, false, false),
+            vec!["regular", "upright"]
+        );
+    }
+
+    #[test]
+    fn style_score_pure() {
+        // The whole name is consumed by a desired substring → max score.
+        assert_eq!(style_score("Regular", &["regular", "upright"]), (true, 255));
+        assert_eq!(style_score("Bold", &["bold", "upright"]), (true, 255));
+        // Nothing matches → 255 − len leftover.
+        assert_eq!(style_score("Regular", &["bold", "upright"]), (false, 248));
+        assert_eq!(style_score("Italic", &["regular", "upright"]), (false, 249));
+        // Empty style: no exact match, but zero leftover → max fuzzy.
+        assert_eq!(style_score("", &["regular", "upright"]), (false, 255));
+    }
+
+    #[test]
+    fn score_style_exact_integration() {
+        // The Regular Menlo candidate exact-matches a default request but not a
+        // bold one, and the matching desire consumes more of the style name.
+        let cands = menlo_candidates();
+        let regular = cands
+            .iter()
+            .find(|c| style_name(c).eq_ignore_ascii_case("Regular"))
+            .expect("a Regular Menlo candidate");
+        let default_score = Descriptor::default().score(regular);
+        assert!(
+            default_score.exact_style,
+            "Regular exact-matches the default desire"
+        );
+        let bold_score = Descriptor {
+            bold: true,
+            ..Default::default()
+        }
+        .score(regular);
+        assert!(
+            !bold_score.exact_style,
+            "Regular does not exact-match a bold desire"
+        );
+        assert!(
+            default_score.fuzzy_style > bold_score.fuzzy_style,
+            "the default desire consumes more of the name"
         );
     }
 }

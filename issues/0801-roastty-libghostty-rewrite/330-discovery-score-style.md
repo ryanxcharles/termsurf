@@ -159,3 +159,66 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-120024-848219-prompt.md`
 - Result: `logs/codex-review/20260603-120024-848219-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+The style match lands — `score()` now fills every field but the deferred
+variation-axis refinement.
+
+- `roastty/src/font/discovery.rs`: `style_name` (reads
+  `kCTFontStyleNameAttribute` → `CFString` → `String`, or `""`);
+  `desired_styles(style, bold, italic)` (the upstream precedence chain —
+  explicit style wins, else the bold/italic combination);
+  `style_score(style_str, desired)` (case-insensitive exact match on
+  `desired[0]`, plus the saturating fuzzy-substring score `255 −` leftover).
+  `score` sets `exact_style`/`fuzzy_style` from these.
+
+Tests: `desired_styles_chain` (every branch, incl. explicit-style precedence),
+`style_score_pure` (`Regular`/default ⇒ `(true, 255)`, `Bold`/bold ⇒
+`(true, 255)`, `Regular`/bold ⇒ `(false, 248)`, `Italic`/default ⇒
+`(false, 249)`, empty ⇒ `(false, 255)`), `score_style_exact_integration` (the
+Regular Menlo candidate exact-matches a default request but not a bold one, and
+its default `fuzzy_style` exceeds its bold `fuzzy_style`).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2716 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The discovery `Score.score` is now a near-complete port: glyph count, codepoint
+coverage, monospace, the `head`/`OS/2`-refined bold/italic, and the style
+exact/fuzzy match. Only the **variation-axis** bold/italic derivation (for
+variable fonts) remains deferred.
+
+The next discovery experiment can be either the **variation-axis** derivation
+(the heaviest CoreText FFI — `kCTFontVariationAxesAttribute`/
+`kCTFontVariationAttribute`) or, since the `Score` is otherwise complete,
+**`sortMatchingDescriptors`** — wiring the ranking into `discover_descriptors`
+so discovery returns its candidates **best-first** (`score` each candidate, sort
+by `Score::int()` descending). After that: the
+`DiscoverIterator`/`DeferredFace`, `discoverFallback`, then the resolver's
+discovery fallback and codepoint overrides.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It confirmed `desired_styles` matches upstream exactly
+(including explicit-style precedence and the `desired[0]` exact-match target,
+with the index safe because every branch is non-empty), that `style_score`
+matches the upstream fuzzy semantics (byte-length start, ASCII case-insensitive
+substring checks, saturating subtraction per matched desired style, then
+saturating `255 − leftover`), that `eq_ignore_ascii_case` and
+`to_ascii_lowercase().contains(...)` are faithful replacements for the Zig ASCII
+helpers, and that `style_name` is sound and leak-free (retains/downcasts the
+copied attribute, converts to an owned `String`, falls back to `""` on
+absent/wrong-type). No Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-120237-619620-last-message.md`
