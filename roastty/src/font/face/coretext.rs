@@ -12,9 +12,10 @@ use objc2_core_foundation::{CFRetained, CFString, CGPoint, CGSize};
 use objc2_core_graphics::{CGBitmapContextCreate, CGColorSpace, CGContext};
 use objc2_core_text::{CTFont, CTFontOrientation, CTFontTableOptions};
 
+use super::constraint::{Constraint, GlyphSize, Size};
 use crate::font::atlas::{Atlas, AtlasError, Format};
 use crate::font::glyph::Glyph;
-use crate::font::metrics::FaceMetrics;
+use crate::font::metrics::{FaceMetrics, Metrics};
 use crate::font::opentype::{head::Head, hhea::Hhea, os2::Os2, post::Post};
 
 /// A font face backed by a CoreText `CTFont`. `CFRetained` manages the
@@ -35,6 +36,39 @@ pub(crate) struct RasterizedGlyph {
     pub bearing_x: i32,
     /// Whole-pixel bottom bearing (`floor(origin.y)`).
     pub bearing_y: i32,
+}
+
+/// An error rendering a glyph into the atlas. Faithful to upstream
+/// `renderGlyph`, which propagates both atlas reservation and bitmap-context
+/// creation failures rather than panicking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RenderGlyphError {
+    /// The atlas cannot fit the glyph; it must be enlarged.
+    AtlasFull,
+    /// CoreGraphics could not create the rasterization bitmap context.
+    ContextCreationFailed,
+}
+
+impl From<AtlasError> for RenderGlyphError {
+    fn from(err: AtlasError) -> Self {
+        match err {
+            AtlasError::AtlasFull => RenderGlyphError::AtlasFull,
+        }
+    }
+}
+
+/// Options controlling how a glyph is rendered into the atlas. Faithful subset
+/// of upstream `RenderOptions`: the grid metrics defining the cell layout, the
+/// sizing/alignment [`Constraint`], and the number of cells the glyph may span.
+/// (Upstream's `cell_width`, `thicken`, and `thicken_strength` are deferred with
+/// the thicken/color branches.)
+pub(crate) struct RenderOptions {
+    /// The metrics defining the grid layout (usually the primary face's).
+    pub grid_metrics: Metrics,
+    /// The sizing and alignment constraint for the glyph.
+    pub constraint: Constraint,
+    /// The number of cells horizontally the glyph may take up when constrained.
+    pub constraint_width: u8,
 }
 
 impl Face {
@@ -352,6 +386,48 @@ impl Face {
         let px_w = (rect.size.width + frac_x).ceil() as usize;
         let px_h = (rect.size.height + frac_y).ceil() as usize;
 
+        // Unconstrained: identity scale, drawn at the negated raw bearings.
+        let bitmap = self.draw_coverage(
+            glyph,
+            -rect.origin.x,
+            -rect.origin.y,
+            frac_x,
+            frac_y,
+            1.0,
+            1.0,
+            px_w,
+            px_h,
+        )?;
+
+        Some(RasterizedGlyph {
+            width: px_w as u32,
+            height: px_h as u32,
+            bitmap,
+            bearing_x: px_x,
+            bearing_y: px_y,
+        })
+    }
+
+    /// Draw a single glyph into a fresh `px_w * px_h` grayscale coverage buffer.
+    /// The CTM is translated by `(frac_x, frac_y)` (sub-pixel positioning) then
+    /// scaled by `(scale_x, scale_y)` (the constraint stretch; `1.0` when
+    /// unconstrained), and the glyph is drawn at `(draw_x, draw_y)` — the caller
+    /// passes the negated raw bearings so the outline's bottom-left maps to the
+    /// CTM origin. Returns the buffer, or `None` if the bitmap context can't be
+    /// created.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_coverage(
+        &self,
+        glyph: u16,
+        draw_x: f64,
+        draw_y: f64,
+        frac_x: f64,
+        frac_y: f64,
+        scale_x: f64,
+        scale_y: f64,
+        px_w: usize,
+        px_h: usize,
+    ) -> Option<Vec<u8>> {
         let colorspace = CGColorSpace::new_device_gray()?;
         let mut buf = vec![0u8; px_w * px_h];
 
@@ -375,15 +451,17 @@ impl Face {
         // White glyph on the zeroed (black) buffer; the gray value is coverage.
         CGContext::set_gray_fill_color(Some(&ctx), 1.0, 1.0);
 
-        // Shift the drawing by the fractional bearing so the glyph lands at the
-        // correct sub-pixel position within the canvas.
+        // Shift by the fractional bearing for sub-pixel positioning, then scale
+        // so the raw outline is stretched to the constrained size. Order
+        // matters: translate before scale.
         CGContext::translate_ctm(Some(&ctx), frac_x, frac_y);
+        CGContext::scale_ctm(Some(&ctx), scale_x, scale_y);
 
-        // Negate the bearing so the glyph's bounding box maps to the bitmap
-        // origin.
+        let glyphs = [glyph];
+        let glyphs_ptr = NonNull::new(glyphs.as_ptr() as *mut u16).unwrap();
         let positions = [CGPoint {
-            x: -rect.origin.x,
-            y: -rect.origin.y,
+            x: draw_x,
+            y: draw_y,
         }];
         let positions_ptr = NonNull::new(positions.as_ptr() as *mut CGPoint).unwrap();
         // SAFETY: `glyphs`/`positions` are 1-element; `ctx` is the live grayscale
@@ -395,25 +473,38 @@ impl Face {
         // Release the context before moving `buf`: it holds a raw pointer into it.
         drop(ctx);
 
-        Some(RasterizedGlyph {
-            width: px_w as u32,
-            height: px_h as u32,
-            bitmap: buf,
-            bearing_x: px_x,
-            bearing_y: px_y,
-        })
+        Some(buf)
     }
 
-    /// Render a glyph into the grayscale `atlas` and return its [`Glyph`]
-    /// (pixel size, whole-pixel bearings, and atlas coordinates). Faithful port
-    /// of the monochrome, unconstrained core of upstream `renderGlyph`: no cell
-    /// constraints, color/sbix, synthetic bold, or thicken.
-    pub(crate) fn render_glyph(&self, atlas: &mut Atlas, glyph: u16) -> Result<Glyph, AtlasError> {
+    /// Render a glyph into the grayscale `atlas`, applying the sizing/alignment
+    /// constraint in `opts`, and return its [`Glyph`] (pixel size, whole-pixel
+    /// bearings, and atlas coordinates). Faithful port of the monochrome core of
+    /// upstream `renderGlyph`: cell constraints are applied, but color/sbix,
+    /// synthetic bold, and thicken are deferred.
+    pub(crate) fn render_glyph(
+        &self,
+        atlas: &mut Atlas,
+        glyph: u16,
+        opts: &RenderOptions,
+    ) -> Result<Glyph, RenderGlyphError> {
         debug_assert_eq!(atlas.format(), Format::Grayscale);
+
+        let glyphs = [glyph];
+        let glyphs_ptr = NonNull::new(glyphs.as_ptr() as *mut u16).unwrap();
+        // SAFETY: `glyphs` is a 1-element slice; a null per-glyph buffer requests
+        // only the overall rect.
+        let rect = unsafe {
+            self.font.bounding_rects_for_glyphs(
+                CTFontOrientation::Horizontal,
+                glyphs_ptr,
+                std::ptr::null_mut(),
+                1,
+            )
+        };
 
         // No outline (or one too small to render) -> a zero glyph, matching
         // upstream. Nothing is reserved in the atlas.
-        let Some(rg) = self.rasterize_glyph(glyph) else {
+        if rect.size.width < 0.25 || rect.size.height < 0.25 {
             return Ok(Glyph {
                 width: 0,
                 height: 0,
@@ -422,17 +513,80 @@ impl Face {
                 atlas_x: 0,
                 atlas_y: 0,
             });
-        };
+        }
 
-        let region = atlas.reserve(rg.width, rg.height)?;
-        atlas.set(region, &rg.bitmap);
+        let cell_width = opts.grid_metrics.cell_width as f64;
+        let cell_baseline = opts.grid_metrics.cell_baseline as f64;
+
+        // Apply the constraint to get the final size and position of the glyph.
+        // The baseline is added to `y` first because `constrain` operates on
+        // cell-relative positions, not baseline-relative ones.
+        let glyph_size = opts.constraint.constrain(
+            GlyphSize {
+                width: rect.size.width,
+                height: rect.size.height,
+                x: rect.origin.x,
+                y: rect.origin.y + cell_baseline,
+            },
+            &opts.grid_metrics,
+            opts.constraint_width,
+        );
+
+        let mut x = glyph_size.x;
+        let y = glyph_size.y;
+        let width = glyph_size.width;
+        let height = glyph_size.height;
+
+        // Center the glyph within the pixel-rounded cell if it's wider than the
+        // face, so it isn't off to the left. Skipped for stretch, which already
+        // positioned against the new cell width.
+        if opts.constraint.size != Size::Stretch {
+            let dx = (cell_width - opts.grid_metrics.face_width) / 2.0;
+            x += dx;
+            if dx < 0.0 {
+                // For a negative diff (cell narrower than advance), drop the
+                // integer part and keep only the fractional sub-pixel adjustment.
+                x -= dx.trunc();
+            }
+        }
+
+        // Whole-pixel bearings and canvas from the constrained values, with the
+        // fractional remainder kept for sub-pixel positioning.
+        let px_x = x.floor() as i32;
+        let px_y = y.floor() as i32;
+        let frac_x = x - x.floor();
+        let frac_y = y - y.floor();
+        let px_w = (width + frac_x).ceil() as usize;
+        let px_h = (height + frac_y).ceil() as usize;
+
+        // Draw at the negated raw bearings, scaling the raw outline to the
+        // constrained size. `draw_coverage` returns `None` only if CoreGraphics
+        // can't create the bitmap context (very unlikely for an in-bounds
+        // `px_w, px_h >= 1` grayscale buffer, but propagated rather than
+        // panicked, matching upstream).
+        let bitmap = self
+            .draw_coverage(
+                glyph,
+                -rect.origin.x,
+                -rect.origin.y,
+                frac_x,
+                frac_y,
+                width / rect.size.width,
+                height / rect.size.height,
+                px_w,
+                px_h,
+            )
+            .ok_or(RenderGlyphError::ContextCreationFailed)?;
+
+        let region = atlas.reserve(px_w as u32, px_h as u32)?;
+        atlas.set(region, &bitmap);
 
         Ok(Glyph {
-            width: rg.width,
-            height: rg.height,
+            width: px_w as u32,
+            height: px_h as u32,
             // Left bearing; top bearing = bottom bearing + height.
-            offset_x: rg.bearing_x,
-            offset_y: rg.bearing_y + rg.height as i32,
+            offset_x: px_x,
+            offset_y: px_y + px_h as i32,
             atlas_x: region.x,
             atlas_y: region.y,
         })
@@ -442,6 +596,7 @@ impl Face {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::font::face::constraint::Align;
     use crate::font::opentype::head::Head;
 
     #[test]
@@ -560,13 +715,23 @@ mod tests {
         }
     }
 
+    /// A `.none`-constraint `RenderOptions` using the face's own grid metrics.
+    fn none_opts(face: &Face) -> RenderOptions {
+        RenderOptions {
+            grid_metrics: Metrics::calc(face.get_metrics()),
+            constraint: Constraint::default(),
+            constraint_width: 1,
+        }
+    }
+
     #[test]
     fn render_glyph_places_m_in_atlas() {
         let mut atlas = Atlas::new(512, Format::Grayscale);
         let face = Face::new("Menlo", 32.0);
+        let opts = none_opts(&face);
         let glyph = face.glyphs_for_characters(&[b'M' as u16])[0];
         let g = face
-            .render_glyph(&mut atlas, glyph)
+            .render_glyph(&mut atlas, glyph, &opts)
             .expect("'M' should render into the atlas");
         assert!(g.width > 0);
         assert!(g.height > 0);
@@ -584,9 +749,10 @@ mod tests {
     fn render_glyph_space_is_zero() {
         let mut atlas = Atlas::new(512, Format::Grayscale);
         let face = Face::new("Menlo", 32.0);
+        let opts = none_opts(&face);
         let glyph = face.glyphs_for_characters(&[b' ' as u16])[0];
         let g = face
-            .render_glyph(&mut atlas, glyph)
+            .render_glyph(&mut atlas, glyph, &opts)
             .expect("space should render (as a zero glyph)");
         // No outline -> a zero glyph, no atlas reservation.
         assert_eq!(g.width, 0);
@@ -595,5 +761,69 @@ mod tests {
         assert_eq!(g.offset_y, 0);
         assert_eq!(g.atlas_x, 0);
         assert_eq!(g.atlas_y, 0);
+    }
+
+    #[test]
+    fn render_glyph_stretch_fills_cell() {
+        let mut atlas = Atlas::new(512, Format::Grayscale);
+        let face = Face::new("Menlo", 32.0);
+        let metrics = Metrics::calc(face.get_metrics());
+        // A stretch constraint maps any outline to exactly the cell, so the
+        // resulting Glyph is deterministic regardless of the raw bbox.
+        let opts = RenderOptions {
+            grid_metrics: metrics,
+            constraint: Constraint {
+                size: Size::Stretch,
+                align_horizontal: Align::Start,
+                align_vertical: Align::Center1,
+                ..Default::default()
+            },
+            constraint_width: 1,
+        };
+        let glyph = face.glyphs_for_characters(&[b'M' as u16])[0];
+        let g = face
+            .render_glyph(&mut atlas, glyph, &opts)
+            .expect("'M' should render stretched into the atlas");
+
+        // The constrained size drives the canvas and bearings.
+        assert_eq!(g.width, metrics.cell_width);
+        assert_eq!(g.height, metrics.cell_height);
+        assert_eq!(g.offset_x, 0);
+        assert_eq!(g.offset_y, metrics.cell_height as i32);
+
+        // Measure the inked-pixel bounding box within the reserved region. A
+        // stretched 'M' fills nearly the whole cell, so it must span most of it
+        // in both axes — this fails if `scale_ctm` were omitted (raw 'M' clipped
+        // in height) or inverted (glyph shrinks to a dot).
+        let size = 512usize;
+        let data = atlas.data();
+        let (mut min_x, mut min_y) = (g.width, g.height);
+        let (mut max_x, mut max_y) = (0u32, 0u32);
+        let mut inked = false;
+        for row in 0..g.height {
+            for col in 0..g.width {
+                let px = data[((g.atlas_y + row) as usize) * size + (g.atlas_x + col) as usize];
+                if px != 0 {
+                    inked = true;
+                    min_x = min_x.min(col);
+                    min_y = min_y.min(row);
+                    max_x = max_x.max(col);
+                    max_y = max_y.max(row);
+                }
+            }
+        }
+        assert!(inked, "stretched 'M' produced no ink");
+        let ink_w = max_x - min_x + 1;
+        let ink_h = max_y - min_y + 1;
+        assert!(
+            ink_w as f64 >= 0.8 * g.width as f64,
+            "ink width {ink_w} should span most of the {} cell",
+            g.width
+        );
+        assert!(
+            ink_h as f64 >= 0.8 * g.height as f64,
+            "ink height {ink_h} should span most of the {} cell",
+            g.height
+        );
     }
 }

@@ -91,8 +91,9 @@ both).
   smoothing toggles, the `thicken_strength` gray fill), the explicit
   subpixel-quantization toggles, and the Nerd Font attribute table that supplies
   real per-codepoint constraints.
-- `render_glyph` still returns `Result<Glyph, AtlasError>` and still
-  `debug_assert!`s the grayscale atlas format.
+- `render_glyph` returns `Result<Glyph, RenderGlyphError>` (atlas-full or
+  bitmap-context-creation failure, both propagated rather than panicked,
+  matching upstream) and still `debug_assert!`s the grayscale atlas format.
 
 ### Tests (live CoreText, macOS)
 
@@ -203,3 +204,75 @@ Review artifacts:
   `…-205601-687623-prompt.md`, `…-205706-218703-prompt.md`
 - Results: `logs/codex-review/20260602-205425-240790-last-message.md`,
   `…-205601-687623-last-message.md`, `…-205706-218703-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`render_glyph` now takes `&RenderOptions`, adds the `cell_baseline` term, calls
+`constrain`, applies the `dx` cell re-center (skipped for `Stretch`), and
+rasterizes at the constrained size via
+`scale_ctm(width / rect.w, height / rect.h)`. The bitmap-context block was
+extracted into a shared `draw_coverage` helper (translate-then-scale-then-draw);
+`rasterize_glyph` now calls it with scale `1.0` and is otherwise unchanged. A
+`RenderOptions` struct (grid metrics, constraint, constraint width) was added.
+
+A result-review **Medium** finding was fixed: the initial implementation used a
+documented `.expect()` for the `draw_coverage` `None` case, but the CoreGraphics
+steps (`CGColorSpace::new_device_gray`, `CGBitmapContextCreate`) are fallible by
+API contract and upstream propagates bitmap-context-creation failure with `try`.
+`render_glyph` now returns `Result<Glyph, RenderGlyphError>` — a small internal
+enum (`AtlasFull` | `ContextCreationFailed`, with `From<AtlasError>`) — so the
+FFI path never panics and the error type isn't misused.
+
+Tests (live CoreText):
+
+- `render_glyph_places_m_in_atlas` / `render_glyph_space_is_zero` (updated to a
+  `.none` `RenderOptions` from `Metrics::calc(face.get_metrics())`) — still
+  pass; they now also exercise the baseline term and `dx`.
+- `render_glyph_stretch_fills_cell` (new) — a `Size::Stretch` constraint renders
+  `'M'` to exactly the cell (`width == cell_width`, `height == cell_height`,
+  `offset_x == 0`, `offset_y == cell_height`), and the inked-pixel bounding box
+  read from the atlas spans `>= 0.8 ×` the cell in both axes, confirming
+  `scale_ctm` is present and the right way up.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty face` → 21 passed, 0 failed (Experiment 254
+  rasterization tests unchanged).
+- `cargo test -p roastty` → 2372 passed, 0 failed (no regressions; +1).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+`render_glyph` now faithfully matches the monochrome core of upstream
+`renderGlyph` end to end: bounding rect → baseline + constrain + `dx` re-center
+→ scaled rasterization → atlas write → `Glyph`. The remaining `renderGlyph`
+branches layer on in later experiments: the color/sbix depth-4 P3 RGBA path
+(needs an RGBA atlas format and the premultiplied-first bitmap info), synthetic
+bold (fill-stroke + size growth), and thicken/font-smoothing (`canvas_padding`,
+the smoothing toggles, the `thicken_strength` gray fill). Beyond `renderGlyph`,
+the font subsystem still needs the Collection/CodepointResolver and the shaper,
+and the Nerd Font attribute table to supply real per-codepoint constraints.
+
+## Completion Review
+
+Codex reviewed the completed implementation. It raised one **Medium** finding —
+`render_glyph` panicked via `.expect()` on a `draw_coverage` `None`, but the
+CoreGraphics steps are fallible by API contract and upstream propagates
+bitmap-context-creation failure. The fix introduced `RenderGlyphError`
+(`AtlasFull` | `ContextCreationFailed`, with `From<AtlasError>`); `render_glyph`
+now returns `Result<Glyph, RenderGlyphError>` and propagates the failure instead
+of panicking. A follow-up review confirmed the finding is **fully resolved**
+with no new issues — the geometry, CTM order, buffer lifetime, and stretch
+coverage test remain sound. The full suite (2372) and all gates pass after the
+fix.
+
+Review artifacts:
+
+- Prompts: `logs/codex-review/20260602-210139-973885-prompt.md`,
+  `…-210335-765177-prompt.md`
+- Results: `logs/codex-review/20260602-210139-973885-last-message.md`,
+  `…-210335-765177-last-message.md`
