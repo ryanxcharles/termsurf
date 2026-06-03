@@ -1178,7 +1178,7 @@ are past the correctness-critical foundation.
 - [Experiment 365: render returns the glyph's presentation](365-render-presentation.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 366: addGlyph — a shaped glyph into a render cell](366-add-glyph.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

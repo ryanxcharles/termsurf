@@ -219,3 +219,72 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-175632-120915-prompt.md` (design)
 - Result: `logs/codex-review/20260603-175632-120915-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The shaped glyph now lands in a render cell — the first piece of the renderer's
+cell assembly.
+
+- `roastty/src/renderer/cell.rs`:
+  `add_glyph(contents, grid, grid_pos, font_index, shaper_cell, color, alpha, no_min_contrast, opts)`
+  renders the shaped glyph through `SharedGrid::render_glyph`, skips invisible
+  (0-size) glyphs, and adds a `CellTextVertex` to `Contents` via `Key::Text` —
+  with the atlas from `render.presentation` (`Emoji → Color`,
+  `Text → Grayscale`), the grid position, RGBA color, the glyph's atlas
+  placement/size, and bearings summing the glyph bearings and the shaper cell's
+  `x_offset`/`y_offset` (checked `i16::try_from(...).expect`, upstream's
+  `@intCast`). Imported the font types (`Index`, `RenderOptions`, `shape`,
+  `SharedGrid`, `Presentation`, `ResolverRenderError`) and the shader types
+  (`CellTextAtlas`, `CellTextFlags`); the module doc notes the bridge's origin
+  (upstream `generic.zig`'s `addGlyph`).
+
+Tests (in `cell.rs`): `add_glyph_emits_text_cell` renders `'M'` with non-zero
+shaper offsets (`x_offset = 3`, `y_offset = -2`) at `grid_pos [2, 1]` and
+asserts one cell in `fg_rows[2]` with `grid_pos == [2, 1]`,
+`atlas == Grayscale`, `color == [10, 20, 30, 255]`, and
+`glyph_pos`/`glyph_size`/`bearings` matching a direct `render_glyph` on a fresh
+identical grid (the bearings include `+3`/`-2`); `add_glyph_skips_invisible`
+renders a space (0-size glyph) and asserts no cell is added.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2814 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The full chain now reaches a drawable cell: a terminal row → `ShapedRun`s
+(Experiments 358–362) → `SharedGrid::render_glyph` (Experiments 363–365) →
+`add_glyph` → a `CellTextVertex` in `Contents`. One shaped glyph can be turned
+into the exact GPU vertex the Metal shader consumes.
+
+The remaining renderer-bridge work is the **`rebuildCells` loop**: iterate the
+viewport's `ShapedRun`s, derive each cell's `RenderOptions` (`cell_width`,
+`constraint` via `is_symbol`/Nerd-Font, `constraint_width`), color/alpha, and
+`no_min_contrast`, and call `add_glyph` — plus the background/decoration cells,
+the cursor glyph, and the Metal upload of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation is faithful to upstream's emit
+half (renders through `SharedGrid`, skips zero-size glyphs before emitting, maps
+`Presentation::Emoji → CellTextAtlas::Color` and `Text → Grayscale`, sums glyph
+bearings with shaper offsets, and routes through `Contents::add(Key::Text, …)`
+which places row `y` in `fg_rows[y + 1]`); that the `i16::try_from(...).expect`
+bearing conversion is appropriate for upstream's checked-cast behavior; and that
+the color, `_padding`, and flags construction are correct (RGBA from
+`[r,g,b] + alpha`, padding zeroed, `CellTextFlags::new(no_min_contrast, false)`
+marking a text glyph rather than a cursor glyph). It noted the tests cover the
+important behavior (field mapping, row routing, atlas selection, color,
+direct-render position/size, bearing offsets, invisible-space skip), with
+`flags`/`_padding` not explicitly asserted but covered by the straight-line code
+and existing shader tests. Nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-175947-307963-last-message.md`

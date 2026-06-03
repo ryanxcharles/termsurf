@@ -6,10 +6,21 @@
 //! Faithful port of upstream `renderer/cell.zig`: the codepoint-classification
 //! predicates, `constraint_width`, and the `Contents` cell-render-data builder
 //! (storage, cursor lists, and row mutation). `cell.zig` is fully ported.
+//!
+//! [`add_glyph`] is the emit half of upstream `renderer/generic.zig`'s `addGlyph`
+//! (render a shaped glyph through the [`SharedGrid`] into a `Contents` text
+//! cell). It is co-located with `Contents` here because the generic renderer that
+//! owns it upstream is not ported yet.
 
 use super::cursor::Style as CursorStyle;
-use super::shader::{CellBg, CellTextVertex};
+use super::shader::{CellBg, CellTextAtlas, CellTextFlags, CellTextVertex};
 use super::size::GridSize;
+use crate::font::codepoint_resolver::ResolverRenderError;
+use crate::font::collection::Index;
+use crate::font::face::coretext::RenderOptions;
+use crate::font::shape;
+use crate::font::shared_grid::SharedGrid;
+use crate::font::Presentation;
 
 /// True only for U+2588 FULL BLOCK.
 pub(crate) fn is_covering(cp: u32) -> bool {
@@ -295,6 +306,57 @@ impl Contents {
     }
 }
 
+/// Render one shaped glyph through `grid` and add it to `contents` as a text
+/// [`CellTextVertex`] at `grid_pos`. Invisible glyphs (0 width/height) are
+/// skipped. Faithful port of the emit half of upstream `addGlyph`: the atlas
+/// comes from the render's presentation, and the bearings sum the glyph's own
+/// bearings and the shaper cell's per-glyph offsets. (`opts`, `color`/`alpha`,
+/// and `no_min_contrast` are derived by the caller — the future `rebuildCells`.)
+pub(crate) fn add_glyph(
+    contents: &mut Contents,
+    grid: &mut SharedGrid,
+    grid_pos: [u16; 2],
+    font_index: Index,
+    shaper_cell: &shape::Cell,
+    color: [u8; 3],
+    alpha: u8,
+    no_min_contrast: bool,
+    opts: &RenderOptions,
+) -> Result<(), ResolverRenderError> {
+    let render = grid.render_glyph(font_index, shaper_cell.glyph_index, opts)?;
+
+    // A 0-size glyph (e.g. a space) is invisible — don't add it to the buffer.
+    if render.glyph.width == 0 || render.glyph.height == 0 {
+        return Ok(());
+    }
+
+    // The glyph's own bearings plus the shaper's per-glyph offsets.
+    let bearings = [
+        i16::try_from(render.glyph.offset_x + i32::from(shaper_cell.x_offset))
+            .expect("glyph x bearing fits i16"),
+        i16::try_from(render.glyph.offset_y + i32::from(shaper_cell.y_offset))
+            .expect("glyph y bearing fits i16"),
+    ];
+
+    contents.add(
+        Key::Text,
+        CellTextVertex {
+            glyph_pos: [render.glyph.atlas_x, render.glyph.atlas_y],
+            glyph_size: [render.glyph.width, render.glyph.height],
+            bearings,
+            grid_pos,
+            color: [color[0], color[1], color[2], alpha],
+            atlas: match render.presentation {
+                Presentation::Emoji => CellTextAtlas::Color,
+                Presentation::Text => CellTextAtlas::Grayscale,
+            },
+            flags: CellTextFlags::new(no_min_contrast, false),
+            _padding: [0, 0],
+        },
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,6 +594,122 @@ mod tests {
             flags: CellTextFlags::default(),
             _padding: [0, 0],
         }
+    }
+
+    fn menlo_grid() -> SharedGrid {
+        use crate::font::codepoint_resolver::CodepointResolver;
+        use crate::font::collection::Collection;
+        use crate::font::face::coretext::Face;
+        use crate::font::Style;
+        let mut c = Collection::new();
+        c.add(Face::new("Menlo", 32.0), Style::Regular, false)
+            .unwrap();
+        c.update_metrics().unwrap();
+        let metrics = *c.metrics().unwrap();
+        SharedGrid::new(CodepointResolver::new(c), metrics)
+    }
+
+    fn menlo_opts() -> RenderOptions {
+        use crate::font::face::constraint::Constraint;
+        use crate::font::face::coretext::Face;
+        use crate::font::metrics::Metrics;
+        let face = Face::new("Menlo", 32.0);
+        RenderOptions {
+            grid_metrics: Metrics::calc(face.get_metrics()),
+            cell_width: None,
+            constraint: Constraint::default(),
+            constraint_width: 1,
+            thicken: false,
+            thicken_strength: 255,
+        }
+    }
+
+    fn glyph_for(ch: u8) -> u32 {
+        use crate::font::face::coretext::Face;
+        u32::from(Face::new("Menlo", 32.0).glyphs_for_characters(&[u16::from(ch)])[0])
+    }
+
+    #[test]
+    fn add_glyph_emits_text_cell() {
+        use crate::font::collection::Index;
+        let mut shared = menlo_grid();
+        let opts = menlo_opts();
+        let mut c = Contents::default();
+        c.resize(grid(4, 2));
+
+        // The expected placement, rendered through a fresh identical grid.
+        let expected = menlo_grid()
+            .render_glyph(Index::default(), glyph_for(b'M'), &opts)
+            .expect("'M' renders")
+            .glyph;
+
+        // Non-zero shaper offsets to prove they are summed into the bearings.
+        let shaper_cell = shape::Cell {
+            x: 0,
+            x_offset: 3,
+            y_offset: -2,
+            glyph_index: glyph_for(b'M'),
+        };
+        add_glyph(
+            &mut c,
+            &mut shared,
+            [2, 1],
+            Index::default(),
+            &shaper_cell,
+            [10, 20, 30],
+            255,
+            false,
+            &opts,
+        )
+        .expect("add_glyph");
+
+        // y = 1 -> fg_rows[y + 1] = fg_rows[2].
+        assert_eq!(c.fg_rows[2].len(), 1);
+        assert!(c.fg_rows[1].is_empty());
+        let v = c.fg_rows[2][0];
+        assert_eq!(v.grid_pos, [2, 1]);
+        assert_eq!(v.atlas, CellTextAtlas::Grayscale);
+        assert_eq!(v.color, [10, 20, 30, 255]);
+        assert_eq!(v.glyph_pos, [expected.atlas_x, expected.atlas_y]);
+        assert_eq!(v.glyph_size, [expected.width, expected.height]);
+        assert_eq!(
+            v.bearings,
+            [
+                (expected.offset_x + 3) as i16,
+                (expected.offset_y - 2) as i16,
+            ]
+        );
+    }
+
+    #[test]
+    fn add_glyph_skips_invisible() {
+        use crate::font::collection::Index;
+        let mut shared = menlo_grid();
+        let opts = menlo_opts();
+        let mut c = Contents::default();
+        c.resize(grid(4, 2));
+
+        // A space rasterizes to a 0-size glyph, so no cell should be added.
+        let shaper_cell = shape::Cell {
+            x: 0,
+            x_offset: 0,
+            y_offset: 0,
+            glyph_index: glyph_for(b' '),
+        };
+        add_glyph(
+            &mut c,
+            &mut shared,
+            [0, 0],
+            Index::default(),
+            &shaper_cell,
+            [0, 0, 0],
+            255,
+            false,
+            &opts,
+        )
+        .expect("add_glyph");
+
+        assert!(c.fg_rows[1].is_empty());
     }
 
     #[test]
