@@ -1059,6 +1059,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 306: Canvas::inner_stroke_path + the outlined corner triangles (U+25F8–25FA, 25FF)](306-outlined-triangles.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 307: the rect-based special sprites (underline, double, strikethrough, overline)](307-special-underlines.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
