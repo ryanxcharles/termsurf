@@ -1041,6 +1041,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 297: z2d port — the multi-segment open-path stroke](297-z2d-stroke-path.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 298: z2d port — the Pen (round-join/cap vertex set)](298-z2d-pen.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
