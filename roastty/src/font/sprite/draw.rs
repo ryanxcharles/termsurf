@@ -5,10 +5,10 @@
 //! the shared `font/sprite/draw/common.zig` primitives (`Thickness`,
 //! `Fraction`/`fill`, the `hline`/`vline` helpers, `Shade`/`Alignment`/`Quads`).
 //! Covered so far: the box-drawing line glyphs (`U+2500`–`U+257F` `linesChar`
-//! dispatch), the dashes, and the Block Elements (`U+2580`–`U+259F`). The
-//! `z2d`-based primitives (arcs, diagonals), the sprite `hasCodepoint`
-//! inventory, and the other sprite categories (braille, powerline, legacy,
-//! geometric) are later experiments.
+//! dispatch), the dashes, the Block Elements (`U+2580`–`U+259F`), and the
+//! Braille Patterns (`U+2800`–`U+28FF`). The `z2d`-based primitives (arcs,
+//! diagonals), the sprite `hasCodepoint` inventory, and the other sprite
+//! categories (powerline, legacy, geometric) are later experiments.
 
 use crate::font::metrics::Metrics;
 use crate::font::sprite::canvas::{Canvas, Color, Rect};
@@ -987,6 +987,148 @@ pub(crate) fn draw_block(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> boo
     true
 }
 
+/// The 8 dot flags of a braille pattern. Faithful port of upstream
+/// `braille.Pattern`: the bits of the codepoint's low byte, in the order
+/// `tl, ul, ll, tr, ur, lr, bl, br`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BraillePattern {
+    tl: bool,
+    ul: bool,
+    ll: bool,
+    tr: bool,
+    ur: bool,
+    lr: bool,
+    bl: bool,
+    br: bool,
+}
+
+impl BraillePattern {
+    /// Decode the low byte of `cp` into its dot flags.
+    fn from_cp(cp: u32) -> BraillePattern {
+        let b = (cp & 0xFF) as u8;
+        BraillePattern {
+            tl: b & 0x01 != 0,
+            ul: b & 0x02 != 0,
+            ll: b & 0x04 != 0,
+            tr: b & 0x08 != 0,
+            ur: b & 0x10 != 0,
+            lr: b & 0x20 != 0,
+            bl: b & 0x40 != 0,
+            br: b & 0x80 != 0,
+        }
+    }
+}
+
+/// Draw the Braille Patterns glyph for `cp` (`U+2800`–`U+28FF`) into `canvas`,
+/// returning `true` if `cp` is a braille codepoint. Faithful port of upstream
+/// `draw2800_28FF`: it sizes the 8-dot grid to the cell with a fixed refinement
+/// pass, then draws a `w × w` box at each set dot.
+pub(crate) fn draw_braille(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> bool {
+    if !(0x2800..=0x28FF).contains(&cp) {
+        return false;
+    }
+
+    let width = metrics.cell_width as i32;
+    let height = metrics.cell_height as i32;
+
+    let mut w: i32 = (metrics.cell_width / 4).min(metrics.cell_height / 8) as i32;
+    let mut x_spacing: i32 = (metrics.cell_width / 4) as i32;
+    let mut y_spacing: i32 = (metrics.cell_height / 8) as i32;
+    let mut x_margin: i32 = x_spacing.div_euclid(2);
+    let mut y_margin: i32 = y_spacing.div_euclid(2);
+
+    let mut x_px_left: i32 = width - 2 * x_margin - x_spacing - 2 * w;
+    let mut y_px_left: i32 = height - 2 * y_margin - 3 * y_spacing - 4 * w;
+
+    // First, try hard to ensure the dot width is non-zero.
+    if x_px_left >= 2 && y_px_left >= 4 && w == 0 {
+        w += 1;
+        x_px_left -= 2;
+        y_px_left -= 4;
+    }
+
+    // Second, prefer a non-zero margin.
+    if x_px_left >= 2 && x_margin == 0 {
+        x_margin = 1;
+        x_px_left -= 2;
+    }
+    if y_px_left >= 2 && y_margin == 0 {
+        y_margin = 1;
+        y_px_left -= 2;
+    }
+
+    // Third, increase spacing.
+    if x_px_left >= 1 {
+        x_spacing += 1;
+        x_px_left -= 1;
+    }
+    if y_px_left >= 3 {
+        y_spacing += 1;
+        y_px_left -= 3;
+    }
+
+    // Fourth, margins ("spacing", but on the sides).
+    if x_px_left >= 2 {
+        x_margin += 1;
+        x_px_left -= 2;
+    }
+    if y_px_left >= 2 {
+        y_margin += 1;
+        y_px_left -= 2;
+    }
+
+    // Last, increase dot width.
+    if x_px_left >= 2 && y_px_left >= 4 {
+        w += 1;
+        x_px_left -= 2;
+        y_px_left -= 4;
+    }
+
+    assert!(x_px_left <= 1 || y_px_left <= 1);
+    assert!(2 * x_margin + 2 * w + x_spacing <= width);
+    assert!(2 * y_margin + 4 * w + 3 * y_spacing <= height);
+
+    let x = [x_margin, x_margin + w + x_spacing];
+    let y = {
+        let mut y = [0i32; 4];
+        y[0] = y_margin;
+        y[1] = y[0] + w + y_spacing;
+        y[2] = y[1] + w + y_spacing;
+        y[3] = y[2] + w + y_spacing;
+        y
+    };
+
+    let p = BraillePattern::from_cp(cp);
+    let mut dot = |col: usize, row: usize| {
+        canvas.r#box(x[col], y[row], x[col] + w, y[row] + w, Color::ON);
+    };
+    if p.tl {
+        dot(0, 0);
+    }
+    if p.ul {
+        dot(0, 1);
+    }
+    if p.ll {
+        dot(0, 2);
+    }
+    if p.bl {
+        dot(0, 3);
+    }
+    if p.tr {
+        dot(1, 0);
+    }
+    if p.ur {
+        dot(1, 1);
+    }
+    if p.lr {
+        dot(1, 2);
+    }
+    if p.br {
+        dot(1, 3);
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1716,6 +1858,96 @@ mod tests {
         for cp in [0x2500u32, 0x257F, 'M' as u32] {
             let mut c = cell_canvas();
             assert!(!draw_block(cp, &m, &mut c), "{cp:#06x} not a block");
+            assert!(all_alpha(&c, &m, 0), "{cp:#06x} drew ink");
+        }
+    }
+
+    /// The exact `[start, end)` span (single dot) expected at column `col`,
+    /// row `row` for the `9×18` braille layout: `x=[1,6]`, `y=[2,6,10,14]`,
+    /// `w=2`.
+    fn braille_dot(col: usize, row: usize) -> (i32, i32, i32, i32) {
+        let x = [1, 6];
+        let y = [2, 6, 10, 14];
+        (x[col], y[row], x[col] + 2, y[row] + 2)
+    }
+
+    fn only_dots_inked(c: &Canvas, m: &Metrics, dots: &[(usize, usize)]) {
+        // Every inked pixel must belong to one of the expected dot rectangles.
+        let rects: Vec<(i32, i32, i32, i32)> =
+            dots.iter().map(|&(c, r)| braille_dot(c, r)).collect();
+        for y in 0..m.cell_height as i32 {
+            for x in 0..m.cell_width as i32 {
+                let want = rects
+                    .iter()
+                    .any(|&(x0, y0, x1, y1)| x >= x0 && x < x1 && y >= y0 && y < y1);
+                assert_eq!(inked(c, x, y), want, "pixel ({x},{y})");
+            }
+        }
+    }
+
+    #[test]
+    fn braille_layout_blank() {
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_braille(0x2800, &m, &mut c));
+        assert!(all_alpha(&c, &m, 0), "blank braille draws nothing");
+    }
+
+    #[test]
+    fn braille_dot_tl() {
+        // 0x2801: tl only -> x[1,3) y[2,4).
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_braille(0x2801, &m, &mut c));
+        only_dots_inked(&c, &m, &[(0, 0)]);
+    }
+
+    #[test]
+    fn braille_dot_br() {
+        // 0x2880: br only -> x[6,8) y[14,16).
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_braille(0x2880, &m, &mut c));
+        only_dots_inked(&c, &m, &[(1, 3)]);
+    }
+
+    #[test]
+    fn braille_bit_mapping() {
+        // 0x284D = 0x4D = bits tl, ll, tr, bl -> (0,0),(0,2),(1,0),(0,3).
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_braille(0x284D, &m, &mut c));
+        only_dots_inked(&c, &m, &[(0, 0), (0, 2), (1, 0), (0, 3)]);
+    }
+
+    #[test]
+    fn braille_all() {
+        // 0x28FF: all eight dots.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_braille(0x28FF, &m, &mut c));
+        only_dots_inked(
+            &c,
+            &m,
+            &[
+                (0, 0),
+                (0, 1),
+                (0, 2),
+                (0, 3),
+                (1, 0),
+                (1, 1),
+                (1, 2),
+                (1, 3),
+            ],
+        );
+    }
+
+    #[test]
+    fn draw_braille_excludes() {
+        let m = fixture_metrics();
+        for cp in [0x27FFu32, 0x2900, 'M' as u32] {
+            let mut c = cell_canvas();
+            assert!(!draw_braille(cp, &m, &mut c), "{cp:#06x} not braille");
             assert!(all_alpha(&c, &m, 0), "{cp:#06x} drew ink");
         }
     }

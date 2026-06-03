@@ -142,3 +142,66 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-010321-884609-prompt.md`
 - Result: `logs/codex-review/20260603-010321-884609-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/draw.rs` gained `BraillePattern` (+ `from_cp`, decoding
+the low byte into the eight dot flags) and `draw_braille` (the faithful layout
+port — the initial `w`/spacings/margins, the five-step refinement spending the
+leftover budgets, the fit `assert!`s, the `x`/`y` grid, and the per-dot `w × w`
+boxes). The module doc now notes braille coverage.
+
+Tests (deterministic, the fixture `Metrics`; the `9×18` layout resolves to
+`w=2`, `x=[1,6]`, `y=[2,6,10,14]`). The `only_dots_inked` helper asserts that
+_every_ cell pixel matches exactly the expected set of dot rectangles — so a
+wrong dot position or an extra/missing dot fails:
+
+- `braille_layout_blank` (`0x2800`) — nothing drawn.
+- `braille_dot_tl` (`0x2801`) — only the `(0,0)` dot (`x[1,3) y[2,4)`).
+- `braille_dot_br` (`0x2880`) — only the `(1,3)` dot (`x[6,8) y[14,16)`).
+- `braille_bit_mapping` (`0x284D`) — exactly the `tl, ll, tr, bl` dots, proving
+  the bit→dot order.
+- `braille_all` (`0x28FF`) — all eight dots, gaps empty.
+- `draw_braille_excludes` — `0x27FF`, `0x2900`, `'M'` return `false`, draw
+  nothing.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty sprite` → 59 passed (6 new).
+- `cargo test -p roastty` → 2485 passed, 0 failed (no regressions; +6).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The Braille Patterns (`U+2800`–`U+28FF`) are ported and pixel-verified — the
+adaptive dot-grid layout and the low-byte bit→dot decoding both confirmed
+exactly. Five rect-based sprite families are now in place (box lines, dashes,
+block elements, the Fraction/fill primitive, braille). The remaining sprite work
+splits into: more rect-based families (the legacy-computing sextants/octants —
+though that file also uses `canvas.line` for some glyphs, so a fill-only subset
+would need scoping) and the larger `z2d` anti-aliased-path port that the arcs,
+diagonals, and geometric-shape curves require. Wiring the per-family dispatchers
+under one sprite `has_codepoint`/draw entry point — which the resolver's
+deferred sprite render arm needs — is increasingly worthwhile. Alongside the
+sprite font remain the discovery consumer, the UCD emoji-presentation default,
+codepoint overrides, the shaper, the Nerd Font attribute table, and SVG color
+detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no required
+changes**. It confirmed `BraillePattern::from_cp` matches the upstream
+packed-bit mapping exactly, the layout refinement is ported in the same order
+with the same guards/decrements/asserts, each dot draws the correct `w × w` box
+at the upstream column/row in the same draw order, `draw_braille` returns
+`false` outside `U+2800`–`U+28FF`, and the `only_dots_inked` helper verifies
+exact pixel membership for the `9×18` layout. It judged the verification clean.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260603-010553-828370-prompt.md`
+- Result: `logs/codex-review/20260603-010553-828370-last-message.md`
