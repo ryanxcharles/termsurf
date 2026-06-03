@@ -1066,7 +1066,7 @@ are past the correctness-critical foundation.
 - [Experiment 309: the dashed underline](309-dashed-underline.md) — **Pass** ·
   Claude/Codex/Codex
 - [Experiment 310: the arc primitive + the dotted underline](310-dotted-underline.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

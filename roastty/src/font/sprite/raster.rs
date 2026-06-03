@@ -959,6 +959,152 @@ pub(crate) fn fill_plot(nodes: &[PathNode], scale: f64, tolerance: f64) -> Polyg
     result
 }
 
+/// The normalized spline-deviation error for an arc of the given `angle`.
+/// Faithful port of z2d's `arc_error_normalized`.
+fn arc_error_normalized(angle: f64) -> f64 {
+    2.0 / 27.0 * (angle / 4.0).sin().powi(6) / (angle / 4.0).cos().powi(2)
+}
+
+/// The largest arc angle a single cubic Bézier approximates within `tolerance`.
+/// Faithful port of z2d's `arc_max_angle_for_tolerance_normalized` (a table
+/// lookup with a `π/i` search fallback). Note the comparisons: the table uses
+/// `err < tolerance`, the fallback `err <= tolerance`.
+fn arc_max_angle_for_tolerance(tolerance: f64) -> f64 {
+    use std::f64::consts::PI;
+    // (angle, precomputed error) for π/1 … π/11.
+    const TABLE: [(f64, f64); 11] = [
+        (PI, 0.0185185185185185036127),
+        (PI / 2.0, 0.000272567143730179811158),
+        (PI / 3.0, 2.38647043651461047433e-05),
+        (PI / 4.0, 4.2455377443222443279e-06),
+        (PI / 5.0, 1.11281001494389081528e-06),
+        (PI / 6.0, 3.72662000942734705475e-07),
+        (PI / 7.0, 1.47783685574284411325e-07),
+        (PI / 8.0, 6.63240432022601149057e-08),
+        (PI / 9.0, 3.2715520137536980553e-08),
+        (PI / 10.0, 1.73863223499021216974e-08),
+        (PI / 11.0, 9.81410988043554039085e-09),
+    ];
+    const MAX_SEGMENTS: usize = 1000;
+
+    for &(angle, err) in TABLE.iter() {
+        if err < tolerance {
+            return angle;
+        }
+    }
+
+    // Fallback: search π/i for an error within tolerance.
+    let mut angle = PI / (TABLE.len() as f64);
+    for i in TABLE.len()..MAX_SEGMENTS {
+        angle = PI / (i as f64);
+        if arc_error_normalized(angle) <= tolerance {
+            break;
+        }
+    }
+    angle
+}
+
+/// The number of cubic segments needed to approximate an arc of `angle` at
+/// `radius` within `tolerance`. Faithful port of z2d's `arc_segments_needed`,
+/// specialized to the translation-only CTM (`major_axis = radius`).
+fn arc_segments_needed(angle: f64, radius: f64, tolerance: f64) -> i32 {
+    let major_axis = radius;
+    let max_angle = arc_max_angle_for_tolerance(tolerance / major_axis);
+    (angle.abs() / max_angle).ceil() as i32
+}
+
+/// Emit one cubic Bézier for the arc `angle_a → angle_b` on the circle centered
+/// at `(cx, cy)`. Faithful port of z2d's `arc_segment` (`h = 4/3 · tan((B − A) /
+/// 4)`).
+fn arc_segment(out: &mut Vec<PathNode>, cx: f64, cy: f64, radius: f64, angle_a: f64, angle_b: f64) {
+    let r_sin_a = radius * angle_a.sin();
+    let r_cos_a = radius * angle_a.cos();
+    let r_sin_b = radius * angle_b.sin();
+    let r_cos_b = radius * angle_b.cos();
+    let h = 4.0 / 3.0 * ((angle_b - angle_a) / 4.0).tan();
+    out.push(PathNode::CurveTo {
+        p1: Point::new(cx + r_cos_a - h * r_sin_a, cy + r_sin_a + h * r_cos_a),
+        p2: Point::new(cx + r_cos_b + h * r_sin_b, cy + r_sin_b - h * r_cos_b),
+        p3: Point::new(cx + r_cos_b, cy + r_sin_b),
+    });
+}
+
+/// Emit the start point of an arc sub-range: a `MoveTo` for the very first
+/// point of the whole arc (where upstream's `line_to` with no current point
+/// acts as a `move_to`), else a `LineTo` (the redundant zero-length join
+/// between recursion halves).
+fn arc_emit_start(out: &mut Vec<PathNode>, first: &mut bool, p: Point) {
+    if *first {
+        out.push(PathNode::MoveTo(p));
+        *first = false;
+    } else {
+        out.push(PathNode::LineTo(p));
+    }
+}
+
+fn arc_in_direction(
+    out: &mut Vec<PathNode>,
+    first: &mut bool,
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    amin: f64,
+    amax: f64,
+    tolerance: f64,
+) {
+    use std::f64::consts::PI;
+    if amax - amin > PI {
+        // Recurse on the two halves for arcs larger than π.
+        let amid = amin + (amax - amin) / 2.0;
+        arc_in_direction(out, first, cx, cy, radius, amin, amid, tolerance);
+        arc_in_direction(out, first, cx, cy, radius, amid, amax, tolerance);
+    } else if amax != amin {
+        let mut segments = arc_segments_needed(amax - amin, radius, tolerance);
+        let step = (amax - amin) / (segments as f64);
+        segments -= 1;
+
+        arc_emit_start(
+            out,
+            first,
+            Point::new(cx + radius * amin.cos(), cy + radius * amin.sin()),
+        );
+
+        let mut a = amin;
+        for _ in 0..segments.max(0) {
+            arc_segment(out, cx, cy, radius, a, a + step);
+            a += step;
+        }
+        arc_segment(out, cx, cy, radius, a, amax);
+    } else {
+        arc_emit_start(
+            out,
+            first,
+            Point::new(cx + radius * amin.cos(), cy + radius * amin.sin()),
+        );
+    }
+}
+
+/// Build the path nodes for the forward arc `angle_min → angle_max` on the
+/// circle centered at `(cx, cy)`, as a `MoveTo` start followed by `LineTo`/
+/// `CurveTo` segments. Faithful port of z2d's `arc_in_direction` (forward). The
+/// reverse direction and the `max_full_circles` wrap are deferred.
+pub(crate) fn arc(
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    angle_min: f64,
+    angle_max: f64,
+    tolerance: f64,
+) -> Vec<PathNode> {
+    debug_assert!(angle_max >= angle_min);
+    let mut out = Vec::new();
+    let mut first = true;
+    arc_in_direction(
+        &mut out, &mut first, cx, cy, radius, angle_min, angle_max, tolerance,
+    );
+    out
+}
+
 /// The sign of `x`: `1.0`/`-1.0`/`0.0`. Faithful port of Zig's `math.sign`
 /// (which is `0` at `0` — unlike `f64::signum`, which is `±1` at `±0`).
 fn sign(x: f64) -> f64 {
@@ -3458,5 +3604,46 @@ mod tests {
         assert!(!round.edges.is_empty(), "round dotted draws a circle");
         let butt = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.1, JoinMode::Miter, CapMode::Butt);
         assert!(butt.edges.is_empty(), "butt dotted draws nothing");
+    }
+
+    #[test]
+    fn arc_full_circle_nodes() {
+        // A full circle at radius 10, tolerance 0.1: tolerance/radius = 0.01 ->
+        // max_angle = pi/2 -> 2 segments per pi half -> 4 cubics total.
+        let nodes = arc(0.0, 0.0, 10.0, 0.0, std::f64::consts::TAU, 0.1);
+        // The first node is a MoveTo at (10, 0).
+        match nodes[0] {
+            PathNode::MoveTo(p) => {
+                assert!(
+                    (p.x - 10.0).abs() < 1e-9 && p.y.abs() < 1e-9,
+                    "start (10,0)"
+                );
+            }
+            _ => panic!("first node is a MoveTo"),
+        }
+        // Exactly four cubic segments, each ending on the radius-10 circle.
+        let mut p3s = Vec::new();
+        for n in &nodes {
+            if let PathNode::CurveTo { p3, .. } = n {
+                assert!(
+                    (p3.x.hypot(p3.y) - 10.0).abs() < 1e-9,
+                    "cubic endpoint on the circle"
+                );
+                p3s.push(*p3);
+            }
+        }
+        assert_eq!(p3s.len(), 4, "four cubics for the full circle");
+        // The endpoints cover the circle: one near (-10, 0), the last back at
+        // (10, 0).
+        assert!(
+            p3s.iter()
+                .any(|p| (p.x + 10.0).abs() < 1e-9 && p.y.abs() < 1e-9),
+            "an endpoint near (-10, 0)"
+        );
+        let last = *p3s.last().unwrap();
+        assert!(
+            (last.x - 10.0).abs() < 1e-9 && last.y.abs() < 1e-9,
+            "the circle closes back at (10, 0)"
+        );
     }
 }

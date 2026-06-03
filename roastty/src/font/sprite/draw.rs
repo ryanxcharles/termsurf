@@ -977,6 +977,48 @@ pub(crate) fn draw_underline_dashed(
     }
 }
 
+/// The dotted underline: a row of filled circles (dots) at the (clamped)
+/// underline position. Faithful port of upstream `special.zig`'s
+/// `underline_dotted`.
+pub(crate) fn draw_underline_dotted(
+    canvas: &mut Canvas,
+    width: u32,
+    height: u32,
+    metrics: &Metrics,
+) {
+    use std::f64::consts::{FRAC_1_SQRT_2, TAU};
+
+    let float_width = width as f64;
+    let float_height = height as f64;
+    let float_pos = metrics.underline_position as f64;
+    let float_thick = metrics.underline_thickness as f64;
+
+    // A slightly fatter radius so the dots don't look anemic.
+    let radius = FRAC_1_SQRT_2 * float_thick;
+
+    // Clamp the dot center so the dots are not clipped below the canvas.
+    let padding = canvas.padding_y() as f64;
+    let y = (float_pos + 0.5 * float_thick).min(float_height + padding - radius.ceil());
+
+    // Enough dots that the spacing roughly matches their diameter, but never so
+    // many that they crowd or overlap; at least one per cell.
+    let dot_count = (float_width / (4.0 * radius))
+        .ceil()
+        .min((float_width / (3.0 * radius)).floor())
+        .min((float_width / (2.0 * radius + 1.0)).floor())
+        .max(1.0);
+
+    // Divide the cell into dot_count areas with a dot centered in each.
+    let mut x = (float_width / dot_count) / 2.0;
+    let mut nodes = Vec::new();
+    for _ in 0..(dot_count as usize) {
+        nodes.extend(raster::arc(x, y, radius, 0.0, TAU, 0.1));
+        nodes.push(raster::PathNode::ClosePath);
+        x += float_width / dot_count;
+    }
+    canvas.fill_path(&nodes);
+}
+
 /// The block cursor: a full-cell rect. Faithful port of upstream `special.zig`'s
 /// `cursor_rect`.
 pub(crate) fn draw_cursor_rect(canvas: &mut Canvas, width: u32, height: u32, _metrics: &Metrics) {
@@ -3332,6 +3374,40 @@ mod tests {
         let mut c = cell_canvas();
         draw_underline_dashed(&mut c, 9, 18, &m);
         assert!(inked(&c, 0, 17), "first dash clamped to row 17");
+    }
+
+    // The arc primitive + the dotted underline.
+
+    #[test]
+    fn arc_fill_disc() {
+        // Filling a radius-4 circle path inks a disc: the center is inked, a
+        // point well outside the radius is not.
+        let mut nodes = raster::arc(5.0, 5.0, 4.0, 0.0, std::f64::consts::TAU, 0.1);
+        nodes.push(raster::PathNode::ClosePath);
+        let mut c = Canvas::new(11, 11, 0, 0);
+        c.fill_path(&nodes);
+        assert!(inked(&c, 5, 5), "disc center inked");
+        assert!(!inked(&c, 0, 0), "outside the radius empty");
+    }
+
+    #[test]
+    fn underline_dotted_dots() {
+        // Three dots centered at x = 1.5, 4.5, 7.5 in the underline band, with
+        // gaps between them and the upper cell empty.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        draw_underline_dotted(&mut c, 9, 18, &m);
+        // The three dot centers are inked (row 14, off the merged center row).
+        assert!(inked(&c, 1, 14), "first dot");
+        assert!(inked(&c, 4, 14), "second dot");
+        assert!(inked(&c, 7, 14), "third dot");
+        // Gaps between the dots.
+        assert!(!inked(&c, 2, 14), "gap after the first dot");
+        assert!(!inked(&c, 3, 14), "gap before the second dot");
+        // The upper cell is empty.
+        for x in 0..9 {
+            assert!(!inked(&c, x, 10), "upper cell empty at x={x}");
+        }
     }
 
     #[test]

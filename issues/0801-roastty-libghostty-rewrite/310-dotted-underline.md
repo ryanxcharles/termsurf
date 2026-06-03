@@ -172,3 +172,72 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-084806-637909-prompt.md`
 - Result: `logs/codex-review/20260603-084806-637909-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/raster.rs` gained the forward arc primitive:
+`arc_error_normalized`, `arc_max_angle_for_tolerance` (the 11-entry table with
+`err < tolerance`, the `π/i` fallback with `err <= tolerance`),
+`arc_segments_needed` (`major_axis = radius`), `arc_segment` (the cubic with
+`h = 4/3 · tan((B − A) / 4)`), `arc_in_direction` (the `> π` recursion, the
+`arc_emit_start` `MoveTo`/`LineTo`, the segment loop), and the `pub(crate) arc`
+entry. `roastty/src/font/sprite/draw.rs` gained `draw_underline_dotted`:
+`radius = (1/√2) · thickness`, the clamped `y`, the `dot_count` min/max formula,
+and a per-dot `arc(x, y, radius, 0, τ) + ClosePath` accumulated into one node
+list and filled via `Canvas::fill_path`.
+
+Tests:
+
+- `arc_full_circle_nodes` — `arc(0, 0, 10, 0, τ, 0.1)` emits a `MoveTo` at
+  `(10, 0)` and exactly **4** `CurveTo`s; only the `MoveTo` and each
+  `CurveTo.p3` endpoint are checked on-circle (distance ≈ 10), with a `p3` near
+  `(−10, 0)` and the last back at `(10, 0)`.
+- `arc_fill_disc` — filling a radius-4 circle path inks a disc (center inked,
+  `(0, 0)` outside empty).
+- `underline_dotted_dots` — three dots at cols 1/4/7 in the underline band (row
+  14), with gaps at cols 2/3 and the upper cell empty.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2637 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The arc primitive and the dotted underline render faithfully — completing the
+**entire underline/special-sprite family** (underline
+plain/double/dashed/dotted/ curly, strikethrough, overline, and the four
+cursors). The `arc` primitive (the tolerance-driven cubic circle approximation)
+is the last rendering primitive, and the basis for the circle/ellipse geometric
+shapes.
+
+With the z2d rendering pipeline (stroke, fill, inner-stroke, arc) and the
+diagonal/arc/triangle/special-sprite glyph families all ported, the major
+remaining sprite-font work is the **circle/ellipse geometric shapes** (consumers
+of `arc`) and the unifying sprite `has_codepoint`/draw and **sprite-kind
+dispatch** (mapping a `Sprite` enum and the box/braille/etc. codepoint tables to
+all the standalone `draw_*` functions, filling the resolver's deferred
+`SpriteUnavailable` arm). After the sprite font: the discovery consumer, the UCD
+emoji-presentation default, codepoint overrides, the shaper, the Nerd Font
+attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes**. It confirmed the arc port is faithful for the forward, translation-
+only scope: the normalized error, the table/fallback comparisons, the segment
+count, the cubic control-point formula, the `> π` recursive split, the start
+emission, and the harmless half-arc `LineTo` all match upstream; and that
+`draw_underline_dotted` matches upstream (the radius, the vertical clamp, the
+dot-count min/max formula, the centered dot spacing, the per-dot full-circle arc
+plus `ClosePath`, and the single `fill_path` over the multi-subpath node list).
+It judged the tests correct (only cubic endpoints checked on-circle; the disc
+fill; the fixture dot layout). No Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-085318-372740-last-message.md`
