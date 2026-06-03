@@ -1561,6 +1561,245 @@ pub(crate) fn stroke_path(
     plotter.result
 }
 
+/// One vertex of a `Pen`: a point on the circle plus the slopes to its
+/// clockwise/counter-clockwise neighbors.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PenVertex {
+    pub(crate) point: Point,
+    pub(crate) slope_cw: Slope,
+    pub(crate) slope_ccw: Slope,
+}
+
+/// A circular vertex set for round joins and caps: a circle of radius
+/// `thickness / 2`, approximated by evenly-spaced vertices dense enough that the
+/// chord error stays within `tolerance`. Faithful port of z2d's `Pen`
+/// (Cairo-derived), specialized to the sprite `Canvas`'s translation-only CTM —
+/// so the major axis is the radius, there is no reflection, and a vertex is
+/// exactly `(radius·cos θ, radius·sin θ)`.
+#[derive(Debug, Clone)]
+pub(crate) struct Pen {
+    pub(crate) vertices: Vec<PenVertex>,
+}
+
+/// The number of pen vertices for `radius`/`tolerance`. Under the translation-
+/// only CTM the major axis is the radius. Faithful port of z2d's count:
+/// degenerate `1`, minimum `4`, else `ceil(2π / acos(1 - tol/M))` rounded up to
+/// an even count (min 4).
+fn pen_vertex_count(radius: f64, tolerance: f64) -> usize {
+    let major_axis = radius;
+    if tolerance >= major_axis * 4.0 {
+        // Degenerate pen: the tolerance exceeds the whole circle.
+        return 1;
+    } else if tolerance >= major_axis {
+        // High tolerance: the minimum vertex count already suffices.
+        return 4;
+    }
+
+    let delta = (1.0 - tolerance / major_axis).acos();
+    if delta == 0.0 {
+        return 4;
+    }
+    let n = (2.0 * std::f64::consts::PI / delta).ceil() as i32;
+    if n < 4 {
+        4
+    } else if n % 2 != 0 {
+        // Even out an odd vertex count.
+        (n + 1) as usize
+    } else {
+        n as usize
+    }
+}
+
+impl Pen {
+    /// Build a pen at radius `thickness / 2` with the tolerance-derived vertex
+    /// count. Two passes (as upstream): the circle points first, then the
+    /// neighbor-relative slopes.
+    pub(crate) fn init(thickness: f64, tolerance: f64) -> Pen {
+        let radius = thickness / 2.0;
+        let num_vertices = pen_vertex_count(radius, tolerance);
+
+        // First pass: the evenly-spaced circle points. No reflection (the
+        // identity linear CTM has a positive determinant) and no device
+        // transform, so a vertex is exactly (radius·cos θ, radius·sin θ).
+        let points: Vec<Point> = (0..num_vertices)
+            .map(|i| {
+                let theta = 2.0 * std::f64::consts::PI * (i as f64) / (num_vertices as f64);
+                Point::new(radius * theta.cos(), radius * theta.sin())
+            })
+            .collect();
+
+        // Second pass: the slopes, each relative to its ring neighbors.
+        let vertices = (0..num_vertices)
+            .map(|i| {
+                let next = if i >= num_vertices - 1 { 0 } else { i + 1 };
+                let prev = if i == 0 { num_vertices - 1 } else { i - 1 };
+                PenVertex {
+                    point: points[i],
+                    slope_cw: Slope::init(points[prev], points[i]),
+                    slope_ccw: Slope::init(points[i], points[next]),
+                }
+            })
+            .collect();
+
+        Pen { vertices }
+    }
+
+    /// The vertex range spanning the arc from one face slope to the other, as an
+    /// iterator that steps forward (clockwise) or backward (counter-clockwise)
+    /// around the ring. Faithful port of z2d's `vertexIteratorFor` — the two
+    /// binary-search branches, kept in signed `i32` index space to match
+    /// upstream's wrap arithmetic.
+    pub(crate) fn vertex_iterator_for(
+        &self,
+        from_slope: Slope,
+        to_slope: Slope,
+        clockwise: bool,
+    ) -> PenVertexIterator<'_> {
+        let vertices_len: i32 = self.vertices.len() as i32;
+        let start: i32;
+        let end: i32;
+
+        if clockwise {
+            // Search back for the vertex just after the inbound face's outer
+            // point.
+            let mut low: i32 = 0;
+            let mut high: i32 = vertices_len;
+            let mut i: i32 = (low + high) >> 1;
+            while high - low > 1 {
+                if Slope::compare(self.vertices[i as usize].slope_cw, from_slope) < 0 {
+                    low = i;
+                } else {
+                    high = i;
+                }
+                i = (low + high) >> 1;
+            }
+
+            if Slope::compare(self.vertices[i as usize].slope_cw, from_slope) < 0 {
+                i += 1;
+                if i == vertices_len {
+                    i = 0;
+                }
+            }
+            start = i;
+
+            // Then search for the vertex just before the outbound face's outer
+            // point.
+            if Slope::compare(to_slope, self.vertices[i as usize].slope_ccw) >= 0 {
+                low = i;
+                high = i + vertices_len;
+                i = (low + high) >> 1;
+                while high - low > 1 {
+                    let j: i32 = if i >= vertices_len {
+                        i - vertices_len
+                    } else {
+                        i
+                    };
+                    if Slope::compare(self.vertices[j as usize].slope_cw, to_slope) > 0 {
+                        high = i;
+                    } else {
+                        low = i;
+                    }
+                    i = (low + high) >> 1;
+                }
+
+                if i >= vertices_len {
+                    i -= vertices_len;
+                }
+            }
+            end = i;
+        } else {
+            // Counter-clockwise join: mirror the searches with the slopes
+            // swapped.
+            let mut low: i32 = 0;
+            let mut high: i32 = vertices_len;
+            let mut i: i32 = (low + high) >> 1;
+            while high - low > 1 {
+                if Slope::compare(from_slope, self.vertices[i as usize].slope_ccw) < 0 {
+                    low = i;
+                } else {
+                    high = i;
+                }
+                i = (low + high) >> 1;
+            }
+
+            if Slope::compare(from_slope, self.vertices[i as usize].slope_ccw) < 0 {
+                i += 1;
+                if i == vertices_len {
+                    i = 0;
+                }
+            }
+            start = i;
+
+            if Slope::compare(self.vertices[i as usize].slope_cw, to_slope) <= 0 {
+                low = i;
+                high = i + vertices_len;
+                i = (low + high) >> 1;
+                while high - low > 1 {
+                    let j: i32 = if i >= vertices_len {
+                        i - vertices_len
+                    } else {
+                        i
+                    };
+                    if Slope::compare(to_slope, self.vertices[j as usize].slope_ccw) > 0 {
+                        high = i;
+                    } else {
+                        low = i;
+                    }
+                    i = (low + high) >> 1;
+                }
+
+                if i >= vertices_len {
+                    i -= vertices_len;
+                }
+            }
+            end = i;
+        }
+
+        PenVertexIterator {
+            pen: self,
+            end: end.max(0) as usize,
+            idx: start.max(0) as usize,
+            clockwise,
+        }
+    }
+}
+
+/// Walks a `Pen`'s vertices over the range chosen by `vertex_iterator_for`,
+/// forward for a clockwise join (wrapping `len → 0`) or backward for a
+/// counter-clockwise join (wrapping `0 → len`), stopping when `idx == end`.
+pub(crate) struct PenVertexIterator<'a> {
+    pen: &'a Pen,
+    end: usize,
+    idx: usize,
+    clockwise: bool,
+}
+
+impl Iterator for PenVertexIterator<'_> {
+    type Item = PenVertex;
+
+    fn next(&mut self) -> Option<PenVertex> {
+        if self.idx == self.end {
+            return None;
+        }
+        let len = self.pen.vertices.len();
+        if self.clockwise {
+            let result = self.pen.vertices[self.idx];
+            self.idx += 1;
+            if self.idx == len {
+                self.idx = 0;
+            }
+            Some(result)
+        } else {
+            let result = self.pen.vertices[self.idx];
+            if self.idx == 0 {
+                self.idx = len;
+            }
+            self.idx -= 1;
+            Some(result)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2577,6 +2816,132 @@ mod tests {
         assert_eq!(poly.extent_top, -1.0);
         assert_eq!(poly.extent_bottom, 11.0);
         assert!(poly.edges.len() > 4);
+    }
+
+    // Pen — the round-join/cap vertex set.
+
+    /// Collect the indices (into `pen.vertices`) yielded by an iterator, by
+    /// matching each yielded vertex's point.
+    fn pen_iter_indices(pen: &Pen, from: Slope, to: Slope, clockwise: bool) -> Vec<usize> {
+        pen.vertex_iterator_for(from, to, clockwise)
+            .map(|v| {
+                pen.vertices
+                    .iter()
+                    .position(|x| x.point == v.point)
+                    .unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn pen_vertex_count_degenerate() {
+        // tolerance >= 4·radius collapses to the degenerate single-vertex pen.
+        assert_eq!(pen_vertex_count(1.0, 4.0), 1);
+        assert_eq!(pen_vertex_count(1.0, 100.0), 1);
+        assert_eq!(Pen::init(2.0, 4.0).vertices.len(), 1);
+    }
+
+    #[test]
+    fn pen_vertex_count_minimum() {
+        // radius <= tolerance < 4·radius fast-paths to the minimum 4 vertices.
+        assert_eq!(pen_vertex_count(1.0, 1.0), 4);
+        assert_eq!(pen_vertex_count(1.0, 2.0), 4);
+        assert_eq!(Pen::init(2.0, 2.0).vertices.len(), 4);
+    }
+
+    #[test]
+    fn pen_vertex_count_even() {
+        // A small tolerance gives ceil(2π / acos(1 - tol/M)) rounded up to even.
+        let (radius, tolerance): (f64, f64) = (10.0, 0.1);
+        let delta = (1.0 - tolerance / radius).acos();
+        let raw = (2.0 * std::f64::consts::PI / delta).ceil() as i32;
+        let expected = if raw % 2 != 0 { raw + 1 } else { raw } as usize;
+        let n = pen_vertex_count(radius, tolerance);
+        assert_eq!(n, expected);
+        assert_eq!(n, 46);
+        assert_eq!(n % 2, 0);
+        assert!(n >= 4);
+    }
+
+    #[test]
+    fn pen_vertices_on_circle() {
+        let pen = Pen::init(20.0, 0.1); // radius 10
+        let n = pen.vertices.len();
+        let r = 10.0;
+        // vertex[0] is exactly (r, 0).
+        assert!((pen.vertices[0].point.x - r).abs() < 1e-9);
+        assert!(pen.vertices[0].point.y.abs() < 1e-9);
+        for (i, v) in pen.vertices.iter().enumerate() {
+            // Every vertex lies on the radius-r circle.
+            assert!((v.point.x.hypot(v.point.y) - r).abs() < 1e-9);
+            // Angles increase by 2π/n (no reflection).
+            let expected_theta = 2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
+            assert!((v.point.x - r * expected_theta.cos()).abs() < 1e-9);
+            assert!((v.point.y - r * expected_theta.sin()).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn pen_vertex_slopes() {
+        let pen = Pen::init(20.0, 0.1);
+        let n = pen.vertices.len();
+        // A representative interior vertex and the wrapping endpoints.
+        for &i in &[0usize, 1, 5, n - 1] {
+            let prev = if i == 0 { n - 1 } else { i - 1 };
+            let next = if i == n - 1 { 0 } else { i + 1 };
+            assert_eq!(
+                pen.vertices[i].slope_cw,
+                Slope::init(pen.vertices[prev].point, pen.vertices[i].point)
+            );
+            assert_eq!(
+                pen.vertices[i].slope_ccw,
+                Slope::init(pen.vertices[i].point, pen.vertices[next].point)
+            );
+        }
+    }
+
+    #[test]
+    fn pen_vertex_iterator_clockwise() {
+        let pen = Pen::init(20.0, 0.1); // 46 vertices
+                                        // Clockwise from v0's ccw slope to v4's cw slope: the interior arc
+                                        // (1,2,3), a contiguous forward run, boundaries exclusive.
+        let cw = pen_iter_indices(
+            &pen,
+            pen.vertices[0].slope_ccw,
+            pen.vertices[4].slope_cw,
+            true,
+        );
+        assert_eq!(cw, vec![1, 2, 3]);
+        // Counter-clockwise yields a contiguous backward run (stepping down).
+        let ccw = pen_iter_indices(
+            &pen,
+            pen.vertices[10].slope_cw,
+            pen.vertices[4].slope_ccw,
+            false,
+        );
+        assert_eq!(ccw, vec![32, 31, 30, 29, 28, 27]);
+        // Each consecutive index decreases by one (no wrap here).
+        for w in ccw.windows(2) {
+            assert_eq!(w[0] - 1, w[1]);
+        }
+    }
+
+    #[test]
+    fn pen_vertex_iterator_wrap() {
+        let pen = Pen::init(20.0, 0.1); // 46 vertices
+                                        // A clockwise arc whose indices cross the 45 -> 0 boundary.
+        let idxs = pen_iter_indices(
+            &pen,
+            pen.vertices[43].slope_ccw,
+            pen.vertices[3].slope_cw,
+            true,
+        );
+        assert_eq!(idxs, vec![44, 45, 0, 1, 2]);
+        // Contiguous forward stepping with the ring wrap.
+        let n = pen.vertices.len();
+        for w in idxs.windows(2) {
+            assert_eq!((w[0] + 1) % n, w[1]);
+        }
     }
 
     #[test]

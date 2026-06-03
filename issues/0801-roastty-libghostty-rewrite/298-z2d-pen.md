@@ -181,3 +181,79 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-072457-391730-prompt.md`
 - Result: `logs/codex-review/20260603-072457-391730-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/raster.rs` gained the Pen primitive:
+
+- `PenVertex { point, slope_cw, slope_ccw }` and `Pen { vertices }`.
+- `pen_vertex_count(radius, tolerance)` — the count formula with the major axis
+  reduced to the radius: the degenerate `1` (`tolerance >= 4·radius`), the
+  minimum `4` (`tolerance >= radius` or `delta == 0` or `n < 4`), else
+  `ceil(2π / acos(1 - tol/radius))` rounded up to an even count.
+- `Pen::init(thickness, tolerance)` — two passes: the unreflected circle points
+  `(radius·cos θ, radius·sin θ)` (no device transform), then the
+  neighbor-relative `slope_cw = Slope(prev, p)` / `slope_ccw = Slope(p, next)`
+  with ring wrap.
+- `Pen::vertex_iterator_for(from_slope, to_slope, clockwise)` — both cw/ccw
+  binary-search branches in signed `i32` index space (the `(low+high)>>1`
+  initialize-then-recompute loop, the exact comparison directions, the `j`-wrap
+  and post-search `i -= len`, `start`/`end = max(0, …)`).
+- `PenVertexIterator` — forward (wrap `len → 0`) for clockwise, backward (wrap
+  `0 → len`) for counter-clockwise, stopping at `idx == end`.
+
+Tests (deterministic; `Pen::init(20.0, 0.1)` → radius 10, 46 vertices):
+
+- `pen_vertex_count_degenerate` / `_minimum` / `_even` — the three count
+  branches (1, 4, and 46 = the even-rounded formula).
+- `pen_vertices_on_circle` — every vertex on the radius-10 circle,
+  `v[0] = (10, 0)`, angles increasing by `2π/46` (no reflection).
+- `pen_vertex_slopes` — `slope_cw`/`slope_ccw` equal the neighbor slopes for
+  representative and wrapping vertices.
+- `pen_vertex_iterator_clockwise` — a contiguous forward run (`[1,2,3]`) and a
+  contiguous backward ccw run (`[32,…,27]`).
+- `pen_vertex_iterator_wrap` — a clockwise arc crossing `45 → 0`
+  (`[44,45,0,1,2]`).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2589 passed, 0 failed (+7, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The Pen renders faithfully under the translation-only CTM: the tolerance-driven
+vertex count, the evenly-spaced circle vertices with neighbor slopes, and the
+cw/ccw vertex-range iterator (with the wrap stepping). This is the primitive the
+round joins/caps and the cubic-curve stroke will consume.
+
+The next z2d-dependent step is to **wire the Pen into the stroke plotter**: the
+round join (replace the miter/bevel outer plot with the pen-arc walk between the
+two face slopes via `vertex_iterator_for`) and the round cap, then the
+cubic-curve stroke (`runCurveTo` flattens a spline — Experiment 296's `Spline`
+decompose already exists — and joins the flattened points with round joins). The
+`arc` cubic approximation (`U+256D`–`U+2570` box-drawing arcs) builds on that.
+After the stroke families: the unifying sprite `has_codepoint`/draw entry point,
+then the discovery consumer, the UCD emoji-presentation default, codepoint
+overrides, the shaper, the Nerd Font attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes**. It confirmed `pen_vertex_count` matches upstream
+(`major_axis = radius`, the degenerate/minimum paths, `delta == 0`, min-4, and
+odd→even rounding); that `Pen::init` builds the unreflected circle vertices and
+the upstream second-pass neighbor slopes with correct ring wrap; that
+`vertex_iterator_for` preserves the signed-index binary-search structure and all
+cw/ccw comparison directions, including the `j` wrap and the post-search
+`i -= len`; and that `PenVertexIterator::next` matches the upstream
+forward/backward wrap and the `idx == end` stop. It judged the tests
+well-targeted and the deferred scope (stroke wiring, round joins, curves) sound.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-073011-219089-last-message.md`
