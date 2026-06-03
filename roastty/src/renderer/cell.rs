@@ -17,7 +17,10 @@ use super::shader::{CellBg, CellTextAtlas, CellTextFlags, CellTextVertex};
 use super::size::GridSize;
 use crate::font::codepoint_resolver::ResolverRenderError;
 use crate::font::collection::Index;
+use crate::font::face::constraint::{Constraint, Size};
 use crate::font::face::coretext::RenderOptions;
+use crate::font::face::nerd_font_attributes::get_constraint;
+use crate::font::metrics::Metrics;
 use crate::font::shape;
 use crate::font::shared_grid::SharedGrid;
 use crate::font::Presentation;
@@ -303,6 +306,44 @@ impl Contents {
         }
         // The `+ 1` skips the reserved cursor list at index 0.
         self.fg_rows[y as usize + 1].clear();
+    }
+}
+
+/// Build the [`RenderOptions`] for the glyph at column `x`, exactly as upstream
+/// `addGlyph` does: the grid metrics and thicken config, the cell's grid width,
+/// the constraint (Nerd Font lookup → else symbol `Fit` → else none), and the
+/// symbol-aware [`constraint_width`]. The caller (the future `rebuildCells`)
+/// supplies the row's [`CellInfo`] slice and the grid/thicken config.
+pub(crate) fn render_options(
+    grid_metrics: Metrics,
+    raw_slice: &[CellInfo],
+    x: usize,
+    cols: usize,
+    thicken: bool,
+    thicken_strength: u8,
+) -> RenderOptions {
+    let cell = raw_slice[x];
+    let cp = cell.codepoint;
+
+    // Nerd Font constraint, else a symbol fits its cell, else no constraint.
+    let constraint = get_constraint(cp).unwrap_or_else(|| {
+        if is_symbol(cp) {
+            Constraint {
+                size: Size::Fit,
+                ..Constraint::default()
+            }
+        } else {
+            Constraint::default() // `.none`
+        }
+    });
+
+    RenderOptions {
+        grid_metrics,
+        cell_width: Some(cell.grid_width),
+        constraint,
+        constraint_width: constraint_width(raw_slice, x, cols),
+        thicken,
+        thicken_strength,
     }
 }
 
@@ -627,6 +668,45 @@ mod tests {
     fn glyph_for(ch: u8) -> u32 {
         use crate::font::face::coretext::Face;
         u32::from(Face::new("Menlo", 32.0).glyphs_for_characters(&[u16::from(ch)])[0])
+    }
+
+    fn sample_metrics() -> Metrics {
+        use crate::font::face::coretext::Face;
+        Metrics::calc(Face::new("Menlo", 32.0).get_metrics())
+    }
+
+    #[test]
+    fn render_options_plain_letter_has_no_constraint() {
+        let m = sample_metrics();
+        let row = [ci('a' as u32, 1)];
+        let opts = render_options(m, &row, 0, 1, true, 200);
+        assert_eq!(opts.constraint, Constraint::default());
+        assert_eq!(opts.cell_width, Some(1));
+        assert_eq!(opts.constraint_width, 1);
+        // Passthrough fields.
+        assert_eq!(opts.grid_metrics, m);
+        assert!(opts.thicken);
+        assert_eq!(opts.thicken_strength, 200);
+    }
+
+    #[test]
+    fn render_options_symbol_without_nerd_entry_fits() {
+        // 0x1F600 is symbol-like but has no Nerd Font constraint.
+        assert_eq!(get_constraint(0x1F600), None);
+        let row = [ci(0x1F600, 1)];
+        let opts = render_options(sample_metrics(), &row, 0, 1, false, 255);
+        assert_eq!(opts.constraint.size, Size::Fit);
+    }
+
+    #[test]
+    fn render_options_nerd_entry_overrides_symbol_fit() {
+        // 0x2630 has a Nerd Font constraint, which takes precedence over the
+        // generic symbol-fit path (0x2630 is also symbol-like).
+        let expected = get_constraint(0x2630).expect("0x2630 is a Nerd glyph");
+        let row = [ci(0x2630, 1)];
+        let opts = render_options(sample_metrics(), &row, 0, 1, false, 255);
+        assert_eq!(opts.constraint, expected);
+        assert_ne!(opts.constraint.size, Size::Fit);
     }
 
     #[test]

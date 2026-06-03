@@ -1180,7 +1180,7 @@ are past the correctness-critical foundation.
 - [Experiment 366: addGlyph — a shaped glyph into a render cell](366-add-glyph.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 367: per-cell RenderOptions derivation](367-render-options.md) —
-  **Designed** · Claude/Codex/Codex
+  **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

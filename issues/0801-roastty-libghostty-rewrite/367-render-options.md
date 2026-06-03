@@ -190,3 +190,70 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-180242-084832-prompt.md` (design)
 - Result: `logs/codex-review/20260603-180242-084832-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The per-cell `RenderOptions` derivation is in place — the input `add_glyph`
+needs, built exactly as upstream `addGlyph` builds it.
+
+- `roastty/src/renderer/cell.rs`:
+  `render_options(grid_metrics, raw_slice, x, cols, thicken, thicken_strength)`
+  reads the cell's codepoint and grid width at `x` and assembles the
+  `RenderOptions`: `cell_width = Some(grid_width)`,
+  `constraint = get_constraint(cp)` else `Size::Fit` for a symbol else
+  `Constraint::default()` (`.none`), `constraint_width = constraint_width(...)`,
+  and the grid-metrics/thicken passthrough. Imported `Constraint`/`Size`,
+  `get_constraint` (Nerd Font), and `Metrics`.
+
+Tests (in `cell.rs`):
+
+- `render_options_plain_letter_has_no_constraint` — `'a'`:
+  `constraint == Constraint::default()`, `cell_width == Some(1)`,
+  `constraint_width == 1`, and the `grid_metrics`/`thicken`/`thicken_strength`
+  pass through;
+- `render_options_symbol_without_nerd_entry_fits` — `0x1F600` (symbol, no Nerd
+  entry; asserts `get_constraint == None`): `constraint.size == Size::Fit`;
+- `render_options_nerd_entry_overrides_symbol_fit` — `0x2630` (a Nerd glyph that
+  is also symbol-like): `constraint == get_constraint(0x2630).unwrap()` and
+  `size != Fit`, proving the Nerd Font entry wins over the symbol-fit fallback.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2817 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The two halves of upstream's `addGlyph` are now both ported: `render_options`
+(Experiment 367) builds the per-cell `RenderOptions`, and `add_glyph`
+(Experiment 366) renders and emits the cell. A `rebuildCells` loop can now, for
+each shaped cell, call `render_options` then `add_glyph` — only the loop and its
+terminal/config inputs (the `CellInfo` slice per row, the per-cell color/alpha,
+`no_min_contrast`, the thicken config) remain.
+
+The remaining renderer-bridge work is the **`rebuildCells` loop**: iterate the
+viewport's `ShapedRun`s and their terminal cells, build each row's `CellInfo`
+slice, derive color/alpha and `no_min_contrast(cp)`, call `render_options` +
+`add_glyph`, and handle the background/decoration/cursor cells — then the Metal
+upload of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches upstream's `addGlyph`
+option construction (`get_constraint` wins first, then symbol-like codepoints
+fall back to `Size::Fit`, otherwise `Constraint::default()`;
+`cell_width = Some(grid_width)`, `constraint_width(...)`, and the
+metrics/thicken passthrough all correct), and that the three tests cover the
+important cases (plain letter → no constraint plus passthrough, `0x1F600` →
+symbol fallback without a Nerd Font entry, `0x2630` → a Nerd Font entry
+overriding the symbol fallback). Nothing needed to change before the result
+commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-180458-119364-last-message.md`
