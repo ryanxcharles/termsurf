@@ -126,3 +126,56 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-084234-539319-prompt.md`
 - Result: `logs/codex-review/20260603-084234-539319-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/draw.rs` gained `draw_underline_dashed`: the saturating
+underline clamp (`height.saturating_add(padding_y()).saturating_sub(thick)`),
+`dash_width = width / 3 + 1`, `dash_count = width / dash_width + 1`, and the
+even- index loop (`i += 2`) drawing a `dash_width × underline_thickness` rect at
+`x = i · dash_width`, `.on`.
+
+Tests (the fixture `9×18` cell — `dash_width 4`, `dash_count 3`):
+
+- `underline_dashed_dashes` — at `y = 15`, the first dash (cols 0–3) is inked,
+  the gap (cols 4–7) is empty, and the third slot (col 8, clipped) is inked.
+- `underline_dashed_clamp` — a large `underline_position` clamps the dashes to
+  row 17.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2634 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The dashed underline renders faithfully — the last rect-based underline
+decoration. The sprite font's special sprites now cover the underlines (plain,
+double, dashed, curly), strikethrough, overline, and the four cursors; only the
+**dotted** underline remains, which fills circles via an arc/circle primitive.
+
+The next sprite-font steps are the **dotted** underline (needs a circle/arc fill
+— the `arc.zig` cubic approximation feeding `Canvas::fill_path`, or a pen-based
+circle polygon) and then the unifying sprite `has_codepoint`/draw and
+**sprite-kind dispatch** (mapping a `Sprite` enum and the box/braille/etc.
+codepoint tables to all the standalone `draw_*` functions, filling the
+resolver's deferred `SpriteUnavailable` arm). After the sprite font: the
+discovery consumer, the UCD emoji-presentation default, codepoint overrides, the
+shaper, the Nerd Font attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes**. It confirmed `draw_underline_dashed` faithfully matches upstream —
+the saturating underline clamp, the integer dash-width/count math, the even-slot
+loop, and the rect geometry are all transcribed correctly; the fixture test pins
+the `width = 9` layout including the clipped final dash at column 8; and the
+clamp test covers the low-position case. No Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-084408-034352-last-message.md`

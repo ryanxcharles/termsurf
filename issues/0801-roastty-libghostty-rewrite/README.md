@@ -1063,8 +1063,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 308: the cursor sprites (block, hollow, bar, underline)](308-cursors.md)
   — **Pass** · Claude/Codex/Codex
-- [Experiment 309: the dashed underline](309-dashed-underline.md) — **Designed**
-  · Claude/Codex/Codex
+- [Experiment 309: the dashed underline](309-dashed-underline.md) — **Pass** ·
+  Claude/Codex/Codex
 
 ## Non-Goals
 

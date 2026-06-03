@@ -944,6 +944,39 @@ pub(crate) fn draw_overline(canvas: &mut Canvas, width: u32, _height: u32, metri
     hline(canvas, 0, width as i32, y, metrics.overline_thickness);
 }
 
+/// The dashed underline: alternating full-thickness rects at the (clamped)
+/// underline position, drawn at even-index slots. Faithful port of upstream
+/// `special.zig`'s `underline_dashed`.
+pub(crate) fn draw_underline_dashed(
+    canvas: &mut Canvas,
+    width: u32,
+    height: u32,
+    metrics: &Metrics,
+) {
+    let thick = metrics.underline_thickness;
+    let limit = height
+        .saturating_add(canvas.padding_y())
+        .saturating_sub(thick);
+    let y = metrics.underline_position.min(limit);
+
+    let dash_width = width / 3 + 1;
+    let dash_count = width / dash_width + 1;
+    let mut i = 0;
+    while i < dash_count {
+        let x = i * dash_width;
+        canvas.rect(
+            Rect {
+                x: x as i32,
+                y: y as i32,
+                width: dash_width as i32,
+                height: thick as i32,
+            },
+            Color::ON,
+        );
+        i += 2;
+    }
+}
+
 /// The block cursor: a full-cell rect. Faithful port of upstream `special.zig`'s
 /// `cursor_rect`.
 pub(crate) fn draw_cursor_rect(canvas: &mut Canvas, width: u32, height: u32, _metrics: &Metrics) {
@@ -3268,6 +3301,37 @@ mod tests {
         let mut c = cell_canvas();
         draw_cursor_underline(&mut c, 9, 18, &m);
         assert!(row_inked(&c, 17, 9), "clamped to row 17");
+    }
+
+    // The dashed underline. The fixture 9×18 cell: width 9 -> dash_width 4,
+    // dash_count 3; dashes at i=0 (cols 0-3) and i=2 (col 8), gap cols 4-7.
+
+    #[test]
+    fn underline_dashed_dashes() {
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        draw_underline_dashed(&mut c, 9, 18, &m);
+        // First dash (cols 0-3) inked.
+        for x in 0..4 {
+            assert!(inked(&c, x, 15), "first dash at x={x}");
+        }
+        // Gap (cols 4-7) empty.
+        for x in 4..8 {
+            assert!(!inked(&c, x, 15), "gap at x={x}");
+        }
+        // Third slot (col 8) inked.
+        assert!(inked(&c, 8, 15), "third dash at col 8");
+    }
+
+    #[test]
+    fn underline_dashed_clamp() {
+        // A large underline_position clamps the dashes to the saturating limit
+        // (18 - 1 = 17) instead of drawing off the bottom.
+        let mut m = fixture_metrics();
+        m.underline_position = 100;
+        let mut c = cell_canvas();
+        draw_underline_dashed(&mut c, 9, 18, &m);
+        assert!(inked(&c, 0, 17), "first dash clamped to row 17");
     }
 
     #[test]
