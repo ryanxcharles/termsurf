@@ -174,3 +174,64 @@ are unchanged, that the unconditional `thicken_strength / 255` fill matches
 upstream even when `thicken = false` and the max-pixel test direction is sound,
 and that the newly-added subpixel toggles refine sub-pixel fidelity without
 changing the existing size/ink assertions.
+
+## Result
+
+**Result:** Pass
+
+`draw_coverage` now applies the full faithful context block — font smoothing
+(allowed always, `set_should_smooth_fonts(thicken)`), sub-pixel positioning on,
+sub-pixel quantization off, antialiasing on, and the gray fill from `fill_gray`
+— with `tx`/`ty`/`thicken`/`fill_gray` parameters. `RenderOptions` gained
+`thicken: bool` and `thicken_strength: u8`. `render_glyph` computes
+`canvas_padding = if opts.thicken { 1 } else { 0 }` and folds it into the
+bearings (`- padding`), canvas (`+ 2 * padding`), and translate (`+ padding`),
+with the gray fill `opts.thicken_strength / 255`. `rasterize_glyph` calls
+`draw_coverage` with `thicken = false`, `fill_gray = 1.0`.
+
+Tests (live CoreText):
+
+- `render_glyph_thicken_pads_canvas` — turning thicken on shifts a fixed `'M'`
+  by exactly `width + 2`, `height + 2`, `offset_x - 1`, `offset_y + 1`, with ink
+  in both renders. The `canvas_padding` geometry is pinned deterministically.
+- `render_glyph_strength_dims_fill` — `thicken_strength = 255` reaches a
+  brighter peak pixel than `64`, confirming the `thicken_strength / 255` fill.
+- The Experiment 254–257 tests still pass unchanged (the new subpixel toggles
+  refine fidelity without altering size/ink/geometry assertions).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty face` → 23 passed, 0 failed.
+- `cargo test -p roastty` → 2374 passed, 0 failed (no regressions; +2).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The glyph drawing context is now fully faithful for the monochrome path, and
+thicken/font-smoothing is wired with its `canvas_padding` geometry. The two
+remaining `renderGlyph` branches are **synthetic bold** (rect growth by the line
+width before constraining, `set_text_drawing_mode(fill_stroke)` +
+`set_line_width`, with the gray stroke color) and the **color/sbix** path (the
+`isColorGlyph`/`ColorState` detection, the depth-4 P3 RGBA atlas + bitmap-info,
+and the sbix pixel quantization). Color is the larger sub-area (it needs font
+traits + sbix/SVG detection and an RGBA atlas write); synthetic bold is the
+smaller, self-contained next step.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no required
+changes**.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-211230-803022-prompt.md`
+- Result: `logs/codex-review/20260602-211230-803022-last-message.md`
+
+Codex confirmed the canvas-padding math is faithful (`px_x/px_y` subtract
+padding, `px_w/px_h` add two per axis, translate gets `frac + padding`,
+`offset_x = px_x` / `offset_y = px_y + px_h` preserve the net `-1`/`+1` shifts),
+that the casts are sound because `canvas_padding ∈ {0, 1}`, that
+`rasterize_glyph` keeps equivalent geometry with the new toggles not affecting
+its assertions, and that both thicken tests are valid and non-flaky.

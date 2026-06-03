@@ -69,6 +69,11 @@ pub(crate) struct RenderOptions {
     pub constraint: Constraint,
     /// The number of cells horizontally the glyph may take up when constrained.
     pub constraint_width: u8,
+    /// Draw the glyph with font smoothing (a heavier, thicker stroke).
+    pub thicken: bool,
+    /// Strength of the thickening, `0..=255` (only meaningful when `thicken`).
+    /// `255` is the default (white fill); lower values gray the fill.
+    pub thicken_strength: u8,
 }
 
 impl Face {
@@ -397,6 +402,8 @@ impl Face {
             1.0,
             px_w,
             px_h,
+            false,
+            1.0,
         )?;
 
         Some(RasterizedGlyph {
@@ -421,12 +428,14 @@ impl Face {
         glyph: u16,
         draw_x: f64,
         draw_y: f64,
-        frac_x: f64,
-        frac_y: f64,
+        tx: f64,
+        ty: f64,
         scale_x: f64,
         scale_y: f64,
         px_w: usize,
         px_h: usize,
+        thicken: bool,
+        fill_gray: f64,
     ) -> Option<Vec<u8>> {
         let colorspace = CGColorSpace::new_device_gray()?;
         let mut buf = vec![0u8; px_w * px_h];
@@ -446,15 +455,32 @@ impl Face {
             )
         }?;
 
+        // "Font smoothing" is the optional thickening that makes text look closer
+        // to native macOS applications.
+        CGContext::set_allows_font_smoothing(Some(&ctx), true);
+        CGContext::set_should_smooth_fonts(Some(&ctx), thicken);
+
+        // Sub-pixel positioning lets glyphs land at non-integer coordinates,
+        // which we need for our own alignment via the CTM translate.
+        CGContext::set_allows_font_subpixel_positioning(Some(&ctx), true);
+        CGContext::set_should_subpixel_position_fonts(Some(&ctx), true);
+
+        // We carefully manage glyph positions ourselves, so we disable CoreText's
+        // sub-pixel quantization to keep it from snapping them to the grid.
+        CGContext::set_allows_font_subpixel_quantization(Some(&ctx), false);
+        CGContext::set_should_subpixel_quantize_fonts(Some(&ctx), false);
+
         CGContext::set_should_antialias(Some(&ctx), true);
         CGContext::set_allows_antialiasing(Some(&ctx), true);
-        // White glyph on the zeroed (black) buffer; the gray value is coverage.
-        CGContext::set_gray_fill_color(Some(&ctx), 1.0, 1.0);
 
-        // Shift by the fractional bearing for sub-pixel positioning, then scale
-        // so the raw outline is stretched to the constrained size. Order
-        // matters: translate before scale.
-        CGContext::translate_ctm(Some(&ctx), frac_x, frac_y);
+        // White (or `thicken_strength`-grayed) glyph on the zeroed (black)
+        // buffer; the gray value is coverage.
+        CGContext::set_gray_fill_color(Some(&ctx), fill_gray, 1.0);
+
+        // Shift by `(tx, ty)` (the fractional bearing plus any canvas padding)
+        // for sub-pixel positioning, then scale so the raw outline is stretched
+        // to the constrained size. Order matters: translate before scale.
+        CGContext::translate_ctm(Some(&ctx), tx, ty);
         CGContext::scale_ctm(Some(&ctx), scale_x, scale_y);
 
         let glyphs = [glyph];
@@ -550,31 +576,41 @@ impl Face {
             }
         }
 
+        // Font smoothing ("thicken") can add up to one pixel on every edge, so
+        // we pad the canvas by that much when it's enabled to avoid clipping.
+        // (No padding for the color/sbix path, which is deferred.)
+        let canvas_padding: i32 = if opts.thicken { 1 } else { 0 };
+
         // Whole-pixel bearings and canvas from the constrained values, with the
-        // fractional remainder kept for sub-pixel positioning.
-        let px_x = x.floor() as i32;
-        let px_y = y.floor() as i32;
+        // fractional remainder kept for sub-pixel positioning. The padding
+        // shifts the bearings out and grows the canvas by two per axis.
+        let px_x = x.floor() as i32 - canvas_padding;
+        let px_y = y.floor() as i32 - canvas_padding;
         let frac_x = x - x.floor();
         let frac_y = y - y.floor();
-        let px_w = (width + frac_x).ceil() as usize;
-        let px_h = (height + frac_y).ceil() as usize;
+        let px_w = (width + frac_x).ceil() as usize + 2 * canvas_padding as usize;
+        let px_h = (height + frac_y).ceil() as usize + 2 * canvas_padding as usize;
 
         // Draw at the negated raw bearings, scaling the raw outline to the
-        // constrained size. `draw_coverage` returns `None` only if CoreGraphics
-        // can't create the bitmap context (very unlikely for an in-bounds
-        // `px_w, px_h >= 1` grayscale buffer, but propagated rather than
-        // panicked, matching upstream).
+        // constrained size. The translate folds in the canvas padding so the
+        // glyph stays centered in the padded canvas. `draw_coverage` returns
+        // `None` only if CoreGraphics can't create the bitmap context (very
+        // unlikely for an in-bounds `px_w, px_h >= 1` grayscale buffer, but
+        // propagated rather than panicked, matching upstream).
+        let pad = canvas_padding as f64;
         let bitmap = self
             .draw_coverage(
                 glyph,
                 -rect.origin.x,
                 -rect.origin.y,
-                frac_x,
-                frac_y,
+                frac_x + pad,
+                frac_y + pad,
                 width / rect.size.width,
                 height / rect.size.height,
                 px_w,
                 px_h,
+                opts.thicken,
+                opts.thicken_strength as f64 / 255.0,
             )
             .ok_or(RenderGlyphError::ContextCreationFailed)?;
 
@@ -721,6 +757,8 @@ mod tests {
             grid_metrics: Metrics::calc(face.get_metrics()),
             constraint: Constraint::default(),
             constraint_width: 1,
+            thicken: false,
+            thicken_strength: 255,
         }
     }
 
@@ -779,6 +817,8 @@ mod tests {
                 ..Default::default()
             },
             constraint_width: 1,
+            thicken: false,
+            thicken_strength: 255,
         };
         let glyph = face.glyphs_for_characters(&[b'M' as u16])[0];
         let g = face
@@ -824,6 +864,73 @@ mod tests {
             ink_h as f64 >= 0.8 * g.height as f64,
             "ink height {ink_h} should span most of the {} cell",
             g.height
+        );
+    }
+
+    #[test]
+    fn render_glyph_thicken_pads_canvas() {
+        let face = Face::new("Menlo", 32.0);
+        let glyph = face.glyphs_for_characters(&[b'M' as u16])[0];
+
+        let mut plain_atlas = Atlas::new(512, Format::Grayscale);
+        let plain_opts = none_opts(&face);
+        let plain = face
+            .render_glyph(&mut plain_atlas, glyph, &plain_opts)
+            .expect("plain 'M' should render");
+
+        let mut thick_atlas = Atlas::new(512, Format::Grayscale);
+        let thick_opts = RenderOptions {
+            thicken: true,
+            ..none_opts(&face)
+        };
+        let thick = face
+            .render_glyph(&mut thick_atlas, glyph, &thick_opts)
+            .expect("thick 'M' should render");
+
+        // Thicken adds one pixel of canvas padding on every edge: the canvas
+        // grows by two per axis, the left bearing moves out by one, and the top
+        // bearing moves up by one.
+        assert_eq!(thick.width, plain.width + 2);
+        assert_eq!(thick.height, plain.height + 2);
+        assert_eq!(thick.offset_x, plain.offset_x - 1);
+        assert_eq!(thick.offset_y, plain.offset_y + 1);
+
+        // Both still have ink.
+        assert!(plain_atlas.data().iter().any(|&b| b != 0));
+        assert!(thick_atlas.data().iter().any(|&b| b != 0));
+    }
+
+    #[test]
+    fn render_glyph_strength_dims_fill() {
+        let face = Face::new("Menlo", 32.0);
+        let glyph = face.glyphs_for_characters(&[b'M' as u16])[0];
+
+        // The gray fill is `thicken_strength / 255`, so a lower strength caps the
+        // glyph's coverage darker — the brightest pixel is dimmer.
+        let max_pixel = |strength: u8| -> u8 {
+            let mut atlas = Atlas::new(512, Format::Grayscale);
+            let opts = RenderOptions {
+                thicken_strength: strength,
+                ..none_opts(&face)
+            };
+            let g = face
+                .render_glyph(&mut atlas, glyph, &opts)
+                .expect("'M' should render");
+            let size = 512usize;
+            let data = atlas.data();
+            let mut max = 0u8;
+            for row in 0..g.height {
+                for col in 0..g.width {
+                    let px = data[((g.atlas_y + row) as usize) * size + (g.atlas_x + col) as usize];
+                    max = max.max(px);
+                }
+            }
+            max
+        };
+
+        assert!(
+            max_pixel(255) > max_pixel(64),
+            "a stronger fill should reach a brighter peak coverage"
         );
     }
 }

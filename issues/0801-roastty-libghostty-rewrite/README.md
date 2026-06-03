@@ -962,7 +962,7 @@ are past the correctness-critical foundation.
 - [Experiment 257: Wire the constraint into render_glyph — RenderOptions + scaled draw](257-render-glyph-constrained.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 258: Faithful drawing context + thicken (font smoothing)](258-render-glyph-thicken.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
