@@ -2,9 +2,11 @@
 //!
 //! Faithful port of upstream `font/SharedGrid.zig`'s render path: it owns the two
 //! glyph atlases (grayscale for text, BGRA for color), the [`CodepointResolver`],
-//! and the active grid [`Metrics`], and renders a glyph index into the correct
-//! atlas. The glyph cache (upstream's `glyphs` map, keyed by `RenderOptions`) is a
-//! later sub-area.
+//! the active grid [`Metrics`], and the glyph cache, and renders a glyph index
+//! into the correct atlas — rasterizing each distinct glyph once. Cache
+//! invalidation on metrics/font reload is a later sub-area.
+
+use std::collections::HashMap;
 
 use crate::font::atlas::{Atlas, AtlasError, Format};
 use crate::font::codepoint_resolver::{CodepointResolver, ResolverRenderError};
@@ -18,15 +20,51 @@ use crate::font::Presentation;
 /// Initial atlas edge length in pixels. Matches upstream `SharedGrid.init`.
 const ATLAS_INITIAL_SIZE: u32 = 512;
 
+/// The glyph cache key. Mirrors upstream `GlyphKey.Packed`: the packed font
+/// index, the glyph id, and the **integer** render options. The float-bearing
+/// `grid_metrics`/`constraint` are excluded — `grid_metrics` is constant per grid
+/// and the `constraint` is derived from the glyph's presentation, so neither
+/// varies independently of these fields.
+///
+/// Invariant: this is correct only on the grid/renderer path. It is **not** a
+/// general "same glyph, arbitrary constraint" key — a caller rendering the same
+/// `(index, glyph, integer-opts)` with a deliberately different
+/// `constraint`/`grid_metrics` would wrongly hit the cache. The grid never does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct GlyphKey {
+    index: u16,
+    glyph: u32,
+    cell_width: u8,
+    thicken: bool,
+    thicken_strength: u8,
+    constraint_width: u8,
+}
+
+impl GlyphKey {
+    fn new(index: Index, glyph: u32, opts: &RenderOptions) -> GlyphKey {
+        GlyphKey {
+            index: index.int(),
+            glyph,
+            // Upstream's `cell_width orelse 0`.
+            cell_width: opts.cell_width.unwrap_or(0),
+            thicken: opts.thicken,
+            thicken_strength: opts.thicken_strength,
+            constraint_width: opts.constraint_width,
+        }
+    }
+}
+
 /// The shared font grid: the two glyph atlases (grayscale for text, BGRA for
-/// color), the codepoint resolver, and the active grid metrics. Renders a glyph
-/// index into the correct atlas. Faithful port of upstream `font/SharedGrid.zig`'s
-/// render path (the glyph cache is a later experiment).
+/// color), the codepoint resolver, the active grid metrics, and the glyph cache.
+/// Renders a glyph index into the correct atlas, rasterizing each distinct glyph
+/// once. Faithful port of upstream `font/SharedGrid.zig`'s render path.
 pub(crate) struct SharedGrid {
     pub atlas_grayscale: Atlas,
     pub atlas_color: Atlas,
     pub resolver: CodepointResolver,
     pub metrics: Metrics,
+    /// The glyph cache: each distinct glyph is rasterized into an atlas once.
+    glyphs: HashMap<GlyphKey, Glyph>,
 }
 
 impl SharedGrid {
@@ -43,6 +81,7 @@ impl SharedGrid {
             atlas_color: Atlas::new(ATLAS_INITIAL_SIZE, Format::Bgra),
             resolver,
             metrics,
+            glyphs: HashMap::new(),
         }
     }
 
@@ -57,9 +96,15 @@ impl SharedGrid {
         glyph_index: u32,
         opts: &RenderOptions,
     ) -> Result<Glyph, ResolverRenderError> {
+        let key = GlyphKey::new(index, glyph_index, opts);
+        if let Some(&glyph) = self.glyphs.get(&key) {
+            // Cache hit: no re-rasterization, no atlas reservation.
+            return Ok(glyph);
+        }
+
         // CoreText glyph ids fit `u16`; a sprite index ignores the glyph here.
         let presentation = self.resolver.get_presentation(index, glyph_index as u16)?;
-        match presentation {
+        let glyph = match presentation {
             Presentation::Emoji => {
                 let render_opts = RenderOptions {
                     // Scale emoji to cover their cells, centered, with a little pad.
@@ -88,7 +133,10 @@ impl SharedGrid {
                 glyph_index,
                 opts,
             ),
-        }
+        }?; // a render error is propagated WITHOUT caching
+
+        self.glyphs.insert(key, glyph);
+        Ok(glyph)
     }
 }
 
@@ -183,5 +231,25 @@ mod tests {
             .expect("the box-drawing sprite renders");
         assert!(g.width > 0);
         assert!(g.height > 0);
+    }
+
+    #[test]
+    fn render_glyph_caches_by_key() {
+        let mut grid = menlo_grid();
+        let opts = menlo_opts();
+        let face = Face::new("Menlo", 32.0);
+        let m = u32::from(face.glyphs_for_characters(&[b'M' as u16])[0]);
+        let n = u32::from(face.glyphs_for_characters(&[b'N' as u16])[0]);
+
+        // Rendering 'M' twice returns the identical glyph and caches one entry —
+        // the second call was a hit (no second rasterization).
+        let first = grid.render_glyph(Index::default(), m, &opts).expect("'M'");
+        let second = grid.render_glyph(Index::default(), m, &opts).expect("'M'");
+        assert_eq!(first, second);
+        assert_eq!(grid.glyphs.len(), 1);
+
+        // A distinct glyph is a distinct key — the cache grows to two entries.
+        grid.render_glyph(Index::default(), n, &opts).expect("'N'");
+        assert_eq!(grid.glyphs.len(), 2);
     }
 }

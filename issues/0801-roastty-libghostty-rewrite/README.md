@@ -1173,8 +1173,8 @@ are past the correctness-critical foundation.
   · Claude/Codex/Codex
 - [Experiment 363: the shared font grid (render path)](363-shared-grid.md) —
   **Pass** · Claude/Codex/Codex
-- [Experiment 364: the shared grid's glyph cache](364-glyph-cache.md) —
-  **Designed** · Claude/Codex/Codex
+- [Experiment 364: the shared grid's glyph cache](364-glyph-cache.md) — **Pass**
+  · Claude/Codex/Codex
 
 ## Non-Goals
 

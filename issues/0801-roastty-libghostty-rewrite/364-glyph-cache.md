@@ -197,3 +197,65 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-174110-544223-prompt.md` (design)
 - Result: `logs/codex-review/20260603-174110-544223-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The shared grid now rasterizes each distinct glyph exactly once.
+
+- `roastty/src/font/shared_grid.rs`:
+  - `GlyphKey { index: u16, glyph: u32, cell_width: u8, thicken: bool, thicken_strength: u8, constraint_width: u8 }`
+    (derives `Hash`/`Eq`), built via `GlyphKey::new(index, glyph, opts)` from
+    `index.int()` and the integer render options (`cell_width.unwrap_or(0)`, …)
+    — mirroring upstream's `Packed`, with the float-bearing
+    `grid_metrics`/`constraint` excluded. Its doc records the grid-path-only
+    invariant.
+  - `SharedGrid` gains a private `glyphs: HashMap<GlyphKey, Glyph>` (empty in
+    `new`). `render_glyph` checks the cache first (returning the cached `Glyph`
+    on a hit, with no re-rasterization or atlas reservation), renders on a miss,
+    and inserts only on success — the `?` after the render match propagates a
+    render error before the insert, so a failed render is never cached.
+  - Module and struct docs updated to reflect that the grid now owns the cache
+    (invalidation on reload remains deferred).
+
+Test (in `shared_grid.rs`): `render_glyph_caches_by_key` renders `'M'` twice
+(asserts the two glyphs are equal and `glyphs.len() == 1` — the second call was
+a hit) then `'N'` (asserts `glyphs.len() == 2` — a distinct key).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2812 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+`SharedGrid` is complete: it resolves, shapes (via the run pipeline),
+rasterizes, and now caches glyphs — each distinct glyph hits the atlas once. The
+`font/` subsystem is feature-complete for the render path; the renderer can
+shape a viewport into `ShapedRun`s (Experiments 358–362) and `render_glyph` each
+glyph index through the cache into an atlas region (Experiments 363–364).
+
+The remaining work is outside `font/`'s core render path: cache invalidation on
+metrics/font reload, and the **Metal draw path** that consumes the atlases + the
+`ShapedRun`s to fill the GPU cell buffer.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved**. It
+found the cache implementation functionally sound: the key mirrors upstream's
+packed shape with `index.int()` preserving the full `Index` representation (no
+collision versus the full index), the hit path returns the copied cached
+`Glyph`, and the `?` after the render match is correctly placed so render errors
+return before the insert (failed renders are never cached). It confirmed the
+test proves the main cache behavior (same key → same glyph, one entry; a
+different glyph → a second entry). Its one **Low** finding — that the
+module/struct doc comments still called the glyph cache a "later sub-area"
+(stale after this implementation) — was fixed: both now state the grid owns the
+cache, with only invalidation/reload deferred.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-174343-614139-last-message.md`
