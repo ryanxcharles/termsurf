@@ -141,3 +141,72 @@ as CoreText's raw positive value is correct (upstream negates it later with
 `c_uint → u32` cast is fine, and that the range/relation test assertions are
 appropriately robust for a live font. Deferring glyph measurement and the full
 assembly keeps the slice clean.
+
+## Result
+
+**Result:** Pass
+
+Added the seven scalar accessors to `impl Face` in
+`roastty/src/font/face/coretext.rs` — `size`, `units_per_em` (`c_uint → u32`),
+`ascent`, `descent` (CoreText's raw positive value), `leading`, `cap_height`,
+`x_height` — each a thin `unsafe` wrapper over the matching `CTFont` method with
+a `SAFETY` note.
+
+Test added (1): `scalar_metrics_are_plausible` — `Face::new("Menlo", 12.0)` →
+`size() == 12.0`, `units_per_em()` in `16..=16384`, `ascent()`/`descent()`/
+`cap_height()`/`x_height()` all `> 0.0`, `leading() >= 0.0`, and
+`cap_height() > x_height()`.
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty face
+cargo test -p roastty
+```
+
+Observed:
+
+- `face`: 3 passed (the table spike + missing-table + the new scalar metrics).
+- Full `roastty`: 2358 unit tests passed (2357 prior + 1 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/font` (and
+  `lib.rs`/header/abi).
+- `git diff --check`: clean.
+
+No C ABI, header, or ABI inventory changes; the glyph-measurement accessors and
+the full `get_metrics` assembly cleanly deferred.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** ("nothing
+needs to change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-201051-081525-prompt.md`
+- Result: `logs/codex-review/20260602-201051-081525-last-message.md`
+
+Codex confirmed each accessor is a thin wrapper over the matching `CTFont`
+method, that `units_per_em` casts to `u32` and `descent` preserves CoreText's
+raw positive magnitude (no premature sign flip), that the `unsafe` blocks are
+scoped to the FFI calls with accurate `SAFETY` notes, and that the test checks
+stable ranges/relations rather than version-specific values. Scope is clean.
+
+## Conclusion
+
+Experiment 251 succeeds. The `Face` now exposes the seven scalar metrics
+`get_metrics` reads from the `CTFont` as fallbacks. Both Codex gates passed with
+zero findings.
+
+The next slice adds the **glyph-measurement accessors**:
+`get_glyphs_for_characters` (map a `&[u16]` of codepoints to `CGGlyph`s),
+`advances_for_glyphs` (horizontal advances → `cell_width` as the max printable-
+ASCII advance), and `bounding_rects_for_glyphs` (the overall ASCII bounding box
+→ `ascii_height`, and the `水`/`H` glyph bounds for `ic_width`). These add
+`objc2-core-graphics` (`CGGlyph`/`CGSize`/`CGRect`). The full `get_metrics`
+assembly — copy the four tables (with the `bhed` fallback), run the
+ascent/descent/underline/cap-height fallback chains, measure the glyph metrics,
+build `FaceMetrics`, and feed `Metrics::calc` — is the slice after that.

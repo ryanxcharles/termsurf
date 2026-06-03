@@ -37,6 +37,49 @@ impl Face {
         let data = unsafe { self.font.table(table_tag, CTFontTableOptions(0)) }?;
         Some(data.to_vec())
     }
+
+    /// The point size the face was created at (pixels per em).
+    pub(crate) fn size(&self) -> f64 {
+        // SAFETY: `self.font` is a live `CTFont`.
+        unsafe { self.font.size() }
+    }
+
+    /// The font's units per em (the head-table fallback).
+    pub(crate) fn units_per_em(&self) -> u32 {
+        // SAFETY: `self.font` is a live `CTFont`.
+        unsafe { self.font.units_per_em() as u32 }
+    }
+
+    /// CoreText ascent in pixels (the hhea-absent fallback).
+    pub(crate) fn ascent(&self) -> f64 {
+        // SAFETY: `self.font` is a live `CTFont`.
+        unsafe { self.font.ascent() }
+    }
+
+    /// CoreText descent in pixels, as a **positive** magnitude (CoreText's
+    /// convention); the metric assembly negates it. The hhea-absent fallback.
+    pub(crate) fn descent(&self) -> f64 {
+        // SAFETY: `self.font` is a live `CTFont`.
+        unsafe { self.font.descent() }
+    }
+
+    /// CoreText leading (line gap) in pixels (the hhea-absent fallback).
+    pub(crate) fn leading(&self) -> f64 {
+        // SAFETY: `self.font` is a live `CTFont`.
+        unsafe { self.font.leading() }
+    }
+
+    /// CoreText cap height in pixels (the OS/2 `sCapHeight`-absent fallback).
+    pub(crate) fn cap_height(&self) -> f64 {
+        // SAFETY: `self.font` is a live `CTFont`.
+        unsafe { self.font.cap_height() }
+    }
+
+    /// CoreText x-height in pixels (the OS/2 `sxHeight`-absent fallback).
+    pub(crate) fn x_height(&self) -> f64 {
+        // SAFETY: `self.font` is a live `CTFont`.
+        unsafe { self.font.x_height() }
+    }
 }
 
 #[cfg(test)]
@@ -65,5 +108,19 @@ mod tests {
         let face = Face::new("Menlo", 12.0);
         // No font has a `ZZZZ` table.
         assert!(face.copy_table(b"ZZZZ").is_none());
+    }
+
+    #[test]
+    fn scalar_metrics_are_plausible() {
+        let face = Face::new("Menlo", 12.0);
+        assert_eq!(face.size(), 12.0);
+        assert!((16..=16384).contains(&face.units_per_em()));
+        assert!(face.ascent() > 0.0);
+        assert!(face.descent() > 0.0); // CoreText returns descent positive
+        assert!(face.leading() >= 0.0);
+        assert!(face.cap_height() > 0.0);
+        assert!(face.x_height() > 0.0);
+        // Capitals are taller than the x-height.
+        assert!(face.cap_height() > face.x_height());
     }
 }
