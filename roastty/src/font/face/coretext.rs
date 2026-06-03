@@ -19,7 +19,7 @@ use super::constraint::{Constraint, GlyphSize, Size};
 use crate::font::atlas::{Atlas, AtlasError, Format};
 use crate::font::glyph::Glyph;
 use crate::font::metrics::{FaceMetrics, Metrics};
-use crate::font::opentype::{head::Head, hhea::Hhea, os2::Os2, post::Post};
+use crate::font::opentype::{head::Head, hhea::Hhea, os2::Os2, post::Post, svg::Svg};
 
 /// The horizontal-shear transform used to synthesize an italic (oblique) face.
 /// `c ≈ tan(15°)` slants the glyphs to the right. Faithful to upstream's
@@ -33,20 +33,27 @@ const ITALIC_SKEW: CGAffineTransform = CGAffineTransform {
     ty: 0.0,
 };
 
-/// Color-font state for a face. Faithful (sbix) port of upstream `ColorState`.
-/// SVG-table detection is deferred, so non-sbix color fonts are not yet flagged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Color-font state for a face. Faithful port of upstream `ColorState`: a face
+/// is colored if it has a non-empty `sbix` table or a parseable `SVG ` table.
+#[derive(Debug)]
 pub(crate) struct ColorState {
     /// True if the font has a non-empty `sbix` table. Upstream assumes the mere
     /// presence of `sbix` means the font's glyphs are colored.
     sbix: bool,
+    /// The parsed `SVG ` table, if the font has one. Used to check whether an
+    /// individual glyph has an SVG document.
+    svg: Option<Svg>,
 }
 
 impl ColorState {
     /// Returns true if the given glyph id is colored. For sbix fonts every glyph
-    /// is treated as colored; the SVG `hasGlyph` check is deferred.
-    fn is_color_glyph(&self, _glyph: u16) -> bool {
-        self.sbix
+    /// is treated as colored; otherwise the glyph must be present in the `SVG `
+    /// table. Faithful port of upstream `ColorState.isColorGlyph`.
+    fn is_color_glyph(&self, glyph: u16) -> bool {
+        if self.sbix {
+            return true;
+        }
+        self.svg.as_ref().is_some_and(|s| s.has_glyph(glyph))
     }
 }
 
@@ -186,12 +193,16 @@ impl Face {
         Face::from_ct_font(copy)
     }
 
-    /// Detect color-font state from the font's tables. A non-empty `sbix` table
-    /// marks the font as a color font (SVG detection deferred).
+    /// Detect color-font state from the font's tables. A font is a color font if
+    /// it has a non-empty `sbix` table or a parseable `SVG ` table. Faithful port
+    /// of upstream `ColorState.init`.
     fn detect_color(&self) -> Option<ColorState> {
         let sbix = self.copy_table(b"sbix").is_some_and(|d| !d.is_empty());
-        if sbix {
-            Some(ColorState { sbix: true })
+        let svg = self
+            .copy_table(b"SVG ")
+            .and_then(|d| Svg::from_bytes(&d).ok());
+        if sbix || svg.is_some() {
+            Some(ColorState { sbix, svg })
         } else {
             None
         }
@@ -216,7 +227,7 @@ impl Face {
 
     /// True if the given glyph id is colored.
     pub(crate) fn is_color_glyph(&self, glyph: u16) -> bool {
-        self.color.is_some_and(|c| c.is_color_glyph(glyph))
+        self.color.as_ref().is_some_and(|c| c.is_color_glyph(glyph))
     }
 
     /// Map a Unicode codepoint to its glyph id, or `None` if this face has no
@@ -711,10 +722,12 @@ impl Face {
         glyph: u16,
         opts: &RenderOptions,
     ) -> Result<Glyph, RenderGlyphError> {
-        // A color glyph is, in this port, always an sbix (bitmap) glyph, since
-        // only sbix color is detected (SVG color is deferred).
+        // `is_color` selects BGRA rendering; `sbix` (a color glyph in an sbix
+        // bitmap font) additionally skips synthetic bold, thicken padding, and
+        // sub-pixel positioning. An SVG color glyph is color but not sbix.
+        // Faithful split of upstream's `is_color` / `sbix = is_color and …sbix`.
         let is_color = self.is_color_glyph(glyph);
-        let sbix = is_color;
+        let sbix = is_color && self.color.as_ref().is_some_and(|c| c.sbix);
 
         // The atlas pixel format must match the glyph's color depth.
         let required = if is_color {
@@ -1424,5 +1437,36 @@ mod tests {
         // The synthetic-bold marker survives, with its width recomputed for the
         // new size (not the stale 32pt width).
         assert_eq!(face.synthetic_bold, Some((24.0_f64 / 14.0).max(1.0)));
+    }
+
+    #[test]
+    fn color_state_svg_branch() {
+        // A synthetic SVG-only color state (no sbix): glyph 5 has an SVG
+        // document, so it is a color glyph; its neighbors are not. A macOS system
+        // font with an `SVG ` table is not guaranteed, so the SVG branch of
+        // `ColorState::is_color_glyph` is exercised with a hand-built table.
+        let mut table = Vec::new();
+        table.extend_from_slice(&0u16.to_be_bytes()); // version 0
+        table.extend_from_slice(&6u32.to_be_bytes()); // doc-list offset
+        table.extend_from_slice(&1u16.to_be_bytes()); // numEntries = 1
+        table.extend_from_slice(&5u16.to_be_bytes()); // startGlyphID
+        table.extend_from_slice(&5u16.to_be_bytes()); // endGlyphID
+        table.extend_from_slice(&0u32.to_be_bytes()); // svgDocOffset
+        table.extend_from_slice(&0u32.to_be_bytes()); // svgDocLength
+        let svg = Svg::from_bytes(&table).expect("parses");
+
+        let cs = ColorState {
+            sbix: false,
+            svg: Some(svg),
+        };
+        assert!(cs.is_color_glyph(5), "glyph 5 has an SVG document");
+        assert!(!cs.is_color_glyph(6), "glyph 6 does not");
+
+        // sbix short-circuits regardless of the SVG table.
+        let cs_sbix = ColorState {
+            sbix: true,
+            svg: None,
+        };
+        assert!(cs_sbix.is_color_glyph(99), "sbix colors every glyph");
     }
 }

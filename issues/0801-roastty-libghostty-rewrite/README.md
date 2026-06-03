@@ -1093,8 +1093,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 323: the Nerd Font constraint attribute table](323-nerd-font-attribute-table.md)
   — **Pass** · Claude/Codex/Codex
-- [Experiment 324: SVG color detection](324-svg-color-detection.md) —
-  **Designed** · Claude/Codex/Codex
+- [Experiment 324: SVG color detection](324-svg-color-detection.md) — **Pass** ·
+  Claude/Codex/Codex
 
 ## Non-Goals
 

@@ -16,3 +16,4 @@ pub(crate) mod hhea;
 pub(crate) mod os2;
 pub(crate) mod post;
 pub(crate) mod sfnt;
+pub(crate) mod svg;

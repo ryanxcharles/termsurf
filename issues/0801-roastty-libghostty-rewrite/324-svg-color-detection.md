@@ -210,3 +210,76 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-110620-209869-prompt.md`
 - Result: `logs/codex-review/20260603-110620-209869-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+SVG color detection lands.
+
+- `roastty/src/font/opentype/svg.rs` (new): `Svg::from_bytes` parses the `SVG `
+  table (big-endian `u16` version → `UnsupportedVersion` if non-zero; `u32`
+  document-list offset; sub-slice at the offset; `u16` `numEntries`; the
+  `numEntries × 12`-byte records, all bounds-checked → `EndOfStream` on
+  truncation/over-declared count/zero records); `start_glyph_id` from record 0,
+  `end_glyph_id` from the last record. `has_glyph` does the two fast paths
+  (out-of-span → `false`, endpoints → `true`) then a `binary_search_by` over the
+  records by `[start, end]`. `opentype/mod.rs` declares the module.
+- `roastty/src/font/face/coretext.rs`: `ColorState` gained `svg: Option<Svg>`
+  (and dropped its `Copy`/`Clone`/`Eq` derives — it now owns a `Vec`);
+  `is_color_glyph` is `sbix → true`, else `svg.has_glyph(glyph)`. `detect_color`
+  reads the `SVG ` table, parses it, and returns `Some` when **sbix OR svg**.
+  `Face::is_color_glyph` uses `self.color.as_ref()`.
+
+Tests: `svg.rs` `from_bytes_single_record` (start=end=11482, mirroring
+upstream's JuliaMono assertion without the font), `from_bytes_multi_record`
+(non-endpoint middle hit + gap misses — exercises the binary search),
+`from_bytes_offset_ beyond_header`, `from_bytes_bad_version`
+(`UnsupportedVersion`), `from_bytes_truncated` (4 `EndOfStream` cases);
+`coretext.rs` `color_state_svg_branch` (a synthetic SVG-only `ColorState`: glyph
+5 is color, 6 is not; sbix short-circuits). The existing
+`text_font_has_no_color` (Menlo) and `emoji_font_has_color` (Apple Color Emoji,
+sbix) still pass.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2695 passed, 0 failed (+6, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+Color-glyph detection is now complete for both color formats CoreText's
+`ColorState` reads: a face is colored if it has sbix **or** a parseable `SVG `
+table, and a glyph is a color glyph if it is sbix or has an SVG document —
+matching upstream's `isColorGlyph`. The result-review caught a real latent bug
+the experiment exposed (`render_glyph` conflated `is_color` with `sbix`, which
+was harmless while only sbix existed) and it is now the faithful upstream split.
+
+The remaining font-subsystem work is the larger arc: **font discovery** (the
+CoreText `Descriptor → CTFontDescriptor → CTFontCollection` matching that gates
+the resolver's discovery fallback and codepoint overrides), wiring
+`get_constraint` into the render path, and the **shaper**.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and raised **one Required
+finding**, since fixed: `render_glyph` used `let sbix = is_color;`, which was
+only correct while color meant sbix-only — after this experiment an SVG glyph is
+color but not sbix, so it would wrongly take the sbix-only branches (skipping
+synthetic bold, skipping thicken padding, quantizing position as a bitmap).
+Fixed with the upstream-equivalent split:
+`let sbix = is_color && self.color.as_ref().is_some_and(|c| c.sbix);`
+(`is_color` selects BGRA; `sbix` additionally gates the bitmap-only branches). A
+follow-up review **confirmed the fix fully resolves the finding** and matches
+upstream's `sbix = is_color and self.color.?.sbix`, with no remaining issues.
+Codex also confirmed the parser is sound (version/offset/count/record parsing,
+`len == 1`, bounds checks, `binary_search_by` direction, `sbix || svg`
+detection, and dropping `Copy/Eq` are all consistent with the port).
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-111218-196044-last-message.md`
+- Fix confirmation: `logs/codex-review/` (follow-up in session
+  `019e8e1b-1019-72f3-b15b-3259f8aabd15`)
