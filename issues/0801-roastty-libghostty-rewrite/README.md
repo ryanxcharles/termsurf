@@ -1027,6 +1027,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 290: z2d port — the Spline cubic-Bézier flattener](290-z2d-spline.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 291: z2d port — the fill plotter](291-z2d-fill-plotter.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
