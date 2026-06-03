@@ -166,3 +166,60 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-124943-560974-prompt.md`
 - Result: `logs/codex-review/20260603-124943-560974-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+The shaper subsystem is started — its output contract lands.
+
+- `roastty/src/font/shape.rs` (new): `Cell` (`x: u16`, `x_offset: i16`,
+  `y_offset: i16`, `glyph_index: u32`; derives
+  `Debug, Clone, Copy, PartialEq, Eq, Default`; no `cluster` field, matching
+  upstream) and `Options` (`features: Vec<String>`). The module doc establishes
+  the shaper subsystem and defers the producers.
+- `roastty/src/font/mod.rs`: declares `pub(crate) mod shape;`.
+
+Tests: `cell_defaults` (all-zero default), `cell_construction` (set fields kept,
+offsets zero-default, signed offsets hold `-2`/`-5`), `cell_eq_copy` (`Copy` +
+`PartialEq`, a differing `glyph_index` is unequal), `options_default_empty`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2739 passed, 0 failed (+4, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The shaper — the largest remaining font subsystem — now has its foundation: the
+`shape::Cell` output type and `shape::Options`, the contract every shaper
+backend produces. The font subsystem map now includes `shape` alongside the
+complete sprite, color, discovery, and resolver work.
+
+The next shaper experiments build the producers: the **`RunIterator`**
+(splitting a terminal row into single-font runs by codepoint), the
+**`RunIteratorHook`** (accumulating a run's codepoints), and the CoreText
+**`Shaper.shape`** pipeline (`CFAttributedString` → `CTLine` → `CTRun` → `Cell`)
+— plus `RunOptions` once the terminal grid/render-state types are threaded in.
+The deferred variation-axis `score()` refinement and variations application
+remain outstanding too.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It verified `shape::Cell` matches upstream
+`shape.Cell` (`x: u16`, `x_offset: i16`, `y_offset: i16`, `glyph_index: u32`)
+and correctly **omits a `cluster` field**; that `Default` gives the expected
+all-zero value (acceptable for this internal value type) and the
+`Debug/Clone/Copy/PartialEq/Eq/Default` derives are appropriate; that
+`Options { features: Vec<String> }` is a faithful owned mapping of
+`[]const []const u8`; that deferring the `RunIterator`, `RunIteratorHook`,
+`RunOptions`, the feature-list plumbing, and the CoreText shaping pipeline is
+the right boundary; and that the four tests cover the value contract. No
+Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-125127-467993-last-message.md`

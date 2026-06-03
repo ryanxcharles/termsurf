@@ -18,6 +18,7 @@ pub(crate) mod face;
 pub(crate) mod glyph;
 pub(crate) mod metrics;
 pub(crate) mod opentype;
+pub(crate) mod shape;
 pub(crate) mod sprite;
 
 /// The style (weight/slant) of a font face.
