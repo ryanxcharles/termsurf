@@ -1001,6 +1001,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 277: Box-drawing dash primitives](277-box-dashes.md) — **Pass** ·
   Claude/Codex/Codex
+- [Experiment 278: The Fraction + fill cell-geometry primitive](278-fraction-fill.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
