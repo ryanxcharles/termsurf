@@ -145,3 +145,68 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-012023-931694-prompt.md`
 - Result: `logs/codex-review/20260603-012023-931694-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/octants.txt` is the vendored data file;
+`roastty/src/font/sprite/draw.rs` gained `parse_octants` (a `const fn` that
+walks the embedded bytes line by line, trims `\r`, skips `#`/blank lines, and
+ORs in `1 << (digit - b'1')` for each digit after the `-`, with a compile-time
+`assert!(i == 230)`), the `const OCTANTS: [u8; 230]` table, and `draw_octant`
+(filling the eight quarter-grid cells per the pattern bits). The `const fn`
+approach compiled — no `OnceLock` fallback needed. The module doc now notes
+octant coverage.
+
+Tests (deterministic; an `8×16` fixture so the halves/quarters divide cleanly —
+cells at columns `[0,4)`/`[4,8)` and rows `[0,4)`/`[4,8)`/`[8,12)`/`[12,16)`):
+
+- `octant_table_first_entries` — the parser is validated directly against known
+  `octants.txt` lines: `OCTANTS[0]=0x04` (`OCTANT-3`), `[1]=0x06` (`OCTANT-23`),
+  `[15]=0x17` (`OCTANT-1235`), `[229]=0xFE` (`OCTANT-2345678`), `len == 230`.
+- `octant_first` (`0x1CD00`) → cell 3; `octant_second` (`0x1CD01`) → cells 2,3;
+  `octant_multi` (`0x1CD0F`) → cells 1,2,3,5; `octant_last` (`0x1CDE5`) → cells
+  2–8 (cell 1 empty, exercising cell 8).
+- `draw_octant_excludes` — `0x1CCFF`, `0x1CDE6`, `'M'` return `false`, draw
+  nothing.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty sprite` → 77 passed (6 new).
+- `cargo test -p roastty` → 2503 passed, 0 failed (no regressions; +6).
+- `cargo build -p roastty` → no warnings (the compile-time table `assert!`
+  passed).
+- No-`ghostty`-name gates clean (incl. the vendored `octants.txt`);
+  `git diff --check` clean.
+
+## Conclusion
+
+The Octants (`U+1CD00`–`U+1CDE5`) are ported and pixel-verified — 230 glyphs
+driven by a `const fn`-parsed lookup table built from the vendored
+`octants.txt`, the parser validated directly against known entries. Eight
+rect/`fill`-based sprite families are now complete (box lines, dashes, the
+Fraction/fill primitive, block elements, braille, sextants, separated quadrants,
+octants). The rect-only sprite surface is now largely covered; what remains for
+the sprite font centers on the **`z2d` anti-aliased-path port** — the
+prerequisite for the box-drawing arcs/diagonals, the circle/ellipse pieces, the
+geometric-shape curves, and the remaining legacy-computing glyphs — and then the
+unifying sprite `has_codepoint`/draw entry point (which the resolver's deferred
+sprite render arm needs). Alongside the sprite font remain the discovery
+consumer, the UCD emoji-presentation default, codepoint overrides, the shaper,
+the Nerd Font attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no required
+changes**. It confirmed `parse_octants`, `OCTANTS`, the vendored `octants.txt`,
+`draw_octant`, the range exclusion, the table-entry tests, and the `8×16`
+`octant_cell` helper all match upstream `draw1CD00_1CDE5`, that the vendored
+data is byte-identical to upstream, and that the fmt/test/build/name/diff gates
+are clean.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260603-012317-987212-prompt.md`
+- Result: `logs/codex-review/20260603-012317-987212-last-message.md`

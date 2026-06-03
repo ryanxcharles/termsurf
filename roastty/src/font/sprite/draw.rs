@@ -7,10 +7,11 @@
 //! Covered so far: the box-drawing line glyphs (`U+2500`–`U+257F` `linesChar`
 //! dispatch), the dashes, the Block Elements (`U+2580`–`U+259F`), the Braille
 //! Patterns (`U+2800`–`U+28FF`), the legacy-computing Sextants
-//! (`U+1FB00`–`U+1FB3B`), and the Separated Block Quadrants
-//! (`U+1CC21`–`U+1CC2F`). The `z2d`-based primitives (arcs, diagonals), the
-//! sprite `hasCodepoint` inventory, and the other sprite categories (powerline,
-//! octants, the rest of legacy-computing, geometric) are later experiments.
+//! (`U+1FB00`–`U+1FB3B`), the Separated Block Quadrants (`U+1CC21`–`U+1CC2F`),
+//! and the Octants (`U+1CD00`–`U+1CDE5`). The `z2d`-based primitives (arcs,
+//! diagonals), the sprite `hasCodepoint` inventory, and the other sprite
+//! categories (powerline, the circle pieces, the rest of legacy-computing,
+//! geometric) are later experiments.
 
 use crate::font::metrics::Metrics;
 use crate::font::sprite::canvas::{Canvas, Color, Rect};
@@ -1250,6 +1251,97 @@ pub(crate) fn draw_separated_quadrant(cp: u32, metrics: &Metrics, canvas: &mut C
     true
 }
 
+/// Parse the embedded `octants.txt` into the 230-entry octant lookup table at
+/// compile time. Faithful port of upstream's comptime `@embedFile` + parse: each
+/// non-comment line `BLOCK OCTANT-<digits>` sets bit `(digit - '1')` for each
+/// digit after the `-`; the Nth data line is the pattern for codepoint
+/// `0x1CD00 + N`.
+const fn parse_octants(data: &str) -> [u8; 230] {
+    let bytes = data.as_bytes();
+    let mut table = [0u8; 230];
+    let mut i = 0; // table (data-line) index
+    let mut pos = 0; // byte cursor
+
+    while pos < bytes.len() {
+        // Find the end of the current line.
+        let start = pos;
+        while pos < bytes.len() && bytes[pos] != b'\n' {
+            pos += 1;
+        }
+        let mut end = pos; // exclusive (at '\n' or EOF)
+        pos += 1; // step past the '\n' (or past EOF)
+
+        // Trim a trailing '\r' (CRLF checkouts).
+        if end > start && bytes[end - 1] == b'\r' {
+            end -= 1;
+        }
+
+        // Skip blank lines and comments.
+        if end == start || bytes[start] == b'#' {
+            continue;
+        }
+
+        // Find the '-' and OR in each trailing digit's bit.
+        let mut k = start;
+        while k < end && bytes[k] != b'-' {
+            k += 1;
+        }
+        k += 1; // step past the '-'
+        let mut oct = 0u8;
+        while k < end {
+            oct |= 1u8 << (bytes[k] - b'1');
+            k += 1;
+        }
+
+        table[i] = oct;
+        i += 1;
+    }
+
+    assert!(i == 230);
+    table
+}
+
+/// The octant lookup table: one byte per codepoint `0x1CD00..=0x1CDE5`, the
+/// cell bits `1..8` in bit positions `0..7`.
+const OCTANTS: [u8; 230] = parse_octants(include_str!("octants.txt"));
+
+/// Draw the octant glyph for `cp` (`U+1CD00`–`U+1CDE5`) into `canvas`, returning
+/// `true` if `cp` is an octant. Faithful port of upstream `draw1CD00_1CDE5`: a
+/// 2×4 (quarter-height) grid of `fill`ed cells selected by the [`OCTANTS`]
+/// pattern.
+pub(crate) fn draw_octant(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> bool {
+    if !(0x1CD00..=0x1CDE5).contains(&cp) {
+        return false;
+    }
+    use Fraction::{Full, Half, OneQuarter, ThreeQuarters, TwoQuarters, Zero};
+    let oct = OCTANTS[(cp - 0x1CD00) as usize];
+    if oct & 0x01 != 0 {
+        fill(metrics, canvas, Zero, Half, Zero, OneQuarter);
+    }
+    if oct & 0x02 != 0 {
+        fill(metrics, canvas, Half, Full, Zero, OneQuarter);
+    }
+    if oct & 0x04 != 0 {
+        fill(metrics, canvas, Zero, Half, OneQuarter, TwoQuarters);
+    }
+    if oct & 0x08 != 0 {
+        fill(metrics, canvas, Half, Full, OneQuarter, TwoQuarters);
+    }
+    if oct & 0x10 != 0 {
+        fill(metrics, canvas, Zero, Half, TwoQuarters, ThreeQuarters);
+    }
+    if oct & 0x20 != 0 {
+        fill(metrics, canvas, Half, Full, TwoQuarters, ThreeQuarters);
+    }
+    if oct & 0x40 != 0 {
+        fill(metrics, canvas, Zero, Half, ThreeQuarters, Fraction::End);
+    }
+    if oct & 0x80 != 0 {
+        fill(metrics, canvas, Half, Full, ThreeQuarters, Fraction::End);
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2229,6 +2321,86 @@ mod tests {
                 !draw_separated_quadrant(cp, &m, &mut c),
                 "{cp:#07x} not a separated quadrant"
             );
+            assert!(all_alpha(&c, &m, 0), "{cp:#07x} drew ink");
+        }
+    }
+
+    /// An `8×16` fixture so the octant halves/quarters divide cleanly.
+    fn fixture_8x16() -> Metrics {
+        Metrics {
+            cell_width: 8,
+            cell_height: 16,
+            ..fixture_metrics()
+        }
+    }
+
+    /// The `[x0, y0, x1, y1)` rect for octant cell `n` (1..8) on the `8×16`
+    /// fixture: left column `[0,4)`, right `[4,8)`; rows `[0,4)`, `[4,8)`,
+    /// `[8,12)`, `[12,16)`.
+    fn octant_cell(n: u8) -> (i32, i32, i32, i32) {
+        let (x0, x1) = if n % 2 == 1 { (0, 4) } else { (4, 8) };
+        let row = ((n - 1) / 2) as i32; // 0..3
+        let y0 = row * 4;
+        (x0, y0, x1, y0 + 4)
+    }
+
+    fn octant_cells_inked(c: &Canvas, m: &Metrics, cells: &[u8]) {
+        let rects: Vec<(i32, i32, i32, i32)> = cells.iter().map(|&n| octant_cell(n)).collect();
+        rects_inked(c, m, &rects);
+    }
+
+    #[test]
+    fn octant_table_first_entries() {
+        // Validate the parser directly against known octants.txt lines.
+        assert_eq!(OCTANTS[0], 0b0000_0100, "OCTANT-3");
+        assert_eq!(OCTANTS[1], 0b0000_0110, "OCTANT-23");
+        assert_eq!(OCTANTS[15], 0b0001_0111, "OCTANT-1235");
+        assert_eq!(OCTANTS[229], 0b1111_1110, "OCTANT-2345678");
+        assert_eq!(OCTANTS.len(), 230);
+    }
+
+    #[test]
+    fn octant_first() {
+        // 0x1CD00 -> OCTANTS[0] -> cell 3.
+        let m = fixture_8x16();
+        let mut c = Canvas::new(8, 16, 0, 0);
+        assert!(draw_octant(0x1CD00, &m, &mut c));
+        octant_cells_inked(&c, &m, &[3]);
+    }
+
+    #[test]
+    fn octant_second() {
+        // 0x1CD01 -> OCTANTS[1] -> cells 2, 3.
+        let m = fixture_8x16();
+        let mut c = Canvas::new(8, 16, 0, 0);
+        assert!(draw_octant(0x1CD01, &m, &mut c));
+        octant_cells_inked(&c, &m, &[2, 3]);
+    }
+
+    #[test]
+    fn octant_multi() {
+        // 0x1CD0F -> OCTANTS[15] -> cells 1, 2, 3, 5.
+        let m = fixture_8x16();
+        let mut c = Canvas::new(8, 16, 0, 0);
+        assert!(draw_octant(0x1CD0F, &m, &mut c));
+        octant_cells_inked(&c, &m, &[1, 2, 3, 5]);
+    }
+
+    #[test]
+    fn octant_last() {
+        // 0x1CDE5 -> OCTANTS[229] -> cells 2..8 (all but 1).
+        let m = fixture_8x16();
+        let mut c = Canvas::new(8, 16, 0, 0);
+        assert!(draw_octant(0x1CDE5, &m, &mut c));
+        octant_cells_inked(&c, &m, &[2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn draw_octant_excludes() {
+        let m = fixture_8x16();
+        for cp in [0x1CCFFu32, 0x1CDE6, 'M' as u32] {
+            let mut c = Canvas::new(8, 16, 0, 0);
+            assert!(!draw_octant(cp, &m, &mut c), "{cp:#07x} not an octant");
             assert!(all_alpha(&c, &m, 0), "{cp:#07x} drew ink");
         }
     }
