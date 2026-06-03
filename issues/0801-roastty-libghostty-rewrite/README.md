@@ -951,6 +951,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 252: CoreText `Face` glyph-measurement accessors](252-coretext-glyph-measurement.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 253: `Face::get_metrics` — assemble `FaceMetrics` from a CoreText font](253-coretext-get-metrics.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
