@@ -1091,6 +1091,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 322: the UCD emoji-presentation default](322-ucd-emoji-presentation-default.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 323: the Nerd Font constraint attribute table](323-nerd-font-attribute-table.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
