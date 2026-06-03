@@ -73,6 +73,66 @@ The rewrite includes, at minimum:
   edge cases
 - the renamed macOS Swift frontend integration once the Rust library has enough
   behavior to host it
+- Rust reimplementations of the third-party libraries Ghostty depends on (see
+  **Reimplemented dependencies** below) — Roastty does not vendor or link
+  Ghostty's Zig or C packages
+
+### Reimplemented dependencies
+
+Roastty does **not** vendor, link, or carry forward Ghostty's third-party Zig or
+C packages. The capability each provides is **reimplemented in Rust** as
+first-class Roastty code, in scope for this issue. Each library is its own
+subsystem slice under the standard experiment process (design → review →
+implement → test → review). A mature Rust crate may stand in for a library
+**only** where an experiment documents it as a faithful, well-maintained
+equivalent; otherwise the default is a Roastty reimplementation.
+
+The macOS-only constraint above still applies: dependencies that exist solely
+for Linux/GTK/Wayland/X11/OpenGL or non-macOS build paths are out of scope, and
+capabilities already supplied by macOS **system frameworks** (CoreText,
+CoreGraphics, etc., reached via `objc2` bindings) are bound, not reimplemented.
+
+Zig-origin libraries → Rust:
+
+- **uucode** — Unicode property, grapheme-break, and width tables/lookups used
+  across the terminal and font layers. Reimplemented as Roastty Unicode tables
+  generated from the UCD, matching Ghostty's exact property semantics.
+- **libxev** — the async event loop. Reimplemented as a Rust kqueue-based event
+  loop driving the PTY read/write loops and timers (macOS only; the
+  epoll/io_uring/IOCP backends are not ported).
+- **z2d** — 2D vector rasterization, used only for the sprite font's
+  anti-aliased path glyphs and the CPU debug overlay. Reimplemented as a Rust
+  alpha-coverage rasterizer (the exact-fill sprite path needs no rasterizer and
+  is already ported).
+- **zf** — fuzzy matching for list/command filtering. Reimplemented in Rust.
+- **zig-objc** — Objective-C runtime bindings. Already satisfied by `objc2`; no
+  further work.
+- **vaxis** — TUI toolkit; used only by the `+list-*` CLI tools, not the
+  library. Reimplemented only if/when those CLIs are ported.
+- **zig-js** — WASM/JS interop; not part of the macOS library (out of scope).
+
+C-origin libraries → Rust:
+
+- **wuffs / libpng / zlib** — image decoding (Kitty graphics PNG) and DEFLATE.
+  Reimplemented in Rust.
+- **oniguruma** — regular expressions (link/URL detection). Reimplemented in
+  Rust.
+- **simdutf** — fast UTF-8 validation/transcoding. Reimplemented in Rust.
+- **highway** — SIMD primitives used by the above; reimplemented with Rust SIMD
+  where still needed.
+- **sentry** — crash reporting (app-level, optional). Reimplemented/replaced in
+  Rust if retained.
+- **dcimgui** — Dear ImGui for the inspector UI. Reimplemented/replaced in Rust
+  if the inspector is retained.
+- **glslang / spirv-cross** — GLSL→SPIR-V→MSL shader translation. Needed only if
+  Roastty translates shaders at runtime; the Metal path uses precompiled
+  shaders, so this is deferred unless a runtime need appears.
+- **harfbuzz / freetype / fontconfig** — shaping, rasterization, font discovery.
+  Superseded on macOS by CoreText/CoreGraphics (bound via `objc2`), so they are
+  not reimplemented; fontconfig is Linux-only.
+
+Out of scope (non-macOS): gobject/GTK, gtk4-layer-shell, wayland (and
+protocols), opengl, libintl, and the Android/SDK packages.
 
 ## Architecture
 
