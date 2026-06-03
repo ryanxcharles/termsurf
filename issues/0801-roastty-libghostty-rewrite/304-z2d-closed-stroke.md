@@ -150,3 +150,76 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-081120-962507-prompt.md`
 - Result: `logs/codex-review/20260603-081120-962507-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/raster.rs` gained the closed-path stroke:
+
+- `run` dispatches `PathNode::ClosePath => self.run_close_path()` (the
+  `unreachable!` removed).
+- `run_close_path` — the point-count switch (`0` nothing / `1` `plot_dotted` /
+  `2` `plot_single` / else `plot_closed_joined(head0, head1, tail2, tail1)`),
+  then `points.reset()` + `reset_subpath()`.
+- `plot_dotted(point)` — `CapMode::Round` fans all `pen.vertices` around the
+  point into `outer` and emits a circle; other caps draw nothing.
+- `plot_closed_joined(initial0, initial1, p1, p2)` — the closing join(s)
+  (`p2 != initial0`: `join(p1,p2,initial0)` then `join(p2,initial0,initial1)`;
+  else the single `join(p1,initial0,initial1)`), then `outer` and `inner` each
+  emitted as a separate closed polygon (no concat, no caps).
+
+Tests:
+
+- `stroke_closed_square` — the closed square mitres to `[-1,11]×[-1,11]` (two
+  concentric loops); its edges differ from the same path left open (capped).
+- `stroke_close_no_panic` — a closed triangle strokes into a non-empty polygon
+  (the `ClosePath` arm is reachable).
+- `stroke_dotted_close` — `move + close`: `Round` draws a circle (non-empty),
+  `Butt` draws nothing (empty).
+- `canvas_closed_square_ring` — via `Canvas::stroke_path` (NonZero), a closed
+  square inks its four border arms and leaves the center hole empty (the ring
+  fill), confirmed against the hollow-square render.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2610 passed, 0 failed (+4, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The closed-path stroke completes the z2d stroke plotter: `plotClosedJoined`
+wraps the contour shut around the initial point and emits the outer and inner
+loops, which `NonZero` fills as a ring. The stroke subsystem now handles open
+**and** closed `move_to`/`line_to`/`curve_to` paths with miter/round/bevel joins
+and butt/round/square caps — the full z2d stroke.
+
+The next sprite glyphs are the **circle/ellipse and geometric shapes**
+(`geometric_shapes.zig` — filled and stroked circles/ellipses, the closed paths
+this unblocks) and the remaining rect-based **special sprites** (plain/double/
+dotted/dashed underlines, strikethrough, overline, cursors). The larger
+remaining integration is the unifying sprite `has_codepoint`/draw and
+sprite-kind dispatch (filling the resolver's deferred `SpriteUnavailable` arm),
+then the discovery consumer, the UCD emoji-presentation default, codepoint
+overrides, the shaper, the Nerd Font attribute table, and SVG color detection.
+(Dashes remain the one deferred stroke feature, used by dashed box/underline
+glyphs.)
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes**. It confirmed `run_close_path` follows the upstream point-count switch
+then clears `points` and resets subpath state (so the trailing `finish()`
+no-ops); `plot_closed_joined` records the correct closing-join sequence, handles
+the `p2 == initial0` degenerate case, and emits `outer` and `inner` as two
+separate closed contours (no concat, no caps); `plot_dotted` matches upstream
+(`Round` draws the pen circle, non-round caps draw nothing); and the ring
+behavior through `Canvas::stroke_path` + `NonZero` is validated by the
+hollow-square test. The added dotted-close test covers the design-review branch.
+No Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-081445-487184-last-message.md`

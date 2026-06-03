@@ -2746,6 +2746,31 @@ mod tests {
     }
 
     #[test]
+    fn canvas_closed_square_ring() {
+        // A closed square stroked via Canvas::stroke_path (NonZero) inks its
+        // border but leaves the center hole empty — the ring fill that
+        // distinguishes a closed stroke from a filled shape. Square (2,2)-(8,8),
+        // thickness 2 → an outer 1..9 / inner 3..7 ring.
+        let mut c = Canvas::new(11, 11, 0, 0);
+        let nodes = [
+            raster::PathNode::MoveTo(raster::Point::new(2.0, 2.0)),
+            raster::PathNode::LineTo(raster::Point::new(8.0, 2.0)),
+            raster::PathNode::LineTo(raster::Point::new(8.0, 8.0)),
+            raster::PathNode::LineTo(raster::Point::new(2.0, 8.0)),
+            raster::PathNode::ClosePath,
+        ];
+        c.stroke_path(&nodes, 2.0, raster::CapMode::Butt);
+        // The four border arms are inked.
+        assert!(inked(&c, 5, 1), "top border");
+        assert!(inked(&c, 5, 8), "bottom border");
+        assert!(inked(&c, 1, 5), "left border");
+        assert!(inked(&c, 8, 5), "right border");
+        // The center hole is empty.
+        assert!(!inked(&c, 5, 5), "center hole empty");
+        assert!(!inked(&c, 4, 4), "inner corner empty");
+    }
+
+    #[test]
     fn draw_box_arc_excludes() {
         let m = fixture_metrics();
         for cp in [0x2500u32, 0x2571, 'M' as u32] {

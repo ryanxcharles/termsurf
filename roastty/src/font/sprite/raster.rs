@@ -1451,12 +1451,36 @@ impl StrokePlotter {
                 // Normal line segments join with the configured mode.
                 PathNode::LineTo(p) => self.run_line_to(self.join_mode, p),
                 PathNode::CurveTo { p1, p2, p3 } => self.run_curve_to(p1, p2, p3),
-                PathNode::ClosePath => {
-                    unreachable!("stroke_path: close_path needs the closed-path stroke (deferred)")
-                }
+                PathNode::ClosePath => self.run_close_path(),
             }
         }
         self.finish();
+    }
+
+    /// Close the current subpath: join its ends around the initial point and
+    /// emit the two closed loops. Faithful port of `runClosePath`.
+    fn run_close_path(&mut self) {
+        match self.points.len {
+            0 => {}
+            1 => {
+                let p = self.points.first().unwrap();
+                self.plot_dotted(p);
+            }
+            2 => {
+                let a = self.points.head(0).unwrap();
+                let b = self.points.head(1).unwrap();
+                self.plot_single(a, b);
+            }
+            _ => {
+                let initial0 = self.points.head(0).unwrap();
+                let initial1 = self.points.head(1).unwrap();
+                let p1 = self.points.tail(2).unwrap();
+                let p2 = self.points.tail(1).unwrap();
+                self.plot_closed_joined(initial0, initial1, p1, p2);
+            }
+        }
+        self.points.reset();
+        self.reset_subpath();
     }
 
     /// Append `point` and join the last three with `join_mode` once 3+ points
@@ -1737,12 +1761,49 @@ impl StrokePlotter {
         self.outer.concat(&mut self.inner);
         self.result.add_edges_from_contour(&self.outer);
     }
+
+    /// A zero-length closed path (`plotDotted`): round caps draw a full circle
+    /// (all pen vertices fanned around the point); other caps draw nothing.
+    fn plot_dotted(&mut self, point: Point) {
+        if self.cap_mode != CapMode::Round {
+            return;
+        }
+        let pen = self.pen.as_ref().expect("round dotted requires a pen");
+        let pts: Vec<Point> = pen
+            .vertices
+            .iter()
+            .map(|v| Point::new(point.x + v.point.x, point.y + v.point.y))
+            .collect();
+        for p in pts {
+            self.outer.plot(p);
+        }
+        self.result.add_edges_from_contour(&self.outer);
+    }
+
+    /// Close and assemble a multi-segment stroke (`plotClosedJoined`): the
+    /// closing join(s) around the initial point, then the `outer` and `inner`
+    /// contours each emitted as a separate closed polygon (no caps, no concat).
+    fn plot_closed_joined(&mut self, initial0: Point, initial1: Point, p1: Point, p2: Point) {
+        let jm = self.join_mode;
+        if p2 != initial0 {
+            // Normal: the final segment's join, then the join wrapping the
+            // initial point.
+            self.join(jm, p1, p2, initial0);
+            self.join(jm, p2, initial0, initial1);
+        } else {
+            // Degenerate (the path already reached the initial point): only the
+            // closing join is needed.
+            self.join(jm, p1, initial0, initial1);
+        }
+        // The outer and inner contours are two distinct closed polygons.
+        self.result.add_edges_from_contour(&self.outer);
+        self.result.add_edges_from_contour(&self.inner);
+    }
 }
 
-/// Stroke a multi-segment open path (line segments; butt/round/square caps;
-/// miter/round/bevel joins) into a fill `Polygon`. Faithful port of z2d's
-/// open-path stroke. `ClosePath` is `unreachable!` (deferred with the
-/// closed-path stroke).
+/// Stroke a multi-segment path (line segments and curves; butt/round/square
+/// caps; miter/round/bevel joins; open or `close_path`-closed) into a fill
+/// `Polygon`. Faithful port of z2d's stroke plotter.
 pub(crate) fn stroke_path(
     nodes: &[PathNode],
     thickness: f64,
@@ -3341,5 +3402,61 @@ mod tests {
         // The fan stays within the half-width of the endpoints.
         assert!(round.extent_left >= -1.0 - 1e-9);
         assert!(round.extent_right <= 11.0 + 1e-9);
+    }
+
+    fn close() -> PathNode {
+        PathNode::ClosePath
+    }
+
+    #[test]
+    fn stroke_closed_square() {
+        // A closed square strokes to two concentric loops: the outer mitres to
+        // [-1,11]², the inner to [1,9]². thickness 2 -> half-width 1.
+        let nodes = [
+            mv(0.0, 0.0),
+            ln(10.0, 0.0),
+            ln(10.0, 10.0),
+            ln(0.0, 10.0),
+            close(),
+        ];
+        let closed = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.1, JoinMode::Miter, CapMode::Butt);
+        assert_eq!(closed.extent_left, -1.0);
+        assert_eq!(closed.extent_right, 11.0);
+        assert_eq!(closed.extent_top, -1.0);
+        assert_eq!(closed.extent_bottom, 11.0);
+        // Two closed loops worth of edges.
+        assert!(closed.edges.len() >= 4);
+        // The open version (no close) caps the ends instead — a different
+        // outline, so the edge sets differ.
+        let open = stroke_path(
+            &nodes[..4],
+            2.0,
+            1.0,
+            10.0,
+            0.1,
+            JoinMode::Miter,
+            CapMode::Butt,
+        );
+        assert_ne!(closed.edges, open.edges);
+    }
+
+    #[test]
+    fn stroke_close_no_panic() {
+        // A closed triangle strokes without panic into a non-empty polygon (the
+        // ClosePath arm is reachable).
+        let nodes = [mv(0.0, 0.0), ln(10.0, 0.0), ln(5.0, 10.0), close()];
+        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.1, JoinMode::Miter, CapMode::Butt);
+        assert!(!poly.edges.is_empty());
+    }
+
+    #[test]
+    fn stroke_dotted_close() {
+        // A zero-length closed path (move + close): round caps draw a circle,
+        // other caps draw nothing.
+        let nodes = [mv(5.0, 5.0), close()];
+        let round = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.1, JoinMode::Miter, CapMode::Round);
+        assert!(!round.edges.is_empty(), "round dotted draws a circle");
+        let butt = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.1, JoinMode::Miter, CapMode::Butt);
+        assert!(butt.edges.is_empty(), "butt dotted draws nothing");
     }
 }
