@@ -34,6 +34,69 @@ pub(crate) fn run_hash(codepoints: &[Codepoint], cell_count: u16, font_index: In
     h.finish()
 }
 
+/// The wide kind of a cell: a normal narrow/wide cell, or a spacer that pads a
+/// wide cell or wraps a line. Mirrors `terminal::page::Wide` (which is
+/// `pub(super)`); the renderer maps the terminal value to this. The run iterator
+/// skips the spacer kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum Wide {
+    /// A normal single-cell-wide cell.
+    #[default]
+    Narrow,
+    /// The first cell of a two-cell-wide character.
+    Wide,
+    /// The padding cell after a wide character.
+    SpacerTail,
+    /// A padding cell at the end of a row before a wide character that wrapped.
+    SpacerHead,
+}
+
+/// The decoded per-cell data the run iterator reads from a terminal row — what
+/// upstream reads off the `cells`/`graphemes`/`styles` slices. The renderer
+/// extracts this from a terminal `Cell` (whose accessors are `pub(super)`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RunCell {
+    /// The cell's primary Unicode scalar (`0` for an empty cell).
+    pub codepoint: u32,
+    /// The grapheme's additional codepoints, in order (empty if not a grapheme).
+    pub graphemes: Vec<u32>,
+    /// The cell's effective style (the default style if the cell is unstyled).
+    pub style: TermStyle,
+    /// The cell's style id (the fast-path equality the run iterator uses before
+    /// the `comparable_style` comparison).
+    pub style_id: u16,
+    /// The cell's wide kind (spacers are skipped by the run iterator).
+    pub wide: Wide,
+    /// Whether the cell is empty (rendered as a space).
+    pub is_empty: bool,
+    /// Whether the cell's content is a plain codepoint (vs a background-color
+    /// cell) — the guard for the bad-ligature break.
+    pub is_codepoint: bool,
+}
+
+impl RunCell {
+    /// Whether the cell carries a grapheme (additional combined codepoints).
+    pub(crate) fn has_grapheme(&self) -> bool {
+        !self.graphemes.is_empty()
+    }
+}
+
+/// The input to a run iterator: a terminal row's decoded cells plus the run
+/// breaks. Faithful port of `shape.RunOptions` — `grid` is omitted (roastty
+/// passes the `CodepointResolver` to the iterator separately) and the cells are
+/// pre-decoded [`RunCell`]s rather than a terminal `MultiArrayList` slice.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct RunOptions {
+    /// The row's cells, left to right, including empty cells (the run iterator's
+    /// trimming, offset, and cluster math depend on positional indexes).
+    pub cells: Vec<RunCell>,
+    /// The `[start, end]` selection column bounds in this row, if any (a run
+    /// breaks at a selection boundary).
+    pub selection: Option<[u16; 2]>,
+    /// The cursor's column in this row, if any (a run breaks around the cursor).
+    pub cursor_x: Option<u16>,
+}
+
 /// A single text run produced by the run iterator: one row's worth of cells that
 /// share a font and a comparable style. Faithful port of upstream `TextRun` — the
 /// `grid` pointer is omitted (roastty resolves the face from `font_index` via the
@@ -210,6 +273,60 @@ mod tests {
         assert_ne!(base, run_hash(&base_cps, 3, idx));
         // A different font index.
         assert_ne!(base, run_hash(&base_cps, 2, Index::new(Style::Bold, 0)));
+    }
+
+    fn sample_cell(codepoint: u32, graphemes: Vec<u32>) -> RunCell {
+        RunCell {
+            codepoint,
+            graphemes,
+            style: TermStyle::default(),
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: codepoint == 0,
+            is_codepoint: true,
+        }
+    }
+
+    #[test]
+    fn run_cell_has_grapheme() {
+        assert!(!sample_cell('A' as u32, vec![]).has_grapheme());
+        assert!(sample_cell('n' as u32, vec![0x0308]).has_grapheme());
+    }
+
+    #[test]
+    fn run_options_default() {
+        let o = RunOptions::default();
+        assert!(o.cells.is_empty());
+        assert_eq!(o.selection, None);
+        assert_eq!(o.cursor_x, None);
+    }
+
+    #[test]
+    fn run_cell_construction() {
+        let cell = RunCell {
+            codepoint: 'Z' as u32,
+            graphemes: vec![0xFE0F],
+            style: TermStyle::default(),
+            style_id: 7,
+            wide: Wide::Wide,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        assert_eq!(cell.codepoint, 'Z' as u32);
+        assert_eq!(cell.graphemes, vec![0xFE0F]);
+        assert_eq!(cell.style_id, 7);
+        assert_eq!(cell.wide, Wide::Wide);
+        assert!(cell.has_grapheme());
+
+        let opts = RunOptions {
+            cells: vec![cell.clone(), sample_cell('A' as u32, vec![])],
+            selection: Some([1, 4]),
+            cursor_x: Some(2),
+        };
+        assert_eq!(opts.cells.len(), 2);
+        assert_eq!(opts.cells[0], cell);
+        assert_eq!(opts.selection, Some([1, 4]));
+        assert_eq!(opts.cursor_x, Some(2));
     }
 
     #[test]

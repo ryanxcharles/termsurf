@@ -204,3 +204,63 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-151526-810944-prompt.md` (design)
 - Result: `logs/codex-review/20260603-151526-810944-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The run iterator's input view is modeled.
+
+- `roastty/src/font/run.rs`: added `Wide` (the four cell-wide kinds the iterator
+  distinguishes, mirroring `terminal::page::Wide`), `RunCell` (the decoded
+  per-cell data `next()` reads — `codepoint`, `graphemes`, `style`, `style_id`,
+  `wide`, `is_empty`, `is_codepoint`, with `has_grapheme()`), and `RunOptions`
+  (the row's `cells` plus `selection`/`cursor_x`). `RunOptions` mirrors
+  `shape.RunOptions`, omitting the `grid` pointer (the resolver is passed
+  separately) and pre-decoding cells into `RunCell`s (the terminal `Cell`
+  accessors are `pub(super)`, so the renderer extracts these).
+
+Tests: `run_cell_has_grapheme` (empty vs non-empty `graphemes`),
+`run_options_default` (empty/`None`/`None`), `run_cell_construction` (field
+round-trip and `RunOptions` holding cells). All pass.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2792 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The run iterator's input contract is now modeled — the shaper↔renderer interface
+(`RunOptions`/`RunCell`) that the cell-walking `next()` loop will consume. With
+this, **every input and output of `RunIterator.next()`, and every decision it
+makes, is in place**: `RunOptions`/`RunCell` (input, 355), `TextRun`/`run_hash`
+(output, 353–354), and all the per-cell helpers (351–353).
+
+The remaining piece is the cell-walking `next()` loop body itself — a pure
+function over `(&RunOptions, &mut CodepointResolver)` that walks the row's
+`RunCell`s, applies the trailing-empty trim, the invisible/spacer skips, the
+selection/cursor/style/ligature breaks, resolves the font index per cell
+(`index_for_grapheme`), accumulates the `(codepoint, cluster)` stream, computes
+`run_hash`, and emits `TextRun`s. It is now portable entirely within
+`font/run.rs` over the just-modeled input (no further terminal coupling), plus a
+follow-up for the renderer to build `RunCell`s from terminal cells.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It verified `Wide` has the four terminal variants the
+iterator distinguishes, `RunCell` carries the fields `next()` reads from
+terminal cells, and `RunOptions` mirrors the relevant `shape.RunOptions` inputs
+while cleanly omitting `grid` for the separate resolver path; the
+left-to-right-including-empty-cells requirement is documented (covering the
+offset/trim/cluster dependency); and the deferred scope is intact (only the
+input view and tests, not the `next()` loop or renderer extraction). It ran the
+targeted tests (`run_cell`: 2 passed; `run_options`: 2 passed, including the
+existing `shape_run_options_regression`).
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-151740-809043-last-message.md`
