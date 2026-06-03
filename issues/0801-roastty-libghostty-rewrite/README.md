@@ -973,6 +973,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 263: Collection — eager faces, add / get_face](263-collection-add-getface.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 264: Collection codepoint resolution — get_index / has_codepoint](264-collection-codepoint-resolution.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
