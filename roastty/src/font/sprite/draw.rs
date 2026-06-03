@@ -1135,6 +1135,21 @@ pub(crate) fn draw_powerline_rounded(
     true
 }
 
+/// The thin diagonal powerline spacers (`E0B9`/`E0BF` `╲`, `E0BB`/`E0BD` `╱`).
+/// Upstream `powerline.zig` draws these as box-drawing diagonals, so this maps
+/// each to the equivalent box diagonal (`U+2572`/`U+2571`) and delegates to
+/// [`draw_box_diagonal`]. Returns `false` for any other codepoint.
+pub(crate) fn draw_powerline_diagonal(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> bool {
+    let box_cp = match cp {
+        // upper-left to lower-right (╲)
+        0xe0b9 | 0xe0bf => 0x2572,
+        // upper-right to lower-left (╱)
+        0xe0bb | 0xe0bd => 0x2571,
+        _ => return false,
+    };
+    draw_box_diagonal(box_cp, metrics, canvas)
+}
+
 /// The block cursor: a full-cell rect. Faithful port of upstream `special.zig`'s
 /// `cursor_rect`.
 pub(crate) fn draw_cursor_rect(canvas: &mut Canvas, width: u32, height: u32, _metrics: &Metrics) {
@@ -3702,6 +3717,66 @@ mod tests {
             assert!(
                 !draw_powerline_rounded(cp, 9, 18, &m, &mut c),
                 "{cp:#06x} not a rounded separator"
+            );
+            assert!(all_alpha(&c, &m, 0), "{cp:#06x} drew ink");
+        }
+    }
+
+    // The powerline diagonal spacers (delegating to draw_box_diagonal).
+
+    #[test]
+    fn powerline_backslash_diagonals() {
+        // E0B9/E0BF -> the ╲ diagonal (U+2572): center inked, top-right empty.
+        let m = fixture_metrics();
+        for cp in [0xe0b9u32, 0xe0bf] {
+            let mut c = cell_canvas();
+            assert!(draw_powerline_diagonal(cp, &m, &mut c));
+            assert!(inked(&c, 4, 9), "{cp:#06x} center on the backslash");
+            assert!(!inked(&c, 8, 1), "{cp:#06x} top-right empty");
+        }
+    }
+
+    #[test]
+    fn powerline_slash_diagonals() {
+        // E0BB/E0BD -> the ╱ diagonal (U+2571): center inked, top-left empty.
+        let m = fixture_metrics();
+        for cp in [0xe0bbu32, 0xe0bd] {
+            let mut c = cell_canvas();
+            assert!(draw_powerline_diagonal(cp, &m, &mut c));
+            assert!(inked(&c, 4, 9), "{cp:#06x} center on the slash");
+            assert!(!inked(&c, 0, 1), "{cp:#06x} top-left empty");
+        }
+    }
+
+    #[test]
+    fn powerline_diagonal_matches_box() {
+        // Each powerline diagonal's buffer equals the delegated box diagonal.
+        let m = fixture_metrics();
+        for (pcp, bcp) in [(0xe0b9u32, 0x2572u32), (0xe0bb, 0x2571)] {
+            let mut pc = cell_canvas();
+            assert!(draw_powerline_diagonal(pcp, &m, &mut pc));
+            let mut bc = cell_canvas();
+            assert!(draw_box_diagonal(bcp, &m, &mut bc));
+            for y in 0..18 {
+                for x in 0..9 {
+                    assert_eq!(
+                        pc.get(x, y),
+                        bc.get(x, y),
+                        "{pcp:#06x} vs {bcp:#06x} at ({x},{y})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn draw_powerline_diagonal_excludes() {
+        let m = fixture_metrics();
+        for cp in [0x2500u32, 0xe0b0, 'M' as u32] {
+            let mut c = cell_canvas();
+            assert!(
+                !draw_powerline_diagonal(cp, &m, &mut c),
+                "{cp:#06x} not a powerline diagonal"
             );
             assert!(all_alpha(&c, &m, 0), "{cp:#06x} drew ink");
         }

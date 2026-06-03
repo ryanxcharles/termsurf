@@ -126,3 +126,58 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-091310-356821-prompt.md`
 - Result: `logs/codex-review/20260603-091310-356821-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/draw.rs` gained
+`draw_powerline_diagonal(cp, metrics, canvas)`: it maps
+`0xE0B9 | 0xE0BF → 0x2572` (`╲`) and `0xE0BB | 0xE0BD → 0x2571` (`╱`) and
+delegates to the existing `draw_box_diagonal`; `_ => false`.
+
+Tests (the fixture `9×18` cell):
+
+- `powerline_backslash_diagonals` — `E0B9`/`E0BF` draw `╲` (center `(4,9)`
+  inked, top-right `(8,1)` empty).
+- `powerline_slash_diagonals` — `E0BB`/`E0BD` draw `╱` (center inked, top-left
+  `(0,1)` empty).
+- `powerline_diagonal_matches_box` — each powerline diagonal's buffer equals the
+  delegated `draw_box_diagonal` (`0x2572`/`0x2571`) buffer, pixel for pixel.
+- `draw_powerline_diagonal_excludes` — `0x2500`, `0xE0B0`, `'M'` return `false`
+  and draw nothing.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2656 passed, 0 failed (+4, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The diagonal powerline spacers render faithfully by delegating to the box
+diagonals — completing **all of `E0B0`–`E0BF`** (the six solid triangles, the
+two chevrons, the four rounded separators, and these four diagonals). The only
+remaining powerline glyphs are the **flames** (`E0D2`/`E0D4`).
+
+The larger remaining integration is the unifying sprite `has_codepoint`/draw and
+**sprite-kind dispatch** (mapping the codepoint tables — box, braille, sextant,
+octant, quadrant, block, diagonals, arcs, geometric shapes, powerline — and a
+`Sprite` enum to all the standalone `draw_*` functions, filling the resolver's
+deferred `SpriteUnavailable` arm). After the sprite font: the discovery
+consumer, the UCD emoji-presentation default, codepoint overrides, the shaper,
+the Nerd Font attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes**. It confirmed the implementation is faithful: `E0B9`/`E0BF` delegate
+to the backslash box diagonal `U+2572`, `E0BB`/`E0BD` to the slash `U+2571`,
+matching upstream's direct calls into the box routines; and that the
+buffer-equality test against `draw_box_diagonal` is the strongest check. No
+Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-091444-036349-last-message.md`

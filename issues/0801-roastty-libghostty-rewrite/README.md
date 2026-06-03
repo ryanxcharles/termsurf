@@ -1074,7 +1074,7 @@ are past the correctness-critical foundation.
 - [Experiment 313: the rounded powerline separators (E0B4–E0B7)](313-powerline-rounded.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 314: the powerline diagonal spacers (E0B9/E0BB/E0BD/E0BF)](314-powerline-diagonals.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
