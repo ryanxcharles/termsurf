@@ -7,7 +7,34 @@
 //! terminal `Cell`), `comparableStyle`, the selection/cursor/spacer breaks, and
 //! the `TextRun` value type are later sub-areas.
 
+use crate::font::collection::Index;
 use crate::font::{Presentation, Style};
+use crate::terminal::style::{Color, Style as TermStyle};
+
+/// A single text run produced by the run iterator: one row's worth of cells that
+/// share a font and a comparable style. Faithful port of upstream `TextRun` — the
+/// `grid` pointer is omitted (roastty resolves the face from `font_index` via the
+/// `CodepointResolver` at the call site rather than carrying the grid).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TextRun {
+    /// A position-independent content hash, for caching shaping results.
+    pub hash: u64,
+    /// The run's start column in the row (added to each shaped cell's `x`).
+    pub offset: u16,
+    /// The number of cells the run produced.
+    pub cells: u16,
+    /// The font index for the run's glyphs.
+    pub font_index: Index,
+}
+
+/// The style that must be identical for a run to continue: the cell's style with
+/// the background color cleared. Background colors may differ within a run — the
+/// cell background is painted regardless and the glyph lands on top in its own
+/// color. Faithful port of upstream `comparableStyle`.
+pub(crate) fn comparable_style(mut style: TermStyle) -> TermStyle {
+    style.bg_color = Color::None;
+    style
+}
 
 /// The font [`Style`] for a cell's bold/italic flags. Faithful port of upstream
 /// `RunIterator.next()`'s `font_style` derivation (bold-with-italic is
@@ -86,5 +113,47 @@ mod tests {
         assert_eq!(presentation_for_grapheme(0xFE0F), Some(Presentation::Emoji));
         assert_eq!(presentation_for_grapheme('a' as u32), None);
         assert_eq!(presentation_for_grapheme(0x200D), None);
+    }
+
+    #[test]
+    fn comparable_style_clears_bg() {
+        let mut s = TermStyle::default();
+        s.bg_color = Color::Palette(5);
+        s.fg_color = Color::Palette(3);
+        s.flags.bold = true;
+        let c = comparable_style(s);
+        assert_eq!(c.bg_color, Color::None, "bg is cleared");
+        assert_eq!(c.fg_color, Color::Palette(3), "fg is unchanged");
+        assert_eq!(c.underline_color, s.underline_color, "underline unchanged");
+        assert_eq!(c.flags, s.flags, "flags unchanged");
+    }
+
+    #[test]
+    fn comparable_style_bg_only_equal() {
+        // Two styles differing only in background compare equal after.
+        let mut a = TermStyle::default();
+        a.bg_color = Color::Palette(1);
+        let mut b = TermStyle::default();
+        b.bg_color = Color::Palette(2);
+        assert_eq!(comparable_style(a), comparable_style(b));
+        // A foreground difference still breaks the run.
+        let mut d = TermStyle::default();
+        d.fg_color = Color::Palette(9);
+        assert_ne!(comparable_style(TermStyle::default()), comparable_style(d));
+    }
+
+    #[test]
+    fn text_run_fields() {
+        let run = TextRun {
+            hash: 42,
+            offset: 3,
+            cells: 5,
+            font_index: Index::new(Style::Regular, 0),
+        };
+        assert_eq!(run.hash, 42);
+        assert_eq!(run.offset, 3);
+        assert_eq!(run.cells, 5);
+        let copy = run; // `Copy`
+        assert_eq!(run, copy); // `PartialEq`
     }
 }

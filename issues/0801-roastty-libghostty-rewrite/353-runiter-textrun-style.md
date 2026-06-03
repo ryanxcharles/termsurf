@@ -170,3 +170,63 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-150153-572145-prompt.md` (design)
 - Result: `logs/codex-review/20260603-150153-572145-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The run iterator's output type and style-break helper are ported.
+
+- `roastty/src/font/run.rs`: added `TextRun { hash, offset, cells, font_index }`
+  (the run iterator's output; the upstream `grid` pointer is omitted — roastty
+  resolves the face from `font_index` via the `CodepointResolver`) and
+  `comparable_style(style)` (clears `bg_color` so only background differences
+  are ignored for run continuation). Imported `crate::font::collection::Index`
+  and `crate::terminal::style::{Color, Style as TermStyle}` — the first `font` →
+  `terminal` dependency, aliased to avoid colliding with the `font::Style`
+  already used by `font_style`.
+
+Tests: `comparable_style_clears_bg` (`bg_color` → `None`, fg/underline/flags
+unchanged), `comparable_style_bg_only_equal` (background-only difference
+compares equal; a foreground difference does not), `text_run_fields`
+(construction, `Copy`, `PartialEq`). All pass.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2786 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The run iterator's scaffolding is complete: its output (`TextRun`), the
+font-resolution core (`index_for_grapheme`, Exp 351), and all the per-cell
+decision helpers
+(`font_style`/`is_bad_ligature_break`/`presentation_for_grapheme`, Exp 352;
+`comparable_style`, this experiment) are in place in `font/run.rs`.
+
+The one remaining piece is the cell-walking `RunIterator.next()` loop itself: it
+walks a terminal row's cells (a `RunOptions`/cells input over `terminal/page.rs`
+`Cell`s), extracts each cell's codepoint/graphemes/style/wide-kind, applies
+these now-ported helpers and breaks, accumulates the `(codepoint, cluster)`
+stream and the position-independent hash, and emits a `TextRun`. Every decision
+it makes is now ported and gated; what's left is the iteration that reads the
+terminal grid.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It confirmed `comparable_style` clears only `bg_color`
+(preserving foreground, underline, and flags), matching upstream; `TextRun`
+carries `hash`/`offset`/`cells`/`font_index` with the `grid` omission being a
+sound roastty simplification (no `SharedGrid`; resolution goes through
+`font_index` + the resolver); the `TermStyle` alias avoids the `font::Style`
+collision and the `font` → `terminal::style` dependency is appropriate for this
+run-iterator bridge; and the deferred `next()` loop, hash production, and
+selection/cursor/spacer breaks are intact (no accidental wiring). It ran the
+targeted tests — both filters passed.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-150413-288896-last-message.md`
