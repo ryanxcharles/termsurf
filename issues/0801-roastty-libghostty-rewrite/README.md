@@ -1191,6 +1191,8 @@ are past the correctness-critical foundation.
   **Pass** · Claude/Codex/Codex
 - [Experiment 372: rebuilding the whole viewport](372-rebuild-viewport.md) —
   **Pass** · Claude/Codex/Codex
+- [Experiment 373: the background-cell row](373-rebuild-bg.md) — **Designed** ·
+  Claude/Codex/Codex
 
 ## Non-Goals
 
