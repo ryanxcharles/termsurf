@@ -232,3 +232,71 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-184723-652094-prompt.md` (design)
 - Result: `logs/codex-review/20260603-184723-652094-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The underline decoration is ported — the first of the three decorations.
+
+- `roastty/src/renderer/cell.rs`:
+  `add_underline(contents, grid, grid_pos, underline, color, alpha)` maps the
+  `Underline` variant to its `Sprite` (`Single → Underline`,
+  `Double → UnderlineDouble`, `Dotted → UnderlineDotted`,
+  `Dashed → UnderlineDashed`, `Curly → UnderlineCurly`; `None → Ok(())`),
+  renders it via
+  `grid.render_glyph(Index::special(Special:: Sprite), sprite as u32, opts{cell_width: Some(1), grid.metrics})`,
+  and adds a `Key::Underline` cell — grayscale atlas, the supplied color, the
+  sprite's atlas placement/size, and the glyph's own bearings (no shaper
+  offset). Imported `font::collection::Special`, `font::sprite::draw::Sprite`,
+  and `terminal::sgr::Underline`.
+
+Tests (in `cell.rs`):
+
+- `add_underline_maps_each_variant_to_its_sprite` — table over all five
+  variants; for each, `add_underline` adds one `Key::Underline` cell to
+  `fg_rows[1]` with `grid_pos [0, 0]`, grayscale atlas, and color
+  `[5, 6, 7, 255]`; a **same-grid** direct render of the expected sprite is a
+  cache hit (identical atlas region) only if `add_underline` rendered exactly
+  that sprite, so the `glyph_pos`/`glyph_size`/`bearings` equality proves the
+  variant→sprite mapping (catching even visually-similar swaps).
+- `add_underline_none_adds_nothing` — `Underline::None` adds no cell.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2827 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The renderer can now draw underlines — each of the five variants renders the
+correct sprite into a `Key::Underline` cell. With the foreground text, the
+backgrounds, and now the underline, `Contents` holds three of the cell kinds a
+viewport needs.
+
+The remaining renderer-bridge work: the **strikethrough** and **overline**
+decorations (the same `Sprite` pattern, one variant each); the underline-color
+resolution (`Style::underline_color`); the row/viewport integration (calling the
+decoration writers per decorated cell); the **cursor** cell; the renderer-layer
+color adjustments; and the **Metal upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `add_underline` is faithful to upstream
+`addUnderline` (the variant mapping covers all five styles correctly, renders
+through `Index::special(Special::Sprite)` with `cell_width: Some(1)`, emits
+`Key::Underline`, uses the grayscale atlas, passes through color/alpha, and uses
+glyph-only bearings with checked `i16` conversion). It confirmed the Required
+test fix is applied well — the table covers all non-`None` variants, and the
+same-grid direct render is a strong check (a wrong sprite would
+allocate/retrieve a different cache entry, so the
+`glyph_pos`/`glyph_size`/`bearings` comparison would fail), with
+`Underline::None` separately verified to add nothing. Nothing needed to change
+before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-185047-509581-last-message.md`

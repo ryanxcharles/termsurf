@@ -16,7 +16,7 @@ use super::cursor::Style as CursorStyle;
 use super::shader::{CellBg, CellTextAtlas, CellTextFlags, CellTextVertex};
 use super::size::GridSize;
 use crate::font::codepoint_resolver::ResolverRenderError;
-use crate::font::collection::Index;
+use crate::font::collection::{Index, Special};
 use crate::font::face::constraint::{Constraint, Size};
 use crate::font::face::coretext::RenderOptions;
 use crate::font::face::nerd_font_attributes::get_constraint;
@@ -24,8 +24,10 @@ use crate::font::metrics::Metrics;
 use crate::font::run::{shape_row, RunCell, RunOptions, ShapedRun, Wide};
 use crate::font::shape;
 use crate::font::shared_grid::SharedGrid;
+use crate::font::sprite::draw::Sprite;
 use crate::font::Presentation;
 use crate::terminal::color::{Palette, Rgb};
+use crate::terminal::sgr::Underline;
 use crate::terminal::style::BoldColor;
 
 /// True only for U+2588 FULL BLOCK.
@@ -582,6 +584,59 @@ pub(crate) fn rebuild_bg_row(
             .unwrap_or(CellBg([0, 0, 0, 0]));
         *contents.bg_cell_mut(row, col) = bg;
     }
+}
+
+/// Render a cell's underline as a sprite through `grid` and add it to `contents`
+/// as a [`Key::Underline`] decoration cell at `grid_pos` with `color`/`alpha`.
+/// `Underline::None` adds nothing. Faithful port of upstream `addUnderline`: the
+/// sprite (one of five variants) is drawn at `cell_width = 1` into the grayscale
+/// atlas, and the bearings are the sprite glyph's own offsets (a decoration has
+/// no shaper offset).
+pub(crate) fn add_underline(
+    contents: &mut Contents,
+    grid: &mut SharedGrid,
+    grid_pos: [u16; 2],
+    underline: Underline,
+    color: [u8; 3],
+    alpha: u8,
+) -> Result<(), ResolverRenderError> {
+    let sprite = match underline {
+        Underline::None => return Ok(()),
+        Underline::Single => Sprite::Underline,
+        Underline::Double => Sprite::UnderlineDouble,
+        Underline::Dotted => Sprite::UnderlineDotted,
+        Underline::Dashed => Sprite::UnderlineDashed,
+        Underline::Curly => Sprite::UnderlineCurly,
+    };
+
+    let opts = RenderOptions {
+        grid_metrics: grid.metrics,
+        cell_width: Some(1),
+        constraint: Constraint::default(),
+        constraint_width: 1,
+        thicken: false,
+        thicken_strength: 255,
+    };
+    let render = grid.render_glyph(Index::special(Special::Sprite), sprite as u32, &opts)?;
+
+    contents.add(
+        Key::Underline,
+        CellTextVertex {
+            glyph_pos: [render.glyph.atlas_x, render.glyph.atlas_y],
+            glyph_size: [render.glyph.width, render.glyph.height],
+            // A decoration has no shaper cell, so only the glyph's own bearings.
+            bearings: [
+                i16::try_from(render.glyph.offset_x).expect("underline x bearing fits i16"),
+                i16::try_from(render.glyph.offset_y).expect("underline y bearing fits i16"),
+            ],
+            grid_pos,
+            color: [color[0], color[1], color[2], alpha],
+            atlas: CellTextAtlas::Grayscale,
+            flags: CellTextFlags::new(false, false),
+            _padding: [0, 0],
+        },
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1173,6 +1228,76 @@ mod tests {
         assert_eq!(*c.bg_cell(0, 0), CellBg([p1.r, p1.g, p1.b, 255]));
         // The default-background cell is cleared to transparent.
         assert_eq!(*c.bg_cell(0, 1), CellBg([0, 0, 0, 0]));
+    }
+
+    fn underline_opts(grid: &SharedGrid) -> RenderOptions {
+        RenderOptions {
+            grid_metrics: grid.metrics,
+            cell_width: Some(1),
+            constraint: Constraint::default(),
+            constraint_width: 1,
+            thicken: false,
+            thicken_strength: 255,
+        }
+    }
+
+    #[test]
+    fn add_underline_maps_each_variant_to_its_sprite() {
+        for (variant, sprite) in [
+            (Underline::Single, Sprite::Underline),
+            (Underline::Double, Sprite::UnderlineDouble),
+            (Underline::Dotted, Sprite::UnderlineDotted),
+            (Underline::Dashed, Sprite::UnderlineDashed),
+            (Underline::Curly, Sprite::UnderlineCurly),
+        ] {
+            let mut shared = menlo_grid();
+            let mut c = Contents::default();
+            c.resize(grid(2, 1));
+
+            add_underline(&mut c, &mut shared, [0, 0], variant, [5, 6, 7], 255)
+                .expect("add_underline");
+
+            // One Key::Underline cell, routed like text to fg_rows[y + 1].
+            assert_eq!(c.fg_rows[1].len(), 1, "{variant:?}");
+            let v = c.fg_rows[1][0];
+            assert_eq!(v.grid_pos, [0, 0]);
+            assert_eq!(v.atlas, CellTextAtlas::Grayscale);
+            assert_eq!(v.color, [5, 6, 7, 255]);
+
+            // Direct-render the expected sprite on the SAME grid: the cache is
+            // keyed by the sprite codepoint, so this is a hit (identical atlas
+            // region) iff `add_underline` rendered exactly this sprite.
+            let opts = underline_opts(&shared);
+            let expected = shared
+                .render_glyph(Index::special(Special::Sprite), sprite as u32, &opts)
+                .expect("expected sprite renders")
+                .glyph;
+            assert_eq!(
+                v.glyph_pos,
+                [expected.atlas_x, expected.atlas_y],
+                "{variant:?} selected the wrong sprite"
+            );
+            assert_eq!(
+                v.glyph_size,
+                [expected.width, expected.height],
+                "{variant:?}"
+            );
+            assert_eq!(
+                v.bearings,
+                [expected.offset_x as i16, expected.offset_y as i16],
+                "{variant:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn add_underline_none_adds_nothing() {
+        let mut shared = menlo_grid();
+        let mut c = Contents::default();
+        c.resize(grid(2, 1));
+        add_underline(&mut c, &mut shared, [0, 0], Underline::None, [5, 6, 7], 255)
+            .expect("add_underline");
+        assert!(c.fg_rows[1].is_empty());
     }
 
     #[test]
