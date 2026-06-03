@@ -1013,6 +1013,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 283: Octants (U+1CD00–U+1CDE5)](283-octants.md) — **Pass** ·
   Claude/Codex/Codex
+- [Experiment 284: z2d port — the Polygon/Edge tessellation core](284-z2d-polygon-core.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
