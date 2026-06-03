@@ -1161,6 +1161,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 357: the run iterator's spacer skip and selection/cursor breaks](357-runiter-breaks.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 358: decoding a terminal row into RunCells](358-render-runcell-extract.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
