@@ -520,6 +520,133 @@ fn add_supersampled_span(cb: &mut SparseCoverageBuffer, x: u32, len: u32) {
     }
 }
 
+/// `src_over` composite of an opaque-`.on` source (modulated to `alpha`) over the
+/// destination alpha8 value `dst`. Faithful port of z2d's integer `srcOver` for
+/// the single-channel case: `out = alpha + dst - trunc(alpha * dst / 255)`
+/// (z2d's `mul` truncates).
+fn src_over_alpha8(dst: u8, alpha: u8) -> u8 {
+    (alpha as u32 + dst as u32 - (alpha as u32 * dst as u32) / 255) as u8
+}
+
+/// Rasterize `polygon` into the alpha8 `buf` (`width * height`, row-major) with
+/// 4× multisample anti-aliasing, filling with the opaque `.on` source (255)
+/// under `src_over`. Faithful port of z2d's `multisample.run`, specialized to
+/// the sprite case (alpha8 surface, opaque source, bounded `src_over` operator —
+/// so the unbounded-clear branches drop out).
+pub(crate) fn fill_polygon(
+    buf: &mut [u8],
+    width: i32,
+    height: i32,
+    polygon: &Polygon,
+    fill_rule: FillRule,
+) {
+    let scale = MSAA_SCALE as i32; // 4
+    let coverage_full: u8 = (MSAA_SCALE * MSAA_SCALE) as u8; // 16
+    let alpha_scale: i32 = 256 / coverage_full as i32; // 16
+
+    if !polygon.in_box(MSAA_SCALE as f64, width, height) {
+        return;
+    }
+
+    let scale_f = scale as f64;
+    let start_scanline = ((polygon.extent_top / scale_f).floor() as i32).clamp(0, height - 1);
+    let end_scanline =
+        ((polygon.extent_bottom / scale_f).ceil() as i32).clamp(start_scanline, height - 1);
+    let scanline_start_x = ((polygon.extent_left / scale_f).floor() as i32).clamp(0, width - 1);
+    let scanline_end_x =
+        ((polygon.extent_right / scale_f).ceil() as i32).clamp(scanline_start_x, width);
+    let scanline_draw_width = scanline_end_x - scanline_start_x;
+    if scanline_draw_width < 1 {
+        return;
+    }
+    let scanline_start_x_scaled = scanline_start_x * scale;
+    let scanline_draw_width_scaled = scanline_draw_width * scale;
+
+    let mut coverage_buffer = SparseCoverageBuffer::new(scanline_draw_width as u32);
+    let mut working = WorkingEdgeSet::new(polygon);
+    let y_breakpoints = working.breakpoints();
+
+    // The initial breakpoint index: the saturating predecessor of the first
+    // breakpoint >= start_scanline. No-op if no breakpoint qualifies.
+    let mut bp_idx: usize = {
+        let mut found: Option<usize> = None;
+        for (idx, &y) in y_breakpoints.iter().enumerate() {
+            if y >= start_scanline {
+                found = Some(idx.saturating_sub(1));
+                break;
+            }
+        }
+        match found {
+            Some(i) => i,
+            None => return,
+        }
+    };
+
+    for y in start_scanline..=end_scanline {
+        coverage_buffer.reset();
+        let y_scaled = y * scale;
+        for y_offset in 0..scale {
+            let y_scanline_scaled = y_scaled + y_offset;
+            if y_scanline_scaled >= y_breakpoints[bp_idx] {
+                working.rescan(y_scanline_scaled);
+                if bp_idx < y_breakpoints.len() - 1 {
+                    bp_idx += 1;
+                }
+            }
+
+            working.inc(y_scanline_scaled);
+            working.sort();
+            let filtered = working.filter(fill_rule);
+
+            let mut x_min: i32 = 0;
+            for pair in 0..filtered.len() / 2 {
+                let start_x = x_min.max(filtered[pair * 2] - scanline_start_x_scaled);
+                if start_x >= scanline_draw_width_scaled {
+                    break;
+                }
+                let end_x = (filtered[pair * 2 + 1] - scanline_start_x_scaled)
+                    .clamp(start_x, scanline_draw_width_scaled);
+                let fill_len = end_x - start_x;
+                if fill_len > 0 {
+                    add_supersampled_span(
+                        &mut coverage_buffer,
+                        start_x.max(0) as u32,
+                        fill_len.max(0) as u32,
+                    );
+                }
+                x_min = end_x;
+            }
+        }
+
+        // Write out the accumulated coverage runs for this pixel row.
+        let coverage_x_max = coverage_buffer.len.min(coverage_buffer.capacity);
+        let mut cov_x: u32 = 0;
+        while cov_x < coverage_x_max {
+            let x = cov_x as i32 + scanline_start_x;
+            let (cov_raw, cov_len_raw) = coverage_buffer.get(cov_x);
+            let coverage_val = cov_raw.min(coverage_full);
+            let coverage_len = cov_len_raw.min((width - x).max(0) as u32);
+
+            if coverage_val == 0 {
+                // skip
+            } else if coverage_val == coverage_full {
+                // Fully opaque span: overwrite with the source (.on = 255).
+                for k in 0..coverage_len as i32 {
+                    buf[(y * width + x + k) as usize] = 255;
+                }
+            } else {
+                let alpha = (coverage_val as i32 * alpha_scale - 1).clamp(0, 255) as u8;
+                for k in 0..coverage_len as i32 {
+                    let idx = (y * width + x + k) as usize;
+                    buf[idx] = src_over_alpha8(buf[idx], alpha);
+                }
+            }
+
+            cov_x += cov_len_raw;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -912,5 +1039,72 @@ mod tests {
         let mut c = SparseCoverageBuffer::new(10);
         add_supersampled_span(&mut c, 0, 0);
         assert_eq!(c.len, 0);
+    }
+
+    // fill_polygon — the multisample rasterizer run.
+
+    /// A closed-contour polygon (device coords) at the MSAA scale.
+    fn closed_polygon(pts: &[(f64, f64)]) -> Polygon {
+        let mut p = Polygon::new(MSAA_SCALE as f64);
+        for i in 0..pts.len() {
+            let a = pts[i];
+            let b = pts[(i + 1) % pts.len()];
+            p.add_edge(Point::new(a.0, a.1), Point::new(b.0, b.1));
+        }
+        p
+    }
+
+    #[test]
+    fn src_over_math() {
+        assert_eq!(src_over_alpha8(0, 127), 127);
+        assert_eq!(src_over_alpha8(255, 100), 255);
+        // 127 + 127 - trunc(127*127/255) = 254 - 63 = 191.
+        assert_eq!(src_over_alpha8(127, 127), 191);
+    }
+
+    #[test]
+    fn fill_square_crisp() {
+        // A 4x4 axis-aligned square at device (1,1)-(5,5) into a 6x6 surface.
+        let p = closed_polygon(&[(1.0, 1.0), (5.0, 1.0), (5.0, 5.0), (1.0, 5.0)]);
+        let mut buf = vec![0u8; 36];
+        fill_polygon(&mut buf, 6, 6, &p, FillRule::NonZero);
+        for y in 0..6 {
+            for x in 0..6 {
+                let want = if (1..5).contains(&x) && (1..5).contains(&y) {
+                    255
+                } else {
+                    0
+                };
+                assert_eq!(buf[y * 6 + x], want, "pixel ({x},{y})");
+            }
+        }
+    }
+
+    #[test]
+    fn fill_partial_row_aa() {
+        // A rectangle (1,1)-(3,2.5): the bottom pixel row is half-covered ->
+        // 2/4 sub-scanlines -> coverage 8 -> alpha 8*16-1 = 127.
+        let p = closed_polygon(&[(1.0, 1.0), (3.0, 1.0), (3.0, 2.5), (1.0, 2.5)]);
+        let mut buf = vec![0u8; 36];
+        fill_polygon(&mut buf, 6, 6, &p, FillRule::NonZero);
+        for y in 0..6 {
+            for x in 0..6 {
+                let want = match (x, y) {
+                    (1, 1) | (2, 1) => 255,
+                    (1, 2) | (2, 2) => 127,
+                    _ => 0,
+                };
+                assert_eq!(buf[y * 6 + x], want, "pixel ({x},{y})");
+            }
+        }
+    }
+
+    #[test]
+    fn fill_outside_noop() {
+        // A square entirely outside the 6x6 surface draws nothing.
+        let p = closed_polygon(&[(10.0, 10.0), (14.0, 10.0), (14.0, 14.0), (10.0, 14.0)]);
+        let mut buf = vec![0u8; 36];
+        fill_polygon(&mut buf, 6, 6, &p, FillRule::NonZero);
+        assert!(buf.iter().all(|&v| v == 0));
     }
 }

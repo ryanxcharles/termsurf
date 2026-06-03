@@ -155,3 +155,69 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-061058-578728-prompt.md`
 - Result: `logs/codex-review/20260603-061058-578728-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/raster.rs` gained `src_over_alpha8` (the truncating
+integer `src_over`) and `fill_polygon` — the faithful sprite-specialized port of
+z2d's `multisample.run`: the scanline/column range computation, the
+saturating-predecessor breakpoint-index init, the per-row/per-sub-scanline loop
+(breakpoint rescan + index advance, `inc`, `sort`, `filter`, the `x_min`-guarded
+pair walk feeding `add_supersampled_span`), and the coverage write-out
+(clamp/crop, zero-skip, full-coverage opaque `255`, partial
+`alpha = clamp(cov*16-1, 0, 255)` source-over).
+
+Tests (deterministic; polygons built at `scale = MSAA_SCALE`):
+
+- `src_over_math` — `src_over_alpha8(0,127)=127`, `(255,100)=255`,
+  `(127,127)=191`.
+- `fill_square_crisp` — a `(1,1)-(5,5)` square into a `6×6` buffer: exactly the
+  interior `x∈[1,5), y∈[1,5)` is `255`, every other pixel `0` (full 36-pixel
+  check).
+- `fill_partial_row_aa` — a `(1,1)-(3,2.5)` rectangle: row `y=1` cols `1,2` are
+  `255`, the half-covered row `y=2` cols `1,2` are exactly `127`, the rest `0` —
+  the AA value verified end-to-end through the whole pipeline.
+- `fill_outside_noop` — an out-of-box polygon draws nothing.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty raster` → 36 passed (4 new).
+- `cargo test -p roastty` → 2537 passed, 0 failed (no regressions; +4).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The z2d fill rasterizer is **complete and verified end to end**: an arbitrary
+`Polygon` rasterizes into an alpha8 surface with 4× multisample anti-aliasing,
+the half-pixel AA value (`127`) confirmed through the whole `Polygon` →
+`WorkingEdgeSet` → `SparseCoverageBuffer` → `add_supersampled_span` → composite
+pipeline. What remains to reach the box-drawing diagonals/arcs is the **path
+front-end**: the `fill_plotter` (a path's line/curve nodes → flattened `Polygon`
+contours) and the `stroke_plotter` (a stroked path → outline `Polygon`, with
+butt caps and the join/`Pen` machinery), then a
+`Canvas::fill_path`/`line`/`stroke` that builds the polygon and calls
+`fill_polygon` on the (padded) `Canvas` buffer. The simplest first consumer is
+`Canvas::line` (a 2-node path, butt cap) → the three box-drawing diagonals
+(`0x2571`–`0x2573`). Alongside the sprite font remain the discovery consumer,
+the UCD emoji-presentation default, codepoint overrides, the shaper, the Nerd
+Font attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no required
+changes**. It confirmed `fill_polygon` is faithful for the sprite-specialized
+`multisample.run` port — the range computation, breakpoint init, sub-scanline
+loop, span recording, write-out behavior, and `src_over_alpha8` math all match
+z2d under the alpha8/opaque-`.on`/bounded-`src_over` scope — and that the tests
+are deterministic and cover the key outcomes (crisp full coverage, the half-row
+AA `127`, the outside no-op, and `src_over_alpha8(127,127) == 191`). It judged
+the gates clean.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260603-061505-087270-prompt.md`
+- Result: `logs/codex-review/20260603-061505-087270-last-message.md`
