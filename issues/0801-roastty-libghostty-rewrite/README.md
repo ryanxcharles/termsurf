@@ -1015,6 +1015,8 @@ are past the correctness-critical foundation.
   Claude/Codex/Codex
 - [Experiment 284: z2d port — the Polygon/Edge tessellation core](284-z2d-polygon-core.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 285: z2d port — the WorkingEdgeSet active-edge-table](285-z2d-working-edge-set.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
