@@ -1,8 +1,9 @@
 //! Shared SFNT scalar types and a big-endian reader.
 //!
 //! Faithful port of the parts of upstream `font/opentype/sfnt.zig` needed by the
-//! `head`/`hhea` table parsers. The `Version16Dot16` type, `F26Dot6`, and the
-//! whole-file `SFNT` table-directory reader are deferred to later slices.
+//! `head`/`hhea`/`post` table parsers (scalar types, `Fixed`, `Version16Dot16`,
+//! and a big-endian reader). `F26Dot6` and the whole-file `SFNT`
+//! table-directory reader are deferred to later slices.
 
 /// An error parsing an OpenType table — the analog of upstream
 /// `error{EndOfStream}`.
@@ -26,6 +27,28 @@ impl Fixed {
     /// Convert from a float, rounding to the nearest 16.16 value.
     pub(crate) fn from_f64(v: f64) -> Fixed {
         Fixed((v * 65536.0).round() as i32)
+    }
+}
+
+/// A `Version16Dot16` version number: a `u32` whose high 16 bits are the major
+/// version and low 16 bits the minor. Used by `post.version`.
+///
+/// Upstream is `packed struct(u32) { minor: u16, major: u16 }`; a Zig packed
+/// struct fills from the least-significant bit, so `minor` is the low half and
+/// `major` the high half.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Version16Dot16 {
+    pub major: u16,
+    pub minor: u16,
+}
+
+impl Version16Dot16 {
+    /// Split a big-endian-read `u32` into `{ major (high 16), minor (low 16) }`.
+    pub(crate) fn from_u32(raw: u32) -> Version16Dot16 {
+        Version16Dot16 {
+            major: (raw >> 16) as u16,
+            minor: (raw & 0xFFFF) as u16,
+        }
     }
 }
 
@@ -115,5 +138,18 @@ mod tests {
 
         let mut r = Reader::new(&[0x00, 0x00, 0x00]); // 3 bytes, need 4
         assert_eq!(r.read_u32(), Err(OpenTypeError::EndOfStream));
+    }
+
+    #[test]
+    fn version16dot16_layout() {
+        // major is the high 16 bits, minor the low 16.
+        assert_eq!(
+            Version16Dot16::from_u32(0x0002_0000),
+            Version16Dot16 { major: 2, minor: 0 }
+        );
+        assert_eq!(
+            Version16Dot16::from_u32(0x0001_0005),
+            Version16Dot16 { major: 1, minor: 5 }
+        );
     }
 }

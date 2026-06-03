@@ -6,10 +6,11 @@
 //! directly, so these parsers are the pure-Rust prerequisite for the font face
 //! path.
 //!
-//! This slice ports the shared SFNT scalar types and the `head` and `hhea`
-//! tables; `os2`/`post`, the whole-file SFNT table-directory reader, and the
+//! This slice ports the shared SFNT scalar types and the `head`, `hhea`, and
+//! `post` tables; `os2`, the whole-file SFNT table-directory reader, and the
 //! CoreText FFI land in later experiments.
 
 pub(crate) mod head;
 pub(crate) mod hhea;
+pub(crate) mod post;
 pub(crate) mod sfnt;

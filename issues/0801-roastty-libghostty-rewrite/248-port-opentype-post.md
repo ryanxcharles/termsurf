@@ -154,3 +154,77 @@ glyph-name payloads), that the `Version16Dot16` mapping is correct (Zig's
 and that the fixture bytes are correctly encoded (`italic_angle 0.0`,
 `underline_position -200 = 0xFF38`, `underline_thickness 100 = 0x0064`, version
 `0x00020000`). Deferring `os2`/CoreText is cleanly scoped.
+
+## Result
+
+**Result:** Pass
+
+Added `Version16Dot16` (+`from_u32`) to `opentype/sfnt.rs` and the `Post` parser
+(`opentype/post.rs`, `pub(crate) mod post;` in `opentype/mod.rs`).
+`Post::from_bytes` reads the 32-byte v1.0 header field-by-field big-endian in
+spec order (`version` via `read_u32` → `Version16Dot16::from_u32`,
+`italic_angle` as `Fixed`, the two underline `i16`, the five `u32`). The module
+doc was updated to list `post`.
+
+Tests added (3): `version16dot16_layout` (`0x00020000 → {2,0}`,
+`0x00010005 → {1,5}`), `parse_post` (hand-built 32-byte fixture → `version 2.0`,
+`underline_position -200`, `underline_thickness 100`, `is_fixed_pitch 1`, rest
+0), `post_truncated` (31 bytes → `EndOfStream`).
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty opentype
+cargo test -p roastty
+```
+
+Observed:
+
+- `opentype`: 10 passed (7 prior + 3 new).
+- Full `roastty`: 2349 unit tests passed (2346 prior + 3 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gate passed for `roastty/src/font`.
+- `git diff --check`: clean.
+
+No C ABI, header, or ABI inventory changes; `os2` and the CoreText FFI cleanly
+deferred.
+
+### Completion Review
+
+Codex reviewed the completed implementation.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-194857-441924-prompt.md`
+- Result: `logs/codex-review/20260602-194857-441924-last-message.md`
+
+Codex confirmed `Version16Dot16::from_u32` (major high 16 / minor low 16),
+`Post::from_bytes` (9 fields, correct 32-byte order/widths), correct big-endian
+fixture bytes, `EndOfStream` on truncation, and no-unsafe/no-FFI scope.
+
+One Low finding, fixed before the result commit:
+
+1. **Low — stale `sfnt.rs` module doc.** The doc still listed `Version16Dot16`
+   as deferred. Updated to reflect that the scalar types, `Fixed`, and
+   `Version16Dot16` are now ported (only `F26Dot6` and the SFNT directory reader
+   remain deferred).
+
+## Conclusion
+
+Experiment 248 succeeds. `post` (underline metrics) and the shared
+`Version16Dot16` are ported, leaving `os2` as the last metric table before the
+CoreText `Face`. Both Codex gates passed (zero design findings; one low result
+finding — the stale doc — fixed).
+
+The next slice is **`os2`** — the largest metric table, with version-gated
+optional fields: the v0 common block (`sTypoAscender`/`sTypoDescender`/
+`sTypoLineGap`, `usWinAscent`/`usWinDescent`, `fsSelection`), the v1 code-page
+ranges, and the v2+ `sxHeight`/`sCapHeight` (and v5 optical sizes). `getMetrics`
+reads the typo metrics (preferred when the `fsSelection` USE_TYPO_METRICS bit is
+set), the win ascent/descent fallback, and the cap/ex heights. With `os2` in
+place, all four tables `getMetrics` parses exist, and the CoreText `Face` FFI
+(`CTFontCopyTable` → these parsers → `FaceMetrics` → `Metrics::calc`) becomes
+the next experiment.
