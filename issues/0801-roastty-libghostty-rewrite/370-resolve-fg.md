@@ -153,3 +153,60 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-182050-764343-prompt.md` (design)
 - Result: `logs/codex-review/20260603-182050-764343-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The renderer can now resolve a cell's foreground color.
+
+- `roastty/src/terminal/style.rs`: `BoldColor` widened to `pub(crate)` (so the
+  renderer can express the bold-color config);
+  `Style::resolve_fg(self, default, palette, bold) -> Rgb` added as a
+  `pub(crate)` wrapper that builds the internal `Fg { default, palette, bold }`
+  and delegates to the (still `pub(super)`) `Style::fg`. No color logic changed
+  — it is a pure pass-through.
+
+Test (in `style.rs`): `resolve_fg_delegates_to_fg` asserts
+`Style::default() .resolve_fg(default, &DEFAULT_PALETTE, None) == default`, a
+bold `Color::Palette(1)` with `BoldColor::Bright` → `DEFAULT_PALETTE[9]` (the
+bright variant), and a `Color::Rgb(x)` → `x`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2820 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+Both per-row inputs the outer `rebuildCells` loop needs are now reachable from
+the shaping output: the `CellInfo` slice (`cell_infos`, Experiment 369) and each
+cell's resolved foreground (`Style::resolve_fg` over `RunCell.style`, this
+experiment). A row's `RunCell`s (from `Terminal::shape_run_options`) can be
+mapped to both `add_run` inputs without any terminal internals beyond the
+`pub(crate)` entry points.
+
+The remaining renderer-bridge work is the **outer `rebuildCells` loop**: per
+row, build the `CellInfo` slice (`cell_infos`) and the per-column `fg_colors`
+(`resolve_fg` + alpha) from the row's `RunCell`s, then iterate the row's
+`ShapedRun`s (from `shape_viewport`) calling `add_run` — plus the renderer-layer
+color adjustments (reverse-video, selection, min-contrast), the
+background/decoration/cursor cells, and the Metal upload of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `resolve_fg` is a faithful pass-through (it
+constructs the same internal `Fg` wrapper and delegates directly to `Style::fg`
+with no color logic added or changed), that `Fg` remains `pub(super)` while only
+`BoldColor` is widened to `pub(crate)` (the minimal visibility surface the
+renderer needs), and that the test covers the wrapper's forwarding path (default
+fallback, palette brightening through `BoldColor::Bright`, RGB passthrough) with
+the existing foreground tests still covering the deeper bold-color behavior.
+Nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-182242-122525-last-message.md`

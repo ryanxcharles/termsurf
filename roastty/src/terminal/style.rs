@@ -63,6 +63,23 @@ impl Style {
         }
     }
 
+    /// Resolve this cell's foreground to an [`Rgb`], given the renderer's default
+    /// foreground, the active `palette`, and the bold-color config. A `pub(crate)`
+    /// wrapper over the (terminal-internal) [`Self::fg`] so the renderer can
+    /// resolve colors without the `pub(super)` [`Fg`] options struct.
+    pub(crate) fn resolve_fg(
+        self,
+        default: Rgb,
+        palette: &Palette,
+        bold: Option<BoldColor>,
+    ) -> Rgb {
+        self.fg(Fg {
+            default,
+            palette,
+            bold,
+        })
+    }
+
     pub(super) fn bg_color(self, palette: &Palette) -> Option<Rgb> {
         match self.bg_color {
             Color::None => None,
@@ -405,7 +422,7 @@ impl Default for Flags {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum BoldColor {
+pub(crate) enum BoldColor {
     Color(Rgb),
     Bright,
 }
@@ -761,6 +778,39 @@ mod tests {
             }),
             bold
         );
+    }
+
+    #[test]
+    fn resolve_fg_delegates_to_fg() {
+        let default = Rgb::new(1, 2, 3);
+
+        // Color::None, not bold -> the default foreground.
+        assert_eq!(
+            Style::default().resolve_fg(default, &DEFAULT_PALETTE, None),
+            default
+        );
+
+        // Color::Palette(1) + bold + Bright -> the bright variant palette[9].
+        let palette_bold = Style {
+            fg_color: Color::Palette(1),
+            flags: Flags {
+                bold: true,
+                ..Flags::default()
+            },
+            ..Style::default()
+        };
+        assert_eq!(
+            palette_bold.resolve_fg(default, &DEFAULT_PALETTE, Some(BoldColor::Bright)),
+            DEFAULT_PALETTE[9]
+        );
+
+        // Color::Rgb(x) -> x.
+        let rgb = Rgb::new(40, 50, 60);
+        let rgb_style = Style {
+            fg_color: Color::Rgb(rgb),
+            ..Style::default()
+        };
+        assert_eq!(rgb_style.resolve_fg(default, &DEFAULT_PALETTE, None), rgb);
     }
 
     #[test]

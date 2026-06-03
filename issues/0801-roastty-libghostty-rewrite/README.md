@@ -1186,7 +1186,7 @@ are past the correctness-critical foundation.
 - [Experiment 369: deriving the CellInfo row](369-cell-infos.md) — **Pass** ·
   Claude/Codex/Codex
 - [Experiment 370: exposing foreground color resolution](370-resolve-fg.md) —
-  **Designed** · Claude/Codex/Codex
+  **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
