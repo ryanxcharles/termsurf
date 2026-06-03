@@ -957,6 +957,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 255: CoreText render_glyph — rasterize into the atlas, return a Glyph](255-coretext-render-glyph.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 256: Glyph constraint math — the constrain geometry, fixture-exact](256-glyph-constraint.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
