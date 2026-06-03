@@ -1197,6 +1197,8 @@ are past the correctness-critical foundation.
   **Pass** · Claude/Codex/Codex
 - [Experiment 375: the underline decoration cell](375-add-underline.md) —
   **Pass** · Claude/Codex/Codex
+- [Experiment 376: strikethrough and overline decorations](376-add-strike-overline.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
