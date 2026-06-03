@@ -1089,6 +1089,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 321: the sprite-kind special glyph dispatch](321-sprite-kind-special-glyphs.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 322: the UCD emoji-presentation default](322-ucd-emoji-presentation-default.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
