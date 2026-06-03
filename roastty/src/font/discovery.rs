@@ -19,8 +19,10 @@ use objc2_core_foundation::{
 use objc2_core_text::{
     kCTFontCharacterSetAttribute, kCTFontFamilyNameAttribute, kCTFontSizeAttribute,
     kCTFontStyleNameAttribute, kCTFontSymbolicTrait, kCTFontTraitsAttribute, CTFont,
-    CTFontCollection, CTFontDescriptor, CTFontSymbolicTraits,
+    CTFontCollection, CTFontDescriptor, CTFontSymbolicTraits, CTFontTableOptions,
 };
+
+use crate::font::opentype::{head::Head, os2::Os2};
 
 /// A font-variation axis setting (e.g. weight `wght`, slant `slnt`).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -287,8 +289,22 @@ impl Descriptor {
         // Symbolic traits drive monospace and the initial bold/italic guesses.
         let traits = symbolic_traits(ct_desc);
         s.monospace = traits.contains(CTFontSymbolicTraits::TraitMonoSpace);
-        let is_bold = traits.contains(CTFontSymbolicTraits::TraitBold);
-        let is_italic = traits.contains(CTFontSymbolicTraits::TraitItalic);
+        let mut is_bold = traits.contains(CTFontSymbolicTraits::TraitBold);
+        let mut is_italic = traits.contains(CTFontSymbolicTraits::TraitItalic);
+
+        // Refine the guesses from the font's own tables, which are generally more
+        // reliable than the symbolic traits. The `head` `macStyle` bits and the
+        // `OS/2` `fsSelection` bits can only turn a flag on (OR-ed in). (The
+        // variation-axis derivation, which overwrites these for variable fonts,
+        // is a later experiment.)
+        if let Some(head) = copy_table(&font, b"head").and_then(|d| Head::from_bytes(&d).ok()) {
+            is_bold |= head.mac_style & 1 == 1;
+            is_italic |= head.mac_style & 2 == 2;
+        }
+        if let Some(os2) = copy_table(&font, b"OS/2").and_then(|d| Os2::from_bytes(&d).ok()) {
+            is_bold |= os2.fs_selection.bold();
+            is_italic |= os2.fs_selection.italic();
+        }
 
         // The bold/italic fields are whether the font matches the request.
         s.bold = self.bold == is_bold;
@@ -296,6 +312,15 @@ impl Descriptor {
 
         s
     }
+}
+
+/// Copy the raw bytes of the OpenType table `tag` from `font`, or `None`.
+/// Mirrors `Face::copy_table`.
+fn copy_table(font: &CTFont, tag: &[u8; 4]) -> Option<Vec<u8>> {
+    let table_tag = u32::from_be_bytes(*tag);
+    // SAFETY: `font` is live; the tag and (empty) options are valid.
+    let data = unsafe { font.table(table_tag, CTFontTableOptions(0)) }?;
+    Some(data.to_vec())
 }
 
 /// Whether `font` has a glyph for the Unicode scalar `cp` (handling the
@@ -729,6 +754,80 @@ mod tests {
         assert_ne!(
             italic_when_false, italic_when_true,
             "flipping the italic request flips the match"
+        );
+    }
+
+    /// All resolved Menlo candidate descriptors from discovery.
+    fn menlo_candidates() -> Vec<CFRetained<CTFontDescriptor>> {
+        Descriptor {
+            family: Some("Menlo".into()),
+            ..Default::default()
+        }
+        .discover_descriptors()
+    }
+
+    #[test]
+    fn score_detects_bold_variant() {
+        let cands = menlo_candidates();
+        assert!(!cands.is_empty(), "Menlo has candidates");
+        // Some Menlo variant is bold: a bold request matches it and a non-bold
+        // request does not (which holds iff `is_bold` for that candidate is true).
+        let any_bold = cands.iter().any(|c| {
+            Descriptor {
+                bold: true,
+                ..Default::default()
+            }
+            .score(c)
+            .bold
+                && !Descriptor {
+                    bold: false,
+                    ..Default::default()
+                }
+                .score(c)
+                .bold
+        });
+        assert!(any_bold, "a bold Menlo variant is detected as bold");
+    }
+
+    #[test]
+    fn score_detects_italic_variant() {
+        let cands = menlo_candidates();
+        let any_italic = cands.iter().any(|c| {
+            Descriptor {
+                italic: true,
+                ..Default::default()
+            }
+            .score(c)
+            .italic
+                && !Descriptor {
+                    italic: false,
+                    ..Default::default()
+                }
+                .score(c)
+                .italic
+        });
+        assert!(any_italic, "an italic Menlo variant is detected as italic");
+    }
+
+    #[test]
+    fn score_regular_not_bold_italic() {
+        let cands = menlo_candidates();
+        // The regular Menlo face is detected as neither bold nor italic: a
+        // non-bold/non-italic request matches both flags (so `is_bold` and
+        // `is_italic` are both false for it — the refinement does not spuriously
+        // flip a regular face).
+        let any_regular = cands.iter().any(|c| {
+            let s = Descriptor {
+                bold: false,
+                italic: false,
+                ..Default::default()
+            }
+            .score(c);
+            s.bold && s.italic
+        });
+        assert!(
+            any_regular,
+            "the regular Menlo face is detected as neither bold nor italic"
         );
     }
 }

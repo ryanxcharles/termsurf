@@ -166,3 +166,59 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-115415-506565-prompt.md`
 - Result: `logs/codex-review/20260603-115415-506565-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+The bold/italic refinement lands.
+
+- `roastty/src/font/discovery.rs`: a `copy_table(font, tag)` helper (mirroring
+  `Face::copy_table`); in `score`, after the symbolic `is_bold`/`is_italic`, the
+  `head` `macStyle` bits (bit 0 bold, bit 1 italic) and the `OS/2` `fsSelection`
+  bold/italic bits are OR-ed in (`|=`), feeding the existing `Head`/`Os2`
+  parsers. The `desc.x == is_x` comparisons are unchanged.
+
+Tests (scoring resolved Menlo candidates): `score_detects_bold_variant` (a Menlo
+variant is detected bold), `score_detects_italic_variant` (a Menlo variant is
+detected italic), `score_regular_not_bold_italic` (the regular face is detected
+as neither — the refinement does not spuriously flip a regular face).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2713 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+A candidate's bold/italic-ness is now refined from the font's own `head` and
+`OS/2` tables, not just CoreText's symbolic summary — faithful to upstream's
+OR-in refinement for non-variable fonts.
+
+The next discovery experiment is the **variation-axis** derivation
+(`wght > 600`, `ital > 0.5`, `slnt <= -5`, which _overwrites_
+`is_bold`/`is_italic` for variable fonts — the heaviest CoreText FFI: the
+`kCTFontVariationAxesAttribute` / `kCTFontVariationAttribute` dictionaries),
+then the style `exact_style`/ `fuzzy_style` match, `sortMatchingDescriptors`,
+the `DiscoverIterator`/ `DeferredFace`, `discoverFallback`, and the resolver's
+discovery fallback and codepoint overrides.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It confirmed the slice matches upstream
+(`head.macStyle` bit 0 / bit 1 and `OS/2.fsSelection.bold()`/`.italic()` OR-ed
+into the symbolic guesses), that `|=` is the right equivalent of upstream `or`
+(refinements only turn detection on, never off, with the variation-axis
+overwrite still deferred and documented), that `copy_table` is correct (it
+mirrors `Face::copy_table`, uses the big-endian tag, and `to_vec()` copies the
+`CFData` bytes before the retained data drops), and that the Menlo tests are
+deterministic integration coverage for non-variable fonts (exercising the full
+detection path, though not isolating the table bits from the symbolic traits, as
+already noted). No Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-115708-542024-last-message.md`
