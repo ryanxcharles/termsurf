@@ -981,6 +981,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 267: Synthetic face methods — Face::synthetic_bold / synthetic_italic](267-synthetic-face-methods.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 268: completeStyles synthesis — synthesize vs. alias](268-complete-styles-synthesis.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
