@@ -5,13 +5,18 @@
 //! and adds style-disabled fallback, presentation defaults, and the
 //! regular-style fallback chain, resolves sprite codepoints to the
 //! procedurally-drawn sprite face when sprite drawing is enabled, and defaults a
-//! presentation-less codepoint via the UCD `Emoji_Presentation` property.
-//! Codepoint overrides and discovery-based fallback are deferred to later
+//! presentation-less codepoint via the UCD `Emoji_Presentation` property, and —
+//! when discovery is enabled — falls back to a system-discovered face for a
+//! regular-style codepoint no loaded face covers. Codepoint overrides and the
+//! dedicated `discoverFallback` codepoint search are deferred to later
 //! experiments.
 
 use crate::font::atlas::{Atlas, AtlasError};
-use crate::font::collection::{Collection, EntryError, Index, PresentationMode, Special};
-use crate::font::face::coretext::{RenderGlyphError, RenderOptions};
+use crate::font::collection::{
+    Collection, EntryError, Index, PresentationMode, SizeAdjustment, Special,
+};
+use crate::font::discovery::Descriptor;
+use crate::font::face::coretext::{Face, RenderGlyphError, RenderOptions};
 use crate::font::glyph::Glyph;
 use crate::font::metrics::Metrics;
 use crate::font::{Presentation, Style};
@@ -70,16 +75,20 @@ pub(crate) struct CodepointResolver {
     /// The grid metrics for sprite rendering. `None` disables sprite drawing —
     /// the analog of upstream's optional `sprite: ?SpriteFace`.
     sprite_metrics: Option<Metrics>,
+    /// Whether the discovery-based fallback is enabled (the analog of upstream's
+    /// optional `discover`). Disabled by default — discovery is opt-in.
+    discover_enabled: bool,
 }
 
 impl CodepointResolver {
     /// Create a resolver over `collection` with all styles enabled and sprite
-    /// drawing disabled.
+    /// drawing and discovery disabled.
     pub(crate) fn new(collection: Collection) -> CodepointResolver {
         CodepointResolver {
             collection,
             styles: [true; 4],
             sprite_metrics: None,
+            discover_enabled: false,
         }
     }
 
@@ -87,6 +96,12 @@ impl CodepointResolver {
     /// `None`. Faithful analog of setting upstream's `sprite: ?SpriteFace`.
     pub(crate) fn set_sprite_metrics(&mut self, metrics: Option<Metrics>) {
         self.sprite_metrics = metrics;
+    }
+
+    /// Enable or disable the discovery-based fallback (the analog of setting
+    /// upstream's optional `discover`).
+    pub(crate) fn set_discover_enabled(&mut self, enabled: bool) {
+        self.discover_enabled = enabled;
     }
 
     /// The underlying collection.
@@ -107,11 +122,13 @@ impl CodepointResolver {
 
     /// Resolve `cp` (in `style`, with optional explicit presentation `p`) to a
     /// face [`Index`], or `None`. Faithful port of upstream `getIndex`'s core
-    /// chain (the sprite check, the UCD presentation default, and the
-    /// regular-style/last-resort fallbacks; codepoint overrides and discovery
-    /// are deferred).
+    /// chain (the sprite check, the UCD presentation default, the regular-style
+    /// retry, the discovery-based fallback when enabled, and the last-resort
+    /// `Any`). A discovery hit **mutates** the collection (adds the fallback
+    /// face), hence `&mut self`. (Codepoint overrides and the dedicated
+    /// `discoverFallback` are deferred.)
     pub(crate) fn get_index(
-        &self,
+        &mut self,
         cp: u32,
         style: Style,
         p: Option<Presentation>,
@@ -157,7 +174,31 @@ impl CodepointResolver {
             }
         }
 
-        // (Discovery-based fallback is deferred here.)
+        // Discovery-based fallback: for a regular request with discovery enabled,
+        // search the system for a font that has this codepoint, add the first
+        // match (in the requested presentation) to the collection as a fallback,
+        // and return it. (Faithful port of upstream's regular-style discovery
+        // fallback; the dedicated `discoverFallback`/codepoint search and the
+        // codepoint overrides are deferred.)
+        if style == Style::Regular && self.discover_enabled {
+            let req = Descriptor {
+                codepoint: cp,
+                monospace: false,
+                ..Default::default()
+            };
+            for face in req.discover_faces() {
+                if fallback_face_has_codepoint(&face, cp, p_mode) {
+                    if let Ok(idx) = self.collection.add_with_adjustment(
+                        face,
+                        Style::Regular,
+                        true,
+                        SizeAdjustment::IcWidth,
+                    ) {
+                        return Some(idx);
+                    }
+                }
+            }
+        }
 
         // A regular request with `any` presentation has nothing more to try.
         // (Effectively unreachable: `p_mode` is always `Explicit` or `Default`.)
@@ -224,6 +265,24 @@ impl CodepointResolver {
     }
 }
 
+/// Whether `face` (used as a **fallback** face) has the glyph for `cp` in the
+/// requested presentation. Replicates a fallback `Entry`'s `has_codepoint`: a
+/// fallback entry treats a `Default` presentation as `Explicit`, so the glyph
+/// must be present **and** its color-ness must match (`Text ⇒ not a color glyph`,
+/// `Emoji ⇒ a color glyph`); `Any` checks presence only.
+fn fallback_face_has_codepoint(face: &Face, cp: u32, p_mode: PresentationMode) -> bool {
+    let Some(glyph) = face.glyph_index(cp) else {
+        return false;
+    };
+    match p_mode {
+        PresentationMode::Any => true,
+        PresentationMode::Explicit(p) | PresentationMode::Default(p) => match p {
+            Presentation::Text => !face.is_color_glyph(glyph),
+            Presentation::Emoji => face.is_color_glyph(glyph),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,7 +319,7 @@ mod tests {
         let emoji = c
             .add(Face::new("Apple Color Emoji", 32.0), Style::Regular, true)
             .unwrap();
-        let r = CodepointResolver::new(c);
+        let mut r = CodepointResolver::new(c);
         let umbrella = 0x2614;
         assert_eq!(
             r.get_index(umbrella, Style::Regular, None),
@@ -276,7 +335,7 @@ mod tests {
 
     #[test]
     fn resolve_basic() {
-        let r = menlo_resolver();
+        let mut r = menlo_resolver();
         let m = 'M' as u32;
         let at0 = Some(Index::new(Style::Regular, 0));
         assert_eq!(
@@ -288,7 +347,7 @@ mod tests {
 
     #[test]
     fn resolve_missing() {
-        let r = menlo_resolver();
+        let mut r = menlo_resolver();
         // A Private-Use codepoint Menlo lacks; discovery is deferred -> None.
         assert_eq!(
             r.get_index(0xE000, Style::Regular, Some(Presentation::Text)),
@@ -303,7 +362,7 @@ mod tests {
             .unwrap();
         c.add(Face::new("Apple Color Emoji", 32.0), Style::Regular, false)
             .unwrap();
-        let r = CodepointResolver::new(c);
+        let mut r = CodepointResolver::new(c);
         let emoji = 0x1F600u32;
         // Explicit Text misses (Menlo lacks it; the emoji glyph is color, not
         // text), but the final regular/any fallback finds the emoji at idx 1.
@@ -433,7 +492,7 @@ mod tests {
 
     #[test]
     fn get_index_sprite_enabled() {
-        let r = menlo_resolver_sprites();
+        let mut r = menlo_resolver_sprites();
         // A box-drawing codepoint resolves to the sprite face.
         assert_eq!(
             r.get_index(0x2500, Style::Regular, None),
@@ -443,7 +502,7 @@ mod tests {
 
     #[test]
     fn get_index_sprite_disabled() {
-        let r = menlo_resolver();
+        let mut r = menlo_resolver();
         // With sprites disabled, the box-drawing codepoint does not resolve to
         // the sprite face.
         assert_ne!(
@@ -471,7 +530,7 @@ mod tests {
     #[test]
     fn render_glyph_sprite_high_codepoint() {
         use crate::font::atlas::Format;
-        let r = menlo_resolver_sprites();
+        let mut r = menlo_resolver_sprites();
         let mut atlas = Atlas::new(512, Format::Grayscale);
         let opts = none_opts(
             r.collection()
@@ -488,5 +547,75 @@ mod tests {
             .render_glyph(&mut atlas, Index::special(Special::Sprite), 0x1fb00, &opts)
             .expect("high sprite renders");
         assert!(g.width > 0 && g.height > 0, "sextant glyph is non-empty");
+    }
+
+    #[test]
+    fn discovery_fallback_finds_emoji() {
+        // Menlo lacks the grinning-face emoji; with discovery enabled, the
+        // resolver discovers a color font that has it and adds it as a fallback.
+        let mut r = menlo_resolver();
+        r.set_discover_enabled(true);
+        let before = r.collection().face_count(Style::Regular);
+        let grin = 0x1F600;
+        let idx = r
+            .get_index(grin, Style::Regular, Some(Presentation::Emoji))
+            .expect("discovery resolves the emoji");
+        assert_eq!(
+            r.collection().face_count(Style::Regular),
+            before + 1,
+            "the discovered fallback was added"
+        );
+        // A second lookup is satisfied by the now-loaded fallback — no new face.
+        let idx2 = r
+            .get_index(grin, Style::Regular, Some(Presentation::Emoji))
+            .expect("the fallback now resolves");
+        assert_eq!(idx, idx2, "the same fallback index resolves");
+        assert_eq!(
+            r.collection().face_count(Style::Regular),
+            before + 1,
+            "no second fallback was added"
+        );
+    }
+
+    #[test]
+    fn discovery_fallback_disabled() {
+        // Without discovery enabled, an emoji Menlo lacks resolves to nothing.
+        let mut r = menlo_resolver();
+        assert_eq!(
+            r.get_index(0x1F600, Style::Regular, Some(Presentation::Emoji)),
+            None,
+            "no discovery, no fallback"
+        );
+    }
+
+    #[test]
+    fn fallback_presentation_check() {
+        use crate::font::face::coretext::Face;
+        let emoji = Face::new("Apple Color Emoji", 32.0);
+        let grin = 0x1F600;
+        // The grinning face is a color glyph: matches Emoji, not Text.
+        assert!(fallback_face_has_codepoint(
+            &emoji,
+            grin,
+            PresentationMode::Explicit(Presentation::Emoji)
+        ));
+        assert!(!fallback_face_has_codepoint(
+            &emoji,
+            grin,
+            PresentationMode::Explicit(Presentation::Text)
+        ));
+        // `Any` matches on presence alone.
+        assert!(fallback_face_has_codepoint(
+            &emoji,
+            grin,
+            PresentationMode::Any
+        ));
+        // A codepoint the face lacks never matches (a CJK ideograph the emoji
+        // font does not cover).
+        assert!(!fallback_face_has_codepoint(
+            &emoji,
+            0x4E00,
+            PresentationMode::Any
+        ));
     }
 }

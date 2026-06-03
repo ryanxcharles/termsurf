@@ -380,6 +380,11 @@ impl Collection {
         self.metrics.as_ref()
     }
 
+    /// The number of entries (faces and aliases) for `style`.
+    pub(crate) fn face_count(&self, style: Style) -> usize {
+        self.faces[style as usize].len()
+    }
+
     /// Add an eagerly-loaded `face` of `style`, returning its [`Index`]. The face
     /// is added last in priority for its style. `fallback` marks a fallback face.
     /// The face is recorded with a scale factor of `1.0` (no size adjustment);

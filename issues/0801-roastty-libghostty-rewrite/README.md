@@ -1112,7 +1112,7 @@ are past the correctness-critical foundation.
 - [Experiment 332: font discovery — the iterator (deferred faces)](332-discovery-iterator.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 333: the resolver's discovery-based fallback](333-resolver-discovery-fallback.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

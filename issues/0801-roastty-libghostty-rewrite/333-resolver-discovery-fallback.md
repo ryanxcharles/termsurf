@@ -212,3 +212,76 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-121840-072696-prompt.md`
 - Result: `logs/codex-review/20260603-121840-072696-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+The resolver's discovery-based fallback lands — discovery is now wired into
+`get_index`.
+
+- `roastty/src/font/codepoint_resolver.rs`: `get_index` is now `&mut self`; the
+  resolver gained a `discover_enabled` toggle (`set_discover_enabled`, default
+  off); after the non-regular retry and before the last-resort `Any`, a
+  regular-style discovery-enabled lookup builds a
+  `Descriptor { codepoint: cp, monospace: false, .. }`, iterates
+  `discover_faces()`, and adds the first face that has the codepoint in the
+  requested presentation (`fallback_face_has_codepoint`) to the collection as a
+  `Regular` fallback (`SizeAdjustment::IcWidth`), returning its index.
+  `fallback_face_has_codepoint` replicates a fallback `Entry::has_codepoint`
+  (`Default → Explicit` presentation matching; `Any` → presence). The
+  module/`get_index` docs were updated.
+- `roastty/src/font/collection.rs`: a `face_count(style)` accessor.
+
+Tests: `discovery_fallback_finds_emoji` (a Menlo-only resolver with discovery
+enabled resolves `0x1F600` (emoji) by discovering a color font, grows the
+collection by one fallback, and a second lookup returns the **same** index
+without growing again), `discovery_fallback_disabled` (no discovery ⇒ `None`),
+`fallback_presentation_check` (the emoji color glyph matches `Emoji` not `Text`;
+`Any` matches presence; a CJK codepoint the emoji font lacks never matches). The
+existing `get_index_*` tests still pass (now `let mut r`).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2724 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The resolver now **uses** discovery: a regular-style codepoint no loaded face
+covers triggers a system search, and the matching font is added to the
+collection and resolved — the integration that makes the whole discovery
+pipeline (Experiments 325–332) useful to the rest of the font system. The
+`&mut self` change reflects that resolution can now grow the collection.
+
+The remaining font-resolution work is: the dedicated **`discoverFallback`/
+`discoverCodepoint`** (`CTFontCreateForString`) candidate search (to reach
+codepoints — notably CJK — the general match misses), **codepoint overrides**
+(`getIndexCodepointOverride` + the `descriptor_cache`, which also depend on
+discovery), the variation-axis score refinement, and applying variations to
+produced faces. Beyond resolution: the **shaper** (shape calls, glyph placement)
+and the remaining font subsystems.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It confirmed `get_index(&mut self)` is warranted (a
+discovery hit mutates the collection); the fallback block is in the upstream
+position (after the exact lookup and non-regular retry, before the final regular
+`Any`); the discovered face is presentation-checked before insertion, added as a
+`Regular` fallback with `SizeAdjustment::IcWidth`, and returned immediately;
+`fallback_face_has_codepoint` matches a fallback `Entry::has_codepoint`
+(`Default(p)` like `Explicit(p)`, `Any` presence-only); the second lookup does
+not grow the collection (the newly added fallback is found by the exact
+`collection.get_index` before discovery runs again); the `discover_faces`
+limitation is now correctly documented as resolver wiring over general discovery
+(dedicated `discoverFallback`/`CTFontCreateForString` deferred); and there is
+**no borrow/lifetime issue** (the discovery iterator does not borrow
+`self.collection`, and the temporary borrow of `face` ends before it is moved
+into `add_with_adjustment`). No Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-122416-937166-last-message.md`
