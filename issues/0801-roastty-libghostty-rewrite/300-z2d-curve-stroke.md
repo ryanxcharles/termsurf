@@ -161,3 +161,77 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-074137-472576-prompt.md`
 - Result: `logs/codex-review/20260603-074137-472576-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/raster.rs` gained the cubic-curve stroke:
+
+- `StrokePlotter` stores `tolerance`; `ensure_pen` builds
+  `Pen::init(thickness, tolerance)` only when `pen` is `None` (the eager `Round`
+  build from Experiment 299 is preserved).
+- `run_line_to` and `join` gained a `join_mode: JoinMode` parameter. The
+  `LineTo` walk passes `self.join_mode`; `join`'s outer switch uses the passed
+  mode (existing miter/round/bevel behavior for line paths unchanged).
+- `run_curve_to(p1, p2, p3)` reads the current point, `ensure_pen`, builds a
+  `Spline { a = current, b = p1, c = p2, d = p3, tolerance }`, `decompose`s into
+  a `Vec`, and runs each flattened point as `run_line_to(JoinMode::Round, p)`.
+- `CurveTo` is now wired in `run`; `ClosePath` stays `unreachable!`.
+
+Tests:
+
+- `stroke_path_curve_degenerate_line` — a cubic with `a == b`, `c == d` flattens
+  to just `d`, so the curve stroke equals the single `line_to` polygon (same
+  edges and extents).
+- `stroke_path_curve_quarter` — a quarter-circle cubic from `(0,0)` to
+  `(10,10)`: 45 round-joined edges (`> 10`), the box bulging past each endpoint
+  by the half-width (`left < 0`, `right > 10`, `top < 0`, `bottom > 10`).
+- `stroke_path_curve_uses_round` — a curve-only path strokes to an identical
+  polygon (edges + extents) under `Miter` and `Round`, proving the curve always
+  round-joins.
+- `stroke_path_line_then_curve` — a `line_to → curve_to` path strokes without
+  panic into a non-empty polygon (the round join at the seam).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2596 passed, 0 failed (+4, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The cubic-curve stroke renders faithfully: `runCurveTo` flattens via the
+Experiment 296 `Spline::decompose` and round-joins the flattened segments,
+independent of the path's outer join mode. The stroke pipeline now handles
+`move_to`/`line_to`/`curve_to` open paths with miter/round/bevel joins and butt
+caps.
+
+The next step is the **box-drawing arcs** (`U+256D`–`U+2570`): a `Canvas` curve
+entry point (`Canvas::stroke_path` over a `move_to`/`curve_to`/`line_to` path,
+or extending `Canvas::line`'s machinery) plus the `arc` geometry from `box.zig`
+(each arc strokes a quarter-circle cubic from the cell edge to the center). That
+makes the arcs the first curved sprite glyphs. After the arcs: round/square
+**caps**, the circle/ellipse pieces, the closed-path stroke, dashes, then the
+unifying sprite `has_codepoint`/draw entry point, the discovery consumer, the
+UCD emoji-presentation default, codepoint overrides, the shaper, the Nerd Font
+attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes**. It confirmed the implementation is faithful to upstream `runCurveTo`
+for the open-path scope: `tolerance` stored and `ensure_pen` lazily building the
+pen only when needed (eager `Round` build intact); `_runLineTo(join_mode, …)`
+correctly modeled (normal `LineTo` uses `self.join_mode`, curve-flattened points
+use `JoinMode::Round`); `join` using the passed mode (existing line-path
+behavior preserved while curves force round joins); `run_curve_to` using the
+current point as `Spline.a` without re-adding it, decomposing, and feeding each
+flattened point through round-joined `run_line_to`; and `CurveTo` reachable with
+`ClosePath` still deferred. It judged the four tests well-targeted. No Optional
+findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-074532-608319-last-message.md`

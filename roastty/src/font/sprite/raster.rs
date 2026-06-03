@@ -1318,8 +1318,10 @@ struct StrokePlotter {
     thickness: f64,
     scale: f64,
     miter_limit: f64,
+    tolerance: f64,
     join_mode: JoinMode,
-    /// The pen for round joins (lazily built only when `join_mode` is `Round`).
+    /// The pen for round joins (eager for `Round` mode, else lazily built on the
+    /// first `curve_to`, whose flattened segments always round-join).
     pen: Option<Pen>,
     points: PointBuffer<2, 5>,
     /// The polygon's winding direction, fixed on the first join.
@@ -1341,8 +1343,10 @@ impl StrokePlotter {
             thickness,
             scale,
             miter_limit,
+            tolerance,
             join_mode,
-            // The pen is only needed for round joins.
+            // Eagerly build the pen for round joins; curve_to lazily builds it
+            // otherwise (its flattened segments always round-join).
             pen: if join_mode == JoinMode::Round {
                 Some(Pen::init(thickness, tolerance))
             } else {
@@ -1367,10 +1371,9 @@ impl StrokePlotter {
                     self.points.reset();
                     self.points.add(p);
                 }
-                PathNode::LineTo(p) => self.run_line_to(p),
-                PathNode::CurveTo { .. } => {
-                    unreachable!("stroke_path: curve_to needs Pen/round joins (deferred)")
-                }
+                // Normal line segments join with the configured mode.
+                PathNode::LineTo(p) => self.run_line_to(self.join_mode, p),
+                PathNode::CurveTo { p1, p2, p3 } => self.run_curve_to(p1, p2, p3),
                 PathNode::ClosePath => {
                     unreachable!("stroke_path: close_path needs the closed-path stroke (deferred)")
                 }
@@ -1379,7 +1382,9 @@ impl StrokePlotter {
         self.finish();
     }
 
-    fn run_line_to(&mut self, point: Point) {
+    /// Append `point` and join the last three with `join_mode` once 3+ points
+    /// exist. Faithful port of `_runLineTo(join_mode, …)`.
+    fn run_line_to(&mut self, join_mode: JoinMode, point: Point) {
         let current = self
             .points
             .last()
@@ -1393,7 +1398,40 @@ impl StrokePlotter {
             let p0 = self.points.tail(3).unwrap();
             let p1 = self.points.tail(2).unwrap();
             let p2 = self.points.tail(1).unwrap();
-            self.join(p0, p1, p2);
+            self.join(join_mode, p0, p1, p2);
+        }
+    }
+
+    /// Build the pen if it has not been built yet (the curve stroke needs it for
+    /// its round joins regardless of the outer join mode). Faithful port of
+    /// `runCurveTo`'s lazy `Pen.init`.
+    fn ensure_pen(&mut self) {
+        if self.pen.is_none() {
+            self.pen = Some(Pen::init(self.thickness, self.tolerance));
+        }
+    }
+
+    /// Stroke a cubic Bézier: flatten it into line segments (`Spline::decompose`)
+    /// and run each flattened point as a round-joined `line_to`. Faithful port
+    /// of `runCurveTo`.
+    fn run_curve_to(&mut self, p1: Point, p2: Point, p3: Point) {
+        let current = self
+            .points
+            .last()
+            .expect("stroke_path: curve_to with no current point");
+        self.ensure_pen();
+        let spline = Spline {
+            a: current,
+            b: p1,
+            c: p2,
+            d: p3,
+            tolerance: self.tolerance,
+        };
+        let mut pts = Vec::new();
+        spline.decompose(&mut pts);
+        // Each flattened segment joins with a round corner.
+        for p in pts {
+            self.run_line_to(JoinMode::Round, p);
         }
     }
 
@@ -1417,9 +1455,9 @@ impl StrokePlotter {
         }
     }
 
-    /// Join the segments `p0→p1` and `p1→p2`. Faithful port of `join` for the
-    /// miter/bevel (default) join mode.
-    fn join(&mut self, p0: Point, p1: Point, p2: Point) {
+    /// Join the segments `p0→p1` and `p1→p2` with `join_mode`. Faithful port of
+    /// `join` (miter/round/bevel).
+    fn join(&mut self, join_mode: JoinMode, p0: Point, p1: Point, p2: Point) {
         // Degenerate segments: nothing to join.
         if p0 == p1 || p1 == p2 {
             if self.clockwise.is_none() {
@@ -1456,11 +1494,11 @@ impl StrokePlotter {
         }
 
         // Outer join, by mode.
-        match self.join_mode {
+        match join_mode {
             JoinMode::Miter | JoinMode::Bevel => {
                 // The miter apex only in Miter mode and within the limit;
                 // otherwise bevel (the two outer face ends).
-                if self.join_mode == JoinMode::Miter
+                if join_mode == JoinMode::Miter
                     && Slope::compare_for_miter_limit(
                         in_f.dev_slope,
                         out_f.dev_slope,
@@ -2340,6 +2378,13 @@ mod tests {
     fn ln(x: f64, y: f64) -> PathNode {
         PathNode::LineTo(Point::new(x, y))
     }
+    fn cv(p1: (f64, f64), p2: (f64, f64), p3: (f64, f64)) -> PathNode {
+        PathNode::CurveTo {
+            p1: Point::new(p1.0, p1.1),
+            p2: Point::new(p2.0, p2.1),
+            p3: Point::new(p3.0, p3.1),
+        }
+    }
 
     #[test]
     fn closed_node_set_basic_closed() {
@@ -3079,5 +3124,73 @@ mod tests {
         assert_eq!(poly.extent_right, 10.0);
         assert_eq!(poly.extent_top, -1.0);
         assert_eq!(poly.extent_bottom, 21.0);
+    }
+
+    #[test]
+    fn stroke_path_curve_degenerate_line() {
+        // A cubic that degenerates to a straight line (a == b, c == d) flattens
+        // to just its endpoint d, so the curve stroke equals the single
+        // line_to segment stroke.
+        let curve = [mv(0.0, 0.0), cv((0.0, 0.0), (10.0, 0.0), (10.0, 0.0))];
+        let line = [mv(0.0, 0.0), ln(10.0, 0.0)];
+        let cp = stroke_path(&curve, 2.0, 1.0, 10.0, 0.1, JoinMode::Miter);
+        let lp = stroke_path(&line, 2.0, 1.0, 10.0, 0.1, JoinMode::Miter);
+        assert_eq!(cp.edges, lp.edges);
+        assert_eq!(cp.extent_left, lp.extent_left);
+        assert_eq!(cp.extent_right, lp.extent_right);
+        assert_eq!(cp.extent_top, lp.extent_top);
+        assert_eq!(cp.extent_bottom, lp.extent_bottom);
+    }
+
+    #[test]
+    fn stroke_path_curve_quarter() {
+        // A genuinely curved cubic (a quarter-circle approximation from (0,0) to
+        // (10,10)) flattens into many round-joined segments: a non-empty stroke
+        // whose box encloses the endpoints padded by the half-width, with far
+        // more than a single bar's 2 edges.
+        let curve = [mv(0.0, 0.0), cv((0.0, 5.523), (4.477, 10.0), (10.0, 10.0))];
+        let poly = stroke_path(&curve, 2.0, 1.0, 10.0, 0.1, JoinMode::Miter);
+        // The cubic flattens into many round-joined segments (far more than a
+        // bar's 2 edges).
+        assert!(poly.edges.len() > 10);
+        // The start tangent is vertical, so the half-width bulges the stroke
+        // left of x=0; the end tangent is horizontal, so it bulges below y=10.
+        // Every extent reaches past the (0,0)→(10,10) endpoint box.
+        assert!(poly.extent_left < 0.0);
+        assert!(poly.extent_right > 10.0);
+        assert!(poly.extent_top < 0.0);
+        assert!(poly.extent_bottom > 10.0);
+    }
+
+    #[test]
+    fn stroke_path_curve_uses_round() {
+        // The curve always round-joins its flattened segments regardless of the
+        // path's configured join mode, so a curve-only path strokes identically
+        // under Miter and Round.
+        let curve = [mv(0.0, 0.0), cv((0.0, 5.523), (4.477, 10.0), (10.0, 10.0))];
+        let miter = stroke_path(&curve, 2.0, 1.0, 10.0, 0.1, JoinMode::Miter);
+        let round = stroke_path(&curve, 2.0, 1.0, 10.0, 0.1, JoinMode::Round);
+        assert_eq!(miter.edges, round.edges);
+        assert_eq!(miter.extent_left, round.extent_left);
+        assert_eq!(miter.extent_right, round.extent_right);
+        assert_eq!(miter.extent_top, round.extent_top);
+        assert_eq!(miter.extent_bottom, round.extent_bottom);
+    }
+
+    #[test]
+    fn stroke_path_line_then_curve() {
+        // A line_to followed by a curve_to: the line→curve seam joins with a
+        // round corner. It strokes without panic into a non-empty polygon.
+        let nodes = [
+            mv(0.0, 0.0),
+            ln(5.0, 0.0),
+            cv((10.0, 0.0), (10.0, 5.0), (10.0, 10.0)),
+        ];
+        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.1, JoinMode::Miter);
+        assert!(poly.edges.len() > 2);
+        // The box encloses the whole path (start (0,0) to end (10,10)) ± width.
+        assert!(poly.extent_left <= 0.0);
+        assert!(poly.extent_right >= 10.0);
+        assert!(poly.extent_bottom >= 10.0);
     }
 }
