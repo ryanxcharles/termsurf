@@ -220,6 +220,35 @@ impl Descriptor {
     pub(crate) fn discover_faces(&self) -> impl Iterator<Item = Face> {
         self.discover_descriptors().into_iter().map(deferred_face)
     }
+
+    /// Discover fallback faces for this descriptor, ranked best-first. Faithful
+    /// port of upstream `discoverFallback`: for a CJK unified ideograph
+    /// (`U+4E00..=U+9FFF`) go straight to CoreText's locale-aware codepoint
+    /// search on `original` (falling through to the general path if it finds
+    /// nothing); otherwise use the general discovery, falling back to the
+    /// codepoint search only when the general match is empty. `original` is the
+    /// font the codepoint search starts from (the caller selects it by style).
+    pub(crate) fn discover_fallback_faces(&self, original: &Face) -> Vec<Face> {
+        // CJK unified ideographs: CoreText handles the locale better than a
+        // manual match. Only return early when the search succeeds (upstream's
+        // `orelse break :han`); on `None`, fall through to the general path.
+        if (0x4E00..=0x9FFF).contains(&self.codepoint) {
+            if let Some(face) = original.font_for_codepoint(self.codepoint) {
+                return vec![face];
+            }
+        }
+
+        // General discovery; if it found nothing and we have a codepoint, fall
+        // back to the codepoint search.
+        let descriptors = self.discover_descriptors();
+        if descriptors.is_empty() && self.codepoint > 0 {
+            return original
+                .font_for_codepoint(self.codepoint)
+                .into_iter()
+                .collect();
+        }
+        descriptors.into_iter().map(deferred_face).collect()
+    }
 }
 
 /// Turn a sorted candidate descriptor into a [`Face`], **removing** the
@@ -1057,5 +1086,34 @@ mod tests {
         };
         let face = req.discover_faces().next().expect("a discovered face");
         assert!(face.glyph_index('M' as u32).is_some());
+    }
+
+    #[test]
+    fn discover_fallback_cjk() {
+        // A CJK ideograph goes straight to the codepoint search on the original
+        // (Menlo) face, yielding a Han font that renders it.
+        let menlo = Face::new("Menlo", 24.0);
+        let req = Descriptor {
+            codepoint: 0x4E00,
+            ..Default::default()
+        };
+        let faces = req.discover_fallback_faces(&menlo);
+        assert!(!faces.is_empty(), "the CJK gate finds a Han font");
+        assert!(
+            faces[0].glyph_index(0x4E00).is_some(),
+            "the discovered font renders U+4E00"
+        );
+    }
+
+    #[test]
+    fn discover_fallback_general() {
+        // A non-CJK request takes the general discovery path.
+        let menlo = Face::new("Menlo", 24.0);
+        let req = Descriptor {
+            family: Some("Menlo".into()),
+            ..Default::default()
+        };
+        let faces = req.discover_fallback_faces(&menlo);
+        assert!(!faces.is_empty(), "the general path finds Menlo");
     }
 }

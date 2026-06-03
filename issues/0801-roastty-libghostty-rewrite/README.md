@@ -1116,7 +1116,7 @@ are past the correctness-critical foundation.
 - [Experiment 334: discover a font for a codepoint (CTFontCreateForString)](334-discover-codepoint.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 335: the discoverFallback orchestration](335-discover-fallback-orchestration.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

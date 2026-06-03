@@ -190,3 +190,66 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-123438-240951-prompt.md`
 - Result: `logs/codex-review/20260603-123438-240951-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+The `discoverFallback` orchestration lands — CJK now resolves through the
+resolver.
+
+- `roastty/src/font/discovery.rs`:
+  `Descriptor::discover_fallback_faces(&self, original: &Face) -> Vec<Face>` —
+  the CJK `U+4E00..=U+9FFF` gate (the codepoint search on `original`, falling
+  through to the general path on `None`), the general discovery path, and the
+  empty-match codepoint fallback.
+- `roastty/src/font/codepoint_resolver.rs`: the discovery fallback in
+  `get_index` now fetches the regular primary face and uses
+  `discover_fallback_faces` (the `match` ends the immutable borrow before the
+  mutable `add_with_adjustment`).
+
+Tests: `discover_fallback_cjk` (`U+4E00` → a Han font rendering it via the CJK
+gate), `discover_fallback_general` (the general path for a family match),
+`discovery_fallback_resolves_cjk` (a Menlo-only resolver with discovery enabled
+now resolves `U+4E00`). The existing `discovery_fallback_finds_emoji` (a non-CJK
+codepoint via the general path) still passes.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2731 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+Font discovery's `discoverFallback` is complete: the resolver now resolves CJK
+unified ideographs (and any codepoint the general match misses) via CoreText's
+`CTFontCreateForString`, on top of the emoji/general path from Experiment 333.
+The font-discovery subsystem — descriptor, collection match, scoring, sort,
+iterator, codepoint search, and the resolver integration — is now functionally
+complete.
+
+The remaining font-resolution work is **codepoint overrides**
+(`getIndexCodepointOverride` + the `descriptor_cache`), the deferred
+**variation-axis** score refinement, and **variations** application. Beyond
+resolution: the **shaper** (shape calls, glyph placement), the largest remaining
+font subsystem.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**, confirming the prior design finding is fixed (the CJK
+branch returns early only when `font_for_codepoint` succeeds, otherwise falling
+through — matching upstream's `orelse break :han`), that the empty-general
+fallback matches upstream (only when `discover_descriptors()` is empty and
+`codepoint > 0`), that the resolver rewire is sound (the owned `Vec<Face>` ends
+the immutable borrow of the regular primary before `add_with_adjustment` mutates
+the collection), that the regular-primary `original` selection is faithful for
+the regular-only resolver fallback, that CJK now resolves while the
+emoji/general path is preserved, and that the eager `Vec` is an acceptable
+scoped deviation. No Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-123735-212456-last-message.md`

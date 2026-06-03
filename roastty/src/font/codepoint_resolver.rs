@@ -175,18 +175,25 @@ impl CodepointResolver {
         }
 
         // Discovery-based fallback: for a regular request with discovery enabled,
-        // search the system for a font that has this codepoint, add the first
-        // match (in the requested presentation) to the collection as a fallback,
-        // and return it. (Faithful port of upstream's regular-style discovery
-        // fallback; the dedicated `discoverFallback`/codepoint search and the
-        // codepoint overrides are deferred.)
+        // search the system (via `discoverFallback` — the CJK gate and the
+        // codepoint search included) for a font that has this codepoint, add the
+        // first match (in the requested presentation) to the collection as a
+        // fallback, and return it. Faithful port of upstream's regular-style
+        // discovery fallback. (Codepoint overrides are deferred.)
         if style == Style::Regular && self.discover_enabled {
             let req = Descriptor {
                 codepoint: cp,
                 monospace: false,
                 ..Default::default()
             };
-            for face in req.discover_faces() {
+            // The codepoint search starts from the regular primary face; compute
+            // the candidate list before mutating the collection (ending the
+            // immutable borrow of `original`).
+            let faces = match self.collection.get_face(Index::new(Style::Regular, 0)) {
+                Ok(original) => req.discover_fallback_faces(original),
+                Err(_) => Vec::new(),
+            };
+            for face in faces {
                 if fallback_face_has_codepoint(&face, cp, p_mode) {
                     if let Ok(idx) = self.collection.add_with_adjustment(
                         face,
@@ -574,6 +581,21 @@ mod tests {
             r.collection().face_count(Style::Regular),
             before + 1,
             "no second fallback was added"
+        );
+    }
+
+    #[test]
+    fn discovery_fallback_resolves_cjk() {
+        // A CJK ideograph Menlo lacks now resolves via the `discoverFallback`
+        // CJK gate (the codepoint search), which the plain general match did not
+        // reliably reach.
+        let mut r = menlo_resolver();
+        r.set_discover_enabled(true);
+        let han = 0x4E00;
+        assert!(
+            r.get_index(han, Style::Regular, Some(Presentation::Text))
+                .is_some(),
+            "the CJK gate resolves U+4E00"
         );
     }
 
