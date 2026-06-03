@@ -947,6 +947,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 250: CoreText `Face` FFI spike — create a `CTFont` and copy a table](250-coretext-face-table-spike.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 251: CoreText `Face` scalar metric accessors](251-coretext-scalar-metrics.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
