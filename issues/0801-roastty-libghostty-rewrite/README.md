@@ -1146,7 +1146,7 @@ are past the correctness-critical foundation.
 - [Experiment 349: threading user features into shaping](349-shaper-user-features.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 350: the special-font fast path](350-shaper-special-font.md) —
-  **Designed** · Claude/Codex/Codex
+  **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

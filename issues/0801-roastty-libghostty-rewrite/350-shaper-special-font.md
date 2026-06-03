@@ -173,3 +173,59 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-143837-267604-prompt.md` (design)
 - Result: `logs/codex-review/20260603-143837-267604-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The special-font fast path is ported.
+
+- `roastty/src/font/shape.rs`: `shape_special(run: &[Codepoint]) -> Vec<Cell>`
+  emits one cell per non-zero-codepoint entry — `glyph_index == codepoint`,
+  `x == cluster` (via a checked `u16::try_from`), zero offsets — skipping
+  `codepoint == 0` entries. A pure transform that skips CoreText shaping,
+  faithful to upstream's special-font branch.
+
+Tests: `shape_special_codepoint_is_glyph` (box-drawing
+`0x2500`/`0x2502`/`0x256C` → `glyph_index == codepoint`, `x == cluster`, zero
+offsets), `shape_special_skips_zero` (`[(0, 0), ('A', 1)]` → one cell, the NUL
+skipped), `shape_special_high_plane` (`0x1FB70` → `glyph_index == 0x1FB70`),
+`shape_special_empty`. All pass.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2775 passed, 0 failed (+4, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The special-font fast path — `Shaper.shape`'s top-of-function shortcut for
+sprite fonts (codepoint == glyph) — is ported as a pure transform. The shaping
+logic for both real CoreText shaping and special fonts is now in place.
+
+The remaining shaper work is the orchestration that _chooses_ between them and
+feeds them: the `Shaper` struct (run state, the cached feature dicts, the
+`features_no_default` variant) and the `RunIterator` over terminal cells, which
+resolves each run's font index from the `Collection` (calling
+`font_index.special()` to pick this fast path) — the layer that threads
+roastty's `terminal/` grid and `renderer/` cell/state types.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It confirmed `shape_special` faithfully ports the
+upstream special-font transform (preserves order, skips `codepoint == 0`, emits
+`glyph_index = codepoint`, `x = cluster`, zero offsets), and that the un-padded
+Rust input is equivalent because upstream's only padding-specific behavior is
+the same `codepoint == 0` skip. It verified the design-gate fix
+(`u16::try_from(cp.cluster).expect(...)` matches upstream's checked `@intCast`,
+no silent truncation), that `glyph_index` stays `u32` so high-plane sprite
+scalars survive, and that the change is isolated to `shape.rs` with the
+`font_index.special()` decision and the `Shaper`/`RunIterator` wiring still
+deferred. It ran `cargo test -p roastty shape_special` (4 passed).
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-144056-673798-last-message.md`

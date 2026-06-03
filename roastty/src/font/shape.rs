@@ -291,6 +291,27 @@ pub(crate) fn parse_features(s: &str) -> Vec<Feature> {
     out
 }
 
+/// Shape a run with a special (sprite) font, whose glyph ids are the codepoints
+/// themselves — the fast path that skips CoreText shaping. Each input codepoint
+/// becomes a [`Cell`] (`glyph_index == codepoint`, `x == cluster`, zero offsets);
+/// `codepoint == 0` entries are skipped (they only pad the UTF-16 string a real
+/// shaping pass builds for CoreText). Faithful port of upstream `Shaper.shape`'s
+/// special-font branch.
+pub(crate) fn shape_special(run: &[Codepoint]) -> Vec<Cell> {
+    run.iter()
+        .filter(|cp| cp.codepoint != 0)
+        .map(|cp| Cell {
+            // A cluster is a terminal-cell column, always within `u16`. The
+            // checked conversion mirrors upstream's `@intCast` (panic on overflow)
+            // rather than silently truncating.
+            x: u16::try_from(cp.cluster).expect("a shaped cluster must fit Cell.x (u16)"),
+            x_offset: 0,
+            y_offset: 0,
+            glyph_index: cp.codepoint,
+        })
+        .collect()
+}
+
 /// Options controlling shaping. Faithful port of upstream `shape.Options`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Options {
@@ -529,6 +550,76 @@ mod tests {
             kern1, kern1, kern1, kern1, kern0, kern0, kern0, aalt2, aalt2, last,
         ];
         assert_eq!(parse_features(s), expected);
+    }
+
+    #[test]
+    fn shape_special_codepoint_is_glyph() {
+        // Box-drawing scalars: each becomes a cell whose glyph id is the codepoint
+        // and whose x is the cluster, with zero offsets.
+        let run = [
+            Codepoint {
+                codepoint: 0x2500,
+                cluster: 0,
+            },
+            Codepoint {
+                codepoint: 0x2502,
+                cluster: 1,
+            },
+            Codepoint {
+                codepoint: 0x256C,
+                cluster: 2,
+            },
+        ];
+        let cells = shape_special(&run);
+        assert_eq!(cells.len(), 3);
+        for (i, cp) in run.iter().enumerate() {
+            assert_eq!(
+                cells[i],
+                Cell {
+                    x: cp.cluster as u16,
+                    x_offset: 0,
+                    y_offset: 0,
+                    glyph_index: cp.codepoint,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn shape_special_skips_zero() {
+        // A `codepoint == 0` entry is skipped.
+        let run = [
+            Codepoint {
+                codepoint: 0,
+                cluster: 0,
+            },
+            Codepoint {
+                codepoint: 'A' as u32,
+                cluster: 1,
+            },
+        ];
+        let cells = shape_special(&run);
+        assert_eq!(cells.len(), 1);
+        assert_eq!(cells[0].glyph_index, 'A' as u32);
+        assert_eq!(cells[0].x, 1);
+    }
+
+    #[test]
+    fn shape_special_high_plane() {
+        // A supplementary-plane sprite scalar survives in the u32 glyph_index.
+        let run = [Codepoint {
+            codepoint: 0x1FB70,
+            cluster: 0,
+        }];
+        let cells = shape_special(&run);
+        assert_eq!(cells.len(), 1);
+        assert_eq!(cells[0].glyph_index, 0x1FB70);
+        assert_eq!(cells[0].x, 0);
+    }
+
+    #[test]
+    fn shape_special_empty() {
+        assert!(shape_special(&[]).is_empty());
     }
 
     #[test]
