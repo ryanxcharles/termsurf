@@ -1095,6 +1095,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 324: SVG color detection](324-svg-color-detection.md) — **Pass** ·
   Claude/Codex/Codex
+- [Experiment 325: font discovery — the CoreText descriptor](325-discovery-descriptor.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
