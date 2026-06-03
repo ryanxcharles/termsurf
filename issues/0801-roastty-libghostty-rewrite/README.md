@@ -1139,6 +1139,8 @@ are past the correctness-critical foundation.
   **Pass** · Claude/Codex/Codex
 - [Experiment 346: the score's variation-axis derivation](346-score-variation-axes.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 347: default font features in shaping](347-shaper-default-features.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
