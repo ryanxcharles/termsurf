@@ -880,6 +880,70 @@ pub(crate) fn draw_corner_triangle_outline(
     true
 }
 
+/// The plain underline: a full-width rect at the underline position, clamped
+/// (saturating) so it stays within the drawable area. Faithful port of upstream
+/// `special.zig`'s `underline`.
+pub(crate) fn draw_underline(canvas: &mut Canvas, width: u32, height: u32, metrics: &Metrics) {
+    let thick = metrics.underline_thickness;
+    let limit = height
+        .saturating_add(canvas.padding_y())
+        .saturating_sub(thick);
+    let y = metrics.underline_position.min(limit);
+    hline(canvas, 0, width as i32, y as i32, thick);
+}
+
+/// The double underline: two full-width rects bracketing the underline position
+/// with a one-thickness gap between them. Faithful port of upstream
+/// `special.zig`'s `underline_double`.
+pub(crate) fn draw_underline_double(
+    canvas: &mut Canvas,
+    width: u32,
+    height: u32,
+    metrics: &Metrics,
+) {
+    let thick = metrics.underline_thickness;
+    let limit = height
+        .saturating_add(canvas.padding_y())
+        .saturating_sub(thick.saturating_mul(2));
+    let y = metrics.underline_position.min(limit);
+    // One line above the position, one below by a thickness (the gap sits where
+    // the single underline would).
+    hline(
+        canvas,
+        0,
+        width as i32,
+        y.saturating_sub(thick) as i32,
+        thick,
+    );
+    hline(
+        canvas,
+        0,
+        width as i32,
+        y.saturating_add(thick) as i32,
+        thick,
+    );
+}
+
+/// The strikethrough: a full-width rect at the strikethrough position. Faithful
+/// port of upstream `special.zig`'s `strikethrough`.
+pub(crate) fn draw_strikethrough(canvas: &mut Canvas, width: u32, _height: u32, metrics: &Metrics) {
+    hline(
+        canvas,
+        0,
+        width as i32,
+        metrics.strikethrough_position as i32,
+        metrics.strikethrough_thickness,
+    );
+}
+
+/// The overline: a full-width rect at the overline position, allowed to extend
+/// up to one quarter cell above the cell (into the top padding) but not past the
+/// canvas. Faithful port of upstream `special.zig`'s `overline`.
+pub(crate) fn draw_overline(canvas: &mut Canvas, width: u32, _height: u32, metrics: &Metrics) {
+    let y = metrics.overline_position.max(-(canvas.padding_y() as i32));
+    hline(canvas, 0, width as i32, y, metrics.overline_thickness);
+}
+
 /// Horizontal line with the top edge at `y`, from `x1` to `x2`, `thick` pixels
 /// tall. Faithful port of upstream `common.hline`.
 fn hline(canvas: &mut Canvas, x1: i32, x2: i32, y: i32, thick: u32) {
@@ -2980,6 +3044,79 @@ mod tests {
                 "{cp:#06x} not an outlined triangle"
             );
             assert!(all_alpha(&c, &m, 0), "{cp:#06x} drew ink");
+        }
+    }
+
+    // The rect-based special sprites (underline / double / strikethrough /
+    // overline). The fixture 9×18 cell: underline_position 15, thickness 1,
+    // strikethrough_position 9, overline_position 0.
+
+    fn row_inked(c: &Canvas, y: i32, width: i32) -> bool {
+        (0..width).all(|x| inked(c, x, y))
+    }
+
+    #[test]
+    fn underline_row() {
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        draw_underline(&mut c, 9, 18, &m);
+        assert!(row_inked(&c, 15, 9), "underline row 15 full width");
+        for x in 0..9 {
+            assert!(!inked(&c, x, 14), "row above clear");
+            assert!(!inked(&c, x, 16), "row below clear");
+        }
+    }
+
+    #[test]
+    fn underline_double_gap() {
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        draw_underline_double(&mut c, 9, 18, &m);
+        assert!(row_inked(&c, 14, 9), "upper line");
+        assert!(row_inked(&c, 16, 9), "lower line");
+        for x in 0..9 {
+            assert!(!inked(&c, x, 15), "gap row clear");
+        }
+    }
+
+    #[test]
+    fn strikethrough_row() {
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        draw_strikethrough(&mut c, 9, 18, &m);
+        assert!(row_inked(&c, 9, 9), "strikethrough row 9 full width");
+    }
+
+    #[test]
+    fn overline_row() {
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        draw_overline(&mut c, 9, 18, &m);
+        assert!(row_inked(&c, 0, 9), "overline top row full width");
+    }
+
+    #[test]
+    fn underline_clamp() {
+        // A large underline_position clamps to the saturating limit (18 - 1 =
+        // 17), drawing at the last row instead of off the bottom.
+        let mut m = fixture_metrics();
+        m.underline_position = 100;
+        let mut c = cell_canvas();
+        draw_underline(&mut c, 9, 18, &m);
+        assert!(row_inked(&c, 17, 9), "clamped to row 17");
+    }
+
+    #[test]
+    fn overline_negative() {
+        // overline_position = -1 with vertical padding draws into the top
+        // padding (cell y = -1), not clamped to 0.
+        let mut m = fixture_metrics();
+        m.overline_position = -1;
+        let mut c = Canvas::new(9, 18, 0, 2);
+        draw_overline(&mut c, 9, 18, &m);
+        assert!(row_inked(&c, -1, 9), "overline drawn above the cell");
+        for x in 0..9 {
+            assert!(!inked(&c, x, 0), "cell top row clear");
         }
     }
 

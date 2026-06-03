@@ -164,3 +164,71 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-083112-077555-prompt.md`
 - Result: `logs/codex-review/20260603-083112-077555-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/draw.rs` gained four rect-based special-sprite
+decorations, each `(canvas, width, height, metrics)` over the `hline` helper:
+
+- `draw_underline` — a full-width rect at `underline_position`, clamped by
+  `height.saturating_add(padding_y()).saturating_sub(thickness)`.
+- `draw_underline_double` — two rects at `y.saturating_sub(thick)` and
+  `y.saturating_add(thick)` (the gap where the single underline would sit), `y`
+  clamped with `saturating_add`/`saturating_mul(2)`.
+- `draw_strikethrough` — an unclamped full-width rect at
+  `strikethrough_position`.
+- `draw_overline` — a full-width rect at
+  `overline_position.max(-(padding_y() as i32))` (negative `y` draws into the
+  top padding).
+
+Tests (the fixture `9×18` cell):
+
+- `underline_row` (`y = 15`, rows 14/16 clear), `underline_double_gap` (rows
+  14 + 16, gap row 15 clear), `strikethrough_row` (`y = 9`), `overline_row`
+  (`y = 0`) — the normal full-width rows.
+- `underline_clamp` — a large `underline_position` (100) clamps to row 17 (the
+  saturating limit) instead of drawing off the bottom.
+- `overline_negative` — `overline_position = -1` with `padding_y = 2` draws at
+  cell `y = -1` (into the top padding), leaving the cell's top row clear.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2627 passed, 0 failed (+6, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The straight line decorations (underline, double underline, strikethrough,
+overline) render faithfully — the rect-based half of the special-sprite family,
+alongside the curly underline (Experiment 303). The saturating-clamped positions
+match upstream's `+|`/`-|` exactly.
+
+The remaining special sprites are the **dotted** and **dashed** underlines
+(which need the dash/dot stroke — `painter` dashes, the one deferred stroke
+feature) and the **cursors** (rect/bar/underline/block variants). The larger
+remaining integration is the unifying sprite `has_codepoint`/draw and
+**sprite-kind dispatch** (the special sprites are keyed by a sprite kind, so the
+dispatch must map a `Sprite` enum to these standalone draw functions), then the
+resolver's deferred `SpriteUnavailable` arm, the discovery consumer, the UCD
+emoji-presentation default, codepoint overrides, the shaper, the Nerd Font
+attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes**. It confirmed `draw_underline` mirrors
+`height +| padding_y -| thickness`; `draw_underline_double` uses the right clamp
+and the two saturated offsets around the gap; `draw_strikethrough` draws
+unclamped at the metric position; and `draw_overline` clamps upward to
+`-padding_y`, allowing negative cell coordinates into the top padding. It judged
+the standalone scope disciplined and the tests good coverage (the normal rows
+plus the underline clamp and the negative-overline behavior). No Optional
+findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-083459-101216-last-message.md`
