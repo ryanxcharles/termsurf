@@ -182,3 +182,67 @@ Review artifacts:
   `…-213557-627770-prompt.md`
 - Results: `logs/codex-review/20260602-213405-968557-last-message.md`,
   `…-213557-627770-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`draw_coverage` gained a `color: bool` that switches to a Display-P3
+(`CGColorSpace::with_name(kCGColorSpaceDisplayP3)`), premultiplied-first
+(`Order32Little | PremultipliedFirst`), depth-4 BGRA context with an opaque
+white RGBA fill/stroke; the mono path is unchanged. `render_glyph` computes
+`is_color`/`sbix`, returns `RenderGlyphError::InvalidAtlasFormat` (new variant)
+before any work when the atlas format doesn't match the depth, gates the
+synthetic-bold rect growth and `canvas_padding` on `!sbix`, and applies the sbix
+whole-pixel quantization after the `dx` re-center.
+
+Tests (live CoreText):
+
+- `render_color_glyph_into_bgra_atlas` — the `U+1F600` emoji renders into a
+  `1024×1024` `Bgra` atlas with a non-empty region carrying real color (a pixel
+  with a non-zero B/G/R channel, not just alpha).
+- `mono_glyph_still_renders` — `'M'` still renders into a `Grayscale` atlas with
+  ink (the mono path is unaffected).
+- `wrong_atlas_format_errors` — a color glyph into a `Grayscale` atlas and a
+  mono glyph into a `Bgra` atlas both return `Err(InvalidAtlasFormat)`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty face` → 31 passed, 0 failed.
+- `cargo test -p roastty` → 2382 passed, 0 failed (no regressions; +3).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+**Upstream `renderGlyph` is now fully ported** — the monochrome path
+(constraints, sub-pixel positioning, thicken, synthetic bold) and the color/sbix
+path (Display-P3 depth-4 RGBA, sbix quantization, bold/thicken suppression, the
+atlas-format guard). `Face::render_glyph` faithfully matches upstream for both
+text and emoji.
+
+The font subsystem's remaining work is **above** `renderGlyph`: SVG-color
+detection (`opentype::SVG` for non-sbix color fonts), the
+**Collection/CodepointResolver** (font fallback and glyph-to-face resolution),
+the **shaper** (text shaping — the harfbuzz replacement), and the **Nerd Font
+attribute table** (the `getConstraint` lookup deferred from Experiment 256). The
+Collection/CodepointResolver is the natural next sub-area, since it sits
+directly above the now-complete face/`render_glyph` layer.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no required
+changes**.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-213950-891898-prompt.md`
+- Result: `logs/codex-review/20260602-213950-891898-last-message.md`
+
+Codex confirmed the implementation matches the intended sbix color render path:
+the P3 BGRA context setup, depth/stride/buffer sizing, opaque RGB fill/stroke,
+the sbix quantization after re-centering, the `!sbix` geometry/padding gates,
+and the runtime `InvalidAtlasFormat` guard before drawing or atlas writes are
+all in place, and the tests cover the color render, the mono regression, and
+both format-mismatch directions.

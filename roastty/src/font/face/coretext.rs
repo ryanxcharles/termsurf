@@ -9,7 +9,10 @@
 use std::ptr::NonNull;
 
 use objc2_core_foundation::{CFRetained, CFString, CGPoint, CGSize};
-use objc2_core_graphics::{CGBitmapContextCreate, CGColorSpace, CGContext, CGTextDrawingMode};
+use objc2_core_graphics::{
+    kCGColorSpaceDisplayP3, CGBitmapContextCreate, CGColorSpace, CGContext, CGImageAlphaInfo,
+    CGImageByteOrderInfo, CGTextDrawingMode,
+};
 use objc2_core_text::{CTFont, CTFontOrientation, CTFontTableOptions};
 
 use super::constraint::{Constraint, GlyphSize, Size};
@@ -69,6 +72,9 @@ pub(crate) enum RenderGlyphError {
     AtlasFull,
     /// CoreGraphics could not create the rasterization bitmap context.
     ContextCreationFailed,
+    /// The atlas pixel format doesn't match the glyph's color depth (a color
+    /// glyph needs a `Bgra` atlas; a monochrome glyph needs a `Grayscale` one).
+    InvalidAtlasFormat,
 }
 
 impl From<AtlasError> for RenderGlyphError {
@@ -464,6 +470,7 @@ impl Face {
             false,
             1.0,
             None,
+            false,
         )?;
 
         Some(RasterizedGlyph {
@@ -475,13 +482,14 @@ impl Face {
         })
     }
 
-    /// Draw a single glyph into a fresh `px_w * px_h` grayscale coverage buffer.
-    /// The CTM is translated by `(frac_x, frac_y)` (sub-pixel positioning) then
-    /// scaled by `(scale_x, scale_y)` (the constraint stretch; `1.0` when
-    /// unconstrained), and the glyph is drawn at `(draw_x, draw_y)` — the caller
-    /// passes the negated raw bearings so the outline's bottom-left maps to the
-    /// CTM origin. Returns the buffer, or `None` if the bitmap context can't be
-    /// created.
+    /// Draw a single glyph into a fresh `px_w * px_h` coverage buffer (1 byte per
+    /// pixel grayscale, or 4 bytes per pixel premultiplied-first BGRA when
+    /// `color`). The CTM is translated by `(tx, ty)` (sub-pixel positioning plus
+    /// any canvas padding) then scaled by `(scale_x, scale_y)` (the constraint
+    /// stretch; `1.0` when unconstrained), and the glyph is drawn at `(draw_x,
+    /// draw_y)` — the caller passes the negated raw bearings so the outline's
+    /// bottom-left maps to the CTM origin. Returns the buffer, or `None` if the
+    /// bitmap context can't be created.
     #[allow(clippy::too_many_arguments)]
     fn draw_coverage(
         &self,
@@ -497,22 +505,33 @@ impl Face {
         thicken: bool,
         fill_gray: f64,
         stroke_width: Option<f64>,
+        color: bool,
     ) -> Option<Vec<u8>> {
-        let colorspace = CGColorSpace::new_device_gray()?;
-        let mut buf = vec![0u8; px_w * px_h];
+        // Color (emoji) glyphs render to a Display-P3, premultiplied-first,
+        // 4-byte-per-pixel BGRA buffer; monochrome glyphs to a 1-byte device-gray
+        // buffer.
+        let (colorspace, depth, bitmap_info) = if color {
+            // SAFETY: `kCGColorSpaceDisplayP3` is a static `CFString` name.
+            let space = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceDisplayP3 }))?;
+            let info =
+                CGImageByteOrderInfo::Order32Little.0 | CGImageAlphaInfo::PremultipliedFirst.0;
+            (space, 4usize, info)
+        } else {
+            (CGColorSpace::new_device_gray()?, 1usize, 0u32)
+        };
+        let mut buf = vec![0u8; px_w * px_h * depth];
 
-        // SAFETY: `buf` is a `px_w * px_h` byte buffer (1 byte/px) matching the
-        // grayscale, no-alpha (`kCGImageAlphaNone` = 0) context; the colorspace
-        // is live.
+        // SAFETY: `buf` is `px_w * px_h * depth` bytes matching the colorspace,
+        // `depth`, and `bitmap_info`; the colorspace is live.
         let ctx = unsafe {
             CGBitmapContextCreate(
                 buf.as_mut_ptr().cast(),
                 px_w,
                 px_h,
                 8,
-                px_w,
+                px_w * depth,
                 Some(&colorspace),
-                0,
+                bitmap_info,
             )
         }?;
 
@@ -534,11 +553,18 @@ impl Face {
         CGContext::set_should_antialias(Some(&ctx), true);
         CGContext::set_allows_antialiasing(Some(&ctx), true);
 
-        // White (or `thicken_strength`-grayed) glyph on the zeroed (black)
-        // buffer; the gray value is coverage. The stroke color matches the fill
-        // and is set unconditionally (it only takes effect when stroking).
-        CGContext::set_gray_fill_color(Some(&ctx), fill_gray, 1.0);
-        CGContext::set_gray_stroke_color(Some(&ctx), fill_gray, 1.0);
+        // Set the drawing color. Color glyphs use opaque white RGBA (the glyph
+        // carries its own colors); monochrome glyphs use a white (or
+        // `thicken_strength`-grayed) fill where the gray value is the coverage.
+        // The stroke color matches the fill and is set unconditionally (it only
+        // takes effect when stroking).
+        if color {
+            CGContext::set_rgb_fill_color(Some(&ctx), 1.0, 1.0, 1.0, 1.0);
+            CGContext::set_rgb_stroke_color(Some(&ctx), 1.0, 1.0, 1.0, 1.0);
+        } else {
+            CGContext::set_gray_fill_color(Some(&ctx), fill_gray, 1.0);
+            CGContext::set_gray_stroke_color(Some(&ctx), fill_gray, 1.0);
+        }
 
         // Synthetic bold: fill *and* stroke the outline at the given line width,
         // making the glyph heavier. Set before the CTM transforms (upstream
@@ -573,18 +599,33 @@ impl Face {
         Some(buf)
     }
 
-    /// Render a glyph into the grayscale `atlas`, applying the sizing/alignment
-    /// constraint in `opts`, and return its [`Glyph`] (pixel size, whole-pixel
-    /// bearings, and atlas coordinates). Faithful port of the monochrome core of
-    /// upstream `renderGlyph`: cell constraints, thicken, and synthetic bold are
-    /// applied, but the color/sbix path is deferred.
+    /// Render a glyph into the `atlas`, applying the sizing/alignment constraint
+    /// in `opts`, and return its [`Glyph`] (pixel size, whole-pixel bearings, and
+    /// atlas coordinates). Faithful port of upstream `renderGlyph`: cell
+    /// constraints, thicken, synthetic bold, and the color/sbix path are applied.
+    /// The atlas must match the glyph's color depth (a `Bgra` atlas for color
+    /// glyphs, `Grayscale` for monochrome) or [`RenderGlyphError::InvalidAtlasFormat`]
+    /// is returned.
     pub(crate) fn render_glyph(
         &self,
         atlas: &mut Atlas,
         glyph: u16,
         opts: &RenderOptions,
     ) -> Result<Glyph, RenderGlyphError> {
-        debug_assert_eq!(atlas.format(), Format::Grayscale);
+        // A color glyph is, in this port, always an sbix (bitmap) glyph, since
+        // only sbix color is detected (SVG color is deferred).
+        let is_color = self.is_color_glyph(glyph);
+        let sbix = is_color;
+
+        // The atlas pixel format must match the glyph's color depth.
+        let required = if is_color {
+            Format::Bgra
+        } else {
+            Format::Grayscale
+        };
+        if atlas.format() != required {
+            return Err(RenderGlyphError::InvalidAtlasFormat);
+        }
 
         let glyphs = [glyph];
         let glyphs_ptr = NonNull::new(glyphs.as_ptr() as *mut u16).unwrap();
@@ -602,18 +643,20 @@ impl Face {
         // Synthetic bold gains half the line width on every edge, so grow the
         // rect by the line width before everything downstream (the guard,
         // `constrain`, the draw position, and the scale denominators) sees it.
-        // (No sbix exemption here — the color/sbix path is deferred.)
+        // Bitmap (sbix) glyphs aren't affected by synthetic bold.
         let (mut rw, mut rh, mut ox, mut oy) = (
             rect.size.width,
             rect.size.height,
             rect.origin.x,
             rect.origin.y,
         );
-        if let Some(lw) = self.synthetic_bold {
-            rw += lw;
-            rh += lw;
-            ox -= lw / 2.0;
-            oy -= lw / 2.0;
+        if !sbix {
+            if let Some(lw) = self.synthetic_bold {
+                rw += lw;
+                rh += lw;
+                ox -= lw / 2.0;
+                oy -= lw / 2.0;
+            }
         }
 
         // No outline (or one too small to render) -> a zero glyph, matching
@@ -647,9 +690,9 @@ impl Face {
         );
 
         let mut x = glyph_size.x;
-        let y = glyph_size.y;
-        let width = glyph_size.width;
-        let height = glyph_size.height;
+        let mut y = glyph_size.y;
+        let mut width = glyph_size.width;
+        let mut height = glyph_size.height;
 
         // Center the glyph within the pixel-rounded cell if it's wider than the
         // face, so it isn't off to the left. Skipped for stretch, which already
@@ -664,10 +707,20 @@ impl Face {
             }
         }
 
+        // A bitmap (sbix) glyph always renders as full pixels, so quantize its
+        // position and size to whole pixels for good results.
+        if sbix {
+            let cell_height = opts.grid_metrics.cell_height as f64;
+            width = cell_width - (cell_width - width - x).round() - x.round();
+            height = cell_height - (cell_height - height - y).round() - y.round();
+            x = x.round();
+            y = y.round();
+        }
+
         // Font smoothing ("thicken") can add up to one pixel on every edge, so
         // we pad the canvas by that much when it's enabled to avoid clipping.
-        // (No padding for the color/sbix path, which is deferred.)
-        let canvas_padding: i32 = if opts.thicken { 1 } else { 0 };
+        // Bitmap (sbix) glyphs aren't affected by smoothing, so no padding.
+        let canvas_padding: i32 = if opts.thicken && !sbix { 1 } else { 0 };
 
         // Whole-pixel bearings and canvas from the constrained values, with the
         // fractional remainder kept for sub-pixel positioning. The padding
@@ -700,6 +753,7 @@ impl Face {
                 opts.thicken,
                 opts.thicken_strength as f64 / 255.0,
                 self.synthetic_bold,
+                is_color,
             )
             .ok_or(RenderGlyphError::ContextCreationFailed)?;
 
@@ -1093,5 +1147,87 @@ mod tests {
             "the emoji glyph should resolve (no font fallback)"
         );
         assert!(face.is_color_glyph(glyph));
+    }
+
+    #[test]
+    fn render_color_glyph_into_bgra_atlas() {
+        let face = Face::new("Apple Color Emoji", 32.0);
+        let utf16: Vec<u16> = '\u{1F600}'.encode_utf16(&mut [0u16; 2]).to_vec();
+        let glyph = face.glyphs_for_characters(&utf16)[0];
+        assert_ne!(glyph, 0, "the emoji glyph should resolve");
+
+        let mut atlas = Atlas::new(1024, Format::Bgra);
+        let opts = RenderOptions {
+            grid_metrics: Metrics::calc(face.get_metrics()),
+            constraint: Constraint::default(),
+            constraint_width: 1,
+            thicken: false,
+            thicken_strength: 255,
+        };
+        let g = face
+            .render_glyph(&mut atlas, glyph, &opts)
+            .expect("the emoji should render into the BGRA atlas");
+        assert!(g.width > 0);
+        assert!(g.height > 0);
+        assert!((g.atlas_x + g.width) as usize <= 1024);
+        assert!((g.atlas_y + g.height) as usize <= 1024);
+
+        // The region must contain real color — at least one pixel with a
+        // non-zero color channel (not just alpha).
+        let size = 1024usize;
+        let data = atlas.data();
+        let mut has_color = false;
+        for row in 0..g.height {
+            for col in 0..g.width {
+                // BGRA: bytes 0..3 are B,G,R (premultiplied), byte 3 is A.
+                let base = (((g.atlas_y + row) as usize) * size + (g.atlas_x + col) as usize) * 4;
+                if data[base] != 0 || data[base + 1] != 0 || data[base + 2] != 0 {
+                    has_color = true;
+                }
+            }
+        }
+        assert!(has_color, "the emoji should render with non-zero color");
+    }
+
+    #[test]
+    fn mono_glyph_still_renders() {
+        let mut atlas = Atlas::new(512, Format::Grayscale);
+        let face = Face::new("Menlo", 32.0);
+        let opts = none_opts(&face);
+        let glyph = face.glyphs_for_characters(&[b'M' as u16])[0];
+        let g = face
+            .render_glyph(&mut atlas, glyph, &opts)
+            .expect("'M' should still render into the grayscale atlas");
+        assert!(g.width > 0 && g.height > 0);
+        assert!(atlas.data().iter().any(|&b| b != 0), "'M' has ink");
+    }
+
+    #[test]
+    fn wrong_atlas_format_errors() {
+        // A color glyph needs a BGRA atlas; a grayscale atlas is rejected.
+        let emoji = Face::new("Apple Color Emoji", 32.0);
+        let utf16: Vec<u16> = '\u{1F600}'.encode_utf16(&mut [0u16; 2]).to_vec();
+        let color_glyph = emoji.glyphs_for_characters(&utf16)[0];
+        let mut gray = Atlas::new(512, Format::Grayscale);
+        let emoji_opts = RenderOptions {
+            grid_metrics: Metrics::calc(emoji.get_metrics()),
+            constraint: Constraint::default(),
+            constraint_width: 1,
+            thicken: false,
+            thicken_strength: 255,
+        };
+        assert_eq!(
+            emoji.render_glyph(&mut gray, color_glyph, &emoji_opts),
+            Err(RenderGlyphError::InvalidAtlasFormat)
+        );
+
+        // A mono glyph needs a grayscale atlas; a BGRA atlas is rejected.
+        let text = Face::new("Menlo", 32.0);
+        let mono_glyph = text.glyphs_for_characters(&[b'M' as u16])[0];
+        let mut bgra = Atlas::new(512, Format::Bgra);
+        assert_eq!(
+            text.render_glyph(&mut bgra, mono_glyph, &none_opts(&text)),
+            Err(RenderGlyphError::InvalidAtlasFormat)
+        );
     }
 }
