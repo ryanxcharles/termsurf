@@ -7,8 +7,7 @@
 //! `CTFontDescriptor` (the query object), [`Descriptor::discover_descriptors`]
 //! runs the collection match and ranks the candidates best-first by [`Score`],
 //! and [`Descriptor::discover_faces`] lazily turns those into [`Face`]s. The
-//! variation-axis score refinement, `discoverFallback`, and the resolver wiring
-//! are later sub-areas.
+//! resolver wiring (`codepoint_resolver`) consumes these.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -19,8 +18,10 @@ use objc2_core_foundation::{
 };
 use objc2_core_text::{
     kCTFontCharacterSetAttribute, kCTFontFamilyNameAttribute, kCTFontSizeAttribute,
-    kCTFontStyleNameAttribute, kCTFontSymbolicTrait, kCTFontTraitsAttribute, CTFont,
-    CTFontCollection, CTFontDescriptor, CTFontSymbolicTraits, CTFontTableOptions,
+    kCTFontStyleNameAttribute, kCTFontSymbolicTrait, kCTFontTraitsAttribute,
+    kCTFontVariationAttribute, kCTFontVariationAxesAttribute, kCTFontVariationAxisDefaultValueKey,
+    kCTFontVariationAxisIdentifierKey, kCTFontVariationAxisNameKey, CTFont, CTFontCollection,
+    CTFontDescriptor, CTFontSymbolicTraits, CTFontTableOptions,
 };
 
 use crate::font::face::coretext::Face;
@@ -318,8 +319,8 @@ fn deferred_face(desc: CFRetained<CTFontDescriptor>) -> Face {
 /// The ranking score for a discovery candidate. Faithful port of upstream's
 /// `CoreText.Score` packed struct: the fields are laid out by **increasing
 /// precedence**, so the integer projection [`Score::int`] compares as a single
-/// value where a higher number is a better match. (Computing a `Score` from a
-/// font — `score()` — and wiring the sort into discovery are later experiments.)
+/// value where a higher number is a better match. [`Descriptor::score`] computes
+/// it from a candidate, and `discover_descriptors` sorts by it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Score {
     /// Tie-breaker: more glyphs is preferred, all else equal (bits `0..16`).
@@ -374,10 +375,9 @@ impl Descriptor {
     /// (request) descriptor. Faithful port of the font-loaded and symbolic-trait
     /// fields of upstream `Score.score`: load the candidate font, count its
     /// glyphs, check whether it has the requested codepoint, and compare its
-    /// monospace/bold/italic-ness (from the symbolic traits) to the request. The
-    /// `head`/`OS/2`/variation bold-italic refinement and the style exact/fuzzy
-    /// match are later experiments, so `bold`/`italic` here use the symbolic
-    /// traits only and `fuzzy_style`/`exact_style` stay zero.
+    /// monospace/bold/italic-ness to the request. The bold/italic guess starts
+    /// from the symbolic traits, then is refined by the `head`/`OS/2` tables and —
+    /// for variable fonts — overwritten by the `wght`/`ital`/`slnt` variation axes.
     pub(crate) fn score(&self, ct_desc: &CTFontDescriptor) -> Score {
         let mut s = Score::default();
 
@@ -405,9 +405,7 @@ impl Descriptor {
 
         // Refine the guesses from the font's own tables, which are generally more
         // reliable than the symbolic traits. The `head` `macStyle` bits and the
-        // `OS/2` `fsSelection` bits can only turn a flag on (OR-ed in). (The
-        // variation-axis derivation, which overwrites these for variable fonts,
-        // is a later experiment.)
+        // `OS/2` `fsSelection` bits can only turn a flag on (OR-ed in).
         if let Some(head) = copy_table(&font, b"head").and_then(|d| Head::from_bytes(&d).ok()) {
             is_bold |= head.mac_style & 1 == 1;
             is_italic |= head.mac_style & 2 == 2;
@@ -415,6 +413,13 @@ impl Descriptor {
         if let Some(os2) = copy_table(&font, b"OS/2").and_then(|d| Os2::from_bytes(&d).ok()) {
             is_bold |= os2.fs_selection.bold();
             is_italic |= os2.fs_selection.italic();
+        }
+
+        // For a variable font, the current axis instance is authoritative: its
+        // `wght`/`ital`/`slnt` values overwrite the table-derived guess.
+        let pairs = variation_axis_pairs(&font);
+        if !pairs.is_empty() {
+            (is_bold, is_italic) = derive_style_from_axes(is_bold, is_italic, &pairs);
         }
 
         // The bold/italic fields are whether the font matches the request.
@@ -525,6 +530,102 @@ fn symbolic_traits(ct_desc: &CTFontDescriptor) -> CTFontSymbolicTraits {
     CTFontSymbolicTraits(n.as_i32().unwrap_or(0) as u32)
 }
 
+/// Refine `(is_bold, is_italic)` from a variable font's ordered axis
+/// `(name, value)` pairs. Faithful port of upstream's `wght`/`ital`/`slnt`
+/// rules: each match **overwrites** the flag (the variable instance is
+/// authoritative); an explicit `ital` axis suppresses a later `slnt`.
+fn derive_style_from_axes(
+    mut is_bold: bool,
+    mut is_italic: bool,
+    axes: &[(String, f64)],
+) -> (bool, bool) {
+    let mut ital_seen = false;
+    for (name, val) in axes {
+        match name.as_str() {
+            // Subjective bold threshold: a `wght` over 600 reads as bold.
+            "wght" => is_bold = *val > 600.0,
+            "ital" => {
+                is_italic = *val > 0.5;
+                ital_seen = true;
+            }
+            // More than a 5° clockwise slant reads as italic (ignored once an
+            // explicit `ital` axis has been seen).
+            "slnt" if !ital_seen => is_italic = *val <= -5.0,
+            _ => {}
+        }
+    }
+    (is_bold, is_italic)
+}
+
+/// Read a variable font's axis `(name, value)` pairs: the axis name from
+/// `kCTFontVariationAxesAttribute` (whose names are non-localized, so the raw
+/// `wght`/`ital`/`slnt` tags appear) paired with the instance's value from
+/// `kCTFontVariationAttribute` (keyed by the axis identifier), falling back to the
+/// axis default. Empty when the font has no variation axes or no instance values.
+fn variation_axis_pairs(font: &CTFont) -> Vec<(String, f64)> {
+    // SAFETY: a static CF string key; the font is live.
+    let Some(axes) = (unsafe { font.attribute(kCTFontVariationAxesAttribute) })
+        .and_then(|a| a.downcast::<CFArray>().ok())
+    else {
+        return Vec::new();
+    };
+    // SAFETY: a static CF string key; the font is live.
+    let Some(values) = (unsafe { font.attribute(kCTFontVariationAttribute) })
+        .and_then(|v| v.downcast::<CFDictionary>().ok())
+    else {
+        return Vec::new();
+    };
+
+    let mut pairs = Vec::new();
+    for i in 0..axes.count() {
+        // SAFETY: `i < count`; each element is a variation-axis `CFDictionary`.
+        let dict = unsafe { axes.value_at_index(i) };
+        if dict.is_null() {
+            continue;
+        }
+        let dict = unsafe { &*(dict as *const CFDictionary) };
+
+        // The axis name (the comparison key for the style rules).
+        // SAFETY: a static CF string key; the value (if present) is a `CFString`.
+        let name = unsafe {
+            dict.value((kCTFontVariationAxisNameKey as *const CFString).cast::<c_void>())
+        };
+        if name.is_null() {
+            continue;
+        }
+        let name = unsafe { &*(name as *const CFString) }.to_string();
+
+        // The axis default, and the instance value (looked up by identifier).
+        // SAFETY: static CF string keys; the values (if present) are `CFNumber`s.
+        let default = unsafe {
+            dict.value((kCTFontVariationAxisDefaultValueKey as *const CFString).cast::<c_void>())
+        };
+        let default = if default.is_null() {
+            0.0
+        } else {
+            unsafe { &*(default as *const CFNumber) }
+                .as_f64()
+                .unwrap_or(0.0)
+        };
+        let id = unsafe {
+            dict.value((kCTFontVariationAxisIdentifierKey as *const CFString).cast::<c_void>())
+        };
+        let mut val = default;
+        if !id.is_null() {
+            // SAFETY: `id` is a live `CFNumber` key; the values dict is keyed by
+            // axis identifier, and CFDictionary matches keys by `CFEqual`.
+            let v = unsafe { values.value(id) };
+            if !v.is_null() {
+                val = unsafe { &*(v as *const CFNumber) }
+                    .as_f64()
+                    .unwrap_or(default);
+            }
+        }
+        pairs.push((name, val));
+    }
+    pairs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,6 +635,50 @@ mod tests {
         // Upstream-verified packed identifiers.
         assert_eq!(Variation::id_from_tag(b"wght"), 2003265652);
         assert_eq!(Variation::id_from_tag(b"slnt"), 1936486004);
+    }
+
+    #[test]
+    fn derive_style_from_axes_thresholds() {
+        let s = |b, i, axes: &[(&str, f64)]| {
+            let owned: Vec<(String, f64)> = axes.iter().map(|&(n, v)| (n.to_string(), v)).collect();
+            derive_style_from_axes(b, i, &owned)
+        };
+        // wght > 600 is bold; a low wght overwrites a true input back to not-bold.
+        assert_eq!(s(false, false, &[("wght", 700.0)]), (true, false));
+        assert_eq!(s(true, false, &[("wght", 400.0)]), (false, false));
+        // ital > 0.5 is italic, and suppresses a following slnt.
+        assert_eq!(s(false, false, &[("ital", 1.0)]), (false, true));
+        assert_eq!(
+            s(false, false, &[("ital", 1.0), ("slnt", -3.0)]),
+            (false, true),
+            "ital suppresses a later slnt"
+        );
+        // slnt <= -5 is italic (when no ital axis); a shallow slant is not.
+        assert_eq!(s(false, false, &[("slnt", -10.0)]), (false, true));
+        assert_eq!(s(false, false, &[("slnt", -3.0)]), (false, false));
+        // A slnt before ital is overwritten by the ital axis.
+        assert_eq!(
+            s(false, false, &[("slnt", -10.0), ("ital", 0.0)]),
+            (false, false),
+            "ital overwrites a prior slnt"
+        );
+        // An unknown axis is ignored.
+        assert_eq!(s(true, true, &[("wdth", 120.0)]), (true, true));
+    }
+
+    #[test]
+    fn score_non_variable_unchanged() {
+        // A non-variable font has no variation axes, so the derivation is skipped
+        // and `score` matches its pre-variation behavior: a "regular" request to a
+        // regular font scores bold/italic as matching (both `false == false`).
+        let req = Descriptor {
+            family: Some("Menlo".into()),
+            ..Default::default()
+        };
+        let ct_desc = req.to_core_text_descriptor();
+        let s = req.score(&ct_desc);
+        assert!(s.bold, "regular request matches Menlo's non-bold");
+        assert!(s.italic, "regular request matches Menlo's non-italic");
     }
 
     #[test]

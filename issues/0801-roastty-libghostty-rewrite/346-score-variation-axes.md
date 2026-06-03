@@ -208,3 +208,69 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-140008-295893-prompt.md` (design)
 - Result: `logs/codex-review/20260603-140008-295893-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The discovery score now reads variable fonts' style axes.
+
+- `roastty/src/font/discovery.rs`:
+  `derive_style_from_axes(is_bold, is_italic, axes)` ports upstream's thresholds
+  — `wght > 600` → bold, `ital > 0.5` → italic (setting `ital_seen`),
+  `slnt <= -5.0` → italic (only when no `ital` axis seen) — each **overwriting**
+  the prior flag. `variation_axis_pairs(font)` reads
+  `kCTFontVariationAxesAttribute` (the axis array) and
+  `kCTFontVariationAttribute` (the instance values), collecting each axis's
+  `(name, value-or-default)` (the value looked up by the axis identifier
+  `CFNumber`), returning empty when either attribute is absent. `score` calls
+  them after the `OS/2` block, overwriting the table-derived bold/italic for
+  variable fonts. The `score` doc comment, the `Score` doc comment, and the
+  module doc comment were updated.
+
+Tests: `derive_style_from_axes_thresholds` (covers `wght`/`ital`/`slnt`
+thresholds, the overwrite semantics, the `ital_seen` suppression including
+`slnt`-before-`ital` and `ital`-overwrites-`slnt`, and an ignored unknown axis),
+`score_non_variable_unchanged` (Menlo → no axes → derivation skipped, regular
+request scores bold/italic as matching). All pass.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2759 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The variation-axis bold/italic derivation completes upstream's `Score.score`:
+roastty's discovery scoring now honors a variable font's `wght`/`ital`/`slnt`
+instance, which overwrites the `head`/`OS/2` guess. With this, the discovery
+`score()` is complete relative to upstream.
+
+The remaining font work is the **special-font** fast path (codepoint == glyph,
+needing the font-index/special concept) and the `Shaper` struct +
+**`RunIterator`** over terminal cells (needing the terminal grid/render-state
+types) — both naturally belong with the higher Shaper/Collection layer.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It confirmed: `derive_style_from_axes` is a faithful
+port (matching thresholds, overwrite of the prior table-derived guess,
+`ital_seen` suppressing only later `slnt` axes — with the test vectors covering
+the order cases including `slnt` before `ital`); `variation_axis_pairs` matches
+upstream's shape (both axes and current values required, name/default/identifier
+read from the axis dictionary, instance value looked up by identifier with
+default fallback); the CF usage is sound (arrays/dictionaries stay live while
+raw pointers are dereferenced, dictionary lookup by the identifier `CFNumber` is
+appropriate, returned `CFNumber` values are consumed immediately); the placement
+after `head`/`OS/2` and before `s.bold`/`s.italic` is correct (variable-axis
+values become authoritative only after the table guess is built); and
+non-variable behavior and the deferred scope are intact. Its one non-required
+note — a stale `Score`-type doc parenthetical — was fixed before the result
+commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-140503-978056-last-message.md`
