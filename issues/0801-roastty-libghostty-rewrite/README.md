@@ -1017,6 +1017,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 285: z2d port — the WorkingEdgeSet active-edge-table](285-z2d-working-edge-set.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 286: z2d port — the SparseCoverageBuffer](286-z2d-sparse-coverage.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
