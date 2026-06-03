@@ -1121,6 +1121,8 @@ are past the correctness-critical foundation.
   Claude/Codex/Codex
 - [Experiment 337: the shaper's output cell](337-shaper-cell.md) — **Pass** ·
   Claude/Codex/Codex
+- [Experiment 338: the CoreText shaping core](338-shaper-coretext-core.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
