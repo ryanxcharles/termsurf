@@ -1029,6 +1029,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 291: z2d port — the fill plotter](291-z2d-fill-plotter.md) —
   **Pass** · Claude/Codex/Codex
+- [Experiment 292: z2d port — Slope](292-z2d-slope.md) — **Designed** ·
+  Claude/Codex/Codex
 
 ## Non-Goals
 
