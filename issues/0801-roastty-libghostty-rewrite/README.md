@@ -1143,6 +1143,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 348: the feature-string parser](348-shaper-feature-parser.md) —
   **Pass** · Claude/Codex/Codex
+- [Experiment 349: threading user features into shaping](349-shaper-user-features.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
