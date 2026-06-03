@@ -806,6 +806,41 @@ pub(crate) fn draw_underline_curly(
     canvas.stroke_path(&nodes, line_width, raster::CapMode::Round);
 }
 
+/// The filled corner triangles (`◢ U+25E2`, `◣ U+25E3`, `◤ U+25E4`,
+/// `◥ U+25E5`) — the first filled sprite glyphs. Each fills a right triangle
+/// covering one corner of the cell, opaque. Faithful port of upstream
+/// `geometric_shapes.zig`'s `cornerTriangleShade` (`.on`). Returns `false` for
+/// any other codepoint.
+pub(crate) fn draw_corner_triangle(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> bool {
+    let corner = match cp {
+        0x25e2 => Corner::Br,
+        0x25e3 => Corner::Bl,
+        0x25e4 => Corner::Tl,
+        0x25e5 => Corner::Tr,
+        _ => return false,
+    };
+
+    let w = metrics.cell_width as f64;
+    let h = metrics.cell_height as f64;
+    // The three triangle vertices per corner.
+    let (v0, v1, v2) = match corner {
+        Corner::Tl => ((0.0, 0.0), (0.0, h), (w, 0.0)),
+        Corner::Tr => ((0.0, 0.0), (w, h), (w, 0.0)),
+        Corner::Bl => ((0.0, 0.0), (0.0, h), (w, h)),
+        Corner::Br => ((0.0, h), (w, h), (w, 0.0)),
+    };
+
+    let nodes = [
+        raster::PathNode::MoveTo(raster::Point::new(v0.0, v0.1)),
+        raster::PathNode::LineTo(raster::Point::new(v1.0, v1.1)),
+        raster::PathNode::LineTo(raster::Point::new(v2.0, v2.1)),
+        raster::PathNode::ClosePath,
+    ];
+
+    canvas.fill_path(&nodes);
+    true
+}
+
 /// Horizontal line with the top edge at `y`, from `x1` to `x2`, `thick` pixels
 /// tall. Faithful port of upstream `common.hline`.
 fn hline(canvas: &mut Canvas, x1: i32, x2: i32, y: i32, thick: u32) {
@@ -2768,6 +2803,63 @@ mod tests {
         // The center hole is empty.
         assert!(!inked(&c, 5, 5), "center hole empty");
         assert!(!inked(&c, 4, 4), "inner corner empty");
+    }
+
+    // The filled corner triangles (Canvas::fill_path + the fill pipeline). The
+    // fixture 9×18 cell: each triangle fills its corner and leaves the opposite
+    // corner empty, confirmed against the render.
+
+    #[test]
+    fn corner_triangle_25e4_tl() {
+        // ◤ : top-left filled.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_corner_triangle(0x25e4, &m, &mut c));
+        assert!(inked(&c, 1, 1), "top-left filled");
+        assert!(!inked(&c, 7, 16), "bottom-right empty");
+    }
+
+    #[test]
+    fn corner_triangle_25e5_tr() {
+        // ◥ : top-right filled.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_corner_triangle(0x25e5, &m, &mut c));
+        assert!(inked(&c, 7, 1), "top-right filled");
+        assert!(!inked(&c, 1, 16), "bottom-left empty");
+    }
+
+    #[test]
+    fn corner_triangle_25e3_bl() {
+        // ◣ : bottom-left filled.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_corner_triangle(0x25e3, &m, &mut c));
+        assert!(inked(&c, 1, 16), "bottom-left filled");
+        assert!(!inked(&c, 7, 1), "top-right empty");
+    }
+
+    #[test]
+    fn corner_triangle_25e2_br() {
+        // ◢ : bottom-right filled.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_corner_triangle(0x25e2, &m, &mut c));
+        assert!(inked(&c, 7, 16), "bottom-right filled");
+        assert!(!inked(&c, 1, 1), "top-left empty");
+    }
+
+    #[test]
+    fn draw_corner_triangle_excludes() {
+        let m = fixture_metrics();
+        for cp in [0x2500u32, 0x25e6, 'M' as u32] {
+            let mut c = cell_canvas();
+            assert!(
+                !draw_corner_triangle(cp, &m, &mut c),
+                "{cp:#06x} not a corner triangle"
+            );
+            assert!(all_alpha(&c, &m, 0), "{cp:#06x} drew ink");
+        }
     }
 
     #[test]

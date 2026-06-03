@@ -147,3 +147,68 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-081805-800977-prompt.md`
 - Result: `logs/codex-review/20260603-081805-800977-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/canvas.rs` gained `Canvas::fill_path` (the
+`translate_node` padding offset for every node → `raster::fill_plot` at
+`MSAA_SCALE` with `tolerance` 0.1 → `raster::fill_polygon` `NonZero` into the
+padded surface with the opaque `.on` source). `roastty/src/font/sprite/draw.rs`
+gained `draw_corner_triangle`: the four-corner triangle vertex sets (reusing the
+`Corner` enum), built `move`/`line`/`line`/`close`, filled via
+`canvas.fill_path`, with the dispatch `0x25E2 → Br`, `0x25E3 → Bl`,
+`0x25E4 → Tl`, `0x25E5 → Tr` (`_ => false`); the module doc notes the first
+filled glyphs.
+
+Tests (the fixture `9×18` cell), confirmed against the render:
+
+- `corner_triangle_25e4_tl` (`◤`) — `(1,1)` inked, `(7,16)` empty.
+- `corner_triangle_25e5_tr` (`◥`) — `(7,1)` inked, `(1,16)` empty.
+- `corner_triangle_25e3_bl` (`◣`) — `(1,16)` inked, `(7,1)` empty.
+- `corner_triangle_25e2_br` (`◢`) — `(7,16)` inked, `(1,1)` empty.
+- `draw_corner_triangle_excludes` — `0x2500`, `0x25E6`, `'M'` return `false` and
+  draw nothing.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2615 passed, 0 failed (+5, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The filled corner triangles (`U+25E2`–`U+25E5`) render end to end — the first
+anti-aliased **filled** sprite glyphs — wiring the `fill_plot` pipeline to the
+surface through the new `Canvas::fill_path`
+(`path → fill_plot → AA alpha8 surface`), the fill analog of
+`Canvas::stroke_path`. The sprite font now covers the diagonals, the box arcs,
+the undercurl (stroked) and these triangles (filled).
+
+The next geometric glyphs are the **outlined** corner triangles
+(`U+25F8`–`U+25FA`, which need `innerStrokePath` — a fill-mask + double-width
+stroke + multiply) and `U+25FF`; the **shaded** fills (medium/light alpha, which
+need `fill_polygon` to composite a source alpha < 255) used widely by the
+block/quadrant families' shade variants; and the circle/ellipse shapes. The
+larger remaining integration is the unifying sprite `has_codepoint`/draw and
+sprite-kind dispatch (filling the resolver's deferred `SpriteUnavailable` arm),
+then the discovery consumer, the UCD emoji-presentation default, codepoint
+overrides, the shaper, the Nerd Font attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes**. It confirmed `Canvas::fill_path` applies the padding CTM to every
+node, runs `fill_plot` at `MSAA_SCALE` with tolerance 0.1, and fills `NonZero`
+into the padded alpha surface using the opaque `.on` path; that
+`draw_corner_triangle` matches the upstream vertex order for all four corners
+and includes `ClosePath`; that the dispatch matches upstream exactly
+(`25E2 → Br`/`25E3 → Bl`/`25E4 → Tl`/`25E5 → Tr`, else `false`); and that the
+tests cover all four orientations and the exclusion behavior. No Optional
+findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-082029-786524-last-message.md`

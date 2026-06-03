@@ -266,6 +266,27 @@ impl Canvas {
         );
     }
 
+    /// Fill an anti-aliased closed path (in unpadded cell coordinates) with the
+    /// opaque (`.on`) source. Faithful port of upstream `Canvas.fillPath` as used
+    /// by the filled geometric shapes: `tolerance` 0.1, the NonZero fill rule —
+    /// z2d's `FillOptions` defaults. The padding translation (upstream's CTM) is
+    /// applied to every node here; the fill is rasterized with 4× multisample
+    /// anti-aliasing into the padded surface. (Shaded fills — a source alpha < 255
+    /// — are deferred; `fill_polygon` composites the coverage as the opaque
+    /// source.)
+    pub(crate) fn fill_path(&mut self, nodes: &[raster::PathNode]) {
+        let translated: Vec<raster::PathNode> =
+            nodes.iter().map(|n| self.translate_node(*n)).collect();
+        let poly = raster::fill_plot(&translated, raster::MSAA_SCALE as f64, 0.1);
+        raster::fill_polygon(
+            &mut self.buf,
+            self.width as i32,
+            self.height as i32,
+            &poly,
+            raster::FillRule::NonZero,
+        );
+    }
+
     /// Offset a path node's point(s) by the surface padding (the upstream
     /// translation-only CTM).
     fn translate_node(&self, node: raster::PathNode) -> raster::PathNode {
