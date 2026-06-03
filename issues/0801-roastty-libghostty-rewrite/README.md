@@ -1151,6 +1151,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 352: the run iterator's break-and-style helpers](352-runiter-break-helpers.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 353: the run iterator's TextRun and style break](353-runiter-textrun-style.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
