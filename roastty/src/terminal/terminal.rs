@@ -35,6 +35,7 @@ use super::size_report;
 use super::stream::{self, Action, Handler};
 use super::style;
 use super::tabstops;
+use crate::font::run::RunOptions;
 
 const TABSTOP_INTERVAL: usize = 8;
 
@@ -1504,6 +1505,12 @@ impl Terminal {
 
     pub(crate) fn render_rows_snapshot(&self) -> Vec<RenderRowSnapshot> {
         self.screens.active().render_rows_snapshot()
+    }
+
+    /// The renderer-facing entry: assemble the active screen's per-row
+    /// [`RunOptions`] for the shaper. Sibling of [`Self::render_rows_snapshot`].
+    pub(crate) fn shape_run_options(&self) -> Vec<RunOptions> {
+        self.screens.active().shape_run_options()
     }
 
     pub(crate) fn kitty_virtual_placements_visible(
@@ -4387,6 +4394,45 @@ mod tests {
         assert!(terminal.is_dirty_for_tests(0, 0));
         assert!(terminal.is_dirty_for_tests(39, 0));
         assert!(!terminal.is_dirty_for_tests(0, 1));
+    }
+
+    #[test]
+    fn shape_run_options_threads_screen_state() {
+        let mut terminal = Terminal::init(4, 2, None).unwrap();
+        terminal.next_slice(b"AB").unwrap();
+        // After printing "AB" the cursor sits at column 2 of row 0.
+        assert_eq!(terminal.cursor_position_for_tests(), (2, 0));
+
+        let opts = terminal.shape_run_options();
+
+        // One RunOptions per active row.
+        assert_eq!(opts.len(), 2);
+
+        // Row 0 decodes the printed cells; the rest are empty.
+        let row0 = &opts[0];
+        assert_eq!(row0.cells.len(), 4);
+        assert_eq!(row0.cells[0].codepoint, u32::from('A'));
+        assert_eq!(row0.cells[1].codepoint, u32::from('B'));
+        assert!(row0.cells[2].is_empty);
+        assert!(row0.cells[3].is_empty);
+
+        // Cursor threaded from the active screen: only on the cursor's row.
+        assert_eq!(row0.cursor_x, Some(2));
+        assert_eq!(opts[1].cursor_x, None);
+
+        // No selection installed yet.
+        assert_eq!(row0.selection, None);
+        assert_eq!(opts[1].selection, None);
+
+        // Selection threading: install a whole-screen selection and confirm the
+        // wrapper passes `self.selection` (not `None`). `select_all` clamps the
+        // end to the last written column (`B` at column 1), so the first row's
+        // range is `[0, 1]`. The key fact is that it is `Some`, proving the
+        // wrapper threads `self.selection`.
+        let sel = terminal.select_all().unwrap();
+        terminal.set_selection(Some(sel)).unwrap();
+        let opts = terminal.shape_run_options();
+        assert_eq!(opts[0].selection, Some([0, 1]));
     }
 
     #[test]

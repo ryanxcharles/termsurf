@@ -23,6 +23,7 @@ use super::sgr;
 use super::size::CellCountInt;
 use super::style;
 use super::tabstops;
+use crate::font::run::RunOptions;
 
 #[derive(Debug)]
 pub(super) struct Screen {
@@ -1552,6 +1553,14 @@ impl Screen {
 
     pub(super) fn render_rows_snapshot(&self) -> Vec<RenderRowSnapshot> {
         self.pages.render_rows_snapshot(self.selection)
+    }
+
+    /// Assemble the per-row [`RunOptions`] for the active viewport, threading the
+    /// screen's selection and the active cursor position into
+    /// [`PageList::shape_run_options`]. Sibling of [`Self::render_rows_snapshot`].
+    pub(super) fn shape_run_options(&self) -> Vec<RunOptions> {
+        self.pages
+            .shape_run_options(self.selection, Some((self.cursor.x, self.cursor.y)))
     }
 
     pub(super) fn kitty_virtual_placements_visible(

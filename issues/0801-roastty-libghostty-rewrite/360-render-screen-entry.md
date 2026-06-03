@@ -188,3 +188,70 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-171325-868942-prompt.md` (design)
 - Result: `logs/codex-review/20260603-171325-868942-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The renderer-facing shape entry is in place — the terminal now exposes its
+per-row `RunOptions` to the renderer.
+
+- `roastty/src/terminal/screen.rs`: `Screen::shape_run_options(&self)`
+  (`pub(super)`) threads the active screen's `self.selection` and the active
+  cursor `(self.cursor.x, self.cursor.y)` into `PageList::shape_run_options`.
+  Sibling of `Screen::render_rows_snapshot`. Imported
+  `crate::font::run::RunOptions`.
+- `roastty/src/terminal/terminal.rs`: `Terminal::shape_run_options(&self)`
+  (`pub(crate)`) delegates to `self.screens.active().shape_run_options()` — the
+  renderer-facing entry. Sibling of `Terminal::render_rows_snapshot`. Imported
+  `crate::font::run::RunOptions`.
+
+Test (in `terminal.rs`): `shape_run_options_threads_screen_state` drives a 4×2
+`Terminal`, prints `"AB"` (cursor lands at `(2, 0)`), and asserts
+`terminal.shape_run_options()`: one `RunOptions` per active row; row 0's cells
+decode `'A'`/`'B'` then empty; `cursor_x == Some(2)` on row 0 and `None` on row
+1 (cursor threaded from the active screen); `selection == None` on both. Then it
+installs a whole-screen selection (`select_all()` → `set_selection(Some(..))`)
+and asserts `shape_run_options()[0].selection == Some([0, 1])` — `select_all`
+clamps the end to the last written column (`B` at column 1), and the key fact is
+that it is `Some`, proving the wrapper threads `self.selection` rather than
+dropping it to `None`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2807 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The terminal→font bridge is complete from packed page cell all the way to a
+`pub(crate)` renderer-facing entry: `Terminal::shape_run_options()` returns the
+active screen's per-row `RunOptions` — decoded cells, selection range, and
+cursor column — exactly mirroring the `render_rows_snapshot` chain. The renderer
+can now obtain shaper-ready run options without touching terminal internals.
+
+The remaining renderer↔font work is the **draw-path wiring**: construct a
+`RunIterator` over each `RunOptions` (with the `CodepointResolver`), run it to
+produce `TextRun`s, shape each via `Face::shape_run`, and route the positioned
+glyphs into the renderer's cell/draw path (the Metal renderer) — plus the
+deferred `config.cursor` visibility gate before shaping.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the wrapper chain is faithful to
+`render_rows_snapshot` (the `Screen` layer threads `self.selection` through
+`self.pages`; the `Terminal` layer calls `self.screens.active()`), that cursor
+threading is correct for the scope (`self.cursor.x`/`.y` are active-screen
+coordinates and `PageList::shape_run_options` iterates active rows, so
+`Some(cx)` only when `cy == y` lines up with the row basis), that deferring the
+cursor visibility/blink/config gate to the draw path is acceptable, and that the
+test now proves both paths that matter — cursor propagation (`Some(2)` only on
+row 0) and selection propagation (`Some([0, 1])` after `select_all`) — closing
+the prior design-review gap. Nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-171738-733494-last-message.md`

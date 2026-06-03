@@ -1166,7 +1166,7 @@ are past the correctness-critical foundation.
 - [Experiment 359: assembling RunOptions for the viewport](359-render-run-options.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 360: the Screen/Terminal-facing shape entry](360-render-screen-entry.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
