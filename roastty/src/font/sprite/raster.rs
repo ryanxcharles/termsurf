@@ -1296,16 +1296,31 @@ pub(crate) fn stroke_line(p0: Point, p1: Point, thickness: f64, scale: f64) -> P
     result
 }
 
-/// A multi-segment open-path stroker (line segments, butt caps, miter/bevel
-/// joins). Faithful port of z2d's `stroke_plotter` for the line-only open-path
-/// case. It walks the path nodes, building the `outer` (convex, appended) and
-/// `inner` (concave, prepended) contours with a join between each consecutive
-/// segment pair, then caps the ends and assembles the result. `CurveTo`, round
-/// joins/caps (`Pen`), and closed paths are deferred.
+/// How two stroked segments are joined at a shared point. Faithful port of
+/// z2d's `JoinMode` (the upstream order).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JoinMode {
+    /// A pointed corner (within the miter limit), else a bevel.
+    Miter,
+    /// A rounded corner: the pen's vertex arc between the two face slopes.
+    Round,
+    /// Always a cut-off corner (the two outer face ends).
+    Bevel,
+}
+
+/// A multi-segment open-path stroker (line segments, butt caps,
+/// miter/round/bevel joins). Faithful port of z2d's `stroke_plotter` for the
+/// line-only open-path case. It walks the path nodes, building the `outer`
+/// (convex, appended) and `inner` (concave, prepended) contours with a join
+/// between each consecutive segment pair, then caps the ends and assembles the
+/// result. `CurveTo`, round caps, and closed paths are deferred.
 struct StrokePlotter {
     thickness: f64,
     scale: f64,
     miter_limit: f64,
+    join_mode: JoinMode,
+    /// The pen for round joins (lazily built only when `join_mode` is `Round`).
+    pen: Option<Pen>,
     points: PointBuffer<2, 5>,
     /// The polygon's winding direction, fixed on the first join.
     clockwise: Option<bool>,
@@ -1315,11 +1330,24 @@ struct StrokePlotter {
 }
 
 impl StrokePlotter {
-    fn new(thickness: f64, scale: f64, miter_limit: f64) -> StrokePlotter {
+    fn new(
+        thickness: f64,
+        scale: f64,
+        miter_limit: f64,
+        tolerance: f64,
+        join_mode: JoinMode,
+    ) -> StrokePlotter {
         StrokePlotter {
             thickness,
             scale,
             miter_limit,
+            join_mode,
+            // The pen is only needed for round joins.
+            pen: if join_mode == JoinMode::Round {
+                Some(Pen::init(thickness, tolerance))
+            } else {
+                None
+            },
             points: PointBuffer::new(),
             clockwise: None,
             // The contours scale the points, so the result polygon stays at 1.
@@ -1427,29 +1455,70 @@ impl StrokePlotter {
             return;
         }
 
-        // Outer join: miter within the limit, else bevel.
-        if Slope::compare_for_miter_limit(in_f.dev_slope, out_f.dev_slope, self.miter_limit) {
-            self.plot_outer(
-                direction_switched,
-                Face::intersect(&in_f, &out_f, join_clockwise),
-            );
-        } else {
-            self.plot_outer(
-                direction_switched,
-                if join_clockwise {
-                    in_f.p1_ccw
+        // Outer join, by mode.
+        match self.join_mode {
+            JoinMode::Miter | JoinMode::Bevel => {
+                // The miter apex only in Miter mode and within the limit;
+                // otherwise bevel (the two outer face ends).
+                if self.join_mode == JoinMode::Miter
+                    && Slope::compare_for_miter_limit(
+                        in_f.dev_slope,
+                        out_f.dev_slope,
+                        self.miter_limit,
+                    )
+                {
+                    self.plot_outer(
+                        direction_switched,
+                        Face::intersect(&in_f, &out_f, join_clockwise),
+                    );
                 } else {
-                    in_f.p1_cw
-                },
-            );
-            self.plot_outer(
-                direction_switched,
-                if join_clockwise {
-                    out_f.p0_ccw
-                } else {
-                    out_f.p0_cw
-                },
-            );
+                    self.plot_outer(
+                        direction_switched,
+                        if join_clockwise {
+                            in_f.p1_ccw
+                        } else {
+                            in_f.p1_cw
+                        },
+                    );
+                    self.plot_outer(
+                        direction_switched,
+                        if join_clockwise {
+                            out_f.p0_ccw
+                        } else {
+                            out_f.p0_cw
+                        },
+                    );
+                }
+            }
+            JoinMode::Round => {
+                // The inbound outer end, the pen's vertex arc between the two
+                // face slopes (offset by the shared corner p1), then the
+                // outbound outer end.
+                self.plot_outer(
+                    direction_switched,
+                    if join_clockwise {
+                        in_f.p1_ccw
+                    } else {
+                        in_f.p1_cw
+                    },
+                );
+                let pen = self.pen.as_ref().expect("round join requires a pen");
+                let arc: Vec<Point> = pen
+                    .vertex_iterator_for(in_f.dev_slope, out_f.dev_slope, join_clockwise)
+                    .map(|v| Point::new(p1.x + v.point.x, p1.y + v.point.y))
+                    .collect();
+                for pt in arc {
+                    self.plot_outer(direction_switched, pt);
+                }
+                self.plot_outer(
+                    direction_switched,
+                    if join_clockwise {
+                        out_f.p0_ccw
+                    } else {
+                        out_f.p0_cw
+                    },
+                );
+            }
         }
 
         // Inner join: through the midpoint.
@@ -1555,8 +1624,10 @@ pub(crate) fn stroke_path(
     thickness: f64,
     scale: f64,
     miter_limit: f64,
+    tolerance: f64,
+    join_mode: JoinMode,
 ) -> Polygon {
-    let mut plotter = StrokePlotter::new(thickness, scale, miter_limit);
+    let mut plotter = StrokePlotter::new(thickness, scale, miter_limit, tolerance, join_mode);
     plotter.run(nodes);
     plotter.result
 }
@@ -2745,7 +2816,7 @@ mod tests {
         // A 2-node path (move,line) strokes to the same polygon as the
         // single-segment stroke_line fallback (plotSingle).
         let nodes = [mv(0.0, 0.0), ln(10.0, 0.0)];
-        let path = stroke_path(&nodes, 2.0, 1.0, 10.0);
+        let path = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.01, JoinMode::Miter);
         let line = stroke_line(pt(0.0, 0.0), pt(10.0, 0.0), 2.0, 1.0);
         assert_eq!(path.edges, line.edges);
         assert_eq!(path.extent_left, line.extent_left);
@@ -2762,7 +2833,7 @@ mod tests {
         // miter join fired (a single bar would stop at x=10). thickness 2 ->
         // half-width 1.
         let nodes = [mv(0.0, 0.0), ln(10.0, 0.0), ln(10.0, 10.0)];
-        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0);
+        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.01, JoinMode::Miter);
         assert_eq!(poly.extent_left, 0.0);
         assert_eq!(poly.extent_right, 11.0);
         assert_eq!(poly.extent_top, -1.0);
@@ -2777,7 +2848,7 @@ mod tests {
         // only the inbound end, so the result is the same 2-edge bar as a single
         // 10-wide horizontal segment.
         let nodes = [mv(0.0, 0.0), ln(5.0, 0.0), ln(10.0, 0.0)];
-        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0);
+        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.01, JoinMode::Miter);
         assert_eq!(poly.edges.len(), 2);
         assert_eq!(poly.extent_left, 0.0);
         assert_eq!(poly.extent_right, 10.0);
@@ -2792,7 +2863,7 @@ mod tests {
         // the bottom-right to (11,11). The path's far side ends in a butt cap at
         // x=0. thickness 2 -> half-width 1.
         let nodes = [mv(0.0, 0.0), ln(10.0, 0.0), ln(10.0, 10.0), ln(0.0, 10.0)];
-        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0);
+        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.01, JoinMode::Miter);
         // Both miters push the right/bottom past the raw points (10 -> 11),
         // proving two joins fired; the start/end butt caps sit at x=0 / y=-1.
         assert_eq!(poly.extent_left, 0.0);
@@ -2809,7 +2880,7 @@ mod tests {
         // counter-clockwise, exercising the direction-switch (outer/inner
         // swap). The outline still encloses every point with the miters.
         let nodes = [mv(0.0, 0.0), ln(10.0, 0.0), ln(10.0, 10.0), ln(20.0, 10.0)];
-        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0);
+        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.01, JoinMode::Miter);
         // The far cap reaches x=20; the first miter pushes the top to y=-1.
         assert_eq!(poly.extent_left, 0.0);
         assert_eq!(poly.extent_right, 20.0);
@@ -2945,12 +3016,62 @@ mod tests {
     }
 
     #[test]
+    fn stroke_path_round_l() {
+        // The L-path with round joins: the convex corner becomes a pen arc
+        // (radius 1 around (10,0)) instead of a single miter apex. The bounding
+        // box matches the miter L (the arc still reaches (11,0) and (10,-1)),
+        // but the arc fans many outer vertices, so the edge count balloons.
+        let l = [mv(0.0, 0.0), ln(10.0, 0.0), ln(10.0, 10.0)];
+        let round = stroke_path(&l, 2.0, 1.0, 10.0, 0.01, JoinMode::Round);
+        let miter = stroke_path(&l, 2.0, 1.0, 10.0, 0.01, JoinMode::Miter);
+        // Same bounding box as the miter L.
+        assert_eq!(round.extent_left, 0.0);
+        assert_eq!(round.extent_right, 11.0);
+        assert_eq!(round.extent_top, -1.0);
+        assert_eq!(round.extent_bottom, 10.0);
+        // The arc adds many outer edges (16 vs the miter L's 4).
+        assert_eq!(round.edges.len(), 16);
+        assert!(round.edges.len() > miter.edges.len());
+    }
+
+    #[test]
+    fn stroke_path_round_vs_miter() {
+        // The same zigzag under Round has strictly more edges than under Miter:
+        // each of the two corners becomes a vertex arc.
+        let zz = [mv(0.0, 0.0), ln(10.0, 0.0), ln(10.0, 10.0), ln(0.0, 10.0)];
+        let miter = stroke_path(&zz, 2.0, 1.0, 10.0, 0.01, JoinMode::Miter);
+        let round = stroke_path(&zz, 2.0, 1.0, 10.0, 0.01, JoinMode::Round);
+        assert!(round.edges.len() > miter.edges.len());
+        assert_eq!(miter.edges.len(), 6);
+        assert_eq!(round.edges.len(), 30);
+    }
+
+    #[test]
+    fn stroke_path_bevel_l() {
+        // The L-path under Bevel always bevels: the outer gets the two face ends
+        // (10,-1) then (11,0) instead of the single miter apex (11,-1). The
+        // bounding box is identical to the miter L (the face ends still reach
+        // x=11 and y=-1), so the discriminator is the edge count — the extra
+        // face-end vertex adds one diagonal edge (5 vs the miter L's 4).
+        let l = [mv(0.0, 0.0), ln(10.0, 0.0), ln(10.0, 10.0)];
+        let bevel = stroke_path(&l, 2.0, 1.0, 10.0, 0.01, JoinMode::Bevel);
+        let miter = stroke_path(&l, 2.0, 1.0, 10.0, 0.01, JoinMode::Miter);
+        assert_eq!(bevel.extent_left, 0.0);
+        assert_eq!(bevel.extent_right, 11.0);
+        assert_eq!(bevel.extent_top, -1.0);
+        assert_eq!(bevel.extent_bottom, 10.0);
+        assert_eq!(bevel.edges.len(), 5);
+        assert_eq!(miter.edges.len(), 4);
+        assert!(bevel.edges.len() > miter.edges.len());
+    }
+
+    #[test]
     fn stroke_path_two_subpaths() {
         // Two separate single-segment subpaths (two move_to's). The second
         // subpath must not re-emit the first's corners: the result is exactly
         // the two bars' edges, i.e. twice a single horizontal bar (2 + 2).
         let nodes = [mv(0.0, 0.0), ln(10.0, 0.0), mv(0.0, 20.0), ln(10.0, 20.0)];
-        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0);
+        let poly = stroke_path(&nodes, 2.0, 1.0, 10.0, 0.01, JoinMode::Miter);
         // Two 2-edge bars, no duplication from a stale contour.
         assert_eq!(poly.edges.len(), 4);
         // The extents span both bars: x[0,10], y[-1,21].

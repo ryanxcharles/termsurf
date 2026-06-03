@@ -170,3 +170,78 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-073403-052736-prompt.md`
 - Result: `logs/codex-review/20260603-073403-052736-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/raster.rs` gained mode-driven joins:
+
+- `JoinMode { Miter, Round, Bevel }` (the upstream order).
+- `StrokePlotter` gained `join_mode`, `tolerance` (via `new`), and
+  `pen: Option<Pen>` built (`Pen::init(thickness, tolerance)`) only when
+  `join_mode` is `Round`.
+- The outer join is now a mode switch: the `Miter | Bevel` arm plots the single
+  miter apex only when `join_mode == Miter && compare_for_miter_limit(...)`,
+  else the two outer face ends (so `Bevel` always bevels); the new `Round` arm
+  plots the inbound outer end, then each pen vertex from
+  `vertex_iterator_for(in.dev_slope, out.dev_slope, join_clockwise)` offset by
+  the shared corner `p1`, then the outbound outer end — all through
+  `plot_outer(direction_switched, …)`. The co-linear early-out and the inner
+  join are unchanged.
+- `stroke_path` gained `tolerance` and `join_mode` parameters.
+
+Tests:
+
+- The six existing `stroke_path` tests pass `0.01, JoinMode::Miter` — geometry
+  byte-identical (the pen is `None`, the miter path unchanged).
+- `stroke_path_round_l` — the L under `Round`: the same bounding box as the
+  miter L (`0/11/-1/10`) but 16 outer edges (the pen arc) vs the miter L's 4.
+- `stroke_path_round_vs_miter` — the zigzag under `Round` has 30 edges vs the
+  miter's 6 (each corner becomes an arc).
+- `stroke_path_bevel_l` — the L under `Bevel`: the same bounding box as the
+  miter L, 5 edges (the extra face-end vertex adds a diagonal) vs the miter's 4,
+  proving the bevel omits the apex while keeping the box.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2592 passed, 0 failed (+3 net, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+Round joins render faithfully: the mode-driven outer join (`miter`/`round`/
+`bevel`) reproduces z2d's `join` for line-only open paths, with the pen-arc
+round corner offset by the shared point. The miter/bevel split is now
+mode-correct (`Bevel` always bevels), and the pen is built only when needed.
+
+The next z2d-dependent step is the **cubic-curve stroke** (`runCurveTo`):
+flatten each cubic with the existing `Spline` decompose (Experiment 296), then
+join the flattened points with **round** joins (the reason `CurveTo` was
+deferred — it always round-joins regardless of the outer join mode). That
+unlocks the box-drawing **arcs** (`U+256D`–`U+2570`), which stroke a single
+quarter-circle cubic, and then the circle/ellipse pieces. After the stroke
+families: round/ square **caps**, the closed-path stroke, dashes, and then the
+unifying sprite `has_codepoint`/draw entry point, the discovery consumer, the
+UCD emoji-presentation default, codepoint overrides, the shaper, the Nerd Font
+attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes**. It confirmed the `JoinMode`/`StrokePlotter` wiring (pen present only
+for `Round`, faithful while caps remain butt); the `Miter | Bevel` arm matching
+upstream (the miter apex only for `JoinMode::Miter && compare_for_miter_limit`,
+else bevel face ends, existing miter behavior preserved); the `Round` arm
+matching the z2d arm (inbound outer end → pen iterator over
+`in.dev_slope → out.dev_slope` offset by `p1` → outbound outer end, all through
+`plot_outer(direction_switched, …)`, inner join unchanged); that the
+`Vec<Point>` borrow break is implementation-local and does not change the
+emitted order; and that the corrected bevel test uses the right discriminator
+(same bbox, the extra bevel edge). No Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-073837-390913-last-message.md`

@@ -1044,7 +1044,7 @@ are past the correctness-critical foundation.
 - [Experiment 298: z2d port — the Pen (round-join/cap vertex set)](298-z2d-pen.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 299: z2d port — round joins in the stroke plotter](299-z2d-round-joins.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
