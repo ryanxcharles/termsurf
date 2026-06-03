@@ -188,3 +188,76 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-170342-865560-prompt.md` (design)
 - Result: `logs/codex-review/20260603-170342-865560-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The viewport-side `RunOptions` assembly is in place — the last terminal-side
+piece before the draw path.
+
+- `roastty/src/terminal/page_list.rs`:
+  `PageList::shape_run_options(selection, cursor)` builds one
+  `font::run::RunOptions` per active visible row: the row's decoded `RunCell`s
+  (`Page::shape_run_cells`, Experiment 358), the per-row selection column range
+  (`selection_contained_row` → `[min, max]` clamped to `last_col`, the same
+  computation as `render_rows_snapshot`), and `cursor_x` set only on the
+  cursor's row. Rows whose pin/page lookup fails are skipped (as in
+  `render_rows_snapshot`). Imported `crate::font::run::RunOptions`.
+
+Tests (in `page_list.rs`):
+
+- `shape_run_options_assembles_rows` — a 4×2 page with `'A'`/`'B'` on row 0,
+  cursor at `(1, 0)`, no selection: asserts one `RunOptions` per visible row,
+  row 0's cells decode (`'A'`/`'B'` then empty), `cursor_x == Some(1)` on row 0
+  and `None` on row 1, and `selection == None` on both.
+- `shape_run_options_emits_column_zero_selection` — a single row `'A'`/`'B'`/
+  `'C'` with a selection spanning columns 0..=2: asserts the assembly emits the
+  raw `Some([0, 2])` range (it does not pre-clamp the column-0 start; the
+  `RunIterator`'s `bounds[0] > 0` guard is the iterator's concern).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2806 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The terminal viewport is now fully assemblable into shaper input: a caller can
+turn the active screen — with its selection and cursor — into a
+`Vec<RunOptions>`, one per row, each ready for a `RunIterator` to group into
+`TextRun`s and `Face::shape_run` to shape into positioned glyphs. The
+terminal→font bridge is complete from packed page cell to shaper-ready run
+options.
+
+The remaining renderer↔font work:
+
+1. **`Terminal`/`Screen`-facing entry** — a `pub(crate)` method the renderer can
+   call (since `PageList`/`Screen` are `pub(super)`), threading the active
+   screen's selection and cursor into `shape_run_options`.
+2. **Draw-path wiring** — run the `RunIterator` over these `RunOptions` and
+   route the shaped glyphs into the Metal renderer's cell/draw path.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `shape_run_options` is faithful to
+`render_rows_snapshot` (same active-row loop, same `pin`/`node_for_pin`
+handling, same `selection_contained_row` path, same `[min, max]` range clamped
+to `last_col`), and that swapping the snapshot fields for
+`RunOptions { cells, selection, cursor_x }` matches the approved design and
+upstream mapping. It confirmed the selection behavior is correct (raw `[0, end]`
+is the right assembly output; the iterator's `bounds[0] > 0` guard is
+downstream), that `cursor_x` is set only when `cy == y` in active-row
+coordinates, and that the two tests cover the core bridge behavior (decoded row
+cells, one option per active visible row, no-selection rows, cursor-row
+filtering, raw column-zero selection). Reverse/rectangle/clamp cases remain
+covered by the existing `selection_contained_row` tests, which it deemed
+acceptable since the helper reuses that exact computation. No correctness or
+regression issue blocks the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-170946-771961-last-message.md`

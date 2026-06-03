@@ -13,6 +13,7 @@ use super::size::{
 use super::{
     color, highlight, hyperlink, kitty::graphics_unicode, selection, selection_codepoints, style,
 };
+use crate::font::run::RunOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Viewport {
@@ -2176,6 +2177,45 @@ impl PageList {
         }
 
         rows
+    }
+
+    /// Assemble a [`RunOptions`] per visible (active) row for the shaper: the
+    /// row's decoded [`RunCell`](crate::font::run::RunCell)s (Experiment 358), its
+    /// selection column range, and the cursor column when the cursor is on that
+    /// row. The shaper's `RunIterator` consumes each `RunOptions`. Mirrors
+    /// [`Self::render_rows_snapshot`]'s row iteration and selection computation;
+    /// the `grid` is omitted (roastty passes the `CodepointResolver` separately).
+    pub(super) fn shape_run_options(
+        &self,
+        selection: Option<selection::Selection>,
+        cursor: Option<(CellCountInt, CellCountInt)>,
+    ) -> Vec<RunOptions> {
+        let mut out = Vec::with_capacity(self.rows as usize);
+        let last_col = self.cols.saturating_sub(1);
+
+        for y in 0..self.rows {
+            let Some(pin) = self.pin(point::Point::active(Coordinate::new(0, y.into()))) else {
+                continue;
+            };
+            let Some(node) = self.node_for_pin(&pin) else {
+                continue;
+            };
+            let cells = node.page.shape_run_cells(pin.y as usize);
+            let selection = selection.and_then(|selection| {
+                let selection = self.selection_contained_row(selection, pin)?;
+                let start_x = selection.start().x.min(selection.end().x).min(last_col);
+                let end_x = selection.start().x.max(selection.end().x).min(last_col);
+                Some([start_x, end_x])
+            });
+            let cursor_x = cursor.and_then(|(cx, cy)| (cy == y).then_some(cx));
+            out.push(RunOptions {
+                cells,
+                selection,
+                cursor_x,
+            });
+        }
+
+        out
     }
 
     pub(super) fn kitty_virtual_placements_visible(
@@ -19723,5 +19763,64 @@ mod tests {
 
         assert_eq!(list.count_tracked_pins(), 1);
         list.verify_integrity().unwrap();
+    }
+
+    #[test]
+    fn shape_run_options_assembles_rows() {
+        let mut list = PageList::init(4, 2, None).unwrap();
+        list.write_basic_active_cell(0, 0, 'A', SemanticContent::Output)
+            .unwrap();
+        list.write_basic_active_cell(1, 0, 'B', SemanticContent::Output)
+            .unwrap();
+
+        // Cursor on row 0, column 1; no selection.
+        let opts = list.shape_run_options(None, Some((1, 0)));
+
+        // One RunOptions per visible row.
+        assert_eq!(opts.len(), 2);
+
+        // Row 0 decodes the written cells; rest empty.
+        let row0 = &opts[0];
+        assert_eq!(row0.cells.len(), 4);
+        assert_eq!(row0.cells[0].codepoint, u32::from('A'));
+        assert_eq!(row0.cells[1].codepoint, u32::from('B'));
+        assert!(row0.cells[2].is_empty);
+        assert!(row0.cells[3].is_empty);
+        // Cursor column only on the cursor's row; no selection.
+        assert_eq!(row0.cursor_x, Some(1));
+        assert_eq!(row0.selection, None);
+
+        // Row 1 is empty, no cursor, no selection.
+        let row1 = &opts[1];
+        assert!(row1.cells.iter().all(|c| c.is_empty));
+        assert_eq!(row1.cursor_x, None);
+        assert_eq!(row1.selection, None);
+    }
+
+    #[test]
+    fn shape_run_options_emits_column_zero_selection() {
+        // A selection that starts at column 0 is emitted as a raw `[0, end]`
+        // range — the assembly passes the true range. The `RunIterator`'s
+        // `bounds[0] > 0` guard (it does not break before column 0) is the
+        // iterator's concern, not the assembly's. This documents that the
+        // assembly does not pre-clamp a column-0 start away.
+        let mut list = PageList::init(4, 1, None).unwrap();
+        for (x, ch) in ['A', 'B', 'C'].into_iter().enumerate() {
+            list.write_basic_active_cell(x as CellCountInt, 0, ch, SemanticContent::Output)
+                .unwrap();
+        }
+
+        // Build a selection covering columns 0..=2 of the single active row.
+        let start = list
+            .pin(point::Point::active(point::Coordinate::new(0, 0)))
+            .unwrap();
+        let end = list
+            .pin(point::Point::active(point::Coordinate::new(2, 0)))
+            .unwrap();
+        let sel = selection::Selection::new(start, end, false);
+
+        let opts = list.shape_run_options(Some(sel), None);
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts[0].selection, Some([0, 2]));
     }
 }
