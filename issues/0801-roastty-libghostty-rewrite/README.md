@@ -975,6 +975,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 264: Collection codepoint resolution — get_index / has_codepoint](264-collection-codepoint-resolution.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 265: Collection EntryOrAlias — style aliasing storage](265-collection-entry-alias.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
