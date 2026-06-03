@@ -991,6 +991,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 272: CodepointResolver core — getIndex with style/regular fallback](272-codepoint-resolver-core.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 273: Descriptor + CodepointMap — the font-search data layer](273-discovery-descriptor-codepoint-map.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
