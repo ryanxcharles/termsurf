@@ -939,6 +939,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 246: Port the Canvas exact-pixel operations (draw + export to atlas)](246-port-canvas-pixel-ops.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 247: Port the OpenType metric-table parsers (sfnt scalars + `head` + `hhea`)](247-port-opentype-head-hhea.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
