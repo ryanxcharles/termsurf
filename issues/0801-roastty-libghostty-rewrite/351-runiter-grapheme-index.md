@@ -244,3 +244,67 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-144737-938874-prompt.md` (design)
 - Result: `logs/codex-review/20260603-144737-938874-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The run iterator's per-cell font resolution is ported.
+
+- `roastty/src/font/codepoint_resolver.rs`: extracted `presentation_mode(cp, p)`
+  (`None` → UCD `Default`) from `get_index` (behavior-preserving); added
+  `has_codepoint_mode(p)` (`None` → `Any`) and the `has_codepoint(idx, cp, p)`
+  grid wrapper; and
+  `index_for_grapheme(primary_cp, graphemes, style, presentation)` — the
+  empty-cell → space fallback, the single-codepoint fast path, the grapheme
+  candidate collection (skipping `U+200D`/`U+FE0E`/`U+FE0F`), and the
+  common-font search (primary uses the cell presentation, components use
+  `None`).
+
+Tests (using `menlo_resolver()`): `index_for_grapheme_simple` (`'A'`, `[]` ==
+`get_index('A')`), `index_for_grapheme_empty_is_space` (`0` ==
+`get_index(' ')`), `index_for_grapheme_multi` (synthetic `('A', ['B'])` → the
+regular index, exercising the candidate + common-font search),
+`index_for_grapheme_skips_zwj` (`('A', [0x200D])` → the regular index),
+`has_codepoint_basic` (covers `'A'`, not a `BEL`). All pass.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2780 passed, 0 failed (+5, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The `RunIterator`'s font-resolution core (`indexForCell`) is ported, built on
+the existing `CodepointResolver` and the new `has_codepoint` grid wrapper —
+including the multi-codepoint grapheme "one font must cover all" search with the
+ZWJ/VS skip. This is the first piece of the `RunIterator` orchestration.
+
+The remaining `RunIterator` work: extracting
+`primary_cp`/`graphemes`/`hasGrapheme` from a terminal `Cell` (roastty's
+`terminal/page.rs` cell), the kitty unicode placeholder check, the row
+cell-grouping into runs (the `next()` loop that groups consecutive same-font
+cells, handling spacers/selection/cursor breaks), and the `TextRun` value type
+with its position-independent run hash. These thread the `terminal/` grid and
+`renderer/` state types.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It confirmed the split is correct — `get_index` uses
+`presentation_mode` (`None` → UCD `Default`) while `has_codepoint` uses
+`has_codepoint_mode` (`None` → `Any`), matching `SharedGrid.hasCodepoint` and
+resolving the design-gate finding — and that `index_for_grapheme` faithfully
+ports `indexForCell` (empty → space, the single-codepoint fast path, the
+candidate collection with the ZWJ/VS skip, the primary using the cell
+presentation and components using `None`, and the `.filter(...).all(...)`
+reproducing Zig's `for … else` including the vacuous-true case). It verified the
+deferred scope is intact (no terminal-cell extraction, kitty placeholder,
+grouping, or `TextRun` introduced) and ran the targeted tests
+(`index_for_grapheme`: 4 passed; `has_codepoint`: 5 passed).
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-145146-831869-last-message.md`

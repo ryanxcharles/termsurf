@@ -213,20 +213,8 @@ impl CodepointResolver {
             }
         }
 
-        // Build the presentation mode. With an explicit presentation we use it;
-        // otherwise we consult the Unicode Character Database (the
-        // `Emoji_Presentation` property) for the default — emoji for codepoints
-        // that render as emoji without a variation selector, text otherwise.
-        let p_mode = match p {
-            Some(v) => PresentationMode::Explicit(v),
-            None => PresentationMode::Default(
-                if crate::font::emoji_presentation::is_emoji_presentation(cp) {
-                    Presentation::Emoji
-                } else {
-                    Presentation::Text
-                },
-            ),
-        };
+        // Build the presentation mode (see `presentation_mode`).
+        let p_mode = presentation_mode(cp, p);
 
         // Exact match in the requested style.
         if let Some(idx) = self.collection.get_index(cp, style, p_mode) {
@@ -336,6 +324,93 @@ impl CodepointResolver {
         // CoreText glyph ids fit in `u16`.
         Ok(face.render_glyph(atlas, glyph_index as u16, opts)?)
     }
+
+    /// Whether the face at `idx` covers `cp` for the requested presentation
+    /// (`None` ⇒ any presentation). Faithful analog of upstream
+    /// `SharedGrid.hasCodepoint` — note `None` maps to `Any`, **not** the UCD
+    /// default (so a grapheme component is satisfied by mere presence).
+    pub(crate) fn has_codepoint(&self, idx: Index, cp: u32, p: Option<Presentation>) -> bool {
+        self.collection
+            .has_codepoint(idx, cp, has_codepoint_mode(p))
+    }
+
+    /// The font index that renders `primary_cp` and — when `graphemes` is
+    /// non-empty — every codepoint of the grapheme: a single font covering them
+    /// all. `primary_cp == 0` resolves the space cell. Emoji ZWJ/variation
+    /// selectors (`U+200D`/`U+FE0E`/`U+FE0F`) are skipped. Faithful port of
+    /// upstream `RunIterator.indexForCell` (the terminal-`Cell` extraction and the
+    /// kitty placeholder check are the `RunIterator`'s, deferred).
+    pub(crate) fn index_for_grapheme(
+        &mut self,
+        primary_cp: u32,
+        graphemes: &[u32],
+        style: Style,
+        presentation: Option<Presentation>,
+    ) -> Option<Index> {
+        const ZWJ_VS: [u32; 3] = [0x200D, 0xFE0E, 0xFE0F];
+
+        // An empty cell renders as a space.
+        if primary_cp == 0 {
+            return self.get_index(' ' as u32, style, presentation);
+        }
+
+        let primary = self.get_index(primary_cp, style, presentation)?;
+        // Common case: a single codepoint resolves to its own index.
+        if graphemes.is_empty() {
+            return Some(primary);
+        }
+
+        // A grapheme: collect a font index for each component, then find one that
+        // covers them all.
+        let mut candidates = vec![primary];
+        for &cp in graphemes {
+            if ZWJ_VS.contains(&cp) {
+                continue;
+            }
+            candidates.push(self.get_index(cp, style, None)?);
+        }
+        for &idx in &candidates {
+            if !self.has_codepoint(idx, primary_cp, presentation) {
+                continue;
+            }
+            if graphemes
+                .iter()
+                .filter(|cp| !ZWJ_VS.contains(cp))
+                .all(|&cp| self.has_codepoint(idx, cp, None))
+            {
+                return Some(idx);
+            }
+        }
+        None
+    }
+}
+
+/// The `get_index` presentation mapping: an explicit presentation is used as-is;
+/// `None` consults the Unicode Character Database (`Emoji_Presentation`) for the
+/// default — emoji for codepoints that render as emoji without a variation
+/// selector, text otherwise.
+fn presentation_mode(cp: u32, p: Option<Presentation>) -> PresentationMode {
+    match p {
+        Some(v) => PresentationMode::Explicit(v),
+        None => PresentationMode::Default(
+            if crate::font::emoji_presentation::is_emoji_presentation(cp) {
+                Presentation::Emoji
+            } else {
+                Presentation::Text
+            },
+        ),
+    }
+}
+
+/// `hasCodepoint`'s presentation mapping: an explicit presentation is required,
+/// but `None` accepts **any** presentation. Differs from [`presentation_mode`]
+/// (which uses the UCD default for `None`) — faithful to upstream's
+/// `SharedGrid.hasCodepoint`.
+fn has_codepoint_mode(p: Option<Presentation>) -> PresentationMode {
+    match p {
+        Some(v) => PresentationMode::Explicit(v),
+        None => PresentationMode::Any,
+    }
 }
 
 /// Whether `face` (used as a **fallback** face) has the glyph for `cp` in the
@@ -373,6 +448,66 @@ mod tests {
         c.add(Face::new("Menlo", 32.0), Style::Regular, false)
             .unwrap();
         CodepointResolver::new(c)
+    }
+
+    #[test]
+    fn index_for_grapheme_simple() {
+        // A single codepoint resolves to its own index.
+        let mut r = menlo_resolver();
+        let want = r.get_index('A' as u32, Style::Regular, None);
+        assert!(want.is_some());
+        assert_eq!(
+            r.index_for_grapheme('A' as u32, &[], Style::Regular, None),
+            want
+        );
+    }
+
+    #[test]
+    fn index_for_grapheme_empty_is_space() {
+        // An empty cell (codepoint 0) resolves as a space.
+        let mut r = menlo_resolver();
+        let space = r.get_index(' ' as u32, Style::Regular, None);
+        assert!(space.is_some());
+        assert_eq!(r.index_for_grapheme(0, &[], Style::Regular, None), space);
+    }
+
+    #[test]
+    fn index_for_grapheme_multi() {
+        // A synthetic two-codepoint grapheme (both in Menlo) exercises the
+        // candidate collection and the common-font search: the regular face
+        // covers both, so it is returned.
+        let mut r = menlo_resolver();
+        let want = r.get_index('A' as u32, Style::Regular, None);
+        assert!(want.is_some());
+        assert_eq!(
+            r.index_for_grapheme('A' as u32, &['B' as u32], Style::Regular, None),
+            want
+        );
+    }
+
+    #[test]
+    fn index_for_grapheme_skips_zwj() {
+        // A ZWJ component is skipped (in both the candidate collection and the
+        // coverage check), so the primary's index is returned despite the ZWJ not
+        // having its own glyph.
+        let mut r = menlo_resolver();
+        let want = r.get_index('A' as u32, Style::Regular, None);
+        assert_eq!(
+            r.index_for_grapheme('A' as u32, &[0x200D], Style::Regular, None),
+            want
+        );
+    }
+
+    #[test]
+    fn has_codepoint_basic() {
+        // The regular face covers 'A' (any presentation); a C0 control it cannot
+        // render is not covered.
+        let mut r = menlo_resolver();
+        let idx = r
+            .get_index('A' as u32, Style::Regular, None)
+            .expect("an index for 'A'");
+        assert!(r.has_codepoint(idx, 'A' as u32, None));
+        assert!(!r.has_codepoint(idx, 0x0007, None), "a BEL has no glyph");
     }
 
     #[test]

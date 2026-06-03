@@ -1148,7 +1148,7 @@ are past the correctness-critical foundation.
 - [Experiment 350: the special-font fast path](350-shaper-special-font.md) —
   **Pass** · Claude/Codex/Codex
 - [Experiment 351: the run iterator's grapheme font resolution](351-runiter-grapheme-index.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
