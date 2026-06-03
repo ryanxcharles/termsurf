@@ -967,6 +967,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 260: Color glyph detection — ColorState (sbix)](260-color-glyph-detection.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 261: Colored glyph render — depth-4 P3 RGBA (sbix)](261-color-glyph-render.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
