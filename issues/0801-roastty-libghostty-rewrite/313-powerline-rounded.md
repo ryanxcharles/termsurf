@@ -149,3 +149,68 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-090752-168111-prompt.md`
 - Result: `logs/codex-review/20260603-090752-168111-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/draw.rs` gained
+`draw_powerline_rounded(cp, width, height, metrics, canvas)`: the
+`(outlined, flip)` dispatch (`E0B4 → (f, f)`, `E0B5 → (t, f)`, `E0B6 → (f, t)`,
+`E0B7 → (t, t)`), the open rounded-right path (`move(0,0)`, the two `curve_to`s
+with `c = (√2 − 1)·4/3` and `r = min(w, h/2)`, the `line(r, h − r)`), then
+either `inner_stroke_path(box_thickness)` (outlined) or `ClosePath` +
+`fill_path` (filled), then `flip_horizontal` when flipped.
+
+Tests (the fixture `9×18` cell, `r = 9`), confirmed against the render:
+
+- `powerline_e0b4_filled` — left side `(0,9)` + interior `(4,9)` filled,
+  top-right `(8,0)` empty.
+- `powerline_e0b5_outlined` — the right curve `(8,9)` stroked, interior `(4,9)`
+  hollow.
+- `powerline_e0b6_flipped` — the filled body on the right (`(8,9)` inked,
+  `(0,0)` empty).
+- `powerline_e0b7_outlined_flipped` — the left curve `(0,9)` stroked, interior
+  `(4,9)` hollow.
+- `powerline_rounded_radius` — `width 8`, `height 6` → `r = 3`: `(1,3)` inked,
+  `(6,3)` empty (proving `min(w, h/2)`).
+- `draw_powerline_rounded_excludes` — `0x2500`, `0xE0B0`, `'M'` return `false`
+  and draw nothing.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2652 passed, 0 failed (+6, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The rounded powerline separators render faithfully — the powerline family now
+covers the six solid triangles (311), the two outlined chevrons (312), and these
+four rounded separators (filled + outlined, each flipped). They reuse the fill,
+inner-stroke, and flip primitives with cubic quarter-circle corners — no new
+infrastructure.
+
+The remaining powerline glyphs are the **inner-stroke arrows**
+(`E0B9`/`E0BB`/`E0BD`/`E0BF`) and the **flames** (`E0D2`/`E0D4`). The larger
+remaining integration is the unifying sprite `has_codepoint`/draw and
+**sprite-kind dispatch** (mapping the codepoint tables and a `Sprite` enum to
+all the standalone `draw_*` functions, filling the resolver's deferred
+`SpriteUnavailable` arm). After the sprite font: the discovery consumer, the UCD
+emoji-presentation default, codepoint overrides, the shaper, the Nerd Font
+attribute table, and SVG color detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no Required
+changes**. It confirmed the rounded path, the cubic coefficient, the radius
+formula, and the dispatch all match upstream; that the filled variants close and
+fill the path while the outlined variants correctly pass the original open path
+to `inner_stroke_path` with `box_thickness`, then flip where upstream flips; and
+that the added `E0B7` and non-`9×18` radius tests close the design gaps. No
+Optional findings.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-091047-542543-last-message.md`

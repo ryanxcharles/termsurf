@@ -1080,6 +1080,61 @@ pub(crate) fn draw_powerline_chevron(
     true
 }
 
+/// The rounded powerline separators (`E0B4`/`E0B6` filled, `E0B5`/`E0B7`
+/// outlined) — a rectangle with a rounded right (or, flipped, left) side, built
+/// from cubic quarter-circle corners. Faithful port of upstream `powerline.zig`'s
+/// `drawE0B4`–`drawE0B7`. Returns `false` for any other codepoint.
+pub(crate) fn draw_powerline_rounded(
+    cp: u32,
+    width: u32,
+    height: u32,
+    metrics: &Metrics,
+    canvas: &mut Canvas,
+) -> bool {
+    let (outlined, flip) = match cp {
+        0xe0b4 => (false, false),
+        0xe0b5 => (true, false),
+        0xe0b6 => (false, true),
+        0xe0b7 => (true, true),
+        _ => return false,
+    };
+
+    let w = width as f64;
+    let h = height as f64;
+    // Coefficient for approximating a circular arc with a cubic.
+    let c = (2.0_f64.sqrt() - 1.0) * 4.0 / 3.0;
+    let r = w.min(h / 2.0);
+    let pt = raster::Point::new;
+
+    // The open rounded-right path.
+    let mut nodes = vec![
+        raster::PathNode::MoveTo(pt(0.0, 0.0)),
+        raster::PathNode::CurveTo {
+            p1: pt(r * c, 0.0),
+            p2: pt(r, r - r * c),
+            p3: pt(r, r),
+        },
+        raster::PathNode::LineTo(pt(r, h - r)),
+        raster::PathNode::CurveTo {
+            p1: pt(r, h - r + r * c),
+            p2: pt(r * c, h),
+            p3: pt(0.0, h),
+        },
+    ];
+
+    if outlined {
+        canvas.inner_stroke_path(&nodes, metrics.box_thickness as f64);
+    } else {
+        nodes.push(raster::PathNode::ClosePath);
+        canvas.fill_path(&nodes);
+    }
+
+    if flip {
+        canvas.flip_horizontal();
+    }
+    true
+}
+
 /// The block cursor: a full-cell rect. Faithful port of upstream `special.zig`'s
 /// `cursor_rect`.
 pub(crate) fn draw_cursor_rect(canvas: &mut Canvas, width: u32, height: u32, _metrics: &Metrics) {
@@ -3578,6 +3633,75 @@ mod tests {
             assert!(
                 !draw_powerline_chevron(cp, 9, 18, &m, &mut c),
                 "{cp:#06x} not a chevron"
+            );
+            assert!(all_alpha(&c, &m, 0), "{cp:#06x} drew ink");
+        }
+    }
+
+    // The rounded powerline separators (fill_path / inner_stroke_path + flip).
+
+    #[test]
+    fn powerline_e0b4_filled() {
+        // The filled rounded-right separator: left side + interior filled, the
+        // top-right corner (outside the curve) empty.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_powerline_rounded(0xe0b4, 9, 18, &m, &mut c));
+        assert!(inked(&c, 0, 9), "left side filled");
+        assert!(inked(&c, 4, 9), "interior filled");
+        assert!(!inked(&c, 8, 0), "top-right corner empty");
+    }
+
+    #[test]
+    fn powerline_e0b5_outlined() {
+        // The outlined rounded separator strokes the rounded edge but leaves the
+        // interior hollow.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_powerline_rounded(0xe0b5, 9, 18, &m, &mut c));
+        assert!(inked(&c, 8, 9), "right curve stroked");
+        assert!(!inked(&c, 4, 9), "interior hollow");
+    }
+
+    #[test]
+    fn powerline_e0b6_flipped() {
+        // E0B6 is E0B4 mirrored: the filled body on the right.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_powerline_rounded(0xe0b6, 9, 18, &m, &mut c));
+        assert!(inked(&c, 8, 9), "filled body on the right");
+        assert!(!inked(&c, 0, 0), "top-left corner empty");
+    }
+
+    #[test]
+    fn powerline_e0b7_outlined_flipped() {
+        // E0B7 is E0B5 mirrored: the rounded edge on the left, interior hollow.
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_powerline_rounded(0xe0b7, 9, 18, &m, &mut c));
+        assert!(inked(&c, 0, 9), "left curve stroked");
+        assert!(!inked(&c, 4, 9), "interior hollow");
+    }
+
+    #[test]
+    fn powerline_rounded_radius() {
+        // width 8, height 6 -> r = min(8, 3) = 3: the rounded corner fits a
+        // radius-3 arc, not the full width (a w-only radius would reach x=8).
+        let m = fixture_metrics();
+        let mut c = Canvas::new(9, 7, 0, 0);
+        assert!(draw_powerline_rounded(0xe0b4, 8, 6, &m, &mut c));
+        assert!(inked(&c, 1, 3), "inside the r=3 body");
+        assert!(!inked(&c, 6, 3), "past the r=3 curve empty");
+    }
+
+    #[test]
+    fn draw_powerline_rounded_excludes() {
+        let m = fixture_metrics();
+        for cp in [0x2500u32, 0xe0b0, 'M' as u32] {
+            let mut c = cell_canvas();
+            assert!(
+                !draw_powerline_rounded(cp, 9, 18, &m, &mut c),
+                "{cp:#06x} not a rounded separator"
             );
             assert!(all_alpha(&c, &m, 0), "{cp:#06x} drew ink");
         }
