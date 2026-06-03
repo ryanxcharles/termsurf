@@ -139,3 +139,67 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-062727-751303-prompt.md`
 - Result: `logs/codex-review/20260603-062727-751303-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/font/sprite/raster.rs` gained the generic `PointBuffer<SPLIT, LEN>`
+(`new`/`add`/`reset`/`first`/`last`/`head`/`tail`, with the split-preserving
+FIFO `add`) and `fill_plot` — the faithful node walk: `MoveTo` (stop on the
+trailing auto-move, else reset+add), `LineTo` (skip duplicates, else add
+edge+point), `CurveTo` (flatten via `Spline`, each point through the same
+edge/add logic), `ClosePath` (the `len >= 3` / `last != first` close).
+Malformed-path branches are `unreachable!`.
+
+Tests:
+
+- `point_buffer_split_one` — `<1,3>` keeps `first` pinned and FIFO-rotates the
+  tail; `reset` empties.
+- `fill_degenerate_line_to` (upstream) → two edges `{0,10,5,0.5}` /
+  `{10,0,5, -0.5}` (duplicate skipped, horizontal filtered, close edge added).
+- `fill_degenerate_close_move_line` (upstream) → one edge (`len < 3` close is a
+  no-op).
+- `fill_degenerate_double_close` (upstream) → the same two edges.
+- `fill_curve` — a `CurveTo` flattens to many edges, all within the control
+  bounding box.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty raster` → 54 passed (5 new).
+- `cargo test -p roastty` → 2555 passed, 0 failed (no regressions; +5).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The fill plotter completes the **fill path** of the z2d port: a path's nodes →
+`fill_plot` → `Polygon` → `fill_polygon` (the rasterizer) → AA alpha8 surface. A
+filled vector path can now be rendered end to end. The one remaining z2d
+sub-area for the box-drawing glyphs is the **`stroke_plotter`** — a stroked path
+→ outline `Polygon` with the `Pen`/join/cap machinery (the box-drawing diagonals
+call `Canvas::line`, which strokes a 2-node butt-cap path). After that, a
+`Canvas::fill_path`/`line`/`stroke` wires the plotters + `fill_polygon` to the
+(padded) `Canvas` buffer, unblocking the diagonals (`0x2571`–`0x2573`), the
+arcs, the circle/ellipse pieces, and the geometric curves. Alongside the sprite
+font remain the discovery consumer, the UCD emoji-presentation default,
+codepoint overrides, the shaper, the Nerd Font attribute table, and SVG color
+detection.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no required
+changes**. It confirmed `PointBuffer` matches `point_buffer.zig` (the
+split-preserving FIFO rotation, the nullable `head`/`tail`/`first`/`last`, the
+`tail(0)` assertion), and `fill_plot` matches `fill_plotter.zig` (the trailing
+`MoveTo` break, the shared duplicate-skip + `add_edge` + buffer-add for line and
+curve, the point tracking through `add_edge`'s horizontal filter, and the
+`ClosePath` `len >= 3` / `last != first` logic), that the `unreachable!`
+branches are acceptable for the well-formed Canvas-path scope, and that the
+ported upstream and added tests are correct. It judged the gates clean.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260603-063012-751816-prompt.md`
+- Result: `logs/codex-review/20260603-063012-751816-last-message.md`

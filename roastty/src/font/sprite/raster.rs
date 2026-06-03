@@ -821,6 +821,144 @@ impl Spline {
     }
 }
 
+/// A fixed buffer of points. Once full, the first `SPLIT` items are kept and the
+/// rest FIFO-rotate (so with `SPLIT = 1`, `first` stays pinned to the subpath's
+/// initial point while `last` follows the most recent). Faithful port of z2d's
+/// `point_buffer.PointBuffer`.
+struct PointBuffer<const SPLIT: usize, const LEN: usize> {
+    items: [Point; LEN],
+    len: usize,
+}
+
+impl<const SPLIT: usize, const LEN: usize> PointBuffer<SPLIT, LEN> {
+    fn new() -> PointBuffer<SPLIT, LEN> {
+        PointBuffer {
+            items: [Point::new(0.0, 0.0); LEN],
+            len: 0,
+        }
+    }
+
+    fn add(&mut self, item: Point) {
+        if self.len < LEN {
+            self.items[self.len] = item;
+            self.len += 1;
+        } else {
+            for idx in SPLIT..LEN - 1 {
+                self.items[idx] = self.items[idx + 1];
+            }
+            self.items[LEN - 1] = item;
+        }
+    }
+
+    fn reset(&mut self) {
+        self.len = 0;
+    }
+
+    fn first(&self) -> Option<Point> {
+        if self.len == 0 {
+            None
+        } else {
+            Some(self.items[0])
+        }
+    }
+
+    fn last(&self) -> Option<Point> {
+        if self.len == 0 {
+            None
+        } else {
+            Some(self.items[self.len - 1])
+        }
+    }
+
+    /// `items[n]`, or `None` if out of range. Faithful port of `head`.
+    fn head(&self, n: usize) -> Option<Point> {
+        if n >= self.len {
+            None
+        } else {
+            Some(self.items[n])
+        }
+    }
+
+    /// `items[len - n]` (`n >= 1`), or `None` if out of range. Faithful port of
+    /// `tail`.
+    fn tail(&self, n: usize) -> Option<Point> {
+        assert!(n != 0, "invalid tail index");
+        if self.len < n {
+            None
+        } else {
+            Some(self.items[self.len - n])
+        }
+    }
+}
+
+/// Plot a path's nodes into a fill `Polygon`. Faithful port of z2d's
+/// `fill_plotter.plot`: walk the nodes, flattening each `CurveTo` via [`Spline`]
+/// and adding each segment as a polygon edge. Malformed paths (a `LineTo`/
+/// `CurveTo` with no current point) are `unreachable!` — the `Canvas` only emits
+/// well-formed paths.
+pub(crate) fn fill_plot(nodes: &[PathNode], scale: f64, tolerance: f64) -> Polygon {
+    let mut result = Polygon::new(scale);
+    let mut points: PointBuffer<1, 3> = PointBuffer::new();
+
+    for (i, node) in nodes.iter().enumerate() {
+        match *node {
+            PathNode::MoveTo(p) => {
+                // The auto-added move_to after a close_path is the last node.
+                if i == nodes.len() - 1 {
+                    break;
+                }
+                points.reset();
+                points.add(p);
+            }
+            PathNode::LineTo(p) => match points.last() {
+                Some(last) => {
+                    if last != p {
+                        result.add_edge(last, p);
+                        points.add(p);
+                    }
+                }
+                None => unreachable!("fill_plot: line_to with no current point"),
+            },
+            PathNode::CurveTo { p1, p2, p3 } => {
+                let a = match points.last() {
+                    Some(a) => a,
+                    None => unreachable!("fill_plot: curve_to with no current point"),
+                };
+                let spline = Spline {
+                    a,
+                    b: p1,
+                    c: p2,
+                    d: p3,
+                    tolerance,
+                };
+                let mut flat = Vec::new();
+                spline.decompose(&mut flat);
+                for pt in flat {
+                    let last = points.last().expect("curve_to current point");
+                    if last != pt {
+                        result.add_edge(last, pt);
+                        points.add(pt);
+                    }
+                }
+            }
+            PathNode::ClosePath => {
+                // Only close a real subpath (>= 3 points); shorter ones are
+                // degenerate and cleared on the next move_to.
+                if points.len >= 3 {
+                    let first = points.first().unwrap();
+                    let last = points.last().unwrap();
+                    if last != first {
+                        result.add_edge(last, first);
+                        points.add(first);
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1474,5 +1612,101 @@ mod tests {
             max_y = max_y.max(p.y);
         }
         assert!(max_y > 0.0, "the curve rises above the chord");
+    }
+
+    // PointBuffer + fill_plot.
+
+    #[test]
+    fn point_buffer_split_one() {
+        let mut b: PointBuffer<1, 3> = PointBuffer::new();
+        b.add(pt(0.0, 0.0));
+        b.add(pt(1.0, 1.0));
+        b.add(pt(2.0, 2.0));
+        b.add(pt(3.0, 3.0)); // full -> keep items[0], FIFO the tail
+        assert_eq!(b.len, 3);
+        assert_eq!(b.first(), Some(pt(0.0, 0.0)));
+        assert_eq!(b.last(), Some(pt(3.0, 3.0)));
+        assert_eq!(b.head(1), Some(pt(2.0, 2.0)));
+        assert_eq!(b.tail(1), Some(pt(3.0, 3.0)));
+        b.reset();
+        assert_eq!(b.len, 0);
+        assert_eq!(b.first(), None);
+        assert_eq!(b.last(), None);
+    }
+
+    fn edge(y0: f64, y1: f64, x_start: f64, x_inc: f64) -> Edge {
+        Edge {
+            y0,
+            y1,
+            x_start,
+            x_inc,
+        }
+    }
+
+    #[test]
+    fn fill_degenerate_line_to() {
+        let nodes = [
+            mv(5.0, 0.0),
+            ln(10.0, 10.0),
+            ln(10.0, 10.0),
+            ln(0.0, 10.0),
+            PathNode::ClosePath,
+            mv(5.0, 0.0),
+        ];
+        let result = fill_plot(&nodes, 1.0, 1.0);
+        assert_eq!(
+            result.edges,
+            vec![edge(0.0, 10.0, 5.0, 0.5), edge(10.0, 0.0, 5.0, -0.5)]
+        );
+    }
+
+    #[test]
+    fn fill_degenerate_close_move_line() {
+        let nodes = [
+            mv(5.0, 0.0),
+            ln(10.0, 10.0),
+            PathNode::ClosePath,
+            mv(5.0, 0.0),
+        ];
+        let result = fill_plot(&nodes, 1.0, 1.0);
+        assert_eq!(result.edges, vec![edge(0.0, 10.0, 5.0, 0.5)]);
+    }
+
+    #[test]
+    fn fill_degenerate_double_close() {
+        let nodes = [
+            mv(5.0, 0.0),
+            ln(10.0, 10.0),
+            ln(0.0, 10.0),
+            PathNode::ClosePath,
+            mv(5.0, 0.0),
+            PathNode::ClosePath,
+            mv(5.0, 0.0),
+        ];
+        let result = fill_plot(&nodes, 1.0, 1.0);
+        assert_eq!(
+            result.edges,
+            vec![edge(0.0, 10.0, 5.0, 0.5), edge(10.0, 0.0, 5.0, -0.5)]
+        );
+    }
+
+    #[test]
+    fn fill_curve() {
+        // A move + curve + close: the cubic flattens to several edges, all
+        // within the control bounding box.
+        let nodes = [
+            mv(0.0, 0.0),
+            PathNode::CurveTo {
+                p1: pt(0.0, 10.0),
+                p2: pt(10.0, 10.0),
+                p3: pt(10.0, 0.0),
+            },
+            PathNode::ClosePath,
+            mv(0.0, 0.0),
+        ];
+        let result = fill_plot(&nodes, 1.0, 0.1);
+        assert!(result.edges.len() > 2, "the cubic flattens to many edges");
+        assert!(result.extent_left >= 0.0 && result.extent_right <= 10.0);
+        assert!(result.extent_top >= 0.0 && result.extent_bottom <= 10.0);
     }
 }
