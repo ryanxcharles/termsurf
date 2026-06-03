@@ -14,6 +14,7 @@ use super::size::{
     StringBytesInt,
 };
 use super::style;
+use crate::font::run::{RunCell, Wide as RunWide};
 
 const PAGE_SIZE_MIN: usize = 16_384;
 const CODEPOINT_STORAGE_SIZE: usize = 4;
@@ -1481,6 +1482,52 @@ impl Page {
                 self.size.cols as usize,
             )
         }
+    }
+
+    /// Decode row `y` into the [`RunCell`]s the font run iterator consumes: each
+    /// cell's codepoint, grapheme codepoints, effective style and style id, wide
+    /// kind, emptiness, and whether it is plain-codepoint content. The renderer
+    /// wraps the result (adding the row's selection/cursor) into a
+    /// `font::run::RunOptions`. This is roastty's `terminal → font` shaping bridge
+    /// — the terminal cell accessors are `pub(super)`, so the decode lives here.
+    pub(crate) fn shape_run_cells(&self, y: usize) -> Vec<RunCell> {
+        let row = self.get_row(y);
+        self.get_cells(row)
+            .iter()
+            .enumerate()
+            .map(|(x, cell)| {
+                let graphemes = if cell.has_grapheme() {
+                    self.lookup_grapheme_at(x, y).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                let style_id = cell.style_id();
+                // `RefCountedSet::get` asserts `id > 0`; the default id has no
+                // stored entry, so it maps to the default style.
+                let style = if style_id == style::DEFAULT_ID {
+                    style::Style::default()
+                } else {
+                    self.get_style(style_id)
+                };
+                RunCell {
+                    codepoint: cell.codepoint(),
+                    graphemes,
+                    style,
+                    style_id,
+                    wide: match cell.wide() {
+                        Wide::Narrow => RunWide::Narrow,
+                        Wide::Wide => RunWide::Wide,
+                        Wide::SpacerTail => RunWide::SpacerTail,
+                        Wide::SpacerHead => RunWide::SpacerHead,
+                    },
+                    is_empty: cell.is_empty(),
+                    is_codepoint: matches!(
+                        cell.content_tag(),
+                        ContentTag::Codepoint | ContentTag::CodepointGrapheme
+                    ),
+                }
+            })
+            .collect()
     }
 
     pub(super) fn get_cells_mut(&mut self, row_index: usize) -> &mut [Cell] {
@@ -4071,6 +4118,60 @@ mod tests {
             let cells = page.get_cells(row);
             assert_eq!(cells[1].codepoint(), y as u32);
         }
+    }
+
+    #[test]
+    fn shape_run_cells_decodes_row() {
+        let mut page = Page::init(Capacity {
+            cols: 4,
+            rows: 1,
+            styles: 8,
+            ..Capacity::new(4, 1)
+        })
+        .unwrap();
+
+        // (0,0) = 'A', plain and unstyled.
+        *page.get_row_and_cell_mut(0, 0).cell = Cell::init('A' as u32);
+        // (1,0) = 'e' with a combining acute accent (a grapheme).
+        *page.get_row_and_cell_mut(1, 0).cell = Cell::init('e' as u32);
+        page.set_graphemes_at(1, 0, &[0x0301]).unwrap();
+        // (2,0) = 'B' with a bold style.
+        let mut bold = style::Style::default();
+        bold.flags.bold = true;
+        let id = page.add_style(bold).unwrap();
+        {
+            let rac = page.get_row_and_cell_mut(2, 0);
+            *rac.cell = Cell::init('B' as u32);
+            rac.cell.set_style_id(id);
+        }
+        // (3,0) left empty.
+
+        let cells = page.shape_run_cells(0);
+        assert_eq!(cells.len(), 4, "one RunCell per column");
+
+        // 'A': plain narrow codepoint, default style, no grapheme.
+        assert_eq!(cells[0].codepoint, 'A' as u32);
+        assert!(!cells[0].has_grapheme());
+        assert_eq!(cells[0].wide, RunWide::Narrow);
+        assert!(!cells[0].is_empty);
+        assert!(cells[0].is_codepoint);
+        assert_eq!(cells[0].style_id, style::DEFAULT_ID);
+        assert_eq!(cells[0].style, style::Style::default());
+
+        // 'e' + U+0301: a grapheme cell.
+        assert_eq!(cells[1].codepoint, 'e' as u32);
+        assert_eq!(cells[1].graphemes, vec![0x0301]);
+        assert!(cells[1].has_grapheme());
+        assert!(cells[1].is_codepoint);
+
+        // 'B' + bold: the style round-trips through the style table.
+        assert_eq!(cells[2].codepoint, 'B' as u32);
+        assert_eq!(cells[2].style_id, id);
+        assert_eq!(cells[2].style, bold);
+
+        // The trailing cell is empty.
+        assert_eq!(cells[3].codepoint, 0);
+        assert!(cells[3].is_empty);
     }
 
     #[test]

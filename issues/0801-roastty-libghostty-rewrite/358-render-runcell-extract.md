@@ -197,3 +197,67 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-165312-347589-prompt.md` (design)
 - Result: `logs/codex-review/20260603-165312-347589-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The terminal→font shaping bridge is in place.
+
+- `roastty/src/terminal/page.rs`: `Page::shape_run_cells(y)` decodes a terminal
+  page row into `font::run::RunCell`s — per cell: the codepoint, grapheme
+  codepoints (via `has_grapheme()` + `lookup_grapheme_at`), the effective style
+  (`style_id == DEFAULT_ID` → `Style::default()`, else `get_style`) and
+  `style_id`, the wide kind (mapped `terminal::page::Wide` → `font::run::Wide`),
+  emptiness, and the plain-codepoint flag
+  (`content_tag ∈ {Codepoint, CodepointGrapheme}`). Imported
+  `font::run::{RunCell, Wide}` — the one `terminal → font` touch point.
+
+Test: `shape_run_cells_decodes_row` builds a 4-column page (`'A'` plain
+unstyled, `'e' + U+0301` grapheme, `'B'` bold via `add_style`/`set_style_id`, a
+trailing empty cell) and asserts the decoded `RunCell`s — codepoint, graphemes,
+`has_grapheme`, `is_codepoint`, wide, emptiness, and the style/`style_id`
+round-trip (default and bold). Passes.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2804 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The terminal grid is now decodable into the shaper's input:
+`Page::shape_run_cells` turns a real terminal row into `RunCell`s, which the
+`RunIterator` groups into `TextRun`s, which `Face::shape_run` shapes into
+glyphs. The font subsystem is no longer fed only by tests — it can consume a
+live terminal page row.
+
+The remaining renderer↔font work:
+
+1. **`RunOptions` assembly** — a renderer/screen-level wrapper that calls
+   `shape_run_cells` for a row and adds the row's `selection`/`cursor_x` (and a
+   `PageList`/`Screen`-facing entry, since `Page` is `pub(super)`).
+2. **Draw-path wiring** — feed the resulting `TextRun`s + shaped glyphs into the
+   renderer's cell/draw path (the Metal renderer).
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no Required findings**. It confirmed the decode reads exactly the
+`RunIterator`'s per-cell fields (codepoint, graphemes, style with the
+`DEFAULT_ID` guard, `style_id`, wide, `is_empty`, `is_codepoint`); that both
+design-gate fixes are correctly applied (`DEFAULT_ID` → `Style::default()`
+rather than `get_style(0)`, and the grapheme gate uses `cell.has_grapheme()`);
+that the `Wide` mapping is exhaustive and one-to-one; that `is_codepoint`
+correctly includes `Codepoint`/ `CodepointGrapheme` and leaves `BgColor*` cells
+`false`; and that the `terminal → font::run` coupling compiles cleanly. Its one
+non-blocking note — that `lookup_grapheme_at(...).unwrap_or_default()` silently
+degrades a corrupt grapheme cell — was kept as-is, matching the nearby
+render-snapshot behavior. It ran `cargo test -p roastty shape_run_cells`,
+`cargo fmt -- --check`, and `git diff --check` — all passed.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-165836-240887-last-message.md`
