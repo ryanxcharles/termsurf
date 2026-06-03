@@ -977,6 +977,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 265: Collection EntryOrAlias — style aliasing storage](265-collection-entry-alias.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 266: Collection completeStyles — alias missing styles](266-collection-complete-styles.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
