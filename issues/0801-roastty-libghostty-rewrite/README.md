@@ -1103,6 +1103,8 @@ are past the correctness-critical foundation.
   **Pass** · Claude/Codex/Codex
 - [Experiment 328: font discovery — computing the score](328-discovery-score-compute.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 329: font discovery — bold/italic refinement](329-discovery-score-bold-italic.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
