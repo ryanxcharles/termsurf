@@ -959,6 +959,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 256: Glyph constraint math — the constrain geometry, fixture-exact](256-glyph-constraint.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 257: Wire the constraint into render_glyph — RenderOptions + scaled draw](257-render-glyph-constrained.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
