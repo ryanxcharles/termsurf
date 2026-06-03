@@ -143,6 +143,32 @@ impl Face {
         self.color.is_some_and(|c| c.is_color_glyph(glyph))
     }
 
+    /// Map a Unicode codepoint to its glyph id, or `None` if this face has no
+    /// glyph for it (or `cp` is not a Unicode scalar value). Faithful port of
+    /// upstream `glyphIndex`: the codepoint is converted to UTF-16 (a surrogate
+    /// pair for non-BMP) and looked up via `CTFontGetGlyphsForCharacters`.
+    pub(crate) fn glyph_index(&self, cp: u32) -> Option<u16> {
+        let c = char::from_u32(cp)?;
+        let mut units = [0u16; 2];
+        let units = c.encode_utf16(&mut units);
+        let mut glyphs = [0u16; 2];
+        let chars_ptr = NonNull::new(units.as_ptr() as *mut u16).unwrap();
+        let glyphs_ptr = NonNull::new(glyphs.as_mut_ptr()).unwrap();
+        // SAFETY: `units`/`glyphs` are length-`len` buffers; CoreText reads the
+        // UTF-16 units and writes one glyph per unit, returning `false` if any
+        // input has no glyph.
+        let ok = unsafe {
+            self.font
+                .glyphs_for_characters(chars_ptr, glyphs_ptr, units.len() as isize)
+        };
+        if !ok {
+            return None;
+        }
+        // For a surrogate pair the trailing unit decodes to `0`; the glyph is in
+        // slot 0.
+        Some(glyphs[0])
+    }
+
     /// Create a face that applies a synthetic-bold effect — a faux bold for
     /// fonts without a real bold variant. The line width scales with the point
     /// size (`max(size / 14, 1)`), the heuristic from upstream `syntheticBold`.
@@ -1229,5 +1255,20 @@ mod tests {
             text.render_glyph(&mut bgra, mono_glyph, &none_opts(&text)),
             Err(RenderGlyphError::InvalidAtlasFormat)
         );
+    }
+
+    #[test]
+    fn glyph_index_maps_codepoints() {
+        let menlo = Face::new("Menlo", 32.0);
+        // A basic ASCII glyph resolves to a non-zero id.
+        assert!(menlo.glyph_index('M' as u32).is_some_and(|g| g != 0));
+        // A Private-Use codepoint Menlo doesn't cover resolves to None.
+        assert_eq!(menlo.glyph_index(0xE000), None);
+        // A non-scalar codepoint (a lone surrogate) is None.
+        assert_eq!(menlo.glyph_index(0xD800), None);
+
+        // A non-BMP emoji resolves via the surrogate-pair path in its font.
+        let emoji = Face::new("Apple Color Emoji", 32.0);
+        assert!(emoji.glyph_index(0x1F600).is_some_and(|g| g != 0));
     }
 }

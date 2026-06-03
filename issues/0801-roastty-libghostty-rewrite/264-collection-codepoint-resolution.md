@@ -151,3 +151,65 @@ Codex confirmed the resolution logic matches upstream: `Default(p)` becomes
 acceptable Rust scalar-value gate for invalid/surrogate codepoints. `get_index`
 ordering, the `has_codepoint` bounds behavior, and the special-index `false`
 behavior are also aligned.
+
+## Result
+
+**Result:** Pass
+
+`Face::glyph_index` (UTF-32 → UTF-16, `glyphs_for_characters` bool, `None` on
+miss / non-scalar) landed in `face/coretext.rs`. `collection.rs` gained
+`PresentationMode` (`Explicit`/`Default`/`Any`), `Entry::has_codepoint` (the
+faithful `default`→`explicit`/`any` + color-check logic), and
+`Collection::get_index`/`has_codepoint`.
+
+Tests (live CoreText):
+
+- `glyph_index_maps_codepoints` — `'M'` → non-zero glyph; a Private-Use
+  codepoint and a lone surrogate (`0xD800`) → `None`; `U+1F600` resolves in
+  Apple Color Emoji via the surrogate-pair path.
+- `get_index_text` — `'M'` in a Menlo collection resolves under `Any` and
+  `Explicit(Text)`, not under `Explicit(Emoji)`.
+- `get_index_emoji` — `😀` resolves to the color face (idx 1, Menlo lacking it)
+  under `Any`/`Explicit(Emoji)`, not under `Explicit(Text)`.
+- `default_presentation_fallback` — a non-fallback emoji entry answers
+  `Default(Text)` true (→ `Any`); a fallback one answers false (→
+  `Explicit(Text)` on a color glyph).
+- `has_codepoint_bounds` — an out-of-bounds index is `false`; the in-bounds face
+  has `'M'`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2399 passed, 0 failed (no regressions; +6).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+The Collection now resolves codepoints to faces with full presentation/fallback
+fidelity — the core query the `CodepointResolver` and shaper depend on. The
+remaining Collection work is `completeStyles`/`EntryOrAlias` (style aliasing, so
+a missing bold-italic falls back to bold), the per-entry `scale_factor` +
+`load_options`/`setSize` size normalization, and `setSize`/`updateMetrics`. The
+deferred-face half (`DeferredFace` + `discovery`) introduces the CoreText
+font-matching FFI sub-area. Above the Collection sit the `CodepointResolver`
+proper (which adds the sprite-codepoint and box-drawing routing over
+`Collection.getIndex`), the shaper, and the Nerd Font attribute table.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and found **no required
+changes**.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-220100-343837-prompt.md`
+- Result: `logs/codex-review/20260602-220100-343837-last-message.md`
+
+Codex confirmed the code is faithful for the scoped behavior:
+`Entry::has_codepoint` matches the `Default`/`Explicit`/`Any` resolution,
+`glyph_index` correctly uses Rust scalar validation + UTF-16 encoding +
+CoreText's boolean result, `get_index` preserves priority order, and
+`has_codepoint` returns `false` for out-of-bounds and special indices. The tests
+exercise the non-trivial paths (text vs emoji filtering, fallback vs
+non-fallback `Default(Text)`, non-BMP lookup, lone-surrogate rejection, bounds).

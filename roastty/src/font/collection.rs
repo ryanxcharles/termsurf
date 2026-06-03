@@ -1,12 +1,13 @@
 //! A collection of font faces, grouped by style.
 //!
-//! Faithful port of upstream `font/Collection.zig`. This slice provides the
-//! foundational [`Index`] value type — the packed handle that names a font
-//! within a collection. The `Collection` struct itself, `Entry`, deferred-face
-//! loading, and discovery land in later experiments.
+//! Faithful port of upstream `font/Collection.zig`: the packed [`Index`] handle,
+//! the per-style [`Collection`] of eagerly-loaded [`Entry`] faces with
+//! `add`/`get_entry`/`get_face`, and codepoint resolution
+//! (`get_index`/`has_codepoint`). Deferred-face loading + discovery, per-entry
+//! scale factors, and style aliasing land in later experiments.
 
 use crate::font::face::coretext::Face;
-use crate::font::Style;
+use crate::font::{Presentation, Style};
 
 /// Bits used for the face index within an [`Index`]. `Style` is a 3-bit field,
 /// leaving 13 bits of a `u16` for the index (up to 8192 fonts per style).
@@ -136,6 +137,44 @@ impl Entry {
     pub(crate) fn fallback(&self) -> bool {
         self.fallback
     }
+
+    /// Whether this face has the given codepoint in the requested presentation.
+    /// Faithful port of upstream `Entry.hasCodepoint`.
+    pub(crate) fn has_codepoint(&self, cp: u32, p_mode: PresentationMode) -> bool {
+        match p_mode {
+            // Fallback fonts require explicit presentation matching; non-fallback
+            // fonts accept any presentation.
+            PresentationMode::Default(p) => {
+                let resolved = if self.fallback {
+                    PresentationMode::Explicit(p)
+                } else {
+                    PresentationMode::Any
+                };
+                self.has_codepoint(cp, resolved)
+            }
+            PresentationMode::Explicit(p) => match self.face.glyph_index(cp) {
+                None => false,
+                Some(idx) => match p {
+                    Presentation::Text => !self.face.is_color_glyph(idx),
+                    Presentation::Emoji => self.face.is_color_glyph(idx),
+                },
+            },
+            PresentationMode::Any => self.face.glyph_index(cp).is_some(),
+        }
+    }
+}
+
+/// How to match a codepoint's presentation when resolving it to a face.
+/// Faithful port of upstream `PresentationMode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PresentationMode {
+    /// The codepoint has an explicit, required presentation (e.g. VS15/VS16).
+    Explicit(Presentation),
+    /// The codepoint has no explicit presentation; use the default (from the
+    /// Unicode character database).
+    Default(Presentation),
+    /// Any presentation is acceptable.
+    Any,
 }
 
 /// An error adding a face to a [`Collection`].
@@ -213,6 +252,34 @@ impl Collection {
     /// Get the loaded face for an index. (Deferred-face loading is deferred.)
     pub(crate) fn get_face(&self, index: Index) -> Result<&Face, EntryError> {
         Ok(self.get_entry(index)?.face())
+    }
+
+    /// Return the index of the first face (in priority order) of `style` that
+    /// has `cp` in the requested presentation, or `None`. Does not load faces.
+    pub(crate) fn get_index(
+        &self,
+        cp: u32,
+        style: Style,
+        p_mode: PresentationMode,
+    ) -> Option<Index> {
+        let list = &self.faces[style as usize];
+        for (i, entry) in list.iter().enumerate() {
+            if entry.has_codepoint(cp, p_mode) {
+                return Some(Index::new(style, i as u16));
+            }
+        }
+        None
+    }
+
+    /// Whether the face at `index` has `cp` in the requested presentation. An
+    /// out-of-bounds (incl. special) index is `false`.
+    pub(crate) fn has_codepoint(&self, index: Index, cp: u32, p_mode: PresentationMode) -> bool {
+        let list = &self.faces[index.style() as usize];
+        let i = index.idx() as usize;
+        if i >= list.len() {
+            return false;
+        }
+        list[i].has_codepoint(cp, p_mode)
     }
 }
 
@@ -341,5 +408,111 @@ mod tests {
         // Count 8189 can still add (produces idx 8189); 8190 is full.
         assert!(!list_is_full(8189));
         assert!(list_is_full(8190));
+    }
+
+    const EMOJI: u32 = 0x1F600; // 😀
+
+    fn menlo_collection() -> Collection {
+        let mut c = Collection::new();
+        c.add(Face::new("Menlo", 32.0), Style::Regular, false)
+            .unwrap();
+        c
+    }
+
+    #[test]
+    fn get_index_text() {
+        let c = menlo_collection();
+        let m = 'M' as u32;
+        assert_eq!(
+            c.get_index(m, Style::Regular, PresentationMode::Any),
+            Some(Index::new(Style::Regular, 0))
+        );
+        assert_eq!(
+            c.get_index(
+                m,
+                Style::Regular,
+                PresentationMode::Explicit(Presentation::Text)
+            ),
+            Some(Index::new(Style::Regular, 0))
+        );
+        // 'M' is not an emoji glyph, so an explicit-emoji request finds nothing.
+        assert_eq!(
+            c.get_index(
+                m,
+                Style::Regular,
+                PresentationMode::Explicit(Presentation::Emoji)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn get_index_emoji() {
+        let mut c = menlo_collection();
+        c.add(Face::new("Apple Color Emoji", 32.0), Style::Regular, false)
+            .unwrap();
+        // Menlo (idx 0) lacks the emoji; the color face (idx 1) has it as color.
+        let at_one = Some(Index::new(Style::Regular, 1));
+        assert_eq!(
+            c.get_index(EMOJI, Style::Regular, PresentationMode::Any),
+            at_one
+        );
+        assert_eq!(
+            c.get_index(
+                EMOJI,
+                Style::Regular,
+                PresentationMode::Explicit(Presentation::Emoji)
+            ),
+            at_one
+        );
+        // It's a color glyph, so an explicit-text request finds nothing.
+        assert_eq!(
+            c.get_index(
+                EMOJI,
+                Style::Regular,
+                PresentationMode::Explicit(Presentation::Text)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn default_presentation_fallback() {
+        // Non-fallback: Default => Any, so the emoji glyph matches regardless of
+        // the requested presentation.
+        let mut c = Collection::new();
+        c.add(Face::new("Apple Color Emoji", 32.0), Style::Regular, false)
+            .unwrap();
+        assert!(c
+            .get_entry(Index::new(Style::Regular, 0))
+            .unwrap()
+            .has_codepoint(EMOJI, PresentationMode::Default(Presentation::Text)));
+
+        // Fallback: Default => Explicit(Text), and the emoji glyph is color, so
+        // it does not match a text request.
+        let mut c = Collection::new();
+        c.add(Face::new("Apple Color Emoji", 32.0), Style::Regular, true)
+            .unwrap();
+        assert!(!c
+            .get_entry(Index::new(Style::Regular, 0))
+            .unwrap()
+            .has_codepoint(EMOJI, PresentationMode::Default(Presentation::Text)));
+    }
+
+    #[test]
+    fn has_codepoint_bounds() {
+        let c = menlo_collection();
+        // Out-of-bounds index resolves to false (no panic).
+        assert!(!c.has_codepoint(
+            Index::new(Style::Regular, 5),
+            'M' as u32,
+            PresentationMode::Any
+        ));
+        // The in-bounds face does have 'M'.
+        assert!(c.has_codepoint(
+            Index::new(Style::Regular, 0),
+            'M' as u32,
+            PresentationMode::Any
+        ));
     }
 }
