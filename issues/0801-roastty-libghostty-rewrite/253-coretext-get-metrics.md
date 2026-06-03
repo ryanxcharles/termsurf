@@ -174,3 +174,84 @@ negated. The underline/strikethrough broken-zero guards, the cap/ex fallback,
 the printable-ASCII range `0x20..0x7F`, the max-advance cell width, the overall
 ASCII bounding height, and the `水` `ic_width` discard guard all match upstream.
 Scope is clean.
+
+## Result
+
+**Result:** Pass
+
+Added `Face::get_metrics(&self) -> FaceMetrics` to `coretext.rs` (plus the
+`FaceMetrics` and `Head`/`Hhea`/`Os2`/`Post` imports), a faithful port of
+upstream `getMetrics`: read the four tables (`head` with the `bhed` fallback),
+derive `units_per_em`/`px_per_em`/`px_per_unit`, run the vertical-metrics
+fallback chain (no-`hhea` CoreText with `-descent()`; OS/2-typo when
+`use_typo_metrics`; else `hhea`; else OS/2-sTypo; else OS/2-win with
+`-us_win_descent`), the underline/strikethrough broken-zero guards, the cap/ex
+height fallback, the printable-ASCII `cell_width`(max advance)/`ascii_height`,
+and the `水` `ic_width` with the bounds-vs-advance discard.
+
+Tests added (2): `get_metrics_is_sane` (Menlo @ 14 → `px_per_em == 14`,
+`cell_width > 0`, `ascent > 0`, **`descent < 0`**, `cap_height > ex_height > 0`,
+`ascii_height > 0`) and `get_metrics_feeds_calc` (`Metrics::calc(get_metrics())`
+→ `cell_width`/`cell_height > 0`, `cell_baseline <= cell_height`,
+`underline_thickness >= 1`).
+
+### Verification
+
+```bash
+cargo fmt -p roastty
+cargo test -p roastty face
+cargo test -p roastty
+```
+
+Observed:
+
+- `face`: 7 passed (the FFI accessors + the two `get_metrics` tests).
+- Full `roastty`: 2362 unit tests passed (2360 prior + 2 new), plus the C ABI
+  harness passed.
+- `cargo fmt -p roastty -- --check`: clean.
+- `cargo build -p roastty`: no warnings.
+- No-`ghostty`-name gates passed for `roastty/src/font` (and
+  `lib.rs`/header/abi).
+- `git diff --check`: clean.
+
+No C ABI, header, or ABI inventory changes; no new dependencies; glyph
+rasterization cleanly deferred.
+
+### Completion Review
+
+Codex reviewed the completed implementation and found **no issues** ("nothing
+needs to change before the result commit").
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260602-202400-673524-prompt.md`
+- Result: `logs/codex-review/20260602-202400-673524-last-message.md`
+
+Codex verified the implementation matches upstream line-by-line: the table reads
+(with `head`→`bhed` and parser-error→`None`), the derivation order, and — the
+critical check — that **only** CoreText `descent()` and `us_win_descent` are
+negated while `hhea.descender`/`os2.s_typo_descender` stay table-native negative
+`* px_per_unit` (no double-negation). The underline/strikethrough broken-zero
+guards, the cap/ex `Some` fallback, the `0x20..0x7F` ASCII range, the
+max-advance cell width, the bounding-rect ASCII height, and the `ic_width`
+missing-glyph / bounds-vs-advance guards all match. Scope is clean; the tests
+cover the live metrics (including `descent < 0`) and `Metrics::calc`.
+
+## Conclusion
+
+Experiment 253 succeeds — **the font-metrics path is complete end-to-end.** A
+real macOS font now flows through the entire ported pipeline: `Face::new` →
+`copy_table` (4 OpenType tables) → the parsers → `get_metrics` (fallback
+chains + glyph measurement) → `FaceMetrics` → `Metrics::calc` → a valid
+`Metrics`, all verified by live `cargo test`. Both Codex gates passed with zero
+findings. This closes the `font/face/coretext.zig` metric surface that
+`getMetrics` covers.
+
+The next slice is **glyph rasterization** — the other half of the CoreText face:
+create a grayscale `CGBitmapContext` sized to a glyph's bounds, draw the glyph
+with `CTFontDrawGlyphs` (or `CGContextShowGlyphsAtPositions`), read back the
+alpha coverage, and produce a `Glyph` + the bitmap to write into the `Atlas`
+(via the already-ported `set`/`set_from_larger`). That adds the `CGContext`
+surface of `objc2-core-graphics` and completes the path from a font to a
+renderable glyph in the atlas. Above the face, the
+`Collection`/`CodepointResolver` and the shaper remain.

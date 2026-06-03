@@ -11,6 +11,9 @@ use std::ptr::NonNull;
 use objc2_core_foundation::{CFRetained, CFString, CGSize};
 use objc2_core_text::{CTFont, CTFontOrientation, CTFontTableOptions};
 
+use crate::font::metrics::FaceMetrics;
+use crate::font::opentype::{head::Head, hhea::Hhea, os2::Os2, post::Post};
+
 /// A font face backed by a CoreText `CTFont`. `CFRetained` manages the
 /// underlying CoreFoundation retain/release.
 pub(crate) struct Face {
@@ -139,6 +142,164 @@ impl Face {
         };
         (rect.size.width, rect.size.height)
     }
+
+    /// Assemble the face's metrics from its OpenType tables and CoreText
+    /// measurements. Faithful port of upstream `getMetrics`.
+    pub(crate) fn get_metrics(&self) -> FaceMetrics {
+        // Read the metric tables. `head` falls back to the byte-identical `bhed`
+        // tag used by bitmap-only fonts.
+        let head = self
+            .copy_table(b"head")
+            .or_else(|| self.copy_table(b"bhed"))
+            .and_then(|b| Head::from_bytes(&b).ok());
+        let post = self
+            .copy_table(b"post")
+            .and_then(|b| Post::from_bytes(&b).ok());
+        let os2 = self
+            .copy_table(b"OS/2")
+            .and_then(|b| Os2::from_bytes(&b).ok());
+        let hhea = self
+            .copy_table(b"hhea")
+            .and_then(|b| Hhea::from_bytes(&b).ok());
+
+        let units_per_em = head
+            .map(|h| h.units_per_em as f64)
+            .unwrap_or_else(|| self.units_per_em() as f64);
+        let px_per_em = self.size();
+        let px_per_unit = px_per_em / units_per_em;
+
+        // Vertical metrics fallback chain.
+        let (ascent, descent, line_gap) = match hhea {
+            // No hhea: use CoreText's pixel metrics directly (CoreText returns
+            // descent as a positive magnitude, so negate it).
+            None => (self.ascent(), -self.descent(), self.leading()),
+            Some(hhea) => {
+                let ha = hhea.ascender as f64;
+                let hd = hhea.descender as f64;
+                let hg = hhea.line_gap as f64;
+                match os2 {
+                    None => (ha * px_per_unit, hd * px_per_unit, hg * px_per_unit),
+                    Some(os2) => {
+                        let oa = os2.s_typo_ascender as f64;
+                        let od = os2.s_typo_descender as f64;
+                        let og = os2.s_typo_line_gap as f64;
+                        if os2.fs_selection.use_typo_metrics() {
+                            (oa * px_per_unit, od * px_per_unit, og * px_per_unit)
+                        } else if hhea.ascender != 0 || hhea.descender != 0 {
+                            (ha * px_per_unit, hd * px_per_unit, hg * px_per_unit)
+                        } else if os2.s_typo_ascender != 0 || os2.s_typo_descender != 0 {
+                            (oa * px_per_unit, od * px_per_unit, og * px_per_unit)
+                        } else {
+                            // usWinDescent is positive-down, so negate it.
+                            (
+                                os2.us_win_ascent as f64 * px_per_unit,
+                                -(os2.us_win_descent as f64) * px_per_unit,
+                                0.0,
+                            )
+                        }
+                    }
+                }
+            }
+        };
+
+        // Underline from `post` (degenerate-zero thickness/position -> None).
+        let (underline_position, underline_thickness) = match post {
+            None => (None, None),
+            Some(post) => {
+                let broken = post.underline_thickness == 0;
+                let pos = if broken && post.underline_position == 0 {
+                    None
+                } else {
+                    Some(post.underline_position as f64 * px_per_unit)
+                };
+                let thick = if broken {
+                    None
+                } else {
+                    Some(post.underline_thickness as f64 * px_per_unit)
+                };
+                (pos, thick)
+            }
+        };
+
+        // Strikethrough from `OS/2` (same degenerate-zero logic).
+        let (strikethrough_position, strikethrough_thickness) = match os2 {
+            None => (None, None),
+            Some(os2) => {
+                let broken = os2.y_strikeout_size == 0;
+                let pos = if broken && os2.y_strikeout_position == 0 {
+                    None
+                } else {
+                    Some(os2.y_strikeout_position as f64 * px_per_unit)
+                };
+                let thick = if broken {
+                    None
+                } else {
+                    Some(os2.y_strikeout_size as f64 * px_per_unit)
+                };
+                (pos, thick)
+            }
+        };
+
+        // Cap/ex height: OS/2 values when present, else CoreText.
+        let (cap_height, ex_height) = match os2 {
+            None => (Some(self.cap_height()), Some(self.x_height())),
+            Some(os2) => (
+                Some(
+                    os2.s_cap_height
+                        .map(|v| v as f64 * px_per_unit)
+                        .unwrap_or_else(|| self.cap_height()),
+                ),
+                Some(
+                    os2.sx_height
+                        .map(|v| v as f64 * px_per_unit)
+                        .unwrap_or_else(|| self.x_height()),
+                ),
+            ),
+        };
+
+        // Cell width = widest printable-ASCII advance; ASCII height = the
+        // overall bounding-box height of those glyphs.
+        let ascii: Vec<u16> = (0x20u16..0x7F).collect();
+        let ascii_glyphs = self.glyphs_for_characters(&ascii);
+        let cell_width = self
+            .advances_for_glyphs(&ascii_glyphs)
+            .into_iter()
+            .fold(0.0_f64, f64::max);
+        let ascii_height = self.bounding_rect_for_glyphs(&ascii_glyphs).1;
+
+        // Ideographic width: the advance of `水`, discarded if absent or if its
+        // bounds are wider than its advance (a butchered patched-CJK font).
+        let ic_width = {
+            let glyph = self.glyphs_for_characters(&[0x6C34])[0];
+            if glyph == 0 {
+                None
+            } else {
+                let advance = self.advances_for_glyphs(&[glyph])[0];
+                let bounds_w = self.bounding_rect_for_glyphs(&[glyph]).0;
+                if bounds_w > advance {
+                    None
+                } else {
+                    Some(advance)
+                }
+            }
+        };
+
+        FaceMetrics {
+            px_per_em,
+            cell_width,
+            ascent,
+            descent,
+            line_gap,
+            underline_position,
+            underline_thickness,
+            strikethrough_position,
+            strikethrough_thickness,
+            cap_height,
+            ex_height,
+            ascii_height: Some(ascii_height),
+            ic_width,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -207,5 +368,30 @@ mod tests {
         assert!(face.glyphs_for_characters(&[]).is_empty());
         assert!(face.advances_for_glyphs(&[]).is_empty());
         assert_eq!(face.bounding_rect_for_glyphs(&[]), (0.0, 0.0));
+    }
+
+    #[test]
+    fn get_metrics_is_sane() {
+        let fm = Face::new("Menlo", 14.0).get_metrics();
+        assert_eq!(fm.px_per_em, 14.0);
+        assert!(fm.cell_width > 0.0);
+        assert!(fm.ascent > 0.0);
+        assert!(fm.descent < 0.0); // below the baseline
+        assert!(fm.line_gap >= 0.0);
+        assert!(fm.cap_height.unwrap() > 0.0);
+        assert!(fm.ex_height.unwrap() > 0.0);
+        assert!(fm.cap_height.unwrap() > fm.ex_height.unwrap());
+        assert!(fm.ascii_height.unwrap() > 0.0);
+    }
+
+    #[test]
+    fn get_metrics_feeds_calc() {
+        use crate::font::metrics::Metrics;
+
+        let m = Metrics::calc(Face::new("Menlo", 14.0).get_metrics());
+        assert!(m.cell_width > 0);
+        assert!(m.cell_height > 0);
+        assert!(m.cell_baseline <= m.cell_height);
+        assert!(m.underline_thickness >= 1);
     }
 }
