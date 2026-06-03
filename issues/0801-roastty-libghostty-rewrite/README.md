@@ -987,6 +987,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 270: Collection scale-factor integration — add with size adjustment](270-collection-scale-integration.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 271: Collection updateMetrics — grid metrics from the primary face](271-collection-update-metrics.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
