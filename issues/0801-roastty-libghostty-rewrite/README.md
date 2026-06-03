@@ -995,6 +995,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 274: Resolver getPresentation + renderGlyph delegation](274-resolver-presentation-render.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 275: Sprite box-drawing — the lines_char primitive](275-sprite-box-lines.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
