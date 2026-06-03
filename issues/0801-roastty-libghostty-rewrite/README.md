@@ -1155,6 +1155,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 354: the run iterator's content hash](354-runiter-run-hash.md) —
   **Pass** · Claude/Codex/Codex
+- [Experiment 355: the run iterator's input view](355-runiter-input-view.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
