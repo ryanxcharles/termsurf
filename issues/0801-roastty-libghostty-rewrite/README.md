@@ -1323,6 +1323,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 438: the grapheme-width-method config enum and its grapheme-cluster mapping (GraphemeWidthMethod, grapheme_cluster)](438-config-grapheme-width-method.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 439: the custom-shader-animation config enum and its animate decision (CustomShaderAnimation, should_animate)](439-config-custom-shader-animation.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
