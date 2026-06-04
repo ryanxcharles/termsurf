@@ -187,3 +187,62 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-091451-d427-prompt.md` (design)
 - Result: `logs/codex-review/20260604-091451-d427-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The per-row padding-extend refinement is now live.
+
+- `roastty/src/renderer/metal/shaders.rs`:
+  `MetalUniforms::refine_padding_extend(&mut self, padding_color, is_first_row, is_last_row, never_extend)`
+  — `Extend` mode only; the first row sets `up` (`EXTEND_UP`) and the last row
+  (`else if`) sets `down` (`EXTEND_DOWN`) to `!never_extend`; `Background` /
+  `ExtendAlways` are no-ops. A private
+  `set_padding_extend_bit(&mut self, bit, on)` helper sets/clears a single bit.
+
+Test (in `shaders.rs`): `refine_padding_extend_applies_extend_heuristics` — from
+`padding_extend == 15`: `Extend` first `never_extend=true` → `11` (up cleared);
+`Extend` first `never_extend=false` → `15` (up set); `Extend` last (not first)
+`never_extend=true` → `7` (down cleared); `Extend` middle row → `15`; a
+single-row grid (first AND last) `Extend` `never_extend=true` → `11` (only `up`,
+via the `else if`); `Background` / `ExtendAlways` → `15` (no-op).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2908 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The `padding_extend` logic is now fully shaped: the full-rebuild reset
+(Experiment 422) and the per-row `Extend`-mode refinement (this experiment),
+with only the `never_extend` computation (`neverExtendBg`) deferred — it needs
+the renderer's terminal-core row/cell representation (the
+`is_perfect_fit_powerline` predicate from Experiment 423 is its codepoint half).
+The remaining renderer-bridge work: the full `neverExtendBg` (awaiting that
+row/cell representation), the live per-frame call sites (the renderer `init` and
+`updateFrame`/`drawFrame`, which depend on the live render `State`), and the
+custom-shader uniforms; beyond the renderer, the other subsystems.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `refine_padding_extend` matches upstream's branch
+(active only for `WindowPaddingColor::Extend`; the first row maps to
+`EXTEND_UP = !never_extend`, the last row to `EXTEND_DOWN = !never_extend`, and
+the `else if` preserves the single-row behavior where only the up edge is
+refined; `Background` and `ExtendAlways` are no-ops). It confirmed the bit
+helper is correct for `u8` (`|= bit` sets only the target flag, `&= !bit` clears
+only that flag), and that the test covers the up/down clear paths, the
+set-back-to-on path, the middle-row no-op, the single-row `else if`, and the
+non-`Extend` no-ops. No public C ABI/header impact; nothing needed to change
+before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-091638-r427-prompt.md` (result)
+- Result: `logs/codex-review/20260604-091638-r427-last-message.md` (result)

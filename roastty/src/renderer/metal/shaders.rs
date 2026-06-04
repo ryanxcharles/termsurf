@@ -301,6 +301,37 @@ impl MetalUniforms {
         }
     }
 
+    /// Refine `padding_extend` for one row (upstream `rebuildCells`'s per-row
+    /// heuristic, `Extend` mode only): the first row's `up` edge and the last
+    /// row's `down` edge are enabled unless the row "never extends" its
+    /// background (`never_extend`, upstream's `rowNeverExtendBg`). `Background` /
+    /// `ExtendAlways` are no-ops (the reset already set them).
+    pub(crate) fn refine_padding_extend(
+        &mut self,
+        padding_color: WindowPaddingColor,
+        is_first_row: bool,
+        is_last_row: bool,
+        never_extend: bool,
+    ) {
+        if padding_color != WindowPaddingColor::Extend {
+            return;
+        }
+        if is_first_row {
+            self.set_padding_extend_bit(EXTEND_UP, !never_extend);
+        } else if is_last_row {
+            self.set_padding_extend_bit(EXTEND_DOWN, !never_extend);
+        }
+    }
+
+    /// Set (`on`) or clear (`!on`) a single `padding_extend` bit.
+    fn set_padding_extend_bit(&mut self, bit: u8, on: bool) {
+        if on {
+            self.padding_extend |= bit;
+        } else {
+            self.padding_extend &= !bit;
+        }
+    }
+
     /// Clear the cursor uniform: set `cursor_pos` to the sentinel
     /// `(u16::MAX, u16::MAX)`, which the shader reads as "no cursor" (upstream's
     /// default clear). Only `cursor_pos` is touched.
@@ -726,6 +757,45 @@ fragment float4 bg_image_fragment() {
         // The other fields are untouched.
         assert_eq!(uniforms.min_contrast, 3.0);
         assert_eq!(uniforms.bg_color, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn refine_padding_extend_applies_extend_heuristics() {
+        use crate::config::WindowPaddingColor;
+
+        // Start from the `Extend`-mode reset state (all four edges set = 15).
+        let mut uniforms =
+            MetalUniforms::test_with_grid([2, 3], [4, 5], [6.0, 7.0], [0.0; 4], 15, [1, 2, 3, 4]);
+
+        // Extend, first row, never_extend → the `up` (4) edge is cleared: 15 → 11.
+        uniforms.refine_padding_extend(WindowPaddingColor::Extend, true, false, true);
+        assert_eq!(uniforms.padding_extend, 11);
+
+        // Extend, first row, NOT never_extend → `up` stays set: back to 15.
+        uniforms.refine_padding_extend(WindowPaddingColor::Extend, true, false, false);
+        assert_eq!(uniforms.padding_extend, 15);
+
+        // Extend, last row (not first), never_extend → `down` (8) cleared: 15 → 7.
+        uniforms.refine_padding_extend(WindowPaddingColor::Extend, false, true, true);
+        assert_eq!(uniforms.padding_extend, 7);
+
+        // A middle row (neither first nor last) is unchanged.
+        uniforms.padding_extend = 15;
+        uniforms.refine_padding_extend(WindowPaddingColor::Extend, false, false, true);
+        assert_eq!(uniforms.padding_extend, 15);
+
+        // A single-row grid (first AND last): only the `up` branch runs (else if),
+        // so `up` is cleared and `down` is untouched: 15 → 11.
+        uniforms.padding_extend = 15;
+        uniforms.refine_padding_extend(WindowPaddingColor::Extend, true, true, true);
+        assert_eq!(uniforms.padding_extend, 11);
+
+        // Background / ExtendAlways are no-ops on any row.
+        uniforms.padding_extend = 15;
+        uniforms.refine_padding_extend(WindowPaddingColor::Background, true, false, true);
+        assert_eq!(uniforms.padding_extend, 15);
+        uniforms.refine_padding_extend(WindowPaddingColor::ExtendAlways, false, true, true);
+        assert_eq!(uniforms.padding_extend, 15);
     }
 
     #[test]
