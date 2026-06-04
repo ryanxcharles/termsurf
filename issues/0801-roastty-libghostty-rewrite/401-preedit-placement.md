@@ -174,3 +174,65 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-061958-124017-prompt.md` (design)
 - Result: `logs/codex-review/20260604-061958-124017-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The preedit placement loop is now ported.
+
+- `roastty/src/renderer/cell.rs`:
+  `add_preedit(contents, grid, preedit, range, y, cols, screen_fg)` —
+  `let mut x = range.start; for cp in &preedit.codepoints[range.cp_offset..] { add_preedit_cell(.., cp.codepoint, cp.wide, [x, y], cols, screen_fg)?; x += if cp.wide { 2 } else { 1 }; }`.
+  Imports `Preedit`/`PreeditRange` from `renderer/state.rs` (now live — removing
+  some dead-code). `pub(crate)` and not yet called in production (the
+  `rebuild_viewport` integration is deferred), reachable in the library crate,
+  so no dead-code warning.
+
+Test (in `cell.rs`): `add_preedit_places_codepoints_with_widths` — two narrow
+codepoints from start 1 → glyph-pos columns `[1, 1, 2, 2]` (glyph + underline
+per cell); `cp_offset = 1` skips the leading codepoint → only the second renders
+at column 1 (`[1, 1]`); a wide-then-narrow preedit from start 0 →
+`[0, 0, 1, 2, 2]` (`'A'` glyph@0, underline@0, second underline@1, then
+`x += 2`, `'B'` glyph@2, underline@2).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2860 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The preedit placement loop is now ported faithfully as `add_preedit` — from the
+range's start column, it renders each codepoint (from `cp_offset`) over the
+cursor via `add_preedit_cell`, advancing the column by the codepoint's width.
+With the preedit cell (Experiment 400), this loop, and the
+`Preedit`/`PreeditRange` state, the preedit rendering is complete; the only
+remaining preedit work is the **integration** into `rebuild_viewport` (computing
+the range/row from the cursor viewport, the default foreground, and skipping the
+under-preedit cells), which belongs with the broader rebuild assembly.
+
+The remaining renderer-bridge work: the `rebuild_viewport` integration of the
+cursor + preedit (and the under-preedit cell skipping); and the **Metal upload**
+of `Contents` (the GPU buffer/uniform upload — the renderer boundary, for which
+roastty already has the buffer/uniform types).
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design:
+`x` starts at `range.start`, iteration begins at
+`preedit.codepoints[range.cp_offset..]`, each codepoint renders through
+`add_preedit_cell` at `[x, y]`, and `x` advances by 2 for wide and 1 for narrow
+— with `y`/`cols`/`screen_fg` passed separately as the right adaptation around
+roastty's column-only `PreeditRange`. It confirmed the tests cover the key
+placement cases (consecutive narrow cells, `cp_offset` skipping, and wide- cell
+advancement with the second underline occupying the next column), with the
+change internal Rust only and no public C ABI/header impact. Nothing needed to
+change before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260604-062225-311539-last-message.md`

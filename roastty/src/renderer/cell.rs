@@ -15,6 +15,7 @@
 use super::cursor::Style as CursorStyle;
 use super::shader::{CellBg, CellTextAtlas, CellTextFlags, CellTextVertex};
 use super::size::GridSize;
+use super::state::{Preedit, PreeditRange};
 use crate::font::codepoint_resolver::ResolverRenderError;
 use crate::font::collection::{Index, Special};
 use crate::font::face::constraint::{Constraint, Size};
@@ -1341,6 +1342,36 @@ pub(crate) fn add_preedit_cell(
             screen_fg,
             255,
         )?;
+    }
+    Ok(())
+}
+
+/// Place a `preedit`'s codepoints over the cursor: from `range.start`, render each
+/// codepoint (from `range.cp_offset` onward) via [`add_preedit_cell`] at `(x, y)`
+/// with `screen_fg`, advancing `x` by the codepoint's cell width (2 wide / 1
+/// narrow). `y`/`cols` are the cursor row and the row's column count. Faithful port
+/// of upstream's preedit placement loop in `rebuildCells`.
+pub(crate) fn add_preedit(
+    contents: &mut Contents,
+    grid: &mut SharedGrid,
+    preedit: &Preedit,
+    range: PreeditRange,
+    y: u16,
+    cols: u16,
+    screen_fg: [u8; 3],
+) -> Result<(), ResolverRenderError> {
+    let mut x = range.start;
+    for cp in &preedit.codepoints[range.cp_offset..] {
+        add_preedit_cell(
+            contents,
+            grid,
+            cp.codepoint,
+            cp.wide,
+            [x, y],
+            cols,
+            screen_fg,
+        )?;
+        x += if cp.wide { 2 } else { 1 };
     }
     Ok(())
 }
@@ -3523,6 +3554,66 @@ mod tests {
         add_preedit_cell(&mut c, &mut shared, 0xE000, false, [1, 0], 4, screen_fg)
             .expect("add_preedit_cell");
         assert!(c.fg_rows[1].is_empty());
+    }
+
+    #[test]
+    fn add_preedit_places_codepoints_with_widths() {
+        use crate::renderer::state::Codepoint;
+
+        let screen_fg = [9, 8, 7];
+        let cp = |c: char, wide: bool| Codepoint {
+            codepoint: c as u32,
+            wide,
+        };
+        // The glyph columns in `fg_rows[1]` (each glyph is followed by its
+        // underline(s), so the glyph is at every position whose grid_pos differs
+        // from the previous one for a text cell — but here we read all columns).
+        let glyph_cols =
+            |c: &Contents| -> Vec<u16> { c.fg_rows[1].iter().map(|v| v.grid_pos[0]).collect() };
+
+        // Two narrow codepoints from start column 1 → glyphs at columns 1 and 2,
+        // each with its single underline: `[1(glyph), 1(ul), 2(glyph), 2(ul)]`.
+        let preedit = Preedit {
+            codepoints: vec![cp('A', false), cp('B', false)],
+        };
+        let range = PreeditRange {
+            start: 1,
+            end: 2,
+            cp_offset: 0,
+        };
+        let mut shared = menlo_grid();
+        let mut c = Contents::default();
+        c.resize(grid(8, 1));
+        add_preedit(&mut c, &mut shared, &preedit, range, 0, 8, screen_fg).expect("add_preedit");
+        assert_eq!(glyph_cols(&c), [1, 1, 2, 2]);
+
+        // `cp_offset = 1` skips the leading codepoint → only `'B'` renders, at the
+        // start column 1: `[1(glyph), 1(ul)]`.
+        let range = PreeditRange {
+            start: 1,
+            end: 1,
+            cp_offset: 1,
+        };
+        let mut c = Contents::default();
+        c.resize(grid(8, 1));
+        add_preedit(&mut c, &mut shared, &preedit, range, 0, 8, screen_fg).expect("add_preedit");
+        assert_eq!(glyph_cols(&c), [1, 1]);
+
+        // A wide-then-narrow preedit from start 0 → `'A'` at column 0 (glyph +
+        // underline at 0 and a second underline at 1), then `x += 2`, `'B'` at
+        // column 2: columns `[0(glyph), 0(ul), 1(ul), 2(glyph), 2(ul)]`.
+        let preedit = Preedit {
+            codepoints: vec![cp('A', true), cp('B', false)],
+        };
+        let range = PreeditRange {
+            start: 0,
+            end: 2,
+            cp_offset: 0,
+        };
+        let mut c = Contents::default();
+        c.resize(grid(8, 1));
+        add_preedit(&mut c, &mut shared, &preedit, range, 0, 8, screen_fg).expect("add_preedit");
+        assert_eq!(glyph_cols(&c), [0, 0, 1, 2, 2]);
     }
 
     #[test]

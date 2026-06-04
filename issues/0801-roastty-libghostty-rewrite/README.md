@@ -1248,7 +1248,7 @@ are past the correctness-critical foundation.
 - [Experiment 400: the preedit cell](400-preedit-cell.md) — **Pass** ·
   Claude/Codex/Codex
 - [Experiment 401: the preedit placement loop](401-preedit-placement.md) —
-  **Designed** · Claude/Codex/Codex
+  **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
