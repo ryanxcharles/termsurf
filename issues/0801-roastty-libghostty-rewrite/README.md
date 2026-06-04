@@ -1224,7 +1224,7 @@ are past the correctness-critical foundation.
 - [Experiment 388: the search-highlight color arms](388-search-colors.md) —
   **Pass** · Claude/Codex/Codex
 - [Experiment 389: route the row passes through selected_colors](389-route-selected-colors.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

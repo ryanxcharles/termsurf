@@ -204,3 +204,77 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-202419-299355-prompt.md` (design)
 - Result: `logs/codex-review/20260603-202419-299355-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+Both row passes now route through the `selected_colors` dispatcher.
+
+- `roastty/src/renderer/cell.rs`:
+  - `selected_state(selection, x, wide) -> Selected` — wraps `is_selected`,
+    yielding `Selection` (in bounds) or `False` (the search states deferred —
+    their per-row ranges are not yet plumbed).
+  - `rebuild_bg_row`: derives `state = selected_state(…)`; the color is
+    `selected_colors(state, cell.style, default_fg, default_bg, palette, bold, selection_config).unwrap_or_else(|| cell_colors(…))`;
+    the `bg_alpha` opaque branch keys on `selected = state != Selected::False`.
+  - `rebuild_row`'s `fg_colors` builder: the foreground is
+    `selected_colors(state, …).map(|c| c.fg).unwrap_or_else(|| cell_colors(…).fg)`;
+    the faint alpha is unchanged.
+  - The doc comments now describe the `selected_state` / `selected_colors` path.
+    No signatures change; after this the passes no longer call
+    `selection_colors` directly (it is reached only via `selected_colors`).
+
+Test (in `cell.rs`): `selected_state_yields_selection_or_false` — `None` bounds
+→ `False`; inside `[1, 3]` → `Selection` (at start and end), outside → `False`;
+a spacer tail at `end + 1` → `Selection` (its `x_compare = end`), a narrow cell
+at the same column → `False`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2846 passed, 0 failed (+1, no regressions; the 13
+  existing rebuild tests pass unchanged, confirming identical routed colors).
+- `cargo build -p roastty` → no warnings (`selection_colors` is still used via
+  `selected_colors`).
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The row passes now mirror upstream's single `selected` dispatch: each cell's
+`selected_state` drives both its background and foreground through
+`selected_colors`, with `False` falling back to `cell_colors` (covering twist
+intact). Behavior is identical to Experiments 386–387 (only `Selection`/`False`
+are produced), but the production color path is now the enum dispatcher — so
+adding search recoloring later changes only `selected_state` (and its input, the
+per-row search highlight ranges).
+
+The remaining renderer-bridge work: deriving the `Search`/`SearchSelected`
+states from per-row search highlight ranges (adding them to `RunOptions`/the
+shaper and having `selected_state` consult them); the lock-cursor glyph +
+under-cursor text recolor; the column-ordered decoration merge + link
+double-underline; and the **Metal upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation is behavior-preserving and
+matches the approved design: `selected_state` wraps `is_selected` exactly,
+producing only `Selection` or `False` while the search states remain deferred;
+both passes route through `selected_colors`, and the `False` path uses
+`unwrap_or_else` to lazily call `cell_colors`, preserving the
+covering/full-block twist only when the base path is needed; for selected cells
+`selected_colors(Selected::Selection, …)` is equivalent to the prior direct
+`selection_colors(…, config.background, config.foreground)` call; and the
+`bg_alpha` branch keying on `state != Selected::False` is equivalent to the
+previous `selected` bool for the current state set. It confirmed no signatures
+changed, no call-site churn occurred, and `selection_colors` remains used via
+`selected_colors` plus tests; that the new `selected_state` test covers
+`Selection`/`False`/spacer-tail while the existing rebuild selection tests
+passing confirms the routed colors stayed identical; and that the diff is
+internal Rust only (no public C ABI/header change). Nothing needed to change
+before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-202643-889475-last-message.md`

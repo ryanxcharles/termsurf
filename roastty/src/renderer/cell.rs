@@ -386,6 +386,17 @@ fn is_selected(selection: Option<[u16; 2]>, x: u16, wide: Wide) -> bool {
     x_compare >= start && x_compare <= end
 }
 
+/// The per-cell [`Selected`] state for a rebuild. Selection takes precedence; the
+/// search-highlight states (`Search`/`SearchSelected`) are deferred (their per-row
+/// ranges are not yet plumbed), so this yields `Selection` or `False`.
+fn selected_state(selection: Option<[u16; 2]>, x: u16, wide: Wide) -> Selected {
+    if is_selected(selection, x, wide) {
+        Selected::Selection
+    } else {
+        Selected::False
+    }
+}
+
 /// Identifies which GPU buffer a cell belongs to. Conceptually maps to a cell
 /// type (upstream `Key.CellType`): `Bg` → `CellBg`; the foreground kinds
 /// (`Text`/`Underline`/`Strikethrough`/`Overline`) → `CellTextVertex`.
@@ -684,12 +695,12 @@ pub(crate) fn add_run(
 /// Assemble one viewport row's foreground text cells into `contents`. Derives the
 /// row's [`CellInfo`] slice ([`cell_infos`]) and per-column `fg_colors` (each
 /// cell's foreground + `alpha`), then places every glyph of each [`ShapedRun`]
-/// via [`add_run`]. A cell inside the row's `selection` bounds ([`is_selected`])
-/// takes its foreground from [`selection_colors`] (the `selection_config`);
-/// otherwise from [`cell_colors`] (so the foreground is inverse-aware —
-/// reverse-video swaps the glyph color). That one per-cell foreground feeds the
-/// glyph and all three decorations (via `fg_colors`). The per-row foreground body
-/// of upstream `rebuildCells`.
+/// via [`add_run`]. Each cell's [`Selected`] state ([`selected_state`]) drives its
+/// foreground: a selected cell takes [`selected_colors`] (the `selection_config`);
+/// otherwise [`cell_colors`] (so the foreground is inverse-aware — reverse-video
+/// swaps the glyph color). That one per-cell foreground feeds the glyph and all
+/// three decorations (via `fg_colors`). The per-row foreground body of upstream
+/// `rebuildCells`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rebuild_row(
     contents: &mut Contents,
@@ -715,22 +726,21 @@ pub(crate) fn rebuild_row(
         .enumerate()
         .map(|(col, cell)| {
             let x = u16::try_from(col).expect("viewport column fits u16");
-            let selected = is_selected(selection, x, cell.wide);
-            // A selected cell's foreground is the selection foreground; otherwise
-            // the inverse-aware SGR foreground. This one color feeds the glyph and
-            // every decoration below.
-            let fg = if selected {
-                selection_colors(
-                    cell.style,
-                    default_fg,
-                    default_bg,
-                    palette,
-                    bold,
-                    selection_config.background,
-                    selection_config.foreground,
-                )
-                .fg
-            } else {
+            let state = selected_state(selection, x, cell.wide);
+            // A selected cell's foreground comes from the selected-state colors;
+            // otherwise the inverse-aware SGR foreground. This one color feeds the
+            // glyph and every decoration below.
+            let fg = selected_colors(
+                state,
+                cell.style,
+                default_fg,
+                default_bg,
+                palette,
+                bold,
+                selection_config,
+            )
+            .map(|c| c.fg)
+            .unwrap_or_else(|| {
                 cell_colors(
                     cell.style,
                     cell.codepoint,
@@ -740,7 +750,7 @@ pub(crate) fn rebuild_row(
                     bold,
                 )
                 .fg
-            };
+            });
             // A faint cell's foreground draws at the reduced faint opacity.
             let a = if cell.style.flags.faint {
                 faint_opacity
@@ -873,9 +883,9 @@ pub(crate) fn rebuild_viewport(
     Ok(())
 }
 
-/// Write one viewport row's background cells into `contents`. A cell inside the
-/// row's `selection` bounds ([`is_selected`]) takes its background from
-/// [`selection_colors`] (the `selection_config`) and is forced **opaque**;
+/// Write one viewport row's background cells into `contents`. Each cell's
+/// [`Selected`] state ([`selected_state`]) drives its background: a selected cell
+/// takes [`selected_colors`] (the `selection_config`) and is forced **opaque**;
 /// otherwise the background comes from [`cell_colors`] (reverse-video + the
 /// full-block twist). The RGB falls back to `default_bg` when the resolved
 /// background is `None` (upstream `bg orelse default`). The background cell is
@@ -883,9 +893,9 @@ pub(crate) fn rebuild_viewport(
 /// for a selected, inverse, or explicit-background cell, transparent (`0`)
 /// otherwise — so a covering-derived or default background lets the already-drawn
 /// screen background show through, while an inverse cell stays opaque even when
-/// its resolved background is `None`. The `.search` highlight arms and the
-/// `background_opacity_cells` branch are deferred. The background half of
-/// upstream `rebuildCells`'s per-cell work.
+/// its resolved background is `None`. The search states (deferred) and the
+/// `background_opacity_cells` branch are deferred. The background half of upstream
+/// `rebuildCells`'s per-cell work.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rebuild_bg_row(
     contents: &mut Contents,
@@ -902,18 +912,17 @@ pub(crate) fn rebuild_bg_row(
     let row = usize::from(y);
     for (col, cell) in row_cells.iter().enumerate() {
         let x = u16::try_from(col).expect("viewport column fits u16");
-        let selected = is_selected(selection, x, cell.wide);
-        let colors = if selected {
-            selection_colors(
-                cell.style,
-                default_fg,
-                default_bg,
-                palette,
-                bold,
-                selection_config.background,
-                selection_config.foreground,
-            )
-        } else {
+        let state = selected_state(selection, x, cell.wide);
+        let colors = selected_colors(
+            state,
+            cell.style,
+            default_fg,
+            default_bg,
+            palette,
+            bold,
+            selection_config,
+        )
+        .unwrap_or_else(|| {
             cell_colors(
                 cell.style,
                 cell.codepoint,
@@ -922,13 +931,14 @@ pub(crate) fn rebuild_bg_row(
                 palette,
                 bold,
             )
-        };
+        });
         // Opaque for a selected, inverse, or explicit-background cell; a
         // covering-derived or default background is transparent. The selection
         // branch is upstream's first `bg_alpha` arm (before inverse/explicit-bg);
         // all three yield the base `alpha`, so the OR is faithful. Evaluated
         // independently of whether the final background is `Some`.
         let has_explicit_bg = !matches!(cell.style.bg_color, Color::None);
+        let selected = state != Selected::False;
         let bg_alpha = if selected || cell.style.flags.inverse || has_explicit_bg {
             alpha
         } else {
@@ -2362,6 +2372,27 @@ mod tests {
         // Saturating: a spacer tail at column 0 compares 0 (no underflow).
         assert!(!is_selected(Some([1, 3]), 0, Wide::SpacerTail));
         assert!(is_selected(Some([0, 0]), 0, Wide::SpacerTail));
+    }
+
+    #[test]
+    fn selected_state_yields_selection_or_false() {
+        // No bounds → `False` (the search states are deferred).
+        assert_eq!(selected_state(None, 0, Wide::Narrow), Selected::False);
+
+        // Inside the inclusive [1, 3] bounds → `Selection`.
+        let bounds = Some([1, 3]);
+        assert_eq!(selected_state(bounds, 0, Wide::Narrow), Selected::False); // before
+        assert_eq!(selected_state(bounds, 1, Wide::Narrow), Selected::Selection); // at start
+        assert_eq!(selected_state(bounds, 3, Wide::Narrow), Selected::Selection); // at end
+        assert_eq!(selected_state(bounds, 4, Wide::Narrow), Selected::False); // after
+
+        // A spacer tail at `end + 1 = 4` compares `x_compare = 3` → `Selection`,
+        // where a narrow cell at column 4 is `False`.
+        assert_eq!(
+            selected_state(bounds, 4, Wide::SpacerTail),
+            Selected::Selection
+        );
+        assert_eq!(selected_state(bounds, 4, Wide::Narrow), Selected::False);
     }
 
     #[test]
