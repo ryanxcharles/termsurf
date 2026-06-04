@@ -1379,6 +1379,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 466: grow the Config struct with the background-image group](466-config-struct-bg-image-group.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 467: grow the Config struct with the optional-colors group](467-config-struct-optional-colors-group.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
