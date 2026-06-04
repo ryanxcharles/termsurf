@@ -188,3 +188,52 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-181957-d522-prompt.md` (design)
 - Result: `logs/codex-review/20260604-181957-d522-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`set_packed_field`, `set_bool_field`, and five new `Config::set` arms were
+added. Packed-struct fields are `Some("")` ⇒ reset, `None` ⇒ `ValueRequired`,
+`Some(v)` ⇒ `parse_cli` or `InvalidValue`; the bool field is `Some("")` ⇒ reset,
+`None` ⇒ `true` (bare flag), `Some(v)` ⇒ `parse_bool` or `InvalidValue`. The new
+test `config_set_routes_packed_and_bool_fields` exercises each packed key
+(`[no-]flag` list / standalone bool), the bool field (explicit value + bare
+flag), the packed-vs-bool missing-value asymmetry, the invalid-value error, and
+a reset.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3008 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation preserves the key asymmetry — packed structs
+require a value (upstream `parseStruct(..., value orelse ValueRequired)`) while
+bool fields use `parseBool(value orelse "t")` (missing value ⇒ bare-flag `true`)
+— and the `Some("")` reset-before-parse is correctly applied to both; the five
+new routes match the approved slice; the tests cover packed flag lists,
+standalone bools, unknown values, the packed/bool missing-value cases, and
+reset-to-default; gates are clean and the remaining loader categories stayed
+deferred. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-182227-r522-prompt.md` (result)
+- Result: `logs/codex-review/20260604-182227-r522-last-message.md` (result)
+
+## Conclusion
+
+`Config::set` now routes 30 of the 43 fields (25 enums + 4 packed structs + 1
+bool). The next slices add the **color** fields (`background` / `foreground` via
+`Color::parse_cli`; `cursor-color` / `cursor-text` / `selection-foreground` /
+`selection-background` via `Option<TerminalColor>`; `bold-color` via
+`Option<BoldColor>`) and the **font-style** fields (`font-style*` via
+`FontStyle::parse_cli`, Experiment 520), then `theme` (after `parseAutoStruct` /
+`Theme::parse_cli`) and the float-blocked `background-image-opacity`. Then the
+`loadCli` / file loader drives `Config::set`.

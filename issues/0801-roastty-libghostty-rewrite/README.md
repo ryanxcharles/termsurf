@@ -1490,7 +1490,7 @@ are past the correctness-critical foundation.
 - [Experiment 521: the per-field parse dispatch, enum slice (Config::set + set_enum_field)](521-config-set-enum-dispatch.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 522: the per-field parse dispatch, packed-struct + bool slice (Config::set)](522-config-set-packed-bool-dispatch.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

@@ -435,6 +435,34 @@ impl Config {
                     CustomShaderAnimation::from_keyword,
                 )?
             }
+            "font-shaping-break" => {
+                self.font_shaping_break = set_packed_field(
+                    value,
+                    default.font_shaping_break,
+                    FontShapingBreak::parse_cli,
+                )?
+            }
+            "scroll-to-bottom" => {
+                self.scroll_to_bottom =
+                    set_packed_field(value, default.scroll_to_bottom, ScrollToBottom::parse_cli)?
+            }
+            "shell-integration-features" => {
+                self.shell_integration_features = set_packed_field(
+                    value,
+                    default.shell_integration_features,
+                    ShellIntegrationFeatures::parse_cli,
+                )?
+            }
+            "notify-on-command-finish-action" => {
+                self.notify_on_command_finish_action = set_packed_field(
+                    value,
+                    default.notify_on_command_finish_action,
+                    NotifyOnCommandFinishAction::parse_cli,
+                )?
+            }
+            "background-image-repeat" => {
+                self.bg_image_repeat = set_bool_field(value, default.bg_image_repeat)?
+            }
             _ => return Err(ConfigSetError::UnknownField),
         }
         Ok(())
@@ -465,6 +493,32 @@ fn set_enum_field<T: Copy>(
         Some("") => Ok(default_value),
         None => Err(ConfigSetError::ValueRequired),
         Some(v) => parse(v).ok_or(ConfigSetError::InvalidValue),
+    }
+}
+
+/// Resolve a packed-struct field value (upstream's empty-reset + `parseStruct`
+/// magic): a set-but-empty value resets to the default; a missing value is
+/// `ValueRequired`; otherwise `parse` (the struct's `parse_cli`) or `InvalidValue`.
+fn set_packed_field<T>(
+    value: Option<&str>,
+    default_value: T,
+    parse: impl FnOnce(&str) -> Result<T, FlagsParseError>,
+) -> Result<T, ConfigSetError> {
+    match value {
+        Some("") => Ok(default_value),
+        None => Err(ConfigSetError::ValueRequired),
+        Some(v) => parse(v).map_err(|_| ConfigSetError::InvalidValue),
+    }
+}
+
+/// Resolve a `bool` field value (upstream's empty-reset + `parseBool(value orelse
+/// "t")`): a set-but-empty value resets to the default; otherwise `parse_bool_field`
+/// (a missing value is a bare flag, which is `true`), with `InvalidValue` on a bad
+/// value.
+fn set_bool_field(value: Option<&str>, default_value: bool) -> Result<bool, ConfigSetError> {
+    match value {
+        Some("") => Ok(default_value),
+        _ => parse_bool_field(value).map_err(|_| ConfigSetError::InvalidValue),
     }
 }
 
@@ -5499,6 +5553,92 @@ mod tests {
         let mut out = String::new();
         cfg.format_config(&mut out);
         assert!(out.lines().any(|l| l == "macos-hidden = never")); // the default
+    }
+
+    #[test]
+    fn config_set_routes_packed_and_bool_fields() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        // Packed structs: a `[no-]flag` comma-list and a standalone bool route to
+        // the right field (verified via `format_config`).
+        let mut cfg = Config::default();
+        cfg.set("font-shaping-break", Some("no-cursor")).unwrap();
+        assert_eq!(
+            line(&cfg, "font-shaping-break"),
+            "font-shaping-break = no-cursor"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("scroll-to-bottom", Some("no-keystroke,output"))
+            .unwrap();
+        assert_eq!(
+            line(&cfg, "scroll-to-bottom"),
+            "scroll-to-bottom = no-keystroke,output"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("shell-integration-features", Some("false"))
+            .unwrap(); // standalone bool
+        assert_eq!(
+            line(&cfg, "shell-integration-features"),
+            "shell-integration-features = no-cursor,no-sudo,no-title,no-ssh-env,no-ssh-terminfo,no-path"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("notify-on-command-finish-action", Some("no-bell,notify"))
+            .unwrap();
+        assert_eq!(
+            line(&cfg, "notify-on-command-finish-action"),
+            "notify-on-command-finish-action = no-bell,notify"
+        );
+
+        // bool field: an explicit value, and a bare flag (None ⇒ true).
+        let mut cfg = Config::default();
+        cfg.set("background-image-repeat", Some("false")).unwrap();
+        assert_eq!(
+            line(&cfg, "background-image-repeat"),
+            "background-image-repeat = false"
+        );
+        let mut cfg = Config::default();
+        cfg.set("background-image-repeat", None).unwrap(); // bare flag ⇒ true
+        assert_eq!(
+            line(&cfg, "background-image-repeat"),
+            "background-image-repeat = true"
+        );
+
+        // Asymmetry: a missing value is `ValueRequired` for a packed struct…
+        let mut cfg = Config::default();
+        assert_eq!(
+            cfg.set("scroll-to-bottom", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        // …but the bool's bare flag is `true` (handled above), and an invalid value
+        // is `InvalidValue` for both.
+        assert_eq!(
+            cfg.set("scroll-to-bottom", Some("nope")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("background-image-repeat", Some("nope")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        // `Some("")` resets a packed struct to its default.
+        let mut cfg = Config::default();
+        cfg.set("scroll-to-bottom", Some("no-keystroke,output"))
+            .unwrap();
+        cfg.set("scroll-to-bottom", Some("")).unwrap(); // reset
+        assert_eq!(
+            line(&cfg, "scroll-to-bottom"),
+            "scroll-to-bottom = keystroke,no-output"
+        );
     }
 
     #[test]
