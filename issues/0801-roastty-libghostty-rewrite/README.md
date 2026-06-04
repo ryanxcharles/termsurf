@@ -1482,7 +1482,7 @@ are past the correctness-critical foundation.
 - [Experiment 517: the packed-struct flag parser (parse_packed_flags + ScrollToBottom / FontShapingBreak parse_cli)](517-config-packed-struct-parse.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 518: the remaining packed-struct flag parsers (ShellIntegrationFeatures / NotifyOnCommandFinishAction parse_cli)](518-config-packed-struct-parse-2.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

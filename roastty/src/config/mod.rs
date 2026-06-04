@@ -1358,6 +1358,30 @@ impl NotifyOnCommandFinishAction {
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_flags(&[("bell", self.bell), ("notify", self.notify)]);
     }
+
+    /// Parse a packed-struct flag value (upstream `cli.args.parsePackedStruct`): a
+    /// standalone bool sets every flag; otherwise a `[no-]flag` comma-list sets the
+    /// named flags, with defaults for the rest.
+    pub(crate) fn parse_cli(value: &str) -> Result<Self, FlagsParseError> {
+        let mut result = NotifyOnCommandFinishAction::default();
+        parse_packed_flags(value, |tok| match tok {
+            FlagToken::All(b) => {
+                result.bell = b;
+                result.notify = b;
+                true
+            }
+            FlagToken::One("bell", on) => {
+                result.bell = on;
+                true
+            }
+            FlagToken::One("notify", on) => {
+                result.notify = on;
+                true
+            }
+            FlagToken::One(_, _) => false,
+        })?;
+        Ok(result)
+    }
 }
 
 impl Default for NotifyOnCommandFinishAction {
@@ -1458,6 +1482,50 @@ impl ShellIntegrationFeatures {
             ("ssh-terminfo", self.ssh_terminfo),
             ("path", self.path),
         ]);
+    }
+
+    /// Parse a packed-struct flag value (upstream `cli.args.parsePackedStruct`): a
+    /// standalone bool sets every flag; otherwise a `[no-]flag` comma-list sets the
+    /// named flags, with defaults for the rest.
+    pub(crate) fn parse_cli(value: &str) -> Result<Self, FlagsParseError> {
+        let mut result = ShellIntegrationFeatures::default();
+        parse_packed_flags(value, |tok| match tok {
+            FlagToken::All(b) => {
+                result.cursor = b;
+                result.sudo = b;
+                result.title = b;
+                result.ssh_env = b;
+                result.ssh_terminfo = b;
+                result.path = b;
+                true
+            }
+            FlagToken::One("cursor", on) => {
+                result.cursor = on;
+                true
+            }
+            FlagToken::One("sudo", on) => {
+                result.sudo = on;
+                true
+            }
+            FlagToken::One("title", on) => {
+                result.title = on;
+                true
+            }
+            FlagToken::One("ssh-env", on) => {
+                result.ssh_env = on;
+                true
+            }
+            FlagToken::One("ssh-terminfo", on) => {
+                result.ssh_terminfo = on;
+                true
+            }
+            FlagToken::One("path", on) => {
+                result.path = on;
+                true
+            }
+            FlagToken::One(_, _) => false,
+        })?;
+        Ok(result)
     }
 }
 
@@ -5403,5 +5471,83 @@ mod tests {
         original.format_entry(&mut EntryFormatter::new("scroll-to-bottom", &mut out));
         let rendered = out.trim_end().split(" = ").nth(1).unwrap().to_string();
         assert_eq!(ScrollToBottom::parse_cli(&rendered), Ok(original));
+    }
+
+    #[test]
+    fn packed_flags_parse_cli_shell_notify() {
+        // Standalone bool sets every flag.
+        assert_eq!(
+            ShellIntegrationFeatures::parse_cli("false"),
+            Ok(ShellIntegrationFeatures {
+                cursor: false,
+                sudo: false,
+                title: false,
+                ssh_env: false,
+                ssh_terminfo: false,
+                path: false,
+            })
+        );
+
+        // A `[no-]flag` comma-list, incl. the kebab `ssh-env` / `ssh-terminfo`
+        // keywords → snake fields; the rest keep defaults (cursor/title/path true,
+        // sudo false).
+        assert_eq!(
+            ShellIntegrationFeatures::parse_cli("ssh-env,ssh-terminfo,no-title"),
+            Ok(ShellIntegrationFeatures {
+                cursor: true,
+                sudo: false,
+                title: false,
+                ssh_env: true,
+                ssh_terminfo: true,
+                path: true,
+            })
+        );
+
+        // Unknown flag → InvalidValue (incl. the snake form, which is not a keyword).
+        assert_eq!(
+            ShellIntegrationFeatures::parse_cli("ssh_env"),
+            Err(FlagsParseError::InvalidValue)
+        );
+        assert_eq!(
+            ShellIntegrationFeatures::parse_cli("nope"),
+            Err(FlagsParseError::InvalidValue)
+        );
+
+        // NotifyOnCommandFinishAction (bell default true, notify default false).
+        assert_eq!(
+            NotifyOnCommandFinishAction::parse_cli("no-bell,notify"),
+            Ok(NotifyOnCommandFinishAction {
+                bell: false,
+                notify: true,
+            })
+        );
+        assert_eq!(
+            NotifyOnCommandFinishAction::parse_cli("true"),
+            Ok(NotifyOnCommandFinishAction {
+                bell: true,
+                notify: true,
+            })
+        );
+        assert_eq!(
+            NotifyOnCommandFinishAction::parse_cli("nope"),
+            Err(FlagsParseError::InvalidValue)
+        );
+
+        // Round-trip: format_entry then parse_cli recovers the value.
+        let original = ShellIntegrationFeatures {
+            cursor: false,
+            sudo: true,
+            title: false,
+            ssh_env: true,
+            ssh_terminfo: false,
+            path: true,
+        };
+        let mut out = String::new();
+        original.format_entry(&mut EntryFormatter::new(
+            "shell-integration-features",
+            &mut out,
+        ));
+        let rendered = out.trim_end().split(" = ").nth(1).unwrap().to_string();
+        assert_eq!(ShellIntegrationFeatures::parse_cli(&rendered), Ok(original));
     }
 }

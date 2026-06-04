@@ -172,3 +172,52 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-175552-d518-prompt.md` (design)
 - Result: `logs/codex-review/20260604-175552-d518-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`parse_cli` was added to `ShellIntegrationFeatures` and
+`NotifyOnCommandFinishAction` via the `parse_packed_flags` helper. A standalone
+bool sets every flag; otherwise each `[no-]flag` comma part sets a named flag
+(the kebab `ssh-env` / `ssh-terminfo` keywords → the `ssh_env` / `ssh_terminfo`
+Rust fields), with `Default` values for the rest, and an unknown flag returns
+`FlagsParseError::InvalidValue`. The new test
+`packed_flags_parse_cli_shell_notify` covers the standalone bool, the kebab
+keywords, omitted-flag defaults, the snake-form `ssh_env` rejected as unknown,
+the notify action, and a `format_entry` → `parse_cli` round-trip. Every
+packed-struct config type now parses.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3004 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches the approved design and upstream
+packed-struct semantics — starts from defaults, standalone bool sets all fields,
+comma-list flags set only named fields, `no-` negates, unknown names error, and
+the SSH fields accept only the upstream kebab names; the tests are adequate
+(negative `ssh_env` case, default-preservation, notify action, `format_entry`
+round-trip); the gates are clean and the remaining loader pieces are properly
+deferred. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-175752-r518-prompt.md` (result)
+- Result: `logs/codex-review/20260604-175752-r518-last-message.md` (result)
+
+## Conclusion
+
+Every packed-struct config type now parses via `parse_packed_flags` (four
+structs: `ScrollToBottom`, `FontShapingBreak`, `ShellIntegrationFeatures`,
+`NotifyOnCommandFinishAction`). The remaining loader work is: the bool / int /
+string "magic" parse paths (the `parseIntoField` type-magic for raw `bool` / int
+/ string fields; float stays blocked); the empty-string reset-to-default rule;
+and the per-field `parseIntoField` dispatch (`Config::set(key, value)`) + the
+`loadCli` / file loader — the inverse of `Config::format_config`.
