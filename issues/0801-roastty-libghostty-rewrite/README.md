@@ -1269,6 +1269,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 411: the font-atlas texture sync (sync_atlas_texture)](411-sync-atlas-texture.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 412: the modified-gated atlas sync (FrameAtlasTexture)](412-frame-atlas-texture.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
