@@ -1496,7 +1496,7 @@ are past the correctness-critical foundation.
 - [Experiment 524: the quote/escape-aware comma splitter (CommaSplitter)](524-config-comma-splitter.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 525: the double-quoted string-literal decoder (parse_quoted_string)](525-config-quoted-string.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

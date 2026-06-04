@@ -139,6 +139,40 @@ fn parse_escape_sequence(bytes: &[u8], i: &mut usize) -> Option<u32> {
     }
 }
 
+/// Decode a double-quoted string literal (upstream `std.zig.string_literal.parseWrite`):
+/// `bytes` must start and end with `"`. Returns the decoded bytes, or `None` on a
+/// failure (a malformed escape, a `\u{…}` codepoint that is not valid UTF-8, a
+/// literal newline, or a missing surrounding quote). `\u{…}` escapes are UTF-8
+/// encoded; every other escape writes a single byte.
+pub(crate) fn parse_quoted_string(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() < 2 || bytes[0] != b'"' || bytes[bytes.len() - 1] != b'"' {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut index = 1usize;
+    loop {
+        match *bytes.get(index)? {
+            b'\\' => {
+                let escape_char_index = index + 1;
+                let cp = parse_escape_sequence(bytes, &mut index)?; // advances index
+                if bytes.get(escape_char_index) == Some(&b'u') {
+                    let ch = char::from_u32(cp)?; // an invalid codepoint is a failure
+                    let mut buf = [0u8; 4];
+                    out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+                } else {
+                    out.push(cp as u8); // upstream `@intCast(codepoint)`
+                }
+            }
+            b'\n' => return None, // a literal newline byte
+            b'"' => return Some(out),
+            other => {
+                out.push(other);
+                index += 1;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,5 +229,29 @@ mod tests {
 
         // Invalid UTF-8 over raw bytes: a valid 2-byte lead with a bad continuation.
         assert_eq!(codepoints_bytes(&[0xC2, 0x20]), Err(InvalidString));
+    }
+
+    #[test]
+    fn parse_quoted_string_decodes_and_fails() {
+        let q = |s: &str| parse_quoted_string(s.as_bytes());
+
+        // Plain content and a comma inside (the surrounding quotes are stripped).
+        assert_eq!(q("\"abc\""), Some(b"abc".to_vec()));
+        assert_eq!(q("\"a,b\""), Some(b"a,b".to_vec()));
+        // Escapes: `\n` ⇒ the byte 0x0A; `\x41` ⇒ `A` (single byte).
+        assert_eq!(q("\"a\\nb\""), Some(vec![b'a', 0x0A, b'b']));
+        assert_eq!(q("\"a\\x41b\""), Some(b"aAb".to_vec()));
+        // `\u{…}` is UTF-8 encoded.
+        assert_eq!(q("\"\\u{48}\\u{49}\""), Some(b"HI".to_vec()));
+        assert_eq!(q("\"\\u{1F601}\""), Some("😁".as_bytes().to_vec()));
+        // Multibyte content is copied verbatim.
+        assert_eq!(q("\"héllo\""), Some("héllo".as_bytes().to_vec()));
+
+        // Failures.
+        assert_eq!(q("\"a\nb\""), None); // a literal newline byte
+        assert_eq!(q("\"\\q\""), None); // a bad escape
+        assert_eq!(q("\"\\u{d800}\""), None); // a surrogate codepoint
+        assert_eq!(q("abc"), None); // missing surrounding quotes
+        assert_eq!(q("\""), None); // too short
     }
 }

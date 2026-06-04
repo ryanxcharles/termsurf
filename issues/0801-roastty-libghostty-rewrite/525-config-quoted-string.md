@@ -198,3 +198,49 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-184204-d525-prompt.md` (design)
 - Result: `logs/codex-review/20260604-184204-d525-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`config::string::parse_quoted_string(bytes) -> Option<Vec<u8>>` was added — a
+faithful port of `std.zig.string_literal.parseWrite`: requires the surrounding
+quotes; decodes the content via the existing `parse_escape_sequence`
+(UTF-8-encoding `\u{…}`, single byte for other escapes); fails on a literal
+newline, a malformed escape, an invalid `\u` codepoint, or a missing quote;
+copies other bytes verbatim. The new test
+`parse_quoted_string_decodes_and_fails` covers the decode cases (plain, comma,
+`\n`/`\xNN`/`\u{…}` escapes, multibyte) and the failure cases.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3013 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches `parseWrite` — surrounding-quote
+requirement, escape dispatch through `parse_escape_sequence`, UTF-8 encoding for
+`\u{…}`, byte output for non-Unicode escapes, raw-newline failure, and raw byte
+copying otherwise; the surrogate failure via `char::from_u32` is faithful to
+Zig's `utf8Encode` rejection; the tests cover the normal and edge cases; gates
+are clean and the consumer work remains deferred. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-184404-r525-prompt.md` (result)
+- Result: `logs/codex-review/20260604-184404-r525-last-message.md` (result)
+
+## Conclusion
+
+`parse_quoted_string` (the `parseWrite` equivalent) is ported. Both
+`parseAutoStruct` building blocks now exist — `CommaSplitter` (Experiment 524)
+and `parse_quoted_string`. The next experiment ports **`parseAutoStruct`** (the
+colon-keyed `key:value` comma-list parser that drives `CommaSplitter`, decodes
+double-quoted values, and tracks required fields), then `Theme::parse_cli` + the
+`theme` `Config::set` arm — the last parseable field. Then the `loadCli` /
+config-file loader.
