@@ -176,3 +176,55 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-115851-d460-prompt.md` (design)
 - Result: `logs/codex-review/20260604-115851-d460-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The clipboard-access config enum and its predicates are now live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) enum ClipboardAccess { Allow, Deny, Ask }` (upstream
+  `ClipboardAccess`) and two predicates — `denied(self) -> bool`
+  (`matches!(self, ClipboardAccess::Deny)`, the `== .deny` gate) and
+  `needs_confirm(self) -> bool` (`matches!(self, ClipboardAccess::Ask)`, the
+  `== .ask` confirmation gate).
+
+Test (in `config/mod.rs`): `clipboard_access_denied_and_needs_confirm` — over
+the three variants: `Allow → false/false`, `Deny → true/false`,
+`Ask → false/true` (denied / needs_confirm); the variants distinct; `Copy`/`Eq`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2951 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries `ClipboardAccess` and its two predicates —
+extending the clipboard config (after `CopyOnSelect`, Experiment 442) with the
+read/write permission gate, modeled as the `denied` and `needs_confirm`
+decisions the surface applies. The `Config` struct / parsing (the field defaults
+— `ask` for read, `allow` for write) and the surface clipboard call sites (the
+read/write, the confirmation prompt, the OSC 52 handling) stay deferred. The
+config-type family — now twenty-three enums/flag-structs with consumers plus
+four value types — remains a clean, gated way to advance the rewrite while the
+larger coupled subsystems stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `ClipboardAccess { Allow, Deny, Ask }` faithfully
+maps upstream; `denied()` captures the `.deny` gate; `needs_confirm()` captures
+the `.ask` confirmation gate; the defaults and call-site behavior are correctly
+deferred; and the test covers the complete behavior matrix and value semantics.
+No public C ABI/header impact; nothing needed to change before the result
+commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-120047-r460-prompt.md` (result)
+- Result: `logs/codex-review/20260604-120047-r460-last-message.md` (result)

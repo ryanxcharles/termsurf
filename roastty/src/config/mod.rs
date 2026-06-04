@@ -346,6 +346,32 @@ impl Theme {
     }
 }
 
+/// The `clipboard-read` / `clipboard-write` config (upstream `ClipboardAccess`):
+/// whether a clipboard operation is allowed, denied, or confirmed. The `Config`
+/// defaults are `Ask` for read and `Allow` for write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClipboardAccess {
+    /// Proceed without asking.
+    Allow,
+    /// Deny the operation.
+    Deny,
+    /// Require a confirmation prompt.
+    Ask,
+}
+
+impl ClipboardAccess {
+    /// Whether the clipboard operation is denied (upstream's `== .deny` check).
+    pub(crate) fn denied(self) -> bool {
+        matches!(self, ClipboardAccess::Deny)
+    }
+
+    /// Whether the clipboard operation needs a confirmation prompt (upstream's
+    /// `== .ask` check).
+    pub(crate) fn needs_confirm(self) -> bool {
+        matches!(self, ClipboardAccess::Ask)
+    }
+}
+
 /// The color space the window renders in (upstream `WindowColorspace`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WindowColorspace {
@@ -664,10 +690,10 @@ impl OscColorReportFormat {
 mod tests {
     use super::{
         AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, BoldColor,
-        Color, ConfirmCloseSurface, CopyOnSelect, CustomShaderAnimation, FontShapingBreak,
-        FontStyle, Fullscreen, GraphemeWidthMethod, LinkPreviews, MacHidden, MacTitlebarProxyIcon,
-        MacTitlebarStyle, MacWindowButtons, MiddleClickAction, MouseShiftCapture,
-        NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
+        ClipboardAccess, Color, ConfirmCloseSurface, CopyOnSelect, CustomShaderAnimation,
+        FontShapingBreak, FontStyle, Fullscreen, GraphemeWidthMethod, LinkPreviews, MacHidden,
+        MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons, MiddleClickAction,
+        MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
         OscColorReportFormat, RightClickAction, ScrollToBottom, ShellIntegration,
         ShellIntegrationFeatures, TerminalBoldColor, TerminalColor, Theme, WindowSubtitle,
     };
@@ -830,6 +856,25 @@ mod tests {
         let i = MacTitlebarProxyIcon::Visible;
         let copied = i;
         assert_eq!(i, copied);
+    }
+
+    #[test]
+    fn clipboard_access_denied_and_needs_confirm() {
+        // (denied, needs_confirm) per variant.
+        assert!(!ClipboardAccess::Allow.denied());
+        assert!(!ClipboardAccess::Allow.needs_confirm());
+
+        assert!(ClipboardAccess::Deny.denied());
+        assert!(!ClipboardAccess::Deny.needs_confirm());
+
+        assert!(!ClipboardAccess::Ask.denied());
+        assert!(ClipboardAccess::Ask.needs_confirm());
+
+        assert_ne!(ClipboardAccess::Allow, ClipboardAccess::Deny);
+        // `Copy` + `Eq`: a trivial round-trip.
+        let c = ClipboardAccess::Ask;
+        let copied = c;
+        assert_eq!(c, copied);
     }
 
     #[test]
