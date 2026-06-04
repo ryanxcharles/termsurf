@@ -4,6 +4,8 @@ use objc2_foundation::NSString;
 use objc2_metal::{MTLDevice, MTLLibrary};
 
 use crate::font::metrics::Metrics;
+use crate::font::run::Wide;
+use crate::renderer::cell::block_cursor_pos;
 use crate::renderer::metal::api::MetalPixelFormat;
 use crate::renderer::metal::buffer::MetalBufferElement;
 use crate::renderer::metal::pipeline::{
@@ -11,6 +13,7 @@ use crate::renderer::metal::pipeline::{
     MetalStandardPipelineDescription, STANDARD_PIPELINE_DESCRIPTIONS,
 };
 use crate::renderer::size::{GridSize, Size};
+use crate::terminal::color::Rgb;
 
 pub(crate) const STANDARD_METAL_SHADER_SOURCE: &str = include_str!("shaders.metal");
 
@@ -182,6 +185,24 @@ impl MetalUniforms {
     /// glyph cell), from the grid `metrics`.
     pub(crate) fn update_font_grid(&mut self, metrics: &Metrics) {
         self.cell_size = [metrics.cell_width as f32, metrics.cell_height as f32];
+    }
+
+    /// Clear the cursor uniform: set `cursor_pos` to the sentinel
+    /// `(u16::MAX, u16::MAX)`, which the shader reads as "no cursor" (upstream's
+    /// default clear). Only `cursor_pos` is touched.
+    pub(crate) fn clear_cursor(&mut self) {
+        self.cursor_pos = [u16::MAX, u16::MAX];
+    }
+
+    /// Set the block-cursor uniforms (upstream's `style == .block` branch): the
+    /// `cursor_pos` (via [`block_cursor_pos`], with the spacer-tail backstep), the
+    /// `cursor_wide` flag, and the opaque `cursor_color`. `color` is the resolved
+    /// cursor color (`cursor-text` vs the cell background — `cursor_text_color`).
+    pub(crate) fn update_block_cursor(&mut self, x: u16, y: u16, wide: Wide, color: Rgb) {
+        let (pos, cursor_wide) = block_cursor_pos(x, y, wide);
+        self.cursor_pos = pos;
+        self.bools.cursor_wide = cursor_wide;
+        self.cursor_color = [color.r, color.g, color.b, 255];
     }
 
     #[cfg(test)]
@@ -538,6 +559,49 @@ fragment float4 bg_image_fragment() {
         assert_eq!(uniforms.screen_size, [2.0, 3.0]);
         assert_eq!(uniforms.grid_size, [4, 5]);
         assert_eq!(uniforms.bg_color, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn clear_cursor_sets_only_the_sentinel_position() {
+        let mut uniforms =
+            MetalUniforms::test_with_grid([2, 3], [4, 5], [6.0, 7.0], [0.0; 4], 0, [1, 2, 3, 4]);
+        // Distinctive cursor fields to prove the clear leaves them alone.
+        uniforms.cursor_pos = [1, 2];
+        uniforms.cursor_color = [9, 9, 9, 9];
+        uniforms.bools.cursor_wide = true;
+
+        uniforms.clear_cursor();
+
+        assert_eq!(uniforms.cursor_pos, [u16::MAX, u16::MAX]);
+        // Only `cursor_pos` is touched.
+        assert_eq!(uniforms.cursor_color, [9, 9, 9, 9]);
+        assert!(uniforms.bools.cursor_wide);
+        assert_eq!(uniforms.screen_size, [2.0, 3.0]);
+    }
+
+    #[test]
+    fn update_block_cursor_sets_pos_wide_and_color() {
+        use crate::font::run::Wide;
+        use crate::terminal::color::Rgb;
+
+        let mut uniforms =
+            MetalUniforms::test_with_grid([2, 3], [4, 5], [6.0, 7.0], [0.0; 4], 0, [1, 2, 3, 4]);
+
+        // A narrow block cursor at (3, 5): pos unchanged, not wide, opaque color.
+        uniforms.update_block_cursor(3, 5, Wide::Narrow, Rgb::new(10, 20, 30));
+        assert_eq!(uniforms.cursor_pos, [3, 5]);
+        assert!(!uniforms.bools.cursor_wide);
+        assert_eq!(uniforms.cursor_color, [10, 20, 30, 255]);
+
+        // A spacer-tail at (4, 2): the column steps back to 3, and it is wide.
+        uniforms.update_block_cursor(4, 2, Wide::SpacerTail, Rgb::new(1, 2, 3));
+        assert_eq!(uniforms.cursor_pos, [3, 2]);
+        assert!(uniforms.bools.cursor_wide);
+        assert_eq!(uniforms.cursor_color, [1, 2, 3, 255]);
+
+        // The non-cursor fields are untouched.
+        assert_eq!(uniforms.screen_size, [2.0, 3.0]);
+        assert_eq!(uniforms.grid_size, [4, 5]);
     }
 
     #[test]

@@ -186,3 +186,70 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-082502-d417-prompt.md` (design)
 - Result: `logs/codex-review/20260604-082502-d417-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The cursor uniform group is now live.
+
+- `roastty/src/renderer/metal/shaders.rs`:
+  `MetalUniforms::clear_cursor(&mut self)` (sets `cursor_pos` to the sentinel
+  `[u16::MAX, u16::MAX]`, the only field upstream's default clear touches) and
+  `MetalUniforms::update_block_cursor(&mut self, x, y, wide: Wide, color: Rgb)`
+  (sets `cursor_pos` via `block_cursor_pos` — the spacer-tail backstep — the
+  `cursor_wide` flag, and the opaque `cursor_color` `[r, g, b, 255]`). Added
+  imports `crate::font::run::Wide`, `crate::renderer::cell::block_cursor_pos`,
+  `crate::terminal::color::Rgb`.
+
+Tests (in `shaders.rs`):
+
+- `clear_cursor_sets_only_the_sentinel_position` — with distinctive `cursor_pos`
+  / `cursor_color` / `cursor_wide`, `clear_cursor` →
+  `cursor_pos == [u16::MAX, u16::MAX]` while `cursor_color` / `cursor_wide` /
+  `screen_size` are unchanged.
+- `update_block_cursor_sets_pos_wide_and_color` — `Wide::Narrow` at `(3, 5)`,
+  `Rgb(10, 20, 30)` → `cursor_pos [3, 5]`, `cursor_wide false`,
+  `cursor_color [10, 20, 30, 255]`; `Wide::SpacerTail` at `(4, 2)` →
+  `cursor_pos [3, 2]` (backstep), `cursor_wide true`; `screen_size` /
+  `grid_size` untouched.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2894 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + `lib.rs`/header/`abi_harness.c`)
+  clean; `git diff --check` clean.
+
+## Conclusion
+
+The per-frame uniforms now cover the screen-size group (Experiment 415), the
+font-grid `cell_size` (Experiment 416), and the cursor group (this experiment).
+The remaining uniform-update work: the grid-size uniform (the resize path in
+`rebuildCells`), the config-derived group (min-contrast and the
+color-space/blending bools, which first need the config `colorspace`/`blending`
+enums), the background color, and a full production `MetalUniforms` constructor
+— then the live call sites that resolve the cursor color (`cursor_text_color`),
+gate the cursor visibility/style, and run these updates each frame.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design and
+upstream cursor uniform behavior: `clear_cursor` sets only the sentinel
+`cursor_pos = [u16::MAX, u16::MAX]`, leaving `cursor_color` and `cursor_wide`
+untouched just like upstream; `update_block_cursor` delegates to the
+already-faithful `block_cursor_pos` (so the spacer-tail backstep and wide flag
+are correct) and writes an opaque cursor color with alpha `255`. It judged the
+tests to cover the relevant behavior (the sentinel clear without resetting other
+cursor fields, the narrow cursor position/wide/color, the spacer-tail backstep
+plus wide flag, and representative non-cursor fields unchanged), and the
+deferred live cursor gating / color resolution / non-block sprite path correctly
+out of scope. No public C ABI/header impact; nothing needed to change before the
+result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-082707-r417-prompt.md` (result)
+- Result: `logs/codex-review/20260604-082707-r417-last-message.md` (result)
