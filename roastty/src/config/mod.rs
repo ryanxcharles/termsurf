@@ -175,6 +175,106 @@ impl Default for Config {
     }
 }
 
+impl Config {
+    /// Format the whole config as `key = value\n` lines, one per field, in
+    /// upstream `Config` declaration order (upstream `FileFormatter.format`,
+    /// `config/formatter_file.zig`, the default non-docs / non-changed path).
+    ///
+    /// `background-image-opacity` (an `f32`) is omitted: the generic float `{d}`
+    /// branch is float-formatting blocked (Experiment 509).
+    pub(crate) fn format_config(&self, out: &mut String) {
+        self.font_style
+            .format_entry(&mut EntryFormatter::new("font-style", out));
+        self.font_style_bold
+            .format_entry(&mut EntryFormatter::new("font-style-bold", out));
+        self.font_style_italic
+            .format_entry(&mut EntryFormatter::new("font-style-italic", out));
+        self.font_style_bold_italic
+            .format_entry(&mut EntryFormatter::new("font-style-bold-italic", out));
+        self.font_shaping_break
+            .format_entry(&mut EntryFormatter::new("font-shaping-break", out));
+        self.alpha_blending
+            .format_entry(&mut EntryFormatter::new("alpha-blending", out));
+        self.grapheme_width_method
+            .format_entry(&mut EntryFormatter::new("grapheme-width-method", out));
+        EntryFormatter::new("theme", out)
+            .entry_optional(self.theme.clone(), |v, f| v.format_entry(f));
+        self.background
+            .format_entry(&mut EntryFormatter::new("background", out));
+        self.foreground
+            .format_entry(&mut EntryFormatter::new("foreground", out));
+        // background-image-opacity (f32) — float-formatting blocked (Exp 509), deferred.
+        self.bg_image_position
+            .format_entry(&mut EntryFormatter::new("background-image-position", out));
+        self.bg_image_fit
+            .format_entry(&mut EntryFormatter::new("background-image-fit", out));
+        EntryFormatter::new("background-image-repeat", out).entry_bool(self.bg_image_repeat);
+        EntryFormatter::new("selection-foreground", out)
+            .entry_optional(self.selection_foreground, |v, f| v.format_entry(f));
+        EntryFormatter::new("selection-background", out)
+            .entry_optional(self.selection_background, |v, f| v.format_entry(f));
+        EntryFormatter::new("cursor-color", out)
+            .entry_optional(self.cursor_color, |v, f| v.format_entry(f));
+        EntryFormatter::new("cursor-text", out)
+            .entry_optional(self.cursor_text, |v, f| v.format_entry(f));
+        self.scroll_to_bottom
+            .format_entry(&mut EntryFormatter::new("scroll-to-bottom", out));
+        self.mouse_shift_capture
+            .format_entry(&mut EntryFormatter::new("mouse-shift-capture", out));
+        self.background_blur
+            .format_entry(&mut EntryFormatter::new("background-blur", out));
+        self.notify_on_command_finish
+            .format_entry(&mut EntryFormatter::new("notify-on-command-finish", out));
+        self.notify_on_command_finish_action
+            .format_entry(&mut EntryFormatter::new(
+                "notify-on-command-finish-action",
+                out,
+            ));
+        self.link_previews
+            .format_entry(&mut EntryFormatter::new("link-previews", out));
+        self.fullscreen
+            .format_entry(&mut EntryFormatter::new("fullscreen", out));
+        self.window_padding_color
+            .format_entry(&mut EntryFormatter::new("window-padding-color", out));
+        self.window_subtitle
+            .format_entry(&mut EntryFormatter::new("window-subtitle", out));
+        self.window_colorspace
+            .format_entry(&mut EntryFormatter::new("window-colorspace", out));
+        self.clipboard_read
+            .format_entry(&mut EntryFormatter::new("clipboard-read", out));
+        self.clipboard_write
+            .format_entry(&mut EntryFormatter::new("clipboard-write", out));
+        self.copy_on_select
+            .format_entry(&mut EntryFormatter::new("copy-on-select", out));
+        self.right_click_action
+            .format_entry(&mut EntryFormatter::new("right-click-action", out));
+        self.middle_click_action
+            .format_entry(&mut EntryFormatter::new("middle-click-action", out));
+        self.confirm_close_surface
+            .format_entry(&mut EntryFormatter::new("confirm-close-surface", out));
+        self.shell_integration
+            .format_entry(&mut EntryFormatter::new("shell-integration", out));
+        self.shell_integration_features
+            .format_entry(&mut EntryFormatter::new("shell-integration-features", out));
+        self.osc_color_report_format
+            .format_entry(&mut EntryFormatter::new("osc-color-report-format", out));
+        self.custom_shader_animation
+            .format_entry(&mut EntryFormatter::new("custom-shader-animation", out));
+        self.macos_non_native_fullscreen
+            .format_entry(&mut EntryFormatter::new("macos-non-native-fullscreen", out));
+        self.macos_window_buttons
+            .format_entry(&mut EntryFormatter::new("macos-window-buttons", out));
+        self.macos_titlebar_style
+            .format_entry(&mut EntryFormatter::new("macos-titlebar-style", out));
+        self.macos_titlebar_proxy_icon
+            .format_entry(&mut EntryFormatter::new("macos-titlebar-proxy-icon", out));
+        self.macos_hidden
+            .format_entry(&mut EntryFormatter::new("macos-hidden", out));
+        EntryFormatter::new("bold-color", out)
+            .entry_optional(self.bold_color, |v, f| v.format_entry(f));
+    }
+}
+
 /// A config color value (upstream `Config.Color`): an RGB byte triple. The string
 /// parsing (named colors / hex) and the C extern struct are ported in later
 /// slices.
@@ -4558,5 +4658,76 @@ mod tests {
             .format_entry(f)),
             "a = light:day,dark:night\n"
         );
+    }
+
+    #[test]
+    fn config_format_config_emits_fields_in_upstream_order() {
+        let cfg = Config::default();
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+
+        // Every line is a `key = …` entry, and the keys appear in upstream
+        // `Config` declaration order (omitting the float-blocked
+        // `background-image-opacity`).
+        let keys: Vec<&str> = out
+            .lines()
+            .map(|l| l.split(" = ").next().unwrap())
+            .collect();
+        assert_eq!(
+            keys,
+            vec![
+                "font-style",
+                "font-style-bold",
+                "font-style-italic",
+                "font-style-bold-italic",
+                "font-shaping-break",
+                "alpha-blending",
+                "grapheme-width-method",
+                "theme",
+                "background",
+                "foreground",
+                "background-image-position",
+                "background-image-fit",
+                "background-image-repeat",
+                "selection-foreground",
+                "selection-background",
+                "cursor-color",
+                "cursor-text",
+                "scroll-to-bottom",
+                "mouse-shift-capture",
+                "background-blur",
+                "notify-on-command-finish",
+                "notify-on-command-finish-action",
+                "link-previews",
+                "fullscreen",
+                "window-padding-color",
+                "window-subtitle",
+                "window-colorspace",
+                "clipboard-read",
+                "clipboard-write",
+                "copy-on-select",
+                "right-click-action",
+                "middle-click-action",
+                "confirm-close-surface",
+                "shell-integration",
+                "shell-integration-features",
+                "osc-color-report-format",
+                "custom-shader-animation",
+                "macos-non-native-fullscreen",
+                "macos-window-buttons",
+                "macos-titlebar-style",
+                "macos-titlebar-proxy-icon",
+                "macos-hidden",
+                "bold-color",
+            ]
+        );
+
+        // The float-blocked field is intentionally absent.
+        assert!(!out.contains("background-image-opacity"));
+
+        // The default optionals (all `None`) format as the void line, and `theme`
+        // (default `None`) too.
+        assert!(out.contains("cursor-color = \n"));
+        assert!(out.contains("theme = \n"));
     }
 }

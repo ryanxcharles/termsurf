@@ -256,3 +256,58 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-165416-d512-prompt.md` (design)
 - Result: `logs/codex-review/20260604-165416-d512-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`Config::format_config(&self, out: &mut String)` was implemented — the top-level
+config dump (upstream `FileFormatter.format`). It emits the 43 non-float
+`Config` fields in upstream `Config` declaration order, each via its
+`format_entry` (or `entry_bool` for `background-image-repeat`; `entry_optional`
+for the six `Option` fields). `theme` is `.clone()`d (non-`Copy`); the `Copy`
+optionals pass by value. `background-image-opacity` is omitted (float-blocked,
+Experiment 509). The new test
+`config_format_config_emits_fields_in_upstream_order` asserts the exact 43-key
+ordered list, the absence of `background-image-opacity`, and the default `None`
+optionals' void lines (`cursor-color = \n`, `theme = \n`).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2998 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: it spot-checked the body and test — the emitted keys are in upstream
+`Config` declaration order for the curated subset, with only
+`background-image-opacity` omitted at its float-blocked position
+(`formatter_file.zig:40`, `Config.zig:639`); the dispatch choices are correct
+(leaf `format_entry`, `entry_bool` for `background-image-repeat`,
+`entry_optional` for `theme` / the terminal colors / `bold-color`); the prior
+Theme issue is resolved (`Theme::format_entry` exists and is valid through the
+optional recursion); the test verifies order, absence of the float-blocked
+field, and representative `None` optional output; gates are clean. "Approved
+with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-165636-r512-prompt.md` (result)
+- Result: `logs/codex-review/20260604-165636-r512-last-message.md` (result)
+
+## Conclusion
+
+The config **formatter** layer is now complete end-to-end: every leaf type
+formats via its `format_entry`, the generic field-dispatch helpers cover every
+branch but the float `{d}` case, and `Config::format_config` dumps the whole
+struct in upstream declaration order. The remaining float gap
+(`background-image-opacity`) is tracked and re-inserts at its declared position
+once a faithful float formatter lands. The next major piece is the config
+**loader** — the inverse direction: parsing CLI arguments / config files into a
+`Config` (upstream `loadCli` / `loadFile` and the per-field `parseCLI` dispatch
+over the aggregate struct), most leaf `parse_cli` methods for which already
+exist. After that comes the entire non-config rewrite.
