@@ -1,16 +1,25 @@
 //! Custom (shadertoy-style) shader support.
 //!
 //! The `CustomShaderUniforms` value type — the uniform struct custom shaders
-//! read — and its renderer-init defaults. A faithful port of upstream
-//! `renderer/shadertoy.zig`'s `Uniforms` `extern struct`; the per-frame/state
-//! update methods, the `Target` enum, and the shader loading are ported in later
-//! slices.
+//! read — its renderer-init defaults and per-frame/state update methods, and the
+//! `Target` enum. A faithful port of upstream `renderer/shadertoy.zig`'s
+//! `Uniforms` `extern struct` and `Target`; the shader loading
+//! (`loadFromFiles`) is ported in a later slice.
 #![allow(dead_code)]
 // This shadertoy layer is consumed by later slices.
 
 use crate::renderer::cursor::Style;
 use crate::renderer::shader::CellTextVertex;
 use crate::terminal::color::{Palette, Rgb};
+
+/// The output language the custom-shader loader cross-compiles to (upstream
+/// `shadertoy.Target`): `Glsl` for OpenGL, `Msl` for Metal. The shader loader
+/// (deferred) switches on it (GLSL → SPIR-V → target).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Target {
+    Glsl,
+    Msl,
+}
 
 /// The uniform struct custom shaders read (upstream `shadertoy.Uniforms`). The
 /// `#[repr(C, align(16))]` layout with explicit padding reproduces upstream's
@@ -243,7 +252,7 @@ fn normalize_rgb(c: Rgb) -> [f32; 4] {
 
 #[cfg(test)]
 mod tests {
-    use super::{CellTextVertex, CustomShaderUniforms};
+    use super::{CellTextVertex, CustomShaderUniforms, Target};
     use std::mem::{align_of, offset_of, size_of};
 
     #[test]
@@ -502,5 +511,14 @@ mod tests {
         // cursor_change_time is not touched here, and an unrelated field stays.
         assert_eq!(u.cursor_change_time, 0.0);
         assert_eq!(u.focus, 1);
+    }
+
+    #[test]
+    fn target_variants_are_distinct() {
+        assert_ne!(Target::Glsl, Target::Msl);
+        // `Copy` + `Eq`: a trivial round-trip.
+        let t = Target::Msl;
+        let copied = t;
+        assert_eq!(t, copied);
     }
 }

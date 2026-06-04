@@ -1316,7 +1316,7 @@ are past the correctness-critical foundation.
 - [Experiment 434: the custom-shader cursor visibility and style (update_cursor_style)](434-custom-shader-cursor-style.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 435: the custom-shader target enum (Target) and the Metal target constant](435-custom-shader-target.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

@@ -183,3 +183,62 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-100339-d435-prompt.md` (design)
 - Result: `logs/codex-review/20260604-100339-d435-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The custom-shader `Target` enum and the Metal target constant are now live.
+
+- `roastty/src/renderer/shadertoy.rs`: `pub(crate) enum Target { Glsl, Msl }`
+  (derive `Debug, Clone, Copy, PartialEq, Eq`) — upstream `shadertoy.Target`.
+  The module doc was updated (the update methods landed in 429–434, `Target`
+  lands here; only the shader loading is deferred).
+- `roastty/src/renderer/metal/mod.rs`:
+  `pub(crate) const CUSTOM_SHADER_TARGET: Target = Target::Msl;` (upstream
+  `Metal.zig`'s `custom_shader_target = .msl`), with
+  `use crate::renderer::shadertoy::Target;` and a new `#[cfg(test)] mod tests`.
+
+Tests:
+
+- `target_variants_are_distinct` (in `shadertoy.rs`) —
+  `Target::Glsl != Target::Msl`, plus a `Copy`/`Eq` round-trip.
+- `custom_shader_target_is_msl` (in `metal/mod.rs`) —
+  `CUSTOM_SHADER_TARGET == Target::Msl`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2920 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The custom-shader target type is in place: `Target { Glsl, Msl }` and the
+Metal-only `CUSTOM_SHADER_TARGET = Msl`. The remaining custom-shader work is the
+shader loader (`loadFromFiles` / `loadFromFile` and the GLSL → SPIR-V → target
+conversion that switches on `Target`, via glslang/spirv-cross) — a larger slice
+that pulls in external shader-compilation dependencies, so it stays deferred.
+With the uniforms (428–434) and the target (435) ported, the remaining renderer
+work is the `dirty` gate, the live per-frame call sites (tying `FrameState`
+sync/draw to live state and these uniform updaters), and the `neverExtendBg`
+terminal-core row/cell access; beyond the renderer, the other subsystems.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the module-doc Low is resolved (`Target` is now
+described as present, only shader loading deferred), and verified faithfulness
+against the vendored upstream: `Target::{Glsl, Msl}` matches `shadertoy.zig:43`,
+`CUSTOM_SHADER_TARGET = Target::Msl` matches `Metal.zig:32`, and keeping `Glsl`
+is correct (part of the upstream enum and the deferred loader's switch). It
+judged the tests adequate for the slice (variant distinctness / `Copy`/`Eq` and
+the Metal constant mapping). No public C ABI/header impact; nothing needed to
+change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-100614-r435-prompt.md` (result)
+- Result: `logs/codex-review/20260604-100614-r435-last-message.md` (result)
