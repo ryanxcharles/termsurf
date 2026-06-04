@@ -1474,7 +1474,7 @@ are past the correctness-critical foundation.
 - [Experiment 513: the enum-keyword config parsers (from_keyword: CopyOnSelect / ClipboardAccess / RightClickAction / MiddleClickAction / WindowColorspace / AlphaBlending / GraphemeWidthMethod)](513-config-enum-from-keyword.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 514: more enum-keyword config parsers (from_keyword: the mac / background-image / shader-mouse enums)](514-config-enum-from-keyword-2.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

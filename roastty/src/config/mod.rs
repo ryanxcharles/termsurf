@@ -1551,6 +1551,18 @@ impl MacTitlebarStyle {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "native" => Some(MacTitlebarStyle::Native),
+            "transparent" => Some(MacTitlebarStyle::Transparent),
+            "tabs" => Some(MacTitlebarStyle::Tabs),
+            "hidden" => Some(MacTitlebarStyle::Hidden),
+            _ => None,
+        }
+    }
+
     /// Format as a config entry (upstream's enum branch): the keyword.
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -1573,6 +1585,16 @@ impl MacTitlebarProxyIcon {
         match self {
             MacTitlebarProxyIcon::Visible => "visible",
             MacTitlebarProxyIcon::Hidden => "hidden",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "visible" => Some(MacTitlebarProxyIcon::Visible),
+            "hidden" => Some(MacTitlebarProxyIcon::Hidden),
+            _ => None,
         }
     }
 
@@ -1666,6 +1688,16 @@ impl MacWindowButtons {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "visible" => Some(MacWindowButtons::Visible),
+            "hidden" => Some(MacWindowButtons::Hidden),
+            _ => None,
+        }
+    }
+
     /// Format as a config entry (upstream's enum branch): the keyword.
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -1688,6 +1720,16 @@ impl MacHidden {
         match self {
             MacHidden::Never => "never",
             MacHidden::Always => "always",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "never" => Some(MacHidden::Never),
+            "always" => Some(MacHidden::Always),
+            _ => None,
         }
     }
 
@@ -2023,6 +2065,18 @@ impl BackgroundImageFit {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "contain" => Some(BackgroundImageFit::Contain),
+            "cover" => Some(BackgroundImageFit::Cover),
+            "stretch" => Some(BackgroundImageFit::Stretch),
+            "none" => Some(BackgroundImageFit::None),
+            _ => None,
+        }
+    }
+
     /// Format this value as a config entry (upstream's generic enum branch).
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -2043,6 +2097,24 @@ impl BackgroundImagePosition {
             BackgroundImagePosition::BottomCenter => "bottom-center",
             BackgroundImagePosition::BottomRight => "bottom-right",
             BackgroundImagePosition::Center => "center",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "top-left" => Some(BackgroundImagePosition::TopLeft),
+            "top-center" => Some(BackgroundImagePosition::TopCenter),
+            "top-right" => Some(BackgroundImagePosition::TopRight),
+            "center-left" => Some(BackgroundImagePosition::CenterLeft),
+            "center-center" => Some(BackgroundImagePosition::CenterCenter),
+            "center-right" => Some(BackgroundImagePosition::CenterRight),
+            "bottom-left" => Some(BackgroundImagePosition::BottomLeft),
+            "bottom-center" => Some(BackgroundImagePosition::BottomCenter),
+            "bottom-right" => Some(BackgroundImagePosition::BottomRight),
+            "center" => Some(BackgroundImagePosition::Center),
+            _ => None,
         }
     }
 
@@ -2183,6 +2255,17 @@ impl CustomShaderAnimation {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "false" => Some(CustomShaderAnimation::False),
+            "true" => Some(CustomShaderAnimation::True),
+            "always" => Some(CustomShaderAnimation::Always),
+            _ => None,
+        }
+    }
+
     /// Format this value as a config entry (upstream's generic enum branch).
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -2260,6 +2343,18 @@ impl MouseShiftCapture {
             MouseShiftCapture::True => "true",
             MouseShiftCapture::Always => "always",
             MouseShiftCapture::Never => "never",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "false" => Some(MouseShiftCapture::False),
+            "true" => Some(MouseShiftCapture::True),
+            "always" => Some(MouseShiftCapture::Always),
+            "never" => Some(MouseShiftCapture::Never),
+            _ => None,
         }
     }
 
@@ -4866,5 +4961,80 @@ mod tests {
             assert_eq!(GraphemeWidthMethod::from_keyword(v.keyword()), Some(v));
         }
         assert_eq!(GraphemeWidthMethod::from_keyword("nope"), None);
+    }
+
+    #[test]
+    fn enum_from_keyword_round_trips_mac_bgimage_shader() {
+        for v in [
+            MacTitlebarStyle::Native,
+            MacTitlebarStyle::Transparent,
+            MacTitlebarStyle::Tabs,
+            MacTitlebarStyle::Hidden,
+        ] {
+            assert_eq!(MacTitlebarStyle::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(MacTitlebarStyle::from_keyword("nope"), None);
+
+        for v in [MacTitlebarProxyIcon::Visible, MacTitlebarProxyIcon::Hidden] {
+            assert_eq!(MacTitlebarProxyIcon::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(MacTitlebarProxyIcon::from_keyword("nope"), None);
+
+        for v in [MacWindowButtons::Visible, MacWindowButtons::Hidden] {
+            assert_eq!(MacWindowButtons::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(MacWindowButtons::from_keyword("nope"), None);
+
+        for v in [MacHidden::Never, MacHidden::Always] {
+            assert_eq!(MacHidden::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(MacHidden::from_keyword("nope"), None);
+
+        for v in [
+            BackgroundImageFit::Contain,
+            BackgroundImageFit::Cover,
+            BackgroundImageFit::Stretch,
+            BackgroundImageFit::None,
+        ] {
+            assert_eq!(BackgroundImageFit::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(BackgroundImageFit::from_keyword("nope"), None);
+
+        for v in [
+            BackgroundImagePosition::TopLeft,
+            BackgroundImagePosition::TopCenter,
+            BackgroundImagePosition::TopRight,
+            BackgroundImagePosition::CenterLeft,
+            BackgroundImagePosition::CenterCenter,
+            BackgroundImagePosition::CenterRight,
+            BackgroundImagePosition::BottomLeft,
+            BackgroundImagePosition::BottomCenter,
+            BackgroundImagePosition::BottomRight,
+            BackgroundImagePosition::Center,
+        ] {
+            assert_eq!(BackgroundImagePosition::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(BackgroundImagePosition::from_keyword("nope"), None);
+
+        for v in [
+            CustomShaderAnimation::False,
+            CustomShaderAnimation::True,
+            CustomShaderAnimation::Always,
+        ] {
+            assert_eq!(CustomShaderAnimation::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(CustomShaderAnimation::from_keyword("nope"), None);
+        assert_eq!(CustomShaderAnimation::from_keyword("1"), None);
+
+        for v in [
+            MouseShiftCapture::False,
+            MouseShiftCapture::True,
+            MouseShiftCapture::Always,
+            MouseShiftCapture::Never,
+        ] {
+            assert_eq!(MouseShiftCapture::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(MouseShiftCapture::from_keyword("nope"), None);
+        assert_eq!(MouseShiftCapture::from_keyword("t"), None);
     }
 }

@@ -144,3 +144,47 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-170444-d514-prompt.md` (design)
 - Result: `logs/codex-review/20260604-170444-d514-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`from_keyword(value: &str) -> Option<Self>` was added to the eight enums
+(`MacTitlebarStyle`, `MacTitlebarProxyIcon`, `MacWindowButtons`, `MacHidden`,
+`BackgroundImageFit`, `BackgroundImagePosition`, `CustomShaderAnimation`,
+`MouseShiftCapture`), each an exact tag match (the inverse of `keyword()`)
+returning `None` otherwise — the `std.meta.stringToEnum` parse. The new test
+`enum_from_keyword_round_trips_mac_bgimage_shader` round-trips every variant,
+rejects an unknown string, and asserts the bool-like tags reject `"1"` / `"t"`.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3000 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches the approved design — exact
+`stringToEnum`-style tag matching, inverse of the existing `keyword()` mappings,
+with bool-like enum tags treated as literal strings only; the `"1"` / `"t"`
+negative checks cover the parseBool non-alias behavior; the test and gates are
+adequate (every variant round-trips, unknowns reject, build/tests clean, no
+deferred-scope leaks). "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-170737-r514-prompt.md` (result)
+- Result: `logs/codex-review/20260604-170737-r514-last-message.md` (result)
+
+## Conclusion
+
+Fifteen plain enums now have `from_keyword` (Experiments 513–514). The remaining
+plain enums (osc / confirm / link / subtitle / padding-color / fullscreen /
+shell / notify groups) come next, then the bool / int / float / string "magic"
+parse paths, the empty-string reset-to-default rule, and the per-field
+`parseIntoField` dispatch (`Config::set(key, value)`) + the `loadCli` / file
+loader.
