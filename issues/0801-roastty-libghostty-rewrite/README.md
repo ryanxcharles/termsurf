@@ -1265,6 +1265,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 409: the core cell-draw sequence (draw_cells)](409-draw-cells-sequence.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 410: the texture region upload (replace_region)](410-texture-replace-region.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
