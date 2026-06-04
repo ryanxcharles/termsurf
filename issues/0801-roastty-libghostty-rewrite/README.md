@@ -1241,6 +1241,8 @@ are past the correctness-critical foundation.
   **Pass** · Claude/Codex/Codex
 - [Experiment 397: the link underline override](397-link-underline.md) —
   **Pass** · Claude/Codex/Codex
+- [Experiment 398: the column-ordered decoration merge](398-column-ordered-merge.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
