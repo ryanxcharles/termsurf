@@ -158,3 +158,66 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-090309-d425-prompt.md` (design)
 - Result: `logs/codex-review/20260604-090309-d425-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The macOS-glass `bg_color` override is now live, completing the `bg_color`
+group.
+
+- `roastty/src/renderer/metal/shaders.rs`:
+  `MetalUniforms::apply_macos_glass_bg_override(&mut self, blur: BackgroundBlur)`
+  zeroes `bg_color[3]` when `blur.is_macos_glass()` (leaving the RGB), a no-op
+  otherwise. Added `BackgroundBlur` to the `crate::config` import. The
+  `update_bg_color` doc comment now points to this method (it is no longer
+  "deferred").
+
+Test (in `shaders.rs`):
+`apply_macos_glass_bg_override_zeros_alpha_for_glass_only` —
+`update_bg_color(Rgb(10, 20, 30), 1.0)` → `[10, 20, 30, 255]`;
+`apply(MacosGlassRegular)` → `[10, 20, 30, 0]`; restore the alpha, then
+`apply(MacosGlassClear)` → `[10, 20, 30, 0]` (both glass arms covered);
+`apply(True)` and `apply(Radius(5))` on a nonzero alpha leave
+`[10, 20, 30, 255]`; `min_contrast` / `screen_size` untouched.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2905 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The `bg_color` uniform group is now complete: `update_bg_color` (the
+background + opacity alpha) followed by `apply_macos_glass_bg_override` (the
+glass alpha zeroing). The per-frame uniform-update surface is now fully ported —
+the geometry trio, the cursor group, the background color (with the glass
+override), the minimum contrast, the color-space/blending bools, and the
+padding-extend reset. The remaining renderer-bridge work: the full
+`neverExtendBg` and its per-row `padding_extend` refinement (awaiting the
+renderer's terminal-core row/cell representation), a production `MetalUniforms`
+constructor that composes the update methods, and the live per-frame call sites
+that supply the terminal state and config; beyond the renderer, the other
+subsystems of the libghostty→libroastty rewrite.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** (no
+Required findings). It confirmed the implementation is functionally faithful:
+glass styles zero only `bg_color[3]`, the RGB is preserved, non-glass variants
+are no-ops, and omitting upstream's macOS `comptime` guard is consistent with
+this roastty macOS-only slice; the prior design Low is resolved (the test
+restores the alpha before checking `MacosGlassClear`, so both glass arms are
+genuinely covered). It raised one **Low** finding — the `update_bg_color` doc
+comment still said the glass override "is deferred", now stale — which was
+**addressed**: the comment now points to `apply_macos_glass_bg_override` (the
+override that landed immediately below). `cargo fmt` / build / the `macos_glass`
+test re-verified clean after the doc edit. No public C ABI/header impact.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-090514-r425-prompt.md` (result)
+- Result: `logs/codex-review/20260604-090514-r425-last-message.md` (result)

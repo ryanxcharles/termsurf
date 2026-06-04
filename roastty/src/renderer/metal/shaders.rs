@@ -3,7 +3,7 @@ use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{MTLDevice, MTLLibrary};
 
-use crate::config::{AlphaBlending, WindowColorspace, WindowPaddingColor};
+use crate::config::{AlphaBlending, BackgroundBlur, WindowColorspace, WindowPaddingColor};
 use crate::font::metrics::Metrics;
 use crate::font::run::Wide;
 use crate::renderer::cell::block_cursor_pos;
@@ -204,7 +204,10 @@ impl MetalUniforms {
 
     /// Update the background-color uniform (upstream `updateFrame`): the terminal
     /// `background` color, with the window `opacity` (`[0, 1]`) as the alpha
-    /// (`round(opacity * 255)`). The macOS glass-style override is deferred.
+    /// (`round(opacity * 255)`). The macOS glass-style override is applied
+    /// separately by [`apply_macos_glass_bg_override`].
+    ///
+    /// [`apply_macos_glass_bg_override`]: MetalUniforms::apply_macos_glass_bg_override
     pub(crate) fn update_bg_color(&mut self, background: Rgb, opacity: f64) {
         self.bg_color = [
             background.r,
@@ -212,6 +215,18 @@ impl MetalUniforms {
             background.b,
             (opacity * 255.0).round() as u8,
         ];
+    }
+
+    /// Apply the macOS glass `bg_color` override (upstream `updateFrame`): under
+    /// a macOS glass `blur` style, the background alpha is zeroed (the glass
+    /// effect supplies the opacity); for a non-glass blur it is a no-op.
+    /// macOS-only. Runs after [`update_bg_color`].
+    ///
+    /// [`update_bg_color`]: MetalUniforms::update_bg_color
+    pub(crate) fn apply_macos_glass_bg_override(&mut self, blur: BackgroundBlur) {
+        if blur.is_macos_glass() {
+            self.bg_color[3] = 0;
+        }
     }
 
     /// Update the minimum-contrast uniform (upstream `changeConfig`): the
@@ -704,6 +719,39 @@ fragment float4 bg_image_fragment() {
 
         // The non-color-space fields are untouched.
         assert!(uniforms.bools.cursor_wide);
+        assert_eq!(uniforms.min_contrast, 3.0);
+        assert_eq!(uniforms.screen_size, [2.0, 3.0]);
+    }
+
+    #[test]
+    fn apply_macos_glass_bg_override_zeros_alpha_for_glass_only() {
+        use crate::config::BackgroundBlur;
+        use crate::terminal::color::Rgb;
+
+        let mut uniforms =
+            MetalUniforms::test_with_grid([2, 3], [4, 5], [6.0, 7.0], [0.0; 4], 0, [1, 2, 3, 4]);
+        uniforms.min_contrast = 3.0;
+
+        // macos-glass-regular → zero the alpha, keep the RGB.
+        uniforms.update_bg_color(Rgb::new(10, 20, 30), 1.0);
+        assert_eq!(uniforms.bg_color, [10, 20, 30, 255]);
+        uniforms.apply_macos_glass_bg_override(BackgroundBlur::MacosGlassRegular);
+        assert_eq!(uniforms.bg_color, [10, 20, 30, 0]);
+
+        // Restore a nonzero alpha, then macos-glass-clear also zeroes it (so a
+        // regular-only implementation would fail this arm).
+        uniforms.update_bg_color(Rgb::new(10, 20, 30), 1.0);
+        uniforms.apply_macos_glass_bg_override(BackgroundBlur::MacosGlassClear);
+        assert_eq!(uniforms.bg_color, [10, 20, 30, 0]);
+
+        // Non-glass blurs are a no-op (the alpha stays).
+        uniforms.update_bg_color(Rgb::new(10, 20, 30), 1.0);
+        uniforms.apply_macos_glass_bg_override(BackgroundBlur::True);
+        assert_eq!(uniforms.bg_color, [10, 20, 30, 255]);
+        uniforms.apply_macos_glass_bg_override(BackgroundBlur::Radius(5));
+        assert_eq!(uniforms.bg_color, [10, 20, 30, 255]);
+
+        // The other fields are untouched.
         assert_eq!(uniforms.min_contrast, 3.0);
         assert_eq!(uniforms.screen_size, [2.0, 3.0]);
     }
