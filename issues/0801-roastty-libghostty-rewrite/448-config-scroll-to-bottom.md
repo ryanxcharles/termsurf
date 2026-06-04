@@ -167,3 +167,55 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-110920-d448-prompt.md` (design)
 - Result: `logs/codex-review/20260604-110920-d448-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The scroll-to-bottom config type is now live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) struct ScrollToBottom { pub keystroke: bool, pub output: bool }`
+  (upstream `ScrollToBottom`) with a hand-written `impl Default`
+  (`keystroke: true`, `output: false`) — upstream's field defaults (a derived
+  `Default` would make `keystroke` `false`). No method — the renderer reads
+  `.output` directly.
+
+Test (in `config/mod.rs`):
+`scroll_to_bottom_defaults_keystroke_true_output_false` — `default()` has
+`keystroke == true`, `output == false`; a `{ keystroke: false, output: true }`
+value differs from the default; the flags are independent (a value differing
+only in `output` is `!=`); `Copy`/`Eq`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2936 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries `ScrollToBottom` — the second flag struct (after
+`FontShapingBreak`) with hand-written intrinsic field defaults. The renderer
+reads its `output` flag (`scroll_to_bottom_on_output`); the string parsing, the
+`Config` struct, and the renderer's `DerivedConfig` wiring stay deferred. The
+config-type family — now nine enums/flag-structs with consumers plus three color
+value types — remains a clean, gated way to advance the rewrite while the larger
+coupled subsystems stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `ScrollToBottom` faithfully ports the two upstream
+flags; the hand-written `Default` correctly preserves `keystroke = true` and
+`output = false`; no helper method is needed (the known renderer consumer reads
+`.output` directly); and the test covers the non-derived default and flag
+independence. No public C ABI/header impact; nothing needed to change before the
+result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-111114-r448-prompt.md` (result)
+- Result: `logs/codex-review/20260604-111114-r448-last-message.md` (result)

@@ -1342,7 +1342,7 @@ are past the correctness-critical foundation.
 - [Experiment 447: the config BoldColor type and its terminal conversion (BoldColor, to_terminal)](447-config-bold-color.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 448: the scroll-to-bottom config type (ScrollToBottom)](448-config-scroll-to-bottom.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

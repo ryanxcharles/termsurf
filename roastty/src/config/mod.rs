@@ -199,6 +199,27 @@ impl Default for FontShapingBreak {
     }
 }
 
+/// The `scroll-to-bottom` config (upstream `ScrollToBottom`): when the viewport
+/// snaps to the bottom. `keystroke` (default `true`) snaps on a keystroke;
+/// `output` (default `false`) snaps on new output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ScrollToBottom {
+    /// Scroll to the bottom on a keystroke.
+    pub keystroke: bool,
+    /// Scroll to the bottom on new output.
+    pub output: bool,
+}
+
+impl Default for ScrollToBottom {
+    /// Upstream's field defaults `keystroke = true`, `output = false`.
+    fn default() -> Self {
+        Self {
+            keystroke: true,
+            output: false,
+        }
+    }
+}
+
 /// The `grapheme-width-method` config (upstream `GraphemeWidthMethod`): how the
 /// terminal measures grapheme width. The `Config` default is `Unicode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -374,7 +395,7 @@ mod tests {
         AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, BoldColor,
         Color, CopyOnSelect, CustomShaderAnimation, FontShapingBreak, FontStyle,
         GraphemeWidthMethod, MiddleClickAction, MouseShiftCapture, OscColorReportFormat,
-        RightClickAction, TerminalBoldColor, TerminalColor,
+        RightClickAction, ScrollToBottom, TerminalBoldColor, TerminalColor,
     };
     use crate::terminal::color::Rgb;
 
@@ -453,6 +474,30 @@ mod tests {
         // `Copy` + `Eq`: a trivial round-trip.
         let copied = off;
         assert_eq!(off, copied);
+    }
+
+    #[test]
+    fn scroll_to_bottom_defaults_keystroke_true_output_false() {
+        let d = ScrollToBottom::default();
+        assert!(d.keystroke);
+        assert!(!d.output);
+
+        let both = ScrollToBottom {
+            keystroke: false,
+            output: true,
+        };
+        assert_ne!(both, d);
+        // The two flags are independent: differing only in `output` is `!=`.
+        assert_ne!(
+            ScrollToBottom {
+                keystroke: true,
+                output: true,
+            },
+            d
+        );
+        // `Copy` + `Eq`: a trivial round-trip.
+        let copied = both;
+        assert_eq!(both, copied);
     }
 
     #[test]
