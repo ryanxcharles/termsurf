@@ -160,3 +160,49 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-130328-d475-prompt.md` (design)
 - Result: `logs/codex-review/20260604-130328-d475-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`Color::format_buf` was added to `roastty/src/config/mod.rs` exactly as designed
+— `format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)`, rendering `#` plus
+each channel as lowercase two-digit hex in `r`/`g`/`b` order, the inverse of
+`from_hex`. The new test `format_buf_renders_lowercase_hex` asserts the upstream
+`formatEntry` example (`{10,11,12}` → `"#0a0b0c"`), the extra colors (`#000000`,
+`#ffffff`, `#aabbcc`), and the round-trip `from_hex(c.format_buf()) == Ok(c)`
+over several colors.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2954 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: `format_buf()` faithfully ports `Color.formatBuf` (`#`, lowercase
+hex, two digits per channel, `r`/`g`/`b` order); returning an owned `String` is
+the right Rust adaptation for this internal formatter core; the test covers the
+upstream `#0a0b0c` case, the zero/max values, lowercase output, and the
+round-trip with `from_hex`; deferring `formatEntry`, the C ABI representation,
+and the broader config formatting remains properly scoped. "Approved for the
+result commit."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-130523-r475-prompt.md` (result)
+- Result: `logs/codex-review/20260604-130523-r475-last-message.md` (result)
+
+## Conclusion
+
+The config `Color` is now fully bridged on both sides: `from_hex` + `parse_cli`
+parse it (Experiments 473–474), and `format_buf` renders it back (this
+experiment), with a round-trip test tying them together. The next slice can port
+`Color.formatEntry` once the config `EntryFormatter` lands, or move to another
+config value type's `parseCLI` / `formatBuf` pair, continuing toward the
+per-field parser/formatter dispatch and the full config loader (`loadCli` / file
+loading).

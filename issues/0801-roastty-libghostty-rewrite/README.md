@@ -1396,7 +1396,7 @@ are past the correctness-critical foundation.
 - [Experiment 474: the config Color CLI parser (Color::parse_cli)](474-config-color-parse-cli.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 475: the config Color formatter (Color::format_buf)](475-config-color-format-buf.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

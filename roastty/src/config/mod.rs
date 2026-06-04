@@ -235,6 +235,13 @@ impl Color {
         }
         Color::from_hex(trimmed)
     }
+
+    /// Format the color as a `#rrggbb` string (upstream `Color.formatBuf`): a
+    /// `#` followed by each channel as lowercase hex, zero-padded to two digits.
+    /// The inverse of [`Color::from_hex`].
+    pub(crate) fn format_buf(self) -> String {
+        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
+    }
 }
 
 /// A config terminal-color value (upstream `Config.TerminalColor`): either an
@@ -1693,5 +1700,60 @@ mod tests {
             Color::parse_cli(Some("nosuchcolor")),
             Err(ColorParseError::Invalid)
         );
+    }
+
+    #[test]
+    fn format_buf_renders_lowercase_hex() {
+        // Upstream `formatEntry` example.
+        assert_eq!(
+            Color {
+                r: 10,
+                g: 11,
+                b: 12
+            }
+            .format_buf(),
+            "#0a0b0c"
+        );
+        assert_eq!(Color { r: 0, g: 0, b: 0 }.format_buf(), "#000000");
+        assert_eq!(
+            Color {
+                r: 255,
+                g: 255,
+                b: 255
+            }
+            .format_buf(),
+            "#ffffff"
+        );
+        assert_eq!(
+            Color {
+                r: 0xAA,
+                g: 0xBB,
+                b: 0xCC
+            }
+            .format_buf(),
+            "#aabbcc"
+        );
+
+        // The formatter is the inverse of the hex parser.
+        for c in [
+            Color { r: 0, g: 0, b: 0 },
+            Color {
+                r: 10,
+                g: 11,
+                b: 12,
+            },
+            Color {
+                r: 0xAA,
+                g: 0xBB,
+                b: 0xCC,
+            },
+            Color {
+                r: 255,
+                g: 255,
+                b: 255,
+            },
+        ] {
+            assert_eq!(Color::from_hex(&c.format_buf()), Ok(c));
+        }
     }
 }
