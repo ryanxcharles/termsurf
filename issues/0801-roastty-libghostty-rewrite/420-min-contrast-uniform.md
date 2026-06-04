@@ -139,3 +139,55 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-083758-d420-prompt.md` (design)
 - Result: `logs/codex-review/20260604-083758-d420-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The minimum-contrast uniform update is now live.
+
+- `roastty/src/renderer/metal/shaders.rs`:
+  `MetalUniforms::update_min_contrast(&mut self, min_contrast: f32)` sets
+  `self.min_contrast` directly (the only field upstream's `changeConfig`
+  `min_contrast` assignment touches).
+
+Test (in `shaders.rs`): `update_min_contrast_sets_min_contrast_only` —
+`update_min_contrast(4.5)` → `min_contrast == 4.5`, and `screen_size` /
+`grid_size` / `bg_color` unchanged.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2897 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + `lib.rs`/header/`abi_harness.c`)
+  clean; `git diff --check` clean.
+
+## Conclusion
+
+The per-frame uniforms now cover the geometry trio (`screen_size`, `cell_size`,
+`grid_size`), the cursor group, the background color, and the minimum contrast.
+The remaining uniform-update work: the color-space and blending bools
+(`use_display_p3` / `use_linear_blending` / `use_linear_correction`), which need
+the config `WindowColorspace` / `AlphaBlending` enums and a config-module home
+(a deliberate config-layer slice); the `padding_extend` flags; and the macOS
+glass override. Then a full production `MetalUniforms` constructor composing the
+groups, and the live per-frame call sites that supply the terminal state and
+config and run the updates.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation is the approved design:
+`update_min_contrast` directly assigns the provided `f32` to `self.min_contrast`
+and touches no other field, matching upstream's
+`self.uniforms.min_contrast = config.min_contrast`. It judged the test to verify
+the assigned value and representative unrelated fields (`screen_size`,
+`grid_size`, `bg_color`) unchanged, and the deferred color-space/blending bools,
+`padding_extend`, and live call site correctly out of scope. No public C
+ABI/header impact; nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-083946-r420-prompt.md` (result)
+- Result: `logs/codex-review/20260604-083946-r420-last-message.md` (result)

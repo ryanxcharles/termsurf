@@ -206,6 +206,13 @@ impl MetalUniforms {
         ];
     }
 
+    /// Update the minimum-contrast uniform (upstream `changeConfig`): the
+    /// `min_contrast` ratio the shader uses to keep text legible against its
+    /// background.
+    pub(crate) fn update_min_contrast(&mut self, min_contrast: f32) {
+        self.min_contrast = min_contrast;
+    }
+
     /// Clear the cursor uniform: set `cursor_pos` to the sentinel
     /// `(u16::MAX, u16::MAX)`, which the shader reads as "no cursor" (upstream's
     /// default clear). Only `cursor_pos` is touched.
@@ -595,6 +602,20 @@ fragment float4 bg_image_fragment() {
         // The other fields are untouched.
         assert_eq!(uniforms.screen_size, [2.0, 3.0]);
         assert_eq!(uniforms.cell_size, [6.0, 7.0]);
+        assert_eq!(uniforms.bg_color, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn update_min_contrast_sets_min_contrast_only() {
+        let mut uniforms =
+            MetalUniforms::test_with_grid([2, 3], [4, 5], [6.0, 7.0], [0.0; 4], 0, [1, 2, 3, 4]);
+
+        uniforms.update_min_contrast(4.5);
+
+        assert_eq!(uniforms.min_contrast, 4.5);
+        // The other fields are untouched.
+        assert_eq!(uniforms.screen_size, [2.0, 3.0]);
+        assert_eq!(uniforms.grid_size, [4, 5]);
         assert_eq!(uniforms.bg_color, [1, 2, 3, 4]);
     }
 
