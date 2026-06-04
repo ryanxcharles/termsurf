@@ -233,6 +233,24 @@ impl ConfirmCloseSurface {
     }
 }
 
+/// The `window-subtitle` config (upstream `WindowSubtitle`): what the window
+/// subtitle shows. The `Config` default is `False`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowSubtitle {
+    /// No subtitle.
+    False,
+    /// Show the working directory.
+    WorkingDirectory,
+}
+
+impl WindowSubtitle {
+    /// Whether the subtitle shows the working directory (upstream's apprt
+    /// `== .working-directory` decision): `true` only for `WorkingDirectory`.
+    pub(crate) fn shows_working_directory(self) -> bool {
+        matches!(self, WindowSubtitle::WorkingDirectory)
+    }
+}
+
 /// The color space the window renders in (upstream `WindowColorspace`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WindowColorspace {
@@ -555,7 +573,7 @@ mod tests {
         FontStyle, GraphemeWidthMethod, LinkPreviews, MiddleClickAction, MouseShiftCapture,
         NotifyOnCommandFinish, NotifyOnCommandFinishAction, OscColorReportFormat, RightClickAction,
         ScrollToBottom, ShellIntegration, ShellIntegrationFeatures, TerminalBoldColor,
-        TerminalColor,
+        TerminalColor, WindowSubtitle,
     };
     use crate::terminal::color::Rgb;
 
@@ -634,6 +652,18 @@ mod tests {
         // `Copy` + `Eq`: a trivial round-trip.
         let copied = off;
         assert_eq!(off, copied);
+    }
+
+    #[test]
+    fn window_subtitle_shows_working_directory_only_for_that_variant() {
+        assert!(!WindowSubtitle::False.shows_working_directory());
+        assert!(WindowSubtitle::WorkingDirectory.shows_working_directory());
+
+        assert_ne!(WindowSubtitle::False, WindowSubtitle::WorkingDirectory);
+        // `Copy` + `Eq`: a trivial round-trip.
+        let w = WindowSubtitle::WorkingDirectory;
+        let copied = w;
+        assert_eq!(w, copied);
     }
 
     #[test]

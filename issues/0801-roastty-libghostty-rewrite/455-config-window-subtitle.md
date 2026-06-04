@@ -164,3 +164,53 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-113721-d455-prompt.md` (design)
 - Result: `logs/codex-review/20260604-113721-d455-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The window-subtitle config enum and its predicate are now live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) enum WindowSubtitle { False, WorkingDirectory }` (upstream
+  `WindowSubtitle`) and `WindowSubtitle::shows_working_directory(self) -> bool`
+  (`matches!(self, WindowSubtitle::WorkingDirectory)`), the extraction of
+  upstream's apprt `== .working-directory` decision.
+
+Test (in `config/mod.rs`):
+`window_subtitle_shows_working_directory_only_for_that_variant` —
+`False.shows_working_directory() == false`,
+`WorkingDirectory.shows_working_directory() == true`; the variants distinct;
+`Copy`/`Eq`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2943 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries `WindowSubtitle` and its predicate — the first
+config slice to reach the window / apprt subtitle. The `Config` struct / parsing
+and the apprt subtitle string handling (resolving / duplicating the pwd) stay
+deferred. The config-type family — now sixteen enums/flag-structs with consumers
+plus three color value types — remains a clean, gated way to advance the rewrite
+while the larger coupled subsystems stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `WindowSubtitle { False, WorkingDirectory }`
+faithfully maps the upstream enum; `shows_working_directory()` correctly
+captures the only non-false behavior; deferring the actual `pwd` resolution and
+string handling remains the right scope; and the test covers both variants and
+value semantics. No public C ABI/header impact; nothing needed to change before
+the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-113910-r455-prompt.md` (result)
+- Result: `logs/codex-review/20260604-113910-r455-last-message.md` (result)
