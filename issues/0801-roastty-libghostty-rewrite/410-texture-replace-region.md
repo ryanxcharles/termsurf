@@ -212,3 +212,73 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-073624-d410-prompt.md` (design)
 - Result: `logs/codex-review/20260604-073624-d410-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The texture region upload primitive is now live.
+
+- `roastty/src/renderer/metal/texture.rs`: a new
+  `MetalTextureError::RegionOutOfBounds { x, y, width, height, texture_width, texture_height }`
+  variant, and
+  `MetalTexture::replace_region(&self, x, y, width, height, data) -> Result<(), MetalTextureError>`
+  — an overflow-safe subtraction-based bounds check, the exact-length check
+  (`width × height × bytes_per_pixel`), then the
+  `replaceRegion:mipmapLevel:withBytes:bytesPerRow:` write with
+  `bytesPerRow = width × bytes_per_pixel` (the same call `new` makes for the
+  initial full-region upload).
+
+Tests (in `texture.rs`, live Metal device, `Gray`/R8 format, 1 byte/pixel):
+
+- `replace_region_full_region_overwrites_all_pixels` — a 2×2 texture init
+  `[1, 2, 3, 4]`, `replace_region(0, 0, 2, 2, &[10, 20, 30, 40])` →
+  `read_bytes()` is `[10, 20, 30, 40]`.
+- `replace_region_sub_region_writes_at_offset` — a 4×4 zero texture,
+  `replace_region(1, 1, 2, 2, &[1, 2, 3, 4])` → `read_bytes()` is
+  `[0,0,0,0, 0,1,2,0, 0,3,4,0, 0,0,0,0]` (the block at origin `(1, 1)`, proving
+  the x/y offset and the source `bytesPerRow`).
+- `replace_region_rejects_wrong_data_length` — a short `data` →
+  `ByteLengthMismatch { expected: 4, actual: 3 }`.
+- `replace_region_rejects_out_of_bounds_region` —
+  `replace_region(3, 3, 2, 2, …)` on a 4×4 → `RegionOutOfBounds { … }`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2881 passed, 0 failed (+4, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + `lib.rs`/header/`abi_harness.c`)
+  clean; `git diff --check` clean.
+
+## Conclusion
+
+`MetalTexture` now exposes the region-upload primitive behind upstream's atlas
+sync. The next renderer-bridge slice is `syncAtlasTexture` itself — the
+grow-and-reallocate wrapper that reallocates the texture when the font atlas
+outgrows it, then calls `replace_region(0, 0, size, size, atlas.data)` — which
+needs the font `Atlas` type (its `size` and `data`); that and the per-frame
+atlas sync call site stay deferred. Together with the cells (`FrameCells`) and
+the draw sequence (`draw_cells`), the texture re-upload completes the GPU
+primitives `drawFrame`'s per-frame sync depends on.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design and
+the prior Required finding is resolved: the subtraction-based bounds check is
+overflow-safe and admits only regions contained in the texture (including the
+zero-sized edge case) without risking an `x + width` wrap;
+`bytesPerRow = width * self.bytes_per_pixel` is the correct source stride for
+tightly packed sub-region data; the full-region path matches `new`'s upload and
+upstream's atlas `replaceRegion(0, 0, size, size, data)`; and checking bounds
+before data length is sensible (an invalid region is rejected before the source
+payload is considered). It judged the tests sufficient (full replacement,
+sub-region offset / row-major layout, byte-length validation, out-of-bounds
+validation). Internal Rust only — no public C ABI/header impact; nothing needed
+to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-073910-r410-prompt.md` (result)
+- Result: `logs/codex-review/20260604-073910-r410-last-message.md` (result)

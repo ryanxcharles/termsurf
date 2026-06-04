@@ -74,7 +74,18 @@ pub(crate) fn image_texture_format_for_upload_pixel_format(
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum MetalTextureError {
     InvalidPixelFormat(MetalPixelFormat),
-    ByteLengthMismatch { expected: usize, actual: usize },
+    ByteLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    RegionOutOfBounds {
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        texture_width: usize,
+        texture_height: usize,
+    },
     TextureCreationFailed,
     UnsupportedUploadPixelFormat(PixelFormat),
 }
@@ -177,6 +188,66 @@ impl MetalTexture {
             }
         }
         bytes
+    }
+
+    /// Replace the pixels of the `[x, x+width) × [y, y+height)` region with
+    /// `data` (tightly packed, `width × height × bytes_per_pixel` bytes). The GPU
+    /// operation behind upstream's `syncAtlasTexture` re-upload
+    /// (`replaceRegion:mipmapLevel:withBytes:bytesPerRow:`); the full-region form
+    /// (`replace_region(0, 0, w, h, data)`) matches upstream's
+    /// `replaceRegion(0, 0, size, size, data)`.
+    pub(crate) fn replace_region(
+        &self,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        data: &[u8],
+    ) -> Result<(), MetalTextureError> {
+        // The region must fit inside the texture. Subtraction-based to avoid the
+        // overflow an `x + width` check would risk.
+        if x > self.width || width > self.width - x || y > self.height || height > self.height - y {
+            return Err(MetalTextureError::RegionOutOfBounds {
+                x,
+                y,
+                width,
+                height,
+                texture_width: self.width,
+                texture_height: self.height,
+            });
+        }
+
+        // The data must be exactly `width × height × bytes_per_pixel`.
+        let expected = texture_byte_len(width, height, self.bytes_per_pixel)?;
+        if data.len() != expected {
+            return Err(MetalTextureError::ByteLengthMismatch {
+                expected,
+                actual: data.len(),
+            });
+        }
+
+        if !data.is_empty() {
+            let region = MTLRegion {
+                origin: MTLOrigin { x, y, z: 0 },
+                size: MTLSize {
+                    width,
+                    height,
+                    depth: 1,
+                },
+            };
+            let bytes = NonNull::new(data.as_ptr().cast_mut().cast()).expect("non-empty data");
+            unsafe {
+                self.texture
+                    .replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+                        region,
+                        0,
+                        bytes,
+                        width * self.bytes_per_pixel,
+                    );
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -465,5 +536,84 @@ mod tests {
         assert_eq!(texture.height(), 1);
         assert_eq!(texture.bytes_per_pixel(), 4);
         assert_eq!(texture.read_bytes(), [5, 6, 7, 255]);
+    }
+
+    fn gray_texture(
+        device: &ProtocolObject<dyn MTLDevice>,
+        width: usize,
+        height: usize,
+        data: &[u8],
+    ) -> MetalTexture {
+        MetalTexture::new(
+            device,
+            image_texture_options(ImageTextureFormat::Gray, false, MetalStorageMode::Shared),
+            width,
+            height,
+            Some(data),
+        )
+        .expect("grayscale texture should be created")
+    }
+
+    #[test]
+    fn replace_region_full_region_overwrites_all_pixels() {
+        let device = metal_device();
+        let texture = gray_texture(&device, 2, 2, &[1, 2, 3, 4]);
+
+        texture
+            .replace_region(0, 0, 2, 2, &[10, 20, 30, 40])
+            .expect("full-region replace should succeed");
+
+        assert_eq!(texture.read_bytes(), [10, 20, 30, 40]);
+    }
+
+    #[test]
+    fn replace_region_sub_region_writes_at_offset() {
+        let device = metal_device();
+        let texture = gray_texture(&device, 4, 4, &[0; 16]);
+
+        // Write a 2×2 block at origin (1, 1). Row-major index is `y * 4 + x`, so
+        // the block lands at (1,1)=1, (2,1)=2, (1,2)=3, (2,2)=4.
+        texture
+            .replace_region(1, 1, 2, 2, &[1, 2, 3, 4])
+            .expect("sub-region replace should succeed");
+
+        assert_eq!(
+            texture.read_bytes(),
+            [0, 0, 0, 0, 0, 1, 2, 0, 0, 3, 4, 0, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn replace_region_rejects_wrong_data_length() {
+        let device = metal_device();
+        let texture = gray_texture(&device, 2, 2, &[0; 4]);
+
+        // A 2×2 region needs 4 bytes; 3 is short.
+        assert_eq!(
+            texture.replace_region(0, 0, 2, 2, &[1, 2, 3]),
+            Err(MetalTextureError::ByteLengthMismatch {
+                expected: 4,
+                actual: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn replace_region_rejects_out_of_bounds_region() {
+        let device = metal_device();
+        let texture = gray_texture(&device, 4, 4, &[0; 16]);
+
+        // Origin (3, 3) with a 2×2 region exceeds the 4×4 texture.
+        assert_eq!(
+            texture.replace_region(3, 3, 2, 2, &[1, 2, 3, 4]),
+            Err(MetalTextureError::RegionOutOfBounds {
+                x: 3,
+                y: 3,
+                width: 2,
+                height: 2,
+                texture_width: 4,
+                texture_height: 4,
+            })
+        );
     }
 }
