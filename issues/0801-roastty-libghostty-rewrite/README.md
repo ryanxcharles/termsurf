@@ -1336,7 +1336,7 @@ are past the correctness-critical foundation.
 - [Experiment 444: the osc-color-report-format config enum and its reports predicate (OscColorReportFormat, reports)](444-config-osc-color-report-format.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 445: the config Color type and its terminal-RGB conversion (Color, to_terminal_rgb)](445-config-color.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

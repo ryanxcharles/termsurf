@@ -7,6 +7,26 @@
 #![allow(dead_code)]
 // This config layer is consumed by later slices.
 
+use crate::terminal::color::Rgb;
+
+/// A config color value (upstream `Config.Color`): an RGB byte triple. The string
+/// parsing (named colors / hex) and the C extern struct are ported in later
+/// slices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl Color {
+    /// Convert to the terminal-native `Rgb` (upstream `Color.toTerminalRGB`): a
+    /// field-for-field copy of the three channels.
+    pub(crate) fn to_terminal_rgb(self) -> Rgb {
+        Rgb::new(self.r, self.g, self.b)
+    }
+}
+
 /// The color space the window renders in (upstream `WindowColorspace`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WindowColorspace {
@@ -303,10 +323,11 @@ impl OscColorReportFormat {
 #[cfg(test)]
 mod tests {
     use super::{
-        AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, CopyOnSelect,
-        CustomShaderAnimation, FontShapingBreak, FontStyle, GraphemeWidthMethod, MiddleClickAction,
-        MouseShiftCapture, OscColorReportFormat, RightClickAction,
+        AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, Color,
+        CopyOnSelect, CustomShaderAnimation, FontShapingBreak, FontStyle, GraphemeWidthMethod,
+        MiddleClickAction, MouseShiftCapture, OscColorReportFormat, RightClickAction,
     };
+    use crate::terminal::color::Rgb;
 
     #[test]
     fn alpha_blending_is_linear_truth_table() {
@@ -518,5 +539,28 @@ mod tests {
         let f = OscColorReportFormat::Bits16;
         let copied = f;
         assert_eq!(f, copied);
+    }
+
+    #[test]
+    fn config_color_converts_to_terminal_rgb() {
+        let c = Color {
+            r: 10,
+            g: 20,
+            b: 30,
+        };
+        assert_eq!(c.to_terminal_rgb(), Rgb::new(10, 20, 30));
+
+        // A boundary case across the channel range.
+        let edge = Color {
+            r: 0,
+            g: 128,
+            b: 255,
+        };
+        assert_eq!(edge.to_terminal_rgb(), Rgb::new(0, 128, 255));
+
+        // `Copy` + `Eq`: a round-trip and a differing value.
+        let copied = c;
+        assert_eq!(c, copied);
+        assert_ne!(c, edge);
     }
 }

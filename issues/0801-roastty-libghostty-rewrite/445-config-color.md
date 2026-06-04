@@ -168,3 +168,56 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-105704-d445-prompt.md` (design)
 - Result: `logs/codex-review/20260604-105704-d445-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The config `Color` type and its terminal-RGB conversion are now live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) struct Color { pub r: u8, pub g: u8, pub b: u8 }` (upstream
+  `Config.Color`) and `Color::to_terminal_rgb(self) -> Rgb`
+  (`Rgb::new(self.r, self.g, self.b)`), the field-for-field port of upstream's
+  `Color.toTerminalRGB`. Added `use crate::terminal::color::Rgb;`.
+
+Test (in `config/mod.rs`): `config_color_converts_to_terminal_rgb` —
+`Color { 10, 20, 30 }.to_terminal_rgb() == Rgb::new(10, 20, 30)`; the boundary
+`Color { 0, 128, 255 } == Rgb::new(0, 128, 255)`; a `Copy`/`Eq` round-trip and
+an `assert_ne!` on a differing value.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2933 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries the foundational `Color` value type and its
+terminal-RGB conversion — the first config _value_ type (vs. an enum) in the
+module, and the building block the later `BoldColor` / `TerminalColor` config
+types wrap. The string parsing (`parseCLI` / `fromHex` / X11 named colors), the
+C extern struct (`cval` / `Color.C`), `formatEntry`, and the `Config` struct
+stay deferred. With `Color` landed, a
+`TerminalColor { Color, CellForeground, CellBackground }` (the renderer's cursor
+/ selection color type) and `BoldColor` become natural next slices. The
+config-type family remains a clean, gated way to advance the rewrite while the
+larger coupled subsystems stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `Color { r, g, b }` faithfully ports upstream's
+config RGB value type; `to_terminal_rgb()` is the direct field-for-field
+`toTerminalRGB` mapping into roastty's `Rgb`; deferring parsing, formatting, and
+the C ABI representation is the right scope; and the test covers normal values,
+boundary channel values, and value semantics. No public C ABI/header impact;
+nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-105859-r445-prompt.md` (result)
+- Result: `logs/codex-review/20260604-105859-r445-last-message.md` (result)
