@@ -10,6 +10,7 @@ use crate::renderer::metal::api::{
     MetalStoreAction,
 };
 use crate::renderer::metal::buffer::FrameCells;
+use crate::renderer::metal::frame::FrameState;
 use crate::renderer::metal::pipeline::MetalPipeline;
 use crate::renderer::metal::shaders::MetalStandardPipelines;
 use crate::renderer::metal::texture::MetalTexture;
@@ -179,6 +180,28 @@ impl MetalRenderPass {
                 instance_count: fg_count,
             },
         });
+    }
+
+    /// Draw a synced [`FrameState`]'s cells — the cell-drawing portion of
+    /// upstream `drawFrame`'s pass body. Forwards to [`draw_cells`] with the
+    /// frame's own uniform buffer, cell buffers, and atlas textures, sized by
+    /// `fg_count` (the value returned by [`FrameState::sync`]).
+    ///
+    /// [`draw_cells`]: MetalRenderPass::draw_cells
+    pub(crate) fn draw_frame(
+        &self,
+        pipelines: &MetalStandardPipelines,
+        state: &FrameState,
+        fg_count: usize,
+    ) {
+        self.draw_cells(
+            pipelines,
+            state.uniforms_buffer(),
+            state.cells(),
+            state.grayscale_texture(),
+            state.color_texture(),
+            fg_count,
+        );
     }
 }
 
@@ -1038,6 +1061,142 @@ mod tests {
         // skipped. An implementation omitting the bg-color step would leave the
         // clear color `[0, 0, 0, 0]`.
         assert_pixels(&target.read_bytes(), [128, 64, 32, 255]);
+    }
+
+    #[test]
+    fn draw_frame_renders_frame_state_cell_background() {
+        use crate::font::atlas::{Atlas, Format};
+        use crate::renderer::cell::Contents;
+        use crate::renderer::size::GridSize;
+
+        let device = metal_device();
+        let queue = device
+            .newCommandQueue()
+            .expect("command queue should be created");
+        let pipelines = MetalStandardPipelines::new(&device, MetalPixelFormat::Bgra8Unorm)
+            .expect("standard pipelines should compile");
+        let options = draw_cells_options(&device);
+
+        // A grayscale atlas and a bgra color atlas (no glyph needed — the text
+        // step is skipped at fg_count 0).
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+
+        // A 1×1 Contents: an opaque green background cell and no foreground.
+        let mut contents = Contents::default();
+        contents.resize(GridSize {
+            columns: 1,
+            rows: 1,
+        });
+        *contents.bg_cell_mut(0, 0) = CellBg([0, 255, 0, 255]);
+
+        let uniforms = cell_text_uniforms([2, 2], [1, 1], [2.0, 2.0], [0, 0, 0, 0]);
+
+        let mut state =
+            FrameState::new(options, &grayscale, &color).expect("frame state should be created");
+        let fg_count = state
+            .sync(options, &uniforms, &contents, &grayscale, &color)
+            .expect("frame state sync should succeed");
+        assert_eq!(fg_count, 0);
+
+        let target = render_target(&device, 2, 2);
+        let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
+        let pass = frame
+            .render_pass(&[MetalRenderPassAttachment {
+                texture: &target,
+                clear_color: Some(MetalClearColor {
+                    red: 0.0,
+                    green: 0.0,
+                    blue: 0.0,
+                    alpha: 0.0,
+                }),
+            }])
+            .expect("render pass should begin");
+
+        pass.draw_frame(&pipelines, &state, fg_count);
+        pass.complete();
+        frame
+            .commit_and_wait()
+            .expect("command frame should complete");
+
+        // The frame's cell-background buffer (synced from `Contents`) bound and
+        // rendered the opaque green cell; the text step was skipped.
+        assert_pixels(&target.read_bytes(), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn draw_frame_renders_foreground_glyph() {
+        use crate::font::atlas::{Atlas, Format};
+        use crate::renderer::cell::{Contents, Key};
+        use crate::renderer::size::GridSize;
+
+        let device = metal_device();
+        let queue = device
+            .newCommandQueue()
+            .expect("command queue should be created");
+        let pipelines = MetalStandardPipelines::new(&device, MetalPixelFormat::Bgra8Unorm)
+            .expect("standard pipelines should compile");
+        let options = draw_cells_options(&device);
+
+        // A grayscale atlas with a reserved 2×2 region set fully on (the glyph
+        // mask); a bgra color atlas (unused — the vertex samples the grayscale
+        // atlas).
+        let mut grayscale = Atlas::new(8, Format::Grayscale);
+        let region = grayscale.reserve(2, 2).expect("reserve a 2×2 region");
+        grayscale.set(region, &[255, 255, 255, 255]);
+        let color = Atlas::new(8, Format::Bgra);
+
+        // A 1×1 Contents: a transparent background cell and a red foreground
+        // vertex sampling the reserved region (origin from the reservation).
+        let mut contents = Contents::default();
+        contents.resize(GridSize {
+            columns: 1,
+            rows: 1,
+        });
+        *contents.bg_cell_mut(0, 0) = CellBg([0, 0, 0, 0]);
+        contents.add(
+            Key::Text,
+            cell_text_vertex(
+                [region.x, region.y],
+                [2, 2],
+                [0, 2],
+                [0, 0],
+                [255, 0, 0, 255],
+            ),
+        );
+
+        let uniforms = cell_text_uniforms([2, 2], [1, 1], [2.0, 2.0], [0, 0, 0, 0]);
+
+        let mut state =
+            FrameState::new(options, &grayscale, &color).expect("frame state should be created");
+        let fg_count = state
+            .sync(options, &uniforms, &contents, &grayscale, &color)
+            .expect("frame state sync should succeed");
+        assert_eq!(fg_count, 1);
+
+        let target = render_target(&device, 2, 2);
+        let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
+        let pass = frame
+            .render_pass(&[MetalRenderPassAttachment {
+                texture: &target,
+                clear_color: Some(MetalClearColor {
+                    red: 0.0,
+                    green: 0.0,
+                    blue: 0.0,
+                    alpha: 0.0,
+                }),
+            }])
+            .expect("render pass should begin");
+
+        pass.draw_frame(&pipelines, &state, fg_count);
+        pass.complete();
+        frame
+            .commit_and_wait()
+            .expect("command frame should complete");
+
+        // The frame's cell-text buffer and grayscale atlas texture bound and
+        // rendered the fully-on red glyph over the whole cell.
+        assert_pixels(&target.read_bytes(), [0, 0, 255, 255]);
     }
 
     #[test]

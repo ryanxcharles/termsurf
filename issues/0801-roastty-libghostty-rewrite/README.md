@@ -1273,8 +1273,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 413: the per-frame resource state (FrameState)](413-frame-state.md)
   — **Pass** · Claude/Codex/Codex
-- [Experiment 414: the frame draw (draw_frame)](414-draw-frame.md) —
-  **Designed** · Claude/Codex/Codex
+- [Experiment 414: the frame draw (draw_frame)](414-draw-frame.md) — **Pass** ·
+  Claude/Codex/Codex
 
 ## Non-Goals
 

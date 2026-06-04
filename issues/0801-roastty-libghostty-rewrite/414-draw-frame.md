@@ -189,3 +189,80 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-080328-d414-prompt.md` (design)
 - Result: `logs/codex-review/20260604-080328-d414-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The frame draw is now live.
+
+- `roastty/src/renderer/metal/render_pass.rs`:
+  `MetalRenderPass::draw_frame(&self, pipelines, state: &FrameState, fg_count)`
+  forwards to `draw_cells` with the `FrameState`'s own uniform buffer, cell
+  buffers, and grayscale/color atlas textures, sized by `fg_count`. Added
+  `use crate::renderer::metal::frame::FrameState;`.
+
+Tests (in `render_pass.rs`, live Metal device, end-to-end render-to-target +
+pixel read-back):
+
+- `draw_frame_renders_frame_state_cell_background` — a grayscale `Atlas` and a
+  `Bgra` color `Atlas`, a 1×1 `Contents` with an opaque green background cell
+  and no foreground, synced into a `FrameState` (`fg_count == 0`); `draw_frame`
+  to a 2×2 target → all pixels green `[0, 255, 0, 255]` (the frame's
+  cell-background buffer, synced from `Contents`, binds and renders; the text
+  step is skipped).
+- `draw_frame_renders_foreground_glyph` — a grayscale `Atlas` (size 8) with a
+  **reserved** 2×2 region `set` fully on, a 1×1 `Contents` with a transparent
+  background cell and a red foreground vertex sampling that region (origin from
+  the reservation, `glyph_size = [2, 2]`, `bearings = [0, 2]`);
+  `FrameState::sync` → `fg_count == 1`; `draw_frame` to a 2×2 target → all
+  pixels red `[0, 0, 255, 255]` (the frame's cell-text buffer and grayscale
+  atlas texture bind and render the glyph).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2889 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + `lib.rs`/header/`abi_harness.c`)
+  clean; `git diff --check` clean.
+
+## Conclusion
+
+The renderer bridge now renders a full frame end-to-end on the GPU from a
+`FrameState`: assemble a `Contents` → `FrameState::sync` (uniforms, cells, atlas
+textures) → `draw_frame` (bg-color → cell-bg → cell-text) → pixels on a Metal
+target, with both the background and the foreground-glyph paths verified. The
+whole per-frame cell pipeline — assembly, upload, frame-state sync, and the
+`FrameState`-driven draw — is ported and tested.
+
+The remaining renderer-bridge work is the live outer loop: acquiring the frame
+target from the drawable (`begin_frame`) and the per-frame call site that builds
+`Contents` and the uniforms from the render `State` (the cursor/preedit
+assembly, the dirty/rebuild gating), then runs `FrameState::sync` + `draw_frame`
+each frame; plus the deferred bg-image / kitty / overlay image draws and the
+custom-shader passes. Those depend on the live render `State` and the
+drawable/target plumbing.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `draw_frame` matches the approved design — a thin
+forwarder to `draw_cells` binding `FrameState`'s own uniform buffer,
+`FrameCells`, grayscale texture, and color texture, sized by the `fg_count`
+returned from `FrameState::sync` — preserving upstream's post-sync cell-draw
+shape while keeping the render-pass step logic centralized in `draw_cells`. It
+judged the tests to cover the integration meaningfully: the green-background
+case proves the synced frame cell-bg buffer and uniforms bind through
+`draw_frame` (text skipped), and the new red-glyph case resolves the prior Low
+finding by driving nonzero foreground through
+`Contents → FrameState::sync → draw_frame`, sampling a reserved grayscale atlas
+region, proving the text buffer plus grayscale atlas texture path renders
+end-to-end. No public C ABI/header impact, and the deferred live-target /
+bg-image / kitty / overlay / custom-shader work remains properly scoped; nothing
+needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-080740-r414-prompt.md` (result)
+- Result: `logs/codex-review/20260604-080740-r414-last-message.md` (result)
