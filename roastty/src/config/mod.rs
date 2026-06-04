@@ -273,6 +273,199 @@ impl Config {
         EntryFormatter::new("bold-color", out)
             .entry_optional(self.bold_color, |v, f| v.format_entry(f));
     }
+
+    /// Set one config field from a `key = value` pair (upstream
+    /// `cli.args.parseIntoField` for `Config`). Built up by category across
+    /// experiments; this slice routes the enum fields. A non-enum key currently
+    /// returns `UnknownField` (wired in later experiments).
+    pub(crate) fn set(&mut self, key: &str, value: Option<&str>) -> Result<(), ConfigSetError> {
+        let default = Config::default();
+        match key {
+            "copy-on-select" => {
+                self.copy_on_select =
+                    set_enum_field(value, default.copy_on_select, CopyOnSelect::from_keyword)?
+            }
+            "clipboard-read" => {
+                self.clipboard_read =
+                    set_enum_field(value, default.clipboard_read, ClipboardAccess::from_keyword)?
+            }
+            "clipboard-write" => {
+                self.clipboard_write = set_enum_field(
+                    value,
+                    default.clipboard_write,
+                    ClipboardAccess::from_keyword,
+                )?
+            }
+            "mouse-shift-capture" => {
+                self.mouse_shift_capture = set_enum_field(
+                    value,
+                    default.mouse_shift_capture,
+                    MouseShiftCapture::from_keyword,
+                )?
+            }
+            "right-click-action" => {
+                self.right_click_action = set_enum_field(
+                    value,
+                    default.right_click_action,
+                    RightClickAction::from_keyword,
+                )?
+            }
+            "middle-click-action" => {
+                self.middle_click_action = set_enum_field(
+                    value,
+                    default.middle_click_action,
+                    MiddleClickAction::from_keyword,
+                )?
+            }
+            "shell-integration" => {
+                self.shell_integration = set_enum_field(
+                    value,
+                    default.shell_integration,
+                    ShellIntegration::from_keyword,
+                )?
+            }
+            "notify-on-command-finish" => {
+                self.notify_on_command_finish = set_enum_field(
+                    value,
+                    default.notify_on_command_finish,
+                    NotifyOnCommandFinish::from_keyword,
+                )?
+            }
+            "window-colorspace" => {
+                self.window_colorspace = set_enum_field(
+                    value,
+                    default.window_colorspace,
+                    WindowColorspace::from_keyword,
+                )?
+            }
+            "alpha-blending" => {
+                self.alpha_blending =
+                    set_enum_field(value, default.alpha_blending, AlphaBlending::from_keyword)?
+            }
+            "window-padding-color" => {
+                self.window_padding_color = set_enum_field(
+                    value,
+                    default.window_padding_color,
+                    WindowPaddingColor::from_keyword,
+                )?
+            }
+            "background-image-position" => {
+                self.bg_image_position = set_enum_field(
+                    value,
+                    default.bg_image_position,
+                    BackgroundImagePosition::from_keyword,
+                )?
+            }
+            "background-image-fit" => {
+                self.bg_image_fit = set_enum_field(
+                    value,
+                    default.bg_image_fit,
+                    BackgroundImageFit::from_keyword,
+                )?
+            }
+            "confirm-close-surface" => {
+                self.confirm_close_surface = set_enum_field(
+                    value,
+                    default.confirm_close_surface,
+                    ConfirmCloseSurface::from_keyword,
+                )?
+            }
+            "link-previews" => {
+                self.link_previews =
+                    set_enum_field(value, default.link_previews, LinkPreviews::from_keyword)?
+            }
+            "window-subtitle" => {
+                self.window_subtitle =
+                    set_enum_field(value, default.window_subtitle, WindowSubtitle::from_keyword)?
+            }
+            "fullscreen" => {
+                self.fullscreen =
+                    set_enum_field(value, default.fullscreen, Fullscreen::from_keyword)?
+            }
+            "macos-non-native-fullscreen" => {
+                self.macos_non_native_fullscreen = set_enum_field(
+                    value,
+                    default.macos_non_native_fullscreen,
+                    NonNativeFullscreen::from_keyword,
+                )?
+            }
+            "macos-titlebar-style" => {
+                self.macos_titlebar_style = set_enum_field(
+                    value,
+                    default.macos_titlebar_style,
+                    MacTitlebarStyle::from_keyword,
+                )?
+            }
+            "macos-titlebar-proxy-icon" => {
+                self.macos_titlebar_proxy_icon = set_enum_field(
+                    value,
+                    default.macos_titlebar_proxy_icon,
+                    MacTitlebarProxyIcon::from_keyword,
+                )?
+            }
+            "macos-window-buttons" => {
+                self.macos_window_buttons = set_enum_field(
+                    value,
+                    default.macos_window_buttons,
+                    MacWindowButtons::from_keyword,
+                )?
+            }
+            "macos-hidden" => {
+                self.macos_hidden =
+                    set_enum_field(value, default.macos_hidden, MacHidden::from_keyword)?
+            }
+            "grapheme-width-method" => {
+                self.grapheme_width_method = set_enum_field(
+                    value,
+                    default.grapheme_width_method,
+                    GraphemeWidthMethod::from_keyword,
+                )?
+            }
+            "osc-color-report-format" => {
+                self.osc_color_report_format = set_enum_field(
+                    value,
+                    default.osc_color_report_format,
+                    OscColorReportFormat::from_keyword,
+                )?
+            }
+            "custom-shader-animation" => {
+                self.custom_shader_animation = set_enum_field(
+                    value,
+                    default.custom_shader_animation,
+                    CustomShaderAnimation::from_keyword,
+                )?
+            }
+            _ => return Err(ConfigSetError::UnknownField),
+        }
+        Ok(())
+    }
+}
+
+/// An error from `Config::set` (upstream `parseIntoField`'s
+/// `error.{InvalidField,InvalidValue,ValueRequired}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfigSetError {
+    /// No field matched the key (upstream `error.InvalidField`).
+    UnknownField,
+    /// The value was set but not a recognized value.
+    InvalidValue,
+    /// The field requires a value but none was given.
+    ValueRequired,
+}
+
+/// Resolve an enum field value (upstream's empty-reset + `stringToEnum` magic): a
+/// set-but-empty value resets to the default; a missing value is `ValueRequired`;
+/// otherwise `parse` (the enum's `from_keyword`) or `InvalidValue`.
+fn set_enum_field<T: Copy>(
+    value: Option<&str>,
+    default_value: T,
+    parse: impl FnOnce(&str) -> Option<T>,
+) -> Result<T, ConfigSetError> {
+    match value {
+        Some("") => Ok(default_value),
+        None => Err(ConfigSetError::ValueRequired),
+        Some(v) => parse(v).ok_or(ConfigSetError::InvalidValue),
+    }
 }
 
 /// A config color value (upstream `Config.Color`): an RGB byte triple. The string
@@ -2842,7 +3035,7 @@ mod tests {
         AlphaBlending, BackgroundBlur, BackgroundBlurParseError, BackgroundImageFit,
         BackgroundImagePosition, BoldColor, ClipboardAccess, ClipboardCodepointMapEntry,
         ClipboardCodepointMapParseError, ClipboardReplacement, Color, ColorList, ColorParseError,
-        Config, ConfirmCloseSurface, CopyOnSelect, CustomShaderAnimation, Duration,
+        Config, ConfigSetError, ConfirmCloseSurface, CopyOnSelect, CustomShaderAnimation, Duration,
         DurationParseError, FlagsParseError, FontShapingBreak, FontStyle, FontStyleParseError,
         Fullscreen, GraphemeWidthMethod, LinkPreviews, MacHidden, MacTitlebarProxyIcon,
         MacTitlebarStyle, MacWindowButtons, MagicParseError, MiddleClickAction, MouseShiftCapture,
@@ -5238,6 +5431,74 @@ mod tests {
         // (default `None`) too.
         assert!(out.contains("cursor-color = \n"));
         assert!(out.contains("theme = \n"));
+    }
+
+    #[test]
+    fn config_set_routes_enum_fields() {
+        // Every enum key, set to a (mostly non-default) valid keyword, routes to
+        // the right field — verified by reading it back through `format_config`.
+        let cases = [
+            ("copy-on-select", "clipboard"),
+            ("clipboard-read", "deny"),
+            ("clipboard-write", "deny"),
+            ("mouse-shift-capture", "always"),
+            ("right-click-action", "paste"),
+            ("middle-click-action", "ignore"),
+            ("shell-integration", "zsh"),
+            ("notify-on-command-finish", "always"),
+            ("window-colorspace", "display-p3"),
+            ("alpha-blending", "linear"),
+            ("window-padding-color", "extend"),
+            ("background-image-position", "top-left"),
+            ("background-image-fit", "stretch"),
+            ("confirm-close-surface", "always"),
+            ("link-previews", "osc8"),
+            ("window-subtitle", "working-directory"),
+            ("fullscreen", "non-native"),
+            ("macos-non-native-fullscreen", "visible-menu"),
+            ("macos-titlebar-style", "tabs"),
+            ("macos-titlebar-proxy-icon", "hidden"),
+            ("macos-window-buttons", "hidden"),
+            ("macos-hidden", "always"),
+            ("grapheme-width-method", "legacy"),
+            ("osc-color-report-format", "8-bit"),
+            ("custom-shader-animation", "always"),
+        ];
+        for (key, sample) in cases {
+            let mut cfg = Config::default();
+            cfg.set(key, Some(sample)).unwrap();
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            let expected = format!("{} = {}", key, sample);
+            assert!(
+                out.lines().any(|l| l == expected.as_str()),
+                "set({key:?}, Some({sample:?})) did not route to the matching field",
+            );
+        }
+
+        // A missing value is `ValueRequired`; an invalid value is `InvalidValue`;
+        // an unknown key is `UnknownField`.
+        let mut cfg = Config::default();
+        assert_eq!(
+            cfg.set("fullscreen", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("fullscreen", Some("nope")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("does-not-exist", Some("x")),
+            Err(ConfigSetError::UnknownField)
+        );
+
+        // A set-but-empty value resets the field to its default.
+        let mut cfg = Config::default();
+        cfg.set("macos-hidden", Some("always")).unwrap(); // non-default
+        cfg.set("macos-hidden", Some("")).unwrap(); // reset
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(out.lines().any(|l| l == "macos-hidden = never")); // the default
     }
 
     #[test]

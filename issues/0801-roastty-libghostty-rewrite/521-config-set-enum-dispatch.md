@@ -221,3 +221,52 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-181358-d521-prompt.md` (design)
 - Result: `logs/codex-review/20260604-181358-d521-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`ConfigSetError`, `set_enum_field`, and `Config::set` (with the 25 enum arms)
+were added. For an enum field, `Some("")` resets to the default (from
+`Config::default()`), `None` is `ValueRequired`, and `Some(v)` is
+`from_keyword(v)` or `InvalidValue`; an unknown key is `UnknownField`. The new
+table-driven test `config_set_routes_enum_fields` (folding the design-review Low
+finding) exercises all 25 enum keys through `Config::set` and verifies routing
+via `format_config`, plus the missing-value, invalid-value, unknown-key, and
+reset-to-default cases.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3007 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches the enum-slice semantics — `Some("")`
+resets from `Config::default()`, `None` gives `ValueRequired`, invalid enum
+values give `InvalidValue`, and unmatched keys give `UnknownField`, with the
+empty-value reset faithfully ordered before the `stringToEnum` branch; the
+folded table-driven test is adequate (every enum key exercised through `set`
+then verified via `format_config`, plus missing/invalid/unknown/reset), and the
+incremental `UnknownField` for non-enum known keys remains documented and
+deferred. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-181803-r521-prompt.md` (result)
+- Result: `logs/codex-review/20260604-181803-r521-last-message.md` (result)
+
+## Conclusion
+
+`Config::set` now exists and routes the 25 enum fields faithfully, with the
+empty-string reset and `ValueRequired` / `InvalidValue` / `UnknownField`
+semantics established. The next slices extend the dispatch by category: the
+packed-struct + bool fields (`set` arms over `parse_cli` / `parse_bool_field`),
+then the color + font-style fields, then `theme` (after `parseAutoStruct` /
+`Theme::parse_cli`) and the float-blocked `background-image-opacity`. Then the
+`loadCli` / file loader drives `Config::set` over parsed CLI args / config-file
+lines.
