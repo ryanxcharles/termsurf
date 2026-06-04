@@ -1249,6 +1249,8 @@ are past the correctness-critical foundation.
   Claude/Codex/Codex
 - [Experiment 401: the preedit placement loop](401-preedit-placement.md) —
   **Pass** · Claude/Codex/Codex
+- [Experiment 402: the invisible (concealed) foreground skip](402-invisible-skip.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
