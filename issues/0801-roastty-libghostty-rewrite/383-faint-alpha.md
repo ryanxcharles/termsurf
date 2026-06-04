@@ -167,3 +167,65 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-193919-603610-prompt.md` (design)
 - Result: `logs/codex-review/20260603-193919-603610-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The faint foreground alpha is now applied during a rebuild.
+
+- `roastty/src/renderer/cell.rs`:
+  - `rebuild_row` (new `faint_opacity: u8` param): each cell's `fg_colors` alpha
+    is `faint ? faint_opacity : alpha`, so the glyph (via `add_run`) draws at
+    the faint opacity; the three decoration passes now use the per-cell
+    `fg_colors[col][3]` (the faint-aware alpha) instead of the uniform `alpha`.
+  - `rebuild_viewport` (new `faint_opacity` param): threads it to `rebuild_row`.
+  - `rebuild_bg_row` is unchanged (faint is foreground-only). The existing test
+    call sites are updated for the new signatures.
+
+Test (in `cell.rs`): `rebuild_row_applies_faint_alpha_to_glyph_and_decorations`
+builds a **faint** cell `'A'` with underline + overline + strikethrough; after
+`rebuild_row` (`alpha = 255`, `faint_opacity = 128`), all four `fg_rows[1]`
+vertices (underline, overline, glyph, strikethrough) carry alpha `128`; a
+separate non-faint cell's glyph carries alpha `255`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2837 passed, 0 failed (+1, no regressions; existing
+  rebuild tests preserved with updated signatures).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+A faint cell now dims its entire foreground — the glyph and all three
+decorations draw at `faint_opacity`, a non-faint cell at the base alpha. With
+reverse-video, the full-block twist, and faint all live, the CPU-side per-cell
+color/alpha computation is essentially complete; the **minimum-contrast**
+adjustment is a GPU-shader uniform (the CPU already sets `no_min_contrast`), not
+a CPU experiment.
+
+The remaining renderer-bridge work: the **selection/search** colors and the
+background-alpha (transparency/opacity) computation; the lock-cursor glyph +
+under-cursor text recolor; the column-ordered decoration merge + link
+double-underline; and the **Metal upload** of `Contents` (which carries the
+min-contrast uniform).
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation is faithful (`fg_colors`
+carries the per-cell foreground alpha, so glyphs get `faint_opacity` through
+`add_run` and the underline/overline/strikethrough pass `rgba[3]` instead of the
+uniform alpha — matching upstream's single per-cell foreground alpha into glyphs
+and all decorations), that leaving `rebuild_bg_row` unchanged is correct (faint
+is foreground-only; background alpha is a separate deferred computation), that
+`rebuild_viewport` threads `faint_opacity` only into `rebuild_row` (the right
+boundary), and that the new test covers the prior gap (all four foreground
+vertices at alpha `128`, the non-faint case at `255`), with the existing
+signature updates scoped. Nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-194254-054699-last-message.md`

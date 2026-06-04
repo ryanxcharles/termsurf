@@ -534,6 +534,7 @@ pub(crate) fn rebuild_row(
     palette: &Palette,
     bold: Option<BoldColor>,
     alpha: u8,
+    faint_opacity: u8,
     thicken: bool,
     thicken_strength: u8,
 ) -> Result<(), ResolverRenderError> {
@@ -551,7 +552,13 @@ pub(crate) fn rebuild_row(
                 bold,
             )
             .fg;
-            [fg.r, fg.g, fg.b, alpha]
+            // A faint cell's foreground draws at the reduced faint opacity.
+            let a = if cell.style.flags.faint {
+                faint_opacity
+            } else {
+                alpha
+            };
+            [fg.r, fg.g, fg.b, a]
         })
         .collect();
 
@@ -575,11 +582,11 @@ pub(crate) fn rebuild_row(
                 grid_pos,
                 flags.underline,
                 underline_color,
-                alpha,
+                rgba[3],
             )?;
         }
         if flags.overline {
-            add_overline(contents, grid, grid_pos, fg, alpha)?;
+            add_overline(contents, grid, grid_pos, fg, rgba[3])?;
         }
     }
 
@@ -602,7 +609,13 @@ pub(crate) fn rebuild_row(
         if cell.style.flags.strikethrough {
             let grid_pos = [u16::try_from(col).expect("column fits u16"), y];
             let rgba = fg_colors[col];
-            add_strikethrough(contents, grid, grid_pos, [rgba[0], rgba[1], rgba[2]], alpha)?;
+            add_strikethrough(
+                contents,
+                grid,
+                grid_pos,
+                [rgba[0], rgba[1], rgba[2]],
+                rgba[3],
+            )?;
         }
     }
     Ok(())
@@ -624,6 +637,7 @@ pub(crate) fn rebuild_viewport(
     palette: &Palette,
     bold: Option<BoldColor>,
     alpha: u8,
+    faint_opacity: u8,
     thicken: bool,
     thicken_strength: u8,
 ) -> Result<(), ResolverRenderError> {
@@ -657,6 +671,7 @@ pub(crate) fn rebuild_viewport(
             palette,
             bold,
             alpha,
+            faint_opacity,
             thicken,
             thicken_strength,
         )?;
@@ -1303,6 +1318,7 @@ mod tests {
             &DEFAULT_PALETTE,
             None,
             255,
+            255,
             false,
             255,
         )
@@ -1383,6 +1399,7 @@ mod tests {
             &DEFAULT_PALETTE,
             None,
             255,
+            255,
             false,
             255,
         )
@@ -1426,6 +1443,118 @@ mod tests {
     }
 
     #[test]
+    fn rebuild_row_applies_faint_alpha_to_glyph_and_decorations() {
+        use crate::font::collection::Index;
+        use crate::font::run::TextRun;
+        use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+        use crate::terminal::style::{Flags, Style as TermStyle};
+
+        // A faint cell 'A' with underline + overline + strikethrough.
+        let faint_cell = RunCell {
+            codepoint: 'A' as u32,
+            graphemes: vec![],
+            style: TermStyle {
+                flags: Flags {
+                    faint: true,
+                    underline: Underline::Single,
+                    overline: true,
+                    strikethrough: true,
+                    ..Flags::default()
+                },
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        let run = ShapedRun {
+            run: TextRun {
+                hash: 0,
+                offset: 0,
+                cells: 1,
+                font_index: Index::default(),
+            },
+            glyphs: vec![shape::Cell {
+                x: 0,
+                x_offset: 0,
+                y_offset: 0,
+                glyph_index: glyph_for(b'A'),
+            }],
+        };
+
+        let mut shared = menlo_grid();
+        let mut c = Contents::default();
+        c.resize(grid(1, 1));
+        rebuild_row(
+            &mut c,
+            &mut shared,
+            0,
+            &[run],
+            &[faint_cell],
+            Rgb::new(200, 200, 200),
+            Rgb::new(0, 0, 0),
+            &DEFAULT_PALETTE,
+            None,
+            255,
+            128, // faint_opacity
+            false,
+            255,
+        )
+        .expect("rebuild_row");
+
+        // The glyph and all three decorations (4 cells) draw at the faint alpha.
+        assert_eq!(c.fg_rows[1].len(), 4);
+        for v in &c.fg_rows[1] {
+            assert_eq!(v.color[3], 128, "faint alpha");
+        }
+
+        // A non-faint cell draws its glyph at the base alpha (255).
+        let plain_cell = RunCell {
+            codepoint: 'A' as u32,
+            graphemes: vec![],
+            style: TermStyle::default(),
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        let run2 = ShapedRun {
+            run: TextRun {
+                hash: 0,
+                offset: 0,
+                cells: 1,
+                font_index: Index::default(),
+            },
+            glyphs: vec![shape::Cell {
+                x: 0,
+                x_offset: 0,
+                y_offset: 0,
+                glyph_index: glyph_for(b'A'),
+            }],
+        };
+        let mut c2 = Contents::default();
+        c2.resize(grid(1, 1));
+        rebuild_row(
+            &mut c2,
+            &mut shared,
+            0,
+            &[run2],
+            &[plain_cell],
+            Rgb::new(200, 200, 200),
+            Rgb::new(0, 0, 0),
+            &DEFAULT_PALETTE,
+            None,
+            255,
+            128,
+            false,
+            255,
+        )
+        .expect("rebuild_row");
+        assert_eq!(c2.fg_rows[1][0].color[3], 255);
+    }
+
+    #[test]
     fn rebuild_viewport_fills_each_row() {
         use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
         use crate::terminal::style::Style as TermStyle;
@@ -1464,6 +1593,7 @@ mod tests {
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
             None,
+            255,
             255,
             false,
             255,
@@ -1517,6 +1647,7 @@ mod tests {
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
             None,
+            255,
             255,
             false,
             255,
@@ -1617,6 +1748,7 @@ mod tests {
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
             None,
+            255,
             255,
             false,
             255,
