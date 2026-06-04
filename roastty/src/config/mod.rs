@@ -90,6 +90,14 @@ pub(crate) struct Config {
     pub font_style_bold_italic: FontStyle,
     /// `font-shaping-break`.
     pub font_shaping_break: FontShapingBreak,
+    /// `grapheme-width-method`.
+    pub grapheme_width_method: GraphemeWidthMethod,
+    /// `osc-color-report-format`.
+    pub osc_color_report_format: OscColorReportFormat,
+    /// `scroll-to-bottom`.
+    pub scroll_to_bottom: ScrollToBottom,
+    /// `custom-shader-animation`.
+    pub custom_shader_animation: CustomShaderAnimation,
 }
 
 impl Default for Config {
@@ -135,6 +143,10 @@ impl Default for Config {
             font_style_italic: FontStyle::Default,
             font_style_bold_italic: FontStyle::Default,
             font_shaping_break: FontShapingBreak::default(),
+            grapheme_width_method: GraphemeWidthMethod::Unicode,
+            osc_color_report_format: OscColorReportFormat::Bits16,
+            scroll_to_bottom: ScrollToBottom::default(),
+            custom_shader_animation: CustomShaderAnimation::True,
         }
     }
 }
@@ -1043,6 +1055,11 @@ mod tests {
         assert_eq!(d.font_style_italic, FontStyle::Default);
         assert_eq!(d.font_style_bold_italic, FontStyle::Default);
         assert_eq!(d.font_shaping_break, FontShapingBreak::default());
+        // Terminal/render-behavior group (Experiment 471).
+        assert_eq!(d.grapheme_width_method, GraphemeWidthMethod::Unicode);
+        assert_eq!(d.osc_color_report_format, OscColorReportFormat::Bits16);
+        assert_eq!(d.scroll_to_bottom, ScrollToBottom::default());
+        assert_eq!(d.custom_shader_animation, CustomShaderAnimation::True);
 
         // A modified config differs from the default and round-trips Clone/PartialEq.
         let mut modified = Config::default();

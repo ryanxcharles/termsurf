@@ -1388,7 +1388,7 @@ are past the correctness-critical foundation.
 - [Experiment 470: grow the Config struct with the font group](470-config-struct-font-group.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 471: grow the Config struct with the terminal/render-behavior group](471-config-struct-terminal-behavior-group.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

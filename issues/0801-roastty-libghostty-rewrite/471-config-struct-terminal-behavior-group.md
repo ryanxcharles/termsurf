@@ -164,3 +164,60 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-124233-d471-prompt.md` (design)
 - Result: `logs/codex-review/20260604-124233-d471-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The `Config` struct now carries the terminal/render-behavior field group.
+
+- `roastty/src/config/mod.rs`: `Config` gains
+  `grapheme_width_method: GraphemeWidthMethod`,
+  `osc_color_report_format: OscColorReportFormat`,
+  `scroll_to_bottom: ScrollToBottom`, and
+  `custom_shader_animation: CustomShaderAnimation`; `Config::default()` sets
+  their upstream Config-field defaults — `GraphemeWidthMethod::Unicode`,
+  `OscColorReportFormat::Bits16`, `ScrollToBottom::default()`,
+  `CustomShaderAnimation::True`.
+
+Test (in `config/mod.rs`): `config_default_clipboard_group` extended to assert
+the four new defaults alongside the ten prior groups' defaults; the
+modified-config inequality and the `Clone`/`PartialEq` round-trip remain.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2952 passed, 0 failed (no regressions; the existing
+  `config_default` test was extended).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The aggregating `Config` struct now holds eleven field groups — clipboard (461)
+through font (470), plus terminal/render-behavior — forty-one fields total. This
+group lands the last of the standalone leaf enums / flag-structs ported earlier
+this issue (`GraphemeWidthMethod`, `OscColorReportFormat`, `ScrollToBottom`,
+`CustomShaderAnimation`); the remaining un-aggregated config types are the base
+`Color` and `Theme` value types (the `background` / `foreground` / `theme`
+keys), which are natural next groups. The parser, the `changeConfig` machinery,
+the conditional-config system, and the remaining upstream `Config` fields stay
+deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the four terminal/render-behavior fields were
+added with faithful defaults (`Unicode`, `Bits16`, `ScrollToBottom::default()`,
+`True`); `Bits16` correctly maps upstream `16-bit` and
+`ScrollToBottom::default()` preserves `keystroke = true`, `output = false`;
+extending the existing `Config::default()` test is adequate and keeps all prior
+groups covered; and the deferred parser / `changeConfig` / conditional-config
+work remains properly scoped. No public C ABI/header impact; nothing needed to
+change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-124433-r471-prompt.md` (result)
+- Result: `logs/codex-review/20260604-124433-r471-last-message.md` (result)
