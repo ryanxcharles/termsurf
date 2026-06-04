@@ -1215,6 +1215,8 @@ are past the correctness-critical foundation.
   Claude/Codex/Codex
 - [Experiment 384: the background-cell alpha](384-bg-alpha.md) — **Pass** ·
   Claude/Codex/Codex
+- [Experiment 385: the selection color computation](385-selection-colors.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
