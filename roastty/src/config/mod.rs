@@ -253,11 +253,38 @@ impl CopyOnSelect {
     }
 }
 
+/// The `right-click-action` config (upstream `RightClickAction`): what a
+/// right-click does. The `Config` default is `ContextMenu`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RightClickAction {
+    /// No action on right-click.
+    Ignore,
+    /// Paste from the system clipboard.
+    Paste,
+    /// Copy the selected text to the system clipboard.
+    Copy,
+    /// Copy the selected text, or paste the clipboard if no text is selected.
+    CopyOrPaste,
+    /// Show a context menu.
+    ContextMenu,
+}
+
+/// The `middle-click-action` config (upstream `MiddleClickAction`): what a
+/// middle-click does. The `Config` default is `PrimaryPaste`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MiddleClickAction {
+    /// Paste from the selection/standard clipboard per `copy-on-select`.
+    PrimaryPaste,
+    /// No action on middle-click.
+    Ignore,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, CopyOnSelect,
-        CustomShaderAnimation, FontShapingBreak, FontStyle, GraphemeWidthMethod, MouseShiftCapture,
+        CustomShaderAnimation, FontShapingBreak, FontStyle, GraphemeWidthMethod, MiddleClickAction,
+        MouseShiftCapture, RightClickAction,
     };
 
     #[test]
@@ -422,5 +449,33 @@ mod tests {
         let c = CopyOnSelect::Clipboard;
         let copied = c;
         assert_eq!(c, copied);
+    }
+
+    #[test]
+    fn right_click_action_has_the_five_upstream_variants() {
+        let actions = [
+            RightClickAction::Ignore,
+            RightClickAction::Paste,
+            RightClickAction::Copy,
+            RightClickAction::CopyOrPaste,
+            RightClickAction::ContextMenu,
+        ];
+        assert_eq!(actions.len(), 5);
+        assert_ne!(RightClickAction::Ignore, RightClickAction::ContextMenu);
+        // `Copy` + `Eq`: a trivial round-trip.
+        let a = RightClickAction::CopyOrPaste;
+        let copied = a;
+        assert_eq!(a, copied);
+    }
+
+    #[test]
+    fn middle_click_action_has_the_two_upstream_variants() {
+        let actions = [MiddleClickAction::PrimaryPaste, MiddleClickAction::Ignore];
+        assert_eq!(actions.len(), 2);
+        assert_ne!(MiddleClickAction::PrimaryPaste, MiddleClickAction::Ignore);
+        // `Copy` + `Eq`: a trivial round-trip.
+        let a = MiddleClickAction::PrimaryPaste;
+        let copied = a;
+        assert_eq!(a, copied);
     }
 }

@@ -1332,7 +1332,7 @@ are past the correctness-critical foundation.
 - [Experiment 442: the copy-on-select config enum and its enabled predicate (CopyOnSelect, enabled)](442-config-copy-on-select.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 443: the click-action config enums (RightClickAction, MiddleClickAction)](443-config-click-actions.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

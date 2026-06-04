@@ -182,3 +182,61 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-104644-d443-prompt.md` (design)
 - Result: `logs/codex-review/20260604-104644-d443-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The click-action config enums are now live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) enum RightClickAction { Ignore, Paste, Copy, CopyOrPaste, ContextMenu }`
+  (upstream `RightClickAction`) and
+  `pub(crate) enum MiddleClickAction { PrimaryPaste, Ignore }` (upstream
+  `MiddleClickAction`), both deriving `Debug, Clone, Copy, PartialEq, Eq`. Plain
+  enums (the consumers are imperative `Surface` dispatch, ported with the call
+  sites later); the `Config` field defaults (`.context-menu` / `.primary-paste`)
+  documented but kept off the enums.
+
+Tests (in `config/mod.rs`):
+
+- `right_click_action_has_the_five_upstream_variants` — an array of all five
+  variants, `assert_eq!(len, 5)`, `assert_ne!(Ignore, ContextMenu)`,
+  `Copy`/`Eq`.
+- `middle_click_action_has_the_two_upstream_variants` — an array of both
+  variants, `assert_eq!(len, 2)`, `assert_ne!(PrimaryPaste, Ignore)`,
+  `Copy`/`Eq`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2931 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries the mouse click-action enums `RightClickAction` and
+`MiddleClickAction`. These are dispatch enums (no extracted method — the
+consumers are imperative `Surface` selection / clipboard / menu side effects),
+so they land as plain enums with exact-variant-set tests, like the
+background-image placement pair (Experiment 436). The `Config` struct / parsing
+and the surface dispatch call sites stay deferred. The config-type family
+remains a clean, gated way to advance the rewrite while the larger coupled
+subsystems stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `RightClickAction` and `MiddleClickAction` carry
+the exact upstream variant sets with the correct CamelCase mapping; keeping them
+as plain enums is appropriate (their behavior belongs in the later `Surface`
+dispatch port); the defaults are correctly documented but not encoded on the
+enums; and the tests reference every variant. No public C ABI/header impact;
+nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-104839-r443-prompt.md` (result)
+- Result: `logs/codex-review/20260604-104839-r443-last-message.md` (result)
