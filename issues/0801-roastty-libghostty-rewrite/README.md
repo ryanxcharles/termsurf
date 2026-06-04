@@ -1443,6 +1443,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 498: the clipboard-codepoint-map formatter (RepeatableClipboardCodepointMap::format_entry)](498-config-clipboard-codepoint-map-format-entry.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 499: the packed-struct flag formatters (ShellIntegrationFeatures / ScrollToBottom / NotifyOnCommandFinishAction)](499-config-flag-struct-format-entries.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
