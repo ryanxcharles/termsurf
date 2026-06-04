@@ -171,3 +171,58 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-111741-d450-prompt.md` (design)
 - Result: `logs/codex-review/20260604-111741-d450-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The notify-on-command-finish-action config type is now live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) struct NotifyOnCommandFinishAction { pub bell: bool, pub notify: bool }`
+  (upstream `NotifyOnCommandFinishAction`) with a hand-written `impl Default`
+  (`bell: true`, `notify: false`) — upstream's field defaults (a derived
+  `Default` would make `bell` `false`). No method — the apprt reads `.bell` /
+  `.notify` directly.
+
+Test (in `config/mod.rs`):
+`notify_on_command_finish_action_defaults_bell_true_notify_false` — `default()`
+has `bell == true`, `notify == false`; a `{ bell: false, notify: true }` value
+differs from the default; the flags are independent (a value differing only in
+`notify` is `!=`); `Copy`/`Eq`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2938 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries `NotifyOnCommandFinishAction` — the companion to
+Experiment 449's `NotifyOnCommandFinish`, completing the
+notify-on-command-finish config pair (the _whether_ decision and the _what_
+action flags). It is the third flag struct (after `FontShapingBreak` and
+`ScrollToBottom`) with hand-written intrinsic field defaults. The string
+parsing, the `Config` struct, and the apprt action execution (ringing the bell,
+sending the desktop notification) stay deferred. The config-type family — now
+eleven enums/flag-structs with consumers plus three color value types — remains
+a clean, gated way to advance the rewrite while the larger coupled subsystems
+stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `NotifyOnCommandFinishAction` faithfully ports the
+two upstream flags; the hand-written `Default` correctly preserves `bell = true`
+and `notify = false`; no helper method is needed (the upstream consumer reads
+`.bell` and `.notify` directly); and the test covers the non-derived default and
+flag independence. No public C ABI/header impact; nothing needed to change
+before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-111924-r450-prompt.md` (result)
+- Result: `logs/codex-review/20260604-111924-r450-last-message.md` (result)

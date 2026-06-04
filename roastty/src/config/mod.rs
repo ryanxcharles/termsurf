@@ -101,6 +101,28 @@ impl NotifyOnCommandFinish {
     }
 }
 
+/// The `notify-on-command-finish-action` config (upstream
+/// `NotifyOnCommandFinishAction`): what a command-finish notification does.
+/// `bell` (default `true`) rings the bell; `notify` (default `false`) sends a
+/// desktop notification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NotifyOnCommandFinishAction {
+    /// Ring the bell on a finished command.
+    pub bell: bool,
+    /// Send a desktop notification on a finished command.
+    pub notify: bool,
+}
+
+impl Default for NotifyOnCommandFinishAction {
+    /// Upstream's field defaults `bell = true`, `notify = false`.
+    fn default() -> Self {
+        Self {
+            bell: true,
+            notify: false,
+        }
+    }
+}
+
 /// The color space the window renders in (upstream `WindowColorspace`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WindowColorspace {
@@ -421,7 +443,8 @@ mod tests {
         AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, BoldColor,
         Color, CopyOnSelect, CustomShaderAnimation, FontShapingBreak, FontStyle,
         GraphemeWidthMethod, MiddleClickAction, MouseShiftCapture, NotifyOnCommandFinish,
-        OscColorReportFormat, RightClickAction, ScrollToBottom, TerminalBoldColor, TerminalColor,
+        NotifyOnCommandFinishAction, OscColorReportFormat, RightClickAction, ScrollToBottom,
+        TerminalBoldColor, TerminalColor,
     };
     use crate::terminal::color::Rgb;
 
@@ -521,6 +544,30 @@ mod tests {
         let n = Unfocused;
         let copied = n;
         assert_eq!(n, copied);
+    }
+
+    #[test]
+    fn notify_on_command_finish_action_defaults_bell_true_notify_false() {
+        let d = NotifyOnCommandFinishAction::default();
+        assert!(d.bell);
+        assert!(!d.notify);
+
+        let both = NotifyOnCommandFinishAction {
+            bell: false,
+            notify: true,
+        };
+        assert_ne!(both, d);
+        // The two flags are independent: differing only in `notify` is `!=`.
+        assert_ne!(
+            NotifyOnCommandFinishAction {
+                bell: true,
+                notify: true,
+            },
+            d
+        );
+        // `Copy` + `Eq`: a trivial round-trip.
+        let copied = both;
+        assert_eq!(both, copied);
     }
 
     #[test]
