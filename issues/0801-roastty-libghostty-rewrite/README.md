@@ -1345,6 +1345,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 449: the notify-on-command-finish config enum and its notify decision (NotifyOnCommandFinish, should_notify)](449-config-notify-on-command-finish.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 450: the notify-on-command-finish-action config type (NotifyOnCommandFinishAction)](450-config-notify-action.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
