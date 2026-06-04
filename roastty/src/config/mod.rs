@@ -75,6 +75,32 @@ impl BoldColor {
     }
 }
 
+/// The `notify-on-command-finish` config (upstream `NotifyOnCommandFinish`): when
+/// to notify on a finished command. The `Config` default is `Never`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NotifyOnCommandFinish {
+    /// Never notify.
+    Never,
+    /// Notify only when the window is unfocused.
+    Unfocused,
+    /// Always notify.
+    Always,
+}
+
+impl NotifyOnCommandFinish {
+    /// Whether to notify on a finished command, given the window's focused state
+    /// (the config's contribution to upstream's apprt notify path): `Never` never
+    /// notifies, `Unfocused` notifies only when **not** `focused`, `Always` always
+    /// notifies.
+    pub(crate) fn should_notify(self, focused: bool) -> bool {
+        match self {
+            NotifyOnCommandFinish::Never => false,
+            NotifyOnCommandFinish::Unfocused => !focused,
+            NotifyOnCommandFinish::Always => true,
+        }
+    }
+}
+
 /// The color space the window renders in (upstream `WindowColorspace`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WindowColorspace {
@@ -394,8 +420,8 @@ mod tests {
     use super::{
         AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, BoldColor,
         Color, CopyOnSelect, CustomShaderAnimation, FontShapingBreak, FontStyle,
-        GraphemeWidthMethod, MiddleClickAction, MouseShiftCapture, OscColorReportFormat,
-        RightClickAction, ScrollToBottom, TerminalBoldColor, TerminalColor,
+        GraphemeWidthMethod, MiddleClickAction, MouseShiftCapture, NotifyOnCommandFinish,
+        OscColorReportFormat, RightClickAction, ScrollToBottom, TerminalBoldColor, TerminalColor,
     };
     use crate::terminal::color::Rgb;
 
@@ -474,6 +500,27 @@ mod tests {
         // `Copy` + `Eq`: a trivial round-trip.
         let copied = off;
         assert_eq!(off, copied);
+    }
+
+    #[test]
+    fn notify_on_command_finish_should_notify_truth_table() {
+        use NotifyOnCommandFinish::{Always, Never, Unfocused};
+
+        // Never: never notifies regardless of focus.
+        assert!(!Never.should_notify(true));
+        assert!(!Never.should_notify(false));
+        // Unfocused: notifies only when not focused.
+        assert!(!Unfocused.should_notify(true));
+        assert!(Unfocused.should_notify(false));
+        // Always: always notifies.
+        assert!(Always.should_notify(true));
+        assert!(Always.should_notify(false));
+
+        assert_ne!(Never, Always);
+        // `Copy` + `Eq`: a trivial round-trip.
+        let n = Unfocused;
+        let copied = n;
+        assert_eq!(n, copied);
     }
 
     #[test]

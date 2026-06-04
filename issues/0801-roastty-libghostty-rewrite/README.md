@@ -1344,7 +1344,7 @@ are past the correctness-critical foundation.
 - [Experiment 448: the scroll-to-bottom config type (ScrollToBottom)](448-config-scroll-to-bottom.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 449: the notify-on-command-finish config enum and its notify decision (NotifyOnCommandFinish, should_notify)](449-config-notify-on-command-finish.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

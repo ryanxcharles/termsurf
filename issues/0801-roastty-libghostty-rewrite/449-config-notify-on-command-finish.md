@@ -181,3 +181,58 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-111331-d449-prompt.md` (design)
 - Result: `logs/codex-review/20260604-111331-d449-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The notify-on-command-finish config enum and its notify decision are now live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) enum NotifyOnCommandFinish { Never, Unfocused, Always }` (upstream
+  `NotifyOnCommandFinish`) and
+  `NotifyOnCommandFinish::should_notify(self, focused: bool) -> bool` — an
+  exhaustive `match` (`Never → false`, `Unfocused → !focused`, `Always → true`),
+  the inverse of upstream's apprt `return true` (skip) early returns.
+
+Test (in `config/mod.rs`): `notify_on_command_finish_should_notify_truth_table`
+— the full 3×2 truth table (`Never → false/false`,
+`Unfocused → false (focused) / true (unfocused)`, `Always → true/true`), the
+variants distinct, `Copy`/`Eq`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2937 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries `NotifyOnCommandFinish` and its notify decision — a
+focused-state truth table parallel to `CustomShaderAnimation::should_animate`
+(Experiment 439), capturing the config's contribution to the apprt notification
+path. The `Config` struct / parsing and the apprt notification path itself (the
+`notify_next_command_finish` manual override, the duration threshold, and the
+bell / notify actions) stay deferred. The config-type family — now ten
+enums/flag-structs with consumers plus three color value types — remains a
+clean, gated way to advance the rewrite while the larger coupled subsystems stay
+deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed
+`NotifyOnCommandFinish { Never, Unfocused, Always }` faithfully maps the
+upstream enum; `should_notify()` correctly represents the inverse of the
+upstream skip checks (never notifies, unfocused notifies only when not focused,
+always notifies); the manual override, duration threshold, and action handling
+remain correctly deferred to the eventual notify call site; and the truth-table
+test is sufficient. No public C ABI/header impact; nothing needed to change
+before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-111544-r449-prompt.md` (result)
+- Result: `logs/codex-review/20260604-111544-r449-last-message.md` (result)
