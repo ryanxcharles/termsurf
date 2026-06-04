@@ -1217,6 +1217,8 @@ are past the correctness-critical foundation.
   Claude/Codex/Codex
 - [Experiment 385: the selection color computation](385-selection-colors.md) —
   **Pass** · Claude/Codex/Codex
+- [Experiment 386: wire the selected state into the background pass](386-wire-selection-bg.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
