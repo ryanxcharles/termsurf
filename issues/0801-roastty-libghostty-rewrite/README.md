@@ -1483,6 +1483,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 518: the remaining packed-struct flag parsers (ShellIntegrationFeatures / NotifyOnCommandFinishAction parse_cli)](518-config-packed-struct-parse-2.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 519: the bool / string type-magic parse paths (parse_bool_field / parse_string_field)](519-config-magic-bool-string.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
