@@ -1389,6 +1389,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 471: grow the Config struct with the terminal/render-behavior group](471-config-struct-terminal-behavior-group.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 472: grow the Config struct with the base-colors group](472-config-struct-base-colors-group.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
