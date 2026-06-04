@@ -43,6 +43,20 @@ impl Style {
             VisualStyle::Underline => Style::Underline,
         }
     }
+
+    /// The integer encoding the custom shader reads (upstream
+    /// `@intFromEnum(cursor_style)`): the `Style` declaration order, matching
+    /// upstream's `renderer.cursor.Style` order
+    /// (`block, block_hollow, bar, underline, lock`).
+    pub(crate) fn shader_int(self) -> i32 {
+        match self {
+            Style::Block => 0,
+            Style::BlockHollow => 1,
+            Style::Bar => 2,
+            Style::Underline => 3,
+            Style::Lock => 4,
+        }
+    }
 }
 
 /// Map the render state's stored `cursor_visual_style` integer back to a
@@ -155,6 +169,15 @@ mod tests {
             Style::from_terminal(VisualStyle::Underline),
             Style::Underline
         );
+    }
+
+    #[test]
+    fn shader_int_encodes_declaration_order() {
+        assert_eq!(Style::Block.shader_int(), 0);
+        assert_eq!(Style::BlockHollow.shader_int(), 1);
+        assert_eq!(Style::Bar.shader_int(), 2);
+        assert_eq!(Style::Underline.shader_int(), 3);
+        assert_eq!(Style::Lock.shader_int(), 4);
     }
 
     #[test]

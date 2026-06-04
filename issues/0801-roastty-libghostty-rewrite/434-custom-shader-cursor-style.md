@@ -222,3 +222,71 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-095535-d434-prompt.md` (design)
 - Result: `logs/codex-review/20260604-095535-d434-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The custom-shader cursor visibility and style are now live, completing
+`updateCustomShaderUniformsFromState`.
+
+- `roastty/src/renderer/cursor.rs`: `Style::shader_int(self) -> i32` — the
+  declaration-order integer (`Block=0`, `BlockHollow=1`, `Bar=2`, `Underline=3`,
+  `Lock=4`), matching upstream `@intFromEnum` of `renderer.cursor.Style`.
+- `roastty/src/renderer/shadertoy.rs`:
+  `CustomShaderUniforms::update_cursor_style(&mut self, visible: bool, style: Style)`
+  sets `cursor_visible = i32::from(visible)`, then **unconditionally**
+  `previous_cursor_style = current_cursor_style` and
+  `current_cursor_style = style.shader_int()`. Added
+  `use crate::renderer::cursor::Style;`.
+
+Tests:
+
+- `shader_int_encodes_declaration_order` (in `cursor.rs`) — the five-style
+  encoding.
+- `update_cursor_style_sets_visibility_and_shifts_unconditionally` (in
+  `shadertoy.rs`) — from `new()`: `update_cursor_style(true, Bar)` →
+  `cursor_visible 1`, `previous 0`, `current 2`; repeated `(true, Bar)` →
+  `previous 2` (unconditional shift), `current 2`; `(false, Underline)` →
+  `cursor_visible 0`, `previous 2`, `current 3`; `cursor_change_time` stays
+  `0.0`, `focus` untouched.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2918 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+`updateCustomShaderUniformsFromState` is now fully ported across three
+experiments — the palette (432), the colors (433), and the cursor
+visibility/style (this one) — all driven by parameters with the live terminal
+state and the `dirty` gate deferred. Both `updateCustomShaderUniformsForFrame`
+(429–431) and `updateCustomShaderUniformsFromState` (432–434) are now complete
+at the uniform level. The remaining custom-shader work — the `Target` enum
+(`glsl`/`msl`) and the shader loading (`loadFromFiles`) — stays deferred, along
+with the `dirty` gate, the broader live per-frame call sites, and the
+`neverExtendBg` terminal-core row/cell access; beyond the renderer, the other
+subsystems.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed both Required design findings are resolved:
+`update_cursor_style` matches the vendored upstream block —
+`cursor_visible = i32::from(visible)`, then `previous_cursor_style` assigned
+from the prior `current_cursor_style` unconditionally (no change-guard) and
+`current_cursor_style` from the style integer, with no `Option<Style>`. It
+confirmed `shader_int` encodes the upstream declaration order (`Block=0` …
+`Lock=4`), and that the tests cover the mapping, the unconditional
+repeated-style shift, a style change while hidden, and that `cursor_change_time`
+is not touched. No public C ABI/header impact; nothing needed to change before
+the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-100004-r434-prompt.md` (result)
+- Result: `logs/codex-review/20260604-100004-r434-last-message.md` (result)

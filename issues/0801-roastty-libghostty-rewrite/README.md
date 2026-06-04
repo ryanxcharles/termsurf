@@ -1314,7 +1314,7 @@ are past the correctness-critical foundation.
 - [Experiment 433: the custom-shader from-state colors (update_state_colors)](433-custom-shader-state-colors.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 434: the custom-shader cursor visibility and style (update_cursor_style)](434-custom-shader-cursor-style.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

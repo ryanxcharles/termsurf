@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 // This shadertoy layer is consumed by later slices.
 
+use crate::renderer::cursor::Style;
 use crate::renderer::shader::CellTextVertex;
 use crate::terminal::color::{Palette, Rgb};
 
@@ -214,6 +215,18 @@ impl CustomShaderUniforms {
         if let Some(c) = selection_foreground {
             self.selection_foreground_color = normalize_rgb(c);
         }
+    }
+
+    /// Update the cursor visibility and style uniforms (the cursor
+    /// visibility/style block of upstream `updateCustomShaderUniformsFromState`):
+    /// `cursor_visible` is `1` when `visible`, else `0`; `previous_cursor_style`
+    /// is always set to the prior `current_cursor_style`, then
+    /// `current_cursor_style` to the new style's `shader_int` — unconditionally
+    /// (upstream does not guard on a change).
+    pub(crate) fn update_cursor_style(&mut self, visible: bool, style: Style) {
+        self.cursor_visible = i32::from(visible);
+        self.previous_cursor_style = self.current_cursor_style;
+        self.current_cursor_style = style.shader_int();
     }
 }
 
@@ -454,6 +467,40 @@ mod tests {
 
         // Unrelated fields are untouched.
         assert_eq!(u.palette[0], [0.0; 4]);
+        assert_eq!(u.focus, 1);
+    }
+
+    #[test]
+    fn update_cursor_style_sets_visibility_and_shifts_unconditionally() {
+        use crate::renderer::cursor::Style;
+
+        let mut u = CustomShaderUniforms::new();
+        assert_eq!(u.current_cursor_style, 0);
+        assert_eq!(u.previous_cursor_style, 0);
+        assert_eq!(u.cursor_visible, 0);
+
+        // First update: previous takes the prior current (0), current = Bar (2).
+        u.update_cursor_style(true, Style::Bar);
+        assert_eq!(u.cursor_visible, 1);
+        assert_eq!(u.previous_cursor_style, 0);
+        assert_eq!(u.current_cursor_style, 2);
+
+        // Repeated same style still shifts unconditionally: previous = prior
+        // current (2), current = Bar (2).
+        u.update_cursor_style(true, Style::Bar);
+        assert_eq!(u.cursor_visible, 1);
+        assert_eq!(u.previous_cursor_style, 2);
+        assert_eq!(u.current_cursor_style, 2);
+
+        // Changed style and hidden cursor: previous = prior current (2),
+        // current = Underline (3), cursor_visible = 0.
+        u.update_cursor_style(false, Style::Underline);
+        assert_eq!(u.cursor_visible, 0);
+        assert_eq!(u.previous_cursor_style, 2);
+        assert_eq!(u.current_cursor_style, 3);
+
+        // cursor_change_time is not touched here, and an unrelated field stays.
+        assert_eq!(u.cursor_change_time, 0.0);
         assert_eq!(u.focus, 1);
     }
 }
