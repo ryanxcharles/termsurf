@@ -140,3 +140,48 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-170913-d515-prompt.md` (design)
 - Result: `logs/codex-review/20260604-170913-d515-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`from_keyword(value: &str) -> Option<Self>` was added to the seven enums
+(`OscColorReportFormat`, `ConfirmCloseSurface`, `LinkPreviews`,
+`WindowSubtitle`, `WindowPaddingColor`, `Fullscreen`, `NonNativeFullscreen`),
+each an exact tag match (the inverse of `keyword()`) returning `None` otherwise
+— the `std.meta.stringToEnum` parse. The new test
+`enum_from_keyword_round_trips_misc_fullscreen` round-trips every variant,
+rejects an unknown string, and asserts `ConfirmCloseSurface::from_keyword`
+rejects `"1"`.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3001 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches the approved design — exact
+`stringToEnum`-style matching, inverse of the existing `keyword()` values, with
+bool-like tags treated only as literal enum tags; the
+`ConfirmCloseSurface::from_keyword("1") == None` check covers the
+non-`parseBool` behavior; the tests and gates are adequate (all variants
+round-trip, unknowns reject, build/tests/fmt clean). "Approved with no
+findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-171136-r515-prompt.md` (result)
+- Result: `logs/codex-review/20260604-171136-r515-last-message.md` (result)
+
+## Conclusion
+
+Twenty-two plain enums now have `from_keyword` (Experiments 513–515). The
+remaining plain enums are the shell-integration / notify groups; then the bool /
+int / float / string "magic" parse paths, the empty-string reset-to-default
+rule, and the per-field `parseIntoField` dispatch (`Config::set(key, value)`) +
+the `loadCli` / file loader.

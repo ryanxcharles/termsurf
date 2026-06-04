@@ -1431,6 +1431,17 @@ impl LinkPreviews {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "false" => Some(LinkPreviews::False),
+            "true" => Some(LinkPreviews::True),
+            "osc8" => Some(LinkPreviews::Osc8),
+            _ => None,
+        }
+    }
+
     /// Format this value as a config entry (upstream's generic enum branch).
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -1473,6 +1484,17 @@ impl ConfirmCloseSurface {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "false" => Some(ConfirmCloseSurface::False),
+            "true" => Some(ConfirmCloseSurface::True),
+            "always" => Some(ConfirmCloseSurface::Always),
+            _ => None,
+        }
+    }
+
     /// Format this value as a config entry (upstream's generic enum branch).
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -1509,6 +1531,16 @@ impl WindowSubtitle {
         match self {
             WindowSubtitle::False => "false",
             WindowSubtitle::WorkingDirectory => "working-directory",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "false" => Some(WindowSubtitle::False),
+            "working-directory" => Some(WindowSubtitle::WorkingDirectory),
+            _ => None,
         }
     }
 
@@ -1646,6 +1678,19 @@ impl Fullscreen {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "false" => Some(Fullscreen::False),
+            "true" => Some(Fullscreen::True),
+            "non-native" => Some(Fullscreen::NonNative),
+            "non-native-visible-menu" => Some(Fullscreen::NonNativeVisibleMenu),
+            "non-native-padded-notch" => Some(Fullscreen::NonNativePaddedNotch),
+            _ => None,
+        }
+    }
+
     /// Format this value as a config entry (upstream's generic enum branch).
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -1660,6 +1705,18 @@ impl NonNativeFullscreen {
             NonNativeFullscreen::True => "true",
             NonNativeFullscreen::VisibleMenu => "visible-menu",
             NonNativeFullscreen::PaddedNotch => "padded-notch",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "false" => Some(NonNativeFullscreen::False),
+            "true" => Some(NonNativeFullscreen::True),
+            "visible-menu" => Some(NonNativeFullscreen::VisibleMenu),
+            "padded-notch" => Some(NonNativeFullscreen::PaddedNotch),
+            _ => None,
         }
     }
 
@@ -1919,6 +1976,17 @@ impl WindowPaddingColor {
             WindowPaddingColor::Background => "background",
             WindowPaddingColor::Extend => "extend",
             WindowPaddingColor::ExtendAlways => "extend-always",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "background" => Some(WindowPaddingColor::Background),
+            "extend" => Some(WindowPaddingColor::Extend),
+            "extend-always" => Some(WindowPaddingColor::ExtendAlways),
+            _ => None,
         }
     }
 
@@ -2511,6 +2579,17 @@ impl OscColorReportFormat {
             OscColorReportFormat::None => "none",
             OscColorReportFormat::Bits8 => "8-bit",
             OscColorReportFormat::Bits16 => "16-bit",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(OscColorReportFormat::None),
+            "8-bit" => Some(OscColorReportFormat::Bits8),
+            "16-bit" => Some(OscColorReportFormat::Bits16),
+            _ => None,
         }
     }
 
@@ -5036,5 +5115,67 @@ mod tests {
         }
         assert_eq!(MouseShiftCapture::from_keyword("nope"), None);
         assert_eq!(MouseShiftCapture::from_keyword("t"), None);
+    }
+
+    #[test]
+    fn enum_from_keyword_round_trips_misc_fullscreen() {
+        for v in [
+            OscColorReportFormat::None,
+            OscColorReportFormat::Bits8,
+            OscColorReportFormat::Bits16,
+        ] {
+            assert_eq!(OscColorReportFormat::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(OscColorReportFormat::from_keyword("nope"), None);
+
+        for v in [
+            ConfirmCloseSurface::False,
+            ConfirmCloseSurface::True,
+            ConfirmCloseSurface::Always,
+        ] {
+            assert_eq!(ConfirmCloseSurface::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(ConfirmCloseSurface::from_keyword("nope"), None);
+        assert_eq!(ConfirmCloseSurface::from_keyword("1"), None);
+
+        for v in [LinkPreviews::False, LinkPreviews::True, LinkPreviews::Osc8] {
+            assert_eq!(LinkPreviews::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(LinkPreviews::from_keyword("nope"), None);
+
+        for v in [WindowSubtitle::False, WindowSubtitle::WorkingDirectory] {
+            assert_eq!(WindowSubtitle::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(WindowSubtitle::from_keyword("nope"), None);
+
+        for v in [
+            WindowPaddingColor::Background,
+            WindowPaddingColor::Extend,
+            WindowPaddingColor::ExtendAlways,
+        ] {
+            assert_eq!(WindowPaddingColor::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(WindowPaddingColor::from_keyword("nope"), None);
+
+        for v in [
+            Fullscreen::False,
+            Fullscreen::True,
+            Fullscreen::NonNative,
+            Fullscreen::NonNativeVisibleMenu,
+            Fullscreen::NonNativePaddedNotch,
+        ] {
+            assert_eq!(Fullscreen::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(Fullscreen::from_keyword("nope"), None);
+
+        for v in [
+            NonNativeFullscreen::False,
+            NonNativeFullscreen::True,
+            NonNativeFullscreen::VisibleMenu,
+            NonNativeFullscreen::PaddedNotch,
+        ] {
+            assert_eq!(NonNativeFullscreen::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(NonNativeFullscreen::from_keyword("nope"), None);
     }
 }
