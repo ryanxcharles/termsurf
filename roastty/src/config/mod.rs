@@ -123,6 +123,30 @@ impl Default for NotifyOnCommandFinishAction {
     }
 }
 
+/// The `shell-integration` config (upstream `ShellIntegration`): which shell's
+/// integration to inject. The `Config` default is `Detect`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShellIntegration {
+    /// Shell integration disabled.
+    None,
+    /// Auto-detect the shell.
+    Detect,
+    Bash,
+    Elvish,
+    Fish,
+    Nushell,
+    Zsh,
+}
+
+impl ShellIntegration {
+    /// Whether shell integration is active at all (upstream's `Exec` setup
+    /// `!= .none` decision): `None` disables it; `Detect` and the explicit shells
+    /// enable it.
+    pub(crate) fn enabled(self) -> bool {
+        !matches!(self, ShellIntegration::None)
+    }
+}
+
 /// The color space the window renders in (upstream `WindowColorspace`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WindowColorspace {
@@ -444,7 +468,7 @@ mod tests {
         Color, CopyOnSelect, CustomShaderAnimation, FontShapingBreak, FontStyle,
         GraphemeWidthMethod, MiddleClickAction, MouseShiftCapture, NotifyOnCommandFinish,
         NotifyOnCommandFinishAction, OscColorReportFormat, RightClickAction, ScrollToBottom,
-        TerminalBoldColor, TerminalColor,
+        ShellIntegration, TerminalBoldColor, TerminalColor,
     };
     use crate::terminal::color::Rgb;
 
@@ -523,6 +547,34 @@ mod tests {
         // `Copy` + `Eq`: a trivial round-trip.
         let copied = off;
         assert_eq!(off, copied);
+    }
+
+    #[test]
+    fn shell_integration_enabled_unless_none() {
+        let all = [
+            ShellIntegration::None,
+            ShellIntegration::Detect,
+            ShellIntegration::Bash,
+            ShellIntegration::Elvish,
+            ShellIntegration::Fish,
+            ShellIntegration::Nushell,
+            ShellIntegration::Zsh,
+        ];
+        assert_eq!(all.len(), 7);
+
+        assert!(!ShellIntegration::None.enabled());
+        assert!(ShellIntegration::Detect.enabled());
+        assert!(ShellIntegration::Bash.enabled());
+        assert!(ShellIntegration::Elvish.enabled());
+        assert!(ShellIntegration::Fish.enabled());
+        assert!(ShellIntegration::Nushell.enabled());
+        assert!(ShellIntegration::Zsh.enabled());
+
+        assert_ne!(ShellIntegration::None, ShellIntegration::Detect);
+        // `Copy` + `Eq`: a trivial round-trip.
+        let s = ShellIntegration::Zsh;
+        let copied = s;
+        assert_eq!(s, copied);
     }
 
     #[test]

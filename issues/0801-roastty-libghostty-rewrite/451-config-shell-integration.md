@@ -186,3 +186,55 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-112138-d451-prompt.md` (design)
 - Result: `logs/codex-review/20260604-112138-d451-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The shell-integration config enum and its enabled predicate are now live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) enum ShellIntegration { None, Detect, Bash, Elvish, Fish, Nushell, Zsh }`
+  (upstream `ShellIntegration`) and `ShellIntegration::enabled(self) -> bool`
+  (`!matches!(self, ShellIntegration::None)`), the extraction of upstream's
+  `Exec` setup `!= .none` disable decision.
+
+Test (in `config/mod.rs`): `shell_integration_enabled_unless_none` — the exact
+variant set (array, `assert_eq!(len, 7)`); `None.enabled() == false`; `Detect`,
+`Bash`, `Elvish`, `Fish`, `Nushell`, `Zsh` each `enabled() == true`;
+`assert_ne!(None, Detect)`; `Copy`/`Eq`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2939 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries `ShellIntegration` and its enabled predicate — the
+first config slice to reach the shell-integration / termio subsystem. The
+`Config` struct / parsing, the forced-shell mapping (`detect` → auto-detect,
+each explicit shell → the terminal `shell_integration.Shell`, which roastty does
+not yet have), and the termio `Exec` setup stay deferred. The config-type family
+— now twelve enums/flag-structs with consumers plus three color value types,
+spanning renderer, font, terminal-mode, input, clipboard, terminal-OSC,
+notification, and shell-integration — remains a clean, gated way to advance the
+rewrite while the larger coupled subsystems stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `ShellIntegration` carries the exact upstream
+variant set; `enabled()` correctly captures the `.none` disable decision (only
+`None` disables, `Detect` and every explicit shell are enabled); deferring the
+forced-shell mapping and the `Exec` integration remains the right scope; and the
+test covers every variant and the predicate behavior. No public C ABI/header
+impact; nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-112327-r451-prompt.md` (result)
+- Result: `logs/codex-review/20260604-112327-r451-last-message.md` (result)
