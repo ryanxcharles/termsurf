@@ -1322,7 +1322,7 @@ are past the correctness-critical foundation.
 - [Experiment 437: the font-shaping-break config type and its run-option consumer (FontShapingBreak, apply_break_config)](437-config-font-shaping-break.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 438: the grapheme-width-method config enum and its grapheme-cluster mapping (GraphemeWidthMethod, grapheme_cluster)](438-config-grapheme-width-method.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

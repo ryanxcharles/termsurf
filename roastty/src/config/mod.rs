@@ -1,8 +1,8 @@
 //! Configuration types.
 //!
-//! The minimal entry point of the config layer: the leaf enums the renderer
-//! consumes. The broader config subsystem (parsing, the full `Config` struct,
-//! the rest of the config keys) is ported in later slices.
+//! The minimal entry point of the config layer: the leaf config types consumed
+//! by the renderer / terminal bridge. The broader config subsystem (parsing, the
+//! full `Config` struct, the rest of the config keys) is ported in later slices.
 #![allow(dead_code)]
 // This config layer is consumed by later slices.
 
@@ -130,11 +130,32 @@ impl Default for FontShapingBreak {
     }
 }
 
+/// The `grapheme-width-method` config (upstream `GraphemeWidthMethod`): how the
+/// terminal measures grapheme width. The `Config` default is `Unicode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GraphemeWidthMethod {
+    /// Legacy per-codepoint width (grapheme clustering off).
+    Legacy,
+    /// Full grapheme-cluster width (grapheme clustering on).
+    Unicode,
+}
+
+impl GraphemeWidthMethod {
+    /// Whether this method enables the terminal's grapheme-cluster mode (upstream
+    /// termio init switch): `Unicode` enables it, `Legacy` does not.
+    pub(crate) fn grapheme_cluster(self) -> bool {
+        match self {
+            GraphemeWidthMethod::Unicode => true,
+            GraphemeWidthMethod::Legacy => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition,
-        FontShapingBreak,
+        FontShapingBreak, GraphemeWidthMethod,
     };
 
     #[test]
@@ -212,5 +233,16 @@ mod tests {
         // `Copy` + `Eq`: a trivial round-trip.
         let copied = off;
         assert_eq!(off, copied);
+    }
+
+    #[test]
+    fn grapheme_width_method_maps_to_grapheme_cluster() {
+        assert!(GraphemeWidthMethod::Unicode.grapheme_cluster());
+        assert!(!GraphemeWidthMethod::Legacy.grapheme_cluster());
+        assert_ne!(GraphemeWidthMethod::Unicode, GraphemeWidthMethod::Legacy);
+        // `Copy` + `Eq`: a trivial round-trip.
+        let m = GraphemeWidthMethod::Unicode;
+        let copied = m;
+        assert_eq!(m, copied);
     }
 }

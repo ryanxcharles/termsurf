@@ -176,3 +176,60 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-102141-d438-prompt.md` (design)
 - Result: `logs/codex-review/20260604-102141-d438-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The grapheme-width-method config enum and its grapheme-cluster mapping are now
+live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) enum GraphemeWidthMethod { Legacy, Unicode }` (upstream
+  `GraphemeWidthMethod`) and
+  `GraphemeWidthMethod::grapheme_cluster(self) -> bool` — an exhaustive `match`
+  (`Unicode → true`, `Legacy → false`), the extraction of upstream's termio init
+  switch. The module-level doc was broadened to "the leaf config types consumed
+  by the renderer / terminal bridge".
+
+Test (in `config/mod.rs`): `grapheme_width_method_maps_to_grapheme_cluster` —
+`Unicode.grapheme_cluster() == true`, `Legacy.grapheme_cluster() == false`, the
+variants distinct, `Copy`/`Eq`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2925 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries `GraphemeWidthMethod` and its grapheme-cluster
+mapping — a second config slice (after `FontShapingBreak`) to land its consumer
+logic alongside the type, here as a method that returns the bool the termio init
+switch sets for `Mode::GraphemeCluster`. The `Config` struct / parsing and the
+termio init call site (which sets `Mode::GraphemeCluster` from this method) stay
+deferred. The config-type family — increasingly pairing a config type with its
+behavior — remains a clean, gated way to advance the rewrite while the larger
+coupled subsystems stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the Low resolved (the module doc now covers leaf
+config types consumed by the renderer / terminal bridge) and verified
+faithfulness against the vendored upstream:
+`GraphemeWidthMethod::{Legacy, Unicode}` matches `Config.zig:9591`; the deferred
+default `.unicode` (`Config.zig:507`) is documented and left off the enum;
+`grapheme_cluster()` exactly extracts the `Termio.zig:229` switch
+(`Unicode → true`, `Legacy → false`); and the exhaustive `match` preserves
+upstream's compile-time pressure. It judged the test to cover both variants, the
+bool mapping, distinctness, and `Copy`/`Eq`. No public C ABI/header impact;
+nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-102356-r438-prompt.md` (result)
+- Result: `logs/codex-review/20260604-102356-r438-last-message.md` (result)
