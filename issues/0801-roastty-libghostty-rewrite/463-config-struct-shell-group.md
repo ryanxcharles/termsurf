@@ -149,3 +149,58 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-121149-d463-prompt.md` (design)
 - Result: `logs/codex-review/20260604-121149-d463-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The `Config` struct now carries the shell-integration field group.
+
+- `roastty/src/config/mod.rs`: `Config` gains
+  `shell_integration: ShellIntegration` and
+  `shell_integration_features: ShellIntegrationFeatures`; `Config::default()`
+  sets their upstream Config-field defaults — `ShellIntegration::Detect` and
+  `ShellIntegrationFeatures::default()` (the `.{}` field default, whose mixed
+  flags `cursor`/`title`/`path` are `true` and the rest `false`).
+
+Test (in `config/mod.rs`): `config_default_clipboard_group` extended to assert
+the new shell-integration defaults (`Detect`;
+`ShellIntegrationFeatures::default()`) alongside the existing clipboard and
+mouse/click defaults; the modified-config inequality and the `Clone`/`PartialEq`
+round-trip remain.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2952 passed, 0 failed (no regressions; the existing
+  `config_default` test was extended).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The aggregating `Config` struct now holds three field groups — clipboard
+(Experiment 461), mouse/click (462), and shell-integration — eight fields total,
+each an already-ported leaf type wired to its upstream default. The
+`shell-integration-features` `.{}` default mapping to
+`ShellIntegrationFeatures::default()` shows the pattern composing cleanly: a
+leaf type's own `Default` (Experiment 452) is the value the aggregate's field
+default reuses. The parser, the `changeConfig` machinery, the conditional-config
+system, and the remaining upstream `Config` fields stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `shell_integration` defaults to `Detect`;
+`shell_integration_features` defaults through
+`ShellIntegrationFeatures::default()`, preserving upstream's `.{}` mixed flag
+defaults; extending the existing `Config::default()` test is adequate and keeps
+the prior default groups covered; and the deferred parser / `changeConfig` /
+conditional-config work remains properly scoped. No public C ABI/header impact;
+nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-121331-r463-prompt.md` (result)
+- Result: `logs/codex-review/20260604-121331-r463-last-message.md` (result)

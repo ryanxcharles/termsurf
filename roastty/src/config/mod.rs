@@ -28,6 +28,10 @@ pub(crate) struct Config {
     pub right_click_action: RightClickAction,
     /// `middle-click-action`.
     pub middle_click_action: MiddleClickAction,
+    /// `shell-integration`.
+    pub shell_integration: ShellIntegration,
+    /// `shell-integration-features`.
+    pub shell_integration_features: ShellIntegrationFeatures,
 }
 
 impl Default for Config {
@@ -42,6 +46,8 @@ impl Default for Config {
             mouse_shift_capture: MouseShiftCapture::False,
             right_click_action: RightClickAction::ContextMenu,
             middle_click_action: MiddleClickAction::PrimaryPaste,
+            shell_integration: ShellIntegration::Detect,
+            shell_integration_features: ShellIntegrationFeatures::default(),
         }
     }
 }
@@ -904,6 +910,12 @@ mod tests {
         assert_eq!(d.mouse_shift_capture, MouseShiftCapture::False);
         assert_eq!(d.right_click_action, RightClickAction::ContextMenu);
         assert_eq!(d.middle_click_action, MiddleClickAction::PrimaryPaste);
+        // Shell-integration group (Experiment 463).
+        assert_eq!(d.shell_integration, ShellIntegration::Detect);
+        assert_eq!(
+            d.shell_integration_features,
+            ShellIntegrationFeatures::default()
+        );
 
         // A modified config differs from the default and round-trips Clone/PartialEq.
         let mut modified = Config::default();

@@ -1372,7 +1372,7 @@ are past the correctness-critical foundation.
 - [Experiment 462: grow the Config struct with the mouse/click group](462-config-struct-mouse-group.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 463: grow the Config struct with the shell-integration group](463-config-struct-shell-group.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
