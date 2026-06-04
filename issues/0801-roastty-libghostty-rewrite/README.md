@@ -1452,7 +1452,7 @@ are past the correctness-critical foundation.
 - [Experiment 502: the macOS enum-keyword config formatters (MacTitlebarStyle / MacTitlebarProxyIcon / MacWindowButtons / MacHidden)](502-config-enum-format-entries-mac.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 503: the fullscreen-style enum-keyword config formatters (Fullscreen / NonNativeFullscreen)](503-config-enum-format-entries-fullscreen.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

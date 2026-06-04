@@ -160,3 +160,46 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-161553-d503-prompt.md` (design)
 - Result: `logs/codex-review/20260604-161553-d503-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`keyword` + `format_entry` were added for the two fullscreen-style config enums
+(`Fullscreen`, `NonNativeFullscreen`), each `keyword` the exact upstream tag
+name — including the bool-aliased `false` / `true` and the kebab-case variants —
+and `format_entry` writing `name = keyword\n`. The new test
+`enum_format_entries_fullscreen` covers every variant.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2989 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the keyword mappings match the upstream fullscreen enum tags
+exactly, including `false` / `true` and all kebab-case variants, and
+`format_entry` preserves the generic enum output shape `name = tag\n`
+(`Config.zig:5253`/`:5263`, `formatter.zig:52`); the test covers every variant;
+gates are clean. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-161719-r503-prompt.md` (result)
+- Result: `logs/codex-review/20260604-161719-r503-last-message.md` (result)
+
+## Conclusion
+
+The two fullscreen-style config enums now format their keywords (fifteen config
+enums total across Experiments 500–503). The next slices can finish the
+remaining config enums (`OscColorReportFormat`, `ConfirmCloseSurface`,
+`LinkPreviews`, `WindowSubtitle`, `WindowPaddingColor`, `BackgroundImageFit`,
+`BackgroundImagePosition`, `FontStyle`, `FontShapingBreak`,
+`CustomShaderAnimation`, `MouseShiftCapture`), then the remaining generic
+field-dispatch cases (float `{d}`, optional recurse), then the full config
+loader, continuing toward the full config formatter and loader.

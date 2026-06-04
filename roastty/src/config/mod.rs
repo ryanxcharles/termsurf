@@ -1450,6 +1450,41 @@ pub(crate) enum NonNativeFullscreen {
     PaddedNotch,
 }
 
+impl Fullscreen {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            Fullscreen::False => "false",
+            Fullscreen::True => "true",
+            Fullscreen::NonNative => "non-native",
+            Fullscreen::NonNativeVisibleMenu => "non-native-visible-menu",
+            Fullscreen::NonNativePaddedNotch => "non-native-padded-notch",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+impl NonNativeFullscreen {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            NonNativeFullscreen::False => "false",
+            NonNativeFullscreen::True => "true",
+            NonNativeFullscreen::VisibleMenu => "visible-menu",
+            NonNativeFullscreen::PaddedNotch => "padded-notch",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
 /// The `macos-window-buttons` config (upstream `MacWindowButtons`): whether the
 /// window's traffic-light buttons are shown. The `Config` default is `Visible`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4116,6 +4151,34 @@ mod tests {
             assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
         }
         for (variant, kw) in [(MacHidden::Never, "never"), (MacHidden::Always, "always")] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+    }
+
+    #[test]
+    fn enum_format_entries_fullscreen() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        for (variant, kw) in [
+            (Fullscreen::False, "false"),
+            (Fullscreen::True, "true"),
+            (Fullscreen::NonNative, "non-native"),
+            (Fullscreen::NonNativeVisibleMenu, "non-native-visible-menu"),
+            (Fullscreen::NonNativePaddedNotch, "non-native-padded-notch"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (NonNativeFullscreen::False, "false"),
+            (NonNativeFullscreen::True, "true"),
+            (NonNativeFullscreen::VisibleMenu, "visible-menu"),
+            (NonNativeFullscreen::PaddedNotch, "padded-notch"),
+        ] {
             assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
         }
     }
