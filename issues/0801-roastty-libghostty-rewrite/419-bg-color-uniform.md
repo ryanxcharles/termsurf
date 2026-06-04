@@ -164,3 +164,63 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-083301-d419-prompt.md` (design)
 - Result: `logs/codex-review/20260604-083301-d419-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The background-color uniform update is now live.
+
+- `roastty/src/renderer/metal/shaders.rs`:
+  `MetalUniforms::update_bg_color(&mut self, background: Rgb, opacity: f64)`
+  sets
+  `bg_color = [background.r, background.g, background.b, (opacity * 255.0).round() as u8]`
+  — the terminal background channels with the rounded opacity alpha (the only
+  field upstream's `updateFrame` `bg_color` assignment touches).
+
+Test (in `shaders.rs`):
+`update_bg_color_sets_channels_and_rounded_opacity_alpha` —
+`update_bg_color(Rgb(10, 20, 30), 0.5)` → `[10, 20, 30, 128]`
+(`round(127.5) = 128`); `(Rgb(1, 2, 3), 1.0)` → `[1, 2, 3, 255]`;
+`(Rgb(4, 5, 6), 0.0)` → `[4, 5, 6, 0]`; and `screen_size` / `grid_size` /
+`cursor_color` unchanged.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2896 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + `lib.rs`/header/`abi_harness.c`)
+  clean; `git diff --check` clean.
+
+## Conclusion
+
+The per-frame uniforms now cover the geometry trio (`screen_size`, `cell_size`,
+`grid_size`), the cursor group, and the background color. The remaining
+uniform-update work: the config-derived group (min-contrast and the
+color-space/blending bools, which first need the config `colorspace`/`blending`
+enums), the `padding_extend` flags (the row-by-row extend computation in
+`rebuildCells`), and the macOS glass override (`bg_color[3] = 0`); then a full
+production `MetalUniforms` constructor composing all the groups, and the live
+per-frame call sites that supply the terminal state and config and run the
+updates.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design and
+the upstream assignment: `bg_color` is set to
+`[background.r, background.g, background.b, round(opacity * 255)]`, and the
+method body touches only `bg_color`; the rounding is correct
+(`255 * 0.5 = 127.5`, and both Zig `@round` and Rust `f64::round()` round that
+to `128` before conversion). It judged the test to cover the important cases
+(the half rounding, the `1.0 → 255` and `0.0 → 0` endpoints, the RGB channel
+propagation, and representative untouched fields), and confirmed the prior Low
+finding is resolved (the doc now records the deferred macOS glass override as
+`bg_color[3] = 0` / transparent). No public C ABI/header impact; nothing needed
+to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-083503-r419-prompt.md` (result)
+- Result: `logs/codex-review/20260604-083503-r419-last-message.md` (result)

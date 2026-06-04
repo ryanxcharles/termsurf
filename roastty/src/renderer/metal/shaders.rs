@@ -194,6 +194,18 @@ impl MetalUniforms {
         self.grid_size = [grid.columns, grid.rows];
     }
 
+    /// Update the background-color uniform (upstream `updateFrame`): the terminal
+    /// `background` color, with the window `opacity` (`[0, 1]`) as the alpha
+    /// (`round(opacity * 255)`). The macOS glass-style override is deferred.
+    pub(crate) fn update_bg_color(&mut self, background: Rgb, opacity: f64) {
+        self.bg_color = [
+            background.r,
+            background.g,
+            background.b,
+            (opacity * 255.0).round() as u8,
+        ];
+    }
+
     /// Clear the cursor uniform: set `cursor_pos` to the sentinel
     /// `(u16::MAX, u16::MAX)`, which the shader reads as "no cursor" (upstream's
     /// default clear). Only `cursor_pos` is touched.
@@ -584,6 +596,30 @@ fragment float4 bg_image_fragment() {
         assert_eq!(uniforms.screen_size, [2.0, 3.0]);
         assert_eq!(uniforms.cell_size, [6.0, 7.0]);
         assert_eq!(uniforms.bg_color, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn update_bg_color_sets_channels_and_rounded_opacity_alpha() {
+        use crate::terminal::color::Rgb;
+
+        let mut uniforms =
+            MetalUniforms::test_with_grid([2, 3], [4, 5], [6.0, 7.0], [0.0; 4], 0, [9, 9, 9, 9]);
+        uniforms.cursor_color = [8, 8, 8, 8];
+
+        // 255 × 0.5 = 127.5, rounded half-away-from-zero → 128.
+        uniforms.update_bg_color(Rgb::new(10, 20, 30), 0.5);
+        assert_eq!(uniforms.bg_color, [10, 20, 30, 128]);
+
+        // Endpoints: full opacity → 255, zero → 0.
+        uniforms.update_bg_color(Rgb::new(1, 2, 3), 1.0);
+        assert_eq!(uniforms.bg_color, [1, 2, 3, 255]);
+        uniforms.update_bg_color(Rgb::new(4, 5, 6), 0.0);
+        assert_eq!(uniforms.bg_color, [4, 5, 6, 0]);
+
+        // The other fields are untouched.
+        assert_eq!(uniforms.screen_size, [2.0, 3.0]);
+        assert_eq!(uniforms.grid_size, [4, 5]);
+        assert_eq!(uniforms.cursor_color, [8, 8, 8, 8]);
     }
 
     #[test]

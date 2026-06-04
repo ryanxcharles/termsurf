@@ -1284,7 +1284,7 @@ are past the correctness-critical foundation.
 - [Experiment 418: the grid-size uniform update (update_grid_size)](418-grid-size-uniform.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 419: the background-color uniform update (update_bg_color)](419-bg-color-uniform.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
