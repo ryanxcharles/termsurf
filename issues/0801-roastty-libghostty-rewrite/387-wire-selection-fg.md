@@ -120,13 +120,12 @@ both for the background pass).
    - Update the existing `rebuild_row` test call sites (`None` bounds,
      `&SelectionConfig::default()`).
 2. Tests (in `cell.rs`):
-   - a 1×1 (or small) row with one cell carrying a glyph + \*\*underline +
-     overline
-     - strikethrough**, **selected**, default selection config: assert all four
-       `fg_rows[1]` vertices (underline, overline, glyph, strikethrough) carry
-       the selection foreground (the default background, a plain reverse),
-       proving every foreground element uses the selection fg — and a separate
-       **unselected\*\* cell keeps its `cell_colors` foreground;
+   - a small row with one cell carrying a glyph plus an underline, an overline,
+     and a strikethrough, **selected**, default selection config: assert all
+     four `fg_rows[1]` vertices (underline, overline, glyph, strikethrough)
+     carry the selection foreground (the default background, a plain reverse),
+     proving every foreground element uses the selection fg — and a separate
+     **unselected** cell keeps its `cell_colors` foreground;
    - a **selected** cell with an **explicit SGR underline color**: its underline
      keeps that explicit color (not the selection fg), while its glyph uses the
      selection fg — proving the underline-color precedence (`… orelse fg`).
@@ -192,3 +191,87 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-201035-582739-prompt.md` (design)
 - Result: `logs/codex-review/20260603-201035-582739-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+A selected cell's foreground now draws with the selection color.
+
+- `roastty/src/renderer/cell.rs`:
+  - `rebuild_row` (new `selection: Option<[u16; 2]>` and
+    `selection_config: &SelectionConfig` params): the `fg_colors` builder
+    enumerates and, per cell, uses `selection_colors(...).fg` when
+    `is_selected(selection, col as u16, cell.wide)` else `cell_colors(...).fg`.
+    The faint alpha (`faint ? faint_opacity : alpha`) is unchanged. The
+    decoration passes and `add_run` are untouched — they read `fg_colors[col]`,
+    so the glyph, underline, overline, and strikethrough all inherit the
+    selection foreground, and the underline-color fallback
+    (`resolve_underline_color(palette).unwrap_or(fg)`) now falls back to the
+    selection-aware foreground (upstream's `underlineColor(palette) orelse fg`).
+    Doc comment updated.
+  - `rebuild_viewport`: passes each row's `opts.selection` and the
+    `selection_config` to `rebuild_row` (it already passed them to
+    `rebuild_bg_row`), so both passes share the same selection state. The
+    existing `rebuild_row` test call sites are updated for the new signatures.
+
+Tests (in `cell.rs`):
+
+- `rebuild_row_recolors_selected_foreground` — a cell `'A'` with underline +
+  overline + strikethrough and no explicit colors (`default_fg = (200,200,200)`,
+  `default_bg = (9,8,7)`): selected (default config) → all four `fg_rows[1]`
+  vertices carry the selection foreground `(9,8,7)` (a plain reverse = the
+  default background); unselected → all four carry the SGR foreground
+  `(200,200,200)`.
+- `rebuild_row_selected_underline_keeps_explicit_color` — a selected cell `'A'`
+  with an explicit SGR underline color `(1,2,3)` and an underline: the underline
+  vertex (emitted first, underneath) keeps `(1,2,3)` while the glyph vertex uses
+  the selection foreground `(9,8,7)` — the `… orelse fg` precedence.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2844 passed, 0 failed (+2, no regressions; existing
+  `rebuild_row` tests preserved with updated signatures).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The `.selection` recolor is now complete on **both** halves of the rebuild: a
+selected cell draws the selection background (Experiment 386) **and** its glyph
+and every decoration draw with the selection foreground, with an explicit SGR
+underline color still taking precedence — all from the same `is_selected` /
+`SelectionConfig` state shared by the two passes. A default-config selection is
+a faithful plain reverse; a configured
+`selection-background`/`selection-foreground` flows through unchanged.
+
+The remaining renderer-bridge work: the `.search`/`.search_selected` highlight
+arms (which extend the `selected` bool to the full enum and reuse
+`selection_colors`); the lock-cursor glyph + under-cursor text recolor; the
+column-ordered decoration merge + link double-underline; and the **Metal
+upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design:
+`rebuild_row` takes `selection` and `&SelectionConfig`, computes
+`selected = is_selected(selection, col, cell.wide)`, and chooses
+`selection_colors(...).fg` for a selected cell or `cell_colors(...).fg`
+otherwise, with the faint-alpha path unchanged; because `fg_colors[col]` remains
+the single source consumed by `add_run` and all decoration passes, the glyph,
+underline fallback, overline, and strikethrough all inherit the selection
+foreground, and the underline fallback stays faithful (explicit underline color
+wins, else the selection-aware `fg`); `rebuild_viewport` passes `opts.selection`
+and `selection_config` into both the background and foreground passes, so the
+selection state is consistent across the two, and the existing call-site updates
+(`None`/`SelectionConfig::default()`) preserve prior behavior. It confirmed the
+new tests cover the selected foreground across all four foreground vertices, the
+unselected-foreground preservation, and the explicit-underline-color precedence,
+with the diff internal Rust only (no public C ABI/header change). Nothing needed
+to change before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-201341-588883-last-message.md`

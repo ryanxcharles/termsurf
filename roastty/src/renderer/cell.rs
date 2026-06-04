@@ -620,10 +620,13 @@ pub(crate) fn add_run(
 
 /// Assemble one viewport row's foreground text cells into `contents`. Derives the
 /// row's [`CellInfo`] slice ([`cell_infos`]) and per-column `fg_colors` (each
-/// cell's [`cell_colors`] foreground + `alpha`, so the foreground is inverse-aware
-/// — reverse-video swaps the glyph color) from `row_cells`, then places every
-/// glyph of each [`ShapedRun`] via [`add_run`]. The per-row foreground body of
-/// upstream `rebuildCells`.
+/// cell's foreground + `alpha`), then places every glyph of each [`ShapedRun`]
+/// via [`add_run`]. A cell inside the row's `selection` bounds ([`is_selected`])
+/// takes its foreground from [`selection_colors`] (the `selection_config`);
+/// otherwise from [`cell_colors`] (so the foreground is inverse-aware —
+/// reverse-video swaps the glyph color). That one per-cell foreground feeds the
+/// glyph and all three decorations (via `fg_colors`). The per-row foreground body
+/// of upstream `rebuildCells`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rebuild_row(
     contents: &mut Contents,
@@ -631,6 +634,8 @@ pub(crate) fn rebuild_row(
     y: u16,
     row_runs: &[ShapedRun],
     row_cells: &[RunCell],
+    selection: Option<[u16; 2]>,
+    selection_config: &SelectionConfig,
     default_fg: Rgb,
     default_bg: Rgb,
     palette: &Palette,
@@ -644,16 +649,35 @@ pub(crate) fn rebuild_row(
     let infos = cell_infos(row_cells);
     let fg_colors: Vec<[u8; 4]> = row_cells
         .iter()
-        .map(|cell| {
-            let fg = cell_colors(
-                cell.style,
-                cell.codepoint,
-                default_fg,
-                default_bg,
-                palette,
-                bold,
-            )
-            .fg;
+        .enumerate()
+        .map(|(col, cell)| {
+            let x = u16::try_from(col).expect("viewport column fits u16");
+            let selected = is_selected(selection, x, cell.wide);
+            // A selected cell's foreground is the selection foreground; otherwise
+            // the inverse-aware SGR foreground. This one color feeds the glyph and
+            // every decoration below.
+            let fg = if selected {
+                selection_colors(
+                    cell.style,
+                    default_fg,
+                    default_bg,
+                    palette,
+                    bold,
+                    selection_config.background,
+                    selection_config.foreground,
+                )
+                .fg
+            } else {
+                cell_colors(
+                    cell.style,
+                    cell.codepoint,
+                    default_fg,
+                    default_bg,
+                    palette,
+                    bold,
+                )
+                .fg
+            };
             // A faint cell's foreground draws at the reduced faint opacity.
             let a = if cell.style.flags.faint {
                 faint_opacity
@@ -771,6 +795,8 @@ pub(crate) fn rebuild_viewport(
             y,
             &runs,
             &opts.cells,
+            opts.selection,
+            selection_config,
             default_fg,
             default_bg,
             palette,
@@ -1452,6 +1478,8 @@ mod tests {
             1,
             &[run],
             &row_cells,
+            None,
+            &SelectionConfig::default(),
             default_fg,
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
@@ -1533,6 +1561,8 @@ mod tests {
             0,
             &[run],
             &row_cells,
+            None,
+            &SelectionConfig::default(),
             default_fg,
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
@@ -1631,6 +1661,8 @@ mod tests {
             0,
             &[run],
             &[faint_cell],
+            None,
+            &SelectionConfig::default(),
             Rgb::new(200, 200, 200),
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
@@ -1680,6 +1712,8 @@ mod tests {
             0,
             &[run2],
             &[plain_cell],
+            None,
+            &SelectionConfig::default(),
             Rgb::new(200, 200, 200),
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
@@ -1691,6 +1725,202 @@ mod tests {
         )
         .expect("rebuild_row");
         assert_eq!(c2.fg_rows[1][0].color[3], 255);
+    }
+
+    #[test]
+    fn rebuild_row_recolors_selected_foreground() {
+        use crate::font::collection::Index;
+        use crate::font::run::TextRun;
+        use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+        use crate::terminal::style::{Flags, Style as TermStyle};
+
+        let default_fg = Rgb::new(200, 200, 200);
+        let default_bg = Rgb::new(9, 8, 7);
+
+        // A cell 'A' with underline + overline + strikethrough and no explicit
+        // colors: its SGR foreground is `default_fg`; the default selection
+        // foreground (a plain reverse) is `default_bg`.
+        let cell = RunCell {
+            codepoint: 'A' as u32,
+            graphemes: vec![],
+            style: TermStyle {
+                flags: Flags {
+                    underline: Underline::Single,
+                    overline: true,
+                    strikethrough: true,
+                    ..Flags::default()
+                },
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        let run = || ShapedRun {
+            run: TextRun {
+                hash: 0,
+                offset: 0,
+                cells: 1,
+                font_index: Index::default(),
+            },
+            glyphs: vec![shape::Cell {
+                x: 0,
+                x_offset: 0,
+                y_offset: 0,
+                glyph_index: glyph_for(b'A'),
+            }],
+        };
+
+        let mut shared = menlo_grid();
+
+        // Selected (default config): the glyph and all three decorations draw
+        // with the selection foreground (= default_bg, a plain reverse).
+        let mut c = Contents::default();
+        c.resize(grid(1, 1));
+        rebuild_row(
+            &mut c,
+            &mut shared,
+            0,
+            &[run()],
+            &[cell.clone()],
+            Some([0, 0]),
+            &SelectionConfig::default(),
+            default_fg,
+            default_bg,
+            &DEFAULT_PALETTE,
+            None,
+            255,
+            255,
+            false,
+            255,
+        )
+        .expect("rebuild_row");
+        assert_eq!(c.fg_rows[1].len(), 4);
+        for v in &c.fg_rows[1] {
+            assert_eq!(
+                [v.color[0], v.color[1], v.color[2]],
+                [default_bg.r, default_bg.g, default_bg.b],
+                "selected foreground"
+            );
+        }
+
+        // Not selected: the same cell keeps its SGR foreground (= default_fg).
+        let mut c2 = Contents::default();
+        c2.resize(grid(1, 1));
+        rebuild_row(
+            &mut c2,
+            &mut shared,
+            0,
+            &[run()],
+            &[cell],
+            None,
+            &SelectionConfig::default(),
+            default_fg,
+            default_bg,
+            &DEFAULT_PALETTE,
+            None,
+            255,
+            255,
+            false,
+            255,
+        )
+        .expect("rebuild_row");
+        for v in &c2.fg_rows[1] {
+            assert_eq!(
+                [v.color[0], v.color[1], v.color[2]],
+                [default_fg.r, default_fg.g, default_fg.b],
+                "unselected foreground"
+            );
+        }
+    }
+
+    #[test]
+    fn rebuild_row_selected_underline_keeps_explicit_color() {
+        use crate::font::collection::Index;
+        use crate::font::run::TextRun;
+        use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+        use crate::terminal::style::{Color, Flags, Style as TermStyle};
+
+        let default_fg = Rgb::new(200, 200, 200);
+        let default_bg = Rgb::new(9, 8, 7);
+        let uc = Rgb::new(1, 2, 3);
+
+        // A selected cell 'A' with an underline that has an EXPLICIT SGR color.
+        let cell = RunCell {
+            codepoint: 'A' as u32,
+            graphemes: vec![],
+            style: TermStyle {
+                underline_color: Color::Rgb(uc),
+                flags: Flags {
+                    underline: Underline::Single,
+                    ..Flags::default()
+                },
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        let run = ShapedRun {
+            run: TextRun {
+                hash: 0,
+                offset: 0,
+                cells: 1,
+                font_index: Index::default(),
+            },
+            glyphs: vec![shape::Cell {
+                x: 0,
+                x_offset: 0,
+                y_offset: 0,
+                glyph_index: glyph_for(b'A'),
+            }],
+        };
+
+        let mut shared = menlo_grid();
+        let mut c = Contents::default();
+        c.resize(grid(1, 1));
+        rebuild_row(
+            &mut c,
+            &mut shared,
+            0,
+            &[run],
+            &[cell],
+            Some([0, 0]),
+            &SelectionConfig::default(),
+            default_fg,
+            default_bg,
+            &DEFAULT_PALETTE,
+            None,
+            255,
+            255,
+            false,
+            255,
+        )
+        .expect("rebuild_row");
+
+        // The underline (emitted first, underneath) keeps its explicit SGR color;
+        // the glyph (emitted after) uses the selection foreground (= default_bg).
+        assert_eq!(c.fg_rows[1].len(), 2);
+        assert_eq!(
+            [
+                c.fg_rows[1][0].color[0],
+                c.fg_rows[1][0].color[1],
+                c.fg_rows[1][0].color[2]
+            ],
+            [uc.r, uc.g, uc.b],
+            "explicit underline color wins"
+        );
+        assert_eq!(
+            [
+                c.fg_rows[1][1].color[0],
+                c.fg_rows[1][1].color[1],
+                c.fg_rows[1][1].color[2]
+            ],
+            [default_bg.r, default_bg.g, default_bg.b],
+            "glyph uses selection foreground"
+        );
     }
 
     #[test]
