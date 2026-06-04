@@ -162,6 +162,44 @@ pub(crate) fn ortho2d(left: f32, right: f32, bottom: f32, top: f32) -> [[f32; 4]
 }
 
 impl MetalUniforms {
+    /// Create the per-frame uniforms from the config-derived values (upstream's
+    /// renderer `init` literal). The geometry fields (`projection_matrix`,
+    /// `screen_size`, `cell_size`, `grid_size`, `grid_padding`) and `cursor_color`
+    /// are zeroed here (upstream's `undefined`) and filled by the geometry update
+    /// methods / the cursor group before the first draw.
+    pub(crate) fn new(
+        min_contrast: f32,
+        background: Rgb,
+        background_opacity: f64,
+        colorspace: WindowColorspace,
+        blending: AlphaBlending,
+    ) -> Self {
+        let mut uniforms = Self {
+            projection_matrix: [[0.0; 4]; 4],
+            screen_size: [0.0, 0.0],
+            cell_size: [0.0, 0.0],
+            grid_size: [0, 0],
+            _padding0: [0; 12],
+            grid_padding: [0.0; 4],
+            padding_extend: 0,
+            _padding1: [0; 3],
+            min_contrast,
+            cursor_pos: [u16::MAX, u16::MAX],
+            cursor_color: [0, 0, 0, 0],
+            bg_color: [0, 0, 0, 0],
+            bools: MetalUniformBools {
+                cursor_wide: false,
+                use_display_p3: false,
+                use_linear_blending: false,
+                use_linear_correction: false,
+            },
+            _padding2: [0; 8],
+        };
+        uniforms.update_bg_color(background, background_opacity);
+        uniforms.update_color_config(colorspace, blending);
+        uniforms
+    }
+
     /// Update the screen-size-derived uniform fields (upstream
     /// `updateScreenSizeUniforms`): the orthographic `projection_matrix`, the
     /// `grid_padding` (the blank space around the grid), and the `screen_size`.
@@ -688,6 +726,58 @@ fragment float4 bg_image_fragment() {
         // The other fields are untouched.
         assert_eq!(uniforms.min_contrast, 3.0);
         assert_eq!(uniforms.bg_color, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn uniforms_new_matches_the_init_literal() {
+        use crate::config::{AlphaBlending, WindowColorspace};
+        use crate::terminal::color::Rgb;
+
+        let uniforms = MetalUniforms::new(
+            4.5,
+            Rgb::new(10, 20, 30),
+            0.5,
+            WindowColorspace::DisplayP3,
+            AlphaBlending::LinearCorrected,
+        );
+
+        // Config-derived fields per the init literal.
+        assert_eq!(uniforms.min_contrast, 4.5);
+        assert_eq!(uniforms.cursor_pos, [u16::MAX, u16::MAX]);
+        assert_eq!(uniforms.padding_extend, 0);
+        // bg_color via update_bg_color: round(255 × 0.5) = 128.
+        assert_eq!(uniforms.bg_color, [10, 20, 30, 128]);
+        // bools via update_color_config + cursor_wide false.
+        assert!(!uniforms.bools.cursor_wide);
+        assert!(uniforms.bools.use_display_p3);
+        assert!(uniforms.bools.use_linear_blending);
+        assert!(uniforms.bools.use_linear_correction);
+
+        // The geometry fields and cursor_color are zeroed (upstream `undefined`).
+        assert_eq!(uniforms.projection_matrix, [[0.0; 4]; 4]);
+        assert_eq!(uniforms.screen_size, [0.0, 0.0]);
+        assert_eq!(uniforms.cell_size, [0.0, 0.0]);
+        assert_eq!(uniforms.grid_size, [0, 0]);
+        assert_eq!(uniforms.grid_padding, [0.0; 4]);
+        assert_eq!(uniforms.cursor_color, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn uniforms_new_srgb_native_leaves_color_bools_false() {
+        use crate::config::{AlphaBlending, WindowColorspace};
+        use crate::terminal::color::Rgb;
+
+        let uniforms = MetalUniforms::new(
+            1.0,
+            Rgb::new(0, 0, 0),
+            1.0,
+            WindowColorspace::Srgb,
+            AlphaBlending::Native,
+        );
+
+        assert!(!uniforms.bools.use_display_p3);
+        assert!(!uniforms.bools.use_linear_blending);
+        assert!(!uniforms.bools.use_linear_correction);
     }
 
     #[test]

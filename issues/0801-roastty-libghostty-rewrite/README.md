@@ -1298,7 +1298,7 @@ are past the correctness-critical foundation.
 - [Experiment 425: the macOS-glass bg_color override (apply_macos_glass_bg_override)](425-macos-glass-bg-override.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 426: the production MetalUniforms constructor (new)](426-uniforms-constructor.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

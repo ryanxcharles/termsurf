@@ -209,3 +209,72 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-090931-d426-prompt.md` (design)
 - Result: `logs/codex-review/20260604-090931-d426-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The production `MetalUniforms` constructor is now live.
+
+- `roastty/src/renderer/metal/shaders.rs`:
+  `MetalUniforms::new(min_contrast, background, background_opacity, colorspace, blending) -> Self`
+  builds the init literal — `min_contrast` direct, `cursor_pos` the
+  `[u16::MAX, u16::MAX]` sentinel, `padding_extend` `0`, the geometry fields and
+  `cursor_color` zeroed (upstream's `undefined`) — then composes
+  `update_bg_color` (the background + rounded-opacity alpha) and
+  `update_color_config` (the color-space/blending bools).
+
+Tests (in `shaders.rs`):
+
+- `uniforms_new_matches_the_init_literal` —
+  `new(4.5, Rgb(10, 20, 30), 0.5, DisplayP3, LinearCorrected)` → `min_contrast`
+  `4.5`, `cursor_pos [u16::MAX, u16::MAX]`, `padding_extend 0`,
+  `bg_color [10, 20, 30, 128]`,
+  `bools { cursor_wide: false, use_display_p3: true, use_linear_blending: true, use_linear_correction: true }`,
+  and the geometry fields + `cursor_color` zeroed.
+- `uniforms_new_srgb_native_leaves_color_bools_false` —
+  `new(1.0, Rgb(0, 0, 0), 1.0, Srgb, Native)` → the three color bools false.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2907 passed, 0 failed (+2, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+`MetalUniforms` now has a production constructor that mirrors upstream's
+renderer init literal and ties the uniform-update methods together. The
+per-frame uniform machinery is complete: `new` (the init defaults) plus the
+update groups (geometry, cursor, background + glass override, contrast,
+color-space bools, padding-extend) — all the uniform state `drawFrame` and the
+renderer init build. The remaining renderer-bridge work is the live wiring: the
+renderer `init` that supplies the config and runs the geometry/atlas updates,
+the per-frame `updateFrame` / `drawFrame` call sites (which depend on the live
+render `State`), the full `neverExtendBg` (awaiting the renderer's terminal-core
+row/cell representation) and its per-row `padding_extend` refinement, and the
+custom-shader uniforms; beyond the renderer, the other subsystems of the
+libghostty→libroastty rewrite.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `MetalUniforms::new` matches upstream's init
+literal: `min_contrast` direct, `cursor_pos` the `[u16::MAX, u16::MAX]`
+sentinel, `padding_extend` `0`, `bg_color` set through the rounded-opacity path,
+and the color-space/blending bools through `update_color_config` with
+`cursor_wide` false; and that it correctly does **not** apply the macOS-glass
+override (matching upstream's split between init and `updateFrame`). It
+confirmed zeroing the upstream-`undefined` geometry fields and `cursor_color` is
+a faithful Rust adaptation for this staged renderer (those fields are populated
+by the geometry and cursor update paths before use), and judged the tests to
+cover the literal-derived fields, the zeroed placeholders, the rounded alpha,
+and both the Display P3 / linear-corrected and sRGB / native bool cases. No
+public C ABI/header impact; nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-091133-r426-prompt.md` (result)
+- Result: `logs/codex-review/20260604-091133-r426-last-message.md` (result)
