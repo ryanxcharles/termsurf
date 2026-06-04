@@ -183,3 +183,45 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-160222-d501-prompt.md` (design)
 - Result: `logs/codex-review/20260604-160222-d501-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`keyword` + `format_entry` were added for the five config enums
+(`ClipboardAccess`, `NotifyOnCommandFinish`, `WindowColorspace`,
+`AlphaBlending`, `GraphemeWidthMethod`), each `keyword` the exact upstream tag
+name and `format_entry` writing `name = keyword\n`. The new test
+`enum_format_entries_2` covers every variant.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2987 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the keyword mappings match the upstream enum tags exactly (incl. the
+kebab-case `display-p3` and `linear-corrected`), and the formatter output
+matches the generic enum branch shape `name = tag\n` (`formatter.zig:52`,
+`Config.zig:8982`/`:9597`/ `:9210`/`:10214`/`:9591`); the test covers every
+variant; gates are clean. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-160556-r501-prompt.md` (result)
+- Result: `logs/codex-review/20260604-160556-r501-last-message.md` (result)
+
+## Conclusion
+
+Five more config enums now format their keywords (nine total across Experiments
+500–501). The next slices can extend the `keyword()`-based pattern to the rest
+of the config enums (the `Mac*` titlebar/window enums, `Fullscreen`,
+`OscColorReportFormat`, `ConfirmCloseSurface`, `LinkPreviews`, `WindowSubtitle`,
+the background-image enums, …), then the remaining generic field-dispatch cases
+(float `{d}`, optional recurse), then the full config loader, continuing toward
+the full config formatter and loader.

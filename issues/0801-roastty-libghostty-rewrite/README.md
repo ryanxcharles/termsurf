@@ -1448,7 +1448,7 @@ are past the correctness-critical foundation.
 - [Experiment 500: the enum-keyword config formatters (CopyOnSelect / MiddleClickAction / RightClickAction / ShellIntegration)](500-config-enum-format-entries.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 501: more enum-keyword config formatters (ClipboardAccess / NotifyOnCommandFinish / WindowColorspace / AlphaBlending / GraphemeWidthMethod)](501-config-enum-format-entries-2.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

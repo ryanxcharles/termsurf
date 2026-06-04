@@ -1146,6 +1146,20 @@ pub(crate) enum NotifyOnCommandFinish {
 }
 
 impl NotifyOnCommandFinish {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            NotifyOnCommandFinish::Never => "never",
+            NotifyOnCommandFinish::Unfocused => "unfocused",
+            NotifyOnCommandFinish::Always => "always",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+
     /// Whether to notify on a finished command, given the window's focused state
     /// (the config's contribution to upstream's apprt notify path): `Never` never
     /// notifies, `Unfocused` notifies only when **not** `focused`, `Always` always
@@ -1459,6 +1473,20 @@ pub(crate) enum ClipboardAccess {
 }
 
 impl ClipboardAccess {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            ClipboardAccess::Allow => "allow",
+            ClipboardAccess::Deny => "deny",
+            ClipboardAccess::Ask => "ask",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+
     /// Whether the clipboard operation is denied (upstream's `== .deny` check).
     pub(crate) fn denied(self) -> bool {
         matches!(self, ClipboardAccess::Deny)
@@ -1480,6 +1508,21 @@ pub(crate) enum WindowColorspace {
     DisplayP3,
 }
 
+impl WindowColorspace {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            WindowColorspace::Srgb => "srgb",
+            WindowColorspace::DisplayP3 => "display-p3",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
 /// The alpha-blending mode for text compositing (upstream `AlphaBlending`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AlphaBlending {
@@ -1492,6 +1535,20 @@ pub(crate) enum AlphaBlending {
 }
 
 impl AlphaBlending {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            AlphaBlending::Native => "native",
+            AlphaBlending::Linear => "linear",
+            AlphaBlending::LinearCorrected => "linear-corrected",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+
     /// Whether this blending mode is linear (upstream `isLinear`): `Native` is
     /// not linear; `Linear` and `LinearCorrected` are.
     pub(crate) fn is_linear(self) -> bool {
@@ -1694,6 +1751,19 @@ pub(crate) enum GraphemeWidthMethod {
 }
 
 impl GraphemeWidthMethod {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            GraphemeWidthMethod::Legacy => "legacy",
+            GraphemeWidthMethod::Unicode => "unicode",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+
     /// Whether this method enables the terminal's grapheme-cluster mode (upstream
     /// termio init switch): `Unicode` enables it, `Legacy` does not.
     pub(crate) fn grapheme_cluster(self) -> bool {
@@ -3905,6 +3975,50 @@ mod tests {
             (ShellIntegration::Fish, "fish"),
             (ShellIntegration::Nushell, "nushell"),
             (ShellIntegration::Zsh, "zsh"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+    }
+
+    #[test]
+    fn enum_format_entries_2() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        for (variant, kw) in [
+            (ClipboardAccess::Allow, "allow"),
+            (ClipboardAccess::Deny, "deny"),
+            (ClipboardAccess::Ask, "ask"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (NotifyOnCommandFinish::Never, "never"),
+            (NotifyOnCommandFinish::Unfocused, "unfocused"),
+            (NotifyOnCommandFinish::Always, "always"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (WindowColorspace::Srgb, "srgb"),
+            (WindowColorspace::DisplayP3, "display-p3"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (AlphaBlending::Native, "native"),
+            (AlphaBlending::Linear, "linear"),
+            (AlphaBlending::LinearCorrected, "linear-corrected"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (GraphemeWidthMethod::Legacy, "legacy"),
+            (GraphemeWidthMethod::Unicode, "unicode"),
         ] {
             assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
         }
