@@ -1319,6 +1319,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 436: the background-image placement config enums (BackgroundImageFit, BackgroundImagePosition)](436-config-background-image-placement.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 437: the font-shaping-break config type and its run-option consumer (FontShapingBreak, apply_break_config)](437-config-font-shaping-break.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
