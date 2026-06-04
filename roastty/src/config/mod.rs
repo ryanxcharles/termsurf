@@ -1616,6 +1616,16 @@ impl Theme {
             dark: name,
         }
     }
+
+    /// Format as a config entry (upstream `Theme.formatEntry`): the single name
+    /// when light and dark match, else `light:{light},dark:{dark}`.
+    pub(crate) fn format_entry(&self, formatter: &mut EntryFormatter) {
+        if self.light == self.dark {
+            formatter.entry_str(&self.light);
+            return;
+        }
+        formatter.entry_str(&format!("light:{},dark:{}", self.light, self.dark));
+    }
 }
 
 /// The `clipboard-read` / `clipboard-write` config (upstream `ClipboardAccess`):
@@ -4525,5 +4535,28 @@ mod tests {
         ] {
             assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
         }
+    }
+
+    #[test]
+    fn theme_format_entry() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        assert_eq!(
+            fmt(&|f| Theme::single("foo".into()).format_entry(f)),
+            "a = foo\n"
+        );
+        assert_eq!(
+            fmt(&|f| Theme {
+                light: "day".into(),
+                dark: "night".into(),
+            }
+            .format_entry(f)),
+            "a = light:day,dark:night\n"
+        );
     }
 }

@@ -166,3 +166,48 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-165116-d511-prompt.md` (design)
 - Result: `logs/codex-review/20260604-165116-d511-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`format_entry(&self, …)` was added to `Theme`'s existing `impl`: the equal arm
+(`light == dark`) writes the single name via `entry_str(&self.light)`, and the
+unequal arm writes `light:{light},dark:{dark}`. The 4096-byte `bufPrint` cap is
+left unmodeled (unreachable; infallible API) per the design review. The new test
+`theme_format_entry` covers both arms.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2997 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches upstream `Theme.formatEntry` — equal
+light/dark writes the single theme string, and unequal writes
+`light:{light},dark:{dark}` as one string entry (`Config.zig:9898`); leaving the
+fixed-buffer OOM path unmodeled is consistent with the infallible Rust formatter
+API; the test covers both branches; gates are clean. "Approved with no
+findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-165250-r511-prompt.md` (result)
+- Result: `logs/codex-review/20260604-165250-r511-last-message.md` (result)
+
+## Conclusion
+
+`Theme::format_entry` — the last per-field config formatter needed before the
+aggregate dump — now formats its `light` / `light:…,dark:…` cases faithfully.
+Every non-float `Config` leaf type now has a `format_entry`. The next experiment
+is the **aggregate per-field config formatter** (`Config::format_config`),
+walking the `Config` struct in upstream declaration order and emitting each
+field via its `format_entry` (or `entry_bool` / `entry_optional`), omitting only
+the float-blocked `background-image-opacity` (Experiment 509); the field-order
+analysis for all 44 keys is already done and Codex-verified. After that comes
+the config loader (`loadCli`, file I/O).

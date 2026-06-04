@@ -1468,7 +1468,7 @@ are past the correctness-critical foundation.
 - [Experiment 510: the optional-recurse field-dispatch case (EntryFormatter::entry_optional)](510-config-formatter-entry-optional.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 511: the Theme config formatter (theme)](511-config-theme-format-entry.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
