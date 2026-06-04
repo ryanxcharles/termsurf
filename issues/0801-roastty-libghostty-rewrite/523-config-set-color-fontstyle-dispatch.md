@@ -266,3 +266,54 @@ Review artifacts:
 - Prompt: `logs/codex-review/20260604-182735-d523-prompt.md` (design, revised)
 - Result: `logs/codex-review/20260604-182735-d523-last-message.md` (design,
   revised)
+
+## Result
+
+**Result:** Pass
+
+The three `From` impls, `set_value_field`, `set_optional_value_field`, and the
+twelve new `Config::set` arms (one inline for `background-blur`) were added.
+Non-optional `Color` / `FontStyle` parse via their `parse_cli` after the
+empty-reset; optional colors parse the child and wrap in `Some` (reset to `None`
+on `Some("")`); `background-blur` parses in place (a missing value ⇒ `.true`).
+The error mappings preserve `ValueRequired` / `InvalidValue`. The helpers use
+`.map_err(Into::into)` (the `Into<ConfigSetError>` bound). The new test
+`config_set_routes_color_and_fontstyle_fields` covers direct colors,
+terminal-color keywords, optional reset-to-`None`, font-style variants,
+`background-blur` bool/bare-flag/radius/error, and the color missing/invalid
+errors — routing verified via `format_config`. `Config::set` now routes 42 of 44
+fields.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3009 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches the revised design and upstream behavior
+— empty values reset before parsing, optional color fields parse the child and
+wrap in `Some`, empty optionals reset to `None`, and missing values are left to
+each parser; the `background-blur` inline arm is faithful (`Some("")` resets,
+`None` becomes true via its parser, valid values parse in place, invalid →
+`InvalidValue`); the error mappings are correct; the test covers the important
+cases and gates are clean. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-183117-r523-prompt.md` (result)
+- Result: `logs/codex-review/20260604-183117-r523-last-message.md` (result)
+
+## Conclusion
+
+`Config::set` now routes 42 of the 44 fields — every field except `theme`
+(awaiting `parseAutoStruct` / `Theme::parse_cli`) and the float-blocked
+`background-image-opacity`. The remaining loader work is: `Theme::parse_cli`
+(the `parseAutoStruct` light/dark-pair parser) + its `Config::set` arm; then the
+`loadCli` / config-file loader that splits `key = value` lines and drives
+`Config::set`. (The int type-magic has no current raw-int `Config` field;
+`background-image-opacity` stays float-blocked.)

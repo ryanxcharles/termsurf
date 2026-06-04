@@ -463,6 +463,64 @@ impl Config {
             "background-image-repeat" => {
                 self.bg_image_repeat = set_bool_field(value, default.bg_image_repeat)?
             }
+            "background" => {
+                self.background = set_value_field(value, default.background, Color::parse_cli)?
+            }
+            "foreground" => {
+                self.foreground = set_value_field(value, default.foreground, Color::parse_cli)?
+            }
+            "cursor-color" => {
+                self.cursor_color =
+                    set_optional_value_field(value, default.cursor_color, TerminalColor::parse_cli)?
+            }
+            "cursor-text" => {
+                self.cursor_text =
+                    set_optional_value_field(value, default.cursor_text, TerminalColor::parse_cli)?
+            }
+            "selection-foreground" => {
+                self.selection_foreground = set_optional_value_field(
+                    value,
+                    default.selection_foreground,
+                    TerminalColor::parse_cli,
+                )?
+            }
+            "selection-background" => {
+                self.selection_background = set_optional_value_field(
+                    value,
+                    default.selection_background,
+                    TerminalColor::parse_cli,
+                )?
+            }
+            "bold-color" => {
+                self.bold_color =
+                    set_optional_value_field(value, default.bold_color, BoldColor::parse_cli)?
+            }
+            "font-style" => {
+                self.font_style = set_value_field(value, default.font_style, FontStyle::parse_cli)?
+            }
+            "font-style-bold" => {
+                self.font_style_bold =
+                    set_value_field(value, default.font_style_bold, FontStyle::parse_cli)?
+            }
+            "font-style-italic" => {
+                self.font_style_italic =
+                    set_value_field(value, default.font_style_italic, FontStyle::parse_cli)?
+            }
+            "font-style-bold-italic" => {
+                self.font_style_bold_italic =
+                    set_value_field(value, default.font_style_bold_italic, FontStyle::parse_cli)?
+            }
+            // `BackgroundBlur::parse_cli` is `&mut self` (it overwrites `self` in
+            // place), so its arm is inline: a set-but-empty value resets to the
+            // default; otherwise parse in place (a missing value sets `.true`, the
+            // bare-flag default).
+            "background-blur" => {
+                if value == Some("") {
+                    self.background_blur = default.background_blur;
+                } else {
+                    self.background_blur.parse_cli(value)?;
+                }
+            }
             _ => return Err(ConfigSetError::UnknownField),
         }
         Ok(())
@@ -519,6 +577,59 @@ fn set_bool_field(value: Option<&str>, default_value: bool) -> Result<bool, Conf
     match value {
         Some("") => Ok(default_value),
         _ => parse_bool_field(value).map_err(|_| ConfigSetError::InvalidValue),
+    }
+}
+
+impl From<ColorParseError> for ConfigSetError {
+    fn from(e: ColorParseError) -> Self {
+        match e {
+            ColorParseError::ValueRequired => ConfigSetError::ValueRequired,
+            ColorParseError::Invalid => ConfigSetError::InvalidValue,
+        }
+    }
+}
+
+impl From<FontStyleParseError> for ConfigSetError {
+    fn from(e: FontStyleParseError) -> Self {
+        match e {
+            FontStyleParseError::ValueRequired => ConfigSetError::ValueRequired,
+        }
+    }
+}
+
+impl From<BackgroundBlurParseError> for ConfigSetError {
+    fn from(e: BackgroundBlurParseError) -> Self {
+        match e {
+            BackgroundBlurParseError::InvalidValue => ConfigSetError::InvalidValue,
+        }
+    }
+}
+
+/// Resolve a field whose type has a `parse_cli(Option<&str>)` (upstream's
+/// empty-reset + `parseCLI`): a set-but-empty value resets to the default;
+/// otherwise the type's parser (which handles a missing value itself).
+fn set_value_field<T, E: Into<ConfigSetError>>(
+    value: Option<&str>,
+    default_value: T,
+    parse: impl FnOnce(Option<&str>) -> Result<T, E>,
+) -> Result<T, ConfigSetError> {
+    match value {
+        Some("") => Ok(default_value),
+        _ => parse(value).map_err(Into::into),
+    }
+}
+
+/// Resolve an `Option<T>` field whose child has a `parse_cli` (upstream's
+/// optional-as-child + empty-reset): a set-but-empty value resets to the default
+/// (`None`); otherwise the parsed child wrapped in `Some`.
+fn set_optional_value_field<T, E: Into<ConfigSetError>>(
+    value: Option<&str>,
+    default_value: Option<T>,
+    parse: impl FnOnce(Option<&str>) -> Result<T, E>,
+) -> Result<Option<T>, ConfigSetError> {
+    match value {
+        Some("") => Ok(default_value),
+        _ => parse(value).map(Some).map_err(Into::into),
     }
 }
 
@@ -5638,6 +5749,70 @@ mod tests {
         assert_eq!(
             line(&cfg, "scroll-to-bottom"),
             "scroll-to-bottom = keystroke,no-output"
+        );
+    }
+
+    #[test]
+    fn config_set_routes_color_and_fontstyle_fields() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        // Non-optional Color: parse a hex value; reset to default on `Some("")`.
+        let mut cfg = Config::default();
+        cfg.set("background", Some("#ff0000")).unwrap();
+        assert_eq!(line(&cfg, "background"), "background = #ff0000");
+        cfg.set("foreground", Some("#ff0000")).unwrap();
+        cfg.set("foreground", Some("")).unwrap(); // reset
+        assert_eq!(line(&cfg, "foreground"), "foreground = #ffffff"); // the default
+
+        // Optional TerminalColor: a hex value and a `cell-foreground` keyword wrap
+        // in `Some`; `Some("")` resets to `None` (the void line).
+        let mut cfg = Config::default();
+        cfg.set("cursor-color", Some("#00ff00")).unwrap();
+        assert_eq!(line(&cfg, "cursor-color"), "cursor-color = #00ff00");
+        cfg.set("cursor-color", Some("cell-foreground")).unwrap();
+        assert_eq!(line(&cfg, "cursor-color"), "cursor-color = cell-foreground");
+        cfg.set("cursor-color", Some("")).unwrap(); // reset to None
+        assert_eq!(line(&cfg, "cursor-color"), "cursor-color = ");
+
+        // FontStyle: `default` / `false` / a named style.
+        let mut cfg = Config::default();
+        cfg.set("font-style", Some("bold")).unwrap();
+        assert_eq!(line(&cfg, "font-style"), "font-style = bold");
+        cfg.set("font-style-italic", Some("false")).unwrap();
+        assert_eq!(line(&cfg, "font-style-italic"), "font-style-italic = false");
+
+        // BackgroundBlur: an explicit bool, a bare flag (None ⇒ true), and a radius.
+        let mut cfg = Config::default();
+        cfg.set("background-blur", Some("true")).unwrap();
+        assert_eq!(line(&cfg, "background-blur"), "background-blur = true");
+        let mut cfg = Config::default();
+        cfg.set("background-blur", None).unwrap(); // bare flag ⇒ true
+        assert_eq!(line(&cfg, "background-blur"), "background-blur = true");
+        let mut cfg = Config::default();
+        cfg.set("background-blur", Some("64")).unwrap();
+        assert_eq!(line(&cfg, "background-blur"), "background-blur = 64");
+
+        // Errors: a Color needs a value (`ValueRequired`), an invalid value is
+        // `InvalidValue`; `background-blur` accepts a bare flag but rejects garbage.
+        let mut cfg = Config::default();
+        assert_eq!(
+            cfg.set("background", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("background", Some("notacolor")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("background-blur", Some("xyz")),
+            Err(ConfigSetError::InvalidValue)
         );
     }
 
