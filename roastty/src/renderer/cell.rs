@@ -298,12 +298,75 @@ pub(crate) fn selection_colors(
     CellColors { fg, bg }
 }
 
-/// The `selection-background`/`selection-foreground` config (upstream's two
-/// `?TerminalColor`s). `Default` (both `None`) is a plain reverse.
-#[derive(Debug, Clone, Copy, Default)]
+/// The per-cell selected state (upstream's `selected` enum). `False` uses the
+/// base [`cell_colors`]; the three selected states use [`selected_colors`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Selected {
+    False,
+    Selection,
+    Search,
+    SearchSelected,
+}
+
+/// The selection/search color config. `selection-*` is optional (`None` → a plain
+/// reverse); the `search-*`/`search-selected-*` values are non-optional (upstream
+/// `TerminalColor`s with concrete defaults).
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct SelectionConfig {
     pub background: Option<SelectionColor>,
     pub foreground: Option<SelectionColor>,
+    pub search_background: SelectionColor,
+    pub search_foreground: SelectionColor,
+    pub search_selected_background: SelectionColor,
+    pub search_selected_foreground: SelectionColor,
+}
+
+impl Default for SelectionConfig {
+    fn default() -> Self {
+        Self {
+            background: None,
+            foreground: None,
+            // Upstream `config/Config.zig` defaults.
+            search_background: SelectionColor::Color(Rgb::new(0xFF, 0xE0, 0x82)),
+            search_foreground: SelectionColor::Color(Rgb::new(0, 0, 0)),
+            search_selected_background: SelectionColor::Color(Rgb::new(0xF2, 0xA5, 0x7E)),
+            search_selected_foreground: SelectionColor::Color(Rgb::new(0, 0, 0)),
+        }
+    }
+}
+
+/// Compute a cell's colors for a `selected` state. `False` returns `None` (the
+/// caller uses the base [`cell_colors`], covering twist intact); the three
+/// selected states delegate to [`selection_colors`] with the matching config —
+/// `Selection` uses the optional `selection-*` config (`None` → a plain reverse),
+/// while `Search`/`SearchSelected` wrap their non-optional `search-*` config in
+/// `Some`. The `.search`/`.search_selected` switch arms are the `.selection` arms
+/// without the reverse default, so this reuses one computation.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn selected_colors(
+    selected: Selected,
+    style: TermStyle,
+    default_fg: Rgb,
+    default_bg: Rgb,
+    palette: &Palette,
+    bold: Option<BoldColor>,
+    config: &SelectionConfig,
+) -> Option<CellColors> {
+    let (background, foreground) = match selected {
+        Selected::False => return None,
+        Selected::Selection => (config.background, config.foreground),
+        Selected::Search => (
+            Some(config.search_background),
+            Some(config.search_foreground),
+        ),
+        Selected::SearchSelected => (
+            Some(config.search_selected_background),
+            Some(config.search_selected_foreground),
+        ),
+    };
+    Some(selection_colors(
+        style, default_fg, default_bg, palette, bold, background, foreground,
+    ))
 }
 
 /// Whether column `x` of a row is selected, given the row's `[start, end]`
@@ -2831,6 +2894,94 @@ mod tests {
             )
             .fg,
             default_bg
+        );
+    }
+
+    #[test]
+    fn selected_colors_dispatches_selection_and_search() {
+        use crate::terminal::color::DEFAULT_PALETTE;
+        use crate::terminal::style::{Color, Flags, Style as TermStyle};
+
+        let a = Rgb::new(10, 20, 30);
+        let b = Rgb::new(40, 50, 60);
+        let default_fg = Rgb::new(200, 200, 200);
+        let default_bg = Rgb::new(7, 8, 9);
+        let amber = Rgb::new(0xFF, 0xE0, 0x82);
+        let salmon = Rgb::new(0xF2, 0xA5, 0x7E);
+        let black = Rgb::new(0, 0, 0);
+
+        // A cell with an explicit SGR fg=a / bg=b.
+        let styled = |inverse: bool| TermStyle {
+            fg_color: Color::Rgb(a),
+            bg_color: Color::Rgb(b),
+            flags: Flags {
+                inverse,
+                ..Flags::default()
+            },
+            ..TermStyle::default()
+        };
+        let cfg = SelectionConfig::default();
+        let colors = |selected, inverse, cfg: &SelectionConfig| {
+            selected_colors(
+                selected,
+                styled(inverse),
+                default_fg,
+                default_bg,
+                &DEFAULT_PALETTE,
+                None,
+                cfg,
+            )
+        };
+
+        // False → None (the caller falls back to `cell_colors`).
+        assert_eq!(colors(Selected::False, false, &cfg), None);
+
+        // Selection with the default config → a plain reverse (bg = default fg,
+        // fg = default bg) — identical to `selection_colors(..., None, None)`.
+        assert_eq!(
+            colors(Selected::Selection, false, &cfg),
+            Some(CellColors {
+                fg: default_bg,
+                bg: Some(default_fg)
+            })
+        );
+
+        // Search with the default config → the amber background, black foreground
+        // (the `.color` arms).
+        assert_eq!(
+            colors(Selected::Search, false, &cfg),
+            Some(CellColors {
+                fg: black,
+                bg: Some(amber)
+            })
+        );
+
+        // SearchSelected with the default config → the salmon background, black
+        // foreground.
+        assert_eq!(
+            colors(Selected::SearchSelected, false, &cfg),
+            Some(CellColors {
+                fg: black,
+                bg: Some(salmon)
+            })
+        );
+
+        // A search config using CellForeground/CellBackground reuses the same
+        // inner switch as selection: non-inverse bg→fg(a), fg→fg(a); inverse
+        // swaps. This proves search shares the selection arm (not just `.color`).
+        let cell_cfg = SelectionConfig {
+            search_background: SelectionColor::CellForeground,
+            search_foreground: SelectionColor::CellForeground,
+            ..SelectionConfig::default()
+        };
+        assert_eq!(
+            colors(Selected::Search, false, &cell_cfg),
+            Some(CellColors { fg: a, bg: Some(a) })
+        );
+        // Inverse: CellForeground bg → bg_style(b), fg → final_bg(b).
+        assert_eq!(
+            colors(Selected::Search, true, &cell_cfg),
+            Some(CellColors { fg: b, bg: Some(b) })
         );
     }
 

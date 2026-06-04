@@ -252,3 +252,84 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-201930-372328-prompt.md` (design)
 - Result: `logs/codex-review/20260603-201930-372328-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The search-highlight color machinery is now in place.
+
+- `roastty/src/renderer/cell.rs`:
+  - the `Selected` enum (`False` / `Selection` / `Search` / `SearchSelected`,
+    upstream's `selected` enum);
+  - `SelectionConfig` gains four non-optional `search_*` fields
+    (`search_background`/`search_foreground`/`search_selected_background`/
+    `search_selected_foreground`) and a hand-written `Default` (replacing the
+    derived one): `background`/`foreground` stay `None` (so the existing
+    `SelectionConfig::default()` call sites keep their plain-reverse selection),
+    and the four search defaults are upstream's `config/Config.zig` values
+    (amber `#FFE082` / black search, salmon `#F2A57E` / black search-selected);
+  - `selected_colors(selected, …, config) -> Option<CellColors>`: `False → None`
+    (the caller keeps the base `cell_colors`, covering twist intact);
+    `Selection` → `selection_colors(…, config.background, config.foreground)`;
+    `Search` / `SearchSelected` → `selection_colors` with their non-optional
+    config wrapped in `Some`, so the plain-reverse `None` default never applies
+    — faithful to upstream's non-optional search config.
+  - `is_selected` and both row passes are unchanged (still selection-only,
+    calling `selection_colors` directly).
+
+Test (in `cell.rs`): `selected_colors_dispatches_selection_and_search` —
+`False → None`; `Selection` (default config) → the plain reverse
+(`bg = Some(default_fg)`, `fg = default_bg`); `Search` → `bg = Some(amber)`,
+`fg = black`; `SearchSelected` → `bg = Some(salmon)`, `fg = black`; and a
+`CellForeground` search config proving the search arm reuses the selection inner
+switch (non-inverse → `a`/`a`, inverse → `b`/`b`).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2845 passed, 0 failed (+1, no regressions; the
+  hand-written `Default` keeps the existing `SelectionConfig::default()` call
+  sites compiling and behaving identically).
+- `cargo build -p roastty` → no warnings (the `pub(crate)` dispatcher is
+  reachable in the library crate, so no dead-code warning despite no production
+  caller yet).
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+A search-highlighted cell's colors are now computable: `selected_colors` covers
+all four `Selected` states, reusing `selection_colors` for the three selected
+ones (the search arms being the selection arms with a non-optional config) and
+returning `None` for `False`. The four search defaults match upstream. The
+dispatcher returns the shared `CellColors`, ready for the passes to route
+through it once the search highlight ranges are derived.
+
+The remaining renderer-bridge work: deriving the `Search`/`SearchSelected`
+states from per-row search highlight ranges (not yet on `RunOptions`) and
+routing the passes through `selected_colors`; the lock-cursor glyph +
+under-cursor text recolor; the column-ordered decoration merge + link
+double-underline; and the **Metal upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design:
+`Selected` has the four upstream states; `SelectionConfig` carries the
+non-optional search/search-selected colors with the correct upstream defaults
+and a hand-written `Default` that preserves the existing selection behavior
+(`background`/`foreground` stay `None`); `selected_colors` is faithful
+(`False → None` preserving the base `cell_colors` path and covering twist,
+`Selection` using the optional selection config, `Search`/`SearchSelected`
+wrapping their non-optional configs in `Some` so the plain-reverse fallback
+cannot apply); and the row passes and `is_selected` are unchanged, as intended
+for this additive experiment. It confirmed the test covers the four dispatcher
+states, the upstream default search colors, and a non-color search config
+including inverse — enough to prove the search path reuses the same inner switch
+rather than only the hardcoded color arms — with the diff internal Rust only and
+no dead-code or ABI/header regression. Nothing needed to change before the
+result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-202132-099337-last-message.md`
