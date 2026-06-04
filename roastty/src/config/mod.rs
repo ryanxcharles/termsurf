@@ -1904,6 +1904,14 @@ pub(crate) struct FontShapingBreak {
     pub cursor: bool,
 }
 
+impl FontShapingBreak {
+    /// Format as a config entry (upstream's packed-struct branch): the `[no-]flag`
+    /// keywords comma-joined.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_flags(&[("cursor", self.cursor)]);
+    }
+}
+
 impl Default for FontShapingBreak {
     /// Upstream's field default `cursor: bool = true`.
     fn default() -> Self {
@@ -4408,6 +4416,25 @@ mod tests {
         assert_eq!(
             fmt(&|f| FontStyle::Name("bold".into()).format_entry(f)),
             "a = bold\n"
+        );
+    }
+
+    #[test]
+    fn font_shaping_break_format_entry() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        assert_eq!(
+            fmt(&|f| FontShapingBreak { cursor: true }.format_entry(f)),
+            "a = cursor\n"
+        );
+        assert_eq!(
+            fmt(&|f| FontShapingBreak { cursor: false }.format_entry(f)),
+            "a = no-cursor\n"
         );
     }
 }

@@ -1460,7 +1460,7 @@ are past the correctness-critical foundation.
 - [Experiment 506: the FontStyle union config formatter (font-style / font-style-bold / …)](506-config-font-style-format-entry.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 507: the FontShapingBreak packed-struct config formatter (font-shaping-break)](507-config-font-shaping-break-format-entry.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

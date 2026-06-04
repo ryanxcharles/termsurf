@@ -130,3 +130,42 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-162913-d507-prompt.md` (design)
 - Result: `logs/codex-review/20260604-162913-d507-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`format_entry(self, …)` was added to `FontShapingBreak`, using the `entry_flags`
+helper to write the single `cursor` field as `cursor` / `no-cursor` — exactly
+the upstream packed-struct branch. The new test
+`font_shaping_break_format_entry` covers both field states.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2993 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation faithfully uses the packed-struct formatter shape
+for the single `cursor` field — `cursor` when true, `no-cursor` when false
+(`Config.zig:8563`, `formatter.zig:98`); the test covers both field states;
+gates are clean. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-163053-r507-prompt.md` (result)
+- Result: `logs/codex-review/20260604-163053-r507-last-message.md` (result)
+
+## Conclusion
+
+`FontShapingBreak` — the second packed-struct/bool-keyword config formatter
+(after `ScrollToBottom`) — now formats its single flag faithfully. The remaining
+config-formatter work is `CustomShaderAnimation` and `MouseShiftCapture`, then
+the remaining generic field-dispatch cases (float `{d}`, optional recurse),
+`QuickTerminalSize`, and the full config loader, continuing toward the full
+config formatter and loader.
