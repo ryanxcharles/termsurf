@@ -1340,7 +1340,7 @@ are past the correctness-critical foundation.
 - [Experiment 446: the config TerminalColor type and its terminal-RGB conversion (TerminalColor, to_terminal_rgb)](446-config-terminal-color.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 447: the config BoldColor type and its terminal conversion (BoldColor, to_terminal)](447-config-bold-color.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

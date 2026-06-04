@@ -8,6 +8,7 @@
 // This config layer is consumed by later slices.
 
 use crate::terminal::color::Rgb;
+use crate::terminal::style::BoldColor as TerminalBoldColor;
 
 /// A config color value (upstream `Config.Color`): an RGB byte triple. The string
 /// parsing (named colors / hex) and the C extern struct are ported in later
@@ -48,6 +49,28 @@ impl TerminalColor {
         match self {
             TerminalColor::Color(c) => Some(c.to_terminal_rgb()),
             TerminalColor::CellForeground | TerminalColor::CellBackground => None,
+        }
+    }
+}
+
+/// The `bold-color` config (upstream `Config.BoldColor`): the color to use for
+/// bold text — either an explicit `Color` or the bright palette variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BoldColor {
+    /// An explicit color.
+    Color(Color),
+    /// Use the bright palette variant for bold text.
+    Bright,
+}
+
+impl BoldColor {
+    /// Convert to the terminal-native `BoldColor` (upstream
+    /// `Config.BoldColor.toTerminal`): an explicit `Color` resolves through
+    /// `to_terminal_rgb`; `Bright` maps to the terminal `Bright`.
+    pub(crate) fn to_terminal(self) -> TerminalBoldColor {
+        match self {
+            BoldColor::Color(c) => TerminalBoldColor::Color(c.to_terminal_rgb()),
+            BoldColor::Bright => TerminalBoldColor::Bright,
         }
     }
 }
@@ -348,10 +371,10 @@ impl OscColorReportFormat {
 #[cfg(test)]
 mod tests {
     use super::{
-        AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, Color,
-        CopyOnSelect, CustomShaderAnimation, FontShapingBreak, FontStyle, GraphemeWidthMethod,
-        MiddleClickAction, MouseShiftCapture, OscColorReportFormat, RightClickAction,
-        TerminalColor,
+        AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, BoldColor,
+        Color, CopyOnSelect, CustomShaderAnimation, FontShapingBreak, FontStyle,
+        GraphemeWidthMethod, MiddleClickAction, MouseShiftCapture, OscColorReportFormat,
+        RightClickAction, TerminalBoldColor, TerminalColor,
     };
     use crate::terminal::color::Rgb;
 
@@ -607,6 +630,32 @@ mod tests {
         assert_ne!(
             TerminalColor::Color(Color { r: 1, g: 2, b: 3 }),
             TerminalColor::Color(Color { r: 4, g: 5, b: 6 })
+        );
+        // `Copy` + `Eq`: a trivial round-trip.
+        let copied = explicit;
+        assert_eq!(explicit, copied);
+    }
+
+    #[test]
+    fn bold_color_converts_to_terminal() {
+        let explicit = BoldColor::Color(Color {
+            r: 10,
+            g: 20,
+            b: 30,
+        });
+        assert_eq!(
+            explicit.to_terminal(),
+            TerminalBoldColor::Color(Rgb::new(10, 20, 30))
+        );
+        assert_eq!(BoldColor::Bright.to_terminal(), TerminalBoldColor::Bright);
+
+        assert_ne!(
+            BoldColor::Bright,
+            BoldColor::Color(Color { r: 0, g: 0, b: 0 })
+        );
+        assert_ne!(
+            BoldColor::Color(Color { r: 1, g: 2, b: 3 }),
+            BoldColor::Color(Color { r: 4, g: 5, b: 6 })
         );
         // `Copy` + `Eq`: a trivial round-trip.
         let copied = explicit;

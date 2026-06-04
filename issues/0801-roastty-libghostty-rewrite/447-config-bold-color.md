@@ -181,3 +181,59 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-110447-d447-prompt.md` (design)
 - Result: `logs/codex-review/20260604-110447-d447-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The config `BoldColor` type and its terminal conversion are now live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) enum BoldColor { Color(Color), Bright }` (upstream
+  `Config.BoldColor`) and `BoldColor::to_terminal(self) -> TerminalBoldColor` —
+  the port of upstream's `toTerminal`:
+  `TerminalBoldColor::Color(c.to_terminal_rgb())` for an explicit color,
+  `TerminalBoldColor::Bright` for `Bright`. Added
+  `use crate::terminal::style::BoldColor as TerminalBoldColor;` (aliased to
+  disambiguate the config and terminal-native `BoldColor`).
+
+Test (in `config/mod.rs`): `bold_color_converts_to_terminal` —
+`BoldColor::Color(Color { 10, 20, 30 }).to_terminal() == TerminalBoldColor::Color(Rgb::new(10, 20, 30))`;
+`BoldColor::Bright.to_terminal() == TerminalBoldColor::Bright`; the variants
+distinct (`Bright != Color(_)`, two `Color(_)` differ); `Copy`/`Eq`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2935 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries `BoldColor` and its conversion to the
+terminal-native `BoldColor`, completing the trio of color config types built on
+the foundational `Color` value (Experiment 445): `Color`, the cell-relative
+`TerminalColor` (Experiment 446), and the bold-text `BoldColor`. Each resolves
+to the terminal's own color representation, with the `Config` struct, the string
+parsing, and the renderer's `DerivedConfig` wiring that calls these conversions
+deferred. The config-type family — now eight enums with consumers plus three
+color value types — remains a clean, gated way to advance the rewrite while the
+larger coupled subsystems stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `BoldColor { Color(Color), Bright }` faithfully
+ports the upstream config union; `to_terminal()` maps an explicit color through
+`Color::to_terminal_rgb()` and maps `Bright` to the existing terminal-native
+`BoldColor::Bright`; the `TerminalBoldColor` alias keeps the namespace
+distinction clear; and the test covers both conversion branches, distinctness,
+and value semantics. No public C ABI/header impact; nothing needed to change
+before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-110659-r447-prompt.md` (result)
+- Result: `logs/codex-review/20260604-110659-r447-last-message.md` (result)
