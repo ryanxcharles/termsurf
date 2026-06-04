@@ -517,10 +517,11 @@ pub(crate) fn add_run(
 }
 
 /// Assemble one viewport row's foreground text cells into `contents`. Derives the
-/// row's [`CellInfo`] slice ([`cell_infos`]) and per-column `fg_colors`
-/// ([`Style::resolve_fg`](crate::terminal::style::Style::resolve_fg) + `alpha`)
-/// from `row_cells`, then places every glyph of each [`ShapedRun`] via
-/// [`add_run`]. The per-row foreground body of upstream `rebuildCells`.
+/// row's [`CellInfo`] slice ([`cell_infos`]) and per-column `fg_colors` (each
+/// cell's [`cell_colors`] foreground + `alpha`, so the foreground is inverse-aware
+/// — reverse-video swaps the glyph color) from `row_cells`, then places every
+/// glyph of each [`ShapedRun`] via [`add_run`]. The per-row foreground body of
+/// upstream `rebuildCells`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rebuild_row(
     contents: &mut Contents,
@@ -529,6 +530,7 @@ pub(crate) fn rebuild_row(
     row_runs: &[ShapedRun],
     row_cells: &[RunCell],
     default_fg: Rgb,
+    default_bg: Rgb,
     palette: &Palette,
     bold: Option<BoldColor>,
     alpha: u8,
@@ -540,8 +542,16 @@ pub(crate) fn rebuild_row(
     let fg_colors: Vec<[u8; 4]> = row_cells
         .iter()
         .map(|cell| {
-            let rgb = cell.style.resolve_fg(default_fg, palette, bold);
-            [rgb.r, rgb.g, rgb.b, alpha]
+            let fg = cell_colors(
+                cell.style,
+                cell.codepoint,
+                default_fg,
+                default_bg,
+                palette,
+                bold,
+            )
+            .fg;
+            [fg.r, fg.g, fg.b, alpha]
         })
         .collect();
 
@@ -610,6 +620,7 @@ pub(crate) fn rebuild_viewport(
     grid: &mut SharedGrid,
     rows: &[RunOptions],
     default_fg: Rgb,
+    default_bg: Rgb,
     palette: &Palette,
     bold: Option<BoldColor>,
     alpha: u8,
@@ -620,7 +631,16 @@ pub(crate) fn rebuild_viewport(
         let y = u16::try_from(y).expect("viewport row fits u16");
 
         // Backgrounds first (behind the glyphs); needs no shaping or grid.
-        rebuild_bg_row(contents, y, &opts.cells, palette, alpha);
+        rebuild_bg_row(
+            contents,
+            y,
+            &opts.cells,
+            default_fg,
+            default_bg,
+            palette,
+            bold,
+            alpha,
+        );
 
         // Then the foreground: shape the row (this borrows the grid's resolver) —
         // `runs` is owned, releasing that borrow before `rebuild_row` borrows the
@@ -633,6 +653,7 @@ pub(crate) fn rebuild_viewport(
             &runs,
             &opts.cells,
             default_fg,
+            default_bg,
             palette,
             bold,
             alpha,
@@ -643,26 +664,36 @@ pub(crate) fn rebuild_viewport(
     Ok(())
 }
 
-/// Write one viewport row's background cells into `contents`. Each cell with an
-/// explicit background ([`Style::resolve_bg`](crate::terminal::style::Style::resolve_bg)
-/// → `Some`) paints a [`CellBg`] at its column with `alpha`; cells with the
-/// default background (`None`) are actively written transparent so a stale
-/// background from a prior rebuild cannot linger. The background half of upstream
-/// `rebuildCells`'s per-cell work.
+/// Write one viewport row's background cells into `contents`. Each cell's
+/// background comes from [`cell_colors`] (so reverse-video and the full-block
+/// twist are applied): a `Some` background paints a [`CellBg`] at its column with
+/// `alpha`; a default (`None`) background is actively written transparent so a
+/// stale background from a prior rebuild cannot linger. The background half of
+/// upstream `rebuildCells`'s per-cell work.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rebuild_bg_row(
     contents: &mut Contents,
     y: u16,
     row_cells: &[RunCell],
+    default_fg: Rgb,
+    default_bg: Rgb,
     palette: &Palette,
+    bold: Option<BoldColor>,
     alpha: u8,
 ) {
     let row = usize::from(y);
     for (col, cell) in row_cells.iter().enumerate() {
-        let bg = cell
-            .style
-            .resolve_bg(palette)
-            .map(|rgb| CellBg([rgb.r, rgb.g, rgb.b, alpha]))
-            .unwrap_or(CellBg([0, 0, 0, 0]));
+        let bg = cell_colors(
+            cell.style,
+            cell.codepoint,
+            default_fg,
+            default_bg,
+            palette,
+            bold,
+        )
+        .bg
+        .map(|rgb| CellBg([rgb.r, rgb.g, rgb.b, alpha]))
+        .unwrap_or(CellBg([0, 0, 0, 0]));
         *contents.bg_cell_mut(row, col) = bg;
     }
 }
@@ -1268,6 +1299,7 @@ mod tests {
             &[run],
             &row_cells,
             default_fg,
+            Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
             None,
             255,
@@ -1347,6 +1379,7 @@ mod tests {
             &[run],
             &row_cells,
             default_fg,
+            Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
             None,
             255,
@@ -1428,6 +1461,7 @@ mod tests {
             &mut shared,
             &rows,
             Rgb::new(200, 200, 200),
+            Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
             None,
             255,
@@ -1480,6 +1514,7 @@ mod tests {
             &mut shared,
             &rows,
             Rgb::new(200, 200, 200),
+            Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
             None,
             255,
@@ -1523,12 +1558,117 @@ mod tests {
         };
         let row_cells = [cell(Color::Palette(1)), cell(Color::None)];
 
-        rebuild_bg_row(&mut c, 0, &row_cells, &DEFAULT_PALETTE, 255);
+        rebuild_bg_row(
+            &mut c,
+            0,
+            &row_cells,
+            Rgb::new(200, 200, 200),
+            Rgb::new(0, 0, 0),
+            &DEFAULT_PALETTE,
+            None,
+            255,
+        );
 
         let p1 = DEFAULT_PALETTE[1];
         assert_eq!(*c.bg_cell(0, 0), CellBg([p1.r, p1.g, p1.b, 255]));
         // The default-background cell is cleared to transparent.
         assert_eq!(*c.bg_cell(0, 1), CellBg([0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn rebuild_viewport_applies_inverse() {
+        use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+        use crate::terminal::style::{Color, Flags, Style as TermStyle};
+
+        let mut shared = menlo_grid();
+        let mut c = Contents::default();
+        c.resize(grid(1, 1));
+
+        let a = Rgb::new(10, 20, 30);
+        let b = Rgb::new(40, 50, 60);
+        // 'A' with explicit fg/bg and the inverse flag set.
+        let cell = RunCell {
+            codepoint: 'A' as u32,
+            graphemes: vec![],
+            style: TermStyle {
+                fg_color: Color::Rgb(a),
+                bg_color: Color::Rgb(b),
+                flags: Flags {
+                    inverse: true,
+                    ..Flags::default()
+                },
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        let rows = vec![RunOptions {
+            cells: vec![cell],
+            ..Default::default()
+        }];
+
+        rebuild_viewport(
+            &mut c,
+            &mut shared,
+            &rows,
+            Rgb::new(200, 200, 200),
+            Rgb::new(0, 0, 0),
+            &DEFAULT_PALETTE,
+            None,
+            255,
+            false,
+            255,
+        )
+        .expect("rebuild_viewport");
+
+        // Inverse swaps: the glyph takes the background color, the bg cell takes
+        // the foreground color.
+        assert_eq!(c.fg_rows[1][0].color, [b.r, b.g, b.b, 255]);
+        assert_eq!(*c.bg_cell(0, 0), CellBg([a.r, a.g, a.b, 255]));
+    }
+
+    #[test]
+    fn rebuild_bg_row_applies_full_block_twist() {
+        use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+        use crate::terminal::style::{Color, Style as TermStyle};
+
+        let mut c = Contents::default();
+        c.resize(grid(1, 1));
+
+        let a = Rgb::new(11, 22, 33);
+        let b = Rgb::new(44, 55, 66);
+        // A full block (U+2588), non-inverse: the bg twist paints the cell with
+        // the foreground color via the background (proving the codepoint is
+        // threaded into `cell_colors`).
+        let cell = RunCell {
+            codepoint: 0x2588,
+            graphemes: vec![],
+            style: TermStyle {
+                fg_color: Color::Rgb(a),
+                bg_color: Color::Rgb(b),
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+
+        rebuild_bg_row(
+            &mut c,
+            0,
+            &[cell],
+            Rgb::new(200, 200, 200),
+            Rgb::new(0, 0, 0),
+            &DEFAULT_PALETTE,
+            None,
+            255,
+        );
+
+        // The full block paints its bg with the foreground color (a), not b.
+        assert_eq!(*c.bg_cell(0, 0), CellBg([a.r, a.g, a.b, 255]));
     }
 
     fn underline_opts(grid: &SharedGrid) -> RenderOptions {

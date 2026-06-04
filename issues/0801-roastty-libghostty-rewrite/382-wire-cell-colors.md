@@ -189,3 +189,70 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-193022-886775-prompt.md` (design)
 - Result: `logs/codex-review/20260603-193022-886775-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`cell_colors` is now wired into the row passes — a rebuild honors reverse-video
+and the full-block twist.
+
+- `roastty/src/renderer/cell.rs`:
+  - `rebuild_row` (new `default_bg` param): builds `fg_colors` from
+    `cell_colors(cell.style, cell.codepoint, default_fg, default_bg, palette, bold).fg`,
+    so the glyphs and decorations inherit the inverse-aware foreground.
+  - `rebuild_bg_row` (new `default_fg`/`default_bg`/`bold` params): writes each
+    background from `cell_colors(...).bg` (active transparent clear for `None`).
+  - `rebuild_viewport` (new `default_bg` param): threads the color config to
+    both.
+  - The `rebuild_row`/`rebuild_bg_row` doc comments now describe the
+    `cell_colors` color path; the existing test call sites are updated for the
+    new signatures.
+
+Tests (in `cell.rs`):
+
+- `rebuild_viewport_applies_inverse` — a 1×1 inverse cell `'A'` (`fg = a`,
+  `bg = b`): the glyph color is `b` and `bg_cell(0, 0)` is `a` (the swap flows
+  through both passes).
+- `rebuild_bg_row_applies_full_block_twist` — a non-inverse `U+2588` cell
+  (`fg = a`, `bg = b`): `bg_cell(0, 0)` is `a` (the twist paints the bg with the
+  foreground), proving `RunCell.codepoint` is threaded into `cell_colors`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2836 passed, 0 failed (+2, no regressions; existing
+  rebuild tests preserved with updated signatures).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The base per-cell color computation is now live in the rebuild: from a terminal
+screen, `rebuild_viewport` fills `Contents` with backgrounds and foreground
+(glyphs + decorations) whose colors honor reverse-video and the full-block
+twist.
+
+The remaining renderer-bridge work: the **selection/search** colors, the
+**minimum-contrast** adjustment, and **faint/dim alpha**; the lock-cursor
+glyph + under-cursor text recolor; the column-ordered decoration merge + link
+double-underline; and the **Metal upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved**. It
+confirmed the wiring is correct (`rebuild_row` builds `fg_colors` from
+`cell_colors(...).fg` so glyphs and decorations inherit the inverse-aware
+foreground; `rebuild_bg_row` writes from `.bg` with active transparent clears
+and threads `cell.codepoint`/`default_fg`/`default_bg`/`bold` correctly), and
+that the two new tests cover the important behavior (the viewport inverse test
+proves both passes consume swapped colors; the full-block background test proves
+the codepoint is threaded into `cell_colors`), with the existing call-site
+updates scoped and the gates covering regressions. Its one **Low** finding —
+that the `rebuild_row` doc comment overstated the full-block twist (which
+affects only `.bg`) — was fixed: the comment now says the foreground is
+inverse-aware, leaving the full-block wording to `rebuild_bg_row`.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-193521-504294-last-message.md`
