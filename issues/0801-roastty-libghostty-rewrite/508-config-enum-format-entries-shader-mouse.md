@@ -145,3 +145,47 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-163207-d508-prompt.md` (design)
 - Result: `logs/codex-review/20260604-163207-d508-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`keyword` + `format_entry` were added to `CustomShaderAnimation` and
+`MouseShiftCapture` (each in its existing `impl`), each `keyword` the exact
+upstream tag name — including the bool-aliased `false` / `true` — and
+`format_entry` writing `name = keyword\n`. The new test
+`enum_format_entries_shader_mouse` covers every variant. With these two, every
+plain config enum now has a `format_entry`.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2994 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the keyword mappings match the upstream tag names exactly for both
+enums, and `format_entry` preserves the generic enum output shape `name = tag\n`
+(`Config.zig:5244`/`:9100`, `formatter.zig:52`); the test covers every variant;
+gates are clean. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-163338-r508-prompt.md` (result)
+- Result: `logs/codex-review/20260604-163338-r508-last-message.md` (result)
+
+## Conclusion
+
+`CustomShaderAnimation` and `MouseShiftCapture` complete the plain-enum
+formatter sweep — every plain config enum (twenty-four across Experiments
+500–508) now has a `keyword` + `format_entry`, plus the `FontStyle` union
+(Exp 506) and the `FontShapingBreak` / `ScrollToBottom` packed structs (Exp
+507/499). The remaining config-formatter work is the generic field-dispatch
+cases (float `{d}`, optional recurse) and `QuickTerminalSize`
+(parseFloat-blocked), then the full config loader (per-field parser/formatter
+dispatch over the aggregate `Config`, `loadCli`, file I/O), continuing toward
+the full config formatter and loader.

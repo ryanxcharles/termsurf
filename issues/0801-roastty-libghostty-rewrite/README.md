@@ -1462,7 +1462,7 @@ are past the correctness-critical foundation.
 - [Experiment 507: the FontShapingBreak packed-struct config formatter (font-shaping-break)](507-config-font-shaping-break-format-entry.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 508: the last enum-keyword config formatters (CustomShaderAnimation / MouseShiftCapture)](508-config-enum-format-entries-shader-mouse.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

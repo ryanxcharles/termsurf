@@ -2006,6 +2006,20 @@ impl CustomShaderAnimation {
             CustomShaderAnimation::False => false,
         }
     }
+
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            CustomShaderAnimation::False => "false",
+            CustomShaderAnimation::True => "true",
+            CustomShaderAnimation::Always => "always",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
 }
 
 /// The `font-style*` config (upstream `FontStyle`): how a font style (bold,
@@ -2070,6 +2084,21 @@ impl MouseShiftCapture {
                 None => matches!(self, MouseShiftCapture::True),
             },
         }
+    }
+
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            MouseShiftCapture::False => "false",
+            MouseShiftCapture::True => "true",
+            MouseShiftCapture::Always => "always",
+            MouseShiftCapture::Never => "never",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
     }
 }
 
@@ -4436,5 +4465,31 @@ mod tests {
             fmt(&|f| FontShapingBreak { cursor: false }.format_entry(f)),
             "a = no-cursor\n"
         );
+    }
+
+    #[test]
+    fn enum_format_entries_shader_mouse() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        for (variant, kw) in [
+            (CustomShaderAnimation::False, "false"),
+            (CustomShaderAnimation::True, "true"),
+            (CustomShaderAnimation::Always, "always"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (MouseShiftCapture::False, "false"),
+            (MouseShiftCapture::True, "true"),
+            (MouseShiftCapture::Always, "always"),
+            (MouseShiftCapture::Never, "never"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
     }
 }
