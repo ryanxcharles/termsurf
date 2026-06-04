@@ -1257,6 +1257,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 405: the background-opacity-cells alpha branch](405-background-opacity-cells.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 406: the foreground-cell buffer upload (sync_from_array_lists)](406-sync-from-array-lists.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
