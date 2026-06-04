@@ -147,6 +147,40 @@ impl ShellIntegration {
     }
 }
 
+/// The `shell-integration-features` config (upstream `ShellIntegrationFeatures`):
+/// which features the injected shell integration provides. Defaults: `cursor`,
+/// `title`, `path` are `true`; `sudo`, `ssh_env`, `ssh_terminfo` are `false`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShellIntegrationFeatures {
+    /// Shell cursor reporting.
+    pub cursor: bool,
+    /// `sudo` wrapping.
+    pub sudo: bool,
+    /// Window-title updates.
+    pub title: bool,
+    /// SSH environment propagation (upstream `ssh-env`).
+    pub ssh_env: bool,
+    /// SSH terminfo install (upstream `ssh-terminfo`).
+    pub ssh_terminfo: bool,
+    /// PATH adjustments.
+    pub path: bool,
+}
+
+impl Default for ShellIntegrationFeatures {
+    /// Upstream's field defaults: `cursor`, `title`, `path` are `true`; `sudo`,
+    /// `ssh_env`, `ssh_terminfo` are `false`.
+    fn default() -> Self {
+        Self {
+            cursor: true,
+            sudo: false,
+            title: true,
+            ssh_env: false,
+            ssh_terminfo: false,
+            path: true,
+        }
+    }
+}
+
 /// The color space the window renders in (upstream `WindowColorspace`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WindowColorspace {
@@ -468,7 +502,7 @@ mod tests {
         Color, CopyOnSelect, CustomShaderAnimation, FontShapingBreak, FontStyle,
         GraphemeWidthMethod, MiddleClickAction, MouseShiftCapture, NotifyOnCommandFinish,
         NotifyOnCommandFinishAction, OscColorReportFormat, RightClickAction, ScrollToBottom,
-        ShellIntegration, TerminalBoldColor, TerminalColor,
+        ShellIntegration, ShellIntegrationFeatures, TerminalBoldColor, TerminalColor,
     };
     use crate::terminal::color::Rgb;
 
@@ -547,6 +581,39 @@ mod tests {
         // `Copy` + `Eq`: a trivial round-trip.
         let copied = off;
         assert_eq!(off, copied);
+    }
+
+    #[test]
+    fn shell_integration_features_default_mixed_flags() {
+        let d = ShellIntegrationFeatures::default();
+        assert!(d.cursor);
+        assert!(!d.sudo);
+        assert!(d.title);
+        assert!(!d.ssh_env);
+        assert!(!d.ssh_terminfo);
+        assert!(d.path);
+
+        // All flags flipped from the default.
+        let flipped = ShellIntegrationFeatures {
+            cursor: false,
+            sudo: true,
+            title: false,
+            ssh_env: true,
+            ssh_terminfo: true,
+            path: false,
+        };
+        assert_ne!(flipped, d);
+        // The flags are independent: differing only in `sudo` is `!=`.
+        assert_ne!(
+            ShellIntegrationFeatures {
+                sudo: true,
+                ..ShellIntegrationFeatures::default()
+            },
+            d
+        );
+        // `Copy` + `Eq`: a trivial round-trip.
+        let copied = flipped;
+        assert_eq!(flipped, copied);
     }
 
     #[test]

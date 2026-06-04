@@ -181,3 +181,61 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-112519-d452-prompt.md` (design)
 - Result: `logs/codex-review/20260604-112519-d452-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The shell-integration-features config type is now live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) struct ShellIntegrationFeatures { pub cursor, sudo, title, ssh_env, ssh_terminfo, path: bool }`
+  (upstream `ShellIntegrationFeatures`; the hyphenated `ssh-env` /
+  `ssh-terminfo` map to `ssh_env` / `ssh_terminfo`) with a hand-written
+  `impl Default` (`cursor`/`title`/`path` `true`;
+  `sudo`/`ssh_env`/`ssh_terminfo` `false`) — upstream's mixed field defaults (a
+  derived `Default` would make every flag `false`). No method — the termio
+  injection reads the flags directly.
+
+Test (in `config/mod.rs`): `shell_integration_features_default_mixed_flags` —
+`default()` has `cursor`/`title`/`path` `true` and
+`sudo`/`ssh_env`/`ssh_terminfo` `false`; an all-flipped value differs from the
+default; the flags are independent (`{ sudo: true, ..default() } != default()`);
+`Copy`/`Eq`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2940 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries `ShellIntegrationFeatures` — the companion to
+Experiment 451's `ShellIntegration`, completing the shell-integration config
+pair (which shell, and which features). It is the fourth flag struct (after
+`FontShapingBreak`, `ScrollToBottom`, `NotifyOnCommandFinishAction`) with
+hand-written intrinsic field defaults, and the first with mixed (`true` and
+`false`) per-field defaults. The string parsing, the `Config` struct, and the
+termio shell-integration injection that reads the flags stay deferred. The
+config-type family — now thirteen enums/flag-structs with consumers plus three
+color value types — remains a clean, gated way to advance the rewrite while the
+larger coupled subsystems stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `ShellIntegrationFeatures` faithfully ports all
+six upstream flags with the correct Rust names for `ssh-env` / `ssh-terminfo`;
+the hand-written `Default` preserves the upstream mixed defaults
+(`cursor`/`title`/`path = true`, the other three `false`); no helper method is
+needed (field consumption belongs in the later termio injection port); and the
+test covers the mixed default, value semantics, and flag independence. No public
+C ABI/header impact; nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-112709-r452-prompt.md` (result)
+- Result: `logs/codex-review/20260604-112709-r452-last-message.md` (result)

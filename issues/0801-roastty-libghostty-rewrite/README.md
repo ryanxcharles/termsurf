@@ -1350,7 +1350,7 @@ are past the correctness-critical foundation.
 - [Experiment 451: the shell-integration config enum and its enabled predicate (ShellIntegration, enabled)](451-config-shell-integration.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 452: the shell-integration-features config type (ShellIntegrationFeatures)](452-config-shell-integration-features.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
