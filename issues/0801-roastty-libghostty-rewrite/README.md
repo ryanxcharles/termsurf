@@ -1454,7 +1454,7 @@ are past the correctness-critical foundation.
 - [Experiment 503: the fullscreen-style enum-keyword config formatters (Fullscreen / NonNativeFullscreen)](503-config-enum-format-entries-fullscreen.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 504: the background-image enum-keyword config formatters (BackgroundImageFit / BackgroundImagePosition)](504-config-enum-format-entries-bgimage.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

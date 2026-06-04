@@ -160,3 +160,45 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-161835-d504-prompt.md` (design)
 - Result: `logs/codex-review/20260604-161835-d504-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`keyword` + `format_entry` were added for the two background-image config enums
+(`BackgroundImageFit`, `BackgroundImagePosition`), each `keyword` the exact
+upstream tag name — including the kebab-case position tags — and `format_entry`
+writing `name = keyword\n`. The new test `enum_format_entries_bgimage` covers
+every variant.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2990 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the keyword mappings match the upstream `BackgroundImageFit` and
+`BackgroundImagePosition` tags exactly, and `format_entry` preserves the generic
+enum output shape `name = tag\n` (`Config.zig:9611`/`:9625`,
+`formatter.zig:52`); the test covers every variant; gates are clean. "Approved
+with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-162013-r504-prompt.md` (result)
+- Result: `logs/codex-review/20260604-162013-r504-last-message.md` (result)
+
+## Conclusion
+
+The two background-image config enums now format their keywords (seventeen
+config enums total across Experiments 500–504). The next slices can finish the
+remaining config enums (`OscColorReportFormat`, `ConfirmCloseSurface`,
+`LinkPreviews`, `WindowSubtitle`, `WindowPaddingColor`, `FontStyle`,
+`FontShapingBreak`, `CustomShaderAnimation`, `MouseShiftCapture`), then the
+remaining generic field-dispatch cases (float `{d}`, optional recurse), then the
+full config loader, continuing toward the full config formatter and loader.

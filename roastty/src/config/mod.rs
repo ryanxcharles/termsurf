@@ -1792,6 +1792,46 @@ pub(crate) enum BackgroundImagePosition {
     Center,
 }
 
+impl BackgroundImageFit {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            BackgroundImageFit::Contain => "contain",
+            BackgroundImageFit::Cover => "cover",
+            BackgroundImageFit::Stretch => "stretch",
+            BackgroundImageFit::None => "none",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+impl BackgroundImagePosition {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            BackgroundImagePosition::TopLeft => "top-left",
+            BackgroundImagePosition::TopCenter => "top-center",
+            BackgroundImagePosition::TopRight => "top-right",
+            BackgroundImagePosition::CenterLeft => "center-left",
+            BackgroundImagePosition::CenterCenter => "center-center",
+            BackgroundImagePosition::CenterRight => "center-right",
+            BackgroundImagePosition::BottomLeft => "bottom-left",
+            BackgroundImagePosition::BottomCenter => "bottom-center",
+            BackgroundImagePosition::BottomRight => "bottom-right",
+            BackgroundImagePosition::Center => "center",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
 /// The `font-shaping-break` config (upstream `FontShapingBreak`): which
 /// boundaries break a shaping run. `cursor` (default `true`) breaks the run
 /// around the cursor.
@@ -4178,6 +4218,39 @@ mod tests {
             (NonNativeFullscreen::True, "true"),
             (NonNativeFullscreen::VisibleMenu, "visible-menu"),
             (NonNativeFullscreen::PaddedNotch, "padded-notch"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+    }
+
+    #[test]
+    fn enum_format_entries_bgimage() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        for (variant, kw) in [
+            (BackgroundImageFit::Contain, "contain"),
+            (BackgroundImageFit::Cover, "cover"),
+            (BackgroundImageFit::Stretch, "stretch"),
+            (BackgroundImageFit::None, "none"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (BackgroundImagePosition::TopLeft, "top-left"),
+            (BackgroundImagePosition::TopCenter, "top-center"),
+            (BackgroundImagePosition::TopRight, "top-right"),
+            (BackgroundImagePosition::CenterLeft, "center-left"),
+            (BackgroundImagePosition::CenterCenter, "center-center"),
+            (BackgroundImagePosition::CenterRight, "center-right"),
+            (BackgroundImagePosition::BottomLeft, "bottom-left"),
+            (BackgroundImagePosition::BottomCenter, "bottom-center"),
+            (BackgroundImagePosition::BottomRight, "bottom-right"),
+            (BackgroundImagePosition::Center, "center"),
         ] {
             assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
         }
