@@ -103,6 +103,14 @@ impl Style {
         }
     }
 
+    /// Resolve this cell's underline color to an [`Rgb`], or `None` for the
+    /// default (`Color::None`, meaning "use the foreground"). A `pub(crate)`
+    /// wrapper over the (terminal-internal) [`Self::underline_color`] so the
+    /// renderer can color underlines.
+    pub(crate) fn resolve_underline_color(self, palette: &Palette) -> Option<Rgb> {
+        self.underline_color(palette)
+    }
+
     pub(super) fn formatter_vt(&self) -> VtFormatter<'_> {
         VtFormatter {
             style: self,
@@ -842,6 +850,33 @@ mod tests {
             ..Style::default()
         };
         assert_eq!(rgb_bg.resolve_bg(&DEFAULT_PALETTE), Some(rgb));
+    }
+
+    #[test]
+    fn resolve_underline_color_delegates() {
+        // Color::None -> None (use the foreground).
+        assert_eq!(
+            Style::default().resolve_underline_color(&DEFAULT_PALETTE),
+            None
+        );
+
+        // Color::Palette(3) -> palette[3].
+        let palette_uc = Style {
+            underline_color: Color::Palette(3),
+            ..Style::default()
+        };
+        assert_eq!(
+            palette_uc.resolve_underline_color(&DEFAULT_PALETTE),
+            Some(DEFAULT_PALETTE[3])
+        );
+
+        // Color::Rgb(x) -> x.
+        let rgb = Rgb::new(12, 34, 56);
+        let rgb_uc = Style {
+            underline_color: Color::Rgb(rgb),
+            ..Style::default()
+        };
+        assert_eq!(rgb_uc.resolve_underline_color(&DEFAULT_PALETTE), Some(rgb));
     }
 
     #[test]

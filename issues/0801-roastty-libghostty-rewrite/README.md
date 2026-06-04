@@ -1200,7 +1200,7 @@ are past the correctness-critical foundation.
 - [Experiment 376: strikethrough and overline decorations](376-add-strike-overline.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 377: exposing underline-color resolution](377-resolve-underline-color.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

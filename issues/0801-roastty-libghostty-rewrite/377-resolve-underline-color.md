@@ -129,3 +129,56 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-185851-606770-prompt.md` (design)
 - Result: `logs/codex-review/20260603-185851-606770-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The renderer can now resolve a cell's underline color.
+
+- `roastty/src/terminal/style.rs`:
+  `Style::resolve_underline_color(self, palette) -> Option<Rgb>` added as a
+  `pub(crate)` wrapper over the (still `pub(super)`) `Style::underline_color` —
+  a pure pass-through (`Color::None → None`, `Palette(idx) → palette[idx]`,
+  `Rgb(rgb) → rgb`). The `None ⇒ foreground` fallback stays the caller's
+  (`unwrap_or(fg)`).
+
+Test (in `style.rs`): `resolve_underline_color_delegates` asserts `None → None`,
+`Color::Palette(3) → DEFAULT_PALETTE[3]`, and `Color::Rgb(x) → x`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2829 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates clean; `git diff --check` clean.
+
+## Conclusion
+
+All three foreground color resolutions are now exposed to the renderer:
+`resolve_fg` (Experiment 370), `resolve_bg` (Experiment 373), and
+`resolve_underline_color` (this experiment). The decoration integration has
+every color input it needs — underlines color with
+`resolve_underline_color(palette) .unwrap_or(fg)`, strikethrough/overline with
+the foreground.
+
+The remaining renderer-bridge work: the **decoration integration** (wire the
+decoration writers into the per-row pass — for each cell, color and add the
+underline/strikethrough/overline that its flags request); the **cursor** cell;
+the renderer-layer **color adjustments** (reverse-video, selection,
+min-contrast, faint/dim alpha, default-bg fill, opacity); and the **Metal
+upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `resolve_underline_color` is a faithful one-line
+pass-through to the existing `underline_color` resolver, that the underlying
+method stays `pub(super)` so the only new surface is the intended `pub(crate)`
+wrapper, and that the test covers the wrapper's complete behavior (`None`,
+palette lookup, RGB passthrough) with the caller-side `None → foreground`
+fallback correctly deferred. Nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-190012-781174-last-message.md`
