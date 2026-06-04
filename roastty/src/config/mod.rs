@@ -7,6 +7,8 @@
 #![allow(dead_code)]
 // This config layer is consumed by later slices.
 
+mod string;
+
 use crate::terminal::color::{Palette as TerminalPalette, PaletteMask, Rgb, DEFAULT_PALETTE};
 use crate::terminal::style::BoldColor as TerminalBoldColor;
 

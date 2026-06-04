@@ -348,3 +348,57 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-141313-d484-prompt.md` (design)
 - Result: `logs/codex-review/20260604-141313-d484-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The new `roastty/src/config/string.rs` module was implemented exactly as the
+(folded-in) design: `InvalidString`, `codepoint_iterator` / `CodepointIterator`
+(the `\\`-vs-UTF-8 dispatch, the end-of-input `None`, and the decode-failure
+advance matching upstream's `defer self.i += cp_len`), `parse_escape_sequence`
+(the single-char escapes, the exactly-two-digit `\x`, the `\u{...}` codepoint
+with all the failure cases), `utf8_sequence_length`, and `hex_digit`. It is
+wired into `config/mod.rs` via `mod string;`. Three tests cover the upstream
+cases, the single-char escapes, the `\x` / `\u{...}` valid and error cases, the
+lone-backslash and invalid-escape failures, and an invalid-UTF-8 raw-bytes case.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2967 passed, 0 failed (three new tests; no
+  regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean (the module doc cites "upstream `config/string.zig`", not the literal
+  name); `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches upstream `CodepointIterator` (backslash
+dispatch through the escape parser, Zig-compatible UTF-8 sequence-length and
+decode validation, escape failures collapsing to `InvalidString`, and the
+decode-failure advance now matching `defer self.i += cp_len` —
+`string.zig:49`/`:63`); the escape parser tracks Zig's `parseEscapeSequence` for
+the simple escapes, the exact two-digit `\x`, the `\u{...}` parsing, the offset
+advancement, and the invalid cases; the tests cover the upstream cases plus the
+important invalid-escape and UTF-8 failure paths; gates are clean. "Approved
+with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-141751-r484-prompt.md` (result)
+- Result: `logs/codex-review/20260604-141751-r484-last-message.md` (result)
+
+## Conclusion
+
+The config string codepoint iterator (upstream `config/string.zig`) is ported as
+a reusable `config::string` module — escape-aware codepoint iteration with a
+faithful port of Zig's `parseEscapeSequence`. This unblocks `SelectionWordChars`
+(which reads escape-laden boundary strings) and any other string-literal config
+value. The next slice can port `SelectionWordChars::parse_cli` on top of this
+iterator, or another self-contained config value type / helper (e.g. the
+byte-array `parse` variant, or a faithful `parseFloat` to unblock
+`QuickTerminalSize`), continuing toward the per-field parser dispatch and the
+full config loader.

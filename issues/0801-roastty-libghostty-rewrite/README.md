@@ -1414,7 +1414,7 @@ are past the correctness-critical foundation.
 - [Experiment 483: the config RepeatableString CLI parser (RepeatableString::parse_cli)](483-config-repeatable-string-parse-cli.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 484: the config string codepoint iterator (config::string::CodepointIterator)](484-config-string-codepoint-iterator.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
