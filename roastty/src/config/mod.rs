@@ -1211,6 +1211,24 @@ impl ShellIntegration {
     pub(crate) fn enabled(self) -> bool {
         !matches!(self, ShellIntegration::None)
     }
+
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            ShellIntegration::None => "none",
+            ShellIntegration::Detect => "detect",
+            ShellIntegration::Bash => "bash",
+            ShellIntegration::Elvish => "elvish",
+            ShellIntegration::Fish => "fish",
+            ShellIntegration::Nushell => "nushell",
+            ShellIntegration::Zsh => "zsh",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
 }
 
 /// The `shell-integration-features` config (upstream `ShellIntegrationFeatures`):
@@ -1785,6 +1803,20 @@ impl CopyOnSelect {
     pub(crate) fn enabled(self) -> bool {
         !matches!(self, CopyOnSelect::False)
     }
+
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            CopyOnSelect::False => "false",
+            CopyOnSelect::True => "true",
+            CopyOnSelect::Clipboard => "clipboard",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
 }
 
 /// The `right-click-action` config (upstream `RightClickAction`): what a
@@ -1803,6 +1835,24 @@ pub(crate) enum RightClickAction {
     ContextMenu,
 }
 
+impl RightClickAction {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            RightClickAction::Ignore => "ignore",
+            RightClickAction::Paste => "paste",
+            RightClickAction::Copy => "copy",
+            RightClickAction::CopyOrPaste => "copy-or-paste",
+            RightClickAction::ContextMenu => "context-menu",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
 /// The `middle-click-action` config (upstream `MiddleClickAction`): what a
 /// middle-click does. The `Config` default is `PrimaryPaste`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1811,6 +1861,21 @@ pub(crate) enum MiddleClickAction {
     PrimaryPaste,
     /// No action on middle-click.
     Ignore,
+}
+
+impl MiddleClickAction {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            MiddleClickAction::PrimaryPaste => "primary-paste",
+            MiddleClickAction::Ignore => "ignore",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
 }
 
 /// The `osc-color-report-format` config (upstream `OSCColorReportFormat`): the
@@ -3780,5 +3845,68 @@ mod tests {
             .format_entry(f)),
             "a = bell,no-notify\n"
         );
+    }
+
+    #[test]
+    fn enum_format_entries() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        // CopyOnSelect.
+        assert_eq!(fmt(&|f| CopyOnSelect::False.format_entry(f)), "a = false\n");
+        assert_eq!(fmt(&|f| CopyOnSelect::True.format_entry(f)), "a = true\n");
+        assert_eq!(
+            fmt(&|f| CopyOnSelect::Clipboard.format_entry(f)),
+            "a = clipboard\n"
+        );
+
+        // MiddleClickAction.
+        assert_eq!(
+            fmt(&|f| MiddleClickAction::PrimaryPaste.format_entry(f)),
+            "a = primary-paste\n"
+        );
+        assert_eq!(
+            fmt(&|f| MiddleClickAction::Ignore.format_entry(f)),
+            "a = ignore\n"
+        );
+
+        // RightClickAction.
+        assert_eq!(
+            fmt(&|f| RightClickAction::Ignore.format_entry(f)),
+            "a = ignore\n"
+        );
+        assert_eq!(
+            fmt(&|f| RightClickAction::Paste.format_entry(f)),
+            "a = paste\n"
+        );
+        assert_eq!(
+            fmt(&|f| RightClickAction::Copy.format_entry(f)),
+            "a = copy\n"
+        );
+        assert_eq!(
+            fmt(&|f| RightClickAction::CopyOrPaste.format_entry(f)),
+            "a = copy-or-paste\n"
+        );
+        assert_eq!(
+            fmt(&|f| RightClickAction::ContextMenu.format_entry(f)),
+            "a = context-menu\n"
+        );
+
+        // ShellIntegration.
+        for (variant, kw) in [
+            (ShellIntegration::None, "none"),
+            (ShellIntegration::Detect, "detect"),
+            (ShellIntegration::Bash, "bash"),
+            (ShellIntegration::Elvish, "elvish"),
+            (ShellIntegration::Fish, "fish"),
+            (ShellIntegration::Nushell, "nushell"),
+            (ShellIntegration::Zsh, "zsh"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
     }
 }

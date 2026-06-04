@@ -201,3 +201,45 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-155650-d500-prompt.md` (design)
 - Result: `logs/codex-review/20260604-155650-d500-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`keyword` + `format_entry` were added for the four config enums (`CopyOnSelect`,
+`MiddleClickAction`, `RightClickAction`, `ShellIntegration`), each `keyword` the
+exact upstream tag name and `format_entry` writing `name = keyword\n`. The new
+test `enum_format_entries` covers every variant of all four enums.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2986 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implemented keyword mappings match the upstream enum tag names
+exactly (incl. the kebab-case tags and lowercase `false` / `true`), and
+`format_entry` correctly emits the generic enum-branch shape `name = tag\n`
+(`formatter.zig:52`, `Config.zig:8619`/`:8633`/`:8652`/`:8661`); the test covers
+every variant across all four enums; gates are clean. "Approved with no
+findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-155945-r500-prompt.md` (result)
+- Result: `logs/codex-review/20260604-155945-r500-last-message.md` (result)
+
+## Conclusion
+
+The generic enum-keyword format (`{t}`) is ported for four config enums via a
+`keyword()` method (the exact upstream tag name) plus `format_entry`. This
+establishes the pattern for the remaining config enums' formatters — the next
+slices can extend it to the other enums (`ClipboardAccess`, `WindowColorspace`,
+`AlphaBlending`, the `Mac*` enums, …) and the remaining generic field-dispatch
+cases (float `{d}`, optional recurse), then the full config loader, continuing
+toward the full config formatter and loader.

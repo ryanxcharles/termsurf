@@ -1446,7 +1446,7 @@ are past the correctness-critical foundation.
 - [Experiment 499: the packed-struct flag formatters (ShellIntegrationFeatures / ScrollToBottom / NotifyOnCommandFinishAction)](499-config-flag-struct-format-entries.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 500: the enum-keyword config formatters (CopyOnSelect / MiddleClickAction / RightClickAction / ShellIntegration)](500-config-enum-format-entries.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
