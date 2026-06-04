@@ -193,3 +193,57 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-104218-d442-prompt.md` (design)
 - Result: `logs/codex-review/20260604-104218-d442-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The copy-on-select config enum and its enabled predicate are now live.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) enum CopyOnSelect { False, True, Clipboard }` (upstream
+  `CopyOnSelect`) and `CopyOnSelect::enabled(self) -> bool`
+  (`!matches!(self, CopyOnSelect::False)`), the extraction of upstream's
+  `Surface` `copy_on_select != .false` guard. The module-level doc was broadened
+  to "the leaf config types consumed by roastty subsystems (renderer, font,
+  terminal, input, clipboard)".
+
+Test (in `config/mod.rs`): `copy_on_select_enabled_unless_false` —
+`False.enabled() == false`, `True.enabled() == true`,
+`Clipboard.enabled() == true`; the variants distinct, `Copy`/`Eq`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2929 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now carries `CopyOnSelect` and its enabled predicate — the
+sixth config slice in a row to land its consumer logic alongside the type, and
+the first to reach the clipboard subsystem. With renderer, font, terminal-mode,
+input, and clipboard consumers now represented, the module doc was broadened to
+a neutral "consumed by roastty subsystems". The `Config` struct / parsing, the
+clipboard-_target_ selection (the `.clipboard` vs `.true` routing, which needs
+the apprt `Clipboard` type), and the surface call sites stay deferred. The
+config-type family remains a clean, gated way to advance the rewrite while the
+larger coupled subsystems stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `CopyOnSelect { False, True, Clipboard }`
+faithfully maps upstream `false`/`true`/`clipboard`; `enabled()` correctly
+captures the `!= .false` guard (only `False` disables; `True` and `Clipboard`
+enabled); deferring the OS-dependent `Config` default and the clipboard-target
+selection is the right scope; and the module-doc Low is resolved by broadening
+the consumer list. It judged the test adequate for the slice. No public C
+ABI/header impact; nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-104434-r442-prompt.md` (result)
+- Result: `logs/codex-review/20260604-104434-r442-last-message.md` (result)

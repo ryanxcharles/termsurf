@@ -1,8 +1,9 @@
 //! Configuration types.
 //!
 //! The minimal entry point of the config layer: the leaf config types consumed
-//! by the renderer / terminal bridge. The broader config subsystem (parsing, the
-//! full `Config` struct, the rest of the config keys) is ported in later slices.
+//! by roastty subsystems (renderer, font, terminal, input, clipboard). The
+//! broader config subsystem (parsing, the full `Config` struct, the rest of the
+//! config keys) is ported in later slices.
 #![allow(dead_code)]
 // This config layer is consumed by later slices.
 
@@ -231,10 +232,31 @@ impl MouseShiftCapture {
     }
 }
 
+/// The `copy-on-select` config (upstream `CopyOnSelect`): whether selecting text
+/// copies it, and to which clipboards. The `Config` default is OS-dependent
+/// (`True` on macOS / Linux, `False` elsewhere).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CopyOnSelect {
+    /// Copy-on-select disabled.
+    False,
+    /// Enabled; the selection goes to the selection clipboard.
+    True,
+    /// Enabled; the selection goes to both the system and selection clipboards.
+    Clipboard,
+}
+
+impl CopyOnSelect {
+    /// Whether copy-on-select is active at all (upstream's `copy_on_select !=
+    /// .false` guard): `False` is off; `True` and `Clipboard` are on.
+    pub(crate) fn enabled(self) -> bool {
+        !matches!(self, CopyOnSelect::False)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition,
+        AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, CopyOnSelect,
         CustomShaderAnimation, FontShapingBreak, FontStyle, GraphemeWidthMethod, MouseShiftCapture,
     };
 
@@ -385,6 +407,19 @@ mod tests {
         assert_ne!(False, True);
         // `Copy` + `Eq`: a trivial round-trip.
         let c = Always;
+        let copied = c;
+        assert_eq!(c, copied);
+    }
+
+    #[test]
+    fn copy_on_select_enabled_unless_false() {
+        assert!(!CopyOnSelect::False.enabled());
+        assert!(CopyOnSelect::True.enabled());
+        assert!(CopyOnSelect::Clipboard.enabled());
+
+        assert_ne!(CopyOnSelect::True, CopyOnSelect::Clipboard);
+        // `Copy` + `Eq`: a trivial round-trip.
+        let c = CopyOnSelect::Clipboard;
         let copied = c;
         assert_eq!(c, copied);
     }
