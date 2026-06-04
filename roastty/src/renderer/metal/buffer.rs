@@ -131,6 +131,56 @@ impl<T: MetalBufferElement> MetalBuffer<T> {
         Ok(())
     }
 
+    /// Like [`MetalBuffer::sync`] but takes data from a list of lists rather than
+    /// a single slice, concatenating them contiguously into the buffer. Returns
+    /// the total number of items synced. This is the foreground-cell upload
+    /// (`Contents::fg_rows` → the cell-text buffer): each row's vertices are an
+    /// owned list, and they are packed end-to-end in list order.
+    pub(crate) fn sync_from_array_lists(
+        &mut self,
+        options: MetalBufferOptions<'_>,
+        lists: &[Vec<T>],
+    ) -> Result<usize, MetalBufferError> {
+        let total_len: usize = lists.iter().map(Vec::len).sum();
+        let required_bytes = byte_len::<T>(total_len)?;
+        if required_bytes > self.capacity_bytes {
+            let new_capacity_items = total_len
+                .checked_mul(2)
+                .ok_or(MetalBufferError::ByteLengthOverflow)?;
+            let new_capacity_bytes = byte_len::<T>(new_capacity_items)?;
+            let new_buffer = options
+                .device
+                .newBufferWithLength_options(new_capacity_bytes, options.resource_options.to_objc())
+                .ok_or(MetalBufferError::BufferCreationFailed)?;
+
+            self.buffer = new_buffer;
+            self.resource_options = options.resource_options;
+            self.capacity_items = new_capacity_items;
+            self.capacity_bytes = new_capacity_bytes;
+        }
+
+        if required_bytes > 0 {
+            let dst = self.buffer.contents().as_ptr().cast::<u8>();
+            let mut offset = 0usize;
+            for list in lists {
+                if list.is_empty() {
+                    continue;
+                }
+                let src = data_as_bytes(list.as_slice());
+                unsafe {
+                    std::ptr::copy_nonoverlapping(src.as_ptr(), dst.add(offset), src.len());
+                }
+                offset += src.len();
+            }
+
+            if requires_did_modify(self.resource_options, required_bytes) {
+                self.buffer.didModifyRange(NSRange::new(0, required_bytes));
+            }
+        }
+
+        Ok(total_len)
+    }
+
     pub(crate) fn capacity_items(&self) -> usize {
         self.capacity_items
     }
@@ -302,6 +352,62 @@ mod tests {
         assert_eq!(buffer.capacity_items(), 6);
         assert_eq!(buffer.capacity_bytes(), 24);
         assert_eq!(buffer.read_bytes(3), u32_bytes(&[4, 5, 6]));
+    }
+
+    #[test]
+    fn sync_from_array_lists_concatenates_in_order_skipping_empty() {
+        let device = metal_device();
+        let mut buffer =
+            MetalBuffer::<u32>::new(shared_options(&device), 5).expect("create empty buffer");
+
+        let lists = vec![vec![1_u32, 2], vec![], vec![3, 4, 5]];
+        let count = buffer
+            .sync_from_array_lists(shared_options(&device), &lists)
+            .expect("sync from array lists");
+
+        // The total fits the buffer (no reallocation), the rows are packed
+        // contiguously in order, the interspersed empty list contributes nothing,
+        // and the return is the total item count.
+        assert_eq!(count, 5);
+        assert_eq!(buffer.capacity_items(), 5);
+        assert_eq!(buffer.capacity_bytes(), 20);
+        assert_eq!(buffer.read_bytes(5), u32_bytes(&[1, 2, 3, 4, 5]));
+    }
+
+    #[test]
+    fn sync_from_array_lists_reallocates_to_double_total() {
+        let device = metal_device();
+        let mut buffer =
+            MetalBuffer::init_fill(shared_options(&device), &[0_u32]).expect("create buffer");
+
+        let lists = vec![vec![4_u32, 5], vec![6], vec![7, 8]];
+        let count = buffer
+            .sync_from_array_lists(shared_options(&device), &lists)
+            .expect("sync from array lists");
+
+        // Total 5 items exceeds the capacity-1 buffer → reallocate to double the
+        // total (10 items / 40 bytes); the data is the contiguous concatenation.
+        assert_eq!(count, 5);
+        assert_eq!(buffer.capacity_items(), 10);
+        assert_eq!(buffer.capacity_bytes(), 40);
+        assert_eq!(buffer.read_bytes(5), u32_bytes(&[4, 5, 6, 7, 8]));
+    }
+
+    #[test]
+    fn sync_from_array_lists_all_empty_returns_zero_without_realloc() {
+        let device = metal_device();
+        let mut buffer =
+            MetalBuffer::<u32>::new(shared_options(&device), 3).expect("create empty buffer");
+
+        let lists: Vec<Vec<u32>> = vec![vec![], vec![]];
+        let count = buffer
+            .sync_from_array_lists(shared_options(&device), &lists)
+            .expect("sync from empty array lists");
+
+        // No items → returns 0 and leaves the buffer (capacity) untouched.
+        assert_eq!(count, 0);
+        assert_eq!(buffer.capacity_items(), 3);
+        assert_eq!(buffer.capacity_bytes(), 12);
     }
 
     #[test]

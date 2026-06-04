@@ -221,3 +221,71 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-070634-d406-prompt.md` (design)
 - Result: `logs/codex-review/20260604-070634-d406-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The foreground-cell buffer upload primitive is now live.
+
+- `roastty/src/renderer/metal/buffer.rs`: a new
+  `MetalBuffer::sync_from_array_lists(&mut self, options, lists: &[Vec<T>]) -> Result<usize, MetalBufferError>`
+  mirroring `sync` — it sums the per-list item counts, reallocates (doubling the
+  item count, via the overflow-checked `byte_len`) only when the total exceeds
+  capacity, copies each non-empty list's bytes contiguously at a running byte
+  offset, signals `didModifyRange(0, required_bytes)` once for managed non-empty
+  writes, and returns the total item count. The all-empty (zero-total) path
+  returns `0` without touching the buffer.
+
+Tests (in `buffer.rs`, live Metal device, `u32` element):
+
+- `sync_from_array_lists_concatenates_in_order_skipping_empty` —
+  `[[1, 2], [], [3, 4, 5]]` into a capacity-5 buffer → `count == 5`,
+  `capacity_items == 5` (no realloc), `read_bytes(5) == [1, 2, 3, 4, 5]` (the
+  interspersed empty list is skipped, order preserved).
+- `sync_from_array_lists_reallocates_to_double_total` — `init_fill([0])`
+  (capacity 1), `[[4, 5], [6], [7, 8]]` → `count == 5`, `capacity_items == 10`,
+  `capacity_bytes == 40`, `read_bytes(5) == [4, 5, 6, 7, 8]`.
+- `sync_from_array_lists_all_empty_returns_zero_without_realloc` — `[[], []]` →
+  `count == 0`, capacity unchanged (`3` items / `12` bytes).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2871 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + `lib.rs`/header/`abi_harness.c`)
+  clean; `git diff --check` clean.
+
+## Conclusion
+
+roastty's `MetalBuffer` now has both cell-upload primitives: `sync` (the flat
+`bg_cells` background upload) and `sync_from_array_lists` (the `fg_rows.lists`
+foreground upload), each faithful to upstream. The next renderer-bridge slice is
+the frame-draw wiring that consumes them — calling `sync` on the background
+buffer and `sync_from_array_lists` on the cell-text buffer from an assembled
+`Contents`, as upstream's `drawFrame` does — which depends on the live frame /
+render-pass plumbing; plus the remaining Metal upload (atlas textures,
+custom-shader uniforms) and the `rebuild_viewport` cursor/preedit assembly.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design and
+is faithful to upstream `syncFromArrayLists`: it sums the per-list item counts,
+computes the checked byte length, reallocates only when the required bytes
+exceed capacity (doubling by item count in the same style as `sync`), copies
+each non-empty list contiguously at a running byte offset, calls
+`didModifyRange(0, required_bytes)` only for non-empty managed writes, and
+returns the total item count. It judged the offset copy sound under the computed
+`required_bytes` (each `src.len()` is one list's byte length, offsets advance by
+exactly those lengths, and reallocation guarantees the destination capacity
+before copying), and the tests sufficient (ordered concatenation with an empty
+middle list, reallocation and capacity bookkeeping, the all-empty no-op).
+Internal Rust only, no public C ABI/header impact — nothing needed to change
+before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-070835-r406-prompt.md` (result)
+- Result: `logs/codex-review/20260604-070835-r406-last-message.md` (result)
