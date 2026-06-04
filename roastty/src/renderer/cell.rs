@@ -298,6 +298,31 @@ pub(crate) fn selection_colors(
     CellColors { fg, bg }
 }
 
+/// The `selection-background`/`selection-foreground` config (upstream's two
+/// `?TerminalColor`s). `Default` (both `None`) is a plain reverse.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct SelectionConfig {
+    pub background: Option<SelectionColor>,
+    pub foreground: Option<SelectionColor>,
+}
+
+/// Whether column `x` of a row is selected, given the row's `[start, end]`
+/// selection bounds (inclusive). A wide cell's spacer tail compares one column to
+/// the left (saturating), faithful to upstream's `x_compare`. Ports the
+/// `.selection` part of upstream's per-cell `selected` derivation; the search
+/// highlights are deferred.
+fn is_selected(selection: Option<[u16; 2]>, x: u16, wide: Wide) -> bool {
+    let Some([start, end]) = selection else {
+        return false;
+    };
+    let x_compare = if matches!(wide, Wide::SpacerTail) {
+        x.saturating_sub(1)
+    } else {
+        x
+    };
+    x_compare >= start && x_compare <= end
+}
+
 /// Identifies which GPU buffer a cell belongs to. Conceptually maps to a cell
 /// type (upstream `Key.CellType`): `Bg` → `CellBg`; the foreground kinds
 /// (`Text`/`Underline`/`Strikethrough`/`Overline`) → `CellTextVertex`.
@@ -709,6 +734,7 @@ pub(crate) fn rebuild_viewport(
     contents: &mut Contents,
     grid: &mut SharedGrid,
     rows: &[RunOptions],
+    selection_config: &SelectionConfig,
     default_fg: Rgb,
     default_bg: Rgb,
     palette: &Palette,
@@ -726,6 +752,8 @@ pub(crate) fn rebuild_viewport(
             contents,
             y,
             &opts.cells,
+            opts.selection,
+            selection_config,
             default_fg,
             default_bg,
             palette,
@@ -756,22 +784,26 @@ pub(crate) fn rebuild_viewport(
     Ok(())
 }
 
-/// Write one viewport row's background cells into `contents`. Each cell's
-/// background color comes from [`cell_colors`] (so reverse-video and the
-/// full-block twist are applied), falling back to `default_bg` when the resolved
+/// Write one viewport row's background cells into `contents`. A cell inside the
+/// row's `selection` bounds ([`is_selected`]) takes its background from
+/// [`selection_colors`] (the `selection_config`) and is forced **opaque**;
+/// otherwise the background comes from [`cell_colors`] (reverse-video + the
+/// full-block twist). The RGB falls back to `default_bg` when the resolved
 /// background is `None` (upstream `bg orelse default`). The background cell is
 /// written unconditionally with a per-cell `bg_alpha`: opaque (the base `alpha`)
-/// for an inverse cell or one with an explicit background, transparent (`0`)
+/// for a selected, inverse, or explicit-background cell, transparent (`0`)
 /// otherwise — so a covering-derived or default background lets the already-drawn
 /// screen background show through, while an inverse cell stays opaque even when
-/// its resolved background is `None`. The selection and `background_opacity_cells`
-/// branches are deferred. The background half of upstream `rebuildCells`'s
-/// per-cell work.
+/// its resolved background is `None`. The `.search` highlight arms and the
+/// `background_opacity_cells` branch are deferred. The background half of
+/// upstream `rebuildCells`'s per-cell work.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rebuild_bg_row(
     contents: &mut Contents,
     y: u16,
     row_cells: &[RunCell],
+    selection: Option<[u16; 2]>,
+    selection_config: &SelectionConfig,
     default_fg: Rgb,
     default_bg: Rgb,
     palette: &Palette,
@@ -780,20 +812,35 @@ pub(crate) fn rebuild_bg_row(
 ) {
     let row = usize::from(y);
     for (col, cell) in row_cells.iter().enumerate() {
-        let colors = cell_colors(
-            cell.style,
-            cell.codepoint,
-            default_fg,
-            default_bg,
-            palette,
-            bold,
-        );
-        // Opaque for an inverse cell or one with an explicit background; a
-        // covering-derived or default background is transparent. Evaluated
-        // independently of whether the final background is `Some` (upstream's
-        // `bg_alpha` branches run regardless of `bg == null`).
+        let x = u16::try_from(col).expect("viewport column fits u16");
+        let selected = is_selected(selection, x, cell.wide);
+        let colors = if selected {
+            selection_colors(
+                cell.style,
+                default_fg,
+                default_bg,
+                palette,
+                bold,
+                selection_config.background,
+                selection_config.foreground,
+            )
+        } else {
+            cell_colors(
+                cell.style,
+                cell.codepoint,
+                default_fg,
+                default_bg,
+                palette,
+                bold,
+            )
+        };
+        // Opaque for a selected, inverse, or explicit-background cell; a
+        // covering-derived or default background is transparent. The selection
+        // branch is upstream's first `bg_alpha` arm (before inverse/explicit-bg);
+        // all three yield the base `alpha`, so the OR is faithful. Evaluated
+        // independently of whether the final background is `Some`.
         let has_explicit_bg = !matches!(cell.style.bg_color, Color::None);
-        let bg_alpha = if cell.style.flags.inverse || has_explicit_bg {
+        let bg_alpha = if selected || cell.style.flags.inverse || has_explicit_bg {
             alpha
         } else {
             0
@@ -1681,6 +1728,7 @@ mod tests {
             &mut c,
             &mut shared,
             &rows,
+            &SelectionConfig::default(),
             Rgb::new(200, 200, 200),
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
@@ -1735,6 +1783,7 @@ mod tests {
             &mut c,
             &mut shared,
             &rows,
+            &SelectionConfig::default(),
             Rgb::new(200, 200, 200),
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
@@ -1785,6 +1834,8 @@ mod tests {
             &mut c,
             0,
             &row_cells,
+            None,
+            &SelectionConfig::default(),
             Rgb::new(200, 200, 200),
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
@@ -1836,6 +1887,7 @@ mod tests {
             &mut c,
             &mut shared,
             &rows,
+            &SelectionConfig::default(),
             Rgb::new(200, 200, 200),
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
@@ -1884,6 +1936,8 @@ mod tests {
             &mut c,
             0,
             &[cell],
+            None,
+            &SelectionConfig::default(),
             Rgb::new(200, 200, 200),
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
@@ -1927,6 +1981,8 @@ mod tests {
             &mut c,
             0,
             &[cell],
+            None,
+            &SelectionConfig::default(),
             Rgb::new(200, 200, 200),
             Rgb::new(0, 0, 0),
             &DEFAULT_PALETTE,
@@ -1974,6 +2030,8 @@ mod tests {
             &mut c,
             0,
             &[cell],
+            None,
+            &SelectionConfig::default(),
             Rgb::new(200, 200, 200),
             default_bg,
             &DEFAULT_PALETTE,
@@ -1988,6 +2046,82 @@ mod tests {
             *c.bg_cell(0, 0),
             CellBg([default_bg.r, default_bg.g, default_bg.b, 255])
         );
+    }
+
+    #[test]
+    fn is_selected_matches_the_x_compare_derivation() {
+        // No bounds → never selected.
+        assert!(!is_selected(None, 0, Wide::Narrow));
+        assert!(!is_selected(None, 3, Wide::SpacerTail));
+
+        // Inclusive [1, 3] bounds for a narrow cell.
+        let bounds = Some([1, 3]);
+        assert!(!is_selected(bounds, 0, Wide::Narrow)); // before
+        assert!(is_selected(bounds, 1, Wide::Narrow)); // at start
+        assert!(is_selected(bounds, 2, Wide::Narrow)); // inside
+        assert!(is_selected(bounds, 3, Wide::Narrow)); // at end
+        assert!(!is_selected(bounds, 4, Wide::Narrow)); // after
+
+        // A spacer tail compares one column to the left: at `end + 1 = 4` its
+        // `x_compare = 3` is in-bounds, where a narrow cell at column 4 is not.
+        assert!(is_selected(bounds, 4, Wide::SpacerTail));
+        assert!(!is_selected(bounds, 4, Wide::Narrow));
+        // Saturating: a spacer tail at column 0 compares 0 (no underflow).
+        assert!(!is_selected(Some([1, 3]), 0, Wide::SpacerTail));
+        assert!(is_selected(Some([0, 0]), 0, Wide::SpacerTail));
+    }
+
+    #[test]
+    fn rebuild_bg_row_recolors_selected_cells_opaque() {
+        use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+        use crate::terminal::style::{Color, Style as TermStyle};
+
+        let mut c = Contents::default();
+        c.resize(grid(2, 1));
+
+        let default_fg = Rgb::new(200, 200, 200);
+        let default_bg = Rgb::new(0, 0, 0);
+
+        // Two narrow cells with NO explicit background. Without selection both
+        // would be transparent (the Exp 384 path).
+        let cell = || RunCell {
+            codepoint: 'x' as u32,
+            graphemes: vec![],
+            style: TermStyle {
+                bg_color: Color::None,
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        let row_cells = [cell(), cell()];
+
+        // Select only column 0, default selection config (a plain reverse).
+        rebuild_bg_row(
+            &mut c,
+            0,
+            &row_cells,
+            Some([0, 0]),
+            &SelectionConfig::default(),
+            default_fg,
+            default_bg,
+            &DEFAULT_PALETTE,
+            None,
+            255,
+        );
+
+        // Column 0 is selected: the default selection background is the default
+        // foreground, made opaque (both the recolor and the selection → opaque
+        // alpha — the Exp 384 path would have left this transparent).
+        assert_eq!(
+            *c.bg_cell(0, 0),
+            CellBg([default_fg.r, default_fg.g, default_fg.b, 255])
+        );
+        // Column 1 is not selected: unchanged (no explicit bg, not inverse →
+        // transparent).
+        assert_eq!(*c.bg_cell(0, 1), CellBg([0, 0, 0, 0]));
     }
 
     fn underline_opts(grid: &SharedGrid) -> RenderOptions {

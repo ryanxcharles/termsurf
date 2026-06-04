@@ -219,3 +219,86 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-200331-617770-prompt.md` (design)
 - Result: `logs/codex-review/20260603-200331-617770-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The selected state now drives the background pass.
+
+- `roastty/src/renderer/cell.rs`:
+  - a `SelectionConfig` struct (the two `selection-background`/
+    `selection-foreground` `Option<SelectionColor>` values, `Default` = a plain
+    reverse) and an `is_selected(selection, x, wide)` predicate (inclusive
+    `[start, end]`, `Wide::SpacerTail` compares `x.saturating_sub(1)`, `None` →
+    false — upstream's `x_compare` derivation, the `.selection` part).
+  - `rebuild_bg_row` (new `selection: Option<[u16; 2]>` and
+    `selection_config: &SelectionConfig` params): per cell,
+    `selected = is_selected(selection, col as u16, cell.wide)`; a selected
+    cell's background is `selection_colors(...)` (else `cell_colors(...)`), and
+    `bg_alpha = (selected || inverse || has_explicit_bg) ? alpha : 0` — the
+    selection → opaque branch, faithful to upstream (all three branches yield
+    the base `alpha`). The RGB still falls back to `default_bg`. Doc comment
+    updated.
+  - `rebuild_viewport` (new `selection_config` param): passes each row's
+    `opts.selection` and the config to `rebuild_bg_row`. `rebuild_row` (the
+    foreground) is untouched (Experiment 387). The existing `rebuild_bg_row`/
+    `rebuild_viewport` test call sites are updated for the new signatures.
+
+Tests (in `cell.rs`):
+
+- `is_selected_matches_the_x_compare_derivation` — `None` → never selected;
+  inclusive `[1, 3]` for a narrow cell (before/at-start/inside/at-end/after); a
+  spacer tail at `end + 1 = 4` selected (its `x_compare = 3`) where a narrow
+  cell at column 4 is not; the saturating edge (a spacer tail at column 0
+  compares 0).
+- `rebuild_bg_row_recolors_selected_cells_opaque` — two no-explicit-bg cells
+  (transparent under the Exp 384 path); selecting only column 0 (default
+  config): column 0 → opaque `CellBg([default_fg …, 255])` (the selection
+  background, made opaque), column 1 → unchanged transparent `[0, 0, 0, 0]`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2842 passed, 0 failed (+2, no regressions; existing
+  rebuild tests preserved with updated signatures).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+A selection range now recolors the rebuild's **backgrounds**: a cell inside the
+row's `selection` bounds draws the selection background (a plain reverse by
+default, or the configured color) and is forced opaque, while non-selected cells
+keep the Experiment-384 path. The `is_selected` predicate (faithful to
+upstream's `x_compare`, including the spacer-tail adjustment) and
+`SelectionConfig` are now in place for the foreground pass.
+
+The remaining renderer-bridge work: the **foreground** pass (`rebuild_row`)
+selection recolor (Experiment 387 — so a selected cell's glyph and decorations
+take the selection foreground); the `.search`/`.search_selected` highlight arms;
+the lock-cursor glyph + under-cursor text recolor; the column-ordered decoration
+merge + link double-underline; and the **Metal upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design:
+`is_selected` returns false for `None`, uses inclusive `[start, end]`, and
+applies `x.saturating_sub(1)` only for `Wide::SpacerTail` (upstream's `x -| 1`);
+`rebuild_bg_row` computes `selected` from the row bounds and column, uses
+`selection_colors` for selected cells and `cell_colors` otherwise, and computes
+`bg_alpha` opaque for `selected || inverse || has_explicit_bg` (equivalent to
+upstream's ordered branches for the current deferred-config subset, since all
+included branches yield the same alpha), preserving
+`rgb = colors.bg.unwrap_or( default_bg)`; `rebuild_viewport` threads
+`opts.selection` and `&SelectionConfig` correctly while `rebuild_row` stays
+untouched for Experiment 387. It confirmed the tests cover the selection
+predicate, the spacer-tail adjustment including saturation, the selected opaque
+recolor, and the unchanged unselected behavior, with the diff internal Rust only
+(no public C ABI/header change). Nothing needed to change before the result
+commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-200731-505483-last-message.md`
