@@ -1375,6 +1375,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 464: grow the Config struct with the notification group](464-config-struct-notify-group.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 465: grow the Config struct with the renderer-appearance group](465-config-struct-appearance-group.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
