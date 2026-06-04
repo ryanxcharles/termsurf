@@ -366,3 +366,55 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-133918-d480-prompt.md` (design)
 - Result: `logs/codex-review/20260604-133918-d480-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`Duration::parse_cli` was implemented over bytes exactly as the design specified
+— the `ValueRequired` guard, the per-segment Zig-whitespace skip with the
+trailing-ws break, the overflow-stopping greedy digit scan, the
+zero-without-unit special case, the longest-unit byte-slice match (handling `µs`
+and `m`-vs-`ms`), the saturating `number * factor` accumulation, and the final
+empty/whitespace-only `ValueRequired`. The new test
+`duration_parse_cli_sums_segments_in_nanoseconds` asserts the single-unit,
+longest-unit, multi-segment, zero, whitespace, saturating, and error cases, plus
+the folded-in `"1 "` / `"0 "` trailing-whitespace cases.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2960 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no findings**
+(the design Low is resolved): `Duration::parse_cli` faithfully ports upstream
+parsing (required input, leading-whitespace skip per segment, the greedy digit
+scan equivalent to upstream's growing-prefix `parseUnsigned`, longest-unit
+matching, the zero-without-unit special case, and `ValueRequired` for
+empty/whitespace-only input); byte-based unit matching correctly handles `µs`
+and the `m`-vs-`ms` longest-match; `saturating_mul` / `saturating_add` correctly
+map the upstream overflow behavior; the added `"1 "` / `"0 "` cases lock the
+subtle trailing-whitespace-after-bare-number behavior; the test covers units,
+longest matching, multi-segment sums, whitespace, zero, saturation, and errors;
+the deferred formatting/conversion helpers remain properly scoped. "Approved for
+the result commit."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-134351-r480-prompt.md` (result)
+- Result: `logs/codex-review/20260604-134351-r480-last-message.md` (result)
+
+## Conclusion
+
+`Duration` is the first non-color config value type to parse — a nanosecond time
+span summed from `number+unit` segments, with a faithful equivalent of
+upstream's greedy number scan and longest-unit match, byte-based to handle the
+multi-byte `µs`. The next slice can port another self-contained config value
+type's `parseCLI` (e.g. `WindowPadding`) or the `Duration` formatter (`format` /
+`asMilliseconds`, once `EntryFormatter` lands), continuing toward the per-field
+parser dispatch and the full config loader.

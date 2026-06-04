@@ -492,6 +492,122 @@ impl ColorList {
     }
 }
 
+/// An error parsing a `Duration` config value (upstream `Duration.parseCLI`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DurationParseError {
+    /// No value, or an all-whitespace value (upstream `error.ValueRequired`).
+    ValueRequired,
+    /// A malformed segment (upstream `error.InvalidValue`).
+    InvalidValue,
+}
+
+/// A `Duration` config value (upstream `Config.Duration`): a time span in
+/// nanoseconds. `format` / `asMilliseconds` / `round` / `lte` are ported later.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Duration {
+    pub duration: u64,
+}
+
+const NS_PER_US: u64 = 1_000;
+const NS_PER_MS: u64 = 1_000_000;
+const NS_PER_S: u64 = 1_000_000_000;
+const NS_PER_MIN: u64 = 60 * NS_PER_S;
+const NS_PER_HOUR: u64 = 60 * NS_PER_MIN;
+const NS_PER_DAY: u64 = 24 * NS_PER_HOUR;
+const NS_PER_WEEK: u64 = 7 * NS_PER_DAY;
+
+/// `(name, factor-in-ns)`, in upstream order (first match is the formatting unit;
+/// the longest match wins when parsing, so `ms` beats `m`).
+const DURATION_UNITS: &[(&[u8], u64)] = &[
+    (b"y", 365 * NS_PER_DAY),
+    (b"w", NS_PER_WEEK),
+    (b"d", NS_PER_DAY),
+    (b"h", NS_PER_HOUR),
+    (b"m", NS_PER_MIN),
+    (b"s", NS_PER_S),
+    (b"ms", NS_PER_MS),
+    ("µs".as_bytes(), NS_PER_US),
+    (b"us", NS_PER_US),
+    (b"ns", 1),
+];
+
+impl Duration {
+    /// Parse a duration (upstream `Duration.parseCLI`): a sequence of `number+unit`
+    /// segments summed in nanoseconds with saturating math. A missing/all-whitespace
+    /// value is `ValueRequired`; a bad number/unit, or a nonzero number with no
+    /// unit, is `InvalidValue`.
+    pub(crate) fn parse_cli(input: Option<&str>) -> Result<Duration, DurationParseError> {
+        let mut remaining = input.ok_or(DurationParseError::ValueRequired)?.as_bytes();
+
+        let mut value: Option<u64> = None;
+        while !remaining.is_empty() {
+            // Skip whitespace before the number.
+            while let [first, rest @ ..] = remaining {
+                if !is_ascii_ws_zig(*first) {
+                    break;
+                }
+                remaining = rest;
+            }
+            if remaining.is_empty() {
+                break; // trailing whitespace is fine
+            }
+
+            // Longest number: consume leading digits, stopping before u64 overflow.
+            let mut number: Option<u64> = None;
+            while let [d @ b'0'..=b'9', rest @ ..] = remaining {
+                match number
+                    .unwrap_or(0)
+                    .checked_mul(10)
+                    .and_then(|n| n.checked_add((d - b'0') as u64))
+                {
+                    Some(n) => {
+                        number = Some(n);
+                        remaining = rest;
+                    }
+                    None => break, // this digit would overflow; leave it in `remaining`
+                }
+            }
+            let number = number.ok_or(DurationParseError::InvalidValue)?;
+
+            if remaining.is_empty() {
+                if number == 0 {
+                    value = Some(0);
+                    break;
+                }
+                return Err(DurationParseError::InvalidValue);
+            }
+
+            // Longest matching unit (so "ms" wins over "m").
+            let mut factor: Option<u64> = None;
+            let mut unit_len = 0usize;
+            for index in 1..=remaining.len() {
+                if let Some(&(_, f)) = DURATION_UNITS
+                    .iter()
+                    .find(|(name, _)| *name == &remaining[..index])
+                {
+                    factor = Some(f);
+                    unit_len = index;
+                }
+            }
+            let factor = factor.ok_or(DurationParseError::InvalidValue)?;
+            remaining = &remaining[unit_len..];
+
+            let diff = number.saturating_mul(factor);
+            value = Some(value.unwrap_or(0).saturating_add(diff));
+        }
+
+        value
+            .map(|duration| Duration { duration })
+            .ok_or(DurationParseError::ValueRequired)
+    }
+}
+
+/// Zig's `std.ascii.isWhitespace` set: space, `\t`, `\n`, `\r`, vertical tab, and
+/// form feed (note vertical tab `0x0B` is not in Rust's `is_ascii_whitespace`).
+fn is_ascii_ws_zig(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
+}
+
 /// The `notify-on-command-finish` config (upstream `NotifyOnCommandFinish`): when
 /// to notify on a finished command. The `Config` default is `Never`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1108,13 +1224,13 @@ mod tests {
     use super::{
         AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, BoldColor,
         ClipboardAccess, Color, ColorList, ColorParseError, Config, ConfirmCloseSurface,
-        CopyOnSelect, CustomShaderAnimation, FontShapingBreak, FontStyle, Fullscreen,
-        GraphemeWidthMethod, LinkPreviews, MacHidden, MacTitlebarProxyIcon, MacTitlebarStyle,
-        MacWindowButtons, MiddleClickAction, MouseShiftCapture, NonNativeFullscreen,
-        NotifyOnCommandFinish, NotifyOnCommandFinishAction, OscColorReportFormat, Palette,
-        PaletteParseError, RightClickAction, ScrollToBottom, ShellIntegration,
-        ShellIntegrationFeatures, TerminalBoldColor, TerminalColor, Theme, WindowColorspace,
-        WindowPaddingColor, WindowSubtitle,
+        CopyOnSelect, CustomShaderAnimation, Duration, DurationParseError, FontShapingBreak,
+        FontStyle, Fullscreen, GraphemeWidthMethod, LinkPreviews, MacHidden, MacTitlebarProxyIcon,
+        MacTitlebarStyle, MacWindowButtons, MiddleClickAction, MouseShiftCapture,
+        NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
+        OscColorReportFormat, Palette, PaletteParseError, RightClickAction, ScrollToBottom,
+        ShellIntegration, ShellIntegrationFeatures, TerminalBoldColor, TerminalColor, Theme,
+        WindowColorspace, WindowPaddingColor, WindowSubtitle,
     };
     use crate::terminal::color::Rgb;
 
@@ -2021,6 +2137,81 @@ mod tests {
         assert_eq!(
             list.parse_cli(Some(&too_many)),
             Err(ColorParseError::Invalid)
+        );
+    }
+
+    #[test]
+    fn duration_parse_cli_sums_segments_in_nanoseconds() {
+        let dur = |ns: u64| Ok(Duration { duration: ns });
+
+        // Single units.
+        assert_eq!(Duration::parse_cli(Some("1s")), dur(1_000_000_000));
+        assert_eq!(Duration::parse_cli(Some("500ms")), dur(500_000_000));
+        assert_eq!(Duration::parse_cli(Some("1ns")), dur(1));
+        assert_eq!(Duration::parse_cli(Some("1us")), dur(1_000));
+        assert_eq!(Duration::parse_cli(Some("1µs")), dur(1_000)); // multi-byte unit
+        assert_eq!(Duration::parse_cli(Some("1h")), dur(3_600_000_000_000));
+        assert_eq!(Duration::parse_cli(Some("1d")), dur(86_400_000_000_000));
+        assert_eq!(Duration::parse_cli(Some("1w")), dur(604_800_000_000_000));
+        assert_eq!(Duration::parse_cli(Some("1y")), dur(31_536_000_000_000_000));
+
+        // The longest-unit match distinguishes `m` from `ms`.
+        assert_eq!(Duration::parse_cli(Some("1m")), dur(60_000_000_000));
+        assert_eq!(Duration::parse_cli(Some("1ms")), dur(1_000_000));
+
+        // Multi-segment sums (including inner whitespace).
+        assert_eq!(
+            Duration::parse_cli(Some("1h30m")),
+            dur(3_600_000_000_000 + 30 * 60_000_000_000)
+        );
+        assert_eq!(Duration::parse_cli(Some("1m30s")), dur(90_000_000_000));
+        assert_eq!(
+            Duration::parse_cli(Some("1d 12h")),
+            dur(86_400_000_000_000 + 12 * 3_600_000_000_000)
+        );
+
+        // Zero without a unit is allowed; whitespace at the ends is fine.
+        assert_eq!(Duration::parse_cli(Some("0")), dur(0));
+        assert_eq!(Duration::parse_cli(Some(" 1s ")), dur(1_000_000_000));
+
+        // An overflowing product saturates to `u64::MAX`.
+        assert_eq!(Duration::parse_cli(Some("99999999y")), dur(u64::MAX));
+
+        // Errors.
+        assert_eq!(
+            Duration::parse_cli(None),
+            Err(DurationParseError::ValueRequired)
+        );
+        assert_eq!(
+            Duration::parse_cli(Some("")),
+            Err(DurationParseError::ValueRequired)
+        );
+        assert_eq!(
+            Duration::parse_cli(Some("   ")),
+            Err(DurationParseError::ValueRequired)
+        );
+        assert_eq!(
+            Duration::parse_cli(Some("5")),
+            Err(DurationParseError::InvalidValue)
+        );
+        assert_eq!(
+            Duration::parse_cli(Some("5x")),
+            Err(DurationParseError::InvalidValue)
+        );
+        assert_eq!(
+            Duration::parse_cli(Some("abc")),
+            Err(DurationParseError::InvalidValue)
+        );
+
+        // A bare number followed by whitespace is not a complete segment: the unit
+        // match runs on the `" "` before the next loop's whitespace skip.
+        assert_eq!(
+            Duration::parse_cli(Some("1 ")),
+            Err(DurationParseError::InvalidValue)
+        );
+        assert_eq!(
+            Duration::parse_cli(Some("0 ")),
+            Err(DurationParseError::InvalidValue)
         );
     }
 
