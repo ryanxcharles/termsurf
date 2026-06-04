@@ -171,3 +171,63 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-192355-624819-prompt.md` (design)
 - Result: `logs/codex-review/20260603-192355-624819-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`cell_colors` is now the complete base per-cell color computation.
+
+- `roastty/src/renderer/cell.rs`: `cell_colors` gains a `codepoint: u32`
+  parameter; the foreground is still inverse-only
+  (`bg_style.unwrap_or(default_bg)` under `inverse`, else `fg_style`), and the
+  background now uses the XOR twist —
+  `bg = if inverse != is_covering(codepoint) { Some(fg_style) } else { bg_style }`
+  — so a full block (U+2588) paints its cell via the background even without
+  inverse.
+
+Test (in `cell.rs`): `cell_colors_applies_reverse_video` threads the codepoint
+via a `colors(inverse, bg, cp)` closure; the four existing cases use a
+non-covering `'A'` (unchanged from Experiment 380), and two full-block
+(`0x2588`) cases assert the twist — non-inverse `{ fg: a, bg: Some(a) }` (paints
+via the background with the foreground color) and inverse
+`{ fg: b, bg: Some(b) }` (the twist cancels for the background while the
+foreground still swaps).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2834 passed, 0 failed (test updated in place; no
+  regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The base per-cell color computation is complete: reverse-video plus the
+full-block twist, matching upstream's non-selected formulas. `cell_colors` is
+ready to be wired into `rebuild_row`/`rebuild_bg_row` (the integration is now
+unblocked).
+
+The remaining renderer-bridge work: wire `cell_colors` into the row passes
+(using `RunCell.codepoint`); the **selection/search** colors, the
+**minimum-contrast** adjustment, and **faint/dim alpha**; the lock-cursor
+glyph + under-cursor text recolor; the column-ordered decoration merge + link
+double-underline; and the **Metal upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches upstream's base
+formulas (foreground inverse-only; background the full XOR twist
+`inverse != is_covering(codepoint)`), correctly preserving Experiment 380 for
+non-covering cells and adding the U+2588 behavior; that the updated test proves
+the important cases (non-covering unchanged, non-inverse full block paints the
+background with the foreground color, inverse full block cancels the background
+twist while the foreground still swaps); and that the `codepoint` parameter is
+the right integration shape (`RunCell.codepoint` is available to the row pass).
+Nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-192717-721940-last-message.md`

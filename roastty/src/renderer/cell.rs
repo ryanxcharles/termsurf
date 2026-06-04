@@ -185,13 +185,16 @@ pub(crate) struct CellColors {
     pub bg: Option<Rgb>,
 }
 
-/// Compute a cell's final colors from its `style`, applying reverse-video
-/// (`inverse`): the foreground and background swap. Faithful port of the base
-/// (non-selection) per-cell color computation in upstream `rebuildCells`. The
-/// `isCovering` full-block twist, selection/search colors, and minimum-contrast
-/// are deferred.
+/// Compute a cell's final colors from its `style` and `codepoint`, applying
+/// reverse-video (`inverse`). Faithful port of the base (non-selection) per-cell
+/// color computation in upstream `rebuildCells`: the foreground swaps to the
+/// (default-filled) background under `inverse`, and the background swaps to the
+/// foreground on `inverse != is_covering(codepoint)` — a full block (U+2588)
+/// paints its cell via the background even without inverse. The selection/search
+/// colors and the minimum-contrast adjustment are deferred.
 pub(crate) fn cell_colors(
     style: TermStyle,
+    codepoint: u32,
     default_fg: Rgb,
     default_bg: Rgb,
     palette: &Palette,
@@ -199,21 +202,23 @@ pub(crate) fn cell_colors(
 ) -> CellColors {
     let fg_style = style.resolve_fg(default_fg, palette, bold);
     let bg_style = style.resolve_bg(palette);
+    let inverse = style.flags.inverse;
 
-    if style.flags.inverse {
-        // The background becomes the foreground (the default bg when the cell has
-        // no explicit bg), and the foreground becomes the background.
-        let final_bg = bg_style.unwrap_or(default_bg);
-        CellColors {
-            fg: final_bg,
-            bg: Some(fg_style),
-        }
+    // The foreground swaps to the (default-filled) background under inverse.
+    let fg = if inverse {
+        bg_style.unwrap_or(default_bg)
     } else {
-        CellColors {
-            fg: fg_style,
-            bg: bg_style,
-        }
-    }
+        fg_style
+    };
+    // The background swaps to the foreground on `inverse != is_covering`: a full
+    // block (U+2588) paints its cell via the background even without inverse.
+    let bg = if inverse != is_covering(codepoint) {
+        Some(fg_style)
+    } else {
+        bg_style
+    };
+
+    CellColors { fg, bg }
 }
 
 /// Identifies which GPU buffer a cell belongs to. Conceptually maps to a cell
@@ -1826,55 +1831,56 @@ mod tests {
             ..TermStyle::default()
         };
 
+        // 'A' is not a covering codepoint, so the bg twist reduces to `inverse`.
+        let plain = 'A' as u32;
+        let colors = |inverse, bg, cp| {
+            cell_colors(
+                styled(inverse, bg),
+                cp,
+                default_fg,
+                default_bg,
+                &DEFAULT_PALETTE,
+                None,
+            )
+        };
+
         // Non-inverse, explicit bg: colors unchanged.
         assert_eq!(
-            cell_colors(
-                styled(false, Color::Rgb(b)),
-                default_fg,
-                default_bg,
-                &DEFAULT_PALETTE,
-                None
-            ),
+            colors(false, Color::Rgb(b), plain),
             CellColors { fg: a, bg: Some(b) }
         );
-
         // Inverse, explicit bg: fg and bg swap.
         assert_eq!(
-            cell_colors(
-                styled(true, Color::Rgb(b)),
-                default_fg,
-                default_bg,
-                &DEFAULT_PALETTE,
-                None
-            ),
+            colors(true, Color::Rgb(b), plain),
             CellColors { fg: b, bg: Some(a) }
         );
-
         // Inverse, no bg: the default background fills the foreground.
         assert_eq!(
-            cell_colors(
-                styled(true, Color::None),
-                default_fg,
-                default_bg,
-                &DEFAULT_PALETTE,
-                None
-            ),
+            colors(true, Color::None, plain),
             CellColors {
                 fg: default_bg,
                 bg: Some(a)
             }
         );
-
         // Non-inverse, no bg: background stays the default (None).
         assert_eq!(
-            cell_colors(
-                styled(false, Color::None),
-                default_fg,
-                default_bg,
-                &DEFAULT_PALETTE,
-                None
-            ),
+            colors(false, Color::None, plain),
             CellColors { fg: a, bg: None }
+        );
+
+        // The full block U+2588: the background swaps on `inverse != covering`.
+        let block = 0x2588;
+        // Non-inverse full block: the block paints via the background with the
+        // foreground color (the twist), even without inverse.
+        assert_eq!(
+            colors(false, Color::Rgb(b), block),
+            CellColors { fg: a, bg: Some(a) }
+        );
+        // Inverse full block: inverse and covering cancel for the background, so
+        // it swaps to the explicit background while the foreground still swaps.
+        assert_eq!(
+            colors(true, Color::Rgb(b), block),
+            CellColors { fg: b, bg: Some(b) }
         );
     }
 

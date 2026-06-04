@@ -1208,7 +1208,7 @@ are past the correctness-critical foundation.
 - [Experiment 380: per-cell colors with reverse-video](380-cell-colors-inverse.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 381: the full-block twist in cell colors](381-cell-colors-covering.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
