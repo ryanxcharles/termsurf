@@ -12,8 +12,9 @@ mod formatter;
 mod string;
 mod unicode_range;
 
+use crate::config::comma_splitter::CommaSplitter;
 use crate::config::formatter::EntryFormatter;
-use crate::config::string::codepoint_iterator;
+use crate::config::string::{codepoint_iterator, parse_quoted_string};
 use crate::terminal::color::{Palette as TerminalPalette, PaletteMask, Rgb, DEFAULT_PALETTE};
 use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
 use crate::terminal::style::BoldColor as TerminalBoldColor;
@@ -2319,6 +2320,15 @@ impl MacHidden {
     }
 }
 
+/// An error parsing a `Theme` (upstream `parseAutoStruct` / `Theme.parseCLI`
+/// `error.InvalidValue`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ThemeParseError {
+    /// The value was malformed (missing `:`, an unknown key, a missing required
+    /// field, a quoted-value decode failure, or a comma-splitter error).
+    Invalid,
+}
+
 /// The `theme` config (upstream `Theme`): the theme names for light mode and dark
 /// mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2347,6 +2357,39 @@ impl Theme {
             return;
         }
         formatter.entry_str(&format!("light:{},dark:{}", self.light, self.dark));
+    }
+
+    /// Parse a `light:…,dark:…` pair (upstream `cli.args.parseAutoStruct` for
+    /// `Theme`): a comma-list of `key:value` pairs into the required `light` /
+    /// `dark` fields. A missing `:`, an unknown key, a missing required field, a
+    /// quoted-value decode failure, or a comma-splitter error is `Invalid`.
+    pub(crate) fn parse_auto_struct(input: &str) -> Result<Theme, ThemeParseError> {
+        let ws = |c: char| c == ' ' || c == '\t';
+        let mut light: Option<String> = None;
+        let mut dark: Option<String> = None;
+
+        let mut splitter = CommaSplitter::new(input);
+        while let Some(entry) = splitter.next().map_err(|_| ThemeParseError::Invalid)? {
+            let idx = entry.find(':').ok_or(ThemeParseError::Invalid)?;
+            let key = entry[..idx].trim_matches(ws);
+            let raw = entry[idx + 1..].trim_matches(ws);
+            let value = if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
+                let bytes = parse_quoted_string(raw.as_bytes()).ok_or(ThemeParseError::Invalid)?;
+                String::from_utf8(bytes).map_err(|_| ThemeParseError::Invalid)?
+            } else {
+                raw.to_string()
+            };
+            match key {
+                "light" => light = Some(value),
+                "dark" => dark = Some(value),
+                _ => return Err(ThemeParseError::Invalid),
+            }
+        }
+
+        Ok(Theme {
+            light: light.ok_or(ThemeParseError::Invalid)?,
+            dark: dark.ok_or(ThemeParseError::Invalid)?,
+        })
     }
 }
 
@@ -3209,9 +3252,10 @@ mod tests {
         OscColorReportFormat, Palette, PaletteParseError, RepeatableClipboardCodepointMap,
         RepeatableString, RepeatableStringParseError, RightClickAction, ScrollToBottom,
         SelectionWordChars, SelectionWordCharsParseError, ShellIntegration,
-        ShellIntegrationFeatures, TerminalBoldColor, TerminalColor, Theme, WindowColorspace,
-        WindowDecoration, WindowDecorationParseError, WindowPadding, WindowPaddingColor,
-        WindowPaddingParseError, WindowSubtitle, WorkingDirectory, WorkingDirectoryParseError,
+        ShellIntegrationFeatures, TerminalBoldColor, TerminalColor, Theme, ThemeParseError,
+        WindowColorspace, WindowDecoration, WindowDecorationParseError, WindowPadding,
+        WindowPaddingColor, WindowPaddingParseError, WindowSubtitle, WorkingDirectory,
+        WorkingDirectoryParseError,
     };
     use crate::terminal::color::Rgb;
     use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
@@ -5526,6 +5570,59 @@ mod tests {
             .format_entry(f)),
             "a = light:day,dark:night\n"
         );
+    }
+
+    #[test]
+    fn theme_parse_auto_struct() {
+        let theme = |light: &str, dark: &str| Theme {
+            light: light.to_string(),
+            dark: dark.to_string(),
+        };
+
+        // A basic pair, and whitespace trimmed around keys and values.
+        assert_eq!(
+            Theme::parse_auto_struct("light:day,dark:night"),
+            Ok(theme("day", "night"))
+        );
+        assert_eq!(
+            Theme::parse_auto_struct(" light : day , dark : night "),
+            Ok(theme("day", "night"))
+        );
+        // A quoted value protects a comma (the quotes are stripped).
+        assert_eq!(
+            Theme::parse_auto_struct("light:\"a,b\",dark:c"),
+            Ok(theme("a,b", "c"))
+        );
+        // Setting a field again overwrites (later wins).
+        assert_eq!(
+            Theme::parse_auto_struct("light:a,light:b,dark:c"),
+            Ok(theme("b", "c"))
+        );
+        // An empty value after the colon is an empty string.
+        assert_eq!(
+            Theme::parse_auto_struct("light:,dark:x"),
+            Ok(theme("", "x"))
+        );
+
+        // Failures: a missing colon, an unknown key, a missing required field.
+        assert_eq!(
+            Theme::parse_auto_struct("light:day,nightonly"),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(
+            Theme::parse_auto_struct("bright:x,dark:y"),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(
+            Theme::parse_auto_struct("light:day"),
+            Err(ThemeParseError::Invalid)
+        );
+
+        // Round-trip: a parsed pair formats back to `light:…,dark:…`.
+        let parsed = Theme::parse_auto_struct("light:day,dark:night").unwrap();
+        let mut out = String::new();
+        parsed.format_entry(&mut EntryFormatter::new("theme", &mut out));
+        assert_eq!(out, "theme = light:day,dark:night\n");
     }
 
     #[test]

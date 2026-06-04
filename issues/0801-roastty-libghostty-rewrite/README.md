@@ -1498,7 +1498,7 @@ are past the correctness-critical foundation.
 - [Experiment 525: the double-quoted string-literal decoder (parse_quoted_string)](525-config-quoted-string.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 526: parseAutoStruct for Theme (Theme::parse_auto_struct)](526-config-theme-auto-struct.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

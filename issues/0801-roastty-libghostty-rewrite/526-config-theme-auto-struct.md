@@ -206,3 +206,52 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-184646-d526-prompt.md` (design)
 - Result: `logs/codex-review/20260604-184646-d526-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`ThemeParseError` and `Theme::parse_auto_struct` were added — a port of
+`cli.args.parseAutoStruct` for `Theme`, driving `CommaSplitter` +
+`parse_quoted_string`: each comma-split entry needs a `:`; the key/value are
+`" \t"`-trimmed; a `"…"` value is decoded; the key matches `light` / `dark`
+(later-wins, unknown ⇒ `Invalid`); both fields are required; and malformed
+splitter/pair cases collapse to `Invalid`. The new test
+`theme_parse_auto_struct` covers the pair, whitespace, quoted-comma, later-wins,
+empty-value, and the missing-colon / unknown-key / missing-field failures, plus
+a `parse → format_entry` round-trip.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3014 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches the approved Theme-specific
+`parseAutoStruct` — comma-aware splitting, required colon, `" \t"` trimming,
+quoted-value decoding, `light` / `dark` matching with later-wins overwrite, both
+fields required, and malformed splitter/pair cases collapsed to `Invalid`; the
+tests cover the main behavior and edge cases (quoted comma, whitespace,
+duplicate-key overwrite, empty value, missing colon, unknown key, missing field,
+format round-trip); gates are clean and the remaining Theme/loader work stays
+deferred. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-184932-r526-prompt.md` (result)
+- Result: `logs/codex-review/20260604-184932-r526-last-message.md` (result)
+
+## Conclusion
+
+`Theme::parse_auto_struct` ports the light/dark-pair branch. The next experiment
+wraps it as **`Theme::parse_cli`** — upstream `Theme.parseCLI`'s `None`/empty ⇒
+`ValueRequired`, the comma/`=`/`:` detection routing to `parse_auto_struct`, and
+the single-name branch (`light = dark = trimmed`) — and adds the `theme`
+`Config::set` arm (the last parseable field, taking `Config::set` to 43 of 44).
+Then the `loadCli` / config-file loader drives `Config::set` over `key = value`
+lines.
