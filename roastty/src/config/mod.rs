@@ -68,6 +68,18 @@ pub(crate) struct Config {
     pub link_previews: LinkPreviews,
     /// `window-subtitle`.
     pub window_subtitle: WindowSubtitle,
+    /// `fullscreen`.
+    pub fullscreen: Fullscreen,
+    /// `macos-non-native-fullscreen`.
+    pub macos_non_native_fullscreen: NonNativeFullscreen,
+    /// `macos-titlebar-style`.
+    pub macos_titlebar_style: MacTitlebarStyle,
+    /// `macos-titlebar-proxy-icon`.
+    pub macos_titlebar_proxy_icon: MacTitlebarProxyIcon,
+    /// `macos-window-buttons`.
+    pub macos_window_buttons: MacWindowButtons,
+    /// `macos-hidden`.
+    pub macos_hidden: MacHidden,
 }
 
 impl Default for Config {
@@ -102,6 +114,12 @@ impl Default for Config {
             confirm_close_surface: ConfirmCloseSurface::True,
             link_previews: LinkPreviews::True,
             window_subtitle: WindowSubtitle::False,
+            fullscreen: Fullscreen::False,
+            macos_non_native_fullscreen: NonNativeFullscreen::False,
+            macos_titlebar_style: MacTitlebarStyle::Transparent,
+            macos_titlebar_proxy_icon: MacTitlebarProxyIcon::Visible,
+            macos_window_buttons: MacWindowButtons::Visible,
+            macos_hidden: MacHidden::Never,
         }
     }
 }
@@ -997,6 +1015,13 @@ mod tests {
         assert_eq!(d.confirm_close_surface, ConfirmCloseSurface::True);
         assert_eq!(d.link_previews, LinkPreviews::True);
         assert_eq!(d.window_subtitle, WindowSubtitle::False);
+        // macOS-window group (Experiment 469).
+        assert_eq!(d.fullscreen, Fullscreen::False);
+        assert_eq!(d.macos_non_native_fullscreen, NonNativeFullscreen::False);
+        assert_eq!(d.macos_titlebar_style, MacTitlebarStyle::Transparent);
+        assert_eq!(d.macos_titlebar_proxy_icon, MacTitlebarProxyIcon::Visible);
+        assert_eq!(d.macos_window_buttons, MacWindowButtons::Visible);
+        assert_eq!(d.macos_hidden, MacHidden::Never);
 
         // A modified config differs from the default and round-trips Clone/PartialEq.
         let mut modified = Config::default();
