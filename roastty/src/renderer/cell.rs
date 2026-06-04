@@ -995,6 +995,8 @@ pub(crate) fn rebuild_viewport(
     thicken_strength: u8,
     link_ranges: &[Vec<[u16; 2]>],
     preedit_skip: Option<PreeditSkip>,
+    background_opacity_cells: bool,
+    background_opacity: f64,
 ) -> Result<(), ResolverRenderError> {
     for (y, opts) in rows.iter().enumerate() {
         // This row's search highlights and hovered-link ranges (empty for a row
@@ -1019,6 +1021,8 @@ pub(crate) fn rebuild_viewport(
             bold,
             alpha,
             row_preedit,
+            background_opacity_cells,
+            background_opacity,
         );
 
         // Then the foreground: shape the row (this borrows the grid's resolver) —
@@ -1064,8 +1068,11 @@ pub(crate) fn rebuild_viewport(
 /// (raw column, inclusive — the IME preedit draws its own cells over it) is
 /// written **transparent** (`[0, 0, 0, 0]`) instead, so the preedit shows through
 /// on the screen background — upstream skips the cell entirely, leaving its
-/// background cleared. The `background_opacity_cells` branch is deferred. The
-/// background half of upstream `rebuildCells`'s per-cell work.
+/// background cleared. When `background_opacity_cells` is on, an
+/// explicit-background (non-selected, non-inverse) cell instead takes the window
+/// `background_opacity` applied per cell (`alpha × background_opacity`, truncated
+/// toward zero), so its own background is translucent. The background half of
+/// upstream `rebuildCells`'s per-cell work.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rebuild_bg_row(
     contents: &mut Contents,
@@ -1080,6 +1087,8 @@ pub(crate) fn rebuild_bg_row(
     bold: Option<BoldColor>,
     alpha: u8,
     preedit_range: Option<[u16; 2]>,
+    background_opacity_cells: bool,
+    background_opacity: f64,
 ) {
     let row = usize::from(y);
     for (col, cell) in row_cells.iter().enumerate() {
@@ -1112,14 +1121,22 @@ pub(crate) fn rebuild_bg_row(
                 bold,
             )
         });
-        // Opaque for a selected, inverse, or explicit-background cell; a
-        // covering-derived or default background is transparent. The selection
-        // branch is upstream's first `bg_alpha` arm (before inverse/explicit-bg);
-        // all three yield the base `alpha`, so the OR is faithful. Evaluated
-        // independently of whether the final background is `Some`.
+        // Opaque for a selected or inverse cell (upstream's first two `bg_alpha`
+        // arms). When `background_opacity_cells` is on, an explicit-background
+        // cell takes the window opacity applied per cell (the third arm); else an
+        // explicit-background cell is opaque (the fourth arm). A covering-derived
+        // or default background is transparent. The arm keys on an *explicit*
+        // background (upstream's `bg_style != null`), independent of whether the
+        // final resolved background is `Some`.
         let has_explicit_bg = !matches!(cell.style.bg_color, Color::None);
         let selected = state != Selected::False;
-        let bg_alpha = if selected || cell.style.flags.inverse || has_explicit_bg {
+        let bg_alpha = if selected || cell.style.flags.inverse {
+            alpha
+        } else if background_opacity_cells && has_explicit_bg {
+            // Per-cell opacity: the window opacity applied to this cell's own
+            // background. Truncated toward zero (upstream `@intFromFloat`).
+            (f64::from(alpha) * background_opacity) as u8
+        } else if has_explicit_bg {
             alpha
         } else {
             0
@@ -2818,6 +2835,8 @@ mod tests {
             255,
             &[],
             None,
+            false,
+            1.0,
         )
         .expect("rebuild_viewport");
 
@@ -2876,6 +2895,8 @@ mod tests {
             255,
             &[],
             None,
+            false,
+            1.0,
         )
         .expect("rebuild_viewport");
 
@@ -2938,6 +2959,8 @@ mod tests {
                 row: 0,
                 range: [0, 0],
             }),
+            false,
+            1.0,
         )
         .expect("rebuild_viewport");
 
@@ -2992,6 +3015,8 @@ mod tests {
             None,
             255,
             None,
+            false,
+            1.0,
         );
 
         let p1 = DEFAULT_PALETTE[1];
@@ -3036,6 +3061,8 @@ mod tests {
             None,
             255,
             Some([1, 2]),
+            false,
+            1.0,
         );
 
         // Columns 1 and 2 (the preedit range, raw inclusive) are transparent.
@@ -3085,6 +3112,8 @@ mod tests {
             None,
             255,
             Some([0, 0]),
+            false,
+            1.0,
         );
 
         // Column 0 (under the preedit) is transparent.
@@ -3146,6 +3175,8 @@ mod tests {
             255,
             &[],
             None,
+            false,
+            1.0,
         )
         .expect("rebuild_viewport");
 
@@ -3195,6 +3226,8 @@ mod tests {
             None,
             255,
             None,
+            false,
+            1.0,
         );
 
         // The full block paints its bg with the foreground color (a), not b.
@@ -3242,6 +3275,8 @@ mod tests {
             None,
             255,
             None,
+            false,
+            1.0,
         );
 
         // Covering-derived bg, no explicit bg, not inverse → transparent.
@@ -3293,6 +3328,8 @@ mod tests {
             None,
             255,
             None,
+            false,
+            1.0,
         );
 
         // Inverse, no explicit bg → opaque default background (proves the inverse
@@ -3302,6 +3339,188 @@ mod tests {
             *c.bg_cell(0, 0),
             CellBg([default_bg.r, default_bg.g, default_bg.b, 255])
         );
+    }
+
+    #[test]
+    fn rebuild_bg_row_background_opacity_cells() {
+        use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+        use crate::terminal::style::{Color, Flags, Style as TermStyle};
+
+        let mut c = Contents::default();
+        c.resize(grid(4, 1));
+
+        let explicit = Rgb::new(10, 20, 30);
+        // Column 0: explicit background, plain.
+        let plain_bg = RunCell {
+            codepoint: 'x' as u32,
+            graphemes: vec![],
+            style: TermStyle {
+                bg_color: Color::Rgb(explicit),
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        // Column 1: default background (no explicit bg).
+        let default_bg_cell = RunCell {
+            codepoint: 'x' as u32,
+            graphemes: vec![],
+            style: TermStyle::default(),
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        // Column 2: explicit background, selected (forced opaque before the
+        // opacity arm).
+        let selected_bg = plain_bg.clone();
+        // Column 3: inverse (forced opaque before the opacity arm), no explicit bg.
+        let inverse_cell = RunCell {
+            codepoint: 'x' as u32,
+            graphemes: vec![],
+            style: TermStyle {
+                flags: Flags {
+                    inverse: true,
+                    ..Flags::default()
+                },
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        let row_cells = [plain_bg, default_bg_cell, selected_bg, inverse_cell];
+
+        rebuild_bg_row(
+            &mut c,
+            0,
+            &row_cells,
+            Some([2, 2]), // select column 2 only
+            &[],
+            &SelectionConfig::default(),
+            Rgb::new(200, 200, 200),
+            Rgb::new(0, 0, 0),
+            &DEFAULT_PALETTE,
+            None,
+            255,
+            None,
+            true, // background_opacity_cells on
+            0.5,  // background_opacity
+        );
+
+        // Column 0: explicit bg, not selected/inverse → per-cell opacity:
+        // 255 × 0.5 = 127.5, truncated toward zero → 127.
+        assert_eq!(
+            *c.bg_cell(0, 0),
+            CellBg([explicit.r, explicit.g, explicit.b, 127])
+        );
+        // Column 1: default bg (no explicit bg) → transparent even with the feature
+        // on (the opacity arm keys on an explicit background).
+        assert_eq!(c.bg_cell(0, 1).0[3], 0);
+        // Column 2: selected → opaque (the selected arm precedes the opacity arm).
+        assert_eq!(c.bg_cell(0, 2).0[3], 255);
+        // Column 3: inverse → opaque (the inverse arm precedes the opacity arm).
+        assert_eq!(c.bg_cell(0, 3).0[3], 255);
+    }
+
+    #[test]
+    fn rebuild_bg_row_opacity_cells_off_is_unchanged() {
+        use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+        use crate::terminal::style::{Color, Style as TermStyle};
+
+        let mut c = Contents::default();
+        c.resize(grid(1, 1));
+
+        let explicit = Rgb::new(10, 20, 30);
+        let cell = RunCell {
+            codepoint: 'x' as u32,
+            graphemes: vec![],
+            style: TermStyle {
+                bg_color: Color::Rgb(explicit),
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+
+        rebuild_bg_row(
+            &mut c,
+            0,
+            &[cell],
+            None,
+            &[],
+            &SelectionConfig::default(),
+            Rgb::new(200, 200, 200),
+            Rgb::new(0, 0, 0),
+            &DEFAULT_PALETTE,
+            None,
+            255,
+            None,
+            false, // feature off
+            0.5,   // opacity ignored when the feature is off
+        );
+
+        // Feature off → an explicit-bg cell stays fully opaque (the opacity is
+        // ignored), proving the feature-off path is unchanged.
+        assert_eq!(
+            *c.bg_cell(0, 0),
+            CellBg([explicit.r, explicit.g, explicit.b, 255])
+        );
+    }
+
+    #[test]
+    fn rebuild_bg_row_opacity_cells_skips_covering_derived() {
+        use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+        use crate::terminal::style::{Color, Style as TermStyle};
+
+        let mut c = Contents::default();
+        c.resize(grid(1, 1));
+
+        let fg = Rgb::new(11, 22, 33);
+        // A full block (U+2588) with an explicit fg but NO explicit background: the
+        // covering twist makes the resolved bg `Some(fg)`, yet it has no explicit
+        // `bg_style`. With the feature on, the opacity arm must NOT apply (it keys
+        // on `has_explicit_bg`, not the resolved bg being `Some`) — the cell stays
+        // alpha 0. An implementation using `colors.bg.is_some()` would wrongly dim
+        // it.
+        let cell = RunCell {
+            codepoint: 0x2588,
+            graphemes: vec![],
+            style: TermStyle {
+                fg_color: Color::Rgb(fg),
+                bg_color: Color::None,
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        };
+
+        rebuild_bg_row(
+            &mut c,
+            0,
+            &[cell],
+            None,
+            &[],
+            &SelectionConfig::default(),
+            Rgb::new(200, 200, 200),
+            Rgb::new(0, 0, 0),
+            &DEFAULT_PALETTE,
+            None,
+            255,
+            None,
+            true, // feature on
+            0.5,
+        );
+
+        // Covering-derived bg, no explicit bg → alpha 0 even with the feature on.
+        assert_eq!(*c.bg_cell(0, 0), CellBg([fg.r, fg.g, fg.b, 0]));
     }
 
     #[test]
@@ -3471,6 +3690,8 @@ mod tests {
             None,
             255,
             None,
+            false,
+            1.0,
         );
 
         // Column 0 is selected: the default selection background is the default
@@ -3529,6 +3750,8 @@ mod tests {
             None,
             255,
             None,
+            false,
+            1.0,
         );
         assert_eq!(*c.bg_cell(0, 0), CellBg([amber.r, amber.g, amber.b, 255]));
         assert_eq!(*c.bg_cell(0, 1), CellBg([0, 0, 0, 0]));
@@ -3552,6 +3775,8 @@ mod tests {
             None,
             255,
             None,
+            false,
+            1.0,
         );
         assert_eq!(
             *c2.bg_cell(0, 0),
@@ -3683,6 +3908,8 @@ mod tests {
             255,
             &[],
             None,
+            false,
+            1.0,
         )
         .expect("rebuild_viewport");
 

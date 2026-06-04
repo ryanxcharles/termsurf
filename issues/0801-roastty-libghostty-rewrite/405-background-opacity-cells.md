@@ -220,3 +220,72 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-065742-d405-prompt.md` (design)
 - Result: `logs/codex-review/20260604-065742-d405-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The `background-opacity-cells` `bg_alpha` arm is now live.
+
+- `roastty/src/renderer/cell.rs`:
+  - `rebuild_bg_row` (new `background_opacity_cells: bool` and
+    `background_opacity: f64` params, last two): the `bg_alpha` computation now
+    interleaves the opacity arm in upstream's order —
+    `if selected || inverse { alpha } else if background_opacity_cells && has_explicit_bg { (f64::from(alpha) * background_opacity) as u8 } else if has_explicit_bg { alpha } else { 0 }`.
+    The product truncates toward zero (the in-range `as u8` cast, matching
+    `@intFromFloat`); the arm keys on `has_explicit_bg` (upstream's
+    `bg_style != null`). Doc comment updated (the deferred note is dropped).
+  - `rebuild_viewport` (same two new params, last two): threads them to
+    `rebuild_bg_row`. All existing `rebuild_bg_row` / `rebuild_viewport` test
+    call sites are updated to `false, 1.0` (feature off, full opacity).
+
+Tests (in `cell.rs`):
+
+- `rebuild_bg_row_background_opacity_cells` — a 4-cell row (explicit-bg plain /
+  default-bg / explicit-bg selected via selection `[2, 2]` / inverse) with
+  `background_opacity_cells = true`, `background_opacity = 0.5`, `alpha = 255` →
+  alphas `127` (255 × 0.5 truncated) / `0` / `255` / `255`.
+- `rebuild_bg_row_opacity_cells_off_is_unchanged` — feature off: an explicit-bg
+  cell stays fully opaque (`255`), the opacity ignored.
+- `rebuild_bg_row_opacity_cells_skips_covering_derived` — a full block
+  (`U+2588`, explicit fg, `bg_color: None`) with the feature on stays alpha `0`,
+  proving the arm keys on `has_explicit_bg`, not the resolved background being
+  `Some`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2868 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + `lib.rs`/header/`abi_harness.c`)
+  clean; `git diff --check` clean.
+
+## Conclusion
+
+`rebuild_bg_row` now ports all five of upstream's `bg_alpha` arms: selected and
+inverse opaque, `background-opacity-cells` per-cell opacity for explicit-bg
+cells, plain explicit-bg opaque, and default/covering-derived transparent. The
+per-cell background alpha is fully faithful to `rebuildCells`. The feature flag
+and opacity are parameters; the live config wiring (reading `background-opacity`
+and `background-opacity-cells`) and the production `rebuild_viewport` caller
+stay deferred (still test-only), as does the Metal upload of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design and
+is faithful to upstream's `bg_alpha` block: the branch order is correct
+(selected/inverse opaque first, then
+`background_opacity_cells && has_explicit_bg` with truncation via the in-range
+`as u8` cast, then plain explicit-bg opaque, then default/covering-derived
+transparent), and the prior Low finding is addressed
+—`rebuild_bg_row_opacity_cells_skips_covering_derived` proves the opacity arm
+keys on the explicit `bg_color`, not `colors.bg.is_some()`. The feature-off
+control protects the existing behavior, and the selected / inverse / default
+cases cover the precedence rules. Internal Rust only, no public C ABI/header
+impact — nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-070155-r405-prompt.md` (result)
+- Result: `logs/codex-review/20260604-070155-r405-last-message.md` (result)
