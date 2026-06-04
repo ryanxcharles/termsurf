@@ -181,3 +181,70 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-063756-319821-prompt.md` (design)
 - Result: `logs/codex-review/20260604-063756-319821-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The under-preedit foreground skip is now live.
+
+- `roastty/src/renderer/cell.rs`:
+  - a `PreeditSkip { row: u16, range: [u16; 2] }` struct (the preedit row + its
+    inclusive raw-column range).
+  - `rebuild_row` (new `preedit_range: Option<[u16; 2]>` param, last):
+    `let under_preedit = preedit_range.is_some_and(|[s, e]| grid_pos[0] >= s && grid_pos[0] <= e); let skip_fg = flags.invisible || under_preedit;`
+    — the underline (with the link override), overline, the per-glyph
+    `add_glyph`, and the strikethrough are all guarded by `!skip_fg`, while the
+    glyph cursor advances regardless. Doc comment updated.
+  - `rebuild_viewport` (new `preedit_skip: Option<PreeditSkip>` param, last):
+    passes `preedit_skip.filter(|p| p.row == y).map(|p| p.range)` to
+    `rebuild_row`. `rebuild_bg_row` is unchanged (the background skip is
+    Experiment 404). The existing `rebuild_row`/`rebuild_viewport` test call
+    sites are updated (`None`).
+
+Test (in `cell.rs`): `rebuild_row_skips_under_preedit_foreground` — a cell under
+the preedit range `[0, 0]` with decorations + a glyph draws **no** foreground
+while a plain visible neighbor's glyph lands at column 1 (cursor advanced); a
+no-preedit control draws the decorated cell's four foreground cells at column 0;
+and a `SpacerTail` at column 1 with preedit `[0, 0]` is **not** skipped (raw
+column 1 ∉ `[0, 0]`), drawing at column 1.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2862 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The cells under the IME preedit now draw no foreground — the preedit
+(Experiments 400–401) draws its own cells over them — with the glyph cursor
+advancing so later cells stay aligned, using the raw column like upstream. The
+foreground half of the under-preedit skip is faithful; the background half
+(transparent under the preedit, in `rebuild_bg_row`) is the next experiment.
+
+The remaining renderer-bridge work: the under-preedit **background** skip
+(Experiment 404); the `rebuild_viewport` cursor/preedit assembly and the
+preedit- range origin (which depend on the live render `State`/`Mouse`); and the
+**Metal upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design:
+`PreeditSkip` carries the row plus the inclusive raw-column range; `rebuild_row`
+folds `under_preedit` into `skip_fg = flags.invisible || under_preedit`,
+suppressing the underline/link override, overline, glyph emission, and
+strikethrough while the glyph cursor still advances; `rebuild_bg_row` is
+correctly unchanged for this foreground-only slice (before Experiment 404);
+`rebuild_viewport` threads the row-matched `PreeditSkip` range correctly (and
+`PreeditSkip` being `Copy` keeps the `filter(...).map(...)` use valid); and the
+raw-column `SpacerTail` test addresses the prior Low while the
+plain-visible-neighbor case proves the cursor advancement — internal Rust only,
+no public C ABI/header impact. Nothing needed to change before the result
+commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260604-064248-755884-last-message.md`

@@ -430,6 +430,15 @@ pub(crate) struct Highlight {
     pub tag: HighlightTag,
 }
 
+/// The cells beneath the IME preedit, skipped by the cell loop (the preedit draws
+/// its own cells over them): the preedit `row` and its inclusive `[start, end]`
+/// column range. Upstream's `preedit_range` (a renderer input).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PreeditSkip {
+    pub row: u16,
+    pub range: [u16; 2],
+}
+
 /// The selection/search color config. `selection-*` is optional (`None` → a plain
 /// reverse); the `search-*`/`search-selected-*` values are non-optional (upstream
 /// `TerminalColor`s with concrete defaults).
@@ -799,8 +808,8 @@ pub(crate) fn add_glyph(
 /// three decorations (via `fg_colors`). A cell inside the row's hovered-link
 /// `link_ranges` (raw column, inclusive — no `x_compare`) has its underline
 /// overridden ([`link_underline`]). A **concealed** cell (the `invisible` flag,
-/// SGR 8) draws no foreground (its glyph cursor still advances). The per-row
-/// foreground body of upstream `rebuildCells`.
+/// SGR 8) or a cell under the row's `preedit_range` draws no foreground (its glyph
+/// cursor still advances). The per-row foreground body of upstream `rebuildCells`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rebuild_row(
     contents: &mut Contents,
@@ -820,6 +829,7 @@ pub(crate) fn rebuild_row(
     thicken: bool,
     thicken_strength: u8,
     link_ranges: &[[u16; 2]],
+    preedit_range: Option<[u16; 2]>,
 ) -> Result<(), ResolverRenderError> {
     let cols = row_cells.len();
     let infos = cell_infos(row_cells);
@@ -875,17 +885,20 @@ pub(crate) fn rebuild_row(
         let rgba = fg_colors[col];
         let fg = [rgba[0], rgba[1], rgba[2]];
         let flags = cell.style.flags;
-        // A concealed cell (SGR 8, invisible) draws its background but no
-        // foreground (no decorations and no glyph), matching xterm. The glyph
-        // cursor still advances below, so its shaped glyph is consumed and later
-        // cells stay aligned.
-        let conceal = flags.invisible;
+        // A cell draws no foreground (no decorations and no glyph) when it is
+        // concealed (SGR 8, invisible — matching xterm) or sits under the preedit
+        // (the preedit draws its own cells over it). The glyph cursor still advances
+        // below, so the cell's shaped glyph is consumed and later cells stay
+        // aligned. The under-preedit range uses the raw column (no `x_compare`).
+        let under_preedit =
+            preedit_range.is_some_and(|[start, end]| grid_pos[0] >= start && grid_pos[0] <= end);
+        let skip_fg = flags.invisible || under_preedit;
 
         // 1. Underline (its own color, else the foreground) — underneath. A
         //    hovered-link cell overrides the underline ([`link_underline`]); the
         //    link membership uses the raw column (no `x_compare`, unlike
         //    selection/highlights).
-        if !conceal {
+        if !skip_fg {
             let is_link = link_ranges
                 .iter()
                 .any(|&[start, end]| grid_pos[0] >= start && grid_pos[0] <= end);
@@ -930,8 +943,8 @@ pub(crate) fn rebuild_row(
             while glyph_i < run.glyphs.len()
                 && usize::from(run.run.offset) + usize::from(run.glyphs[glyph_i].x) == col
             {
-                // Always advance the cursor; emit the glyph only when not concealed.
-                if !conceal {
+                // Always advance the cursor; emit the glyph only when not skipped.
+                if !skip_fg {
                     add_glyph(
                         contents,
                         grid,
@@ -949,7 +962,7 @@ pub(crate) fn rebuild_row(
         }
 
         // 4. Strikethrough — on top.
-        if !conceal && flags.strikethrough {
+        if !skip_fg && flags.strikethrough {
             add_strikethrough(contents, grid, grid_pos, fg, rgba[3])?;
         }
     }
@@ -981,6 +994,7 @@ pub(crate) fn rebuild_viewport(
     thicken: bool,
     thicken_strength: u8,
     link_ranges: &[Vec<[u16; 2]>],
+    preedit_skip: Option<PreeditSkip>,
 ) -> Result<(), ResolverRenderError> {
     for (y, opts) in rows.iter().enumerate() {
         // This row's search highlights and hovered-link ranges (empty for a row
@@ -988,6 +1002,8 @@ pub(crate) fn rebuild_viewport(
         let row_highlights = highlights.get(y).map(Vec::as_slice).unwrap_or(&[]);
         let row_links = link_ranges.get(y).map(Vec::as_slice).unwrap_or(&[]);
         let y = u16::try_from(y).expect("viewport row fits u16");
+        // This row's preedit column range (only the preedit row has one).
+        let row_preedit = preedit_skip.filter(|p| p.row == y).map(|p| p.range);
 
         // Backgrounds first (behind the glyphs); needs no shaping or grid.
         rebuild_bg_row(
@@ -1026,6 +1042,7 @@ pub(crate) fn rebuild_viewport(
             thicken,
             thicken_strength,
             row_links,
+            row_preedit,
         )?;
     }
     Ok(())
@@ -1773,6 +1790,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_row");
 
@@ -1860,6 +1878,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_row");
 
@@ -1917,6 +1936,7 @@ mod tests {
                 false,
                 255,
                 links,
+                None,
             )
             .expect("rebuild_row");
             (shared, c)
@@ -2036,6 +2056,7 @@ mod tests {
                 false,
                 255,
                 &[],
+                None,
             )
             .expect("rebuild_row");
             c
@@ -2072,6 +2093,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_row");
         // Exactly one foreground cell — the visible 'B' glyph at column 1.
@@ -2088,6 +2110,126 @@ mod tests {
             .expect("'B' renders")
             .glyph;
         assert_eq!(v.glyph_pos, [b_glyph.atlas_x, b_glyph.atlas_y]);
+    }
+
+    #[test]
+    fn rebuild_row_skips_under_preedit_foreground() {
+        use crate::font::collection::Index;
+        use crate::font::run::TextRun;
+        use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+        use crate::terminal::style::{Flags, Style as TermStyle};
+
+        let default_fg = Rgb::new(200, 200, 200);
+        let default_bg = Rgb::new(0, 0, 0);
+
+        let cell = |cp: u32, flags: Flags, wide: Wide| RunCell {
+            codepoint: cp,
+            graphemes: vec![],
+            style: TermStyle {
+                flags,
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide,
+            is_empty: false,
+            is_codepoint: true,
+        };
+        // A decorated cell (so the skip is visible) and a plain cell.
+        let decorated = |cp: u32, wide: Wide| {
+            cell(
+                cp,
+                Flags {
+                    underline: Underline::Single,
+                    overline: true,
+                    strikethrough: true,
+                    ..Flags::default()
+                },
+                wide,
+            )
+        };
+        let plain = |cp: u32, wide: Wide| cell(cp, Flags::default(), wide);
+        let glyph = |x: u16, ch: u8| shape::Cell {
+            x,
+            x_offset: 0,
+            y_offset: 0,
+            glyph_index: glyph_for(ch),
+        };
+        let run = |cells: u16, glyphs: Vec<shape::Cell>| ShapedRun {
+            run: TextRun {
+                hash: 0,
+                offset: 0,
+                cells,
+                font_index: Index::default(),
+            },
+            glyphs,
+        };
+        let build = |row_cells: &[RunCell], runs: &[ShapedRun], preedit: Option<[u16; 2]>| {
+            let mut shared = menlo_grid();
+            let mut c = Contents::default();
+            c.resize(grid(u16::try_from(row_cells.len()).unwrap(), 1));
+            rebuild_row(
+                &mut c,
+                &mut shared,
+                0,
+                runs,
+                row_cells,
+                None,
+                &[],
+                &SelectionConfig::default(),
+                default_fg,
+                default_bg,
+                &DEFAULT_PALETTE,
+                None,
+                255,
+                255,
+                false,
+                255,
+                &[],
+                preedit,
+            )
+            .expect("rebuild_row");
+            c
+        };
+
+        // Cell 0 is under the preedit (range [0, 0]); cell 1 is a plain visible
+        // cell. Cell 0 draws no foreground; cell 1's glyph is emitted at column 1
+        // (the cursor advanced past the skipped glyph).
+        let c = build(
+            &[
+                decorated('A' as u32, Wide::Narrow),
+                plain('B' as u32, Wide::Narrow),
+            ],
+            &[run(2, vec![glyph(0, b'A'), glyph(1, b'B')])],
+            Some([0, 0]),
+        );
+        assert_eq!(c.fg_rows[1].len(), 1);
+        assert_eq!(c.fg_rows[1][0].grid_pos, [1, 0]);
+
+        // No preedit → the decorated cell 0 draws its foreground (underline +
+        // overline + glyph + strikethrough = 4 cells at column 0).
+        let c = build(
+            &[decorated('A' as u32, Wide::Narrow)],
+            &[run(1, vec![glyph(0, b'A')])],
+            None,
+        );
+        assert_eq!(c.fg_rows[1].len(), 4);
+        assert!(c.fg_rows[1].iter().all(|v| v.grid_pos[0] == 0));
+
+        // Raw column: a SpacerTail at column 1 with preedit range [0, 0] is NOT
+        // skipped (raw column 1 ∉ [0, 0]; an x_compare of 0 would wrongly skip it),
+        // so its decorations draw at column 1.
+        let c = build(
+            &[
+                plain('A' as u32, Wide::Narrow),
+                decorated('B' as u32, Wide::SpacerTail),
+            ],
+            &[run(2, vec![glyph(0, b'A'), glyph(1, b'B')])],
+            Some([0, 0]),
+        );
+        // Column 0 (under preedit) draws nothing; column 1 (SpacerTail, not skipped)
+        // draws its decorations + glyph — so there are cells at column 1.
+        assert!(c.fg_rows[1].iter().any(|v| v.grid_pos[0] == 1));
+        assert!(c.fg_rows[1].iter().all(|v| v.grid_pos[0] == 1));
     }
 
     #[test]
@@ -2161,6 +2303,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_row");
 
@@ -2246,6 +2389,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_row");
 
@@ -2348,6 +2492,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_row");
 
@@ -2401,6 +2546,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_row");
         assert_eq!(c2.fg_rows[1][0].color[3], 255);
@@ -2475,6 +2621,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_row");
         assert_eq!(c.fg_rows[1].len(), 4);
@@ -2507,6 +2654,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_row");
         for v in &c2.fg_rows[1] {
@@ -2582,6 +2730,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_row");
 
@@ -2654,6 +2803,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_viewport");
 
@@ -2711,6 +2861,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_viewport");
 
@@ -2818,6 +2969,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_viewport");
 
@@ -3284,6 +3436,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_row");
 
@@ -3347,6 +3500,7 @@ mod tests {
             false,
             255,
             &[],
+            None,
         )
         .expect("rebuild_viewport");
 
