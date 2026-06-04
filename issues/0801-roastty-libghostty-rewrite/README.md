@@ -1277,6 +1277,8 @@ are past the correctness-critical foundation.
   Claude/Codex/Codex
 - [Experiment 415: the screen-size uniform update (ortho2d + update_screen_size)](415-screen-size-uniforms.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 416: the font-grid uniform update (update_font_grid)](416-font-grid-uniform.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
