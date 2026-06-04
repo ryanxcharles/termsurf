@@ -1237,6 +1237,8 @@ are past the correctness-critical foundation.
   **Pass** · Claude/Codex/Codex
 - [Experiment 395: the cursor's own color](395-cursor-color.md) — **Pass** ·
   Claude/Codex/Codex
+- [Experiment 396: the block-cursor position uniform](396-block-cursor-pos.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
