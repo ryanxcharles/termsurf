@@ -1229,6 +1229,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 391: plumb the per-row highlights into the passes](391-plumb-highlights.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 392: the codepoint render path](392-render-codepoint.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
