@@ -1465,6 +1465,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 509: the WindowDecoration enum config formatter (window-decoration)](509-config-window-decoration-format-entry.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 510: the optional-recurse field-dispatch case (EntryFormatter::entry_optional)](510-config-formatter-entry-optional.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
