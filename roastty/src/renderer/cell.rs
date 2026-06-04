@@ -1281,6 +1281,70 @@ pub(crate) fn add_cursor(
     Ok(())
 }
 
+/// Render one preedit (IME) codepoint into `contents` at `coord` with `screen_fg`:
+/// the glyph (via [`SharedGrid::render_codepoint`], skipped if no font has it) as a
+/// grayscale text cell, plus a single underline — and a second underline on the
+/// next column for a wide codepoint that is not in the last column. Faithful port
+/// of upstream `addPreeditCell`. `cols` is the row's column count (for the
+/// wide/last-column check). A render error propagates (the `?`, consistent with the
+/// other renderer helpers); a missing glyph (`None`) draws nothing.
+pub(crate) fn add_preedit_cell(
+    contents: &mut Contents,
+    grid: &mut SharedGrid,
+    codepoint: u32,
+    wide: bool,
+    coord: [u16; 2],
+    cols: u16,
+    screen_fg: [u8; 3],
+) -> Result<(), ResolverRenderError> {
+    let opts = RenderOptions {
+        grid_metrics: grid.metrics,
+        cell_width: None,
+        constraint: Constraint::default(),
+        constraint_width: 1,
+        thicken: false,
+        thicken_strength: 255,
+    };
+    let Some(render) =
+        grid.render_codepoint(codepoint, Style::Regular, Some(Presentation::Text), &opts)?
+    else {
+        // No font has the codepoint — draw nothing (upstream logs and returns).
+        return Ok(());
+    };
+
+    contents.add(
+        Key::Text,
+        CellTextVertex {
+            glyph_pos: [render.glyph.atlas_x, render.glyph.atlas_y],
+            glyph_size: [render.glyph.width, render.glyph.height],
+            bearings: [
+                i16::try_from(render.glyph.offset_x).expect("preedit x bearing fits i16"),
+                i16::try_from(render.glyph.offset_y).expect("preedit y bearing fits i16"),
+            ],
+            grid_pos: coord,
+            color: [screen_fg[0], screen_fg[1], screen_fg[2], 255],
+            atlas: CellTextAtlas::Grayscale,
+            flags: CellTextFlags::new(false, false),
+            _padding: [0, 0],
+        },
+    );
+
+    // A single underline at the cell, and a second on the next column for a wide
+    // codepoint (when it fits).
+    add_underline(contents, grid, coord, Underline::Single, screen_fg, 255)?;
+    if wide && coord[0] + 1 < cols {
+        add_underline(
+            contents,
+            grid,
+            [coord[0] + 1, coord[1]],
+            Underline::Single,
+            screen_fg,
+            255,
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3382,6 +3446,83 @@ mod tests {
         .expect("add_cursor");
         assert!(c.fg_rows[0].is_empty());
         assert!(c.fg_rows[4].is_empty());
+    }
+
+    #[test]
+    fn add_preedit_cell_renders_glyph_and_underline() {
+        use crate::font::collection::Index;
+
+        let screen_fg = [9, 8, 7];
+
+        let sprite_glyph = |shared: &mut SharedGrid, sprite: Sprite| {
+            let opts = underline_opts(shared);
+            shared
+                .render_glyph(Index::special(Special::Sprite), sprite as u32, &opts)
+                .expect("sprite renders")
+                .glyph
+        };
+        let direct_glyph = |shared: &mut SharedGrid| {
+            let opts = RenderOptions {
+                grid_metrics: shared.metrics,
+                cell_width: None,
+                constraint: Constraint::default(),
+                constraint_width: 1,
+                thicken: false,
+                thicken_strength: 255,
+            };
+            shared
+                .render_codepoint('A' as u32, Style::Regular, Some(Presentation::Text), &opts)
+                .expect("render ok")
+                .expect("'A' present")
+                .glyph
+        };
+
+        // A narrow preedit 'A' at column 1 → the glyph + one underline at [1, 0].
+        let mut shared = menlo_grid();
+        let mut c = Contents::default();
+        c.resize(grid(4, 1));
+        add_preedit_cell(&mut c, &mut shared, 'A' as u32, false, [1, 0], 4, screen_fg)
+            .expect("add_preedit_cell");
+        assert_eq!(c.fg_rows[1].len(), 2);
+        // The glyph: grayscale, screen_fg at alpha 255, matching a direct render.
+        let glyph = c.fg_rows[1][0];
+        assert_eq!(glyph.grid_pos, [1, 0]);
+        assert_eq!(glyph.atlas, CellTextAtlas::Grayscale);
+        assert_eq!(glyph.color, [9, 8, 7, 255]);
+        let dg = direct_glyph(&mut shared);
+        assert_eq!(glyph.glyph_pos, [dg.atlas_x, dg.atlas_y]);
+        assert_eq!(glyph.glyph_size, [dg.width, dg.height]);
+        // The underline: a single-underline sprite at [1, 0].
+        let underline = c.fg_rows[1][1];
+        assert_eq!(underline.grid_pos, [1, 0]);
+        let su = sprite_glyph(&mut shared, Sprite::Underline);
+        assert_eq!(underline.glyph_pos, [su.atlas_x, su.atlas_y]);
+
+        // A wide preedit cell at column 1 → a second underline at column 2.
+        let mut shared = menlo_grid();
+        let mut c = Contents::default();
+        c.resize(grid(4, 1));
+        add_preedit_cell(&mut c, &mut shared, 'A' as u32, true, [1, 0], 4, screen_fg)
+            .expect("add_preedit_cell");
+        assert_eq!(c.fg_rows[1].len(), 3);
+        let cols: Vec<u16> = c.fg_rows[1].iter().map(|v| v.grid_pos[0]).collect();
+        assert_eq!(cols, [1, 1, 2]); // glyph@1, underline@1, underline@2
+
+        // A wide preedit cell in the LAST column → no second underline.
+        let mut shared = menlo_grid();
+        let mut c = Contents::default();
+        c.resize(grid(4, 1));
+        add_preedit_cell(&mut c, &mut shared, 'A' as u32, true, [3, 0], 4, screen_fg)
+            .expect("add_preedit_cell");
+        assert_eq!(c.fg_rows[1].len(), 2); // glyph + one underline, no second
+
+        // A codepoint no font has → nothing drawn.
+        let mut shared = menlo_grid();
+        let mut c = Contents::default();
+        c.resize(grid(4, 1));
+        add_preedit_cell(&mut c, &mut shared, 0xE000, false, [1, 0], 4, screen_fg)
+            .expect("add_preedit_cell");
+        assert!(c.fg_rows[1].is_empty());
     }
 
     #[test]

@@ -242,3 +242,68 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-061426-274567-prompt.md` (design)
 - Result: `logs/codex-review/20260604-061426-274567-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The preedit cell is now rendered.
+
+- `roastty/src/renderer/cell.rs`:
+  `add_preedit_cell(contents, grid, codepoint, wide, coord, cols, screen_fg)` —
+  builds the render options with `cell_width: None`, renders the codepoint via
+  `render_codepoint(.., Style::Regular, Some(Presentation::Text))` (a `None`
+  result is a no-op), adds a grayscale text cell at `coord` (raw glyph bearings,
+  `screen_fg` at alpha 255, `CellTextFlags::new(false, false)`), then a single
+  underline at `coord` and — for `wide && coord[0] + 1 < cols` — a second single
+  underline at the next column. `pub(crate)` and not yet called in production
+  (the preedit placement loop is deferred), reachable in the library crate, so
+  no dead-code warning.
+
+Test (in `cell.rs`): `add_preedit_cell_renders_glyph_and_underline` — a narrow
+`'A'` at column 1 → the glyph (grayscale, `screen_fg` at alpha 255, matching a
+direct `render_codepoint('A')`) + a single underline (cache identity vs
+`Sprite::Underline`); a wide cell at column 1 → grid-pos columns `[1, 1, 2]`
+(glyph, underline, second underline); a wide cell in the last column (3) → 2
+cells (no second underline); and `0xE000` (no font) → nothing.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2859 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The preedit cell rendering — the IME composition glyph + underline(s) drawn over
+the cursor — is now ported faithfully as `add_preedit_cell`, reusing
+`render_codepoint` (Experiment 392) and `add_underline`. Combined with the
+ported `Preedit`/`PreeditRange` state, the per-codepoint preedit rendering is
+complete; the placement loop (iterating the codepoints over a `PreeditRange`,
+computing each coordinate and `screen_fg`, and skipping the under-preedit cells)
+and the Metal upload remain.
+
+The remaining renderer-bridge work: the preedit placement loop; and the **Metal
+upload** of `Contents` (the GPU buffer/uniform upload — the renderer boundary,
+which depends on the GUI's Metal layer that roastty already has the
+buffer/uniform types for).
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design
+(the `cell_width: None` render options, `Regular`/`Text`, the `None` no-op, the
+grayscale text vertex at `coord` with raw glyph bearings / `screen_fg` alpha 255
+/ `CellTextFlags::new(false, false)`, the single underline at `coord`, and the
+second underline only when `wide && coord[0] + 1 < cols`), that the
+design-review Low is addressed (render errors intentionally propagate via `?`,
+consistent with the lock cursor and the current Rust renderer-helper style,
+while missing glyphs stay a no-op like upstream), and that the tests cover the
+narrow, wide, last-column, and missing-codepoint behavior — internal Rust only,
+no public C ABI/header impact. Nothing needed to change before the result
+commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260604-061712-569004-last-message.md`
