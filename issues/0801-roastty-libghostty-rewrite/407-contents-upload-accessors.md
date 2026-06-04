@@ -176,3 +176,62 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-071238-d407-prompt.md` (design)
 - Result: `logs/codex-review/20260604-071238-d407-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The `Contents` upload accessors are now live.
+
+- `roastty/src/renderer/cell.rs`: `Contents::bg_cells(&self) -> &[CellBg]`
+  returns the whole flat row-major background slice (upstream
+  `self.cells.bg_cells`); `Contents::fg_rows(&self) -> &[Vec<CellTextVertex>]`
+  returns the whole foreground list array (length `rows + 2`), including the two
+  reserved cursor lists at index `0` and the last (upstream
+  `self.cells.fg_rows.lists`). Both are plain borrows — no copy.
+
+Test (in `cell.rs`): `contents_upload_accessors_expose_whole_buffers` — a 2×1
+`Contents` with both background cells set (row-major), a foreground vertex added
+to the real row (`grid_pos [1, 0]`), and a block cursor glyph via `set_cursor` →
+`bg_cells()` is `[CellBg([1, 2, 3, 4]), CellBg([5, 6, 7, 8])]`;
+`fg_rows().len()` is `3` (`rows + 2`); the block cursor glyph is in reserved
+list `0` (`color [9, 9, 9, 9]`), the added vertex is in real row `1`
+(`grid_pos [1, 0]`), and the last reserved list is present (empty).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2872 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + `lib.rs`/header/`abi_harness.c`)
+  clean; `git diff --check` clean.
+
+## Conclusion
+
+`Contents` now exposes the exact two upload views upstream's `drawFrame` reads —
+the flat background slice and the whole foreground list array (reserved cursor
+lists included). With the two upload primitives (`sync`, `sync_from_array_lists`
+— Experiment 406) and these read views in place, the next renderer-bridge slice
+is the frame-cell sync that composes them: a frame-owned background buffer +
+cell-text buffer that syncs from a `Contents` and returns the foreground count
+(upstream's `drawFrame` lines 1560–1561). The full draw wiring, the remaining
+Metal upload (atlas textures, custom-shader uniforms), and the
+`rebuild_viewport` cursor/preedit assembly stay deferred.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design:
+`bg_cells()` returns the full flat row-major background slice by borrow, and
+`fg_rows()` returns the full foreground list array by borrow including the
+reserved cursor lists at index `0` and the last — faithful to upstream's
+`self.cells.bg_cells` and `self.cells.fg_rows.lists` upload views. It judged the
+test sufficient (row-major background exposure, `fg_rows().len() == rows + 2`,
+the block cursor data in reserved list `0`, normal foreground data in the real
+row list, and the final reserved list present). Internal Rust only — no C
+ABI/header concern; nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-071440-r407-prompt.md` (result)
+- Result: `logs/codex-review/20260604-071440-r407-last-message.md` (result)

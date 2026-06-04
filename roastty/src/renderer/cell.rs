@@ -704,6 +704,22 @@ impl Contents {
         // The `+ 1` skips the reserved cursor list at index 0.
         self.fg_rows[y as usize + 1].clear();
     }
+
+    /// The flat background cells, row-major (`bg_cells[row * columns + col]`).
+    /// The upload view consumed by the background buffer's `sync` (upstream
+    /// `self.cells.bg_cells`).
+    pub(crate) fn bg_cells(&self) -> &[CellBg] {
+        &self.bg_cells
+    }
+
+    /// All foreground row lists, **including** the two reserved cursor lists
+    /// (index `0` and the last); real rows are `1..=rows`. The upload view
+    /// consumed by the cell-text buffer's `sync_from_array_lists` (upstream
+    /// `self.cells.fg_rows.lists`) — the whole array, so the cursor glyph in the
+    /// reserved lists is uploaded too.
+    pub(crate) fn fg_rows(&self) -> &[Vec<CellTextVertex>] {
+        &self.fg_rows
+    }
 }
 
 /// Build the [`RenderOptions`] for the glyph at column `x`, exactly as upstream
@@ -1710,6 +1726,43 @@ mod tests {
     fn sample_metrics() -> Metrics {
         use crate::font::face::coretext::Face;
         Metrics::calc(Face::new("Menlo", 32.0).get_metrics())
+    }
+
+    #[test]
+    fn contents_upload_accessors_expose_whole_buffers() {
+        let mut c = Contents::default();
+        c.resize(grid(2, 1));
+
+        // Two background cells (row-major) and a foreground vertex on the real
+        // row, plus a block cursor glyph in the reserved list.
+        *c.bg_cell_mut(0, 0) = CellBg([1, 2, 3, 4]);
+        *c.bg_cell_mut(0, 1) = CellBg([5, 6, 7, 8]);
+
+        let mut row_vertex = dummy_vertex();
+        row_vertex.grid_pos = [1, 0]; // column 1, real row 0
+        c.add(Key::Text, row_vertex);
+
+        let mut cursor_vertex = dummy_vertex();
+        cursor_vertex.grid_pos = [0, 0];
+        cursor_vertex.color = [9, 9, 9, 9];
+        c.set_cursor(Some(cursor_vertex), Some(CursorStyle::Block));
+
+        // `bg_cells()` exposes the whole flat slice, row-major.
+        assert_eq!(c.bg_cells(), &[CellBg([1, 2, 3, 4]), CellBg([5, 6, 7, 8])]);
+
+        // `fg_rows()` exposes ALL lists, length rows + 2 = 3: reserved cursor list
+        // 0, the real row 1, and the last reserved list.
+        let fg = c.fg_rows();
+        assert_eq!(fg.len(), 3);
+        // Reserved list 0 holds the block cursor glyph.
+        assert_eq!(fg[0].len(), 1);
+        assert_eq!(fg[0][0].color, [9, 9, 9, 9]);
+        // Real row 1 (storage index 1) holds the added vertex.
+        assert_eq!(fg[1].len(), 1);
+        assert_eq!(fg[1][0].grid_pos, [1, 0]);
+        // The last reserved list is present (empty: the block cursor went to list
+        // 0, not the last).
+        assert!(fg[2].is_empty());
     }
 
     #[test]
