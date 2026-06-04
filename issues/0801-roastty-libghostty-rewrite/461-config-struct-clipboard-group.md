@@ -185,3 +185,63 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-120259-d461-prompt.md` (design)
 - Result: `logs/codex-review/20260604-120259-d461-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The aggregating `Config` struct is now begun, with the clipboard config group.
+
+- `roastty/src/config/mod.rs`:
+  `pub(crate) struct Config { pub copy_on_select: CopyOnSelect, pub clipboard_read: ClipboardAccess, pub clipboard_write: ClipboardAccess }`
+  (derive `Debug, Clone, PartialEq` — not `Copy`/`Eq`, anticipating future
+  `String`/float fields) and a `Default` impl setting the upstream Config-field
+  defaults (macOS `copy-on-select` `True`, `clipboard-read` `Ask`,
+  `clipboard-write` `Allow`). The module doc was updated: `Config` now exists
+  and is grown one field group per slice.
+
+Test (in `config/mod.rs`): `config_default_clipboard_group` —
+`Config::default()` has `copy_on_select == CopyOnSelect::True`,
+`clipboard_read == ClipboardAccess::Ask`,
+`clipboard_write == ClipboardAccess::Allow`; a modified config
+(`clipboard_read = Deny`) differs from the default; a `Clone`/`PartialEq`
+round-trip.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2952 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + config +
+  `lib.rs`/header/`abi_harness.c`) clean; `git diff --check` clean.
+
+## Conclusion
+
+The config layer now has the **aggregating `Config` struct** it was building
+toward — the home all the leaf-type defaults were deferred to — begun with the
+clipboard field group (`copy_on_select`, `clipboard_read`, `clipboard_write`)
+and its `Default`. This is the first slice of a larger coupled piece: `Config`
+grows one coherent field group per later experiment (wiring each already-ported
+leaf type's documented default), and the parser (`loadCli` / file loading /
+per-field `parseCLI`), the `changeConfig` machinery, and the conditional-config
+system stay deferred. The forward-compatible derive set (`Clone`/`PartialEq`,
+not `Copy`/`Eq`) anticipates the `String`-backed (`Theme`, `FontStyle`) and
+float (`background_opacity`, `minimum_contrast`) fields to come.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings** (the design Low resolved). It confirmed `Config` begins the
+aggregate with the clipboard group only (a reasonable incremental port shape);
+the defaults are faithful for roastty's macOS-only target
+(`copy_on_select = True`, `clipboard_read = Ask`, `clipboard_write = Allow`);
+`Clone + PartialEq` without `Copy`/`Eq` is the right forward-compatible derive
+set; the module-doc update addresses the "Config now exists but grows per slice"
+transition; and the test covers the defaults, mutation inequality, and
+clone/equality. No public C ABI/header impact; nothing needed to change before
+the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-120613-r461-prompt.md` (result)
+- Result: `logs/codex-review/20260604-120613-r461-last-message.md` (result)

@@ -1,14 +1,41 @@
 //! Configuration types.
 //!
-//! The minimal entry point of the config layer: the leaf config types consumed
-//! by roastty subsystems (renderer, font, terminal, input, clipboard). The
-//! broader config subsystem (parsing, the full `Config` struct, the rest of the
-//! config keys) is ported in later slices.
+//! The leaf config types consumed by roastty subsystems (renderer, font,
+//! terminal, input, clipboard) and the aggregating [`Config`] struct (upstream
+//! `config.Config`). `Config` is grown one coherent field group per slice; the
+//! full key set, the parser, and file loading are ported in later slices.
 #![allow(dead_code)]
 // This config layer is consumed by later slices.
 
 use crate::terminal::color::Rgb;
 use crate::terminal::style::BoldColor as TerminalBoldColor;
+
+/// The aggregating config struct (upstream `config.Config`) — the home of the
+/// config keys. Built up one coherent field group per slice; this lands the
+/// clipboard group. The full key set, the parser, and file loading are ported
+/// later.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Config {
+    /// `copy-on-select`.
+    pub copy_on_select: CopyOnSelect,
+    /// `clipboard-read`.
+    pub clipboard_read: ClipboardAccess,
+    /// `clipboard-write`.
+    pub clipboard_write: ClipboardAccess,
+}
+
+impl Default for Config {
+    /// Upstream's `Config` field defaults for the clipboard group (macOS):
+    /// `copy-on-select` is `True`, `clipboard-read` is `Ask`, `clipboard-write`
+    /// is `Allow`.
+    fn default() -> Self {
+        Self {
+            copy_on_select: CopyOnSelect::True,
+            clipboard_read: ClipboardAccess::Ask,
+            clipboard_write: ClipboardAccess::Allow,
+        }
+    }
+}
 
 /// A config color value (upstream `Config.Color`): an RGB byte triple. The string
 /// parsing (named colors / hex) and the C extern struct are ported in later
@@ -690,7 +717,7 @@ impl OscColorReportFormat {
 mod tests {
     use super::{
         AlphaBlending, BackgroundBlur, BackgroundImageFit, BackgroundImagePosition, BoldColor,
-        ClipboardAccess, Color, ConfirmCloseSurface, CopyOnSelect, CustomShaderAnimation,
+        ClipboardAccess, Color, Config, ConfirmCloseSurface, CopyOnSelect, CustomShaderAnimation,
         FontShapingBreak, FontStyle, Fullscreen, GraphemeWidthMethod, LinkPreviews, MacHidden,
         MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons, MiddleClickAction,
         MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
@@ -856,6 +883,21 @@ mod tests {
         let i = MacTitlebarProxyIcon::Visible;
         let copied = i;
         assert_eq!(i, copied);
+    }
+
+    #[test]
+    fn config_default_clipboard_group() {
+        let d = Config::default();
+        assert_eq!(d.copy_on_select, CopyOnSelect::True);
+        assert_eq!(d.clipboard_read, ClipboardAccess::Ask);
+        assert_eq!(d.clipboard_write, ClipboardAccess::Allow);
+
+        // A modified config differs from the default and round-trips Clone/PartialEq.
+        let mut modified = Config::default();
+        modified.clipboard_read = ClipboardAccess::Deny;
+        assert_ne!(modified, d);
+        let cloned = modified.clone();
+        assert_eq!(modified, cloned);
     }
 
     #[test]
