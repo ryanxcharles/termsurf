@@ -1431,6 +1431,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 492: the color-union formatters (TerminalColor / BoldColor format_entry)](492-config-color-union-format-entry.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 493: scalar config formatters (WorkingDirectory / WindowPadding / BackgroundBlur format_entry)](493-config-scalar-format-entries.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
