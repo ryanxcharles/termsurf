@@ -191,3 +191,66 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-210118-011959-prompt.md` (design)
 - Result: `logs/codex-review/20260603-210118-011959-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The under-cursor text recolor color is now computable.
+
+- `roastty/src/renderer/cell.rs`:
+  `cursor_text_color(cursor_style, cursor_text, default_fg, default_bg, palette, bold) -> Rgb`
+  delegates to
+  `selection_colors(cursor_style, default_fg, default_bg, palette, bold, None, cursor_text).fg`
+  — the cursor-text resolution is the selection foreground arm (Experiment 385)
+  applied to the under-cursor cell's style with the cursor-text config; the
+  (unused) selection background is discarded. `pub(crate)` and not yet called in
+  production (the uniform/Metal upload is deferred), but reachable in the
+  library crate, so no dead-code warning.
+
+Test (in `cell.rs`): `cursor_text_color_resolves_the_cursor_text_config` — over
+a cell with explicit SGR `fg = a` / `bg = b`: `None` → `default_bg`; `Color(c1)`
+→ `c1`; `CellForeground` → `a` (non-inverse) / `b` (inverse); `CellBackground` →
+`b` (non-inverse) / `a` (inverse); and a no-explicit-bg `CellBackground`
+non-inverse → `default_bg` (the background defaults to the default background).
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2853 passed, 0 failed (+1, no regressions; the
+  `selection_colors` tests guard the shared resolution).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+The under-cursor text recolor — the color a block cursor's covered glyph is
+redrawn with — is now ported faithfully as `cursor_text_color`, reusing the
+selection foreground resolution so the two stay consistent. Like `cell_colors` /
+`selection_colors` / `cursor_text_color`, this is the CPU-side color
+computation; the uniform that carries it (and the `cursor_pos`/`cursor_wide`
+block-cursor uniforms) is part of the deferred Metal upload.
+
+The remaining renderer-bridge work: the cursor's own color (`cursor_color` from
+OSC 12 / config) and the block-cursor uniforms (with the Metal upload); the
+column-ordered decoration merge + link double-underline; and the **Metal
+upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design:
+`cursor_text_color` delegates exactly to
+`selection_colors(cursor_style, default_fg, default_bg, palette, bold, None, cursor_text).fg`,
+inheriting the already-reviewed selection foreground arm (`None → default_bg`,
+the explicit color verbatim, and `CellForeground`/`CellBackground` swapped under
+inverse with `final_bg = bg_style.unwrap_or(default_bg)`). It confirmed the test
+covers the full intended matrix including the no-explicit-bg fallback to
+`default_bg`, that the function is internal Rust only (unused until the cursor
+uniform/Metal upload work lands), and that the deferred scope is reasonable,
+with no public C ABI/header change. Nothing needed to change before the result
+commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-210309-581385-last-message.md`

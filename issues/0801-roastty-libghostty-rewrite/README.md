@@ -1234,7 +1234,7 @@ are past the correctness-critical foundation.
 - [Experiment 393: the lock cursor glyph](393-lock-cursor.md) — **Pass** ·
   Claude/Codex/Codex
 - [Experiment 394: the under-cursor text recolor](394-cursor-text-color.md) —
-  **Designed** · Claude/Codex/Codex
+  **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

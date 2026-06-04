@@ -298,6 +298,34 @@ pub(crate) fn selection_colors(
     CellColors { fg, bg }
 }
 
+/// Compute the under-cursor text recolor — the color a **block** cursor's covered
+/// text is redrawn with (upstream's block-cursor `uniforms.cursor_color`). Given
+/// the under-cursor cell's `cursor_style` and the `cursor-text` config: an explicit
+/// color, or the cell's resolved foreground/background swapped under `inverse`,
+/// defaulting to the default background. Its resolution is identical to the
+/// selection foreground arm (the shared `TerminalColor` foreground resolution), so
+/// it reuses [`selection_colors`] and takes `.fg`.
+pub(crate) fn cursor_text_color(
+    cursor_style: TermStyle,
+    cursor_text: Option<SelectionColor>,
+    default_fg: Rgb,
+    default_bg: Rgb,
+    palette: &Palette,
+    bold: Option<BoldColor>,
+) -> Rgb {
+    // The selection background config is unused — only `.fg` is taken.
+    selection_colors(
+        cursor_style,
+        default_fg,
+        default_bg,
+        palette,
+        bold,
+        None,
+        cursor_text,
+    )
+    .fg
+}
+
 /// The per-cell selected state (upstream's `selected` enum). `False` uses the
 /// base [`cell_colors`]; the three selected states use [`selected_colors`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3393,6 +3421,75 @@ mod tests {
         assert_eq!(
             colors(Selected::Search, true, &cell_cfg),
             Some(CellColors { fg: b, bg: Some(b) })
+        );
+    }
+
+    #[test]
+    fn cursor_text_color_resolves_the_cursor_text_config() {
+        use crate::terminal::color::DEFAULT_PALETTE;
+        use crate::terminal::style::{Color, Flags, Style as TermStyle};
+
+        let a = Rgb::new(10, 20, 30);
+        let b = Rgb::new(40, 50, 60);
+        let c1 = Rgb::new(1, 2, 3);
+        let default_fg = Rgb::new(200, 200, 200);
+        let default_bg = Rgb::new(7, 8, 9);
+
+        // The under-cursor cell: explicit SGR fg=a / bg=b.
+        let styled = |inverse: bool, bg: Color| TermStyle {
+            fg_color: Color::Rgb(a),
+            bg_color: bg,
+            flags: Flags {
+                inverse,
+                ..Flags::default()
+            },
+            ..TermStyle::default()
+        };
+        let color = |inverse, bg, cfg| {
+            cursor_text_color(
+                styled(inverse, bg),
+                cfg,
+                default_fg,
+                default_bg,
+                &DEFAULT_PALETTE,
+                None,
+            )
+        };
+
+        // No cursor-text config → the default background.
+        assert_eq!(color(false, Color::Rgb(b), None), default_bg);
+        // An explicit color is used verbatim.
+        assert_eq!(
+            color(false, Color::Rgb(b), Some(SelectionColor::Color(c1))),
+            c1
+        );
+
+        // CellForeground: the cell's foreground (a); inverse swaps to its
+        // background (b).
+        assert_eq!(
+            color(false, Color::Rgb(b), Some(SelectionColor::CellForeground)),
+            a
+        );
+        assert_eq!(
+            color(true, Color::Rgb(b), Some(SelectionColor::CellForeground)),
+            b
+        );
+        // CellBackground: the cell's background (b); inverse swaps to its
+        // foreground (a).
+        assert_eq!(
+            color(false, Color::Rgb(b), Some(SelectionColor::CellBackground)),
+            b
+        );
+        assert_eq!(
+            color(true, Color::Rgb(b), Some(SelectionColor::CellBackground)),
+            a
+        );
+
+        // No explicit SGR background: CellBackground non-inverse falls back to the
+        // default background.
+        assert_eq!(
+            color(false, Color::None, Some(SelectionColor::CellBackground)),
+            default_bg
         );
     }
 
