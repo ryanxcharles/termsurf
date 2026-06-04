@@ -151,3 +151,48 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-170002-d513-prompt.md` (design)
 - Result: `logs/codex-review/20260604-170002-d513-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`from_keyword(value: &str) -> Option<Self>` was added to the seven plain enums
+(`CopyOnSelect`, `ClipboardAccess`, `RightClickAction`, `MiddleClickAction`,
+`WindowColorspace`, `AlphaBlending`, `GraphemeWidthMethod`), each an exact tag
+match (the inverse of `keyword()`) returning `None` otherwise — the
+`std.meta.stringToEnum` parse. The new test
+`enum_from_keyword_round_trips_and_rejects_unknown` round-trips every variant,
+rejects an unknown string, and asserts `CopyOnSelect::from_keyword` rejects
+`"1"` / `"t"` (the bool-like tags match only as literal strings).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2999 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches upstream's generic enum parse path —
+exact tag-name matching through `stringToEnum`, with no bool-alias parsing for
+enum fields (`args.zig:341`/`:442`); the round-trip tests cover every variant,
+unknown rejection, and the `CopyOnSelect` distinction that `"1"` / `"t"` are not
+accepted; gates are clean. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-170251-r513-prompt.md` (result)
+- Result: `logs/codex-review/20260604-170251-r513-last-message.md` (result)
+
+## Conclusion
+
+The config **loader** now has its first parse-side primitive: the `stringToEnum`
+enum parse (`from_keyword`) for seven plain enums. The next slices can add
+`from_keyword` for the remaining plain enums (the mac / fullscreen /
+background-image / font / shader groups), then the bool / int / float / string
+"magic" parse paths, the empty-string reset-to-default rule, and finally the
+per-field `parseIntoField` dispatch (`Config::set(key, value)`) and the
+`loadCli` / file loader — the inverse of `Config::format_config`.

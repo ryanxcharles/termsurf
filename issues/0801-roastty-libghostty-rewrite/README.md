@@ -1472,7 +1472,7 @@ are past the correctness-critical foundation.
 - [Experiment 512: the aggregate per-field config formatter (Config::format_config)](512-config-aggregate-formatter.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 513: the enum-keyword config parsers (from_keyword: CopyOnSelect / ClipboardAccess / RightClickAction / MiddleClickAction / WindowColorspace / AlphaBlending / GraphemeWidthMethod)](513-config-enum-from-keyword.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

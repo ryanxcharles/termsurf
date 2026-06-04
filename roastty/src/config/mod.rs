@@ -1751,6 +1751,17 @@ impl ClipboardAccess {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "allow" => Some(ClipboardAccess::Allow),
+            "deny" => Some(ClipboardAccess::Deny),
+            "ask" => Some(ClipboardAccess::Ask),
+            _ => None,
+        }
+    }
+
     /// Format as a config entry (upstream's enum branch): the keyword.
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -1786,6 +1797,16 @@ impl WindowColorspace {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "srgb" => Some(WindowColorspace::Srgb),
+            "display-p3" => Some(WindowColorspace::DisplayP3),
+            _ => None,
+        }
+    }
+
     /// Format as a config entry (upstream's enum branch): the keyword.
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -1810,6 +1831,17 @@ impl AlphaBlending {
             AlphaBlending::Native => "native",
             AlphaBlending::Linear => "linear",
             AlphaBlending::LinearCorrected => "linear-corrected",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "native" => Some(AlphaBlending::Native),
+            "linear" => Some(AlphaBlending::Linear),
+            "linear-corrected" => Some(AlphaBlending::LinearCorrected),
+            _ => None,
         }
     }
 
@@ -2092,6 +2124,16 @@ impl GraphemeWidthMethod {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "legacy" => Some(GraphemeWidthMethod::Legacy),
+            "unicode" => Some(GraphemeWidthMethod::Unicode),
+            _ => None,
+        }
+    }
+
     /// Format as a config entry (upstream's enum branch): the keyword.
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -2256,6 +2298,17 @@ impl CopyOnSelect {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "false" => Some(CopyOnSelect::False),
+            "true" => Some(CopyOnSelect::True),
+            "clipboard" => Some(CopyOnSelect::Clipboard),
+            _ => None,
+        }
+    }
+
     /// Format as a config entry (upstream's enum branch): the keyword.
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -2290,6 +2343,19 @@ impl RightClickAction {
         }
     }
 
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "ignore" => Some(RightClickAction::Ignore),
+            "paste" => Some(RightClickAction::Paste),
+            "copy" => Some(RightClickAction::Copy),
+            "copy-or-paste" => Some(RightClickAction::CopyOrPaste),
+            "context-menu" => Some(RightClickAction::ContextMenu),
+            _ => None,
+        }
+    }
+
     /// Format as a config entry (upstream's enum branch): the keyword.
     pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
         formatter.entry_str(self.keyword());
@@ -2312,6 +2378,16 @@ impl MiddleClickAction {
         match self {
             MiddleClickAction::PrimaryPaste => "primary-paste",
             MiddleClickAction::Ignore => "ignore",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "primary-paste" => Some(MiddleClickAction::PrimaryPaste),
+            "ignore" => Some(MiddleClickAction::Ignore),
+            _ => None,
         }
     }
 
@@ -4729,5 +4805,66 @@ mod tests {
         // (default `None`) too.
         assert!(out.contains("cursor-color = \n"));
         assert!(out.contains("theme = \n"));
+    }
+
+    #[test]
+    fn enum_from_keyword_round_trips_and_rejects_unknown() {
+        // Each variant's keyword round-trips through `from_keyword`, and an
+        // unknown string is `None` (upstream `std.meta.stringToEnum`).
+        for v in [
+            CopyOnSelect::False,
+            CopyOnSelect::True,
+            CopyOnSelect::Clipboard,
+        ] {
+            assert_eq!(CopyOnSelect::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(CopyOnSelect::from_keyword("nope"), None);
+        // The bool-like tags only match as literal tag strings, not `1`/`t`.
+        assert_eq!(CopyOnSelect::from_keyword("1"), None);
+        assert_eq!(CopyOnSelect::from_keyword("t"), None);
+
+        for v in [
+            ClipboardAccess::Allow,
+            ClipboardAccess::Deny,
+            ClipboardAccess::Ask,
+        ] {
+            assert_eq!(ClipboardAccess::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(ClipboardAccess::from_keyword("nope"), None);
+
+        for v in [
+            RightClickAction::Ignore,
+            RightClickAction::Paste,
+            RightClickAction::Copy,
+            RightClickAction::CopyOrPaste,
+            RightClickAction::ContextMenu,
+        ] {
+            assert_eq!(RightClickAction::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(RightClickAction::from_keyword("nope"), None);
+
+        for v in [MiddleClickAction::PrimaryPaste, MiddleClickAction::Ignore] {
+            assert_eq!(MiddleClickAction::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(MiddleClickAction::from_keyword("nope"), None);
+
+        for v in [WindowColorspace::Srgb, WindowColorspace::DisplayP3] {
+            assert_eq!(WindowColorspace::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(WindowColorspace::from_keyword("nope"), None);
+
+        for v in [
+            AlphaBlending::Native,
+            AlphaBlending::Linear,
+            AlphaBlending::LinearCorrected,
+        ] {
+            assert_eq!(AlphaBlending::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(AlphaBlending::from_keyword("nope"), None);
+
+        for v in [GraphemeWidthMethod::Legacy, GraphemeWidthMethod::Unicode] {
+            assert_eq!(GraphemeWidthMethod::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(GraphemeWidthMethod::from_keyword("nope"), None);
     }
 }
