@@ -1491,6 +1491,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 522: the per-field parse dispatch, packed-struct + bool slice (Config::set)](522-config-set-packed-bool-dispatch.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 523: the per-field parse dispatch, color + font-style slice (Config::set)](523-config-set-color-fontstyle-dispatch.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
