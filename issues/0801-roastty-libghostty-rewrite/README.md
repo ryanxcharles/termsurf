@@ -1383,6 +1383,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 468: grow the Config struct with the surface-policy group](468-config-struct-surface-policy-group.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 469: grow the Config struct with the macOS-window group](469-config-struct-mac-window-group.md)
+  — **Designed** · Claude/Codex/—
 
 ## Non-Goals
 
