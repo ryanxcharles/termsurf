@@ -145,3 +145,58 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-081944-d416-prompt.md` (design)
 - Result: `logs/codex-review/20260604-081944-d416-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The font-grid uniform update is now live.
+
+- `roastty/src/renderer/metal/shaders.rs`:
+  `MetalUniforms::update_font_grid(&mut self, metrics: &Metrics)` sets
+  `cell_size = [metrics.cell_width as f32, metrics.cell_height as f32]` (the
+  only field upstream's `updateFontGridUniforms` touches). Added
+  `use crate::font::metrics::Metrics;`.
+
+Test (in `shaders.rs`): `update_font_grid_sets_cell_size_only` — a real
+`Metrics` (`Metrics::calc(Face::new("Menlo", 32.0).get_metrics())`) with
+overridden distinct dimensions (`cell_width = 7`, `cell_height = 17`), and a
+`MetalUniforms` with distinctive other fields → `cell_size == [7.0, 17.0]`, and
+`screen_size` / `grid_size` / `bg_color` unchanged.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2892 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + `lib.rs`/header/`abi_harness.c`)
+  clean; `git diff --check` clean.
+
+## Conclusion
+
+The per-frame uniforms now derive both the screen-size group (Experiment 415)
+and the font-grid `cell_size` (this experiment) from the live geometry. The
+remaining uniform-update groups — the grid-size (the resize path in
+`rebuildCells`), the config-derived group (min-contrast and the
+color-space/blending bools, which need the config `colorspace`/`blending`
+enums), the background color, and the cursor group — and a full production
+`MetalUniforms` constructor are the next slices, along with the live call sites
+that run these updates on font/size/config change.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation is a direct faithful port of
+upstream `updateFontGridUniforms`: it sets `cell_size` to
+`[metrics.cell_width as f32, metrics.cell_height as f32]` in width-then-height
+order, and the method body touches no other uniform field. It judged the test
+sufficient (distinct overridden dimensions `7`/`17` so an order mistake would
+fail, and representative unrelated fields verified unchanged), and the scope
+correctly limited to the font-grid uniform group with the grid-size / config /
+cursor / live-call-site wiring properly deferred. No public C ABI/header impact;
+nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-082158-r416-prompt.md` (result)
+- Result: `logs/codex-review/20260604-082158-r416-last-message.md` (result)

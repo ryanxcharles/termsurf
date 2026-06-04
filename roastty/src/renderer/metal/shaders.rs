@@ -3,6 +3,7 @@ use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{MTLDevice, MTLLibrary};
 
+use crate::font::metrics::Metrics;
 use crate::renderer::metal::api::MetalPixelFormat;
 use crate::renderer::metal::buffer::MetalBufferElement;
 use crate::renderer::metal::pipeline::{
@@ -174,6 +175,13 @@ impl MetalUniforms {
             blank.left as f32,
         ];
         self.screen_size = [size.screen.width as f32, size.screen.height as f32];
+    }
+
+    /// Update the font-grid-derived uniform field (upstream
+    /// `updateFontGridUniforms`): the `cell_size` (the pixel width/height of one
+    /// glyph cell), from the grid `metrics`.
+    pub(crate) fn update_font_grid(&mut self, metrics: &Metrics) {
+        self.cell_size = [metrics.cell_width as f32, metrics.cell_height as f32];
     }
 
     #[cfg(test)]
@@ -506,6 +514,30 @@ fragment float4 bg_image_fragment() {
                 [-1.0, 1.0, 0.0, 1.0],
             ]
         );
+    }
+
+    #[test]
+    fn update_font_grid_sets_cell_size_only() {
+        use crate::font::face::coretext::Face;
+        use crate::font::metrics::Metrics;
+
+        // A real metrics with overridden, distinct cell dimensions (so the
+        // width/height order is meaningful).
+        let mut metrics = Metrics::calc(Face::new("Menlo", 32.0).get_metrics());
+        metrics.cell_width = 7;
+        metrics.cell_height = 17;
+
+        // Distinctive cell_size + other fields to prove only cell_size changes.
+        let mut uniforms =
+            MetalUniforms::test_with_grid([2, 3], [4, 5], [99.0, 99.0], [0.0; 4], 0, [1, 2, 3, 4]);
+
+        uniforms.update_font_grid(&metrics);
+
+        assert_eq!(uniforms.cell_size, [7.0, 17.0]);
+        // The other fields are untouched.
+        assert_eq!(uniforms.screen_size, [2.0, 3.0]);
+        assert_eq!(uniforms.grid_size, [4, 5]);
+        assert_eq!(uniforms.bg_color, [1, 2, 3, 4]);
     }
 
     #[test]
