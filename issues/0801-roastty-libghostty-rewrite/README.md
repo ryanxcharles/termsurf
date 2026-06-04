@@ -1295,6 +1295,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 424: the BackgroundBlur config enum (enabled + is_macos_glass)](424-background-blur-config.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 425: the macOS-glass bg_color override (apply_macos_glass_bg_override)](425-macos-glass-bg-override.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
