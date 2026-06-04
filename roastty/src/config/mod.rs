@@ -2547,6 +2547,13 @@ impl CustomShaderAnimation {
     }
 }
 
+/// An error parsing a `FontStyle` (upstream `error.ValueRequired`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FontStyleParseError {
+    /// No value was supplied.
+    ValueRequired,
+}
+
 /// The `font-style*` config (upstream `FontStyle`): how a font style (bold,
 /// italic, …) is selected. The `Config` default is `Default`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2565,6 +2572,18 @@ impl FontStyle {
     /// and `Name` both leave the style enabled.
     pub(crate) fn enabled(&self) -> bool {
         !matches!(self, FontStyle::False)
+    }
+
+    /// Parse the `font-style*` value (upstream `FontStyle.parseCLI`): a missing
+    /// value is `ValueRequired`; `default` / `false` select those variants; any
+    /// other value is a named style (an owned copy).
+    pub(crate) fn parse_cli(value: Option<&str>) -> Result<FontStyle, FontStyleParseError> {
+        let value = value.ok_or(FontStyleParseError::ValueRequired)?;
+        Ok(match value {
+            "default" => FontStyle::Default,
+            "false" => FontStyle::False,
+            other => FontStyle::Name(other.to_string()),
+        })
     }
 
     /// Format this value as a config entry (upstream's custom union
@@ -2824,9 +2843,9 @@ mod tests {
         BackgroundImagePosition, BoldColor, ClipboardAccess, ClipboardCodepointMapEntry,
         ClipboardCodepointMapParseError, ClipboardReplacement, Color, ColorList, ColorParseError,
         Config, ConfirmCloseSurface, CopyOnSelect, CustomShaderAnimation, Duration,
-        DurationParseError, FlagsParseError, FontShapingBreak, FontStyle, Fullscreen,
-        GraphemeWidthMethod, LinkPreviews, MacHidden, MacTitlebarProxyIcon, MacTitlebarStyle,
-        MacWindowButtons, MagicParseError, MiddleClickAction, MouseShiftCapture,
+        DurationParseError, FlagsParseError, FontShapingBreak, FontStyle, FontStyleParseError,
+        Fullscreen, GraphemeWidthMethod, LinkPreviews, MacHidden, MacTitlebarProxyIcon,
+        MacTitlebarStyle, MacWindowButtons, MagicParseError, MiddleClickAction, MouseShiftCapture,
         NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
         OscColorReportFormat, Palette, PaletteParseError, RepeatableClipboardCodepointMap,
         RepeatableString, RepeatableStringParseError, RightClickAction, ScrollToBottom,
@@ -5029,6 +5048,38 @@ mod tests {
             fmt(&|f| FontStyle::Name("bold".into()).format_entry(f)),
             "a = bold\n"
         );
+    }
+
+    #[test]
+    fn font_style_parse_cli() {
+        assert_eq!(
+            FontStyle::parse_cli(None),
+            Err(FontStyleParseError::ValueRequired)
+        );
+        assert_eq!(
+            FontStyle::parse_cli(Some("default")),
+            Ok(FontStyle::Default)
+        );
+        assert_eq!(FontStyle::parse_cli(Some("false")), Ok(FontStyle::False));
+        assert_eq!(
+            FontStyle::parse_cli(Some("bold")),
+            Ok(FontStyle::Name("bold".to_string()))
+        );
+        // Any non-default/false value (including empty) is a named style; the
+        // set-but-empty reset is a separate dispatch branch.
+        assert_eq!(
+            FontStyle::parse_cli(Some("")),
+            Ok(FontStyle::Name(String::new()))
+        );
+
+        // Round-trip: parse_cli then format_entry recovers the formatted line for
+        // each of the three formatted cases.
+        for value in ["default", "false", "bold"] {
+            let parsed = FontStyle::parse_cli(Some(value)).unwrap();
+            let mut out = String::new();
+            parsed.format_entry(&mut EntryFormatter::new("a", &mut out));
+            assert_eq!(out, format!("a = {}\n", value));
+        }
     }
 
     #[test]

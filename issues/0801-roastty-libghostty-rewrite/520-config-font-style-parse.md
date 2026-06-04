@@ -153,3 +153,48 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-180731-d520-prompt.md` (design)
 - Result: `logs/codex-review/20260604-180731-d520-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`FontStyleParseError` and `FontStyle::parse_cli` were added: `None` →
+`ValueRequired`, `"default"` / `"false"` select the void variants, and any other
+value (including `""`) becomes `Name(copy)` — faithful to upstream
+`FontStyle.parseCLI`. The new test `font_style_parse_cli` covers the missing
+value, the two literals, a named style, the empty-string case, and a `parse_cli`
+→ `format_entry` round-trip for the three formatted cases.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3006 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches upstream `FontStyle.parseCLI` — `None` is
+`ValueRequired`, `"default"` / `"false"` select the void variants, and
+everything else (incl. `""`) becomes a copied `Name`; the test coverage is
+adequate (explicit empty-string case, parse/format round-trip); the gates are
+clean and the deferred dispatch/reset work stayed out of scope. "Approved with
+no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-180941-r520-prompt.md` (result)
+- Result: `logs/codex-review/20260604-180941-r520-last-message.md` (result)
+
+## Conclusion
+
+`FontStyle::parse_cli` is ported — four of the aggregate `Config::set` fields'
+parsers (`font-style*`) are now ready. The remaining leaf parser for the
+aggregate is `Theme::parse_cli` (its light/dark-pair branch needs upstream
+`parseAutoStruct` — its own experiment). After that, the aggregate `Config::set`
+dispatch (with the set-but-empty reset rule) can wire `from_keyword`, the
+packed-struct / leaf `parse_cli`, and the bool magic — the inverse of
+`Config::format_config`. The int type-magic (float blocked) and the `loadCli` /
+file loader follow.
