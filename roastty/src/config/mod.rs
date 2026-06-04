@@ -608,6 +608,95 @@ fn is_ascii_ws_zig(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
 }
 
+/// An error parsing `WindowPadding` (upstream `WindowPadding.parseCLI`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowPaddingParseError {
+    /// No value was supplied (upstream `error.ValueRequired`).
+    ValueRequired,
+    /// A side did not parse as a base-10 `u32` (upstream `error.InvalidValue`).
+    InvalidValue,
+}
+
+/// The `window-padding-*` config (upstream `Config.WindowPadding`): a padding pair
+/// (a single value applies to both edges). The `formatEntry` formatter is ported
+/// later.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct WindowPadding {
+    pub top_left: u32,
+    pub bottom_right: u32,
+}
+
+impl WindowPadding {
+    /// Parse window padding (upstream `WindowPadding.parseCLI`): one base-10 `u32`
+    /// applied to both edges, or two comma-separated `u32`s
+    /// (`top_left,bottom_right`), each `" \t"`-trimmed. A missing value is
+    /// `WindowPaddingParseError::ValueRequired`; any parse failure is
+    /// `InvalidValue`.
+    pub(crate) fn parse_cli(input: Option<&str>) -> Result<WindowPadding, WindowPaddingParseError> {
+        let input = input.ok_or(WindowPaddingParseError::ValueRequired)?;
+        let trim = |s: &str| s.trim_matches(|c: char| c == ' ' || c == '\t').to_string();
+
+        if let Some(idx) = input.find(',') {
+            let left =
+                parse_u32_dec(&trim(&input[..idx])).ok_or(WindowPaddingParseError::InvalidValue)?;
+            let right = parse_u32_dec(&trim(&input[idx + 1..]))
+                .ok_or(WindowPaddingParseError::InvalidValue)?;
+            Ok(WindowPadding {
+                top_left: left,
+                bottom_right: right,
+            })
+        } else {
+            let value = parse_u32_dec(&trim(input)).ok_or(WindowPaddingParseError::InvalidValue)?;
+            Ok(WindowPadding {
+                top_left: value,
+                bottom_right: value,
+            })
+        }
+    }
+}
+
+/// Parse a base-10 `u32` (upstream `std.fmt.parseInt(u32, _, 10)`): an optional
+/// `+`/`-` sign, then decimal digits with interior-only `_` separators
+/// (leading/trailing `_` rejected). `-0` is `0`; a negative nonzero, an overflow,
+/// or any non-digit is `None`. (The whole string must parse — unlike the greedy
+/// scan in [`Duration::parse_cli`].)
+fn parse_u32_dec(buf: &str) -> Option<u32> {
+    let (neg, rest): (bool, &str) = match buf.as_bytes().first() {
+        Some(b'+') => (false, &buf[1..]),
+        Some(b'-') => (true, &buf[1..]),
+        _ => (false, buf),
+    };
+    let bytes = rest.as_bytes();
+    if bytes.is_empty() || bytes[0] == b'_' || bytes[bytes.len() - 1] == b'_' {
+        return None;
+    }
+    let mut acc: i64 = 0;
+    for &c in bytes {
+        if c == b'_' {
+            continue;
+        }
+        if !c.is_ascii_digit() {
+            return None;
+        }
+        let digit = (c - b'0') as i64;
+        if acc != 0 {
+            acc = acc.checked_mul(10).filter(|&v| v <= u32::MAX as i64)?;
+        } else if neg {
+            // First digit of a negative number: only `-0` survives for unsigned.
+            acc = -digit;
+            if acc < 0 {
+                return None;
+            }
+            continue;
+        }
+        acc = if neg { acc - digit } else { acc + digit };
+        if !(0..=(u32::MAX as i64)).contains(&acc) {
+            return None;
+        }
+    }
+    Some(acc as u32)
+}
+
 /// The `notify-on-command-finish` config (upstream `NotifyOnCommandFinish`): when
 /// to notify on a finished command. The `Config` default is `Never`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1230,7 +1319,8 @@ mod tests {
         NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
         OscColorReportFormat, Palette, PaletteParseError, RightClickAction, ScrollToBottom,
         ShellIntegration, ShellIntegrationFeatures, TerminalBoldColor, TerminalColor, Theme,
-        WindowColorspace, WindowPaddingColor, WindowSubtitle,
+        WindowColorspace, WindowPadding, WindowPaddingColor, WindowPaddingParseError,
+        WindowSubtitle,
     };
     use crate::terminal::color::Rgb;
 
@@ -2212,6 +2302,63 @@ mod tests {
         assert_eq!(
             Duration::parse_cli(Some("0 ")),
             Err(DurationParseError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn window_padding_parse_cli_parses_single_and_pair() {
+        let pad = |tl: u32, br: u32| {
+            Ok(WindowPadding {
+                top_left: tl,
+                bottom_right: br,
+            })
+        };
+
+        // Upstream `WindowPadding.parseCLI` cases.
+        assert_eq!(WindowPadding::parse_cli(Some("100")), pad(100, 100));
+        assert_eq!(WindowPadding::parse_cli(Some("100,200")), pad(100, 200));
+        assert_eq!(WindowPadding::parse_cli(Some(" 100 , 200 ")), pad(100, 200));
+        assert_eq!(
+            WindowPadding::parse_cli(None),
+            Err(WindowPaddingParseError::ValueRequired)
+        );
+        assert_eq!(
+            WindowPadding::parse_cli(Some("")),
+            Err(WindowPaddingParseError::InvalidValue)
+        );
+        assert_eq!(
+            WindowPadding::parse_cli(Some("a")),
+            Err(WindowPaddingParseError::InvalidValue)
+        );
+
+        // `parse_u32_dec` faithfulness (Zig `parseInt(u32, _, 10)`).
+        assert_eq!(WindowPadding::parse_cli(Some("0")), pad(0, 0));
+        assert_eq!(
+            WindowPadding::parse_cli(Some("4294967295")),
+            pad(u32::MAX, u32::MAX)
+        );
+        assert_eq!(
+            WindowPadding::parse_cli(Some("4294967296")), // overflow
+            Err(WindowPaddingParseError::InvalidValue)
+        );
+        assert_eq!(WindowPadding::parse_cli(Some("1_000")), pad(1000, 1000)); // interior `_`
+        assert_eq!(
+            WindowPadding::parse_cli(Some("_5")),
+            Err(WindowPaddingParseError::InvalidValue)
+        );
+        assert_eq!(
+            WindowPadding::parse_cli(Some("5_")),
+            Err(WindowPaddingParseError::InvalidValue)
+        );
+        assert_eq!(WindowPadding::parse_cli(Some("+5")), pad(5, 5)); // leading `+`
+        assert_eq!(WindowPadding::parse_cli(Some("-0")), pad(0, 0)); // `-0` is `0`
+        assert_eq!(
+            WindowPadding::parse_cli(Some("-5")), // negative nonzero
+            Err(WindowPaddingParseError::InvalidValue)
+        );
+        assert_eq!(
+            WindowPadding::parse_cli(Some("100,x")), // bad side
+            Err(WindowPaddingParseError::InvalidValue)
         );
     }
 

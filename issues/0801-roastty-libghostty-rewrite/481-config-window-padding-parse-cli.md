@@ -279,3 +279,52 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-134654-d481-prompt.md` (design)
 - Result: `logs/codex-review/20260604-134654-d481-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`WindowPadding::parse_cli` was added to `roastty/src/config/mod.rs` exactly as
+designed — the `ValueRequired` guard, the first-comma split with per-side /
+whole `" \t"` trim, the single-value-to-both-edges behavior, and base-10 `u32`
+parsing (`parse_u32_dec`, a faithful base-10 port of Zig's `parseInt`) with
+every failure folding to `InvalidValue`. The new test
+`window_padding_parse_cli_parses_single_and_pair` asserts the upstream cases and
+the integer-parser edge cases (overflow, interior vs edge underscores, leading
+`+`, `-0`, negative nonzero, a bad pair side).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2961 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: `WindowPadding::parse_cli` faithfully ports upstream (missing input
+→ `ValueRequired`, first comma splits pair mode, trim is only space/tab, single
+value applies to both fields, all integer parse failures → `InvalidValue`);
+`parse_u32_dec` preserves the relevant Zig `parseInt(u32, _, 10)` behavior
+(fixed decimal, optional `+`, `-0`, negative-nonzero invalid, internal
+underscores, edge-underscore rejection, overflow rejection); the test covers the
+upstream cases plus the useful integer edge cases; and deferring `formatEntry`
+and the broader parser/formatter remains properly scoped. "Approved for the
+result commit."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-135014-r481-prompt.md` (result)
+- Result: `logs/codex-review/20260604-135014-r481-last-message.md` (result)
+
+## Conclusion
+
+`WindowPadding` now parses (one or two comma-separated `u32`s), and this slice
+also lands a reusable base-10 `u32` parser (`parse_u32_dec`) — a companion to
+the base-0 `u8` parser from Experiment 478 — that later integer config types can
+use. The config parse layer now spans `Color`, `TerminalColor`, `BoldColor`,
+`Palette`, `ColorList`, `Duration`, and `WindowPadding`. The next slice can port
+another self-contained config value type's `parseCLI`, or begin the per-field
+parser dispatch, continuing toward the full config loader.

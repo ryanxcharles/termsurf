@@ -1408,7 +1408,7 @@ are past the correctness-critical foundation.
 - [Experiment 480: the config Duration CLI parser (Duration::parse_cli)](480-config-duration-parse-cli.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 481: the config WindowPadding CLI parser (WindowPadding::parse_cli)](481-config-window-padding-parse-cli.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
