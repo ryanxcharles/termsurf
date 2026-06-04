@@ -195,3 +195,67 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260603-190328-962459-prompt.md` (design)
 - Result: `logs/codex-review/20260603-190328-962459-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+Decorations are now wired into the row pass — the per-row foreground assembly is
+complete (glyphs + decorations).
+
+- `roastty/src/renderer/cell.rs`: `rebuild_row` gains two per-cell decoration
+  passes around the existing run loop. Before the runs (underneath), for each
+  cell it emits an `add_underline` (colored
+  `resolve_underline_color(palette) .unwrap_or(fg)`) when
+  `flags.underline != None` and an `add_overline` (fg) when `flags.overline`;
+  after the runs (on top), it emits an `add_strikethrough` (fg) when
+  `flags.strikethrough`. The column is a checked `u16::try_from(col)`, the fg
+  comes from the already-resolved `fg_colors[col]`.
+
+Test (in `cell.rs`): `rebuild_row_emits_decorations_layered` builds a 1×1 row
+with `'A'` carrying `underline = Single` (a distinct `underline_color`),
+`overline`, and `strikethrough`, plus a matching `ShapedRun`; after
+`rebuild_row`, `fg_rows[1]` has four cells in order — underline (its own color,
+`Sprite::Underline`), overline (fg, `Sprite::Overline`), the glyph `'A'` (fg,
+distinct), strikethrough (fg, `Sprite::Strikethrough`) — the sprites verified by
+same-grid cache identity. This proves the per-cell emission, the colors, and the
+same-column layering.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2830 passed, 0 failed (+1, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer) clean; `git diff --check` clean.
+
+## Conclusion
+
+`rebuild_row` now produces a cell's full foreground — its glyphs and its
+underline/overline/strikethrough — and `rebuild_viewport` drives it (with
+backgrounds) over the whole screen. From a terminal screen's `RunOptions`, the
+renderer now fills `Contents` with backgrounds, glyphs, and all three
+decorations, correctly layered within each column.
+
+The remaining renderer-bridge work: a strict column-ordered merge (the deferred
+cross-column layering refinement); the upstream link double-underline override;
+the **cursor** cell; the renderer-layer **color adjustments** (reverse-video,
+selection, min-contrast, faint/dim alpha, default-bg fill, opacity); and the
+**Metal upload** of `Contents`.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed `rebuild_row` emits underline/overline before the
+run glyphs and strikethrough after, with checked column conversion and clean
+sequential borrows of `contents`/`grid`; that the color handling is faithful
+(underline uses `resolve_underline_color(palette).unwrap_or(fg)`, overline and
+strikethrough use the resolved foreground); that the test proves the same-column
+layering and colors (`fg_rows[1]` ordered underline, overline, glyph,
+strikethrough, with the underline's distinct color and the decoration sprites
+verified by same-grid cache identity); and that the documented cross-column
+ordering caveat covers the known non-equivalence with upstream's exact column
+interleave. Nothing needed to change before the result commit.
+
+Review artifacts:
+
+- Result review: `logs/codex-review/20260603-190718-625631-last-message.md`

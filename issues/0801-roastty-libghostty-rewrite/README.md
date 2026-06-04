@@ -1202,7 +1202,7 @@ are past the correctness-critical foundation.
 - [Experiment 377: exposing underline-color resolution](377-resolve-underline-color.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 378: wiring decorations into the row pass](378-decoration-integration.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

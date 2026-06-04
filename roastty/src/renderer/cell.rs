@@ -501,6 +501,34 @@ pub(crate) fn rebuild_row(
         })
         .collect();
 
+    // Decorations that layer UNDERNEATH the text: underline (its own color, else
+    // the foreground) and overline (the foreground). Emitted before the glyphs so
+    // they sit below them in the foreground cell list.
+    for (col, cell) in row_cells.iter().enumerate() {
+        let grid_pos = [u16::try_from(col).expect("column fits u16"), y];
+        let rgba = fg_colors[col];
+        let fg = [rgba[0], rgba[1], rgba[2]];
+        let flags = cell.style.flags;
+        if flags.underline != Underline::None {
+            let underline_color = cell
+                .style
+                .resolve_underline_color(palette)
+                .map(|rgb| [rgb.r, rgb.g, rgb.b])
+                .unwrap_or(fg);
+            add_underline(
+                contents,
+                grid,
+                grid_pos,
+                flags.underline,
+                underline_color,
+                alpha,
+            )?;
+        }
+        if flags.overline {
+            add_overline(contents, grid, grid_pos, fg, alpha)?;
+        }
+    }
+
     for run in row_runs {
         add_run(
             contents,
@@ -513,6 +541,15 @@ pub(crate) fn rebuild_row(
             thicken,
             thicken_strength,
         )?;
+    }
+
+    // Strikethrough layers ON TOP of the text (emitted after the glyphs).
+    for (col, cell) in row_cells.iter().enumerate() {
+        if cell.style.flags.strikethrough {
+            let grid_pos = [u16::try_from(col).expect("column fits u16"), y];
+            let rgba = fg_colors[col];
+            add_strikethrough(contents, grid, grid_pos, [rgba[0], rgba[1], rgba[2]], alpha)?;
+        }
     }
     Ok(())
 }
@@ -1151,6 +1188,108 @@ mod tests {
         assert_eq!(v0.color, [200, 200, 200, 255]);
         assert_eq!(v1.color, [11, 22, 33, 255]);
         assert_ne!(v1.color, [200, 200, 200, 255]);
+    }
+
+    #[test]
+    fn rebuild_row_emits_decorations_layered() {
+        use crate::font::collection::Index;
+        use crate::font::run::TextRun;
+        use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+        use crate::terminal::style::{Color, Flags, Style as TermStyle};
+
+        let mut shared = menlo_grid();
+        let mut c = Contents::default();
+        c.resize(grid(1, 1));
+
+        // One cell 'A' with an underline (its own color), an overline, and a
+        // strikethrough.
+        let underline_rgb = Rgb::new(1, 2, 3);
+        let style = TermStyle {
+            underline_color: Color::Rgb(underline_rgb),
+            flags: Flags {
+                underline: Underline::Single,
+                overline: true,
+                strikethrough: true,
+                ..Flags::default()
+            },
+            ..TermStyle::default()
+        };
+        let row_cells = [RunCell {
+            codepoint: 'A' as u32,
+            graphemes: vec![],
+            style,
+            style_id: 0,
+            wide: Wide::Narrow,
+            is_empty: false,
+            is_codepoint: true,
+        }];
+        let run = ShapedRun {
+            run: TextRun {
+                hash: 0,
+                offset: 0,
+                cells: 1,
+                font_index: Index::default(),
+            },
+            glyphs: vec![shape::Cell {
+                x: 0,
+                x_offset: 0,
+                y_offset: 0,
+                glyph_index: glyph_for(b'A'),
+            }],
+        };
+
+        let default_fg = Rgb::new(200, 200, 200);
+        let fg = [200, 200, 200, 255];
+        rebuild_row(
+            &mut c,
+            &mut shared,
+            0,
+            &[run],
+            &row_cells,
+            default_fg,
+            &DEFAULT_PALETTE,
+            None,
+            255,
+            false,
+            255,
+        )
+        .expect("rebuild_row");
+
+        // Draw order in fg_rows[1]: underline, overline (underneath), glyph 'A',
+        // strikethrough (on top).
+        assert_eq!(c.fg_rows[1].len(), 4);
+        let cells = c.fg_rows[1].clone();
+
+        let opts = underline_opts(&shared);
+        let sprite_pos = |grid: &mut SharedGrid, sprite: Sprite| {
+            let g = grid
+                .render_glyph(Index::special(Special::Sprite), sprite as u32, &opts)
+                .unwrap()
+                .glyph;
+            [g.atlas_x, g.atlas_y]
+        };
+
+        // [0] underline — its own color, the underline sprite.
+        assert_eq!(cells[0].color, [1, 2, 3, 255]);
+        assert_eq!(
+            cells[0].glyph_pos,
+            sprite_pos(&mut shared, Sprite::Underline)
+        );
+        // [1] overline — foreground color, the overline sprite.
+        assert_eq!(cells[1].color, fg);
+        assert_eq!(
+            cells[1].glyph_pos,
+            sprite_pos(&mut shared, Sprite::Overline)
+        );
+        // [3] strikethrough — foreground color, the strikethrough sprite.
+        assert_eq!(cells[3].color, fg);
+        assert_eq!(
+            cells[3].glyph_pos,
+            sprite_pos(&mut shared, Sprite::Strikethrough)
+        );
+        // [2] is the glyph 'A' (foreground color), distinct from the decorations.
+        assert_eq!(cells[2].color, fg);
+        assert_ne!(cells[2].glyph_pos, cells[0].glyph_pos);
     }
 
     #[test]
