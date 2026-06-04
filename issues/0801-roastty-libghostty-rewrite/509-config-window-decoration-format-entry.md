@@ -152,3 +152,50 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-163730-d509-prompt.md` (design)
 - Result: `logs/codex-review/20260604-163730-d509-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`keyword` + `format_entry` were added to `WindowDecoration`'s existing `impl`,
+each `keyword` the exact upstream tag name (`auto` / `client` / `server` /
+`none`) and `format_entry` writing `name = keyword\n` via the generic enum
+branch. The new test `window_decoration_format_entry` covers every variant. With
+this, every plain config enum (and `WindowDecoration`) has a `format_entry`.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2995 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches upstream — `WindowDecoration` has no
+custom formatter, so it uses the generic enum branch and writes the exact tag
+name (`auto` / `client` / `server` / `none`) as `name = tag\n`
+(`Config.zig:9782`, `formatter.zig:52`); the test covers every variant; gates
+are clean. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-163857-r509-prompt.md` (result)
+- Result: `logs/codex-review/20260604-163857-r509-last-message.md` (result)
+
+## Conclusion
+
+`WindowDecoration` was the last plain config enum without a `format_entry`;
+every plain config enum (and the `FontStyle` union, the `FontShapingBreak` /
+`ScrollToBottom` packed structs) now formats faithfully. The generic float `{d}`
+field-dispatch case is **float-formatting-blocked** — Codex confirmed Rust
+`Display` is not a faithful substitute for Zig `{d}` (which emits full
+positional decimal with no scientific notation, backed by a ~1700-line Ryū
+formatter); it stays deferred alongside `QuickTerminalSize`'s parseFloat block
+until a compatible float formatter is ported or it is constrained with exact
+per-field evidence and tests. The remaining config-formatter work is the
+optional-recurse field-dispatch case, then the full config loader (per-field
+parser/formatter dispatch over the aggregate `Config`, `loadCli`, file I/O),
+continuing toward the full config formatter and loader.

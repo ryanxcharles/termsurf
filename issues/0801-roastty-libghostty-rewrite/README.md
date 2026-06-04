@@ -1464,7 +1464,7 @@ are past the correctness-critical foundation.
 - [Experiment 508: the last enum-keyword config formatters (CustomShaderAnimation / MouseShiftCapture)](508-config-enum-format-entries-shader-mouse.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 509: the WindowDecoration enum config formatter (window-decoration)](509-config-window-decoration-format-entry.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

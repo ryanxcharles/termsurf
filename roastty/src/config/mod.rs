@@ -863,6 +863,21 @@ impl WindowDecoration {
             _ => Err(WindowDecorationParseError::InvalidValue),
         }
     }
+
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            WindowDecoration::Auto => "auto",
+            WindowDecoration::Client => "client",
+            WindowDecoration::Server => "server",
+            WindowDecoration::None => "none",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
 }
 
 /// Parse a config boolean (upstream `cli.args.parseBool`): `1`/`t`/`T`/`true` are
@@ -4488,6 +4503,25 @@ mod tests {
             (MouseShiftCapture::True, "true"),
             (MouseShiftCapture::Always, "always"),
             (MouseShiftCapture::Never, "never"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+    }
+
+    #[test]
+    fn window_decoration_format_entry() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        for (variant, kw) in [
+            (WindowDecoration::Auto, "auto"),
+            (WindowDecoration::Client, "client"),
+            (WindowDecoration::Server, "server"),
+            (WindowDecoration::None, "none"),
         ] {
             assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
         }
