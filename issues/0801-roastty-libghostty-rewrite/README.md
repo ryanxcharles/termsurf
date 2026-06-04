@@ -1263,6 +1263,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 408: the frame cell buffers (FrameCells)](408-frame-cell-buffers.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 409: the core cell-draw sequence (draw_cells)](409-draw-cells-sequence.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
