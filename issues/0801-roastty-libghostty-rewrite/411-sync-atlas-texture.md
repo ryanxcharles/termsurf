@@ -216,3 +216,73 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-074324-d411-prompt.md` (design)
 - Result: `logs/codex-review/20260604-074324-d411-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+The font-atlas texture sync is now live.
+
+- `roastty/src/renderer/metal/texture.rs`: a new
+  `MetalTextureError::UnsupportedAtlasFormat(Format)` variant;
+  `init_atlas_texture(device, storage_mode, atlas)` (maps `Grayscale → R8Unorm`
+  / `Bgra → Bgra8UnormSrgb`, rejects `Bgr`; a square shader-read texture, no
+  initial data); and `sync_atlas_texture(device, storage_mode, texture, atlas)`
+  (reallocates when `atlas.size > texture.width`, then uploads the whole atlas
+  via `replace_region(0, 0, size, size, atlas.data())`). Added
+  `use crate::font::atlas::{Atlas, Format};`.
+
+Tests (in `texture.rs`, live Metal device):
+
+- `sync_atlas_texture_reallocates_when_atlas_grew` — a 4×4 grayscale atlas (a
+  reserved pixel `set` to 200), an initial 2×2 texture → reallocated to 4×4,
+  `read_bytes()` equals `atlas.data()`.
+- `sync_atlas_texture_uploads_sub_region_without_realloc` — the same atlas, an
+  initial 6×6 texture → stays 6×6, the atlas pixels land in the top-left 4×4
+  block (zeros elsewhere).
+- `init_atlas_texture_maps_formats_and_rejects_bgr` — grayscale →
+  `pixelFormat() == R8Unorm`, `bytes_per_pixel == 1`, width 4; bgra →
+  `pixelFormat() == Bgra8UnormSrgb`, `bytes_per_pixel == 4`; bgr →
+  `UnsupportedAtlasFormat`.
+
+Gate results:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty` → 2884 passed, 0 failed (+3, no regressions).
+- `cargo build -p roastty` → no warnings.
+- No-`ghostty`-name gates (font + renderer + `lib.rs`/header/`abi_harness.c`)
+  clean; `git diff --check` clean.
+
+## Conclusion
+
+The three GPU primitives of `drawFrame`'s per-frame sync are now all ported: the
+uniforms (`MetalBuffer::sync`), the cells (`FrameCells`), and the **font atlas
+textures** (`sync_atlas_texture`). Together with `draw_cells` (the render-pass
+sequence), the renderer bridge has the full per-frame GPU surface a frame draw
+needs. The remaining renderer-bridge work is the per-frame orchestration that
+ties them together — deciding when each sync runs (the atlas `modified`-counter
+gate, the cell rebuild), acquiring the frame target (`begin_frame`), and the
+live call site driven by the render `State` — plus the deferred bg-image / kitty
+/ overlay draws and the `rebuild_viewport` cursor/preedit assembly.
+
+## Completion Review
+
+Codex reviewed the completed implementation and result and **approved** with
+**no findings**. It confirmed the implementation matches the approved design and
+upstream behavior: `init_atlas_texture` maps `Grayscale → R8Unorm`,
+`Bgra → Bgra8UnormSrgb`, rejects `Bgr` with `UnsupportedAtlasFormat`, and
+creates a square shader-read texture with no initial data (storage mode as the
+Rust adaptation of upstream's renderer storage mode); `sync_atlas_texture` uses
+the upstream growth condition `size > texture.width()`, reallocates before
+upload, then performs the full atlas upload via
+`replace_region(0, 0, size, size, atlas.data())`. It confirmed the Low finding
+is addressed (the format test asserts concrete Metal pixel formats via
+`texture().pixelFormat()`, not just byte depth) and that the realloc and
+no-realloc tests cover both the full replacement after growth and the top-left
+sub-region behavior. Internal Rust only — no public C ABI/header impact; nothing
+needed to change before the result commit.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-074626-r411-prompt.md` (result)
+- Result: `logs/codex-review/20260604-074626-r411-last-message.md` (result)

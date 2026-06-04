@@ -4,6 +4,7 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{MTLDevice, MTLOrigin, MTLRegion, MTLSize, MTLTexture, MTLTextureDescriptor};
 
+use crate::font::atlas::{Atlas, Format};
 use crate::renderer::image::{ImageUploadBackend, PendingImage, PixelFormat};
 use crate::renderer::metal::api::{
     MetalPixelFormat, MetalResourceOptions, MetalStorageMode, MetalTextureUsage,
@@ -88,6 +89,7 @@ pub(crate) enum MetalTextureError {
     },
     TextureCreationFailed,
     UnsupportedUploadPixelFormat(PixelFormat),
+    UnsupportedAtlasFormat(Format),
 }
 
 pub(crate) struct MetalTexture {
@@ -249,6 +251,48 @@ impl MetalTexture {
 
         Ok(())
     }
+}
+
+/// Create a GPU texture sized to and matching the format of `atlas` (upstream
+/// `initAtlasTexture`). The font-atlas pixel formats map to Metal as
+/// `Grayscale → R8Unorm` and `Bgra → Bgra8UnormSrgb`; `Bgr` has no Metal pixel
+/// format and is rejected (where upstream `@panic`s). The texture is square
+/// (`atlas.size × atlas.size`), shader-read, with no initial data.
+pub(crate) fn init_atlas_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    storage_mode: MetalStorageMode,
+    atlas: &Atlas,
+) -> Result<MetalTexture, MetalTextureError> {
+    let (format, srgb) = match atlas.format() {
+        Format::Grayscale => (ImageTextureFormat::Gray, false),
+        Format::Bgra => (ImageTextureFormat::Bgra, true),
+        Format::Bgr => return Err(MetalTextureError::UnsupportedAtlasFormat(atlas.format())),
+    };
+    let size = atlas.size() as usize;
+    MetalTexture::new(
+        device,
+        image_texture_options(format, srgb, storage_mode),
+        size,
+        size,
+        None,
+    )
+}
+
+/// Sync `atlas`'s pixels into `texture`, reallocating it first if the atlas has
+/// grown past the texture (upstream `syncAtlasTexture`): reallocate when
+/// `atlas.size > texture.width`, then re-upload the whole atlas via
+/// `replace_region(0, 0, size, size, atlas.data())`.
+pub(crate) fn sync_atlas_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    storage_mode: MetalStorageMode,
+    texture: &mut MetalTexture,
+    atlas: &Atlas,
+) -> Result<(), MetalTextureError> {
+    let size = atlas.size() as usize;
+    if size > texture.width() {
+        *texture = init_atlas_texture(device, storage_mode, atlas)?;
+    }
+    texture.replace_region(0, 0, size, size, atlas.data())
 }
 
 pub(crate) struct MetalImageUploadBackend<'a> {
@@ -614,6 +658,84 @@ mod tests {
                 texture_width: 4,
                 texture_height: 4,
             })
+        );
+    }
+
+    fn grayscale_atlas_with_pixel(size: u32, value: u8) -> Atlas {
+        let mut atlas = Atlas::new(size, Format::Grayscale);
+        let region = atlas.reserve(1, 1).expect("reserve a 1×1 region");
+        atlas.set(region, &[value]);
+        atlas
+    }
+
+    #[test]
+    fn sync_atlas_texture_reallocates_when_atlas_grew() {
+        let device = metal_device();
+        let atlas = grayscale_atlas_with_pixel(4, 200);
+        // The initial texture (2×2) is smaller than the 4×4 atlas.
+        let mut texture = gray_texture(&device, 2, 2, &[0; 4]);
+
+        sync_atlas_texture(&device, MetalStorageMode::Shared, &mut texture, &atlas)
+            .expect("atlas sync should succeed");
+
+        // Reallocated to the atlas size, holding the atlas pixels verbatim.
+        assert_eq!(texture.width(), 4);
+        assert_eq!(texture.height(), 4);
+        assert_eq!(texture.read_bytes(), atlas.data());
+    }
+
+    #[test]
+    fn sync_atlas_texture_uploads_sub_region_without_realloc() {
+        let device = metal_device();
+        let atlas = grayscale_atlas_with_pixel(4, 200);
+        // The initial texture (6×6) already fits the 4×4 atlas.
+        let mut texture = gray_texture(&device, 6, 6, &[0; 36]);
+
+        sync_atlas_texture(&device, MetalStorageMode::Shared, &mut texture, &atlas)
+            .expect("atlas sync should succeed");
+
+        // No reallocation: the texture stays 6×6 and the atlas pixels land in the
+        // top-left 4×4 block, zero elsewhere.
+        assert_eq!(texture.width(), 6);
+        let atlas_data = atlas.data();
+        let mut expected = vec![0u8; 36];
+        for y in 0..4 {
+            for x in 0..4 {
+                expected[y * 6 + x] = atlas_data[y * 4 + x];
+            }
+        }
+        assert_eq!(texture.read_bytes(), expected);
+    }
+
+    #[test]
+    fn init_atlas_texture_maps_formats_and_rejects_bgr() {
+        use objc2_metal::MTLTexture;
+
+        let device = metal_device();
+
+        let grayscale = Atlas::new(4, Format::Grayscale);
+        let gray_texture = init_atlas_texture(&device, MetalStorageMode::Shared, &grayscale)
+            .expect("grayscale atlas texture");
+        assert_eq!(
+            gray_texture.texture().pixelFormat(),
+            MetalPixelFormat::R8Unorm.to_objc()
+        );
+        assert_eq!(gray_texture.bytes_per_pixel(), 1);
+        assert_eq!(gray_texture.width(), 4);
+
+        let bgra = Atlas::new(4, Format::Bgra);
+        let bgra_texture = init_atlas_texture(&device, MetalStorageMode::Shared, &bgra)
+            .expect("bgra atlas texture");
+        assert_eq!(
+            bgra_texture.texture().pixelFormat(),
+            MetalPixelFormat::Bgra8UnormSrgb.to_objc()
+        );
+        assert_eq!(bgra_texture.bytes_per_pixel(), 4);
+
+        let bgr = Atlas::new(4, Format::Bgr);
+        assert_eq!(
+            init_atlas_texture(&device, MetalStorageMode::Shared, &bgr).err(),
+            Some(MetalTextureError::UnsupportedAtlasFormat(Format::Bgr))
         );
     }
 }
