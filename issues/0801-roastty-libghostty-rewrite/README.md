@@ -1221,6 +1221,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 387: wire the selected state into the foreground pass](387-wire-selection-fg.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 388: the search-highlight color arms](388-search-colors.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
