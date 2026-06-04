@@ -1307,6 +1307,22 @@ pub(crate) enum LinkPreviews {
 }
 
 impl LinkPreviews {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            LinkPreviews::False => "false",
+            LinkPreviews::True => "true",
+            LinkPreviews::Osc8 => "osc8",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+impl LinkPreviews {
     /// Whether to preview a regular (detected) link (upstream's `link_previews ==
     /// .true` check): only when `True`.
     pub(crate) fn previews_regular_link(self) -> bool {
@@ -1333,6 +1349,22 @@ pub(crate) enum ConfirmCloseSurface {
 }
 
 impl ConfirmCloseSurface {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            ConfirmCloseSurface::False => "false",
+            ConfirmCloseSurface::True => "true",
+            ConfirmCloseSurface::Always => "always",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+impl ConfirmCloseSurface {
     /// Whether closing needs confirmation, given whether the terminal is at a
     /// shell prompt (the config's part of upstream `Surface.needsConfirmQuit`):
     /// `Always` always confirms, `False` never confirms, `True` confirms only when
@@ -1354,6 +1386,21 @@ pub(crate) enum WindowSubtitle {
     False,
     /// Show the working directory.
     WorkingDirectory,
+}
+
+impl WindowSubtitle {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            WindowSubtitle::False => "false",
+            WindowSubtitle::WorkingDirectory => "working-directory",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
 }
 
 impl WindowSubtitle {
@@ -1664,6 +1711,22 @@ pub(crate) enum WindowPaddingColor {
     Extend,
     /// The edge cells' background always extends into the padding.
     ExtendAlways,
+}
+
+impl WindowPaddingColor {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            WindowPaddingColor::Background => "background",
+            WindowPaddingColor::Extend => "extend",
+            WindowPaddingColor::ExtendAlways => "extend-always",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
 }
 
 /// The `background-blur` config (upstream `BackgroundBlur`).
@@ -2095,6 +2158,22 @@ pub(crate) enum OscColorReportFormat {
     Bits8,
     /// Report at 16-bit channel precision (upstream `16-bit`).
     Bits16,
+}
+
+impl OscColorReportFormat {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            OscColorReportFormat::None => "none",
+            OscColorReportFormat::Bits8 => "8-bit",
+            OscColorReportFormat::Bits16 => "16-bit",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
 }
 
 impl OscColorReportFormat {
@@ -4251,6 +4330,51 @@ mod tests {
             (BackgroundImagePosition::BottomCenter, "bottom-center"),
             (BackgroundImagePosition::BottomRight, "bottom-right"),
             (BackgroundImagePosition::Center, "center"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+    }
+
+    #[test]
+    fn enum_format_entries_misc() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        for (variant, kw) in [
+            (OscColorReportFormat::None, "none"),
+            (OscColorReportFormat::Bits8, "8-bit"),
+            (OscColorReportFormat::Bits16, "16-bit"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (ConfirmCloseSurface::False, "false"),
+            (ConfirmCloseSurface::True, "true"),
+            (ConfirmCloseSurface::Always, "always"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (LinkPreviews::False, "false"),
+            (LinkPreviews::True, "true"),
+            (LinkPreviews::Osc8, "osc8"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (WindowSubtitle::False, "false"),
+            (WindowSubtitle::WorkingDirectory, "working-directory"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (WindowPaddingColor::Background, "background"),
+            (WindowPaddingColor::Extend, "extend"),
+            (WindowPaddingColor::ExtendAlways, "extend-always"),
         ] {
             assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
         }

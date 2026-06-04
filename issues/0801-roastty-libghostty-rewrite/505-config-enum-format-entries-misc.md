@@ -200,3 +200,47 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-162209-d505-prompt.md` (design)
 - Result: `logs/codex-review/20260604-162209-d505-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`keyword` + `format_entry` were added for the five remaining small config enums
+(`OscColorReportFormat`, `ConfirmCloseSurface`, `LinkPreviews`,
+`WindowSubtitle`, `WindowPaddingColor`), each `keyword` the exact upstream tag
+name — including the digit-led `8-bit` / `16-bit`, `osc8`, and the kebab-case
+`working-directory` / `extend-always` — and `format_entry` writing
+`name = keyword\n`. The new test `enum_format_entries_misc` covers every
+variant.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2991 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the keyword mappings match the upstream enum tags exactly, including
+`8-bit` / `16-bit`, `osc8`, `working-directory`, and `extend-always`, and the
+formatter shape matches the generic enum branch `name = tag\n`
+(`Config.zig:8966`/`:5235`/`:5282`/ `:5277`/`:5271`, `formatter.zig:52`); the
+test covers every variant; gates are clean. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-162426-r505-prompt.md` (result)
+- Result: `logs/codex-review/20260604-162426-r505-last-message.md` (result)
+
+## Conclusion
+
+The five remaining small config enums now format their keywords (twenty-two
+config enums total across Experiments 500–505). The remaining config-formatter
+work is the non-trivial-shaped types: the packed-struct/bool-keyword enums
+`FontStyle` (a `default` / `false` / name union) and `FontShapingBreak`,
+`CustomShaderAnimation`, and `MouseShiftCapture`, then the remaining generic
+field-dispatch cases (float `{d}`, optional recurse), `QuickTerminalSize`, and
+the full config loader, continuing toward the full config formatter and loader.
