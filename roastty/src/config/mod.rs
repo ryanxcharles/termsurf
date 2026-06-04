@@ -1378,6 +1378,23 @@ pub(crate) enum MacTitlebarStyle {
     Hidden,
 }
 
+impl MacTitlebarStyle {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            MacTitlebarStyle::Native => "native",
+            MacTitlebarStyle::Transparent => "transparent",
+            MacTitlebarStyle::Tabs => "tabs",
+            MacTitlebarStyle::Hidden => "hidden",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
 /// The `macos-titlebar-proxy-icon` config (upstream `MacTitlebarProxyIcon`):
 /// whether the document proxy icon is shown. The `Config` default is `Visible`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1386,6 +1403,21 @@ pub(crate) enum MacTitlebarProxyIcon {
     Visible,
     /// Hide the document proxy icon.
     Hidden,
+}
+
+impl MacTitlebarProxyIcon {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            MacTitlebarProxyIcon::Visible => "visible",
+            MacTitlebarProxyIcon::Hidden => "hidden",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
 }
 
 /// The `fullscreen` config (upstream `Fullscreen`): the startup fullscreen mode.
@@ -1428,6 +1460,21 @@ pub(crate) enum MacWindowButtons {
     Hidden,
 }
 
+impl MacWindowButtons {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            MacWindowButtons::Visible => "visible",
+            MacWindowButtons::Hidden => "hidden",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
 /// The `macos-hidden` config (upstream `MacHidden`): whether the app starts
 /// hidden. The `Config` default is `Never`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1436,6 +1483,21 @@ pub(crate) enum MacHidden {
     Never,
     /// Always start hidden.
     Always,
+}
+
+impl MacHidden {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            MacHidden::Never => "never",
+            MacHidden::Always => "always",
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
 }
 
 /// The `theme` config (upstream `Theme`): the theme names for light mode and dark
@@ -4020,6 +4082,40 @@ mod tests {
             (GraphemeWidthMethod::Legacy, "legacy"),
             (GraphemeWidthMethod::Unicode, "unicode"),
         ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+    }
+
+    #[test]
+    fn enum_format_entries_mac() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        for (variant, kw) in [
+            (MacTitlebarStyle::Native, "native"),
+            (MacTitlebarStyle::Transparent, "transparent"),
+            (MacTitlebarStyle::Tabs, "tabs"),
+            (MacTitlebarStyle::Hidden, "hidden"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (MacTitlebarProxyIcon::Visible, "visible"),
+            (MacTitlebarProxyIcon::Hidden, "hidden"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [
+            (MacWindowButtons::Visible, "visible"),
+            (MacWindowButtons::Hidden, "hidden"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        for (variant, kw) in [(MacHidden::Never, "never"), (MacHidden::Always, "always")] {
             assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
         }
     }

@@ -1450,7 +1450,7 @@ are past the correctness-critical foundation.
 - [Experiment 501: more enum-keyword config formatters (ClipboardAccess / NotifyOnCommandFinish / WindowColorspace / AlphaBlending / GraphemeWidthMethod)](501-config-enum-format-entries-2.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 502: the macOS enum-keyword config formatters (MacTitlebarStyle / MacTitlebarProxyIcon / MacWindowButtons / MacHidden)](502-config-enum-format-entries-mac.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

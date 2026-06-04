@@ -168,3 +168,43 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-160821-d502-prompt.md` (design)
 - Result: `logs/codex-review/20260604-160821-d502-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`keyword` + `format_entry` were added for the four macOS window config enums
+(`MacTitlebarStyle`, `MacTitlebarProxyIcon`, `MacWindowButtons`, `MacHidden`),
+each `keyword` the exact upstream tag name and `format_entry` writing
+`name = keyword\n`. The new test `enum_format_entries_mac` covers every variant.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 2988 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the keyword mappings match the upstream macOS enum tags exactly, and
+`format_entry` preserves the generic enum output shape `name = tag\n`
+(`Config.zig:8988`/`:8994`/ `:9002`/`:9008`); the test covers every variant;
+gates are clean. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-161119-r502-prompt.md` (result)
+- Result: `logs/codex-review/20260604-161119-r502-last-message.md` (result)
+
+## Conclusion
+
+The four macOS window config enums now format their keywords (thirteen config
+enums total across Experiments 500–502). The next slices can finish the
+remaining config enums (`Fullscreen`, `NonNativeFullscreen`,
+`OscColorReportFormat`, the bool-like `true`/`false`-keyword enums, the
+background-image enums, `FontStyle`, `FontShapingBreak`), then the remaining
+generic field-dispatch cases (float `{d}`, optional recurse), then the full
+config loader, continuing toward the full config formatter and loader.
