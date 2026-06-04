@@ -1211,6 +1211,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 382: wiring cell_colors into the row passes](382-wire-cell-colors.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 383: faint foreground alpha](383-faint-alpha.md) — **Designed** ·
+  Claude/Codex/Codex
 
 ## Non-Goals
 
