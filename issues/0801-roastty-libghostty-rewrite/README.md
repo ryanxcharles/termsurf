@@ -1645,6 +1645,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 599: highlight tracking lifecycle (Untracked::track / Tracked::init / deinit)](599-highlight-tracking-lifecycle.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 600: search ScreenSearch select_next / select_prev](600-search-screen-select-step.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
