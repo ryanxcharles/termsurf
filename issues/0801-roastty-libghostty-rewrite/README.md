@@ -1545,6 +1545,8 @@ are past the correctness-critical foundation.
   Claude/Codex/Codex
 - [Experiment 549: open a URL in the default handler (os::open)](549-os-open.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 550: thread QoS class (os::macos)](550-os-macos-qos.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
