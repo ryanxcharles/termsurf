@@ -2,8 +2,9 @@
 //! `ActiveSearch` (the mutable active area) and `PageListSearch` (history) that caches results so a
 //! background search survives screen changes. So far it lands the state-machine vocabulary and
 //! struct skeleton, the read-only result accessors (`needle` / `matches_len` / `matches`), and the
-//! `tick` state machine (`tick` / `tick_active` / `tick_history`); construction (`init` /
-//! `reload_active`), `feed` / `prune_history`, and `select` are deferred.
+//! `tick` state machine (`tick` / `tick_active` / `tick_history`), and `prune_history` (drop stale
+//! cached history results); construction (`init` / `reload_active`), `feed`, and `select` are
+//! deferred.
 
 use std::ptr::NonNull;
 
@@ -175,11 +176,30 @@ impl ScreenSearch {
 
         self.state = State::HistoryFeed;
     }
+
+    /// Drop cached history results whose pages have been pruned from the scrollback (upstream
+    /// `pruneHistory`). History results are stored newest-to-oldest, so the first result whose first
+    /// chunk's serial is below the screen's minimum live page serial marks the boundary — it and
+    /// everything older are truncated.
+    fn prune_history(&mut self) {
+        // SAFETY: the screen is alive (the construction-time invariant).
+        let min = unsafe { self.screen.as_ref() }.page_serial_min();
+        for i in 0..self.history_results.len() {
+            let first_chunk_serial = self.history_results[i].chunks[0].serial;
+            if first_chunk_serial < min {
+                self.history_results.truncate(i);
+                self.history_results.shrink_to_fit(); // mirror upstream's `shrinkAndFree`
+                return;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::highlight::Chunk;
     use super::super::super::page_list::PageList;
+    use super::super::super::screen::Screen;
     use super::*;
 
     #[test]
@@ -304,5 +324,80 @@ mod tests {
         let mut s = build(Vec::new(), Vec::new());
         s.state = State::Complete;
         assert_eq!(s.tick(), Tick::Complete);
+    }
+
+    /// A `Flattened` whose single chunk carries `serial` (its `node` is dangling — `prune_history`
+    /// reads only the serial).
+    fn flat_serial(serial: u64) -> Flattened {
+        Flattened {
+            chunks: vec![Chunk {
+                node: NonNull::dangling(),
+                serial,
+                start: 0,
+                end: 0,
+            }],
+            top_x: 0,
+            bot_x: 0,
+        }
+    }
+
+    /// Build a `ScreenSearch` over a real `screen` (so `prune_history` can read `page_serial_min`)
+    /// with the given history results.
+    fn build_over_screen(screen: &Screen, history: Vec<Flattened>) -> ScreenSearch {
+        ScreenSearch {
+            screen: NonNull::from(screen),
+            active: ActiveSearch::new(b"x"),
+            history: None,
+            state: State::Active,
+            selected: None,
+            history_results: history,
+            active_results: Vec::new(),
+            rows: 10,
+            cols: 10,
+        }
+    }
+
+    fn history_serials(s: &ScreenSearch) -> Vec<u64> {
+        s.history_results
+            .iter()
+            .map(|h| h.chunks[0].serial)
+            .collect()
+    }
+
+    #[test]
+    fn prune_history_drops_from_the_first_stale_result() {
+        let mut screen = Screen::init(10, 10, None).unwrap();
+        screen.set_page_serial_min_for_tests(4);
+
+        // Newest-to-oldest serials [5, 4, 3, 2]; serial 3 < 4 marks the boundary.
+        let mut s = build_over_screen(
+            &screen,
+            vec![
+                flat_serial(5),
+                flat_serial(4),
+                flat_serial(3),
+                flat_serial(2),
+            ],
+        );
+        s.prune_history();
+        assert_eq!(history_serials(&s), vec![5, 4]);
+    }
+
+    #[test]
+    fn prune_history_keeps_all_live_results() {
+        let mut screen = Screen::init(10, 10, None).unwrap();
+        screen.set_page_serial_min_for_tests(0);
+
+        let mut s = build_over_screen(&screen, vec![flat_serial(5), flat_serial(4)]);
+        s.prune_history();
+        assert_eq!(history_serials(&s), vec![5, 4]);
+    }
+
+    #[test]
+    fn prune_history_on_empty_is_a_noop() {
+        let screen = Screen::init(10, 10, None).unwrap();
+        let mut s = build_over_screen(&screen, Vec::new());
+        s.prune_history();
+        assert!(s.history_results.is_empty());
     }
 }

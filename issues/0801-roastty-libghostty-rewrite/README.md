@@ -1640,7 +1640,7 @@ are past the correctness-critical foundation.
 - [Experiment 596: search ScreenSearch tick (the state machine step)](596-search-screen-tick.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 597: search ScreenSearch prune_history](597-search-screen-prune-history.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

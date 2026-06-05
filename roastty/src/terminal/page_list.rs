@@ -2123,6 +2123,18 @@ impl PageList {
         self.rows
     }
 
+    /// The minimum serial of a still-live page (upstream `page_serial_min`). Rises as pages are
+    /// pruned from the scrollback; the search uses it to drop stale cached results.
+    pub(in crate::terminal) fn page_serial_min(&self) -> u64 {
+        self.page_serial_min
+    }
+
+    /// Set the minimum live page serial (test helper for the search history pruning).
+    #[cfg(test)]
+    pub(in crate::terminal) fn set_page_serial_min_for_tests(&mut self, value: u64) {
+        self.page_serial_min = value;
+    }
+
     /// The page nodes front-to-back as pointers, for the search subsystem to walk (upstream
     /// `pages.first/last` + `node.next/prev`).
     pub(in crate::terminal) fn node_ptrs_front_to_back(&self) -> Vec<NonNull<Node>> {

@@ -200,3 +200,69 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d597-prompt.md`
 - Result: `logs/codex-review/20260604-d597-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`ScreenSearch` gained `prune_history`, which reads the screen's
+`page_serial_min` once, scans `history_results` newest-to-oldest, and at the
+first result whose first chunk's serial is below that minimum truncates from
+there to the end (`truncate(i)` + `shrink_to_fit()`). Supporting
+`PageList::page_serial_min` and `Screen::page_serial_min` accessors (plus
+`#[cfg(test)]` setters) were added.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3287 passed, 0 failed (three new tests; no
+  regressions, up from 3284).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps: `roastty/src/terminal/search` and
+  `roastty/src/terminal/page_list.rs` clean; `git diff --check` clean.
+- **Scoped no-name-gate exception**: grepping the whole
+  `roastty/src/terminal/screen.rs` (a large pre-existing file touched only to
+  add the `page_serial_min` accessors) surfaces one **pre-existing** comment
+  (`// Upstream Ghostty currently uses this broad range`, present in `HEAD`, not
+  in this experiment's diff). This experiment's additions to `screen.rs` contain
+  no ghostty names; the pre-existing comment was left untouched per the "no
+  unrequested changes to unrelated code" rule. Codex confirmed leaving it was
+  the right call.
+
+The three new tests build a real `Screen` (so `page_serial_min` is readable)
+with a test-set minimum and history results whose first chunk carries a known
+serial (the `node` is dangling — `prune_history` reads only the serial): pruning
+from the first stale result (`[5, 4, 3, 2]`, `min == 4` → `[5, 4]`), no pruning
+when all live (`[5, 4]`, `min == 0` → unchanged), and the empty no-op.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (one Nit: the `## Result` / `## Conclusion` sections were
+not yet saved, and to note the scoped no-name-gate exception clearly — both done
+here). Codex confirmed the port is faithful: `prune_history` reads the live
+minimum serial once, scans newest-to-oldest, uses `chunks[0].serial < min` as
+the stale boundary, and truncates from that result through the older tail;
+`truncate(i)` correctly drops the owned `Flattened` values and the adopted
+`shrink_to_fit()` mirrors upstream's capacity release; the tests are sound (a
+real `Screen` for `page_serial_min`, dangling chunk nodes never dereferenced on
+this path); and leaving the pre-existing `screen.rs` comment untouched was the
+right call under the "no unrequested changes" rule.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r597-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r597-last-message.md` (result)
+
+## Conclusion
+
+This experiment ports `prune_history` — the cleanup that drops cached history
+results whose scrollback pages have been pruned (keyed on the page serial
+falling below the screen's `page_serial_min`). It is a self-contained piece used
+by `feed` and `select`. The remaining `ScreenSearch` work is the construction
+(`init` / `reload_active` — the trickiest, setting up the `HistorySearch` with
+its tracked `start_pin` and handling active-area growth into history), `feed`
+(advance the history searcher, reinit on resize, prune on completion), and
+`select` / `select_next` / `select_prev` (step the tracked selected match).
+After `ScreenSearch`, `ViewportSearch` (`search/viewport.zig`) and the search
+`Thread` remain.

@@ -181,6 +181,18 @@ impl Screen {
         })
     }
 
+    /// The minimum serial of a still-live page in this screen's page list (used by the search
+    /// subsystem to prune stale history results).
+    pub(in crate::terminal) fn page_serial_min(&self) -> u64 {
+        self.pages.page_serial_min()
+    }
+
+    /// Set the minimum live page serial (test helper for the search history pruning).
+    #[cfg(test)]
+    pub(in crate::terminal) fn set_page_serial_min_for_tests(&mut self, value: u64) {
+        self.pages.set_page_serial_min_for_tests(value);
+    }
+
     pub(super) fn reset(&mut self) {
         self.clear_selection();
         self.clear_kitty_images();
