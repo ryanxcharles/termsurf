@@ -1,10 +1,10 @@
 //! The split-pane tree (port of upstream `datastruct/split_tree`). Lands the vocabulary
-//! (`Handle` / `Layout` / `Direction`), the `Split` / `Slot` payloads, the spatial geometry, and
-//! the `Node<V>` arena (`SplitTree`) with the structural queries (`is_empty` / `is_split` /
-//! `deepest` / `dimensions`) and `Rc<V>`-based view ref-counting. Still deferred: the tree-shaping
-//! operations (`split` / `remove` / `goto` / `zoom` / `equalize` / `resize`), the iterator, the
-//! `Spatial` container's normalization (`spatial` / `fillSpatialSlots`) and `nearest`, and the
-//! formatters.
+//! (`Handle` / `Layout` / `Direction`), the `Split` / `Slot` payloads, the spatial geometry, the
+//! `Node<V>` arena (`SplitTree`) with the structural queries (`is_empty` / `is_split` / `deepest` /
+//! `dimensions`) and `Rc<V>`-based view ref-counting, the leaf `iter`ator, `zoom`, and the `Goto`
+//! enum. Still deferred: the tree-shaping operations (`split` / `remove` / `equalize` / `resize`),
+//! the `goto` method, the `Spatial` container's normalization (`spatial` / `fillSpatialSlots`) and
+//! `nearest`, and the formatters.
 
 use half::f16;
 use std::rc::Rc;
@@ -237,6 +237,27 @@ impl<V> SplitTree<V> {
         }
     }
 
+    /// Iterate the tree's leaf views in node-arena order (upstream `iterator`).
+    pub(crate) fn iter(&self) -> Iter<'_, V> {
+        Iter {
+            nodes: &self.nodes,
+            i: 0,
+        }
+    }
+
+    /// Set (or clear) the zoomed node (upstream `zoom`). Asserts the handle is in range.
+    pub(crate) fn zoom(&mut self, handle: Option<Handle>) {
+        if let Some(h) = handle {
+            assert!(h.idx() < self.nodes.len(), "zoom handle out of range");
+        }
+        self.zoomed = handle;
+    }
+
+    /// The currently-zoomed node, if any (upstream's `zoomed` field).
+    pub(crate) fn zoomed(&self) -> Option<Handle> {
+        self.zoomed
+    }
+
     /// Relative dimensions of the subtree at `from`, in leaf units (upstream `dimensions`).
     pub(crate) fn dimensions(&self, from: Handle) -> Dimensions {
         match &self.nodes[from.idx()] {
@@ -260,6 +281,45 @@ impl<V> SplitTree<V> {
             }
         }
     }
+}
+
+/// A leaf visited by the tree iterator (upstream `ViewEntry`).
+pub(crate) struct ViewEntry<'a, V> {
+    pub(crate) handle: Handle,
+    pub(crate) view: &'a Rc<V>,
+}
+
+/// An iterator over the tree's leaf views, in node-arena order (upstream `Iterator`).
+pub(crate) struct Iter<'a, V> {
+    nodes: &'a [Node<V>],
+    i: usize,
+}
+
+impl<'a, V> Iterator for Iter<'a, V> {
+    type Item = ViewEntry<'a, V>;
+
+    fn next(&mut self) -> Option<ViewEntry<'a, V>> {
+        while self.i < self.nodes.len() {
+            let handle = Handle::from_index(self.i);
+            self.i += 1;
+            if let Node::Leaf(view) = &self.nodes[handle.idx()] {
+                return Some(ViewEntry { handle, view });
+            }
+            // split → skip, advance to the next node (upstream's `self.next()` tail recursion).
+        }
+        None
+    }
+}
+
+/// A navigation target for `goto` (upstream `Goto`): the previous / next view (optionally wrapped),
+/// or a spatial direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Goto {
+    Previous,
+    Next,
+    PreviousWrapped,
+    NextWrapped,
+    Spatial(SpatialDirection),
 }
 
 #[cfg(test)]
@@ -602,5 +662,91 @@ mod tests {
 
         drop(tree);
         assert_eq!(Rc::strong_count(&view), 1);
+    }
+
+    /// Collect `(handle index, view)` pairs from an iterator.
+    fn collect_views<V: Copy>(tree: &SplitTree<V>) -> Vec<(usize, V)> {
+        tree.iter().map(|e| (e.handle.idx(), **e.view)).collect()
+    }
+
+    #[test]
+    fn iterate_single_leaf() {
+        let tree = SplitTree::new(Rc::new("v"));
+        assert_eq!(collect_views(&tree), vec![(0, "v")]);
+    }
+
+    #[test]
+    fn iterate_empty_tree() {
+        let tree: SplitTree<&str> = SplitTree::empty();
+        assert_eq!(collect_views(&tree), vec![]);
+    }
+
+    #[test]
+    fn iterate_horizontal_split_skips_the_split() {
+        let tree = SplitTree {
+            nodes: vec![
+                Node::Split(split(Layout::Horizontal, 1, 2)),
+                Node::Leaf(Rc::new("a")),
+                Node::Leaf(Rc::new("b")),
+            ],
+            zoomed: None,
+        };
+        // The split at index 0 is skipped; leaves at 1, 2 visited in order.
+        assert_eq!(collect_views(&tree), vec![(1, "a"), (2, "b")]);
+    }
+
+    #[test]
+    fn iterate_nested_tree_visits_all_leaves_in_arena_order() {
+        let tree = SplitTree {
+            nodes: vec![
+                Node::Split(split(Layout::Horizontal, 1, 4)),
+                Node::Split(split(Layout::Vertical, 2, 3)),
+                Node::Leaf(Rc::new("a")),
+                Node::Leaf(Rc::new("b")),
+                Node::Leaf(Rc::new("c")),
+            ],
+            zoomed: None,
+        };
+        // Splits at 0, 1 skipped; leaves at 2, 3, 4 in arena order.
+        assert_eq!(collect_views(&tree), vec![(2, "a"), (3, "b"), (4, "c")]);
+    }
+
+    #[test]
+    fn zoom_sets_and_clears() {
+        let mut tree = SplitTree {
+            nodes: vec![
+                Node::Split(split(Layout::Horizontal, 1, 2)),
+                Node::Leaf(Rc::new("a")),
+                Node::Leaf(Rc::new("b")),
+            ],
+            zoomed: None,
+        };
+        assert_eq!(tree.zoomed(), None);
+        tree.zoom(Some(Handle::from_index(2)));
+        assert_eq!(tree.zoomed(), Some(Handle::from_index(2)));
+        tree.zoom(None);
+        assert_eq!(tree.zoomed(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "zoom handle out of range")]
+    fn zoom_out_of_range_panics() {
+        let mut tree = SplitTree::new(Rc::new("v"));
+        tree.zoom(Some(Handle::from_index(5)));
+    }
+
+    #[test]
+    fn goto_variants_are_distinct() {
+        assert_ne!(Goto::Previous, Goto::Next);
+        assert_ne!(Goto::PreviousWrapped, Goto::NextWrapped);
+        assert_ne!(Goto::Next, Goto::Spatial(SpatialDirection::Left));
+        assert_ne!(
+            Goto::Spatial(SpatialDirection::Left),
+            Goto::Spatial(SpatialDirection::Right)
+        );
+        assert_eq!(
+            Goto::Spatial(SpatialDirection::Up),
+            Goto::Spatial(SpatialDirection::Up)
+        );
     }
 }

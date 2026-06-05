@@ -1600,7 +1600,7 @@ are past the correctness-critical foundation.
 - [Experiment 576: split tree arena (Node, SplitTree, Side, structural queries)](576-split-tree-arena.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 577: split tree iterator, zoom, and Goto](577-split-tree-iterator.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

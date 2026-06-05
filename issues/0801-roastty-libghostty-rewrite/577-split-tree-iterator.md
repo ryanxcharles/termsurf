@@ -222,3 +222,72 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d577-prompt.md`
 - Result: `logs/codex-review/20260604-d577-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`terminal::split_tree` gained the leaf iterator and navigation vocabulary:
+`ViewEntry<'a, V>` (`handle` + `view: &'a Rc<V>`), `Iter<'a, V>` (an `Iterator`
+impl walking node indices `0..len`, yielding a `ViewEntry` per leaf and skipping
+splits), `SplitTree::iter` / `zoom` / `zoomed`, and the `Goto` enum (`Previous`
+/ `Next` / `PreviousWrapped` / `NextWrapped` / `Spatial(SpatialDirection)`). The
+module doc comment was updated to reflect the iterator and `zoom` are now
+landed.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3187 passed, 0 failed (seven new tests; no
+  regressions, up from 3180).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/split_tree.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+The seven new tests: single-leaf iteration (`[(0, "v")]`), the empty tree
+(`[]`), a horizontal split skipping the split at index 0
+(`[(1, "a"), (2, "b")]`), a nested tree visiting all leaves in arena order with
+both splits skipped (`[(2, "a"), (3, "b"), (4, "c")]`), `zoom` set/clear, the
+out-of-range `zoom` panic, and `Goto` variant distinctness.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (two Nits, both fixed): the module doc comment still
+listed `zoom` / the iterator as deferred (updated to leave only the
+still-deferred `goto` method, shaping operations, spatial container
+normalization/navigation, and formatters), and the `## Result` / `## Conclusion`
+sections were not yet in the saved file (added here). Codex confirmed the
+implementation matches upstream — arena-order, leaf-only iteration skipping
+splits with the same observable behavior as upstream's recursive `next`;
+`ViewEntry` correctly borrowing the leaf `Rc`; `zoom` enforcing the in-range
+handle and clearing on `None`; and `Goto` mirroring the upstream vocabulary —
+and that the tests cover the important cases including nested split skipping and
+the zoom panic.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r577-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r577-last-message.md` (result)
+
+## Conclusion
+
+This experiment ports the split_tree leaf `iterator` (`Iter` / `ViewEntry`), the
+`zoom` setter (and a `zoomed` getter), and the `Goto` navigation enum — the
+fifth split_tree slice. The iterator is a faithful arena walk (leaf-only, splits
+skipped) expressed as a Rust `Iterator`, and `ViewEntry` borrows the leaf's
+`Rc<V>` so a consumer can clone it to share the view. The `Goto` enum's
+consuming `goto` method stays deferred (it dispatches to the still-deferred
+`previous` / `next` and, for `Spatial`, builds the `Spatial` container and calls
+`nearest`). The next split_tree slices are the tree-shaping operations (`split`
+/ `remove` — both arena rewrites over `Node<V>`, with `split` also using the
+`Direction::split_layout` mapping and `Handle::offset` already ported), the
+in-order `previous` / `next` traversal (the backtracking search), then the
+`Spatial` container's `spatial` / `fillSpatialSlots` normalization (combining
+the `Node` arena with the `Slot` / spatial geometry) and `nearest` /
+`nearestWrapped`, then `goto`, and finally the formatters. The other remaining
+big-ticket subsystem is the terminal **search subsystem** (coupled to `PageList`
+/ `Pin` / `Screen` / `Selection` / `PageFormatter`); the dependency-blocked
+helpers persist (regex/oniguruma for `Link::oniRegex`, a URI parser for
+`os/uri`, the config-directory naming decision for `file_load` / `edit` /
+`loadDefaultFiles`).
