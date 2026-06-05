@@ -223,3 +223,58 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d560-prompt.md` (design)
 - Result: `logs/codex-review/20260604-d560-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`terminal::message_data::MessageData<'a, T, SMALL>` was added: a const-generic
+SBO enum (`Small { data, len }` / `Stable(&[T])` / `Alloc(Vec<T>)`) with `init`
+(inline when `data.len() <= SMALL`, else `Vec`; never `Stable`; returns
+`MessageData<'static, …>`), the `stable` constructor for the borrowed variant,
+and `slice` (the per-variant view). `Drop` frees the `Alloc` `Vec`. The module
+is registered in `terminal/mod.rs`. Four tests: `init` small (`b"hello!"` ⇒
+`Small`), `init` large (700 bytes ⇒ `Alloc`), boundary (`500` into `SMALL = 500`
+⇒ `Small`), and `stable` (borrowed `Stable`) — each checking the variant and
+`slice()`.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3108 passed, 0 failed (four new tests; no
+  regressions, up from 3104).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/message_data.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **one Nit** (no
+Required or Optional findings): the doc had `## Result` but no `## Conclusion` —
+fixed by adding the conclusion below. Codex confirmed the implementation matches
+upstream and the approved design: `init` uses the correct `<= SMALL` SBO
+threshold and never creates `Stable`, `Alloc(Vec<T>)` owns and frees via `Drop`,
+`Stable` is a borrowed slice, and `slice()` returns the correct per-variant
+view; the four tests cover the upstream small/alloc/boundary behavior plus the
+explicit `stable` constructor.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r560-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r560-last-message.md` (result)
+
+## Conclusion
+
+`terminal::message_data::MessageData` — a small-buffer-optimization payload
+(inline / borrowed stable / heap-allocated) for thread messaging — is faithfully
+ported from `datastruct/message_data.zig`. The Zig `union(enum)` became a
+const-generic Rust `enum`, the `undefined` inline tail became a `Default`-filled
+`[T; SMALL]` (only `[..len]` read), and `deinit` became `Drop`. This is
+roastty's third `datastruct/` port (after `CacheTable` and the now-complete
+`CircBuf`). Remaining `datastruct/` types are the pointer-heavy `lru` /
+`intrusive_linked_list`, the libuv-specific `segmented_pool`, the channel-like
+`blocking_queue`, and the large `split_tree`; the terminal **search subsystem**
+(now that `CircBuf` is done) is the other natural target. The objc/bundle-id
+helpers, the `home()` resolver, and config `loadDefaultFiles` remain deferred
+pending roastty's naming decision; `background-image-opacity` stays
+float-blocked.
