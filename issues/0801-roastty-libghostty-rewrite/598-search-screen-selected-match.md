@@ -164,3 +164,58 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d598-prompt.md`
 - Result: `logs/codex-review/20260604-d598-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`ScreenSearch` gained `selected_match`: it returns `None` when nothing is
+selected, otherwise indexes the combined newest-to-oldest match list by
+`SelectedMatch.idx` — `active_results[active_len - 1 - idx]` for
+`idx < active_len` (the reversed active area),
+`history_results[idx - active_len]` for the history range, and `None` past the
+end — returning an owned deep clone of the `Flattened`. It is a safe fn (no
+screen / pin dereference).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3292 passed, 0 failed (five new tests; no
+  regressions, up from 3287).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/search +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+The five new tests build a `ScreenSearch` with a `SelectedMatch` (a `Tracked`
+highlight with dangling pins, never dereferenced): reversed-active indexing
+(`idx 0` → the newest active result, `idx 1` → the older), the history spillover
+(`idx 2` → the first history result), out-of-range (`idx 3` → `None`), no
+selection (`None`), and the `active_len == 0` branch (`idx 0` → `history[0]`).
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (one Nit: the `## Result` / `## Conclusion` sections were
+not yet saved — added here). Codex confirmed the implementation matches
+upstream's indexing exactly (no selection → `None`; active results indexed in
+reverse via `active_len - 1 - idx`; history via `idx - active_len`; out-of-range
+→ `None`), that returning a cloned owned `Flattened` is the correct Rust
+adaptation, and that the tests (active reverse indexing, history spillover,
+out-of-range, no selection, the `active_len == 0` branch) are sound with the
+never-dereferenced dangling `Tracked` pins.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r598-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r598-last-message.md` (result)
+
+## Conclusion
+
+This experiment ports `selected_match` — the self-contained accessor that reads
+the currently-selected result by its end-relative index across the reversed
+active results and the history results. It advances `ScreenSearch` without
+touching the large, mutually-recursive `reload_active` / `select` /
+`select_next` / `select_prev` selection cluster (which manipulates tracked pins
+and re-searches on screen changes) — that construction/selection cluster, plus
+`init` and `feed` / `search_all`, is the remaining `ScreenSearch` work, followed
+by `ViewportSearch` (`search/viewport.zig`) and the search `Thread`.

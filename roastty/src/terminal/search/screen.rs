@@ -2,9 +2,9 @@
 //! `ActiveSearch` (the mutable active area) and `PageListSearch` (history) that caches results so a
 //! background search survives screen changes. So far it lands the state-machine vocabulary and
 //! struct skeleton, the read-only result accessors (`needle` / `matches_len` / `matches`), and the
-//! `tick` state machine (`tick` / `tick_active` / `tick_history`), and `prune_history` (drop stale
-//! cached history results); construction (`init` / `reload_active`), `feed`, and `select` are
-//! deferred.
+//! `tick` state machine (`tick` / `tick_active` / `tick_history`), `prune_history` (drop stale
+//! cached history results), and `selected_match` (read the selected result by index); construction
+//! (`init` / `reload_active`), `feed`, and `select` are deferred.
 
 use std::ptr::NonNull;
 
@@ -192,6 +192,23 @@ impl ScreenSearch {
                 return;
             }
         }
+    }
+
+    /// Return the currently-selected match, if any (upstream `selectedMatch`). `idx` counts from the
+    /// end of the combined newest-to-oldest match list: `< active_len` indexes the (forward) active
+    /// results reversed, then history results follow; out of range yields `None`. Does not access
+    /// the screen.
+    pub(in crate::terminal) fn selected_match(&self) -> Option<Flattened> {
+        let sel = self.selected.as_ref()?;
+        let active_len = self.active_results.len();
+        if sel.idx < active_len {
+            return Some(self.active_results[active_len - 1 - sel.idx].clone());
+        }
+        let history_len = self.history_results.len();
+        if sel.idx < active_len + history_len {
+            return Some(self.history_results[sel.idx - active_len].clone());
+        }
+        None
     }
 }
 
@@ -399,5 +416,52 @@ mod tests {
         let mut s = build_over_screen(&screen, Vec::new());
         s.prune_history();
         assert!(s.history_results.is_empty());
+    }
+
+    /// Build a `ScreenSearch` with a selected match at `idx` (the tracked highlight uses dangling
+    /// pins — `selected_match` never dereferences them).
+    fn build_selected(idx: usize, active: Vec<Flattened>, history: Vec<Flattened>) -> ScreenSearch {
+        let mut s = build(active, history);
+        s.selected = Some(SelectedMatch {
+            idx,
+            highlight: Tracked::init_assume(NonNull::dangling(), NonNull::dangling()),
+        });
+        s
+    }
+
+    #[test]
+    fn selected_match_indexes_the_reversed_active_area() {
+        // Active is stored forward [a(1), b(2)]; idx 0 = most recent active = b.
+        let s = build_selected(0, vec![flat(1), flat(2)], vec![flat(10)]);
+        assert_eq!(s.selected_match().unwrap().top_x, 2);
+
+        let s = build_selected(1, vec![flat(1), flat(2)], vec![flat(10)]);
+        assert_eq!(s.selected_match().unwrap().top_x, 1);
+    }
+
+    #[test]
+    fn selected_match_spills_into_history() {
+        // active_len 2, so idx 2 = history[0].
+        let s = build_selected(2, vec![flat(1), flat(2)], vec![flat(10)]);
+        assert_eq!(s.selected_match().unwrap().top_x, 10);
+    }
+
+    #[test]
+    fn selected_match_out_of_range_is_none() {
+        let s = build_selected(3, vec![flat(1), flat(2)], vec![flat(10)]);
+        assert!(s.selected_match().is_none());
+    }
+
+    #[test]
+    fn selected_match_none_when_nothing_selected() {
+        let s = build(vec![flat(1)], vec![flat(10)]);
+        assert!(s.selected_match().is_none());
+    }
+
+    #[test]
+    fn selected_match_with_empty_active_uses_history() {
+        // active_len 0, so idx 0 = history[0].
+        let s = build_selected(0, Vec::new(), vec![flat(10)]);
+        assert_eq!(s.selected_match().unwrap().top_x, 10);
     }
 }
