@@ -1555,6 +1555,8 @@ are past the correctness-critical foundation.
   **Pass** · Claude/Codex/Codex
 - [Experiment 554: shell command construction (os::shell)](554-os-shell-command.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 555: the fixed-bucket LRU cache (CacheTable)](555-cache-table.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
