@@ -1525,6 +1525,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 539: the mouse input types](539-input-mouse-types.md) — **Pass** ·
   Claude/Codex/Codex
+- [Experiment 540: the keyboard layout](540-input-keyboard-layout.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
