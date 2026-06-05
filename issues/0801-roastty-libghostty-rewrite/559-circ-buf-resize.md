@@ -225,3 +225,61 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d559-prompt.md` (design)
 - Result: `logs/codex-review/20260604-d559-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`terminal::circ_buf` gained `resize` (rotate-to-zero, then
+`Vec::resize(size, default)` — grow-with-default or truncate — with the
+full-buffer `head = prev_len` / `full = false` fixup on growth),
+`ensure_unused_capacity` (grow only when `len + amount` exceeds capacity), and
+the private `rotate_to_zero` (`slice::rotate_left(tail)` + `head = len % cap`,
+`tail = 0`). **This completes the `CircBuf` port.** Five new tests: grow a full
+buffer (data preserved + the grown capacity appendable), grow a wrapped buffer
+(rotate-to-zero preserves the data), the `ensure_unused_capacity` grow / no-op
+cases, grow from zero capacity, and shrink a full buffer
+(`full`/`len`/`capacity`/contents per Codex's expectation).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3104 passed, 0 failed (five new tests; no
+  regressions, up from 3099).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/circ_buf.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it (no Required or
+Optional findings) with **two Nits**, both fixed:
+
+- **shrink test should assert `full` (Nit, fixed)**: the design said the
+  shrink-full edge checks `full == true`, but the test only verified `len` /
+  `capacity` / non-empty / contents. Added `assert!(buf.full)` to
+  `resize_shrinks_full_buffer` (it still passes).
+- **missing `## Conclusion` (Nit, fixed)**: added below.
+
+Codex confirmed the implementation matches upstream — `rotate_to_zero`,
+grow/shrink via `Vec::resize`, the full-buffer grow fixup, and the
+`ensure_unused_capacity` threshold are faithful — and that with these operations
+added, `CircBuf` is fully ported.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r559-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r559-last-message.md` (result)
+
+## Conclusion
+
+`resize`, `ensure_unused_capacity`, and `rotate_to_zero` are faithfully ported,
+**completing the `CircBuf` port** across Experiments 556–559 (core ring,
+iterator, two-span access, auto-grow). `Vec::resize(size, default)` cleanly
+subsumed upstream's `realloc` + grow-time `@memset`, and
+`slice::rotate_left(tail)` is `std.mem.rotate`. With `CircBuf` complete, the
+terminal **search subsystem** (the sliding window, which is built on `CircBuf`)
+becomes the natural next target — along with the remaining `datastruct/` types
+(`lru`, `intrusive_linked_list`, `segmented_pool`). The objc/bundle-id helpers,
+the `home()` resolver, and config `loadDefaultFiles` remain deferred pending
+roastty's naming decision; `background-image-opacity` stays float-blocked.

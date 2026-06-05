@@ -234,6 +234,45 @@ impl<T: Copy> CircBuf<T> {
         span0.copy_from_slice(&slice[..first]);
         span1.copy_from_slice(&slice[first..]);
     }
+
+    /// Ensure there is room to append `amount` more items, growing if needed (upstream
+    /// `ensureUnusedCapacity`).
+    pub(crate) fn ensure_unused_capacity(&mut self, amount: usize) {
+        let new_cap = self.len() + amount;
+        if new_cap <= self.capacity() {
+            return;
+        }
+        self.resize(new_cap);
+    }
+
+    /// Resize the buffer to `size` (larger or smaller). New slots (when growing) are `default`
+    /// (upstream `resize`).
+    pub(crate) fn resize(&mut self, size: usize) {
+        // Rotate the data to be zero-aligned so the reallocation's new space is contiguous.
+        self.rotate_to_zero();
+
+        let prev_len = self.len();
+        let prev_cap = self.storage.len();
+        // `Vec::resize` both grows (filling new slots with `default`) and shrinks (truncating)
+        // — the equivalent of `realloc` + the grow-time `@memset` to `default`.
+        self.storage.resize(size, self.default);
+
+        if size > prev_cap && self.full {
+            // We grew a full buffer: the data now occupies `[0, prev_len)`, free space after.
+            self.head = prev_len;
+            self.full = false;
+        }
+    }
+
+    /// Rotate the data so the oldest element is at index 0 (upstream `rotateToZero`).
+    fn rotate_to_zero(&mut self) {
+        if self.tail == 0 {
+            return;
+        }
+        self.storage.rotate_left(self.tail);
+        self.head = self.len() % self.storage.len();
+        self.tail = 0;
+    }
 }
 
 #[cfg(test)]
@@ -438,6 +477,93 @@ mod tests {
         buf.append_slice_assume_capacity(&[]);
         assert_eq!(buf.len(), 1);
         assert_eq!(buf.first(), Some(&7));
+    }
+
+    #[test]
+    fn resize_grows_full_buffer() {
+        let mut buf = CircBuf::new(3, 0u8);
+        buf.append_assume_capacity(1);
+        buf.append_assume_capacity(2);
+        buf.append_assume_capacity(3); // full
+
+        buf.resize(5);
+        assert_eq!(buf.capacity(), 5);
+        assert_eq!(buf.len(), 3);
+        assert_eq!(collect(buf.iterator(Direction::Forward)), vec![1, 2, 3]);
+
+        // The grown capacity is appendable.
+        assert_eq!(buf.append(4), Ok(()));
+        assert_eq!(buf.append(5), Ok(()));
+        assert_eq!(
+            collect(buf.iterator(Direction::Forward)),
+            vec![1, 2, 3, 4, 5],
+        );
+    }
+
+    #[test]
+    fn resize_grows_wrapped_buffer() {
+        let mut buf = CircBuf::new(4, 0u8);
+        buf.append_assume_capacity(1);
+        buf.append_assume_capacity(2);
+        buf.append_assume_capacity(3);
+        buf.delete_oldest(1); // tail != 0, data [2, 3]
+
+        buf.resize(6); // rotates to zero, then grows
+        assert_eq!(buf.capacity(), 6);
+        assert_eq!(buf.len(), 2);
+        assert_eq!(collect(buf.iterator(Direction::Forward)), vec![2, 3]);
+
+        assert_eq!(buf.append(4), Ok(()));
+        assert_eq!(collect(buf.iterator(Direction::Forward)), vec![2, 3, 4]);
+    }
+
+    #[test]
+    fn ensure_unused_capacity_grows_or_noops() {
+        let mut buf = CircBuf::new(3, 0u8);
+        buf.append_assume_capacity(1);
+        buf.append_assume_capacity(2);
+        buf.append_assume_capacity(3); // full
+
+        buf.ensure_unused_capacity(2);
+        assert!(buf.capacity() >= 5);
+        assert_eq!(collect(buf.iterator(Direction::Forward)), vec![1, 2, 3]);
+        assert_eq!(buf.append(4), Ok(()));
+        assert_eq!(buf.append(5), Ok(()));
+
+        // Already enough room: a no-op (capacity unchanged).
+        let cap = buf.capacity();
+        buf.ensure_unused_capacity(0);
+        assert_eq!(buf.capacity(), cap);
+    }
+
+    #[test]
+    fn resize_grows_from_zero_capacity() {
+        let mut buf = CircBuf::new(0, 0u8);
+        buf.resize(3);
+        assert_eq!(buf.capacity(), 3);
+        assert_eq!(buf.len(), 0);
+        assert!(buf.is_empty());
+
+        buf.append_assume_capacity(1);
+        buf.append_assume_capacity(2);
+        buf.append_assume_capacity(3);
+        assert_eq!(collect(buf.iterator(Direction::Forward)), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn resize_shrinks_full_buffer() {
+        let mut buf = CircBuf::new(4, 0u8);
+        buf.append_assume_capacity(1);
+        buf.append_assume_capacity(2);
+        buf.append_assume_capacity(3);
+        buf.append_assume_capacity(4); // full
+
+        buf.resize(3); // the "smaller" path
+        assert_eq!(buf.capacity(), 3);
+        assert_eq!(buf.len(), 3);
+        assert!(buf.full); // a full buffer shrunk to its length stays full (upstream)
+        assert!(!buf.is_empty());
+        assert_eq!(collect(buf.iterator(Direction::Forward)), vec![1, 2, 3]);
     }
 
     #[test]

@@ -1564,7 +1564,7 @@ are past the correctness-critical foundation.
 - [Experiment 558: CircBuf two-span access (getPtrSlice + appendSlice)](558-circ-buf-getptrslice.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 559: CircBuf auto-grow (resize + ensureUnusedCapacity)](559-circ-buf-resize.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
