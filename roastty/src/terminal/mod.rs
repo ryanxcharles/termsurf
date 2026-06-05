@@ -116,6 +116,9 @@ mod size;
 pub(crate) mod size_report;
 
 #[allow(dead_code)]
+mod split_tree;
+
+#[allow(dead_code)]
 pub(crate) mod style;
 
 #[allow(dead_code)]

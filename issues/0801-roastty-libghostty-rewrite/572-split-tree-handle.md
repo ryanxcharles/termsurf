@@ -241,3 +241,66 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d572-prompt.md`
 - Result: `logs/codex-review/20260604-d572-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`terminal::split_tree` was added with the `f16`-free foundational vocabulary of
+upstream `datastruct/split_tree`: `Handle(u16)` (`ROOT` = index 0; `from_index`
+accepting the full `u16` range as the `@enumFromInt` adapter; `idx`; `offset`
+using `checked_add` then the strict `< u16::MAX` assert), `Layout` (`Horizontal`
+/ `Vertical`), `Direction` (`Left` / `Right` / `Down` / `Up`), and
+`Direction::split_layout() -> (Layout, bool)` reproducing the upstream `split`
+direction switch. Registered via `#[allow(dead_code)] mod split_tree;` in
+`terminal/mod.rs`. The tree machinery and all `f16` logic are deferred.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3166 passed, 0 failed (seven new tests; no
+  regressions, up from 3159).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/split_tree.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+The seven new tests: handle root / `idx` / `offset` composition, `from_index`
+allowing `u16::MAX` (the end sentinel) while `from_index(u16::MAX + 1)` panics,
+`offset` succeeding at `u16::MAX - 1` and panicking at `u16::MAX`, the
+four-direction `split_layout` mapping, and enum distinctness.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (one Nit: the `## Result` / `## Conclusion` sections were
+not yet in the saved file — added here as part of result recording). Codex
+confirmed the fixed `Handle` semantics line up with upstream — `from_index`
+allows the full `u16` range for `@enumFromInt`-style construction, `offset` uses
+checked addition and keeps the strict `< u16::MAX` assertion, and the
+direction-to-layout/first-side mapping is exact — that the `f16` / tree deferral
+is appropriately scoped, and that the tests cover the handle boundaries and the
+mapping.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r572-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r572-last-message.md` (result)
+
+## Conclusion
+
+This experiment opens the `terminal::split_tree` module with the `f16`-free
+foundational vocabulary of upstream's 2517-line `datastruct/split_tree` — the
+`u16` node `Handle`, the `Layout` / `Direction` enums, and the direction →
+`(layout, first-side)` mapping. It is the first slice of what will be a
+multi-experiment subsystem: the immutable node arena, view ref-counting, and the
+tree-shaping operations (`split` / `remove` / `goto` / `zoom` / `equalize`)
+follow, but the **`f16`-parameterized** parts (`Split.ratio`, the normalized
+`Spatial` representation and its resize math) are blocked on the lack of a
+stable Rust `f16` — the same block as `background-image-opacity`. The remaining
+big-ticket subsystem is the terminal **search subsystem** (coupled to `PageList`
+/ `Pin` / `Screen` / `Selection` / `PageFormatter`), and the dependency-blocked
+helpers persist (regex/oniguruma for `Link::oniRegex`, a URI parser for
+`os/uri`, the config-directory naming decision for `file_load` / `edit` /
+`loadDefaultFiles`). The `f16` block now spans `background-image-opacity` and
+the `split_tree` spatial/ratio logic; a future slice could introduce a shared
+half-precision-float representation to unblock both.
