@@ -23,6 +23,8 @@ pub(crate) enum ParseError {
     InvalidFormat,
     /// The port component is not a valid number (the MAC-address case `os/uri` catches).
     InvalidPort,
+    /// `os/uri`'s `mac_address` option found a host shaped like — but not — a valid MAC address.
+    InvalidMacAddress,
 }
 
 /// Parse a full URI (`scheme ":" …`) — upstream `std.Uri.parse`.
@@ -133,6 +135,97 @@ fn split_once(s: &str, sep: char) -> (&str, Option<&str>) {
         Some(i) => (&s[..i], Some(&s[i + 1..])),
         None => (s, None),
     }
+}
+
+/// `os/uri`'s parse options.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ParseOptions {
+    /// Parse MAC addresses in the host (macOS "Private Wi-Fi address" rotating hostnames, which
+    /// `std.Uri` would otherwise reject because the trailing octet looks like a bogus port).
+    pub(crate) mac_address: bool,
+    /// Return the full raw path (path + query + fragment, verbatim) in `path`; clear
+    /// `query`/`fragment`.
+    pub(crate) raw_path: bool,
+}
+
+/// Parse a URI with `os/uri`'s MAC-address + `raw_path` extensions (upstream `os.uri.parse`).
+pub(crate) fn parse_with_options(text: &str, options: ParseOptions) -> Result<Uri<'_>, ParseError> {
+    let mut uri = match parse(text) {
+        Ok(u) => u,
+        Err(ParseError::InvalidPort) if options.mac_address => {
+            // The greedy port split choked on a MAC's last octet; re-parse with a MAC host.
+            let scheme_end = text.find("://").ok_or(ParseError::InvalidFormat)?;
+            let scheme = &text[..scheme_end];
+            let host_start = scheme_end + 3;
+            let host_end = text[host_start..]
+                .find('/')
+                .map_or(text.len(), |i| host_start + i);
+            let mac = &text[host_start..host_end];
+            if !is_valid_mac_address(mac) {
+                return Err(ParseError::InvalidMacAddress);
+            }
+            let mut u = parse_after_scheme(scheme, &text[host_end..])?;
+            u.host = Some(mac);
+            u
+        }
+        Err(e) => return Err(e),
+    };
+
+    // Repair: a numeric MAC's last octet parsed as a port (host 14 chars / 4 colons / port ≤99).
+    if options.mac_address {
+        if let Some(host) = uri.host {
+            let four_colons = host.bytes().filter(|&b| b == b':').count() == 4;
+            if host.len() == 14 && four_colons {
+                if let Some(port) = uri.port {
+                    if port <= 99 {
+                        let host_start = offset_in(text, host);
+                        let path_start = offset_in(text, uri.path);
+                        let mac = &text[host_start..path_start];
+                        if !is_valid_mac_address(mac) {
+                            return Err(ParseError::InvalidMacAddress);
+                        }
+                        uri.host = Some(mac);
+                        uri.port = None;
+                    }
+                }
+            }
+        }
+    }
+
+    // raw_path: path = everything after the authority (path + query + fragment, verbatim).
+    if options.raw_path {
+        let path_start = offset_in(text, uri.path);
+        uri.path = &text[path_start..];
+        uri.query = None;
+        uri.fragment = None;
+    }
+
+    Ok(uri)
+}
+
+/// Byte offset of `slice` (which must be a subslice of `text`) within `text`.
+fn offset_in(text: &str, slice: &str) -> usize {
+    let base = text.as_ptr() as usize;
+    let start = slice.as_ptr() as usize;
+    debug_assert!(start >= base && start + slice.len() <= base + text.len());
+    start - base
+}
+
+/// Whether `s` is a valid MAC address `12:34:56:ab:cd:ef` (upstream `isValidMacAddress`).
+pub(crate) fn is_valid_mac_address(s: &str) -> bool {
+    if s.len() != 17 {
+        return false;
+    }
+    for (i, b) in s.bytes().enumerate() {
+        if i % 3 == 2 {
+            if b != b':' {
+                return false;
+            }
+        } else if !b.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -246,5 +339,143 @@ mod tests {
         // The path slice pointer locates Exp 619's raw_path start (path + query + fragment).
         let path_start = u.path.as_ptr() as usize - text.as_ptr() as usize;
         assert_eq!(&text[path_start..], "/path??#fragment");
+    }
+
+    const MAC: ParseOptions = ParseOptions {
+        mac_address: true,
+        raw_path: false,
+    };
+
+    #[test]
+    fn mac_numeric_no_port() {
+        // Greedy split → host "00:12:34:56:78", port 90; the repair restores the full MAC.
+        let u = parse_with_options("file://00:12:34:56:78:90/path", MAC).unwrap();
+        assert_eq!(u.host, Some("00:12:34:56:78:90"));
+        assert_eq!(u.port, None);
+        assert_eq!(u.path, "/path");
+    }
+
+    #[test]
+    fn mac_numeric_with_port() {
+        // Host "00:12:34:56:78:90" (17 chars ≠ 14) → repair does not fire; the :999 is a real port.
+        let u = parse_with_options("file://00:12:34:56:78:90:999/path", MAC).unwrap();
+        assert_eq!(u.host, Some("00:12:34:56:78:90"));
+        assert_eq!(u.port, Some(999));
+        assert_eq!(u.path, "/path");
+    }
+
+    #[test]
+    fn mac_alphabetic_no_port() {
+        // Alphabetic tail → `parse` returns InvalidPort; the fallback re-parses with the MAC host.
+        let u = parse_with_options("file://ab:cd:ef:ab:cd:ef/path", MAC).unwrap();
+        assert_eq!(u.host, Some("ab:cd:ef:ab:cd:ef"));
+        assert_eq!(u.port, None);
+        assert_eq!(u.path, "/path");
+    }
+
+    #[test]
+    fn mac_alphabetic_with_port() {
+        // Host "ab:cd:ef:ab:cd:ef" (17 chars ≠ 14) → repair does not fire; :999 is a real port.
+        let u = parse_with_options("file://ab:cd:ef:ab:cd:ef:999/path", MAC).unwrap();
+        assert_eq!(u.host, Some("ab:cd:ef:ab:cd:ef"));
+        assert_eq!(u.port, Some(999));
+        assert_eq!(u.path, "/path");
+    }
+
+    #[test]
+    fn mac_no_path() {
+        let u = parse_with_options("file://00:12:34:56:78:90", MAC).unwrap();
+        assert_eq!(u.host, Some("00:12:34:56:78:90"));
+        assert_eq!(u.port, None);
+        assert_eq!(u.path, "");
+    }
+
+    #[test]
+    fn mac_invalid_via_repair() {
+        // Numeric-looking port (00) but a non-hex host → InvalidMacAddress through the repair path.
+        assert_eq!(
+            parse_with_options("file://zz:zz:zz:zz:zz:00/path", MAC),
+            Err(ParseError::InvalidMacAddress)
+        );
+    }
+
+    #[test]
+    fn mac_invalid_via_fallback() {
+        // Alphabetic-but-not-hex tail → InvalidPort → fallback → InvalidMacAddress.
+        assert_eq!(
+            parse_with_options("file://zz:zz:zz:zz:zz:zz/path", MAC),
+            Err(ParseError::InvalidMacAddress)
+        );
+    }
+
+    #[test]
+    fn mac_disabled_passthrough() {
+        // Without the option, an alphabetic MAC tail stays an InvalidPort error.
+        assert_eq!(
+            parse_with_options("file://ab:cd:ef:ab:cd:ef/path", ParseOptions::default()),
+            Err(ParseError::InvalidPort)
+        );
+    }
+
+    #[test]
+    fn raw_path_off_splits_query_fragment() {
+        let opts = ParseOptions {
+            mac_address: false,
+            raw_path: false,
+        };
+        let u = parse_with_options("file://localhost/path??#fragment", opts).unwrap();
+        assert_eq!(u.path, "/path");
+        assert_eq!(u.query, Some("?"));
+        assert_eq!(u.fragment, Some("fragment"));
+    }
+
+    #[test]
+    fn raw_path_on_keeps_tail_verbatim() {
+        let opts = ParseOptions {
+            mac_address: false,
+            raw_path: true,
+        };
+        let u = parse_with_options("file://localhost/path??#fragment", opts).unwrap();
+        assert_eq!(u.path, "/path??#fragment");
+        assert_eq!(u.query, None);
+        assert_eq!(u.fragment, None);
+    }
+
+    #[test]
+    fn raw_path_on_empty_path() {
+        let opts = ParseOptions {
+            mac_address: false,
+            raw_path: true,
+        };
+        let u = parse_with_options("file://localhost", opts).unwrap();
+        assert_eq!(u.host, Some("localhost"));
+        assert_eq!(u.path, "");
+        assert_eq!(u.query, None);
+        assert_eq!(u.fragment, None);
+    }
+
+    #[test]
+    fn mac_and_raw_path_compose() {
+        let opts = ParseOptions {
+            mac_address: true,
+            raw_path: true,
+        };
+        let u = parse_with_options("file://00:12:34:56:78:90/p?q#f", opts).unwrap();
+        assert_eq!(u.host, Some("00:12:34:56:78:90"));
+        assert_eq!(u.port, None);
+        assert_eq!(u.path, "/p?q#f");
+        assert_eq!(u.query, None);
+        assert_eq!(u.fragment, None);
+    }
+
+    #[test]
+    fn is_valid_mac_address_table() {
+        assert!(is_valid_mac_address("01:23:45:67:89:Aa"));
+        assert!(is_valid_mac_address("Aa:Bb:Cc:Dd:Ee:Ff"));
+        assert!(!is_valid_mac_address(""));
+        assert!(!is_valid_mac_address("00:23:45"));
+        assert!(!is_valid_mac_address("zz:zz:zz:zz:zz:zz"));
+        assert!(!is_valid_mac_address("01-23-45-67-89-Aa"));
+        assert!(!is_valid_mac_address("01:23:45:67:89:Aa:Bb"));
     }
 }

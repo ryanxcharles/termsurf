@@ -226,3 +226,53 @@ source.
 Two Optional findings, both adopted: (1) a `debug_assert!` in `offset_in` that
 the slice lies within `text` (catches future misuse early); (2) a combined
 `mac_address + raw_path` test. Added to the design above.
+
+## Result
+
+**Result:** Pass
+
+`parse_with_options`, `ParseOptions`, `offset_in`, `is_valid_mac_address`, and
+`ParseError::InvalidMacAddress` landed in `roastty/src/os/uri.rs` on top of the
+Exp 618 RFC-3986 parser. The MAC fallback (on `InvalidPort` + `mac_address`),
+the numeric-MAC repair (host 14 / 4 colons / port ≤99), and the `raw_path`
+rewrite all reproduce `os/uri.zig`'s behavior across the upstream corpus.
+
+Gates (all green):
+
+- `cargo build -p roastty` — no warnings.
+- `cargo test -p roastty` — **3420 passed / 0 failed** (was 3407; +13 new tests:
+  the MAC numeric/alphabetic × with/without-port matrix, no-path, the
+  `InvalidMacAddress` fallback + repair paths, `mac_disabled` passthrough, the
+  `raw_path` off/on/empty cases, the combined `mac_address + raw_path`, and the
+  `is_valid_mac_address` table).
+- `cargo fmt -p roastty -- --check` — clean.
+- no-ghostty grep on `roastty/src/os/uri.rs` — clean.
+- `git diff --check` — clean.
+
+## Completion Review
+
+**Reviewer:** Codex (gpt-5.5, medium) · resumed session
+`019e8f83-9029-7d43-8e82-f4c5754e14ba`
+
+**Verdict:** APPROVED — no Required, Optional, or Nit findings. Codex confirmed
+`parse_with_options` faithfully ports the MAC fallback, the numeric-MAC repair
+(correct boundaries: 14-char/4-colon + port ≤99 repairs; 17-char host with
+`:999` stays host+port), and `raw_path` rewriting; that `offset_in` is sound for
+the verbatim-subslice model (including the fallback's `parse_after_scheme` path)
+with the `debug_assert!` the right guard; that `is_valid_mac_address` matches
+upstream; and that the error/passthrough behavior and the 13 tests are correct.
+
+## Conclusion
+
+The URI area is **complete** — Exp 618 ported the RFC-3986 foundation
+(`std.Uri.parse`) and Exp 619 layered `os/uri`'s MAC-address + `raw_path`
+options. This was the pure-Rust hand-port chosen over the `url` crate (which
+can't represent MAC-address hosts or hand back verbatim `raw_path` slices).
+
+Next, the remaining regex-area work: the `config/url` default URL regex needs an
+oniguruma-class engine (its `(?<!\$\d*)` variable-length look-behind is
+supported by neither `regex` nor `fancy-regex`) — a separate dependency/engine
+decision — and `input/Link` matching builds on whatever that resolves to. Beyond
+regex, the unported `os/` leaves (locale, resourcesdir, kernel_info, args,
+cf_release_thread) and the config-directory naming remain, each
+dependency/branding/scope-gated.
