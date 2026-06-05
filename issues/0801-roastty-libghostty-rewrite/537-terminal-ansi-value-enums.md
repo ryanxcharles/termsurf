@@ -195,3 +195,49 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-194148-d537-prompt.md` (design)
 - Result: `logs/codex-review/20260604-194148-d537-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`RenditionAspect` (`0` / `1` / `39` / `49`) and `StatusLineType` (`0` / `1` /
+`2`) were added to `terminal::ansi`, each a `#[repr(u16)]` enum with `value()`
+(the discriminant / wire parameter) and `from_value(u16) -> Option<Self>`
+mapping a parameter to its named aspect or `None` — the same non-exhaustive
+pattern as `C0`. The two new tests round-trip each variant, check the exact
+discriminants, and reject representative unrecognized values.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3028 passed, 0 failed (two new tests; no
+  regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/ansi.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches the approved value-enum slice — exact
+discriminants for `RenditionAspect` and `StatusLineType`, `value()` returns the
+wire value, and `from_value()` maps only named values to `Some`
+(non-exhaustive/unknown ⇒ `None`); the tests cover round-trips, exact
+discriminants, and representative unknown values; gates are clean and the
+parser-consumer enums remain deferred. "Approved with no findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-194325-r537-prompt.md` (result)
+- Result: `logs/codex-review/20260604-194325-r537-last-message.md` (result)
+
+## Conclusion
+
+`terminal::ansi` now holds the three non-exhaustive ANSI enums (`C0`,
+`RenditionAspect`, `StatusLineType`). The exhaustive `ansi.zig` enums
+(`CursorStyle`, `StatusDisplay`, `ModifyKeyFormat`, `ProtectedMode`) are bare
+type definitions best ported alongside their parser/dispatch consumers, so the
+next slices move to the rest of the VT layer (`csi`, `apc`, `parse_table`,
+`Parser`) and the stream parser — toward the terminal core. The config
+`loadDefaultFiles` stays deferred pending roastty's naming decision;
+`background-image-opacity` stays float-blocked.

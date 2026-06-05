@@ -62,6 +62,70 @@ impl C0 {
     }
 }
 
+/// The SGR rendition aspects that can be set (upstream `terminal.ansi.RenditionAspect`).
+/// The value is the SGR (`ESC [ m`) parameter value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+pub(crate) enum RenditionAspect {
+    /// Reset to default.
+    Default = 0,
+    /// Bold.
+    Bold = 1,
+    /// Default foreground color.
+    DefaultFg = 39,
+    /// Default background color.
+    DefaultBg = 49,
+}
+
+impl RenditionAspect {
+    /// The SGR parameter value of this aspect.
+    pub(crate) fn value(self) -> u16 {
+        self as u16
+    }
+
+    /// The named rendition aspect for an SGR parameter, or `None` for an unrecognized
+    /// value (upstream's non-exhaustive `@enumFromInt`).
+    pub(crate) fn from_value(value: u16) -> Option<RenditionAspect> {
+        Some(match value {
+            0 => RenditionAspect::Default,
+            1 => RenditionAspect::Bold,
+            39 => RenditionAspect::DefaultFg,
+            49 => RenditionAspect::DefaultBg,
+            _ => return None,
+        })
+    }
+}
+
+/// The status line type for DECSSDT (upstream `terminal.ansi.StatusLineType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+pub(crate) enum StatusLineType {
+    /// No status line.
+    None = 0,
+    /// Indicator status line.
+    Indicator = 1,
+    /// Host-writable status line.
+    HostWritable = 2,
+}
+
+impl StatusLineType {
+    /// The DECSSDT parameter value of this type.
+    pub(crate) fn value(self) -> u16 {
+        self as u16
+    }
+
+    /// The named status line type for a DECSSDT parameter, or `None` for an
+    /// unrecognized value (upstream's non-exhaustive `@enumFromInt`).
+    pub(crate) fn from_value(value: u16) -> Option<StatusLineType> {
+        Some(match value {
+            0 => StatusLineType::None,
+            1 => StatusLineType::Indicator,
+            2 => StatusLineType::HostWritable,
+            _ => return None,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,5 +163,38 @@ mod tests {
         assert_eq!(C0::from_byte(0x04), None); // EOT
         assert_eq!(C0::from_byte(0x20), None); // space
         assert_eq!(C0::from_byte(0x7F), None); // DEL
+    }
+
+    #[test]
+    fn rendition_aspect_round_trips_and_rejects_unknown() {
+        for a in [
+            RenditionAspect::Default,
+            RenditionAspect::Bold,
+            RenditionAspect::DefaultFg,
+            RenditionAspect::DefaultBg,
+        ] {
+            assert_eq!(RenditionAspect::from_value(a.value()), Some(a));
+        }
+        // Exact SGR parameter values.
+        assert_eq!(RenditionAspect::Default.value(), 0);
+        assert_eq!(RenditionAspect::Bold.value(), 1);
+        assert_eq!(RenditionAspect::DefaultFg.value(), 39);
+        assert_eq!(RenditionAspect::DefaultBg.value(), 49);
+        // Unrecognized SGR parameters are `None`.
+        assert_eq!(RenditionAspect::from_value(7), None);
+        assert_eq!(RenditionAspect::from_value(38), None);
+    }
+
+    #[test]
+    fn status_line_type_round_trips_and_rejects_unknown() {
+        for t in [
+            StatusLineType::None,
+            StatusLineType::Indicator,
+            StatusLineType::HostWritable,
+        ] {
+            assert_eq!(StatusLineType::from_value(t.value()), Some(t));
+        }
+        assert_eq!(StatusLineType::HostWritable.value(), 2);
+        assert_eq!(StatusLineType::from_value(3), None);
     }
 }
