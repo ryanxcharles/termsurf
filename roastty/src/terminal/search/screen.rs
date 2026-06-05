@@ -87,6 +87,30 @@ pub(crate) struct ScreenSearch {
     cols: CellCountInt,
 }
 
+impl ScreenSearch {
+    /// The needle this search is using (upstream `needle`). The active window is always forward, so
+    /// its stored bytes are the original needle.
+    pub(in crate::terminal) fn needle(&self) -> &[u8] {
+        self.active.needle()
+    }
+
+    /// The total number of matches found so far (upstream `matchesLen`).
+    pub(in crate::terminal) fn matches_len(&self) -> usize {
+        self.active_results.len() + self.history_results.len()
+    }
+
+    /// All matches, ordered newest-to-oldest (upstream `matches`): the active results (stored
+    /// forward) reversed, then the history results (already newest-to-oldest) appended. Returns an
+    /// owned `Vec` (Rust ownership replaces upstream's caller-frees slice).
+    pub(in crate::terminal) fn matches(&self) -> Vec<Flattened> {
+        let mut results =
+            Vec::with_capacity(self.active_results.len() + self.history_results.len());
+        results.extend(self.active_results.iter().rev().cloned());
+        results.extend(self.history_results.iter().cloned());
+        results
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +142,57 @@ mod tests {
         let copy = d;
         assert_eq!(d, copy);
         assert_ne!(Select::Next, Select::Prev);
+    }
+
+    /// A minimal `Flattened` distinguished by its `top_x`.
+    fn flat(top_x: CellCountInt) -> Flattened {
+        Flattened {
+            chunks: Vec::new(),
+            top_x,
+            bot_x: 0,
+        }
+    }
+
+    /// Build a `ScreenSearch` directly with populated result lists. The accessors never dereference
+    /// `screen` (so it can be dangling) and there are no tracked pins (so dropping is safe).
+    fn build(active: Vec<Flattened>, history: Vec<Flattened>) -> ScreenSearch {
+        ScreenSearch {
+            screen: NonNull::dangling(),
+            active: ActiveSearch::new(b"foo"),
+            history: None,
+            state: State::Active,
+            selected: None,
+            history_results: history,
+            active_results: active,
+            rows: 10,
+            cols: 10,
+        }
+    }
+
+    #[test]
+    fn needle_returns_the_active_needle() {
+        let s = build(Vec::new(), Vec::new());
+        assert_eq!(s.needle(), b"foo");
+    }
+
+    #[test]
+    fn matches_len_sums_both_lists() {
+        let s = build(vec![flat(1), flat(2)], vec![flat(10), flat(11)]);
+        assert_eq!(s.matches_len(), 4);
+
+        let empty = build(Vec::new(), Vec::new());
+        assert_eq!(empty.matches_len(), 0);
+    }
+
+    #[test]
+    fn matches_orders_newest_to_oldest() {
+        // Active is stored forward (oldest-to-newest); history is newest-to-oldest.
+        let s = build(vec![flat(1), flat(2)], vec![flat(10), flat(11)]);
+        let order: Vec<CellCountInt> = s.matches().iter().map(|h| h.top_x).collect();
+        // Reversed active, then history.
+        assert_eq!(order, vec![2, 1, 10, 11]);
+
+        let empty = build(Vec::new(), Vec::new());
+        assert!(empty.matches().is_empty());
     }
 }

@@ -82,6 +82,12 @@ impl SlidingWindow {
         self.needle.len()
     }
 
+    /// The stored needle bytes (upstream `window.needle`). For a reverse window these are reversed;
+    /// callers that need the original (e.g. the screen search) use a forward window.
+    pub(in crate::terminal) fn needle(&self) -> &[u8] {
+        &self.needle
+    }
+
     /// The number of metas (pages) currently in the window (test helper).
     #[cfg(test)]
     pub(in crate::terminal) fn meta_len(&self) -> usize {

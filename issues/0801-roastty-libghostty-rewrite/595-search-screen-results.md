@@ -212,3 +212,58 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d595-prompt.md`
 - Result: `logs/codex-review/20260604-d595-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`ScreenSearch` gained the read-only result accessors `needle` (returns the
+active forward window's needle), `matches_len` (the sum of the active and
+history result-list lengths), and `matches` (an owned `Vec<Flattened>` ordered
+newest-to-oldest — the active results reversed, then the history results
+appended). Supporting `SlidingWindow::needle` and `ActiveSearch::needle`
+accessors were added.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3281 passed, 0 failed (three new tests; no
+  regressions, up from 3278).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/search +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+The three new tests build a `ScreenSearch` directly (dangling `screen`,
+`ActiveSearch::new(b"foo")`, populated result vecs): `needle` returns `b"foo"`;
+`matches_len` is `4` for 2 + 2 results and `0` for empty; and `matches` orders
+the `top_x` values `[2, 1, 10, 11]` for active `[1, 2]` + history `[10, 11]`
+(reversed active, then history), empty for empty lists.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (one Nit: the `## Result` / `## Conclusion` sections were
+not yet saved — added here). Codex confirmed the implementation is faithful:
+`needle()` returns the active forward-window needle, `matches_len()` sums the
+active and history result counts, and `matches()` returns newest-to-oldest as
+reversed active results followed by history results; the deep-cloned
+`Vec<Flattened>` is the right Rust ownership adaptation.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r595-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r595-last-message.md` (result)
+
+## Conclusion
+
+This experiment ports the `ScreenSearch` read-only result accessors (`needle` /
+`matches_len` / `matches`) — the self-contained read paths over the cached
+result lists, testable ahead of the construction and search logic. `matches`
+reproduces upstream's newest-to-oldest ordering (reversed active ++ history) as
+an owned `Vec<Flattened>`. The next slices build the search behavior on the
+skeleton: the `init` / `reloadActive` construction (the trickiest piece — it
+loads the active area and diffs the new active top against the previous history
+start), then the `tick` state machine (`tickActive` / `tickHistory`) and `feed`
+/ `pruneHistory`, and finally `select` / `selectNext` / `selectPrev`. After
+`ScreenSearch`, `ViewportSearch` (`search/viewport.zig`) and the search `Thread`
+remain.

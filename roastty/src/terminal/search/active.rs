@@ -78,6 +78,11 @@ impl ActiveSearch {
     pub(in crate::terminal) fn next(&mut self) -> Option<Flattened> {
         self.window.next()
     }
+
+    /// The (forward) needle this searcher is using.
+    pub(in crate::terminal) fn needle(&self) -> &[u8] {
+        self.window.needle()
+    }
 }
 
 #[cfg(test)]
