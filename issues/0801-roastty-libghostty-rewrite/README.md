@@ -1677,6 +1677,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 615: search Thread — part 6: thread_main + spawn (std-concurrency loop)](615-search-thread-loop.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 616: terminal StringMap + the regex crate](616-string-map-regex.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
