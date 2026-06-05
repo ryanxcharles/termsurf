@@ -1554,7 +1554,7 @@ are past the correctness-critical foundation.
 - [Experiment 553: Mach VM memory tags (os::mach)](553-os-mach-vmtag.md) —
   **Pass** · Claude/Codex/Codex
 - [Experiment 554: shell command construction (os::shell)](554-os-shell-command.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

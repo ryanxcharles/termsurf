@@ -226,3 +226,53 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d554-prompt.md` (design)
 - Result: `logs/codex-review/20260604-d554-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`os::shell` was opened with `ShellCommandBuilder` (a `Vec<u8>` builder:
+`append_arg` skips empty args and inserts a single space only between non-empty
+args; `as_bytes` / `into_bytes`) and `shell_escape(&[u8]) -> Vec<u8>`
+(backslash-prefixes exactly the 11 special bytes
+``\ " ' $ ` * ? <space> | ( )``, everything else — incl. linefeed — passes
+through). The module is registered in `os/mod.rs`. Eight tests: the builder
+suite (empty, single, multiple, empty-arg skip, `into_bytes`), the upstream
+escape examples, a linefeed-passthrough, and the full 11-character escape-set
+table (covering `'`, `$`, `` ` ``, `*` that the examples omit).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3081 passed, 0 failed (eight new tests; no
+  regressions, up from 3073).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + os/shell.rs + os/mod.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **one Nit** (no
+Required or Optional findings): the doc had `## Result` but no `## Conclusion` —
+fixed by adding the conclusion below. Codex confirmed the implementation matches
+upstream — the builder's empty-skip and single-space separation are faithful,
+`shell_escape` covers the exact 11-byte escape set with linefeed and ordinary
+bytes passing through, and the byte-oriented `Vec<u8>` adaptation is
+appropriate; the added full-set table test closes the earlier coverage gap.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r554-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r554-last-message.md` (result)
+
+## Conclusion
+
+`os::shell` is opened with `ShellCommandBuilder` (space-separated command
+construction, empty-arg skipping) and `shell_escape` (backslash-escaping the 11
+shell-special characters, linefeed deliberately excluded), faithfully ported
+from `os/shell.zig`. roastty will use these to build shell-integration / launch
+command strings safely (wiring deferred). Both types are fully ported on the
+macOS arm — `shell.zig` is complete. The OS-utility frontier still has a couple
+of self-contained slices (`locale`, `i18n_locales`). The objc/bundle-id helpers,
+the `home()` resolver, and config `loadDefaultFiles` remain deferred pending
+roastty's naming decision; `background-image-opacity` stays float-blocked.
