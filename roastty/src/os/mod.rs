@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub(crate) mod args;
 pub(crate) mod env;
 pub(crate) mod file;
 pub(crate) mod homedir;

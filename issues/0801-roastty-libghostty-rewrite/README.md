@@ -1686,7 +1686,7 @@ are past the correctness-critical foundation.
 - [Experiment 619: os/uri options (MAC-address + raw_path)](619-os-uri-options.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 620: os args iterator (NSProcessInfo-backed command-line args)](620-os-args.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

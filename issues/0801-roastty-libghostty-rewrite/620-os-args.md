@@ -169,3 +169,50 @@ Follow-up review approved the design with no Required findings. Codex confirmed
 the Objective-C lifetime plan is sound: `NSProcessInfo::arguments()` is retained
 by the typed binding, each `NSString` is converted inside an autorelease pool,
 and the UTF-8 borrow is copied into an owned `String` before it can escape.
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/os/args.rs` now provides an `Args` snapshot iterator plus
+`iterator()` / `Args::from_process_info()`. On macOS the process-backed path
+uses `NSProcessInfo::processInfo().arguments()`, indexed with `objectAtIndex`,
+and copies each `NSString::to_str(pool)` result into an owned `String` inside
+the autorelease pool. The module exposes upstream-equivalent `next` and `skip`
+cursor behavior while avoiding borrowed Objective-C lifetime coupling.
+
+`roastty/Cargo.toml` enables the minimal additional Foundation features needed
+for the typed bridge (`NSArray` and `NSProcessInfo`), and
+`roastty/src/os/mod.rs` exports the new module.
+
+Gates (all green):
+
+- `cargo build -p roastty` — no warnings.
+- `cargo test -p roastty` — **3424 passed / 0 failed** unit tests, plus **1
+  passed / 0 failed** ABI harness test.
+- `cargo fmt -p roastty -- --check` — clean.
+- no-ghostty grep on `roastty/src/os/args.rs`, `roastty/src/os/mod.rs`, and
+  `roastty/Cargo.toml` — clean.
+- `git diff --check` — clean.
+
+## Conclusion
+
+The `os.args` primitive is now present in Roastty with the macOS
+`NSProcessInfo.arguments` source that upstream uses for app launches. Later
+config/app startup slices can consume `os::args::iterator()` without having to
+solve Objective-C argument discovery at the same time.
+
+## Completion Review
+
+**Reviewer:** Codex (gpt-5.5, medium) · resumed session
+`019e8f83-9029-7d43-8e82-f4c5754e14ba`
+
+**Verdict:** APPROVED — no Required, Optional, or Nit findings.
+
+Codex confirmed the implementation matches the approved design: macOS uses
+`NSProcessInfo::processInfo().arguments()`, indexes via `args.len()` and
+`objectAtIndex`, and copies `NSString::to_str(pool)` into owned `String`s inside
+the autorelease pool. The enabled `objc2-foundation` features are sufficient
+(`NSArray`, `NSProcessInfo`, and existing `NSString`), with no `NSEnumerator`
+dependency. The review also confirmed `next` / `skip` cursor semantics, the
+owned snapshot lifetime model, the test coverage, and the recorded gate results.
