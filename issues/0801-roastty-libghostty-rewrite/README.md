@@ -1661,6 +1661,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 607: search Thread — part 2: `Search::feed` + Terminal integration](607-search-thread-feed.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 608: search Thread — part 3: `Search::notify` + `Event` types](608-search-thread-notify.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
