@@ -4,8 +4,9 @@
 //! struct skeleton, the read-only result accessors (`needle` / `matches_len` / `matches`), and the
 //! `tick` state machine (`tick` / `tick_active` / `tick_history`), `prune_history` (drop stale
 //! cached history results), `selected_match` (read the selected result by index), the selection
-//! stepping (`select_next` / `select_prev`), and the construction/dispatch cluster (`new` /
-//! `reload_active` / `select` / `deinit`); `feed` and `search_all` are deferred.
+//! stepping (`select_next` / `select_prev`), the construction/dispatch cluster (`new` /
+//! `reload_active` / `select` / `deinit`), and the feed driver (`feed` / `search_all`). The
+//! incremental, lock-aware search surface is complete.
 
 use std::ptr::NonNull;
 
@@ -670,6 +671,73 @@ impl ScreenSearch {
         // SAFETY: as `reload_active`.
         unsafe { self.select(Select::Next) };
     }
+
+    /// Tick and feed until the search is complete (upstream `searchAll`). Drives the state machine
+    /// to `Complete`, pulling more history whenever a `tick` requests a feed.
+    ///
+    /// # Safety
+    /// As `feed` — the caller holds the screen lock and the screen outlives the search.
+    pub(in crate::terminal) unsafe fn search_all(&mut self) {
+        loop {
+            match self.tick() {
+                Tick::Progressed => {}
+                // SAFETY: caller's contract.
+                Tick::FeedRequired => unsafe { self.feed() },
+                Tick::Complete => return,
+            }
+        }
+    }
+
+    /// Pull one page of history into the searcher, resetting the whole search on a resize (upstream
+    /// `feed`). Accesses screen state.
+    ///
+    /// # Safety
+    /// The caller holds the screen lock; the screen is live and outlives the search.
+    pub(in crate::terminal) unsafe fn feed(&mut self) {
+        // (1) A resize can't be reflowed into the cached results, so reset the whole search.
+        let (cur_rows, cur_cols) = {
+            // SAFETY: screen alive.
+            let s = unsafe { self.screen.as_ref() };
+            (s.rows(), s.cols())
+        };
+        if cur_rows != self.rows || cur_cols != self.cols {
+            let screen = self.screen;
+            let needle = self.needle().to_vec();
+            // SAFETY: screen alive. `new` runs `reload_active`, creating fresh tracked pins; the old
+            // pins (still tracked) are released by `deinit` immediately below — they briefly
+            // coexist, exactly as upstream's `init` then `self.deinit()`.
+            let new = unsafe { ScreenSearch::new(screen, &needle) };
+            // SAFETY: screen alive; release the old pins before overwriting.
+            unsafe { self.deinit() };
+            *self = new;
+            debug_assert!(self.rows == cur_rows && self.cols == cur_cols);
+        }
+
+        // (2) No history searcher → nothing left to feed.
+        if self.history.is_none() {
+            self.state = State::Complete;
+            return;
+        }
+
+        // (3) Feed one page. No `&mut Screen` is held across this — `PageListSearch::feed`
+        // dereferences its own `NonNull<PageList>` into the same screen (cf.
+        // `HistorySearch::deinit`).
+        // SAFETY: screen alive; the searcher's list is the live screen's page list.
+        let fed = unsafe { self.history.as_mut().unwrap().searcher.feed() };
+        if !fed {
+            // No more data → complete; reclaim scrollback-pruned history results.
+            self.state = State::Complete;
+            self.prune_history();
+            return;
+        }
+
+        // (4) A successful feed while waiting resumes the history search; active/history unchanged.
+        match self.state {
+            State::Active | State::History => {}
+            State::HistoryFeed => self.state = State::History,
+            State::Complete => unreachable!("a complete search's feed returns no data"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1061,6 +1129,79 @@ mod tests {
         // SAFETY: as `new`.
         assert!(!unsafe { s.select(Select::Next) });
         assert!(s.selected.is_none());
+
+        // SAFETY: as `new`; called once.
+        unsafe { s.deinit() };
+        assert_eq!(screen.tracked_pin_count(), baseline);
+    }
+
+    #[test]
+    fn search_all_reaches_complete_and_keeps_active_matches() {
+        let mut screen = Screen::init(10, 10, None).unwrap();
+        screen.set_text_lines_for_tests(&["Fizz buzz", "Fizz pop"]);
+        let baseline = screen.tracked_pin_count();
+        let ptr = NonNull::from(&mut screen);
+        // SAFETY: `screen` outlives `s`.
+        let mut s = unsafe { ScreenSearch::new(ptr, b"Fizz") };
+
+        // SAFETY: as `new`.
+        unsafe { s.search_all() };
+        // Driven to completion, with the two active-area matches intact.
+        assert_eq!(s.tick(), Tick::Complete);
+        assert_eq!(s.matches_len(), 2);
+
+        // SAFETY: as `new`; called once.
+        unsafe { s.deinit() };
+        assert_eq!(screen.tracked_pin_count(), baseline);
+    }
+
+    #[test]
+    fn feed_repeatedly_reaches_complete() {
+        let mut screen = Screen::init(10, 10, None).unwrap();
+        screen.set_text_lines_for_tests(&["Fizz"]);
+        let baseline = screen.tracked_pin_count();
+        let ptr = NonNull::from(&mut screen);
+        // SAFETY: `screen` outlives `s`.
+        let mut s = unsafe { ScreenSearch::new(ptr, b"Fizz") };
+
+        // A single-page screen has no history pages to feed, so feeding completes the search; the
+        // call is idempotent once complete.
+        for _ in 0..3 {
+            // SAFETY: as `new`.
+            unsafe { s.feed() };
+        }
+        assert_eq!(s.tick(), Tick::Complete);
+        assert_eq!(s.matches_len(), 1);
+
+        // SAFETY: as `new`; called once.
+        unsafe { s.deinit() };
+        assert_eq!(screen.tracked_pin_count(), baseline);
+    }
+
+    #[test]
+    fn feed_from_history_feed_resumes_history_search() {
+        // A two-page screen leaves a real history page above the active area, so the first feed
+        // returns data and resumes (rather than completes) the history search.
+        let mut screen = Screen::init(10, 3, Some(100)).unwrap();
+        screen.pages_mut().grow_to_two_pages_for_tests();
+        screen.pages_mut().set_page_row0_text_for_tests(1, "Fizz");
+        screen.pages_mut().set_page_row0_text_for_tests(0, "Fizz");
+        let baseline = screen.tracked_pin_count();
+        let ptr = NonNull::from(&mut screen);
+        // SAFETY: `screen` outlives `s`.
+        let mut s = unsafe { ScreenSearch::new(ptr, b"Fizz") };
+
+        // Tick until the state machine needs a feed.
+        let mut guard = 0;
+        while s.tick() != Tick::FeedRequired {
+            guard += 1;
+            assert!(guard < 100, "search should reach FeedRequired");
+        }
+
+        // Feeding the history page resumes the history search rather than completing it.
+        // SAFETY: as `new`.
+        unsafe { s.feed() };
+        assert_eq!(s.tick(), Tick::Progressed);
 
         // SAFETY: as `new`; called once.
         unsafe { s.deinit() };

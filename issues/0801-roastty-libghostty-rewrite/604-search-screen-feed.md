@@ -202,3 +202,62 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260605-d604-prompt.md`
 - Result: `logs/codex-review/20260605-d604-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+Implemented `search_all` and `feed` in `roastty/src/terminal/search/screen.rs`,
+faithfully porting upstream's `searchAll` / `feed`:
+
+- `unsafe fn search_all(&mut self)` — loops on `tick()`: `Progressed` →
+  continue, `FeedRequired` → `feed()`, `Complete` → return (the `Tick`-enum form
+  of upstream's error-union loop, minus the infallible OOM arm).
+- `unsafe fn feed(&mut self)` — resize → reinit (`new` + `deinit` +
+  `*self = new`) with fall-through; `history.is_none()` → `Complete`;
+  `!searcher.feed()` → `Complete` + `prune_history`; otherwise the state switch
+  (`HistoryFeed` → `History`, `active`/`history` unchanged, `Complete`
+  unreachable). No `&mut Screen` is held across `PageListSearch::feed` (the
+  resize-check `&Screen` is scoped to step 1; `prune_history` re-borrows after).
+
+Three tests added: `search_all_reaches_complete_and_keeps_active_matches`
+(single-page drive to `Complete` with matches intact),
+`feed_repeatedly_reaches_complete` (single-page exhaustion is idempotent), and
+`feed_from_history_feed_resumes_history_search` (a two-page screen exercises the
+`HistoryFeed` → `History` resume path where `searcher.feed()` returns data) —
+the resize-branch test from the design's first Optional remains the residual
+coverage gap. All three confirm `deinit` returns the tracked-pin count to
+baseline.
+
+Gates: `cargo fmt --check` clean, `cargo build -p roastty` no warnings,
+`cargo test -p roastty` **3310 passed / 0 failed** (3307 → 3310, +3), no-ghostty
+grep clean (only the pre-existing `// Upstream Ghostty` comment in `screen.rs`,
+untouched), `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **APPROVED** it with **no Required
+and no Optional findings**, confirming: `search_all` loops/feeds/returns
+correctly; `feed` preserves the resize rebuild-then-fall-through; the no-history
+and exhausted-history paths match upstream (`Complete`, plus `prune_history` on
+exhaustion); the `HistoryFeed` → `History` transition and the `Complete`
+`unreachable!` are correct; the borrow scoping is sound (no `&mut Screen` across
+`PageListSearch::feed`); and the reinit pin lifecycle matches upstream with no
+double-free. The one Nit (record `## Result` / `## Conclusion`) is addressed by
+this section.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260605-r604-prompt.md`
+- Result: `logs/codex-review/20260605-r604-last-message.md`
+
+## Conclusion
+
+`ScreenSearch` is now feature-complete: the read accessors, the full `tick` /
+`feed` / `search_all` state machine, `prune_history`, the construction/dispatch
+cluster, selection stepping, and teardown all port faithfully. The incremental,
+lock-aware screen search is done. The remaining search subsystem is
+`ViewportSearch` (a thin viewport-scoped wrapper over `ScreenSearch`) and the
+search `Thread` (the background driver that owns a `ScreenSearch` and pumps
+`tick` / `feed` off the render thread). The next experiment should port
+`ViewportSearch`, after which the `Thread` completes the subsystem.
