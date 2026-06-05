@@ -8,6 +8,9 @@ mod bitmap_allocator;
 mod cache_table;
 
 #[allow(dead_code)]
+mod circ_buf;
+
+#[allow(dead_code)]
 mod charsets;
 
 #[allow(dead_code)]

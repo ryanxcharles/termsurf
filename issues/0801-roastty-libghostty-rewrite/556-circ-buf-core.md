@@ -278,3 +278,57 @@ Review artifacts:
   `logs/codex-review/20260604-d556b-prompt.md` (design re-review)
 - Result: `logs/codex-review/20260604-d556-last-message.md` (design),
   `logs/codex-review/20260604-d556b-last-message.md` (design re-review)
+
+## Result
+
+**Result:** Pass
+
+`terminal::circ_buf::CircBuf<T>` was added: the `head` / `tail` / `full` ring
+with `new` (filled with a runtime `default`), `append` (`Err(Full)` when full) /
+`append_assume_capacity` (wrapping), `clear`, `is_empty`, `capacity`, the
+three-case `len`, `delete_oldest` (reset the oldest slots to `default` + advance
+`tail`), and `first` / `last` (guarded on `len() == 0`). The module is
+registered in `terminal/mod.rs`. Four tests: append-to-full (with the
+`Err(Full)` and `first`/`last` ends), delete-and-wrap (the tail advances, a
+subsequent append wraps the head, and an over-long delete empties it),
+clear-and-reuse, and the zero-capacity edge (full, not appendable,
+`first`/`last` ⇒ `None`).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3089 passed, 0 failed (four new tests; no
+  regressions, up from 3085).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/circ_buf.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **one Nit** (no
+Required or Optional findings): the doc had `## Result` but no `## Conclusion` —
+fixed by adding the conclusion below. Codex confirmed the implementation matches
+the approved core — append wraps and sets `full`, `len` uses the three upstream
+cases, `delete_oldest` resets/advances the oldest range, and `first` / `last`
+correctly guard on `len() == 0` (including zero-capacity buffers) — and that the
+tests cover the important edge cases for this scoped slice.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r556-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r556-last-message.md` (result)
+
+## Conclusion
+
+`terminal::circ_buf::CircBuf<T>` — the core of a fixed-capacity ring buffer — is
+faithfully ported from `datastruct/circ_buf.zig`. This is the foundational
+structure the terminal search subsystem (the sliding window) builds on, and
+roastty's second `datastruct/` port (after `CacheTable`). The design review
+caught a real zero-capacity edge: `first` / `last` must guard on `len() == 0`
+rather than `is_empty()`, since a zero-capacity buffer is `full`. The `Iterator`
+(forward / reverse), auto-growing (`resize` / `ensureUnusedCapacity`), and the
+two-span `getPtrSlice` (and the `appendSliceAssumeCapacity` built on it) are the
+next CircBuf slices — needed before the search subsystem itself can be ported.
+The objc/bundle-id helpers, the `home()` resolver, and config `loadDefaultFiles`
+remain deferred pending roastty's naming decision; `background-image-opacity`
+stays float-blocked.

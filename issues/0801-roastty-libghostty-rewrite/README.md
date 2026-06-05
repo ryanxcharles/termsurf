@@ -1558,7 +1558,7 @@ are past the correctness-critical foundation.
 - [Experiment 555: the fixed-bucket LRU cache (CacheTable)](555-cache-table.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 556: the circular buffer core (CircBuf)](556-circ-buf-core.md) —
-  **Designed** · Claude/Codex/Codex
+  **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
