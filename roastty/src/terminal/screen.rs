@@ -193,6 +193,12 @@ impl Screen {
         self.pages.scrollback_disabled()
     }
 
+    /// The pin at the top-left cell of the active area (upstream `pages.getTopLeft(.active)`). Used
+    /// by `reload_active`'s no-scrollback pruning.
+    pub(in crate::terminal) fn active_area_top_left(&self) -> Pin {
+        self.pages.active_area_top_left()
+    }
+
     /// Set the minimum live page serial (test helper for the search history pruning).
     #[cfg(test)]
     pub(in crate::terminal) fn set_page_serial_min_for_tests(&mut self, value: u64) {
@@ -2462,6 +2468,44 @@ mod tests {
 
         let with = Screen::init(10, 10, None).unwrap();
         assert!(!with.no_scrollback());
+    }
+
+    #[test]
+    fn pin_before_orders_within_a_node() {
+        let screen = Screen::init(10, 10, None).unwrap();
+        let node = screen.first_node_ptr_for_tests();
+
+        // Same node: column order, then row order.
+        assert_eq!(
+            screen.pin_before(Pin::new(node, 0, 0), Pin::new(node, 0, 1)),
+            Some(true)
+        );
+        assert_eq!(
+            screen.pin_before(Pin::new(node, 1, 0), Pin::new(node, 0, 0)),
+            Some(false)
+        );
+        // Equal pins are not strictly before.
+        assert_eq!(
+            screen.pin_before(Pin::new(node, 0, 0), Pin::new(node, 0, 0)),
+            Some(false)
+        );
+        // An invalid pin is not orderable.
+        assert_eq!(
+            screen.pin_before(Pin::test_invalid_for_tests(), Pin::new(node, 0, 0)),
+            None
+        );
+    }
+
+    #[test]
+    fn active_area_top_left_is_the_active_origin() {
+        let screen = Screen::init(10, 10, None).unwrap();
+        let node = screen.first_node_ptr_for_tests();
+        let tl = screen.active_area_top_left();
+
+        assert_eq!(tl.x(), 0);
+        assert_eq!(tl.y(), 0);
+        // The active top-left is before a lower row.
+        assert_eq!(screen.pin_before(tl, Pin::new(node, 5, 0)), Some(true));
     }
 
     fn screen_with_lines(lines: &[&str]) -> Screen {

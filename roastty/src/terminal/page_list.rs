@@ -2205,6 +2205,13 @@ impl PageList {
         )
     }
 
+    /// The pin at the top-left cell of the active area (upstream `getTopLeft(.active)`). A focused
+    /// wrapper over the private `get_top_left`, for the search subsystem. (Distinct from the
+    /// viewport-pin `active_top_left`.)
+    pub(in crate::terminal) fn active_area_top_left(&self) -> Pin {
+        self.get_top_left(point::Tag::Active)
+    }
+
     fn get_top_left(&self, tag: point::Tag) -> Pin {
         match tag {
             point::Tag::Screen | point::Tag::History => Pin {
@@ -20060,5 +20067,23 @@ mod tests {
         let list = PageList::init(10, 10, None).unwrap();
         let only = list.first_node_ptr();
         assert_eq!(list.next_node_ptr(only), None);
+    }
+
+    #[test]
+    fn pin_before_orders_across_pages() {
+        let mut list = PageList::init(10, 10, None).unwrap();
+        list.grow_to_two_pages_for_tests();
+        let first = list.first_node_ptr();
+        let last = list.last_node_ptr();
+
+        // The older page's pin is before the newer page's pin, and vice versa.
+        assert_eq!(
+            list.pin_before(Pin::new(first, 0, 0), Pin::new(last, 0, 0)),
+            Some(true)
+        );
+        assert_eq!(
+            list.pin_before(Pin::new(last, 0, 0), Pin::new(first, 0, 0)),
+            Some(false)
+        );
     }
 }

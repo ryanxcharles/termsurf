@@ -1649,8 +1649,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 601: search reload_active support accessors (next_node_ptr, no_scrollback)](601-search-reload-support-accessors.md)
   — **Pass** · Claude/Codex/Codex
-- [Experiment 602: search reload_active pin accessors (pin_before, active_top_left)](602-search-reload-pin-accessors.md)
-  — **Designed** · Claude/Codex/Codex
+- [Experiment 602: search reload_active pin accessors (pin_before, active_area_top_left)](602-search-reload-pin-accessors.md)
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
