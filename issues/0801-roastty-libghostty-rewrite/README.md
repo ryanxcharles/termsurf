@@ -1670,7 +1670,9 @@ are past the correctness-critical foundation.
 - [Experiment 611: base64 scalar decoder](611-base64-scalar-decoder.md) —
   **Pass** · Claude/Codex/Codex
 - [Experiment 612: base64 dispatcher (scalar path)](612-base64-dispatcher.md) —
-  **Designed** · Claude/Codex/Codex
+  **Pass** · Claude/Codex/Codex
+- [Experiment 613: search Thread — part 4: the outer Thread foundation](613-search-thread-foundation.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
