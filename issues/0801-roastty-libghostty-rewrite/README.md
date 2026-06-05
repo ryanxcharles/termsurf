@@ -1690,7 +1690,7 @@ are past the correctness-critical foundation.
 - [Experiment 621: os resources directory resolver](621-os-resources-dir.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 622: os i18n locale canonicalization foundation](622-os-i18n-locale.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

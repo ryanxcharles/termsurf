@@ -5,6 +5,7 @@ pub(crate) mod env;
 pub(crate) mod file;
 pub(crate) mod homedir;
 pub(crate) mod hostname;
+pub(crate) mod i18n;
 pub(crate) mod mach;
 pub(crate) mod macos;
 pub(crate) mod open;

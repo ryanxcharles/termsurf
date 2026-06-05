@@ -174,3 +174,53 @@ replacement and added `en-US` as a non-Chinese BCP-47 case. Follow-up review
 approved the scope with no Required findings: no gettext binding, no Cocoa
 `NSLocale` probing, only the pure string foundation and preferred-language
 composition helpers.
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/os/i18n.rs` now contains the upstream supported-locale table in
+exact order, `is_supported_locale`, `canonicalize_locale`, and gettext
+preferred-language helpers. The canonicalizer covers the upstream macOS Chinese
+cases, including no-region `zh-Hans` / `zh-Hant`, and uses a deliberately narrow
+hyphen-to-underscore fallback for BCP-47-style preferred language strings until
+the full gettext canonicalizer is ported.
+
+`gettext_language_entry` appends `.UTF-8` only when the canonical locale has no
+encoding, and `gettext_language_list` joins non-empty entries with `:` while
+returning `None` for an empty effective list. `roastty/src/os/mod.rs` exposes
+the new module.
+
+Gates (all green):
+
+- `cargo test -p roastty os::i18n::tests` — **6 passed / 0 failed** focused
+  tests.
+- `cargo build -p roastty` — no warnings.
+- `cargo test -p roastty` — **3442 passed / 0 failed** unit tests, plus **1
+  passed / 0 failed** ABI harness test.
+- `cargo fmt -p roastty -- --check` — clean.
+- no-ghostty grep on `roastty/src/os/i18n.rs` and `roastty/src/os/mod.rs` —
+  clean.
+- `git diff --check` — clean.
+
+## Conclusion
+
+Roastty now has the pure locale foundation needed by later locale-environment
+and gettext initialization slices. The remaining i18n work is to wire actual
+gettext domain initialization and Cocoa `NSLocale` probing without changing the
+canonicalization behavior landed here.
+
+## Completion Review
+
+**Reviewer:** Codex (gpt-5.5, medium) · resumed session
+`019e8f83-9029-7d43-8e82-f4c5754e14ba`
+
+**Verdict:** APPROVED — no Required findings.
+
+Codex confirmed the implementation matches the approved narrow scope: the
+supported-locale table order matches upstream exactly, `zh` canonicalization
+covers the no-region and region cases, fallback canonicalization matches the
+approved pure string slice, `gettext_language_entry` and `gettext_language_list`
+match their helper contracts, `os::i18n` is exposed from `mod.rs`, the result
+documentation is accurate, and touched source satisfies the Roastty naming
+constraint.
