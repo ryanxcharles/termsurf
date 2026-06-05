@@ -21,6 +21,7 @@ use super::selection;
 use super::selection_codepoints;
 use super::sgr;
 use super::size::CellCountInt;
+use super::string_map::StringMap;
 use super::style;
 use super::tabstops;
 use crate::font::run::RunOptions;
@@ -218,6 +219,26 @@ impl Screen {
     /// Scroll the viewport to `pin` (upstream search `select`'s `screen.scroll(.{ .pin })`).
     pub(in crate::terminal) fn scroll_to_pin(&mut self, pin: Pin) {
         self.pages.scroll_to_pin_for_search(pin);
+    }
+
+    /// Flatten `selection` to a `StringMap` (text + a per-byte map back to screen pins) for regex
+    /// search (upstream `Screen.selectionString` with a `StringMap` out-parameter). `unwrap` is
+    /// always `true` (so soft-wrapped lines join, as upstream's `selectionString`); `trim` is the
+    /// caller's choice — link detection passes `false` for the raw line content.
+    pub(in crate::terminal) fn selection_string_map(
+        &self,
+        selection: selection::Selection,
+        trim: bool,
+    ) -> StringMap {
+        let page_string = self.pages.screen_format_string_with_pin_map(
+            Some(selection),
+            trim,
+            true, // unwrap (upstream `selectionString` always unwraps)
+            PageOutputFormat::Plain,
+            None, // palette
+            None, // codepoint_map
+        );
+        StringMap::from_page_string(page_string)
     }
 
     /// The active row count of this screen's page list (upstream `screen.pages.rows`).

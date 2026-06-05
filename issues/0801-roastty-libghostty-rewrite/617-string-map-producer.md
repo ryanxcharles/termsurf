@@ -152,3 +152,53 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260605-d617-prompt.md`
 - Result: `logs/codex-review/20260605-d617-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+Implemented `StringMap::from_page_string(PageStringWithPinMap)`
+(`string_map.rs`) and
+`Screen::selection_string_map(&self, selection, trim: bool) -> StringMap`
+(`screen.rs`), wiring the existing `screen_format_string_with_pin_map` producer
+into a `StringMap` for regex search — closing the Exp 616 loop end-to-end. Both
+Required design fixes are in: `unwrap=true` always (matching upstream
+`selectionString`), and `trim` exposed as a parameter.
+
+Four tests: a real-selection URL search (`https?://\S+` → cells 3..=13), a
+simple `[A-B]{2}` match, the per-byte-count guard, and the multibyte invariant
+(`"héllo"` — `é` is 2 bytes / 1 cell — confirming the producer is per-byte, so
+`from_page_string` does not panic). The dedicated soft-wrap test was deferred
+(reliably building a soft-wrapped line from the `Screen` test helpers is
+involved, and the producer's `unwrap=true` is independently covered by existing
+formatter tests) — Codex accepted this. Gates: `cargo fmt --check` clean,
+`cargo build -p roastty` no warnings, `cargo test -p roastty` **3394 passed / 0
+failed** (3390 → 3394, +4), no-ghostty grep clean, `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **APPROVED** it with **no Required,
+Optional, or Nit findings**, confirming both Required fixes are correctly
+applied (`trim` caller-controlled, `unwrap=true` hardwired); that
+`from_page_string` is the right adapter (`PageStringWithPinMap` carries per-byte
+pins, `StringMap::new` enforces the invariant); that the multibyte test suffices
+for the per-byte concern; and that deferring the soft-wrap test is acceptable
+given the existing formatter coverage (a future higher-level link-detection test
+can cover the integrated soft-wrap case).
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260605-d617-prompt.md` / `…-r617-prompt.md`
+- Result: `logs/codex-review/20260605-d617-last-message.md` /
+  `…-r617-last-message.md`
+
+## Conclusion
+
+`StringMap` is now usable end-to-end: a screen selection flattens to a
+`StringMap` whose `regex`-crate matches resolve to screen pins. The regex-area
+work so far: the `regex` crate (616), `StringMap` + search (616), and the screen
+producer (617). The remaining regex-area piece — the default URL-detection regex
+(`config/url`) — needs a regex engine beyond `regex` / `fancy-regex` (variable-
+length look-behind, only oniguruma-class engines), so it is its own dependency
+question (the `onig` C crate, or a pattern rewrite). Issue 801 stays open and
+broad.

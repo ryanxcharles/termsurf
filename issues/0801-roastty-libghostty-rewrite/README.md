@@ -1680,7 +1680,7 @@ are past the correctness-critical foundation.
 - [Experiment 616: terminal StringMap + the regex crate](616-string-map-regex.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 617: wire StringMap to the screen producer](617-string-map-producer.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

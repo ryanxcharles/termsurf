@@ -4,7 +4,7 @@
 
 use regex::bytes::Regex;
 
-use super::page_list::Pin;
+use super::page_list::{PageStringWithPinMap, Pin};
 use super::selection::Selection;
 
 /// A flattened string and the screen `Pin` for each of its bytes (upstream `StringMap`).
@@ -19,6 +19,12 @@ impl StringMap {
         // Hard assert (not `debug_assert`) so a violation fails at construction, not later indexing.
         assert_eq!(string.len(), map.len(), "one pin per byte");
         StringMap { string, map }
+    }
+
+    /// Build a `StringMap` from a screen's flattened selection text + per-byte pin map (upstream's
+    /// `selectionString` map output). The producer's `pin_map` is already one pin per byte.
+    pub(in crate::terminal) fn from_page_string(p: PageStringWithPinMap) -> StringMap {
+        StringMap::new(p.text.into_bytes(), p.pin_map)
     }
 
     /// Iterate the non-overlapping regex matches of the string (upstream `searchIterator`). The
@@ -172,5 +178,66 @@ mod tests {
         // no (invalid) selections rather than loop forever.
         let re = Regex::new("a*").unwrap();
         assert_eq!(sm.search_iterator(&re).count(), 0);
+    }
+
+    // --- Screen producer (Exp 617) ---
+
+    use crate::terminal::selection::Selection;
+
+    /// A whole-row selection spanning cells `0..=last` of `screen`.
+    fn row_selection(screen: &Screen, last: usize) -> Selection {
+        Selection::new(cell_pin(screen, 0), cell_pin(screen, last), false)
+    }
+
+    #[test]
+    fn selection_string_map_searches_a_real_selection() {
+        let text = "hi https://x.y";
+        let screen = screen_with(text);
+        let sel = row_selection(&screen, text.len() - 1);
+        let sm = screen.selection_string_map(sel, false);
+        let re = Regex::new(r"https?://\S+").unwrap();
+        let matches: Vec<Match> = sm.search_iterator(&re).collect();
+        assert_eq!(matches.len(), 1);
+        // "https://x.y" is cells 3..=13 (after "hi ").
+        assert_eq!(matches[0].selection().start(), cell_pin(&screen, 3));
+        assert_eq!(matches[0].selection().end(), cell_pin(&screen, 13));
+    }
+
+    #[test]
+    fn selection_string_map_simple_match() {
+        let text = "xABy";
+        let screen = screen_with(text);
+        let sel = row_selection(&screen, text.len() - 1);
+        let sm = screen.selection_string_map(sel, false);
+        let re = Regex::new("[A-B]{2}").unwrap();
+        let matches: Vec<Match> = sm.search_iterator(&re).collect();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].selection().start(), cell_pin(&screen, 1));
+        assert_eq!(matches[0].selection().end(), cell_pin(&screen, 2));
+    }
+
+    #[test]
+    fn from_page_string_preserves_byte_count() {
+        let text = "abc def";
+        let screen = screen_with(text);
+        let sel = row_selection(&screen, text.len() - 1);
+        // If the producer's `pin_map` were not one-pin-per-byte, `from_page_string`'s `assert_eq!`
+        // would panic here. A trivial search confirms the resulting map is usable.
+        let sm = screen.selection_string_map(sel, false);
+        let re = Regex::new("def").unwrap();
+        assert_eq!(sm.search_iterator(&re).count(), 1);
+    }
+
+    #[test]
+    fn selection_string_map_multibyte_invariant() {
+        // `é` (U+00E9) is one cell but two UTF-8 bytes; the producer's pin map is per byte, so the
+        // one-pin-per-byte invariant still holds (`from_page_string` must not panic).
+        let text = "héllo";
+        let screen = screen_with(text);
+        let sel = row_selection(&screen, 4); // 5 cells: h é l l o
+        let sm = screen.selection_string_map(sel, false);
+        // "llo" is the last three bytes; the byte-indexed map still resolves it.
+        let re = Regex::new("llo").unwrap();
+        assert_eq!(sm.search_iterator(&re).count(), 1);
     }
 }
