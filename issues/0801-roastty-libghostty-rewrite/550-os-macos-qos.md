@@ -237,3 +237,58 @@ Review artifacts:
   `logs/codex-review/20260604-d550b-prompt.md` (design re-review)
 - Result: `logs/codex-review/20260604-d550-last-message.md` (design),
   `logs/codex-review/20260604-d550b-last-message.md` (design re-review)
+
+## Result
+
+**Result:** Pass
+
+`os::macos` was opened with `QosClass` (the six QoS levels with their exact
+`0x21`…`0x00` values + `to_libc` mapping to `libc::qos_class_t`),
+`SetQosClassError::ThreadIncompatible`, `set_qos_class` (calls
+`libc::pthread_set_qos_class_self_np(class, 0)` on the current thread), and the
+testable `map_qos_result` (`0` ⇒ `Ok`, `EPERM` ⇒ `ThreadIncompatible`, else
+panic — the function returns the errno value directly per Apple's
+`<pthread/qos.h>`). The module is registered in `os/mod.rs`. Four tests: the
+discriminants (each `QosClass as u32` and its `to_libc as u32` match upstream),
+the result mapping (`0` ⇒ `Ok`, `EPERM` ⇒ `ThreadIncompatible`), a
+`#[should_panic]` for an unexpected errno (`EINVAL`), and a benign
+`set_qos_class(Default)` smoke test.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3065 passed, 0 failed (four new tests; no
+  regressions, up from 3061).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + os/macos.rs + os/mod.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **one Nit** (no
+Required or Optional findings): the doc had `## Result` but no `## Conclusion` —
+fixed by adding the conclusion below. Codex confirmed the implementation matches
+the approved design: the QoS discriminants and `to_libc` are exact,
+`set_qos_class` uses the direct return-code/errno-value contract correctly,
+`EPERM` maps to `ThreadIncompatible`, unexpected codes panic, and the tests
+cover both the value mapping and the live benign success path.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r550-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r550-last-message.md` (result)
+
+## Conclusion
+
+`os::macos` is opened with the thread Quality-of-Service helpers (`QosClass`,
+`set_qos_class`, `SetQosClassError`), faithfully ported from `os/macos.zig` —
+the libc-only slice that lets roastty tune its render / IO thread priorities
+(wiring into thread setup deferred). The Codex design review caught a real
+correctness issue the Rust idiom would have gotten wrong:
+`pthread_set_qos_class_self_np` returns the errno value _directly_ (per Apple's
+`<pthread/qos.h>`), so the result is matched on `rc` rather than read from
+`errno`. The objc-based `isAtLeastVersion` and the bundle-id `appSupportDir` /
+`cacheDir` helpers stay deferred (the latter blocked on roastty's product-naming
+decision, like `loadDefaultFiles`). The OS-utility frontier still has
+self-contained slices (`locale`, `homedir`'s tilde- expansion, `i18n_locales`).
+`background-image-opacity` stays float-blocked.
