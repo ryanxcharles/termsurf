@@ -233,3 +233,64 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d569-prompt.md`
 - Result: `logs/codex-review/20260604-d569-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`config::conditional` was added: `Theme` (`Light` / `Dark`, tags `b"light"` /
+`b"dark"`), `OsTag` (`Macos`, tag `b"macos"`), `State` (`theme` + `os`,
+`Default` = `light` / `macos`) with `matches(&Conditional)` selecting the keyed
+state field's tag and comparing `eq` / `ne` against `cond.value.as_slice()`,
+plus `Key` (`Theme` / `Os`), `Op` (`Eq` / `Ne`), and `Conditional` (`key`, `op`,
+`value: Vec<u8>`, deriving `Clone`). Registered via
+`#[allow(dead_code)] mod conditional;` in `config/mod.rs`.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3151 passed, 0 failed (four new tests; no
+  regressions, up from 3147).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer + config/conditional.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+The four new tests: the upstream `conditional enum match` (with `theme = Dark`:
+`eq "dark"` true, `ne "dark"` false, `ne "light"` true), the `light` / `macos`
+defaults, OS matching (`eq "macos"` true, `eq "linux"` false, `ne "linux"`
+true), and `Conditional` clone duplicating the value.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (one Nit: the `## Result` / `## Conclusion` sections were
+not yet in the saved file — added here as part of result recording). Codex
+confirmed the implementation matches upstream's macOS-arm semantics — the
+`light` / `dark` / `macos` tag names, the `light` / `macos` defaults, `matches`
+selecting the keyed state field and applying byte `eq` / `ne`, and `Conditional`
+clone duplicating the `Vec<u8>` value — and that the tests cover the upstream
+theme case, the defaults, the OS comparisons, and clone behavior.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r569-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r569-last-message.md` (result)
+
+## Conclusion
+
+`config::conditional` is a 1:1 port of `config/conditional.zig` — the typed
+state-of-the-world (`State`) and the `Conditional` predicate that drive
+conditional configuration. The macOS-only resolution is clean: upstream's
+`os: std.Target.Os.Tag` becomes `OsTag::Macos` (the sole build target), and
+conditionals comparing `os` against other OS names correctly never match —
+faithful to the macOS arm. This is the first `config/` leaf port of this session
+(the config loader, formatter, string, comma-splitter, and unicode-range were
+ported earlier); wiring `State` into the config loader's conditional-block
+evaluation is a natural follow-up slice once the surrounding loader hooks are
+mapped. Other unported leaves remain (`terminal/ScreenSet`, `src/quirks`,
+`input/Link`, `config/edit`); the big-ticket subsystems are still
+`datastruct/split_tree` (2517 lines) and the terminal **search subsystem**
+(coupled to `PageList` / `Pin` / `Screen` / `Selection` / `PageFormatter`). The
+objc/bundle-id helpers, the `home()` resolver, and config `loadDefaultFiles`
+remain deferred pending roastty's naming decision; `background-image-opacity`
+stays float-blocked.

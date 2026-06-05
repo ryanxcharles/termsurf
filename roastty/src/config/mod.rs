@@ -8,6 +8,8 @@
 // This config layer is consumed by later slices.
 
 mod comma_splitter;
+#[allow(dead_code)]
+mod conditional;
 mod formatter;
 mod loader;
 mod string;
