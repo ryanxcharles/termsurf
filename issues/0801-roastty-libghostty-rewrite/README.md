@@ -1551,6 +1551,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 552: set the running thread's name (os::macos)](552-os-macos-thread-name.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 553: Mach VM memory tags (os::mach)](553-os-mach-vmtag.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
