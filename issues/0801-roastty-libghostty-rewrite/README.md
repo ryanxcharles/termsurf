@@ -1532,7 +1532,7 @@ are past the correctness-critical foundation.
 - [Experiment 542: PATH executable search (os::path::expand)](542-os-path-expand.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 543: environment-variable composition (os::env)](543-os-env-compose.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

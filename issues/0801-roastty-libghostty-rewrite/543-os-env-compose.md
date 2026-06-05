@@ -207,3 +207,53 @@ Review artifacts:
   `logs/codex-review/20260604-d543b-prompt.md` (design re-review)
 - Result: `logs/codex-review/20260604-d543-last-message.md` (design),
   `logs/codex-review/20260604-d543b-last-message.md` (design re-review)
+
+## Result
+
+**Result:** Pass
+
+`os::env` was added with `append_env` / `append_env_always` / `prepend_env` over
+`&OsStr -> OsString` (byte-faithful, `:` delimiter via `OsString::push`, owned
+results, empty-`current` passthrough for `append_env` / `prepend_env`). The
+module is registered in `os/mod.rs`. Six tests: the upstream macOS-arm cases
+(`append_env` empty/existing, `prepend_env` empty/existing), the
+`append_env_always` always-delimiter cases (empty ⇒ `:foo`), and a non-UTF-8
+byte-preservation test (`a:\xff` + `\xfeb` ⇒ `a:\xff:\xfeb`).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3049 passed, 0 failed (six new tests; no regressions,
+  up from 3043).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + os/env.rs + os/mod.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **one Nit** (no
+Required or Optional findings): the doc had `## Result` but no `## Conclusion` —
+fixed by adding the conclusion below. Codex confirmed the implementation matches
+upstream `env.zig` and the approved design: `&OsStr -> OsString` preserves POSIX
+byte semantics, `:` is the correct macOS delimiter, `append_env` / `prepend_env`
+preserve the empty-`current` passthrough, and `append_env_always` always emits
+the delimiter; the non-UTF-8 test directly covers the earlier review finding and
+the rest cover the upstream string cases.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r543-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r543-last-message.md` (result)
+
+## Conclusion
+
+`os::env` now holds the environment-variable composition helpers (`append_env`,
+`append_env_always`, `prepend_env`), faithfully ported from `os/env.zig` over
+byte-exact `&OsStr -> OsString`, adding to the `os` module from Experiments
+541–542. These build the child-process `PATH`-style variables the eventual
+termio layer will need (wiring deferred, along with
+`getenv`/`setenv`/`getEnvMap` — see Deferred). The OS-utility frontier still has
+clean self-contained slices (`pipe`, `file`, `i18n_locales`, `TempDir`, and the
+getenv/setenv remainder of `env.zig`). The config `loadDefaultFiles` stays
+deferred pending roastty's naming decision; `background-image-opacity` stays
+float-blocked.
