@@ -1669,6 +1669,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 611: base64 scalar decoder](611-base64-scalar-decoder.md) —
   **Pass** · Claude/Codex/Codex
+- [Experiment 612: base64 dispatcher (scalar path)](612-base64-dispatcher.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
