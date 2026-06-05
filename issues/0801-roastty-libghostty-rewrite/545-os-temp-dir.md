@@ -223,3 +223,54 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d545-prompt.md` (design)
 - Result: `logs/codex-review/20260604-d545-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`os::temp_dir::TempDir` was added: `new` resolves `file::tmp_dir`, loops over
+`file::random_basename` creating `create_dir` directories until one succeeds
+(retry on `AlreadyExists`, propagate other errors), and stores the full
+`PathBuf` + basename; `name` returns the basename, `path` the full path, and
+`Drop` does `remove_dir_all`. The module is registered in `os/mod.rs`. Two
+tests: create-then-remove (the dir exists, has a 22-char basename equal to its
+`file_name`, lives under `file::tmp_dir()`, and is gone after the value drops)
+and distinctness (two `TempDir`s differ in name and path).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3055 passed, 0 failed (two new tests; no regressions,
+  up from 3053).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + os/temp_dir.rs + os/mod.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **one Nit** (no
+Required or Optional findings): the doc had `## Result` but no `## Conclusion` —
+fixed by adding the conclusion below. Codex confirmed the implementation matches
+upstream `TempDir.zig` and the approved design: `new` resolves the temp parent,
+loops over random basenames, retries on `AlreadyExists`, and propagates other
+errors; `name()` returns only the basename, `path()` is a reasonable Rust
+convenience, and `Drop` uses recursive removal like `deleteTree`, ignoring
+errors as upstream logs without propagating; and the tests soundly verify
+creation, basename length, location, cleanup after drop, and distinctness.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r545-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r545-last-message.md` (result)
+
+## Conclusion
+
+`os::temp_dir::TempDir` — a RAII temporary directory that creates itself with a
+random basename and removes itself (and its contents) on drop — is faithfully
+ported from `os/TempDir.zig`, building on Experiment 544's `os::file` helpers.
+The Zig handle-based `Dir` fields became a stored `PathBuf` (Rust's `std::fs` is
+path-oriented), and `deinit` became `Drop`. This is a clean RAII primitive for
+the eventual termio / socket setup. The OS-utility frontier still has small
+self-contained slices (`pipe`, `i18n_locales`, the rlimit remainder of
+`file.zig`). The config `loadDefaultFiles` stays deferred pending roastty's
+naming decision; `background-image-opacity` stays float-blocked.
