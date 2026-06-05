@@ -160,3 +160,55 @@ Review artifacts:
   `logs/codex-review/20260604-d552b-prompt.md` (design re-review)
 - Result: `logs/codex-review/20260604-d552-last-message.md` (design),
   `logs/codex-review/20260604-d552b-last-message.md` (design re-review)
+
+## Result
+
+**Result:** Pass
+
+`set_thread_name(&CStr) -> io::Result<()>` was added to `os::macos`: it calls
+`libc::pthread_setname_np` on the calling thread, returning `Ok` on `0` or the
+errno via `io::Error::last_os_error()` on the `-1` failure (the `-1`/`errno`
+convention, distinct from the QoS function's direct-errno return). With this the
+libc-only surface of `macos.zig` is complete. Two tests: a round-trip
+(`set_thread_name(c"roastty-552")` then `pthread_getname_np` reads it back), and
+the over-long path (a 100-byte name ⇒ `Err` with
+`raw_os_error() == Some(ENAMETOOLONG)`, the prior name left unchanged).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3071 passed, 0 failed (two new tests; no regressions,
+  up from 3069).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + os/macos.rs + os/mod.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **one Nit** (no
+Required or Optional findings): the doc had `## Result` but no `## Conclusion` —
+fixed by adding the conclusion below. Codex confirmed the implementation matches
+the approved design: the macOS one-argument `pthread_setname_np`, `&CStr` for
+the NUL-terminated name, `0` ⇒ success and `last_os_error()` on `-1`, plus tests
+covering the round-trip naming and the `ENAMETOOLONG` failure without changing
+the prior name.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r552-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r552-last-message.md` (result)
+
+## Conclusion
+
+`os::macos::set_thread_name` — name the running thread via `pthread_setname_np`
+— is faithfully ported from `os/macos.zig`, **completing the libc-only surface
+of `macos.zig`** (`QosClass` / `set_qos_class` from Experiment 550 plus this).
+roastty will use it to label its render / IO / mux threads for debugging (wiring
+into thread setup deferred). The design review surfaced that this function uses
+the `-1`/`errno` convention here — distinct from the QoS function's direct-errno
+return — a per-function detail the runtime probe pinned down. Only the objc /
+bundle-id helpers (`isAtLeastVersion`, `appSupportDir` / `cacheDir`) remain
+unported in `macos.zig`, deferred on roastty's product-naming decision. The
+OS-utility frontier still has self-contained slices (`locale`, `i18n_locales`).
+The config `loadDefaultFiles` stays deferred pending roastty's naming decision;
+`background-image-opacity` stays float-blocked.

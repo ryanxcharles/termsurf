@@ -1550,7 +1550,7 @@ are past the correctness-critical foundation.
 - [Experiment 551: tilde home expansion (os::homedir)](551-os-homedir-expand.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 552: set the running thread's name (os::macos)](552-os-macos-thread-name.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
