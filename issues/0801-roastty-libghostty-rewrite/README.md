@@ -1567,6 +1567,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 560: small-buffer message data (MessageData)](560-message-data.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 561: the LRU cache core (Lru)](561-lru-core.md) — **Designed** ·
+  Claude/Codex/Codex
 
 ## Non-Goals
 
