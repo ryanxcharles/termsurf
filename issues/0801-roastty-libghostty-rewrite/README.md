@@ -1575,6 +1575,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 564: the doubly-linked list (arena port of the intrusive list)](564-intrusive-linked-list.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 565: the BlockingQueue (fixed-capacity SPSC ring)](565-blocking-queue.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
