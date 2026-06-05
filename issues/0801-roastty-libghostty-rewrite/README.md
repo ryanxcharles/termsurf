@@ -1506,7 +1506,7 @@ are past the correctness-critical foundation.
 - [Experiment 529: the multi-line config loader (Config::load_str)](529-config-load-str.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 530: config file IO (Config::load_file)](530-config-load-file.md)
-  — **Designed** · Claude/Codex/—
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

@@ -169,3 +169,51 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-190530-d530-prompt.md` (design)
 - Result: `logs/codex-review/20260604-190530-d530-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`Config::load_file(path) -> io::Result<Vec<ConfigDiagnostic>>` was added: read
+the file (`read_to_string`), strip a leading UTF-8 BOM
+(`strip_prefix('\u{FEFF}')`), and drive `load_str`; an open/read failure is an
+`io::Error`. The new test `config_load_file_reads_and_skips_bom` (writing temp
+files under `std::env::temp_dir()`) covers a clean file load, a BOM file (BOM
+skipped), a file with a bad line (the expected diagnostic), and a missing path
+(`is_err()`).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3020 passed, 0 failed (one new test; no regressions).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + lib.rs/header/abi_harness.c)
+  clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no
+findings**: the implementation matches the approved IO slice — read the file,
+strip a leading UTF-8 BOM, delegate to `load_str`; the BOM behavior is faithful
+to upstream's `peek`/`toss`, and returning `io::Error` for open/read failures is
+the documented Rust narrowing versus upstream's `NotAFile` warn-and-return; the
+test coverage is adequate (clean file, BOM file, diagnostic collection,
+missing-file error); the UTF-8 requirement is documented, gates are clean, and
+the remaining default-path / CLI-form work is deferred. "Approved with no
+findings."
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-190749-r530-prompt.md` (result)
+- Result: `logs/codex-review/20260604-190749-r530-last-message.md` (result)
+
+## Conclusion
+
+`Config::load_file` completes the config-file load path: a file on disk →
+`read_to_string` → BOM skip → `load_str` → `Config` + diagnostics. The config
+subsystem now loads from a file and from a string, and formats back, over all
+leaf parsers/formatters and the 43-of-44-field `Config::set`. The remaining
+config work is the **default config-path resolution** (`loadDefaultFiles` — the
+platform config dir) and the `--key=value` CLI-arg form;
+`background-image-opacity` stays float-blocked. After the config subsystem, the
+entire non-config rewrite remains.

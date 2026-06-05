@@ -553,6 +553,18 @@ impl Config {
         }
         diagnostics
     }
+
+    /// Load config from a file (upstream `Config.loadFile` → `loadReader`): read the
+    /// file, skip a leading UTF-8 byte-order mark, and drive `load_str`. Returns the
+    /// per-line diagnostics; an open/read error propagates as `io::Error`.
+    pub(crate) fn load_file(
+        &mut self,
+        path: &std::path::Path,
+    ) -> std::io::Result<Vec<ConfigDiagnostic>> {
+        let text = std::fs::read_to_string(path)?;
+        let text = text.strip_prefix('\u{FEFF}').unwrap_or(&text);
+        Ok(self.load_str(text))
+    }
 }
 
 /// An error from `Config::set` (upstream `parseIntoField`'s
@@ -5809,6 +5821,61 @@ mod tests {
         cfg.format_config(&mut out);
         assert!(has(&out, "copy-on-select", "clipboard"));
         assert!(has(&out, "fullscreen", "false")); // the default
+    }
+
+    #[test]
+    fn config_load_file_reads_and_skips_bom() {
+        let has = |cfg: &Config, key: &str, val: &str| {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().any(|l| l == format!("{} = {}", key, val))
+        };
+
+        let dir = std::env::temp_dir();
+        let stamp = std::process::id();
+
+        // A clean config file applies its fields with no diagnostics.
+        let path = dir.join(format!("roastty-cfg-{stamp}-a.conf"));
+        std::fs::write(
+            &path,
+            "fullscreen = non-native\nwindow-colorspace = display-p3\n",
+        )
+        .unwrap();
+        let mut cfg = Config::default();
+        let diags = cfg.load_file(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert!(diags.is_empty());
+        assert!(has(&cfg, "fullscreen", "non-native"));
+        assert!(has(&cfg, "window-colorspace", "display-p3"));
+
+        // A file with a leading UTF-8 BOM still parses (the BOM is skipped).
+        let path = dir.join(format!("roastty-cfg-{stamp}-b.conf"));
+        std::fs::write(&path, b"\xEF\xBB\xBFmacos-hidden = always\n").unwrap();
+        let mut cfg = Config::default();
+        let diags = cfg.load_file(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert!(diags.is_empty());
+        assert!(has(&cfg, "macos-hidden", "always"));
+
+        // A file with a bad line yields the expected diagnostic.
+        let path = dir.join(format!("roastty-cfg-{stamp}-c.conf"));
+        std::fs::write(&path, "badkey = x\n").unwrap();
+        let mut cfg = Config::default();
+        let diags = cfg.load_file(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(
+            diags,
+            vec![ConfigDiagnostic {
+                line: 1,
+                key: "badkey".to_string(),
+                error: ConfigSetError::UnknownField,
+            }]
+        );
+
+        // A nonexistent path is an `io::Error`.
+        let path = dir.join(format!("roastty-cfg-{stamp}-does-not-exist.conf"));
+        let mut cfg = Config::default();
+        assert!(cfg.load_file(&path).is_err());
     }
 
     #[test]
