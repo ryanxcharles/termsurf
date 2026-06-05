@@ -1533,6 +1533,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 543: environment-variable composition (os::env)](543-os-env-compose.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 544: temp-path generation (os::file)](544-os-file-tmppath.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
