@@ -1693,6 +1693,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 623: os mouse double-click interval](623-os-mouse-click-interval.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 624: os desktop launch detection](624-os-desktop-launch-detection.md)
+  — **Designed**
 
 ## Non-Goals
 
