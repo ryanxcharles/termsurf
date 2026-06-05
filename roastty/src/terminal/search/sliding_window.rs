@@ -1,9 +1,11 @@
 //! The search sliding window (port of upstream `terminal/search/sliding_window.zig`). So far it
 //! lands the vocabulary and lifecycle (the search `Direction`, the per-page `Meta` record, the
 //! `SlidingWindow` struct, its constructor, and `clear_and_retain_capacity`), `append` (encode a
-//! page node's text into the window with its cell map), the `assert_integrity` invariant, and
-//! `highlight` (turn a match byte-range into a `Flattened` highlight, pruning consumed pages). The
-//! scan that finds matches and calls `highlight` (`next`, the overlap/prune logic) is deferred.
+//! page node's text into the window with its cell map), the `assert_integrity` invariant,
+//! `highlight` (turn a match byte-range into a `Flattened` highlight, pruning consumed pages), and
+//! `next` (the scan: search the data across the two ring slices and the cross-page overlap for the
+//! needle, pruning on a miss). The `SlidingWindow` matcher is complete; the higher-level searchers
+//! (`active` / `pagelist` / `screen` / `viewport`) and the search `Thread` remain.
 
 use std::collections::VecDeque;
 use std::ptr::NonNull;
@@ -278,12 +280,119 @@ impl SlidingWindow {
         result.chunks = self.chunk_buf.clone();
         result
     }
+
+    /// Search the window for the next needle occurrence (upstream `next`). Returns a flattened
+    /// highlight on a match (pruning consumed pages); on a miss, prunes to the trailing overlap and
+    /// returns `None`.
+    pub(in crate::terminal) fn next(&mut self) -> Option<Flattened> {
+        // The needle must be non-empty: an empty needle would make `highlight(0, 0)` underflow
+        // `end = start + len - 1` (upstream assumes this too; the searchers always pass a non-empty
+        // needle). `new` accepts an empty needle, so encode the precondition with an active assert.
+        assert!(!self.needle.is_empty(), "search needle must be non-empty");
+
+        let data_len = self.data.len();
+        if data_len < self.needle.len() {
+            return None;
+        }
+
+        // Search the two ring slices and the cross-boundary overlap, in upstream order. Yields the
+        // match's start offset (relative to `data_offset`) or `None`.
+        let match_offset: Option<usize> = 'search: {
+            let needle = self.needle.as_slice();
+            let nlen = needle.len();
+            let (a, b) = self.data.as_slices();
+            let (s0, s1): (&[u8], &[u8]) = if self.data_offset <= a.len() {
+                (&a[self.data_offset..], b)
+            } else {
+                (&b[self.data_offset - a.len()..], &[][..])
+            };
+
+            if let Some(idx) = index_of_ignore_case(s0, needle) {
+                break 'search Some(idx);
+            }
+            if !s0.is_empty() && !s1.is_empty() {
+                let nlen1 = nlen - 1;
+                let plen = s0.len().min(nlen1);
+                let slen = s1.len().min(nlen1);
+                let overlap_len = plen + slen;
+                debug_assert!(overlap_len <= self.overlap_buf.len());
+                self.overlap_buf[..plen].copy_from_slice(&s0[s0.len() - plen..]);
+                self.overlap_buf[plen..overlap_len].copy_from_slice(&s1[..slen]);
+                if let Some(idx) = index_of_ignore_case(&self.overlap_buf[..overlap_len], needle) {
+                    break 'search Some(s0.len() - plen + idx);
+                }
+            }
+            if let Some(idx) = index_of_ignore_case(s1, needle) {
+                break 'search Some(s0.len() + idx);
+            }
+            None
+        };
+
+        if let Some(off) = match_offset {
+            return Some(self.highlight(off, self.needle.len()));
+        }
+
+        // 1-length needles: clear the whole window.
+        if self.needle.len() == 1 {
+            self.clear_and_retain_capacity();
+            self.assert_integrity();
+            return None;
+        }
+
+        // No match: keep the trailing `needle.len() - 1` bytes for the future overlap; prune the
+        // rest. Reverse-iterate the metas to find the oldest meta that still covers the remaining
+        // overlap; every older meta (and its data) is pruned.
+        let nlen1 = self.needle.len() - 1;
+        let mut saved = 0usize;
+        let mut keep: Option<usize> = None;
+        for i in (0..self.meta.len()).rev() {
+            let cmlen = self.meta[i].cell_map.len();
+            if cmlen >= nlen1 - saved {
+                keep = Some(i);
+                break;
+            }
+            saved += cmlen;
+        }
+        match keep {
+            Some(j) if j > 0 => {
+                let prune_data_len: usize = (0..j).map(|k| self.meta[k].cell_map.len()).sum();
+                self.meta.drain(..j);
+                self.data.drain(..prune_data_len);
+            }
+            Some(_) => {} // keep the first meta — nothing older to prune
+            None => debug_assert!(saved < nlen1),
+        }
+
+        // The inner upstream `data_offset = cell_map.len - needed` is vestigial (overwritten here
+        // with no intervening read), so it is dropped. Move the offset to `needle.len - 1` from the
+        // end so a future `append` can complete a cross-page match.
+        self.data_offset = self.data.len() - self.needle.len() + 1;
+        self.assert_integrity();
+        None
+    }
 }
 
 /// Narrow a page-relative row coordinate (`u32`) to `CellCountInt` (upstream `@intCast`). Page rows
 /// always fit.
 fn cell_row(y: u32) -> CellCountInt {
     y.try_into().expect("page row fits CellCountInt")
+}
+
+/// Case-insensitive ASCII substring search (upstream `std.ascii.indexOfIgnoreCase`). An empty
+/// needle matches at 0.
+fn index_of_ignore_case(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    if needle.len() > haystack.len() {
+        return None;
+    }
+    (0..=haystack.len() - needle.len()).find(|&i| {
+        haystack[i..i + needle.len()]
+            .iter()
+            .zip(needle)
+            .all(|(h, n)| h.eq_ignore_ascii_case(n))
+    })
 }
 
 #[cfg(test)]
@@ -546,6 +655,136 @@ mod tests {
         }
         // And the two chunks reference the two distinct nodes.
         assert_ne!(h.chunks[0].serial, h.chunks[1].serial);
+    }
+
+    #[test]
+    fn index_of_ignore_case_matches() {
+        assert_eq!(index_of_ignore_case(b"hello world", b"world"), Some(6));
+        assert_eq!(index_of_ignore_case(b"hello world", b"WORLD"), Some(6));
+        assert_eq!(index_of_ignore_case(b"abHELlo", b"hell"), Some(2));
+        assert_eq!(index_of_ignore_case(b"hello", b"xyz"), None);
+        assert_eq!(index_of_ignore_case(b"hi", b"hello"), None);
+        assert_eq!(index_of_ignore_case(b"anything", b""), Some(0));
+    }
+
+    #[test]
+    fn next_forward_match() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.set_screen_text_lines_for_tests(&["hello world"]);
+        let node = list.first_node_ptr();
+
+        let mut w = SlidingWindow::new(Direction::Forward, b"world");
+        // SAFETY: `list` outlives `w`; the node pointer is not invalidated below.
+        unsafe { w.append(node) };
+
+        let h = w.next().expect("forward match");
+        assert_eq!(h.chunks.len(), 1);
+        assert_eq!(h.top_x, 6); // 'w'
+        assert_eq!(h.bot_x, 10); // 'd'
+    }
+
+    #[test]
+    fn next_match_is_case_insensitive() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.set_screen_text_lines_for_tests(&["hello world"]);
+        let node = list.first_node_ptr();
+
+        let mut w = SlidingWindow::new(Direction::Forward, b"WORLD");
+        // SAFETY: `list` outlives `w`; the node pointer is not invalidated below.
+        unsafe { w.append(node) };
+
+        let h = w.next().expect("case-insensitive match");
+        assert_eq!(h.top_x, 6);
+        assert_eq!(h.bot_x, 10);
+    }
+
+    #[test]
+    fn next_no_match_prunes_to_overlap_tail() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.set_screen_text_lines_for_tests(&["hello world"]);
+        let node = list.first_node_ptr();
+
+        let mut w = SlidingWindow::new(Direction::Forward, b"zzzz");
+        // SAFETY: `list` outlives `w`; the node pointer is not invalidated below.
+        unsafe { w.append(node) };
+
+        assert!(w.next().is_none());
+        // data is "hello world\n" (12 bytes), one meta (the keep meta — nothing older to prune).
+        assert_eq!(w.meta.len(), 1);
+        assert_eq!(w.data_offset, 12 - 4 + 1);
+    }
+
+    #[test]
+    fn next_one_length_needle_clears_the_window() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.set_screen_text_lines_for_tests(&["hello"]);
+        let node = list.first_node_ptr();
+
+        let mut w = SlidingWindow::new(Direction::Forward, b"z");
+        // SAFETY: `list` outlives `w`; the node pointer is not invalidated below.
+        unsafe { w.append(node) };
+
+        assert!(w.next().is_none());
+        assert!(w.data.is_empty());
+        assert!(w.meta.is_empty());
+    }
+
+    #[test]
+    fn next_returns_successive_matches() {
+        let mut list = PageList::init(80, 24, None).unwrap();
+        list.set_screen_text_lines_for_tests(&["ababab"]);
+        let node = list.first_node_ptr();
+
+        let mut w = SlidingWindow::new(Direction::Forward, b"ab");
+        // SAFETY: `list` outlives `w`; the node pointer is not invalidated below.
+        unsafe { w.append(node) };
+
+        // "ababab" has "ab" at columns 0, 2, 4.
+        assert!(w.next().is_some());
+        assert!(w.next().is_some());
+        assert!(w.next().is_some());
+        assert!(w.next().is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "non-empty")]
+    fn next_empty_needle_panics() {
+        let mut w = SlidingWindow::new(Direction::Forward, b"");
+        let _ = w.next();
+    }
+
+    #[test]
+    fn next_finds_overlap_across_ring_boundary() {
+        // Build a wrapped `data` VecDeque whose `as_slices()` splits "hello" across the boundary.
+        let mut data: VecDeque<u8> = VecDeque::with_capacity(16);
+        for _ in 0..11 {
+            data.push_back(0);
+        }
+        for _ in 0..11 {
+            data.pop_front();
+        }
+        for &byte in b"abhellocd" {
+            data.push_back(byte);
+        }
+        let (a, b) = data.as_slices();
+        assert_eq!(a, b"abhel");
+        assert_eq!(b, b"locd");
+
+        let mut w = SlidingWindow::new(Direction::Forward, b"hello");
+        w.data = data;
+        // A single meta covering all nine bytes; the match stays within it, so `highlight` takes the
+        // within-one-meta path and never dereferences the (dangling) node.
+        w.meta.push_back(Meta {
+            node: NonNull::dangling(),
+            serial: 0,
+            cell_map: (0..9).map(|i| Coordinate::new(i as u16, 0)).collect(),
+        });
+
+        let h = w.next().expect("overlap match");
+        assert_eq!(h.chunks.len(), 1);
+        // "hello" spans logical columns 2..=6.
+        assert_eq!(h.top_x, 2);
+        assert_eq!(h.bot_x, 6);
     }
 
     #[test]

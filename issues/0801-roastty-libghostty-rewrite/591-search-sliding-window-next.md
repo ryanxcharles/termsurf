@@ -339,3 +339,75 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d591-prompt.md`
 - Result: `logs/codex-review/20260604-d591-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`terminal::search::sliding_window` gained `SlidingWindow::next` and the
+file-local `index_of_ignore_case`. `next` asserts a non-empty needle, returns
+`None` when the data is shorter than the needle, searches `data[data_offset..]`
+across the two `as_slices()`-derived ring slices and the cross-boundary
+`overlap_buf` (in the upstream s0 → overlap → s1 order, the overlap assembled
+via a disjoint field borrow), returns `highlight` on a hit, clears the window
+for a 1-length needle, and on a miss reverse-prunes everything before the oldest
+meta covering the trailing `needle.len() - 1` bytes and sets
+`data_offset = data.len() - needle.len() + 1`. The vestigial inner
+`data_offset = cell_map.len - needed` was dropped (overwritten with no
+intervening read). `index_of_ignore_case` is a case-insensitive ASCII substring
+search (empty needle → `Some(0)`).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3265 passed, 0 failed (eight new tests; no
+  regressions, up from 3257).
+- `cargo build -p roastty`: no warnings (the disjoint `overlap_buf` / `data`
+  field borrow compiled cleanly).
+- no-`ghostty`-name greps (font/renderer/config + terminal/search +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+The eight new tests: the `index_of_ignore_case` unit (case-insensitive,
+no-match, needle-longer, empty); a forward match (`"world"` → `top_x 6` /
+`bot_x 10`); a case-insensitive match (`"WORLD"`); a no-match prune (`"zzzz"` →
+`None`, `meta.len() == 1`, `data_offset == 9`); the 1-length clear (`"z"` →
+window emptied); successive matches (`"ababab"` / `"ab"` →
+`Some, Some, Some, None`); the empty-needle panic; and the cross-ring-boundary
+overlap (a manually wrapped `VecDeque` splitting `"hello"` as
+`("abhel", "locd")`, a single dangling-node meta, the match found within one
+meta at `top_x 2` / `bot_x 6`).
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (one Nit: the `## Result` / `## Conclusion` sections were
+not yet saved — added here). Codex confirmed the implementation is faithful: it
+preserves the s0 → overlap → s1 order, maps overlap offsets correctly, clears
+the window for one-byte needles, and uses the reverse-meta prune with the final
+`data_offset = data.len() - needle.len() + 1`; dropping the inner `data_offset`
+write is correctly documented and safe (overwritten with no intervening read);
+the active empty-needle assert is the right precondition encoding;
+`index_of_ignore_case` matches the ASCII-only behavior; and the
+wrapped-`VecDeque` overlap test is sound under the documented constraints.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r591-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r591-last-message.md` (result)
+
+## Conclusion
+
+This experiment ports `next`, completing the `SlidingWindow` matcher: search the
+window's data (the two ring slices + the cross-page `overlap_buf`) for the
+needle (case-insensitive ASCII), return a `Flattened` highlight on a hit
+(pruning consumed pages), special-case 1-length needles, and on a miss prune to
+the trailing `needle.len() - 1` overlap bytes. The `VecDeque` adaptation maps
+`getPtrSlice` to `as_slices()` arithmetic, `indexOfIgnoreCase` to a file-local
+helper, and `deleteOldest` to `drain`; the inner `data_offset` write is dropped
+as vestigial. With the skeleton (587), encoder (588), `append` (589),
+`highlight` (590), and `next` (591), the `SlidingWindow` is a complete port of
+`terminal/search/sliding_window.zig`. The remaining search work is the
+higher-level searchers that drive the window — `ActiveSearch`
+(`search/active.zig`, the smallest, ~175 lines: search only the mutable active
+area), then `PageListSearch` / `ScreenSearch` / `ViewportSearch`, and finally
+the search `Thread`.
