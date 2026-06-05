@@ -1565,6 +1565,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Codex/Codex
 - [Experiment 559: CircBuf auto-grow (resize + ensureUnusedCapacity)](559-circ-buf-resize.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 560: small-buffer message data (MessageData)](560-message-data.md)
+  — **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
