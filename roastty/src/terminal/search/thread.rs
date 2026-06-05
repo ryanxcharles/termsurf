@@ -1,14 +1,18 @@
 //! The search-thread aggregator (port of the `Search` struct in upstream `terminal/search/Thread.zig`).
 //!
-//! This lands the lock-aware, multi-screen orchestration core: a `ViewportSearch` plus a
-//! `ScreenSearch` per terminal screen, with `new` / `deinit` / `is_complete` / `tick`. The
-//! aggregator's `feed` (terminal integration: the `search_viewport_dirty` flag and screen
-//! reconciliation) and `notify` (the `Event` / `EventCallback` machinery), and the outer libxev
-//! event-loop `Thread`, are deferred to later slices — roastty has no libxev port yet.
+//! This lands the lock-aware, multi-screen orchestration core (the `Search` aggregator: a
+//! `ViewportSearch` plus a `ScreenSearch` per terminal screen, with `new` / `deinit` /
+//! `is_complete` / `tick` / `feed` / `notify`) and the outer `Thread`'s foundation — its types
+//! (`Options` / `Message` / `Mailbox` / `EventCallback`), `new` / `deinit`, `change_needle`, and
+//! `drain_mailbox`. The outer `Thread`'s `select` handler and its `thread_main` event loop (a
+//! std-concurrency adaptation of upstream's libxev loop) are deferred to later slices.
 
 use std::ptr::NonNull;
+use std::sync::{Arc, Mutex};
 
+use super::super::blocking_queue::BlockingQueue;
 use super::super::highlight::{Flattened, Untracked};
+use super::super::message_data::MessageData;
 use super::super::terminal::{Terminal, TerminalScreenKey};
 use super::screen::{ScreenSearch, Tick as ScreenTick};
 use super::viewport::ViewportSearch;
@@ -136,6 +140,11 @@ impl Search {
             last_complete: false,
             stale_viewport_matches: true,
         }
+    }
+
+    /// The needle this aggregator is searching for (upstream `s.viewport.needle()`).
+    pub(in crate::terminal) fn needle(&self) -> &[u8] {
+        self.viewport.needle()
     }
 
     /// Tear down every screen searcher (upstream `deinit`). `ViewportSearch` frees itself on `Drop`.
@@ -323,6 +332,127 @@ impl Search {
             self.last_complete = true;
             cb(Event::Complete);
         }
+    }
+}
+
+/// Messages the search thread accepts (upstream `Thread.Message`). `Select` is added in Exp 614.
+pub(in crate::terminal) enum Message {
+    /// Change the search term (start / restart / stop on empty).
+    ChangeNeedle(MessageData<'static, u8, 255>),
+}
+
+/// The mailbox for sending the search thread messages (upstream `Mailbox = BlockingQueue(Message,
+/// 64)`). Held behind an `Arc` so a producer's handle stays valid once the `Thread` is spawned.
+pub(in crate::terminal) type Mailbox = BlockingQueue<Message, 64>;
+
+/// The event callback (upstream `EventCallback` fn-ptr + opaque userdata) as a boxed closure. `Send`
+/// is required once the thread is spawned (Exp 615).
+pub(in crate::terminal) type EventCallback = Box<dyn FnMut(Event<'_>) + Send>;
+
+/// Embedder-supplied configuration (upstream `Thread.Options`). The lock and terminal are raw
+/// pointers to embedder-owned state, accessed only while the lock is held.
+pub(in crate::terminal) struct Options {
+    /// Guards all access to `terminal`.
+    pub(in crate::terminal) lock: NonNull<Mutex<()>>,
+    /// The terminal to search.
+    pub(in crate::terminal) terminal: NonNull<Terminal>,
+    /// Optional event callback.
+    pub(in crate::terminal) event_cb: Option<EventCallback>,
+}
+
+/// The search thread (upstream `Thread`). This slice lands its state + message handling; the OS
+/// thread and event loop come in Exp 615.
+pub(crate) struct Thread {
+    mailbox: Arc<Mailbox>,
+    search: Option<Search>,
+    opts: Options,
+}
+
+impl Thread {
+    /// Construct the thread state (upstream `init`, minus the xev loop/async/timer — Exp 615).
+    pub(in crate::terminal) fn new(opts: Options) -> Thread {
+        Thread {
+            mailbox: Arc::new(Mailbox::new()),
+            search: None,
+            opts,
+        }
+    }
+
+    /// Tear down the active search (upstream `deinit`'s `if (search) |*s| s.deinit()`). The `deinit`
+    /// runs under the terminal lock (it untracks pins, mutating terminal state).
+    ///
+    /// # Safety
+    /// The terminal (and lock) the search points into must still be live (the `Search::deinit`
+    /// contract).
+    pub(in crate::terminal) unsafe fn deinit(&mut self) {
+        if let Some(mut s) = self.search.take() {
+            // SAFETY: `lock` is live and guards `terminal`.
+            let _guard = unsafe { self.opts.lock.as_ref() }.lock().unwrap();
+            // SAFETY: terminal live; lock held.
+            unsafe { s.deinit() };
+        }
+    }
+
+    /// An owned handle to the mailbox (so producers can post messages even after the `Thread` is
+    /// spawned).
+    pub(in crate::terminal) fn mailbox(&self) -> Arc<Mailbox> {
+        Arc::clone(&self.mailbox)
+    }
+
+    /// Drain and dispatch all pending messages (upstream `drainMailbox`).
+    ///
+    /// # Safety
+    /// As `change_needle`.
+    pub(in crate::terminal) unsafe fn drain_mailbox(&mut self) {
+        while let Some(message) = self.mailbox.pop() {
+            match message {
+                // SAFETY: caller's contract.
+                Message::ChangeNeedle(v) => unsafe { self.change_needle(v.slice()) },
+            }
+        }
+    }
+
+    /// Change the search term (upstream `changeNeedle`): unchanged → no-op; otherwise stop the prior
+    /// search (emitting reset events), and on a non-empty needle start a new search with an initial
+    /// feed under the lock.
+    ///
+    /// # Safety
+    /// `opts.terminal` and `opts.lock` must be live; the terminal must outlive any search.
+    pub(in crate::terminal) unsafe fn change_needle(&mut self, needle: &[u8]) {
+        // Unchanged needle → no-op (case-insensitive).
+        if let Some(s) = self.search.as_ref() {
+            if s.needle().eq_ignore_ascii_case(needle) {
+                return;
+            }
+        }
+        // Stop the prior search: deinit it UNDER the lock (it untracks pins, mutating terminal
+        // state), then emit the reset events AFTER releasing the lock (so callbacks cannot reenter
+        // while the terminal is locked).
+        if let Some(mut old) = self.search.take() {
+            {
+                // SAFETY: `lock` is live and guards `terminal`.
+                let _guard = unsafe { self.opts.lock.as_ref() }.lock().unwrap();
+                // SAFETY: terminal live; lock held.
+                unsafe { old.deinit() };
+            }
+            if let Some(cb) = self.opts.event_cb.as_mut() {
+                cb(Event::TotalMatches(0));
+                cb(Event::SelectedMatch(None));
+                cb(Event::ViewportMatches(&[]));
+            }
+        }
+        if needle.is_empty() {
+            return; // empty needle stops the search
+        }
+        let mut s = Search::new(needle);
+        {
+            // Initial feed under the terminal lock.
+            // SAFETY: `lock` is live and guards `terminal`.
+            let _guard = unsafe { self.opts.lock.as_ref() }.lock().unwrap();
+            // SAFETY: terminal live; the lock is held.
+            unsafe { s.feed(self.opts.terminal) };
+        }
+        self.search = Some(s);
     }
 }
 
@@ -778,5 +908,152 @@ mod tests {
         let mut search = Search::new(b"Fizz");
         let evs = collect(&mut search);
         assert!(evs.is_empty());
+    }
+
+    // --- Thread foundation (Exp 613) ---
+
+    use crate::terminal::blocking_queue::Timeout;
+
+    fn ev_of(e: Event<'_>) -> Ev {
+        match e {
+            Event::Quit => Ev::Quit,
+            Event::Complete => Ev::Complete,
+            Event::TotalMatches(n) => Ev::Total(n),
+            Event::SelectedMatch(Some(m)) => Ev::Selected(Some(m.idx)),
+            Event::SelectedMatch(None) => Ev::Selected(None),
+            Event::ViewportMatches(v) => Ev::Viewport(v.len()),
+        }
+    }
+
+    /// An event-collecting callback writing into `events`.
+    fn collecting_cb(events: &Arc<Mutex<Vec<Ev>>>) -> EventCallback {
+        let ev = Arc::clone(events);
+        Box::new(move |e| ev.lock().unwrap().push(ev_of(e)))
+    }
+
+    fn thread_opts(
+        terminal: &mut Terminal,
+        lock: &Mutex<()>,
+        cb: Option<EventCallback>,
+    ) -> Options {
+        Options {
+            lock: NonNull::from(lock),
+            terminal: NonNull::new(core::ptr::addr_of_mut!(*terminal)).unwrap(),
+            event_cb: cb,
+        }
+    }
+
+    #[test]
+    fn change_needle_starts_a_search_and_feeds() {
+        let mut terminal = Terminal::init(10, 10, None).unwrap();
+        terminal.next_slice(b"Fizz Fizz").unwrap();
+        let lock = Mutex::new(());
+        let mut thread = Thread::new(thread_opts(&mut terminal, &lock, None));
+
+        // SAFETY: `terminal` and `lock` outlive `thread`.
+        unsafe { thread.change_needle(b"Fizz") };
+        let s = thread.search.as_ref().expect("a search was started");
+        // The initial feed ran under the lock and populated the active screen searcher.
+        assert!(
+            s.screens
+                .get(TerminalScreenKey::Primary)
+                .unwrap()
+                .matches_len()
+                >= 1
+        );
+
+        // SAFETY: terminal live; called once.
+        unsafe { thread.deinit() };
+    }
+
+    #[test]
+    fn change_needle_unchanged_is_a_noop() {
+        let mut terminal = Terminal::init(10, 10, None).unwrap();
+        terminal.next_slice(b"Fizz").unwrap();
+        let lock = Mutex::new(());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut thread = Thread::new(thread_opts(
+            &mut terminal,
+            &lock,
+            Some(collecting_cb(&events)),
+        ));
+
+        // SAFETY: as above.
+        unsafe { thread.change_needle(b"Fizz") };
+        events.lock().unwrap().clear();
+        // A same-needle (any case) change is a no-op: no reset events, search retained.
+        // SAFETY: as above.
+        unsafe { thread.change_needle(b"FIZZ") };
+        assert!(events.lock().unwrap().is_empty());
+        assert!(thread.search.is_some());
+
+        // SAFETY: as above.
+        unsafe { thread.deinit() };
+    }
+
+    #[test]
+    fn change_needle_empty_stops_the_search() {
+        let mut terminal = Terminal::init(10, 10, None).unwrap();
+        terminal.next_slice(b"Fizz").unwrap();
+        let lock = Mutex::new(());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut thread = Thread::new(thread_opts(
+            &mut terminal,
+            &lock,
+            Some(collecting_cb(&events)),
+        ));
+
+        // SAFETY: as above.
+        unsafe { thread.change_needle(b"Fizz") };
+        events.lock().unwrap().clear();
+        // An empty needle stops the search and emits the three reset events.
+        // SAFETY: as above.
+        unsafe { thread.change_needle(b"") };
+        assert!(thread.search.is_none());
+        let collected = events.lock().unwrap();
+        assert!(collected.contains(&Ev::Total(0)));
+        assert!(collected.contains(&Ev::Selected(None)));
+        assert!(collected.contains(&Ev::Viewport(0)));
+        drop(collected);
+
+        // SAFETY: as above (search is already None, so this is a no-op).
+        unsafe { thread.deinit() };
+    }
+
+    #[test]
+    fn drain_mailbox_processes_change_needle() {
+        let mut terminal = Terminal::init(10, 10, None).unwrap();
+        terminal.next_slice(b"Fizz").unwrap();
+        let lock = Mutex::new(());
+        let mut thread = Thread::new(thread_opts(&mut terminal, &lock, None));
+
+        thread.mailbox().push(
+            Message::ChangeNeedle(MessageData::init(b"Fizz")),
+            Timeout::Instant,
+        );
+        // SAFETY: as above.
+        unsafe { thread.drain_mailbox() };
+        assert!(thread.search.is_some());
+
+        // SAFETY: as above.
+        unsafe { thread.deinit() };
+    }
+
+    #[test]
+    fn deinit_releases_the_search() {
+        let mut terminal = Terminal::init(10, 10, None).unwrap();
+        terminal.next_slice(b"Fizz").unwrap();
+        let lock = Mutex::new(());
+        let t = NonNull::new(core::ptr::addr_of_mut!(terminal)).unwrap();
+        let baseline = primary_pin_count(t);
+
+        let mut thread = Thread::new(thread_opts(&mut terminal, &lock, None));
+        // SAFETY: as above.
+        unsafe { thread.change_needle(b"Fizz") };
+        assert!(primary_pin_count(t) > baseline);
+
+        // SAFETY: as above; called once.
+        unsafe { thread.deinit() };
+        assert_eq!(primary_pin_count(t), baseline);
     }
 }

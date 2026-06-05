@@ -291,3 +291,54 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260605-d613-prompt.md`
 - Result: `logs/codex-review/20260605-d613-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+Implemented the outer `Thread`'s foundation in
+`roastty/src/terminal/search/thread.rs` (alongside `Search`): the `Message` /
+`Mailbox` (`Arc`-held `BlockingQueue`) / `EventCallback`
+(`Box<dyn FnMut(Event) + Send>`) / `Options` types, the `Thread` struct, `new`,
+`unsafe deinit` (under the lock), `mailbox()` (clones the `Arc`),
+`unsafe drain_mailbox` (dispatches `ChangeNeedle`), and `unsafe change_needle`
+(unchanged no-op; stop+reset-events; empty-stop; new+locked-feed) — plus the
+`Search::needle()` accessor. Both Required design fixes are in: the old search's
+`deinit` runs under `opts.lock` (in `change_needle` and `Thread::deinit`) with
+reset events emitted after the lock releases, and the mailbox is `Arc`-held so a
+producer's handle survives the eventual `std::thread::spawn`.
+
+Five tests over a real `Terminal` + a `Mutex<()>` + an
+`Arc<Mutex<Vec>>`-collecting callback cover the start/feed, unchanged no-op,
+empty-stop reset events, mailbox-drain dispatch, and `deinit` pin release.
+Gates: `cargo fmt --check` clean, `cargo build -p roastty` no warnings,
+`cargo test -p roastty` **3377 passed / 0 failed** (3372 → 3377, +5), no-ghostty
+grep clean, `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **APPROVED** it with **no Required,
+Optional, or Nit findings**, confirming both Required design fixes are correctly
+applied (`Arc<Mailbox>` + cloned-handle `mailbox()`; old-search teardown under
+`opts.lock` in both paths with reset callbacks after the lock releases) and that
+`change_needle` remains faithful (case-insensitive no-op; tear-down + three
+reset events; empty-stop; `Search::new` + initial locked `feed`). The raw
+`Options` pointer model and `unsafe` boundary are consistent with the
+established search contracts, and `drain_mailbox` handling only `ChangeNeedle`
+is a clean boundary before `Select` (Exp 614).
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260605-r613-prompt.md`
+- Result: `logs/codex-review/20260605-r613-last-message.md`
+
+## Conclusion
+
+The outer search `Thread`'s foundation is in place (types + message handling +
+`change_needle`). The std-concurrency adaptation is on track. Remaining: **Exp
+614** — the `select` message handler (needs new Screen scroll-to-pin +
+viewport-overlap surface, then adds `Message::Select`); **Exp 615** —
+`thread_main` (the event loop), the `std::thread` spawn, the `unsafe Send` model
+for the search's raw `Terminal` pointers, the stop signal, and the
+`REFRESH_INTERVAL` timer cadence. Those two slices complete the search
+subsystem.
