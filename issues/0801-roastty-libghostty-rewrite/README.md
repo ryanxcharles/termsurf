@@ -1696,7 +1696,7 @@ are past the correctness-critical foundation.
 - [Experiment 624: os desktop launch detection](624-os-desktop-launch-detection.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 625: os locale Cocoa probe](625-os-locale-cocoa-probe.md) —
-  **Designed**
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

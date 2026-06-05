@@ -175,3 +175,60 @@ routes `macos_language_from_cocoa()` through that helper, and verifies
 Follow-up review approved the probe-only scope, the `NSLocale` feature addition,
 the typed `objc2-foundation` API, deferred env mutation/`setlocale`, the narrow
 deprecated `countryCode` use to match upstream, and non-macOS `None` stubs.
+
+## Result
+
+**Result:** Pass
+
+`roastty/src/os/locale.rs` now provides the Cocoa probe slice for future locale
+initialization. `macos_lang_from_cocoa()` reads `NSLocale::currentLocale()`,
+`languageCode`, and upstream-compatible `countryCode`, then formats
+`<language>_<country>.UTF-8` through the pure `lang_env_value` helper.
+`macos_language_from_cocoa()` reads `NSLocale::preferredLanguages()` and routes
+the list through `language_env_value`, which delegates to the existing
+`os::i18n` canonicalization and gettext `.UTF-8` formatting.
+
+The helpers are cfg-gated: macOS uses typed `objc2-foundation` `NSLocale`, while
+non-macOS hosts return `None`. The experiment adds only the `NSLocale` feature
+to the existing `objc2-foundation` dependency, exposes `os::locale`, and does
+not mutate process environment or call `setlocale`.
+
+Gates (all green):
+
+- `cargo test -p roastty os::locale::tests` — **5 passed / 0 failed** focused
+  tests on this macOS host, including the Cocoa smoke probe.
+- `cargo build -p roastty` — no warnings.
+- `cargo test -p roastty` — **3454 passed / 0 failed** unit tests, plus **1
+  passed / 0 failed** ABI harness test and **0** doc tests.
+- `cargo fmt -p roastty -- --check` — clean.
+- no-ghostty grep on `roastty/src/os/locale.rs`, `roastty/src/os/mod.rs`, and
+  `roastty/Cargo.toml` — clean.
+- `git diff --check` — clean.
+
+## Conclusion
+
+Roastty now has a typed, test-covered Cocoa source for future `LANG` and
+`LANGUAGE` initialization. The process-global pieces of upstream `ensureLocale`
+remain deferred for a later experiment: env mutation, `setlocale(LC_ALL, "")`,
+invalid-`LANG` recovery, and final `en_US.UTF-8` fallback.
+
+## Completion Review
+
+**Reviewer:** Codex (gpt-5.5, medium) · resumed session
+`019e8f83-9029-7d43-8e82-f4c5754e14ba`
+
+**Verdict:** APPROVED.
+
+Initial completion review found no code or documentation issues, but noted the
+new `roastty/src/os/locale.rs` file was still untracked and therefore had to be
+staged before the result commit. After staging the full result and confirming
+`git diff --cached --check` was clean, follow-up review approved the result with
+no remaining Required fixes.
+
+Codex confirmed the implementation matches the approved design:
+`macos_lang_from_cocoa()` uses typed `NSLocale::currentLocale()`,
+`languageCode`, deprecated `countryCode`, and `lang_env_value`;
+`macos_language_from_cocoa()` uses `NSLocale::preferredLanguages()` and routes
+through `language_env_value`; non-macOS probes return `None`; only the
+`NSLocale` feature was added to the existing Foundation dependency; and no
+environment mutation or `setlocale` behavior was added.
