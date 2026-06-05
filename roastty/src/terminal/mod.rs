@@ -2,6 +2,9 @@
 mod ansi;
 
 #[allow(dead_code)]
+mod array_list_collection;
+
+#[allow(dead_code)]
 mod bitmap_allocator;
 
 #[allow(dead_code)]

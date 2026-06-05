@@ -161,3 +161,50 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260605-d610-prompt.md`
 - Result: `logs/codex-review/20260605-d610-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+Implemented `roastty/src/terminal/array_list_collection.rs` (registered
+`#[allow(dead_code)] mod array_list_collection;` in `terminal/mod.rs`), porting
+upstream `ArrayListCollection(T)` as a generic `ArrayListCollection<T>` over
+`Vec<Vec<T>>`: `new(list_count, initial_capacity)` (each inner `Vec` pre-sized),
+`reset` (`Vec::clear` each, retaining capacity), and `len` / `lists` /
+`lists_mut` accessors. `Drop` replaces `deinit`; allocation is infallible so
+`new` returns `Self` directly.
+
+Three tests cover construction (N empty lists at capacity), the bulk
+capacity-retaining `reset` (now asserting each list's exact pre-reset capacity
+is unchanged — the adopted Optional), and independent per-list appends. Gates:
+`cargo fmt --check` clean, `cargo build -p roastty` no warnings,
+`cargo test -p roastty` **3358 passed / 0 failed** (3355 → 3358, +3), no-ghostty
+grep clean, `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **APPROVED** it with **no Required
+findings**, confirming the port is faithful: `Vec<Vec<T>>` maps the fixed outer
+slice of growable lists; `new` creates exactly `list_count` pre-allocated empty
+lists; `reset` uses `Vec::clear` (matching `clearRetainingCapacity`); `Drop`
+covers cleanup; the accessor surface matches the upstream public `lists` field;
+and the private module registration is consistent with nearby datastruct ports.
+
+- **Optional (adopted)**: the retention test now records each list's exact
+  capacity before `reset` and asserts it is unchanged after.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260605-r610-prompt.md`
+- Result: `logs/codex-review/20260605-r610-last-message.md`
+
+## Conclusion
+
+`datastruct/array_list_collection` is fully ported — a clean, dependency-free
+slice keeping roastty's datastruct layer ahead of its (yet-unported) renderer
+consumer. The dependency boundaries that gate the larger remaining work are
+unchanged: the outer search `Thread` (libxev), regex/oniguruma, and the URI
+parser (`std.Uri`). roastty's other self-contained, unblocked modules —
+remaining `os/` (`locale`, `resourcesdir`, …) and any further `datastruct/`
+utilities — remain the natural next slices for Issue 801, which stays open and
+broad.
