@@ -1541,8 +1541,8 @@ are past the correctness-critical foundation.
   · Claude/Codex/Codex
 - [Experiment 547: maximize the file-descriptor limit (os::file rlimit)](547-os-file-rlimit.md)
   — **Pass** · Claude/Codex/Codex
-- [Experiment 548: the passwd entry (os::passwd)](548-os-passwd.md) —
-  **Designed** · Claude/Codex/Codex
+- [Experiment 548: the passwd entry (os::passwd)](548-os-passwd.md) — **Pass** ·
+  Claude/Codex/Codex
 
 ## Non-Goals
 

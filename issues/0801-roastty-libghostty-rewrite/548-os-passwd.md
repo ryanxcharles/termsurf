@@ -211,3 +211,54 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d548-prompt.md` (design)
 - Result: `logs/codex-review/20260604-d548-last-message.md` (design)
+
+## Result
+
+**Result:** Pass
+
+`os::passwd` was added with `Entry { shell, home, name }` (all
+`Option<OsString>`) and `get`: `libc::getpwuid_r(getuid(), …)` into a zeroed
+`libc::passwd` with a 1024-byte buffer, an empty `Entry` on non-zero return or
+null result, otherwise the `pw_shell` / `pw_dir` / `pw_name` C strings copied
+via `cstr_to_os` (`CStr` + `OsString::from_vec`, byte-faithful). The
+Linux/flatpak branch is dropped. The module is registered in `os/mod.rs`. One
+test confirms the current user's `shell`, `home`, and `name` are all `Some(_)`
+and non-empty.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3059 passed, 0 failed (one new test; no regressions,
+  up from 3058).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + os/passwd.rs + os/mod.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **one Nit** (no
+Required or Optional findings): the doc had `## Result` but no `## Conclusion` —
+fixed by adding the conclusion below. Codex confirmed the implementation matches
+upstream `passwd.zig` and the approved design: `getpwuid_r(getuid(), …)` uses
+the 1024-byte buffer, `res != 0 || pw_ptr.is_null()` returns an empty `Entry`,
+and fields are copied only after a valid result; `CStr::from_ptr(…).to_bytes()`
+plus `OsString::from_vec` is byte-faithful and drops the trailing NUL as
+intended; the test is sound for the macOS slice; and dropping the Linux/flatpak
+branch is correctly scoped.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r548-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r548-last-message.md` (result)
+
+## Conclusion
+
+`os::passwd::get` — the `getpwuid_r` lookup of the current user's `shell` /
+`home` / `name` — is faithfully ported from `os/passwd.zig`, adding to the `os`
+module from Experiments 541–547. This is how roastty will determine the default
+shell and home directory for the child process (wiring into homedir /
+shell-launch deferred). The Linux/flatpak host-command branch was dropped
+(macOS-only). The OS-utility frontier still has a few self-contained slices
+(`i18n_locales`, `open`, `locale`, `homedir`'s tilde-expansion). The config
+`loadDefaultFiles` stays deferred pending roastty's naming decision;
+`background-image-opacity` stays float-blocked.
