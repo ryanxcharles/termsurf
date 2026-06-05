@@ -233,3 +233,67 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d574-prompt.md`
 - Result: `logs/codex-review/20260604-d574-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`terminal::split_tree` gained the spatial-geometry core: the `SpatialDirection`
+enum (`Left` / `Right` / `Down` / `Up`, a separate type from `Direction`), and
+three `Slot` methods — `is_in_direction` (the candidate-vs-target `max_x` /
+`max_y` direction predicate, inclusive), `distance_to` (the euclidean distance
+with `dx` / `dy` / products / sum in `f16` and the square root widened through
+`f64`), and `wrapped_for` (the one-grid wrap shift of the target slot).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3173 passed, 0 failed (four new tests; no
+  regressions, up from 3169).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/split_tree.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+The four new tests: `is_in_direction` basics (each direction plus the
+overlapping-target none-of-them case), the inclusive boundary-touch cases
+(`candidate.max_x() == target.x` ⇒ `Left`, etc.), `distance_to` (zero, an
+axis-aligned `0.5`, and the binary-exact 3-4-5 diagonal `0.75`/`1.0` ⇒ `1.25`),
+and `wrapped_for` (each direction shifts the correct axis by `1.0` leaving the
+others unchanged).
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (one Nit: the `## Result` / `## Conclusion` sections were
+not yet in the saved file — added here as part of result recording). Codex
+confirmed `is_in_direction` matches upstream's candidate-vs-target comparisons
+including the inclusive boundary behavior, `distance_to` keeps the per-op half
+arithmetic through the sum and uses a wider sqrt intermediate before returning
+to `f16`, `wrapped_for` shifts the target by one normalized unit in the correct
+axis/direction, `SpatialDirection` stays properly separate from the split
+`Direction`, and the tests cover the core geometry and boundary cases.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r574-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r574-last-message.md` (result)
+
+## Conclusion
+
+This experiment ports the pure-geometry core of split_tree's spatial navigation
+— the `SpatialDirection` enum and the `Slot` direction predicate, euclidean
+distance, and wrap shift — all over `half::f16` (Experiment 573). It is the
+third split_tree slice (after the `Handle` / `Layout` / `Direction` vocabulary
+and the `Split` / `Slot` structs). What remains for the spatial side is the
+arena-coupled `nearest` / `nearestWrapped` (which iterate the `Spatial` slots,
+skip non-leaf nodes via the `Node` arena, and track the running minimum using
+exactly these helpers), plus the `Spatial` container and its `spatial()` /
+`fillSpatialSlots()` / `dimensions()` construction — all gated on the
+**`Node`-over-`View`-generic arena and ref-counting**, which is the next
+split_tree design question. The remaining big-ticket subsystem is the terminal
+**search subsystem** (coupled to `PageList` / `Pin` / `Screen` / `Selection` /
+`PageFormatter`), and the dependency-blocked helpers persist (regex/oniguruma
+for `Link::oniRegex`, a URI parser for `os/uri`, the config-dir naming decision
+for `file_load` / `edit` / `loadDefaultFiles`). With `f16` now in place,
+`background-image-opacity`'s float formatter is also unblocked as its own config
+slice.

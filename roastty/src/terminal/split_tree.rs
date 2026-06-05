@@ -96,6 +96,64 @@ impl Slot {
     pub(crate) fn max_y(self) -> f16 {
         self.y + self.height
     }
+
+    /// Whether `self` (a candidate slot) lies in `direction` relative to `target` (upstream
+    /// `nearest`'s direction switch).
+    pub(crate) fn is_in_direction(self, target: Slot, direction: SpatialDirection) -> bool {
+        match direction {
+            SpatialDirection::Left => self.max_x() <= target.x,
+            SpatialDirection::Right => self.x >= target.max_x(),
+            SpatialDirection::Up => self.max_y() <= target.y,
+            SpatialDirection::Down => self.y >= target.max_y(),
+        }
+    }
+
+    /// The euclidean distance from `self` to `target` (upstream `nearest`'s
+    /// `@sqrt(dx*dx + dy*dy)`). The `dx`/`dy`/products/sum are computed in `f16` (matching
+    /// upstream's per-op binary16 arithmetic); the square root widens the `f16` sum to `f64`, takes
+    /// the root there, and rounds back to `f16` (Rust's `half` has no `f16` sqrt). The wide `f64`
+    /// intermediate makes this a single effective rounding, matching Zig's `@sqrt` on `f16`.
+    pub(crate) fn distance_to(self, target: Slot) -> f16 {
+        let dx = self.x - target.x;
+        let dy = self.y - target.y;
+        let sum = dx * dx + dy * dy;
+        f16::from_f64(sum.to_f64().sqrt())
+    }
+
+    /// `self` shifted by one full normalized (1×1) grid for wrap-around in `direction` (upstream
+    /// `nearestWrapped`'s target shift). Shifts in the opposite sense of travel so the nearest
+    /// search re-finds across the wrap boundary.
+    pub(crate) fn wrapped_for(self, direction: SpatialDirection) -> Slot {
+        let one = f16::from_f32(1.0);
+        match direction {
+            SpatialDirection::Left => Slot {
+                x: self.x + one,
+                ..self
+            },
+            SpatialDirection::Right => Slot {
+                x: self.x - one,
+                ..self
+            },
+            SpatialDirection::Up => Slot {
+                y: self.y + one,
+                ..self
+            },
+            SpatialDirection::Down => Slot {
+                y: self.y - one,
+                ..self
+            },
+        }
+    }
+}
+
+/// A spatial navigation direction — the nearest surface visually in this direction (upstream
+/// `Spatial.Direction`; a separate type from `Direction`, with the same variants).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SpatialDirection {
+    Left,
+    Right,
+    Down,
+    Up,
 }
 
 #[cfg(test)]
@@ -201,5 +259,106 @@ mod tests {
         assert_eq!(slot.max_y(), f16::from_f32(0.375));
         // Compare like-for-like against the explicit half addition.
         assert_eq!(slot.max_y(), f16::from_f32(0.125) + f16::from_f32(0.25));
+    }
+
+    /// A square slot of the given size at the given position.
+    fn slot(x: f32, y: f32, w: f32, h: f32) -> Slot {
+        Slot {
+            x: f16::from_f32(x),
+            y: f16::from_f32(y),
+            width: f16::from_f32(w),
+            height: f16::from_f32(h),
+        }
+    }
+
+    #[test]
+    fn is_in_direction_basic() {
+        // Target occupies [0.5, 0.75] x [0.5, 0.75].
+        let target = slot(0.5, 0.5, 0.25, 0.25);
+
+        let left = slot(0.0, 0.5, 0.25, 0.25); // max_x 0.25 <= 0.5
+        assert!(left.is_in_direction(target, SpatialDirection::Left));
+        assert!(!left.is_in_direction(target, SpatialDirection::Right));
+
+        let right = slot(0.75, 0.5, 0.25, 0.25); // x 0.75 >= max_x 0.75
+        assert!(right.is_in_direction(target, SpatialDirection::Right));
+        assert!(!right.is_in_direction(target, SpatialDirection::Left));
+
+        let up = slot(0.5, 0.0, 0.25, 0.25); // max_y 0.25 <= 0.5
+        assert!(up.is_in_direction(target, SpatialDirection::Up));
+        assert!(!up.is_in_direction(target, SpatialDirection::Down));
+
+        let down = slot(0.5, 0.75, 0.25, 0.25); // y 0.75 >= max_y 0.75
+        assert!(down.is_in_direction(target, SpatialDirection::Down));
+        assert!(!down.is_in_direction(target, SpatialDirection::Up));
+
+        // The target itself overlaps and is in no direction.
+        assert!(!target.is_in_direction(target, SpatialDirection::Left));
+        assert!(!target.is_in_direction(target, SpatialDirection::Right));
+        assert!(!target.is_in_direction(target, SpatialDirection::Up));
+        assert!(!target.is_in_direction(target, SpatialDirection::Down));
+    }
+
+    #[test]
+    fn is_in_direction_boundary_touch_is_inclusive() {
+        let target = slot(0.5, 0.5, 0.25, 0.25);
+
+        // candidate.max_x() == target.x → Left (inclusive `<=`).
+        let touch_left = slot(0.25, 0.5, 0.25, 0.25);
+        assert_eq!(touch_left.max_x(), target.x);
+        assert!(touch_left.is_in_direction(target, SpatialDirection::Left));
+
+        // candidate.x == target.max_x() → Right (inclusive `>=`).
+        let touch_right = slot(0.75, 0.5, 0.25, 0.25);
+        assert_eq!(touch_right.x, target.max_x());
+        assert!(touch_right.is_in_direction(target, SpatialDirection::Right));
+
+        // candidate.max_y() == target.y → Up.
+        let touch_up = slot(0.5, 0.25, 0.25, 0.25);
+        assert_eq!(touch_up.max_y(), target.y);
+        assert!(touch_up.is_in_direction(target, SpatialDirection::Up));
+
+        // candidate.y == target.max_y() → Down.
+        let touch_down = slot(0.5, 0.75, 0.25, 0.25);
+        assert_eq!(touch_down.y, target.max_y());
+        assert!(touch_down.is_in_direction(target, SpatialDirection::Down));
+    }
+
+    #[test]
+    fn distance_to_uses_euclidean_geometry() {
+        let target = slot(0.0, 0.0, 0.0, 0.0);
+
+        // Zero separation.
+        assert_eq!(target.distance_to(target), f16::from_f32(0.0));
+
+        // Axis-aligned: dy = 0.5.
+        let axis = slot(0.0, 0.5, 0.0, 0.0);
+        assert_eq!(axis.distance_to(target), f16::from_f32(0.5));
+
+        // Binary-exact 3-4-5 triangle: 0.75² + 1.0² = 1.5625 = 1.25².
+        let diag = slot(0.75, 1.0, 0.0, 0.0);
+        assert_eq!(diag.distance_to(target), f16::from_f32(1.25));
+    }
+
+    #[test]
+    fn wrapped_for_shifts_one_grid() {
+        let s = slot(0.25, 0.5, 0.1, 0.2);
+        let one = f16::from_f32(1.0);
+
+        let left = s.wrapped_for(SpatialDirection::Left);
+        assert_eq!(left.x, s.x + one);
+        assert_eq!((left.y, left.width, left.height), (s.y, s.width, s.height));
+
+        let right = s.wrapped_for(SpatialDirection::Right);
+        assert_eq!(right.x, s.x - one);
+        assert_eq!(right.y, s.y);
+
+        let up = s.wrapped_for(SpatialDirection::Up);
+        assert_eq!(up.y, s.y + one);
+        assert_eq!(up.x, s.x);
+
+        let down = s.wrapped_for(SpatialDirection::Down);
+        assert_eq!(down.y, s.y - one);
+        assert_eq!(down.x, s.x);
     }
 }

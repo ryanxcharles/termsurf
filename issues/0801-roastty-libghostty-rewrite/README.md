@@ -1594,7 +1594,7 @@ are past the correctness-critical foundation.
 - [Experiment 573: split tree f16 structs (Split, Slot) via half::f16](573-split-tree-f16.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 574: split tree spatial geometry (SpatialDirection, slot direction/distance/wrap)](574-split-tree-spatial-geometry.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
