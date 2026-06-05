@@ -213,3 +213,54 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260605-d616-prompt.md`
 - Result: `logs/codex-review/20260605-d616-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+Added `regex = "1"` to `roastty/Cargo.toml` and implemented
+`roastty/src/terminal/string_map.rs`, porting upstream `terminal/StringMap`:
+`StringMap { string: Vec<u8>, map: Vec<Pin> }` (one pin per byte, hard
+`assert_eq!`), `search_iterator(&Regex)` over `regex::bytes::Regex`, the
+`SearchIterator` (`find_at` absolute offsets → advance `offset = match.end()`;
+empty-match guard), and `Match::selection()`
+(`Selection::new(start, end, false)`). The oniguruma retry-budget machinery
+drops (the Rust engine is linear-time). The screen-side producer
+(`PageStringWithPinMap`) wiring and the URL-detection regex (`config/url`)
+remain follow-ups.
+
+Five tests build a `StringMap` from one screen's per-cell pins and compare match
+selections against pins from the same screen (so node-identity comparisons are
+meaningful): a simple `[A-B]{2}` match, two non-overlapping matches, a no-match
+case, a `https?://\S+` URL-like match, and the empty-match-terminates guard.
+Gates: `cargo fmt --check` clean, `cargo build -p roastty` no warnings (`regex`
+resolves), `cargo test -p roastty` **3390 passed / 0 failed** (3385 → 3390, +5),
+no-ghostty grep clean, `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **APPROVED** it with **no Required,
+Optional, or Nit findings**, confirming the port is faithful: the
+one-byte-per-pin invariant (hard `assert_eq!`); `find_at` absolute offsets
+correctly replacing the slice-relative region; non-overlapping advancement;
+`Match` resolving to copied `Pin`s; `Match::selection()` building an untracked
+non-rectangle `Selection`; the empty-match guard (tested); and the sound
+dropping of the oniguruma retry budget. The test approach (all pins from the
+same screen) and the minimal dependency addition are confirmed sound.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260605-d616-prompt.md` / `…-r616-prompt.md`
+- Result: `logs/codex-review/20260605-d616-last-message.md` /
+  `…-r616-last-message.md`
+
+## Conclusion
+
+The `regex` crate is now a roastty dependency and the terminal-core `StringMap`
+regex primitive is ported — the first slice of the regex-area work (resolving
+the oniguruma block by depending, per the chosen direction). The natural
+follow-ups: wire `StringMap` to the existing `PageStringWithPinMap` producer
+(build a map from a real screen selection), and port `config/url`'s
+URL-detection regex + `input/Link`'s matching (the URL pattern may need
+`regex`-crate-compatible syntax — a `fancy-regex` fallback is also available in
+the workspace if look-around is required). Issue 801 stays open and broad.
