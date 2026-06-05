@@ -187,3 +187,65 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d570-prompt.md`
 - Result: `logs/codex-review/20260604-d570-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`input::link` was added: `Action` (`Open` / `OpenOsc8`), `Highlight` (`Always` /
+`Hover` / `AlwaysMods(Mods)` / `HoverMods(Mods)`, using
+`input::key_mods::Mods`), and `Link` (`regex: Vec<u8>`, `action`, `highlight`,
+deriving `Clone` / `PartialEq` / `Eq`) with an `equal` method delegating to
+`==`. `oniRegex` is deferred (no regex binding yet). Registered via
+`pub(crate) mod link;` in `input/mod.rs` (which carries crate-level
+`#![allow(dead_code)]`).
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3155 passed, 0 failed (four new tests; no
+  regressions, up from 3151).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + input/link.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+The four new tests: `equal` comparing all three fields (identical equal;
+differing regex / action / highlight unequal), `clone` as a deep copy (clone
+equals the original and owns a separate buffer — mutating one doesn't affect the
+other), `Highlight` mods comparing by value
+(`AlwaysMods(ctrl) == AlwaysMods(ctrl)`, `!= AlwaysMods(shift)`,
+`AlwaysMods(ctrl) != HoverMods(ctrl)`), and `Action::Open` ≠ `Action::OpenOsc8`.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (one Nit: the `## Result` / `## Conclusion` sections were
+not yet in the saved file — added here as part of result recording). Codex
+confirmed the implementation matches upstream's data shape and the approved
+adaptation — the action/highlight variants are correct, the `Mods` payloads
+compare by value, `regex` is byte-oriented, the derived `Clone` deep-copies the
+`Vec`, and `equal` is equivalent to upstream's field-wise comparison — and that
+the tests cover the equality, clone, modifier, and action cases.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r570-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r570-last-message.md` (result)
+
+## Conclusion
+
+`input::link::Link` is ported from `input/Link.zig` — a clickable
+regex-over-terminal-text link (`Action`, `Highlight`, `equal`, `clone`). The
+byte-faithfulness theme continued (`regex: Vec<u8>` for upstream's
+`[]const u8`), and Rust's derived `PartialEq` / `Clone` exactly capture
+upstream's `std.meta.eql` + `std.mem.eql` `equal` and regex-duplicating `clone`.
+The one external-dependency piece, `oniRegex`, is **deferred** — it needs an
+oniguruma (or equivalent) regex binding that roastty does not yet have; that
+binding (and wiring `Link` into URL/hyperlink detection) is a natural future
+slice. Other unported leaves include `terminal/ScreenSet`, `config/edit`,
+`terminal/osc/parsers/clipboard_operation`; the big-ticket subsystems remain
+`datastruct/split_tree` (2517 lines) and the terminal **search subsystem**
+(coupled to `PageList` / `Pin` / `Screen` / `Selection` / `PageFormatter`). The
+objc/bundle-id helpers, the `home()` resolver, and config `loadDefaultFiles`
+remain deferred pending roastty's naming decision; `background-image-opacity`
+stays float-blocked.
