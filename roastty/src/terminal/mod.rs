@@ -5,6 +5,9 @@ mod ansi;
 mod array_list_collection;
 
 #[allow(dead_code)]
+mod base64_scalar;
+
+#[allow(dead_code)]
 mod bitmap_allocator;
 
 #[allow(dead_code)]

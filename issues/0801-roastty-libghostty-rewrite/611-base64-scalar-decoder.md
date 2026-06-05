@@ -226,3 +226,59 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260605-d611-prompt.md`
 - Result: `logs/codex-review/20260605-d611-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+Implemented `roastty/src/terminal/base64_scalar.rs` (registered in
+`terminal/mod.rs`), porting upstream `simd/base64_scalar`: `Base64Decoder` with
+the precomputed `char_to_index` / `fast_char_to_index` tables (and the
+uniqueness
+
+- pad-overlap asserts), `scalar_decoder()`, `calc_size_upper_bound` /
+  `calc_size_for_slice`, and `decode` — the `u128` 16-char/12-byte and `u32`
+  4-char/3-byte fast loops (with the deliberate over-wide little-endian stores
+  the strict bounds guarantee are overwritten), the scalar leftover, and the
+  lenient (commented-out) padding checks. The one refinement from the design:
+  the scalar accumulator is a `u32` masked `& 0x0fff` (the design said `u16`,
+  but `u16 << 6` overflows before the mask) — bit-for-bit equivalent to
+  upstream's `u12`. The pad-tail loop preserves upstream's exact raw-`0xff` →
+  `InvalidCharacter` else `InvalidPadding` branch. Added `decode_alloc` as an
+  owned-`Vec` convenience.
+
+Seven tests: known vectors, a 28-char input exercising all three paths, a
+round-trip across lengths 0..40, invalid-char, size agreement, Kitty-style
+padding leniency, and the two pad-tail error branches. Gates:
+`cargo fmt --check` clean, `cargo build -p roastty` no warnings,
+`cargo test -p roastty` **3365 passed / 0 failed** (3358 → 3365, +7), no-ghostty
+grep clean, `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **APPROVED** it with **no Required,
+Optional, or Nit findings**, confirming: the two Required design fixes are
+present (alphabet asserts; the raw-`0xff` pad-tail branch); the `u32`
+accumulator masked `& 0x0fff` is sound and `u12`-equivalent while avoiding the
+`u16 << 6` overflow; the fast loops preserve the strict bounds, sentinel checks,
+packed-bit formulas, little-endian writes, and the intentional over-wide stores
+guarded by the destination length; and `calc_size_*`, the pad-size reduction,
+the scalar leftover, and the lenient commented-out padding checks all match. The
+28-char and pad-tail tests cover the subtle paths.
+
+Review artifacts:
+
+- Design prompt/result:
+  `logs/codex-review/20260605-d611-{prompt,last-message}.md`
+- Result prompt/result:
+  `logs/codex-review/20260605-r611-{prompt,last-message}.md`
+
+## Conclusion
+
+`simd/base64_scalar` is fully ported — the canonical scalar base64 decoder for
+the terminal, faithful to upstream including its Kitty-compatibility leniency.
+The dependency boundaries gating the larger remaining work are unchanged (the
+outer search `Thread` / libxev, regex/oniguruma, the URI parser / `std.Uri`).
+Remaining self-contained `simd/` companions (`base64.zig`'s SIMD dispatcher,
+`index_of`, `codepoint_width`) and any further unblocked utilities are the
+natural next slices; Issue 801 stays open and broad.
