@@ -1604,7 +1604,7 @@ are past the correctness-critical foundation.
 - [Experiment 578: split tree Spatial container (spatial / fillSpatialSlots)](578-split-tree-spatial.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 579: split tree nearest / nearestWrapped (spatial navigation)](579-split-tree-nearest.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

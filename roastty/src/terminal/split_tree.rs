@@ -2,9 +2,9 @@
 //! (`Handle` / `Layout` / `Direction`), the `Split` / `Slot` payloads, the spatial geometry, the
 //! `Node<V>` arena (`SplitTree`) with the structural queries (`is_empty` / `is_split` / `deepest` /
 //! `dimensions`) and `Rc<V>`-based view ref-counting, the leaf `iter`ator, `zoom`, and the `Goto`
-//! enum, and the `Spatial` container's normalization (`spatial` / `fillSpatialSlots`). Still
-//! deferred: the tree-shaping operations (`split` / `remove` / `equalize` / `resize`), the `goto`
-//! method, the arena-coupled `nearest` / `nearestWrapped`, and the formatters.
+//! enum, the `Spatial` container's normalization (`spatial` / `fillSpatialSlots`), and the spatial
+//! navigation (`nearest` / `nearest_wrapped`). Still deferred: the tree-shaping operations (`split`
+//! / `remove` / `equalize` / `resize`), the `goto` method, and the formatters.
 
 use half::f16;
 use std::rc::Rc;
@@ -298,6 +298,61 @@ impl<V> SplitTree<V> {
         }
 
         Spatial { slots }
+    }
+
+    /// The nearest leaf to `target` in `direction`, or `None` if there is none (upstream
+    /// `nearest`). Scans the spatial slots, skipping `from` and non-leaf nodes, and returns the
+    /// closest in-direction leaf (ties to the first found).
+    fn nearest(
+        &self,
+        sp: &Spatial,
+        from: Handle,
+        direction: SpatialDirection,
+        target: Slot,
+    ) -> Option<Handle> {
+        let mut result: Option<(Handle, f16)> = None;
+        for (handle, &slot) in sp.slots().iter().enumerate() {
+            if handle == from.idx() {
+                continue; // never match ourself
+            }
+            if !matches!(self.nodes[handle], Node::Leaf(_)) {
+                continue; // only leaves
+            }
+            if !slot.is_in_direction(target, direction) {
+                continue; // must be in the proper direction
+            }
+            let distance = slot.distance_to(target);
+            if let Some((_, best)) = result {
+                if distance >= best {
+                    continue; // an existing nearest must be strictly closer
+                }
+            }
+            result = Some((Handle::from_index(handle), distance));
+        }
+        result.map(|(handle, _)| handle)
+    }
+
+    /// Like `nearest`, but wraps around the 1×1 grid if there is no in-direction leaf (upstream
+    /// `nearestWrapped`).
+    fn nearest_wrapped(
+        &self,
+        sp: &Spatial,
+        from: Handle,
+        direction: SpatialDirection,
+    ) -> Option<Handle> {
+        let target = sp.slots()[from.idx()];
+        if let Some(v) = self.nearest(sp, from, direction, target) {
+            return Some(v);
+        }
+
+        // No in-direction leaf: shift the target one full grid (the wrap) and retry. The grid is
+        // normalized to 1×1, so this models wrapping without modifying the representation.
+        let zero = f16::from_f32(0.0);
+        let one = f16::from_f32(1.0);
+        assert!(target.x >= zero && target.y >= zero);
+        assert!(target.max_x() <= one && target.max_y() <= one);
+        let wrapped = target.wrapped_for(direction);
+        self.nearest(sp, from, direction, wrapped)
     }
 
     /// Recursively fill each child's slot from its parent split's slot (upstream
@@ -926,6 +981,112 @@ mod tests {
         let sp = tree.spatial();
         assert!(slot_eq(sp.slots()[1], 0.0, 0.0, 1.0, 0.5)); // top leaf
         assert!(slot_eq(sp.slots()[2], 0.0, 0.5, 1.0, 0.5)); // bottom leaf
+    }
+
+    /// A 2x2 grid tree: root is a horizontal split of two vertical columns. Leaves: TL=2, BL=3,
+    /// TR=5, BR=6.
+    fn grid_2x2() -> SplitTree<&'static str> {
+        SplitTree {
+            nodes: vec![
+                Node::Split(split_ratio(Layout::Horizontal, 0.5, 1, 4)), // 0: root
+                Node::Split(split_ratio(Layout::Vertical, 0.5, 2, 3)),   // 1: left column
+                Node::Leaf(Rc::new("TL")),                               // 2
+                Node::Leaf(Rc::new("BL")),                               // 3
+                Node::Split(split_ratio(Layout::Vertical, 0.5, 5, 6)),   // 4: right column
+                Node::Leaf(Rc::new("TR")),                               // 5
+                Node::Leaf(Rc::new("BR")),                               // 6
+            ],
+            zoomed: None,
+        }
+    }
+
+    #[test]
+    fn nearest_horizontal_no_wrap() {
+        let tree = SplitTree {
+            nodes: vec![
+                Node::Split(split_ratio(Layout::Horizontal, 0.5, 1, 2)),
+                Node::Leaf(Rc::new("a")),
+                Node::Leaf(Rc::new("b")),
+            ],
+            zoomed: None,
+        };
+        let sp = tree.spatial();
+        let left = Handle::from_index(1);
+        let right = Handle::from_index(2);
+
+        // From the left leaf, Right finds the right leaf; symmetric.
+        assert_eq!(
+            tree.nearest(&sp, left, SpatialDirection::Right, sp.slots()[1]),
+            Some(right)
+        );
+        assert_eq!(
+            tree.nearest(&sp, right, SpatialDirection::Left, sp.slots()[2]),
+            Some(left)
+        );
+        // From the left leaf, Left has no in-direction leaf (no wrap).
+        assert_eq!(
+            tree.nearest(&sp, left, SpatialDirection::Left, sp.slots()[1]),
+            None
+        );
+    }
+
+    #[test]
+    fn nearest_wrapped_horizontal() {
+        let tree = SplitTree {
+            nodes: vec![
+                Node::Split(split_ratio(Layout::Horizontal, 0.5, 1, 2)),
+                Node::Leaf(Rc::new("a")),
+                Node::Leaf(Rc::new("b")),
+            ],
+            zoomed: None,
+        };
+        let sp = tree.spatial();
+        let left = Handle::from_index(1);
+        let right = Handle::from_index(2);
+
+        // Left from the leftmost wraps around to the rightmost, and vice versa.
+        assert_eq!(
+            tree.nearest_wrapped(&sp, left, SpatialDirection::Left),
+            Some(right)
+        );
+        assert_eq!(
+            tree.nearest_wrapped(&sp, right, SpatialDirection::Right),
+            Some(left)
+        );
+    }
+
+    #[test]
+    fn nearest_wrapped_2x2_grid() {
+        let tree = grid_2x2();
+        let sp = tree.spatial();
+        let tl = Handle::from_index(2);
+        let bl = Handle::from_index(3);
+        let tr = Handle::from_index(5);
+        let br = Handle::from_index(6);
+
+        // Adjacents from the top-left corner.
+        assert_eq!(
+            tree.nearest_wrapped(&sp, tl, SpatialDirection::Right),
+            Some(tr)
+        );
+        assert_eq!(
+            tree.nearest_wrapped(&sp, tl, SpatialDirection::Down),
+            Some(bl)
+        );
+        // Adjacents from the bottom-right corner.
+        assert_eq!(
+            tree.nearest_wrapped(&sp, br, SpatialDirection::Left),
+            Some(bl)
+        );
+        assert_eq!(
+            tree.nearest_wrapped(&sp, br, SpatialDirection::Up),
+            Some(tr)
+        );
+        // Left from the left column wraps to the same row on the right.
+        assert_eq!(
+            tree.nearest_wrapped(&sp, tl, SpatialDirection::Left),
+            Some(tr)
+        );
     }
 
     #[test]

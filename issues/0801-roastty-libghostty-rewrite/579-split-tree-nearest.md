@@ -217,3 +217,63 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d579-prompt.md`
 - Result: `logs/codex-review/20260604-d579-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`terminal::split_tree` gained the spatial navigation: `SplitTree::nearest` (scan
+the `Spatial` slots by index, skip `from` and non-leaf nodes via the arena,
+filter by `is_in_direction`, keep the strictly-closest by `distance_to`,
+returning the handle) and `SplitTree::nearest_wrapped` (try `from`'s own slot
+first; otherwise assert the normalized bounds, shift the target with
+`wrapped_for`, and retry). The module doc comment was updated to mark the
+navigation as landed.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3196 passed, 0 failed (three new tests; no
+  regressions, up from 3193).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/split_tree.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+The three new tests: horizontal no-wrap (`Right`/`Left` find the adjacent leaf,
+`Left` from the leftmost is `None`), horizontal wrap (`Left` from the leftmost
+wraps to the rightmost, and vice versa), and a 2×2 grid (`TL` `Right`→`TR`, `TL`
+`Down`→`BL`, `BR` `Left`→`BL`, `BR` `Up`→`TR`, and `TL` `Left` wrapping to the
+same row on the right).
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (one Nit: the `## Result` / `## Conclusion` sections were
+not yet in the saved file — added here). Codex confirmed `nearest` matches
+upstream — arena-order scan, skip `from`, leaf-only filtering, the direction
+predicate, the `distance >= best` comparison preserving first-on-tie, and handle
+reconstruction from the slot index — and that `nearest_wrapped` matches
+(unwrapped attempt first, normalized-bounds assertions before wrapping, shift
+target, retry), and that the 2×2 expectations are sound.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r579-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r579-last-message.md` (result)
+
+## Conclusion
+
+This experiment ports the split_tree spatial navigation — the seventh split_tree
+slice — the consumer that **ties together** the `Node<V>` arena (Experiment
+576), the `Slot` geometry helpers (Experiment 574), and the `Spatial` container
+(Experiment 578): `nearest` scans a `Spatial`'s slots, filters to in-direction
+leaves via the arena, and returns the closest; `nearest_wrapped` wraps the
+target by one grid when there is no neighbor ahead. With the spatial core
+complete, the remaining split_tree work is the in-order `previous` / `next`
+backtracking traversal, the `goto` dispatch (which combines `previous` / `next`
+with `nearest_wrapped`), the tree-shaping operations (`split` / `remove` /
+`equalize` / `resize`), and the formatters. The other remaining big-ticket
+subsystem is the terminal **search subsystem** (coupled to `PageList` / `Pin` /
+`Screen` / `Selection` / `PageFormatter`); the dependency-blocked helpers
+persist (regex/oniguruma for `Link::oniRegex`, a URI parser for `os/uri`, the
+config-directory naming decision for `file_load` / `edit` / `loadDefaultFiles`).
