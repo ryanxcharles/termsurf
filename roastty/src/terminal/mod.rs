@@ -44,6 +44,9 @@ pub(crate) mod focus;
 mod hyperlink;
 
 #[allow(dead_code)]
+mod lru;
+
+#[allow(dead_code)]
 mod message_data;
 
 #[allow(dead_code)]

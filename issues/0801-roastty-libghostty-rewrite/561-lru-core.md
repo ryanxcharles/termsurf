@@ -347,3 +347,64 @@ Review artifacts:
   `logs/codex-review/20260604-d561b-prompt.md` (design re-review)
 - Result: `logs/codex-review/20260604-d561-last-message.md` (design),
   `logs/codex-review/20260604-d561b-last-message.md` (design re-review)
+
+## Result
+
+**Result:** Pass
+
+`terminal::lru::Lru<K, V>` was added: an arena (`Vec<Node>` + `usize` indices
+with a `NIL` sentinel) doubly-linked LRU list plus a `HashMap<K, usize>`, with
+`new`, `get` (no recency change), `get_or_put_with` (hit ⇒ bump to MRU; miss ⇒
+compute the value via the closure, then insert — reusing the LRU slot via
+`mem::replace` when at capacity and reporting the genuinely- evicted
+`(old.key, old.value)`), `len`, `capacity`, and the `unlink` / `link_tail` /
+`bump` helpers. `GetOrPut` returns the `&mut V` handle + `found_existing` +
+`evicted`. The module is registered in `terminal/mod.rs`. Four tests: the
+upstream eviction sequence (with `panic!` closures proving `make_value` is never
+called on a hit), `get` not changing recency, the returned value being writable,
+and `len`/`capacity`.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3112 passed, 0 failed (four new tests; no
+  regressions, up from 3108).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/lru.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **one Nit** (no
+Required or Optional findings): the doc had `## Result` but no `## Conclusion` —
+fixed by adding the conclusion below. Codex confirmed the implementation matches
+the approved re-reviewed design: hits bump to MRU, `get` does not bump, misses
+compute the value only once before mutation, capacity misses reuse the LRU slot,
+and the documented `evicted.key` correction returns the genuine
+`(old.key, old.value)` while preserving upstream's meaningful evicted value; the
+tests cover the eviction sequence, no-bump `get`, the hit-closure behavior,
+returned mutability, and length/capacity.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r561-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r561-last-message.md` (result)
+
+## Conclusion
+
+`terminal::lru::Lru` — a capacity-bounded LRU cache core — is faithfully ported
+from `datastruct/lru.zig`'s `HashMap`. The biggest adaptation was structural:
+upstream's intrusive `DoublyLinkedList` + `HashMap<K, *Entry>` (raw pointers,
+`@fieldParentPtr`, an uninitialized `value_ptr`) became a safe **arena**
+(`Vec<Node>` + `usize` indices) doubly-linked list, a `HashMap<K, usize>`, and a
+**closure** `get_or_put_with` that computes the value only on a miss. The design
+review also surfaced an upstream quirk — `evicted.key` is erroneously the new
+key — which roastty intentionally corrects (the value, the only meaningful
+field, is identical). This is roastty's fourth `datastruct/` port. The remaining
+`lru` slice (`resize`, which needs arena free-slot handling) is deferred; the
+other remaining `datastruct/` types are `intrusive_linked_list` (the raw
+machinery), `segmented_pool` (libuv), `blocking_queue` (channel-like), and the
+large `split_tree`. The terminal **search subsystem** (now that `CircBuf` is
+complete) is the other natural target. The objc/bundle-id helpers, the `home()`
+resolver, and config `loadDefaultFiles` remain deferred pending roastty's naming
+decision; `background-image-opacity` stays float-blocked.
