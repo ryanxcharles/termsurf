@@ -262,3 +262,72 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d576-prompt.md`
 - Result: `logs/codex-review/20260604-d576-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`terminal::split_tree` gained the node arena: `Node<V>` (`Leaf(Rc<V>)` /
+`Split`), `Side`, `Dimensions`, and `SplitTree<V>` (`nodes: Vec<Node<V>>`,
+`zoomed: Option<Handle>`, deriving `Clone`) with `empty` / `new(Rc<V>)` /
+`is_empty` / `is_split` / `deepest` / `dimensions`. The leaf's `Rc<V>` supplies
+the view ref-count lifecycle: cloning the tree refs each view (upstream
+`refNodes`), dropping it unrefs them (upstream `viewUnref` / `deinit`). The
+module doc comment was updated to reflect that the arena and ref-counting are
+now landed.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3180 passed, 0 failed (six new tests; no regressions,
+  up from 3174).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/split_tree.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+The six new tests: single-leaf queries, the empty tree, a horizontal split
+(`is_split`, `deepest` left/right = the two leaf handles,
+`dimensions == {2, 1}`), a vertical split (`{1, 2}`), a nested tree (a
+horizontal split of a vertical 1×2 column and a single leaf → `deepest` left
+reaches the deep leaf, right reaches the leaf, `dimensions == {2, 2}`), and the
+`Rc::strong_count` clone/drop lifecycle (`2 → 3` on clone, `→ 2` on dropping the
+clone, `→ 1` on dropping the tree).
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (two Nits, both fixed): the module doc comment still
+listed the arena / ref-counting as deferred (updated to reflect they are landed,
+narrowing the deferral to the tree-shaping / spatial / formatter work), and the
+`## Result` / `## Conclusion` sections were not yet in the saved file (added
+here). Codex confirmed the implementation matches upstream for the arena model,
+root-at- index-0, `is_empty`, root `is_split`, `deepest`, and `dimensions` —
+verifying the nested `{2, 2}` case (a vertical `{1, 2}` left subtree plus a
+`{1, 1}` right leaf under a horizontal split gives width `2`, height `2`) — and
+that the `Rc` clone/drop strong-count test soundly validates the refcount
+adaptation.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r576-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r576-last-message.md` (result)
+
+## Conclusion
+
+This experiment lands the **generic `Node<V>` arena** of `datastruct/split_tree`
+— the fourth split_tree slice (after the vocabulary, the `Split` / `Slot`
+payloads, and the spatial geometry). The defining adaptation is the view
+lifecycle: upstream's externally ref-counted `*View` (`View.ref` / `View.unref`
+via `viewRef` / `viewUnref`) becomes `Rc<V>`, so the tree's `clone` and drop
+_are_ the ref / unref — no allocator, no explicit ref methods, validated by the
+`Rc::strong_count` test. With the arena in place, the next split_tree slices are
+the tree-shaping operations (`split` / `remove` / `goto` / `previous` / `next` /
+`zoom`) and the `iterator` (all arena walks over `Node<V>`), then the `Spatial`
+container's normalization (`spatial` / `fillSpatialSlots`, which combine the
+`Node` arena with the `Slot` / spatial geometry already ported) and the
+arena-coupled `nearest` / `nearestWrapped`, and finally the formatters. The
+other remaining big-ticket subsystem is the terminal **search subsystem**
+(coupled to `PageList` / `Pin` / `Screen` / `Selection` / `PageFormatter`); the
+dependency-blocked helpers persist (regex/oniguruma for `Link::oniRegex`, a URI
+parser for `os/uri`, the config-directory naming decision for `file_load` /
+`edit` / `loadDefaultFiles`).

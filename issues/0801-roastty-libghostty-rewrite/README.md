@@ -1598,7 +1598,7 @@ are past the correctness-critical foundation.
 - [Experiment 575: config float formatter (background-image-opacity)](575-config-float-formatter.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 576: split tree arena (Node, SplitTree, Side, structural queries)](576-split-tree-arena.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 

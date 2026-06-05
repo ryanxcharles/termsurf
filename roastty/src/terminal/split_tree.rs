@@ -1,8 +1,13 @@
-//! Foundational types for the split-pane tree (port of the vocabulary of upstream
-//! `datastruct/split_tree`). The tree itself — the node arena, view ref-counting, and the
-//! spatial normalization / resize logic — is deferred.
+//! The split-pane tree (port of upstream `datastruct/split_tree`). Lands the vocabulary
+//! (`Handle` / `Layout` / `Direction`), the `Split` / `Slot` payloads, the spatial geometry, and
+//! the `Node<V>` arena (`SplitTree`) with the structural queries (`is_empty` / `is_split` /
+//! `deepest` / `dimensions`) and `Rc<V>`-based view ref-counting. Still deferred: the tree-shaping
+//! operations (`split` / `remove` / `goto` / `zoom` / `equalize` / `resize`), the iterator, the
+//! `Spatial` container's normalization (`spatial` / `fillSpatialSlots`) and `nearest`, and the
+//! formatters.
 
 use half::f16;
+use std::rc::Rc;
 
 /// A handle into the tree's `nodes` array (upstream `Node.Handle`): a `u16`-backed index, so nodes
 /// are referenced by 16-bit handles rather than pointers.
@@ -154,6 +159,107 @@ pub(crate) enum SpatialDirection {
     Right,
     Down,
     Up,
+}
+
+/// A node in the split tree (upstream `Node`): a leaf holding a (ref-counted) view, or an internal
+/// split.
+#[derive(Debug, Clone)]
+pub(crate) enum Node<V> {
+    Leaf(Rc<V>),
+    Split(Split),
+}
+
+/// Which child to descend into (upstream `Side`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Side {
+    Left,
+    Right,
+}
+
+/// Relative tree dimensions in leaf units (upstream `dimensions`' anonymous return).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Dimensions {
+    pub(crate) width: u16,
+    pub(crate) height: u16,
+}
+
+/// An immutable binary tree of split panes, stored as a flat node arena (upstream `SplitTree(V)`).
+/// Index 0 is the root. Cloning the tree clones each leaf's `Rc<V>` (upstream `clone` / `refNodes`);
+/// dropping it drops them (upstream `deinit` / `viewUnref`).
+#[derive(Debug, Clone)]
+pub(crate) struct SplitTree<V> {
+    nodes: Vec<Node<V>>,
+    zoomed: Option<Handle>,
+}
+
+impl<V> SplitTree<V> {
+    /// An empty tree with no nodes (upstream `empty`).
+    pub(crate) fn empty() -> Self {
+        SplitTree {
+            nodes: Vec::new(),
+            zoomed: None,
+        }
+    }
+
+    /// A single-leaf tree holding `view` (upstream `init`). The caller's `Rc` is stored (its
+    /// refcount is the view's ref).
+    pub(crate) fn new(view: Rc<V>) -> Self {
+        SplitTree {
+            nodes: vec![Node::Leaf(view)],
+            zoomed: None,
+        }
+    }
+
+    /// Whether the tree has no nodes (upstream `isEmpty`).
+    pub(crate) fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    /// Whether the root is a split — i.e. the tree has more than one view (upstream `isSplit`).
+    pub(crate) fn is_split(&self) -> bool {
+        matches!(self.nodes.first(), Some(Node::Split(_)))
+    }
+
+    /// The deepest leaf reached by always descending into the `side` child from `from` (upstream
+    /// `deepest`).
+    pub(crate) fn deepest(&self, side: Side, from: Handle) -> Handle {
+        let mut current = from;
+        loop {
+            match &self.nodes[current.idx()] {
+                Node::Leaf(_) => return current,
+                Node::Split(s) => {
+                    current = match side {
+                        Side::Left => s.left,
+                        Side::Right => s.right,
+                    }
+                }
+            }
+        }
+    }
+
+    /// Relative dimensions of the subtree at `from`, in leaf units (upstream `dimensions`).
+    pub(crate) fn dimensions(&self, from: Handle) -> Dimensions {
+        match &self.nodes[from.idx()] {
+            Node::Leaf(_) => Dimensions {
+                width: 1,
+                height: 1,
+            },
+            Node::Split(s) => {
+                let left = self.dimensions(s.left);
+                let right = self.dimensions(s.right);
+                match s.layout {
+                    Layout::Horizontal => Dimensions {
+                        width: left.width + right.width,
+                        height: left.height.max(right.height),
+                    },
+                    Layout::Vertical => Dimensions {
+                        width: left.width.max(right.width),
+                        height: left.height + right.height,
+                    },
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -360,5 +466,141 @@ mod tests {
         let down = s.wrapped_for(SpatialDirection::Down);
         assert_eq!(down.y, s.y - one);
         assert_eq!(down.x, s.x);
+    }
+
+    // A split node payload for hand-built test trees.
+    fn split(layout: Layout, left: usize, right: usize) -> Split {
+        Split {
+            layout,
+            ratio: f16::from_f32(0.5),
+            left: Handle::from_index(left),
+            right: Handle::from_index(right),
+        }
+    }
+
+    #[test]
+    fn single_leaf_tree_queries() {
+        let tree = SplitTree::new(Rc::new("view"));
+        assert!(!tree.is_empty());
+        assert!(!tree.is_split());
+        assert_eq!(tree.deepest(Side::Left, Handle::ROOT), Handle::ROOT);
+        assert_eq!(tree.deepest(Side::Right, Handle::ROOT), Handle::ROOT);
+        assert_eq!(
+            tree.dimensions(Handle::ROOT),
+            Dimensions {
+                width: 1,
+                height: 1
+            }
+        );
+    }
+
+    #[test]
+    fn empty_tree_queries() {
+        let tree: SplitTree<&str> = SplitTree::empty();
+        assert!(tree.is_empty());
+        assert!(!tree.is_split());
+    }
+
+    #[test]
+    fn horizontal_split_of_two_leaves() {
+        // root = H split(left=1, right=2); nodes[1]=leaf, nodes[2]=leaf.
+        let tree = SplitTree {
+            nodes: vec![
+                Node::Split(split(Layout::Horizontal, 1, 2)),
+                Node::Leaf(Rc::new("a")),
+                Node::Leaf(Rc::new("b")),
+            ],
+            zoomed: None,
+        };
+        assert!(tree.is_split());
+        assert_eq!(
+            tree.deepest(Side::Left, Handle::ROOT),
+            Handle::from_index(1)
+        );
+        assert_eq!(
+            tree.deepest(Side::Right, Handle::ROOT),
+            Handle::from_index(2)
+        );
+        assert_eq!(
+            tree.dimensions(Handle::ROOT),
+            Dimensions {
+                width: 2,
+                height: 1
+            }
+        );
+    }
+
+    #[test]
+    fn vertical_split_dimensions() {
+        let tree = SplitTree {
+            nodes: vec![
+                Node::Split(split(Layout::Vertical, 1, 2)),
+                Node::Leaf(Rc::new("a")),
+                Node::Leaf(Rc::new("b")),
+            ],
+            zoomed: None,
+        };
+        assert_eq!(
+            tree.dimensions(Handle::ROOT),
+            Dimensions {
+                width: 1,
+                height: 2
+            }
+        );
+    }
+
+    #[test]
+    fn nested_tree_deepest_and_dimensions() {
+        // root = H split(left=1, right=4); node1 = V split(left=2, right=3) of two leaves; node4 =
+        // leaf. Layout: a 1x2 column on the left, a single leaf on the right → width 2, height 2.
+        let tree = SplitTree {
+            nodes: vec![
+                Node::Split(split(Layout::Horizontal, 1, 4)),
+                Node::Split(split(Layout::Vertical, 2, 3)),
+                Node::Leaf(Rc::new("a")),
+                Node::Leaf(Rc::new("b")),
+                Node::Leaf(Rc::new("c")),
+            ],
+            zoomed: None,
+        };
+        assert!(tree.is_split());
+        // deepest-left descends root→node1→node2.
+        assert_eq!(
+            tree.deepest(Side::Left, Handle::ROOT),
+            Handle::from_index(2)
+        );
+        // deepest-right descends root→node4 (a leaf).
+        assert_eq!(
+            tree.deepest(Side::Right, Handle::ROOT),
+            Handle::from_index(4)
+        );
+        // left column is 1 wide, 2 tall; right leaf is 1x1. Horizontal: width 1+1=2, height
+        // max(2,1)=2.
+        assert_eq!(
+            tree.dimensions(Handle::ROOT),
+            Dimensions {
+                width: 2,
+                height: 2
+            }
+        );
+    }
+
+    #[test]
+    fn clone_ref_counts_the_views() {
+        let view = Rc::new("shared");
+        let tree = SplitTree::new(Rc::clone(&view));
+        // `view` + the leaf's Rc.
+        assert_eq!(Rc::strong_count(&view), 2);
+
+        let cloned = tree.clone();
+        // Cloning the tree refs the view again (upstream `refNodes`).
+        assert_eq!(Rc::strong_count(&view), 3);
+
+        drop(cloned);
+        // Dropping the clone unrefs it (upstream `deinit` / `viewUnref`).
+        assert_eq!(Rc::strong_count(&view), 2);
+
+        drop(tree);
+        assert_eq!(Rc::strong_count(&view), 1);
     }
 }
