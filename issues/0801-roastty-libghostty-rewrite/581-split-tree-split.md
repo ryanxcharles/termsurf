@@ -236,3 +236,79 @@ Review artifacts:
 
 - Prompt: `logs/codex-review/20260604-d581-prompt.md`
 - Result: `logs/codex-review/20260604-d581-last-message.md`
+
+## Result
+
+**Result:** Pass
+
+`terminal::split_tree` gained `TooManyNodes` and `SplitTree::split` — the first
+tree-shaping operation. `split` builds a new tree (`self`'s nodes cloned at the
+front, `insert`'s nodes cloned next with their split handles `offset` by
+`self_len`, the `at` node relocated to the final slot, and a fresh `Split` at
+`at`'s slot whose child order follows `Direction::split_layout`), erroring with
+`TooManyNodes` when the node count exceeds the `u16` handle range, and resetting
+`zoomed`.
+
+One structural fix was required during implementation: the derived `Clone` on
+`Node<V>` and `SplitTree<V>` added a spurious `V: Clone` bound (a `derive`-macro
+limitation), but `Rc<V>` is `Clone` for any `V` and `split` is generic with no
+`Clone` bound. The derived `Clone` was replaced with **manual** `Clone` impls
+for both (`Node::clone` → `Rc::clone` / copy the `Copy` `Split`;
+`SplitTree::clone` → clone the node `Vec` + copy `zoomed`), with no `V` bound;
+`#[derive(Debug)]` was kept. The module doc comment was updated to mark `split`
+landed.
+
+Gates:
+
+- `cargo fmt -p roastty` accepted; `--check` clean.
+- `cargo test -p roastty`: 3206 passed, 0 failed (seven new tests; no
+  regressions, up from 3199).
+- `cargo build -p roastty`: no warnings.
+- no-`ghostty`-name greps (font/renderer/config + terminal/split_tree.rs +
+  lib.rs/header/abi_harness.c) clean; `git diff --check` clean.
+
+The seven new tests: split single + single `Right` (original left, inserted
+right; `dimensions == {2,1}`, spatial placement), `Left` (mirror), vertical
+`Down` (inserted below, `{1,2}`), inserting a 2-leaf subtree (its child handles
+offset by `self_len`, `{3,1}`), splitting **at a split node** (the relocated
+split keeps its child handles, views `a, b, c`), the `u16`-overflow
+`TooManyNodes` error (a `u16::MAX`-node tree), and the `Rc::strong_count`
+ref-counting (each view `2 → 3` on split, `→ 2` on drop).
+
+## Completion Review
+
+Codex reviewed the completed experiment and **approved** it with **no Required
+or Optional findings** (two Nits, both fixed): the module doc comment still
+listed `split` as deferred (updated) and the `## Result` / `## Conclusion`
+sections were not yet in the saved file (added here). Codex confirmed the
+implementation matches upstream (self nodes cloned at the front, insert nodes
+cloned with handles offset by `self_len`, `at` relocated to the final slot, the
+replacement split's child order following `Direction::split_layout`, `zoomed`
+reset, and the `TooManyNodes` guard covering the `u16` limit before `offset` can
+panic), that the manual `Clone` impls are sound and better than derive here (no
+`V: Clone` needed, the `at`-relocation refcount trace correct), and that the
+tests cover the shape, offset, split-at-split, overflow, spatial placement, and
+refcount cases.
+
+Review artifacts:
+
+- Prompt: `logs/codex-review/20260604-r581-prompt.md` (result)
+- Result: `logs/codex-review/20260604-r581-last-message.md` (result)
+
+## Conclusion
+
+This experiment ports `split` — the ninth split_tree slice and the **first
+tree-shaping operation**. `split` builds a new immutable tree by inserting a
+subtree next to a node, reusing the already-ported `Direction::split_layout` and
+`Handle::offset`, with Rust's `Rc::clone` providing upstream's `refNodes` view
+ref-counting for free. A notable side-effect was switching `Node<V>` /
+`SplitTree<V>` to **manual `Clone`** impls (the derived bound `V: Clone` was
+wrong for an `Rc<V>`-holding type) — which also makes the tree `clone`able for
+any view type, as upstream's is. The remaining split_tree work is the other
+shaping operations — `remove` (the inverse of `split`), `equalize`, and `resize`
+(the `f16`-ratio rebalancers) — and the `formatText` / `formatDiagram`
+formatters. The other remaining big-ticket subsystem is the terminal **search
+subsystem** (coupled to `PageList` / `Pin` / `Screen` / `Selection` /
+`PageFormatter`); the dependency-blocked helpers persist (regex/oniguruma for
+`Link::oniRegex`, a URI parser for `os/uri`, the config-directory naming
+decision for `file_load` / `edit` / `loadDefaultFiles`).

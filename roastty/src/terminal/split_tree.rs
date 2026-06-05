@@ -4,8 +4,8 @@
 //! `dimensions`) and `Rc<V>`-based view ref-counting, the leaf `iter`ator, `zoom`, and the `Goto`
 //! enum, the `Spatial` container's normalization (`spatial` / `fillSpatialSlots`), and the full
 //! navigation (the spatial `nearest` / `nearest_wrapped`, the in-order `previous` / `next`, and the
-//! `goto` dispatch). Still deferred: the tree-shaping operations (`split` / `remove` / `equalize` /
-//! `resize`) and the formatters.
+//! `goto` dispatch), and the `split` tree-shaping operation. Still deferred: the remaining
+//! tree-shaping operations (`remove` / `equalize` / `resize`) and the formatters.
 
 use half::f16;
 use std::rc::Rc;
@@ -164,10 +164,20 @@ pub(crate) enum SpatialDirection {
 
 /// A node in the split tree (upstream `Node`): a leaf holding a (ref-counted) view, or an internal
 /// split.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum Node<V> {
     Leaf(Rc<V>),
     Split(Split),
+}
+
+// Manual `Clone` (not derived) so it does not require `V: Clone` — `Rc<V>` is `Clone` for any `V`.
+impl<V> Clone for Node<V> {
+    fn clone(&self) -> Self {
+        match self {
+            Node::Leaf(v) => Node::Leaf(Rc::clone(v)),
+            Node::Split(s) => Node::Split(*s),
+        }
+    }
 }
 
 /// Which child to descend into (upstream `Side`).
@@ -184,6 +194,11 @@ enum Backtrack {
     Result(Handle),
 }
 
+/// The node count of a `split` result would exceed the `u16` handle range (upstream's
+/// `error.OutOfMemory` on the handle-limit check).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct TooManyNodes;
+
 /// Relative tree dimensions in leaf units (upstream `dimensions`' anonymous return).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Dimensions {
@@ -194,10 +209,21 @@ pub(crate) struct Dimensions {
 /// An immutable binary tree of split panes, stored as a flat node arena (upstream `SplitTree(V)`).
 /// Index 0 is the root. Cloning the tree clones each leaf's `Rc<V>` (upstream `clone` / `refNodes`);
 /// dropping it drops them (upstream `deinit` / `viewUnref`).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct SplitTree<V> {
     nodes: Vec<Node<V>>,
     zoomed: Option<Handle>,
+}
+
+// Manual `Clone` (not derived) so it does not require `V: Clone` — cloning the node arena clones
+// each leaf's `Rc<V>` (upstream `refNodes`), which works for any `V`.
+impl<V> Clone for SplitTree<V> {
+    fn clone(&self) -> Self {
+        SplitTree {
+            nodes: self.nodes.clone(),
+            zoomed: self.zoomed,
+        }
+    }
 }
 
 impl<V> SplitTree<V> {
@@ -306,6 +332,56 @@ impl<V> SplitTree<V> {
         }
 
         Spatial { slots }
+    }
+
+    /// Build a new tree by splitting `at` in `direction` with `ratio`, inserting `insert` on the
+    /// new side (upstream `split`). The result shares all views with `self` and `insert`
+    /// (ref-counted) and resets the zoom state.
+    pub(crate) fn split(
+        &self,
+        at: Handle,
+        direction: Direction,
+        ratio: f16,
+        insert: &SplitTree<V>,
+    ) -> Result<SplitTree<V>, TooManyNodes> {
+        let self_len = self.nodes.len();
+        let total = self_len + insert.nodes.len() + 1;
+        if total > u16::MAX as usize {
+            return Err(TooManyNodes);
+        }
+
+        let mut nodes: Vec<Node<V>> = Vec::with_capacity(total);
+        // self's nodes, unchanged (cloning refs each view).
+        nodes.extend(self.nodes.iter().cloned());
+        // insert's nodes, with split handles shifted by `self_len`.
+        for node in &insert.nodes {
+            nodes.push(match node {
+                Node::Leaf(v) => Node::Leaf(Rc::clone(v)),
+                Node::Split(s) => Node::Split(Split {
+                    left: s.left.offset(self_len),
+                    right: s.right.offset(self_len),
+                    ..*s
+                }),
+            });
+        }
+
+        // Relocate the `at` node to the end, then replace its slot with the new split.
+        let relocated_at = total - 1;
+        let inserted_root = self_len;
+        nodes.push(nodes[at.idx()].clone());
+
+        let (layout, left) = direction.split_layout();
+        nodes[at.idx()] = Node::Split(Split {
+            layout,
+            ratio,
+            left: Handle::from_index(if left { inserted_root } else { relocated_at }),
+            right: Handle::from_index(if left { relocated_at } else { inserted_root }),
+        });
+
+        Ok(SplitTree {
+            nodes,
+            zoomed: None, // split always resets zoom
+        })
     }
 
     /// The in-order previous view of `from`, or `None` if it is the first (upstream `previous`).
@@ -1237,6 +1313,175 @@ mod tests {
             tree.goto(tl, Goto::Spatial(SpatialDirection::Down)),
             Some(Handle::from_index(3)) // BL
         );
+    }
+
+    fn half() -> f16 {
+        f16::from_f32(0.5)
+    }
+
+    #[test]
+    fn split_single_right_puts_inserted_on_the_right() {
+        let a = Rc::new("a");
+        let b = Rc::new("b");
+        let original = SplitTree::new(Rc::clone(&a));
+        let insert = SplitTree::new(Rc::clone(&b));
+
+        let tree = original
+            .split(Handle::ROOT, Direction::Right, half(), &insert)
+            .unwrap();
+
+        assert!(tree.is_split());
+        assert_eq!(
+            tree.dimensions(Handle::ROOT),
+            Dimensions {
+                width: 2,
+                height: 1
+            }
+        );
+        // Arena: split@0, b@1 (inserted), a@2 (relocated). a is the left child, b the right.
+        assert_eq!(collect_views(&tree), vec![(1, "b"), (2, "a")]);
+        let sp = tree.spatial();
+        assert!(slot_eq(sp.slots()[2], 0.0, 0.0, 0.5, 1.0)); // a on the left
+        assert!(slot_eq(sp.slots()[1], 0.5, 0.0, 0.5, 1.0)); // b on the right
+    }
+
+    #[test]
+    fn split_single_left_puts_inserted_on_the_left() {
+        let a = Rc::new("a");
+        let b = Rc::new("b");
+        let original = SplitTree::new(Rc::clone(&a));
+        let insert = SplitTree::new(Rc::clone(&b));
+
+        let tree = original
+            .split(Handle::ROOT, Direction::Left, half(), &insert)
+            .unwrap();
+
+        let sp = tree.spatial();
+        assert!(slot_eq(sp.slots()[1], 0.0, 0.0, 0.5, 1.0)); // b on the left
+        assert!(slot_eq(sp.slots()[2], 0.5, 0.0, 0.5, 1.0)); // a on the right
+    }
+
+    #[test]
+    fn split_vertical_down_puts_inserted_below() {
+        let a = Rc::new("a");
+        let b = Rc::new("b");
+        let original = SplitTree::new(Rc::clone(&a));
+        let insert = SplitTree::new(Rc::clone(&b));
+
+        let tree = original
+            .split(Handle::ROOT, Direction::Down, half(), &insert)
+            .unwrap();
+
+        assert_eq!(
+            tree.dimensions(Handle::ROOT),
+            Dimensions {
+                width: 1,
+                height: 2
+            }
+        );
+        let sp = tree.spatial();
+        assert!(slot_eq(sp.slots()[2], 0.0, 0.0, 1.0, 0.5)); // a on top
+        assert!(slot_eq(sp.slots()[1], 0.0, 0.5, 1.0, 0.5)); // b below
+    }
+
+    #[test]
+    fn split_inserting_a_subtree_offsets_its_handles() {
+        let a = Rc::new("a");
+        let original = SplitTree::new(Rc::clone(&a));
+        // A two-leaf horizontal subtree to insert.
+        let insert = SplitTree {
+            nodes: vec![
+                Node::Split(split_ratio(Layout::Horizontal, 0.5, 1, 2)),
+                Node::Leaf(Rc::new("b")),
+                Node::Leaf(Rc::new("c")),
+            ],
+            zoomed: None,
+        };
+
+        let tree = original
+            .split(Handle::ROOT, Direction::Right, half(), &insert)
+            .unwrap();
+
+        // a={1,1}; inserted split (b|c)={2,1}; root H={3,1}.
+        assert_eq!(
+            tree.dimensions(Handle::ROOT),
+            Dimensions {
+                width: 3,
+                height: 1
+            }
+        );
+        // The inserted split's children were offset by self_len=1: b@2, c@3; a relocated to @4.
+        assert_eq!(collect_views(&tree), vec![(2, "b"), (3, "c"), (4, "a")]);
+    }
+
+    #[test]
+    fn split_at_a_split_node_relocates_the_subtree() {
+        // self is a 2-leaf horizontal split.
+        let original = SplitTree {
+            nodes: vec![
+                Node::Split(split_ratio(Layout::Horizontal, 0.5, 1, 2)),
+                Node::Leaf(Rc::new("a")),
+                Node::Leaf(Rc::new("b")),
+            ],
+            zoomed: None,
+        };
+        let insert = SplitTree::new(Rc::new("c"));
+
+        // Split at the root split node, Right.
+        let tree = original
+            .split(Handle::ROOT, Direction::Right, half(), &insert)
+            .unwrap();
+
+        // Relocated original split (a|b) on the left, c on the right.
+        // a={1,1},b={1,1} → relocated split {2,1}; c={1,1}; root H = {3,1}.
+        assert_eq!(
+            tree.dimensions(Handle::ROOT),
+            Dimensions {
+                width: 3,
+                height: 1
+            }
+        );
+        // Arena: new split@0, a@1, b@2 (preserved front), c@3 (inserted), relocated split@4.
+        assert_eq!(collect_views(&tree), vec![(1, "a"), (2, "b"), (3, "c")]);
+    }
+
+    #[test]
+    fn split_overflowing_the_handle_range_errors() {
+        // A tree at the u16 node limit; splitting pushes the count past the handle range.
+        let big: SplitTree<u8> = SplitTree {
+            nodes: (0..u16::MAX as usize)
+                .map(|_| Node::Leaf(Rc::new(0u8)))
+                .collect(),
+            zoomed: None,
+        };
+        let insert = SplitTree::new(Rc::new(0u8));
+        assert_eq!(
+            big.split(Handle::ROOT, Direction::Right, half(), &insert)
+                .err(),
+            Some(TooManyNodes)
+        );
+    }
+
+    #[test]
+    fn split_ref_counts_both_trees_views() {
+        let a = Rc::new("a");
+        let b = Rc::new("b");
+        let original = SplitTree::new(Rc::clone(&a));
+        let insert = SplitTree::new(Rc::clone(&b));
+        // Each view: the local Rc + its tree's leaf.
+        assert_eq!(Rc::strong_count(&a), 2);
+        assert_eq!(Rc::strong_count(&b), 2);
+
+        let tree = original
+            .split(Handle::ROOT, Direction::Right, half(), &insert)
+            .unwrap();
+        // The new tree references each view once more.
+        assert_eq!(Rc::strong_count(&a), 3);
+        assert_eq!(Rc::strong_count(&b), 3);
+
+        drop(tree);
+        assert_eq!(Rc::strong_count(&a), 2);
+        assert_eq!(Rc::strong_count(&b), 2);
     }
 
     #[test]

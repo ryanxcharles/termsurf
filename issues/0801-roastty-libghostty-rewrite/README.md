@@ -1608,7 +1608,7 @@ are past the correctness-critical foundation.
 - [Experiment 580: split tree previous / next traversal and goto dispatch](580-split-tree-goto.md)
   — **Pass** · Claude/Codex/Codex
 - [Experiment 581: split tree split (insert a split node)](581-split-tree-split.md)
-  — **Designed** · Claude/Codex/Codex
+  — **Pass** · Claude/Codex/Codex
 
 ## Non-Goals
 
