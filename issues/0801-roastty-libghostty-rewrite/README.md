@@ -1585,6 +1585,8 @@ are past the correctness-critical foundation.
   **Pass** · Claude/Codex/Codex
 - [Experiment 569: config conditional state (State / Key / Conditional)](569-config-conditional.md)
   — **Pass** · Claude/Codex/Codex
+- [Experiment 570: the input Link type (regex → action)](570-input-link.md) —
+  **Designed** · Claude/Codex/Codex
 
 ## Non-Goals
 
