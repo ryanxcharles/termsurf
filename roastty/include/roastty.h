@@ -1176,10 +1176,40 @@ typedef struct {
   roastty_surface_t surface;
 } roastty_target_s;
 
+typedef enum {
+  ROASTTY_ACTION_NEW_SPLIT = 4,
+  ROASTTY_ACTION_GOTO_SPLIT = 16,
+  ROASTTY_ACTION_RESIZE_SPLIT = 18,
+  ROASTTY_ACTION_EQUALIZE_SPLITS = 19,
+} roastty_action_tag_e;
+
 typedef struct {
   int tag;
   uintptr_t storage[8];
 } roastty_action_s;
+
+typedef enum {
+  ROASTTY_SPLIT_DIRECTION_RIGHT = 0,
+  ROASTTY_SPLIT_DIRECTION_DOWN = 1,
+  ROASTTY_SPLIT_DIRECTION_LEFT = 2,
+  ROASTTY_SPLIT_DIRECTION_UP = 3,
+} roastty_split_direction_e;
+
+typedef enum {
+  ROASTTY_GOTO_SPLIT_PREVIOUS = 0,
+  ROASTTY_GOTO_SPLIT_NEXT = 1,
+  ROASTTY_GOTO_SPLIT_UP = 2,
+  ROASTTY_GOTO_SPLIT_LEFT = 3,
+  ROASTTY_GOTO_SPLIT_DOWN = 4,
+  ROASTTY_GOTO_SPLIT_RIGHT = 5,
+} roastty_goto_split_e;
+
+typedef enum {
+  ROASTTY_RESIZE_SPLIT_UP = 0,
+  ROASTTY_RESIZE_SPLIT_DOWN = 1,
+  ROASTTY_RESIZE_SPLIT_LEFT = 2,
+  ROASTTY_RESIZE_SPLIT_RIGHT = 3,
+} roastty_resize_split_e;
 
 typedef enum {
   ROASTTY_MOUSE_ACTION_PRESS = 0,
@@ -1872,6 +1902,14 @@ ROASTTY_API bool roastty_surface_read_text(roastty_surface_t,
                                            roastty_text_s*);
 ROASTTY_API void roastty_surface_free_text(roastty_surface_t, roastty_text_s*);
 ROASTTY_API void roastty_surface_request_close(roastty_surface_t);
+ROASTTY_API void roastty_surface_split(roastty_surface_t,
+                                       roastty_split_direction_e);
+ROASTTY_API void roastty_surface_split_focus(roastty_surface_t,
+                                             roastty_goto_split_e);
+ROASTTY_API void roastty_surface_split_resize(roastty_surface_t,
+                                              roastty_resize_split_e,
+                                              uint16_t);
+ROASTTY_API void roastty_surface_split_equalize(roastty_surface_t);
 
 #ifdef __cplusplus
 }

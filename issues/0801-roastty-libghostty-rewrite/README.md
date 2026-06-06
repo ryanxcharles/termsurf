@@ -276,7 +276,8 @@ Experiment 246).
       key translation-mod query done; IME point query done; surface key
       callback/keybinding query state foundation done; renderer preedit/export,
       surface mouse callback state foundation done; key dispatch, mouse event
-      dispatch, frontend selection routing/metadata, and splits missing
+      dispatch, frontend selection routing/metadata, and split action callback
+      forwarding done; split tree/frontend mutations missing
 - [ ] Inspector ABI — missing
 
 ### App / Surface / IO — partial
@@ -1871,7 +1872,7 @@ are past the correctness-critical foundation.
 - [Experiment 690: Surface Key Callback Foundation](690-surface-key-callback-foundation.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 691: Surface Split Action Callbacks](691-surface-split-action-callbacks.md)
-  — **Designed** · Codex/-/-
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

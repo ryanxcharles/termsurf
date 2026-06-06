@@ -101,6 +101,29 @@ const ROASTTY_SURFACE_CONTEXT_WINDOW: c_int = 0;
 const ROASTTY_SURFACE_CONTEXT_TAB: c_int = 1;
 const ROASTTY_SURFACE_CONTEXT_SPLIT: c_int = 2;
 
+const ROASTTY_TARGET_SURFACE: c_int = 1;
+const ROASTTY_ACTION_NEW_SPLIT: c_int = 4;
+const ROASTTY_ACTION_GOTO_SPLIT: c_int = 16;
+const ROASTTY_ACTION_RESIZE_SPLIT: c_int = 18;
+const ROASTTY_ACTION_EQUALIZE_SPLITS: c_int = 19;
+
+const ROASTTY_SPLIT_DIRECTION_RIGHT: c_int = 0;
+const ROASTTY_SPLIT_DIRECTION_DOWN: c_int = 1;
+const ROASTTY_SPLIT_DIRECTION_LEFT: c_int = 2;
+const ROASTTY_SPLIT_DIRECTION_UP: c_int = 3;
+
+const ROASTTY_GOTO_SPLIT_PREVIOUS: c_int = 0;
+const ROASTTY_GOTO_SPLIT_NEXT: c_int = 1;
+const ROASTTY_GOTO_SPLIT_UP: c_int = 2;
+const ROASTTY_GOTO_SPLIT_LEFT: c_int = 3;
+const ROASTTY_GOTO_SPLIT_DOWN: c_int = 4;
+const ROASTTY_GOTO_SPLIT_RIGHT: c_int = 5;
+
+const ROASTTY_RESIZE_SPLIT_UP: c_int = 0;
+const ROASTTY_RESIZE_SPLIT_DOWN: c_int = 1;
+const ROASTTY_RESIZE_SPLIT_LEFT: c_int = 2;
+const ROASTTY_RESIZE_SPLIT_RIGHT: c_int = 3;
+
 #[cfg(test)]
 const ROASTTY_MODS_NONE: c_int = 0;
 const ROASTTY_MODS_SHIFT: c_int = 1 << 0;
@@ -1563,6 +1586,22 @@ impl Surface {
         }
     }
 
+    fn perform_action(&self, tag: c_int, storage: [usize; 8]) {
+        let Some(app) = app_from_handle(self.app) else {
+            return;
+        };
+        if let Some(action) = app.runtime.action_cb {
+            let target = RoasttyTarget {
+                tag: ROASTTY_TARGET_SURFACE,
+                surface: (self as *const Surface).cast_mut().cast(),
+            };
+            let action_value = RoasttyAction { tag, storage };
+            unsafe {
+                let _ = action(self.app, target, action_value);
+            }
+        }
+    }
+
     fn inherited_config(&mut self, context: c_int) -> RoasttySurfaceConfig {
         let mut config = roastty_surface_config_new();
         config.context = valid_surface_context(context).unwrap_or(self.context);
@@ -1839,6 +1878,38 @@ fn valid_surface_context(context: c_int) -> Option<c_int> {
         ROASTTY_SURFACE_CONTEXT_WINDOW
         | ROASTTY_SURFACE_CONTEXT_TAB
         | ROASTTY_SURFACE_CONTEXT_SPLIT => Some(context),
+        _ => None,
+    }
+}
+
+fn valid_split_direction(direction: c_int) -> Option<c_int> {
+    match direction {
+        ROASTTY_SPLIT_DIRECTION_RIGHT
+        | ROASTTY_SPLIT_DIRECTION_DOWN
+        | ROASTTY_SPLIT_DIRECTION_LEFT
+        | ROASTTY_SPLIT_DIRECTION_UP => Some(direction),
+        _ => None,
+    }
+}
+
+fn valid_goto_split(direction: c_int) -> Option<c_int> {
+    match direction {
+        ROASTTY_GOTO_SPLIT_PREVIOUS
+        | ROASTTY_GOTO_SPLIT_NEXT
+        | ROASTTY_GOTO_SPLIT_UP
+        | ROASTTY_GOTO_SPLIT_LEFT
+        | ROASTTY_GOTO_SPLIT_DOWN
+        | ROASTTY_GOTO_SPLIT_RIGHT => Some(direction),
+        _ => None,
+    }
+}
+
+fn valid_resize_split(direction: c_int) -> Option<c_int> {
+    match direction {
+        ROASTTY_RESIZE_SPLIT_UP
+        | ROASTTY_RESIZE_SPLIT_DOWN
+        | ROASTTY_RESIZE_SPLIT_LEFT
+        | ROASTTY_RESIZE_SPLIT_RIGHT => Some(direction),
         _ => None,
     }
 }
@@ -9350,6 +9421,54 @@ pub extern "C" fn roastty_surface_request_close(surface: RoasttySurface) {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn roastty_surface_split(surface: RoasttySurface, direction: c_int) {
+    let Some(direction) = valid_split_direction(direction) else {
+        return;
+    };
+    if let Some(surface) = surface_from_handle(surface) {
+        let mut storage = [0usize; 8];
+        storage[0] = direction as usize;
+        surface.perform_action(ROASTTY_ACTION_NEW_SPLIT, storage);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_split_focus(surface: RoasttySurface, direction: c_int) {
+    let Some(direction) = valid_goto_split(direction) else {
+        return;
+    };
+    if let Some(surface) = surface_from_handle(surface) {
+        let mut storage = [0usize; 8];
+        storage[0] = direction as usize;
+        surface.perform_action(ROASTTY_ACTION_GOTO_SPLIT, storage);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_split_resize(
+    surface: RoasttySurface,
+    direction: c_int,
+    amount: u16,
+) {
+    let Some(direction) = valid_resize_split(direction) else {
+        return;
+    };
+    if let Some(surface) = surface_from_handle(surface) {
+        let mut storage = [0usize; 8];
+        storage[0] = usize::from(amount);
+        storage[1] = direction as usize;
+        surface.perform_action(ROASTTY_ACTION_RESIZE_SPLIT, storage);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_split_equalize(surface: RoasttySurface) {
+    if let Some(surface) = surface_from_handle(surface) {
+        surface.perform_action(ROASTTY_ACTION_EQUALIZE_SPLITS, [0usize; 8]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -9376,6 +9495,15 @@ mod tests {
     static CLOSE_USERDATA: AtomicUsize = AtomicUsize::new(0);
     static CLOSE_NEEDS_CONFIRM: AtomicBool = AtomicBool::new(false);
 
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    struct ActionRecord {
+        app: RoasttyApp,
+        target_tag: c_int,
+        surface: RoasttySurface,
+        action_tag: c_int,
+        storage: [usize; 8],
+    }
+
     #[derive(Default)]
     struct EffectState {
         write_calls: Vec<Vec<u8>>,
@@ -9400,6 +9528,8 @@ mod tests {
 
     thread_local! {
         static EFFECT_STATE: RefCell<EffectState> = RefCell::new(EffectState::default());
+        static ACTION_RECORDS: RefCell<Vec<ActionRecord>> = const { RefCell::new(Vec::new()) };
+        static ACTION_RESULT: RefCell<bool> = const { RefCell::new(true) };
     }
 
     fn reset_effect_state() {
@@ -9463,6 +9593,47 @@ mod tests {
             confirm_read_clipboard_cb: None,
             write_clipboard_cb: None,
             close_surface_cb: Some(close_surface_cb),
+        };
+        roastty_app_new(&runtime, ptr::null_mut())
+    }
+
+    unsafe extern "C" fn split_action_cb(
+        app: RoasttyApp,
+        target: RoasttyTarget,
+        action: RoasttyAction,
+    ) -> bool {
+        ACTION_RECORDS.with(|records| {
+            records.borrow_mut().push(ActionRecord {
+                app,
+                target_tag: target.tag,
+                surface: target.surface,
+                action_tag: action.tag,
+                storage: action.storage,
+            });
+        });
+        ACTION_RESULT.with(|result| *result.borrow())
+    }
+
+    fn reset_action_records(result: bool) {
+        ACTION_RECORDS.with(|records| records.borrow_mut().clear());
+        ACTION_RESULT.with(|stored| *stored.borrow_mut() = result);
+    }
+
+    fn action_records() -> Vec<ActionRecord> {
+        ACTION_RECORDS.with(|records| records.borrow().clone())
+    }
+
+    fn new_test_app_with_action(result: bool) -> RoasttyApp {
+        reset_action_records(result);
+        let runtime = RoasttyRuntimeConfig {
+            userdata: ptr::null_mut(),
+            supports_selection_clipboard: false,
+            wakeup_cb: None,
+            action_cb: Some(split_action_cb),
+            read_clipboard_cb: None,
+            confirm_read_clipboard_cb: None,
+            write_clipboard_cb: None,
+            close_surface_cb: None,
         };
         roastty_app_new(&runtime, ptr::null_mut())
     }
@@ -10280,6 +10451,94 @@ mod tests {
         assert_eq!(CLOSE_COUNT.load(Ordering::SeqCst), 0);
         assert_eq!(roastty_surface_app(surface), ptr::null_mut());
         roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_split_constants_match_upstream_values() {
+        assert_eq!(ROASTTY_ACTION_NEW_SPLIT, 4);
+        assert_eq!(ROASTTY_ACTION_GOTO_SPLIT, 16);
+        assert_eq!(ROASTTY_ACTION_RESIZE_SPLIT, 18);
+        assert_eq!(ROASTTY_ACTION_EQUALIZE_SPLITS, 19);
+        assert_eq!(ROASTTY_SPLIT_DIRECTION_RIGHT, 0);
+        assert_eq!(ROASTTY_SPLIT_DIRECTION_DOWN, 1);
+        assert_eq!(ROASTTY_SPLIT_DIRECTION_LEFT, 2);
+        assert_eq!(ROASTTY_SPLIT_DIRECTION_UP, 3);
+        assert_eq!(ROASTTY_GOTO_SPLIT_PREVIOUS, 0);
+        assert_eq!(ROASTTY_GOTO_SPLIT_NEXT, 1);
+        assert_eq!(ROASTTY_GOTO_SPLIT_UP, 2);
+        assert_eq!(ROASTTY_GOTO_SPLIT_LEFT, 3);
+        assert_eq!(ROASTTY_GOTO_SPLIT_DOWN, 4);
+        assert_eq!(ROASTTY_GOTO_SPLIT_RIGHT, 5);
+        assert_eq!(ROASTTY_RESIZE_SPLIT_UP, 0);
+        assert_eq!(ROASTTY_RESIZE_SPLIT_DOWN, 1);
+        assert_eq!(ROASTTY_RESIZE_SPLIT_LEFT, 2);
+        assert_eq!(ROASTTY_RESIZE_SPLIT_RIGHT, 3);
+    }
+
+    #[test]
+    fn surface_split_actions_validate_noop_cases() {
+        reset_action_records(true);
+        roastty_surface_split(ptr::null_mut(), ROASTTY_SPLIT_DIRECTION_RIGHT);
+        roastty_surface_split_focus(ptr::null_mut(), ROASTTY_GOTO_SPLIT_NEXT);
+        roastty_surface_split_resize(ptr::null_mut(), ROASTTY_RESIZE_SPLIT_UP, 10);
+        roastty_surface_split_equalize(ptr::null_mut());
+        assert!(action_records().is_empty());
+
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+        roastty_surface_split(surface, 99);
+        roastty_surface_split_focus(surface, 99);
+        roastty_surface_split_resize(surface, 99, 10);
+        assert!(action_records().is_empty());
+        roastty_app_free(app);
+
+        roastty_surface_split(surface, ROASTTY_SPLIT_DIRECTION_RIGHT);
+        roastty_surface_split_focus(surface, ROASTTY_GOTO_SPLIT_NEXT);
+        roastty_surface_split_resize(surface, ROASTTY_RESIZE_SPLIT_UP, 10);
+        roastty_surface_split_equalize(surface);
+        assert!(action_records().is_empty());
+        roastty_surface_free(surface);
+
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        roastty_surface_split(surface, ROASTTY_SPLIT_DIRECTION_RIGHT);
+        roastty_surface_split_focus(surface, ROASTTY_GOTO_SPLIT_NEXT);
+        roastty_surface_split_resize(surface, ROASTTY_RESIZE_SPLIT_UP, 10);
+        roastty_surface_split_equalize(surface);
+        assert!(action_records().is_empty());
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_split_actions_invoke_runtime_action_callback() {
+        let app = new_test_app_with_action(false);
+        let surface = new_test_surface(app);
+
+        roastty_surface_split(surface, ROASTTY_SPLIT_DIRECTION_LEFT);
+        roastty_surface_split_focus(surface, ROASTTY_GOTO_SPLIT_NEXT);
+        roastty_surface_split_resize(surface, ROASTTY_RESIZE_SPLIT_RIGHT, 37);
+        roastty_surface_split_equalize(surface);
+
+        let records = action_records();
+        assert_eq!(records.len(), 4);
+        for record in &records {
+            assert_eq!(record.app, app);
+            assert_eq!(record.target_tag, ROASTTY_TARGET_SURFACE);
+            assert_eq!(record.surface, surface);
+        }
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_NEW_SPLIT);
+        assert_eq!(records[0].storage[0], ROASTTY_SPLIT_DIRECTION_LEFT as usize);
+        assert_eq!(records[1].action_tag, ROASTTY_ACTION_GOTO_SPLIT);
+        assert_eq!(records[1].storage[0], ROASTTY_GOTO_SPLIT_NEXT as usize);
+        assert_eq!(records[2].action_tag, ROASTTY_ACTION_RESIZE_SPLIT);
+        assert_eq!(records[2].storage[0], 37);
+        assert_eq!(records[2].storage[1], ROASTTY_RESIZE_SPLIT_RIGHT as usize);
+        assert_eq!(records[3].action_tag, ROASTTY_ACTION_EQUALIZE_SPLITS);
+        assert!(records[3].storage.iter().all(|value| *value == 0));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
     }
 
     #[test]

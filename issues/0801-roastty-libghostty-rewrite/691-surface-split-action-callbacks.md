@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 691: Surface Split Action Callbacks
@@ -100,3 +105,42 @@ layout. The design now stores `amount` in `storage[0]` and `direction` in
 Codex approved forwarding the split requests through Roastty's existing runtime
 `action_cb` as the right boundary for this slice, with split-tree and frontend
 pane mutations left to the embedding frontend.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now exposes split action tags, upstream-compatible split direction
+enums, and the four surface split request functions: `roastty_surface_split`,
+`roastty_surface_split_focus`, `roastty_surface_split_resize`, and
+`roastty_surface_split_equalize`.
+
+The implementation validates enum values and forwards valid attached-surface
+requests through the existing runtime `action_cb` with target
+`ROASTTY_TARGET_SURFACE`. Payloads use the approved storage layout: new split
+and goto split store direction in `storage[0]`, resize split stores amount in
+`storage[0]` and direction in `storage[1]`, and equalize splits has no payload.
+Null surfaces, detached surfaces, invalid enum values, and apps without
+`action_cb` are safe no-ops. The callback return value is ignored.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty surface_split -- --nocapture`
+- `cargo test -p roastty --test abi_harness`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+Surface split requests now cross the C ABI and reach the embedding runtime as
+explicit actions. Roastty still does not own split-tree/frontend pane mutation;
+frontends must interpret the action callback and perform the actual split,
+focus, resize, or equalize operation.
+
+## Completion Review
+
+Codex reviewed the staged implementation and result. It found no correctness
+blockers: the ABI forwards through `action_cb`, uses the upstream tag values and
+approved resize payload order, treats null/detached/invalid/no-callback cases as
+no-ops, and ignores the callback return value.
