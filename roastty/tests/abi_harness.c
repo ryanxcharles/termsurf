@@ -4490,6 +4490,23 @@ int main(int argc, char **argv) {
   assert(trigger.key.physical == ROASTTY_KEY_KEY_N);
   assert(trigger.mods == ROASTTY_MODS_SUPER);
 
+  roastty_key_event_t cli_binding_event = NULL;
+  assert(roastty_key_event_new(&cli_binding_event) == ROASTTY_SUCCESS);
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_KEY_N, ROASTTY_MODS_SUPER, NULL, 0);
+  assert(roastty_config_key_is_binding(cli_config, cli_binding_event));
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_CTRL, "a",
+                           0);
+  assert(roastty_config_key_is_binding(cli_config, cli_binding_event));
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_RELEASE,
+                           ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_CTRL, "a",
+                           0);
+  assert(!roastty_config_key_is_binding(cli_config, cli_binding_event));
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_ALT, "a", 0);
+  assert(!roastty_config_key_is_binding(cli_config, cli_binding_event));
+
   roastty_config_t cli_clone = roastty_config_clone(cli_config);
   assert(cli_clone != NULL);
   trigger = roastty_config_trigger(cli_clone, "new_window",
@@ -4497,6 +4514,10 @@ int main(int argc, char **argv) {
   assert(trigger.tag == ROASTTY_TRIGGER_PHYSICAL);
   assert(trigger.key.physical == ROASTTY_KEY_KEY_N);
   assert(trigger.mods == ROASTTY_MODS_SUPER);
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_KEY_N, ROASTTY_MODS_SUPER, NULL, 0);
+  assert(roastty_config_key_is_binding(cli_clone, cli_binding_event));
+  roastty_key_event_free(cli_binding_event);
   roastty_config_free(cli_clone);
   roastty_config_free(cli_config);
 
@@ -4520,6 +4541,19 @@ int main(int argc, char **argv) {
   assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
   assert(trigger.key.unicode == 'n');
   assert(trigger.mods == ROASTTY_MODS_SUPER);
+  assert(roastty_key_event_new(&cli_binding_event) == ROASTTY_SUCCESS);
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_CTRL, "n",
+                           0);
+  assert(roastty_config_key_is_binding(cli_config, cli_binding_event));
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_SUPER, "n",
+                           0);
+  assert(roastty_config_key_is_binding(cli_config, cli_binding_event));
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_F1, ROASTTY_MODS_NONE, NULL, 0);
+  assert(!roastty_config_key_is_binding(cli_config, cli_binding_event));
+  roastty_key_event_free(cli_binding_event);
   trigger = roastty_config_trigger(cli_config, "reload_config",
                                    strlen("reload_config"));
   assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);

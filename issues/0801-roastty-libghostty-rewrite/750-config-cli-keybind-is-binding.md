@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 750: Config CLI Keybind Is Binding
@@ -96,3 +101,51 @@ metadata until the completion review is performed.
 
 Codex re-reviewed the corrected design and approved it for the plan commit with
 no remaining blocking findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now keeps every valid CLI-loaded root keybind available for forward
+event matching while preserving latest-trigger display behavior for
+`roastty_config_trigger` through its newest-to-oldest action scan.
+`roastty_config_key_is_binding` now checks configured keybind triggers before
+falling back to the static default binding query.
+
+Configured trigger matching follows the same shape as the default matcher:
+release events are ignored, modifiers are normalized through
+`event.mods.binding()`, physical triggers compare against `event.key`, and
+Unicode triggers compare against a single-codepoint UTF-8 event value before
+falling back to `event.unshifted_codepoint`.
+
+Verification passed:
+
+- `cargo test -p roastty config_cli_keybind -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_key_is_binding -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_trigger -- --nocapture --test-threads=1`
+- `cargo test -p roastty --test abi_harness -- --nocapture`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Completion Review
+
+Codex reviewed the implementation diff and found no blocking issues. The review
+confirmed that append-only configured keybind storage lets forward matching see
+all loaded root bindings, while `roastty_config_trigger` still reports the
+latest trigger for an action through reverse scanning. It also confirmed that
+configured matching preserves default-query behavior by checking releases,
+binding-normalized modifiers, physical keys, single-codepoint UTF-8, and
+unshifted codepoints before falling back to static defaults.
+
+The review found no must-fix test gaps. It noted that an additional
+side-modifier noise test would be a possible non-blocking follow-up, but the
+implementation already uses the same normalized modifier path as default key
+matching.
+
+## Conclusion
+
+Experiment 750 moved CLI-loaded keybinds from display-only trigger lookup into
+config-level event recognition. The remaining keybinding work is still surface
+dispatch and action execution for configured bindings, plus config files,
+diagnostics, tables, sequences, `clear`, and `unbind` semantics.

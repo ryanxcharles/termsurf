@@ -1448,15 +1448,13 @@ struct ConfigKeybind {
 
 impl Config {
     fn store_keybind(&mut self, binding: ConfigKeybind) {
-        if let Some(existing) = self
-            .keybind_triggers
-            .iter_mut()
-            .find(|existing| existing.action == binding.action)
-        {
-            *existing = binding;
-        } else {
-            self.keybind_triggers.push(binding);
-        }
+        self.keybind_triggers.push(binding);
+    }
+
+    fn key_event_is_binding(&self, event: &key::KeyEvent) -> bool {
+        self.keybind_triggers
+            .iter()
+            .any(|binding| config_trigger_matches_key_event(binding.trigger, event))
     }
 }
 
@@ -5263,6 +5261,34 @@ fn default_key_event_binding(event: &key::KeyEvent) -> Option<DefaultBindingMatc
     None
 }
 
+fn config_trigger_matches_key_event(trigger: RoasttyInputTrigger, event: &key::KeyEvent) -> bool {
+    if event.action == key::KeyAction::Release {
+        return false;
+    }
+
+    if trigger.mods != key_mods_to_raw(event.mods.binding()) {
+        return false;
+    }
+
+    match trigger.tag {
+        ROASTTY_TRIGGER_PHYSICAL => (unsafe { trigger.key.physical }) == event.key as c_int,
+        ROASTTY_TRIGGER_UNICODE => {
+            let codepoint = unsafe { trigger.key.unicode };
+            if let Ok(text) = std::str::from_utf8(&event.utf8) {
+                let mut chars = text.chars();
+                if let Some(ch) = chars.next() {
+                    if chars.next().is_none() && ch as u32 == codepoint {
+                        return true;
+                    }
+                }
+            }
+
+            event.unshifted_codepoint > 0 && event.unshifted_codepoint == codepoint
+        }
+        _ => false,
+    }
+}
+
 fn default_key_event_binding_flags(event: &key::KeyEvent) -> Option<u8> {
     default_key_event_binding(event).map(|binding| binding.flags)
 }
@@ -8596,12 +8622,15 @@ pub extern "C" fn roastty_config_key_is_binding(
     config: RoasttyConfig,
     event: RoasttyKeyEvent,
 ) -> bool {
-    if config_from_handle(config).is_none() {
+    let Some(config) = config_from_handle(config) else {
         return false;
-    }
+    };
     let Some(event) = key_event_from_handle(event) else {
         return false;
     };
+    if config.key_event_is_binding(&event.event) {
+        return true;
+    }
     default_key_event_is_binding(&event.event)
 }
 
@@ -15456,7 +15485,7 @@ mod tests {
     }
 
     #[test]
-    fn config_cli_keybind_later_action_replaces_earlier_and_clones() {
+    fn config_cli_keybind_later_action_reports_latest_trigger_and_clones() {
         with_init_args(
             &[
                 "roastty",
@@ -15478,6 +15507,156 @@ mod tests {
                 }
 
                 roastty_config_free(clone);
+                roastty_config_free(config);
+            },
+        );
+    }
+
+    #[test]
+    fn config_cli_keybind_key_is_binding_matches_physical_unicode_and_clone() {
+        with_init_args(
+            &[
+                "roastty",
+                "--keybind=cmd+KeyN=new_window",
+                "--keybind=ctrl+ö=text:hello",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                let clone = roastty_config_clone(config);
+                let event = new_key_event();
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::KeyN,
+                    ROASTTY_MODS_SUPER,
+                    &[],
+                    0,
+                );
+                assert!(roastty_config_key_is_binding(config, event));
+                assert!(roastty_config_key_is_binding(clone, event));
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_CTRL,
+                    "ö".as_bytes(),
+                    0,
+                );
+                assert!(roastty_config_key_is_binding(config, event));
+                assert!(roastty_config_key_is_binding(clone, event));
+
+                roastty_key_event_free(event);
+                roastty_config_free(clone);
+                roastty_config_free(config);
+            },
+        );
+    }
+
+    #[test]
+    fn config_cli_keybind_key_is_binding_matches_unshifted_and_duplicate_actions() {
+        with_init_args(
+            &[
+                "roastty",
+                "--keybind=ctrl+n=new_window",
+                "--keybind=cmd+n=new_window",
+                "--keybind=alt+x=text:unshifted",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                let event = new_key_event();
+
+                let action = CString::new("new_window").unwrap();
+                assert_unicode_config_trigger(
+                    roastty_config_trigger(config, action.as_ptr(), action.as_bytes().len()),
+                    u32::from(b'n'),
+                    ROASTTY_MODS_SUPER,
+                );
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_CTRL,
+                    b"n",
+                    0,
+                );
+                assert!(roastty_config_key_is_binding(config, event));
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_SUPER,
+                    b"n",
+                    0,
+                );
+                assert!(roastty_config_key_is_binding(config, event));
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_ALT,
+                    &[],
+                    u32::from(b'x'),
+                );
+                assert!(roastty_config_key_is_binding(config, event));
+
+                roastty_key_event_free(event);
+                roastty_config_free(config);
+            },
+        );
+    }
+
+    #[test]
+    fn config_cli_keybind_key_is_binding_rejects_release_mismatch_and_malformed() {
+        with_init_args(
+            &[
+                "roastty",
+                "--keybind=ctrl+a=copy_to_clipboard",
+                "--keybind=F1=reload_config",
+                "--keybind=ctrl+=new_window",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                let event = new_key_event();
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Release,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_CTRL,
+                    b"a",
+                    0,
+                );
+                assert!(!roastty_config_key_is_binding(config, event));
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_ALT,
+                    b"a",
+                    0,
+                );
+                assert!(!roastty_config_key_is_binding(config, event));
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_NONE,
+                    &[],
+                    0,
+                );
+                assert!(!roastty_config_key_is_binding(config, event));
+
+                roastty_key_event_free(event);
                 roastty_config_free(config);
             },
         );
