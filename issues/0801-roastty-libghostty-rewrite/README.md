@@ -1965,6 +1965,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 725: Binding Action Toggle Mouse Reporting](725-binding-action-toggle-mouse-reporting.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 726: Binding Action Toggle Readonly](726-binding-action-toggle-readonly.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
