@@ -10,9 +10,9 @@ model = "gpt-5"
 reasoning = "medium"
 
 [review.result]
-agent = "pending"
-model = "pending"
-reasoning = "pending"
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 709: Binding Action Scroll Lines
@@ -105,3 +105,58 @@ smoke coverage, and prior-action regression coverage.
 The only required fix before plan commit was workflow provenance: replacing the
 pending design-review metadata, adding this design-review section, and updating
 the README provenance tuple to `Codex/Codex/-`.
+
+## Result
+
+**Result:** Pass
+
+Implemented `scroll_page_lines:<i16>` binding-action support for attached
+surfaces. `parse_binding_action` now accepts signed decimal `i16` parameters
+with optional leading `+` or `-`, rejects missing, empty, whitespace, malformed,
+extra-colon, and out-of-range parameters, and stores the parsed value as
+`ScrollPageLines(i16)`.
+
+Dispatch returns `false` for null or detached surfaces, returns `true` for
+attached surfaces, and routes worker-backed surfaces through the existing
+terminal row-delta viewport helper. A zero line count consumes the action
+without moving the viewport.
+
+The Rust tests cover invalid forms, signed negative/positive/explicit-plus
+forms, null/detached surfaces, attached no-worker surfaces, exact worker-backed
+movement by signed line count, zero no-op behavior, and unchanged binding-action
+behavior around previous actions. The C ABI harness now rejects representative
+malformed/out-of-range line-scroll forms and accepts negative, positive,
+explicit-plus, and zero forms.
+
+Verification:
+
+- `cargo fmt -p roastty` passed.
+- `cargo test -p roastty binding_action -- --nocapture` passed: 35 tests.
+- `cargo test -p roastty scroll_page_lines -- --nocapture` passed: 4 tests.
+- `cargo test -p roastty --test abi_harness` passed.
+- `cargo fmt -p roastty -- --check` passed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The line-scroll slice now follows upstream's signed integer parsing and direct
+row-delta viewport movement semantics. The remaining viewport binding-action
+work can continue with fractional page scrolling, explicit row/selection
+scrolling, prompt jumps, or the higher-risk clear-screen action.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 709 diff and found no code correctness
+blockers. The review confirmed that the parser accepts optional leading `+` or
+`-`, requires digits, rejects whitespace/trailing bytes/extra colon/malformed
+input, enforces `i16` bounds including `-32768`, and dispatches the signed value
+directly through the existing viewport row-delta helper.
+
+The review also confirmed that the tests cover invalid forms, out-of-range
+values, signed negative/positive/explicit-plus forms, no-worker, null/detached,
+exact worker-backed movement, zero no-op behavior, ABI smoke coverage, and
+prior-action regression coverage.
+
+The only required fix was workflow provenance: replacing the pending
+result-review metadata, adding this completion-review note, and updating the
+README provenance tuple to `Codex/Codex/Codex`.
