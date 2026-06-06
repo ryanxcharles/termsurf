@@ -129,6 +129,71 @@ pub(crate) enum OutputParseError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TmuxScreenKey {
+    Primary,
+    Alternate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TmuxCapturePane {
+    pub(crate) id: usize,
+    pub(crate) screen_key: TmuxScreenKey,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TmuxCommand {
+    ListWindows,
+    PaneHistory(TmuxCapturePane),
+    PaneVisible(TmuxCapturePane),
+    PaneState,
+    TmuxVersion,
+    User(String),
+}
+
+pub(crate) const LIST_PANES_DELIMITER: u8 = b';';
+pub(crate) const LIST_WINDOWS_DELIMITER: u8 = b' ';
+pub(crate) const TMUX_VERSION_DELIMITER: u8 = b' ';
+
+pub(crate) const LIST_PANES_VARIABLES: &[OutputVariable] = &[
+    OutputVariable::PaneId,
+    OutputVariable::CursorX,
+    OutputVariable::CursorY,
+    OutputVariable::CursorFlag,
+    OutputVariable::CursorShape,
+    OutputVariable::CursorColour,
+    OutputVariable::CursorBlinking,
+    OutputVariable::AlternateOn,
+    OutputVariable::AlternateSavedX,
+    OutputVariable::AlternateSavedY,
+    OutputVariable::InsertFlag,
+    OutputVariable::WrapFlag,
+    OutputVariable::KeypadFlag,
+    OutputVariable::KeypadCursorFlag,
+    OutputVariable::OriginFlag,
+    OutputVariable::MouseAllFlag,
+    OutputVariable::MouseAnyFlag,
+    OutputVariable::MouseButtonFlag,
+    OutputVariable::MouseStandardFlag,
+    OutputVariable::MouseUtf8Flag,
+    OutputVariable::MouseSgrFlag,
+    OutputVariable::FocusFlag,
+    OutputVariable::BracketedPaste,
+    OutputVariable::ScrollRegionUpper,
+    OutputVariable::ScrollRegionLower,
+    OutputVariable::PaneTabs,
+];
+
+pub(crate) const LIST_WINDOWS_VARIABLES: &[OutputVariable] = &[
+    OutputVariable::SessionId,
+    OutputVariable::WindowId,
+    OutputVariable::WindowWidth,
+    OutputVariable::WindowHeight,
+    OutputVariable::WindowLayout,
+];
+
+pub(crate) const TMUX_VERSION_VARIABLES: &[OutputVariable] = &[OutputVariable::Version];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct LayoutChecksum(u16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -471,6 +536,45 @@ pub(crate) fn format_output_variables(variables: &[OutputVariable], delimiter: u
         output.push('}');
     }
     output
+}
+
+impl TmuxCommand {
+    pub(crate) fn format_command(&self) -> String {
+        match self {
+            Self::ListWindows => format!(
+                "list-windows -F '{}'\n",
+                format_output_variables(LIST_WINDOWS_VARIABLES, LIST_WINDOWS_DELIMITER)
+            ),
+            Self::PaneHistory(capture) => format!(
+                "capture-pane -p -e -q {}-S - -E -1 -t %{}\n",
+                capture.alternate_flag(),
+                capture.id
+            ),
+            Self::PaneVisible(capture) => format!(
+                "capture-pane -p -e -q {}-t %{}\n",
+                capture.alternate_flag(),
+                capture.id
+            ),
+            Self::PaneState => format!(
+                "list-panes -F '{}'\n",
+                format_output_variables(LIST_PANES_VARIABLES, LIST_PANES_DELIMITER)
+            ),
+            Self::TmuxVersion => format!(
+                "display-message -p '{}'\n",
+                format_output_variables(TMUX_VERSION_VARIABLES, TMUX_VERSION_DELIMITER)
+            ),
+            Self::User(command) => command.clone(),
+        }
+    }
+}
+
+impl TmuxCapturePane {
+    fn alternate_flag(self) -> &'static str {
+        match self.screen_key {
+            TmuxScreenKey::Primary => "",
+            TmuxScreenKey::Alternate => "-a ",
+        }
+    }
 }
 
 fn parse_notification_line(line: &str) -> Option<ControlNotification> {
@@ -1192,6 +1296,128 @@ mod tests {
                 b' ',
             ),
             "#{session_id} #{window_id} #{window_width} #{window_height} #{window_layout}"
+        );
+    }
+
+    #[test]
+    fn tmux_command_format_constants_match_upstream_lists() {
+        assert_eq!(
+            LIST_WINDOWS_VARIABLES,
+            &[
+                OutputVariable::SessionId,
+                OutputVariable::WindowId,
+                OutputVariable::WindowWidth,
+                OutputVariable::WindowHeight,
+                OutputVariable::WindowLayout,
+            ]
+        );
+        assert_eq!(TMUX_VERSION_VARIABLES, &[OutputVariable::Version]);
+        assert_eq!(
+            LIST_PANES_VARIABLES,
+            &[
+                OutputVariable::PaneId,
+                OutputVariable::CursorX,
+                OutputVariable::CursorY,
+                OutputVariable::CursorFlag,
+                OutputVariable::CursorShape,
+                OutputVariable::CursorColour,
+                OutputVariable::CursorBlinking,
+                OutputVariable::AlternateOn,
+                OutputVariable::AlternateSavedX,
+                OutputVariable::AlternateSavedY,
+                OutputVariable::InsertFlag,
+                OutputVariable::WrapFlag,
+                OutputVariable::KeypadFlag,
+                OutputVariable::KeypadCursorFlag,
+                OutputVariable::OriginFlag,
+                OutputVariable::MouseAllFlag,
+                OutputVariable::MouseAnyFlag,
+                OutputVariable::MouseButtonFlag,
+                OutputVariable::MouseStandardFlag,
+                OutputVariable::MouseUtf8Flag,
+                OutputVariable::MouseSgrFlag,
+                OutputVariable::FocusFlag,
+                OutputVariable::BracketedPaste,
+                OutputVariable::ScrollRegionUpper,
+                OutputVariable::ScrollRegionLower,
+                OutputVariable::PaneTabs,
+            ]
+        );
+    }
+
+    #[test]
+    fn tmux_command_format_list_windows() {
+        assert_eq!(
+            TmuxCommand::ListWindows.format_command(),
+            "list-windows -F '#{session_id} #{window_id} #{window_width} #{window_height} #{window_layout}'\n"
+        );
+    }
+
+    #[test]
+    fn tmux_command_format_pane_history_primary_and_alternate() {
+        assert_eq!(
+            TmuxCommand::PaneHistory(TmuxCapturePane {
+                id: 42,
+                screen_key: TmuxScreenKey::Primary,
+            })
+            .format_command(),
+            "capture-pane -p -e -q -S - -E -1 -t %42\n"
+        );
+        assert_eq!(
+            TmuxCommand::PaneHistory(TmuxCapturePane {
+                id: 42,
+                screen_key: TmuxScreenKey::Alternate,
+            })
+            .format_command(),
+            "capture-pane -p -e -q -a -S - -E -1 -t %42\n"
+        );
+    }
+
+    #[test]
+    fn tmux_command_format_pane_visible_primary_and_alternate() {
+        assert_eq!(
+            TmuxCommand::PaneVisible(TmuxCapturePane {
+                id: 42,
+                screen_key: TmuxScreenKey::Primary,
+            })
+            .format_command(),
+            "capture-pane -p -e -q -t %42\n"
+        );
+        assert_eq!(
+            TmuxCommand::PaneVisible(TmuxCapturePane {
+                id: 42,
+                screen_key: TmuxScreenKey::Alternate,
+            })
+            .format_command(),
+            "capture-pane -p -e -q -a -t %42\n"
+        );
+    }
+
+    #[test]
+    fn tmux_command_format_pane_state() {
+        assert_eq!(
+            TmuxCommand::PaneState.format_command(),
+            "list-panes -F '#{pane_id};#{cursor_x};#{cursor_y};#{cursor_flag};#{cursor_shape};#{cursor_colour};#{cursor_blinking};#{alternate_on};#{alternate_saved_x};#{alternate_saved_y};#{insert_flag};#{wrap_flag};#{keypad_flag};#{keypad_cursor_flag};#{origin_flag};#{mouse_all_flag};#{mouse_any_flag};#{mouse_button_flag};#{mouse_standard_flag};#{mouse_utf8_flag};#{mouse_sgr_flag};#{focus_flag};#{bracketed_paste};#{scroll_region_upper};#{scroll_region_lower};#{pane_tabs}'\n"
+        );
+    }
+
+    #[test]
+    fn tmux_command_format_tmux_version() {
+        assert_eq!(
+            TmuxCommand::TmuxVersion.format_command(),
+            "display-message -p '#{version}'\n"
+        );
+    }
+
+    #[test]
+    fn tmux_command_format_user_passthrough() {
+        assert_eq!(
+            TmuxCommand::User("display-message hello".to_owned()).format_command(),
+            "display-message hello"
+        );
+        assert_eq!(
+            TmuxCommand::User("display-message hello\n".to_owned()).format_command(),
+            "display-message hello\n"
         );
     }
 

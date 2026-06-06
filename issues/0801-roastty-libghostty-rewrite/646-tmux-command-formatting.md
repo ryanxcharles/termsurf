@@ -3,6 +3,16 @@
 agent = "codex"
 model = "gpt-5"
 reasoning = "high"
+
+[review.design]
+agent = "codex"
+session = "019e9ad0-cc79-7040-a54f-3245185e6401"
+verdict = "approved"
+
+[review.result]
+agent = "codex"
+session = "019e9ad0-cc79-7040-a54f-3245185e6401"
+verdict = "approved"
 +++
 
 # Experiment 646: Tmux Command Formatting
@@ -92,3 +102,53 @@ user passthrough, `%` pane targets, reusable format constants, and exact command
 string tests are now specified. The only nit was to make the fail criterion say
 built-in commands, not all commands, are newline-terminated; that wording was
 updated before the plan commit.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has standalone tmux command string formatting in
+`roastty/src/terminal/tmux.rs`.
+
+The implementation ports the command-formatting slice from
+`vendor/ghostty/src/terminal/tmux/viewer.zig`:
+
+- `TmuxScreenKey` distinguishes primary and alternate capture targets;
+- `TmuxCapturePane` carries pane ID and screen key;
+- `TmuxCommand` covers list windows, pane history, pane visible, pane state,
+  tmux version, and user passthrough commands;
+- reusable variable-list and delimiter constants mirror upstream
+  `Format.list_windows`, `Format.list_panes`, and `Format.tmux_version`;
+- built-in commands are newline-terminated;
+- user commands are returned exactly as provided;
+- capture-pane targets include the tmux `%` pane prefix, e.g. `-t %42`;
+- alternate capture-pane commands include `-a`.
+
+Verification passed:
+
+- `cargo test -p roastty terminal::tmux` — 68 passed
+- `cargo fmt -p roastty` — passed
+- `cargo fmt -p roastty -- --check` — passed
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/646-tmux-command-formatting.md`
+  — passed
+- `git diff --check` — passed
+
+Source comparison was performed against:
+
+- `vendor/ghostty/src/terminal/tmux/viewer.zig` `Command` and `Format` sections
+- `vendor/ghostty/src/terminal/tmux/output.zig`
+
+Completion review in Codex session `019e9ad0-cc79-7040-a54f-3245185e6401`
+approved the code behavior and scope. The reviewer confirmed that Rust command
+formatting matches upstream `Command.formatCommand`, that built-ins include
+trailing newlines, user commands are exact passthrough, `capture-pane` uses
+`-t %42`, alternate captures include `-a`, and the format variable constants
+match upstream ordering and delimiters. The only blocking issue was missing
+review provenance metadata, fixed before the result commit.
+
+## Conclusion
+
+Tmux command string formatting is complete. The overall terminal-core `tmux`
+checklist item remains open because viewer state, command queue/runtime
+coordination, PTY read/write integration, and App/Surface wiring are still
+missing.
