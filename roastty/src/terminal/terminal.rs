@@ -1154,6 +1154,38 @@ impl Terminal {
         }
     }
 
+    pub(in crate::terminal) fn switch_tmux_screen(
+        &mut self,
+        screen: TerminalScreen,
+    ) -> Result<(), TerminalStreamError> {
+        let target = match screen {
+            TerminalScreen::Primary => TerminalScreenKey::Primary,
+            TerminalScreen::Alternate => TerminalScreenKey::Alternate,
+        };
+        self.screens
+            .switch_to(target, self.size.cols, self.size.rows, self.kitty_config)
+            .map(|_| ())
+            .map_err(|_| TerminalStreamError::PageAlloc)
+    }
+
+    pub(in crate::terminal) fn prepare_tmux_visible_capture(
+        &mut self,
+    ) -> Result<(), TerminalStreamError> {
+        self.screens
+            .active_mut()
+            .erase_display_basic(
+                stream::EraseDisplayMode::Complete,
+                self.size.rows,
+                self.size.cols,
+                false,
+            )
+            .map_err(TerminalStreamError::from)?;
+        self.screens
+            .active_mut()
+            .cursor_position_basic(1, 1, self.size.rows, self.size.cols);
+        Ok(())
+    }
+
     pub(crate) fn cursor_visible(&self) -> bool {
         self.modes.get(modes::Mode::CursorVisible)
     }

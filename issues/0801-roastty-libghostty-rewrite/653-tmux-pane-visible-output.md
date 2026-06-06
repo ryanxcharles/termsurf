@@ -73,3 +73,51 @@ Codex confirmed the blockers were resolved, the scope remained narrow, and the
 design matched upstream `receivedPaneVisible`: stale pane IDs are non-fatal, and
 tracked panes switch screen, complete-erase with protected cells disabled, home
 to `1,1`, and stream content through the terminal parser.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now applies `PaneVisible` command output to the tracked pane terminal.
+The handler switches the pane terminal to the requested primary or alternate
+screen, clears the active display with protected cells disabled, homes the
+cursor to the top-left, and replays the captured bytes through
+`Terminal::next_slice`.
+
+Unknown pane IDs remain non-fatal and simply consume the command output,
+matching upstream's stale-pane behavior. Command-queue continuation is
+preserved: consuming a visible capture still emits the next queued command when
+one is pending.
+
+No separate malformed replay fixture was added. `Terminal::next_slice` accepts
+arbitrary byte slices through the normal parser path, and the focused testable
+contract for this slice is successful setup/replay plus queue continuation and
+stale-pane handling.
+
+Verification passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/653-tmux-pane-visible-output.md`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty terminal::tmux` — 105 passed, 0 failed
+- `git diff --check`
+
+## Conclusion
+
+Pane terminal reconstruction now has the visible-region half of bootstrap wired.
+The next tmux experiment should handle `PaneHistory` output so historical
+scrollback can be replayed without leaving copied history in the active area.
+
+## Completion Review
+
+**Result:** Approved.
+
+Codex found no blocking issues. It confirmed the implementation matches the
+approved visible capture behavior: unknown panes are non-fatal, tracked panes
+switch to the requested screen, complete-erase with protected cells disabled,
+home to `1,1`, and replay through `Terminal::next_slice`. It also confirmed
+command-queue continuation is preserved and covered by the new test.
+
+The only notes were non-blocking: the test-only pane screen accessor mutates the
+active screen while inspecting it, and a single combined helper may be useful if
+the tmux capture setup sequence is reused later.
