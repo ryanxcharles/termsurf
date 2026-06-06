@@ -4608,6 +4608,19 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_key_is_binding(surface, surface_binding_event,
                                          &keybind_flags));
   assert(keybind_flags == 0x00);
+  set_config_binding_event(surface_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_KEY_D, ROASTTY_MODS_SUPER, "d", 0);
+  assert(roastty_surface_key(surface, surface_binding_event));
+  set_config_binding_event(surface_binding_event, ROASTTY_KEY_ACTION_RELEASE,
+                           ROASTTY_KEY_KEY_D, ROASTTY_MODS_SUPER, NULL, 0);
+  assert(roastty_surface_key(surface, surface_binding_event));
+  set_config_binding_event(surface_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_KEY_G, ROASTTY_MODS_SUPER, "g", 0);
+  keybind_flags = 0xff;
+  assert(roastty_surface_key_is_binding(surface, surface_binding_event,
+                                        &keybind_flags));
+  assert(keybind_flags == 0x09);
+  assert(!roastty_surface_key(surface, surface_binding_event));
   roastty_key_event_free(surface_binding_event);
   roastty_surface_config_s inherited =
       roastty_surface_inherited_config(surface, ROASTTY_SURFACE_CONTEXT_SPLIT);

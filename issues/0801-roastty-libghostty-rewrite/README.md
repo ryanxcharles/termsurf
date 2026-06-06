@@ -2008,7 +2008,7 @@ are past the correctness-critical foundation.
 - [Experiment 746: Surface Default Key Is Binding](746-surface-default-key-is-binding.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 747: Surface Default Key Dispatch](747-surface-default-key-dispatch.md)
-  — **Designed** · Codex/Codex/-
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 747: Surface Default Key Dispatch
@@ -127,3 +132,56 @@ static matcher includes some defaults whose actions are not yet supported by the
 binding-action parser, such as search navigation. The plan now includes a test
 proving command-G or shift-command-G remains query-visible but is not consumed
 by this dispatch layer until a supported action exists.
+
+## Result
+
+**Result:** Pass
+
+`roastty_surface_key` now checks the static default keybind matcher before
+terminal encoding. Matching defaults that have a supported binding-action string
+dispatch through the same parsed action semantics used by
+`roastty_surface_binding_action`.
+
+Ordinary consumed defaults return `true` and suppress the corresponding release
+event even if their runtime callback or action preconditions do not perform.
+Performable defaults return `true` only when the action performs; otherwise they
+fall through to normal terminal encoding. Unsupported query-only defaults such
+as command-G remain visible to `roastty_surface_key_is_binding` but are not
+consumed by `roastty_surface_key` until their action parser/dispatcher exists.
+
+The release suppression identity is physical key plus normalized binding
+modifiers, so a unicode default press such as command-D suppresses an empty
+UTF-8 release with the same physical key and modifiers.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty surface_key_default -- --nocapture --test-threads=1`
+- `cargo test -p roastty surface_key_is_binding -- --nocapture --test-threads=1`
+- `cargo test -p roastty surface_key -- --nocapture --test-threads=1`
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1`
+- `cargo test -p roastty --test abi_harness -- --nocapture`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+Roastty now has a static default key-dispatch foundation: default keybinds can
+be queried, report flags, and execute supported actions before terminal
+encoding. Remaining keybinding work can build from here toward real keybind
+storage, custom config parsing, key tables, sequences, remaps, chained/global
+bindings, and unsupported default actions such as search navigation.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 747 diff and found one real technical
+bug: release suppression state was not one-shot, so a stale consumed default
+could suppress later matching release events. The implementation now clears the
+stored release identity when consuming a release and clears stale state before
+terminal encoding on non-consumed press/repeat paths.
+
+Codex re-reviewed the fixed diff and reported no remaining blocking technical
+issues. The review confirmed ordinary bindings consume even when unperformed,
+performable bindings fall through when unperformed, unsupported query-only
+command-G remains query-visible but undispatched, stale-release behavior is
+covered by tests, and the ABI coverage is representative.

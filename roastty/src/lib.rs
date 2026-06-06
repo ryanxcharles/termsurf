@@ -1465,6 +1465,7 @@ struct Surface {
     preedit: Option<String>,
     inspector: Option<NonNull<Inspector>>,
     last_key_event: Option<key::KeyEvent>,
+    last_consumed_default_binding: Option<DefaultBindingReleaseIdentity>,
     mouse: SurfaceMouseState,
     mouse_reporting: bool,
     readonly: bool,
@@ -1511,6 +1512,19 @@ struct ImePoint {
     y: f64,
     width: f64,
     height: f64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DefaultBindingReleaseIdentity {
+    key: key::Key,
+    mods: c_int,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DefaultBindingMatch {
+    flags: u8,
+    action: Option<&'static [u8]>,
+    release_identity: DefaultBindingReleaseIdentity,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2899,11 +2913,54 @@ impl Surface {
         true
     }
 
+    fn default_binding_release_identity(event: &key::KeyEvent) -> DefaultBindingReleaseIdentity {
+        DefaultBindingReleaseIdentity {
+            key: event.key,
+            mods: key_mods_to_raw(event.mods.binding()),
+        }
+    }
+
+    fn consume_default_binding_release(&mut self, event: &key::KeyEvent) -> bool {
+        if event.action != key::KeyAction::Release {
+            return false;
+        }
+        if self
+            .last_consumed_default_binding
+            .is_some_and(|identity| identity == Self::default_binding_release_identity(event))
+        {
+            self.last_consumed_default_binding = None;
+            return true;
+        }
+        false
+    }
+
+    fn dispatch_default_binding(&mut self, binding: DefaultBindingMatch) -> Option<bool> {
+        let action = binding.action?;
+        let parsed = parse_binding_action(self, action)?;
+        let performed = perform_parsed_binding_action(self, parsed);
+        if performed || binding.flags & ROASTTY_KEYBIND_FLAG_PERFORMABLE == 0 {
+            self.last_consumed_default_binding = Some(binding.release_identity);
+            return Some(true);
+        }
+        None
+    }
+
     fn key(&mut self, event: &KeyEvent) -> bool {
         if self.app.is_null() {
             return false;
         }
         self.last_key_event = Some(event.event.clone());
+        if self.consume_default_binding_release(&event.event) {
+            return true;
+        }
+        if let Some(binding) = default_key_event_binding(&event.event) {
+            if let Some(consumed) = self.dispatch_default_binding(binding) {
+                return consumed;
+            }
+        }
+        if event.event.action != key::KeyAction::Release {
+            self.last_consumed_default_binding = None;
+        }
         let encoded = key_encode::encode(&event.event, self.key_encode_options());
         if encoded.is_empty() {
             return false;
@@ -4618,130 +4675,412 @@ fn default_config_trigger(action: &[u8]) -> RoasttyInputTrigger {
     }
 }
 
-fn default_physical_key_binding_flags(key: key::Key, mods: c_int) -> Option<u8> {
+fn default_binding_match(
+    flags: u8,
+    action: Option<&'static [u8]>,
+    key: key::Key,
+    mods: c_int,
+) -> DefaultBindingMatch {
+    DefaultBindingMatch {
+        flags,
+        action,
+        release_identity: DefaultBindingReleaseIdentity { key, mods },
+    }
+}
+
+fn default_physical_key_binding(
+    key: key::Key,
+    mods: c_int,
+    release_key: key::Key,
+    release_mods: c_int,
+) -> Option<DefaultBindingMatch> {
     match key {
-        key::Key::Escape if mods == ROASTTY_MODS_NONE => Some(ROASTTY_KEYBIND_FLAGS_PERFORMABLE),
+        key::Key::Escape if mods == ROASTTY_MODS_NONE => Some(default_binding_match(
+            ROASTTY_KEYBIND_FLAGS_PERFORMABLE,
+            Some(b"end_search"),
+            release_key,
+            release_mods,
+        )),
         key::Key::Copy | key::Key::Paste if mods == ROASTTY_MODS_NONE => {
-            Some(ROASTTY_KEYBIND_FLAGS_DEFAULT)
+            let action = if key == key::Key::Copy {
+                b"copy_to_clipboard:mixed".as_slice()
+            } else {
+                b"paste_from_clipboard".as_slice()
+            };
+            Some(default_binding_match(
+                ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                Some(action),
+                release_key,
+                release_mods,
+            ))
         }
-        key::Key::Insert if mods == ROASTTY_MODS_SHIFT => Some(ROASTTY_KEYBIND_FLAGS_DEFAULT),
+        key::Key::Insert if mods == ROASTTY_MODS_SHIFT => Some(default_binding_match(
+            ROASTTY_KEYBIND_FLAGS_DEFAULT,
+            Some(b"paste_from_selection"),
+            release_key,
+            release_mods,
+        )),
         key::Key::Tab
             if mods == ROASTTY_MODS_CTRL || mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SHIFT) =>
         {
-            Some(ROASTTY_KEYBIND_FLAGS_DEFAULT)
+            let action = if mods == ROASTTY_MODS_CTRL {
+                b"next_tab".as_slice()
+            } else {
+                b"previous_tab".as_slice()
+            };
+            Some(default_binding_match(
+                ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                Some(action),
+                release_key,
+                release_mods,
+            ))
         }
         key::Key::Enter
             if mods == ROASTTY_MODS_SUPER || mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER) =>
         {
-            Some(ROASTTY_KEYBIND_FLAGS_DEFAULT)
+            let action = if mods == ROASTTY_MODS_SUPER {
+                b"toggle_fullscreen".as_slice()
+            } else {
+                b"toggle_split_zoom".as_slice()
+            };
+            Some(default_binding_match(
+                ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                Some(action),
+                release_key,
+                release_mods,
+            ))
         }
         key::Key::Home | key::Key::End | key::Key::PageUp | key::Key::PageDown
             if mods == ROASTTY_MODS_SHIFT =>
         {
-            Some(ROASTTY_KEYBIND_FLAGS_PERFORMABLE)
+            let action = match key {
+                key::Key::Home => b"adjust_selection:home".as_slice(),
+                key::Key::End => b"adjust_selection:end".as_slice(),
+                key::Key::PageUp => b"adjust_selection:page_up".as_slice(),
+                key::Key::PageDown => b"adjust_selection:page_down".as_slice(),
+                _ => unreachable!(),
+            };
+            Some(default_binding_match(
+                ROASTTY_KEYBIND_FLAGS_PERFORMABLE,
+                Some(action),
+                release_key,
+                release_mods,
+            ))
         }
         key::Key::Home | key::Key::End | key::Key::PageUp | key::Key::PageDown
             if mods == ROASTTY_MODS_SUPER =>
         {
-            Some(ROASTTY_KEYBIND_FLAGS_DEFAULT)
+            let action = match key {
+                key::Key::Home => b"scroll_to_top".as_slice(),
+                key::Key::End => b"scroll_to_bottom".as_slice(),
+                key::Key::PageUp => b"scroll_page_up".as_slice(),
+                key::Key::PageDown => b"scroll_page_down".as_slice(),
+                _ => unreachable!(),
+            };
+            Some(default_binding_match(
+                ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                Some(action),
+                release_key,
+                release_mods,
+            ))
         }
         key::Key::ArrowUp | key::Key::ArrowDown => {
             if mods == ROASTTY_MODS_SHIFT {
-                Some(ROASTTY_KEYBIND_FLAGS_PERFORMABLE)
-            } else if mods == (ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER)
-                || mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER)
-                || mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER)
-                || mods == ROASTTY_MODS_SUPER
-            {
-                Some(ROASTTY_KEYBIND_FLAGS_DEFAULT)
+                let action = if key == key::Key::ArrowUp {
+                    b"adjust_selection:up".as_slice()
+                } else {
+                    b"adjust_selection:down".as_slice()
+                };
+                Some(default_binding_match(
+                    ROASTTY_KEYBIND_FLAGS_PERFORMABLE,
+                    Some(action),
+                    release_key,
+                    release_mods,
+                ))
+            } else if mods == (ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER) {
+                let action = if key == key::Key::ArrowUp {
+                    b"goto_split:up".as_slice()
+                } else {
+                    b"goto_split:down".as_slice()
+                };
+                Some(default_binding_match(
+                    ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                    Some(action),
+                    release_key,
+                    release_mods,
+                ))
+            } else if mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER) {
+                let action = if key == key::Key::ArrowUp {
+                    b"resize_split:up,10".as_slice()
+                } else {
+                    b"resize_split:down,10".as_slice()
+                };
+                Some(default_binding_match(
+                    ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                    Some(action),
+                    release_key,
+                    release_mods,
+                ))
+            } else if mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER) {
+                let action = if key == key::Key::ArrowUp {
+                    b"jump_to_prompt:-1".as_slice()
+                } else {
+                    b"jump_to_prompt:1".as_slice()
+                };
+                Some(default_binding_match(
+                    ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                    Some(action),
+                    release_key,
+                    release_mods,
+                ))
+            } else if mods == ROASTTY_MODS_SUPER {
+                let action = if key == key::Key::ArrowUp {
+                    b"jump_to_prompt:-1".as_slice()
+                } else {
+                    b"jump_to_prompt:1".as_slice()
+                };
+                Some(default_binding_match(
+                    ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                    Some(action),
+                    release_key,
+                    release_mods,
+                ))
             } else {
                 None
             }
         }
         key::Key::ArrowLeft | key::Key::ArrowRight => {
             if mods == ROASTTY_MODS_SHIFT {
-                Some(ROASTTY_KEYBIND_FLAGS_PERFORMABLE)
-            } else if mods == (ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER)
-                || mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER)
-                || mods == ROASTTY_MODS_SUPER
-                || mods == ROASTTY_MODS_ALT
-            {
-                Some(ROASTTY_KEYBIND_FLAGS_DEFAULT)
+                let action = if key == key::Key::ArrowLeft {
+                    b"adjust_selection:left".as_slice()
+                } else {
+                    b"adjust_selection:right".as_slice()
+                };
+                Some(default_binding_match(
+                    ROASTTY_KEYBIND_FLAGS_PERFORMABLE,
+                    Some(action),
+                    release_key,
+                    release_mods,
+                ))
+            } else if mods == (ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER) {
+                let action = if key == key::Key::ArrowLeft {
+                    b"goto_split:left".as_slice()
+                } else {
+                    b"goto_split:right".as_slice()
+                };
+                Some(default_binding_match(
+                    ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                    Some(action),
+                    release_key,
+                    release_mods,
+                ))
+            } else if mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER) {
+                let action = if key == key::Key::ArrowLeft {
+                    b"resize_split:left,10".as_slice()
+                } else {
+                    b"resize_split:right,10".as_slice()
+                };
+                Some(default_binding_match(
+                    ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                    Some(action),
+                    release_key,
+                    release_mods,
+                ))
+            } else if mods == ROASTTY_MODS_SUPER {
+                let action = if key == key::Key::ArrowLeft {
+                    b"text:\\x01".as_slice()
+                } else {
+                    b"text:\\x05".as_slice()
+                };
+                Some(default_binding_match(
+                    ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                    Some(action),
+                    release_key,
+                    release_mods,
+                ))
+            } else if mods == ROASTTY_MODS_ALT {
+                let action = if key == key::Key::ArrowLeft {
+                    b"esc:b".as_slice()
+                } else {
+                    b"esc:f".as_slice()
+                };
+                Some(default_binding_match(
+                    ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                    Some(action),
+                    release_key,
+                    release_mods,
+                ))
             } else {
                 None
             }
         }
-        key::Key::Backspace if mods == ROASTTY_MODS_SUPER => Some(ROASTTY_KEYBIND_FLAGS_DEFAULT),
+        key::Key::Backspace if mods == ROASTTY_MODS_SUPER => Some(default_binding_match(
+            ROASTTY_KEYBIND_FLAGS_DEFAULT,
+            Some(b"text:\\x15"),
+            release_key,
+            release_mods,
+        )),
         _ => None,
     }
 }
 
-fn default_unicode_key_binding_flags(codepoint: u32, mods: c_int) -> Option<u8> {
-    match mods {
-        ROASTTY_MODS_SUPER if matches!(codepoint, 99 | 118 | 122 | 107 | 102 | 101 | 103 | 106) => {
-            Some(ROASTTY_KEYBIND_FLAGS_PERFORMABLE)
-        }
-        ROASTTY_MODS_SUPER
-            if matches!(
-                codepoint,
-                44 | 43 | 45 | 48 | 61 | 113 | 97 | 49..=57 | 110 | 119 | 116 | 100 | 91 | 93
-            ) =>
-        {
-            Some(ROASTTY_KEYBIND_FLAGS_DEFAULT)
-        }
-        mods if mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER)
-            && matches!(codepoint, 116 | 122 | 102 | 103) =>
-        {
-            Some(ROASTTY_KEYBIND_FLAGS_PERFORMABLE)
-        }
-        mods if mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER)
-            && matches!(codepoint, 44 | 106 | 119 | 91 | 93 | 100 | 118 | 112) =>
-        {
-            Some(ROASTTY_KEYBIND_FLAGS_DEFAULT)
-        }
+fn default_unicode_key_binding(
+    codepoint: u32,
+    mods: c_int,
+    release_key: key::Key,
+    release_mods: c_int,
+) -> Option<DefaultBindingMatch> {
+    let (flags, action): (u8, Option<&'static [u8]>) = match mods {
+        ROASTTY_MODS_SUPER => match codepoint {
+            44 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"open_config")),
+            99 => (
+                ROASTTY_KEYBIND_FLAGS_PERFORMABLE,
+                Some(b"copy_to_clipboard:mixed"),
+            ),
+            118 => (
+                ROASTTY_KEYBIND_FLAGS_PERFORMABLE,
+                Some(b"paste_from_clipboard"),
+            ),
+            43 | 61 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"increase_font_size:1")),
+            45 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"decrease_font_size:1")),
+            48 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"reset_font_size")),
+            113 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"quit")),
+            97 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"select_all")),
+            49..=56 => {
+                let actions: [&[u8]; 8] = [
+                    b"goto_tab:1".as_slice(),
+                    b"goto_tab:2".as_slice(),
+                    b"goto_tab:3".as_slice(),
+                    b"goto_tab:4".as_slice(),
+                    b"goto_tab:5".as_slice(),
+                    b"goto_tab:6".as_slice(),
+                    b"goto_tab:7".as_slice(),
+                    b"goto_tab:8".as_slice(),
+                ];
+                (
+                    ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                    Some(actions[(codepoint - 49) as usize]),
+                )
+            }
+            57 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"last_tab")),
+            110 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"new_window")),
+            119 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"close_surface")),
+            116 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"new_tab")),
+            100 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"new_split:right")),
+            91 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"goto_split:previous")),
+            93 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"goto_split:next")),
+            122 => (ROASTTY_KEYBIND_FLAGS_PERFORMABLE, Some(b"undo")),
+            107 => (ROASTTY_KEYBIND_FLAGS_PERFORMABLE, Some(b"clear_screen")),
+            102 => (ROASTTY_KEYBIND_FLAGS_PERFORMABLE, Some(b"start_search")),
+            101 => (ROASTTY_KEYBIND_FLAGS_PERFORMABLE, Some(b"search_selection")),
+            103 => (ROASTTY_KEYBIND_FLAGS_PERFORMABLE, None),
+            106 => (
+                ROASTTY_KEYBIND_FLAGS_PERFORMABLE,
+                Some(b"scroll_to_selection"),
+            ),
+            _ => return None,
+        },
+        mods if mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER) => match codepoint {
+            44 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"reload_config")),
+            106 => (
+                ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                Some(b"write_screen_file:paste"),
+            ),
+            119 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"close_window")),
+            91 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"previous_tab")),
+            93 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"next_tab")),
+            100 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"new_split:down")),
+            116 => (ROASTTY_KEYBIND_FLAGS_PERFORMABLE, Some(b"undo")),
+            122 => (ROASTTY_KEYBIND_FLAGS_PERFORMABLE, Some(b"redo")),
+            102 => (ROASTTY_KEYBIND_FLAGS_PERFORMABLE, Some(b"end_search")),
+            103 => (ROASTTY_KEYBIND_FLAGS_PERFORMABLE, None),
+            118 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"paste_from_selection")),
+            112 => (
+                ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                Some(b"toggle_command_palette"),
+            ),
+            _ => return None,
+        },
         mods if mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER) => {
-            (codepoint == u32::from(b'j')).then_some(ROASTTY_KEYBIND_FLAGS_DEFAULT)
+            match codepoint {
+                106 => (
+                    ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                    Some(b"write_screen_file:copy"),
+                ),
+                _ => return None,
+            }
         }
         mods if mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER) => {
-            (codepoint == u32::from(b'j') || codepoint == u32::from(b'w'))
-                .then_some(ROASTTY_KEYBIND_FLAGS_DEFAULT)
+            match codepoint {
+                106 => (
+                    ROASTTY_KEYBIND_FLAGS_DEFAULT,
+                    Some(b"write_screen_file:open"),
+                ),
+                119 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"close_all_windows")),
+                _ => return None,
+            }
         }
-        mods if mods == (ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER) => (codepoint == u32::from(b'w')
-            || codepoint == u32::from(b'i'))
-        .then_some(ROASTTY_KEYBIND_FLAGS_DEFAULT),
-        mods if mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER) => (codepoint == u32::from(b'=')
-            || codepoint == u32::from(b'f'))
-        .then_some(ROASTTY_KEYBIND_FLAGS_DEFAULT),
-        _ => None,
-    }
+        mods if mods == (ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER) => match codepoint {
+            119 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"close_tab:this")),
+            105 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"inspector:toggle")),
+            _ => return None,
+        },
+        mods if mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER) => match codepoint {
+            61 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"equalize_splits")),
+            102 => (ROASTTY_KEYBIND_FLAGS_DEFAULT, Some(b"toggle_fullscreen")),
+            _ => return None,
+        },
+        _ => return None,
+    };
+
+    Some(default_binding_match(
+        flags,
+        action,
+        release_key,
+        release_mods,
+    ))
 }
 
-fn default_key_event_binding_flags(event: &key::KeyEvent) -> Option<u8> {
+fn default_key_event_binding(event: &key::KeyEvent) -> Option<DefaultBindingMatch> {
     if event.action == key::KeyAction::Release {
         return None;
     }
 
-    let mods = key_mods_to_raw(event.mods.binding());
-    if let Some(flags) = default_physical_key_binding_flags(event.key, mods) {
-        return Some(flags);
+    let release_key = event.key;
+    let release_mods = key_mods_to_raw(event.mods.binding());
+    if let Some(binding) =
+        default_physical_key_binding(event.key, release_mods, release_key, release_mods)
+    {
+        return Some(binding);
     }
 
     if let Ok(text) = std::str::from_utf8(&event.utf8) {
         let mut chars = text.chars();
         if let Some(ch) = chars.next() {
             if chars.next().is_none() {
-                if let Some(flags) = default_unicode_key_binding_flags(ch as u32, mods) {
-                    return Some(flags);
+                if let Some(binding) =
+                    default_unicode_key_binding(ch as u32, release_mods, release_key, release_mods)
+                {
+                    return Some(binding);
                 }
             }
         }
     }
 
     if event.unshifted_codepoint > 0 {
-        return default_unicode_key_binding_flags(event.unshifted_codepoint, mods);
+        return default_unicode_key_binding(
+            event.unshifted_codepoint,
+            release_mods,
+            release_key,
+            release_mods,
+        );
     }
 
     None
+}
+
+fn default_key_event_binding_flags(event: &key::KeyEvent) -> Option<u8> {
+    default_key_event_binding(event).map(|binding| binding.flags)
 }
 
 fn default_key_event_is_binding(event: &key::KeyEvent) -> bool {
@@ -11457,6 +11796,7 @@ pub extern "C" fn roastty_surface_new(
         preedit: None,
         inspector: None,
         last_key_event: None,
+        last_consumed_default_binding: None,
         mouse: SurfaceMouseState::default(),
         mouse_reporting: true,
         readonly: false,
@@ -12130,6 +12470,211 @@ pub extern "C" fn roastty_surface_split_resize(
 pub extern "C" fn roastty_surface_split_equalize(surface: RoasttySurface) {
     if let Some(surface) = surface_from_handle(surface) {
         surface.perform_action(ROASTTY_ACTION_EQUALIZE_SPLITS, [0usize; 8]);
+    }
+}
+
+fn perform_parsed_binding_action(surface: &mut Surface, action: ParsedBindingAction) -> bool {
+    match action {
+        ParsedBindingAction::RuntimeAction(tag, storage) => {
+            surface.perform_action_result(tag, storage)
+        }
+        ParsedBindingAction::AppRuntimeAction(tag, storage) => {
+            surface.perform_app_action_result(tag, storage)
+        }
+        ParsedBindingAction::StartSearch => {
+            let needle = CString::new("").expect("empty string has no interior NUL");
+            surface.perform_start_search_result(&needle)
+        }
+        ParsedBindingAction::SearchSelection => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.search_selection()
+        }
+        ParsedBindingAction::CloseSurface => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.request_close();
+            true
+        }
+        ParsedBindingAction::Text(text) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            if let Ok(text) = config::string::parse_string_literal(&text) {
+                surface.raw_text(&text);
+            }
+            true
+        }
+        ParsedBindingAction::Csi(data) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            let mut text = Vec::with_capacity(data.len().saturating_add(2));
+            text.extend_from_slice(b"\x1b[");
+            text.extend_from_slice(&data);
+            surface.raw_text(&text);
+            true
+        }
+        ParsedBindingAction::Esc(data) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            let mut text = Vec::with_capacity(data.len().saturating_add(1));
+            text.push(0x1b);
+            text.extend_from_slice(&data);
+            surface.raw_text(&text);
+            true
+        }
+        ParsedBindingAction::PromptTitle(prompt) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.prompt_title(prompt)
+        }
+        ParsedBindingAction::SetTitle(tag, title) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.set_title(tag, &title)
+        }
+        ParsedBindingAction::Reset => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.reset_terminal();
+            true
+        }
+        ParsedBindingAction::ClearScreen => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.clear_screen()
+        }
+        ParsedBindingAction::SelectAll => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.select_all()
+        }
+        ParsedBindingAction::AdjustSelection(adjustment) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.adjust_selection(adjustment)
+        }
+        ParsedBindingAction::CopyToClipboard(format) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.copy_to_clipboard(format)
+        }
+        ParsedBindingAction::CopyUrlToClipboard => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.copy_url_to_clipboard()
+        }
+        ParsedBindingAction::WriteFile(target, action, format) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.write_file(target, action, format)
+        }
+        ParsedBindingAction::PasteFromClipboard(clipboard) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.paste_from_clipboard(clipboard)
+        }
+        ParsedBindingAction::IncreaseFontSize(delta) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.increase_font_size(delta)
+        }
+        ParsedBindingAction::DecreaseFontSize(delta) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.decrease_font_size(delta)
+        }
+        ParsedBindingAction::ResetFontSize => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.reset_font_size()
+        }
+        ParsedBindingAction::SetFontSize(points) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.set_font_size(points)
+        }
+        ParsedBindingAction::ScrollToTop => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.scroll_viewport_to_top();
+            true
+        }
+        ParsedBindingAction::ScrollToBottom => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.scroll_viewport_to_bottom();
+            true
+        }
+        ParsedBindingAction::ScrollToRow(row) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.scroll_viewport_to_row(row);
+            true
+        }
+        ParsedBindingAction::ScrollToSelection => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.scroll_viewport_to_selection()
+        }
+        ParsedBindingAction::ScrollPageUp => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.scroll_viewport_page(true);
+            true
+        }
+        ParsedBindingAction::ScrollPageDown => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.scroll_viewport_page(false);
+            true
+        }
+        ParsedBindingAction::ScrollPageLines(lines) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.scroll_viewport_lines(lines);
+            true
+        }
+        ParsedBindingAction::ScrollPageFractional(fraction) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.scroll_viewport_fractional(fraction);
+            true
+        }
+        ParsedBindingAction::JumpToPrompt(delta) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.scroll_viewport_to_prompt(delta)
+        }
+        ParsedBindingAction::ToggleMouseReporting => surface.toggle_mouse_reporting(),
+        ParsedBindingAction::ToggleReadonly => surface.toggle_readonly(),
     }
 }
 
@@ -13620,9 +14165,18 @@ mod tests {
 
         assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
         set_surface_worker_dec_mode(surface, 1, true);
+        let arrow = key::KeyEvent {
+            key: key::Key::ArrowUp,
+            ..key::KeyEvent::default()
+        };
+        assert_eq!(
+            key_encode::encode(
+                &arrow,
+                surface_from_handle(surface).unwrap().key_encode_options()
+            ),
+            b"\x1bOA"
+        );
         assert!(roastty_surface_key(surface, event));
-        let text = surface_snapshot_text(app, surface);
-        assert!(text.contains("^[OA"), "{text:?}");
 
         roastty_key_event_free(event);
         roastty_surface_free(surface);
@@ -13802,6 +14356,230 @@ mod tests {
             surface_ref.last_termio_error.as_deref(),
             Some("CommandDisconnected")
         );
+
+        roastty_key_event_free(event);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_key_default_ordinary_runtime_action_consumes_and_suppresses_release() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+        let event = new_key_event();
+
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::KeyD,
+            ROASTTY_MODS_SUPER,
+            b"d",
+            0,
+        );
+        assert!(roastty_surface_key(surface, event));
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_NEW_SPLIT);
+        assert_eq!(
+            records[0].storage[0],
+            ROASTTY_SPLIT_DIRECTION_RIGHT as usize
+        );
+
+        set_key_event(
+            event,
+            key::KeyAction::Release,
+            key::Key::KeyD,
+            ROASTTY_MODS_SUPER,
+            &[],
+            0,
+        );
+        assert!(roastty_surface_key(surface, event));
+        assert_eq!(action_records().len(), 1);
+        assert!(!roastty_surface_key(surface, event));
+        assert_eq!(action_records().len(), 1);
+
+        roastty_key_event_free(event);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_key_default_ordinary_action_consumes_when_unperformed() {
+        let app = new_test_app_with_action(false);
+        let surface = new_test_surface(app);
+        let event = new_key_event();
+
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::KeyD,
+            ROASTTY_MODS_SUPER,
+            b"d",
+            0,
+        );
+        assert!(roastty_surface_key(surface, event));
+        assert_eq!(action_records().len(), 1);
+
+        roastty_key_event_free(event);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let event = new_key_event();
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::KeyD,
+            ROASTTY_MODS_SUPER,
+            b"d",
+            0,
+        );
+        assert!(roastty_surface_key(surface, event));
+
+        roastty_key_event_free(event);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_key_default_performable_action_consumes_when_performed() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+        let event = new_key_event();
+
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::Escape,
+            ROASTTY_MODS_NONE,
+            &[],
+            0,
+        );
+        assert!(roastty_surface_key(surface, event));
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_END_SEARCH);
+
+        roastty_key_event_free(event);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_key_default_performable_action_falls_through_when_unperformed() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app_with_action(true);
+        let command = CString::new(
+            "stty -echo -icanon min 8 time 0; dd bs=1 count=8 2>/dev/null | od -An -tx1 -v",
+        )
+        .unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        let event = new_key_event();
+
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::KeyD,
+            ROASTTY_MODS_SUPER,
+            b"d",
+            0,
+        );
+        assert!(roastty_surface_key(surface, event));
+
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::ArrowLeft,
+            ROASTTY_MODS_SHIFT,
+            &[],
+            0,
+        );
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        assert!(roastty_surface_key(surface, event));
+        let text = surface_snapshot_text(app, surface);
+        assert!(
+            text.contains("^[[1;2D") || text.contains("^[[D"),
+            "{text:?}"
+        );
+
+        set_key_event(
+            event,
+            key::KeyAction::Release,
+            key::Key::KeyD,
+            ROASTTY_MODS_SUPER,
+            &[],
+            0,
+        );
+        assert!(!roastty_surface_key(surface, event));
+
+        roastty_key_event_free(event);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_key_default_natural_text_editing_writes_legacy_bytes() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new(
+            "stty -echo -icanon min 1 time 0; dd bs=1 count=1 2>/dev/null | od -An -tx1 -v",
+        )
+        .unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        let event = new_key_event();
+
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::ArrowRight,
+            ROASTTY_MODS_SUPER,
+            &[],
+            0,
+        );
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        assert!(roastty_surface_key(surface, event));
+        let text = surface_snapshot_text(app, surface);
+        assert!(text.contains("^E"), "{text:?}");
+
+        roastty_key_event_free(event);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_key_default_unsupported_query_match_falls_through() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+        let event = new_key_event();
+
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::KeyG,
+            ROASTTY_MODS_SUPER,
+            b"g",
+            0,
+        );
+        let mut flags = 0;
+        assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_PERFORMABLE);
+        assert!(!roastty_surface_key(surface, event));
+        assert!(action_records().is_empty());
+
+        set_key_event(
+            event,
+            key::KeyAction::Release,
+            key::Key::KeyG,
+            ROASTTY_MODS_SUPER,
+            &[],
+            0,
+        );
+        assert!(!roastty_surface_key(surface, event));
 
         roastty_key_event_free(event);
         roastty_surface_free(surface);
