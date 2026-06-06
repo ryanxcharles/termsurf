@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 677: Surface Draw Wakeup
@@ -82,3 +87,53 @@ will spawn a PTY process and should explicitly use the shared PTY command lock.
 
 The design now includes a repeated-draw wakeup test and requires
 `os::pty::PTY_COMMAND_LOCK` for the worker-backed render-state update test.
+
+## Result
+
+**Result:** Pass
+
+Implemented `roastty_surface_draw(surface)` in the public C header and Rust ABI.
+The function is null-safe, marks live surfaces dirty, and invokes the app
+runtime `wakeup_cb` with runtime userdata while the surface is still attached to
+an app. Detached live surfaces keep the dirty-state behavior without
+dereferencing the cleared app pointer.
+
+The Rust tests cover null draw calls, live dirty marking, wakeup userdata,
+repeated wakeups while already dirty, detached-surface dirty marking without
+wakeup, and render-state update clearing a draw-requested dirty flag when a
+worker-backed snapshot succeeds. The C ABI harness now calls the exported draw
+function through `roastty.h` and observes
+`roastty_surface_needs_render(surface)` become true.
+
+Verification passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/677-surface-draw-wakeup.md`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty surface`
+- `cargo test -p roastty --test abi_harness`
+- `git diff --check`
+
+## Conclusion
+
+Roastty now has the renamed surface draw ABI and a minimal wakeup bridge that
+matches the current library architecture. This does not replace Ghostty's full
+renderer thread or mailbox behavior yet; it establishes the external surface
+draw entry point and preserves dirty-state semantics so later renderer slices
+can attach to it.
+
+## Completion Review
+
+**Result:** Approved after documentation fixes.
+
+Codex found no code, ABI/header, or test-reliability blockers. It confirmed the
+draw ABI is declared in the public header, implemented as null-safe dirty+wakeup
+behavior, and covered by tests for repeated wakeups, detached surfaces, and
+worker-backed dirty clearing.
+
+Codex did block the first completion-review pass because the experiment file was
+missing `[review.result]` provenance and the README still showed
+`Codex/Codex/-`. It also noted that the PTY/termio checklist should not claim
+surface draw wakeup as a PTY behavior. The experiment file now records the
+result review, the README tuple is updated to `Codex/Codex/Codex`, and the
+PTY/termio checklist wording keeps draw wakeup out of that subsystem.

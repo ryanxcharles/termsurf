@@ -1400,6 +1400,22 @@ impl Surface {
         }
     }
 
+    fn draw(&mut self) {
+        self.dirty = true;
+        self.wakeup_app();
+    }
+
+    fn wakeup_app(&self) {
+        let Some(app) = app_from_handle(self.app) else {
+            return;
+        };
+        if let Some(wakeup) = app.runtime.wakeup_cb {
+            unsafe {
+                wakeup(app.runtime.userdata);
+            }
+        }
+    }
+
     fn tick_termio(&mut self) {
         #[cfg(test)]
         while let Some(event) = self.test_termio_events.pop_front() {
@@ -8561,6 +8577,13 @@ pub extern "C" fn roastty_surface_needs_render(surface: RoasttySurface) -> bool 
 }
 
 #[no_mangle]
+pub extern "C" fn roastty_surface_draw(surface: RoasttySurface) {
+    if let Some(surface) = surface_from_handle(surface) {
+        surface.draw();
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn roastty_surface_render_state_update(
     surface: RoasttySurface,
     state: RoasttyRenderStateHandle,
@@ -8680,6 +8703,9 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
     static SCRIPT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    static WAKEUP_LOCK: Mutex<()> = Mutex::new(());
+    static WAKEUP_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static WAKEUP_USERDATA: AtomicUsize = AtomicUsize::new(0);
 
     #[derive(Default)]
     struct EffectState {
@@ -8726,6 +8752,27 @@ mod tests {
 
     fn new_test_app() -> RoasttyApp {
         roastty_app_new(ptr::null(), ptr::null_mut())
+    }
+
+    unsafe extern "C" fn wakeup_cb(userdata: *mut c_void) {
+        WAKEUP_COUNT.fetch_add(1, Ordering::SeqCst);
+        WAKEUP_USERDATA.store(userdata as usize, Ordering::SeqCst);
+    }
+
+    fn new_test_app_with_wakeup(userdata: usize) -> RoasttyApp {
+        WAKEUP_COUNT.store(0, Ordering::SeqCst);
+        WAKEUP_USERDATA.store(0, Ordering::SeqCst);
+        let runtime = RoasttyRuntimeConfig {
+            userdata: userdata as *mut c_void,
+            supports_selection_clipboard: false,
+            wakeup_cb: Some(wakeup_cb),
+            action_cb: None,
+            read_clipboard_cb: None,
+            confirm_read_clipboard_cb: None,
+            write_clipboard_cb: None,
+            close_surface_cb: None,
+        };
+        roastty_app_new(&runtime, ptr::null_mut())
     }
 
     fn new_test_surface(app: RoasttyApp) -> RoasttySurface {
@@ -9015,6 +9062,89 @@ mod tests {
         assert!(surface_ref.process_exited);
         assert!(roastty_surface_process_exited(surface));
 
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_draw_null_is_noop() {
+        roastty_surface_draw(ptr::null_mut());
+    }
+
+    #[test]
+    fn surface_draw_marks_surface_needs_render() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert!(!roastty_surface_needs_render(surface));
+        roastty_surface_draw(surface);
+
+        assert!(roastty_surface_needs_render(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_draw_invokes_runtime_wakeup_with_userdata() {
+        let _guard = WAKEUP_LOCK.lock().unwrap();
+        let app = new_test_app_with_wakeup(0xD00D);
+        let surface = new_test_surface(app);
+
+        roastty_surface_draw(surface);
+
+        assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(WAKEUP_USERDATA.load(Ordering::SeqCst), 0xD00D);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_draw_repeatedly_invokes_runtime_wakeup() {
+        let _guard = WAKEUP_LOCK.lock().unwrap();
+        let app = new_test_app_with_wakeup(0xFACE);
+        let surface = new_test_surface(app);
+
+        roastty_surface_draw(surface);
+        roastty_surface_draw(surface);
+
+        assert!(roastty_surface_needs_render(surface));
+        assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 2);
+        assert_eq!(WAKEUP_USERDATA.load(Ordering::SeqCst), 0xFACE);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_draw_after_app_detach_marks_dirty_without_wakeup() {
+        let _guard = WAKEUP_LOCK.lock().unwrap();
+        let app = new_test_app_with_wakeup(0xA11);
+        let surface = new_test_surface(app);
+        roastty_app_free(app);
+
+        roastty_surface_draw(surface);
+
+        assert!(roastty_surface_needs_render(surface));
+        assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 0);
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_render_state_update_clears_draw_requested_dirty_state() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+
+        roastty_surface_draw(surface);
+        assert!(roastty_surface_needs_render(surface));
+        let state = new_render_state();
+        assert_eq!(
+            roastty_surface_render_state_update(surface, state),
+            ROASTTY_SUCCESS
+        );
+
+        assert!(!roastty_surface_needs_render(surface));
+        roastty_render_state_free(state);
         roastty_surface_free(surface);
         roastty_app_free(app);
     }

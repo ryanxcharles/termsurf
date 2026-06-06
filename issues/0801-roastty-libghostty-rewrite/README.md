@@ -270,7 +270,8 @@ Experiment 246).
       setters)
 - [ ] `config_get` (12 defaults only) + keybind triggers — partial
 - [ ] App/surface key dispatch, surface draw/refresh, IME/text/preedit, surface
-      mouse dispatch, selection read, splits — missing
+      mouse dispatch, selection read, splits — surface draw wakeup done; refresh
+      and the remaining dispatch/read/split paths missing
 - [ ] Inspector ABI — missing
 
 ### App / Surface / IO — partial
@@ -283,15 +284,15 @@ Experiment 246).
       display-id, occlusion, quicklook, inspector, splits, selection + text
       reads) — lifecycle handle, basic setters, app detachment, worker event
       draining, dirty/process-exit/error state, and surface render-state
-      snapshots, and surface worker start done; draw/refresh, splits, text
-      reads, and full frontend presentation missing
+      snapshots, surface worker start, and surface draw wakeup done; refresh,
+      splits, text reads, and full frontend presentation missing
 - [ ] `pty` + `termio` (shell spawn, read/write loops, resize, fg pid, tty name,
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
       background worker, worker shutdown/drop, and surface process-exit state
       done; surface command/cwd/env/initial-input worker launch done; surface
       worker resize forwarding and default shell resolution done; configured
-      command/direct-exec/shell-integration policy, renderer wakeups,
-      renderer/grid calculation, and full renderer integration missing
+      command/direct-exec/shell-integration policy, renderer thread/mailbox
+      wakeups, renderer/grid calculation, and full renderer integration missing
 - [ ] `os/` utilities (tmpdir / file / env / hostname / locale) — ad hoc Rust
       stdlib; no dedicated module
 
@@ -1832,8 +1833,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 676: Surface Default Shell](676-surface-default-shell.md) —
   **Pass** · Codex/Codex/Codex
-- [Experiment 677: Surface Draw Wakeup](677-surface-draw-wakeup.md) —
-  **Designed** · Codex/Codex/-
+- [Experiment 677: Surface Draw Wakeup](677-surface-draw-wakeup.md) — **Pass** ·
+  Codex/Codex/Codex
 
 ## Non-Goals
 

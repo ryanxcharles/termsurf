@@ -7,7 +7,7 @@
 #include "roastty.h"
 
 static void wakeup_cb(void *userdata) {
-  (void)userdata;
+  assert(userdata == (void *)0xA991);
 }
 
 static bool action_cb(roastty_app_t app,
@@ -4107,6 +4107,9 @@ int main(int argc, char **argv) {
   assert(roastty_surface_foreground_pid(surface) == 0);
   assert(!roastty_surface_needs_confirm_quit(surface));
   assert(!roastty_surface_process_exited(surface));
+  assert(!roastty_surface_needs_render(surface));
+  roastty_surface_draw(surface);
+  assert(roastty_surface_needs_render(surface));
 
   roastty_string_s tty_name = roastty_surface_tty_name(surface);
   assert(tty_name.ptr != NULL);
