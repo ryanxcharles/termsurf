@@ -217,7 +217,7 @@ Experiment 246).
 - [x] CoreText `Face` (rasterization + face-metric extraction)
 - [x] Shaper (CoreText shaping, run, cache, feature)
 - [ ] `Collection` / `CodepointResolver` / `CodepointMap` / `DeferredFace` /
-      `discovery` / `library` / `backend` — missing
+      `discovery` — ported foundations; final parity audit pending
 - [ ] `SharedGrid` / `SharedGridSet` — missing
 - [ ] `opentype/` (SFNT table parsing), `embedded`, `nerd_font_attributes` —
       missing
@@ -1714,7 +1714,7 @@ are past the correctness-critical foundation.
 - [Experiment 633: Collection Deferred Entries](633-collection-deferred-entries.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 634: Font Backend And Library](634-font-backend-library.md) —
-  **Designed**
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

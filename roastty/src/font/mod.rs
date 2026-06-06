@@ -3,12 +3,12 @@
 
 //! Font subsystem.
 //!
-//! Faithful port of upstream `font/`. This slice establishes the module, the
-//! `Glyph` value type, the `Metrics` derivation, the texture `Atlas`, the
-//! `sprite` geometric primitives, and the `opentype` table parsers;
-//! rasterization, faces, and shaping land in later experiments.
+//! Faithful macOS/CoreText slice of upstream `font/`: metrics, atlases, glyphs,
+//! CoreText faces, discovery, shaping, collections, shared-grid rendering,
+//! sprites, and OpenType table parsers.
 
 pub(crate) mod atlas;
+pub(crate) mod backend;
 pub(crate) mod codepoint_map;
 pub(crate) mod codepoint_resolver;
 pub(crate) mod collection;
@@ -17,6 +17,7 @@ pub(crate) mod discovery;
 pub(crate) mod emoji_presentation;
 pub(crate) mod face;
 pub(crate) mod glyph;
+pub(crate) mod library;
 pub(crate) mod metrics;
 pub(crate) mod opentype;
 pub(crate) mod run;

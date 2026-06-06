@@ -86,3 +86,57 @@ font runtime behavior, or the checklist overclaims completion of
 
 The reviewer found no overclaiming, missing tests, or incorrect upstream mapping
 in the design.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has an explicit macOS/CoreText font backend boundary in
+`roastty/src/font/backend.rs`. The active backend is `Backend::CoreText`, and
+the capability predicates match upstream's CoreText backend row: CoreText is
+available, while FreeType, Fontconfig, HarfBuzz, and browser Canvas are not.
+
+Roastty also has the CoreText no-op font library boundary in
+`roastty/src/font/library.rs`. `Library` is zero-sized, infallible to create,
+copyable, and has a no-op `deinit`, matching upstream's `NoopLibrary` mapping
+for CoreText-family backends.
+
+`font/mod.rs` exports both modules and its module comment now reflects the
+current ported font surface instead of saying faces/shaping are future work. The
+Issue 801 checklist no longer lists `library`/`backend` as missing, but the
+broader `Collection`/resolver/discovery line stays unchecked because final
+parity audit remains separate work.
+
+Verification:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty font::backend` — 2 tests passed
+- `cargo test -p roastty font::library` — 2 tests passed
+- `cargo test -p roastty font::tests` — 2 tests passed
+- `cargo test -p roastty` — 3486 unit tests passed, plus the ABI harness
+- `cargo fmt -p roastty -- --check`
+- `rg -n "library.*backend.*missing|rasterization, faces, and shaping land in later experiments|font_backend" roastty/src/font issues/0801-roastty-libghostty-rewrite/README.md`
+  — no matches
+- `rg -n "ghostty_" roastty/src/font` — no matches
+- `git diff --check`
+
+The planned `ghostty_` grep was split from the README stale-wording grep because
+the issue README intentionally contains policy text forbidding `ghostty_*`
+compatibility names.
+
+## Conclusion
+
+The `library` and `backend` pieces of the broad font checklist are now concrete
+Roastty modules rather than implicit assumptions. The next font-adjacent work
+can focus on final parity audits for collection/resolver/discovery or on the
+missing `SharedGridSet` cache layer.
+
+## Completion Review
+
+**Reviewer:** Codex (gpt-5.5, medium) · resumed session
+`019e8f83-9029-7d43-8e82-f4c5754e14ba`
+
+**Verdict:** APPROVED.
+
+The reviewer found no correctness issues, upstream-mapping errors, checklist
+overclaiming, or verification gaps in the staged result.
