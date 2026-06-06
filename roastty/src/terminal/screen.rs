@@ -233,6 +233,17 @@ impl Screen {
         self.pages.scroll_to_row(row);
     }
 
+    pub(super) fn scroll_to_selection(&mut self) -> bool {
+        let Some(selection) = self.selection else {
+            return false;
+        };
+        let Some(top_left) = self.pages.selection_top_left(selection) else {
+            return false;
+        };
+        self.pages.scroll_to_pin(top_left);
+        true
+    }
+
     /// Flatten `selection` to a `StringMap` (text + a per-byte map back to screen pins) for regex
     /// search (upstream `Screen.selectionString` with a `StringMap` out-parameter). `unwrap` is
     /// always `true` (so soft-wrapped lines join, as upstream's `selectionString`); `trim` is the

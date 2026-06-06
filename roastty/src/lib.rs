@@ -1907,6 +1907,21 @@ impl Surface {
         self.request_render();
     }
 
+    fn scroll_viewport_to_selection(&mut self) -> bool {
+        if self.app.is_null() {
+            return false;
+        }
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return false;
+        };
+        let scrolled =
+            worker.with_termio_mut(|termio| termio.terminal_mut().scroll_viewport_to_selection());
+        if scrolled {
+            self.request_render();
+        }
+        scrolled
+    }
+
     fn scroll_viewport_page(&mut self, up: bool) {
         if self.app.is_null() {
             return;
@@ -2529,6 +2544,7 @@ enum ParsedBindingAction {
     ScrollToTop,
     ScrollToBottom,
     ScrollToRow(usize),
+    ScrollToSelection,
     ScrollPageUp,
     ScrollPageDown,
     ScrollPageLines(i16),
@@ -2622,6 +2638,12 @@ fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindin
         b"scroll_to_row" => Some(ParsedBindingAction::ScrollToRow(parse_usize_ascii(
             parameter?,
         )?)),
+        b"scroll_to_selection" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(ParsedBindingAction::ScrollToSelection)
+        }
         b"scroll_page_up" => {
             if parameter.is_some() {
                 return None;
@@ -10681,6 +10703,12 @@ pub extern "C" fn roastty_surface_binding_action(
             surface.scroll_viewport_to_row(row);
             true
         }
+        ParsedBindingAction::ScrollToSelection => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.scroll_viewport_to_selection()
+        }
         ParsedBindingAction::ScrollPageUp => {
             if surface.app.is_null() {
                 return false;
@@ -12535,6 +12563,8 @@ mod tests {
             "scroll_to_row:1:2",
             "scroll_to_row:abc",
             "scroll_to_row:999999999999999999999999999999999999999",
+            "scroll_to_selection:",
+            "scroll_to_selection:now",
             "scroll_page_up:",
             "scroll_page_up:now",
             "scroll_page_down:",
@@ -13117,6 +13147,108 @@ mod tests {
         );
 
         assert!(binding_action(surface, "scroll_to_row:999999"));
+        assert_eq!(
+            surface_worker_viewport_top_left_screen(surface),
+            active_top_left
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_scroll_to_selection_false_for_null_detached_no_worker_and_no_selection(
+    ) {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert!(!binding_action(ptr::null_mut(), "scroll_to_selection"));
+        assert!(!binding_action(surface, "scroll_to_selection"));
+        roastty_app_free(app);
+        assert!(!binding_action(surface, "scroll_to_selection"));
+        roastty_surface_free(surface);
+
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\n'; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+
+        assert!(surface_snapshot_text_after_start(app, surface).contains("l5"));
+        let before = surface_worker_viewport_top_left_screen(surface);
+        assert!(!binding_action(surface, "scroll_to_selection"));
+        assert_eq!(surface_worker_viewport_top_left_screen(surface), before);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_scroll_to_selection_moves_to_normalized_selection_top_left() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command =
+            CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\nl6\\nl7\\nl8\\n'; sleep 5")
+                .unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+
+        assert!(surface_snapshot_text_after_start(app, surface).contains("l8"));
+        assert!(binding_action(surface, "scroll_to_top"));
+
+        let forward = surface_worker_selection(surface, (1, 2), (4, 2));
+        set_surface_worker_active_selection(surface, Some(forward));
+        assert!(binding_action(surface, "scroll_to_selection"));
+        assert_eq!(
+            surface_worker_viewport_top_left_screen(surface),
+            point::Coordinate::new(0, 2)
+        );
+
+        let reverse = surface_worker_selection(surface, (4, 4), (1, 1));
+        set_surface_worker_active_selection(surface, Some(reverse));
+        assert!(binding_action(surface, "scroll_to_selection"));
+        assert_eq!(
+            surface_worker_viewport_top_left_screen(surface),
+            point::Coordinate::new(0, 1)
+        );
+
+        let mut mirrored = surface_worker_selection(surface, (8, 1), (2, 3));
+        mirrored.rectangle = true;
+        set_surface_worker_active_selection(surface, Some(mirrored));
+        assert!(binding_action(surface, "scroll_to_selection"));
+        assert_eq!(
+            surface_worker_viewport_top_left_screen(surface),
+            point::Coordinate::new(0, 1)
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_scroll_to_selection_in_active_area_clamps_to_active() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command =
+            CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\nl6\\nl7\\nl8\\n'; sleep 5")
+                .unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+
+        assert!(surface_snapshot_text_after_start(app, surface).contains("l8"));
+        let active_top_left = surface_worker_active_viewport_top_left_screen(surface);
+        let selection = surface_worker_selection(
+            surface,
+            (1, active_top_left.y + 1),
+            (4, active_top_left.y + 1),
+        );
+        set_surface_worker_active_selection(surface, Some(selection));
+        assert!(binding_action(surface, "scroll_to_top"));
+
+        assert!(binding_action(surface, "scroll_to_selection"));
         assert_eq!(
             surface_worker_viewport_top_left_screen(surface),
             active_top_left

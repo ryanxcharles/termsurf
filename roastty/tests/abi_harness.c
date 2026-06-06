@@ -4310,6 +4310,8 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(surface, "scroll_to_row:-1", 16));
   assert(!roastty_surface_binding_action(
       surface, "scroll_to_row:18446744073709551616", 34));
+  assert(!roastty_surface_binding_action(surface, "scroll_to_selection:", 20));
+  assert(!roastty_surface_binding_action(surface, "scroll_to_selection:now", 23));
   assert(!roastty_surface_binding_action(surface, "scroll_page_up:", 15));
   assert(!roastty_surface_binding_action(surface, "scroll_page_up:now", 18));
   assert(!roastty_surface_binding_action(surface, "scroll_page_down:", 17));
@@ -4333,6 +4335,7 @@ int main(int argc, char **argv) {
   assert(roastty_surface_binding_action(surface, "scroll_to_row:0", 15));
   assert(roastty_surface_binding_action(surface, "scroll_to_row:+1", 16));
   assert(roastty_surface_binding_action(surface, "scroll_to_row:2", 15));
+  assert(!roastty_surface_binding_action(surface, "scroll_to_selection", 19));
   assert(roastty_surface_binding_action(surface, "scroll_page_up", 14));
   assert(roastty_surface_binding_action(surface, "scroll_page_down", 16));
   assert(roastty_surface_binding_action(surface, "scroll_page_lines:-2", 20));

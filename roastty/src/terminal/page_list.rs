@@ -2657,7 +2657,7 @@ impl PageList {
         Some(selection::Order::Reverse)
     }
 
-    fn selection_top_left(&self, selection: selection::Selection) -> Option<Pin> {
+    pub(super) fn selection_top_left(&self, selection: selection::Selection) -> Option<Pin> {
         Some(match self.selection_order(selection)? {
             selection::Order::Forward => selection.start(),
             selection::Order::Reverse => selection.end(),
@@ -4933,7 +4933,7 @@ impl PageList {
         self.scroll(Scroll::Active);
     }
 
-    fn scroll_to_pin(&mut self, mut pin: Pin) {
+    pub(super) fn scroll_to_pin(&mut self, mut pin: Pin) {
         pin.x = 0;
         if self.pin_is_active(pin) {
             self.viewport = Viewport::Active;

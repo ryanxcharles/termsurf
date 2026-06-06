@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 712: Binding Action Scroll Selection
@@ -120,3 +125,60 @@ re-review confirmed that the no-worker ABI expectation is explicitly `false`,
 both colon forms are called out in parser coverage, and the design-review
 provenance plus review section are recorded. The design is approved for the plan
 commit.
+
+## Result
+
+**Result:** Pass
+
+Implemented `scroll_to_selection` binding-action support for attached
+worker-backed surfaces with an active selection. `parse_binding_action` now
+accepts only the bare void action and rejects `scroll_to_selection:` and
+parameterized forms. Null, detached, no-worker, and no-selection surfaces return
+`false`.
+
+The terminal stack now exposes the existing selection top-left normalization and
+pin-scroll primitives through narrow page-list, screen, and terminal wrappers.
+Worker-backed surfaces call the terminal helper under the termio lock, request a
+render only when an active selection is scrolled to, and return the terminal
+helper's boolean result.
+
+Verification covered parser false paths, no-worker/no-selection false returns,
+null/detached rejection, forward and reverse selection normalization,
+rectangular mirrored selection normalization, active-area clamping, C ABI smoke
+coverage, and previous binding-action behavior.
+
+Commands run:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty scroll_to_selection -- --nocapture`
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1`
+- `cargo test -p roastty --test abi_harness`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+`scroll_to_selection` can reuse the local selection-top-left and pin-scroll
+primitives without new terminal state. The binding-action scroll family now
+covers top, bottom, absolute row, active selection, page up/down, signed lines,
+and finite fractional pages. The next binding-action slice should likely move to
+a non-scroll action such as `clear_screen` only after explicitly checking
+alternate-screen and history-clearing semantics.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 712 diff and found no code correctness
+blockers. The review confirmed that the parser accepts only bare
+`scroll_to_selection` and rejects both colon forms, and that null, detached,
+no-worker, and worker-backed no-selection paths return `false`.
+
+The review also approved the terminal path: it reuses the existing top-left
+selection normalization and pin-scroll primitives, and requests a render only
+after a successful selection scroll. Test coverage was accepted for
+no-worker/no-selection false returns, forward, reverse, and rectangular
+selection normalization, active-area clamping, ABI smoke coverage, and previous
+binding-action behavior.
+
+The only required fix before result commit was workflow provenance: adding the
+`[review.result]` frontmatter, recording this completion-review section, and
+updating the README provenance tuple to `Codex/Codex/Codex`.
