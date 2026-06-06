@@ -588,21 +588,43 @@ impl Config {
         paths: DefaultConfigPaths,
     ) -> DefaultConfigLoadReport {
         let mut report = DefaultConfigLoadReport::default();
-        if self.load_default_file_candidate(paths.legacy_xdg, &mut report) {
+        let legacy_xdg = paths.legacy_xdg;
+        let preferred_xdg = paths.preferred_xdg;
+        let legacy_xdg_status = self.load_default_file_candidate(legacy_xdg.clone(), &mut report);
+        if legacy_xdg_status.present() {
             report.xdg_loaded = true;
         }
-        if self.load_default_file_candidate(paths.preferred_xdg, &mut report) {
+        let preferred_xdg_status =
+            self.load_default_file_candidate(preferred_xdg.clone(), &mut report);
+        if preferred_xdg_status.present() {
             report.xdg_loaded = true;
+        }
+        if legacy_xdg_status.present() && preferred_xdg_status.present() {
+            if let (Some(legacy), Some(preferred)) = (legacy_xdg, preferred_xdg) {
+                report.duplicate_xdg = Some((legacy, preferred));
+            }
         }
 
         let same_app_support = paths.legacy_app_support == paths.preferred_app_support;
-        if self.load_default_file_candidate(paths.legacy_app_support, &mut report) {
+        let legacy_app_support = paths.legacy_app_support;
+        let preferred_app_support = paths.preferred_app_support;
+        let legacy_app_support_status =
+            self.load_default_file_candidate(legacy_app_support.clone(), &mut report);
+        if legacy_app_support_status.present() {
             report.app_support_loaded = true;
         }
-        if !same_app_support
-            && self.load_default_file_candidate(paths.preferred_app_support, &mut report)
-        {
-            report.app_support_loaded = true;
+        if !same_app_support {
+            let preferred_app_support_status =
+                self.load_default_file_candidate(preferred_app_support.clone(), &mut report);
+            if preferred_app_support_status.present() {
+                report.app_support_loaded = true;
+            }
+            if legacy_app_support_status.present() && preferred_app_support_status.present() {
+                if let (Some(legacy), Some(preferred)) = (legacy_app_support, preferred_app_support)
+                {
+                    report.duplicate_app_support = Some((legacy, preferred));
+                }
+            }
         }
         report
     }
@@ -616,21 +638,21 @@ impl Config {
         &mut self,
         path: Option<PathBuf>,
         report: &mut DefaultConfigLoadReport,
-    ) -> bool {
+    ) -> DefaultConfigCandidateStatus {
         let Some(path) = path else {
-            return false;
+            return DefaultConfigCandidateStatus::Absent;
         };
         match self.load_optional_file(&path) {
             OptionalFileAction::Loaded(diagnostics) => {
                 report
                     .loaded
                     .push(DefaultConfigFileLoad { path, diagnostics });
-                true
+                DefaultConfigCandidateStatus::Loaded
             }
-            OptionalFileAction::NotFound => false,
+            OptionalFileAction::NotFound => DefaultConfigCandidateStatus::NotFound,
             OptionalFileAction::Error(error) => {
                 report.errors.push(DefaultConfigFileError { path, error });
-                true
+                DefaultConfigCandidateStatus::Error
             }
         }
     }
@@ -680,6 +702,20 @@ pub(crate) enum OptionalFileAction {
     Error(std::io::Error),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DefaultConfigCandidateStatus {
+    Absent,
+    NotFound,
+    Loaded,
+    Error,
+}
+
+impl DefaultConfigCandidateStatus {
+    fn present(self) -> bool {
+        matches!(self, Self::Loaded | Self::Error)
+    }
+}
+
 /// Default config candidate paths, in preferred/legacy families.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct DefaultConfigPaths {
@@ -710,6 +746,8 @@ pub(crate) struct DefaultConfigLoadReport {
     pub errors: Vec<DefaultConfigFileError>,
     pub xdg_loaded: bool,
     pub app_support_loaded: bool,
+    pub duplicate_xdg: Option<(PathBuf, PathBuf)>,
+    pub duplicate_app_support: Option<(PathBuf, PathBuf)>,
 }
 
 /// An error from `Config::set` (upstream `parseIntoField`'s
@@ -6169,6 +6207,14 @@ mod tests {
         assert!(report.app_support_loaded);
         assert!(report.errors.is_empty());
         assert_eq!(
+            report.duplicate_xdg,
+            Some((legacy_xdg.clone(), preferred_xdg.clone()))
+        );
+        assert_eq!(
+            report.duplicate_app_support,
+            Some((legacy_app.clone(), preferred_app.clone()))
+        );
+        assert_eq!(
             report
                 .loaded
                 .iter()
@@ -6212,8 +6258,97 @@ mod tests {
         assert!(!report.xdg_loaded);
         assert!(report.app_support_loaded);
         assert!(report.errors.is_empty());
+        assert_eq!(report.duplicate_app_support, None);
         assert_eq!(report.loaded.len(), 1);
         assert_eq!(report.loaded[0].path, app);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_load_default_files_reports_xdg_error_duplicates() {
+        let dir = unique_config_test_dir("default-xdg-error-duplicate");
+        let error_path = dir.join("is-directory");
+        let preferred_xdg = dir.join("xdg-preferred");
+        std::fs::create_dir_all(&error_path).unwrap();
+        write_config_file(&preferred_xdg, "window-colorspace = display-p3\n");
+
+        let mut cfg = Config::default();
+        let report = cfg.load_default_files_from_paths(DefaultConfigPaths {
+            legacy_xdg: Some(error_path.clone()),
+            preferred_xdg: Some(preferred_xdg.clone()),
+            legacy_app_support: None,
+            preferred_app_support: None,
+        });
+
+        assert!(report.xdg_loaded);
+        assert!(!report.app_support_loaded);
+        assert_eq!(
+            report.duplicate_xdg,
+            Some((error_path.clone(), preferred_xdg.clone()))
+        );
+        assert_eq!(report.duplicate_app_support, None);
+        assert_eq!(report.errors.len(), 1);
+        assert_eq!(report.errors[0].path, error_path);
+        assert_eq!(report.loaded.len(), 1);
+        assert_eq!(report.loaded[0].path, preferred_xdg);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_load_default_files_does_not_report_xdg_missing_duplicates() {
+        let dir = unique_config_test_dir("default-xdg-missing");
+        let legacy_xdg = dir.join("missing");
+        let preferred_xdg = dir.join("xdg-preferred");
+        write_config_file(&preferred_xdg, "fullscreen = true\n");
+
+        let mut cfg = Config::default();
+        let report = cfg.load_default_files_from_paths(DefaultConfigPaths {
+            legacy_xdg: Some(legacy_xdg),
+            preferred_xdg: Some(preferred_xdg.clone()),
+            legacy_app_support: None,
+            preferred_app_support: None,
+        });
+
+        assert!(report.xdg_loaded);
+        assert!(!report.app_support_loaded);
+        assert_eq!(report.duplicate_xdg, None);
+        assert_eq!(report.duplicate_app_support, None);
+        assert!(report.errors.is_empty());
+        assert_eq!(report.loaded.len(), 1);
+        assert_eq!(report.loaded[0].path, preferred_xdg);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_load_default_files_reports_app_support_error_duplicates() {
+        let dir = unique_config_test_dir("default-app-error-duplicate");
+        let legacy_app = dir.join("is-directory");
+        let preferred_app = dir.join("app-preferred");
+        std::fs::create_dir_all(&legacy_app).unwrap();
+        write_config_file(&preferred_app, "window-colorspace = display-p3\n");
+
+        let mut cfg = Config::default();
+        let report = cfg.load_default_files_from_paths(DefaultConfigPaths {
+            legacy_xdg: None,
+            preferred_xdg: None,
+            legacy_app_support: Some(legacy_app.clone()),
+            preferred_app_support: Some(preferred_app.clone()),
+        });
+
+        assert!(!report.xdg_loaded);
+        assert!(report.app_support_loaded);
+        assert_eq!(report.duplicate_xdg, None);
+        assert_eq!(
+            report.duplicate_app_support,
+            Some((legacy_app.clone(), preferred_app.clone()))
+        );
+        assert_eq!(report.errors.len(), 1);
+        assert_eq!(report.errors[0].path, legacy_app);
+        assert_eq!(report.loaded.len(), 1);
+        assert_eq!(report.loaded[0].path, preferred_app);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -6238,6 +6373,11 @@ mod tests {
 
         assert!(report.xdg_loaded);
         assert!(report.app_support_loaded);
+        assert_eq!(
+            report.duplicate_xdg,
+            Some((error_path.clone(), later_path.clone()))
+        );
+        assert_eq!(report.duplicate_app_support, None);
         assert_eq!(report.errors.len(), 1);
         assert_eq!(report.errors[0].path, error_path);
         assert_ne!(report.errors[0].error.kind(), std::io::ErrorKind::NotFound);

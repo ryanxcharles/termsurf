@@ -95,3 +95,48 @@ ordering, and the Application Support error-plus-loaded duplicate case is now in
 scope. The review also confirmed that the scope remains internal and
 report-only, with logging, C ABI exposure, templates, recursive config-file
 loading, and UI deferred.
+
+## Result
+
+**Result:** Pass
+
+Implemented duplicate-candidate reporting in `DefaultConfigLoadReport` for XDG
+and Application Support default config families. The loader now records each
+candidate probe as absent, not found, loaded, or error. Successful loads and
+non-not-found errors count as present for duplicate detection, while absent and
+not-found candidates do not.
+
+Duplicate tuples are stored in deterministic `(legacy_path, preferred_path)`
+order. Equal Application Support paths still load once and do not report a
+duplicate.
+
+Verification passed:
+
+- `cargo test -p roastty load_default_files -- --nocapture --test-threads=1` — 6
+  passed
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no blocking findings. The
+review confirmed that `DefaultConfigCandidateStatus::present()` correctly treats
+`Loaded` and `Error` as present while excluding `Absent` and `NotFound`, that
+duplicate reporting preserves `(legacy_path, preferred_path)` order, and that
+Application Support deduplication is preserved. The review also confirmed that
+the tests cover normal XDG and Application Support duplicates, XDG and
+Application Support error duplicates, XDG missing non-duplicates, and equal
+Application Support path dedupe.
+
+Non-blocking follow-ups from the review: both-candidates-error duplicate
+coverage and Application Support missing non-duplicate coverage would add
+symmetry, but the current tests cover the important branches and the prior
+review requirements.
+
+## Conclusion
+
+Roastty now preserves upstream's duplicate default-config warning condition as
+structured internal report data without adding logging or public ABI surface. A
+future slice can surface these report fields as warnings where the app/runtime
+logging boundary lands.
