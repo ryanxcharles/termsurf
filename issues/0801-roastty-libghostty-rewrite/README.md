@@ -201,7 +201,7 @@ Experiment 246).
       queueing, pane terminal state, pane visible output, and pane history
       output, pane state parsing, and pane state cursor application done; pane
       state mode application done; pane state mouse mode application done; pane
-      state scroll-region application in progress; remaining pane state
+      state scroll-region application done; remaining pane state
       application/live output, PTY, and App integration missing
 - [x] `sys` (PNG-decode abstraction) — implemented and tested via C ABI
 
@@ -1783,7 +1783,7 @@ are past the correctness-critical foundation.
 - [Experiment 658: Tmux Pane State Mouse Modes](658-tmux-pane-state-mouse.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 659: Tmux Pane State Scroll Region](659-tmux-pane-state-scroll-region.md)
-  — **Designed** · Codex/Codex/Codex
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

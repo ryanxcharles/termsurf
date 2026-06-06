@@ -1283,6 +1283,26 @@ impl Terminal {
         self.modes.set(modes::Mode::MouseFormatSgr, mouse_sgr);
     }
 
+    pub(in crate::terminal) fn apply_tmux_scroll_region_state(
+        &mut self,
+        top: usize,
+        bottom: usize,
+    ) {
+        let (Ok(top), Ok(bottom)) = (CellCountInt::try_from(top), CellCountInt::try_from(bottom))
+        else {
+            return;
+        };
+        let region = ScrollingRegion {
+            top,
+            bottom,
+            left: self.scrolling_region.left,
+            right: self.scrolling_region.right,
+        };
+        if region.is_valid(self.size) {
+            self.scrolling_region = region;
+        }
+    }
+
     pub(crate) fn cursor_visible(&self) -> bool {
         self.modes.get(modes::Mode::CursorVisible)
     }
@@ -2029,6 +2049,16 @@ impl Terminal {
     #[cfg(test)]
     fn scrolling_region_for_tests(&self) -> ScrollingRegion {
         self.scrolling_region
+    }
+
+    #[cfg(test)]
+    pub(super) fn scrolling_region_tuple_for_tests(&self) -> (u16, u16, u16, u16) {
+        (
+            self.scrolling_region.top,
+            self.scrolling_region.bottom,
+            self.scrolling_region.left,
+            self.scrolling_region.right,
+        )
     }
 
     #[cfg(test)]
@@ -3668,16 +3698,16 @@ impl ScrollingRegion {
     }
 
     fn assert_valid(self, size: TerminalSize) {
-        assert!(self.top <= self.bottom);
-        assert!(self.left <= self.right);
-        assert!(self.bottom < size.rows);
-        assert!(self.right < size.cols);
-        if size.rows > 1 {
-            assert!(self.top < self.bottom);
-        }
-        if size.cols > 1 {
-            assert!(self.left < self.right);
-        }
+        assert!(self.is_valid(size));
+    }
+
+    fn is_valid(self, size: TerminalSize) -> bool {
+        self.top <= self.bottom
+            && self.left <= self.right
+            && self.bottom < size.rows
+            && self.right < size.cols
+            && (size.rows <= 1 || self.top < self.bottom)
+            && (size.cols <= 1 || self.left < self.right)
     }
 }
 

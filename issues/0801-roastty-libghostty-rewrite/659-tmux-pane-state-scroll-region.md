@@ -99,3 +99,56 @@ assignment.
 - `cargo fmt -p roastty -- --check`
 - `cargo test -p roastty terminal::tmux`
 - `git diff --check`
+
+## Result
+
+**Result:** Pass.
+
+Roastty now applies the tmux pane-state vertical scroll-region subset after
+cursor, non-mouse mode, and mouse mode restoration. The restore path treats
+`scroll_region_upper` and `scroll_region_lower` as 0-based tmux row values,
+preserves existing left/right margins, validates the full candidate
+`ScrollingRegion`, and ignores invalid parsed bounds without defuncting the
+viewer.
+
+The implementation added a direct tmux-facing terminal helper for scroll-region
+restoration and a shared `ScrollingRegion::is_valid` predicate so normal test
+setters and tmux restoration use the same invariant. The tmux tests use a
+tuple-based pane accessor/setter to avoid exposing the private region type while
+still proving horizontal margin preservation.
+
+Verification covers valid restoration, left/right margin preservation, stale
+pane IDs followed by a valid pane state line, and invalid parsed bounds for
+`top > bottom`, `bottom == rows`, and `top == bottom` on a multi-row pane. The
+existing tmux pane-state tests continue to cover malformed output defuncting the
+viewer and successful command-queue continuation.
+
+Verification passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/659-tmux-pane-state-scroll-region.md`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty terminal::tmux` — 131 passed, 0 failed
+- `git diff --check`
+
+## Conclusion
+
+Pane-state restoration now covers cursor state, non-mouse modes, mouse modes,
+and vertical scroll regions. The remaining parsed pane-state fields are
+alternate saved cursor position and tab stops; after those, the tmux work can
+move toward live pane output, PTY writes, and App integration.
+
+## Completion Review
+
+**Result:** Approved.
+
+Codex found no issues. It confirmed that
+`Terminal::apply_tmux_scroll_region_state` treats tmux row values as 0-based,
+preserves horizontal margins, validates the complete candidate with
+`ScrollingRegion::is_valid`, and silently ignores invalid or overflowing bounds
+without defuncting the viewer.
+
+Codex also confirmed the tests cover valid restoration, horizontal margin
+preservation, stale-pane handling with a later valid restore, and the approved
+invalid cases. It judged the recorded result, conclusion, README status update,
+and checklist wording accurate and sufficient for the result commit.

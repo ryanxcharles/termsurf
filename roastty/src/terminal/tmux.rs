@@ -1007,6 +1007,10 @@ impl TmuxViewer {
                 state.mouse_utf8_flag,
                 state.mouse_sgr_flag,
             );
+            pane.terminal.apply_tmux_scroll_region_state(
+                state.scroll_region_upper,
+                state.scroll_region_lower,
+            );
         }
 
         true
@@ -1165,6 +1169,31 @@ impl TmuxViewer {
             .iter()
             .find(|pane| pane.id == id)
             .map(|pane| pane.terminal.mouse_format_for_tests())
+    }
+
+    #[cfg(test)]
+    fn pane_scrolling_region_for_tests(&self, id: usize) -> Option<(u16, u16, u16, u16)> {
+        self.panes
+            .iter()
+            .find(|pane| pane.id == id)
+            .map(|pane| pane.terminal.scrolling_region_tuple_for_tests())
+    }
+
+    #[cfg(test)]
+    fn set_pane_scrolling_region_for_tests(
+        &mut self,
+        id: usize,
+        top: u16,
+        bottom: u16,
+        left: u16,
+        right: u16,
+    ) -> bool {
+        let Some(pane) = self.panes.iter_mut().find(|pane| pane.id == id) else {
+            return false;
+        };
+        pane.terminal
+            .set_scrolling_region_for_tests(top, bottom, left, right);
+        true
     }
 
     #[cfg(test)]
@@ -3660,6 +3689,90 @@ mod tests {
     }
 
     #[test]
+    fn tmux_viewer_pane_state_applies_scroll_region() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 6)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneState);
+
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(
+                pane_state_line_with_scroll_region(42, 2, 4).into_bytes()
+            )),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_scrolling_region_for_tests(42),
+            Some((2, 4, 0, 9))
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_pane_state_scroll_region_preserves_horizontal_margins() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 6)]);
+        assert!(viewer.set_pane_scrolling_region_for_tests(42, 0, 5, 2, 8));
+        viewer.queue_command_for_tests(TmuxCommand::PaneState);
+
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(
+                pane_state_line_with_scroll_region(42, 1, 3).into_bytes()
+            )),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_scrolling_region_for_tests(42),
+            Some((1, 3, 2, 8))
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_pane_state_stale_panes_do_not_apply_scroll_region() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 6)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneState);
+        let output = format!(
+            "{}\n{}",
+            pane_state_line_with_scroll_region(99, 1, 3),
+            pane_state_line_with_scroll_region(42, 2, 4)
+        );
+
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(output.into_bytes())),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_scrolling_region_for_tests(42),
+            Some((2, 4, 0, 9))
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_pane_state_invalid_scroll_region_is_ignored() {
+        for (upper, lower) in [(4, 1), (0, 6), (2, 2)] {
+            let mut viewer = TmuxViewer::new();
+            viewer.set_panes_for_tests(&[(42, 10, 6)]);
+            assert!(viewer.set_pane_scrolling_region_for_tests(42, 1, 4, 2, 8));
+            viewer.queue_command_for_tests(TmuxCommand::PaneState);
+
+            assert_eq!(
+                viewer.next(ControlNotification::BlockEnd(
+                    pane_state_line_with_scroll_region(42, upper, lower).into_bytes()
+                )),
+                Vec::new()
+            );
+
+            assert_eq!(viewer.state(), TmuxViewerState::CommandQueue);
+            assert_eq!(
+                viewer.pane_scrolling_region_for_tests(42),
+                Some((1, 4, 2, 8))
+            );
+        }
+    }
+
+    #[test]
     fn tmux_viewer_pane_visible_primary_clears_homes_and_replays() {
         let mut viewer = TmuxViewer::new();
         let capture = TmuxCapturePane {
@@ -3956,6 +4069,32 @@ mod tests {
         )
     }
 
+    fn pane_state_line_with_scroll_region(
+        pane_id: usize,
+        scroll_region_upper: usize,
+        scroll_region_lower: usize,
+    ) -> String {
+        pane_state_line_with_modes_and_scroll_region(
+            pane_id,
+            1,
+            1,
+            false,
+            "block",
+            true,
+            false,
+            true,
+            true,
+            false,
+            true,
+            false,
+            false,
+            true,
+            TmuxPaneMouseFlags::default(),
+            scroll_region_upper,
+            scroll_region_lower,
+        )
+    }
+
     #[derive(Debug, Clone, Copy, Default)]
     struct TmuxPaneMouseFlags {
         mouse_all_flag: bool,
@@ -3987,8 +4126,52 @@ mod tests {
         bracketed_paste: bool,
         mouse_flags: TmuxPaneMouseFlags,
     ) -> String {
+        pane_state_line_with_modes_and_scroll_region(
+            pane_id,
+            cursor_x,
+            cursor_y,
+            alternate_on,
+            cursor_shape,
+            cursor_flag,
+            cursor_blinking,
+            insert_flag,
+            wrap_flag,
+            keypad_flag,
+            keypad_cursor_flag,
+            origin_flag,
+            focus_flag,
+            bracketed_paste,
+            mouse_flags,
+            0,
+            1,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "tmux pane-state fixtures mirror fields"
+    )]
+    fn pane_state_line_with_modes_and_scroll_region(
+        pane_id: usize,
+        cursor_x: usize,
+        cursor_y: usize,
+        alternate_on: bool,
+        cursor_shape: &str,
+        cursor_flag: bool,
+        cursor_blinking: bool,
+        insert_flag: bool,
+        wrap_flag: bool,
+        keypad_flag: bool,
+        keypad_cursor_flag: bool,
+        origin_flag: bool,
+        focus_flag: bool,
+        bracketed_paste: bool,
+        mouse_flags: TmuxPaneMouseFlags,
+        scroll_region_upper: usize,
+        scroll_region_lower: usize,
+    ) -> String {
         format!(
-            "%{pane_id};{cursor_x};{cursor_y};{};{cursor_shape};colour255;{};{};5;6;{};{};{};{};{};{};{};{};{};{};{};{};{};0;1;0,4,8",
+            "%{pane_id};{cursor_x};{cursor_y};{};{cursor_shape};colour255;{};{};5;6;{};{};{};{};{};{};{};{};{};{};{};{};{};{scroll_region_upper};{scroll_region_lower};0,4,8",
             usize::from(cursor_flag),
             usize::from(cursor_blinking),
             usize::from(alternate_on),
