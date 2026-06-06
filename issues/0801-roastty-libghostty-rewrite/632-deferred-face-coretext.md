@@ -103,3 +103,54 @@ must match text and not emoji, and an Apple Color Emoji codepoint must match
 emoji and not text.
 
 Follow-up review approved the revised design.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a first-class macOS/CoreText `DeferredFace` type in
+`roastty/src/font/deferred_face.rs`. It owns a character-set-filter-free
+`CTFontDescriptor`, preserves requested variations, can load into a renderable
+`Face`, and can answer glyph support with explicit text/emoji presentation
+filtering.
+
+Discovery now uses `DeferredFace::from_descriptor(...).load()` as the bridge
+from ranked CoreText descriptors to eager `Face`s. That removes the private
+`deferred_face(desc) -> Face` helper from `discovery.rs` without changing the
+current discovery, fallback, or resolver surface. `Collection` remains
+eager-entry-only for now; deferred collection entries are intentionally left for
+the next integration experiment.
+
+Verification:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty deferred_face` — 5 tests passed
+- `cargo test -p roastty discover_faces` — 4 tests passed
+- `cargo test -p roastty discover_fallback` — 2 tests passed
+- `cargo test -p roastty codepoint_override` — 3 tests passed
+- `cargo test -p roastty discovery_fallback` — 3 tests passed
+- `cargo test -p roastty` — 3475 unit tests passed, plus the ABI harness
+- `cargo fmt -p roastty -- --check`
+- `rg -n "DeferredFace.*missing|deferred-face arm is deferred|Deferred-face loading.*later|deferred_face\\(" roastty/src/font`
+  — no matches after removing stale collection wording
+- `rg -n "\bghostty_[A-Za-z0-9_]*\b" roastty/src/font/deferred_face.rs roastty/src/font/discovery.rs roastty/src/font/collection.rs roastty/src/font/codepoint_resolver.rs`
+  — no matches
+- `git diff --check`
+
+## Conclusion
+
+This proves the CoreText deferred-face primitive can live independently in
+Roastty and can replace discovery's private eager helper while keeping existing
+behavior green. The next experiment should wire deferred faces into
+`Collection`/resolver storage, so descriptor-backed fallback entries can stay
+lazy until they are actually needed.
+
+## Completion Review
+
+**Reviewer:** Codex (gpt-5.5, medium) · resumed session
+`019e8f83-9029-7d43-8e82-f4c5754e14ba`
+
+**Verdict:** APPROVED.
+
+The reviewer found no correctness bugs, stale documentation, or overclaiming in
+the staged result.

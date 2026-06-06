@@ -1710,7 +1710,7 @@ are past the correctness-critical foundation.
 - [Experiment 631: Shaper audit](631-shaper-audit.md) — **Pass** ·
   Codex/Codex/Codex
 - [Experiment 632: CoreText DeferredFace](632-deferred-face-coretext.md) —
-  **Designed**
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

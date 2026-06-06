@@ -13,8 +13,8 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use objc2_core_foundation::{
-    kCFNull, CFArray, CFCharacterSet, CFDictionary, CFMutableDictionary, CFNumber, CFRange,
-    CFRetained, CFString, CFType,
+    CFArray, CFCharacterSet, CFDictionary, CFMutableDictionary, CFNumber, CFRange, CFRetained,
+    CFString, CFType,
 };
 use objc2_core_text::{
     kCTFontCharacterSetAttribute, kCTFontFamilyNameAttribute, kCTFontSizeAttribute,
@@ -24,6 +24,7 @@ use objc2_core_text::{
     CTFontDescriptor, CTFontSymbolicTraits, CTFontTableOptions,
 };
 
+use crate::font::deferred_face::DeferredFace;
 use crate::font::face::coretext::Face;
 use crate::font::opentype::{head::Head, os2::Os2};
 
@@ -250,11 +251,9 @@ impl Descriptor {
     /// `setVariations`). The face is produced only when the iterator advances.
     pub(crate) fn discover_faces(&self) -> impl Iterator<Item = Face> {
         let variations = self.variations.clone();
-        self.discover_descriptors().into_iter().map(move |d| {
-            let mut face = deferred_face(d);
-            face.set_variations(&variations);
-            face
-        })
+        self.discover_descriptors()
+            .into_iter()
+            .map(move |d| DeferredFace::from_descriptor(d, variations.clone()).load())
     }
 
     /// Discover fallback faces for this descriptor, ranked best-first. Faithful
@@ -286,34 +285,9 @@ impl Descriptor {
         }
         descriptors
             .into_iter()
-            .map(|d| self.apply_variations(deferred_face(d)))
+            .map(|d| DeferredFace::from_descriptor(d, self.variations.clone()).load())
             .collect()
     }
-}
-
-/// Turn a sorted candidate descriptor into a [`Face`], **removing** the
-/// character-set attribute first (upstream's `DiscoverIterator.next`).
-fn deferred_face(desc: CFRetained<CTFontDescriptor>) -> Face {
-    // Drop the character-set filter by copying the descriptor with the attribute
-    // set to `kCFNull` (CoreText removes a null-valued attribute from the copy).
-    let attrs = CFMutableDictionary::<CFString, CFType>::empty();
-    // SAFETY: `kCTFontCharacterSetAttribute` is a static key; `kCFNull` is a
-    // live singleton; the mutable dict retains both.
-    unsafe {
-        let null = kCFNull.expect("kCFNull is available");
-        CFMutableDictionary::set_value(
-            Some(attrs.as_opaque()),
-            (kCTFontCharacterSetAttribute as *const CFString).cast::<c_void>(),
-            (null as *const objc2_core_foundation::CFNull).cast::<c_void>(),
-        );
-    }
-    // SAFETY: `desc` is live; `attrs` is a valid attributes dictionary.
-    let desc = unsafe { desc.copy_with_attributes(attrs.as_opaque()) };
-
-    // Create the font (size 12; resized later when actually used).
-    // SAFETY: `desc` is live; a null matrix is valid.
-    let font = unsafe { CTFont::with_font_descriptor(&desc, 12.0, std::ptr::null()) };
-    Face::from_ct_font(font)
 }
 
 /// The ranking score for a discovery candidate. Faithful port of upstream's

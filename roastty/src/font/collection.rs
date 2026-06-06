@@ -121,9 +121,10 @@ impl Default for Index {
     }
 }
 
-/// A single face in a [`Collection`]. Faithful (eager) port of upstream `Entry`:
-/// it owns a loaded [`Face`], a fallback flag, and the resolved size-adjustment
-/// scale factor (`1.0` when not adjusted). (The deferred-face arm is deferred.)
+/// A single eagerly loaded face in a [`Collection`].
+///
+/// Owns a loaded [`Face`], a fallback flag, and the resolved size-adjustment
+/// scale factor (`1.0` when not adjusted).
 pub(crate) struct Entry {
     face: Face,
     fallback: bool,
