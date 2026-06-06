@@ -1464,7 +1464,16 @@ struct App {
     color_scheme: c_int,
     confirm_close_surface: config::ConfirmCloseSurface,
     has_global_keybinds: bool,
+    keybind_triggers: Vec<ConfigKeybind>,
     surfaces: Vec<NonNull<Surface>>,
+}
+
+impl App {
+    fn key_event_is_binding(&self, event: &key::KeyEvent) -> bool {
+        self.keybind_triggers
+            .iter()
+            .any(|binding| config_trigger_matches_key_event(binding.trigger, event))
+    }
 }
 
 struct Surface {
@@ -3012,9 +3021,14 @@ impl Surface {
         if self.app.is_null() || event.is_none() {
             return false;
         }
-        let Some(flags_value) =
-            event.and_then(|event| default_key_event_binding_flags(&event.event))
-        else {
+        let event = event.unwrap();
+        let flags_value = if app_from_handle(self.app)
+            .is_some_and(|app| app.key_event_is_binding(&event.event))
+        {
+            ROASTTY_KEYBIND_FLAGS_DEFAULT
+        } else if let Some(flags) = default_key_event_binding_flags(&event.event) {
+            flags
+        } else {
             return false;
         };
         if !flags.is_null() {
@@ -8673,12 +8687,15 @@ pub extern "C" fn roastty_app_new(
     } else {
         unsafe { *runtime }
     };
-    let confirm_close_surface = config_from_handle(config)
-        .map(|config| config.confirm_close_surface)
-        .unwrap_or(config::ConfirmCloseSurface::True);
-    let has_global_keybinds = config_from_handle(config)
-        .map(|config| config.has_global_keybinds)
-        .unwrap_or(false);
+    let (confirm_close_surface, has_global_keybinds, keybind_triggers) = config_from_handle(config)
+        .map(|config| {
+            (
+                config.confirm_close_surface,
+                config.has_global_keybinds,
+                config.keybind_triggers.clone(),
+            )
+        })
+        .unwrap_or((config::ConfirmCloseSurface::True, false, Vec::new()));
 
     Box::into_raw(Box::new(App {
         runtime,
@@ -8686,6 +8703,7 @@ pub extern "C" fn roastty_app_new(
         color_scheme: 0,
         confirm_close_surface,
         has_global_keybinds,
+        keybind_triggers,
         surfaces: Vec::new(),
     }))
     .cast()
@@ -8743,6 +8761,7 @@ pub extern "C" fn roastty_app_update_config(app: RoasttyApp, config: RoasttyConf
     };
     app.confirm_close_surface = config.confirm_close_surface;
     app.has_global_keybinds = config.has_global_keybinds;
+    app.keybind_triggers = config.keybind_triggers.clone();
 }
 
 #[no_mangle]
@@ -15065,6 +15084,250 @@ mod tests {
         roastty_key_event_free(event);
         roastty_surface_free(surface);
         roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_key_is_binding_matches_app_configured_keybinds_after_config_free() {
+        with_init_args(
+            &[
+                "roastty",
+                "--keybind=cmd+KeyN=new_window",
+                "--keybind=ctrl+x=text:custom",
+                "--keybind=alt+z=text:unshifted",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                let app = roastty_app_new(ptr::null(), config);
+                roastty_config_free(config);
+                let surface = new_test_surface(app);
+                let event = new_key_event();
+                let mut flags = 0xffu8;
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::KeyN,
+                    ROASTTY_MODS_SUPER,
+                    &[],
+                    0,
+                );
+                assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
+
+                flags = 0xff;
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_CTRL,
+                    b"x",
+                    0,
+                );
+                assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
+
+                flags = 0xff;
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_ALT,
+                    &[],
+                    u32::from(b'z'),
+                );
+                assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::KeyN,
+                    ROASTTY_MODS_SUPER,
+                    &[],
+                    0,
+                );
+                assert!(roastty_surface_key_is_binding(
+                    surface,
+                    event,
+                    ptr::null_mut()
+                ));
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Release,
+                    key::Key::KeyN,
+                    ROASTTY_MODS_SUPER,
+                    &[],
+                    0,
+                );
+                flags = 0xff;
+                assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert_eq!(flags, 0);
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::KeyN,
+                    ROASTTY_MODS_CTRL,
+                    &[],
+                    0,
+                );
+                flags = 0xff;
+                assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert_eq!(flags, 0);
+
+                roastty_app_free(app);
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::KeyN,
+                    ROASTTY_MODS_SUPER,
+                    &[],
+                    0,
+                );
+                flags = 0xff;
+                assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert_eq!(flags, 0);
+
+                roastty_key_event_free(event);
+                roastty_surface_free(surface);
+            },
+        );
+    }
+
+    #[test]
+    fn surface_key_is_binding_configured_overrides_static_default_flags() {
+        with_init_args(&["roastty", "--keybind=cmd+c=text:custom"], || {
+            let config = roastty_config_new();
+            roastty_config_load_cli_args(config);
+            let app = roastty_app_new(ptr::null(), config);
+            let surface = new_test_surface(app);
+            let event = new_key_event();
+            let mut flags = 0xffu8;
+
+            set_key_event(
+                event,
+                key::KeyAction::Press,
+                key::Key::Unidentified,
+                ROASTTY_MODS_SUPER,
+                b"c",
+                0,
+            );
+            assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+            assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
+
+            roastty_key_event_free(event);
+            roastty_surface_free(surface);
+            roastty_app_free(app);
+            roastty_config_free(config);
+        });
+    }
+
+    #[test]
+    fn surface_key_is_binding_app_update_replaces_configured_keybinds() {
+        let config = roastty_config_new();
+        config_from_handle(config)
+            .unwrap()
+            .store_keybind(parse_config_keybind(b"ctrl+a=text:first").unwrap());
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        let event = new_key_event();
+        let mut flags = 0xffu8;
+
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::Unidentified,
+            ROASTTY_MODS_CTRL,
+            b"a",
+            0,
+        );
+        assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
+
+        let updated = roastty_config_new();
+        config_from_handle(updated)
+            .unwrap()
+            .store_keybind(parse_config_keybind(b"alt+b=text:second").unwrap());
+        roastty_app_update_config(app, updated);
+
+        flags = 0xff;
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::Unidentified,
+            ROASTTY_MODS_CTRL,
+            b"a",
+            0,
+        );
+        assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert_eq!(flags, 0);
+
+        flags = 0xff;
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::Unidentified,
+            ROASTTY_MODS_ALT,
+            b"b",
+            0,
+        );
+        assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
+
+        roastty_key_event_free(event);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(updated);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_is_binding_matches_duplicate_configured_actions() {
+        with_init_args(
+            &[
+                "roastty",
+                "--keybind=ctrl+n=new_window",
+                "--keybind=cmd+n=new_window",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                let app = roastty_app_new(ptr::null(), config);
+                let surface = new_test_surface(app);
+                let event = new_key_event();
+                let mut flags = 0xffu8;
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_CTRL,
+                    b"n",
+                    0,
+                );
+                assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
+
+                flags = 0xff;
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_SUPER,
+                    b"n",
+                    0,
+                );
+                assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
+
+                roastty_key_event_free(event);
+                roastty_surface_free(surface);
+                roastty_app_free(app);
+                roastty_config_free(config);
+            },
+        );
     }
 
     #[test]

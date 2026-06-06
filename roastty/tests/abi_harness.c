@@ -4517,9 +4517,42 @@ int main(int argc, char **argv) {
   set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
                            ROASTTY_KEY_KEY_N, ROASTTY_MODS_SUPER, NULL, 0);
   assert(roastty_config_key_is_binding(cli_clone, cli_binding_event));
-  roastty_key_event_free(cli_binding_event);
   roastty_config_free(cli_clone);
+
+  roastty_app_t cli_app = roastty_app_new(NULL, cli_config);
+  assert(cli_app != NULL);
   roastty_config_free(cli_config);
+  cli_config = NULL;
+  roastty_surface_config_s cli_surface_config = roastty_surface_config_new();
+  roastty_surface_t cli_surface =
+      roastty_surface_new(cli_app, &cli_surface_config);
+  assert(cli_surface != NULL);
+  uint8_t cli_binding_flags = 0xff;
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_KEY_N, ROASTTY_MODS_SUPER, NULL, 0);
+  assert(roastty_surface_key_is_binding(cli_surface, cli_binding_event,
+                                        &cli_binding_flags));
+  assert(cli_binding_flags == 0x01);
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_CTRL, "a",
+                           0);
+  assert(roastty_surface_key_is_binding(cli_surface, cli_binding_event, NULL));
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_RELEASE,
+                           ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_CTRL, "a",
+                           0);
+  cli_binding_flags = 0xff;
+  assert(!roastty_surface_key_is_binding(cli_surface, cli_binding_event,
+                                         &cli_binding_flags));
+  assert(cli_binding_flags == 0);
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_ALT, "a", 0);
+  cli_binding_flags = 0xff;
+  assert(!roastty_surface_key_is_binding(cli_surface, cli_binding_event,
+                                         &cli_binding_flags));
+  assert(cli_binding_flags == 0);
+  roastty_surface_free(cli_surface);
+  roastty_app_free(cli_app);
+  roastty_key_event_free(cli_binding_event);
 
   char malformed_flag[] = "--keybind";
   char next_option[] = "--window-theme=dark";
@@ -4559,6 +4592,30 @@ int main(int argc, char **argv) {
   assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
   assert(trigger.key.unicode == ',');
   assert(trigger.mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER));
+  roastty_config_free(cli_config);
+
+  char override_keybind[] = "--keybind=cmd+c=text:custom";
+  char *override_argv[] = {cli_arg0, override_keybind};
+  assert(roastty_init(2, override_argv) == ROASTTY_SUCCESS);
+  cli_config = roastty_config_new();
+  assert(cli_config != NULL);
+  roastty_config_load_cli_args(cli_config);
+  cli_app = roastty_app_new(NULL, cli_config);
+  assert(cli_app != NULL);
+  cli_surface_config = roastty_surface_config_new();
+  cli_surface = roastty_surface_new(cli_app, &cli_surface_config);
+  assert(cli_surface != NULL);
+  assert(roastty_key_event_new(&cli_binding_event) == ROASTTY_SUCCESS);
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_SUPER, "c",
+                           0);
+  cli_binding_flags = 0xff;
+  assert(roastty_surface_key_is_binding(cli_surface, cli_binding_event,
+                                        &cli_binding_flags));
+  assert(cli_binding_flags == 0x01);
+  roastty_key_event_free(cli_binding_event);
+  roastty_surface_free(cli_surface);
+  roastty_app_free(cli_app);
   roastty_config_free(cli_config);
 
   char later_keybind[] = "--keybind=cmd+n=new_window";

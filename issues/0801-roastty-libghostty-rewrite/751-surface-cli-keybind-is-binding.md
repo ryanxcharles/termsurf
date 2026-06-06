@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 751: Surface CLI Keybind Is Binding
@@ -103,3 +108,51 @@ parsing and performability.
 
 Codex re-reviewed the corrected design and approved it for the plan commit with
 no remaining blocking findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now carries configured root keybind triggers from `Config` into `App`.
+`roastty_app_new` clones the configured keybind list, and
+`roastty_app_update_config` replaces the app-owned list when a new config is
+applied. Surfaces query the attached app's configured keybinds before falling
+back to static default keybind flags.
+
+Configured surface matches now return `ROASTTY_KEYBIND_FLAGS_DEFAULT`. This
+includes configured-over-static overlaps such as `cmd+c=text:custom`, where the
+configured binding wins and returns ordinary consumed flags instead of the
+static command-C performable flags. Static default fallbacks still return their
+existing ordinary and performable flag values.
+
+Verification passed:
+
+- `cargo test -p roastty config_cli_keybind -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_key_is_binding -- --nocapture --test-threads=1`
+- `cargo test -p roastty surface_key_is_binding -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_trigger -- --nocapture --test-threads=1`
+- `cargo test -p roastty --test abi_harness -- --nocapture`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Completion Review
+
+Codex reviewed the implementation diff and found no blocking issues. The review
+confirmed that app-owned configured keybind storage is cloned on app creation,
+replaced on app config updates, and checked by `Surface::key_is_binding` before
+static defaults. It also confirmed that configured matches return ordinary
+consumed flags, including the important command-C overlap case, while default
+surface flags remain unchanged when no configured keybind matches.
+
+The review found no must-fix test gaps. It noted that a surface-level malformed
+keybind test would be a possible non-blocking extra pin, but malformed parsing
+and malformed config behavior are already covered by the preceding config
+keybind tests.
+
+## Conclusion
+
+Experiment 751 made CLI-loaded root keybinds visible to surface-level binding
+queries. Configured bindings are still query-only: action dispatch, configured
+performable flags, key tables, sequences, config files, diagnostics, `clear`,
+and `unbind` remain for later experiments.

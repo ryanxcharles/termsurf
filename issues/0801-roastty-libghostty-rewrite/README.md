@@ -2016,7 +2016,7 @@ are past the correctness-critical foundation.
 - [Experiment 750: Config CLI Keybind Is Binding](750-config-cli-keybind-is-binding.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 751: Surface CLI Keybind Is Binding](751-surface-cli-keybind-is-binding.md)
-  — **Designed** · Codex/Codex/Codex
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
