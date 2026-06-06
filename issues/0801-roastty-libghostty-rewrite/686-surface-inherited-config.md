@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 686: Surface Inherited Config
@@ -91,3 +96,66 @@ unnecessary env-array lifetime risk from the slice.
 
 Codex approved the amended design in follow-up review and found no remaining
 substantive design blockers.
+
+## Result
+
+**Result:** Pass.
+
+Implemented `roastty_surface_inherited_config(surface, context)` as a
+conservative inherited surface-config snapshot. Null surfaces return default
+surface config with a valid requested context applied. Live surfaces return
+default unsupported fields, use the requested valid child context, and fall back
+to the source surface context for invalid context values.
+
+Worker-backed surfaces now expose current terminal PWD through
+`working_directory` when available. The returned pointer is borrowed from an
+owned cache on the source surface and remains valid across unrelated surface
+mutations while that source surface is alive. No-worker surfaces, worker-backed
+surfaces without PWD, and unsupported launch fields return defaults: command,
+env vars, initial input, userdata, platform, scale factor, font size, and
+wait-after-command are not inherited.
+
+The C header now declares the API, and the C ABI harness exercises null and live
+no-worker calls through the public header. Rust tests cover null/default
+behavior, unsupported launch-field defaults, valid requested context, invalid
+context fallback, current worker-terminal PWD inheritance, PWD pointer
+stability, detached surfaces ignoring worker PWD, and no-worker/no-PWD null
+working-directory results.
+
+Verification:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty surface_text_bracketed_mode_wraps_paste_markers -- --nocapture`
+- `cargo test -p roastty surface`
+- `cargo test -p roastty --test abi_harness`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+Note: an initial `cargo test -p roastty surface` run hit the existing PTY timing
+flake in `surface_text_bracketed_mode_wraps_paste_markers`, which then poisoned
+the shared PTY test lock. The exact failing test passed when rerun alone, and
+the full `surface` filter passed cleanly afterward.
+
+## Conclusion
+
+Roastty now exposes the upstream surface inherited-config entry point for the
+subset it can support faithfully today: requested context plus current
+worker-terminal PWD. Full inherited config policy remains future work with the
+larger config system: conditional config inheritance, font/theme/keybind
+inheritance, platform view inheritance, and reload semantics are still missing.
+
+## Completion Review
+
+**Result:** Approved after fixes and workflow updates.
+
+Codex first found that detached surfaces could still return a worker PWD,
+contradicting the approved design. The implementation now checks
+`self.app.is_null()` before reading worker PWD, clears the cached inherited
+working directory on detach, and includes a regression test for a detached
+surface with a manually attached worker PWD.
+
+Codex then reviewed the fixed staged diff and found no remaining code, ABI,
+pointer-lifetime, regression, or test blockers. It approved the code result and
+blocked the result commit only until review provenance was recorded. This
+section, the `[review.result]` frontmatter, and the README reviewer tuple are
+the requested workflow updates.

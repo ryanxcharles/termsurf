@@ -3948,6 +3948,15 @@ int main(int argc, char **argv) {
   assert(!roastty_app_has_global_keybinds(NULL));
   assert(roastty_surface_userdata(NULL) == NULL);
   assert(roastty_surface_app(NULL) == NULL);
+  roastty_surface_config_s null_inherited =
+      roastty_surface_inherited_config(NULL, ROASTTY_SURFACE_CONTEXT_SPLIT);
+  assert(null_inherited.context == ROASTTY_SURFACE_CONTEXT_SPLIT);
+  assert(null_inherited.userdata == NULL);
+  assert(null_inherited.working_directory == NULL);
+  assert(null_inherited.command == NULL);
+  assert(null_inherited.env_vars == NULL);
+  assert(null_inherited.env_var_count == 0);
+  assert(null_inherited.initial_input == NULL);
   roastty_surface_update_config(NULL, NULL);
   assert(!roastty_surface_needs_confirm_quit(NULL));
   assert(!roastty_surface_process_exited(NULL));
@@ -4128,6 +4137,15 @@ int main(int argc, char **argv) {
   assert(surface != NULL);
   assert(roastty_surface_app(surface) == app);
   assert((uintptr_t)roastty_surface_userdata(surface) == surface_userdata);
+  roastty_surface_config_s inherited =
+      roastty_surface_inherited_config(surface, ROASTTY_SURFACE_CONTEXT_SPLIT);
+  assert(inherited.context == ROASTTY_SURFACE_CONTEXT_SPLIT);
+  assert(inherited.userdata == NULL);
+  assert(inherited.working_directory == NULL);
+  assert(inherited.command == NULL);
+  assert(inherited.env_vars == NULL);
+  assert(inherited.env_var_count == 0);
+  assert(inherited.initial_input == NULL);
 
   roastty_surface_set_content_scale(surface, 2.0, 2.0);
   roastty_surface_set_display_id(surface, 77);

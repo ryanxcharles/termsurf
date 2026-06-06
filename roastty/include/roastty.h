@@ -1787,6 +1787,8 @@ ROASTTY_API roastty_result_e roastty_surface_start(roastty_surface_t);
 ROASTTY_API void roastty_surface_free(roastty_surface_t);
 ROASTTY_API void* roastty_surface_userdata(roastty_surface_t);
 ROASTTY_API roastty_app_t roastty_surface_app(roastty_surface_t);
+ROASTTY_API roastty_surface_config_s
+roastty_surface_inherited_config(roastty_surface_t, roastty_surface_context_e);
 ROASTTY_API void roastty_surface_update_config(roastty_surface_t,
                                                roastty_config_t);
 ROASTTY_API bool roastty_surface_needs_confirm_quit(roastty_surface_t);

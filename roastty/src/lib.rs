@@ -97,6 +97,10 @@ const ROASTTY_OUT_OF_SPACE: c_int = 3;
 const ROASTTY_NO_VALUE: c_int = 4;
 const ROASTTY_BUILD_MODE_DEBUG: c_int = 0;
 
+const ROASTTY_SURFACE_CONTEXT_WINDOW: c_int = 0;
+const ROASTTY_SURFACE_CONTEXT_TAB: c_int = 1;
+const ROASTTY_SURFACE_CONTEXT_SPLIT: c_int = 2;
+
 const ROASTTY_OPTIMIZE_DEBUG: c_int = 0;
 #[allow(dead_code)]
 const ROASTTY_OPTIMIZE_RELEASE_SAFE: c_int = 1;
@@ -1274,8 +1278,10 @@ struct Surface {
     command: Option<String>,
     env_vars: Vec<(String, String)>,
     initial_input: Option<Vec<u8>>,
+    context: c_int,
     scale_factor_x: f64,
     scale_factor_y: f64,
+    inherited_working_directory: Option<CString>,
     display_id: u32,
     focused: bool,
     occluded: bool,
@@ -1450,6 +1456,26 @@ impl Surface {
                 close_surface(self.userdata, self.needs_confirm_quit());
             }
         }
+    }
+
+    fn inherited_config(&mut self, context: c_int) -> RoasttySurfaceConfig {
+        let mut config = roastty_surface_config_new();
+        config.context = valid_surface_context(context).unwrap_or(self.context);
+        if self.app.is_null() {
+            self.inherited_working_directory = None;
+            return config;
+        }
+        self.inherited_working_directory = self
+            .termio_worker
+            .as_ref()
+            .and_then(|worker| {
+                worker.with_termio(|termio| termio.terminal().pwd().map(str::to_owned))
+            })
+            .and_then(|pwd| CString::new(pwd).ok());
+        if let Some(pwd) = self.inherited_working_directory.as_ref() {
+            config.working_directory = pwd.as_ptr();
+        }
+        config
     }
 
     fn text(&mut self, text: &[u8]) {
@@ -1638,6 +1664,15 @@ fn copied_config_string(ptr: *const c_char) -> Option<String> {
 
 fn valid_env_key(key: &str) -> bool {
     !key.is_empty() && !key.contains('=')
+}
+
+fn valid_surface_context(context: c_int) -> Option<c_int> {
+    match context {
+        ROASTTY_SURFACE_CONTEXT_WINDOW
+        | ROASTTY_SURFACE_CONTEXT_TAB
+        | ROASTTY_SURFACE_CONTEXT_SPLIT => Some(context),
+        _ => None,
+    }
 }
 
 fn copied_env_vars(ptr: *mut RoasttyEnvVar, len: usize) -> Vec<(String, String)> {
@@ -8641,8 +8676,10 @@ pub extern "C" fn roastty_surface_new(
         command: copied_config_string(config.command),
         env_vars: copied_env_vars(config.env_vars, config.env_var_count),
         initial_input: copied_config_string(config.initial_input).map(String::into_bytes),
+        context: valid_surface_context(config.context).unwrap_or(0),
         scale_factor_x: config.scale_factor,
         scale_factor_y: config.scale_factor,
+        inherited_working_directory: None,
         display_id: 0,
         focused: false,
         occluded: false,
@@ -8702,6 +8739,21 @@ pub extern "C" fn roastty_surface_app(surface: RoasttySurface) -> RoasttyApp {
     surface_from_handle(surface)
         .map(|surface| surface.app)
         .unwrap_or(ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_inherited_config(
+    surface: RoasttySurface,
+    context: c_int,
+) -> RoasttySurfaceConfig {
+    let Some(surface) = surface_from_handle(surface) else {
+        let mut config = roastty_surface_config_new();
+        if let Some(context) = valid_surface_context(context) {
+            config.context = context;
+        }
+        return config;
+    };
+    surface.inherited_config(context)
 }
 
 #[no_mangle]
@@ -9315,6 +9367,23 @@ mod tests {
             });
     }
 
+    fn set_surface_worker_pwd(surface: RoasttySurface, pwd: &str) {
+        let surface = surface_from_handle(surface).unwrap();
+        surface
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| termio.terminal_mut().set_pwd(Some(format!("{pwd}\0"))));
+    }
+
+    fn c_str_ptr_to_str(ptr: *const c_char) -> Option<String> {
+        if ptr.is_null() {
+            None
+        } else {
+            Some(unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string())
+        }
+    }
+
     fn take_roastty_text(mut text: RoasttyText) -> Vec<u8> {
         if text.text.is_null() {
             return Vec::new();
@@ -9363,6 +9432,148 @@ mod tests {
         roastty_surface_free(second);
         assert_eq!(app_surface_count(app), 0);
         roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_inherited_config_null_defaults_and_valid_context() {
+        let inherited =
+            roastty_surface_inherited_config(ptr::null_mut(), ROASTTY_SURFACE_CONTEXT_TAB);
+
+        assert_eq!(inherited.context, ROASTTY_SURFACE_CONTEXT_TAB);
+        assert_eq!(inherited.platform_tag, 0);
+        assert!(inherited.userdata.is_null());
+        assert_eq!(inherited.scale_factor, 1.0);
+        assert_eq!(inherited.font_size, 0.0);
+        assert!(inherited.working_directory.is_null());
+        assert!(inherited.command.is_null());
+        assert!(inherited.env_vars.is_null());
+        assert_eq!(inherited.env_var_count, 0);
+        assert!(inherited.initial_input.is_null());
+        assert!(!inherited.wait_after_command);
+    }
+
+    #[test]
+    fn surface_inherited_config_defaults_unsupported_parent_launch_fields() {
+        let app = new_test_app();
+        let command = CString::new("printf ignored").unwrap();
+        let cwd = CString::new("/tmp/ignored-cwd").unwrap();
+        let input = CString::new("ignored input").unwrap();
+        let key = CString::new("ROASTTY_IGNORED_ENV").unwrap();
+        let value = CString::new("ignored").unwrap();
+        let mut env = [RoasttyEnvVar {
+            key: key.as_ptr(),
+            value: value.as_ptr(),
+        }];
+        let mut config = roastty_surface_config_new();
+        config.userdata = 0x5A5Ausize as *mut c_void;
+        config.scale_factor = 2.5;
+        config.font_size = 17.0;
+        config.working_directory = cwd.as_ptr();
+        config.command = command.as_ptr();
+        config.env_vars = env.as_mut_ptr();
+        config.env_var_count = env.len();
+        config.initial_input = input.as_ptr();
+        config.wait_after_command = true;
+        config.context = ROASTTY_SURFACE_CONTEXT_WINDOW;
+        let surface = new_test_surface_with_config(app, &config);
+
+        let inherited = roastty_surface_inherited_config(surface, ROASTTY_SURFACE_CONTEXT_SPLIT);
+
+        assert_eq!(inherited.context, ROASTTY_SURFACE_CONTEXT_SPLIT);
+        assert!(inherited.userdata.is_null());
+        assert_eq!(inherited.scale_factor, 1.0);
+        assert_eq!(inherited.font_size, 0.0);
+        assert!(inherited.working_directory.is_null());
+        assert!(inherited.command.is_null());
+        assert!(inherited.env_vars.is_null());
+        assert_eq!(inherited.env_var_count, 0);
+        assert!(inherited.initial_input.is_null());
+        assert!(!inherited.wait_after_command);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_inherited_config_invalid_context_falls_back_to_source_context() {
+        let app = new_test_app();
+        let mut config = roastty_surface_config_new();
+        config.context = ROASTTY_SURFACE_CONTEXT_TAB;
+        let surface = new_test_surface_with_config(app, &config);
+
+        let inherited = roastty_surface_inherited_config(surface, 99);
+
+        assert_eq!(inherited.context, ROASTTY_SURFACE_CONTEXT_TAB);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_inherited_config_uses_current_worker_pwd_when_available() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_worker_pwd(surface, "/tmp/roastty-inherited-pwd");
+
+        let inherited = roastty_surface_inherited_config(surface, ROASTTY_SURFACE_CONTEXT_SPLIT);
+        let pwd_ptr = inherited.working_directory;
+
+        assert_eq!(inherited.context, ROASTTY_SURFACE_CONTEXT_SPLIT);
+        assert_eq!(
+            c_str_ptr_to_str(pwd_ptr).as_deref(),
+            Some("/tmp/roastty-inherited-pwd")
+        );
+
+        roastty_surface_set_focus(surface, true);
+        roastty_surface_set_size(surface, 640, 480);
+        assert_eq!(
+            c_str_ptr_to_str(pwd_ptr).as_deref(),
+            Some("/tmp/roastty-inherited-pwd")
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_inherited_config_without_worker_pwd_returns_null_working_directory() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let no_worker = new_test_surface(app);
+        let worker_without_pwd = new_test_surface(app);
+        surface_from_handle(worker_without_pwd)
+            .unwrap()
+            .termio_worker = Some(test_worker("sleep 1"));
+
+        let no_worker_config =
+            roastty_surface_inherited_config(no_worker, ROASTTY_SURFACE_CONTEXT_WINDOW);
+        let no_pwd_config =
+            roastty_surface_inherited_config(worker_without_pwd, ROASTTY_SURFACE_CONTEXT_WINDOW);
+
+        assert!(no_worker_config.working_directory.is_null());
+        assert!(no_pwd_config.working_directory.is_null());
+        roastty_surface_free(worker_without_pwd);
+        roastty_surface_free(no_worker);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_inherited_config_after_app_detach_ignores_worker_pwd() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let mut config = roastty_surface_config_new();
+        config.context = ROASTTY_SURFACE_CONTEXT_TAB;
+        let surface = new_test_surface_with_config(app, &config);
+        roastty_app_free(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_worker_pwd(surface, "/tmp/detached-pwd");
+
+        let inherited = roastty_surface_inherited_config(surface, 99);
+
+        assert_eq!(inherited.context, ROASTTY_SURFACE_CONTEXT_TAB);
+        assert!(inherited.working_directory.is_null());
+        roastty_surface_free(surface);
     }
 
     #[test]

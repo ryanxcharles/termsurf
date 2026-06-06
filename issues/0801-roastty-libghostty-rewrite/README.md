@@ -267,7 +267,7 @@ Experiment 246).
 - [x] Key-event + key-encoder ABI, mouse event/encoder ABI, OSC parser ABI,
       selection-gesture ABI, Kitty-graphics ABI
 - [x] Config / app / surface lifecycle handles (new/free/clone/userdata/basic
-      setters)
+      setters/inherited surface config)
 - [ ] `config_get` (12 defaults only) + keybind triggers — partial
 - [ ] App/surface key dispatch, surface draw/refresh, IME/text/preedit, surface
       mouse dispatch, selection read, splits — surface draw and refresh wakeups
@@ -288,10 +288,11 @@ Experiment 246).
       reads) — lifecycle handle, basic setters, app detachment, worker event
       draining, dirty/process-exit/error state, and surface render-state
       snapshots, surface worker start, and surface draw/refresh wakeups done;
-      display-ID storage, request-close callback forwarding, explicit text reads
-      plus active selection reads, and mouse-captured query done; splits,
-      frontend selection routing/metadata, full confirm-close policy, renderer
-      display-ID delivery, and full frontend presentation missing
+      display-ID storage, request-close callback forwarding, inherited surface
+      config, explicit text reads plus active selection reads, and
+      mouse-captured query done; splits, frontend selection routing/metadata,
+      full confirm-close policy, renderer display-ID delivery, and full frontend
+      presentation missing
 - [ ] `pty` + `termio` (shell spawn, read/write loops, resize, fg pid, tty name,
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
       background worker, worker shutdown/drop, and surface process-exit state
@@ -1858,7 +1859,7 @@ are past the correctness-critical foundation.
 - [Experiment 685: Surface Mouse Captured](685-surface-mouse-captured.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 686: Surface Inherited Config](686-surface-inherited-config.md) —
-  **Designed** · Codex/-/-
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
