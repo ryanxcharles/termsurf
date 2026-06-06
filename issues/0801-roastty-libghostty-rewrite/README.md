@@ -285,8 +285,9 @@ Experiment 246).
       reads) — lifecycle handle, basic setters, app detachment, worker event
       draining, dirty/process-exit/error state, and surface render-state
       snapshots, surface worker start, and surface draw/refresh wakeups done;
-      display-ID storage done; splits, text reads, renderer display-ID delivery,
-      and full frontend presentation missing
+      display-ID storage and request-close callback forwarding done; splits,
+      text reads, full confirm-close policy, renderer display-ID delivery, and
+      full frontend presentation missing
 - [ ] `pty` + `termio` (shell spawn, read/write loops, resize, fg pid, tty name,
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
       background worker, worker shutdown/drop, and surface process-exit state
@@ -1841,7 +1842,7 @@ are past the correctness-critical foundation.
 - [Experiment 679: Surface Display ID](679-surface-display-id.md) — **Pass** ·
   Codex/Codex/Codex
 - [Experiment 680: Surface Request Close](680-surface-request-close.md) —
-  **Designed** · Codex/Codex/-
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

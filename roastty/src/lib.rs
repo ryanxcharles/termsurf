@@ -1425,6 +1425,21 @@ impl Surface {
         }
     }
 
+    fn needs_confirm_quit(&self) -> bool {
+        false
+    }
+
+    fn request_close(&self) {
+        let Some(app) = app_from_handle(self.app) else {
+            return;
+        };
+        if let Some(close_surface) = app.runtime.close_surface_cb {
+            unsafe {
+                close_surface(self.userdata, self.needs_confirm_quit());
+            }
+        }
+    }
+
     fn tick_termio(&mut self) {
         #[cfg(test)]
         while let Some(event) = self.test_termio_events.pop_front() {
@@ -8568,8 +8583,10 @@ pub extern "C" fn roastty_surface_app(surface: RoasttySurface) -> RoasttyApp {
 pub extern "C" fn roastty_surface_update_config(_surface: RoasttySurface, _config: RoasttyConfig) {}
 
 #[no_mangle]
-pub extern "C" fn roastty_surface_needs_confirm_quit(_surface: RoasttySurface) -> bool {
-    false
+pub extern "C" fn roastty_surface_needs_confirm_quit(surface: RoasttySurface) -> bool {
+    surface_from_handle(surface)
+        .map(|surface| surface.needs_confirm_quit())
+        .unwrap_or(false)
 }
 
 #[no_mangle]
@@ -8707,7 +8724,11 @@ pub extern "C" fn roastty_surface_set_color_scheme(surface: RoasttySurface, colo
 }
 
 #[no_mangle]
-pub extern "C" fn roastty_surface_request_close(_surface: RoasttySurface) {}
+pub extern "C" fn roastty_surface_request_close(surface: RoasttySurface) {
+    if let Some(surface) = surface_from_handle(surface) {
+        surface.request_close();
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -8730,6 +8751,10 @@ mod tests {
     static WAKEUP_LOCK: Mutex<()> = Mutex::new(());
     static WAKEUP_COUNT: AtomicUsize = AtomicUsize::new(0);
     static WAKEUP_USERDATA: AtomicUsize = AtomicUsize::new(0);
+    static CLOSE_LOCK: Mutex<()> = Mutex::new(());
+    static CLOSE_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static CLOSE_USERDATA: AtomicUsize = AtomicUsize::new(0);
+    static CLOSE_NEEDS_CONFIRM: AtomicBool = AtomicBool::new(false);
 
     #[derive(Default)]
     struct EffectState {
@@ -8795,6 +8820,29 @@ mod tests {
             confirm_read_clipboard_cb: None,
             write_clipboard_cb: None,
             close_surface_cb: None,
+        };
+        roastty_app_new(&runtime, ptr::null_mut())
+    }
+
+    unsafe extern "C" fn close_surface_cb(userdata: *mut c_void, needs_confirm: bool) {
+        CLOSE_COUNT.fetch_add(1, Ordering::SeqCst);
+        CLOSE_USERDATA.store(userdata as usize, Ordering::SeqCst);
+        CLOSE_NEEDS_CONFIRM.store(needs_confirm, Ordering::SeqCst);
+    }
+
+    fn new_test_app_with_close_surface() -> RoasttyApp {
+        CLOSE_COUNT.store(0, Ordering::SeqCst);
+        CLOSE_USERDATA.store(0, Ordering::SeqCst);
+        CLOSE_NEEDS_CONFIRM.store(false, Ordering::SeqCst);
+        let runtime = RoasttyRuntimeConfig {
+            userdata: ptr::null_mut(),
+            supports_selection_clipboard: false,
+            wakeup_cb: None,
+            action_cb: None,
+            read_clipboard_cb: None,
+            confirm_read_clipboard_cb: None,
+            write_clipboard_cb: None,
+            close_surface_cb: Some(close_surface_cb),
         };
         roastty_app_new(&runtime, ptr::null_mut())
     }
@@ -9165,6 +9213,74 @@ mod tests {
         assert_eq!(WAKEUP_USERDATA.load(Ordering::SeqCst), 0);
         roastty_surface_free(surface);
         roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_request_close_null_is_noop() {
+        roastty_surface_request_close(ptr::null_mut());
+    }
+
+    #[test]
+    fn surface_request_close_invokes_runtime_callback_with_surface_userdata() {
+        let _guard = CLOSE_LOCK.lock().unwrap();
+        let app = new_test_app_with_close_surface();
+        let mut config = roastty_surface_config_new();
+        config.userdata = 0xC105E as *mut c_void;
+        let surface = new_test_surface_with_config(app, &config);
+
+        roastty_surface_request_close(surface);
+
+        assert_eq!(CLOSE_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(CLOSE_USERDATA.load(Ordering::SeqCst), 0xC105E);
+        assert!(!CLOSE_NEEDS_CONFIRM.load(Ordering::SeqCst));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_request_close_leaves_surface_alive_and_registered() {
+        let _guard = CLOSE_LOCK.lock().unwrap();
+        let app = new_test_app_with_close_surface();
+        let surface = new_test_surface(app);
+
+        roastty_surface_request_close(surface);
+
+        assert_eq!(CLOSE_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(roastty_surface_app(surface), app);
+        assert_eq!(app_surface_count(app), 1);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_request_close_without_runtime_callback_is_noop() {
+        let _guard = CLOSE_LOCK.lock().unwrap();
+        CLOSE_COUNT.store(0, Ordering::SeqCst);
+        CLOSE_USERDATA.store(0, Ordering::SeqCst);
+        CLOSE_NEEDS_CONFIRM.store(false, Ordering::SeqCst);
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        roastty_surface_request_close(surface);
+
+        assert_eq!(CLOSE_COUNT.load(Ordering::SeqCst), 0);
+        assert_eq!(roastty_surface_app(surface), app);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_request_close_after_app_detach_is_noop() {
+        let _guard = CLOSE_LOCK.lock().unwrap();
+        let app = new_test_app_with_close_surface();
+        let surface = new_test_surface(app);
+        roastty_app_free(app);
+
+        roastty_surface_request_close(surface);
+
+        assert_eq!(CLOSE_COUNT.load(Ordering::SeqCst), 0);
+        assert_eq!(roastty_surface_app(surface), ptr::null_mut());
+        roastty_surface_free(surface);
     }
 
     #[test]

@@ -50,9 +50,14 @@ static void write_clipboard_cb(void *userdata,
   (void)confirm;
 }
 
-static void close_surface_cb(void *userdata, bool process_alive) {
-  (void)userdata;
-  (void)process_alive;
+static size_t close_surface_call_count = 0;
+static void *close_surface_last_userdata = NULL;
+static bool close_surface_last_needs_confirm = true;
+
+static void close_surface_cb(void *userdata, bool needs_confirm) {
+  close_surface_call_count++;
+  close_surface_last_userdata = userdata;
+  close_surface_last_needs_confirm = needs_confirm;
 }
 
 static size_t support_alloc_count = 0;
@@ -4127,7 +4132,13 @@ int main(int argc, char **argv) {
   assert(tty_name.sentinel == true);
   roastty_string_free(tty_name);
 
+  close_surface_call_count = 0;
+  close_surface_last_userdata = NULL;
+  close_surface_last_needs_confirm = true;
   roastty_surface_request_close(surface);
+  assert(close_surface_call_count == 1);
+  assert((uintptr_t)close_surface_last_userdata == surface_userdata);
+  assert(!close_surface_last_needs_confirm);
   roastty_surface_free(surface);
 
   roastty_string_s empty_tty = roastty_surface_tty_name(NULL);
