@@ -2957,6 +2957,7 @@ impl TerminalStreamHandler<'_> {
         match command {
             dcs::Command::Decrqss(request) => self.decrqss(request),
             dcs::Command::XtGettcap(mut request) => while request.next().is_some() {},
+            dcs::Command::Tmux(_) => {}
         }
     }
 
@@ -6323,6 +6324,7 @@ mod tests {
 
             assert!(terminal.pty_response_for_tests().is_empty());
             assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+            assert_eq!(terminal.cursor_position(), (3, 0));
             assert!(!terminal.is_dirty_for_tests(0, 0));
             assert!(!terminal.is_dirty_for_tests(9, 0));
         }

@@ -3,6 +3,16 @@
 agent = "codex"
 model = "gpt-5"
 reasoning = "high"
+
+[review.design]
+agent = "codex"
+session = "019e9acc-08fb-7b31-a4ed-4a5777dc8cdf"
+verdict = "approved"
+
+[review.result]
+agent = "codex"
+session = "019e9ace-ac3c-7462-b328-abb9719566fb"
+verdict = "approved"
 +++
 
 # Experiment 645: Tmux DCS Entry
@@ -99,3 +109,63 @@ and terminal-stream cursor-position checks are now specified. The reviewer also
 called out an implementation detail: initialize the tmux parser with the DCS
 handler's `max_bytes` so `Handler::with_max_bytes(...)` can exercise the tmux
 over-capacity path without a one-megabyte payload.
+
+## Result
+
+**Result:** Pass
+
+Roastty now wires tmux control mode into the DCS handler boundary.
+
+The implementation updates `roastty/src/terminal/dcs.rs` to:
+
+- import `super::tmux`;
+- add `Command::Tmux(tmux::ControlNotification)`;
+- add `State::Tmux(tmux::ControlParser)`;
+- treat `DCS 1000 p` with no intermediates and exactly one `1000` parameter as
+  tmux control-mode entry;
+- initialize the control parser with the DCS handler's `max_bytes`;
+- emit `ControlNotification::Enter` on hook;
+- forward payload bytes through `ControlParser::put`;
+- emit parser notifications such as `SessionsChanged`;
+- enter `State::Ignore` on parser errors such as over-capacity;
+- preserve upstream's malformed-payload behavior: a parser-emitted early `Exit`
+  does not consume the DCS state, so unhook still emits the implicit `Exit`;
+- emit `ControlNotification::Exit` on unhook.
+
+`roastty/src/terminal/terminal.rs` now handles `dcs::Command::Tmux(_)` as a
+no-op. This intentionally keeps terminal rendering, cursor position, dirty
+state, and PTY responses unchanged until a later viewer/PTY/App integration
+experiment consumes tmux notifications.
+
+Verification passed:
+
+- `cargo test -p roastty terminal::dcs` — 13 passed
+- `cargo test -p roastty terminal::tmux` — 61 passed
+- `cargo test -p roastty terminal::terminal::tests::terminal_stream_dcs_command_tmux_and_unknown_are_ignored`
+  — 1 passed
+- `cargo fmt -p roastty` — passed
+- `cargo fmt -p roastty -- --check` — passed
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/645-tmux-dcs-entry.md`
+  — passed
+- `git diff --check` — passed
+
+Source comparison was performed against:
+
+- `vendor/ghostty/src/terminal/dcs.zig`
+- `vendor/ghostty/src/terminal/tmux/control.zig`
+- `vendor/ghostty/src/termio/stream_handler.zig` tmux notification handling
+  boundary
+
+Completion review in Codex session `019e9ace-ac3c-7462-b328-abb9719566fb`
+approved the code behavior and documentation scope. The reviewer confirmed that
+the Rust DCS path matches the vendored Ghostty boundary for exact `DCS 1000 p`
+matching, `Enter` on hook, payload delegation, parser error to ignore, malformed
+early `Exit` plus implicit unhook `Exit`, and terminal-level no-op handling. The
+only blocking issue was missing review provenance metadata, fixed before the
+result commit.
+
+## Conclusion
+
+Tmux DCS entry is complete at the terminal-core handler boundary. The overall
+terminal-core `tmux` checklist item remains open because tmux viewer state, PTY
+read/write integration, and App/Surface plumbing are still missing.

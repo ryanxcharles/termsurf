@@ -1,6 +1,6 @@
 //! DCS command handling.
 
-use super::stream;
+use super::{stream, tmux};
 
 const DEFAULT_MAX_BYTES: usize = 1024 * 1024;
 
@@ -14,6 +14,7 @@ pub(super) struct Handler {
 pub(super) enum Command {
     XtGettcap(XtGettcap),
     Decrqss(Decrqss),
+    Tmux(tmux::ControlNotification),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +38,7 @@ enum State {
     Ignore,
     XtGettcap(Vec<u8>),
     Decrqss { data: [u8; 2], len: u8 },
+    Tmux(tmux::ControlParser),
 }
 
 impl Handler {
@@ -52,7 +54,10 @@ impl Handler {
 
         let command = match dcs.intermediates() {
             [] => match dcs.final_byte() {
-                b'p' if dcs.params() == [1000] => None,
+                b'p' if dcs.params() == [1000] => {
+                    self.state = State::Tmux(tmux::ControlParser::with_max_bytes(self.max_bytes));
+                    Some(Command::Tmux(tmux::ControlNotification::Enter))
+                }
                 _ => None,
             },
             [b'+'] => match dcs.final_byte() {
@@ -75,7 +80,10 @@ impl Handler {
             _ => None,
         };
 
-        if !matches!(self.state, State::XtGettcap(_) | State::Decrqss { .. }) {
+        if !matches!(
+            self.state,
+            State::XtGettcap(_) | State::Decrqss { .. } | State::Tmux(_)
+        ) {
             self.state = State::Ignore;
         }
 
@@ -101,6 +109,14 @@ impl Handler {
                 data[index] = byte;
                 *len += 1;
             }
+            State::Tmux(parser) => match parser.put(byte) {
+                Ok(Some(notification)) => return Some(Command::Tmux(notification)),
+                Ok(None) => {}
+                Err(_) => {
+                    self.state = State::Ignore;
+                    return None;
+                }
+            },
         }
         None
     }
@@ -127,6 +143,7 @@ impl Handler {
                 },
                 _ => unreachable!("DECRQSS buffer only stores two bytes"),
             })),
+            State::Tmux(_) => Some(Command::Tmux(tmux::ControlNotification::Exit)),
         }
     }
 
@@ -283,11 +300,88 @@ mod tests {
     }
 
     #[test]
-    fn terminal_dcs_tmux_control_mode_is_ignored() {
+    fn terminal_dcs_tmux_enter_and_implicit_exit() {
         let mut handler = Handler::new();
 
-        assert_eq!(handler.hook(hook(b"", &[1000], b'p')), None);
+        assert_eq!(
+            handler.hook(hook(b"", &[1000], b'p')),
+            Some(Command::Tmux(tmux::ControlNotification::Enter))
+        );
+        assert_eq!(
+            handler.unhook(),
+            Some(Command::Tmux(tmux::ControlNotification::Exit))
+        );
+    }
+
+    #[test]
+    fn terminal_dcs_tmux_payload_notification() {
+        let mut handler = Handler::new();
+
+        assert_eq!(
+            handler.hook(hook(b"", &[1000], b'p')),
+            Some(Command::Tmux(tmux::ControlNotification::Enter))
+        );
+        for byte in b"%sessions-changed" {
+            assert_eq!(handler.put(*byte), None);
+        }
+        assert_eq!(
+            handler.put(b'\n'),
+            Some(Command::Tmux(tmux::ControlNotification::SessionsChanged))
+        );
+        assert_eq!(
+            handler.unhook(),
+            Some(Command::Tmux(tmux::ControlNotification::Exit))
+        );
+    }
+
+    #[test]
+    fn terminal_dcs_tmux_malformed_payload_exits_then_unhook_exits() {
+        let mut handler = Handler::new();
+
+        assert_eq!(
+            handler.hook(hook(b"", &[1000], b'p')),
+            Some(Command::Tmux(tmux::ControlNotification::Enter))
+        );
+        assert_eq!(
+            handler.put(b'x'),
+            Some(Command::Tmux(tmux::ControlNotification::Exit))
+        );
         assert_eq!(handler.put(b'%'), None);
+        assert_eq!(
+            handler.unhook(),
+            Some(Command::Tmux(tmux::ControlNotification::Exit))
+        );
+    }
+
+    #[test]
+    fn terminal_dcs_tmux_over_capacity_enters_ignore() {
+        let mut handler = Handler::with_max_bytes(2);
+
+        assert_eq!(
+            handler.hook(hook(b"", &[1000], b'p')),
+            Some(Command::Tmux(tmux::ControlNotification::Enter))
+        );
+        assert_eq!(handler.put(b'%'), None);
+        assert_eq!(handler.put(b'a'), None);
+        assert_eq!(handler.put(b'b'), None);
         assert_eq!(handler.unhook(), None);
+    }
+
+    #[test]
+    fn terminal_dcs_tmux_negative_matchers_are_ignored() {
+        let cases: &[(&[u8], &[u16])] = &[
+            (b"", &[]),
+            (b"", &[999]),
+            (b"", &[1000, 1]),
+            (b"+", &[1000]),
+        ];
+
+        for (intermediates, params) in cases {
+            let mut handler = Handler::new();
+
+            assert_eq!(handler.hook(hook(intermediates, params, b'p')), None);
+            assert_eq!(handler.put(b'%'), None);
+            assert_eq!(handler.unhook(), None);
+        }
     }
 }

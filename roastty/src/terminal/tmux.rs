@@ -154,6 +154,14 @@ impl ControlParser {
         }
     }
 
+    pub(crate) const fn with_max_bytes(max_bytes: usize) -> Self {
+        Self {
+            state: State::Idle,
+            buffer: Vec::new(),
+            max_bytes,
+        }
+    }
+
     pub(crate) fn put(
         &mut self,
         byte: u8,
@@ -232,14 +240,6 @@ impl ControlParser {
     fn broken(&mut self) {
         self.state = State::Broken;
         self.buffer.clear();
-    }
-
-    #[cfg(test)]
-    fn with_max_bytes(max_bytes: usize) -> Self {
-        Self {
-            max_bytes,
-            ..Self::new()
-        }
     }
 }
 
