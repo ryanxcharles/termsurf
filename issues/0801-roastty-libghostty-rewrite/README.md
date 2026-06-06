@@ -1729,6 +1729,8 @@ are past the correctness-critical foundation.
   · Codex/Codex/Codex
 - [Experiment 639: Highlight And Hyperlink Audit](639-highlight-hyperlink-audit.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 640: Terminal Render And Formatter Audit](640-terminal-render-formatter-audit.md)
+  — **Designed**
 
 ## Non-Goals
 
