@@ -1308,6 +1308,7 @@ struct Surface {
     size: RoasttySurfaceSize,
     color_scheme: c_int,
     preedit: Option<String>,
+    last_key_event: Option<key::KeyEvent>,
     mouse: SurfaceMouseState,
     termio_worker: Option<termio::TermioWorker>,
     process_exited: bool,
@@ -1659,6 +1660,26 @@ impl Surface {
         }
         self.mouse.pressure_stage = stage;
         self.mouse.pressure = pressure;
+    }
+
+    fn key(&mut self, event: &KeyEvent) -> bool {
+        if self.app.is_null() {
+            return false;
+        }
+        self.last_key_event = Some(event.event.clone());
+        false
+    }
+
+    fn key_is_binding(&self, event: Option<&KeyEvent>, flags: *mut u8) -> bool {
+        if !flags.is_null() {
+            unsafe {
+                flags.write(0);
+            }
+        }
+        if self.app.is_null() || event.is_none() {
+            return false;
+        }
+        false
     }
 
     fn tick_termio(&mut self) {
@@ -8881,6 +8902,7 @@ pub extern "C" fn roastty_surface_new(
         },
         color_scheme: 0,
         preedit: None,
+        last_key_event: None,
         mouse: SurfaceMouseState::default(),
         termio_worker: None,
         process_exited: false,
@@ -9095,6 +9117,35 @@ pub extern "C" fn roastty_surface_key_translation_mods(
     mods: c_int,
 ) -> c_int {
     key_mods_to_raw(key_mods_from_raw(mods).translation(key_mods::OptionAsAlt::False))
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_key(surface: RoasttySurface, event: RoasttyKeyEvent) -> bool {
+    let Some(surface) = surface_from_handle(surface) else {
+        return false;
+    };
+    let Some(event) = key_event_from_handle(event) else {
+        return false;
+    };
+    surface.key(event)
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_key_is_binding(
+    surface: RoasttySurface,
+    event: RoasttyKeyEvent,
+    flags: *mut u8,
+) -> bool {
+    let event = key_event_from_handle(event).map(|event| &*event);
+    let Some(surface) = surface_from_handle(surface) else {
+        if !flags.is_null() {
+            unsafe {
+                flags.write(0);
+            }
+        }
+        return false;
+    };
+    surface.key_is_binding(event, flags)
 }
 
 #[no_mangle]
@@ -10009,6 +10060,106 @@ mod tests {
             roastty_surface_key_translation_mods(ptr::null_mut(), known | unknown),
             known
         );
+    }
+
+    #[test]
+    fn surface_key_callbacks_validate_null_detached_and_zero_flags() {
+        let event = new_key_event();
+        let mut flags = 0xffu8;
+
+        assert!(!roastty_surface_key(ptr::null_mut(), event));
+        assert!(!roastty_surface_key_is_binding(
+            ptr::null_mut(),
+            event,
+            &mut flags
+        ));
+        assert_eq!(flags, 0);
+
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        roastty_app_free(app);
+        flags = 0xff;
+
+        assert!(!roastty_surface_key(surface, event));
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .last_key_event
+            .is_none());
+        assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert_eq!(flags, 0);
+
+        roastty_key_event_free(event);
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_key_stores_owned_event_and_returns_false() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let event = new_key_event();
+        assert_eq!(
+            roastty_key_event_set_key(event, key::Key::KeyC as c_int),
+            ROASTTY_SUCCESS
+        );
+        let mut mods = key_mods();
+        mods.ctrl = true;
+        assert_eq!(roastty_key_event_set_mods(event, mods), ROASTTY_SUCCESS);
+
+        assert!(!roastty_surface_key(surface, event));
+
+        let stored = surface_from_handle(surface)
+            .unwrap()
+            .last_key_event
+            .as_ref()
+            .unwrap()
+            .clone();
+        assert_eq!(stored.key, key::Key::KeyC);
+        assert!(stored.mods.ctrl);
+
+        assert_eq!(
+            roastty_key_event_set_key(event, key::Key::KeyD as c_int),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            surface_from_handle(surface)
+                .unwrap()
+                .last_key_event
+                .as_ref()
+                .unwrap()
+                .key,
+            key::Key::KeyC
+        );
+
+        roastty_key_event_free(event);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_key_is_binding_zeroes_flags_tolerates_null_flags_and_returns_false() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let event = new_key_event();
+        let mut flags = 0xffu8;
+
+        assert!(!roastty_surface_key_is_binding(
+            surface,
+            ptr::null_mut(),
+            &mut flags
+        ));
+        assert_eq!(flags, 0);
+        assert!(!roastty_surface_key_is_binding(
+            surface,
+            event,
+            ptr::null_mut()
+        ));
+        flags = 0xff;
+        assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert_eq!(flags, 0);
+
+        roastty_key_event_free(event);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
     }
 
     #[test]

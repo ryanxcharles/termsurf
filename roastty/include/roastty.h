@@ -882,6 +882,8 @@ typedef enum {
   ROASTTY_KEY_ACTION_REPEAT = 2,
 } roastty_key_action_e;
 
+typedef uint8_t roastty_keybind_flags_t;
+
 typedef enum {
   ROASTTY_MODS_NONE = 0,
   ROASTTY_MODS_SHIFT = 1 << 0,
@@ -1833,6 +1835,10 @@ ROASTTY_API void roastty_surface_set_color_scheme(roastty_surface_t,
                                                   roastty_color_scheme_e);
 ROASTTY_API roastty_input_mods_e
 roastty_surface_key_translation_mods(roastty_surface_t, roastty_input_mods_e);
+ROASTTY_API bool roastty_surface_key(roastty_surface_t, roastty_key_event_t);
+ROASTTY_API bool roastty_surface_key_is_binding(roastty_surface_t,
+                                                roastty_key_event_t,
+                                                roastty_keybind_flags_t*);
 ROASTTY_API void roastty_surface_text(roastty_surface_t, const char*, uintptr_t);
 ROASTTY_API void roastty_surface_preedit(roastty_surface_t,
                                          const char*,

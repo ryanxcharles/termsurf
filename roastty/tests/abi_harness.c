@@ -1769,6 +1769,8 @@ static void assert_support_abi(void) {
   assert(ROASTTY_MODS_CTRL_RIGHT == (1 << 7));
   assert(ROASTTY_MODS_ALT_RIGHT == (1 << 8));
   assert(ROASTTY_MODS_SUPER_RIGHT == (1 << 9));
+  roastty_keybind_flags_t keybind_flags = 0;
+  assert(sizeof(keybind_flags) == sizeof(uint8_t));
   roastty_input_scroll_mods_t scroll_mods = 0;
   assert(sizeof(scroll_mods) == sizeof(int));
   assert(ROASTTY_MOUSE_BUTTON_RELEASE == 0);
@@ -3999,6 +4001,11 @@ int main(int argc, char **argv) {
   assert(ime_width == 0.0);
   assert(ime_height == 0.0);
   roastty_surface_ime_point(NULL, NULL, NULL, NULL, NULL);
+  roastty_keybind_flags_t binding_flags = 0xff;
+  assert(!roastty_surface_key(NULL, NULL));
+  assert(!roastty_surface_key_is_binding(NULL, NULL, &binding_flags));
+  assert(binding_flags == 0);
+  assert(!roastty_surface_key_is_binding(NULL, NULL, NULL));
   roastty_text_s null_read_text = {0};
   roastty_selection_s null_selection = {0};
   null_selection.size = sizeof(roastty_selection_s);
@@ -4221,6 +4228,16 @@ int main(int argc, char **argv) {
   assert(ime_y == 0.0);
   assert(ime_width == 0.0);
   assert(ime_height == 0.0);
+  roastty_key_event_t surface_key_event = NULL;
+  assert(roastty_key_event_new(&surface_key_event) == ROASTTY_SUCCESS);
+  assert(surface_key_event != NULL);
+  assert(!roastty_surface_key(surface, surface_key_event));
+  binding_flags = 0xff;
+  assert(!roastty_surface_key_is_binding(surface, surface_key_event,
+                                         &binding_flags));
+  assert(binding_flags == 0);
+  assert(!roastty_surface_key_is_binding(surface, surface_key_event, NULL));
+  roastty_key_event_free(surface_key_event);
   roastty_surface_preedit(surface, NULL, 3);
   roastty_surface_preedit(surface, NULL, 0);
   roastty_text_s read_text = {0};

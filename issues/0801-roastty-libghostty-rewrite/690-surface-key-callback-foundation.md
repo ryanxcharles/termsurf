@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 690: Surface Key Callback Foundation
@@ -97,3 +102,50 @@ handles cannot validate arbitrary dangling pointers, so the design now says
 pointer detection. Second, the test plan now includes a null flags-pointer case
 for `roastty_surface_key_is_binding`, matching upstream's optional output
 pointer shape.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now exposes `roastty_keybind_flags_t`,
+`roastty_surface_key(surface, event)`, and
+`roastty_surface_key_is_binding(surface, event, flags)` in the public C ABI. The
+implementation stores an owned clone of the latest valid key event on the
+surface and returns `false` until full key dispatch exists.
+
+`roastty_surface_key_is_binding` zeroes non-null flags and returns `false`,
+including for valid events, because Roastty still lacks keybinding tables,
+trigger sequence state, and action dispatch. Null and detached surfaces are safe
+and do not mutate stored key state. Null key-event handles return `false`.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty surface_key -- --nocapture`
+- `cargo test -p roastty key -- --nocapture`
+- `cargo test -p roastty --test abi_harness`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+The surface key callback ABI is now present and safe for frontends to call, with
+stored key-event state available for future dispatch work. Full upstream
+behavior remains future work: keymaps, remaps, binding tables, trigger
+sequences, action dispatch, key report encoding, PTY writes, and consumed-event
+returns.
+
+## Completion Review
+
+**Result:** Approved after provenance update.
+
+Codex found no code blockers. It confirmed the ABI additions match the approved
+slice, `roastty_surface_key` stores an owned clone and returns `false`, and
+`roastty_surface_key_is_binding` zeroes non-null flags and returns `false`,
+including null surface, null event, and null flags cases. It also confirmed the
+tests cover the state-only contract and the result docs accurately describe the
+exclusions.
+
+Codex initially blocked the result commit only because result-review provenance,
+this completion-review section, and the final README agent tuple were not
+recorded yet. Those workflow records are now present.
