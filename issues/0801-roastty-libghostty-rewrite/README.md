@@ -1939,6 +1939,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 714: Binding Action Jump To Prompt](714-binding-action-jump-to-prompt.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 715: Binding Action Select All](715-binding-action-select-all.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
