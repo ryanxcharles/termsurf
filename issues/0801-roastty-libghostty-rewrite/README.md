@@ -2025,6 +2025,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 755: Config Default File Load Order](755-config-default-file-load-order.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 756: Config Default File Duplicates](756-config-default-file-duplicates.md)
+  — **Designed** · Codex/Codex/Codex
 
 ## Non-Goals
 
