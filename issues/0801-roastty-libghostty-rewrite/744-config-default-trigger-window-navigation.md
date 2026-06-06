@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 744: Config Default Trigger Window Navigation
@@ -123,3 +128,83 @@ and `6a61c40cc4aed Set menu bells to keys`. No Experiment 743 blocker remains.
 The remaining workflow requirement from the review was to record
 `[review.design]`, this review section, and the README tuple before the
 Experiment 744 plan commit; those records are now present.
+
+## Result
+
+**Result:** Pass
+
+Experiment 744 expanded `roastty_config_trigger` with upstream-compatible macOS
+default triggers for window, tab, split, viewport, prompt-jump, fullscreen,
+command-palette, inspector, and selection-clipboard actions. The new static
+lookup now covers:
+
+- command-`q` quit and command-`a` select-all;
+- command-`1` through command-`8` for `goto_tab:1` through `goto_tab:8`, plus
+  command-`9` for `last_tab`;
+- command-`n` new window, command-`w` close surface, command-option-`w` close
+  tab, command-shift-`w` close window, and command-option-shift-`w` close all
+  windows;
+- command-`t` new tab, command-shift-`[` previous tab, and command-shift-`]`
+  next tab;
+- command-`d` right split, command-shift-`d` down split, command-`[` previous
+  split, command-`]` next split, command-option arrows for directional split
+  navigation, command-control arrows for resize-by-10, and command-control-`=`
+  equalize splits;
+- command-shift-Enter split zoom, command-control-`f` fullscreen, and
+  command-shift-`p` command palette;
+- command-Home / End / PageUp / PageDown viewport scrolling;
+- command-ArrowUp / ArrowDown prompt jumps, preserving upstream's later macOS
+  binding over the earlier shift-super binding;
+- command-option-`i` inspector toggle and command-shift-`v` selection clipboard
+  paste.
+
+Performable defaults remain excluded from the static reverse lookup, including
+`clear_screen`, `undo`, `redo`, `scroll_to_selection`, search actions, and
+natural text-editing `text`/`esc` actions. Unsupported variants such as
+`goto_tab:0`, `goto_tab:9`, `resize_split:up,5`, and `toggle_fullscreen:native`
+still return the empty physical-unidentified trigger.
+`roastty_config_key_is_binding` remains unchanged.
+
+The C ABI harness now checks representative unicode, physical, alias,
+later-binding-wins, and empty-trigger fallback cases. Rust tests cover every new
+default trigger exactly.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty config_trigger -- --nocapture --test-threads=1`
+  - 4 passed
+- `cargo test -p roastty config_key_is_binding -- --nocapture --test-threads=1`
+  - 1 passed
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1`
+  - 129 passed
+- `cargo test -p roastty --test abi_harness`
+  - 1 passed
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+The static default trigger ABI now covers the major non-performable macOS
+frontend/menu keybinds. Remaining keybind work is no longer just adding more
+literal defaults; the next substantial step should move toward a real default
+keybind set and key-event lookup, or deliberately handle the remaining
+performable/natural-text-editing defaults with documented reverse-map semantics.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 744 implementation and result diff. It
+found no implementation blockers.
+
+The review confirmed that the added mappings match the approved macOS static
+reverse-lookup slice, including the later-binding-wins cases for
+`toggle_fullscreen` and `jump_to_prompt`, the `close_tab` alias, and physical
+arrow/Home/End/PageUp/PageDown keys. It also confirmed that performable and
+default-excluded actions plus unsupported variants still return the empty
+trigger. Rust coverage is exhaustive for the new defaults, and the ABI harness
+covers representative unicode, physical, alias, later-binding-wins, and fallback
+cases as planned.
+
+The review's only blocker was missing workflow metadata: `[review.result]`, this
+completion-review section, and the README tuple update. Those records are now
+present.

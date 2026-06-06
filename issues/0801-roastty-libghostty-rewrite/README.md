@@ -2002,7 +2002,7 @@ are past the correctness-critical foundation.
 - [Experiment 743: Config Default Trigger Menu Actions](743-config-default-trigger-menu-actions.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 744: Config Default Trigger Window Navigation](744-config-default-trigger-window-navigation.md)
-  — **Designed** · Codex/Codex/-
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

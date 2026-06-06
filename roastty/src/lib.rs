@@ -4517,6 +4517,88 @@ fn default_config_trigger(action: &[u8]) -> RoasttyInputTrigger {
             u32::from(b'j'),
             ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
         ),
+        b"quit" => unicode_trigger(u32::from(b'q'), ROASTTY_MODS_SUPER),
+        b"select_all" => unicode_trigger(u32::from(b'a'), ROASTTY_MODS_SUPER),
+        b"goto_tab:1" => unicode_trigger(u32::from(b'1'), ROASTTY_MODS_SUPER),
+        b"goto_tab:2" => unicode_trigger(u32::from(b'2'), ROASTTY_MODS_SUPER),
+        b"goto_tab:3" => unicode_trigger(u32::from(b'3'), ROASTTY_MODS_SUPER),
+        b"goto_tab:4" => unicode_trigger(u32::from(b'4'), ROASTTY_MODS_SUPER),
+        b"goto_tab:5" => unicode_trigger(u32::from(b'5'), ROASTTY_MODS_SUPER),
+        b"goto_tab:6" => unicode_trigger(u32::from(b'6'), ROASTTY_MODS_SUPER),
+        b"goto_tab:7" => unicode_trigger(u32::from(b'7'), ROASTTY_MODS_SUPER),
+        b"goto_tab:8" => unicode_trigger(u32::from(b'8'), ROASTTY_MODS_SUPER),
+        b"last_tab" => unicode_trigger(u32::from(b'9'), ROASTTY_MODS_SUPER),
+        b"new_window" => unicode_trigger(u32::from(b'n'), ROASTTY_MODS_SUPER),
+        b"close_surface" => unicode_trigger(u32::from(b'w'), ROASTTY_MODS_SUPER),
+        b"close_tab" | b"close_tab:this" => {
+            unicode_trigger(u32::from(b'w'), ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER)
+        }
+        b"close_window" => {
+            unicode_trigger(u32::from(b'w'), ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER)
+        }
+        b"close_all_windows" => unicode_trigger(
+            u32::from(b'w'),
+            ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
+        ),
+        b"new_tab" => unicode_trigger(u32::from(b't'), ROASTTY_MODS_SUPER),
+        b"previous_tab" => {
+            unicode_trigger(u32::from(b'['), ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER)
+        }
+        b"next_tab" => unicode_trigger(u32::from(b']'), ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER),
+        b"new_split:right" => unicode_trigger(u32::from(b'd'), ROASTTY_MODS_SUPER),
+        b"new_split:down" => {
+            unicode_trigger(u32::from(b'd'), ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER)
+        }
+        b"goto_split:previous" => unicode_trigger(u32::from(b'['), ROASTTY_MODS_SUPER),
+        b"goto_split:next" => unicode_trigger(u32::from(b']'), ROASTTY_MODS_SUPER),
+        b"goto_split:up" => {
+            physical_trigger(key::Key::ArrowUp, ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER)
+        }
+        b"goto_split:down" => {
+            physical_trigger(key::Key::ArrowDown, ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER)
+        }
+        b"goto_split:left" => {
+            physical_trigger(key::Key::ArrowLeft, ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER)
+        }
+        b"goto_split:right" => {
+            physical_trigger(key::Key::ArrowRight, ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER)
+        }
+        b"resize_split:up,10" => {
+            physical_trigger(key::Key::ArrowUp, ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER)
+        }
+        b"resize_split:down,10" => {
+            physical_trigger(key::Key::ArrowDown, ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER)
+        }
+        b"resize_split:left,10" => {
+            physical_trigger(key::Key::ArrowLeft, ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER)
+        }
+        b"resize_split:right,10" => {
+            physical_trigger(key::Key::ArrowRight, ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER)
+        }
+        b"equalize_splits" => {
+            unicode_trigger(u32::from(b'='), ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER)
+        }
+        b"toggle_split_zoom" => {
+            physical_trigger(key::Key::Enter, ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER)
+        }
+        b"toggle_fullscreen" => {
+            unicode_trigger(u32::from(b'f'), ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER)
+        }
+        b"toggle_command_palette" => {
+            unicode_trigger(u32::from(b'p'), ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER)
+        }
+        b"scroll_to_top" => physical_trigger(key::Key::Home, ROASTTY_MODS_SUPER),
+        b"scroll_to_bottom" => physical_trigger(key::Key::End, ROASTTY_MODS_SUPER),
+        b"scroll_page_up" => physical_trigger(key::Key::PageUp, ROASTTY_MODS_SUPER),
+        b"scroll_page_down" => physical_trigger(key::Key::PageDown, ROASTTY_MODS_SUPER),
+        b"jump_to_prompt:-1" => physical_trigger(key::Key::ArrowUp, ROASTTY_MODS_SUPER),
+        b"jump_to_prompt:1" => physical_trigger(key::Key::ArrowDown, ROASTTY_MODS_SUPER),
+        b"inspector:toggle" => {
+            unicode_trigger(u32::from(b'i'), ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER)
+        }
+        b"paste_from_selection" => {
+            unicode_trigger(u32::from(b'v'), ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER)
+        }
         _ => empty_trigger(),
     }
 }
@@ -13727,14 +13809,169 @@ mod tests {
     }
 
     #[test]
+    fn config_trigger_returns_default_window_navigation_triggers() {
+        let config = roastty_config_new();
+
+        for (action, codepoint, mods) in [
+            ("quit", u32::from(b'q'), ROASTTY_MODS_SUPER),
+            ("select_all", u32::from(b'a'), ROASTTY_MODS_SUPER),
+            ("goto_tab:1", u32::from(b'1'), ROASTTY_MODS_SUPER),
+            ("goto_tab:2", u32::from(b'2'), ROASTTY_MODS_SUPER),
+            ("goto_tab:3", u32::from(b'3'), ROASTTY_MODS_SUPER),
+            ("goto_tab:4", u32::from(b'4'), ROASTTY_MODS_SUPER),
+            ("goto_tab:5", u32::from(b'5'), ROASTTY_MODS_SUPER),
+            ("goto_tab:6", u32::from(b'6'), ROASTTY_MODS_SUPER),
+            ("goto_tab:7", u32::from(b'7'), ROASTTY_MODS_SUPER),
+            ("goto_tab:8", u32::from(b'8'), ROASTTY_MODS_SUPER),
+            ("last_tab", u32::from(b'9'), ROASTTY_MODS_SUPER),
+            ("new_window", u32::from(b'n'), ROASTTY_MODS_SUPER),
+            ("close_surface", u32::from(b'w'), ROASTTY_MODS_SUPER),
+            (
+                "close_tab",
+                u32::from(b'w'),
+                ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "close_tab:this",
+                u32::from(b'w'),
+                ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "close_window",
+                u32::from(b'w'),
+                ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "close_all_windows",
+                u32::from(b'w'),
+                ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
+            ),
+            ("new_tab", u32::from(b't'), ROASTTY_MODS_SUPER),
+            (
+                "previous_tab",
+                u32::from(b'['),
+                ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "next_tab",
+                u32::from(b']'),
+                ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
+            ),
+            ("new_split:right", u32::from(b'd'), ROASTTY_MODS_SUPER),
+            (
+                "new_split:down",
+                u32::from(b'd'),
+                ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
+            ),
+            ("goto_split:previous", u32::from(b'['), ROASTTY_MODS_SUPER),
+            ("goto_split:next", u32::from(b']'), ROASTTY_MODS_SUPER),
+            (
+                "equalize_splits",
+                u32::from(b'='),
+                ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "toggle_fullscreen",
+                u32::from(b'f'),
+                ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "toggle_command_palette",
+                u32::from(b'p'),
+                ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "inspector:toggle",
+                u32::from(b'i'),
+                ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "paste_from_selection",
+                u32::from(b'v'),
+                ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
+            ),
+        ] {
+            let action = CString::new(action).unwrap();
+            assert_unicode_config_trigger(
+                roastty_config_trigger(config, action.as_ptr(), action.as_bytes().len()),
+                codepoint,
+                mods,
+            );
+        }
+
+        for (action, key, mods) in [
+            (
+                "goto_split:up",
+                key::Key::ArrowUp,
+                ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "goto_split:down",
+                key::Key::ArrowDown,
+                ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "goto_split:left",
+                key::Key::ArrowLeft,
+                ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "goto_split:right",
+                key::Key::ArrowRight,
+                ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "resize_split:up,10",
+                key::Key::ArrowUp,
+                ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "resize_split:down,10",
+                key::Key::ArrowDown,
+                ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "resize_split:left,10",
+                key::Key::ArrowLeft,
+                ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "resize_split:right,10",
+                key::Key::ArrowRight,
+                ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER,
+            ),
+            (
+                "toggle_split_zoom",
+                key::Key::Enter,
+                ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
+            ),
+            ("scroll_to_top", key::Key::Home, ROASTTY_MODS_SUPER),
+            ("scroll_to_bottom", key::Key::End, ROASTTY_MODS_SUPER),
+            ("scroll_page_up", key::Key::PageUp, ROASTTY_MODS_SUPER),
+            ("scroll_page_down", key::Key::PageDown, ROASTTY_MODS_SUPER),
+            ("jump_to_prompt:-1", key::Key::ArrowUp, ROASTTY_MODS_SUPER),
+            ("jump_to_prompt:1", key::Key::ArrowDown, ROASTTY_MODS_SUPER),
+        ] {
+            let action = CString::new(action).unwrap();
+            assert_physical_config_trigger(
+                roastty_config_trigger(config, action.as_ptr(), action.as_bytes().len()),
+                key,
+                mods,
+            );
+        }
+
+        roastty_config_free(config);
+    }
+
+    #[test]
     fn config_trigger_returns_empty_trigger_for_missing_malformed_and_performable_actions() {
         let config = roastty_config_new();
-        let action = CString::new("new_window").unwrap();
+        let action = CString::new("unknown_action").unwrap();
 
         for trigger in [
-            roastty_config_trigger(ptr::null_mut(), action.as_ptr(), 10),
-            roastty_config_trigger(config, ptr::null(), 10),
-            roastty_config_trigger(config, action.as_ptr(), 10),
+            roastty_config_trigger(ptr::null_mut(), action.as_ptr(), action.as_bytes().len()),
+            roastty_config_trigger(config, ptr::null(), action.as_bytes().len()),
+            roastty_config_trigger(config, action.as_ptr(), action.as_bytes().len()),
             roastty_config_trigger(config, action.as_ptr(), 0),
         ] {
             assert_empty_config_trigger(trigger);
@@ -13752,6 +13989,19 @@ mod tests {
             "write_screen_file:copy,html",
             "write_screen_file:paste,vt",
             "write_screen_file:open,plain",
+            "goto_tab:0",
+            "goto_tab:9",
+            "resize_split:up,5",
+            "toggle_fullscreen:native",
+            "clear_screen",
+            "undo",
+            "redo",
+            "scroll_to_selection",
+            "start_search",
+            "end_search",
+            "search_selection",
+            "text:\\x05",
+            "esc:b",
         ] {
             let action = CString::new(action).unwrap();
             assert_empty_config_trigger(roastty_config_trigger(

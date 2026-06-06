@@ -4306,9 +4306,9 @@ int main(int argc, char **argv) {
   roastty_app_update_config(app, config);
   roastty_input_trigger_s trigger =
       roastty_config_trigger(config, "new_window", 10);
-  assert(trigger.tag == ROASTTY_TRIGGER_PHYSICAL);
-  assert(trigger.key.physical == ROASTTY_KEY_UNIDENTIFIED);
-  assert(trigger.mods == ROASTTY_MODS_NONE);
+  assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
+  assert(trigger.key.unicode == 'n');
+  assert(trigger.mods == ROASTTY_MODS_SUPER);
   trigger = roastty_config_trigger(config, "open_config", 11);
   assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
   assert(trigger.key.unicode == ',');
@@ -4355,6 +4355,54 @@ int main(int argc, char **argv) {
   assert(trigger.key.unicode == 'j');
   assert(trigger.mods ==
          (ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER));
+  trigger = roastty_config_trigger(config, "quit", strlen("quit"));
+  assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
+  assert(trigger.key.unicode == 'q');
+  assert(trigger.mods == ROASTTY_MODS_SUPER);
+  trigger = roastty_config_trigger(config, "goto_tab:8", strlen("goto_tab:8"));
+  assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
+  assert(trigger.key.unicode == '8');
+  assert(trigger.mods == ROASTTY_MODS_SUPER);
+  trigger = roastty_config_trigger(config, "close_tab", strlen("close_tab"));
+  assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
+  assert(trigger.key.unicode == 'w');
+  assert(trigger.mods == (ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER));
+  trigger = roastty_config_trigger(config, "close_all_windows",
+                                   strlen("close_all_windows"));
+  assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
+  assert(trigger.key.unicode == 'w');
+  assert(trigger.mods ==
+         (ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER));
+  trigger = roastty_config_trigger(config, "previous_tab",
+                                   strlen("previous_tab"));
+  assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
+  assert(trigger.key.unicode == '[');
+  assert(trigger.mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER));
+  trigger = roastty_config_trigger(config, "goto_split:right",
+                                   strlen("goto_split:right"));
+  assert(trigger.tag == ROASTTY_TRIGGER_PHYSICAL);
+  assert(trigger.key.physical == ROASTTY_KEY_ARROW_RIGHT);
+  assert(trigger.mods == (ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER));
+  trigger = roastty_config_trigger(config, "resize_split:down,10",
+                                   strlen("resize_split:down,10"));
+  assert(trigger.tag == ROASTTY_TRIGGER_PHYSICAL);
+  assert(trigger.key.physical == ROASTTY_KEY_ARROW_DOWN);
+  assert(trigger.mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER));
+  trigger = roastty_config_trigger(config, "toggle_fullscreen",
+                                   strlen("toggle_fullscreen"));
+  assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
+  assert(trigger.key.unicode == 'f');
+  assert(trigger.mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER));
+  trigger = roastty_config_trigger(config, "jump_to_prompt:-1",
+                                   strlen("jump_to_prompt:-1"));
+  assert(trigger.tag == ROASTTY_TRIGGER_PHYSICAL);
+  assert(trigger.key.physical == ROASTTY_KEY_ARROW_UP);
+  assert(trigger.mods == ROASTTY_MODS_SUPER);
+  trigger = roastty_config_trigger(config, "paste_from_selection",
+                                   strlen("paste_from_selection"));
+  assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
+  assert(trigger.key.unicode == 'v');
+  assert(trigger.mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER));
   trigger = roastty_config_trigger(config, "open_config:", 12);
   assert(trigger.tag == ROASTTY_TRIGGER_PHYSICAL);
   assert(trigger.key.physical == ROASTTY_KEY_UNIDENTIFIED);
@@ -4392,6 +4440,21 @@ int main(int argc, char **argv) {
   assert(trigger.key.physical == ROASTTY_KEY_UNIDENTIFIED);
   assert(trigger.mods == ROASTTY_MODS_NONE);
   trigger = roastty_config_trigger(config, "write_screen_file:open,plain", 28);
+  assert(trigger.tag == ROASTTY_TRIGGER_PHYSICAL);
+  assert(trigger.key.physical == ROASTTY_KEY_UNIDENTIFIED);
+  assert(trigger.mods == ROASTTY_MODS_NONE);
+  trigger = roastty_config_trigger(config, "goto_tab:9",
+                                   strlen("goto_tab:9"));
+  assert(trigger.tag == ROASTTY_TRIGGER_PHYSICAL);
+  assert(trigger.key.physical == ROASTTY_KEY_UNIDENTIFIED);
+  assert(trigger.mods == ROASTTY_MODS_NONE);
+  trigger = roastty_config_trigger(config, "resize_split:up,5",
+                                   strlen("resize_split:up,5"));
+  assert(trigger.tag == ROASTTY_TRIGGER_PHYSICAL);
+  assert(trigger.key.physical == ROASTTY_KEY_UNIDENTIFIED);
+  assert(trigger.mods == ROASTTY_MODS_NONE);
+  trigger = roastty_config_trigger(config, "clear_screen",
+                                   strlen("clear_screen"));
   assert(trigger.tag == ROASTTY_TRIGGER_PHYSICAL);
   assert(trigger.key.physical == ROASTTY_KEY_UNIDENTIFIED);
   assert(trigger.mods == ROASTTY_MODS_NONE);
