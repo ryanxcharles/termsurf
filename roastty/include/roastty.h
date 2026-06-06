@@ -1790,6 +1790,7 @@ roastty_surface_render_state_update(roastty_surface_t, roastty_render_state_t);
 ROASTTY_API void roastty_surface_set_content_scale(roastty_surface_t,
                                                    double,
                                                    double);
+ROASTTY_API void roastty_surface_set_display_id(roastty_surface_t, uint32_t);
 ROASTTY_API void roastty_surface_set_focus(roastty_surface_t, bool);
 ROASTTY_API void roastty_surface_set_occlusion(roastty_surface_t, bool);
 ROASTTY_API void roastty_surface_set_size(roastty_surface_t, uint32_t, uint32_t);

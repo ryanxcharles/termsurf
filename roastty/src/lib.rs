@@ -1265,6 +1265,7 @@ struct Surface {
     initial_input: Option<Vec<u8>>,
     scale_factor_x: f64,
     scale_factor_y: f64,
+    display_id: u32,
     focused: bool,
     occluded: bool,
     size: RoasttySurfaceSize,
@@ -8503,6 +8504,7 @@ pub extern "C" fn roastty_surface_new(
         initial_input: copied_config_string(config.initial_input).map(String::into_bytes),
         scale_factor_x: config.scale_factor,
         scale_factor_y: config.scale_factor,
+        display_id: 0,
         focused: false,
         occluded: false,
         size: RoasttySurfaceSize {
@@ -8623,6 +8625,13 @@ pub extern "C" fn roastty_surface_set_content_scale(surface: RoasttySurface, x: 
     if let Some(surface) = surface_from_handle(surface) {
         surface.scale_factor_x = x;
         surface.scale_factor_y = y;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_set_display_id(surface: RoasttySurface, display_id: u32) {
+    if let Some(surface) = surface_from_handle(surface) {
+        surface.display_id = display_id;
     }
 }
 
@@ -9089,6 +9098,73 @@ mod tests {
     #[test]
     fn surface_refresh_null_is_noop() {
         roastty_surface_refresh(ptr::null_mut());
+    }
+
+    #[test]
+    fn surface_set_display_id_null_is_noop() {
+        roastty_surface_set_display_id(ptr::null_mut(), 42);
+    }
+
+    #[test]
+    fn surface_display_id_defaults_to_zero() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert_eq!(surface_from_handle(surface).unwrap().display_id, 0);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_set_display_id_stores_value() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        roastty_surface_set_display_id(surface, 37);
+
+        assert_eq!(surface_from_handle(surface).unwrap().display_id, 37);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_set_display_id_keeps_latest_value() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        roastty_surface_set_display_id(surface, 37);
+        roastty_surface_set_display_id(surface, 99);
+
+        assert_eq!(surface_from_handle(surface).unwrap().display_id, 99);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_set_display_id_after_app_detach_updates_stored_value() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        roastty_app_free(app);
+
+        roastty_surface_set_display_id(surface, 71);
+
+        assert_eq!(surface_from_handle(surface).unwrap().display_id, 71);
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_set_display_id_does_not_dirty_or_wakeup_app() {
+        let _guard = WAKEUP_LOCK.lock().unwrap();
+        let app = new_test_app_with_wakeup(0xD15C);
+        let surface = new_test_surface(app);
+
+        roastty_surface_set_display_id(surface, 144);
+
+        assert!(!roastty_surface_needs_render(surface));
+        assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 0);
+        assert_eq!(WAKEUP_USERDATA.load(Ordering::SeqCst), 0);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
     }
 
     #[test]

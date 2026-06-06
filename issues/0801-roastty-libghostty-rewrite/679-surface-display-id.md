@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 679: Surface Display ID
@@ -84,3 +89,58 @@ Codex also confirmed the planned tests are sufficient for this slice: null
 safety, default value, latest-value overwrite, detached update, no dirty/no
 wakeup, and C ABI header/symbol coverage. The result documentation should record
 this as display-ID storage only, not renderer mailbox or renderer wakeup parity.
+
+## Result
+
+**Result:** Pass
+
+Implemented `roastty_surface_set_display_id(surface, display_id)` in the public
+C header and Rust ABI. The function is null-safe and stores the latest display
+ID on live surfaces, including detached surfaces whose app pointer has already
+been cleared by `roastty_app_free`.
+
+The implementation initializes new surfaces with display ID `0`, preserves the
+latest value across repeated sets, and intentionally does not mark the surface
+dirty or invoke app `wakeup_cb`. That keeps this slice aligned with upstream's
+semantics: display-ID changes are renderer-routing metadata delivered through
+the renderer mailbox, not terminal render-state dirtiness or app runtime wakeup.
+Roastty does not have the renderer mailbox yet, so this experiment records only
+the stored-state source for later renderer work.
+
+The Rust tests cover null calls, default value, latest-value overwrite,
+detached-surface update, and the no-dirty/no-wakeup behavior. The C ABI harness
+calls `roastty_surface_set_display_id` through `roastty.h` on both null and live
+surfaces to prove the symbol is exported and null-safe.
+
+Verification passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/679-surface-display-id.md`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty surface`
+- `cargo test -p roastty --test abi_harness`
+- `git diff --check`
+
+## Conclusion
+
+Roastty now accepts the macOS display ID setter at the renamed ABI boundary and
+keeps the latest display ID on each surface. Renderer-thread work still needs to
+consume this state and deliver upstream-equivalent `.macos_display_id` messages
+to the Metal renderer path.
+
+## Completion Review
+
+**Result:** Approved after provenance update.
+
+Codex found no code issues. It confirmed that the implementation stores
+`display_id` on `Surface`, initializes it to `0`, and only assigns the field in
+`roastty_surface_set_display_id` without touching dirty state or app wakeup. It
+also confirmed that the header declaration is exposed correctly and the Rust/C
+tests cover the intended ABI surface and null safety.
+
+Codex confirmed the result documentation avoids claiming renderer mailbox
+parity: it states that Roastty does not have the renderer mailbox yet, and the
+README checklist records display-ID storage as done while renderer display-ID
+delivery remains missing. The first completion-review pass blocked only because
+`[review.result]`, this completion-review section, and the README
+`Codex/Codex/Codex` tuple had not yet been recorded.

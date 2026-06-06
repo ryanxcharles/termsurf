@@ -3941,6 +3941,7 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_process_exited(NULL));
   roastty_surface_refresh(NULL);
   roastty_surface_set_content_scale(NULL, 1.0, 1.0);
+  roastty_surface_set_display_id(NULL, 42);
   roastty_surface_set_focus(NULL, true);
   roastty_surface_set_occlusion(NULL, true);
   roastty_surface_set_color_scheme(NULL, ROASTTY_COLOR_SCHEME_DARK);
@@ -4092,6 +4093,7 @@ int main(int argc, char **argv) {
   assert((uintptr_t)roastty_surface_userdata(surface) == surface_userdata);
 
   roastty_surface_set_content_scale(surface, 2.0, 2.0);
+  roastty_surface_set_display_id(surface, 77);
   roastty_surface_set_focus(surface, true);
   roastty_surface_set_occlusion(surface, false);
   roastty_surface_set_color_scheme(surface, ROASTTY_COLOR_SCHEME_LIGHT);
