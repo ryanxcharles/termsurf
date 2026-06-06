@@ -3,6 +3,16 @@
 agent = "codex"
 model = "gpt-5"
 reasoning = "high"
+
+[review.design]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 667: Synchronous Termio Pump
@@ -123,3 +133,58 @@ response reaches the child and leaves no queued bytes behind.
 - `cargo fmt -p roastty -- --check`
 - `cargo test -p roastty termio`
 - `git diff --check`
+
+## Result
+
+**Result:** Pass.
+
+Roastty now has an internal synchronous `Termio` pump. It owns a `Terminal` and
+`PtyChild`, spawns a child with caller-supplied `PtySize`, marks the PTY master
+nonblocking, queues caller input, drains bounded child output into
+`Terminal::next_slice`, collects terminal-generated PTY responses, and flushes
+all pending writes back to the child without dropping bytes on partial
+nonblocking writes.
+
+The pump result reports PTY readiness, bytes read, EOF, bytes written, pending
+write byte count, and child exit. Invalid PTY readiness is a hard `TermioError`,
+while `WouldBlock` during write flushing keeps bytes queued for a later pump.
+Resize currently forwards to the OS PTY only; terminal grid resizing remains for
+a later terminal resize experiment.
+
+Focused tests cover child output reaching the terminal screen, caller input
+reaching a shell and returning output, primary device-attributes responses
+flowing from child output through the terminal and back to the child, PTY
+resize, child exit reporting, and the basic internal accessors. PTY subprocess
+tests are serialized with a static mutex to avoid controlling-terminal races.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty os::pty` — 13 passed, 0 failed
+- `cargo test -p roastty termio` — 6 passed, 0 failed
+- `git diff --check`
+
+## Conclusion
+
+The PTY work now has a tested synchronous coordination layer between child IO
+and the terminal stream. The remaining termio work is to wrap this foundation in
+a persistent background read/write loop with quit signaling, process-wait
+handling, mailbox/event delivery, renderer wakeup, and App/surface integration.
+
+## Completion Review
+
+**Result:** Approved after fixes.
+
+Codex found no pump correctness blockers: full `PtySize`, bounded reads, invalid
+readiness handling, response collection, partial-write preservation, resize
+forwarding, and child-exit reporting matched the approved design. It found two
+result-commit issues: termio subprocess tests used a module-local mutex instead
+of sharing Experiment 666's PTY subprocess lock, and the issue provenance still
+showed no result review.
+
+The PTY subprocess lock is now shared from `os::pty` so full parallel test runs
+do not race `os::pty` and `termio` controlling-terminal children against each
+other. The experiment frontmatter and README agent tuple now record the result
+review. Codex re-reviewed the fixes and approved the result commit with no
+remaining blockers.

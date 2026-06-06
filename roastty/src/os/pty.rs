@@ -169,6 +169,9 @@ pub(crate) struct PtyRead {
     pub(crate) eof: bool,
 }
 
+#[cfg(test)]
+pub(crate) static PTY_COMMAND_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 impl PtyChild {
     pub(crate) fn master_fd(&self) -> RawFd {
         self.pty.master_fd()
@@ -324,9 +327,6 @@ fn dup_owned(fd: RawFd) -> io::Result<OwnedFd> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static PTY_COMMAND_LOCK: Mutex<()> = Mutex::new(());
 
     fn test_size() -> PtySize {
         PtySize {

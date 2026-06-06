@@ -46,6 +46,8 @@ mod input;
 mod os;
 mod renderer;
 mod terminal;
+#[allow(dead_code)]
+mod termio;
 
 // ABI ownership model:
 // - Config/app/surface handles returned by Roastty are heap-owned by Roastty and
