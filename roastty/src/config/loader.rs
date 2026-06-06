@@ -4,7 +4,14 @@
 //! multi-line driver and file IO are layered on top of this per-line extraction.
 #![allow(dead_code)]
 
+use super::DefaultConfigPaths;
 use std::path::PathBuf;
+
+pub(crate) const ROASTTY_BUNDLE_ID: &str = "com.termsurf.roastty";
+pub(crate) const ROASTTY_XDG_CONFIG_LEGACY: &str = "roastty/config";
+pub(crate) const ROASTTY_XDG_CONFIG_PREFERRED: &str = "roastty/config.roastty";
+pub(crate) const ROASTTY_APP_CONFIG_LEGACY: &str = "config";
+pub(crate) const ROASTTY_APP_CONFIG_PREFERRED: &str = "config.roastty";
 
 /// Read an environment variable, treating an empty value as unset (upstream
 /// `getenvNotEmpty`).
@@ -69,6 +76,39 @@ fn resolve_app_support(home: Option<&str>, bundle_id: &str, sub_path: &str) -> O
 /// `$HOME` and resolves `$HOME/Library/Application Support/<bundle_id>/<sub_path>`.
 pub(crate) fn app_support_dir(bundle_id: &str, sub_path: &str) -> Option<PathBuf> {
     resolve_app_support(env_nonempty("HOME").as_deref(), bundle_id, sub_path)
+}
+
+/// Build Roastty's default config file candidates from explicit env values.
+pub(crate) fn default_config_paths_from_home(
+    xdg_config_home: Option<&str>,
+    home: Option<&str>,
+) -> DefaultConfigPaths {
+    DefaultConfigPaths {
+        legacy_xdg: resolve_xdg_config(xdg_config_home, home, Some(ROASTTY_XDG_CONFIG_LEGACY)),
+        preferred_xdg: resolve_xdg_config(
+            xdg_config_home,
+            home,
+            Some(ROASTTY_XDG_CONFIG_PREFERRED),
+        ),
+        legacy_app_support: resolve_app_support(home, ROASTTY_BUNDLE_ID, ROASTTY_APP_CONFIG_LEGACY),
+        preferred_app_support: resolve_app_support(
+            home,
+            ROASTTY_BUNDLE_ID,
+            ROASTTY_APP_CONFIG_PREFERRED,
+        ),
+    }
+}
+
+/// Build Roastty's default config file candidates from the process environment.
+pub(crate) fn default_config_paths() -> DefaultConfigPaths {
+    let xdg_config_home = env_nonempty("XDG_CONFIG_HOME");
+    let home = env_nonempty("HOME");
+    let mut paths = default_config_paths_from_home(xdg_config_home.as_deref(), home.as_deref());
+    if !cfg!(target_os = "macos") {
+        paths.legacy_app_support = None;
+        paths.preferred_app_support = None;
+    }
+    paths
 }
 
 /// Parse one config-file line into a `(key, value)` pair (upstream
@@ -217,5 +257,43 @@ mod tests {
             resolve_app_support(None, "com.termsurf.roastty", "config"),
             None
         );
+    }
+
+    #[test]
+    fn default_config_paths_from_home_builds_roastty_candidates() {
+        let paths = default_config_paths_from_home(Some("/xdg"), Some("/home/tester"));
+        assert_eq!(paths.legacy_xdg, Some(PathBuf::from("/xdg/roastty/config")));
+        assert_eq!(
+            paths.preferred_xdg,
+            Some(PathBuf::from("/xdg/roastty/config.roastty"))
+        );
+        assert_eq!(
+            paths.legacy_app_support,
+            Some(PathBuf::from(
+                "/home/tester/Library/Application Support/com.termsurf.roastty/config"
+            ))
+        );
+        assert_eq!(
+            paths.preferred_app_support,
+            Some(PathBuf::from(
+                "/home/tester/Library/Application Support/com.termsurf.roastty/config.roastty"
+            ))
+        );
+
+        let paths = default_config_paths_from_home(None, Some("/home/tester"));
+        assert_eq!(
+            paths.legacy_xdg,
+            Some(PathBuf::from("/home/tester/.config/roastty/config"))
+        );
+        assert_eq!(
+            paths.preferred_xdg,
+            Some(PathBuf::from("/home/tester/.config/roastty/config.roastty"))
+        );
+
+        let paths = default_config_paths_from_home(None, None);
+        assert_eq!(paths.legacy_xdg, None);
+        assert_eq!(paths.preferred_xdg, None);
+        assert_eq!(paths.legacy_app_support, None);
+        assert_eq!(paths.preferred_app_support, None);
     }
 }

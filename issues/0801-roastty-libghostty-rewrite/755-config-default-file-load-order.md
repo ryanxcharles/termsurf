@@ -3,6 +3,16 @@
 agent = "codex"
 model = "gpt-5"
 reasoning = "high"
+
+[review.design]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 755: Config Default File Load Order
@@ -136,3 +146,50 @@ and appropriately small: candidate construction, ordered optional loading,
 loaded/error accounting, per-file diagnostics, and Application Support
 deduplication, with C ABI wiring, warnings, templates, recursive `config-file`,
 and richer logging deferred.
+
+## Result
+
+**Result:** Pass
+
+Roastty's typed internal config now has default-file candidate construction and
+ordered loading. `loader.rs` defines the Roastty preferred and legacy names
+(`config.roastty` and `config`) for both XDG and Application Support paths, with
+`com.termsurf.roastty` as the bundle id. The deterministic builder returns all
+candidate families for tests, while the env-reading wrapper returns Application
+Support candidates only on macOS.
+
+`Config::load_default_files_from_paths` loads candidates in upstream order:
+legacy XDG, preferred XDG, legacy Application Support, preferred Application
+Support. It skips duplicate Application Support paths, records each loaded file
+with its diagnostics, records non-not-found IO errors, treats loaded files and
+non-not-found errors as loaded-family evidence, ignores missing files, and keeps
+processing later candidates after diagnostics or errors.
+
+Verification passed:
+
+- `cargo test -p roastty default_config -- --nocapture --test-threads=1`
+- `cargo test -p roastty load_default_files -- --nocapture --test-threads=1`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no blocking issues. The
+review agreed that candidate construction uses the approved Roastty names, the
+pure builder and env wrapper have the intended platform behavior, and
+`Config::load_default_files_from_paths` preserves upstream order with
+Application Support deduplication.
+
+The review also confirmed loaded-family accounting, error handling, continued
+loading after errors, and per-file diagnostic preservation. It considered the
+verification sufficient. As a non-blocking note, it observed that
+`default_config_paths()` platform gating has no direct test, but the wrapper is
+small and the pure builder plus load-order tests cover the meaningful behavior
+for this internal slice.
+
+## Conclusion
+
+Experiment 755 completes the internal default-config candidate construction and
+ordered optional-load orchestration. Template creation, duplicate warnings,
+recursive `config-file` loading, and C ABI wiring remain separate future slices.

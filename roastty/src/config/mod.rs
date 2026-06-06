@@ -25,6 +25,7 @@ use crate::terminal::color::{Palette as TerminalPalette, PaletteMask, Rgb, DEFAU
 use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
 use crate::terminal::style::BoldColor as TerminalBoldColor;
 use std::ffi::OsStr;
+use std::path::PathBuf;
 
 /// The aggregating config struct (upstream `config.Config`) — the home of the
 /// config keys. Built up one coherent field group per slice; this lands the
@@ -580,6 +581,60 @@ impl Config {
         }
     }
 
+    /// Load the default config candidates in upstream order: legacy XDG,
+    /// preferred XDG, legacy Application Support, preferred Application Support.
+    pub(crate) fn load_default_files_from_paths(
+        &mut self,
+        paths: DefaultConfigPaths,
+    ) -> DefaultConfigLoadReport {
+        let mut report = DefaultConfigLoadReport::default();
+        if self.load_default_file_candidate(paths.legacy_xdg, &mut report) {
+            report.xdg_loaded = true;
+        }
+        if self.load_default_file_candidate(paths.preferred_xdg, &mut report) {
+            report.xdg_loaded = true;
+        }
+
+        let same_app_support = paths.legacy_app_support == paths.preferred_app_support;
+        if self.load_default_file_candidate(paths.legacy_app_support, &mut report) {
+            report.app_support_loaded = true;
+        }
+        if !same_app_support
+            && self.load_default_file_candidate(paths.preferred_app_support, &mut report)
+        {
+            report.app_support_loaded = true;
+        }
+        report
+    }
+
+    /// Load default config files using the environment-derived default paths.
+    pub(crate) fn load_default_files(&mut self) -> DefaultConfigLoadReport {
+        self.load_default_files_from_paths(loader::default_config_paths())
+    }
+
+    fn load_default_file_candidate(
+        &mut self,
+        path: Option<PathBuf>,
+        report: &mut DefaultConfigLoadReport,
+    ) -> bool {
+        let Some(path) = path else {
+            return false;
+        };
+        match self.load_optional_file(&path) {
+            OptionalFileAction::Loaded(diagnostics) => {
+                report
+                    .loaded
+                    .push(DefaultConfigFileLoad { path, diagnostics });
+                true
+            }
+            OptionalFileAction::NotFound => false,
+            OptionalFileAction::Error(error) => {
+                report.errors.push(DefaultConfigFileError { path, error });
+                true
+            }
+        }
+    }
+
     /// Apply config from CLI arguments (upstream `cli.args.parse` over args): for each
     /// argument, parse the `--key=value` form (`parse_cli_arg`) and apply it via
     /// `Config::set`; a non-flag argument or a `Config::set` error records a diagnostic,
@@ -623,6 +678,38 @@ pub(crate) enum OptionalFileAction {
     NotFound,
     /// Another IO error occurred reading the file (the load is skipped).
     Error(std::io::Error),
+}
+
+/// Default config candidate paths, in preferred/legacy families.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct DefaultConfigPaths {
+    pub legacy_xdg: Option<PathBuf>,
+    pub preferred_xdg: Option<PathBuf>,
+    pub legacy_app_support: Option<PathBuf>,
+    pub preferred_app_support: Option<PathBuf>,
+}
+
+/// One loaded default config file and the diagnostics collected while applying it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DefaultConfigFileLoad {
+    pub path: PathBuf,
+    pub diagnostics: Vec<ConfigDiagnostic>,
+}
+
+/// A non-not-found error encountered while probing a default config file.
+#[derive(Debug)]
+pub(crate) struct DefaultConfigFileError {
+    pub path: PathBuf,
+    pub error: std::io::Error,
+}
+
+/// Summary of default config file loading.
+#[derive(Debug, Default)]
+pub(crate) struct DefaultConfigLoadReport {
+    pub loaded: Vec<DefaultConfigFileLoad>,
+    pub errors: Vec<DefaultConfigFileError>,
+    pub xdg_loaded: bool,
+    pub app_support_loaded: bool,
 }
 
 /// An error from `Config::set` (upstream `parseIntoField`'s
@@ -3395,22 +3482,24 @@ mod tests {
         BackgroundImagePosition, BoldColor, ClipboardAccess, ClipboardCodepointMapEntry,
         ClipboardCodepointMapParseError, ClipboardReplacement, Color, ColorList, ColorParseError,
         Config, ConfigDiagnostic, ConfigSetError, ConfirmCloseSurface, CopyOnSelect,
-        CustomShaderAnimation, Duration, DurationParseError, FlagsParseError, FontShapingBreak,
-        FontStyle, FontStyleParseError, Fullscreen, GraphemeWidthMethod, LinkPreviews, MacHidden,
-        MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons, MagicParseError,
-        MiddleClickAction, MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish,
-        NotifyOnCommandFinishAction, OptionalFileAction, OscColorReportFormat, Palette,
-        PaletteParseError, RepeatableClipboardCodepointMap, RepeatableString,
-        RepeatableStringParseError, RightClickAction, ScrollToBottom, SelectionWordChars,
-        SelectionWordCharsParseError, ShellIntegration, ShellIntegrationFeatures,
-        TerminalBoldColor, TerminalColor, Theme, ThemeParseError, WindowColorspace,
-        WindowDecoration, WindowDecorationParseError, WindowPadding, WindowPaddingColor,
-        WindowPaddingParseError, WindowSubtitle, WorkingDirectory, WorkingDirectoryParseError,
+        CustomShaderAnimation, DefaultConfigPaths, Duration, DurationParseError, FlagsParseError,
+        FontShapingBreak, FontStyle, FontStyleParseError, Fullscreen, GraphemeWidthMethod,
+        LinkPreviews, MacHidden, MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons,
+        MagicParseError, MiddleClickAction, MouseShiftCapture, NonNativeFullscreen,
+        NotifyOnCommandFinish, NotifyOnCommandFinishAction, OptionalFileAction,
+        OscColorReportFormat, Palette, PaletteParseError, RepeatableClipboardCodepointMap,
+        RepeatableString, RepeatableStringParseError, RightClickAction, ScrollToBottom,
+        SelectionWordChars, SelectionWordCharsParseError, ShellIntegration,
+        ShellIntegrationFeatures, TerminalBoldColor, TerminalColor, Theme, ThemeParseError,
+        WindowColorspace, WindowDecoration, WindowDecorationParseError, WindowPadding,
+        WindowPaddingColor, WindowPaddingParseError, WindowSubtitle, WorkingDirectory,
+        WorkingDirectoryParseError,
     };
     use crate::terminal::color::Rgb;
     use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
 
     #[test]
     fn alpha_blending_is_linear_truth_table() {
@@ -6030,6 +6119,149 @@ mod tests {
             cfg.load_optional_file(&dir),
             OptionalFileAction::Error(_)
         ));
+    }
+
+    fn unique_config_test_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "roastty-config-{tag}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    fn write_config_file(path: &std::path::Path, text: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn config_load_default_files_applies_candidates_in_order() {
+        let dir = unique_config_test_dir("default-order");
+        let legacy_xdg = dir.join("xdg-legacy");
+        let preferred_xdg = dir.join("xdg-preferred");
+        let legacy_app = dir.join("app-legacy");
+        let preferred_app = dir.join("app-preferred");
+        write_config_file(&legacy_xdg, "fullscreen = non-native\n");
+        write_config_file(
+            &preferred_xdg,
+            "fullscreen = true\nwindow-colorspace = srgb\n",
+        );
+        write_config_file(
+            &legacy_app,
+            "fullscreen = false\nwindow-colorspace = display-p3\n",
+        );
+        write_config_file(&preferred_app, "fullscreen = non-native-visible-menu\n");
+
+        let mut cfg = Config::default();
+        let report = cfg.load_default_files_from_paths(DefaultConfigPaths {
+            legacy_xdg: Some(legacy_xdg.clone()),
+            preferred_xdg: Some(preferred_xdg.clone()),
+            legacy_app_support: Some(legacy_app.clone()),
+            preferred_app_support: Some(preferred_app.clone()),
+        });
+
+        assert!(report.xdg_loaded);
+        assert!(report.app_support_loaded);
+        assert!(report.errors.is_empty());
+        assert_eq!(
+            report
+                .loaded
+                .iter()
+                .map(|load| load.path.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                legacy_xdg.clone(),
+                preferred_xdg.clone(),
+                legacy_app.clone(),
+                preferred_app.clone()
+            ]
+        );
+        assert!(report.loaded.iter().all(|load| load.diagnostics.is_empty()));
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(out
+            .lines()
+            .any(|line| line == "fullscreen = non-native-visible-menu"));
+        assert!(out
+            .lines()
+            .any(|line| line == "window-colorspace = display-p3"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_load_default_files_deduplicates_equal_app_support_paths() {
+        let dir = unique_config_test_dir("default-dedupe");
+        let app = dir.join("app");
+        write_config_file(&app, "fullscreen = non-native\n");
+
+        let mut cfg = Config::default();
+        let report = cfg.load_default_files_from_paths(DefaultConfigPaths {
+            legacy_xdg: None,
+            preferred_xdg: None,
+            legacy_app_support: Some(app.clone()),
+            preferred_app_support: Some(app.clone()),
+        });
+
+        assert!(!report.xdg_loaded);
+        assert!(report.app_support_loaded);
+        assert!(report.errors.is_empty());
+        assert_eq!(report.loaded.len(), 1);
+        assert_eq!(report.loaded[0].path, app);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_load_default_files_reports_errors_and_diagnostics_without_aborting() {
+        let dir = unique_config_test_dir("default-errors");
+        let error_path = dir.join("is-directory");
+        let later_path = dir.join("later");
+        let diagnostic_path = dir.join("diagnostic");
+        std::fs::create_dir_all(&error_path).unwrap();
+        write_config_file(&later_path, "window-colorspace = display-p3\n");
+        write_config_file(&diagnostic_path, "badkey = x\nfullscreen = non-native\n");
+
+        let mut cfg = Config::default();
+        let report = cfg.load_default_files_from_paths(DefaultConfigPaths {
+            legacy_xdg: Some(error_path.clone()),
+            preferred_xdg: Some(later_path.clone()),
+            legacy_app_support: Some(diagnostic_path.clone()),
+            preferred_app_support: Some(dir.join("missing")),
+        });
+
+        assert!(report.xdg_loaded);
+        assert!(report.app_support_loaded);
+        assert_eq!(report.errors.len(), 1);
+        assert_eq!(report.errors[0].path, error_path);
+        assert_ne!(report.errors[0].error.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(report.loaded.len(), 2);
+        assert_eq!(report.loaded[0].path, later_path);
+        assert!(report.loaded[0].diagnostics.is_empty());
+        assert_eq!(report.loaded[1].path, diagnostic_path);
+        assert_eq!(
+            report.loaded[1].diagnostics,
+            vec![ConfigDiagnostic {
+                line: 1,
+                key: "badkey".to_string(),
+                error: ConfigSetError::UnknownField,
+            }]
+        );
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(out
+            .lines()
+            .any(|line| line == "window-colorspace = display-p3"));
+        assert!(out.lines().any(|line| line == "fullscreen = non-native"));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -2024,7 +2024,7 @@ are past the correctness-critical foundation.
 - [Experiment 754: Working Directory Finalize](754-working-directory-finalize.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 755: Config Default File Load Order](755-config-default-file-load-order.md)
-  — **Designed** · Codex/Codex/Codex
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
