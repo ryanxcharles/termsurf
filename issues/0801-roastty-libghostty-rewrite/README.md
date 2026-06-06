@@ -1902,6 +1902,8 @@ are past the correctness-critical foundation.
   · Codex/Codex/Codex
 - [Experiment 700: Keybind Trigger ABI Foundation](700-keybind-trigger-abi-foundation.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 701: Clipboard Completion ABI Foundation](701-clipboard-completion-abi-foundation.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
