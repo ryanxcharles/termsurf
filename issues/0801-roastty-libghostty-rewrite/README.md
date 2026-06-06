@@ -1707,6 +1707,7 @@ are past the correctness-critical foundation.
   Codex/Codex/Codex
 - [Experiment 630: integrate the shaper cache](630-shaper-cache-integration.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 631: Shaper audit](631-shaper-audit.md) — **Designed**
 
 ## Non-Goals
 
