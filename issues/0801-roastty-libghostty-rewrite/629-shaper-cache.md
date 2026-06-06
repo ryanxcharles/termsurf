@@ -113,3 +113,58 @@ the test plan now requires an internal slot-count assertion showing repeated
 same-bucket evictions reuse freed slots.
 
 Follow-up review approved the revised plan.
+
+## Result
+
+**Result:** Pass.
+
+The shaped-run cache now exists as a reusable Roastty font component. It is
+keyed by `TextRun.hash`, stores cache-owned copies of `shape::Cell` slices, uses
+the already-ported fixed-bucket `CacheTable` for upstream-style LRU behavior,
+and reuses evicted slots so repeated same-bucket churn does not grow storage
+without bound.
+
+Changes:
+
+- `roastty/src/terminal/mod.rs`: made the existing `cache_table` module
+  `pub(crate)` so the font subsystem can reuse it.
+- `roastty/src/font/mod.rs`: added the `shaper_cache` module.
+- `roastty/src/font/shaper_cache.rs`: added `ShaperCache`, the identity hash
+  context, owned slot storage, free-list reuse, `new`, `get`, `put`, `clear`,
+  and seven unit tests covering miss/hit behavior, copy ownership, same-key
+  replacement, LRU eviction, MRU bumping, bounded slot reuse, and clear.
+
+Verification:
+
+- `cargo test -p roastty shaper_cache` — passed, 7 tests.
+- `cargo test -p roastty cache_table` — passed, 4 tests.
+- `cargo test -p roastty run_hash` — passed, 3 tests.
+- `cargo test -p roastty shape_row` — passed, 1 test.
+- `cargo test -p roastty` — passed, 3468 unit tests plus 1 ABI harness test.
+- `cargo fmt -p roastty -- --check` — clean.
+- `rg -n "\bghostty_[A-Za-z0-9_]*\b" roastty/src/font/shaper_cache.rs roastty/src/font/run.rs roastty/src/terminal/cache_table.rs`
+  — no matches.
+- `git diff --check` — clean.
+
+This experiment does not wire the cache into `shape_row` or the renderer rebuild
+loop. The Issue 801 Shaper checklist item remains unchecked until that
+integration is implemented or separately audited.
+
+## Conclusion
+
+The missing Shaper cache component is now ported. The remaining Shaper work is
+integration: route row shaping through the cache at the renderer or row-driver
+boundary, then audit the full CoreText shaping/run/cache/feature line as one
+coherent path.
+
+## Completion Review
+
+**Reviewer:** Codex (gpt-5.5, medium) · resumed session
+`019e8f83-9029-7d43-8e82-f4c5754e14ba`
+
+**Verdict:** APPROVED.
+
+The reviewer checked the staged diff for cache ownership, same-key replacement,
+fixed-bucket LRU semantics through `CacheTable<u64, usize>`, free-list slot
+reuse, test coverage, and whether the documentation avoids overclaiming Shaper
+completion. No required fixes were found.

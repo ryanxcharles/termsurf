@@ -1703,7 +1703,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 628: CoreText Face audit](628-coretext-face-audit.md) — **Pass** ·
   Codex/Codex/Codex
-- [Experiment 629: the shaper cache](629-shaper-cache.md) — **Designed**
+- [Experiment 629: the shaper cache](629-shaper-cache.md) — **Pass** ·
+  Codex/Codex/Codex
 
 ## Non-Goals
 

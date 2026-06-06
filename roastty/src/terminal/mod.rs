@@ -17,7 +17,7 @@ mod bitmap_allocator;
 mod blocking_queue;
 
 #[allow(dead_code)]
-mod cache_table;
+pub(crate) mod cache_table;
 
 #[allow(dead_code)]
 mod circ_buf;
