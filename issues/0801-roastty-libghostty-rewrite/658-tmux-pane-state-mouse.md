@@ -104,3 +104,66 @@ the plan commit.
 - `cargo fmt -p roastty -- --check`
 - `cargo test -p roastty terminal::tmux`
 - `git diff --check`
+
+## Result
+
+**Result:** Pass.
+
+Roastty now applies the tmux pane-state mouse mode subset after the cursor and
+non-mouse mode restoration added by Experiments 656 and 657. The restore path
+maps tmux's six mouse fields to Roastty mode bits using the upstream Ghostty
+mapping:
+
+- `mouse_all_flag` -> `MouseEventAny`
+- `mouse_any_flag` -> `MouseEventButton`
+- `mouse_button_flag` -> `MouseEventNormal`
+- `mouse_standard_flag` -> `MouseEventX10`
+- `mouse_utf8_flag` -> `MouseFormatUtf8`
+- `mouse_sgr_flag` -> `MouseFormatSgr`
+
+The fixture helper now carries mouse fields through a named `TmuxPaneMouseFlags`
+struct, so tests no longer hide three mouse fields behind hardcoded values. The
+tests prove all six flags set and clear, each one-hot field maps to exactly one
+expected Roastty mode, stale pane IDs do not apply mouse modes, malformed
+pane-state output still defuncts the viewer, and successful pane-state handling
+still emits the next queued command.
+
+The implementation intentionally leaves `flags.mouse_event` and
+`flags.mouse_format` unchanged. That matches upstream's tmux pane-state restore
+path, which writes the mode bits directly; future live input/output integration
+can decide whether Roastty needs an additional cache synchronization step for
+mouse forwarding.
+
+Verification passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/658-tmux-pane-state-mouse.md`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty terminal::tmux` — 127 passed, 0 failed
+- `git diff --check`
+
+## Conclusion
+
+Pane-state restoration now covers cursor state, non-mouse terminal modes, and
+the tmux mouse event/format mode subset. The next pane-state experiments should
+restore the remaining upstream fields: alternate saved cursor position, scroll
+region, and tab stops, before moving on to live output, PTY writes, and App
+integration.
+
+## Completion Review
+
+**Result:** Approved.
+
+Codex found no blocking issues. It confirmed that
+`Terminal::apply_tmux_mouse_mode_state` writes the six tmux mouse booleans
+directly to `ModeState`, uses the approved upstream mapping, and intentionally
+does not touch Roastty's runtime mouse caches. It also confirmed that
+`TmuxViewer` calls the helper after cursor and non-mouse mode restoration, the
+fixture field order matches the `list-panes` format, and the named mouse fixture
+avoids the previous positional masking risk.
+
+Codex judged the test coverage sufficient for this slice: all-true/all-false
+coverage, one-hot mapping for all six fields, stale-pane behavior, and explicit
+runtime-cache non-synchronization checks. It also confirmed that the recorded
+result, README status update, and conclusion accurately describe the
+implementation and remaining pane-state work.

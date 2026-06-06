@@ -200,9 +200,9 @@ Experiment 246).
       notifications, layout-change window updates, and pane ID sync/capture
       queueing, pane terminal state, pane visible output, and pane history
       output, pane state parsing, and pane state cursor application done; pane
-      state mode application done; pane state mouse mode application in
-      progress; remaining pane state application/live output, PTY, and App
-      integration missing
+      state mode application done; pane state mouse mode application done;
+      remaining pane state application/live output, PTY, and App integration
+      missing
 - [x] `sys` (PNG-decode abstraction) — implemented and tested via C ABI
 
 ### Renderer — data + Metal primitives only; no live render loop
@@ -1781,7 +1781,7 @@ are past the correctness-critical foundation.
 - [Experiment 657: Tmux Pane State Modes](657-tmux-pane-state-modes.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 658: Tmux Pane State Mouse Modes](658-tmux-pane-state-mouse.md) —
-  **Designed** · Codex/Codex/Codex
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

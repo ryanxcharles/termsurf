@@ -1264,6 +1264,25 @@ impl Terminal {
         self.modes.set(modes::Mode::BracketedPaste, bracketed_paste);
     }
 
+    pub(in crate::terminal) fn apply_tmux_mouse_mode_state(
+        &mut self,
+        mouse_all: bool,
+        mouse_any: bool,
+        mouse_button: bool,
+        mouse_standard: bool,
+        mouse_utf8: bool,
+        mouse_sgr: bool,
+    ) {
+        // Upstream tmux pane-state restoration updates mode bits directly here;
+        // Roastty's mouse runtime caches stay unchanged until input integration.
+        self.modes.set(modes::Mode::MouseEventAny, mouse_all);
+        self.modes.set(modes::Mode::MouseEventButton, mouse_any);
+        self.modes.set(modes::Mode::MouseEventNormal, mouse_button);
+        self.modes.set(modes::Mode::MouseEventX10, mouse_standard);
+        self.modes.set(modes::Mode::MouseFormatUtf8, mouse_utf8);
+        self.modes.set(modes::Mode::MouseFormatSgr, mouse_sgr);
+    }
+
     pub(crate) fn cursor_visible(&self) -> bool {
         self.modes.get(modes::Mode::CursorVisible)
     }
