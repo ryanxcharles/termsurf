@@ -1805,6 +1805,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 668: Background Termio Worker](668-background-termio-worker.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 669: Surface Termio Presentation](669-surface-termio-presentation.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
