@@ -1,7 +1,9 @@
 use std::alloc::{self, Layout};
 #[cfg(test)]
+use std::cell::Cell;
+#[cfg(test)]
 use std::collections::VecDeque;
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, OsString};
 use std::io::Write;
 use std::os::raw::{c_char, c_int, c_void};
 use std::path::PathBuf;
@@ -1275,6 +1277,44 @@ struct Surface {
     test_termio_events: VecDeque<termio::TermioWorkerEvent>,
 }
 
+#[cfg(test)]
+thread_local! {
+    static DEFAULT_SHELL_DESKTOP_OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
+}
+
+fn default_shell_program() -> OsString {
+    default_shell_program_from(
+        std::env::var_os("SHELL"),
+        os::passwd::get().shell,
+        launched_from_desktop_for_default_shell(),
+    )
+}
+
+fn default_shell_program_from(
+    env_shell: Option<OsString>,
+    passwd_shell: Option<OsString>,
+    launched_from_desktop: bool,
+) -> OsString {
+    if !launched_from_desktop {
+        if let Some(shell) = env_shell.filter(|shell| !shell.is_empty()) {
+            return shell;
+        }
+    }
+    if let Some(shell) = passwd_shell.filter(|shell| !shell.is_empty()) {
+        return shell;
+    }
+    OsString::from("/bin/sh")
+}
+
+fn launched_from_desktop_for_default_shell() -> bool {
+    #[cfg(test)]
+    if let Some(value) = DEFAULT_SHELL_DESKTOP_OVERRIDE.with(Cell::get) {
+        return value;
+    }
+
+    os::desktop::launched_from_desktop()
+}
+
 impl Surface {
     fn pty_size(&self) -> os::pty::PtySize {
         os::pty::PtySize {
@@ -1318,7 +1358,7 @@ impl Surface {
                 size,
             ),
             None => termio::Termio::spawn_with_options(
-                "/bin/sh",
+                default_shell_program(),
                 std::iter::empty::<&str>(),
                 termio::TermioSpawnOptions {
                     cwd,
@@ -8631,9 +8671,15 @@ mod tests {
         TerminalDeviceAttributesSecondary, TerminalDeviceAttributesTertiary,
     };
     use std::cell::RefCell;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+    use std::sync::Mutex;
     use std::thread;
     use std::time::Duration;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    static SCRIPT_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     #[derive(Default)]
     struct EffectState {
@@ -8714,6 +8760,77 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         panic!("condition not met");
+    }
+
+    struct DefaultShellDesktopOverrideGuard {
+        previous: Option<bool>,
+    }
+
+    impl DefaultShellDesktopOverrideGuard {
+        fn new(value: bool) -> Self {
+            let previous = DEFAULT_SHELL_DESKTOP_OVERRIDE.with(|state| {
+                let previous = state.get();
+                state.set(Some(value));
+                previous
+            });
+            Self { previous }
+        }
+    }
+
+    impl Drop for DefaultShellDesktopOverrideGuard {
+        fn drop(&mut self) {
+            DEFAULT_SHELL_DESKTOP_OVERRIDE.with(|state| state.set(self.previous));
+        }
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    struct TempScript {
+        path: PathBuf,
+    }
+
+    impl TempScript {
+        fn new(body: &[u8]) -> Self {
+            let id = SCRIPT_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "roastty-default-shell-{}-{id}.sh",
+                std::process::id()
+            ));
+            std::fs::write(&path, body).expect("write script");
+            let mut permissions = std::fs::metadata(&path)
+                .expect("script metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&path, permissions).expect("chmod script");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempScript {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 
     fn test_pump(
@@ -8982,6 +9099,83 @@ mod tests {
 
         assert!(text.contains("hello"));
         assert!(!roastty_surface_needs_render(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn default_shell_non_desktop_env_wins_over_passwd() {
+        assert_eq!(
+            default_shell_program_from(
+                Some(OsString::from("/tmp/env-shell")),
+                Some(OsString::from("/tmp/passwd-shell")),
+                false,
+            ),
+            OsString::from("/tmp/env-shell")
+        );
+    }
+
+    #[test]
+    fn default_shell_desktop_ignores_env_and_uses_passwd() {
+        assert_eq!(
+            default_shell_program_from(
+                Some(OsString::from("/tmp/env-shell")),
+                Some(OsString::from("/tmp/passwd-shell")),
+                true,
+            ),
+            OsString::from("/tmp/passwd-shell")
+        );
+    }
+
+    #[test]
+    fn default_shell_ignores_empty_env_shell() {
+        assert_eq!(
+            default_shell_program_from(
+                Some(OsString::from("")),
+                Some(OsString::from("/tmp/passwd-shell")),
+                false,
+            ),
+            OsString::from("/tmp/passwd-shell")
+        );
+    }
+
+    #[test]
+    fn default_shell_uses_passwd_without_env_shell() {
+        assert_eq!(
+            default_shell_program_from(None, Some(OsString::from("/tmp/passwd-shell")), false),
+            OsString::from("/tmp/passwd-shell")
+        );
+    }
+
+    #[test]
+    fn default_shell_ignores_empty_passwd_shell() {
+        assert_eq!(
+            default_shell_program_from(None, Some(OsString::from("")), false),
+            OsString::from("/bin/sh")
+        );
+    }
+
+    #[test]
+    fn default_shell_falls_back_to_bin_sh() {
+        assert_eq!(
+            default_shell_program_from(None, None, false),
+            OsString::from("/bin/sh")
+        );
+    }
+
+    #[test]
+    fn surface_start_without_command_uses_non_desktop_env_shell() {
+        let _env_guard = ENV_LOCK.lock().unwrap();
+        let _pty_guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _desktop = DefaultShellDesktopOverrideGuard::new(false);
+        let script = TempScript::new(b"#!/bin/sh\nprintf roastty-env-shell\n");
+        let _shell = EnvGuard::set("SHELL", &script.path);
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        let text = surface_snapshot_text_after_start(app, surface);
+
+        assert!(text.contains("roastty-env-shell"));
         roastty_surface_free(surface);
         roastty_app_free(app);
     }

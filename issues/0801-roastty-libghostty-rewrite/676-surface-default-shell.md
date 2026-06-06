@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 676: Surface Default Shell
@@ -85,3 +90,51 @@ tests needed an empty-passwd-shell case.
 The design now requires deterministic non-desktop resolver state for the surface
 integration test, an RAII guard that restores or unsets `SHELL` on drop, and a
 pure resolver test that empty passwd shell falls back instead of being used.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now resolves the no-command surface shell instead of always launching
+`/bin/sh`. The resolver uses non-empty `SHELL` when the process is not launched
+from the desktop, then a non-empty passwd shell, then `/bin/sh`. The no-command
+surface launch path uses that resolved program. Explicit surface command strings
+remain unchanged and still run through `/bin/sh -lc <command>`.
+
+The implementation includes a pure resolver helper for deterministic coverage
+and a runtime helper that reads `std::env::var_os("SHELL")`,
+`os::passwd::get().shell`, and `os::desktop::launched_from_desktop()`. Tests
+cover env-vs-passwd precedence, desktop ignoring env shell, empty env and passwd
+shells, passwd fallback, `/bin/sh` fallback, and a no-command surface
+integration path using a temporary executable `SHELL` script. The integration
+test forces non-desktop resolver state and uses an RAII environment guard to
+restore `SHELL`.
+
+Verification passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/676-surface-default-shell.md`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty surface` — 35 passed, 0 failed
+- `git diff --check`
+
+## Conclusion
+
+No-command surfaces now honor the macOS default-shell resolution chain already
+ported into Roastty's `os` helpers. The remaining launch-policy work is full
+configured command/direct-exec behavior, initial-command/config plumbing,
+shell-integration injection, login-shell argv decoration, and wait-after-command
+semantics.
+
+## Completion Review
+
+**Result:** Approved after provenance and verification-record fixes.
+
+Codex found no code or test blocker in the staged Rust changes. It confirmed
+that the resolver matches the approved scope, explicit commands remain on
+`/bin/sh -lc`, empty env/passwd shells are ignored, and the surface integration
+test forces non-desktop resolver state while restoring `SHELL`.
+
+The review required two issue-record fixes: add result-review provenance and the
+completion-review section, and record the planned prettier verification command.
+Those fixes are now included.

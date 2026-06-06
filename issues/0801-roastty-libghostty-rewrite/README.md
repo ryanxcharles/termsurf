@@ -289,9 +289,9 @@ Experiment 246).
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
       background worker, worker shutdown/drop, and surface process-exit state
       done; surface command/cwd/env/initial-input worker launch done; surface
-      worker resize forwarding done; configured shell policy beyond `/bin/sh`,
-      renderer wakeups, renderer/grid calculation, and full renderer integration
-      missing
+      worker resize forwarding and default shell resolution done; configured
+      command/direct-exec/shell-integration policy, renderer wakeups,
+      renderer/grid calculation, and full renderer integration missing
 - [ ] `os/` utilities (tmpdir / file / env / hostname / locale) — ad hoc Rust
       stdlib; no dedicated module
 
@@ -1831,7 +1831,7 @@ are past the correctness-critical foundation.
 - [Experiment 675: Surface Worker Resize](675-surface-worker-resize.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 676: Surface Default Shell](676-surface-default-shell.md) —
-  **Designed** · Codex/Codex/-
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
