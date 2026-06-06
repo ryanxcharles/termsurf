@@ -3,6 +3,11 @@
 agent = "codex"
 model = "gpt-5"
 reasoning = "high"
+
+[review.result]
+agent = "codex"
+session = "019e9a9a-ee48-7ec2-bb17-ea152a97b42d"
+verdict = "approved_with_nits"
 +++
 
 # Experiment 643: Tmux Layout Parser
@@ -97,3 +102,64 @@ Follow-up review in the same session approved the revised design for
 implementation. The reviewer confirmed that the checksum-wrapper semantics now
 match upstream, the enum payload shapes are explicit, and the planned tests
 cover the key parser and checksum cases.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a standalone tmux layout and checksum parser folded into
+`roastty/src/terminal/tmux.rs`.
+
+The parser ports the isolated behavior from
+`vendor/ghostty/src/terminal/tmux/layout.zig`:
+
+- `Layout` nodes carry width, height, x/y offsets, and `LayoutContent`;
+- `LayoutContent` represents pane leaves plus horizontal and vertical child
+  vectors;
+- raw `WxH,X,Y,ID` pane layouts parse into leaf nodes;
+- `{...}` horizontal splits and `[...]` vertical splits parse recursively;
+- comma-separated sibling nodes and nested horizontal/vertical trees are
+  preserved;
+- malformed numbers, missing delimiters, missing content, unclosed or mismatched
+  brackets, and trailing data return `SyntaxError`;
+- `parse_with_checksum` accepts `XXXX,layout` wrappers, returns `SyntaxError`
+  only for wrappers shorter than five bytes or missing the comma at byte 4, and
+  returns `ChecksumMismatch` for any non-matching prefix after that;
+- `LayoutChecksum` uses the upstream rotate-right/add byte algorithm and emits
+  lowercase, zero-padded four-character hexadecimal checksums.
+
+The Rust implementation owns child layouts with `Vec<Layout>`, rather than using
+allocator-backed slices. It remains standalone: layout strings from tmux control
+notifications are not yet converted in the viewer path because the viewer,
+output formatter, DCS entry, PTY handling, and App/Surface integration are still
+future tmux work.
+
+Verification passed:
+
+- `cargo test -p roastty terminal::tmux` — 47 passed
+- `cargo fmt -p roastty` — passed
+- `cargo fmt -p roastty -- --check` — passed
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/643-tmux-layout-parser.md`
+  — passed
+- `git diff --check` — passed
+
+Source comparison was performed against:
+
+- `vendor/ghostty/src/terminal/tmux.zig`
+- `vendor/ghostty/src/terminal/tmux/layout.zig`
+- `vendor/ghostty/src/terminal/tmux/viewer.zig` layout usage sites
+
+Completion review in Codex session `019e9a9a-ee48-7ec2-bb17-ea152a97b42d`
+approved the result with no blocking findings. The reviewer agreed that the Rust
+parser matches vendored `layout.zig` behavior for recursive layout parsing,
+checksum calculation, and checksum-wrapper error classification, and that the
+wider tmux checklist remains open correctly. The optional test nits were fixed
+before the result commit by adding the upstream different-inputs checksum test
+and the known `bb62` tmux layout checksum case.
+
+## Conclusion
+
+The tmux layout/checksum parser foundation is complete. The overall
+terminal-core `tmux` checklist item remains open because output command
+formatting, DCS entry, viewer state, PTY read/write integration, and App/Surface
+wiring are still missing.

@@ -56,6 +56,31 @@ pub(crate) enum ControlParseError {
     OutOfMemory,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Layout {
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+    pub(crate) x: usize,
+    pub(crate) y: usize,
+    pub(crate) content: LayoutContent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LayoutContent {
+    Pane(usize),
+    Horizontal(Vec<Layout>),
+    Vertical(Vec<Layout>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LayoutParseError {
+    SyntaxError,
+    ChecksumMismatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LayoutChecksum(u16);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
     Idle,
@@ -174,6 +199,118 @@ impl Default for ControlParser {
     }
 }
 
+impl Layout {
+    pub(crate) fn parse_with_checksum(value: &str) -> Result<Self, LayoutParseError> {
+        if value.len() < 5 {
+            return Err(LayoutParseError::SyntaxError);
+        }
+        if value.as_bytes()[4] != b',' {
+            return Err(LayoutParseError::SyntaxError);
+        }
+
+        let layout = &value[5..];
+        if value.as_bytes()[..4] != LayoutChecksum::calculate(layout.as_bytes()).as_string() {
+            return Err(LayoutParseError::ChecksumMismatch);
+        }
+
+        Self::parse(layout)
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, LayoutParseError> {
+        let mut offset = 0;
+        let layout = Self::parse_next(value, &mut offset)?;
+        if offset != value.len() {
+            return Err(LayoutParseError::SyntaxError);
+        }
+        Ok(layout)
+    }
+
+    fn parse_next(value: &str, offset: &mut usize) -> Result<Self, LayoutParseError> {
+        let bytes = value.as_bytes();
+        let width = parse_number_until(value, offset, b"x")?;
+        let height = parse_number_until(value, offset, b",")?;
+        let x = parse_number_until(value, offset, b",")?;
+        let y = parse_number_until_without_consuming(value, offset, b",{[")?;
+
+        let content = match bytes.get(*offset).copied() {
+            Some(b',') => {
+                *offset += 1;
+                let start = *offset;
+                while *offset < value.len() && !matches!(bytes[*offset], b',' | b'}' | b']') {
+                    *offset += 1;
+                }
+                let pane_id = parse_usize_exact(&value[start..*offset])
+                    .ok_or(LayoutParseError::SyntaxError)?;
+                LayoutContent::Pane(pane_id)
+            }
+            Some(opening @ (b'{' | b'[')) => {
+                *offset += 1;
+                let mut children = Vec::new();
+
+                loop {
+                    children.push(Self::parse_next(value, offset)?);
+
+                    if *offset >= value.len() {
+                        return Err(LayoutParseError::SyntaxError);
+                    }
+
+                    if bytes[*offset] == b',' {
+                        *offset += 1;
+                        continue;
+                    }
+
+                    match opening {
+                        b'{' if bytes[*offset] != b'}' => {
+                            return Err(LayoutParseError::SyntaxError);
+                        }
+                        b'[' if bytes[*offset] != b']' => {
+                            return Err(LayoutParseError::SyntaxError);
+                        }
+                        _ => {}
+                    }
+
+                    *offset += 1;
+                    break match opening {
+                        b'{' => LayoutContent::Horizontal(children),
+                        b'[' => LayoutContent::Vertical(children),
+                        _ => unreachable!("opening is constrained above"),
+                    };
+                }
+            }
+            _ => return Err(LayoutParseError::SyntaxError),
+        };
+
+        Ok(Self {
+            width,
+            height,
+            x,
+            y,
+            content,
+        })
+    }
+}
+
+impl LayoutChecksum {
+    pub(crate) fn calculate(value: &[u8]) -> Self {
+        let mut result = 0u16;
+        for byte in value {
+            result = result.rotate_right(1);
+            result = result.wrapping_add(u16::from(*byte));
+        }
+        Self(result)
+    }
+
+    pub(crate) fn as_string(self) -> [u8; 4] {
+        const CHARSET: &[u8; 16] = b"0123456789abcdef";
+        [
+            CHARSET[usize::from((self.0 >> 12) & 0xf)],
+            CHARSET[usize::from((self.0 >> 8) & 0xf)],
+            CHARSET[usize::from((self.0 >> 4) & 0xf)],
+            CHARSET[usize::from(self.0 & 0xf)],
+        ]
+    }
+}
+
 fn parse_notification_line(line: &str) -> Option<ControlNotification> {
     let cmd = line.split_once(' ').map_or(line, |(cmd, _)| cmd);
 
@@ -282,6 +419,35 @@ fn parse_usize_field(value: &str) -> Option<(usize, &str)> {
     Some((parse_usize_exact(digits)?, rest))
 }
 
+fn parse_number_until(
+    value: &str,
+    offset: &mut usize,
+    delimiters: &[u8],
+) -> Result<usize, LayoutParseError> {
+    let index = find_any(value, *offset, delimiters).ok_or(LayoutParseError::SyntaxError)?;
+    let result = parse_usize_exact(&value[*offset..index]).ok_or(LayoutParseError::SyntaxError)?;
+    *offset = index + 1;
+    Ok(result)
+}
+
+fn parse_number_until_without_consuming(
+    value: &str,
+    offset: &mut usize,
+    delimiters: &[u8],
+) -> Result<usize, LayoutParseError> {
+    let index = find_any(value, *offset, delimiters).ok_or(LayoutParseError::SyntaxError)?;
+    let result = parse_usize_exact(&value[*offset..index]).ok_or(LayoutParseError::SyntaxError)?;
+    *offset = index;
+    Ok(result)
+}
+
+fn find_any(value: &str, offset: usize, bytes: &[u8]) -> Option<usize> {
+    value.as_bytes()[offset..]
+        .iter()
+        .position(|byte| bytes.contains(byte))
+        .map(|index| offset + index)
+}
+
 fn parse_non_empty_field(value: &str) -> Option<(&str, &str)> {
     let (field, rest) = value.split_once(' ')?;
     non_empty(field).map(|field| (field, rest))
@@ -306,6 +472,283 @@ mod tests {
         for byte in data {
             assert_eq!(parser.put(*byte), Ok(None));
         }
+    }
+
+    fn pane(layout: &Layout) -> usize {
+        let LayoutContent::Pane(pane_id) = layout.content else {
+            panic!("expected pane layout");
+        };
+        pane_id
+    }
+
+    fn horizontal(layout: &Layout) -> &[Layout] {
+        let LayoutContent::Horizontal(children) = &layout.content else {
+            panic!("expected horizontal layout");
+        };
+        children
+    }
+
+    fn vertical(layout: &Layout) -> &[Layout] {
+        let LayoutContent::Vertical(children) = &layout.content else {
+            panic!("expected vertical layout");
+        };
+        children
+    }
+
+    #[test]
+    fn tmux_layout_simple_single_pane() {
+        let layout = Layout::parse("80x24,0,0,42").unwrap();
+        assert_eq!(layout.width, 80);
+        assert_eq!(layout.height, 24);
+        assert_eq!(layout.x, 0);
+        assert_eq!(layout.y, 0);
+        assert_eq!(pane(&layout), 42);
+    }
+
+    #[test]
+    fn tmux_layout_single_pane_with_offset() {
+        let layout = Layout::parse("40x12,10,5,7").unwrap();
+        assert_eq!(layout.width, 40);
+        assert_eq!(layout.height, 12);
+        assert_eq!(layout.x, 10);
+        assert_eq!(layout.y, 5);
+        assert_eq!(pane(&layout), 7);
+    }
+
+    #[test]
+    fn tmux_layout_single_pane_large_values() {
+        let layout = Layout::parse("1920x1080,100,200,999").unwrap();
+        assert_eq!(layout.width, 1920);
+        assert_eq!(layout.height, 1080);
+        assert_eq!(layout.x, 100);
+        assert_eq!(layout.y, 200);
+        assert_eq!(pane(&layout), 999);
+    }
+
+    #[test]
+    fn tmux_layout_horizontal_split_two_panes() {
+        let layout = Layout::parse("80x24,0,0{40x24,0,0,1,40x24,40,0,2}").unwrap();
+        assert_eq!(layout.width, 80);
+        assert_eq!(layout.height, 24);
+
+        let children = horizontal(&layout);
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].width, 40);
+        assert_eq!(children[0].height, 24);
+        assert_eq!(children[0].x, 0);
+        assert_eq!(children[0].y, 0);
+        assert_eq!(pane(&children[0]), 1);
+        assert_eq!(children[1].width, 40);
+        assert_eq!(children[1].height, 24);
+        assert_eq!(children[1].x, 40);
+        assert_eq!(children[1].y, 0);
+        assert_eq!(pane(&children[1]), 2);
+    }
+
+    #[test]
+    fn tmux_layout_vertical_split_two_panes() {
+        let layout = Layout::parse("80x24,0,0[80x12,0,0,1,80x12,0,12,2]").unwrap();
+        assert_eq!(layout.width, 80);
+        assert_eq!(layout.height, 24);
+
+        let children = vertical(&layout);
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].width, 80);
+        assert_eq!(children[0].height, 12);
+        assert_eq!(children[0].x, 0);
+        assert_eq!(children[0].y, 0);
+        assert_eq!(pane(&children[0]), 1);
+        assert_eq!(children[1].width, 80);
+        assert_eq!(children[1].height, 12);
+        assert_eq!(children[1].x, 0);
+        assert_eq!(children[1].y, 12);
+        assert_eq!(pane(&children[1]), 2);
+    }
+
+    #[test]
+    fn tmux_layout_horizontal_split_three_panes() {
+        let layout = Layout::parse("120x24,0,0{40x24,0,0,1,40x24,40,0,2,40x24,80,0,3}").unwrap();
+        let children = horizontal(&layout);
+        assert_eq!(children.len(), 3);
+        assert_eq!(pane(&children[0]), 1);
+        assert_eq!(pane(&children[1]), 2);
+        assert_eq!(pane(&children[2]), 3);
+    }
+
+    #[test]
+    fn tmux_layout_nested_horizontal_in_vertical() {
+        let layout =
+            Layout::parse("80x24,0,0[80x12,0,0,1,80x12,0,12{40x12,0,12,2,40x12,40,12,3}]").unwrap();
+        let children = vertical(&layout);
+        assert_eq!(children.len(), 2);
+        assert_eq!(pane(&children[0]), 1);
+
+        let nested = horizontal(&children[1]);
+        assert_eq!(nested.len(), 2);
+        assert_eq!(pane(&nested[0]), 2);
+        assert_eq!(pane(&nested[1]), 3);
+    }
+
+    #[test]
+    fn tmux_layout_nested_vertical_in_horizontal() {
+        let layout =
+            Layout::parse("80x24,0,0{40x24,0,0,1,40x24,40,0[40x12,40,0,2,40x12,40,12,3]}").unwrap();
+        let children = horizontal(&layout);
+        assert_eq!(children.len(), 2);
+        assert_eq!(pane(&children[0]), 1);
+
+        let nested = vertical(&children[1]);
+        assert_eq!(nested.len(), 2);
+        assert_eq!(pane(&nested[0]), 2);
+        assert_eq!(pane(&nested[1]), 3);
+    }
+
+    #[test]
+    fn tmux_layout_deeply_nested_layout() {
+        let layout =
+            Layout::parse("80x24,0,0{40x24,0,0[40x12,0,0,1,40x12,0,12,2],40x24,40,0,3}").unwrap();
+        let children = horizontal(&layout);
+        assert_eq!(children.len(), 2);
+        let nested = vertical(&children[0]);
+        assert_eq!(nested.len(), 2);
+        assert_eq!(pane(&nested[0]), 1);
+        assert_eq!(pane(&nested[1]), 2);
+        assert_eq!(pane(&children[1]), 3);
+    }
+
+    #[test]
+    fn tmux_layout_syntax_errors() {
+        for value in [
+            "",
+            "x24,0,0,1",
+            "80x,0,0,1",
+            "80x24,,0,1",
+            "80x24,0,,1",
+            "80x24,0,0,",
+            "abcx24,0,0,1",
+            "80x24,0,0,abc",
+            "80x24,0,0{40x24,0,0,1",
+            "80x24,0,0[40x24,0,0,1",
+            "80x24,0,0{40x24,0,0,1]",
+            "80x24,0,0[40x24,0,0,1}",
+            "80x24,0,0,1extra",
+            "8024,0,0,1",
+            "80x24,0,0",
+        ] {
+            assert_eq!(Layout::parse(value), Err(LayoutParseError::SyntaxError));
+        }
+    }
+
+    #[test]
+    fn tmux_layout_parse_with_checksum_valid() {
+        let layout =
+            Layout::parse_with_checksum("f8f9,80x24,0,0{40x24,0,0,1,40x24,40,0,2}").unwrap();
+        assert_eq!(layout.width, 80);
+        assert_eq!(layout.height, 24);
+    }
+
+    #[test]
+    fn tmux_layout_parse_with_checksum_mismatch() {
+        assert_eq!(
+            Layout::parse_with_checksum("0000,80x24,0,0{40x24,0,0,1,40x24,40,0,2}"),
+            Err(LayoutParseError::ChecksumMismatch)
+        );
+        assert_eq!(
+            Layout::parse_with_checksum("F8F9,80x24,0,0{40x24,0,0,1,40x24,40,0,2}"),
+            Err(LayoutParseError::ChecksumMismatch)
+        );
+        assert_eq!(
+            Layout::parse_with_checksum("zzzz,80x24,0,0{40x24,0,0,1,40x24,40,0,2}"),
+            Err(LayoutParseError::ChecksumMismatch)
+        );
+    }
+
+    #[test]
+    fn tmux_layout_parse_with_checksum_syntax_errors() {
+        assert_eq!(
+            Layout::parse_with_checksum("bb62"),
+            Err(LayoutParseError::SyntaxError)
+        );
+        assert_eq!(
+            Layout::parse_with_checksum(""),
+            Err(LayoutParseError::SyntaxError)
+        );
+        assert_eq!(
+            Layout::parse_with_checksum("bb62x159x48,0,0"),
+            Err(LayoutParseError::SyntaxError)
+        );
+    }
+
+    #[test]
+    fn tmux_layout_checksum_empty_string() {
+        let checksum = LayoutChecksum::calculate(b"");
+        assert_eq!(checksum.0, 0);
+        assert_eq!(checksum.as_string(), *b"0000");
+    }
+
+    #[test]
+    fn tmux_layout_checksum_single_character() {
+        let checksum = LayoutChecksum::calculate(b"A");
+        assert_eq!(checksum.0, 65);
+        assert_eq!(checksum.as_string(), *b"0041");
+    }
+
+    #[test]
+    fn tmux_layout_checksum_two_characters() {
+        let checksum = LayoutChecksum::calculate(b"AB");
+        assert_eq!(checksum.0, 32866);
+        assert_eq!(checksum.as_string(), *b"8062");
+    }
+
+    #[test]
+    fn tmux_layout_checksum_known_layouts() {
+        assert_eq!(
+            LayoutChecksum::calculate(b"80x24,0,0,42").as_string(),
+            *b"d962"
+        );
+        assert_eq!(
+            LayoutChecksum::calculate(b"80x24,0,0{40x24,0,0,1,40x24,40,0,2}").as_string(),
+            *b"f8f9"
+        );
+    }
+
+    #[test]
+    fn tmux_layout_checksum_as_string_values() {
+        assert_eq!(LayoutChecksum(0x000f).as_string(), *b"000f");
+        assert_eq!(LayoutChecksum(0x1234).as_string(), *b"1234");
+        assert_eq!(LayoutChecksum(0xabcd).as_string(), *b"abcd");
+        assert_eq!(LayoutChecksum(0xffff).as_string(), *b"ffff");
+    }
+
+    #[test]
+    fn tmux_layout_checksum_wraparound() {
+        let checksum = LayoutChecksum::calculate(b"\xff\xff\xff\xff\xff\xff\xff\xff");
+        assert_eq!(checksum.as_string(), *b"03fc");
+    }
+
+    #[test]
+    fn tmux_layout_checksum_deterministic() {
+        let value = b"80x24,0,0{40x24,0,0,1,40x24,40,0,2}";
+        assert_eq!(
+            LayoutChecksum::calculate(value),
+            LayoutChecksum::calculate(value)
+        );
+    }
+
+    #[test]
+    fn tmux_layout_checksum_different_inputs_different_outputs() {
+        assert_ne!(
+            LayoutChecksum::calculate(b"80x24,0,0,1"),
+            LayoutChecksum::calculate(b"80x24,0,0,2")
+        );
+    }
+
+    #[test]
+    fn tmux_layout_checksum_known_tmux_layout_bb62() {
+        assert_eq!(
+            LayoutChecksum::calculate(b"159x48,0,0{79x48,0,0,79x48,80,0}").as_string(),
+            *b"bb62"
+        );
     }
 
     #[test]
