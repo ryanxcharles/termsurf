@@ -188,7 +188,7 @@ Experiment 246).
       / folded into `screen.rs`/`terminal.rs` (confirm parity)
 - [ ] Scrollback `search` + `StringMap` — missing (needs `oniguruma`)
 - [ ] `tmux` control mode — missing
-- [ ] `sys` (PNG-decode abstraction) — missing
+- [x] `sys` (PNG-decode abstraction) — implemented and tested via C ABI
 
 ### Renderer — data + Metal primitives only; no live render loop
 
@@ -1700,7 +1700,7 @@ are past the correctness-critical foundation.
 - [Experiment 626: os locale ensureLocale core](626-os-locale-ensure.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 627: sys PNG decode abstraction audit](627-sys-png-decode-audit.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

@@ -62,7 +62,8 @@ only after the focused gates prove the current implementation is complete.
 - `cargo test -p roastty --test abi_harness` — proves the exported C header and
   dylib still link.
 - `cargo test -p roastty` — full Roastty test suite stays green.
-- no-ghostty grep on any touched issue docs — clean.
+- forbidden compatibility-name grep on `roastty/include/roastty.h` and
+  `roastty/src/lib.rs` — clean.
 - `git diff --check` — clean.
 
 Pass = the current source and tests prove the sys PNG-decode abstraction is
@@ -85,3 +86,75 @@ ABI claim.
 
 Follow-up review approved the verification-only approach and confirmed the gates
 are broad enough to justify the checklist update if they pass.
+
+## Result
+
+**Result:** Pass
+
+The current Roastty source already implements the `sys` PNG-decode abstraction
+required by Issue 801:
+
+- `roastty/include/roastty.h` exposes `roastty_sys_image_s`,
+  `roastty_sys_decode_png_fn`, `ROASTTY_SYS_OPT_DECODE_PNG`, and
+  `roastty_sys_set`.
+- `roastty/src/lib.rs` stores sys callbacks/userdata, exposes
+  `sys_has_decode_png`, routes `sys_decode_png` through the installed callback,
+  supplies the callback allocator bridge, validates decoded output, frees
+  oversized callback output, and implements `roastty_sys_set`.
+- `roastty/src/terminal/kitty/graphics_image.rs` defers unsupported PNG input
+  when no decoder is installed, decodes direct/file/temp/shared-memory PNG data
+  through `sys_decode_png` when a decoder exists, validates decoded dimensions
+  and data length, and converts the loaded image to RGBA.
+- `roastty/src/terminal/terminal.rs` covers full terminal-stream Kitty PNG APC
+  integration through the sys callback.
+
+The README checklist line now records this as complete:
+
+```markdown
+- [x] `sys` (PNG-decode abstraction) — implemented and tested via C ABI
+```
+
+Gates (all green):
+
+- `cargo test -p roastty sys_c_abi_sets_callbacks_and_userdata` — **1 passed / 0
+  failed**.
+- `cargo test -p roastty kitty_graphics_image_png` — **4 passed / 0 failed**.
+- `cargo test -p roastty kitty_graphics_image_non_direct_png` — **2 passed / 0
+  failed**.
+- `cargo test -p roastty terminal_stream_kitty_graphics_png_decodes_through_sys_callback`
+  — **1 passed / 0 failed**.
+- `cargo test -p roastty --test abi_harness` — **1 passed / 0 failed**.
+- `cargo test -p roastty` — **3461 passed / 0 failed** unit tests, plus **1
+  passed / 0 failed** ABI harness test and **0** doc tests.
+- `rg -n "\\bghostty_[A-Za-z0-9_]*\\b" roastty/include/roastty.h roastty/src/lib.rs`
+  — clean.
+- `git diff --check` — clean.
+
+The original plan listed a broad no-Ghostty grep on issue docs. That is the
+wrong hygiene check for this repository because Issue 801 and some test names
+intentionally cite upstream Ghostty as source material. The result instead
+checks the exported header and ABI surface file for forbidden `ghostty_*`
+compatibility names.
+
+## Conclusion
+
+No new code was needed. The sys PNG-decode abstraction is implemented, tested
+through the C ABI and Kitty graphics paths, and no longer belongs on the missing
+terminal-behavior checklist.
+
+## Completion Review
+
+**Reviewer:** Codex (gpt-5.5, medium) · resumed session
+`019e8f83-9029-7d43-8e82-f4c5754e14ba`
+
+**Verdict:** APPROVED after fixing the README experiment index.
+
+Initial completion review found one Required documentation issue: the checklist
+update and experiment result were recorded, but the README experiment index
+still listed Experiment 627 as `Designed`. The README now marks Experiment 627
+as `Pass`.
+
+Codex confirmed the checklist update is supported by the recorded evidence: C
+ABI surface, callback install/clear/userdata tests, direct and non-direct Kitty
+PNG decode tests, terminal stream integration, ABI harness, full suite,
+forbidden compatibility-name grep, and `git diff --check`.
