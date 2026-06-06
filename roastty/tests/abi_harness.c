@@ -4277,6 +4277,45 @@ int main(int argc, char **argv) {
   roastty_surface_mouse_scroll(surface, 1.0, 2.0,
                                (roastty_input_scroll_mods_t)0x1ff);
   roastty_surface_mouse_pressure(surface, 1, 0.5);
+
+  assert(roastty_surface_inspector(NULL) == NULL);
+  roastty_inspector_free(NULL);
+  roastty_inspector_set_focus(NULL, true);
+  roastty_inspector_set_content_scale(NULL, 1.0, 1.0);
+  roastty_inspector_set_size(NULL, 1, 2);
+  roastty_inspector_mouse_button(NULL,
+                                 ROASTTY_MOUSE_BUTTON_PRESS,
+                                 ROASTTY_MOUSE_BUTTON_LEFT,
+                                 ROASTTY_MODS_SHIFT);
+  roastty_inspector_mouse_pos(NULL, 1.0, 2.0);
+  roastty_inspector_mouse_scroll(NULL, 1.0, 2.0, 0);
+  roastty_inspector_key(NULL,
+                        ROASTTY_KEY_ACTION_PRESS,
+                        ROASTTY_KEY_KEY_A,
+                        ROASTTY_MODS_CTRL);
+  roastty_inspector_text(NULL, "ignored");
+
+  roastty_inspector_t inspector = roastty_surface_inspector(surface);
+  assert(inspector != NULL);
+  assert(roastty_surface_inspector(surface) == inspector);
+  roastty_inspector_set_focus(inspector, true);
+  roastty_inspector_set_content_scale(inspector, 2.0, 2.0);
+  roastty_inspector_set_size(inspector, 640, 480);
+  roastty_inspector_mouse_button(inspector,
+                                 ROASTTY_MOUSE_BUTTON_PRESS,
+                                 ROASTTY_MOUSE_BUTTON_LEFT,
+                                 ROASTTY_MODS_SHIFT);
+  roastty_inspector_mouse_pos(inspector, 3.0, 4.0);
+  roastty_inspector_mouse_scroll(inspector, 5.0, 6.0, 0);
+  roastty_inspector_key(inspector,
+                        ROASTTY_KEY_ACTION_REPEAT,
+                        ROASTTY_KEY_KEY_B,
+                        ROASTTY_MODS_ALT);
+  roastty_inspector_text(inspector, "inspector");
+  roastty_inspector_text(inspector, NULL);
+  roastty_inspector_free(surface);
+  assert(roastty_surface_inspector(surface) != NULL);
+
   assert(!roastty_surface_has_selection(surface));
   assert(!roastty_surface_read_selection(surface, NULL));
   assert(!roastty_surface_read_selection(surface, &read_text));

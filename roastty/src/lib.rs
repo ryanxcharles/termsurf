@@ -65,6 +65,7 @@ mod termio;
 pub type RoasttyApp = *mut c_void;
 pub type RoasttyConfig = *mut c_void;
 pub type RoasttyFormatter = *mut c_void;
+pub type RoasttyInspector = *mut c_void;
 pub type RoasttyKeyEncoder = *mut c_void;
 pub type RoasttyKeyEvent = *mut c_void;
 pub type RoasttyMouseEncoder = *mut c_void;
@@ -1331,6 +1332,7 @@ struct Surface {
     size: RoasttySurfaceSize,
     color_scheme: c_int,
     preedit: Option<String>,
+    inspector: Option<NonNull<Inspector>>,
     last_key_event: Option<key::KeyEvent>,
     mouse: SurfaceMouseState,
     termio_worker: Option<termio::TermioWorker>,
@@ -1339,6 +1341,34 @@ struct Surface {
     last_termio_error: Option<String>,
     #[cfg(test)]
     test_termio_events: VecDeque<termio::TermioWorkerEvent>,
+}
+
+#[derive(Debug)]
+struct Inspector {
+    width: u32,
+    height: u32,
+    scale_x: f64,
+    scale_y: f64,
+    focused: bool,
+    mouse_position: Option<(f64, f64)>,
+    mouse_button: Option<InspectorMouseButton>,
+    mouse_scroll: Option<(f64, f64, u8)>,
+    key: Option<InspectorKey>,
+    text: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct InspectorMouseButton {
+    state: SurfaceMouseButtonState,
+    button: mouse::MouseButton,
+    mods: key_mods::Mods,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct InspectorKey {
+    action: key::KeyAction,
+    key: key::Key,
+    mods: key_mods::Mods,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -1662,6 +1692,39 @@ impl Surface {
         if let Some(close_surface) = app.runtime.close_surface_cb {
             unsafe {
                 close_surface(self.userdata, self.needs_confirm_quit());
+            }
+        }
+    }
+
+    fn inspector_handle(&mut self) -> RoasttyInspector {
+        if self.app.is_null() {
+            return ptr::null_mut();
+        }
+        if let Some(inspector) = self.inspector {
+            return inspector.as_ptr().cast();
+        }
+
+        let inspector = Box::new(Inspector {
+            width: 0,
+            height: 0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            focused: false,
+            mouse_position: None,
+            mouse_button: None,
+            mouse_scroll: None,
+            key: None,
+            text: None,
+        });
+        let inspector = unsafe { NonNull::new_unchecked(Box::into_raw(inspector)) };
+        self.inspector = Some(inspector);
+        inspector.as_ptr().cast()
+    }
+
+    fn free_inspector(&mut self) {
+        if let Some(inspector) = self.inspector.take() {
+            unsafe {
+                drop(Box::from_raw(inspector.as_ptr()));
             }
         }
     }
@@ -2128,6 +2191,14 @@ fn surface_from_handle<'a>(handle: RoasttySurface) -> Option<&'a mut Surface> {
         None
     } else {
         Some(unsafe { &mut *(handle.cast::<Surface>()) })
+    }
+}
+
+fn inspector_from_handle<'a>(handle: RoasttyInspector) -> Option<&'a mut Inspector> {
+    if handle.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *(handle.cast::<Inspector>()) })
     }
 }
 
@@ -9314,6 +9385,7 @@ pub extern "C" fn roastty_surface_new(
         },
         color_scheme: 0,
         preedit: None,
+        inspector: None,
         last_key_event: None,
         mouse: SurfaceMouseState::default(),
         termio_worker: None,
@@ -9341,7 +9413,8 @@ pub extern "C" fn roastty_surface_free(surface: RoasttySurface) {
     if !surface.is_null() {
         unsafe {
             let surface_ptr = NonNull::new_unchecked(surface.cast::<Surface>());
-            let surface_box = Box::from_raw(surface.cast::<Surface>());
+            let mut surface_box = Box::from_raw(surface.cast::<Surface>());
+            surface_box.free_inspector();
             if !surface_box.app.is_null() {
                 unregister_surface(surface_box.app, surface_ptr);
             }
@@ -9521,6 +9594,126 @@ pub extern "C" fn roastty_surface_set_color_scheme(surface: RoasttySurface, colo
     if let Some(surface) = surface_from_handle(surface) {
         surface.color_scheme = color_scheme;
     }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_inspector(surface: RoasttySurface) -> RoasttyInspector {
+    surface_from_handle(surface)
+        .map(Surface::inspector_handle)
+        .unwrap_or(ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_inspector_free(surface: RoasttySurface) {
+    if let Some(surface) = surface_from_handle(surface) {
+        if surface.app.is_null() {
+            return;
+        }
+        surface.free_inspector();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_inspector_set_focus(inspector: RoasttyInspector, focused: bool) {
+    if let Some(inspector) = inspector_from_handle(inspector) {
+        inspector.focused = focused;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_inspector_set_content_scale(inspector: RoasttyInspector, x: f64, y: f64) {
+    if let Some(inspector) = inspector_from_handle(inspector) {
+        inspector.scale_x = Surface::sanitized_scale(x);
+        inspector.scale_y = Surface::sanitized_scale(y);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_inspector_set_size(inspector: RoasttyInspector, width: u32, height: u32) {
+    if let Some(inspector) = inspector_from_handle(inspector) {
+        inspector.width = width;
+        inspector.height = height;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_inspector_mouse_button(
+    inspector: RoasttyInspector,
+    state: c_int,
+    button: c_int,
+    mods: c_int,
+) {
+    let Some(inspector) = inspector_from_handle(inspector) else {
+        return;
+    };
+    let Some(state) = mouse_button_state_from_int(state) else {
+        return;
+    };
+    let Some(button) = mouse_button_from_int(button) else {
+        return;
+    };
+    inspector.mouse_button = Some(InspectorMouseButton {
+        state,
+        button,
+        mods: key_mods_from_raw(mods),
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_inspector_mouse_pos(inspector: RoasttyInspector, x: f64, y: f64) {
+    if let Some(inspector) = inspector_from_handle(inspector) {
+        if x.is_finite() && y.is_finite() {
+            inspector.mouse_position = Some((x, y));
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_inspector_mouse_scroll(
+    inspector: RoasttyInspector,
+    x: f64,
+    y: f64,
+    scroll_mods: c_int,
+) {
+    if let Some(inspector) = inspector_from_handle(inspector) {
+        if x.is_finite() && y.is_finite() {
+            inspector.mouse_scroll = Some((x, y, scroll_mods as u8));
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_inspector_key(
+    inspector: RoasttyInspector,
+    action: c_int,
+    key: c_int,
+    mods: c_int,
+) {
+    let Some(inspector) = inspector_from_handle(inspector) else {
+        return;
+    };
+    let Some(action) = key_action_from_int(action) else {
+        return;
+    };
+    let Some(key) = key_from_int(key) else {
+        return;
+    };
+    inspector.key = Some(InspectorKey {
+        action,
+        key,
+        mods: key_mods_from_raw(mods),
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_inspector_text(inspector: RoasttyInspector, text: *const c_char) {
+    let Some(inspector) = inspector_from_handle(inspector) else {
+        return;
+    };
+    if text.is_null() {
+        return;
+    }
+    inspector.text = Some(unsafe { CStr::from_ptr(text) }.to_bytes().to_vec());
 }
 
 #[no_mangle]
@@ -10341,6 +10534,131 @@ mod tests {
         assert_eq!(roastty_surface_app(second), app);
 
         roastty_surface_free(second);
+        assert_eq!(app_surface_count(app), 0);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn inspector_lifecycle_reuses_frees_and_recreates_surface_owned_handle() {
+        assert!(roastty_surface_inspector(ptr::null_mut()).is_null());
+        roastty_inspector_free(ptr::null_mut());
+        roastty_inspector_set_focus(ptr::null_mut(), true);
+        roastty_inspector_set_size(ptr::null_mut(), 1, 2);
+        roastty_inspector_set_content_scale(ptr::null_mut(), 2.0, 3.0);
+        roastty_inspector_mouse_button(
+            ptr::null_mut(),
+            ROASTTY_MOUSE_BUTTON_PRESS,
+            ROASTTY_MOUSE_BUTTON_LEFT,
+            ROASTTY_MODS_SHIFT,
+        );
+        roastty_inspector_mouse_pos(ptr::null_mut(), 1.0, 2.0);
+        roastty_inspector_mouse_scroll(ptr::null_mut(), 1.0, 2.0, 0);
+        roastty_inspector_key(
+            ptr::null_mut(),
+            key::KeyAction::Press as c_int,
+            key::Key::KeyA as c_int,
+            ROASTTY_MODS_CTRL,
+        );
+        let text = CString::new("ignored").unwrap();
+        roastty_inspector_text(ptr::null_mut(), text.as_ptr());
+
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let inspector = roastty_surface_inspector(surface);
+        assert!(!inspector.is_null());
+        assert_eq!(roastty_surface_inspector(surface), inspector);
+        assert!(surface_from_handle(surface).unwrap().inspector.is_some());
+
+        roastty_inspector_free(surface);
+        assert!(surface_from_handle(surface).unwrap().inspector.is_none());
+        roastty_inspector_free(surface);
+
+        let recreated = roastty_surface_inspector(surface);
+        assert!(!recreated.is_null());
+        assert!(surface_from_handle(surface).unwrap().inspector.is_some());
+
+        roastty_app_free(app);
+        assert!(roastty_surface_inspector(surface).is_null());
+        roastty_inspector_free(surface);
+        assert!(surface_from_handle(surface).unwrap().inspector.is_some());
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn inspector_state_forwarding_validates_inputs() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let inspector = roastty_surface_inspector(surface);
+
+        roastty_inspector_set_focus(inspector, true);
+        roastty_inspector_set_size(inspector, 640, 480);
+        roastty_inspector_set_content_scale(inspector, 2.0, f64::NAN);
+        roastty_inspector_mouse_pos(inspector, 12.5, 34.25);
+        roastty_inspector_mouse_scroll(inspector, -1.0, 2.5, 3);
+        roastty_inspector_mouse_button(
+            inspector,
+            ROASTTY_MOUSE_BUTTON_PRESS,
+            ROASTTY_MOUSE_BUTTON_LEFT,
+            ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT,
+        );
+        roastty_inspector_key(
+            inspector,
+            key::KeyAction::Repeat as c_int,
+            key::Key::KeyA as c_int,
+            ROASTTY_MODS_CTRL,
+        );
+        let hello = CString::new("hello inspector").unwrap();
+        roastty_inspector_text(inspector, hello.as_ptr());
+
+        let state = inspector_from_handle(inspector).unwrap();
+        assert!(state.focused);
+        assert_eq!((state.width, state.height), (640, 480));
+        assert_eq!((state.scale_x, state.scale_y), (2.0, 1.0));
+        assert_eq!(state.mouse_position, Some((12.5, 34.25)));
+        assert_eq!(state.mouse_scroll, Some((-1.0, 2.5, 3)));
+        assert_eq!(
+            state.mouse_button,
+            Some(InspectorMouseButton {
+                state: SurfaceMouseButtonState::Press,
+                button: mouse::MouseButton::Left,
+                mods: key_mods_from_raw(ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT),
+            })
+        );
+        assert_eq!(
+            state.key,
+            Some(InspectorKey {
+                action: key::KeyAction::Repeat,
+                key: key::Key::KeyA,
+                mods: key_mods_from_raw(ROASTTY_MODS_CTRL),
+            })
+        );
+        assert_eq!(state.text.as_deref(), Some(b"hello inspector".as_slice()));
+
+        roastty_inspector_mouse_pos(inspector, f64::NAN, 1.0);
+        roastty_inspector_mouse_scroll(inspector, 1.0, f64::INFINITY, 0);
+        roastty_inspector_mouse_button(inspector, 99, ROASTTY_MOUSE_BUTTON_LEFT, 0);
+        roastty_inspector_mouse_button(inspector, ROASTTY_MOUSE_BUTTON_PRESS, 99, 0);
+        roastty_inspector_key(inspector, 99, key::Key::KeyB as c_int, 0);
+        roastty_inspector_key(inspector, key::KeyAction::Press as c_int, 999, 0);
+        roastty_inspector_text(inspector, ptr::null());
+
+        let state = inspector_from_handle(inspector).unwrap();
+        assert_eq!(state.mouse_position, Some((12.5, 34.25)));
+        assert_eq!(state.mouse_scroll, Some((-1.0, 2.5, 3)));
+        assert_eq!(state.text.as_deref(), Some(b"hello inspector".as_slice()));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_free_releases_live_inspector() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        assert!(!roastty_surface_inspector(surface).is_null());
+
+        roastty_surface_free(surface);
+
         assert_eq!(app_surface_count(app), 0);
         roastty_app_free(app);
     }

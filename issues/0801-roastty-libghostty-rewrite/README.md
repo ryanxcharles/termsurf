@@ -281,7 +281,9 @@ Experiment 246).
       done; terminal-derived key encoder options done; surface text viewport
       metadata done; keybinding/action dispatch, frontend selection routing, and
       split tree/frontend mutations missing
-- [ ] Inspector ABI — missing
+- [ ] Inspector ABI — non-Metal handle lifecycle and input forwarding foundation
+      done; Metal renderer integration, inspector UI rendering, and core
+      inspector data collection missing
 
 ### App / Surface / IO — partial
 
@@ -1887,7 +1889,7 @@ are past the correctness-critical foundation.
 - [Experiment 696: Surface Text Viewport Metadata](696-surface-text-viewport-metadata.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 697: Inspector ABI Foundation](697-inspector-abi-foundation.md) —
-  **Designed** · Codex/Codex/-
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

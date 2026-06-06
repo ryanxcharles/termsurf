@@ -22,6 +22,7 @@ extern "C" {
 typedef void* roastty_app_t;
 typedef void* roastty_config_t;
 typedef void* roastty_formatter_t;
+typedef void* roastty_inspector_t;
 typedef void* roastty_key_encoder_t;
 typedef void* roastty_key_event_t;
 typedef void* roastty_mouse_encoder_t;
@@ -1863,6 +1864,31 @@ ROASTTY_API uint64_t roastty_surface_foreground_pid(roastty_surface_t);
 ROASTTY_API roastty_string_s roastty_surface_tty_name(roastty_surface_t);
 ROASTTY_API void roastty_surface_set_color_scheme(roastty_surface_t,
                                                   roastty_color_scheme_e);
+ROASTTY_API roastty_inspector_t roastty_surface_inspector(roastty_surface_t);
+ROASTTY_API void roastty_inspector_free(roastty_surface_t);
+ROASTTY_API void roastty_inspector_set_focus(roastty_inspector_t, bool);
+ROASTTY_API void roastty_inspector_set_content_scale(roastty_inspector_t,
+                                                     double,
+                                                     double);
+ROASTTY_API void roastty_inspector_set_size(roastty_inspector_t,
+                                            uint32_t,
+                                            uint32_t);
+ROASTTY_API void roastty_inspector_mouse_button(roastty_inspector_t,
+                                                roastty_mouse_button_state_e,
+                                                roastty_mouse_button_e,
+                                                roastty_input_mods_e);
+ROASTTY_API void roastty_inspector_mouse_pos(roastty_inspector_t,
+                                             double,
+                                             double);
+ROASTTY_API void roastty_inspector_mouse_scroll(roastty_inspector_t,
+                                                double,
+                                                double,
+                                                roastty_input_scroll_mods_t);
+ROASTTY_API void roastty_inspector_key(roastty_inspector_t,
+                                       roastty_key_action_e,
+                                       roastty_key_e,
+                                       roastty_input_mods_e);
+ROASTTY_API void roastty_inspector_text(roastty_inspector_t, const char*);
 ROASTTY_API roastty_input_mods_e
 roastty_surface_key_translation_mods(roastty_surface_t, roastty_input_mods_e);
 ROASTTY_API bool roastty_surface_key(roastty_surface_t, roastty_key_event_t);

@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 697: Inspector ABI Foundation
@@ -110,3 +115,53 @@ contract to null-handle no-ops while treating handles as invalid after
 `roastty_inspector_free(surface)` or `roastty_surface_free(surface)`.
 
 Codex then approved the revised design for the plan commit.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now exposes the non-Metal inspector ABI foundation with Roastty-named
+upstream-compatible signatures. `roastty_surface_inspector` creates or reuses a
+surface-owned inspector handle, `roastty_inspector_free(surface)` clears it, and
+`roastty_surface_free` releases any live inspector before dropping the surface.
+
+The inspector stores state for the latest size, content scale, focus, mouse
+position, mouse button, mouse scroll, key action/key/mods tuple, and
+NUL-terminated text callback. The forwarding functions are safe no-ops for null
+inspector handles and validate invalid mouse/key/non-finite inputs without
+mutating previous valid state. The raw-pointer ownership contract matches the
+revised design: handles are invalid after their owning surface frees the
+inspector or surface.
+
+The C ABI harness compiles and links against the new prototypes, including null
+handle no-ops, live handle forwarding calls, stable repeated
+`roastty_surface_inspector(surface)` reuse, and free/recreate smoke coverage.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty inspector -- --nocapture`
+- `cargo test -p roastty surface_free -- --nocapture`
+- `cargo test -p roastty --test abi_harness`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+The Inspector ABI is no longer absent: Roastty now has the surface-owned handle
+and input-forwarding boundary needed by the Swift/app side. The remaining
+inspector work is renderer/core integration: Metal init/render/shutdown,
+inspector UI rendering, terminal event collection, and action/keybinding
+integration for showing or hiding the inspector.
+
+## Completion Review
+
+Codex reviewed the staged result and found the ABI signatures and C harness
+coverage aligned with the approved design. It found one implementation mismatch:
+`roastty_inspector_free(surface)` freed an inspector after app detachment even
+though the design said detached surfaces are no-ops. The implementation now
+returns without freeing when `surface.app` is null, and the lifecycle test
+asserts the inspector remains surface-owned until `roastty_surface_free`.
+
+The same review also required standard result-review provenance; this section,
+the `[review.result]` frontmatter, and the README reviewer tuple record it.
