@@ -1918,6 +1918,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 706: Binding Action Reset](706-binding-action-reset.md) — **Pass**
   · Codex/Codex/Codex
+- [Experiment 707: Binding Action Scroll Top and Bottom](707-binding-action-scroll-top-bottom.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
