@@ -4327,6 +4327,10 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(surface, "scroll_page_fractional:nan", 26));
   assert(!roastty_surface_binding_action(surface, "scroll_page_fractional:inf", 26));
   assert(!roastty_surface_binding_action(surface, "scroll_page_fractional:1e20", 27));
+  assert(!roastty_surface_binding_action(surface, "jump_to_prompt:", 15));
+  assert(!roastty_surface_binding_action(surface, "jump_to_prompt:abc", 18));
+  assert(!roastty_surface_binding_action(surface, "jump_to_prompt:32768", 20));
+  assert(!roastty_surface_binding_action(surface, "jump_to_prompt:-32769", 21));
   assert(!roastty_surface_binding_action(surface, "new_split:right", 15));
   assert(roastty_surface_binding_action(surface, "text:hello", 10));
   assert(roastty_surface_binding_action(surface, "csi:", 4));
@@ -4349,6 +4353,10 @@ int main(int argc, char **argv) {
   assert(roastty_surface_binding_action(surface, "scroll_page_fractional:+0.5", 27));
   assert(roastty_surface_binding_action(surface, "scroll_page_fractional:5e-1", 27));
   assert(roastty_surface_binding_action(surface, "scroll_page_fractional:0", 24));
+  assert(!roastty_surface_binding_action(surface, "jump_to_prompt:-1", 17));
+  assert(!roastty_surface_binding_action(surface, "jump_to_prompt:+1", 17));
+  assert(!roastty_surface_binding_action(surface, "jump_to_prompt:1", 16));
+  assert(!roastty_surface_binding_action(surface, "jump_to_prompt:0", 16));
   assert(roastty_surface_binding_action(surface, "close_surface", 13));
   roastty_surface_preedit(surface, NULL, 3);
   roastty_surface_preedit(surface, NULL, 0);

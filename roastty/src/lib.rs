@@ -1957,6 +1957,22 @@ impl Surface {
         scrolled
     }
 
+    fn scroll_viewport_to_prompt(&mut self, delta: i16) -> bool {
+        if self.app.is_null() {
+            return false;
+        }
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return false;
+        };
+        worker.with_termio_mut(|termio| {
+            termio
+                .terminal_mut()
+                .scroll_viewport_to_prompt(isize::from(delta))
+        });
+        self.request_render();
+        true
+    }
+
     fn scroll_viewport_page(&mut self, up: bool) {
         if self.app.is_null() {
             return;
@@ -2585,6 +2601,7 @@ enum ParsedBindingAction {
     ScrollPageDown,
     ScrollPageLines(i16),
     ScrollPageFractional(f32),
+    JumpToPrompt(i16),
 }
 
 fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindingAction> {
@@ -2704,6 +2721,9 @@ fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindin
         b"scroll_page_fractional" => Some(ParsedBindingAction::ScrollPageFractional(
             parse_f32_ascii(parameter?)?,
         )),
+        b"jump_to_prompt" => Some(ParsedBindingAction::JumpToPrompt(parse_i16_ascii(
+            parameter?,
+        )?)),
         _ => None,
     }
 }
@@ -10785,6 +10805,12 @@ pub extern "C" fn roastty_surface_binding_action(
             surface.scroll_viewport_fractional(fraction);
             true
         }
+        ParsedBindingAction::JumpToPrompt(delta) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.scroll_viewport_to_prompt(delta)
+        }
     }
 }
 
@@ -12666,6 +12692,17 @@ mod tests {
             "scroll_page_fractional:inf",
             "scroll_page_fractional:+inf",
             "scroll_page_fractional:1e20",
+            "jump_to_prompt",
+            "jump_to_prompt:",
+            "jump_to_prompt:+",
+            "jump_to_prompt:-",
+            "jump_to_prompt: ",
+            "jump_to_prompt: 1",
+            "jump_to_prompt:1 ",
+            "jump_to_prompt:1:2",
+            "jump_to_prompt:abc",
+            "jump_to_prompt:32768",
+            "jump_to_prompt:-32769",
         ] {
             assert!(!binding_action(surface, action), "{action}");
         }
@@ -13213,6 +13250,156 @@ mod tests {
                 .saturating_sub(usize::from(termio.terminal().rows()));
             point::Coordinate::new(0, u32::try_from(y).unwrap())
         })
+    }
+
+    fn terminal_viewport_top_left_screen(terminal: &InnerTerminal) -> point::Coordinate {
+        let (top_left, _) = terminal.viewport_bounds().unwrap();
+        terminal
+            .point_from_grid_ref(top_left, TerminalPointTag::Screen)
+            .unwrap()
+    }
+
+    fn prompt_fixture() -> &'static [u8] {
+        b"\x1b]133;P\x07p0\nout0\n\x1b]133;P\x07p1\nout1\n\x1b]133;P\x07p2\nout2\n"
+    }
+
+    #[test]
+    fn terminal_jump_to_prompt_zero_and_no_prompt_are_noops() {
+        let mut terminal = InnerTerminal::init(10, 3, None).unwrap();
+        terminal.next_slice(b"l0\nl1\nl2\nl3\nl4\nl5").unwrap();
+        let active = terminal_viewport_top_left_screen(&terminal);
+
+        terminal.scroll_viewport_to_prompt(0);
+        assert_eq!(terminal_viewport_top_left_screen(&terminal), active);
+
+        terminal.scroll_viewport_to_prompt(-1);
+        assert_eq!(terminal_viewport_top_left_screen(&terminal), active);
+        terminal.scroll_viewport_to_prompt(1);
+        assert_eq!(terminal_viewport_top_left_screen(&terminal), active);
+    }
+
+    #[test]
+    fn terminal_jump_to_prompt_moves_backward_forward_and_clamps_to_furthest_prompt() {
+        let mut terminal = InnerTerminal::init(10, 3, None).unwrap();
+        terminal.next_slice(prompt_fixture()).unwrap();
+        assert_eq!(
+            terminal_viewport_top_left_screen(&terminal),
+            point::Coordinate::new(0, 5)
+        );
+
+        terminal.scroll_viewport_to_prompt(-1);
+        assert_eq!(
+            terminal_viewport_top_left_screen(&terminal),
+            point::Coordinate::new(0, 2)
+        );
+
+        terminal.scroll_viewport_to_prompt(-9);
+        assert_eq!(
+            terminal_viewport_top_left_screen(&terminal),
+            point::Coordinate::new(0, 0)
+        );
+
+        terminal.scroll_viewport_to_prompt(1);
+        assert_eq!(
+            terminal_viewport_top_left_screen(&terminal),
+            point::Coordinate::new(0, 2)
+        );
+
+        terminal.scroll_viewport_to_prompt(9);
+        assert_eq!(
+            terminal_viewport_top_left_screen(&terminal),
+            point::Coordinate::new(0, 5)
+        );
+    }
+
+    #[test]
+    fn terminal_jump_to_prompt_forward_skips_continuation_rows_and_clamps_to_active() {
+        let mut terminal = InnerTerminal::init(10, 3, None).unwrap();
+        terminal
+            .next_slice(b"\x1b]133;P\x07p0\n\x1b]133;P;k=c\x07p0c\nout\n\x1b]133;P\x07p1\nout1\n")
+            .unwrap();
+
+        terminal.scroll_viewport_to_row(0);
+        terminal.scroll_viewport_to_prompt(1);
+        assert_eq!(
+            terminal_viewport_top_left_screen(&terminal),
+            point::Coordinate::new(0, 3)
+        );
+
+        terminal.scroll_viewport_to_prompt(1);
+        let active = point::Coordinate::new(
+            0,
+            u32::try_from(terminal.total_rows() - usize::from(terminal.rows())).unwrap(),
+        );
+        assert_eq!(terminal_viewport_top_left_screen(&terminal), active);
+    }
+
+    #[test]
+    fn surface_binding_action_jump_to_prompt_false_for_null_detached_and_no_worker() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert!(!binding_action(ptr::null_mut(), "jump_to_prompt:-1"));
+        assert!(!binding_action(surface, "jump_to_prompt:-1"));
+        assert!(!binding_action(surface, "jump_to_prompt:+1"));
+        assert!(!binding_action(surface, "jump_to_prompt:1"));
+        assert!(!binding_action(surface, "jump_to_prompt:0"));
+        roastty_app_free(app);
+        assert!(!binding_action(surface, "jump_to_prompt:-1"));
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_binding_action_jump_to_prompt_no_prompt_worker_consumes_without_moving() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5'; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+
+        assert!(surface_snapshot_text_after_start(app, surface).contains("l5"));
+        let before = surface_worker_viewport_top_left_screen(surface);
+        assert!(binding_action(surface, "jump_to_prompt:-1"));
+        assert_eq!(surface_worker_viewport_top_left_screen(surface), before);
+        assert!(binding_action(surface, "jump_to_prompt:0"));
+        assert_eq!(surface_worker_viewport_top_left_screen(surface), before);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_jump_to_prompt_moves_worker_viewport() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            let worker = surface_ref.termio_worker.as_ref().unwrap();
+            worker.with_termio_mut(|termio| {
+                termio.terminal_mut().reset();
+                termio.terminal_mut().next_slice(prompt_fixture()).unwrap();
+            });
+        }
+
+        assert!(binding_action(surface, "jump_to_prompt:-1"));
+        assert_eq!(
+            surface_worker_viewport_top_left_screen(surface),
+            point::Coordinate::new(0, 2)
+        );
+        assert!(binding_action(surface, "jump_to_prompt:+1"));
+        assert_eq!(
+            surface_worker_viewport_top_left_screen(surface),
+            point::Coordinate::new(0, 5)
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
     }
 
     #[test]

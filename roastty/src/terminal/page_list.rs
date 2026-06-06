@@ -35,6 +35,7 @@ enum Scroll {
     Top,
     Row(usize),
     DeltaRow(isize),
+    DeltaPrompt(isize),
     Pin(Pin),
 }
 
@@ -4919,6 +4920,7 @@ impl PageList {
             Scroll::Pin(pin) => self.scroll_to_pin(pin),
             Scroll::Row(row) => self.scroll_to_row(row),
             Scroll::DeltaRow(delta) => self.scroll_delta_row(delta),
+            Scroll::DeltaPrompt(delta) => self.scroll_delta_prompt(delta),
         }
 
         self.verify_integrity()
@@ -5074,6 +5076,53 @@ impl PageList {
             self.set_viewport_pin(Pin { x: 0, ..pin });
             self.viewport = Viewport::Pin;
             self.viewport_pin_row_offset = None;
+        }
+    }
+
+    pub(super) fn scroll_delta_prompt(&mut self, delta: isize) {
+        if delta == 0 {
+            return;
+        }
+
+        let top_left = self.get_top_left(point::Tag::Viewport);
+        let start = if delta < 0 {
+            let Some(pin) = self.pin_up(top_left, 1) else {
+                return;
+            };
+            pin
+        } else {
+            let Some(mut pin) = self.pin_down(top_left, 1) else {
+                return;
+            };
+            if self.pin_semantic_prompt(top_left) != Some(SemanticPrompt::None) {
+                while self.pin_semantic_prompt(pin) == Some(SemanticPrompt::PromptContinuation) {
+                    let Some(next) = self.pin_down(pin, 1) else {
+                        break;
+                    };
+                    pin = next;
+                }
+            }
+            pin
+        };
+
+        let direction = if delta > 0 {
+            Direction::RightDown
+        } else {
+            Direction::LeftUp
+        };
+        let mut remaining = delta.unsigned_abs();
+        let mut prompts = self.prompt_iterator_from_pin(direction, start, None);
+        let mut prompt_pin = None;
+        while let Some(next) = prompts.next() {
+            prompt_pin = Some(next);
+            remaining -= 1;
+            if remaining == 0 {
+                break;
+            }
+        }
+
+        if let Some(prompt_pin) = prompt_pin {
+            self.scroll_to_pin(prompt_pin);
         }
     }
 

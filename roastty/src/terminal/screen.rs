@@ -233,6 +233,10 @@ impl Screen {
         self.pages.scroll_to_row(row);
     }
 
+    pub(super) fn scroll_delta_prompt(&mut self, delta: isize) {
+        self.pages.scroll_delta_prompt(delta);
+    }
+
     pub(super) fn scroll_to_selection(&mut self) -> bool {
         let Some(selection) = self.selection else {
             return false;

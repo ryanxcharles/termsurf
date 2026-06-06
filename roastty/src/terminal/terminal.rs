@@ -1719,6 +1719,10 @@ impl Terminal {
         self.screens.active_mut().scroll_to_selection()
     }
 
+    pub(crate) fn scroll_viewport_to_prompt(&mut self, delta: isize) {
+        self.screens.active_mut().scroll_delta_prompt(delta);
+    }
+
     pub(crate) fn drag_select_cells(
         &self,
         click_pin: Pin,

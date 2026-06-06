@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 714: Binding Action Jump To Prompt
@@ -106,6 +111,69 @@ Run:
 - `cargo test -p roastty --test abi_harness`
 - `cargo fmt -p roastty -- --check`
 - `git diff --check`
+
+## Result
+
+**Result:** Pass
+
+Roastty now accepts `jump_to_prompt:<i16>` as a binding action. The parser uses
+the existing strict ASCII `i16` parser, so explicit plus/minus signs are
+accepted and malformed, whitespace-padded, extra-colon, missing, empty, and
+out-of-range parameters are rejected.
+
+The terminal path now exposes prompt-delta scrolling through the page list,
+active screen, terminal, and surface binding-action dispatcher. Negative deltas
+search from one row above the viewport top, positive deltas search from one row
+below it, positive jumps skip continuation rows when starting from an existing
+prompt group, oversized deltas clamp to the furthest prompt found, and targets
+inside the active area restore the active viewport. `jump_to_prompt:0` is a
+consumed no-op on attached worker-backed surfaces. Worker-backed terminals with
+no prompt markers also consume the action and leave the viewport unchanged.
+Null, detached, no-worker, and malformed action cases return `false`.
+
+The C ABI harness now smoke-tests malformed prompt-jump forms and valid
+no-worker forms, proving the exported binding-action entry point rejects or
+returns false without crashing.
+
+Verification run:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty jump_to_prompt -- --nocapture --test-threads=1` — 6
+  passed
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1` — 53
+  passed
+- `cargo test -p roastty --test abi_harness` — 1 passed
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+Experiment 714 fills the next upstream binding-action gap by adding semantic
+prompt navigation without changing the behavior of existing binding actions. The
+remaining binding-action work is outside prompt scrolling: selection adjustment,
+search actions, write-file actions, cursor-key actions, clipboard actions, and
+eventual keybind storage/dispatch.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 714 diff and found no code correctness
+blockers. The review confirmed that parser semantics match the stated `i16`
+behavior, dispatch correctly returns `false` for null, detached, and no-worker
+surfaces while consuming worker-backed zero and no-prompt no-ops, and the
+prompt-delta algorithm matches the design: upward and downward start rows,
+positive continuation skipping, furthest-prompt clamping, and active-area
+clamping through `scroll_to_pin`.
+
+The review also confirmed that tests cover parser false paths, valid no-worker
+false returns, zero/no-prompt no-ops, backward and forward movement, oversized
+deltas, continuation skipping, active clamping, ABI smoke coverage, and prior
+binding-action behavior.
+
+The only required finding was workflow provenance: the result-review
+frontmatter, this completion-review section, and the README provenance tuple
+needed to be recorded before the result commit. Those fields are now present.
+The review noted that the result lists `cargo fmt -p roastty`; that command was
+run as part of the focused verification command before tests.
 
 ## Design Review
 
