@@ -4312,6 +4312,10 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:", 18));
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:rtf", 21));
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:plain:extra", 29));
+  assert(!roastty_surface_binding_action(surface, "paste_from_clipboard:", 21));
+  assert(!roastty_surface_binding_action(surface, "paste_from_clipboard:now", 24));
+  assert(!roastty_surface_binding_action(surface, "paste_from_selection:", 21));
+  assert(!roastty_surface_binding_action(surface, "paste_from_selection:now", 24));
   assert(!roastty_surface_binding_action(surface, "scroll_to_top:", 14));
   assert(!roastty_surface_binding_action(surface, "scroll_to_top:now", 17));
   assert(!roastty_surface_binding_action(surface, "scroll_to_bottom:", 17));
@@ -4357,6 +4361,8 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:vt", 20));
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:html", 22));
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:mixed", 23));
+  assert(!roastty_surface_binding_action(surface, "paste_from_clipboard", 20));
+  assert(!roastty_surface_binding_action(surface, "paste_from_selection", 20));
   assert(roastty_surface_binding_action(surface, "scroll_to_top", 13));
   assert(roastty_surface_binding_action(surface, "scroll_to_bottom", 16));
   assert(roastty_surface_binding_action(surface, "scroll_to_row:0", 15));

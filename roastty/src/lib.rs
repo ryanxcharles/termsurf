@@ -104,6 +104,7 @@ const ROASTTY_SURFACE_CONTEXT_SPLIT: c_int = 2;
 
 const ROASTTY_TARGET_SURFACE: c_int = 1;
 const ROASTTY_CLIPBOARD_STANDARD: c_int = 0;
+const ROASTTY_CLIPBOARD_SELECTION: c_int = 1;
 #[allow(dead_code)]
 const ROASTTY_CLIPBOARD_REQUEST_PASTE: c_int = 0;
 #[allow(dead_code)]
@@ -2043,6 +2044,27 @@ impl Surface {
         true
     }
 
+    fn paste_from_clipboard(&mut self, clipboard: c_int) -> bool {
+        if self.app.is_null() {
+            return false;
+        }
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return false;
+        };
+        let Some(app) = app_from_handle(self.app) else {
+            return false;
+        };
+        if clipboard == ROASTTY_CLIPBOARD_SELECTION && !app.runtime.supports_selection_clipboard {
+            return false;
+        }
+        let Some(read_clipboard) = app.runtime.read_clipboard_cb else {
+            return false;
+        };
+        let _ = worker;
+        let state = (self as *mut Surface).cast::<c_void>();
+        unsafe { read_clipboard(app.runtime.userdata, clipboard, state) }
+    }
+
     fn scroll_viewport_to_top(&mut self) {
         if self.app.is_null() {
             return;
@@ -2730,6 +2752,7 @@ enum ParsedBindingAction {
     SelectAll,
     AdjustSelection(TerminalSelectionAdjustment),
     CopyToClipboard(CopyToClipboardFormat),
+    PasteFromClipboard(c_int),
     ScrollToTop,
     ScrollToBottom,
     ScrollToRow(usize),
@@ -2850,6 +2873,22 @@ fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindin
         b"copy_to_clipboard" => Some(ParsedBindingAction::CopyToClipboard(
             copy_to_clipboard_format_from_str(parameter)?,
         )),
+        b"paste_from_clipboard" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(ParsedBindingAction::PasteFromClipboard(
+                ROASTTY_CLIPBOARD_STANDARD,
+            ))
+        }
+        b"paste_from_selection" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(ParsedBindingAction::PasteFromClipboard(
+                ROASTTY_CLIPBOARD_SELECTION,
+            ))
+        }
         b"scroll_to_top" => {
             if parameter.is_some() {
                 return None;
@@ -10662,15 +10701,20 @@ pub extern "C" fn roastty_surface_ime_point(
 pub extern "C" fn roastty_surface_complete_clipboard_request(
     surface: RoasttySurface,
     text: *const c_char,
-    _state: *mut c_void,
-    _confirmed: bool,
+    state: *mut c_void,
+    confirmed: bool,
 ) {
+    if text.is_null() || state != surface || !confirmed {
+        return;
+    }
     let Some(surface) = surface_from_handle(surface) else {
         return;
     };
-    if surface.app.is_null() || text.is_null() {
+    if surface.app.is_null() || surface.termio_worker.is_none() {
         return;
     }
+    let bytes = unsafe { CStr::from_ptr(text) }.to_bytes();
+    surface.text(bytes);
 }
 
 #[no_mangle]
@@ -10952,6 +10996,12 @@ pub extern "C" fn roastty_surface_binding_action(
             }
             surface.copy_to_clipboard(format)
         }
+        ParsedBindingAction::PasteFromClipboard(clipboard) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.paste_from_clipboard(clipboard)
+        }
         ParsedBindingAction::ScrollToTop => {
             if surface.app.is_null() {
                 return false;
@@ -11059,6 +11109,13 @@ mod tests {
         confirm: bool,
     }
 
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    struct ClipboardReadRecord {
+        userdata: usize,
+        clipboard: c_int,
+        state: usize,
+    }
+
     #[derive(Default)]
     struct EffectState {
         write_calls: Vec<Vec<u8>>,
@@ -11086,6 +11143,8 @@ mod tests {
         static ACTION_RECORDS: RefCell<Vec<ActionRecord>> = const { RefCell::new(Vec::new()) };
         static ACTION_RESULT: RefCell<bool> = const { RefCell::new(true) };
         static CLIPBOARD_WRITE_RECORDS: RefCell<Vec<ClipboardWriteRecord>> = const { RefCell::new(Vec::new()) };
+        static CLIPBOARD_READ_RECORDS: RefCell<Vec<ClipboardReadRecord>> = const { RefCell::new(Vec::new()) };
+        static CLIPBOARD_READ_RESULT: RefCell<bool> = const { RefCell::new(true) };
     }
 
     fn reset_effect_state() {
@@ -11249,6 +11308,49 @@ mod tests {
             read_clipboard_cb: None,
             confirm_read_clipboard_cb: None,
             write_clipboard_cb: Some(write_clipboard_record_cb),
+            close_surface_cb: None,
+        };
+        roastty_app_new(&runtime, ptr::null_mut())
+    }
+
+    unsafe extern "C" fn read_clipboard_record_cb(
+        userdata: *mut c_void,
+        clipboard: c_int,
+        state: *mut c_void,
+    ) -> bool {
+        CLIPBOARD_READ_RECORDS.with(|records| {
+            records.borrow_mut().push(ClipboardReadRecord {
+                userdata: userdata as usize,
+                clipboard,
+                state: state as usize,
+            });
+        });
+        CLIPBOARD_READ_RESULT.with(|result| *result.borrow())
+    }
+
+    fn reset_clipboard_read_records(result: bool) {
+        CLIPBOARD_READ_RECORDS.with(|records| records.borrow_mut().clear());
+        CLIPBOARD_READ_RESULT.with(|stored| *stored.borrow_mut() = result);
+    }
+
+    fn clipboard_read_records() -> Vec<ClipboardReadRecord> {
+        CLIPBOARD_READ_RECORDS.with(|records| records.borrow().clone())
+    }
+
+    fn new_test_app_with_clipboard_read(
+        userdata: usize,
+        result: bool,
+        supports_selection_clipboard: bool,
+    ) -> RoasttyApp {
+        reset_clipboard_read_records(result);
+        let runtime = RoasttyRuntimeConfig {
+            userdata: userdata as *mut c_void,
+            supports_selection_clipboard,
+            wakeup_cb: None,
+            action_cb: None,
+            read_clipboard_cb: Some(read_clipboard_record_cb),
+            confirm_read_clipboard_cb: None,
+            write_clipboard_cb: None,
             close_surface_cb: None,
         };
         roastty_app_new(&runtime, ptr::null_mut())
@@ -12926,6 +13028,10 @@ mod tests {
             "copy_to_clipboard: plain",
             "copy_to_clipboard:plain ",
             "copy_to_clipboard:rtf",
+            "paste_from_clipboard:",
+            "paste_from_clipboard:now",
+            "paste_from_selection:",
+            "paste_from_selection:now",
             "scroll_to_top:",
             "scroll_to_top:now",
             "scroll_to_bottom:",
@@ -13982,6 +14088,97 @@ mod tests {
                 }]
             );
         }
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_paste_from_clipboard_false_paths() {
+        let app = new_test_app_with_clipboard_read(0xCA57, true, true);
+        let surface = new_test_surface(app);
+
+        assert!(!binding_action(ptr::null_mut(), "paste_from_clipboard"));
+        assert!(!binding_action(surface, "paste_from_clipboard"));
+        assert!(!binding_action(surface, "paste_from_selection"));
+        assert!(clipboard_read_records().is_empty());
+
+        roastty_app_free(app);
+        assert!(!binding_action(surface, "paste_from_clipboard"));
+        assert!(clipboard_read_records().is_empty());
+        roastty_surface_free(surface);
+
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+
+        reset_clipboard_read_records(true);
+        assert!(!binding_action(surface, "paste_from_clipboard"));
+        assert!(clipboard_read_records().is_empty());
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+
+        let app = new_test_app_with_clipboard_read(0xCA57, true, false);
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+
+        assert!(!binding_action(surface, "paste_from_selection"));
+        assert!(clipboard_read_records().is_empty());
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_paste_from_clipboard_starts_read_requests() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app_with_clipboard_read(0xCA57, true, true);
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+
+        assert!(binding_action(surface, "paste_from_clipboard"));
+        assert_eq!(
+            clipboard_read_records(),
+            vec![ClipboardReadRecord {
+                userdata: 0xCA57,
+                clipboard: ROASTTY_CLIPBOARD_STANDARD,
+                state: surface as usize,
+            }]
+        );
+
+        reset_clipboard_read_records(true);
+        assert!(binding_action(surface, "paste_from_selection"));
+        assert_eq!(
+            clipboard_read_records(),
+            vec![ClipboardReadRecord {
+                userdata: 0xCA57,
+                clipboard: ROASTTY_CLIPBOARD_SELECTION,
+                state: surface as usize,
+            }]
+        );
+
+        reset_clipboard_read_records(false);
+        assert!(!binding_action(surface, "paste_from_clipboard"));
+        assert_eq!(
+            clipboard_read_records(),
+            vec![ClipboardReadRecord {
+                userdata: 0xCA57,
+                clipboard: ROASTTY_CLIPBOARD_STANDARD,
+                state: surface as usize,
+            }]
+        );
 
         roastty_surface_free(surface);
         roastty_app_free(app);
@@ -15114,6 +15311,80 @@ mod tests {
         assert!(!roastty_surface_needs_render(surface));
         assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 0);
         assert_eq!(WAKEUP_USERDATA.load(Ordering::SeqCst), 0);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_complete_clipboard_request_invalid_state_confirm_and_worker_noop() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let text = CString::new("paste").unwrap();
+
+        roastty_surface_complete_clipboard_request(surface, text.as_ptr(), surface, true);
+        assert!(!roastty_surface_needs_render(surface));
+
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let worker_surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(worker_surface, 10, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, worker_surface).contains("ready"));
+
+        roastty_surface_complete_clipboard_request(
+            worker_surface,
+            ptr::null(),
+            worker_surface,
+            true,
+        );
+        roastty_surface_complete_clipboard_request(
+            worker_surface,
+            text.as_ptr(),
+            ptr::null_mut(),
+            true,
+        );
+        roastty_surface_complete_clipboard_request(worker_surface, text.as_ptr(), surface, true);
+        roastty_surface_complete_clipboard_request(
+            worker_surface,
+            text.as_ptr(),
+            worker_surface,
+            false,
+        );
+        let snapshot = surface_snapshot_text(app, worker_surface);
+        assert!(snapshot.contains("ready"));
+        assert!(!snapshot.contains("paste"));
+
+        roastty_app_free(app);
+        roastty_surface_complete_clipboard_request(
+            worker_surface,
+            text.as_ptr(),
+            worker_surface,
+            true,
+        );
+        roastty_surface_free(worker_surface);
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_complete_clipboard_request_confirmed_state_pastes_text() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new(
+            "python3 -c 'import sys, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); data = sys.stdin.buffer.read(5); sys.stdout.write(\"\\nbytes:\" + data.hex())'",
+        )
+        .unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 20, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+        let text = CString::new("paste").unwrap();
+
+        roastty_surface_complete_clipboard_request(surface, text.as_ptr(), surface, true);
+
+        let snapshot = surface_snapshot_text_until(app, surface, "bytes:7061737465");
+        assert!(snapshot.contains("bytes:7061737465"), "{snapshot:?}");
         roastty_surface_free(surface);
         roastty_app_free(app);
     }
