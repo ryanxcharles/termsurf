@@ -1863,6 +1863,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 687: Surface Key Translation Mods](687-surface-key-translation-mods.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 688: Surface IME Point](688-surface-ime-point.md) — **Designed** ·
+  Codex/-/-
 
 ## Non-Goals
 
