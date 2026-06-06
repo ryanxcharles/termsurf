@@ -31,11 +31,11 @@ use terminal::selection_gesture::{
     SelectionGestureGeometry, SelectionGesturePress, SelectionGestureRelease, DEFAULT_BEHAVIORS,
 };
 use terminal::terminal::{
-    KittyImageMedium, Terminal as InnerTerminal, TerminalBellCallback, TerminalColorKind,
-    TerminalColorSchemeCallback, TerminalDeviceAttributesCallback, TerminalEnquiryCallback,
-    TerminalFormatterExtra, TerminalGridRef, TerminalGridRefPointError, TerminalPointTag,
-    TerminalScreen, TerminalSelection, TerminalSelectionAdjustment, TerminalSelectionFormat,
-    TerminalSelectionOrder, TerminalSizeCallback, TerminalStreamError,
+    ClearScreenResult, KittyImageMedium, Terminal as InnerTerminal, TerminalBellCallback,
+    TerminalColorKind, TerminalColorSchemeCallback, TerminalDeviceAttributesCallback,
+    TerminalEnquiryCallback, TerminalFormatterExtra, TerminalGridRef, TerminalGridRefPointError,
+    TerminalPointTag, TerminalScreen, TerminalSelection, TerminalSelectionAdjustment,
+    TerminalSelectionFormat, TerminalSelectionOrder, TerminalSizeCallback, TerminalStreamError,
     TerminalTitleChangedCallback, TerminalTrackedGridRef, TerminalWritePtyCallback,
     TerminalXtversionCallback,
 };
@@ -1874,6 +1874,41 @@ impl Surface {
         self.request_render();
     }
 
+    fn clear_screen(&mut self) -> bool {
+        if self.app.is_null() {
+            return false;
+        }
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return false;
+        };
+        let result = worker.with_termio_mut(|termio| termio.terminal_mut().clear_screen(true));
+        let result = match result {
+            Ok(result) => result,
+            Err(err) => {
+                self.apply_termio_event(termio::TermioWorkerEvent::Error(format!("{err:?}")));
+                return false;
+            }
+        };
+        let write_error = if result == ClearScreenResult::SendFormFeed {
+            worker
+                .queue_write(b"\x0c")
+                .err()
+                .map(|err| format!("{err:?}"))
+        } else {
+            None
+        };
+        match result {
+            ClearScreenResult::NotPerformed => false,
+            ClearScreenResult::Performed | ClearScreenResult::SendFormFeed => {
+                self.request_render();
+                if let Some(error) = write_error {
+                    self.apply_termio_event(termio::TermioWorkerEvent::Error(error));
+                }
+                true
+            }
+        }
+    }
+
     fn scroll_viewport_to_top(&mut self) {
         if self.app.is_null() {
             return;
@@ -2541,6 +2576,7 @@ enum ParsedBindingAction {
     Csi(Vec<u8>),
     Esc(Vec<u8>),
     Reset,
+    ClearScreen,
     ScrollToTop,
     ScrollToBottom,
     ScrollToRow(usize),
@@ -2622,6 +2658,12 @@ fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindin
                 return None;
             }
             Some(ParsedBindingAction::Reset)
+        }
+        b"clear_screen" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(ParsedBindingAction::ClearScreen)
         }
         b"scroll_to_top" => {
             if parameter.is_some() {
@@ -10682,6 +10724,12 @@ pub extern "C" fn roastty_surface_binding_action(
             surface.reset_terminal();
             true
         }
+        ParsedBindingAction::ClearScreen => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.clear_screen()
+        }
         ParsedBindingAction::ScrollToTop => {
             if surface.app.is_null() {
                 return false;
@@ -11264,6 +11312,31 @@ mod tests {
         let text = render_state_text(state);
         roastty_render_state_free(state);
         text
+    }
+
+    fn surface_snapshot_text_until(
+        app: RoasttyApp,
+        surface: RoasttySurface,
+        needle: &str,
+    ) -> String {
+        let mut latest = String::new();
+        for _ in 0..300 {
+            roastty_app_tick(app);
+            if roastty_surface_needs_render(surface) {
+                let state = new_render_state();
+                assert_eq!(
+                    roastty_surface_render_state_update(surface, state),
+                    ROASTTY_SUCCESS
+                );
+                latest = render_state_text(state);
+                roastty_render_state_free(state);
+                if latest.contains(needle) {
+                    return latest;
+                }
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("condition not met, latest snapshot: {latest:?}");
     }
 
     #[test]
@@ -12549,6 +12622,8 @@ mod tests {
             "esc",
             "reset:",
             "reset:now",
+            "clear_screen:",
+            "clear_screen:now",
             "scroll_to_top:",
             "scroll_to_top:now",
             "scroll_to_bottom:",
@@ -12943,7 +13018,7 @@ mod tests {
     fn surface_binding_action_reset_clears_visible_terminal_text() {
         let _guard = PTY_COMMAND_LOCK.lock().unwrap();
         let app = new_test_app();
-        let command = CString::new("printf ready; sleep 5").unwrap();
+        let command = CString::new("printf 'ready\\n'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
         config.command = command.as_ptr();
         let surface = new_test_surface_with_config(app, &config);
@@ -12990,6 +13065,126 @@ mod tests {
             assert!(termio.terminal().title().is_empty());
             assert_eq!(termio.terminal().pwd(), None);
         });
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_clear_screen_false_for_null_detached_and_no_worker() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert!(!binding_action(ptr::null_mut(), "clear_screen"));
+        assert!(!binding_action(surface, "clear_screen"));
+        roastty_app_free(app);
+        assert!(!binding_action(surface, "clear_screen"));
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_binding_action_clear_screen_non_prompt_clears_above_cursor_and_history() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\ncurrent'; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+
+        assert!(surface_snapshot_text_after_start(app, surface).contains("current"));
+        assert!(surface_worker_active_viewport_top_left_screen(surface).y > 0);
+
+        assert!(binding_action(surface, "clear_screen"));
+        let text = surface_snapshot_text(app, surface);
+        assert!(text.contains("current"), "{text:?}");
+        assert!(!text.contains("l0"), "{text:?}");
+        assert!(!text.contains("l1"), "{text:?}");
+        assert!(!text.contains("l2"), "{text:?}");
+        assert!(!text.contains("l3"), "{text:?}");
+        assert_eq!(
+            surface_worker_active_viewport_top_left_screen(surface),
+            point::Coordinate::new(0, 0)
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_clear_screen_clears_active_selection() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'l0\\nl1\\ncurrent'; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+
+        assert!(surface_snapshot_text_after_start(app, surface).contains("current"));
+        let selection = surface_worker_selection(surface, (0, 0), (1, 0));
+        set_surface_worker_active_selection(surface, Some(selection));
+        assert!(roastty_surface_has_selection(surface));
+
+        assert!(binding_action(surface, "clear_screen"));
+        assert!(!roastty_surface_has_selection(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn terminal_clear_screen_false_on_alternate_screen() {
+        let mut terminal = InnerTerminal::init(12, 3, None).unwrap();
+        terminal.next_slice(b"primary").unwrap();
+        terminal.next_slice(b"\x1b[?1049halt").unwrap();
+        assert_eq!(terminal.active_screen(), TerminalScreen::Alternate);
+        let before = terminal.render_rows_snapshot();
+
+        assert_eq!(
+            terminal.clear_screen(true).unwrap(),
+            ClearScreenResult::NotPerformed
+        );
+        assert_eq!(terminal.active_screen(), TerminalScreen::Alternate);
+        assert_eq!(terminal.render_rows_snapshot(), before);
+    }
+
+    #[test]
+    fn terminal_clear_screen_at_prompt_erases_visible_screen_and_requests_form_feed() {
+        let mut terminal = InnerTerminal::init(20, 3, None).unwrap();
+        terminal.next_slice(b"\x1b]133;A\x07$ ").unwrap();
+        assert!(terminal.cursor_is_at_prompt());
+        assert!(terminal
+            .render_rows_snapshot()
+            .iter()
+            .flat_map(|row| row.cells.iter())
+            .any(|cell| cell_codepoint(cell.raw) == '$' as u32));
+
+        assert_eq!(
+            terminal.clear_screen(true).unwrap(),
+            ClearScreenResult::SendFormFeed
+        );
+        assert!(terminal
+            .render_rows_snapshot()
+            .iter()
+            .flat_map(|row| row.cells.iter())
+            .all(|cell| !cell_has_text(cell.raw)));
+    }
+
+    #[test]
+    fn surface_binding_action_clear_screen_at_prompt_queues_form_feed_to_child() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new(
+            "python3 -c 'import sys, tty, time; sys.stdout.write(\"\\x1b]133;A\\x07$ \"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); b = sys.stdin.buffer.read(1); sys.stdout.write(\"\\nbyte:\" + b.hex()); sys.stdout.flush(); time.sleep(5)'",
+        )
+        .unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 20, 3, 10, 20);
+
+        assert!(surface_snapshot_text_after_start(app, surface).contains("$"));
+        assert!(binding_action(surface, "clear_screen"));
+        let text = surface_snapshot_text_until(app, surface, "byte:0c");
+        assert!(!text.contains("$"), "{text:?}");
         roastty_surface_free(surface);
         roastty_app_free(app);
     }

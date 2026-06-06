@@ -5585,6 +5585,14 @@ impl PageList {
         )
     }
 
+    pub(super) fn erase_active_basic(
+        &mut self,
+        y: CellCountInt,
+    ) -> Result<(), BasicCellWriteError> {
+        self.erase_active(y)
+            .map_err(|_| BasicCellWriteError::InvalidPoint)
+    }
+
     fn erase_active(&mut self, y: CellCountInt) -> Result<(), EraseRowsError> {
         assert!(y < self.rows);
         self.erase_rows(

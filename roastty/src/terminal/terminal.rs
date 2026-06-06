@@ -92,6 +92,13 @@ pub(crate) enum TerminalScreen {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClearScreenResult {
+    NotPerformed,
+    Performed,
+    SendFormFeed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TerminalPointTag {
     Active,
     Viewport,
@@ -1185,6 +1192,32 @@ impl Terminal {
             TerminalScreenKey::Primary => self.screens.active().cursor_is_at_prompt(),
             TerminalScreenKey::Alternate => false,
         }
+    }
+
+    pub(crate) fn clear_screen(
+        &mut self,
+        history: bool,
+    ) -> Result<ClearScreenResult, TerminalStreamError> {
+        if self.screens.active_key() == TerminalScreenKey::Alternate {
+            return Ok(ClearScreenResult::NotPerformed);
+        }
+
+        let at_prompt = self.cursor_is_at_prompt();
+        let rows = self.size.rows;
+        let cols = self.size.cols;
+        let screen = self.screens.active_mut();
+        screen.clear_selection();
+        if history && screen.total_rows() > usize::from(rows) {
+            screen.erase_display_basic(stream::EraseDisplayMode::Scrollback, rows, cols, false)?;
+        }
+
+        if !at_prompt {
+            screen.clear_screen_rows_above_cursor()?;
+            return Ok(ClearScreenResult::Performed);
+        }
+
+        screen.erase_display_basic(stream::EraseDisplayMode::Complete, rows, cols, false)?;
+        Ok(ClearScreenResult::SendFormFeed)
     }
 
     pub(in crate::terminal) fn switch_tmux_screen(

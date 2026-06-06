@@ -1735,6 +1735,16 @@ impl Screen {
         }
     }
 
+    pub(super) fn clear_screen_rows_above_cursor(&mut self) -> Result<(), EraseDisplayError> {
+        if self.cursor.y == 0 {
+            return Ok(());
+        }
+        self.pages
+            .erase_active_basic(self.cursor.y - 1)
+            .map_err(EraseDisplayError::from)?;
+        Ok(())
+    }
+
     pub(super) fn select_word(
         &self,
         ref_: GridRef,
