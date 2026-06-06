@@ -150,6 +150,8 @@ const ROASTTY_ACTION_CLOSE_WINDOW: c_int = 49;
 const ROASTTY_ACTION_UNDO: c_int = 51;
 const ROASTTY_ACTION_REDO: c_int = 52;
 const ROASTTY_ACTION_CHECK_FOR_UPDATES: c_int = 53;
+#[allow(dead_code)]
+const ROASTTY_ACTION_OPEN_URL: c_int = 54;
 const ROASTTY_ACTION_SHOW_ON_SCREEN_KEYBOARD: c_int = 57;
 const ROASTTY_ACTION_START_SEARCH: c_int = 59;
 const ROASTTY_ACTION_END_SEARCH: c_int = 60;
@@ -196,6 +198,13 @@ const ROASTTY_PROMPT_TITLE_TAB: c_int = 1;
 
 const ROASTTY_READONLY_ON: c_int = 0;
 const ROASTTY_READONLY_OFF: c_int = 1;
+
+#[allow(dead_code)]
+const ROASTTY_ACTION_OPEN_URL_KIND_UNKNOWN: c_int = 0;
+#[allow(dead_code)]
+const ROASTTY_ACTION_OPEN_URL_KIND_TEXT: c_int = 1;
+#[allow(dead_code)]
+const ROASTTY_ACTION_OPEN_URL_KIND_HTML: c_int = 2;
 
 const ROASTTY_SPLIT_DIRECTION_RIGHT: c_int = 0;
 const ROASTTY_SPLIT_DIRECTION_DOWN: c_int = 1;
@@ -1885,6 +1894,15 @@ impl Surface {
         let mut storage = [0usize; 8];
         storage[0] = needle.as_ptr() as usize;
         self.perform_action_result(ROASTTY_ACTION_START_SEARCH, storage)
+    }
+
+    #[allow(dead_code)]
+    fn perform_open_url_result(&self, kind: c_int, url: &[u8]) -> bool {
+        let mut storage = [0usize; 8];
+        storage[0] = kind as usize;
+        storage[1] = url.as_ptr() as usize;
+        storage[2] = url.len();
+        self.perform_action_result(ROASTTY_ACTION_OPEN_URL, storage)
     }
 
     fn perform_targeted_action_result(
@@ -12083,6 +12101,7 @@ mod tests {
         storage: [usize; 8],
         title: Option<String>,
         needle: Option<String>,
+        open_url: Option<(c_int, Vec<u8>)>,
     }
 
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -12233,6 +12252,16 @@ mod tests {
             } else {
                 None
             };
+            let open_url = if action.tag == ROASTTY_ACTION_OPEN_URL {
+                let ptr = action.storage[1] as *const u8;
+                let len = action.storage[2];
+                (!ptr.is_null()).then(|| {
+                    let bytes = unsafe { slice::from_raw_parts(ptr, len) };
+                    (action.storage[0] as c_int, bytes.to_vec())
+                })
+            } else {
+                None
+            };
             records.borrow_mut().push(ActionRecord {
                 app,
                 target_tag: target.tag,
@@ -12241,6 +12270,7 @@ mod tests {
                 storage: action.storage,
                 title,
                 needle,
+                open_url,
             });
         });
         ACTION_RESULT.with(|result| *result.borrow())
@@ -13924,6 +13954,7 @@ mod tests {
         assert_eq!(ROASTTY_ACTION_UNDO, 51);
         assert_eq!(ROASTTY_ACTION_REDO, 52);
         assert_eq!(ROASTTY_ACTION_CHECK_FOR_UPDATES, 53);
+        assert_eq!(ROASTTY_ACTION_OPEN_URL, 54);
         assert_eq!(ROASTTY_ACTION_SHOW_ON_SCREEN_KEYBOARD, 57);
         assert_eq!(ROASTTY_ACTION_START_SEARCH, 59);
         assert_eq!(ROASTTY_ACTION_END_SEARCH, 60);
@@ -13954,6 +13985,9 @@ mod tests {
         assert_eq!(ROASTTY_PROMPT_TITLE_TAB, 1);
         assert_eq!(ROASTTY_READONLY_ON, 0);
         assert_eq!(ROASTTY_READONLY_OFF, 1);
+        assert_eq!(ROASTTY_ACTION_OPEN_URL_KIND_UNKNOWN, 0);
+        assert_eq!(ROASTTY_ACTION_OPEN_URL_KIND_TEXT, 1);
+        assert_eq!(ROASTTY_ACTION_OPEN_URL_KIND_HTML, 2);
         assert_eq!(ROASTTY_SPLIT_DIRECTION_RIGHT, 0);
         assert_eq!(ROASTTY_SPLIT_DIRECTION_DOWN, 1);
         assert_eq!(ROASTTY_SPLIT_DIRECTION_LEFT, 2);
@@ -14031,6 +14065,116 @@ mod tests {
         assert_eq!(records[2].storage[1], ROASTTY_RESIZE_SPLIT_RIGHT as usize);
         assert_eq!(records[3].action_tag, ROASTTY_ACTION_EQUALIZE_SPLITS);
         assert!(records[3].storage.iter().all(|value| *value == 0));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_open_url_false_for_detached_no_app_and_no_callback() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert!(!surface_from_handle(surface)
+            .unwrap()
+            .perform_open_url_result(
+                ROASTTY_ACTION_OPEN_URL_KIND_UNKNOWN,
+                b"https://example.test"
+            ));
+
+        roastty_app_free(app);
+        assert!(!surface_from_handle(surface)
+            .unwrap()
+            .perform_open_url_result(ROASTTY_ACTION_OPEN_URL_KIND_TEXT, b"/tmp/file.txt"));
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_open_url_forwards_kind_url_and_length() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+
+        for (kind, url) in [
+            (
+                ROASTTY_ACTION_OPEN_URL_KIND_UNKNOWN,
+                b"https://example.test/path".as_slice(),
+            ),
+            (
+                ROASTTY_ACTION_OPEN_URL_KIND_TEXT,
+                b"/tmp/roastty-open-url.txt".as_slice(),
+            ),
+            (
+                ROASTTY_ACTION_OPEN_URL_KIND_HTML,
+                b"/tmp/roastty-open-url.html".as_slice(),
+            ),
+        ] {
+            assert!(surface_from_handle(surface)
+                .unwrap()
+                .perform_open_url_result(kind, url));
+        }
+
+        let records = action_records();
+        assert_eq!(records.len(), 3);
+        for (record, (kind, url)) in records.iter().zip([
+            (
+                ROASTTY_ACTION_OPEN_URL_KIND_UNKNOWN,
+                b"https://example.test/path".as_slice(),
+            ),
+            (
+                ROASTTY_ACTION_OPEN_URL_KIND_TEXT,
+                b"/tmp/roastty-open-url.txt".as_slice(),
+            ),
+            (
+                ROASTTY_ACTION_OPEN_URL_KIND_HTML,
+                b"/tmp/roastty-open-url.html".as_slice(),
+            ),
+        ]) {
+            assert_eq!(record.app, app);
+            assert_eq!(record.target_tag, ROASTTY_TARGET_SURFACE);
+            assert_eq!(record.surface, surface);
+            assert_eq!(record.action_tag, ROASTTY_ACTION_OPEN_URL);
+            assert_eq!(record.storage[0], kind as usize);
+            assert_ne!(record.storage[1], 0);
+            assert_eq!(record.storage[2], url.len());
+            assert!(record.storage[3..].iter().all(|value| *value == 0));
+            assert_eq!(record.open_url, Some((kind, url.to_vec())));
+        }
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_open_url_uses_pointer_and_length_not_c_string() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+        let url = b"prefix\0suffix";
+
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .perform_open_url_result(ROASTTY_ACTION_OPEN_URL_KIND_UNKNOWN, url));
+
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].open_url,
+            Some((ROASTTY_ACTION_OPEN_URL_KIND_UNKNOWN, url.to_vec()))
+        );
+        assert_eq!(records[0].storage[2], url.len());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_open_url_returns_callback_result() {
+        let app = new_test_app_with_action(false);
+        let surface = new_test_surface(app);
+
+        assert!(!surface_from_handle(surface)
+            .unwrap()
+            .perform_open_url_result(ROASTTY_ACTION_OPEN_URL_KIND_HTML, b"/tmp/file.html"));
+        assert_eq!(action_records().len(), 1);
 
         roastty_surface_free(surface);
         roastty_app_free(app);

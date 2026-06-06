@@ -1232,6 +1232,7 @@ typedef enum {
   ROASTTY_ACTION_UNDO = 51,
   ROASTTY_ACTION_REDO = 52,
   ROASTTY_ACTION_CHECK_FOR_UPDATES = 53,
+  ROASTTY_ACTION_OPEN_URL = 54,
   ROASTTY_ACTION_SHOW_ON_SCREEN_KEYBOARD = 57,
   ROASTTY_ACTION_START_SEARCH = 59,
   ROASTTY_ACTION_END_SEARCH = 60,
@@ -1291,6 +1292,12 @@ typedef enum {
   ROASTTY_READONLY_OFF = 1,
 } roastty_readonly_e;
 
+typedef enum {
+  ROASTTY_ACTION_OPEN_URL_KIND_UNKNOWN = 0,
+  ROASTTY_ACTION_OPEN_URL_KIND_TEXT = 1,
+  ROASTTY_ACTION_OPEN_URL_KIND_HTML = 2,
+} roastty_action_open_url_kind_e;
+
 typedef struct {
   int tag;
   /*
@@ -1315,6 +1322,11 @@ typedef struct {
    *   storage[0] = borrowed const char* valid only during action_cb.
    *   Parameterless start_search bindings pass an empty string.
    * - ROASTTY_ACTION_READONLY: storage[0] = roastty_readonly_e
+   * - ROASTTY_ACTION_OPEN_URL:
+   *   storage[0] = roastty_action_open_url_kind_e
+   *   storage[1] = borrowed const char* URL pointer valid only during action_cb
+   *   storage[2] = URL byte length
+   *   storage[3..7] = 0
    * - ROASTTY_ACTION_INSPECTOR: storage[0] = roastty_inspector_mode_e
    * - ROASTTY_ACTION_FLOAT_WINDOW: storage[0] = roastty_float_window_e
    * - ROASTTY_ACTION_SECURE_INPUT: storage[0] = roastty_secure_input_e

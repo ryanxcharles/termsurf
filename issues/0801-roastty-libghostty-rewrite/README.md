@@ -1994,7 +1994,7 @@ are past the correctness-critical foundation.
 - [Experiment 739: Binding Action Write Scrollback File Paste](739-binding-action-write-scrollback-file-paste.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 740: Runtime Open URL Action Foundation](740-runtime-open-url-action-foundation.md)
-  — **Designed** · Codex/Codex/-
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

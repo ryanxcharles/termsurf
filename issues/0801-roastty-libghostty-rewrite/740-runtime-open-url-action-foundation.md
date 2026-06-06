@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 740: Runtime Open URL Action Foundation
@@ -87,3 +92,53 @@ preserve surface-target runtime callback semantics, and defer
 `write_*_file:open` plus OS fallback behavior. The review also required
 recording `[review.design]` frontmatter, this review section, and the README
 tuple before the plan commit; those records are now present.
+
+## Result
+
+**Result:** Pass
+
+Experiment 740 added the runtime `open_url` ABI foundation. The public header
+now exposes `ROASTTY_ACTION_OPEN_URL = 54`, matching upstream Ghostty, plus
+`roastty_action_open_url_kind_e` values for unknown, text, and html. The
+`roastty_action_s` documentation now records the open-url storage layout: kind
+in `storage[0]`, borrowed URL pointer in `storage[1]`, URL byte length in
+`storage[2]`, and zeroed unused slots `storage[3]` through `storage[7]`.
+
+Roastty now has a `Surface::perform_open_url_result(kind, url_bytes)` helper
+that forwards `ROASTTY_ACTION_OPEN_URL` to the existing runtime action callback
+with a surface target. The helper uses pointer plus byte length and does not
+require NUL-terminated URL bytes. It returns `false` for missing apps, missing
+callbacks, detached surfaces, and callback rejection.
+
+`write_*_file:open` and OS fallback opener behavior remain future work.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty open_url -- --nocapture --test-threads=1`
+  - 4 passed
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1`
+  - 125 passed
+- `cargo test -p roastty --test abi_harness`
+  - 1 passed
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+Roastty can now forward open-url runtime actions with upstream-compatible tag,
+kind values, and pointer-plus-length payload semantics. The next write-file
+experiment can use this helper to implement `write_selection_file:open`,
+`write_screen_file:open`, or `write_scrollback_file:open` while keeping OS
+fallback behavior as a separate decision.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 740 result and implementation diff. It
+found no implementation blockers.
+
+The review confirmed that the ABI tag and kind values match the plan, storage
+uses kind, pointer, and length with `storage[3]` through `storage[7]` zeroed and
+tested, pointer-plus-length semantics are covered with interior NUL bytes,
+callback result propagation and false paths are covered, and the verification
+record is consistent with the listed changes.
