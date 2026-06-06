@@ -1849,6 +1849,8 @@ are past the correctness-critical foundation.
   Codex/Codex/Codex
 - [Experiment 682: Surface Preedit State](682-surface-preedit-state.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 683: Surface Read Text](683-surface-read-text.md) — **Designed** ·
+  Codex/Codex/-
 
 ## Non-Goals
 
