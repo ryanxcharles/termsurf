@@ -72,3 +72,56 @@ both were added.
 Codex confirmed the blocker was resolved and the design now matches upstream's
 `carriageReturn`, `index` once per row, then `setCursorPos(1,1)` sequence. It
 also confirmed the scope remains narrow and the verification is sufficient.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now applies `PaneHistory` command output to tracked pane terminals. The
+handler switches to the requested primary or alternate screen, streams the
+captured bytes through `Terminal::next_slice`, then performs the upstream
+cleanup sequence: carriage return, true index semantics once per terminal row,
+and cursor home.
+
+Primary-screen history is retained in scrollback while the active area is left
+empty for the following visible capture. Alternate-screen history follows the
+same cleanup path, but Roastty's alternate screen has no scrollback, matching
+the existing terminal model; the test verifies the alternate active area is
+cleared and primary content is not polluted.
+
+Unknown pane IDs remain non-fatal and simply consume the command output. Command
+queue continuation is preserved after history output, so bootstrap proceeds to
+the next queued capture/state command.
+
+No separate malformed replay/cleanup fixture was added. `Terminal::next_slice`
+accepts arbitrary byte slices through the normal parser path, and allocation
+failure for the cleanup `index` path is not practical to fixture-test in the
+focused tmux unit suite.
+
+Verification passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/654-tmux-pane-history-output.md`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty terminal::tmux` — 109 passed, 0 failed
+- `git diff --check`
+
+## Conclusion
+
+Tmux pane bootstrap now reconstructs both historical scrollback and visible
+content for tracked pane terminals. The next tmux experiment should handle
+`PaneState` output so cursor, modes, scroll regions, tab stops, mouse flags, and
+alternate-screen state can be restored after captures.
+
+## Completion Review
+
+**Result:** Approved.
+
+Codex found no blocking issues. It confirmed `PaneHistory` is routed separately
+from no-op command output, unknown panes remain non-fatal, command continuation
+is preserved, and the cleanup helper matches upstream's sequence using carriage
+return, true index semantics once per row, and cursor home.
+
+The only notes were non-blocking: the primary history test could assert more of
+the replayed scrollback text, and the test-only pane accessors mutate the active
+screen while inspecting it.

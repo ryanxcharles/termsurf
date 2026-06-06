@@ -785,9 +785,13 @@ impl TmuxViewer {
                 }
                 Vec::new()
             }
-            TmuxCommand::PaneHistory(_) | TmuxCommand::PaneState | TmuxCommand::User(_) => {
+            TmuxCommand::PaneHistory(capture) => {
+                if !self.received_pane_history(capture, &content) {
+                    return self.defunct();
+                }
                 Vec::new()
             }
+            TmuxCommand::PaneState | TmuxCommand::User(_) => Vec::new(),
         };
 
         actions.extend(self.emit_next_queued_command());
@@ -904,6 +908,23 @@ impl TmuxViewer {
             .is_ok()
     }
 
+    fn received_pane_history(&mut self, capture: TmuxCapturePane, content: &[u8]) -> bool {
+        let Some(pane) = self.panes.iter_mut().find(|pane| pane.id == capture.id) else {
+            return true;
+        };
+
+        let screen = match capture.screen_key {
+            TmuxScreenKey::Primary => TerminalScreen::Primary,
+            TmuxScreenKey::Alternate => TerminalScreen::Alternate,
+        };
+
+        pane.terminal
+            .switch_tmux_screen(screen)
+            .and_then(|()| pane.terminal.next_slice(content))
+            .and_then(|()| pane.terminal.finish_tmux_history_capture())
+            .is_ok()
+    }
+
     fn emit_next_queued_command(&self) -> Vec<TmuxViewerAction> {
         self.command_queue
             .front()
@@ -963,6 +984,36 @@ impl TmuxViewer {
         };
         pane.terminal.switch_tmux_screen(screen).ok()?;
         Some(pane.terminal.full_screen_plain_for_tests(false))
+    }
+
+    #[cfg(test)]
+    fn pane_active_plain_for_tests(
+        &mut self,
+        id: usize,
+        screen_key: TmuxScreenKey,
+    ) -> Option<String> {
+        let pane = self.panes.iter_mut().find(|pane| pane.id == id)?;
+        let screen = match screen_key {
+            TmuxScreenKey::Primary => TerminalScreen::Primary,
+            TmuxScreenKey::Alternate => TerminalScreen::Alternate,
+        };
+        pane.terminal.switch_tmux_screen(screen).ok()?;
+        Some(pane.terminal.active_area_plain_for_tests())
+    }
+
+    #[cfg(test)]
+    fn pane_scrollback_rows_for_tests(
+        &mut self,
+        id: usize,
+        screen_key: TmuxScreenKey,
+    ) -> Option<usize> {
+        let pane = self.panes.iter_mut().find(|pane| pane.id == id)?;
+        let screen = match screen_key {
+            TmuxScreenKey::Primary => TerminalScreen::Primary,
+            TmuxScreenKey::Alternate => TerminalScreen::Alternate,
+        };
+        pane.terminal.switch_tmux_screen(screen).ok()?;
+        Some(pane.terminal.scrollback_rows_for_tests())
     }
 
     #[cfg(test)]
@@ -2709,6 +2760,122 @@ mod tests {
         assert_eq!(viewer.state(), TmuxViewerState::CommandQueue);
         assert_eq!(
             viewer.pane_plain_for_tests(42, TmuxScreenKey::Primary),
+            Some("keep".to_owned())
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_pane_history_primary_replays_to_scrollback_and_clears_active() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 8, 2)]);
+
+        viewer.queue_command_for_tests(TmuxCommand::PaneHistory(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Primary,
+        }));
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(
+                b"one\r\ntwo\r\nthree".to_vec()
+            )),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_active_plain_for_tests(42, TmuxScreenKey::Primary),
+            Some(String::new())
+        );
+        assert!(
+            viewer
+                .pane_scrollback_rows_for_tests(42, TmuxScreenKey::Primary)
+                .unwrap()
+                > 0
+        );
+        assert!(viewer
+            .pane_plain_for_tests(42, TmuxScreenKey::Primary)
+            .unwrap()
+            .contains("one"));
+    }
+
+    #[test]
+    fn tmux_viewer_pane_history_alternate_does_not_pollute_primary() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 2)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneVisible(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Primary,
+        }));
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(b"primary".to_vec())),
+            Vec::new()
+        );
+
+        viewer.queue_command_for_tests(TmuxCommand::PaneHistory(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Alternate,
+        }));
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(
+                b"alt-one\r\nalt-two".to_vec()
+            )),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_active_plain_for_tests(42, TmuxScreenKey::Alternate),
+            Some(String::new())
+        );
+        assert_eq!(
+            viewer.pane_scrollback_rows_for_tests(42, TmuxScreenKey::Alternate),
+            Some(0)
+        );
+        assert_eq!(
+            viewer.pane_active_plain_for_tests(42, TmuxScreenKey::Primary),
+            Some("primary".to_owned())
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_pane_history_emits_next_queued_command() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 2)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneHistory(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Primary,
+        }));
+        viewer.queue_command_for_tests(TmuxCommand::User("next-command\n".to_owned()));
+
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(b"history".to_vec())),
+            vec![TmuxViewerAction::Command("next-command\n".to_owned())]
+        );
+        assert_eq!(viewer.queue_len(), 1);
+    }
+
+    #[test]
+    fn tmux_viewer_pane_history_ignores_unknown_panes() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 2)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneVisible(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Primary,
+        }));
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(b"keep".to_vec())),
+            Vec::new()
+        );
+        viewer.queue_command_for_tests(TmuxCommand::PaneHistory(TmuxCapturePane {
+            id: 99,
+            screen_key: TmuxScreenKey::Primary,
+        }));
+        viewer.queue_command_for_tests(TmuxCommand::User("next-command\n".to_owned()));
+
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(b"stale".to_vec())),
+            vec![TmuxViewerAction::Command("next-command\n".to_owned())]
+        );
+        assert_eq!(viewer.state(), TmuxViewerState::CommandQueue);
+        assert_eq!(
+            viewer.pane_active_plain_for_tests(42, TmuxScreenKey::Primary),
             Some("keep".to_owned())
         );
     }

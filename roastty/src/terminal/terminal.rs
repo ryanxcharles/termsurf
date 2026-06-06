@@ -1186,6 +1186,22 @@ impl Terminal {
         Ok(())
     }
 
+    pub(in crate::terminal) fn finish_tmux_history_capture(
+        &mut self,
+    ) -> Result<(), TerminalStreamError> {
+        self.screens.active_mut().carriage_return_basic();
+        for _ in 0..self.size.rows {
+            self.screens
+                .active_mut()
+                .line_feed_basic(self.size.rows, self.size.cols)
+                .map_err(TerminalStreamError::from)?;
+        }
+        self.screens
+            .active_mut()
+            .cursor_position_basic(1, 1, self.size.rows, self.size.cols);
+        Ok(())
+    }
+
     pub(crate) fn cursor_visible(&self) -> bool {
         self.modes.get(modes::Mode::CursorVisible)
     }
@@ -2086,6 +2102,15 @@ impl Terminal {
     #[cfg(test)]
     pub(super) fn full_screen_plain_for_tests(&self, unwrap: bool) -> String {
         self.screens.active().full_screen_plain_for_tests(unwrap)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_area_plain_for_tests(&self) -> String {
+        ScreenFormatter::init(
+            self.screens.active(),
+            ScreenFormatterOptions::new(PageOutputFormat::Plain),
+        )
+        .format()
     }
 
     #[cfg(test)]
