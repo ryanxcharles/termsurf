@@ -1855,6 +1855,8 @@ are past the correctness-critical foundation.
   Codex/Codex/Codex
 - [Experiment 684: Surface Active Selection Read](684-surface-active-selection-read.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 685: Surface Mouse Captured](685-surface-mouse-captured.md) —
+  **Designed** · Codex/-/-
 
 ## Non-Goals
 
