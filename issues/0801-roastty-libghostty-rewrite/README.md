@@ -1744,6 +1744,7 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 642: Tmux Control Parser](642-tmux-control-parser.md) — **Pass** ·
   Codex/Codex/Codex
+- [Experiment 643: Tmux Layout Parser](643-tmux-layout-parser.md) — **Designed**
 
 ## Non-Goals
 
