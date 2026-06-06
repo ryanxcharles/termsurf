@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 739: Binding Action Write Scrollback File Paste
@@ -87,3 +92,56 @@ contents, no-history behavior, readonly, queue failure, and regressions for
 existing write-file targets. The review required recording `[review.design]`
 frontmatter, this review section, and the README tuple before the plan commit;
 those records are now present.
+
+## Result
+
+**Result:** Pass
+
+Experiment 739 added `write_scrollback_file:paste` support. The scrollback-file
+parser now accepts `paste`, `paste,plain`, `paste,vt`, and `paste,html`
+alongside the existing copy forms. Malformed paste forms, unsupported formats,
+and `open` remain rejected.
+
+Scrollback paste reuses the target-aware write-file helper and paste branch:
+Roastty formats only the history above the active screen, writes
+`scrollback.txt` or `scrollback.html` in a retained temporary directory, and
+queues exactly the canonical file path bytes to the terminal worker with no
+trailing newline or NUL. No-history scrollback paste returns `false` without
+retaining a temp file. Readonly mode returns `false` before creating or
+retaining a temp file, and worker queue failure returns `false`.
+
+Tests use a known history-plus-visible-screen fixture and assert the written
+scrollback file contains `history-red` and `history-two` while excluding
+`visible-one`, `visible-two`, and `visible-three`.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty write_scrollback_file -- --nocapture --test-threads=1`
+  - 4 passed
+- `cargo test -p roastty write_screen_file -- --nocapture --test-threads=1`
+  - 4 passed
+- `cargo test -p roastty write_selection_file -- --nocapture --test-threads=1`
+  - 5 passed
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1`
+  - 125 passed
+- `cargo test -p roastty --test abi_harness`
+  - 1 passed
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+All three write-file targets now support copy and paste: selection, screen, and
+scrollback. The remaining write-file behavior is the `open` action for each
+target, which still needs runtime URL/open action plumbing before a faithful
+port.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 739 result and implementation diff. It
+found no implementation blockers.
+
+The review confirmed that parser scope, scrollback paste behavior, history-only
+formatting, readonly/no-history/queue-failure false paths, temp-file retention,
+and the verification record match the plan.
