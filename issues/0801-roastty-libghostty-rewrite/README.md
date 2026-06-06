@@ -1827,6 +1827,8 @@ are past the correctness-critical foundation.
   Codex/Codex/Codex
 - [Experiment 674: Surface Foreground PID](674-surface-foreground-pid.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 675: Surface Worker Resize](675-surface-worker-resize.md) —
+  **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
