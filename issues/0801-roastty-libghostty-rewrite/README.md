@@ -1830,6 +1830,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 675: Surface Worker Resize](675-surface-worker-resize.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 676: Surface Default Shell](676-surface-default-shell.md) —
+  **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
