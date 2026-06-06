@@ -2,6 +2,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::io;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -75,10 +76,22 @@ impl Termio {
         args: impl IntoIterator<Item = impl AsRef<OsStr>>,
         size: PtySize,
     ) -> Result<Self, TermioError> {
+        Self::spawn_with_cwd(program, args, None, size)
+    }
+
+    pub(crate) fn spawn_with_cwd(
+        program: impl Into<OsString>,
+        args: impl IntoIterator<Item = impl AsRef<OsStr>>,
+        cwd: Option<PathBuf>,
+        size: PtySize,
+    ) -> Result<Self, TermioError> {
         let terminal = Terminal::init(size.cols, size.rows, None)?;
         let mut command = PtyCommand::new(program, size);
         for arg in args {
             command.arg(arg);
+        }
+        if let Some(cwd) = cwd {
+            command.cwd(cwd);
         }
         let child = command.spawn()?;
         child.set_nonblocking()?;
@@ -530,6 +543,50 @@ mod tests {
         termio.queue_write(b"x");
         assert_eq!(termio.pending_write_bytes(), 1);
         assert_eq!(termio.terminal_mut().pty_response(), b"");
+    }
+
+    #[test]
+    fn spawn_with_cwd_runs_child_in_requested_directory() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let cwd = std::env::current_dir().expect("current dir");
+        let mut termio = Termio::spawn_with_cwd(
+            "/bin/pwd",
+            std::iter::empty::<&str>(),
+            Some(cwd.clone()),
+            test_size(),
+        )
+        .expect("spawn termio with cwd");
+
+        pump_until(&mut termio, |termio, pump| {
+            pump.bytes_read > 0
+                && termio
+                    .terminal()
+                    .plain_screen(false)
+                    .contains(cwd.to_str().unwrap())
+        });
+
+        assert!(termio
+            .terminal()
+            .plain_screen(false)
+            .contains(cwd.to_str().unwrap()));
+    }
+
+    #[test]
+    fn spawn_with_cwd_reports_missing_directory() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let missing = std::env::temp_dir().join(format!(
+            "roastty-missing-cwd-for-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&missing);
+
+        assert!(Termio::spawn_with_cwd(
+            "/bin/pwd",
+            std::iter::empty::<&str>(),
+            Some(missing),
+            test_size()
+        )
+        .is_err());
     }
 
     #[test]

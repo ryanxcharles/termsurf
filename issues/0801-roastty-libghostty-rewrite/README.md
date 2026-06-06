@@ -283,13 +283,14 @@ Experiment 246).
       display-id, occlusion, quicklook, inspector, splits, selection + text
       reads) — lifecycle handle, basic setters, app detachment, worker event
       draining, dirty/process-exit/error state, and surface render-state
-      snapshots done; draw/refresh, splits, text reads, and full frontend
-      presentation missing
+      snapshots, and surface worker start done; draw/refresh, splits, text
+      reads, and full frontend presentation missing
 - [ ] `pty` + `termio` (shell spawn, read/write loops, resize, fg pid, tty name,
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
       background worker, worker shutdown/drop, and surface process-exit state
-      done; configured shell launch, foreground pid, tty name, renderer wakeups,
-      and full renderer integration missing
+      done; surface command/cwd/initial-input worker launch done; env var
+      propagation, configured shell policy beyond `/bin/sh`, foreground pid, tty
+      name, renderer wakeups, and full renderer integration missing
 - [ ] `os/` utilities (tmpdir / file / env / hostname / locale) — ad hoc Rust
       stdlib; no dedicated module
 
@@ -1819,7 +1820,7 @@ are past the correctness-critical foundation.
 - [Experiment 670: Surface Render-State Snapshot](670-surface-render-state-snapshot.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 671: Surface Worker Launch](671-surface-worker-launch.md) —
-  **Designed** · Codex/Codex/-
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

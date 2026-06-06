@@ -1,9 +1,10 @@
 use std::alloc::{self, Layout};
 #[cfg(test)]
 use std::collections::VecDeque;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::io::Write;
 use std::os::raw::{c_char, c_int, c_void};
+use std::path::PathBuf;
 use std::ptr;
 use std::ptr::NonNull;
 use std::slice;
@@ -1256,6 +1257,9 @@ struct App {
 struct Surface {
     app: RoasttyApp,
     userdata: *mut c_void,
+    working_directory: Option<String>,
+    command: Option<String>,
+    initial_input: Option<Vec<u8>>,
     scale_factor_x: f64,
     scale_factor_y: f64,
     focused: bool,
@@ -1271,6 +1275,64 @@ struct Surface {
 }
 
 impl Surface {
+    fn pty_size(&self) -> os::pty::PtySize {
+        os::pty::PtySize {
+            rows: if self.size.rows == 0 {
+                24
+            } else {
+                self.size.rows
+            },
+            cols: if self.size.columns == 0 {
+                80
+            } else {
+                self.size.columns
+            },
+            width_px: u16::try_from(self.size.width_px).unwrap_or(u16::MAX),
+            height_px: u16::try_from(self.size.height_px).unwrap_or(u16::MAX),
+        }
+    }
+
+    fn start_termio(&mut self) -> c_int {
+        if self.app.is_null() {
+            return ROASTTY_INVALID_VALUE;
+        }
+        if self.termio_worker.is_some() {
+            return ROASTTY_SUCCESS;
+        }
+
+        let cwd = self.working_directory.as_ref().map(PathBuf::from);
+        let size = self.pty_size();
+        let termio = match self
+            .command
+            .as_deref()
+            .filter(|command| !command.is_empty())
+        {
+            Some(command) => termio::Termio::spawn_with_cwd("/bin/sh", ["-lc", command], cwd, size),
+            None => {
+                termio::Termio::spawn_with_cwd("/bin/sh", std::iter::empty::<&str>(), cwd, size)
+            }
+        };
+        let Ok(termio) = termio else {
+            return ROASTTY_INVALID_VALUE;
+        };
+
+        let worker = termio::TermioWorker::spawn(termio, 10, 4096);
+        let Ok(worker) = worker else {
+            return ROASTTY_INVALID_VALUE;
+        };
+        if let Some(initial_input) = &self.initial_input {
+            if worker.queue_write(initial_input).is_err() {
+                return ROASTTY_INVALID_VALUE;
+            }
+        }
+
+        self.termio_worker = Some(worker);
+        self.process_exited = false;
+        self.dirty = false;
+        self.last_termio_error = None;
+        ROASTTY_SUCCESS
+    }
+
     fn tick_termio(&mut self) {
         #[cfg(test)]
         while let Some(event) = self.test_termio_events.pop_front() {
@@ -1407,6 +1469,16 @@ fn unregister_surface(app: RoasttyApp, surface: NonNull<Surface>) {
     if let Some(app) = app_from_handle(app) {
         app.surfaces.retain(|registered| *registered != surface);
     }
+}
+
+fn copied_config_string(ptr: *const c_char) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    unsafe { CStr::from_ptr(ptr) }
+        .to_str()
+        .ok()
+        .map(str::to_owned)
 }
 
 fn terminal_from_handle<'a>(handle: RoasttyTerminal) -> Option<&'a mut Terminal> {
@@ -8312,6 +8384,9 @@ pub extern "C" fn roastty_surface_new(
     let surface = Box::new(Surface {
         app,
         userdata: config.userdata,
+        working_directory: copied_config_string(config.working_directory),
+        command: copied_config_string(config.command),
+        initial_input: copied_config_string(config.initial_input).map(String::into_bytes),
         scale_factor_x: config.scale_factor,
         scale_factor_y: config.scale_factor,
         focused: false,
@@ -8335,6 +8410,14 @@ pub extern "C" fn roastty_surface_new(
     let surface = NonNull::from(Box::leak(surface));
     register_surface(app, surface);
     surface.as_ptr().cast()
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_start(surface: RoasttySurface) -> c_int {
+    let Some(surface) = surface_from_handle(surface) else {
+        return ROASTTY_INVALID_VALUE;
+    };
+    surface.start_termio()
 }
 
 #[no_mangle]
@@ -8540,6 +8623,13 @@ mod tests {
         roastty_surface_new(app, &config)
     }
 
+    fn new_test_surface_with_config(
+        app: RoasttyApp,
+        config: &RoasttySurfaceConfig,
+    ) -> RoasttySurface {
+        roastty_surface_new(app, config)
+    }
+
     fn app_surface_count(app: RoasttyApp) -> usize {
         app_from_handle(app)
             .map(|app| app.surfaces.len())
@@ -8611,6 +8701,22 @@ mod tests {
 
         roastty_render_state_row_cells_free(cells);
         roastty_render_state_row_iterator_free(iterator);
+        text
+    }
+
+    fn surface_snapshot_text_after_start(app: RoasttyApp, surface: RoasttySurface) -> String {
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        wait_until(|| {
+            roastty_app_tick(app);
+            roastty_surface_needs_render(surface)
+        });
+        let state = new_render_state();
+        assert_eq!(
+            roastty_surface_render_state_update(surface, state),
+            ROASTTY_SUCCESS
+        );
+        let text = render_state_text(state);
+        roastty_render_state_free(state);
         text
     }
 
@@ -8795,6 +8901,225 @@ mod tests {
         assert!(roastty_surface_needs_render(surface));
 
         roastty_render_state_free(state);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_start_launches_configured_command_for_snapshot() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf hello").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+
+        let text = surface_snapshot_text_after_start(app, surface);
+
+        assert!(text.contains("hello"));
+        assert!(!roastty_surface_needs_render(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_start_without_command_attaches_worker_and_is_idempotent() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        let first_pid = surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| termio.child_id());
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        let second_pid = surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| termio.child_id());
+
+        assert_eq!(first_pid, second_pid);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_start_uses_copied_config_after_source_strings_drop() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let current_dir = std::env::current_dir().expect("current dir");
+        let surface = {
+            let command =
+                CString::new("IFS= read line; printf '%s:%s' \"$(pwd)\" \"$line\"").unwrap();
+            let cwd = CString::new(current_dir.to_str().unwrap()).unwrap();
+            let input = CString::new("owned\n").unwrap();
+            let mut config = roastty_surface_config_new();
+            config.command = command.as_ptr();
+            config.working_directory = cwd.as_ptr();
+            config.initial_input = input.as_ptr();
+            new_test_surface_with_config(app, &config)
+        };
+
+        let text = surface_snapshot_text_after_start(app, surface);
+
+        assert!(text.contains(current_dir.to_str().unwrap()));
+        assert!(text.contains("owned"));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_start_uses_initial_input() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command =
+            CString::new("stty -echo; IFS= read line; printf 'out:%s' \"$line\"").unwrap();
+        let input = CString::new("hello\n").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        config.initial_input = input.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+
+        let text = surface_snapshot_text_after_start(app, surface);
+
+        assert!(text.contains("out:hello"));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_start_uses_working_directory() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let current_dir = std::env::current_dir().expect("current dir");
+        let command = CString::new("pwd").unwrap();
+        let cwd = CString::new(current_dir.to_str().unwrap()).unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        config.working_directory = cwd.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+
+        let text = surface_snapshot_text_after_start(app, surface);
+
+        assert!(text.contains(current_dir.to_str().unwrap()));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_start_after_process_exit_keeps_attached_worker() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf done").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        wait_until(|| {
+            roastty_app_tick(app);
+            roastty_surface_process_exited(surface)
+        });
+        let first_pid = surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| termio.child_id());
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        let second_pid = surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| termio.child_id());
+
+        assert_eq!(first_pid, second_pid);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_start_failure_leaves_surface_state_unchanged() {
+        let app = new_test_app();
+        let command = CString::new("printf ignored").unwrap();
+        let missing = std::env::temp_dir().join(format!(
+            "roastty-missing-surface-cwd-for-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&missing);
+        let cwd = CString::new(missing.to_str().unwrap()).unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        config.working_directory = cwd.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            surface_ref.dirty = true;
+            surface_ref.process_exited = true;
+            surface_ref.last_termio_error = Some("previous".to_string());
+        }
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_INVALID_VALUE);
+
+        let surface_ref = surface_from_handle(surface).unwrap();
+        assert!(surface_ref.termio_worker.is_none());
+        assert!(surface_ref.dirty);
+        assert!(surface_ref.process_exited);
+        assert_eq!(surface_ref.last_termio_error.as_deref(), Some("previous"));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_start_validates_null_surface() {
+        assert_eq!(
+            roastty_surface_start(ptr::null_mut()),
+            ROASTTY_INVALID_VALUE
+        );
+    }
+
+    #[test]
+    fn surface_pty_size_uses_fallbacks_and_clamps_pixels() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let surface_ref = surface_from_handle(surface).unwrap();
+
+        assert_eq!(
+            surface_ref.pty_size(),
+            os::pty::PtySize {
+                rows: 24,
+                cols: 80,
+                width_px: 0,
+                height_px: 0,
+            }
+        );
+
+        surface_ref.size.rows = 0;
+        surface_ref.size.columns = 120;
+        surface_ref.size.width_px = 70_000;
+        surface_ref.size.height_px = 42;
+        assert_eq!(
+            surface_ref.pty_size(),
+            os::pty::PtySize {
+                rows: 24,
+                cols: 120,
+                width_px: u16::MAX,
+                height_px: 42,
+            }
+        );
+
+        surface_ref.size.rows = 33;
+        surface_ref.size.columns = 0;
+        assert_eq!(surface_ref.pty_size().rows, 33);
+        assert_eq!(surface_ref.pty_size().cols, 80);
+
         roastty_surface_free(surface);
         roastty_app_free(app);
     }

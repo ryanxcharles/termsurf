@@ -1774,6 +1774,7 @@ ROASTTY_API bool roastty_osc_command_data(roastty_osc_command_t, int, void*);
 ROASTTY_API roastty_surface_config_s roastty_surface_config_new(void);
 ROASTTY_API roastty_surface_t roastty_surface_new(roastty_app_t,
                                                   const roastty_surface_config_s*);
+ROASTTY_API roastty_result_e roastty_surface_start(roastty_surface_t);
 ROASTTY_API void roastty_surface_free(roastty_surface_t);
 ROASTTY_API void* roastty_surface_userdata(roastty_surface_t);
 ROASTTY_API roastty_app_t roastty_surface_app(roastty_surface_t);

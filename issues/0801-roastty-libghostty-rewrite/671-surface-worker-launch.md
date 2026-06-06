@@ -3,6 +3,16 @@
 agent = "codex"
 model = "gpt-5"
 reasoning = "high"
+
+[review.design]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 671: Surface Worker Launch
@@ -117,3 +127,62 @@ clamping with focused tests.
 - `cargo test -p roastty termio`
 - `cargo test -p roastty render_state`
 - `git diff --check`
+
+## Result
+
+**Result:** Pass.
+
+Roastty surfaces can now start a real background termio worker through the new
+`roastty_surface_start(surface)` ABI. Surface construction copies the command,
+working directory, and initial input strings from `RoasttySurfaceConfig` into
+owned state. Start uses the current/default surface PTY size, launches `/bin/sh`
+with no arguments when no command is configured, launches
+`/bin/sh -lc <command>` when a command is configured, passes the copied working
+directory when present, starts a `TermioWorker`, queues copied initial input,
+and then stores the worker on the surface.
+
+Start is idempotent while a worker is attached, including after the child has
+exited. Spawn, worker, and initial-input failures return `ROASTTY_INVALID_VALUE`
+and leave the prior surface state unchanged. PTY size fallback is now explicit:
+zero rows default to 24, zero columns default to 80, and pixel dimensions clamp
+to `u16::MAX`.
+
+`Termio::spawn_with_cwd` now supports cwd-aware subprocess launch, while the
+existing `Termio::spawn` remains the no-cwd convenience wrapper. This experiment
+still defers environment-variable propagation, shell policy beyond `/bin/sh`,
+foreground PID, tty-name, renderer wakeup, terminal grid resize, and full
+draw/refresh integration.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty surface` — 20 passed, 0 failed
+- `cargo test -p roastty termio` — 16 passed, 0 failed
+- `cargo test -p roastty render_state` — 21 passed, 0 failed
+- `git diff --check`
+
+## Conclusion
+
+Surface workers are no longer test-only attachments. A frontend can create a
+surface, start its configured command worker, tick the app, and snapshot the
+surface render state. The remaining PTY/frontend work is to propagate
+environment variables, report foreground PID and tty name, wire renderer
+wakeups, resize terminal grids with surface size changes, and implement the
+broader draw/refresh lifecycle.
+
+## Completion Review
+
+**Result:** Approved after fixes.
+
+Codex found no ABI or implementation blockers in the worker launch path. It
+confirmed that `roastty_surface_start` is exported in the header and source,
+null/detached handling is correct, strings are copied into owned state,
+command/cwd/initial-input semantics match the design, idempotence preserves an
+attached worker, PTY fallback/clamping is covered, and failure rollback avoids
+mutating surface state until start fully succeeds.
+
+Codex found two result-commit issues: missing result-review provenance and fixed
+`/tmp` paths in missing-cwd tests. The experiment frontmatter and README agent
+tuple now record the result review, and the missing-cwd tests now use
+process-specific temp paths that are removed before asserting spawn failure.
