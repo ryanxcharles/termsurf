@@ -202,8 +202,8 @@ Experiment 246).
       output, pane state parsing, and pane state cursor application done; pane
       state mode application done; pane state mouse mode application done; pane
       state scroll-region application done; pane state tab-stop application
-      done; pane state alternate saved cursor application in progress; remaining
-      pane state application/live output, PTY, and App integration missing
+      done; pane state alternate saved cursor application done; remaining pane
+      state application/live output, PTY, and App integration missing
 - [x] `sys` (PNG-decode abstraction) — implemented and tested via C ABI
 
 ### Renderer — data + Metal primitives only; no live render loop
@@ -1788,7 +1788,7 @@ are past the correctness-critical foundation.
 - [Experiment 660: Tmux Pane State Tab Stops](660-tmux-pane-state-tab-stops.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 661: Tmux Pane State Alternate Saved Cursor](661-tmux-pane-state-alternate-saved-cursor.md)
-  — **Designed** · Codex/Codex/Codex
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

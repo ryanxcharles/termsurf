@@ -1239,6 +1239,27 @@ impl Terminal {
         }
     }
 
+    pub(in crate::terminal) fn apply_tmux_alternate_saved_cursor_state(
+        &mut self,
+        cursor_x: usize,
+        cursor_y: usize,
+    ) {
+        let Some(screen) = self.screens.screen_mut(TerminalScreenKey::Alternate) else {
+            return;
+        };
+        let (Ok(x), Ok(y)) = (
+            CellCountInt::try_from(cursor_x),
+            CellCountInt::try_from(cursor_y),
+        ) else {
+            return;
+        };
+        let cols = screen.cols();
+        let rows = screen.rows();
+        if x < cols && y < rows {
+            screen.cursor_position_basic(y.saturating_add(1), x.saturating_add(1), rows, cols);
+        }
+    }
+
     pub(in crate::terminal) fn apply_tmux_mode_state(
         &mut self,
         cursor_visible: bool,

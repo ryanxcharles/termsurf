@@ -114,3 +114,63 @@ Codex confirmed the revised design resolves all prior findings: ordering when
 main implementation watchpoint is to place the helper call between the existing
 target cursor restore and mode writes, and to use the alternate screen's own
 bounds rather than terminal size.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now applies the final field from upstream Ghostty's current
+`receivedPaneState` restore block: `alternate_saved_x/y`. The new terminal
+helper updates the existing alternate screen's current cursor position using
+0-based tmux coordinates, checks the alternate screen's own bounds, accepts the
+last cell, and ignores missing alternate screens, out-of-bounds coordinates, and
+`CellCountInt`-overflowing sentinel values such as `4294967295`.
+
+The helper does not call `save_cursor`, `restore_saved_cursor`, or mutate
+`ScreenSavedCursor`. The tests prove this behaviorally by saving a distinct
+alternate-screen cursor snapshot, applying pane state with different
+`alternate_saved_x/y`, restoring the saved cursor, and verifying the saved
+snapshot still wins.
+
+The tmux restore call is placed after target screen cursor restoration and
+before mode, mouse, scroll-region, and tab-stop writes. Tests cover
+`alternate_on = false`, the `alternate_on = true` ordering where
+`alternate_saved_x/y` wins over target alternate cursor restoration, active
+screen preservation, missing alternate screens, last-cell acceptance,
+out-of-bounds and overflow ignore behavior, stale pane IDs with a later valid
+line, and the saved-cursor snapshot guard.
+
+Verification passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/661-tmux-pane-state-alternate-saved-cursor.md`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty terminal::` — 2344 passed, 0 failed
+- `git diff --check`
+
+## Conclusion
+
+Roastty now restores every field in upstream Ghostty's current tmux
+`receivedPaneState` block: target cursor position/shape, alternate saved cursor
+position, cursor and terminal modes, mouse modes, focus and bracketed paste,
+vertical scroll region, and tab stops. The remaining tmux work is outside
+pane-state restoration: live pane output, PTY writes, and App integration.
+
+## Completion Review
+
+**Result:** Approved.
+
+Codex found no issues. It confirmed that the tmux restore path calls
+`Terminal::apply_tmux_alternate_saved_cursor_state` immediately after target
+cursor restoration and before mode, mouse, scroll-region, and tab-stop writes,
+matching upstream ordering. It also confirmed the helper only touches an
+existing alternate screen, converts parsed `usize` values through
+`CellCountInt`, checks the alternate screen's own `cols()` and `rows()`, and
+then updates the current cursor position.
+
+Codex judged the test coverage sufficient for this slice: normal application
+with `alternate_on = false`, `alternate_on = true` ordering where
+`alternate_saved_x/y` wins, missing alternate screen, last-cell acceptance,
+out-of-bounds and overflow ignore behavior, `ScreenSavedCursor` non-mutation,
+and stale pane handling with a later valid line. It also confirmed the recorded
+result, conclusion, README status, and checklist updates are accurate.

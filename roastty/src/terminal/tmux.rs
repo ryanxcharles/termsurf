@@ -988,6 +988,10 @@ impl TmuxViewer {
                 state.cursor_y,
                 &state.cursor_shape,
             );
+            pane.terminal.apply_tmux_alternate_saved_cursor_state(
+                state.alternate_saved_x,
+                state.alternate_saved_y,
+            );
             pane.terminal.apply_tmux_mode_state(
                 state.cursor_flag,
                 state.cursor_blinking,
@@ -1212,6 +1216,14 @@ impl TmuxViewer {
             .iter()
             .find(|pane| pane.id == id)
             .map(|pane| pane.terminal.get_tabstop_for_tests(col))
+    }
+
+    #[cfg(test)]
+    fn pane_next_slice_for_tests(&mut self, id: usize, content: &[u8]) -> bool {
+        let Some(pane) = self.panes.iter_mut().find(|pane| pane.id == id) else {
+            return false;
+        };
+        pane.terminal.next_slice(content).is_ok()
     }
 
     #[cfg(test)]
@@ -3906,6 +3918,216 @@ mod tests {
     }
 
     #[test]
+    fn tmux_viewer_pane_state_applies_alternate_saved_cursor() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 6)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneVisible(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Alternate,
+        }));
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(b"alternate".to_vec())),
+            Vec::new()
+        );
+        viewer.queue_command_for_tests(TmuxCommand::PaneVisible(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Primary,
+        }));
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(b"primary".to_vec())),
+            Vec::new()
+        );
+        viewer.queue_command_for_tests(TmuxCommand::PaneState);
+
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(
+                pane_state_line_with_alternate_saved(42, 1, 1, false, 5, 3).into_bytes()
+            )),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_active_screen_for_tests(42),
+            Some(TerminalScreen::Primary)
+        );
+        assert_eq!(
+            viewer.pane_cursor_position_for_tests(42, TerminalScreen::Alternate),
+            Some((5, 3))
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_pane_state_alternate_saved_cursor_wins_after_alternate_target_cursor() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 6)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneVisible(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Alternate,
+        }));
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(b"alternate".to_vec())),
+            Vec::new()
+        );
+        viewer.queue_command_for_tests(TmuxCommand::PaneState);
+
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(
+                pane_state_line_with_alternate_saved(42, 1, 1, true, 4, 3).into_bytes()
+            )),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_cursor_position_for_tests(42, TerminalScreen::Alternate),
+            Some((4, 3))
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_pane_state_alternate_saved_cursor_missing_alternate_is_ignored() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 6)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneState);
+
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(
+                pane_state_line_with_alternate_saved(42, 1, 1, false, 5, 3).into_bytes()
+            )),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_screen_initialized_for_tests(42, TerminalScreen::Alternate),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_pane_state_alternate_saved_cursor_accepts_last_cell() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 6)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneVisible(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Alternate,
+        }));
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(b"alternate".to_vec())),
+            Vec::new()
+        );
+        viewer.queue_command_for_tests(TmuxCommand::PaneState);
+
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(
+                pane_state_line_with_alternate_saved(42, 1, 1, false, 9, 5).into_bytes()
+            )),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_cursor_position_for_tests(42, TerminalScreen::Alternate),
+            Some((9, 5))
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_pane_state_invalid_alternate_saved_cursor_is_ignored() {
+        for (x, y) in [(10, 3), (5, 6), (4_294_967_295, 3)] {
+            let mut viewer = TmuxViewer::new();
+            viewer.set_panes_for_tests(&[(42, 10, 6)]);
+            viewer.queue_command_for_tests(TmuxCommand::PaneVisible(TmuxCapturePane {
+                id: 42,
+                screen_key: TmuxScreenKey::Alternate,
+            }));
+            assert_eq!(
+                viewer.next(ControlNotification::BlockEnd(b"alternate".to_vec())),
+                Vec::new()
+            );
+            viewer.queue_command_for_tests(TmuxCommand::PaneState);
+            assert_eq!(
+                viewer.next(ControlNotification::BlockEnd(
+                    pane_state_line_with_alternate_saved(42, 1, 1, false, 2, 3).into_bytes()
+                )),
+                Vec::new()
+            );
+            viewer.queue_command_for_tests(TmuxCommand::PaneState);
+
+            assert_eq!(
+                viewer.next(ControlNotification::BlockEnd(
+                    pane_state_line_with_alternate_saved(42, 1, 1, false, x, y).into_bytes()
+                )),
+                Vec::new()
+            );
+
+            assert_eq!(
+                viewer.pane_cursor_position_for_tests(42, TerminalScreen::Alternate),
+                Some((2, 3))
+            );
+        }
+    }
+
+    #[test]
+    fn tmux_viewer_pane_state_alternate_saved_cursor_does_not_mutate_saved_snapshot() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 6)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneVisible(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Alternate,
+        }));
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(b"\x1b[2;3H\x1b7".to_vec())),
+            Vec::new()
+        );
+        viewer.queue_command_for_tests(TmuxCommand::PaneState);
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(
+                pane_state_line_with_alternate_saved(42, 1, 1, false, 5, 3).into_bytes()
+            )),
+            Vec::new()
+        );
+        assert_eq!(
+            viewer.pane_cursor_position_for_tests(42, TerminalScreen::Alternate),
+            Some((5, 3))
+        );
+
+        assert!(viewer.pane_next_slice_for_tests(42, b"\x1b8"));
+
+        assert_eq!(
+            viewer.pane_cursor_position_for_tests(42, TerminalScreen::Alternate),
+            Some((2, 1))
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_pane_state_stale_panes_do_not_apply_alternate_saved_cursor() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 10, 6)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneVisible(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Alternate,
+        }));
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(b"alternate".to_vec())),
+            Vec::new()
+        );
+        viewer.queue_command_for_tests(TmuxCommand::PaneState);
+        let output = format!(
+            "{}\n{}",
+            pane_state_line_with_alternate_saved(99, 1, 1, false, 1, 3),
+            pane_state_line_with_alternate_saved(42, 1, 1, false, 2, 4)
+        );
+
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(output.into_bytes())),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_cursor_position_for_tests(42, TerminalScreen::Alternate),
+            Some((2, 4))
+        );
+    }
+
+    #[test]
     fn tmux_viewer_pane_visible_primary_clears_homes_and_replays() {
         let mut viewer = TmuxViewer::new();
         let capture = TmuxCapturePane {
@@ -4207,12 +4429,14 @@ mod tests {
         scroll_region_upper: usize,
         scroll_region_lower: usize,
     ) -> String {
-        pane_state_line_with_modes_scroll_region_and_tabs(
+        pane_state_line_with_all_fields(
             pane_id,
             1,
             1,
             false,
             "block",
+            5,
+            6,
             true,
             false,
             true,
@@ -4230,12 +4454,14 @@ mod tests {
     }
 
     fn pane_state_line_with_tabs(pane_id: usize, alternate_on: bool, pane_tabs: &str) -> String {
-        pane_state_line_with_modes_scroll_region_and_tabs(
+        pane_state_line_with_all_fields(
             pane_id,
             1,
             1,
             alternate_on,
             "block",
+            5,
+            6,
             true,
             false,
             true,
@@ -4249,6 +4475,42 @@ mod tests {
             0,
             1,
             pane_tabs,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "tmux pane-state fixtures mirror fields"
+    )]
+    fn pane_state_line_with_alternate_saved(
+        pane_id: usize,
+        cursor_x: usize,
+        cursor_y: usize,
+        alternate_on: bool,
+        alternate_saved_x: usize,
+        alternate_saved_y: usize,
+    ) -> String {
+        pane_state_line_with_all_fields(
+            pane_id,
+            cursor_x,
+            cursor_y,
+            alternate_on,
+            "block",
+            alternate_saved_x,
+            alternate_saved_y,
+            true,
+            false,
+            true,
+            true,
+            false,
+            true,
+            false,
+            false,
+            true,
+            TmuxPaneMouseFlags::default(),
+            0,
+            1,
+            "0,4,8",
         )
     }
 
@@ -4283,12 +4545,14 @@ mod tests {
         bracketed_paste: bool,
         mouse_flags: TmuxPaneMouseFlags,
     ) -> String {
-        pane_state_line_with_modes_scroll_region_and_tabs(
+        pane_state_line_with_all_fields(
             pane_id,
             cursor_x,
             cursor_y,
             alternate_on,
             cursor_shape,
+            5,
+            6,
             cursor_flag,
             cursor_blinking,
             insert_flag,
@@ -4309,12 +4573,14 @@ mod tests {
         clippy::too_many_arguments,
         reason = "tmux pane-state fixtures mirror fields"
     )]
-    fn pane_state_line_with_modes_scroll_region_and_tabs(
+    fn pane_state_line_with_all_fields(
         pane_id: usize,
         cursor_x: usize,
         cursor_y: usize,
         alternate_on: bool,
         cursor_shape: &str,
+        alternate_saved_x: usize,
+        alternate_saved_y: usize,
         cursor_flag: bool,
         cursor_blinking: bool,
         insert_flag: bool,
@@ -4330,7 +4596,7 @@ mod tests {
         pane_tabs: &str,
     ) -> String {
         format!(
-            "%{pane_id};{cursor_x};{cursor_y};{};{cursor_shape};colour255;{};{};5;6;{};{};{};{};{};{};{};{};{};{};{};{};{};{scroll_region_upper};{scroll_region_lower};{pane_tabs}",
+            "%{pane_id};{cursor_x};{cursor_y};{};{cursor_shape};colour255;{};{};{alternate_saved_x};{alternate_saved_y};{};{};{};{};{};{};{};{};{};{};{};{};{};{scroll_region_upper};{scroll_region_lower};{pane_tabs}",
             usize::from(cursor_flag),
             usize::from(cursor_blinking),
             usize::from(alternate_on),
