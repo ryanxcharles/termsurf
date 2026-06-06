@@ -2003,6 +2003,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 744: Config Default Trigger Window Navigation](744-config-default-trigger-window-navigation.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 745: Config Default Key Is Binding](745-config-default-key-is-binding.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
