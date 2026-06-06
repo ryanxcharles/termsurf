@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 706: Binding Action Reset
@@ -88,3 +93,48 @@ Upstream void-action parsing rejects any colon-bearing form, including an empty
 parameter, and `reset:` is easy to regress because `text:`, `csi:`, and `esc:`
 intentionally accept empty parameters. The review also required recording this
 section and updating the README provenance tuple before the plan commit.
+
+## Result
+
+**Result:** Pass
+
+Implemented parameterless `reset` binding-action support for attached surfaces.
+`parse_binding_action` now accepts only the exact `reset` form and rejects
+colon-bearing variants like `reset:` and `reset:now`. Dispatch returns `false`
+for null or detached surfaces, returns `true` for attached surfaces, and resets
+the worker-backed terminal through `Terminal::reset` when a worker exists.
+
+The Rust tests cover malformed reset forms, null/detached surfaces, no-worker
+attached surfaces, visible text clearing, title/PWD clearing, and unchanged
+binding-action behavior around split, close, `text:`, `csi:`, and `esc:`. The C
+ABI harness now rejects `reset:`/`reset:now` and accepts `reset`.
+
+Verification:
+
+- `cargo fmt -p roastty` passed.
+- `cargo test -p roastty binding_action -- --nocapture` passed: 24 tests.
+- `cargo test -p roastty terminal_reset -- --nocapture` passed, but matched 0
+  tests because no current test name contains `terminal_reset`.
+- `cargo test -p roastty reset -- --nocapture` passed: 83 tests.
+- `cargo test -p roastty --test abi_harness` passed.
+- `cargo fmt -p roastty -- --check` passed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The reset slice now matches the upstream void-action parsing contract and uses
+Roastty's existing terminal reset path for surface-backed workers. The remaining
+binding-action work can continue with the next upstream action family instead of
+special-casing reset outside the shared parser/dispatcher path.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 706 diff and found no code correctness
+blockers. The review confirmed that the parser accepts only parameterless
+`reset`, rejects colon-bearing reset forms, returns `false` for null/detached
+surfaces, returns `true` for attached surfaces, and routes worker-backed
+surfaces through `Terminal::reset`.
+
+The only required fix was workflow provenance: replacing the pending result
+review metadata, adding this completion-review note, and updating the README
+provenance tuple to `Codex/Codex/Codex`.

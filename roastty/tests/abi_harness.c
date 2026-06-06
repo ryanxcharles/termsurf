@@ -4299,10 +4299,13 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(surface, "text", 4));
   assert(!roastty_surface_binding_action(surface, "csi", 3));
   assert(!roastty_surface_binding_action(surface, "esc", 3));
+  assert(!roastty_surface_binding_action(surface, "reset:", 6));
+  assert(!roastty_surface_binding_action(surface, "reset:now", 9));
   assert(!roastty_surface_binding_action(surface, "new_split:right", 15));
   assert(roastty_surface_binding_action(surface, "text:hello", 10));
   assert(roastty_surface_binding_action(surface, "csi:", 4));
   assert(roastty_surface_binding_action(surface, "esc:", 4));
+  assert(roastty_surface_binding_action(surface, "reset", 5));
   assert(roastty_surface_binding_action(surface, "close_surface", 13));
   roastty_surface_preedit(surface, NULL, 3);
   roastty_surface_preedit(surface, NULL, 0);

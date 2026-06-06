@@ -1863,6 +1863,17 @@ impl Surface {
         }
     }
 
+    fn reset_terminal(&mut self) {
+        if self.app.is_null() {
+            return;
+        }
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return;
+        };
+        worker.with_termio_mut(|termio| termio.terminal_mut().reset());
+        self.request_render();
+    }
+
     fn set_preedit(&mut self, preedit: Option<&str>) {
         self.preedit = preedit.map(str::to_owned);
         self.request_render();
@@ -2416,6 +2427,7 @@ enum ParsedBindingAction {
     Text(Vec<u8>),
     Csi(Vec<u8>),
     Esc(Vec<u8>),
+    Reset,
 }
 
 fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindingAction> {
@@ -2484,6 +2496,12 @@ fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindin
         b"text" => Some(ParsedBindingAction::Text(parameter?.to_vec())),
         b"csi" => Some(ParsedBindingAction::Csi(parameter?.to_vec())),
         b"esc" => Some(ParsedBindingAction::Esc(parameter?.to_vec())),
+        b"reset" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(ParsedBindingAction::Reset)
+        }
         _ => None,
     }
 }
@@ -10432,6 +10450,13 @@ pub extern "C" fn roastty_surface_binding_action(
             surface.raw_text(&text);
             true
         }
+        ParsedBindingAction::Reset => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.reset_terminal();
+            true
+        }
     }
 }
 
@@ -12242,6 +12267,8 @@ mod tests {
             "text",
             "csi",
             "esc",
+            "reset:",
+            "reset:now",
         ] {
             assert!(!binding_action(surface, action), "{action}");
         }
@@ -12563,6 +12590,86 @@ mod tests {
     #[test]
     fn surface_binding_action_csi_parameters_are_not_decoded() {
         assert_binding_action_raw_bytes(b"csi:\\x15", 6, "1b5b5c783135");
+    }
+
+    #[test]
+    fn surface_binding_action_reset_no_worker_consumes_action() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert!(binding_action(surface, "reset"));
+
+        let surface_ref = surface_from_handle(surface).unwrap();
+        assert!(surface_ref.last_termio_error.is_none());
+        assert!(!surface_ref.dirty);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_reset_false_for_null_and_detached() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert!(!binding_action(ptr::null_mut(), "reset"));
+        roastty_app_free(app);
+        assert!(!binding_action(surface, "reset"));
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_binding_action_reset_clears_visible_terminal_text() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+        assert!(binding_action(surface, "reset"));
+        let text = surface_snapshot_text(app, surface);
+
+        assert!(!text.contains("ready"));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_reset_clears_title_and_pwd_metadata() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            let worker = surface_ref.termio_worker.as_ref().unwrap();
+            worker.with_termio_mut(|termio| {
+                termio.terminal_mut().set_title(Some("title".to_string()));
+                termio
+                    .terminal_mut()
+                    .set_pwd(Some("/Users/ryan/example\0".to_string()));
+            });
+            worker.with_termio(|termio| {
+                assert_eq!(termio.terminal().title(), "title");
+                assert_eq!(termio.terminal().pwd(), Some("/Users/ryan/example"));
+            });
+        }
+
+        assert!(binding_action(surface, "reset"));
+
+        let surface_ref = surface_from_handle(surface).unwrap();
+        let worker = surface_ref.termio_worker.as_ref().unwrap();
+        worker.with_termio(|termio| {
+            assert!(termio.terminal().title().is_empty());
+            assert_eq!(termio.terminal().pwd(), None);
+        });
+        roastty_surface_free(surface);
+        roastty_app_free(app);
     }
 
     #[test]
