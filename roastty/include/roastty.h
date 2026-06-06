@@ -1201,6 +1201,9 @@ typedef enum {
   ROASTTY_ACTION_NEW_SPLIT = 4,
   ROASTTY_ACTION_TOGGLE_MAXIMIZE = 6,
   ROASTTY_ACTION_TOGGLE_FULLSCREEN = 7,
+  ROASTTY_ACTION_TOGGLE_TAB_OVERVIEW = 8,
+  ROASTTY_ACTION_MOVE_TAB = 14,
+  ROASTTY_ACTION_GOTO_TAB = 15,
   ROASTTY_ACTION_GOTO_SPLIT = 16,
   ROASTTY_ACTION_GOTO_WINDOW = 17,
   ROASTTY_ACTION_RESIZE_SPLIT = 18,
@@ -1224,6 +1227,12 @@ typedef enum {
 } roastty_goto_window_e;
 
 typedef enum {
+  ROASTTY_GOTO_TAB_PREVIOUS = -1,
+  ROASTTY_GOTO_TAB_NEXT = -2,
+  ROASTTY_GOTO_TAB_LAST = -3,
+} roastty_goto_tab_e;
+
+typedef enum {
   ROASTTY_FULLSCREEN_NATIVE = 0,
   ROASTTY_FULLSCREEN_MACOS_NON_NATIVE = 1,
   ROASTTY_FULLSCREEN_MACOS_NON_NATIVE_VISIBLE_MENU = 2,
@@ -1244,6 +1253,12 @@ typedef struct {
    *   storage is zeroed
    * - ROASTTY_ACTION_CLOSE_TAB: storage[0] = roastty_close_tab_e
    * - ROASTTY_ACTION_NEW_SPLIT: storage[0] = roastty_split_direction_e
+   * - ROASTTY_ACTION_GOTO_TAB:
+   *   storage[0] = tab index, or roastty_goto_tab_e cast from intptr_t to
+   *   uintptr_t for special negative values
+   * - ROASTTY_ACTION_MOVE_TAB:
+   *   storage[0] = signed intptr_t offset cast to uintptr_t
+   * - ROASTTY_ACTION_TOGGLE_TAB_OVERVIEW: storage is zeroed
    * - ROASTTY_ACTION_GOTO_SPLIT: storage[0] = roastty_goto_split_e
    * - ROASTTY_ACTION_GOTO_WINDOW: storage[0] = roastty_goto_window_e
    * - ROASTTY_ACTION_RESIZE_SPLIT:

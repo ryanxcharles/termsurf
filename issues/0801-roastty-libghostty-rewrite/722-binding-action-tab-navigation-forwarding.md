@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 722: Binding Action Tab Navigation Forwarding
@@ -126,3 +131,58 @@ the README tuple is `Codex/Codex/-`.
 
 Codex re-reviewed the revised design and found no remaining findings. The design
 is approved for the plan commit.
+
+## Result
+
+**Result:** Pass
+
+Implemented tab-navigation binding-action forwarding through the existing
+runtime action callback path. Roastty now exposes upstream-matching action tags
+for toggle-tab-overview, move-tab, and goto-tab actions, plus goto-tab special
+selector constants in `roastty/include/roastty.h`.
+
+`parse_binding_action` now accepts:
+
+- `previous_tab`
+- `next_tab`
+- `last_tab`
+- `goto_tab:<index>`
+- `move_tab:<offset>`
+- `toggle_tab_overview`
+
+`previous_tab`, `next_tab`, and `last_tab` forward as `ROASTTY_ACTION_GOTO_TAB`
+using signed special selectors stored as `intptr_t` cast to `uintptr_t`.
+`move_tab` stores its signed offset with the same signed-to-unsigned storage
+convention. Invalid empty, unknown, whitespace-padded, extra-colon, negative
+goto-tab, and overflowing numeric forms are rejected.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty tab_navigation -- --nocapture --test-threads=1`
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1`
+- `cargo test -p roastty --test abi_harness`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+Tab-navigation binding actions now reach the app runtime with stable
+upstream-shaped action tags and storage. The remaining work is the frontend/tab
+model behavior that consumes these callbacks, plus later binding-action slices
+for window decorations, command palette/background toggles, inspector, and other
+runtime-forwarded actions.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 722 result and found no implementation
+blockers. The review approved the upstream-matching constants, header ABI,
+signed storage convention, parser false paths, runtime callback forwarding,
+no-callback false paths, and ABI harness coverage.
+
+The review found one workflow blocker: result-review provenance was missing from
+the experiment frontmatter and README tuple. This section, the `[review.result]`
+frontmatter, and the README tuple now record the completion review.
+
+Codex re-reviewed the revised result and found no remaining findings. The
+completion review approved the result for commit.

@@ -1774,6 +1774,9 @@ static void assert_support_abi(void) {
   assert(ROASTTY_ACTION_NEW_SPLIT == 4);
   assert(ROASTTY_ACTION_TOGGLE_MAXIMIZE == 6);
   assert(ROASTTY_ACTION_TOGGLE_FULLSCREEN == 7);
+  assert(ROASTTY_ACTION_TOGGLE_TAB_OVERVIEW == 8);
+  assert(ROASTTY_ACTION_MOVE_TAB == 14);
+  assert(ROASTTY_ACTION_GOTO_TAB == 15);
   assert(ROASTTY_ACTION_GOTO_SPLIT == 16);
   assert(ROASTTY_ACTION_GOTO_WINDOW == 17);
   assert(ROASTTY_ACTION_RESIZE_SPLIT == 18);
@@ -1785,6 +1788,9 @@ static void assert_support_abi(void) {
   assert(ROASTTY_CLOSE_TAB_RIGHT == 2);
   assert(ROASTTY_GOTO_WINDOW_PREVIOUS == 0);
   assert(ROASTTY_GOTO_WINDOW_NEXT == 1);
+  assert(ROASTTY_GOTO_TAB_PREVIOUS == -1);
+  assert(ROASTTY_GOTO_TAB_NEXT == -2);
+  assert(ROASTTY_GOTO_TAB_LAST == -3);
   assert(ROASTTY_FULLSCREEN_NATIVE == 0);
   assert(ROASTTY_FULLSCREEN_MACOS_NON_NATIVE == 1);
   assert(ROASTTY_FULLSCREEN_MACOS_NON_NATIVE_VISIBLE_MENU == 2);
@@ -3983,6 +3989,9 @@ int main(int argc, char **argv) {
   assert(ROASTTY_ACTION_CLOSE_TAB == 3);
   assert(ROASTTY_ACTION_TOGGLE_MAXIMIZE == 6);
   assert(ROASTTY_ACTION_TOGGLE_FULLSCREEN == 7);
+  assert(ROASTTY_ACTION_TOGGLE_TAB_OVERVIEW == 8);
+  assert(ROASTTY_ACTION_MOVE_TAB == 14);
+  assert(ROASTTY_ACTION_GOTO_TAB == 15);
   assert(ROASTTY_ACTION_GOTO_WINDOW == 17);
   assert(ROASTTY_ACTION_TOGGLE_SPLIT_ZOOM == 20);
   assert(ROASTTY_ACTION_RESET_WINDOW_SIZE == 23);
@@ -3994,6 +4003,9 @@ int main(int argc, char **argv) {
   assert(ROASTTY_CLOSE_TAB_RIGHT == 2);
   assert(ROASTTY_GOTO_WINDOW_PREVIOUS == 0);
   assert(ROASTTY_GOTO_WINDOW_NEXT == 1);
+  assert(ROASTTY_GOTO_TAB_PREVIOUS == -1);
+  assert(ROASTTY_GOTO_TAB_NEXT == -2);
+  assert(ROASTTY_GOTO_TAB_LAST == -3);
   assert(ROASTTY_FULLSCREEN_NATIVE == 0);
   assert(ROASTTY_FULLSCREEN_MACOS_NON_NATIVE == 1);
   assert(ROASTTY_FULLSCREEN_MACOS_NON_NATIVE_VISIBLE_MENU == 2);
@@ -4339,6 +4351,33 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(surface, "close_tab:this:extra", 20));
   assert(!roastty_surface_binding_action(surface, "close_tab: this", 15));
   assert(!roastty_surface_binding_action(surface, "close_tab:this ", 15));
+  assert(!roastty_surface_binding_action(surface, "previous_tab:", 13));
+  assert(!roastty_surface_binding_action(surface, "previous_tab:now", 16));
+  assert(!roastty_surface_binding_action(surface, "next_tab:", 9));
+  assert(!roastty_surface_binding_action(surface, "next_tab:now", 12));
+  assert(!roastty_surface_binding_action(surface, "last_tab:", 9));
+  assert(!roastty_surface_binding_action(surface, "last_tab:now", 12));
+  assert(!roastty_surface_binding_action(surface, "goto_tab", 8));
+  assert(!roastty_surface_binding_action(surface, "goto_tab:", 9));
+  assert(!roastty_surface_binding_action(surface, "goto_tab:-1", 11));
+  assert(!roastty_surface_binding_action(surface, "goto_tab: 1", 11));
+  assert(!roastty_surface_binding_action(surface, "goto_tab:1 ", 11));
+  assert(!roastty_surface_binding_action(surface, "goto_tab:1:2", 12));
+  assert(!roastty_surface_binding_action(surface, "goto_tab:abc", 12));
+  assert(!roastty_surface_binding_action(
+      surface, "goto_tab:18446744073709551616", 29));
+  assert(!roastty_surface_binding_action(surface, "move_tab", 8));
+  assert(!roastty_surface_binding_action(surface, "move_tab:", 9));
+  assert(!roastty_surface_binding_action(surface, "move_tab: 1", 11));
+  assert(!roastty_surface_binding_action(surface, "move_tab:1 ", 11));
+  assert(!roastty_surface_binding_action(surface, "move_tab:1:2", 12));
+  assert(!roastty_surface_binding_action(surface, "move_tab:abc", 12));
+  assert(!roastty_surface_binding_action(
+      surface, "move_tab:9223372036854775808", 28));
+  assert(!roastty_surface_binding_action(
+      surface, "move_tab:-9223372036854775809", 29));
+  assert(!roastty_surface_binding_action(surface, "toggle_tab_overview:", 20));
+  assert(!roastty_surface_binding_action(surface, "toggle_tab_overview:now", 23));
   assert(!roastty_surface_binding_action(surface, "goto_window", 11));
   assert(!roastty_surface_binding_action(surface, "goto_window:", 12));
   assert(!roastty_surface_binding_action(surface, "goto_window:previous:extra", 26));
@@ -4431,6 +4470,15 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(surface, "close_tab:this", 14));
   assert(!roastty_surface_binding_action(surface, "close_tab:other", 15));
   assert(!roastty_surface_binding_action(surface, "close_tab:right", 15));
+  assert(!roastty_surface_binding_action(surface, "previous_tab", 12));
+  assert(!roastty_surface_binding_action(surface, "next_tab", 8));
+  assert(!roastty_surface_binding_action(surface, "last_tab", 8));
+  assert(!roastty_surface_binding_action(surface, "goto_tab:1", 10));
+  assert(!roastty_surface_binding_action(surface, "goto_tab:+2", 11));
+  assert(!roastty_surface_binding_action(surface, "move_tab:-1", 11));
+  assert(!roastty_surface_binding_action(surface, "move_tab:+1", 11));
+  assert(!roastty_surface_binding_action(surface, "move_tab:0", 10));
+  assert(!roastty_surface_binding_action(surface, "toggle_tab_overview", 19));
   assert(!roastty_surface_binding_action(surface, "goto_window:previous", 20));
   assert(!roastty_surface_binding_action(surface, "goto_window:next", 16));
   assert(!roastty_surface_binding_action(surface, "toggle_split_zoom", 17));

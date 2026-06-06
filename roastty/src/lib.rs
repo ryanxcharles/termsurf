@@ -119,6 +119,9 @@ const ROASTTY_ACTION_CLOSE_TAB: c_int = 3;
 const ROASTTY_ACTION_NEW_SPLIT: c_int = 4;
 const ROASTTY_ACTION_TOGGLE_MAXIMIZE: c_int = 6;
 const ROASTTY_ACTION_TOGGLE_FULLSCREEN: c_int = 7;
+const ROASTTY_ACTION_TOGGLE_TAB_OVERVIEW: c_int = 8;
+const ROASTTY_ACTION_MOVE_TAB: c_int = 14;
+const ROASTTY_ACTION_GOTO_TAB: c_int = 15;
 const ROASTTY_ACTION_GOTO_SPLIT: c_int = 16;
 const ROASTTY_ACTION_GOTO_WINDOW: c_int = 17;
 const ROASTTY_ACTION_RESIZE_SPLIT: c_int = 18;
@@ -135,6 +138,10 @@ const ROASTTY_CLOSE_TAB_RIGHT: c_int = 2;
 
 const ROASTTY_GOTO_WINDOW_PREVIOUS: c_int = 0;
 const ROASTTY_GOTO_WINDOW_NEXT: c_int = 1;
+
+const ROASTTY_GOTO_TAB_PREVIOUS: c_int = -1;
+const ROASTTY_GOTO_TAB_NEXT: c_int = -2;
+const ROASTTY_GOTO_TAB_LAST: c_int = -3;
 
 const ROASTTY_FULLSCREEN_NATIVE: c_int = 0;
 #[allow(dead_code)]
@@ -2843,6 +2850,16 @@ fn goto_window_from_str(value: &[u8]) -> Option<c_int> {
     }
 }
 
+fn signed_storage(value: isize) -> usize {
+    value as usize
+}
+
+fn goto_tab_action(selector: c_int) -> ParsedBindingAction {
+    let mut storage = [0usize; 8];
+    storage[0] = signed_storage(selector as isize);
+    ParsedBindingAction::RuntimeAction(ROASTTY_ACTION_GOTO_TAB, storage)
+}
+
 enum ParsedBindingAction {
     RuntimeAction(c_int, [usize; 8]),
     CloseSurface,
@@ -2919,6 +2936,49 @@ fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindin
             Some(ParsedBindingAction::RuntimeAction(
                 ROASTTY_ACTION_CLOSE_TAB,
                 storage,
+            ))
+        }
+        b"previous_tab" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(goto_tab_action(ROASTTY_GOTO_TAB_PREVIOUS))
+        }
+        b"next_tab" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(goto_tab_action(ROASTTY_GOTO_TAB_NEXT))
+        }
+        b"last_tab" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(goto_tab_action(ROASTTY_GOTO_TAB_LAST))
+        }
+        b"goto_tab" => {
+            let mut storage = [0usize; 8];
+            storage[0] = parse_usize_ascii(parameter?)?;
+            Some(ParsedBindingAction::RuntimeAction(
+                ROASTTY_ACTION_GOTO_TAB,
+                storage,
+            ))
+        }
+        b"move_tab" => {
+            let mut storage = [0usize; 8];
+            storage[0] = signed_storage(parse_isize_ascii(parameter?)?);
+            Some(ParsedBindingAction::RuntimeAction(
+                ROASTTY_ACTION_MOVE_TAB,
+                storage,
+            ))
+        }
+        b"toggle_tab_overview" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(ParsedBindingAction::RuntimeAction(
+                ROASTTY_ACTION_TOGGLE_TAB_OVERVIEW,
+                [0usize; 8],
             ))
         }
         b"new_split" => {
@@ -3211,6 +3271,13 @@ fn parse_i16_ascii(bytes: &[u8]) -> Option<i16> {
     }
 
     i16::try_from(sign * magnitude).ok()
+}
+
+fn parse_isize_ascii(bytes: &[u8]) -> Option<isize> {
+    if bytes.is_empty() || bytes.iter().any(u8::is_ascii_whitespace) {
+        return None;
+    }
+    std::str::from_utf8(bytes).ok()?.parse().ok()
 }
 
 fn parse_f32_ascii(bytes: &[u8]) -> Option<f32> {
@@ -13168,6 +13235,9 @@ mod tests {
         assert_eq!(ROASTTY_ACTION_NEW_SPLIT, 4);
         assert_eq!(ROASTTY_ACTION_TOGGLE_MAXIMIZE, 6);
         assert_eq!(ROASTTY_ACTION_TOGGLE_FULLSCREEN, 7);
+        assert_eq!(ROASTTY_ACTION_TOGGLE_TAB_OVERVIEW, 8);
+        assert_eq!(ROASTTY_ACTION_MOVE_TAB, 14);
+        assert_eq!(ROASTTY_ACTION_GOTO_TAB, 15);
         assert_eq!(ROASTTY_ACTION_GOTO_SPLIT, 16);
         assert_eq!(ROASTTY_ACTION_GOTO_WINDOW, 17);
         assert_eq!(ROASTTY_ACTION_RESIZE_SPLIT, 18);
@@ -13182,6 +13252,9 @@ mod tests {
         assert_eq!(ROASTTY_CLOSE_TAB_RIGHT, 2);
         assert_eq!(ROASTTY_GOTO_WINDOW_PREVIOUS, 0);
         assert_eq!(ROASTTY_GOTO_WINDOW_NEXT, 1);
+        assert_eq!(ROASTTY_GOTO_TAB_PREVIOUS, -1);
+        assert_eq!(ROASTTY_GOTO_TAB_NEXT, -2);
+        assert_eq!(ROASTTY_GOTO_TAB_LAST, -3);
         assert_eq!(ROASTTY_FULLSCREEN_NATIVE, 0);
         assert_eq!(ROASTTY_FULLSCREEN_MACOS_NON_NATIVE, 1);
         assert_eq!(ROASTTY_FULLSCREEN_MACOS_NON_NATIVE_VISIBLE_MENU, 2);
@@ -13309,6 +13382,30 @@ mod tests {
             "close_tab:this:extra",
             "close_tab: this",
             "close_tab:this ",
+            "previous_tab:",
+            "previous_tab:now",
+            "next_tab:",
+            "next_tab:now",
+            "last_tab:",
+            "last_tab:now",
+            "goto_tab",
+            "goto_tab:",
+            "goto_tab:-1",
+            "goto_tab: 1",
+            "goto_tab:1 ",
+            "goto_tab:1:2",
+            "goto_tab:abc",
+            "goto_tab:999999999999999999999999999999999999999",
+            "move_tab",
+            "move_tab:",
+            "move_tab: 1",
+            "move_tab:1 ",
+            "move_tab:1:2",
+            "move_tab:abc",
+            "move_tab:999999999999999999999999999999999999999",
+            "move_tab:-999999999999999999999999999999999999999",
+            "toggle_tab_overview:",
+            "toggle_tab_overview:now",
             "new_split:",
             "new_split:diagonal",
             "goto_split",
@@ -15573,6 +15670,118 @@ mod tests {
         assert!(!binding_action(surface, "toggle_maximize"));
         assert!(!binding_action(surface, "toggle_fullscreen"));
         assert_eq!(action_records().len(), 7);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_tab_navigation_false_for_null_detached_and_no_callback() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        for action in [
+            "previous_tab",
+            "next_tab",
+            "last_tab",
+            "goto_tab:1",
+            "goto_tab:+2",
+            "move_tab:-1",
+            "move_tab:+1",
+            "move_tab:0",
+            "toggle_tab_overview",
+        ] {
+            assert!(!binding_action(ptr::null_mut(), action), "{action}");
+            assert!(!binding_action(surface, action), "{action}");
+        }
+
+        roastty_app_free(app);
+        for action in [
+            "previous_tab",
+            "next_tab",
+            "last_tab",
+            "goto_tab:1",
+            "move_tab:-1",
+            "toggle_tab_overview",
+        ] {
+            assert!(!binding_action(surface, action), "{action}");
+        }
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_binding_action_forwards_supported_tab_navigation_actions() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+
+        for action in [
+            "previous_tab",
+            "next_tab",
+            "last_tab",
+            "goto_tab:1",
+            "goto_tab:+2",
+            "move_tab:-1",
+            "move_tab:+1",
+            "move_tab:0",
+            "toggle_tab_overview",
+        ] {
+            assert!(binding_action(surface, action), "{action}");
+        }
+
+        let records = action_records();
+        assert_eq!(records.len(), 9);
+        for record in &records {
+            assert_eq!(record.app, app);
+            assert_eq!(record.target_tag, ROASTTY_TARGET_SURFACE);
+            assert_eq!(record.surface, surface);
+        }
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_GOTO_TAB);
+        assert_eq!(
+            records[0].storage[0] as isize,
+            ROASTTY_GOTO_TAB_PREVIOUS as isize
+        );
+        assert_eq!(records[1].action_tag, ROASTTY_ACTION_GOTO_TAB);
+        assert_eq!(
+            records[1].storage[0] as isize,
+            ROASTTY_GOTO_TAB_NEXT as isize
+        );
+        assert_eq!(records[2].action_tag, ROASTTY_ACTION_GOTO_TAB);
+        assert_eq!(
+            records[2].storage[0] as isize,
+            ROASTTY_GOTO_TAB_LAST as isize
+        );
+        assert_eq!(records[3].action_tag, ROASTTY_ACTION_GOTO_TAB);
+        assert_eq!(records[3].storage[0], 1);
+        assert_eq!(records[4].action_tag, ROASTTY_ACTION_GOTO_TAB);
+        assert_eq!(records[4].storage[0], 2);
+        assert_eq!(records[5].action_tag, ROASTTY_ACTION_MOVE_TAB);
+        assert_eq!(records[5].storage[0] as isize, -1);
+        assert_eq!(records[6].action_tag, ROASTTY_ACTION_MOVE_TAB);
+        assert_eq!(records[6].storage[0] as isize, 1);
+        assert_eq!(records[7].action_tag, ROASTTY_ACTION_MOVE_TAB);
+        assert_eq!(records[7].storage[0] as isize, 0);
+        assert_eq!(records[8].action_tag, ROASTTY_ACTION_TOGGLE_TAB_OVERVIEW);
+        assert!(records[8].storage.iter().all(|value| *value == 0));
+        for record in &records[..8] {
+            assert!(record.storage[1..].iter().all(|value| *value == 0));
+        }
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_tab_navigation_returns_callback_result() {
+        let app = new_test_app_with_action(false);
+        let surface = new_test_surface(app);
+
+        assert!(!binding_action(surface, "previous_tab"));
+        assert!(!binding_action(surface, "next_tab"));
+        assert!(!binding_action(surface, "last_tab"));
+        assert!(!binding_action(surface, "goto_tab:1"));
+        assert!(!binding_action(surface, "move_tab:-1"));
+        assert!(!binding_action(surface, "toggle_tab_overview"));
+        assert_eq!(action_records().len(), 6);
 
         roastty_surface_free(surface);
         roastty_app_free(app);
