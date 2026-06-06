@@ -1851,6 +1851,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 683: Surface Read Text](683-surface-read-text.md) — **Pass** ·
   Codex/Codex/Codex
+- [Experiment 684: Surface Active Selection Read](684-surface-active-selection-read.md)
+  — **Designed** · Codex/-/-
 
 ## Non-Goals
 
