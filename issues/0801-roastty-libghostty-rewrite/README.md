@@ -2021,6 +2021,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 753: Config CLI Keybind Action Diagnostics](753-config-cli-keybind-action-diagnostics.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 754: Working Directory Finalize](754-working-directory-finalize.md)
+  — **Designed** · Codex/Codex/Codex
 
 ## Non-Goals
 
