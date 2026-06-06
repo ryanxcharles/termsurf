@@ -1270,6 +1270,7 @@ struct Surface {
     occluded: bool,
     size: RoasttySurfaceSize,
     color_scheme: c_int,
+    preedit: Option<String>,
     termio_worker: Option<termio::TermioWorker>,
     process_exited: bool,
     dirty: bool,
@@ -1469,6 +1470,11 @@ impl Surface {
         if let Some(error) = error {
             self.apply_termio_event(termio::TermioWorkerEvent::Error(error));
         }
+    }
+
+    fn set_preedit(&mut self, preedit: Option<&str>) {
+        self.preedit = preedit.map(str::to_owned);
+        self.request_render();
     }
 
     fn tick_termio(&mut self) {
@@ -8562,6 +8568,7 @@ pub extern "C" fn roastty_surface_new(
             cell_height_px: 0,
         },
         color_scheme: 0,
+        preedit: None,
         termio_worker: None,
         process_exited: false,
         dirty: false,
@@ -8766,6 +8773,27 @@ pub extern "C" fn roastty_surface_text(surface: RoasttySurface, text: *const c_c
         let bytes = unsafe { slice::from_raw_parts(text.cast::<u8>(), len) };
         surface.text(bytes);
     }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_preedit(
+    surface: RoasttySurface,
+    preedit: *const c_char,
+    len: usize,
+) {
+    let Some(surface) = surface_from_handle(surface) else {
+        return;
+    };
+    if len == 0 {
+        surface.set_preedit(None);
+        return;
+    }
+    if preedit.is_null() {
+        return;
+    }
+
+    let bytes = unsafe { slice::from_raw_parts(preedit.cast::<u8>(), len) };
+    surface.set_preedit(std::str::from_utf8(bytes).ok());
 }
 
 #[no_mangle]
@@ -9329,6 +9357,138 @@ mod tests {
 
         assert_eq!(CLOSE_COUNT.load(Ordering::SeqCst), 0);
         assert_eq!(roastty_surface_app(surface), ptr::null_mut());
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_preedit_null_inputs_are_noop() {
+        roastty_surface_preedit(ptr::null_mut(), b"pre".as_ptr().cast(), 3);
+
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        roastty_surface_preedit(surface, ptr::null(), 3);
+
+        let surface_ref = surface_from_handle(surface).unwrap();
+        assert!(surface_ref.preedit.is_none());
+        assert!(!surface_ref.dirty);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_preedit_stores_owned_utf8() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let mut bytes = b"preedit".to_vec();
+
+        roastty_surface_preedit(surface, bytes.as_ptr().cast(), bytes.len());
+        bytes.fill(b'x');
+
+        let surface_ref = surface_from_handle(surface).unwrap();
+        assert_eq!(surface_ref.preedit.as_deref(), Some("preedit"));
+        assert!(surface_ref.dirty);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_preedit_replaces_existing_value() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        roastty_surface_preedit(surface, b"first".as_ptr().cast(), 5);
+        roastty_surface_preedit(surface, b"second".as_ptr().cast(), 6);
+
+        assert_eq!(
+            surface_from_handle(surface).unwrap().preedit.as_deref(),
+            Some("second")
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_preedit_accepts_multibyte_utf8() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let text = "かな";
+
+        roastty_surface_preedit(surface, text.as_ptr().cast(), text.len());
+
+        assert_eq!(
+            surface_from_handle(surface).unwrap().preedit.as_deref(),
+            Some(text)
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_preedit_zero_length_clears_existing_value() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        roastty_surface_preedit(surface, b"preedit".as_ptr().cast(), 7);
+        surface_from_handle(surface).unwrap().dirty = false;
+
+        roastty_surface_preedit(surface, ptr::null(), 0);
+
+        let surface_ref = surface_from_handle(surface).unwrap();
+        assert!(surface_ref.preedit.is_none());
+        assert!(surface_ref.dirty);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_preedit_invalid_utf8_clears_existing_value() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        roastty_surface_preedit(surface, b"preedit".as_ptr().cast(), 7);
+        surface_from_handle(surface).unwrap().dirty = false;
+
+        roastty_surface_preedit(surface, b"\xff".as_ptr().cast(), 1);
+
+        let surface_ref = surface_from_handle(surface).unwrap();
+        assert!(surface_ref.preedit.is_none());
+        assert!(surface_ref.dirty);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_preedit_set_clear_and_invalid_input_wake_app() {
+        let _guard = WAKEUP_LOCK.lock().unwrap();
+        let app = new_test_app_with_wakeup(0x1E);
+        let surface = new_test_surface(app);
+
+        roastty_surface_preedit(surface, b"pre".as_ptr().cast(), 3);
+        roastty_surface_preedit(surface, ptr::null(), 0);
+        roastty_surface_preedit(surface, b"\xff".as_ptr().cast(), 1);
+
+        assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 3);
+        assert_eq!(WAKEUP_USERDATA.load(Ordering::SeqCst), 0x1E);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_preedit_after_app_detach_updates_state_without_wakeup() {
+        let _guard = WAKEUP_LOCK.lock().unwrap();
+        let app = new_test_app_with_wakeup(0x1F);
+        let surface = new_test_surface(app);
+        roastty_app_free(app);
+
+        roastty_surface_preedit(surface, b"pre".as_ptr().cast(), 3);
+        assert_eq!(
+            surface_from_handle(surface).unwrap().preedit.as_deref(),
+            Some("pre")
+        );
+        assert!(roastty_surface_needs_render(surface));
+        assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 0);
+
+        roastty_surface_preedit(surface, ptr::null(), 0);
+        assert!(surface_from_handle(surface).unwrap().preedit.is_none());
+        assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 0);
         roastty_surface_free(surface);
     }
 

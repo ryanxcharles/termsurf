@@ -3952,6 +3952,7 @@ int main(int argc, char **argv) {
   roastty_surface_set_color_scheme(NULL, ROASTTY_COLOR_SCHEME_DARK);
   roastty_surface_set_size(NULL, 1, 1);
   roastty_surface_text(NULL, "hello", 5);
+  roastty_surface_preedit(NULL, "pre", 3);
   roastty_surface_size_s null_size = roastty_surface_size(NULL);
   assert(null_size.width_px == 0);
   assert(null_size.height_px == 0);
@@ -4120,6 +4121,9 @@ int main(int argc, char **argv) {
   roastty_surface_draw(surface);
   assert(roastty_surface_needs_render(surface));
   roastty_surface_text(surface, "hello", 5);
+  roastty_surface_preedit(surface, "pre", 3);
+  roastty_surface_preedit(surface, NULL, 3);
+  roastty_surface_preedit(surface, NULL, 0);
 
   roastty_surface_t refresh_surface = roastty_surface_new(app, &surface_config);
   assert(refresh_surface != NULL);

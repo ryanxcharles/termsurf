@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 682: Surface Preedit State
@@ -98,3 +103,57 @@ along with explicit invalid-input dirty/wakeup expectations.
 
 Codex otherwise approved the narrow state slice as long as renderer placement,
 Unicode widths, selection clearing, and preedit export remain out of scope.
+
+## Result
+
+**Result:** Pass
+
+Implemented `roastty_surface_preedit(surface, ptr, len)` in the public C header
+and Rust ABI. Surfaces now store preedit as an owned `Option<String>`. New
+surfaces start with no preedit, valid UTF-8 stores or replaces the current
+value, zero-length calls clear the value, and invalid UTF-8 clears the current
+value for upstream fidelity.
+
+Setting, clearing, and invalid-input clearing mark the surface dirty and invoke
+the app runtime `wakeup_cb` while the surface is attached to a live app.
+Detached surfaces still update and dirty their stored preedit state without
+dereferencing the cleared app pointer or waking the app. Null surfaces and null
+pointers with nonzero length remain no-ops.
+
+The Rust tests cover null/no-op cases, owned storage, replacement, multi-byte
+UTF-8, zero-length clear, invalid UTF-8 clear, dirty state, wakeup delivery, and
+detached-surface behavior. The C ABI harness now calls `roastty_surface_preedit`
+through `roastty.h` on null and live skeleton surfaces, including live set,
+null-pointer nonzero no-op, and zero-length clear.
+
+Verification passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/682-surface-preedit-state.md`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty surface`
+- `cargo test -p roastty --test abi_harness`
+- `git diff --check`
+
+## Conclusion
+
+Roastty now accepts and stores IME/dead-key preedit text at the renamed surface
+ABI boundary. Renderer preedit placement, Unicode width tables, selection
+clearing, and render-state/preedit export remain future slices.
+
+## Completion Review
+
+**Result:** Approved after provenance update.
+
+Codex found no code issues. It confirmed that the ABI/header addition is
+correct, the implementation clears on `len == 0`, no-ops nonzero null pointers,
+clears on invalid UTF-8 for upstream fidelity, and marks dirty/wakes through
+`request_render()`. Detached-surface safety follows the existing null-app wakeup
+path.
+
+Codex also confirmed that the result documentation correctly scopes this to
+stored preedit state and leaves renderer placement, Unicode widths, selection
+clearing, and render-state/preedit export as future work. The first
+completion-review pass blocked only because `[review.result]`, this
+completion-review section, and the README `Codex/Codex/Codex` tuple had not yet
+been recorded.

@@ -271,8 +271,9 @@ Experiment 246).
 - [ ] `config_get` (12 defaults only) + keybind triggers — partial
 - [ ] App/surface key dispatch, surface draw/refresh, IME/text/preedit, surface
       mouse dispatch, selection read, splits — surface draw and refresh wakeups
-      and surface text paste input done; key dispatch, IME/preedit, mouse
-      dispatch, selection read, and splits missing
+      and surface text paste input done; preedit state done; key dispatch,
+      renderer preedit/export, mouse dispatch, selection read, and splits
+      missing
 - [ ] Inspector ABI — missing
 
 ### App / Surface / IO — partial
@@ -1847,7 +1848,7 @@ are past the correctness-critical foundation.
 - [Experiment 681: Surface Text Paste](681-surface-text-paste.md) — **Pass** ·
   Codex/Codex/Codex
 - [Experiment 682: Surface Preedit State](682-surface-preedit-state.md) —
-  **Designed** · Codex/Codex/-
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

@@ -1800,6 +1800,9 @@ ROASTTY_API roastty_string_s roastty_surface_tty_name(roastty_surface_t);
 ROASTTY_API void roastty_surface_set_color_scheme(roastty_surface_t,
                                                   roastty_color_scheme_e);
 ROASTTY_API void roastty_surface_text(roastty_surface_t, const char*, uintptr_t);
+ROASTTY_API void roastty_surface_preedit(roastty_surface_t,
+                                         const char*,
+                                         uintptr_t);
 ROASTTY_API void roastty_surface_request_close(roastty_surface_t);
 
 #ifdef __cplusplus
