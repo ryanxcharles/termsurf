@@ -1755,6 +1755,7 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 647: Tmux Viewer Startup](647-tmux-viewer-startup.md) — **Pass** ·
   Codex/Codex/Codex
+- [Experiment 648: Tmux List Windows](648-tmux-list-windows.md) — **Designed**
 
 ## Non-Goals
 
