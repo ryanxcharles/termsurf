@@ -1764,6 +1764,8 @@ are past the correctness-critical foundation.
   Codex/Codex/Codex
 - [Experiment 651: Tmux Pane ID Sync](651-tmux-pane-id-sync.md) — **Pass** ·
   Codex/Codex/Codex
+- [Experiment 652: Tmux Pane Terminal State](652-tmux-pane-terminal-state.md) —
+  **Designed**
 
 ## Non-Goals
 
