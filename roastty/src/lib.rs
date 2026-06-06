@@ -1469,10 +1469,20 @@ struct App {
 }
 
 impl App {
-    fn key_event_is_binding(&self, event: &key::KeyEvent) -> bool {
+    fn key_event_binding(&self, event: &key::KeyEvent) -> Option<ConfiguredBindingMatch> {
+        let release_identity = Surface::default_binding_release_identity(event);
         self.keybind_triggers
             .iter()
-            .any(|binding| config_trigger_matches_key_event(binding.trigger, event))
+            .rev()
+            .find(|binding| config_trigger_matches_key_event(binding.trigger, event))
+            .map(|binding| ConfiguredBindingMatch {
+                action: binding.action.clone(),
+                release_identity,
+            })
+    }
+
+    fn key_event_is_binding(&self, event: &key::KeyEvent) -> bool {
+        self.key_event_binding(event).is_some()
     }
 }
 
@@ -1558,6 +1568,12 @@ struct DefaultBindingReleaseIdentity {
 struct DefaultBindingMatch {
     flags: u8,
     action: Option<&'static [u8]>,
+    release_identity: DefaultBindingReleaseIdentity,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct ConfiguredBindingMatch {
+    action: Vec<u8>,
     release_identity: DefaultBindingReleaseIdentity,
 }
 
@@ -2979,6 +2995,20 @@ impl Surface {
         None
     }
 
+    fn configured_binding(&self, event: &key::KeyEvent) -> Option<ConfiguredBindingMatch> {
+        if self.app.is_null() {
+            return None;
+        }
+        app_from_handle(self.app).and_then(|app| app.key_event_binding(event))
+    }
+
+    fn dispatch_configured_binding(&mut self, binding: ConfiguredBindingMatch) -> Option<bool> {
+        let parsed = parse_binding_action(self, &binding.action)?;
+        let _performed = perform_parsed_binding_action(self, parsed);
+        self.last_consumed_default_binding = Some(binding.release_identity);
+        Some(true)
+    }
+
     fn key(&mut self, event: &KeyEvent) -> bool {
         if self.app.is_null() {
             return false;
@@ -2986,6 +3016,15 @@ impl Surface {
         self.last_key_event = Some(event.event.clone());
         if self.consume_default_binding_release(&event.event) {
             return true;
+        }
+        if let Some(binding) = self.configured_binding(&event.event) {
+            if let Some(consumed) = self.dispatch_configured_binding(binding) {
+                return consumed;
+            }
+            if event.event.action != key::KeyAction::Release {
+                self.last_consumed_default_binding = None;
+            }
+            return self.write_encoded_key_event(&event.event);
         }
         if let Some(binding) = default_key_event_binding(&event.event) {
             if let Some(consumed) = self.dispatch_default_binding(binding) {
@@ -2995,7 +3034,11 @@ impl Surface {
         if event.event.action != key::KeyAction::Release {
             self.last_consumed_default_binding = None;
         }
-        let encoded = key_encode::encode(&event.event, self.key_encode_options());
+        self.write_encoded_key_event(&event.event)
+    }
+
+    fn write_encoded_key_event(&mut self, event: &key::KeyEvent) -> bool {
+        let encoded = key_encode::encode(event, self.key_encode_options());
         if encoded.is_empty() {
             return false;
         }
@@ -14917,6 +14960,299 @@ mod tests {
         roastty_key_event_free(event);
         roastty_surface_free(surface);
         roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_key_configured_text_dispatch_writes_to_child_pty() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        with_init_args(&["roastty", "--keybind=ctrl+x=text:hello"], || {
+            let config = roastty_config_new();
+            roastty_config_load_cli_args(config);
+            let app = roastty_app_new(ptr::null(), config);
+            let command =
+                CString::new("stty -echo -icanon min 5 time 0; dd bs=5 count=1 2>/dev/null")
+                    .unwrap();
+            let mut surface_config = roastty_surface_config_new();
+            surface_config.command = command.as_ptr();
+            let surface = new_test_surface_with_config(app, &surface_config);
+            let event = new_key_event();
+
+            assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+            set_key_event(
+                event,
+                key::KeyAction::Press,
+                key::Key::Unidentified,
+                ROASTTY_MODS_CTRL,
+                b"x",
+                0,
+            );
+            assert!(roastty_surface_key(surface, event));
+            let text = surface_snapshot_text(app, surface);
+            assert!(text.contains("hello"), "{text:?}");
+
+            roastty_key_event_free(event);
+            roastty_surface_free(surface);
+            roastty_app_free(app);
+            roastty_config_free(config);
+        });
+    }
+
+    #[test]
+    fn surface_key_configured_runtime_and_app_actions_dispatch() {
+        with_init_args(
+            &[
+                "roastty",
+                "--keybind=ctrl+n=new_window",
+                "--keybind=ctrl+q=quit",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                let app = new_test_app_with_action(true);
+                roastty_app_update_config(app, config);
+                let surface = new_test_surface(app);
+                let event = new_key_event();
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_CTRL,
+                    b"n",
+                    0,
+                );
+                assert!(roastty_surface_key(surface, event));
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_CTRL,
+                    b"q",
+                    0,
+                );
+                assert!(roastty_surface_key(surface, event));
+
+                let records = action_records();
+                assert_eq!(records.len(), 2);
+                assert_eq!(records[0].action_tag, ROASTTY_ACTION_NEW_WINDOW);
+                assert_eq!(records[1].action_tag, ROASTTY_ACTION_QUIT);
+
+                roastty_key_event_free(event);
+                roastty_surface_free(surface);
+                roastty_app_free(app);
+                roastty_config_free(config);
+            },
+        );
+    }
+
+    #[test]
+    fn surface_key_configured_overrides_static_default_dispatch() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        with_init_args(&["roastty", "--keybind=cmd+c=text:custom"], || {
+            let config = roastty_config_new();
+            roastty_config_load_cli_args(config);
+            let app = new_test_app_with_clipboard_write(0xCAFE);
+            roastty_app_update_config(app, config);
+            let command =
+                CString::new("stty -echo -icanon min 6 time 0; dd bs=6 count=1 2>/dev/null")
+                    .unwrap();
+            let mut surface_config = roastty_surface_config_new();
+            surface_config.command = command.as_ptr();
+            let surface = new_test_surface_with_config(app, &surface_config);
+            let event = new_key_event();
+
+            assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+            set_key_event(
+                event,
+                key::KeyAction::Press,
+                key::Key::Unidentified,
+                ROASTTY_MODS_SUPER,
+                b"c",
+                0,
+            );
+            assert!(roastty_surface_key(surface, event));
+            assert!(clipboard_write_records().is_empty());
+            let text = surface_snapshot_text(app, surface);
+            assert!(text.contains("custom"), "{text:?}");
+
+            roastty_key_event_free(event);
+            roastty_surface_free(surface);
+            roastty_app_free(app);
+            roastty_config_free(config);
+        });
+    }
+
+    #[test]
+    fn surface_key_configured_supported_actions_consume_when_unperformed() {
+        with_init_args(
+            &[
+                "roastty",
+                "--keybind=ctrl+n=new_window",
+                "--keybind=ctrl+c=copy_to_clipboard",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                let app = new_test_app_with_action(false);
+                roastty_app_update_config(app, config);
+                let surface = new_test_surface(app);
+                let event = new_key_event();
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_CTRL,
+                    b"n",
+                    0,
+                );
+                assert!(roastty_surface_key(surface, event));
+                assert_eq!(action_records().len(), 1);
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_CTRL,
+                    b"c",
+                    0,
+                );
+                assert!(roastty_surface_key(surface, event));
+
+                roastty_key_event_free(event);
+                roastty_surface_free(surface);
+                roastty_app_free(app);
+                roastty_config_free(config);
+            },
+        );
+    }
+
+    #[test]
+    fn surface_key_configured_release_suppression_is_one_shot() {
+        with_init_args(&["roastty", "--keybind=ctrl+d=text:ok"], || {
+            let config = roastty_config_new();
+            roastty_config_load_cli_args(config);
+            let app = roastty_app_new(ptr::null(), config);
+            let surface = new_test_surface(app);
+            let event = new_key_event();
+
+            set_key_event(
+                event,
+                key::KeyAction::Press,
+                key::Key::KeyD,
+                ROASTTY_MODS_CTRL,
+                b"d",
+                0,
+            );
+            assert!(roastty_surface_key(surface, event));
+
+            set_key_event(
+                event,
+                key::KeyAction::Release,
+                key::Key::KeyD,
+                ROASTTY_MODS_CTRL,
+                &[],
+                0,
+            );
+            assert!(roastty_surface_key(surface, event));
+            assert!(!roastty_surface_key(surface, event));
+
+            roastty_key_event_free(event);
+            roastty_surface_free(surface);
+            roastty_app_free(app);
+            roastty_config_free(config);
+        });
+    }
+
+    #[test]
+    fn surface_key_configured_unsupported_falls_through_and_clears_stale_release() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        with_init_args(
+            &[
+                "roastty",
+                "--keybind=ctrl+d=new_window",
+                "--keybind=ctrl+x=unknown_action",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                let app = roastty_app_new(ptr::null(), config);
+                let command = CString::new(
+                    "stty -echo -icanon min 1 time 0; dd bs=1 count=1 2>/dev/null | od -An -tx1 -v",
+                )
+                .unwrap();
+                let mut surface_config = roastty_surface_config_new();
+                surface_config.command = command.as_ptr();
+                let surface = new_test_surface_with_config(app, &surface_config);
+                let event = new_key_event();
+
+                assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::KeyD,
+                    ROASTTY_MODS_CTRL,
+                    b"d",
+                    0,
+                );
+                assert!(roastty_surface_key(surface, event));
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Press,
+                    key::Key::Unidentified,
+                    ROASTTY_MODS_CTRL,
+                    b"x",
+                    0,
+                );
+                assert!(roastty_surface_key(surface, event));
+                let text = surface_snapshot_text(app, surface);
+                assert!(text.contains("^X") || text.contains("18"), "{text:?}");
+
+                set_key_event(
+                    event,
+                    key::KeyAction::Release,
+                    key::Key::KeyD,
+                    ROASTTY_MODS_CTRL,
+                    &[],
+                    0,
+                );
+                assert!(!roastty_surface_key(surface, event));
+
+                roastty_key_event_free(event);
+                roastty_surface_free(surface);
+                roastty_app_free(app);
+                roastty_config_free(config);
+            },
+        );
+    }
+
+    #[test]
+    fn surface_key_configured_unsupported_shadows_static_default() {
+        with_init_args(&["roastty", "--keybind=cmd+c=unknown_action"], || {
+            let config = roastty_config_new();
+            roastty_config_load_cli_args(config);
+            let app = new_test_app_with_clipboard_write(0xCAFE);
+            roastty_app_update_config(app, config);
+            let surface = new_test_surface(app);
+            let event = new_key_event();
+
+            set_key_event(
+                event,
+                key::KeyAction::Press,
+                key::Key::Unidentified,
+                ROASTTY_MODS_SUPER,
+                b"c",
+                0,
+            );
+            assert!(!roastty_surface_key(surface, event));
+            assert!(clipboard_write_records().is_empty());
+
+            roastty_key_event_free(event);
+            roastty_surface_free(surface);
+            roastty_app_free(app);
+            roastty_config_free(config);
+        });
     }
 
     #[test]

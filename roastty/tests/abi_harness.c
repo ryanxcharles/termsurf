@@ -4533,6 +4533,11 @@ int main(int argc, char **argv) {
   assert(roastty_surface_key_is_binding(cli_surface, cli_binding_event,
                                         &cli_binding_flags));
   assert(cli_binding_flags == 0x01);
+  assert(roastty_surface_key(cli_surface, cli_binding_event));
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_RELEASE,
+                           ROASTTY_KEY_KEY_N, ROASTTY_MODS_SUPER, NULL, 0);
+  assert(roastty_surface_key(cli_surface, cli_binding_event));
+  assert(!roastty_surface_key(cli_surface, cli_binding_event));
   set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
                            ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_CTRL, "a",
                            0);
@@ -4613,6 +4618,28 @@ int main(int argc, char **argv) {
   assert(roastty_surface_key_is_binding(cli_surface, cli_binding_event,
                                         &cli_binding_flags));
   assert(cli_binding_flags == 0x01);
+  assert(roastty_surface_key(cli_surface, cli_binding_event));
+  roastty_key_event_free(cli_binding_event);
+  roastty_surface_free(cli_surface);
+  roastty_app_free(cli_app);
+  roastty_config_free(cli_config);
+
+  char unknown_override_keybind[] = "--keybind=cmd+c=unknown_action";
+  char *unknown_override_argv[] = {cli_arg0, unknown_override_keybind};
+  assert(roastty_init(2, unknown_override_argv) == ROASTTY_SUCCESS);
+  cli_config = roastty_config_new();
+  assert(cli_config != NULL);
+  roastty_config_load_cli_args(cli_config);
+  cli_app = roastty_app_new(NULL, cli_config);
+  assert(cli_app != NULL);
+  cli_surface_config = roastty_surface_config_new();
+  cli_surface = roastty_surface_new(cli_app, &cli_surface_config);
+  assert(cli_surface != NULL);
+  assert(roastty_key_event_new(&cli_binding_event) == ROASTTY_SUCCESS);
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_SUPER, "c",
+                           0);
+  assert(!roastty_surface_key(cli_surface, cli_binding_event));
   roastty_key_event_free(cli_binding_event);
   roastty_surface_free(cli_surface);
   roastty_app_free(cli_app);

@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 752: Surface CLI Keybind Dispatch
@@ -125,3 +130,56 @@ non-consumed press/repeat path falls through to terminal encoding.
 
 Codex re-reviewed the corrected design and approved it for the plan commit with
 no remaining blocking findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now dispatches CLI-loaded root keybinds through `roastty_surface_key`.
+The app-level configured keybind lookup reverse-scans app-owned keybinds,
+returns the matching action bytes plus a normalized release identity, and lets
+`Surface::key` try configured bindings before static defaults. Supported
+configured actions reuse the existing `parse_binding_action` and
+`perform_parsed_binding_action` pipeline.
+
+Configured actions are ordinary consumed bindings for this experiment: a
+supported configured action returns `true` and suppresses the matching release
+even when the runtime callback returns false or the action preconditions do not
+perform. Unsupported configured actions still shadow static defaults, but they
+fall through to terminal encoding without setting release suppression.
+
+Verification passed:
+
+- `cargo test -p roastty config_cli_keybind -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_key_is_binding -- --nocapture --test-threads=1`
+- `cargo test -p roastty surface_key_is_binding -- --nocapture --test-threads=1`
+- `cargo test -p roastty surface_key_default -- --nocapture --test-threads=1`
+- `cargo test -p roastty surface_key -- --nocapture --test-threads=1`
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1`
+- `cargo test -p roastty --test abi_harness -- --nocapture`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Completion Review
+
+Codex reviewed the implementation diff and found no blocking issues. The review
+confirmed that configured key dispatch runs before static defaults, supported
+configured actions dispatch through the existing binding-action parser and
+performer, and unsupported configured actions shadow static defaults before
+falling through without release suppression.
+
+The review also confirmed no regressions in default dispatch or query behavior:
+static defaults still run when no configured trigger matches, surface keybind
+queries remain consistent with Experiment 751, and release suppression continues
+to use the existing one-shot identity path. The review found no must-fix test
+gaps. It noted a non-blocking efficiency issue: `App::key_event_is_binding` now
+clones action bytes through `key_event_binding` even for boolean queries.
+
+## Conclusion
+
+Experiment 752 moved configured root keybinds from query-only support into real
+surface key dispatch for all actions already supported by Roastty's
+binding-action parser. Remaining keybinding work includes action validation and
+diagnostics, configured performable flags, key tables, sequences, config-file
+loading, `clear`, `unbind`, global/all prefixes, and chained bindings.

@@ -2018,7 +2018,7 @@ are past the correctness-critical foundation.
 - [Experiment 751: Surface CLI Keybind Is Binding](751-surface-cli-keybind-is-binding.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 752: Surface CLI Keybind Dispatch](752-surface-cli-keybind-dispatch.md)
-  — **Designed** · Codex/Codex/Codex
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
