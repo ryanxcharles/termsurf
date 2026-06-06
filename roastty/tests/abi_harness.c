@@ -1777,6 +1777,13 @@ static void assert_support_abi(void) {
   assert(offsetof(roastty_sys_image_s, height) == 4);
   assert(offsetof(roastty_sys_image_s, data) == 8);
   assert(offsetof(roastty_sys_image_s, data_len) == 16);
+  assert(sizeof(roastty_text_s) == 40);
+  assert(offsetof(roastty_text_s, tl_px_x) == 0);
+  assert(offsetof(roastty_text_s, tl_px_y) == 8);
+  assert(offsetof(roastty_text_s, offset_start) == 16);
+  assert(offsetof(roastty_text_s, offset_len) == 20);
+  assert(offsetof(roastty_text_s, text) == 24);
+  assert(offsetof(roastty_text_s, text_len) == 32);
 
   bool bool_value = true;
   assert(roastty_build_info(ROASTTY_BUILD_INFO_SIMD, &bool_value) ==
@@ -3953,6 +3960,19 @@ int main(int argc, char **argv) {
   roastty_surface_set_size(NULL, 1, 1);
   roastty_surface_text(NULL, "hello", 5);
   roastty_surface_preedit(NULL, "pre", 3);
+  roastty_text_s null_read_text = {0};
+  roastty_selection_s null_selection = {0};
+  null_selection.size = sizeof(roastty_selection_s);
+  assert(!roastty_surface_read_text(NULL, null_selection, &null_read_text));
+  assert(null_read_text.tl_px_x == -1.0);
+  assert(null_read_text.tl_px_y == -1.0);
+  assert(null_read_text.offset_start == 0);
+  assert(null_read_text.offset_len == 0);
+  assert(null_read_text.text == NULL);
+  assert(null_read_text.text_len == 0);
+  assert(!roastty_surface_read_text(NULL, null_selection, NULL));
+  roastty_surface_free_text(NULL, &null_read_text);
+  roastty_surface_free_text(NULL, NULL);
   roastty_surface_size_s null_size = roastty_surface_size(NULL);
   assert(null_size.width_px == 0);
   assert(null_size.height_px == 0);
@@ -4124,6 +4144,18 @@ int main(int argc, char **argv) {
   roastty_surface_preedit(surface, "pre", 3);
   roastty_surface_preedit(surface, NULL, 3);
   roastty_surface_preedit(surface, NULL, 0);
+  roastty_text_s read_text = {0};
+  roastty_selection_s empty_selection = {0};
+  empty_selection.size = sizeof(roastty_selection_s);
+  assert(!roastty_surface_read_text(surface, empty_selection, NULL));
+  assert(!roastty_surface_read_text(surface, empty_selection, &read_text));
+  assert(read_text.tl_px_x == -1.0);
+  assert(read_text.tl_px_y == -1.0);
+  assert(read_text.offset_start == 0);
+  assert(read_text.offset_len == 0);
+  assert(read_text.text == NULL);
+  assert(read_text.text_len == 0);
+  roastty_surface_free_text(surface, &read_text);
 
   roastty_surface_t refresh_surface = roastty_surface_new(app, &surface_config);
   assert(refresh_surface != NULL);

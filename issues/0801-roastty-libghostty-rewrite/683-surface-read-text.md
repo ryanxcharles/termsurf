@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 683: Surface Read Text
@@ -109,3 +114,63 @@ read/free test covers the intended non-stale-pointer flow.
 Codex otherwise approved the scope: explicit-selection readback from the
 attached worker terminal only, with active selection, viewport pixel metadata,
 quicklook metadata, and frontend selection routing left out of this slice.
+
+## Result
+
+**Result:** Pass.
+
+Implemented `roastty_text_s`,
+`roastty_surface_read_text(surface, selection, result)`, and
+`roastty_surface_free_text(surface, result)`. Reads now validate the output
+pointer, surface handle, attached app, selection/grid refs, and attached
+`TermioWorker`; successful reads format the explicit worker-terminal selection
+as plain text with `unwrap = true` and `trim = false`.
+
+The returned text uses the upstream ownership shape: the allocation is
+`text_len + 1` bytes, `text_len` excludes the trailing sentinel, and
+`roastty_surface_free_text` frees the full allocation and resets the struct to
+the empty metadata defaults. Viewport/quicklook metadata remains unavailable in
+this slice, so successful and empty outputs use `tl_px_x = -1`, `tl_px_y = -1`,
+`offset_start = 0`, and `offset_len = 0`.
+
+The C ABI harness now asserts the `roastty_text_s` layout and exercises
+null/no-worker read/free calls through the public header. Rust tests cover null
+inputs, no-worker and detached surfaces, invalid selections, successful explicit
+selections, sentinel termination, unavailable metadata defaults, owned text
+lifetime across ticks, and repeated read/free pointer reset behavior.
+
+Verification:
+
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty surface`
+- `cargo test -p roastty --test abi_harness`
+- `git diff --check`
+
+Note: the broad `surface` PTY filter was run alone. An earlier overlapping Cargo
+test process caused a PTY integration test to fail with blank output and
+poisoned the shared test lock; rerunning the exact failing test alone and then
+the full `surface` filter alone passed.
+
+## Conclusion
+
+Surface explicit-selection text readback now exists and matches the upstream
+text ownership and metadata-default contract for the part Roastty can currently
+support. The remaining selection/readback work is active-selection
+`roastty_surface_read_selection`, viewport pixel metadata, quicklook/word
+metadata, and frontend selection routing.
+
+## Completion Review
+
+**Result:** Approved after workflow updates.
+
+Codex reviewed the staged result diff and found no code, ABI, ownership, or test
+blockers. It confirmed the implementation matched the intended scope and
+contract: explicit selection only, plain formatting with `unwrap = true` and
+`trim = false`, owned `text_len + 1` allocation with a trailing NUL sentinel,
+reset-on-free behavior, unavailable metadata defaults, and no claim of active
+selection, quicklook, viewport pixel, or frontend routing support.
+
+Codex blocked the result commit only until review provenance was recorded. This
+section, the `[review.result]` frontmatter, and the README reviewer tuple are
+the requested workflow updates.

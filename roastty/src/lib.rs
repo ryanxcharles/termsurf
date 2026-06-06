@@ -484,6 +484,17 @@ pub struct RoasttyString {
     sentinel: bool,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RoasttyText {
+    tl_px_x: f64,
+    tl_px_y: f64,
+    offset_start: u32,
+    offset_len: u32,
+    text: *const c_char,
+    text_len: usize,
+}
+
 type AllocCallback = Option<unsafe extern "C" fn(*mut c_void, usize, u8, usize) -> *mut u8>;
 type ResizeCallback =
     Option<unsafe extern "C" fn(*mut c_void, *mut c_void, usize, u8, usize, usize) -> bool>;
@@ -2048,6 +2059,67 @@ fn write_empty_string(out: *mut RoasttyString) {
             out.write(empty_string());
         }
     }
+}
+
+fn empty_text() -> RoasttyText {
+    RoasttyText {
+        tl_px_x: -1.0,
+        tl_px_y: -1.0,
+        offset_start: 0,
+        offset_len: 0,
+        text: ptr::null(),
+        text_len: 0,
+    }
+}
+
+fn write_empty_text(out: *mut RoasttyText) {
+    if !out.is_null() {
+        unsafe {
+            out.write(empty_text());
+        }
+    }
+}
+
+fn try_allocated_text(bytes: &[u8]) -> Result<RoasttyText, c_int> {
+    let len = bytes.len();
+    let alloc_len = len.checked_add(1).ok_or(ROASTTY_OUT_OF_MEMORY)?;
+    let layout = Layout::array::<u8>(alloc_len).map_err(|_| ROASTTY_OUT_OF_MEMORY)?;
+    let ptr = unsafe { alloc::alloc(layout) };
+    if ptr.is_null() {
+        return Err(ROASTTY_OUT_OF_MEMORY);
+    }
+    if len > 0 {
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, len);
+        }
+    }
+    unsafe {
+        ptr.add(len).write(0);
+    }
+
+    Ok(RoasttyText {
+        text: ptr.cast::<c_char>(),
+        text_len: len,
+        ..empty_text()
+    })
+}
+
+fn free_text_allocation(value: *mut RoasttyText) {
+    if value.is_null() {
+        return;
+    }
+    let text = unsafe { (*value).text };
+    let text_len = unsafe { (*value).text_len };
+    if !text.is_null() {
+        if let Some(alloc_len) = text_len.checked_add(1) {
+            if let Ok(layout) = Layout::array::<u8>(alloc_len) {
+                unsafe {
+                    alloc::dealloc(text.cast::<u8>().cast_mut(), layout);
+                }
+            }
+        }
+    }
+    write_empty_text(value);
 }
 
 fn try_allocated_string(bytes: &[u8]) -> Result<RoasttyString, c_int> {
@@ -8797,6 +8869,53 @@ pub extern "C" fn roastty_surface_preedit(
 }
 
 #[no_mangle]
+pub extern "C" fn roastty_surface_read_text(
+    surface: RoasttySurface,
+    selection: RoasttySelection,
+    result: *mut RoasttyText,
+) -> bool {
+    if result.is_null() {
+        return false;
+    }
+    write_empty_text(result);
+    let Some(surface) = surface_from_handle(surface) else {
+        return false;
+    };
+    if surface.app.is_null() {
+        return false;
+    }
+    let Ok(selection) = read_selection(&selection) else {
+        return false;
+    };
+    let Some(worker) = surface.termio_worker.as_ref() else {
+        return false;
+    };
+    let text = worker.with_termio(|termio| {
+        termio.terminal().selection_format(
+            TerminalSelectionFormat::Plain,
+            true,
+            false,
+            Some(selection),
+        )
+    });
+    let Ok(text) = text else {
+        return false;
+    };
+    let Ok(text) = try_allocated_text(text.as_bytes()) else {
+        return false;
+    };
+    unsafe {
+        result.write(text);
+    }
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_free_text(_surface: RoasttySurface, text: *mut RoasttyText) {
+    free_text_allocation(text);
+}
+
+#[no_mangle]
 pub extern "C" fn roastty_surface_request_close(surface: RoasttySurface) {
     if let Some(surface) = surface_from_handle(surface) {
         surface.request_close();
@@ -9075,6 +9194,55 @@ mod tests {
         roastty_render_state_row_cells_free(cells);
         roastty_render_state_row_iterator_free(iterator);
         text
+    }
+
+    fn surface_worker_selection(
+        surface: RoasttySurface,
+        start: (u16, u32),
+        end: (u16, u32),
+    ) -> RoasttySelection {
+        let surface = surface_from_handle(surface).unwrap();
+        surface
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| {
+                let start = termio
+                    .terminal()
+                    .grid_ref(
+                        TerminalPointTag::Screen,
+                        point::Coordinate::new(start.0, start.1),
+                    )
+                    .unwrap();
+                let end = termio
+                    .terminal()
+                    .grid_ref(
+                        TerminalPointTag::Screen,
+                        point::Coordinate::new(end.0, end.1),
+                    )
+                    .unwrap();
+                let selection = TerminalSelection {
+                    start,
+                    end,
+                    rectangle: false,
+                };
+                let mut out = RoasttySelection::default();
+                write_selection(&mut out, selection);
+                out
+            })
+    }
+
+    fn take_roastty_text(mut text: RoasttyText) -> Vec<u8> {
+        if text.text.is_null() {
+            return Vec::new();
+        }
+        let bytes = unsafe { slice::from_raw_parts(text.text.cast::<u8>(), text.text_len) };
+        let out = bytes.to_vec();
+        assert_eq!(unsafe { *text.text.add(text.text_len) }, 0);
+        roastty_surface_free_text(ptr::null_mut(), &mut text);
+        assert!(text.text.is_null());
+        assert_eq!(text.text_len, 0);
+        out
     }
 
     fn surface_snapshot_text_after_start(app: RoasttyApp, surface: RoasttySurface) -> String {
@@ -9490,6 +9658,134 @@ mod tests {
         assert!(surface_from_handle(surface).unwrap().preedit.is_none());
         assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 0);
         roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_read_text_validates_null_inputs_and_no_worker() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let selection = RoasttySelection::default();
+        let mut text = empty_text();
+
+        assert!(!roastty_surface_read_text(
+            ptr::null_mut(),
+            selection,
+            &mut text
+        ));
+        assert!(text.text.is_null());
+        assert!(!roastty_surface_read_text(
+            surface,
+            selection,
+            ptr::null_mut()
+        ));
+        assert!(!roastty_surface_read_text(surface, selection, &mut text));
+        assert!(text.text.is_null());
+
+        roastty_surface_free_text(ptr::null_mut(), ptr::null_mut());
+        roastty_surface_free_text(surface, &mut text);
+        assert!(text.text.is_null());
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_read_text_after_app_detach_returns_false() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("printf hello"));
+        let selection = RoasttySelection::default();
+        let mut text = empty_text();
+        roastty_app_free(app);
+
+        assert!(!roastty_surface_read_text(surface, selection, &mut text));
+        assert!(text.text.is_null());
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_read_text_reads_explicit_worker_selection() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'Hello World'").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("Hello World"));
+        let selection = surface_worker_selection(surface, (6, 0), (10, 0));
+        let mut text = empty_text();
+
+        assert!(roastty_surface_read_text(surface, selection, &mut text));
+
+        assert_eq!(text.tl_px_x, -1.0);
+        assert_eq!(text.tl_px_y, -1.0);
+        assert_eq!(text.offset_start, 0);
+        assert_eq!(text.offset_len, 0);
+        assert_eq!(take_roastty_text(text), b"World");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_read_text_invalid_selection_returns_false() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'Hello World'").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("Hello World"));
+        let mut selection = surface_worker_selection(surface, (0, 0), (4, 0));
+        selection.start.size = std::mem::size_of::<RoasttyGridRef>() - 1;
+        let mut text = empty_text();
+
+        assert!(!roastty_surface_read_text(surface, selection, &mut text));
+        assert!(text.text.is_null());
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_read_text_result_is_owned_across_ticks() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'Hello World'").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("Hello World"));
+        let selection = surface_worker_selection(surface, (0, 0), (4, 0));
+        let mut text = empty_text();
+
+        assert!(roastty_surface_read_text(surface, selection, &mut text));
+        roastty_app_tick(app);
+
+        assert_eq!(take_roastty_text(text), b"Hello");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_read_text_repeated_read_free_resets_pointer_state() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'Hello World'").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("Hello World"));
+        let hello = surface_worker_selection(surface, (0, 0), (4, 0));
+        let world = surface_worker_selection(surface, (6, 0), (10, 0));
+        let mut text = empty_text();
+
+        assert!(roastty_surface_read_text(surface, hello, &mut text));
+        assert_eq!(take_roastty_text(text), b"Hello");
+
+        text = empty_text();
+        assert!(roastty_surface_read_text(surface, world, &mut text));
+        assert_eq!(take_roastty_text(text), b"World");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
     }
 
     #[test]

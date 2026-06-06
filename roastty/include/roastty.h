@@ -357,6 +357,15 @@ typedef struct {
 } roastty_string_s;
 
 typedef struct {
+  double tl_px_x;
+  double tl_px_y;
+  uint32_t offset_start;
+  uint32_t offset_len;
+  const char* text;
+  uintptr_t text_len;
+} roastty_text_s;
+
+typedef struct {
   uint8_t* ptr;
   size_t cap;
   size_t len;
@@ -1803,6 +1812,10 @@ ROASTTY_API void roastty_surface_text(roastty_surface_t, const char*, uintptr_t)
 ROASTTY_API void roastty_surface_preedit(roastty_surface_t,
                                          const char*,
                                          uintptr_t);
+ROASTTY_API bool roastty_surface_read_text(roastty_surface_t,
+                                           roastty_selection_s,
+                                           roastty_text_s*);
+ROASTTY_API void roastty_surface_free_text(roastty_surface_t, roastty_text_s*);
 ROASTTY_API void roastty_surface_request_close(roastty_surface_t);
 
 #ifdef __cplusplus
