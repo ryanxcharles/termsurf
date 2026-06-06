@@ -1741,6 +1741,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 641: Search And StringMap Audit](641-search-stringmap-audit.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 642: Tmux Control Parser](642-tmux-control-parser.md) —
+  **Designed**
 
 ## Non-Goals
 
