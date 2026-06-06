@@ -3,10 +3,11 @@ use std::alloc::{self, Layout};
 use std::cell::Cell;
 #[cfg(test)]
 use std::collections::VecDeque;
-use std::ffi::{CStr, CString, OsString};
+use std::ffi::{CStr, CString, OsStr, OsString};
 use std::io::Write;
 use std::os::raw::{c_char, c_int, c_void};
-use std::path::PathBuf;
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::ptr::NonNull;
 use std::slice;
@@ -1434,6 +1435,7 @@ pub struct RoasttyRuntimeConfig {
 }
 
 struct Config {
+    parsed: config::Config,
     finalized: bool,
     confirm_close_surface: config::ConfirmCloseSurface,
     has_global_keybinds: bool,
@@ -1448,6 +1450,27 @@ struct ConfigKeybind {
 }
 
 impl Config {
+    fn sync_from_parsed_config(&mut self) {
+        self.confirm_close_surface = self.parsed.confirm_close_surface;
+    }
+
+    fn push_config_diagnostic(
+        &mut self,
+        source: impl std::fmt::Display,
+        diagnostic: &config::ConfigDiagnostic,
+    ) {
+        self.push_diagnostic(format!(
+            "{source}:{}: invalid config key `{}`: {:?}",
+            diagnostic.line, diagnostic.key, diagnostic.error
+        ));
+    }
+
+    fn push_config_file_error(&mut self, source: impl std::fmt::Display, error: &std::io::Error) {
+        self.push_diagnostic(format!(
+            "error loading config from file path={source}: {error}"
+        ));
+    }
+
     fn store_keybind(&mut self, binding: ConfigKeybind) {
         self.keybind_triggers.push(binding);
     }
@@ -8554,6 +8577,7 @@ pub extern "C" fn roastty_mode_report_encode(
 #[no_mangle]
 pub extern "C" fn roastty_config_new() -> RoasttyConfig {
     Box::into_raw(Box::new(Config {
+        parsed: config::Config::default(),
         finalized: false,
         confirm_close_surface: config::ConfirmCloseSurface::True,
         has_global_keybinds: false,
@@ -8574,25 +8598,34 @@ pub extern "C" fn roastty_config_free(config: RoasttyConfig) {
 
 #[no_mangle]
 pub extern "C" fn roastty_config_clone(config: RoasttyConfig) -> RoasttyConfig {
-    let (finalized, confirm_close_surface, has_global_keybinds, keybind_triggers, diagnostics) =
-        config_from_handle(config)
-            .map(|config| {
-                (
-                    config.finalized,
-                    config.confirm_close_surface,
-                    config.has_global_keybinds,
-                    config.keybind_triggers.clone(),
-                    config.diagnostics.clone(),
-                )
-            })
-            .unwrap_or((
-                false,
-                config::ConfirmCloseSurface::True,
-                false,
-                Vec::new(),
-                Vec::new(),
-            ));
+    let (
+        parsed,
+        finalized,
+        confirm_close_surface,
+        has_global_keybinds,
+        keybind_triggers,
+        diagnostics,
+    ) = config_from_handle(config)
+        .map(|config| {
+            (
+                config.parsed.clone(),
+                config.finalized,
+                config.confirm_close_surface,
+                config.has_global_keybinds,
+                config.keybind_triggers.clone(),
+                config.diagnostics.clone(),
+            )
+        })
+        .unwrap_or((
+            config::Config::default(),
+            false,
+            config::ConfirmCloseSurface::True,
+            false,
+            Vec::new(),
+            Vec::new(),
+        ));
     Box::into_raw(Box::new(Config {
+        parsed,
         finalized,
         confirm_close_surface,
         has_global_keybinds,
@@ -8640,10 +8673,44 @@ pub extern "C" fn roastty_config_load_cli_args(config: RoasttyConfig) {
 }
 
 #[no_mangle]
-pub extern "C" fn roastty_config_load_file(_config: RoasttyConfig, _path: *const c_char) {}
+pub extern "C" fn roastty_config_load_file(config: RoasttyConfig, path: *const c_char) {
+    let Some(config) = config_from_handle(config) else {
+        return;
+    };
+    if path.is_null() {
+        return;
+    }
+
+    let path = unsafe { CStr::from_ptr(path) };
+    let path = Path::new(OsStr::from_bytes(path.to_bytes()));
+    match config.parsed.load_file(path) {
+        Ok(diagnostics) => {
+            for diagnostic in &diagnostics {
+                config.push_config_diagnostic(path.display(), diagnostic);
+            }
+            config.sync_from_parsed_config();
+        }
+        Err(error) => config.push_config_file_error(path.display(), &error),
+    }
+}
 
 #[no_mangle]
-pub extern "C" fn roastty_config_load_default_files(_config: RoasttyConfig) {}
+pub extern "C" fn roastty_config_load_default_files(config: RoasttyConfig) {
+    let Some(config) = config_from_handle(config) else {
+        return;
+    };
+
+    let report = config.parsed.load_default_files();
+    for load in &report.loaded {
+        for diagnostic in &load.diagnostics {
+            config.push_config_diagnostic(load.path.display(), diagnostic);
+        }
+    }
+    for error in &report.errors {
+        config.push_config_file_error(error.path.display(), &error.error);
+    }
+    config.sync_from_parsed_config();
+}
 
 #[no_mangle]
 pub extern "C" fn roastty_config_load_recursive_files(_config: RoasttyConfig) {}
@@ -13323,6 +13390,7 @@ mod tests {
         TerminalDeviceAttributesSecondary, TerminalDeviceAttributesTertiary,
     };
     use std::cell::RefCell;
+    use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
@@ -15804,6 +15872,28 @@ mod tests {
             .into_owned()
     }
 
+    fn unique_config_abi_test_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "roastty-config-abi-{tag}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    fn write_config_file(path: &std::path::Path, text: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, text).unwrap();
+    }
+
+    fn c_path(path: &std::path::Path) -> CString {
+        CString::new(path.as_os_str().as_bytes()).unwrap()
+    }
+
     fn with_init_args(args: &[&str], f: impl FnOnce()) {
         let _guard = CLI_ARGS_LOCK.lock().unwrap();
         let strings = args
@@ -16460,6 +16550,136 @@ mod tests {
                 roastty_config_free(config);
             },
         );
+    }
+
+    #[test]
+    fn config_load_file_syncs_confirm_close_surface_through_c_abi() {
+        roastty_config_load_file(ptr::null_mut(), ptr::null());
+
+        let dir = unique_config_abi_test_dir("load-file-sync");
+        let path = dir.join("config.roastty");
+        write_config_file(&path, "confirm-close-surface = false\n");
+        let path = c_path(&path);
+
+        let config = new_test_config_with_confirm_close(config::ConfirmCloseSurface::Always);
+        roastty_config_load_file(config, path.as_ptr());
+        assert_eq!(roastty_config_diagnostics_count(config), 0);
+
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = roastty_surface_new(app, ptr::null());
+        assert!(!roastty_surface_needs_confirm_quit(surface));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_load_file_records_diagnostics_and_applies_later_settings() {
+        let dir = unique_config_abi_test_dir("load-file-diagnostics");
+        let path = dir.join("config.roastty");
+        write_config_file(
+            &path,
+            "not-a-real-key = value\nconfirm-close-surface = always\n",
+        );
+        let path = c_path(&path);
+
+        let config = roastty_config_new();
+        roastty_config_load_file(config, path.as_ptr());
+        assert_eq!(roastty_config_diagnostics_count(config), 1);
+        let message = config_diagnostic_message(config, 0);
+        assert!(message.contains("not-a-real-key"), "{message}");
+        assert!(message.contains(":1:"), "{message}");
+
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = roastty_surface_new(app, ptr::null());
+        assert!(roastty_surface_needs_confirm_quit(surface));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_load_file_records_missing_file_diagnostic() {
+        let dir = unique_config_abi_test_dir("load-file-missing");
+        let path = c_path(&dir.join("missing.roastty"));
+
+        let config = roastty_config_new();
+        roastty_config_load_file(config, path.as_ptr());
+        assert_eq!(roastty_config_diagnostics_count(config), 1);
+        let message = config_diagnostic_message(config, 0);
+        assert!(
+            message.contains("error loading config from file"),
+            "{message}"
+        );
+        assert!(message.contains("missing.roastty"), "{message}");
+
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_c_abi_file_load_state_and_diagnostics_clone() {
+        let dir = unique_config_abi_test_dir("load-file-clone");
+        let first = dir.join("first.roastty");
+        let second = dir.join("second.roastty");
+        write_config_file(
+            &first,
+            "first-bad-key = value\nconfirm-close-surface = always\n",
+        );
+        write_config_file(&second, "second-bad-key = value\n");
+        let first = c_path(&first);
+        let second = c_path(&second);
+
+        let config = roastty_config_new();
+        roastty_config_load_file(config, first.as_ptr());
+        assert_eq!(roastty_config_diagnostics_count(config), 1);
+
+        let clone = roastty_config_clone(config);
+        assert_eq!(roastty_config_diagnostics_count(clone), 1);
+        assert_eq!(
+            config_diagnostic_message(clone, 0),
+            config_diagnostic_message(config, 0)
+        );
+
+        roastty_config_load_file(clone, second.as_ptr());
+        assert_eq!(roastty_config_diagnostics_count(clone), 2);
+        let app = roastty_app_new(ptr::null(), clone);
+        let surface = roastty_surface_new(app, ptr::null());
+        assert!(roastty_surface_needs_confirm_quit(surface));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(clone);
+        roastty_config_free(config);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_c_abi_load_default_files_uses_temporary_environment() {
+        let _env_guard = ENV_LOCK.lock().unwrap();
+        let dir = unique_config_abi_test_dir("default-files");
+        let xdg = dir.join("xdg");
+        let home = dir.join("home");
+        let preferred = xdg.join("roastty").join("config.roastty");
+        write_config_file(&preferred, "confirm-close-surface = always\n");
+        let _xdg = EnvGuard::set("XDG_CONFIG_HOME", &xdg);
+        let _home = EnvGuard::set("HOME", &home);
+
+        let config = roastty_config_new();
+        roastty_config_load_default_files(config);
+        assert_eq!(roastty_config_diagnostics_count(config), 0);
+
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = roastty_surface_new(app, ptr::null());
+        assert!(roastty_surface_needs_confirm_quit(surface));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

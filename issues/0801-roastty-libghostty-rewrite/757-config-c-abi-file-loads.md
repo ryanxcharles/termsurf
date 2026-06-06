@@ -106,3 +106,48 @@ real C ABI file/default loading, diagnostics through the existing ABI
 diagnostics channel, and syncing only `confirm_close_surface`, with duplicate
 warnings, logging callbacks, recursive `config-file` loading, and broader getter
 conversion deferred.
+
+## Result
+
+**Result:** Pass
+
+Implemented the public C ABI file load functions in `roastty/src/lib.rs`.
+`roastty_config_load_file` now reads null-terminated C paths losslessly as Unix
+path bytes, loads the file through the typed Rust config loader, records file IO
+errors and per-line config diagnostics through the existing ABI diagnostics
+channel, and syncs parsed `confirm_close_surface` into the runtime-facing ABI
+wrapper state after successful reads.
+
+`roastty_config_load_default_files` now calls the internal default-file loader,
+records loaded-file diagnostics and non-not-found default-file errors, and syncs
+the wrapper state. Duplicate warning exposure remains deferred.
+
+Verification passed:
+
+- `cargo test -p roastty config_load_file -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_c_abi -- --nocapture --test-threads=1`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no blocking findings. The
+review confirmed that explicit file loads use lossless Unix path conversion,
+diagnostics flow through the existing ABI diagnostics channel,
+`confirm_close_surface` syncs after successful reads, default-file reports are
+recorded without exposing duplicate warnings, clone handling includes the parsed
+config and diagnostics, null-handle behavior is preserved, and the default-file
+test uses a temporary environment.
+
+Non-blocking follow-ups from the review: add a Unix-only non-UTF-8 path test for
+`roastty_config_load_file`, add a C ABI harness check for the load functions,
+and add a C ABI-level default-file diagnostic/error test when the diagnostics
+surface gets broader coverage.
+
+## Conclusion
+
+The C ABI config load functions are no longer inert stubs. They now connect the
+public `roastty_config_load_file` and `roastty_config_load_default_files` entry
+points to the internal Rust config loader while preserving the intentionally
+narrow ABI surface for this slice.
