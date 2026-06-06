@@ -10,13 +10,14 @@ use std::collections::HashMap;
 
 use crate::font::atlas::{Atlas, AtlasError, Format};
 use crate::font::codepoint_resolver::{CodepointResolver, ResolverRenderError};
-use crate::font::collection::Index;
+use crate::font::collection::{EntryError, Index};
 use crate::font::face::constraint::{Align, Constraint, Size};
 use crate::font::face::coretext::{RenderGlyphError, RenderOptions};
 use crate::font::glyph::Glyph;
 use crate::font::metrics::Metrics;
 use crate::font::shaper_cache::ShaperCache;
 use crate::font::{Presentation, Style};
+use crate::renderer::size::CellSize;
 
 /// Initial atlas edge length in pixels. Matches upstream `SharedGrid.init`.
 const ATLAS_INITIAL_SIZE: u32 = 512;
@@ -65,6 +66,24 @@ impl GlyphKey {
     }
 }
 
+/// The codepoint cache key. Mirrors upstream `CodepointKey`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct CodepointKey {
+    style: u8,
+    codepoint: u32,
+    presentation: Option<u8>,
+}
+
+impl CodepointKey {
+    fn new(codepoint: u32, style: Style, presentation: Option<Presentation>) -> CodepointKey {
+        CodepointKey {
+            style: style as u8,
+            codepoint,
+            presentation: presentation.map(|p| p as u8),
+        }
+    }
+}
+
 /// The shared font grid: the two glyph atlases (grayscale for text, BGRA for
 /// color), the codepoint resolver, the active grid metrics, and the glyph cache.
 /// Renders a glyph index into the correct atlas, rasterizing each distinct glyph
@@ -75,6 +94,10 @@ pub(crate) struct SharedGrid {
     pub resolver: CodepointResolver,
     pub metrics: Metrics,
     pub shaper_cache: ShaperCache,
+    /// The codepoint cache: each lookup stores the resolved font index or a
+    /// negative result. Real-face indexes are inserted only after preload
+    /// succeeds, matching upstream's no-poison rollback contract.
+    codepoints: HashMap<CodepointKey, Option<Index>>,
     /// The glyph cache: each distinct glyph is rasterized into an atlas once.
     glyphs: HashMap<GlyphKey, Render>,
 }
@@ -94,8 +117,54 @@ impl SharedGrid {
             resolver,
             metrics,
             shaper_cache: ShaperCache::new(),
+            codepoints: HashMap::new(),
             glyphs: HashMap::new(),
         }
+    }
+
+    /// The grid cell size. Faithful port of upstream `SharedGrid.cellSize`.
+    pub(crate) fn cell_size(&self) -> CellSize {
+        CellSize {
+            width: self.metrics.cell_width,
+            height: self.metrics.cell_height,
+        }
+    }
+
+    /// Get the font index for `cp`, caching positive and negative results.
+    ///
+    /// Positive real-font results are preloaded before insertion so a preload
+    /// failure cannot leave a stale index in the cache. Special sprite indexes do
+    /// not have a real face and are cached without preloading.
+    pub(crate) fn get_index(
+        &mut self,
+        cp: u32,
+        style: Style,
+        presentation: Option<Presentation>,
+    ) -> Result<Option<Index>, EntryError> {
+        let key = CodepointKey::new(cp, style, presentation);
+        if let Some(&cached) = self.codepoints.get(&key) {
+            return Ok(cached);
+        }
+
+        let value = self.resolver.get_index(cp, style, presentation);
+        if let Some(index) = value {
+            if index.special_kind().is_none() {
+                self.resolver.collection_mut().get_face(index)?;
+            }
+        }
+        self.codepoints.insert(key, value);
+        Ok(value)
+    }
+
+    /// Returns true if the given font index has the codepoint and presentation.
+    /// `None` presentation accepts any presentation.
+    pub(crate) fn has_codepoint(
+        &self,
+        index: Index,
+        cp: u32,
+        presentation: Option<Presentation>,
+    ) -> bool {
+        self.resolver.has_codepoint(index, cp, presentation)
     }
 
     /// Render `glyph_index` at `index` into the correct atlas — grayscale for
@@ -171,7 +240,7 @@ impl SharedGrid {
         presentation: Option<Presentation>,
         opts: &RenderOptions,
     ) -> Result<Option<Render>, ResolverRenderError> {
-        let Some(index) = self.resolver.get_index(cp, style, presentation) else {
+        let Some(index) = self.get_index(cp, style, presentation)? else {
             return Ok(None);
         };
         let Some(glyph_index) = self.resolver.glyph_index(index, cp)? else {
@@ -240,6 +309,132 @@ mod tests {
             thicken: false,
             thicken_strength: 255,
         }
+    }
+
+    #[test]
+    fn cell_size_reports_metrics_dimensions() {
+        let grid = menlo_grid();
+
+        assert_eq!(
+            grid.cell_size(),
+            CellSize {
+                width: grid.metrics.cell_width,
+                height: grid.metrics.cell_height,
+            }
+        );
+    }
+
+    #[test]
+    fn get_index_caches_visible_ascii_and_has_codepoint_any() {
+        let mut grid = menlo_grid();
+
+        for cp in 32..127 {
+            let idx = grid
+                .get_index(cp, Style::Regular, None)
+                .unwrap()
+                .expect("ASCII resolves");
+            assert_eq!(idx, Index::default());
+            assert!(grid.has_codepoint(idx, cp, None));
+        }
+
+        assert_eq!(grid.codepoints.len(), 95);
+
+        for cp in 32..127 {
+            let idx = grid
+                .get_index(cp, Style::Regular, None)
+                .unwrap()
+                .expect("ASCII cache hit");
+            assert_eq!(idx, Index::default());
+        }
+
+        assert_eq!(grid.codepoints.len(), 95);
+    }
+
+    #[test]
+    fn get_index_caches_missing_codepoint_as_none() {
+        let mut grid = menlo_grid();
+        let missing = 0xFDD0;
+
+        assert_eq!(
+            grid.get_index(missing, Style::Regular, Some(Presentation::Text))
+                .unwrap(),
+            None
+        );
+        assert_eq!(grid.codepoints.len(), 1);
+        assert_eq!(
+            grid.get_index(missing, Style::Regular, Some(Presentation::Text))
+                .unwrap(),
+            None
+        );
+        assert_eq!(grid.codepoints.len(), 1);
+    }
+
+    #[test]
+    fn get_index_discovery_fallback_caches_without_duplicates() {
+        let mut grid = menlo_grid();
+        grid.resolver.set_discover_enabled(true);
+        let grin = 0x1F600;
+
+        let first = grid
+            .get_index(grin, Style::Regular, Some(Presentation::Emoji))
+            .unwrap()
+            .expect("emoji fallback resolves");
+        let face_count = grid.resolver.collection().face_count(Style::Regular);
+        assert_eq!(face_count, 2);
+
+        let second = grid
+            .get_index(grin, Style::Regular, Some(Presentation::Emoji))
+            .unwrap()
+            .expect("emoji fallback cache hit");
+        assert_eq!(second, first);
+        assert_eq!(
+            grid.resolver.collection().face_count(Style::Regular),
+            face_count
+        );
+        assert_eq!(grid.codepoints.len(), 1);
+    }
+
+    #[test]
+    fn get_index_deferred_discovery_preloads_face_before_caching() {
+        let mut grid = menlo_grid();
+        grid.resolver.set_discover_enabled(true);
+        let grin = 0x1F600;
+
+        let idx = grid
+            .get_index(grin, Style::Regular, Some(Presentation::Emoji))
+            .unwrap()
+            .expect("emoji fallback resolves");
+
+        assert!(!grid
+            .resolver
+            .collection()
+            .get_entry(idx)
+            .expect("fallback entry exists")
+            .is_deferred());
+        assert_eq!(
+            grid.get_index(grin, Style::Regular, Some(Presentation::Emoji))
+                .unwrap(),
+            Some(idx)
+        );
+    }
+
+    #[test]
+    fn get_index_sprite_caches_special_without_real_face_preload() {
+        let mut grid = menlo_grid();
+        let cp = 0x2500;
+
+        let idx = grid
+            .get_index(cp, Style::Regular, None)
+            .unwrap()
+            .expect("sprite resolves");
+
+        assert_eq!(idx, Index::special(Special::Sprite));
+        assert_eq!(grid.resolver.collection().face_count(Style::Regular), 1);
+        assert_eq!(
+            grid.get_index(cp, Style::Regular, None).unwrap(),
+            Some(Index::special(Special::Sprite))
+        );
+        assert_eq!(grid.codepoints.len(), 1);
     }
 
     #[test]

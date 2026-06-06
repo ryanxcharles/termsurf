@@ -1718,7 +1718,7 @@ are past the correctness-critical foundation.
 - [Experiment 635: Collection Size Loading](635-collection-size-loading.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 636: SharedGrid Codepoint Cache](636-shared-grid-codepoint-cache.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

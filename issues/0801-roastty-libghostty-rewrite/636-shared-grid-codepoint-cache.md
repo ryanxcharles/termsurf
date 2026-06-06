@@ -118,3 +118,50 @@ explain the preload-error contract. The plan now returns
 after successful preload, and records why current CoreText deferred loading
 cannot induce a normal preload failure in tests. Follow-up review approved the
 revised design.
+
+## Result
+
+**Result:** Pass
+
+`SharedGrid` now owns the upstream-style codepoint cache and exposes
+`get_index`, `has_codepoint`, and `cell_size`. `render_codepoint` resolves
+through the cached lookup path. Positive real-face results are preloaded before
+being cached, negative results are cached as `None`, and sprite indexes are
+cached without attempting a real-face preload.
+
+The preload-error contract is enforced structurally: positive real-face cache
+entries are inserted only after `resolver.collection_mut().get_face(index)`
+succeeds. In the current CoreText slice, normal resolver-produced deferred faces
+load infallibly, so there is no representative failing deferred-face fixture to
+induce in tests without manufacturing an invalid index.
+
+Verification passed:
+
+- `cargo test -p roastty shared_grid` — 11 passed, 3488 filtered
+- `cargo test -p roastty discovery_fallback` — 6 passed, 3493 filtered
+- `cargo test -p roastty collection_deferred` — 5 passed, 3494 filtered
+- `cargo test -p roastty font::tests` — 2 passed, 3497 filtered
+- `cargo test -p roastty` — 3499 unit tests passed, 1 ABI harness test passed
+- `cargo fmt -p roastty -- --check` — pass
+- `git diff --check` — pass
+
+## Conclusion
+
+Roastty's `SharedGrid` now matches Ghostty's codepoint lookup surface for the
+current single-threaded port: cached positive/negative codepoint resolution,
+real-face preload before cache insertion, sprite index handling, `hasCodepoint`,
+and `cellSize`. The remaining `SharedGrid` gap is the larger `SharedGridSet`
+configuration/refcount manager and Ghostty's cross-surface locking model, which
+should remain a separate experiment.
+
+## Completion Review
+
+**Reviewer:** Codex (gpt-5.5) · session `019e9a89-7b7a-7e73-8c5a-aaf6ab763e99`
+
+**Verdict:** APPROVED.
+
+The reviewer found no blocking issues. Residual note: because
+`SharedGrid::resolver` remains publicly mutable in this foundation slice, stale
+cache entries are possible if callers mutate resolver/discovery/font state after
+lookups. That is within this experiment's single-threaded, no-`SharedGridSet`
+scope and should be addressed with the larger grid ownership/refcount model.
