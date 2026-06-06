@@ -273,9 +273,9 @@ Experiment 246).
       mouse dispatch, selection read, splits — surface draw and refresh wakeups
       and surface text paste input done; preedit state and explicit surface text
       reads plus active surface selection reads done; mouse-captured query done;
-      key translation-mod query done; key dispatch, renderer preedit/export,
-      mouse event dispatch, frontend selection routing/metadata, and splits
-      missing
+      key translation-mod query done; IME point query done; key dispatch,
+      renderer preedit/export, mouse event dispatch, frontend selection
+      routing/metadata, and splits missing
 - [ ] Inspector ABI — missing
 
 ### App / Surface / IO — partial
@@ -1863,8 +1863,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 687: Surface Key Translation Mods](687-surface-key-translation-mods.md)
   — **Pass** · Codex/Codex/Codex
-- [Experiment 688: Surface IME Point](688-surface-ime-point.md) — **Designed** ·
-  Codex/-/-
+- [Experiment 688: Surface IME Point](688-surface-ime-point.md) — **Pass** ·
+  Codex/Codex/Codex
 
 ## Non-Goals
 

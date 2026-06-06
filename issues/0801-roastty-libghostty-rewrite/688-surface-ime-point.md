@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 688: Surface IME Point
@@ -101,3 +106,49 @@ Codex approved the updated design as appropriately incremental. It also
 confirmed the explicit exclusions are acceptable for this slice: renderer
 padding, visible-scroll handling, renderer-owned preedit ranges, and full
 width-aware preedit parity remain future work.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now exposes `roastty_surface_ime_point(surface, x, y, width, height)` in
+the public C ABI. The implementation computes the current conservative IME
+rectangle from stored surface cell geometry, sanitized content scale, the
+attached worker terminal cursor when present on an app-attached surface, and the
+stored surface preedit string.
+
+Null surfaces write a zero rectangle to non-null outputs, null output pointers
+are handled independently, missing cell geometry returns a zero rectangle, and
+invalid scale values fall back to `1.0`. Width uses the planned scalar-count
+preedit approximation and saturates to zero when the cursor-derived offset is at
+or beyond the surface width.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty surface`
+- `cargo test -p roastty --test abi_harness`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+The surface IME point query is now available for frontends that need a safe
+composition-window rectangle. It remains an incremental geometry slice: renderer
+padding, visible-scroll handling, renderer-owned preedit ranges, and full
+width-aware preedit parity are still future renderer/input work.
+
+## Completion Review
+
+**Result:** Approved after detached-worker fix and provenance update.
+
+Codex initially found one code blocker: detached surfaces with a retained worker
+could still query that worker's cursor, contradicting the design's detached
+fallback behavior. The implementation now returns `(0, 0)` from
+`Surface::cursor_position()` when `surface.app` is null, and the regression test
+keeps a worker present while nulling `app` before calling
+`roastty_surface_ime_point`.
+
+Codex approved the corrected code and verification. Its remaining blocker was
+workflow-only: result-review provenance, this completion-review section, and the
+README experiment tuple needed to be recorded. Those records are now present.

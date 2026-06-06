@@ -1307,6 +1307,14 @@ struct Surface {
     test_termio_events: VecDeque<termio::TermioWorkerEvent>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct ImePoint {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
 #[cfg(test)]
 thread_local! {
     static DEFAULT_SHELL_DESKTOP_OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
@@ -1346,6 +1354,65 @@ fn launched_from_desktop_for_default_shell() -> bool {
 }
 
 impl Surface {
+    fn sanitized_scale(value: f64) -> f64 {
+        if value.is_finite() && value > 0.0 {
+            value
+        } else {
+            1.0
+        }
+    }
+
+    fn cursor_position(&self) -> (u16, u16) {
+        if self.app.is_null() {
+            return (0, 0);
+        }
+        self.termio_worker
+            .as_ref()
+            .map(|worker| worker.with_termio(|termio| termio.terminal().cursor_position()))
+            .unwrap_or((0, 0))
+    }
+
+    fn preedit_width(&self) -> u32 {
+        self.preedit
+            .as_deref()
+            .map(|preedit| u32::try_from(preedit.chars().count()).unwrap_or(u32::MAX))
+            .unwrap_or(0)
+    }
+
+    fn ime_point(&self) -> ImePoint {
+        if self.size.cell_width_px == 0 || self.size.cell_height_px == 0 {
+            return ImePoint::default();
+        }
+
+        let (cursor_x, cursor_y) = self.cursor_position();
+        let cursor_x = u32::from(cursor_x);
+        let cursor_y = u32::from(cursor_y);
+        let cell_width = self.size.cell_width_px;
+        let cell_height = self.size.cell_height_px;
+        let scale_x = Self::sanitized_scale(self.scale_factor_x);
+        let scale_y = Self::sanitized_scale(self.scale_factor_y);
+        let remaining_width = self
+            .size
+            .width_px
+            .saturating_sub(cursor_x.saturating_add(1).saturating_mul(cell_width));
+        let preedit_width = self
+            .preedit_width()
+            .saturating_mul(cell_width)
+            .min(remaining_width);
+
+        ImePoint {
+            x: (f64::from(cursor_x.saturating_mul(cell_width)) + f64::from(cell_width) / 2.0)
+                / scale_x,
+            y: f64::from(
+                cursor_y
+                    .saturating_mul(cell_height)
+                    .saturating_add(cell_height),
+            ) / scale_y,
+            width: f64::from(preedit_width),
+            height: f64::from(cell_height) / scale_y,
+        }
+    }
+
     fn pty_size(&self) -> os::pty::PtySize {
         os::pty::PtySize {
             rows: if self.size.rows == 0 {
@@ -8984,6 +9051,33 @@ pub extern "C" fn roastty_surface_preedit(
 }
 
 #[no_mangle]
+pub extern "C" fn roastty_surface_ime_point(
+    surface: RoasttySurface,
+    x: *mut f64,
+    y: *mut f64,
+    width: *mut f64,
+    height: *mut f64,
+) {
+    let point = surface_from_handle(surface)
+        .map(|surface| surface.ime_point())
+        .unwrap_or_default();
+    unsafe {
+        if !x.is_null() {
+            x.write(point.x);
+        }
+        if !y.is_null() {
+            y.write(point.y);
+        }
+        if !width.is_null() {
+            width.write(point.width);
+        }
+        if !height.is_null() {
+            height.write(point.height);
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn roastty_surface_mouse_captured(surface: RoasttySurface) -> bool {
     let Some(surface) = surface_from_handle(surface) else {
         return false;
@@ -9422,6 +9516,20 @@ mod tests {
             .as_ref()
             .unwrap()
             .with_termio_mut(|termio| termio.terminal_mut().set_pwd(Some(format!("{pwd}\0"))));
+    }
+
+    fn set_surface_worker_cursor(surface: RoasttySurface, row: u16, column: u16) {
+        let surface = surface_from_handle(surface).unwrap();
+        surface
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                termio
+                    .terminal_mut()
+                    .next_slice(format!("\x1b[{row};{column}H").as_bytes())
+                    .unwrap();
+            });
     }
 
     fn c_str_ptr_to_str(ptr: *const c_char) -> Option<String> {
@@ -10028,6 +10136,218 @@ mod tests {
         roastty_surface_preedit(surface, ptr::null(), 0);
         assert!(surface_from_handle(surface).unwrap().preedit.is_none());
         assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 0);
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_ime_point_null_and_missing_geometry_return_zero() {
+        let mut x = 1.0;
+        let mut y = 2.0;
+        let mut width = 3.0;
+        let mut height = 4.0;
+
+        roastty_surface_ime_point(ptr::null_mut(), &mut x, &mut y, &mut width, &mut height);
+        assert_eq!(
+            ImePoint {
+                x,
+                y,
+                width,
+                height
+            },
+            ImePoint::default()
+        );
+        roastty_surface_ime_point(
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+        );
+
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        roastty_surface_preedit(surface, b"pre".as_ptr().cast(), 3);
+        x = 1.0;
+        y = 2.0;
+        width = 3.0;
+        height = 4.0;
+
+        roastty_surface_ime_point(surface, &mut x, &mut y, &mut width, &mut height);
+
+        assert_eq!(
+            ImePoint {
+                x,
+                y,
+                width,
+                height
+            },
+            ImePoint::default()
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_ime_point_uses_cursor_geometry_scale_and_preedit_width() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_worker_cursor(surface, 3, 5);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            surface_ref.size = RoasttySurfaceSize {
+                columns: 12,
+                rows: 8,
+                width_px: 120,
+                height_px: 160,
+                cell_width_px: 10,
+                cell_height_px: 20,
+            };
+            surface_ref.scale_factor_x = 2.0;
+            surface_ref.scale_factor_y = 4.0;
+        }
+        roastty_surface_preedit(surface, b"abcde".as_ptr().cast(), 5);
+
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut width = 0.0;
+        let mut height = 0.0;
+        roastty_surface_ime_point(surface, &mut x, &mut y, &mut width, &mut height);
+
+        assert_eq!(
+            ImePoint {
+                x,
+                y,
+                width,
+                height
+            },
+            ImePoint {
+                x: 22.5,
+                y: 15.0,
+                width: 50.0,
+                height: 5.0,
+            }
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_ime_point_sanitizes_invalid_scale_and_partial_null_outputs() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            surface_ref.size = RoasttySurfaceSize {
+                columns: 10,
+                rows: 4,
+                width_px: 100,
+                height_px: 80,
+                cell_width_px: 10,
+                cell_height_px: 20,
+            };
+            surface_ref.scale_factor_x = 0.0;
+            surface_ref.scale_factor_y = f64::NAN;
+        }
+        roastty_surface_preedit(surface, b"abcd".as_ptr().cast(), 4);
+
+        let mut x = -1.0;
+        let mut width = -1.0;
+        roastty_surface_ime_point(
+            surface,
+            &mut x,
+            ptr::null_mut(),
+            &mut width,
+            ptr::null_mut(),
+        );
+
+        assert_eq!(x, 5.0);
+        assert_eq!(width, 40.0);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_ime_point_width_saturates_at_or_beyond_right_edge() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_worker_cursor(surface, 1, 12);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            surface_ref.size = RoasttySurfaceSize {
+                columns: 12,
+                rows: 4,
+                width_px: 120,
+                height_px: 80,
+                cell_width_px: 10,
+                cell_height_px: 20,
+            };
+        }
+        roastty_surface_preedit(surface, b"abc".as_ptr().cast(), 3);
+
+        let mut width = -1.0;
+        roastty_surface_ime_point(
+            surface,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &mut width,
+            ptr::null_mut(),
+        );
+
+        assert_eq!(width, 0.0);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_ime_point_after_app_detach_uses_stored_geometry_and_preedit() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_worker_cursor(surface, 3, 5);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            surface_ref.size = RoasttySurfaceSize {
+                columns: 10,
+                rows: 4,
+                width_px: 100,
+                height_px: 80,
+                cell_width_px: 10,
+                cell_height_px: 20,
+            };
+        }
+        roastty_surface_preedit(surface, b"ab".as_ptr().cast(), 2);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            assert!(surface_ref.termio_worker.is_some());
+            surface_ref.app = ptr::null_mut();
+        }
+
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut width = 0.0;
+        let mut height = 0.0;
+        roastty_surface_ime_point(surface, &mut x, &mut y, &mut width, &mut height);
+
+        assert_eq!(
+            ImePoint {
+                x,
+                y,
+                width,
+                height
+            },
+            ImePoint {
+                x: 5.0,
+                y: 20.0,
+                width: 20.0,
+                height: 20.0,
+            }
+        );
+        roastty_app_free(app);
         roastty_surface_free(surface);
     }
 
