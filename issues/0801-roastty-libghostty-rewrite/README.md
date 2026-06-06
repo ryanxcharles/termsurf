@@ -1909,6 +1909,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 702: Surface Binding Action ABI Foundation](702-surface-binding-action-abi-foundation.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 703: Binding Action Close Surface](703-binding-action-close-surface.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
