@@ -140,6 +140,7 @@ const ROASTTY_ACTION_SECURE_INPUT: c_int = 43;
 const ROASTTY_ACTION_CLOSE_WINDOW: c_int = 49;
 const ROASTTY_ACTION_SHOW_ON_SCREEN_KEYBOARD: c_int = 57;
 const ROASTTY_ACTION_READONLY: c_int = 63;
+const ROASTTY_ACTION_COPY_TITLE_TO_CLIPBOARD: c_int = 64;
 
 const ROASTTY_INSPECTOR_TOGGLE: c_int = 0;
 const ROASTTY_INSPECTOR_SHOW: c_int = 1;
@@ -3297,6 +3298,15 @@ fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindin
         b"copy_to_clipboard" => Some(ParsedBindingAction::CopyToClipboard(
             copy_to_clipboard_format_from_str(parameter)?,
         )),
+        b"copy_title_to_clipboard" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(ParsedBindingAction::RuntimeAction(
+                ROASTTY_ACTION_COPY_TITLE_TO_CLIPBOARD,
+                [0usize; 8],
+            ))
+        }
         b"paste_from_clipboard" => {
             if parameter.is_some() {
                 return None;
@@ -13432,6 +13442,7 @@ mod tests {
         assert_eq!(ROASTTY_ACTION_CLOSE_WINDOW, 49);
         assert_eq!(ROASTTY_ACTION_SHOW_ON_SCREEN_KEYBOARD, 57);
         assert_eq!(ROASTTY_ACTION_READONLY, 63);
+        assert_eq!(ROASTTY_ACTION_COPY_TITLE_TO_CLIPBOARD, 64);
         assert_eq!(ROASTTY_INSPECTOR_TOGGLE, 0);
         assert_eq!(ROASTTY_INSPECTOR_SHOW, 1);
         assert_eq!(ROASTTY_INSPECTOR_HIDE, 2);
@@ -13678,6 +13689,8 @@ mod tests {
             "copy_to_clipboard: plain",
             "copy_to_clipboard:plain ",
             "copy_to_clipboard:rtf",
+            "copy_title_to_clipboard:",
+            "copy_title_to_clipboard:now",
             "paste_from_clipboard:",
             "paste_from_clipboard:now",
             "paste_from_selection:",
@@ -14895,6 +14908,53 @@ mod tests {
                 }]
             );
         }
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_copy_title_to_clipboard_false_paths() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert!(!binding_action(ptr::null_mut(), "copy_title_to_clipboard"));
+        assert!(!binding_action(surface, "copy_title_to_clipboard"));
+
+        roastty_app_free(app);
+        assert!(!binding_action(surface, "copy_title_to_clipboard"));
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_binding_action_copy_title_to_clipboard_forwards_runtime_action() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+
+        assert!(binding_action(surface, "copy_title_to_clipboard"));
+
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].app, app);
+        assert_eq!(records[0].target_tag, ROASTTY_TARGET_SURFACE);
+        assert_eq!(records[0].surface, surface);
+        assert_eq!(
+            records[0].action_tag,
+            ROASTTY_ACTION_COPY_TITLE_TO_CLIPBOARD
+        );
+        assert!(records[0].storage.iter().all(|value| *value == 0));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_copy_title_to_clipboard_returns_callback_result() {
+        let app = new_test_app_with_action(false);
+        let surface = new_test_surface(app);
+
+        assert!(!binding_action(surface, "copy_title_to_clipboard"));
+        assert_eq!(action_records().len(), 1);
 
         roastty_surface_free(surface);
         roastty_app_free(app);

@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 727: Binding Action Copy Title To Clipboard
@@ -77,3 +82,44 @@ paths, forwarding tests, C ABI harness coverage, and verification steps.
 The review found one workflow blocker: this design-review section still said
 `Pending.` This section now records the review outcome, and the README tuple is
 `Codex/Codex/-`.
+
+## Result
+
+**Result:** Pass
+
+Roastty now exposes `ROASTTY_ACTION_COPY_TITLE_TO_CLIPBOARD = 64`, matching
+upstream `apprt.Action.Key.copy_title_to_clipboard`, and documents that the
+action carries zeroed storage.
+
+`copy_title_to_clipboard` now parses as a strict parameterless binding action
+and forwards through the existing surface-targeted runtime action path. It
+returns `false` for null surfaces, detached surfaces, missing callbacks, or
+false callbacks, and returns the callback result when a runtime action callback
+is present.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty copy_title_to_clipboard -- --nocapture --test-threads=1`
+  — 3 passed
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1` — 94
+  passed
+- `cargo test -p roastty --test abi_harness` — 1 passed
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+`copy_title_to_clipboard` is complete for Roastty's current runtime-action
+surface. The ABI tag, parser behavior, runtime forwarding, callback result
+propagation, Rust tests, and C ABI coverage all match the experiment plan.
+
+## Completion Review
+
+Codex reviewed the completed experiment and found one workflow blocker: this
+completion-review section still said `Pending.` The review found no
+implementation blockers.
+
+The review approved the ABI tag 64, zero-storage convention, strict parser
+behavior, runtime forwarding path, callback false/result behavior, Rust tests, C
+ABI harness coverage, verification record, and README status/provenance.

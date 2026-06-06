@@ -1789,6 +1789,7 @@ static void assert_support_abi(void) {
   assert(ROASTTY_ACTION_INSPECTOR == 28);
   assert(ROASTTY_ACTION_SHOW_ON_SCREEN_KEYBOARD == 57);
   assert(ROASTTY_ACTION_READONLY == 63);
+  assert(ROASTTY_ACTION_COPY_TITLE_TO_CLIPBOARD == 64);
   assert(ROASTTY_ACTION_FLOAT_WINDOW == 42);
   assert(ROASTTY_ACTION_SECURE_INPUT == 43);
   assert(ROASTTY_READONLY_ON == 0);
@@ -4479,6 +4480,8 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:", 18));
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:rtf", 21));
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:plain:extra", 29));
+  assert(!roastty_surface_binding_action(surface, "copy_title_to_clipboard:", 24));
+  assert(!roastty_surface_binding_action(surface, "copy_title_to_clipboard:now", 27));
   assert(!roastty_surface_binding_action(surface, "paste_from_clipboard:", 21));
   assert(!roastty_surface_binding_action(surface, "paste_from_clipboard:now", 24));
   assert(!roastty_surface_binding_action(surface, "paste_from_selection:", 21));
@@ -4578,6 +4581,7 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:vt", 20));
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:html", 22));
   assert(!roastty_surface_binding_action(surface, "copy_to_clipboard:mixed", 23));
+  assert(!roastty_surface_binding_action(surface, "copy_title_to_clipboard", 23));
   assert(!roastty_surface_binding_action(surface, "paste_from_clipboard", 20));
   assert(!roastty_surface_binding_action(surface, "paste_from_selection", 20));
   assert(roastty_surface_binding_action(surface, "increase_font_size:1", 20));
