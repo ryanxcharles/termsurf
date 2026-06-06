@@ -2122,6 +2122,21 @@ fn free_text_allocation(value: *mut RoasttyText) {
     write_empty_text(value);
 }
 
+fn try_surface_selection_text(
+    worker: &termio::TermioWorker,
+    selection: Option<TerminalSelection>,
+) -> Result<RoasttyText, c_int> {
+    let text = worker.with_termio(|termio| {
+        termio
+            .terminal()
+            .selection_format(TerminalSelectionFormat::Plain, true, false, selection)
+    });
+    let Ok(text) = text else {
+        return Err(ROASTTY_INVALID_VALUE);
+    };
+    try_allocated_text(text.as_bytes())
+}
+
 fn try_allocated_string(bytes: &[u8]) -> Result<RoasttyString, c_int> {
     if bytes.is_empty() {
         return Ok(empty_string());
@@ -8869,6 +8884,47 @@ pub extern "C" fn roastty_surface_preedit(
 }
 
 #[no_mangle]
+pub extern "C" fn roastty_surface_has_selection(surface: RoasttySurface) -> bool {
+    let Some(surface) = surface_from_handle(surface) else {
+        return false;
+    };
+    if surface.app.is_null() {
+        return false;
+    }
+    let Some(worker) = surface.termio_worker.as_ref() else {
+        return false;
+    };
+    worker.with_termio(|termio| termio.terminal().active_selection().is_some())
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_read_selection(
+    surface: RoasttySurface,
+    result: *mut RoasttyText,
+) -> bool {
+    if result.is_null() {
+        return false;
+    }
+    write_empty_text(result);
+    let Some(surface) = surface_from_handle(surface) else {
+        return false;
+    };
+    if surface.app.is_null() {
+        return false;
+    }
+    let Some(worker) = surface.termio_worker.as_ref() else {
+        return false;
+    };
+    let Ok(text) = try_surface_selection_text(worker, None) else {
+        return false;
+    };
+    unsafe {
+        result.write(text);
+    }
+    true
+}
+
+#[no_mangle]
 pub extern "C" fn roastty_surface_read_text(
     surface: RoasttySurface,
     selection: RoasttySelection,
@@ -8890,18 +8946,7 @@ pub extern "C" fn roastty_surface_read_text(
     let Some(worker) = surface.termio_worker.as_ref() else {
         return false;
     };
-    let text = worker.with_termio(|termio| {
-        termio.terminal().selection_format(
-            TerminalSelectionFormat::Plain,
-            true,
-            false,
-            Some(selection),
-        )
-    });
-    let Ok(text) = text else {
-        return false;
-    };
-    let Ok(text) = try_allocated_text(text.as_bytes()) else {
+    let Ok(text) = try_surface_selection_text(worker, Some(selection)) else {
         return false;
     };
     unsafe {
@@ -9230,6 +9275,19 @@ mod tests {
                 write_selection(&mut out, selection);
                 out
             })
+    }
+
+    fn set_surface_worker_active_selection(
+        surface: RoasttySurface,
+        selection: Option<RoasttySelection>,
+    ) {
+        let selection = selection.map(|selection| read_selection(&selection).unwrap());
+        let surface = surface_from_handle(surface).unwrap();
+        surface
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| termio.terminal_mut().set_selection(selection).unwrap());
     }
 
     fn take_roastty_text(mut text: RoasttyText) -> Vec<u8> {
@@ -9683,6 +9741,122 @@ mod tests {
 
         roastty_surface_free_text(ptr::null_mut(), ptr::null_mut());
         roastty_surface_free_text(surface, &mut text);
+        assert!(text.text.is_null());
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_has_selection_validates_null_detached_no_worker_and_empty() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        assert!(!roastty_surface_has_selection(ptr::null_mut()));
+
+        let app = new_test_app();
+        let no_worker = new_test_surface(app);
+        assert!(!roastty_surface_has_selection(no_worker));
+
+        let command = CString::new("printf 'Hello World'").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("Hello World"));
+        assert!(!roastty_surface_has_selection(surface));
+
+        let selection = surface_worker_selection(surface, (0, 0), (4, 0));
+        set_surface_worker_active_selection(surface, Some(selection));
+        assert!(roastty_surface_has_selection(surface));
+
+        roastty_app_free(app);
+        assert!(!roastty_surface_has_selection(surface));
+        roastty_surface_free(surface);
+        roastty_surface_free(no_worker);
+    }
+
+    #[test]
+    fn surface_read_selection_validates_null_inputs_and_no_selection() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let mut text = empty_text();
+
+        assert!(!roastty_surface_read_selection(ptr::null_mut(), &mut text));
+        assert_eq!(text.tl_px_x, -1.0);
+        assert_eq!(text.tl_px_y, -1.0);
+        assert_eq!(text.offset_start, 0);
+        assert_eq!(text.offset_len, 0);
+        assert!(text.text.is_null());
+        assert_eq!(text.text_len, 0);
+        assert!(!roastty_surface_read_selection(surface, ptr::null_mut()));
+        assert!(!roastty_surface_read_selection(surface, &mut text));
+        assert!(text.text.is_null());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_read_selection_reads_active_worker_selection() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'Hello World'").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("Hello World"));
+        let selection = surface_worker_selection(surface, (6, 0), (10, 0));
+        set_surface_worker_active_selection(surface, Some(selection));
+        let mut text = empty_text();
+
+        assert!(roastty_surface_read_selection(surface, &mut text));
+
+        assert_eq!(text.tl_px_x, -1.0);
+        assert_eq!(text.tl_px_y, -1.0);
+        assert_eq!(text.offset_start, 0);
+        assert_eq!(text.offset_len, 0);
+        assert_eq!(take_roastty_text(text), b"World");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_read_selection_result_is_owned_across_ticks() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'Hello World'").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("Hello World"));
+        let selection = surface_worker_selection(surface, (0, 0), (4, 0));
+        set_surface_worker_active_selection(surface, Some(selection));
+        let mut text = empty_text();
+
+        assert!(roastty_surface_read_selection(surface, &mut text));
+        roastty_app_tick(app);
+
+        assert_eq!(take_roastty_text(text), b"Hello");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_read_selection_returns_false_after_clearing_selection() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'Hello World'").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("Hello World"));
+        let selection = surface_worker_selection(surface, (0, 0), (4, 0));
+        set_surface_worker_active_selection(surface, Some(selection));
+        assert!(roastty_surface_has_selection(surface));
+
+        set_surface_worker_active_selection(surface, None);
+        let mut text = empty_text();
+
+        assert!(!roastty_surface_has_selection(surface));
+        assert!(!roastty_surface_read_selection(surface, &mut text));
         assert!(text.text.is_null());
         roastty_surface_free(surface);
         roastty_app_free(app);

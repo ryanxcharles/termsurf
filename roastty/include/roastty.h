@@ -1812,6 +1812,9 @@ ROASTTY_API void roastty_surface_text(roastty_surface_t, const char*, uintptr_t)
 ROASTTY_API void roastty_surface_preedit(roastty_surface_t,
                                          const char*,
                                          uintptr_t);
+ROASTTY_API bool roastty_surface_has_selection(roastty_surface_t);
+ROASTTY_API bool roastty_surface_read_selection(roastty_surface_t,
+                                                roastty_text_s*);
 ROASTTY_API bool roastty_surface_read_text(roastty_surface_t,
                                            roastty_selection_s,
                                            roastty_text_s*);

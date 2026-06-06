@@ -287,6 +287,11 @@ impl TermioWorker {
         f(&termio)
     }
 
+    pub(crate) fn with_termio_mut<R>(&self, f: impl FnOnce(&mut Termio) -> R) -> R {
+        let mut termio = self.termio.lock().expect("termio worker mutex poisoned");
+        f(&mut termio)
+    }
+
     pub(crate) fn shutdown(&mut self) -> Result<(), TermioWorkerError> {
         if self.join.is_none() {
             return Ok(());

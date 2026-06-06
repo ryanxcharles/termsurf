@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 684: Surface Active Selection Read
@@ -101,3 +106,56 @@ callers must free a previous successful result before reusing the same struct.
 The planned verification covers null, detached, no-worker, no-selection,
 positive active-selection, sentinel/default metadata, lifetime, clearing, and C
 header exposure paths.
+
+## Result
+
+**Result:** Pass.
+
+Implemented `roastty_surface_has_selection(surface)` and
+`roastty_surface_read_selection(surface, result)` for worker-backed surfaces.
+The active-selection read path shares the same formatter and allocation helper
+as `roastty_surface_read_text`, so both surface text APIs use plain formatting
+with `unwrap = true` and `trim = false`, allocate `text_len + 1` bytes with a
+trailing NUL sentinel, and return unavailable metadata defaults.
+
+Null, detached, no-worker, and no-active-selection surfaces return `false`.
+`roastty_surface_read_selection` writes an empty result on every non-null output
+failure path before returning `false`. `roastty_surface_has_selection` reports
+only the attached worker terminal's active selection and does not try to infer
+frontend/UI selection state.
+
+The C header now declares the two active-selection surface APIs, and the C ABI
+harness exercises null/no-worker `has_selection` and `read_selection` calls.
+Rust tests seed the worker terminal active selection directly, then verify
+positive readback, sentinel/default metadata, ownership across ticks, clearing
+the selection, and the null/detached/no-worker/no-selection failure paths.
+
+Verification:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty surface`
+- `cargo test -p roastty --test abi_harness`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+Surface active-selection query/readback now matches the worker-terminal portion
+of upstream's surface selection API and reuses the text ownership contract from
+Experiment 683. Remaining selection work is frontend mouse selection routing,
+selection/quicklook metadata, viewport pixel metadata, and UI integration.
+
+## Completion Review
+
+**Result:** Approved after workflow updates.
+
+Codex reviewed the staged result diff and found no code, ABI, ownership, or
+required-test changes. It confirmed the implementation matches the intended
+contract: active worker-terminal selection only, plain formatting with
+`unwrap = true` and `trim = false`, shared `roastty_text_s` ownership/free
+semantics, sentinel allocation, metadata defaults, and no frontend, quicklook,
+viewport, or UI claims.
+
+Codex blocked the result commit only until review provenance was recorded. This
+section, the `[review.result]` frontmatter, and the README reviewer tuple are
+the requested workflow updates.
