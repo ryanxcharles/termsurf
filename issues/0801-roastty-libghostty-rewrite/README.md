@@ -197,7 +197,8 @@ Experiment 246).
       Oniguruma
 - [ ] `tmux` control mode — control/layout/output helpers, command formatting,
       DCS entry, viewer startup, list-windows parsing, and window-refresh
-      notifications done; full viewer state, PTY, and App integration missing
+      notifications, and layout-change window updates done; pane sync, PTY, and
+      App integration missing
 - [x] `sys` (PNG-decode abstraction) — implemented and tested via C ABI
 
 ### Renderer — data + Metal primitives only; no live render loop
@@ -1759,7 +1760,8 @@ are past the correctness-critical foundation.
   Codex/Codex/Codex
 - [Experiment 649: Tmux Window Refresh Notifications](649-tmux-window-refresh-notifications.md)
   — **Pass** · Codex/Codex/Codex
-- [Experiment 650: Tmux Layout Change](650-tmux-layout-change.md) — **Designed**
+- [Experiment 650: Tmux Layout Change](650-tmux-layout-change.md) — **Pass** ·
+  Codex/Codex/Codex
 
 ## Non-Goals
 

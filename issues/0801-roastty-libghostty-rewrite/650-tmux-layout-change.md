@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 session = "019e9ad7-04a6-7b20-823a-fa6e3d24129f"
 verdict = "approved"
+
+[review.result]
+agent = "codex"
+session = "019e9ad7-04a6-7b20-823a-fa6e3d24129f"
+verdict = "approved"
 +++
 
 # Experiment 650: Tmux Layout Change
@@ -88,3 +93,54 @@ windows update and emit a full `Windows` snapshot, unknown windows are ignored,
 invalid layouts defunct the viewer, queued commands are not consumed or emitted,
 `visible_layout` and `raw_flags` are ignored, and pane/runtime integration
 remains out of scope.
+
+## Result
+
+**Result:** Pass
+
+Implemented command-queue `LayoutChange` handling in
+`roastty/src/terminal/tmux.rs`. Known windows now parse the notification's
+checked `layout` with `Layout::parse_with_checksum`, update the stored
+`TmuxWindow` layout, and emit a full `Windows` snapshot. Unknown windows are
+ignored, matching upstream's early return. Invalid checked layouts move the
+viewer to `Defunct` and emit `Exit`.
+
+`LayoutChange` does not consume or emit queued commands. The notification's
+`visible_layout` and `raw_flags` fields remain ignored in this slice.
+
+The intended upstream boundary remains intact. This experiment does not port
+`syncLayouts`, does not create/prune panes, does not queue pane
+history/visible/state commands, and does not integrate with PTY, App, or Surface
+runtime code.
+
+Verification performed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty terminal::tmux` — 95 passed, 0 failed
+
+Source comparison was against `vendor/ghostty/src/terminal/tmux/viewer.zig`
+`layoutChanged` and the `syncLayouts` boundary.
+
+## Completion Review
+
+Codex completion review session `019e9ad7-04a6-7b20-823a-fa6e3d24129f` found no
+blocking issues and approved the completed experiment. The reviewer confirmed
+that command-queue `LayoutChange` updates known windows with
+`Layout::parse_with_checksum`, emits a full `Windows` snapshot, ignores unknown
+windows, defuncts on invalid layouts, leaves queued commands untouched, ignores
+`visible_layout` and `raw_flags`, and does not add `syncLayouts`, pane
+management, PTY, App, or Surface integration.
+
+The reviewer also ran:
+
+- `cargo test -p roastty terminal::tmux` — 95 passed
+- `cargo fmt -p roastty -- --check`
+- `prettier --check ... README.md ... 650-tmux-layout-change.md`
+- `git diff --check`
+
+## Conclusion
+
+Roastty's standalone tmux viewer now updates stored window layouts on
+`LayoutChange` without crossing into pane synchronization. The next tmux
+experiment should begin the `syncLayouts` pane-state boundary or explicitly
+split out pane ID discovery from layout trees before creating terminal state.

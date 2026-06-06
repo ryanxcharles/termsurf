@@ -664,9 +664,11 @@ impl TmuxViewer {
             ControlNotification::WindowAdd { .. } => {
                 self.queue_commands([TmuxCommand::ListWindows])
             }
+            ControlNotification::LayoutChange {
+                window_id, layout, ..
+            } => self.layout_changed(window_id, &layout),
             ControlNotification::Enter => Vec::new(),
             ControlNotification::Output { .. }
-            | ControlNotification::LayoutChange { .. }
             | ControlNotification::WindowRenamed { .. }
             | ControlNotification::WindowPaneChanged { .. }
             | ControlNotification::SessionsChanged
@@ -711,6 +713,23 @@ impl TmuxViewer {
         let mut actions = vec![TmuxViewerAction::Windows(Vec::new())];
         actions.extend(self.queue_commands([TmuxCommand::ListWindows]));
         actions
+    }
+
+    fn layout_changed(&mut self, window_id: usize, layout: &str) -> Vec<TmuxViewerAction> {
+        let Some(index) = self
+            .windows
+            .iter()
+            .position(|window| window.id == window_id)
+        else {
+            return Vec::new();
+        };
+
+        let Ok(layout) = Layout::parse_with_checksum(layout) else {
+            return self.defunct();
+        };
+
+        self.windows[index].layout = layout;
+        vec![TmuxViewerAction::Windows(self.windows.clone())]
     }
 
     fn received_command_output(&mut self, content: Vec<u8>) -> Vec<TmuxViewerAction> {
@@ -2084,12 +2103,6 @@ mod tests {
                 pane_id: 42,
                 data: "output".to_owned(),
             },
-            ControlNotification::LayoutChange {
-                window_id: 2,
-                layout: checked_layout("80x24,0,0,42"),
-                visible_layout: checked_layout("80x24,0,0,42"),
-                raw_flags: "flags".to_owned(),
-            },
         ];
 
         for notification in ignored {
@@ -2108,6 +2121,96 @@ mod tests {
             assert_eq!(viewer.windows(), windows.as_slice());
             assert_eq!(viewer.queue_len(), 1);
         }
+    }
+
+    #[test]
+    fn tmux_viewer_layout_change_updates_known_window_and_ignores_visible_fields() {
+        let mut viewer = TmuxViewer::new();
+        let old_window = test_window(2, 80, 24, "80x24,0,0,42");
+        let unchanged_window = test_window(3, 100, 30, "100x30,0,0,43");
+        let new_layout = checked_layout("80x24,0,0{40x24,0,0,42,40x24,40,0,44}");
+        let expected = vec![
+            TmuxWindow {
+                layout: Layout::parse_with_checksum(&new_layout).unwrap(),
+                ..old_window.clone()
+            },
+            unchanged_window.clone(),
+        ];
+        viewer.state = TmuxViewerState::CommandQueue;
+        viewer.windows = vec![old_window, unchanged_window];
+
+        assert_eq!(
+            viewer.next(ControlNotification::LayoutChange {
+                window_id: 2,
+                layout: new_layout,
+                visible_layout: "not-a-layout".to_owned(),
+                raw_flags: "ignored".to_owned(),
+            }),
+            vec![TmuxViewerAction::Windows(expected.clone())]
+        );
+        assert_eq!(viewer.windows(), expected.as_slice());
+    }
+
+    #[test]
+    fn tmux_viewer_layout_change_unknown_window_is_ignored() {
+        let mut viewer = TmuxViewer::new();
+        let windows = vec![test_window(2, 80, 24, "80x24,0,0,42")];
+        viewer.state = TmuxViewerState::CommandQueue;
+        viewer.windows = windows.clone();
+
+        assert_eq!(
+            viewer.next(ControlNotification::LayoutChange {
+                window_id: 99,
+                layout: checked_layout("80x24,0,0,99"),
+                visible_layout: checked_layout("80x24,0,0,99"),
+                raw_flags: "ignored".to_owned(),
+            }),
+            Vec::new()
+        );
+        assert_eq!(viewer.windows(), windows.as_slice());
+    }
+
+    #[test]
+    fn tmux_viewer_layout_change_invalid_layout_defuncts() {
+        let mut viewer = TmuxViewer::new();
+        viewer.state = TmuxViewerState::CommandQueue;
+        viewer.windows = vec![test_window(2, 80, 24, "80x24,0,0,42")];
+
+        assert_eq!(
+            viewer.next(ControlNotification::LayoutChange {
+                window_id: 2,
+                layout: "0000,80x24,0,0,42".to_owned(),
+                visible_layout: checked_layout("80x24,0,0,42"),
+                raw_flags: "ignored".to_owned(),
+            }),
+            vec![TmuxViewerAction::Exit]
+        );
+        assert_eq!(viewer.state(), TmuxViewerState::Defunct);
+    }
+
+    #[test]
+    fn tmux_viewer_layout_change_does_not_consume_pending_command() {
+        let mut viewer = TmuxViewer::new();
+        let new_layout = checked_layout("80x24,0,0,43");
+        viewer.queue_command_for_tests(TmuxCommand::ListWindows);
+        viewer.windows = vec![test_window(2, 80, 24, "80x24,0,0,42")];
+
+        assert!(matches!(
+            viewer
+                .next(ControlNotification::LayoutChange {
+                    window_id: 2,
+                    layout: new_layout,
+                    visible_layout: checked_layout("80x24,0,0,43"),
+                    raw_flags: "ignored".to_owned(),
+                })
+                .as_slice(),
+            [TmuxViewerAction::Windows(_)]
+        ));
+        assert_eq!(viewer.queue_len(), 1);
+        assert_eq!(
+            viewer.command_queue.front(),
+            Some(&TmuxCommand::ListWindows)
+        );
     }
 
     #[test]
