@@ -720,9 +720,9 @@ impl TmuxViewer {
             ControlNotification::LayoutChange {
                 window_id, layout, ..
             } => self.layout_changed(window_id, &layout),
+            ControlNotification::Output { pane_id, data } => self.received_output(pane_id, &data),
             ControlNotification::Enter => Vec::new(),
-            ControlNotification::Output { .. }
-            | ControlNotification::WindowRenamed { .. }
+            ControlNotification::WindowRenamed { .. }
             | ControlNotification::WindowPaneChanged { .. }
             | ControlNotification::SessionsChanged
             | ControlNotification::ClientDetached { .. }
@@ -931,6 +931,14 @@ impl TmuxViewer {
         };
         self.tmux_version = version;
         true
+    }
+
+    fn received_output(&mut self, id: usize, data: &str) -> Vec<TmuxViewerAction> {
+        let Some(pane) = self.panes.iter_mut().find(|pane| pane.id == id) else {
+            return Vec::new();
+        };
+        let _ = pane.terminal.next_slice(data.as_bytes());
+        Vec::new()
     }
 
     fn received_pane_visible(&mut self, capture: TmuxCapturePane, content: &[u8]) -> bool {
@@ -3032,6 +3040,120 @@ mod tests {
             Vec::new()
         );
         assert_eq!(viewer.state(), TmuxViewerState::CommandQueue);
+    }
+
+    #[test]
+    fn tmux_viewer_live_output_replays_to_tracked_pane() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 12, 2)]);
+        viewer.state = TmuxViewerState::CommandQueue;
+
+        assert_eq!(
+            viewer.next(ControlNotification::Output {
+                pane_id: 42,
+                data: "live output".to_owned(),
+            }),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_active_plain_for_tests(42, TmuxScreenKey::Primary),
+            Some("live output".to_owned())
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_live_output_ignores_unknown_panes() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 12, 2)]);
+        viewer.state = TmuxViewerState::CommandQueue;
+
+        assert_eq!(
+            viewer.next(ControlNotification::Output {
+                pane_id: 99,
+                data: "ignored".to_owned(),
+            }),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_active_plain_for_tests(42, TmuxScreenKey::Primary),
+            Some(String::new())
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_live_output_does_not_consume_pending_command() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 12, 2)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneState);
+        viewer.queue_command_for_tests(TmuxCommand::User("next-command\n".to_owned()));
+
+        assert_eq!(
+            viewer.next(ControlNotification::Output {
+                pane_id: 42,
+                data: "live".to_owned(),
+            }),
+            Vec::new()
+        );
+
+        assert_eq!(viewer.queue_len(), 2);
+        assert_eq!(
+            viewer.pane_active_plain_for_tests(42, TmuxScreenKey::Primary),
+            Some("live".to_owned())
+        );
+    }
+
+    #[test]
+    fn tmux_viewer_live_output_with_empty_queue_emits_no_actions() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 12, 2)]);
+        viewer.state = TmuxViewerState::CommandQueue;
+        assert_eq!(viewer.queue_len(), 0);
+
+        assert_eq!(
+            viewer.next(ControlNotification::Output {
+                pane_id: 42,
+                data: "live".to_owned(),
+            }),
+            Vec::new()
+        );
+
+        assert_eq!(viewer.state(), TmuxViewerState::CommandQueue);
+        assert_eq!(viewer.queue_len(), 0);
+    }
+
+    #[test]
+    fn tmux_viewer_live_output_replays_to_active_alternate_screen() {
+        let mut viewer = TmuxViewer::new();
+        viewer.set_panes_for_tests(&[(42, 20, 2)]);
+        viewer.queue_command_for_tests(TmuxCommand::PaneVisible(TmuxCapturePane {
+            id: 42,
+            screen_key: TmuxScreenKey::Alternate,
+        }));
+        assert_eq!(
+            viewer.next(ControlNotification::BlockEnd(b"alternate".to_vec())),
+            Vec::new()
+        );
+        viewer.state = TmuxViewerState::CommandQueue;
+        viewer.command_queue.clear();
+
+        assert_eq!(
+            viewer.next(ControlNotification::Output {
+                pane_id: 42,
+                data: " live".to_owned(),
+            }),
+            Vec::new()
+        );
+
+        assert_eq!(
+            viewer.pane_active_plain_for_tests(42, TmuxScreenKey::Alternate),
+            Some("alternate live".to_owned())
+        );
+        assert_eq!(
+            viewer.pane_active_plain_for_tests(42, TmuxScreenKey::Primary),
+            Some(String::new())
+        );
     }
 
     #[test]

@@ -87,3 +87,43 @@ now explicitly limits this experiment to wiring the existing parsed notification
 through the viewer and defers raw byte or tmux-escaped payload parity to a
 future parser-level experiment. Codex also requested an empty-command-queue
 live-output test, which is now part of the plan.
+
+## Result
+
+**Result:** Pass.
+
+`TmuxViewer` now routes `ControlNotification::Output` to a live-output handler
+in command-queue state. The handler finds the tracked pane by ID, feeds the
+existing UTF-8 output data into that pane terminal with `Terminal::next_slice`,
+returns no actions, leaves the command queue untouched, and ignores unknown
+panes.
+
+Focused tests cover tracked panes, unknown panes, pending commands, an empty
+command queue, and output delivered while the alternate screen is active.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty terminal::tmux` — 148 passed, 0 failed
+
+## Conclusion
+
+Roastty now applies live tmux pane output to the pane terminal instead of
+dropping it. This matches the approved viewer-scope behavior from upstream
+Ghostty while preserving the known parser limitation: raw byte and tmux-escaped
+`%output` parity remains a future parser-level slice.
+
+## Completion Review
+
+**Result:** Approved.
+
+Codex found no concrete bugs, regressions, or missing tests blocking the result
+commit. The review confirmed that `ControlNotification::Output` is routed in
+command-queue state, `received_output` feeds the tracked pane terminal and
+returns no actions, the command queue remains untouched, and the tests cover
+tracked panes, unknown panes, pending commands, empty queues, and active
+alternate-screen routing.
+
+The review also confirmed that the recorded result and conclusion accurately
+describe the implemented viewer-scope behavior and the deferred raw byte parser
+parity.
