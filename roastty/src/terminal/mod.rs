@@ -143,6 +143,9 @@ mod string_map;
 mod tabstops;
 
 #[allow(dead_code)]
+pub(crate) mod tmux;
+
+#[allow(dead_code)]
 pub(crate) mod terminal;
 
 #[allow(dead_code)]

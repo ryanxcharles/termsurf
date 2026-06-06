@@ -102,3 +102,68 @@ Follow-up review in the same session approved the revised design with no
 blocking findings. The reviewer confirmed that the guard-line validation
 boundary, README checklist update, DCS-ignore regression, and `enter`
 notification boundary were all addressed.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a standalone tmux control-mode parser in
+`roastty/src/terminal/tmux.rs`, exposed from `roastty/src/terminal/mod.rs`.
+
+The parser ports the first upstream tmux slice from
+`vendor/ghostty/src/terminal/tmux/control.zig`:
+
+- idle, notification, block, and broken states;
+- the one-megabyte default buffer limit and broken-state input dropping;
+- `%begin` block entry with raw block accumulation;
+- `%end` and `%error` guard-line shape validation using the same no-metadata
+  matching boundary as upstream;
+- block payload trimming and preservation of misleading `%end` / `%error`
+  payload lines;
+- `%output`, `%session-changed`, `%sessions-changed`, `%layout-change`,
+  `%window-add`, `%window-renamed`, `%window-pane-changed`, `%client-detached`,
+  and `%client-session-changed` notifications;
+- unknown and malformed notifications returning to idle without emitting a
+  notification;
+- non-`%` idle input emitting `Exit` and entering the broken state.
+
+The Rust parser owns emitted notification strings and block payloads instead of
+borrowing slices from the internal buffer. It uses direct string parsing rather
+than a regex engine for these anchored control-mode lines. The `Enter`
+notification variant is present as the future DCS-entry boundary, but this
+experiment intentionally leaves `terminal/dcs.rs`'s current `DCS 1000 p` ignore
+behavior unchanged.
+
+Verification passed:
+
+- `cargo test -p roastty terminal::tmux` — 25 passed
+- `cargo test -p roastty terminal::dcs` — 9 passed
+- `cargo test -p roastty terminal::terminal::tests::terminal_stream_dcs_command_tmux_and_unknown_are_ignored`
+  — 1 passed
+- `cargo fmt -p roastty` — passed
+- `cargo fmt -p roastty -- --check` — passed
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/642-tmux-control-parser.md`
+  — passed
+- `git diff --check` — passed
+
+Source comparison was performed against:
+
+- `vendor/ghostty/src/terminal/tmux.zig`
+- `vendor/ghostty/src/terminal/tmux/control.zig`
+- `vendor/ghostty/src/terminal/dcs.zig`
+
+Completion review in Codex session `019e9a9a-ee48-7ec2-bb17-ea152a97b42d`
+approved the result with no blocking findings. The reviewer agreed that the
+parser matches the intended standalone `terminal/tmux/control.zig` slice, that
+the README keeps the broader tmux scope open correctly, and that no
+implementation or scope fixes were required. The review nits were to record the
+full verification list and complete the README provenance tag before the result
+commit.
+
+## Conclusion
+
+The tmux control parser foundation is complete, but the overall terminal-core
+`tmux` checklist item remains open. The next tmux experiments still need to wire
+DCS entry and `Enter`, port layout parsing, port output command formatting,
+build the viewer state machine, connect PTY writes/reads, and integrate with the
+App/Surface layers.
