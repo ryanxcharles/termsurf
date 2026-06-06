@@ -1818,6 +1818,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 670: Surface Render-State Snapshot](670-surface-render-state-snapshot.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 671: Surface Worker Launch](671-surface-worker-launch.md) —
+  **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
