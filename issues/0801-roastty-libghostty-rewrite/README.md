@@ -1873,6 +1873,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 691: Surface Split Action Callbacks](691-surface-split-action-callbacks.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 692: Surface Mouse Button Position Dispatch](692-surface-mouse-button-position-dispatch.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
