@@ -1991,6 +1991,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 738: Binding Action Write Scrollback File Copy](738-binding-action-write-scrollback-file-copy.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 739: Binding Action Write Scrollback File Paste](739-binding-action-write-scrollback-file-paste.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
