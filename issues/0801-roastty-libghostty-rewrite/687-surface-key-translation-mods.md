@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 687: Surface Key Translation Mods
@@ -94,3 +99,49 @@ Codex also approved the narrow ABI scope: add the upstream-compatible modifier
 bitmask enum, add the surface query, round-trip known bits under the current
 policy, and drop unknown bits. The planned verification covers constants,
 internal layout, null/live calls, right-side bits, and unknown-bit dropping.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now exposes an upstream-compatible `roastty_input_mods_e` bitmask and
+`roastty_surface_key_translation_mods(surface, mods)` in the public C ABI. The
+Rust implementation converts raw ABI bits into `input::key_mods::Mods`, applies
+the existing translation helper with the current default `OptionAsAlt::False`
+policy, and converts the result back to the public bitmask.
+
+Known modifier bits round-trip for null and live surfaces under the current
+policy, right-side modifier bits preserve the internal `Mods::int()` layout, and
+unknown input bits are dropped from the returned ABI value. The C ABI harness
+asserts the public constants and exercises null/live calls through `roastty.h`.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty surface`
+- `cargo test -p roastty key`
+- `cargo test -p roastty --test abi_harness`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+The surface-level key translation modifier query is now present as a small,
+tested ABI slice. It intentionally does not implement full key dispatch, binding
+detection, keybind trigger state, or config/layout-driven `macos-option-as-alt`;
+those remain separate work because the current Roastty surface boundary does not
+yet carry that policy.
+
+## Completion Review
+
+**Result:** Approved after provenance update.
+
+Codex found no code, ABI, regression, or missing-test blockers. It confirmed the
+header constants match the intended upstream-compatible bit values, the exported
+function applies the current `OptionAsAlt::False` policy, known bits round-trip,
+and unknown bits are dropped by reconstructing the return value from
+`Mods::int()`.
+
+Codex initially blocked the result commit only because result-review provenance,
+this completion-review section, and the final README agent tuple were not
+recorded yet. Those workflow records are now present.

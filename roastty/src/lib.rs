@@ -101,6 +101,17 @@ const ROASTTY_SURFACE_CONTEXT_WINDOW: c_int = 0;
 const ROASTTY_SURFACE_CONTEXT_TAB: c_int = 1;
 const ROASTTY_SURFACE_CONTEXT_SPLIT: c_int = 2;
 
+const ROASTTY_MODS_SHIFT: c_int = 1 << 0;
+const ROASTTY_MODS_CTRL: c_int = 1 << 1;
+const ROASTTY_MODS_ALT: c_int = 1 << 2;
+const ROASTTY_MODS_SUPER: c_int = 1 << 3;
+const ROASTTY_MODS_CAPS: c_int = 1 << 4;
+const ROASTTY_MODS_NUM: c_int = 1 << 5;
+const ROASTTY_MODS_SHIFT_RIGHT: c_int = 1 << 6;
+const ROASTTY_MODS_CTRL_RIGHT: c_int = 1 << 7;
+const ROASTTY_MODS_ALT_RIGHT: c_int = 1 << 8;
+const ROASTTY_MODS_SUPER_RIGHT: c_int = 1 << 9;
+
 const ROASTTY_OPTIMIZE_DEBUG: c_int = 0;
 #[allow(dead_code)]
 const ROASTTY_OPTIMIZE_RELEASE_SAFE: c_int = 1;
@@ -1947,6 +1958,35 @@ fn key_mods_to_abi(value: key_mods::Mods) -> RoasttyKeyMods {
         alt_side: key_side_to_int(value.sides.alt),
         super_side: key_side_to_int(value.sides.super_),
     }
+}
+
+fn side_from_raw_bit(value: c_int, bit: c_int) -> key_mods::Side {
+    if value & bit == 0 {
+        key_mods::Side::Left
+    } else {
+        key_mods::Side::Right
+    }
+}
+
+fn key_mods_from_raw(value: c_int) -> key_mods::Mods {
+    key_mods::Mods {
+        shift: value & ROASTTY_MODS_SHIFT != 0,
+        ctrl: value & ROASTTY_MODS_CTRL != 0,
+        alt: value & ROASTTY_MODS_ALT != 0,
+        super_: value & ROASTTY_MODS_SUPER != 0,
+        caps_lock: value & ROASTTY_MODS_CAPS != 0,
+        num_lock: value & ROASTTY_MODS_NUM != 0,
+        sides: key_mods::ModSides {
+            shift: side_from_raw_bit(value, ROASTTY_MODS_SHIFT_RIGHT),
+            ctrl: side_from_raw_bit(value, ROASTTY_MODS_CTRL_RIGHT),
+            alt: side_from_raw_bit(value, ROASTTY_MODS_ALT_RIGHT),
+            super_: side_from_raw_bit(value, ROASTTY_MODS_SUPER_RIGHT),
+        },
+    }
+}
+
+fn key_mods_to_raw(value: key_mods::Mods) -> c_int {
+    c_int::from(value.int())
 }
 
 fn option_as_alt_from_int(value: c_int) -> Option<key_mods::OptionAsAlt> {
@@ -8901,6 +8941,14 @@ pub extern "C" fn roastty_surface_set_color_scheme(surface: RoasttySurface, colo
 }
 
 #[no_mangle]
+pub extern "C" fn roastty_surface_key_translation_mods(
+    _surface: RoasttySurface,
+    mods: c_int,
+) -> c_int {
+    key_mods_to_raw(key_mods_from_raw(mods).translation(key_mods::OptionAsAlt::False))
+}
+
+#[no_mangle]
 pub extern "C" fn roastty_surface_text(surface: RoasttySurface, text: *const c_char, len: usize) {
     if len == 0 {
         return;
@@ -9700,6 +9748,35 @@ mod tests {
         assert_eq!(surface_from_handle(surface).unwrap().display_id, 0);
         roastty_surface_free(surface);
         roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_key_translation_mods_round_trips_known_bits_with_default_policy() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let mods =
+            ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT | ROASTTY_MODS_CAPS | ROASTTY_MODS_ALT_RIGHT;
+
+        assert_eq!(
+            roastty_surface_key_translation_mods(ptr::null_mut(), mods),
+            mods
+        );
+        assert_eq!(roastty_surface_key_translation_mods(surface, mods), mods);
+
+        roastty_app_free(app);
+        assert_eq!(roastty_surface_key_translation_mods(surface, mods), mods);
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_key_translation_mods_drops_unknown_bits() {
+        let known = ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER_RIGHT;
+        let unknown = 1 << 20;
+
+        assert_eq!(
+            roastty_surface_key_translation_mods(ptr::null_mut(), known | unknown),
+            known
+        );
     }
 
     #[test]
@@ -20864,6 +20941,48 @@ mod tests {
         assert_eq!(key_from_int(0), Some(key::Key::Unidentified));
         assert_eq!(key_from_int(175), Some(key::Key::Paste));
         assert_eq!(key_from_int(176), None);
+    }
+
+    #[test]
+    fn key_translation_mods_bitmask_matches_internal_layout() {
+        assert_eq!(ROASTTY_MODS_SHIFT, 1 << 0);
+        assert_eq!(ROASTTY_MODS_CTRL, 1 << 1);
+        assert_eq!(ROASTTY_MODS_ALT, 1 << 2);
+        assert_eq!(ROASTTY_MODS_SUPER, 1 << 3);
+        assert_eq!(ROASTTY_MODS_CAPS, 1 << 4);
+        assert_eq!(ROASTTY_MODS_NUM, 1 << 5);
+        assert_eq!(ROASTTY_MODS_SHIFT_RIGHT, 1 << 6);
+        assert_eq!(ROASTTY_MODS_CTRL_RIGHT, 1 << 7);
+        assert_eq!(ROASTTY_MODS_ALT_RIGHT, 1 << 8);
+        assert_eq!(ROASTTY_MODS_SUPER_RIGHT, 1 << 9);
+
+        let mods = key_mods::Mods {
+            shift: true,
+            ctrl: true,
+            alt: true,
+            super_: true,
+            caps_lock: true,
+            num_lock: true,
+            sides: key_mods::ModSides {
+                shift: key_mods::Side::Right,
+                ctrl: key_mods::Side::Right,
+                alt: key_mods::Side::Right,
+                super_: key_mods::Side::Right,
+            },
+        };
+        assert_eq!(
+            key_mods_to_raw(mods),
+            ROASTTY_MODS_SHIFT
+                | ROASTTY_MODS_CTRL
+                | ROASTTY_MODS_ALT
+                | ROASTTY_MODS_SUPER
+                | ROASTTY_MODS_CAPS
+                | ROASTTY_MODS_NUM
+                | ROASTTY_MODS_SHIFT_RIGHT
+                | ROASTTY_MODS_CTRL_RIGHT
+                | ROASTTY_MODS_ALT_RIGHT
+                | ROASTTY_MODS_SUPER_RIGHT
+        );
     }
 
     #[test]

@@ -883,6 +883,20 @@ typedef enum {
 } roastty_key_action_e;
 
 typedef enum {
+  ROASTTY_MODS_NONE = 0,
+  ROASTTY_MODS_SHIFT = 1 << 0,
+  ROASTTY_MODS_CTRL = 1 << 1,
+  ROASTTY_MODS_ALT = 1 << 2,
+  ROASTTY_MODS_SUPER = 1 << 3,
+  ROASTTY_MODS_CAPS = 1 << 4,
+  ROASTTY_MODS_NUM = 1 << 5,
+  ROASTTY_MODS_SHIFT_RIGHT = 1 << 6,
+  ROASTTY_MODS_CTRL_RIGHT = 1 << 7,
+  ROASTTY_MODS_ALT_RIGHT = 1 << 8,
+  ROASTTY_MODS_SUPER_RIGHT = 1 << 9,
+} roastty_input_mods_e;
+
+typedef enum {
   ROASTTY_KEY_UNIDENTIFIED = 0,
   ROASTTY_KEY_BACKQUOTE = 1,
   ROASTTY_KEY_BACKSLASH = 2,
@@ -1810,6 +1824,8 @@ ROASTTY_API uint64_t roastty_surface_foreground_pid(roastty_surface_t);
 ROASTTY_API roastty_string_s roastty_surface_tty_name(roastty_surface_t);
 ROASTTY_API void roastty_surface_set_color_scheme(roastty_surface_t,
                                                   roastty_color_scheme_e);
+ROASTTY_API roastty_input_mods_e
+roastty_surface_key_translation_mods(roastty_surface_t, roastty_input_mods_e);
 ROASTTY_API void roastty_surface_text(roastty_surface_t, const char*, uintptr_t);
 ROASTTY_API void roastty_surface_preedit(roastty_surface_t,
                                          const char*,

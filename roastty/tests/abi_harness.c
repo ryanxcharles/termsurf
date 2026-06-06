@@ -1758,6 +1758,17 @@ static void assert_support_abi(void) {
   assert(ROASTTY_BUILD_INFO_VERSION_PATCH == 8);
   assert(ROASTTY_BUILD_INFO_VERSION_PRE == 9);
   assert(ROASTTY_BUILD_INFO_VERSION_BUILD == 10);
+  assert(ROASTTY_MODS_NONE == 0);
+  assert(ROASTTY_MODS_SHIFT == (1 << 0));
+  assert(ROASTTY_MODS_CTRL == (1 << 1));
+  assert(ROASTTY_MODS_ALT == (1 << 2));
+  assert(ROASTTY_MODS_SUPER == (1 << 3));
+  assert(ROASTTY_MODS_CAPS == (1 << 4));
+  assert(ROASTTY_MODS_NUM == (1 << 5));
+  assert(ROASTTY_MODS_SHIFT_RIGHT == (1 << 6));
+  assert(ROASTTY_MODS_CTRL_RIGHT == (1 << 7));
+  assert(ROASTTY_MODS_ALT_RIGHT == (1 << 8));
+  assert(ROASTTY_MODS_SUPER_RIGHT == (1 << 9));
   assert(ROASTTY_SYS_LOG_LEVEL_ERROR == 0);
   assert(ROASTTY_SYS_LOG_LEVEL_WARNING == 1);
   assert(ROASTTY_SYS_LOG_LEVEL_INFO == 2);
@@ -3948,6 +3959,11 @@ int main(int argc, char **argv) {
   assert(!roastty_app_has_global_keybinds(NULL));
   assert(roastty_surface_userdata(NULL) == NULL);
   assert(roastty_surface_app(NULL) == NULL);
+  assert(roastty_surface_key_translation_mods(
+             NULL,
+             (roastty_input_mods_e)(ROASTTY_MODS_ALT | ROASTTY_MODS_ALT_RIGHT |
+                                    (1 << 20))) ==
+         (ROASTTY_MODS_ALT | ROASTTY_MODS_ALT_RIGHT));
   roastty_surface_config_s null_inherited =
       roastty_surface_inherited_config(NULL, ROASTTY_SURFACE_CONTEXT_SPLIT);
   assert(null_inherited.context == ROASTTY_SURFACE_CONTEXT_SPLIT);
@@ -4137,6 +4153,11 @@ int main(int argc, char **argv) {
   assert(surface != NULL);
   assert(roastty_surface_app(surface) == app);
   assert((uintptr_t)roastty_surface_userdata(surface) == surface_userdata);
+  assert(roastty_surface_key_translation_mods(
+             surface,
+             (roastty_input_mods_e)(ROASTTY_MODS_SHIFT | ROASTTY_MODS_CTRL |
+                                    ROASTTY_MODS_CTRL_RIGHT)) ==
+         (ROASTTY_MODS_SHIFT | ROASTTY_MODS_CTRL | ROASTTY_MODS_CTRL_RIGHT));
   roastty_surface_config_s inherited =
       roastty_surface_inherited_config(surface, ROASTTY_SURFACE_CONTEXT_SPLIT);
   assert(inherited.context == ROASTTY_SURFACE_CONTEXT_SPLIT);
