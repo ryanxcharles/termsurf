@@ -118,6 +118,12 @@ const ROASTTY_ACTION_NEW_SPLIT: c_int = 4;
 const ROASTTY_ACTION_GOTO_SPLIT: c_int = 16;
 const ROASTTY_ACTION_RESIZE_SPLIT: c_int = 18;
 const ROASTTY_ACTION_EQUALIZE_SPLITS: c_int = 19;
+const ROASTTY_ACTION_SET_TITLE: c_int = 32;
+const ROASTTY_ACTION_SET_TAB_TITLE: c_int = 33;
+const ROASTTY_ACTION_PROMPT_TITLE: c_int = 34;
+
+const ROASTTY_PROMPT_TITLE_SURFACE: c_int = 0;
+const ROASTTY_PROMPT_TITLE_TAB: c_int = 1;
 
 const ROASTTY_SPLIT_DIRECTION_RIGHT: c_int = 0;
 const ROASTTY_SPLIT_DIRECTION_DOWN: c_int = 1;
@@ -1802,6 +1808,21 @@ impl Surface {
         false
     }
 
+    fn prompt_title(&self, prompt: c_int) -> bool {
+        let mut storage = [0usize; 8];
+        storage[0] = prompt as usize;
+        self.perform_action_result(ROASTTY_ACTION_PROMPT_TITLE, storage)
+    }
+
+    fn set_title(&self, tag: c_int, title: &[u8]) -> bool {
+        let Ok(title) = CString::new(title) else {
+            return false;
+        };
+        let mut storage = [0usize; 8];
+        storage[0] = title.as_ptr() as usize;
+        self.perform_action_result(tag, storage)
+    }
+
     fn inherited_config(&mut self, context: c_int) -> RoasttySurfaceConfig {
         let mut config = roastty_surface_config_new();
         config.context = valid_surface_context(context).unwrap_or(self.context);
@@ -2789,6 +2810,8 @@ enum ParsedBindingAction {
     Text(Vec<u8>),
     Csi(Vec<u8>),
     Esc(Vec<u8>),
+    PromptTitle(c_int),
+    SetTitle(c_int, Vec<u8>),
     Reset,
     ClearScreen,
     SelectAll,
@@ -2895,6 +2918,28 @@ fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindin
         b"text" => Some(ParsedBindingAction::Text(parameter?.to_vec())),
         b"csi" => Some(ParsedBindingAction::Csi(parameter?.to_vec())),
         b"esc" => Some(ParsedBindingAction::Esc(parameter?.to_vec())),
+        b"prompt_surface_title" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(ParsedBindingAction::PromptTitle(
+                ROASTTY_PROMPT_TITLE_SURFACE,
+            ))
+        }
+        b"prompt_tab_title" => {
+            if parameter.is_some() {
+                return None;
+            }
+            Some(ParsedBindingAction::PromptTitle(ROASTTY_PROMPT_TITLE_TAB))
+        }
+        b"set_surface_title" => Some(ParsedBindingAction::SetTitle(
+            ROASTTY_ACTION_SET_TITLE,
+            parse_title_bytes(parameter?)?,
+        )),
+        b"set_tab_title" => Some(ParsedBindingAction::SetTitle(
+            ROASTTY_ACTION_SET_TAB_TITLE,
+            parse_title_bytes(parameter?)?,
+        )),
         b"reset" => {
             if parameter.is_some() {
                 return None;
@@ -3091,6 +3136,13 @@ fn parse_font_size_f32_ascii(bytes: &[u8]) -> Option<f32> {
     } else {
         None
     }
+}
+
+fn parse_title_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.contains(&0) || std::str::from_utf8(bytes).is_err() {
+        return None;
+    }
+    Some(bytes.to_vec())
 }
 
 fn copied_env_vars(ptr: *mut RoasttyEnvVar, len: usize) -> Vec<(String, String)> {
@@ -11043,6 +11095,18 @@ pub extern "C" fn roastty_surface_binding_action(
             surface.raw_text(&text);
             true
         }
+        ParsedBindingAction::PromptTitle(prompt) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.prompt_title(prompt)
+        }
+        ParsedBindingAction::SetTitle(tag, title) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.set_title(tag, &title)
+        }
         ParsedBindingAction::Reset => {
             if surface.app.is_null() {
                 return false;
@@ -11194,13 +11258,14 @@ mod tests {
     static CLOSE_USERDATA: AtomicUsize = AtomicUsize::new(0);
     static CLOSE_NEEDS_CONFIRM: AtomicBool = AtomicBool::new(false);
 
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    #[derive(Clone, Debug, Default, PartialEq, Eq)]
     struct ActionRecord {
         app: RoasttyApp,
         target_tag: c_int,
         surface: RoasttySurface,
         action_tag: c_int,
         storage: [usize; 8],
+        title: Option<String>,
     }
 
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -11328,12 +11393,26 @@ mod tests {
         action: RoasttyAction,
     ) -> bool {
         ACTION_RECORDS.with(|records| {
+            let title = if matches!(
+                action.tag,
+                ROASTTY_ACTION_SET_TITLE | ROASTTY_ACTION_SET_TAB_TITLE
+            ) {
+                let ptr = action.storage[0] as *const c_char;
+                (!ptr.is_null()).then(|| {
+                    unsafe { CStr::from_ptr(ptr) }
+                        .to_string_lossy()
+                        .into_owned()
+                })
+            } else {
+                None
+            };
             records.borrow_mut().push(ActionRecord {
                 app,
                 target_tag: target.tag,
                 surface: target.surface,
                 action_tag: action.tag,
                 storage: action.storage,
+                title,
             });
         });
         ACTION_RESULT.with(|result| *result.borrow())
@@ -12984,6 +13063,11 @@ mod tests {
         assert_eq!(ROASTTY_ACTION_GOTO_SPLIT, 16);
         assert_eq!(ROASTTY_ACTION_RESIZE_SPLIT, 18);
         assert_eq!(ROASTTY_ACTION_EQUALIZE_SPLITS, 19);
+        assert_eq!(ROASTTY_ACTION_SET_TITLE, 32);
+        assert_eq!(ROASTTY_ACTION_SET_TAB_TITLE, 33);
+        assert_eq!(ROASTTY_ACTION_PROMPT_TITLE, 34);
+        assert_eq!(ROASTTY_PROMPT_TITLE_SURFACE, 0);
+        assert_eq!(ROASTTY_PROMPT_TITLE_TAB, 1);
         assert_eq!(ROASTTY_SPLIT_DIRECTION_RIGHT, 0);
         assert_eq!(ROASTTY_SPLIT_DIRECTION_DOWN, 1);
         assert_eq!(ROASTTY_SPLIT_DIRECTION_LEFT, 2);
@@ -13113,6 +13197,12 @@ mod tests {
             "text",
             "csi",
             "esc",
+            "prompt_surface_title:",
+            "prompt_surface_title:now",
+            "prompt_tab_title:",
+            "prompt_tab_title:now",
+            "set_surface_title:a\0b",
+            "set_tab_title:a\0b",
             "reset:",
             "reset:now",
             "clear_screen:",
@@ -13537,6 +13627,108 @@ mod tests {
     #[test]
     fn surface_binding_action_csi_parameters_are_not_decoded() {
         assert_binding_action_raw_bytes(b"csi:\\x15", 6, "1b5b5c783135");
+    }
+
+    #[test]
+    fn surface_binding_action_title_false_paths() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        for action in [
+            "prompt_surface_title",
+            "prompt_tab_title",
+            "set_surface_title:surface",
+            "set_surface_title:",
+            "set_tab_title:tab",
+            "set_tab_title:",
+        ] {
+            assert!(!binding_action(ptr::null_mut(), action), "{action}");
+            assert!(!binding_action(surface, action), "{action}");
+        }
+
+        assert!(!binding_action_bytes(surface, b"set_surface_title:\xff"));
+        assert!(!binding_action_bytes(surface, b"set_tab_title:\xff"));
+
+        roastty_app_free(app);
+        for action in [
+            "prompt_surface_title",
+            "prompt_tab_title",
+            "set_surface_title:surface",
+            "set_tab_title:tab",
+        ] {
+            assert!(!binding_action(surface, action), "{action}");
+        }
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_binding_action_prompt_title_forwards_runtime_actions() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+
+        assert!(binding_action(surface, "prompt_surface_title"));
+        assert!(binding_action(surface, "prompt_tab_title"));
+
+        let records = action_records();
+        assert_eq!(records.len(), 2);
+        for record in &records {
+            assert_eq!(record.app, app);
+            assert_eq!(record.target_tag, ROASTTY_TARGET_SURFACE);
+            assert_eq!(record.surface, surface);
+            assert_eq!(record.action_tag, ROASTTY_ACTION_PROMPT_TITLE);
+            assert!(record.storage[1..].iter().all(|value| *value == 0));
+        }
+        assert_eq!(records[0].storage[0], ROASTTY_PROMPT_TITLE_SURFACE as usize);
+        assert_eq!(records[1].storage[0], ROASTTY_PROMPT_TITLE_TAB as usize);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_set_title_forwards_runtime_actions() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+
+        assert!(binding_action(surface, "set_surface_title:surface"));
+        assert!(binding_action(surface, "set_tab_title:tab"));
+        assert!(binding_action(surface, "set_surface_title:"));
+        assert!(binding_action(surface, "set_tab_title:"));
+
+        let records = action_records();
+        assert_eq!(records.len(), 4);
+        for record in &records {
+            assert_eq!(record.app, app);
+            assert_eq!(record.target_tag, ROASTTY_TARGET_SURFACE);
+            assert_eq!(record.surface, surface);
+            assert!(record.storage[1..].iter().all(|value| *value == 0));
+        }
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_SET_TITLE);
+        assert_eq!(records[0].title.as_deref(), Some("surface"));
+        assert_eq!(records[1].action_tag, ROASTTY_ACTION_SET_TAB_TITLE);
+        assert_eq!(records[1].title.as_deref(), Some("tab"));
+        assert_eq!(records[2].action_tag, ROASTTY_ACTION_SET_TITLE);
+        assert_eq!(records[2].title.as_deref(), Some(""));
+        assert_eq!(records[3].action_tag, ROASTTY_ACTION_SET_TAB_TITLE);
+        assert_eq!(records[3].title.as_deref(), Some(""));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_title_returns_callback_result() {
+        let app = new_test_app_with_action(false);
+        let surface = new_test_surface(app);
+
+        assert!(!binding_action(surface, "prompt_surface_title"));
+        assert!(!binding_action(surface, "prompt_tab_title"));
+        assert!(!binding_action(surface, "set_surface_title:surface"));
+        assert!(!binding_action(surface, "set_tab_title:tab"));
+        assert_eq!(action_records().len(), 4);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
     }
 
     #[test]

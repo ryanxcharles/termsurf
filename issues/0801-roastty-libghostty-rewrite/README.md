@@ -1949,8 +1949,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 719: Binding Action Font Size](719-binding-action-font-size.md) —
   **Pass** · Codex/Codex/Codex
-- [Experiment 720: Binding Action Title](720-binding-action-title.md) —
-  **Designed** · Codex/Codex/-
+- [Experiment 720: Binding Action Title](720-binding-action-title.md) — **Pass**
+  · Codex/Codex/Codex
 
 ## Non-Goals
 

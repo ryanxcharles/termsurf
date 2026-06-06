@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 720: Binding Action Title
@@ -130,3 +135,54 @@ provenance will be added only after implementation and completion review.
 Codex re-reviewed the revised design and found no remaining blockers. The review
 approved the invalid UTF-8 and NUL set-title coverage, explicit empty/non-empty
 prompt colon coverage, and provenance record.
+
+## Result
+
+**Result:** Pass
+
+Implemented title binding-action parsing and dispatch for
+`prompt_surface_title`, `prompt_tab_title`, `set_surface_title`, and
+`set_tab_title`. Roastty now exposes the upstream-matching runtime action tags
+for set title, set tab title, and prompt title, plus the prompt-title selector
+constants.
+
+Prompt actions forward the selector in `storage[0]`. Set-title actions validate
+UTF-8 and NUL-free parameters, allow empty titles for reset/clear behavior, and
+forward a borrowed C string pointer in `storage[0]` for the duration of
+`action_cb`. Tests copy that string inside the callback to match the documented
+lifetime.
+
+The C ABI header now documents the action storage convention for split and title
+actions, and the harness covers constants, malformed prompt forms, and valid
+no-callback title actions returning `false`.
+
+Verification:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty title -- --nocapture --test-threads=1` — 11 passed
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1` — 74
+  passed
+- `cargo test -p roastty --test abi_harness` — 1 passed
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+Roastty now has the binding-action and runtime-action ABI slice needed for the
+macOS frontend to prompt for or set surface/tab titles. Remaining title work is
+frontend/UI behavior and persistent title override state; this experiment only
+establishes parser and runtime callback forwarding parity.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 720 implementation and result record.
+The review found one workflow blocker: result-review provenance was not yet
+recorded in the experiment frontmatter or README tuple. This file now includes
+`[review.result]`, and the README provenance tuple has been updated to
+`Codex/Codex/Codex`.
+
+The review found no code blockers. It approved the upstream-matching constants,
+header storage convention, borrowed C string lifetime handling, parser behavior
+for prompt and set-title actions, null/detached/no-callback false paths,
+callback-result propagation, Rust tests, C ABI smoke coverage, and
+binding-action regression coverage.

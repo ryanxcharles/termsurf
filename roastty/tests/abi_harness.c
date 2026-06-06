@@ -3963,6 +3963,11 @@ static void assert_terminal_abi(void) {
 
 int main(int argc, char **argv) {
   assert(roastty_init((uintptr_t)argc, argv) == ROASTTY_SUCCESS);
+  assert(ROASTTY_ACTION_SET_TITLE == 32);
+  assert(ROASTTY_ACTION_SET_TAB_TITLE == 33);
+  assert(ROASTTY_ACTION_PROMPT_TITLE == 34);
+  assert(ROASTTY_PROMPT_TITLE_SURFACE == 0);
+  assert(ROASTTY_PROMPT_TITLE_TAB == 1);
   assert(ROASTTY_CLIPBOARD_REQUEST_PASTE == 0);
   assert(ROASTTY_CLIPBOARD_REQUEST_OSC_52_READ == 1);
   assert(ROASTTY_CLIPBOARD_REQUEST_OSC_52_WRITE == 2);
@@ -4299,6 +4304,12 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(surface, "text", 4));
   assert(!roastty_surface_binding_action(surface, "csi", 3));
   assert(!roastty_surface_binding_action(surface, "esc", 3));
+  assert(!roastty_surface_binding_action(surface, "prompt_surface_title:", 21));
+  assert(!roastty_surface_binding_action(surface, "prompt_surface_title:now", 24));
+  assert(!roastty_surface_binding_action(surface, "prompt_tab_title:", 17));
+  assert(!roastty_surface_binding_action(surface, "prompt_tab_title:now", 20));
+  assert(!roastty_surface_binding_action(surface, "set_surface_title:a", 19));
+  assert(!roastty_surface_binding_action(surface, "set_tab_title:a", 14));
   assert(!roastty_surface_binding_action(surface, "reset:", 6));
   assert(!roastty_surface_binding_action(surface, "reset:now", 9));
   assert(!roastty_surface_binding_action(surface, "clear_screen:", 13));
@@ -4362,6 +4373,10 @@ int main(int argc, char **argv) {
   assert(roastty_surface_binding_action(surface, "text:hello", 10));
   assert(roastty_surface_binding_action(surface, "csi:", 4));
   assert(roastty_surface_binding_action(surface, "esc:", 4));
+  assert(!roastty_surface_binding_action(surface, "prompt_surface_title", 20));
+  assert(!roastty_surface_binding_action(surface, "prompt_tab_title", 16));
+  assert(!roastty_surface_binding_action(surface, "set_surface_title:", 18));
+  assert(!roastty_surface_binding_action(surface, "set_tab_title:", 13));
   assert(roastty_surface_binding_action(surface, "reset", 5));
   assert(!roastty_surface_binding_action(surface, "clear_screen", 12));
   assert(!roastty_surface_binding_action(surface, "select_all", 10));

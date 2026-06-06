@@ -1200,10 +1200,28 @@ typedef enum {
   ROASTTY_ACTION_GOTO_SPLIT = 16,
   ROASTTY_ACTION_RESIZE_SPLIT = 18,
   ROASTTY_ACTION_EQUALIZE_SPLITS = 19,
+  ROASTTY_ACTION_SET_TITLE = 32,
+  ROASTTY_ACTION_SET_TAB_TITLE = 33,
+  ROASTTY_ACTION_PROMPT_TITLE = 34,
 } roastty_action_tag_e;
+
+typedef enum {
+  ROASTTY_PROMPT_TITLE_SURFACE = 0,
+  ROASTTY_PROMPT_TITLE_TAB = 1,
+} roastty_prompt_title_e;
 
 typedef struct {
   int tag;
+  /*
+   * Tag-specific storage:
+   * - ROASTTY_ACTION_NEW_SPLIT: storage[0] = roastty_split_direction_e
+   * - ROASTTY_ACTION_GOTO_SPLIT: storage[0] = roastty_goto_split_e
+   * - ROASTTY_ACTION_RESIZE_SPLIT:
+   *   storage[0] = amount, storage[1] = roastty_resize_split_e
+   * - ROASTTY_ACTION_PROMPT_TITLE: storage[0] = roastty_prompt_title_e
+   * - ROASTTY_ACTION_SET_TITLE / ROASTTY_ACTION_SET_TAB_TITLE:
+   *   storage[0] = borrowed const char* valid only during action_cb
+   */
   uintptr_t storage[8];
 } roastty_action_s;
 
