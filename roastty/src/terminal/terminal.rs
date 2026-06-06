@@ -1180,6 +1180,13 @@ impl Terminal {
         }
     }
 
+    pub(crate) fn cursor_is_at_prompt(&self) -> bool {
+        match self.screens.active_key() {
+            TerminalScreenKey::Primary => self.screens.active().cursor_is_at_prompt(),
+            TerminalScreenKey::Alternate => false,
+        }
+    }
+
     pub(in crate::terminal) fn switch_tmux_screen(
         &mut self,
         screen: TerminalScreen,
@@ -8588,6 +8595,39 @@ mod tests {
             SemanticContent::Output
         );
         assert!(terminal.pty_response_for_tests().is_empty());
+    }
+
+    #[test]
+    fn terminal_cursor_is_at_prompt_tracks_semantic_prompt_state() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+        assert!(!terminal.cursor_is_at_prompt());
+
+        terminal.next_slice(b"\x1b]133;P\x07$ ").unwrap();
+        assert!(terminal.cursor_is_at_prompt());
+
+        terminal.next_slice(b"\x1b]133;B\x07ls").unwrap();
+        assert!(terminal.cursor_is_at_prompt());
+
+        terminal.next_slice(b"\x1b]133;C\x07").unwrap();
+        assert!(terminal.cursor_is_at_prompt());
+
+        terminal.next_slice(b"\noutput").unwrap();
+        assert!(!terminal.cursor_is_at_prompt());
+
+        terminal.next_slice(b"\n\x1b]133;A\x07").unwrap();
+        assert!(terminal.cursor_is_at_prompt());
+    }
+
+    #[test]
+    fn terminal_cursor_is_at_prompt_returns_false_on_alternate_screen() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+        terminal.next_slice(b"\x1b]133;P\x07$ ").unwrap();
+        assert!(terminal.cursor_is_at_prompt());
+
+        terminal.next_slice(b"\x1b[?1049h\x1b]133;P\x07$ ").unwrap();
+
+        assert_eq!(terminal.active_screen(), TerminalScreen::Alternate);
+        assert!(!terminal.cursor_is_at_prompt());
     }
 
     #[test]

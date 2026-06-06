@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 699: Confirm Close Policy
@@ -118,3 +123,52 @@ without a worker returns false because there is no live terminal prompt state to
 inspect. The review also accepted the scoped terminal prompt predicate, config
 field propagation plan, app/surface policy wiring, request-close forwarding, and
 test coverage.
+
+## Result
+
+**Result:** Pass
+
+Implemented app and surface quit-confirm policy:
+
+- Added `Terminal::cursor_is_at_prompt`, backed by `Screen` semantic prompt and
+  cursor semantic-content state, with alternate screens returning false.
+- Added `confirm_close_surface` to the local C-facing `Config` skeleton, cloned
+  it, copied it into `App`, inherited it into new surfaces, and wired
+  `roastty_app_update_config` / `roastty_surface_update_config` for this field.
+- Implemented `Surface::needs_confirm_quit` with detached/exited false
+  short-circuits, `Always` true for attached non-exited surfaces, `False` false,
+  and `True` consulting live terminal prompt state.
+- Implemented `roastty_app_needs_confirm_quit` by scanning registered attached
+  surfaces.
+- Kept `roastty_surface_request_close` forwarding the computed surface policy to
+  the runtime close callback.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty cursor_is_at_prompt -- --nocapture`
+- `cargo test -p roastty confirm_quit -- --nocapture`
+- `cargo test -p roastty request_close -- --nocapture`
+- `cargo test -p roastty --test abi_harness`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+Roastty now has the upstream-shaped quit-confirm decision path for the current
+surface/app model. Remaining work is outside this slice: read-only surfaces,
+full config loading/reload semantics, and frontend presentation of confirmation
+UI.
+
+## Completion Review
+
+Codex reviewed the staged completed Experiment 699 result. The review found no
+code correctness blockers and approved the implementation: detached/exited
+surfaces return false, no-worker `Always` returns true, no-worker `True` returns
+false, worker-backed `True` uses terminal prompt state, alternate screens are
+not prompts, and app aggregation, config propagation, and request-close callback
+propagation are covered by tests.
+
+The review initially blocked the result commit only because completion-review
+provenance had not yet been recorded. This section, the `[review.result]`
+frontmatter, and the README tuple update resolve that workflow finding.

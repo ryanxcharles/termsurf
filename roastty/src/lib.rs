@@ -1306,12 +1306,14 @@ pub struct RoasttyRuntimeConfig {
 
 struct Config {
     finalized: bool,
+    confirm_close_surface: config::ConfirmCloseSurface,
 }
 
 struct App {
     runtime: RoasttyRuntimeConfig,
     focused: bool,
     color_scheme: c_int,
+    confirm_close_surface: config::ConfirmCloseSurface,
     surfaces: Vec<NonNull<Surface>>,
 }
 
@@ -1331,6 +1333,7 @@ struct Surface {
     occluded: bool,
     size: RoasttySurfaceSize,
     color_scheme: c_int,
+    confirm_close_surface: config::ConfirmCloseSurface,
     preedit: Option<String>,
     inspector: Option<NonNull<Inspector>>,
     last_key_event: Option<key::KeyEvent>,
@@ -1682,7 +1685,22 @@ impl Surface {
     }
 
     fn needs_confirm_quit(&self) -> bool {
-        false
+        if self.app.is_null() || self.process_exited {
+            return false;
+        }
+
+        match self.confirm_close_surface {
+            config::ConfirmCloseSurface::Always => true,
+            config::ConfirmCloseSurface::False => false,
+            config::ConfirmCloseSurface::True => {
+                let Some(worker) = self.termio_worker.as_ref() else {
+                    return false;
+                };
+                let at_prompt =
+                    worker.with_termio(|termio| termio.terminal().cursor_is_at_prompt());
+                self.confirm_close_surface.needs_confirm(at_prompt)
+            }
+        }
     }
 
     fn request_close(&self) {
@@ -5920,7 +5938,11 @@ pub extern "C" fn roastty_mode_report_encode(
 
 #[no_mangle]
 pub extern "C" fn roastty_config_new() -> RoasttyConfig {
-    Box::into_raw(Box::new(Config { finalized: false })).cast()
+    Box::into_raw(Box::new(Config {
+        finalized: false,
+        confirm_close_surface: config::ConfirmCloseSurface::True,
+    }))
+    .cast()
 }
 
 #[no_mangle]
@@ -5934,10 +5956,14 @@ pub extern "C" fn roastty_config_free(config: RoasttyConfig) {
 
 #[no_mangle]
 pub extern "C" fn roastty_config_clone(config: RoasttyConfig) -> RoasttyConfig {
-    let finalized = config_from_handle(config)
-        .map(|config| config.finalized)
-        .unwrap_or(false);
-    Box::into_raw(Box::new(Config { finalized })).cast()
+    let (finalized, confirm_close_surface) = config_from_handle(config)
+        .map(|config| (config.finalized, config.confirm_close_surface))
+        .unwrap_or((false, config::ConfirmCloseSurface::True));
+    Box::into_raw(Box::new(Config {
+        finalized,
+        confirm_close_surface,
+    }))
+    .cast()
 }
 
 #[no_mangle]
@@ -6044,7 +6070,7 @@ pub extern "C" fn roastty_config_open_path() -> RoasttyString {
 #[no_mangle]
 pub extern "C" fn roastty_app_new(
     runtime: *const RoasttyRuntimeConfig,
-    _config: RoasttyConfig,
+    config: RoasttyConfig,
 ) -> RoasttyApp {
     let runtime = if runtime.is_null() {
         RoasttyRuntimeConfig {
@@ -6060,11 +6086,15 @@ pub extern "C" fn roastty_app_new(
     } else {
         unsafe { *runtime }
     };
+    let confirm_close_surface = config_from_handle(config)
+        .map(|config| config.confirm_close_surface)
+        .unwrap_or(config::ConfirmCloseSurface::True);
 
     Box::into_raw(Box::new(App {
         runtime,
         focused: false,
         color_scheme: 0,
+        confirm_close_surface,
         surfaces: Vec::new(),
     }))
     .cast()
@@ -6113,11 +6143,25 @@ pub extern "C" fn roastty_app_set_focus(app: RoasttyApp, focused: bool) {
 }
 
 #[no_mangle]
-pub extern "C" fn roastty_app_update_config(_app: RoasttyApp, _config: RoasttyConfig) {}
+pub extern "C" fn roastty_app_update_config(app: RoasttyApp, config: RoasttyConfig) {
+    let Some(app) = app_from_handle(app) else {
+        return;
+    };
+    let Some(config) = config_from_handle(config) else {
+        return;
+    };
+    app.confirm_close_surface = config.confirm_close_surface;
+}
 
 #[no_mangle]
-pub extern "C" fn roastty_app_needs_confirm_quit(_app: RoasttyApp) -> bool {
-    false
+pub extern "C" fn roastty_app_needs_confirm_quit(app: RoasttyApp) -> bool {
+    let Some(app_ref) = app_from_handle(app) else {
+        return false;
+    };
+    app_ref.surfaces.iter().any(|surface| {
+        let surface = unsafe { surface.as_ref() };
+        surface.app == app && surface.needs_confirm_quit()
+    })
 }
 
 #[no_mangle]
@@ -9394,6 +9438,9 @@ pub extern "C" fn roastty_surface_new(
     } else {
         unsafe { *config }
     };
+    let confirm_close_surface = app_from_handle(app)
+        .map(|app| app.confirm_close_surface)
+        .unwrap_or(config::ConfirmCloseSurface::True);
 
     let surface = Box::new(Surface {
         app,
@@ -9418,6 +9465,7 @@ pub extern "C" fn roastty_surface_new(
             cell_height_px: 0,
         },
         color_scheme: 0,
+        confirm_close_surface,
         preedit: None,
         inspector: None,
         last_key_event: None,
@@ -9487,7 +9535,15 @@ pub extern "C" fn roastty_surface_inherited_config(
 }
 
 #[no_mangle]
-pub extern "C" fn roastty_surface_update_config(_surface: RoasttySurface, _config: RoasttyConfig) {}
+pub extern "C" fn roastty_surface_update_config(surface: RoasttySurface, config: RoasttyConfig) {
+    let Some(surface) = surface_from_handle(surface) else {
+        return;
+    };
+    let Some(config) = config_from_handle(config) else {
+        return;
+    };
+    surface.confirm_close_surface = config.confirm_close_surface;
+}
 
 #[no_mangle]
 pub extern "C" fn roastty_surface_needs_confirm_quit(surface: RoasttySurface) -> bool {
@@ -10145,6 +10201,14 @@ mod tests {
 
     fn new_test_app() -> RoasttyApp {
         roastty_app_new(ptr::null(), ptr::null_mut())
+    }
+
+    fn new_test_config_with_confirm_close(
+        confirm_close_surface: config::ConfirmCloseSurface,
+    ) -> RoasttyConfig {
+        let config = roastty_config_new();
+        config_from_handle(config).unwrap().confirm_close_surface = confirm_close_surface;
+        config
     }
 
     unsafe extern "C" fn wakeup_cb(userdata: *mut c_void) {
@@ -11474,6 +11538,152 @@ mod tests {
         assert_eq!(CLOSE_COUNT.load(Ordering::SeqCst), 0);
         assert_eq!(roastty_surface_app(surface), ptr::null_mut());
         roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_needs_confirm_quit_policy_variants_without_worker() {
+        let always_config = new_test_config_with_confirm_close(config::ConfirmCloseSurface::Always);
+        let false_config = new_test_config_with_confirm_close(config::ConfirmCloseSurface::False);
+        let true_config = new_test_config_with_confirm_close(config::ConfirmCloseSurface::True);
+        let always_app = roastty_app_new(ptr::null(), always_config);
+        let false_app = roastty_app_new(ptr::null(), false_config);
+        let true_app = roastty_app_new(ptr::null(), true_config);
+        let always_surface = new_test_surface(always_app);
+        let false_surface = new_test_surface(false_app);
+        let true_surface = new_test_surface(true_app);
+
+        assert!(roastty_surface_needs_confirm_quit(always_surface));
+        assert!(roastty_app_needs_confirm_quit(always_app));
+        assert!(!roastty_surface_needs_confirm_quit(false_surface));
+        assert!(!roastty_app_needs_confirm_quit(false_app));
+        assert!(!roastty_surface_needs_confirm_quit(true_surface));
+        assert!(!roastty_app_needs_confirm_quit(true_app));
+
+        roastty_surface_free(always_surface);
+        roastty_surface_free(false_surface);
+        roastty_surface_free(true_surface);
+        roastty_app_free(always_app);
+        roastty_app_free(false_app);
+        roastty_app_free(true_app);
+        roastty_config_free(always_config);
+        roastty_config_free(false_config);
+        roastty_config_free(true_config);
+    }
+
+    #[test]
+    fn surface_needs_confirm_quit_false_after_exit_or_detach() {
+        let config = new_test_config_with_confirm_close(config::ConfirmCloseSurface::Always);
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        assert!(roastty_surface_needs_confirm_quit(surface));
+
+        surface_from_handle(surface).unwrap().process_exited = true;
+        assert!(!roastty_surface_needs_confirm_quit(surface));
+
+        surface_from_handle(surface).unwrap().process_exited = false;
+        roastty_app_free(app);
+        assert!(!roastty_surface_needs_confirm_quit(surface));
+
+        roastty_surface_free(surface);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn app_needs_confirm_quit_aggregates_attached_surfaces() {
+        let config = new_test_config_with_confirm_close(config::ConfirmCloseSurface::Always);
+        let app = roastty_app_new(ptr::null(), config);
+        let no_confirm_config =
+            new_test_config_with_confirm_close(config::ConfirmCloseSurface::False);
+        let no_confirm = new_test_surface(app);
+        roastty_surface_update_config(no_confirm, no_confirm_config);
+        let confirm = new_test_surface(app);
+
+        assert!(roastty_surface_needs_confirm_quit(confirm));
+        assert!(roastty_app_needs_confirm_quit(app));
+
+        roastty_surface_free(confirm);
+        assert!(!roastty_app_needs_confirm_quit(app));
+
+        roastty_surface_free(no_confirm);
+        roastty_app_free(app);
+        roastty_config_free(config);
+        roastty_config_free(no_confirm_config);
+    }
+
+    #[test]
+    fn surface_needs_confirm_quit_uses_semantic_prompt_for_true_policy() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+
+        let mut running_config = roastty_surface_config_new();
+        let running_command = CString::new("printf ready; sleep 5").unwrap();
+        running_config.command = running_command.as_ptr();
+        let running = new_test_surface_with_config(app, &running_config);
+        assert!(surface_snapshot_text_after_start(app, running).contains("ready"));
+        assert!(roastty_surface_needs_confirm_quit(running));
+
+        let mut prompt_config = roastty_surface_config_new();
+        let prompt_command =
+            CString::new("printf '\\033]133;A\\007$ \\033]133;B\\007'; sleep 5").unwrap();
+        prompt_config.command = prompt_command.as_ptr();
+        let prompt = new_test_surface_with_config(app, &prompt_config);
+        assert!(surface_snapshot_text_after_start(app, prompt).contains("$ "));
+        assert!(!roastty_surface_needs_confirm_quit(prompt));
+
+        roastty_surface_free(prompt);
+        roastty_surface_free(running);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn app_and_surface_update_config_copy_confirm_close_policy() {
+        let app = new_test_app();
+        let true_surface = new_test_surface(app);
+        assert!(!roastty_surface_needs_confirm_quit(true_surface));
+
+        let always = new_test_config_with_confirm_close(config::ConfirmCloseSurface::Always);
+        roastty_app_update_config(app, always);
+        let inherited = new_test_surface(app);
+        assert!(roastty_surface_needs_confirm_quit(inherited));
+
+        let false_config = new_test_config_with_confirm_close(config::ConfirmCloseSurface::False);
+        roastty_surface_update_config(inherited, false_config);
+        assert!(!roastty_surface_needs_confirm_quit(inherited));
+
+        roastty_surface_free(inherited);
+        roastty_surface_free(true_surface);
+        roastty_app_free(app);
+        roastty_config_free(always);
+        roastty_config_free(false_config);
+    }
+
+    #[test]
+    fn surface_request_close_passes_computed_confirm_policy() {
+        let _guard = CLOSE_LOCK.lock().unwrap();
+        let config = new_test_config_with_confirm_close(config::ConfirmCloseSurface::Always);
+        let runtime = RoasttyRuntimeConfig {
+            userdata: ptr::null_mut(),
+            supports_selection_clipboard: false,
+            wakeup_cb: None,
+            action_cb: None,
+            read_clipboard_cb: None,
+            confirm_read_clipboard_cb: None,
+            write_clipboard_cb: None,
+            close_surface_cb: Some(close_surface_cb),
+        };
+        CLOSE_COUNT.store(0, Ordering::SeqCst);
+        CLOSE_USERDATA.store(0, Ordering::SeqCst);
+        CLOSE_NEEDS_CONFIRM.store(false, Ordering::SeqCst);
+        let app = roastty_app_new(&runtime, config);
+        let surface = new_test_surface(app);
+
+        roastty_surface_request_close(surface);
+
+        assert_eq!(CLOSE_COUNT.load(Ordering::SeqCst), 1);
+        assert!(CLOSE_NEEDS_CONFIRM.load(Ordering::SeqCst));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
     }
 
     #[test]

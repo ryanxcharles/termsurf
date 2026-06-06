@@ -900,6 +900,20 @@ impl Screen {
         self.pages.active_row_semantic_prompt(self.cursor.y.into())
     }
 
+    pub(super) fn cursor_is_at_prompt(&self) -> bool {
+        if !matches!(
+            self.current_row_semantic_prompt(),
+            None | Some(SemanticPrompt::None)
+        ) {
+            return true;
+        }
+
+        matches!(
+            self.cursor.semantic_content,
+            SemanticContent::Prompt | SemanticContent::Input
+        )
+    }
+
     fn after_explicit_linefeed(&mut self) -> Result<(), BasicCellWriteError> {
         if self.cursor.semantic_content_clear_eol {
             self.set_cursor_semantic_output();

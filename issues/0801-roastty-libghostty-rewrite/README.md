@@ -289,8 +289,8 @@ Experiment 246).
 
 - [ ] `App` lifecycle (init, tick, focus, quit-confirm, color-scheme, global
       keybinds, mailbox / events) — app struct, focus/color-scheme state, and
-      surface tick registry exist; mailbox/events and full lifecycle behavior
-      missing
+      surface tick registry exist; app-level quit-confirm aggregation done;
+      mailbox/events and full lifecycle behavior missing
 - [ ] `Surface` lifecycle (create, config-inherit, draw/refresh, sizing, scale,
       display-id, occlusion, quicklook, inspector, splits, selection + text
       reads) — lifecycle handle, basic setters, app detachment, worker event
@@ -300,9 +300,10 @@ Experiment 246).
       config, explicit text reads plus active selection reads, and
       mouse-captured query done; surface text viewport metadata done; Quicklook
       word ABI foundation done with font handle returning null until CoreText
-      font-grid integration exists; splits, frontend selection routing, full
-      confirm-close policy, renderer display-ID delivery, Quicklook UI/font
-      integration, and full frontend presentation missing
+      font-grid integration exists; confirm-close policy and request-close
+      propagation done; splits, frontend selection routing, renderer display-ID
+      delivery, Quicklook UI/font integration, and full frontend presentation
+      missing
 - [ ] `pty` + `termio` (shell spawn, read/write loops, resize, fg pid, tty name,
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
       background worker, worker shutdown/drop, and surface process-exit state
@@ -1894,8 +1895,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 698: Surface Quicklook ABI](698-surface-quicklook-abi.md) —
   **Pass** · Codex/Codex/Codex
-- [Experiment 699: Confirm Close Policy](699-confirm-close-policy.md) —
-  **Designed** · Codex/Codex/-
+- [Experiment 699: Confirm Close Policy](699-confirm-close-policy.md) — **Pass**
+  · Codex/Codex/Codex
 
 ## Non-Goals
 
