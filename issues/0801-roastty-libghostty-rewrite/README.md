@@ -198,8 +198,8 @@ Experiment 246).
 - [ ] `tmux` control mode — control/layout/output helpers, command formatting,
       DCS entry, viewer startup, list-windows parsing, and window-refresh
       notifications, layout-change window updates, and pane ID sync/capture
-      queueing, and pane terminal state done; pane command output, PTY, and App
-      integration missing
+      queueing, and pane terminal state done; pane visible output in progress;
+      pane history/state/live output, PTY, and App integration missing
 - [x] `sys` (PNG-decode abstraction) — implemented and tested via C ABI
 
 ### Renderer — data + Metal primitives only; no live render loop
@@ -1767,6 +1767,8 @@ are past the correctness-critical foundation.
   Codex/Codex/Codex
 - [Experiment 652: Tmux Pane Terminal State](652-tmux-pane-terminal-state.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 653: Tmux Pane Visible Output](653-tmux-pane-visible-output.md) —
+  **Designed**
 
 ## Non-Goals
 
