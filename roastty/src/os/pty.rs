@@ -1,6 +1,6 @@
 //! POSIX PTY ownership and sizing.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::{CStr, OsStr, OsString};
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::process::CommandExt;
@@ -31,6 +31,7 @@ impl PtySize {
 pub(crate) struct Pty {
     master: OwnedFd,
     slave: Option<OwnedFd>,
+    tty_name: Option<String>,
 }
 
 impl Pty {
@@ -57,10 +58,12 @@ impl Pty {
 
         set_cloexec(master.as_raw_fd())?;
         set_cloexec(slave.as_raw_fd())?;
+        let tty_name = tty_name(slave.as_raw_fd());
 
         Ok(Self {
             master,
             slave: Some(slave),
+            tty_name,
         })
     }
 
@@ -78,6 +81,10 @@ impl Pty {
 
     pub(crate) fn slave_fd(&self) -> Option<RawFd> {
         self.slave.as_ref().map(AsRawFd::as_raw_fd)
+    }
+
+    pub(crate) fn tty_name(&self) -> Option<&str> {
+        self.tty_name.as_deref()
     }
 
     pub(crate) fn close_slave(&mut self) {
@@ -194,6 +201,10 @@ impl PtyChild {
 
     pub(crate) fn child_id(&self) -> u32 {
         self.child.id()
+    }
+
+    pub(crate) fn tty_name(&self) -> Option<&str> {
+        self.pty.tty_name()
     }
 
     pub(crate) fn set_nonblocking(&self) -> io::Result<()> {
@@ -335,6 +346,17 @@ fn dup_owned(fd: RawFd) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(duplicated) })
 }
 
+fn tty_name(fd: RawFd) -> Option<String> {
+    let ptr = unsafe { libc::ttyname(fd) };
+    if ptr.is_null() {
+        return None;
+    }
+    unsafe { CStr::from_ptr(ptr) }
+        .to_str()
+        .ok()
+        .map(str::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,6 +474,14 @@ mod tests {
     }
 
     #[test]
+    fn pty_open_records_slave_tty_name() {
+        let pty = Pty::open(test_size()).expect("open pty");
+
+        let tty_name = pty.tty_name().expect("tty name");
+        assert!(tty_name.starts_with("/dev/"), "{tty_name}");
+    }
+
+    #[test]
     fn pty_set_size_updates_reported_size() {
         let pty = Pty::open(test_size()).expect("open pty");
         let resized = PtySize {
@@ -529,6 +559,19 @@ mod tests {
         let output = read_master_with_timeout(child.master_fd(), 3).expect("read master");
         assert_eq!(output, b"tty");
         assert!(child.wait().expect("wait child").success());
+    }
+
+    #[test]
+    fn pty_child_keeps_tty_name_after_slave_close() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let mut command = PtyCommand::new("/bin/sleep", test_size());
+        command.arg("1");
+
+        let child = command.spawn().expect("spawn child");
+
+        assert!(child.slave_fd().is_none());
+        let tty_name = child.tty_name().expect("tty name");
+        assert!(tty_name.starts_with("/dev/"), "{tty_name}");
     }
 
     #[test]

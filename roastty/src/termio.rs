@@ -142,6 +142,10 @@ impl Termio {
         self.child.child_id()
     }
 
+    pub(crate) fn tty_name(&self) -> Option<&str> {
+        self.child.tty_name()
+    }
+
     pub(crate) fn pending_write_bytes(&self) -> usize {
         self.pending_write.len()
     }
@@ -565,6 +569,8 @@ mod tests {
         let mut termio = Termio::spawn("/bin/sleep", ["1"], test_size()).expect("spawn termio");
 
         assert!(termio.child_id() > 0);
+        let tty_name = termio.tty_name().expect("tty name");
+        assert!(tty_name.starts_with("/dev/"), "{tty_name}");
         assert_eq!(termio.pending_write_bytes(), 0);
         termio.queue_write(b"x");
         assert_eq!(termio.pending_write_bytes(), 1);

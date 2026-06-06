@@ -8579,8 +8579,16 @@ pub extern "C" fn roastty_surface_foreground_pid(_surface: RoasttySurface) -> u6
 
 #[no_mangle]
 pub extern "C" fn roastty_surface_tty_name(surface: RoasttySurface) -> RoasttyString {
-    if surface.is_null() {
-        empty_string()
+    let Some(surface) = surface_from_handle(surface) else {
+        return empty_string();
+    };
+
+    if let Some(tty_name) = surface
+        .termio_worker
+        .as_ref()
+        .and_then(|worker| worker.with_termio(|termio| termio.tty_name().map(str::to_owned)))
+    {
+        allocated_c_string(&tty_name)
     } else {
         allocated_c_string("roastty-skeleton-tty")
     }
@@ -8984,6 +8992,38 @@ mod tests {
         assert_eq!(first_pid, second_pid);
         roastty_surface_free(surface);
         roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_tty_name_reports_worker_tty_after_start() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+
+        let tty_name = roastty_surface_tty_name(surface);
+        assert!(tty_name.sentinel);
+        let tty_name = take_roastty_string(tty_name);
+        assert!(tty_name.starts_with(b"/dev/"), "{tty_name:?}");
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_tty_name_falls_back_after_app_detach() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        roastty_app_free(app);
+
+        let tty_name = roastty_surface_tty_name(surface);
+        assert_eq!(take_roastty_string(tty_name), b"roastty-skeleton-tty");
+
+        roastty_surface_free(surface);
     }
 
     #[test]

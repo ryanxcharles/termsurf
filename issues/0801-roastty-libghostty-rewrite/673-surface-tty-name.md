@@ -3,6 +3,16 @@
 agent = "codex"
 model = "gpt-5"
 reasoning = "high"
+
+[review.design]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 673: Surface TTY Name
@@ -78,3 +88,53 @@ tty names, and requires the shared PTY lock for spawned tests.
 - `cargo test -p roastty termio`
 - `cargo test -p roastty surface`
 - `git diff --check`
+
+## Result
+
+**Result:** Pass.
+
+Roastty now captures the PTY slave tty name at `Pty::open` time, stores it as
+owned Rust state, and keeps it available after the slave fd is closed during
+child spawn. `Pty::tty_name`, `PtyChild::tty_name`, and `Termio::tty_name`
+expose the captured name internally without making tty-name capture required for
+PTY creation.
+
+The surface ABI now returns an allocated `RoasttyString` copy of the attached
+worker's tty name when available. Null surfaces still return an empty string,
+and non-null surfaces without an attached worker, or without a captured worker
+tty name, keep returning the existing `roastty-skeleton-tty` placeholder.
+
+Focused tests cover PTY open capture, `PtyChild` retention after slave close,
+Termio tty-name exposure, surface tty-name after `roastty_surface_start`, and
+fallback behavior after `roastty_app_free` detaches the worker.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty os::pty` — 16 passed, 0 failed
+- `cargo test -p roastty termio` — 17 passed, 0 failed
+- `cargo test -p roastty surface` — 27 passed, 0 failed
+- `git diff --check`
+
+## Conclusion
+
+Surface worker launch now provides the real PTY tty path through
+`roastty_surface_tty_name` once a worker exists, while preserving the skeleton
+placeholder for dormant or detached surfaces. The remaining PTY/frontend launch
+gaps are configured shell policy beyond `/bin/sh`, foreground PID, renderer
+wakeups, terminal grid resize, and the broader draw/refresh lifecycle.
+
+## Completion Review
+
+**Result:** Approved after provenance and verification-record fixes.
+
+Codex found no code bugs or regressions in the staged implementation. It
+confirmed that the PTY tty name is captured from the slave before
+`Pty::close_slave`, stored as owned state, forwarded through `PtyChild` and
+`Termio`, and returned from `roastty_surface_tty_name` as an allocated
+`RoasttyString` copy with the designed placeholder fallback.
+
+The review required two issue-record fixes: add result-review provenance and the
+completion-review section, and record the already-run `cargo fmt --check` and
+`git diff --check` verification commands. Those fixes are now included.
